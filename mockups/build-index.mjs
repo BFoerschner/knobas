@@ -38,6 +38,42 @@ function parseHeader(html) {
   return h;
 }
 
+// ---- list mode: round dirs that hold W*.html (or any flat *.html) instead of P*/ dirs
+const flat = readdirSync(roundDir).filter((f) => /^[A-Z]\d.*\.html$/.test(f) || /^base.*\.html$/.test(f)).sort();
+if (flat.length) {
+  const items = flat.map((f) => {
+    const path = join(roundDir, f);
+    const html = readFileSync(path, 'utf8');
+    return { href: f, lines: html.split('\n').length, kb: Math.round(statSync(path).size / 1024), header: parseHeader(html) };
+  });
+  const li = items.map((c) => `<li class="item">
+    <a class="open" href="${c.href}" target="_blank" rel="noopener"><span class="id">${esc(c.header.way ?? c.header.paradigm ?? c.href)}</span><span class="title">${esc(c.header.design ?? '')}</span></a>
+    <ul class="thesis">${c.header.thesis.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
+    <span class="meta">${c.lines} lines · ${c.kb} KB</span></li>`).join('');
+  const html = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>knobas mockups — ${esc(round)}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: light dark; --line: #8884; --muted: #888; --accent: #3b6fd6; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 32px 40px; max-width: 900px; }
+  h1 { font-size: 22px; margin: 0 0 4px; } h1 small { font-weight: 400; color: var(--muted); margin-left: 8px; }
+  .intro { color: var(--muted); margin: 0 0 20px; } .intro a { color: var(--accent); }
+  ul.list { list-style: none; padding: 0; margin: 0; } .item { border-top: 1px solid var(--line); padding: 14px 0; }
+  .open { text-decoration: none; color: inherit; display: block; } .open:hover .id { color: var(--accent); text-decoration: underline; }
+  .id { font-weight: 700; font-size: 16px; margin-right: 10px; } .title { color: var(--muted); }
+  .thesis { margin: 6px 0 8px; padding-left: 16px; font-size: 13px; color: var(--muted); }
+  .meta { font-size: 11px; color: var(--muted); font-family: ui-monospace, Menlo, monospace; }
+</style></head><body>
+<h1>knobas mockups <small>${esc(round)} · ${items.length} built</small></h1>
+<p class="intro">All on the Signal shell (context hub + launcher box). Same example data: <a href="../shared/dataset.md">dataset.md</a> + <a href="../shared/assets.md">assets.md</a>; required surfaces in <a href="../shared/round-2-brief.md">round-2-brief.md</a>. Try: <kbd>⌘K</kbd> then <code>asset:</code>, the PAY-231 room's ASSETS tile, and promoting <code>sepa-payout-export</code> stage → prod.</p>
+<ul class="list">${li}</ul>
+</body></html>
+`;
+  writeFileSync(join(roundDir, 'index.html'), html);
+  console.log(`${round}: ${items.length} items → ${join(roundDir, 'index.html')}`);
+  process.exit(0);
+}
+
 const cells = {};
 for (const pdir of readdirSync(roundDir).filter((d) => /^P\d/.test(d))) {
   for (const f of readdirSync(join(roundDir, pdir)).filter((f) => /^D\d.*\.html$/.test(f))) {
