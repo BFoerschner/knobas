@@ -1,0 +1,1705 @@
+<!--
+knobas mockup
+paradigm: P3 Graph
+design: D4 Atlas
+thesis: The chart shows the shape of the work — which ticket pulls which branch, build, page and note — so filtering, linking and navigating are one gesture on one surface.
+thesis: A navigator's chart table at night: indigo ground with faint contours, parchment type, places marked by map glyphs, relationships drawn as dashed teal routes with waypoints, gold reserved for what is chosen or running.
+thesis: Routes and itineraries — confirming a link draws the route in, every entity opens with its route strip, and the status-bar itinerary records where you went and how long you stayed.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>knobas — chart</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400;1,6..72,500&family=Source+Sans+3:wght@400;600&family=DM+Mono&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#121A2C; --panel:#182238; --raised:#1F2B45; --line:#27344F; --line2:#33425F;
+  --text:#EAE4D3; --muted:#A5AEC2; --faint:#6C778F;
+  --gold:#D4A857; --gold-dim:rgba(212,168,87,.16); --teal:#3FB8AF; --teal-dim:rgba(63,184,175,.14);
+  --coral:#E2735B; --coral-dim:rgba(226,115,91,.14); --ok:#8CC8A0;
+  --serif:'Newsreader',Georgia,'Times New Roman',serif;
+  --sans:'Source Sans 3','Source Sans Pro','Helvetica Neue',Arial,sans-serif;
+  --mono:'DM Mono','SF Mono',Menlo,Consolas,monospace;
+  --r:3px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font:14px/1.5 var(--sans)}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-align:left}
+input,select,textarea{font:inherit;color:inherit}
+a{color:var(--teal)}
+code{font-family:var(--mono);font-size:.92em;color:var(--text)}
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+[hidden]{display:none!important}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:var(--line);border-radius:5px;border:2px solid var(--panel)}
+
+/* ---------- app frame ---------- */
+.app{display:grid;grid-template-columns:52px minmax(0,1fr) 392px;grid-template-rows:48px minmax(0,1fr) 28px;height:100vh;width:100vw}
+@media (max-width:1260px){.app{grid-template-columns:52px minmax(0,1fr) 340px}}
+@media (max-width:1300px){.canvas-hint{display:none}}
+
+.eyebrow{font-family:var(--serif);font-weight:500;font-variant:small-caps;font-feature-settings:"smcp";letter-spacing:.09em;font-size:13.5px;color:var(--muted);line-height:1.2}
+.src{font-family:var(--serif);font-weight:500;font-variant:small-caps;font-feature-settings:"smcp";letter-spacing:.08em;font-size:12.5px;color:var(--muted);display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.src svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:1.3;stroke-linecap:round;stroke-linejoin:round}
+.mono{font-family:var(--mono);font-size:12.5px}
+.t{font-family:var(--mono);font-size:12px;color:var(--muted);white-space:nowrap}
+.gold{color:var(--gold)} .teal{color:var(--teal)} .coral{color:var(--coral)} .ok{color:var(--ok)} .muted{color:var(--muted)} .faint{color:var(--faint)}
+
+/* ---------- top bar ---------- */
+.topbar{grid-column:1/-1;display:flex;align-items:center;gap:12px;padding:0 14px 0 12px;background:var(--panel);border-bottom:1px solid var(--line);z-index:30;position:relative}
+.brand{display:flex;align-items:center;gap:8px;width:128px;flex:none}
+.brand-name{font-family:var(--serif);font-weight:500;font-size:19px;letter-spacing:.01em;color:var(--text)}
+.brand svg{width:18px;height:18px;color:var(--gold)}
+.search{position:relative;flex:0 1 440px;display:flex;align-items:center;background:var(--bg);border:1px solid var(--line);border-radius:var(--r);height:32px;padding:0 8px 0 10px}
+.search:focus-within{border-color:var(--gold)}
+.search>svg{width:14px;height:14px;stroke:var(--faint);fill:none;stroke-width:1.6;flex:none}
+.search input{flex:1;background:none;border:0;outline:0;padding:0 8px;color:var(--text);min-width:0}
+.search input::placeholder{color:var(--faint)}
+kbd{font-family:var(--mono);font-size:11px;color:var(--faint);border:1px solid var(--line);border-radius:var(--r);padding:1px 5px;line-height:1.3}
+.tb-btn{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 10px;border-radius:var(--r);border:1px solid transparent;color:var(--muted);white-space:nowrap}
+.tb-btn:hover{background:var(--raised);color:var(--text)}
+.tb-btn svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.tb-right{margin-left:auto;display:flex;align-items:center;gap:6px}
+.count{font-family:var(--mono);font-size:11.5px;background:var(--gold);color:var(--bg);border-radius:9px;padding:0 6px;line-height:17px;min-width:18px;text-align:center}
+.count.is-zero{background:var(--line);color:var(--muted)}
+.timer{display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 12px 0 8px;border-radius:var(--r);border:1px solid var(--line);background:var(--bg);color:var(--text);flex:none;white-space:nowrap}
+.timer:hover{border-color:var(--gold)}
+.timer.is-running{border-color:rgba(212,168,87,.5)}
+.timer svg{width:18px;height:18px;color:var(--faint)}
+.timer.is-running svg{color:var(--gold)}
+.timer-ctx{font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+.timer.is-running .timer-ctx{color:var(--text)}
+.timer-el{font-family:var(--mono);font-size:13px;color:var(--faint)}
+.timer.is-running .timer-el{color:var(--gold)}
+.sync{gap:8px}
+.dots{display:inline-flex;gap:3px}
+.dots i{width:6px;height:6px;border-radius:50%;background:var(--ok);opacity:.8;display:block}
+.dots i.bad{background:var(--coral);opacity:1}
+.pulse-dot{animation:blink 1.6s ease-in-out infinite}
+
+/* ---------- rail ---------- */
+.rail{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding-top:8px;gap:2px;z-index:20}
+.rail-btn{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--r);color:var(--faint);position:relative}
+.rail-btn:hover{background:var(--raised);color:var(--text)}
+.rail-btn.is-on{color:var(--gold);box-shadow:inset 3px 0 0 var(--gold)}
+.rail-btn svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.rail-btn .count{position:absolute;top:3px;right:2px;font-size:10px;line-height:14px;min-width:14px;padding:0 4px}
+.rail-sp{flex:1}
+
+/* ---------- canvas ---------- */
+.canvas{position:relative;overflow:hidden;background:var(--bg);min-width:0}
+.chart{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab}
+.chart.is-panning{cursor:grabbing}
+.chart.is-linking{cursor:crosshair}
+.lenses{position:absolute;top:10px;left:14px;right:14px;display:flex;gap:6px;flex-wrap:wrap;z-index:5;pointer-events:none}
+.lens{pointer-events:auto;display:inline-flex;align-items:center;gap:7px;height:26px;padding:0 9px 0 8px;border:1px solid var(--line);border-radius:var(--r);background:rgba(24,34,56,.92);color:var(--muted);font-size:13px;white-space:nowrap}
+.lens:hover{color:var(--text);border-color:var(--line2)}
+.lens.is-on{color:var(--text);border-color:var(--gold);box-shadow:inset 3px 0 0 var(--gold)}
+.lens .n{font-family:var(--mono);font-size:11.5px;color:var(--text)}
+.lens .delta{font-family:var(--mono);font-size:10.5px;color:var(--gold)}
+.lens-clear{pointer-events:auto;color:var(--gold);font-size:13px;height:26px;padding:0 8px}
+.legend{position:absolute;left:14px;bottom:12px;display:flex;gap:14px;align-items:center;padding:6px 10px;background:rgba(24,34,56,.9);border:1px solid var(--line);border-radius:var(--r);font-size:12px;color:var(--muted);z-index:5}
+.legend .src{font-size:12px}
+.legend svg.lg{width:26px;height:10px}
+.canvas-hint{position:absolute;right:14px;bottom:12px;font-size:12px;color:var(--faint);z-index:5;background:rgba(24,34,56,.9);padding:5px 9px;border:1px solid var(--line);border-radius:var(--r)}
+
+/* graph elements */
+.node{cursor:pointer;outline:none;transition:opacity .15s}
+.node.is-dim{opacity:.16;pointer-events:none}
+.node-fill{fill:var(--panel);stroke:var(--faint);stroke-width:1.3;transition:stroke .15s}
+.node:hover .node-fill{stroke:var(--muted)}
+.node:focus-visible .node-fill{stroke:var(--gold)}
+.node.is-sel .node-fill{stroke:var(--gold);stroke-width:2}
+.node.is-sel .node-key,.node.is-sel .node-name{fill:var(--gold)}
+.node.is-sel .glyph{stroke:var(--gold)}
+.node.is-target .node-fill{stroke:var(--teal);stroke-width:2.2}
+.node-key{font:11.5px var(--mono);fill:var(--text);text-anchor:middle;pointer-events:none}
+.node-name{font:12px var(--sans);fill:var(--muted);text-anchor:middle;pointer-events:none}
+.node--doc .node-name{font:italic 500 13.5px var(--serif);fill:var(--text)}
+.node--doc .node-key{font:500 10.5px var(--serif);font-variant:small-caps;font-feature-settings:"smcp";letter-spacing:.1em;fill:var(--faint)}
+.glyph{fill:none;stroke:var(--muted);stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
+.node--failed .node-fill{stroke:var(--coral)} .node--failed .glyph{stroke:var(--coral)} .node--failed .node-key{fill:var(--coral)}
+.node--running .node-ring{stroke:var(--gold);stroke-width:1.2;stroke-dasharray:2.5 4;fill:none;transform-box:fill-box;transform-origin:center;animation:spin 9s linear infinite}
+.node--merged .glyph{stroke:var(--ok)}
+.node-ring{fill:var(--bg);fill-opacity:.72;stroke:none}
+.node-halo{fill:none;stroke:var(--gold);stroke-width:1.4;opacity:0}
+.node.is-timer .node-halo{animation:halo 2.2s ease-out infinite}
+.node.is-hl .node-halo{animation:hl 1.4s ease-out 2}
+.node.is-new{animation:fadein .4s ease-out}
+.route{fill:none;stroke:var(--teal);stroke-width:1.3;stroke-dasharray:7 4;opacity:.8;transition:opacity .15s}
+.route--suggested{stroke-dasharray:2 5;opacity:.5;stroke-width:1.2}
+.route--blocked{stroke:var(--coral);opacity:.75}
+.route--contains{stroke:var(--line2);stroke-dasharray:none;stroke-width:1;opacity:1}
+.route.is-dim{opacity:.08}
+.route.is-drawing{stroke-dasharray:none;opacity:.9;animation:none}
+.wp{fill:var(--bg);stroke:var(--teal);stroke-width:1.2;transition:opacity .15s}
+.wp.is-dim{opacity:.1}
+.wp--blocked{stroke:var(--coral)}
+.route-tag{font:10px var(--mono);fill:var(--teal);opacity:.7;text-anchor:middle;pointer-events:none}
+.route-tag.is-dim{opacity:.08}
+.draglink{fill:none;stroke:var(--gold);stroke-width:1.4;stroke-dasharray:5 4;pointer-events:none}
+
+/* ---------- side card ---------- */
+.card{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;overflow-x:hidden;min-height:0;display:flex;flex-direction:column;position:relative}
+.card-head{padding:16px 18px 12px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel);z-index:2}
+.card-eyebrow{display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap}
+.card-title{font-family:var(--serif);font-weight:500;font-size:21px;line-height:1.25;letter-spacing:-.005em;color:var(--text)}
+.card-title .key{font-family:var(--mono);font-size:14px;color:var(--gold);display:block;margin-bottom:2px;letter-spacing:.02em}
+.card-title em{font-style:italic;font-weight:400}
+.meta{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin-top:10px;font-size:13.5px;align-items:center}
+.meta dt{color:var(--faint);font-size:12.5px}
+.meta dd{color:var(--text)}
+.actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+.sec{padding:14px 18px;border-bottom:1px solid var(--line)}
+.sec-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:8px}
+.sec-h .n{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+.prose{color:var(--text);line-height:1.55}
+.prose p+p{margin-top:8px}
+.prose h4{font-family:var(--serif);font-weight:500;font-size:16px;margin:10px 0 4px}
+.prose em{color:var(--muted)}
+.callout{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:var(--r);background:var(--coral-dim);border-left:3px solid var(--coral);font-size:13.5px}
+.callout.gold{background:var(--gold-dim);border-left-color:var(--gold)}
+.callout.teal{background:var(--teal-dim);border-left-color:var(--teal)}
+.callout.ok{background:rgba(140,200,160,.12);border-left-color:var(--ok)}
+
+.lrow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:7px 8px;margin:0 -8px;border-radius:var(--r);cursor:pointer;color:var(--text)}
+.lrow:hover{background:var(--raised)}
+.lrow.is-sel{box-shadow:inset 3px 0 0 var(--gold)}
+.lrow .k{font-family:var(--mono);font-size:12.5px;color:var(--text)}
+.lrow .ttl{color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lrow .st{font-size:12px;color:var(--faint);white-space:nowrap}
+.lrow .st.coral{color:var(--coral)} .lrow .st.gold{color:var(--gold)} .lrow .st.ok{color:var(--ok)}
+.srow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:8px 0;border-top:1px dashed var(--line)}
+.srow:first-of-type{border-top:0}
+.srow .why{font-size:12.5px;color:var(--faint);margin-top:1px}
+.srow .why b{font-weight:600;color:var(--muted)}
+.srow .pair{font-size:13.5px}
+.srow .arr{color:var(--teal);margin:0 6px;font-family:var(--mono)}
+.srow.is-done .pair{color:var(--ok)}
+.srow.is-gone{opacity:.45}
+
+.cmt{padding:10px 0;border-top:1px dashed var(--line)}
+.cmt:first-child{border-top:0}
+.cmt-h{display:flex;gap:8px;align-items:baseline;font-size:13px;margin-bottom:3px}
+.cmt-h b{font-weight:600}
+.cmt p{color:var(--text);font-size:13.5px}
+.addbox{margin-top:8px}
+textarea.ta{width:100%;min-height:64px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r);padding:8px 10px;color:var(--text);resize:vertical;outline:0;line-height:1.45}
+textarea.ta:focus{border-color:var(--gold)}
+input.in,select.in{width:100%;height:32px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r);padding:0 10px;color:var(--text);outline:0}
+input.in:focus,select.in:focus{border-color:var(--gold)}
+select.in{appearance:none;-webkit-appearance:none;padding-right:26px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23A5AEC2' stroke-width='1.4'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 9px center}
+select.in option{background:var(--raised);color:var(--text)}
+select.in.status-sel{height:26px;padding:0 26px 0 8px;font-size:13px;border-color:var(--line2);width:auto;min-width:132px;display:inline-block}
+.field{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+.field label{font-size:12.5px;color:var(--muted)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.check{display:flex;align-items:flex-start;gap:9px;padding:5px 0;font-size:13.5px;cursor:pointer}
+.check input{accent-color:var(--gold);margin-top:3px}
+.check .t{margin-left:auto}
+
+.btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px;border-radius:var(--r);border:1px solid var(--line2);background:var(--raised);color:var(--text);font-size:13.5px;white-space:nowrap;transition:background .15s,border-color .15s}
+.btn:hover{border-color:var(--muted)}
+.btn svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.btn--gold{background:var(--gold);border-color:var(--gold);color:var(--bg);font-weight:600}
+.btn--gold:hover{background:#dfb86b;border-color:#dfb86b}
+.btn--ghost{background:transparent;border-color:transparent;color:var(--muted)}
+.btn--ghost:hover{background:var(--raised);color:var(--text);border-color:transparent}
+.btn--line{background:transparent}
+.btn--sm{height:24px;padding:0 8px;font-size:12.5px}
+.btn--danger{color:var(--coral)}
+.btn:disabled{opacity:.45;cursor:default}
+
+.chip{display:inline-flex;align-items:center;gap:4px;padding:0 6px 0 5px;height:20px;border-radius:var(--r);background:var(--raised);border:1px solid var(--line2);font-family:var(--mono);font-size:11.5px;color:var(--text);vertical-align:middle;line-height:1;cursor:pointer;margin:0 1px}
+.chip:hover{border-color:var(--teal);color:var(--teal)}
+.chip svg{width:10px;height:10px;fill:none;stroke:var(--muted);stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+.chip.is-doc{font-family:var(--serif);font-style:italic;font-size:13px}
+
+/* route strip (signature) */
+.rstrip{position:relative;padding:14px 18px 10px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,rgba(63,184,175,.05),transparent)}
+.rstrip::after{content:"";position:absolute;right:0;bottom:10px;top:38px;width:26px;pointer-events:none;background:linear-gradient(90deg,rgba(24,34,56,0),var(--panel))}
+.rstrip-h{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:10px}
+.rstrip-h .eyebrow{flex:none}
+.rstrip-h .t{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.rs{display:flex;align-items:flex-start;overflow-x:auto;padding-bottom:6px;scrollbar-width:thin}
+.rs-stop{display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;min-width:0;flex:0 0 auto;max-width:84px}
+.rs-dot{width:9px;height:9px;border-radius:50%;border:1.5px solid var(--teal);background:var(--panel)}
+.rs-stop.is-here .rs-dot{background:var(--gold);border-color:var(--gold);width:11px;height:11px;margin:-1px}
+.rs-stop.is-bad .rs-dot{border-color:var(--coral)}
+.rs-lbl{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:84px}
+.rs-stop.is-doc .rs-lbl{font-family:var(--serif);font-style:italic;font-size:12px}
+.rs-stop.is-here .rs-lbl{color:var(--gold)}
+.rs-stop:hover .rs-lbl{color:var(--text)}
+.rs-leg{flex:1 1 0;height:0;border-top:1.5px dashed var(--teal);opacity:.7;margin-top:4px;min-width:8px}
+.rs-leg.is-bad{border-color:var(--coral)}
+
+/* ---------- status bar / itinerary ---------- */
+.statusbar{grid-column:1/-1;display:flex;align-items:center;gap:14px;padding:0 12px;background:var(--panel);border-top:1px solid var(--line);font-size:12px;color:var(--muted);z-index:20;min-width:0}
+.itin{display:flex;align-items:center;gap:0;min-width:0;overflow:hidden;flex:1}
+.itin .eyebrow{font-size:12px;margin-right:10px;flex:none}
+.it-stop{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:11.5px;color:var(--muted);padding:2px 4px;border-radius:var(--r);white-space:nowrap}
+.it-stop:hover{color:var(--text);background:var(--raised)}
+.it-stop.is-here{color:var(--gold)}
+.it-stop .d{color:var(--faint);font-size:10.5px}
+.it-leg{width:18px;height:0;border-top:1px dashed var(--teal);opacity:.6;margin:0 2px;flex:none}
+.sb-right{margin-left:auto;display:flex;gap:14px;align-items:center;white-space:nowrap;flex:none}
+.sb-right .src{font-size:11.5px}
+.sb-sep{width:1px;height:14px;background:var(--line)}
+
+/* ---------- overlays ---------- */
+.scrim{position:fixed;inset:48px 0 28px 52px;background:rgba(18,26,44,.55);z-index:55;display:none}
+.scrim.is-on{display:block}
+.panel{position:fixed;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:0 18px 50px rgba(0,0,0,.45);z-index:60;display:none;flex-direction:column;min-height:0;animation:fadein .15s ease-out}
+.panel.is-on{display:flex}
+.panel-h{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);flex:none}
+.panel-h .ttl{font-family:var(--serif);font-weight:500;font-size:18px;margin-right:auto}
+.panel-b{overflow:auto;min-height:0;flex:1}
+.x{width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;border-radius:var(--r);color:var(--faint)}
+.x:hover{background:var(--raised);color:var(--text)}
+.x svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round}
+
+/* inbox */
+#ov-inbox{top:52px;right:60px;width:580px;max-height:calc(100vh - 90px)}
+.ib{display:grid;grid-template-columns:78px minmax(0,1fr);gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);align-items:start}
+.ib:hover{background:rgba(31,43,69,.5)}
+.ib .t{padding-top:2px;display:flex;flex-direction:column;line-height:1.35}
+.ib .t .day{color:var(--faint);font-size:11px}
+.ib-txt{font-size:13.5px;line-height:1.45}
+.ib-txt q{color:var(--muted);font-style:italic;font-family:var(--serif);font-size:14.5px}
+.ib-act{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center}
+.ib.is-gone{animation:fadeout .2s ease-in forwards}
+.ib-reply{margin-top:8px;display:none}
+.ib.is-replying .ib-reply{display:block}
+.ib-sub{padding:10px 16px 6px;display:flex;justify-content:space-between;align-items:baseline}
+.locate{color:var(--faint);font-size:12px;display:inline-flex;align-items:center;gap:4px;margin-left:auto}
+.locate:hover{color:var(--teal)}
+.locate svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:1.5}
+
+/* notes drawer */
+#ov-notes{top:52px;left:56px;width:320px;max-height:calc(100vh - 90px)}
+.nrow{display:block;padding:10px 16px;border-bottom:1px solid var(--line);cursor:pointer}
+.nrow:hover{background:var(--raised)}
+.nrow.is-sel{box-shadow:inset 3px 0 0 var(--gold)}
+.nrow .nt{font-family:var(--serif);font-style:italic;font-size:15px;font-weight:500}
+.nrow .nl{margin-top:4px;display:flex;gap:3px;flex-wrap:wrap}
+
+/* standup */
+#ov-standup{top:64px;left:50%;transform:translateX(calc(-50% - 160px));width:760px;max-height:calc(100vh - 110px)}
+@media (max-width:1260px){#ov-standup{transform:translateX(calc(-50% - 120px));width:680px}}
+.doc{padding:18px 26px 26px}
+.doc h2{font-family:var(--serif);font-weight:500;font-size:22px;margin:4px 0 10px}
+.doc h3{font-family:var(--serif);font-weight:500;font-size:17px;margin:16px 0 6px}
+.dg{display:grid;grid-template-columns:80px 1fr;gap:8px 14px;align-items:start}
+.dg .eyebrow{padding-top:3px}
+.dl{padding:5px 8px;margin:0 -8px;border-radius:var(--r);font-size:14px;line-height:1.5}
+.dl:hover{background:var(--raised)}
+.dl .trace{display:inline-flex;gap:3px;margin-left:6px;vertical-align:middle;flex-wrap:wrap}
+.proto{border:1px solid var(--line);border-radius:var(--r);background:var(--bg);padding:12px 14px;line-height:1.6;font-size:14px;outline:0;min-height:120px}
+.proto:focus{border-color:var(--gold)}
+.proto ul{padding-left:18px}
+.ai{display:flex;align-items:center;gap:10px;padding:6px 0;border-top:1px dashed var(--line);font-size:14px}
+.ai:first-child{border-top:0}
+.ai .who{font-weight:600;min-width:64px}
+.ai .btn{margin-left:auto}
+.doc-foot{display:flex;gap:8px;align-items:center;margin-top:16px;flex-wrap:wrap}
+.pubtarget{font-size:13px;color:var(--muted)}
+.pubtarget b{font-weight:600;color:var(--text)}
+
+/* sources */
+#ov-sources{top:60px;left:80px;right:80px;max-height:calc(100vh - 116px);max-width:1180px;margin:0 auto}
+.srcgrid{display:grid;grid-template-columns:1fr;gap:0}
+.srow2{display:grid;grid-template-columns:34px 200px minmax(0,1fr) 220px auto;gap:14px;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line)}
+.srow2.is-off{opacity:.55}
+.srow2 .name{font-family:var(--serif);font-weight:500;font-size:17px}
+.srow2 .sub{font-size:12.5px;color:var(--faint);margin-top:1px}
+.srow2 .url{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.srow2 .auth{font-size:13px;color:var(--muted);margin-top:2px}
+.srow2 .state{font-size:13px}
+.srow2 .gl{width:34px;height:34px;border:1px solid var(--line);border-radius:var(--r);display:flex;align-items:center;justify-content:center;color:var(--muted);background:var(--bg)}
+.srow2 .gl svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.3;stroke-linecap:round;stroke-linejoin:round}
+.caps{display:flex;gap:4px;margin-top:5px;flex-wrap:wrap}
+.cap{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:var(--r);padding:0 5px;line-height:16px;font-family:var(--mono)}
+.cap.off{color:var(--faint);text-decoration:line-through}
+.srow2 .ctl{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.toggle{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);cursor:pointer}
+.toggle i{width:28px;height:16px;border-radius:8px;background:var(--line);position:relative;display:block;transition:background .15s}
+.toggle i::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--muted);transition:transform .15s}
+.toggle.is-on i{background:var(--teal)}
+.toggle.is-on i::after{transform:translateX(12px);background:var(--bg)}
+.src-foot{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;padding:16px 18px}
+.kv{background:var(--bg);border:1px solid var(--line);border-radius:var(--r);padding:10px 12px}
+.kv .eyebrow{margin-bottom:6px}
+.kv .v{font-size:14px}
+.pwbox{display:flex;gap:6px;align-items:center;margin-top:8px}
+.pwbox input{height:28px}
+
+/* time strip */
+#ov-time{left:52px;right:0;bottom:28px;height:332px;border-left:0;border-right:0;border-bottom:0;border-radius:0}
+.time-grid{display:grid;grid-template-columns:minmax(0,1fr) 330px;height:100%;min-height:0}
+.day{padding:12px 18px;overflow:auto;min-height:0}
+.day-h{display:flex;align-items:baseline;gap:14px;margin-bottom:10px}
+.day-h .ttl{font-family:var(--serif);font-weight:500;font-size:18px}
+.strip{position:relative;height:118px;margin-top:6px}
+.ticks{position:absolute;left:0;right:0;top:0;height:14px}
+.tick{position:absolute;top:0;font-family:var(--mono);font-size:10.5px;color:var(--faint);transform:translateX(-50%)}
+.tick::after{content:"";position:absolute;left:50%;top:15px;height:78px;border-left:1px solid var(--line)}
+.blk{position:absolute;top:22px;height:56px;border-radius:var(--r);border:1px solid var(--line2);background:var(--raised);padding:5px 8px;font-size:12px;line-height:1.3;overflow:hidden;cursor:pointer;transition:border-color .15s}
+.blk:hover{border-color:var(--muted)}
+.blk .bk{font-family:var(--mono);font-size:11.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.blk .bl{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.blk .bh{font-family:var(--mono);font-size:10px;color:var(--faint);position:absolute;right:7px;bottom:4px}
+.blk--passive{background:repeating-linear-gradient(135deg,var(--raised) 0 6px,var(--panel) 6px 8px)}
+.blk--manual{background:var(--gold-dim);border-color:rgba(212,168,87,.5)}
+.blk--manual .bk{color:var(--gold)}
+.blk--label{background:var(--teal-dim);border-color:rgba(63,184,175,.45)}
+.blk--label .bk{color:var(--teal)}
+.blk--unattr{background:transparent;border:1px dashed var(--coral)}
+.blk--unattr .bk{color:var(--coral)}
+.blk--gap{background:transparent;border:0;cursor:default;color:var(--faint);font-size:11px;padding-top:20px;text-align:center}
+.blk--tight{padding:5px 4px;text-align:center}
+.blk--tight .bk{font-size:10.5px}
+.blk--tight .bh{position:static;display:block;margin-top:3px}
+.blk.is-hl{border-color:var(--gold)}
+.journey{position:absolute;left:0;right:0;top:92px;height:20px}
+.journey .jl{position:absolute;left:0;right:0;top:8px;border-top:1.5px dashed var(--teal);opacity:.6}
+.journey .jw{position:absolute;top:4px;width:9px;height:9px;border-radius:50%;border:1.5px solid var(--teal);background:var(--panel);transform:translateX(-50%)}
+.journey .jw.now{background:var(--gold);border-color:var(--gold)}
+.legs{display:flex;gap:14px;margin-top:10px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
+.legs .lg{display:inline-flex;gap:6px;align-items:center}
+.legs .lg i{width:10px;height:10px;border-radius:2px;display:block;border:1px solid var(--line2)}
+.week{border-left:1px solid var(--line);padding:12px 18px;overflow:auto;min-height:0}
+.week .ttl{font-family:var(--serif);font-weight:500;font-size:18px;margin-bottom:8px}
+.wrow{display:grid;grid-template-columns:36px 1fr 56px 60px;gap:8px;align-items:center;padding:5px 0;font-size:13px}
+.wrow .bar{height:8px;background:var(--line);border-radius:2px;overflow:hidden}
+.wrow .bar i{display:block;height:100%;background:var(--teal);opacity:.8}
+.wrow .bar i.part{background:linear-gradient(90deg,var(--teal) 60%,var(--gold) 60%)}
+.wrow .bar i.none{background:var(--gold)}
+.wrow .st{font-size:11.5px;color:var(--faint);text-align:right}
+.wtot{display:grid;grid-template-columns:1fr auto;gap:4px 10px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-size:13px}
+.wtot .v{font-family:var(--mono);font-size:12.5px;text-align:right}
+
+/* modal */
+.mscrim{position:fixed;inset:0;background:rgba(10,15,28,.6);z-index:70;display:none;align-items:center;justify-content:center}
+.mscrim.is-on{display:flex}
+.modal{width:560px;max-width:calc(100vw - 40px);max-height:calc(100vh - 60px);background:var(--panel);border:1px solid var(--line2);border-radius:var(--r);box-shadow:0 24px 70px rgba(0,0,0,.5);display:flex;flex-direction:column;animation:fadein .15s ease-out}
+.modal.wide{width:680px}
+.modal-h{padding:14px 20px 10px;border-bottom:1px solid var(--line)}
+.modal-h .ttl{font-family:var(--serif);font-weight:500;font-size:20px}
+.modal-h .sub{font-size:13px;color:var(--muted);margin-top:2px}
+.modal-b{padding:16px 20px;overflow:auto;min-height:0}
+.modal-f{padding:12px 20px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:center}
+.modal-f .sp{flex:1}
+.steps{display:flex;flex-direction:column;gap:0}
+.step{display:grid;grid-template-columns:22px 1fr auto;gap:10px;align-items:center;padding:8px 0;border-top:1px dashed var(--line);font-size:14px}
+.step:first-child{border-top:0}
+.step .sd{width:12px;height:12px;border-radius:50%;border:1.5px solid var(--faint);margin-left:4px}
+.step.is-run .sd{border-color:var(--gold);border-top-color:transparent;animation:spin .9s linear infinite}
+.step.is-done .sd{background:var(--ok);border-color:var(--ok)}
+.step.is-fail .sd{background:var(--coral);border-color:var(--coral)}
+.step .sub{font-size:12.5px;color:var(--faint)}
+.step .r{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+.step.is-done .r{color:var(--ok)}
+.wiz{display:flex;gap:8px;margin-bottom:14px}
+.wiz b{font-family:var(--mono);font-size:11px;color:var(--faint);border:1px solid var(--line);padding:1px 7px;border-radius:var(--r);font-weight:400}
+.wiz b.is-on{color:var(--gold);border-color:var(--gold)}
+.wiz b.is-done{color:var(--ok);border-color:var(--ok)}
+.tgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.tcard{border:1px solid var(--line);border-radius:var(--r);padding:10px;cursor:pointer;background:var(--bg);display:flex;flex-direction:column;gap:4px}
+.tcard:hover{border-color:var(--muted)}
+.tcard.is-on{border-color:var(--gold);box-shadow:inset 3px 0 0 var(--gold)}
+.tcard .n{font-family:var(--serif);font-weight:500;font-size:15px}
+.tcard .a{font-size:11.5px;color:var(--faint);font-family:var(--mono)}
+.log{font-family:var(--mono);font-size:12px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;white-space:pre-wrap;color:var(--muted);line-height:1.5;overflow:auto}
+.log .bad{color:var(--coral)}
+.log .good{color:var(--ok)}
+.radios{display:flex;gap:6px;flex-wrap:wrap}
+.radio{border:1px solid var(--line);border-radius:var(--r);padding:4px 10px;font-size:13px;cursor:pointer;color:var(--muted)}
+.radio.is-on{border-color:var(--gold);color:var(--text);box-shadow:inset 3px 0 0 var(--gold)}
+
+/* popovers, context menu */
+.pop{position:fixed;z-index:80;background:var(--raised);border:1px solid var(--line2);border-radius:var(--r);box-shadow:0 12px 34px rgba(0,0,0,.45);padding:10px 12px;min-width:220px;max-width:340px;display:none;animation:fadein .12s ease-out;font-size:13.5px}
+.pop.is-on{display:block}
+.pop .ttl{font-family:var(--serif);font-weight:500;font-size:15px;margin-bottom:6px}
+.pop .row{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.pop .row input.in{flex:1 1 120px;width:auto;min-width:0}
+.pop ul{list-style:none}
+.pop li button{display:block;width:100%;padding:5px 8px;margin:0 -8px;width:calc(100% + 16px);border-radius:var(--r);font-size:13.5px}
+.pop li button:hover{background:var(--panel)}
+.ctx{position:fixed;z-index:85;background:var(--raised);border:1px solid var(--line2);border-radius:var(--r);box-shadow:0 12px 34px rgba(0,0,0,.45);padding:5px;min-width:210px;display:none}
+.ctx.is-on{display:block}
+.ctx-h{padding:5px 9px 6px;font-family:var(--mono);font-size:11.5px;color:var(--faint);border-bottom:1px solid var(--line);margin-bottom:4px}
+.ctx button{display:block;width:100%;padding:6px 9px;border-radius:var(--r);font-size:13.5px;color:var(--text)}
+.ctx button:hover{background:var(--panel)}
+.ctx button .k{float:right;color:var(--faint);font-family:var(--mono);font-size:11px}
+.ctx hr{border:0;border-top:1px solid var(--line);margin:4px 0}
+
+/* search dropdown */
+.sdrop{position:absolute;top:36px;left:-1px;width:640px;background:var(--panel);border:1px solid var(--line2);border-radius:var(--r);box-shadow:0 18px 50px rgba(0,0,0,.5);z-index:40;display:none;max-height:calc(100vh - 120px);flex-direction:column}
+.sdrop.is-on{display:flex}
+.sfilters{display:flex;gap:6px;padding:10px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap;align-items:center}
+.sf{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:var(--r);padding:2px 8px;cursor:pointer;white-space:nowrap}
+.sf:hover{color:var(--text)}
+.sf.is-on{color:var(--text);border-color:var(--gold);box-shadow:inset 3px 0 0 var(--gold)}
+.sf.cross{border-style:dashed}
+.sf-lbl{font-size:11px;color:var(--faint);margin-left:6px;font-family:var(--mono)}
+.sres{overflow:auto;min-height:0;padding:6px 0}
+.sr{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:10px;align-items:center;padding:7px 14px;cursor:pointer}
+.sr:hover,.sr.is-sel{background:var(--raised);box-shadow:inset 3px 0 0 var(--gold)}
+.sr .k{font-family:var(--mono);font-size:12.5px}
+.sr .ttl{color:var(--text);font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sr .ttl.doc{font-family:var(--serif);font-style:italic;font-size:14.5px}
+.sr .snip{font-size:12px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sr .meta2{text-align:right;font-size:11.5px;color:var(--faint);white-space:nowrap}
+.sr .meta2 .src{display:block;font-size:12px}
+.sr svg{width:14px;height:14px;fill:none;stroke:var(--muted);stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+.sempty{padding:16px 14px;color:var(--muted);font-size:13.5px}
+.slists{padding:8px 14px 10px;border-top:1px solid var(--line)}
+.sl{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:5px 8px;margin:0 -8px;border-radius:var(--r);cursor:pointer;font-size:13.5px}
+.sl:hover{background:var(--raised)}
+.sl .n{font-family:var(--mono);font-size:12px;color:var(--text)}
+.sl .delta{font-family:var(--mono);font-size:11px;color:var(--gold)}
+.sl .note{font-size:12px;color:var(--faint)}
+
+/* toasts */
+.toasts{position:fixed;left:64px;bottom:78px;z-index:90;display:flex;flex-direction:column;gap:6px;max-width:440px}
+.toast{background:var(--raised);border:1px solid var(--line2);border-left:3px solid var(--gold);border-radius:var(--r);padding:9px 12px;font-size:13.5px;box-shadow:0 10px 30px rgba(0,0,0,.4);animation:fadein .15s ease-out;display:flex;gap:10px;align-items:center}
+.toast.bad{border-left-color:var(--coral)} .toast.ok{border-left-color:var(--ok)} .toast.teal{border-left-color:var(--teal)}
+.toast .t{margin-left:auto}
+.toast button{color:var(--teal);font-size:13px;white-space:nowrap}
+
+/* lens / list card */
+.jql{font-family:var(--mono);font-size:12px;color:var(--faint);background:var(--bg);border:1px dashed var(--line2);padding:8px 10px;border-radius:var(--r);margin-top:8px}
+.jql b{color:var(--coral);font-weight:400}
+
+.empty{padding:40px 24px;text-align:center;color:var(--muted)}
+.empty .ttl{font-family:var(--serif);font-weight:500;font-size:20px;color:var(--text);margin-bottom:6px}
+.kbd-list{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:13px;margin-top:18px;text-align:left;color:var(--muted)}
+
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes halo{0%{r:16;opacity:.8}100%{r:30;opacity:0}}
+@keyframes hl{0%{r:16;opacity:.9}100%{r:36;opacity:0}}
+@keyframes blink{50%{opacity:.3}}
+@keyframes fadein{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+@keyframes fadeout{to{opacity:0;height:0;padding:0;overflow:hidden}}
+#ov-standup{animation:none}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <!-- ===== top bar ===== -->
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 1l2 7 7 2-7 2-2 7-2-7-7-2 7-2z" fill="currentColor"/><circle cx="10" cy="10" r="1.6" fill="#121A2C"/></svg>
+      <span class="brand-name">knobas</span>
+    </div>
+    <div class="search" id="searchbox">
+      <svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>
+      <input id="q" type="text" placeholder="Search the chart — try “sepa retry”" autocomplete="off" spellcheck="false" aria-label="Search">
+      <kbd>⌘K</kbd>
+      <div class="sdrop" id="sdrop" role="listbox"></div>
+    </div>
+    <button class="tb-btn" id="newbtn" aria-haspopup="true"><svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>New</button>
+    <div class="tb-right">
+      <button class="timer is-running" id="timerbtn" title="Timer · ⌘T">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 1l2 7 7 2-7 2-2 7-2-7-7-2 7-2z" fill="currentColor"/><circle cx="10" cy="10" r="1.6" fill="#121A2C"/></svg>
+        <span class="timer-ctx" id="timer-ctx">PAY-231</span>
+        <span class="timer-el" id="timer-el">0:34</span>
+      </button>
+      <button class="tb-btn" id="inboxbtn" title="Inbox"><svg viewBox="0 0 16 16"><path d="M2 4h12v9H2zM2 4l6 5 6-5"/></svg>Inbox <span class="count" id="inbox-count">6</span></button>
+      <button class="tb-btn sync" id="syncbtn" title="Sources"><span class="dots" id="sync-dots"><i></i><i></i><i></i><i class="bad"></i></span><span id="sync-lbl">3 of 4 synced · CI 401</span></button>
+    </div>
+  </header>
+
+  <!-- ===== rail ===== -->
+  <nav class="rail" aria-label="Surfaces">
+    <button class="rail-btn is-on" data-go="#/graph" title="Chart"><svg viewBox="0 0 20 20"><circle cx="5" cy="6" r="2.2"/><circle cx="15" cy="5" r="2.2"/><circle cx="10" cy="14" r="2.2"/><path d="M7 7l2 5M13 6.5l-2 5.5M7 6.5h6" stroke-dasharray="2 2"/></svg></button>
+    <button class="rail-btn" data-go="#/inbox" title="Inbox"><svg viewBox="0 0 20 20"><path d="M3 5h14v11H3zM3 5l7 6 7-6"/></svg><span class="count" id="rail-count">6</span></button>
+    <button class="rail-btn" data-go="#/time" title="Time · day review"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.5"/><path d="M10 5.5V10l3 2"/></svg></button>
+    <button class="rail-btn" data-go="#/notes" title="Notes"><svg viewBox="0 0 20 20"><path d="M5 2.5v15M5 3h8l-2.5 3 2.5 3H5"/></svg></button>
+    <button class="rail-btn" data-go="#/standup" title="Standup"><svg viewBox="0 0 20 20"><path d="M4 4h12v12H4zM7 8h6M7 11h6M7 14h3"/></svg></button>
+    <span class="rail-sp"></span>
+    <button class="rail-btn" data-go="#/sources" title="Sources · layers"><svg viewBox="0 0 20 20"><path d="M10 3l7 4-7 4-7-4zM3 11l7 4 7-4M3 14.5l7 4 7-4"/></svg></button>
+  </nav>
+
+  <!-- ===== chart ===== -->
+  <main class="canvas" id="canvas">
+    <div class="lenses" id="lenses"></div>
+    <svg class="chart" id="chart" viewBox="0 0 1000 884" preserveAspectRatio="xMidYMid meet" aria-label="Knowledge chart">
+      <defs>
+        <pattern id="contour" width="480" height="480" patternUnits="userSpaceOnUse">
+          <g fill="none" stroke="#EAE4D3" stroke-opacity=".065" stroke-width="1">
+            <path d="M40 250C60 150 180 90 300 120S460 230 430 330S260 470 150 430S20 350 40 250Z"/>
+            <path d="M90 250C105 180 190 140 290 160S400 240 385 320S270 420 175 395S75 320 90 250Z"/>
+            <path d="M140 250C150 210 205 185 280 200S345 255 335 310S270 370 200 355S130 290 140 250Z"/>
+            <path d="M190 255C200 235 230 225 270 235S300 270 292 300S250 325 225 315S180 275 190 255Z"/>
+            <path d="M0 60C80 40 150 90 240 70S400 20 480 60"/>
+            <path d="M0 30C70 10 160 60 250 40S390 -10 480 30"/>
+            <path d="M0 420C60 460 140 440 220 470S380 480 480 440"/>
+            <path d="M0 455C70 490 150 470 230 495"/>
+          </g>
+        </pattern>
+      </defs>
+      <rect width="100%" height="100%" fill="url(#contour)"/>
+      <g id="view">
+        <g id="edges"></g>
+        <path id="draglink" class="draglink" d="" style="display:none"/>
+        <g id="nodes"></g>
+      </g>
+    </svg>
+    <div class="legend" id="legend"></div>
+    <div class="canvas-hint">Drag a place onto another to draw a route · right-click for actions</div>
+  </main>
+
+  <!-- ===== side card ===== -->
+  <aside class="card" id="card" aria-live="polite"></aside>
+
+  <!-- ===== status bar ===== -->
+  <footer class="statusbar">
+    <div class="itin" id="itin"></div>
+    <div class="sb-right" id="sbright"></div>
+  </footer>
+</div>
+
+<!-- overlays -->
+<div class="scrim" id="scrim"></div>
+<section class="panel" id="ov-inbox" aria-label="Inbox"></section>
+<section class="panel" id="ov-notes" aria-label="Notes"></section>
+<section class="panel" id="ov-standup" aria-label="Standup"></section>
+<section class="panel" id="ov-sources" aria-label="Sources"></section>
+<section class="panel" id="ov-time" aria-label="Time"></section>
+<div class="mscrim" id="mscrim"><div class="modal" id="modal" role="dialog" aria-modal="true"></div></div>
+<div class="pop" id="pop"></div>
+<div class="ctx" id="ctx" role="menu"></div>
+<div class="toasts" id="toasts"></div>
+<div id="errlog" hidden></div>
+<script>
+try {
+/* =====================================================================
+   DATA — Tidewater Freight dataset, verbatim
+   ===================================================================== */
+const SYNC = {jira:'synced 4 min ago', wiki:'synced 4 min ago', git:'synced 2 min ago', ci:'sync failed 38 min ago · 401', note:'local'};
+const SRCLBL = {jira:'Jira', wiki:'Wiki', git:'Git', ci:'CI', note:'Note'};
+const GL = {
+  pin:'<path d="M6 11C6 11 2.5 7.6 2.5 5a3.5 3.5 0 0 1 7 0C9.5 7.6 6 11 6 11z"/><circle cx="6" cy="5" r="1.2"/>',
+  book:'<path d="M1.5 2.5h3.5a1 1 0 0 1 1 1v6.5a1 1 0 0 0-1-1H1.5zM10.5 2.5H7a1 1 0 0 0-1 1v6.5a1 1 0 0 1 1-1h3.5z"/>',
+  fork:'<circle cx="3" cy="2.3" r="1.1"/><circle cx="9" cy="2.3" r="1.1"/><circle cx="6" cy="10" r="1.1"/><path d="M3 3.5v1a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2v-1M6 6.5v2.3"/>',
+  beacon:'<path d="M4.6 11L5 5.2h2l.4 5.8zM3.6 3.5h4.8M6 1.2v2.3M1.6 4.3l1.4-.9M10.4 4.3L9 3.4M3.5 11h5"/>',
+  flag:'<path d="M3 1.5v9.5M3 2h6L7.6 4.2 9 6.4H3"/>',
+  epic:'<path d="M6 1.5l4.5 2.6v4.8L6 11.5 1.5 8.9V4.1z"/><circle cx="6" cy="6.5" r="1.2"/>',
+  commit:'<circle cx="6" cy="6" r="2.2"/><path d="M1 6h2.8M8.2 6H11"/>',
+  branch:'<circle cx="3" cy="2.5" r="1.2"/><circle cx="3" cy="9.5" r="1.2"/><circle cx="9" cy="4" r="1.2"/><path d="M3 3.7v4.6M9 5.2c0 2-6 1.5-6 3.5"/>',
+  repo:'<path d="M2 2.5h6l2 2v7H2z"/><path d="M4 6h4M4 8.5h4"/>',
+};
+const SRCGL = {jira:'pin', wiki:'book', git:'fork', ci:'beacon', note:'flag'};
+const gl = (name, cls='') => `<svg viewBox="0 0 12 12" class="${cls}" aria-hidden="true">${GL[name]||GL.pin}</svg>`;
+
+const E = {};
+const add = (o) => (E[o.id] = o);
+// --- Jira
+add({id:'PAY-200', kind:'ticket', src:'jira', key:'PAY-200', title:'Payout reliability', itype:'Epic', status:'In Progress', priority:'High', assignee:'Priya Nair', updated:'today 08:12', hash:'#/ticket/PAY-200', who:['priya'], date:'today', links:['PAY-231','PAY-228','PAY-240','PAY-219','PAY-236'], children:['PAY-231','PAY-228','PAY-240','PAY-219','PAY-236'], search:'payout reliability epic'});
+add({id:'PAY-231', kind:'ticket', src:'jira', key:'PAY-231', title:'Retry failed SEPA payouts', itype:'Story', status:'In Progress', priority:'High', assignee:'Mara Lindqvist', updated:'today 11:48', epic:'PAY-200', hash:'#/ticket/PAY-231', who:['mara','priya','jonas'], date:'today', failing:true,
+  desc:'When the SEPA batch at the PSP returns a transient error (HTTP 503 or PSP code <code>TEMP_UNAVAILABLE</code>), retry the payout with exponential backoff (base 30 s, factor 2, max 5 attempts, jitter). Permanent failures go to the manual review queue.',
+  comments:[{who:'Priya Nair', when:'yesterday 14:20', text:'Please make sure the backoff policy matches the design page — finance wants max 5 attempts.'},{who:'Mara Lindqvist', when:'today 10:15', text:'Backoff + jitter implemented in a41f2c, integration test still red (#1187), investigating.'}],
+  estimate:'2d', spentWeek:'6h 30m', worklogs:[{when:'yesterday', dur:'3h', text:'Retry loop implementation'}],
+  links:['br-231','pr-142','b-1187','b-1188','pg-sepa','nt-sepa'], search:'retry failed sepa payouts transient backoff jitter manual review queue psp'});
+add({id:'PAY-228', kind:'ticket', src:'jira', key:'PAY-228', title:'Ledger drift on partial refunds', itype:'Bug', status:'In Review', priority:'High', assignee:'Mara Lindqvist', updated:'yesterday 16:05', epic:'PAY-200', hash:'#/ticket/PAY-228', who:['mara'], date:'yesterday', blockedBy:'OPS-77',
+  desc:'Ledger totals drift after partial refunds. Fixed in PR #139; staging verification pending.', comments:[], estimate:'1d', spentWeek:'4h 15m', worklogs:[{when:'yesterday', dur:'1h 30m', text:'Review PR #139 fixes, re-test partial refund drift'}],
+  links:['pr-139','pg-runbook','nt-standup21','OPS-77'], search:'ledger drift partial refunds bug'});
+add({id:'PAY-240', kind:'ticket', src:'jira', key:'PAY-240', title:'Payout dashboard latency', itype:'Task', status:'To Do', priority:'Medium', assignee:'Mara Lindqvist', assignedNote:'assigned today 08:12 by Priya', updated:'today 08:12', epic:'PAY-200', hash:'#/ticket/PAY-240', who:['mara','priya'], date:'today',
+  desc:'Finance reports the payout dashboard takes 8–12 s to load for August. Target &lt; 2 s.', comments:[], estimate:'—', spentWeek:'0h', worklogs:[], links:[], search:'payout dashboard latency finance slow august'});
+add({id:'PAY-219', kind:'ticket', src:'jira', key:'PAY-219', title:'Rotate PSP credentials', itype:'Task', status:'Done', priority:'Medium', assignee:'Mara Lindqvist', updated:'2026-08-18', epic:'PAY-200', hash:'#/ticket/PAY-219', who:['mara'], date:'week', desc:'', comments:[], estimate:'4h', spentWeek:'—', worklogs:[], links:['nt-creds'], search:'rotate psp credentials'});
+add({id:'PAY-236', kind:'ticket', src:'jira', key:'PAY-236', title:'Payout CSV export for finance', itype:'Story', status:'To Do', priority:'Low', assignee:'Jonas Becker', updated:'2026-08-20', epic:'PAY-200', hash:'#/ticket/PAY-236', who:['jonas'], date:'week', desc:'', comments:[], estimate:'3d', spentWeek:'—', worklogs:[], links:['pr-144'], search:'payout csv export finance'});
+add({id:'OPS-77', kind:'ticket', src:'jira', key:'OPS-77', title:'On-call runbook outdated', itype:'Task', status:'To Do', priority:'Medium', assignee:'Tomasz Wójcik', updated:'2026-08-19', hash:'#/ticket/OPS-77', who:['tomasz'], date:'week', desc:'', comments:[], estimate:'—', spentWeek:'—', worklogs:[], links:['pg-handbook','PAY-228'], blocks:'PAY-228', search:'on-call runbook outdated operations'});
+// --- Gitea
+add({id:'repo-payout', kind:'repo', src:'git', key:'payout-service', title:'payout-service', lang:'Rust', clone:'~/code/payout-service', note:'default branch <code>main</code>, 312 commits', hash:'#/repo/payout-service', who:['mara','jonas'], date:'today', links:['br-231','pr-142','pr-144'], search:'payout-service rust repo'});
+add({id:'repo-ledger', kind:'repo', src:'git', key:'ledger-api', title:'ledger-api', lang:'Kotlin', clone:'~/code/ledger-api', note:'', hash:'#/repo/ledger-api', who:['mara'], date:'yesterday', links:['pr-139'], search:'ledger-api kotlin repo'});
+add({id:'repo-runbooks', kind:'repo', src:'git', key:'ops-runbooks', title:'ops-runbooks', lang:'Markdown', clone:'not cloned', note:'', hash:'#/repo/ops-runbooks', who:['tomasz'], date:'older', links:[], search:'ops-runbooks markdown repo'});
+add({id:'br-231', kind:'branch', src:'git', key:'feature/PAY-231-sepa-retry', title:'feature/PAY-231-sepa-retry', repo:'repo-payout', ahead:3, checkedOut:true, hash:'#/branch/feature-PAY-231-sepa-retry', who:['mara'], date:'today', failing:true, commits:['c-c90d11','c-a41f2c','c-7be0e4'], links:['PAY-231','pr-142','c-c90d11','c-a41f2c','c-7be0e4'], search:'feature/pay-231-sepa-retry branch sepa retry'});
+add({id:'c-c90d11', kind:'commit', src:'git', key:'c90d11', title:'PAY-231: jitter in backoff, cap at 5 attempts', when:'today 11:42', who:['mara'], date:'today', branch:'br-231', hash:'#/commit/c90d11', links:['br-231'], search:'c90d11 pay-231 jitter in backoff cap at 5 attempts feature/pay-231-sepa-retry sepa retry'});
+add({id:'c-a41f2c', kind:'commit', src:'git', key:'a41f2c', title:'PAY-231 backoff jitter', when:'today 10:02', who:['mara'], date:'today', branch:'br-231', hash:'#/commit/a41f2c', links:['br-231'], search:'a41f2c pay-231 backoff jitter feature/pay-231-sepa-retry sepa retry'});
+add({id:'c-7be0e4', kind:'commit', src:'git', key:'7be0e4', title:'PAY-231: retry SEPA payouts on transient PSP errors', when:'yesterday 17:30', who:['mara'], date:'yesterday', branch:'br-231', hash:'#/commit/7be0e4', links:['br-231'], search:'7be0e4 pay-231 retry sepa payouts on transient psp errors feature/pay-231-sepa-retry'});
+add({id:'pr-142', kind:'pr', src:'git', key:'PR #142', num:142, title:'SEPA retry with exponential backoff', repo:'repo-payout', from:'feature/PAY-231-sepa-retry', to:'main', state:'open', by:'Mara Lindqvist', opened:'yesterday 17:41', approvals:[{who:'Priya Nair', ok:true},{who:'Jonas Becker', ok:false, note:'review requested today 09:05'}], checks:['b-1188','b-1187'], files:[['src/sepa/retry.rs','+84 −12'],['tests/sepa_retry.rs','+51'],['docs/backoff.md','+9']],
+  comments:[{who:'Jonas Becker', when:'today 09:30', text:'Should the jitter be bounded? ±20 % feels wide.'},{who:'Mara Lindqvist', when:'today 10:20', text:'Bounded to ±10 % in c90d11.'}], hash:'#/pr/142', who:['mara','priya','jonas'], date:'today', failing:true, links:['PAY-231','br-231','b-1188','b-1187'], search:'pr 142 sepa retry with exponential backoff pull request'});
+add({id:'pr-144', kind:'pr', src:'git', key:'PR #144', num:144, title:'Add payout CSV export', repo:'repo-payout', from:'feature/PAY-236-csv-export', to:'main', state:'open', by:'Jonas Becker', opened:'today 13:50', reviewRequested:'review requested from you today 13:50', approvals:[{who:'Mara Lindqvist', ok:false, note:'requested today 13:50'}], checks:[], files:[], comments:[], hash:'#/pr/144', who:['jonas','mara'], date:'today', links:['PAY-236'], search:'pr 144 add payout csv export pull request'});
+add({id:'pr-139', kind:'pr', src:'git', key:'PR #139', num:139, title:'Fix ledger drift on partial refunds', repo:'repo-ledger', from:'fix/PAY-228-partial-refund-drift', to:'main', state:'merged', by:'Mara Lindqvist', opened:'yesterday', merged:'yesterday 16:00', approvals:[], checks:['b-412'], files:[], comments:[], hash:'#/pr/139', who:['mara'], date:'yesterday', links:['PAY-228','pg-runbook'], search:'pr 139 fix ledger drift on partial refunds pull request merged'});
+// --- TeamCity
+add({id:'b-1188', kind:'build', src:'ci', key:'#1188', cfg:'Payout_Build', title:'Payout_Build #1188', state:'running', step:'step 3/5 <code>cargo test</code>', branch:'feature/PAY-231-sepa-retry', when:'started today 11:45', hash:'#/build/1188', who:['mara'], date:'today', failing:false, links:['pr-142','PAY-231'], params:'branch=feature/PAY-231-sepa-retry, env=staging', search:'1188 payout_build running feature/pay-231-sepa-retry sepa retry'});
+add({id:'b-1187', kind:'build', src:'ci', key:'#1187', cfg:'Payout_IntegrationTests', title:'Payout_IntegrationTests #1187', state:'failed', branch:'feature/PAY-231-sepa-retry', when:'today 10:10 · 4 m 12 s', hash:'#/build/1187', who:['mara'], date:'today', failing:true, links:['pr-142','PAY-231','nt-sepa'], params:'branch=feature/PAY-231-sepa-retry, env=staging',
+  log:'test sepa::retry::gives_up_after_max_attempts ... <span class="bad">FAILED</span>\nassertion failed: attempts == 5 (left: 6, right: 5)\ntest result: <span class="bad">FAILED</span>. 41 passed; 1 failed', search:'1187 payout_integrationtests failed feature/pay-231-sepa-retry sepa retry gives_up_after_max_attempts'});
+add({id:'b-412', kind:'build', src:'ci', key:'#412', cfg:'Ledger_Deploy_Staging', title:'Ledger_Deploy_Staging #412', state:'success', branch:'main', when:'yesterday 16:20', hash:'#/build/412', who:['mara'], date:'yesterday', links:['pr-139'], params:'branch=main, env=staging', search:'412 ledger_deploy_staging success main'});
+// --- Confluence
+add({id:'pg-sepa', kind:'page', src:'wiki', key:'', title:'SEPA payout retry design', space:'ENG', edited:'today 10:40', editedSection:'Backoff policy', by:'Mara Lindqvist', hash:'#/page/sepa-payout-retry-design', who:['mara','priya'], date:'today',
+  body:'<h4>Backoff policy</h4><p>base 30 s, factor 2, max 5 attempts, jitter ±10 %. Transient codes: HTTP 503, <code>TEMP_UNAVAILABLE</code>. After the final attempt the payout is moved to the manual review queue (see PAY-231).</p><h4>Manual review queue</h4><p><em>SLA: to be defined.</em></p>',
+  comments:[{who:'Priya Nair', when:'today 12:05', text:'@Mara can you add the manual-review queue SLA here?', mention:true}], links:['PAY-231','nt-sepa','pr-142'], search:'sepa payout retry design backoff policy manual review queue sla'});
+add({id:'pg-runbook', kind:'page', src:'wiki', key:'', title:'Ledger reconciliation runbook', space:'ENG', edited:'2026-08-19', by:'Tomasz Wójcik', hash:'#/page/ledger-reconciliation-runbook', who:['tomasz'], date:'week', body:'<p>Steps to reconcile ledger totals against the PSP settlement report on staging and production.</p>', comments:[], links:['PAY-228','pr-139'], search:'ledger reconciliation runbook'});
+add({id:'pg-handbook', kind:'page', src:'wiki', key:'', title:'On-call handbook', space:'ENG', edited:'2026-07-02', by:'Tomasz Wójcik', hash:'#/page/on-call-handbook', who:['tomasz'], date:'older', body:'<p>Escalation paths, paging rotation and runbook index for the Payments on-call.</p>', comments:[], links:['OPS-77'], search:'on-call handbook escalation'});
+add({id:'pg-arch', kind:'page', src:'wiki', key:'', title:'Payments architecture overview', space:'ENG', edited:'2026-08-11', by:'Priya Nair', hash:'#/page/payments-architecture-overview', who:['priya'], date:'week', body:'<p>Service map for Payments: payout-service, ledger-api, PSP adapters and the finance dashboard.</p>', comments:[], links:[], search:'payments architecture overview dashboard latency ledger-api'});
+add({id:'pg-standups', kind:'page', src:'wiki', key:'', title:'Standup protocols', space:'ENG', edited:'yesterday', by:'Mara Lindqvist', hash:'#/page/standup-protocols', who:['mara'], date:'yesterday', body:'<p>Parent of the daily protocol pages.</p>', comments:[], links:[], search:'standup protocols daily'});
+// --- Notes
+add({id:'nt-sepa', kind:'note', src:'note', key:'', title:'SEPA retry investigation', edited:'today 11:20', hash:'#/note/sepa-retry-investigation', who:['mara'], date:'today', failing:true,
+  text:'Test expects 5 attempts, code counts the initial try as attempt 0 → off-by-one. Fix: start counter at 1. Also: ask Priya about manual-review SLA.', refs:['PAY-231','#1187','SEPA payout retry design'], links:['PAY-231','b-1187','pg-sepa'], search:'sepa retry investigation off-by-one attempt counter manual-review sla'});
+add({id:'nt-standup21', kind:'note', src:'note', key:'', title:'Standup 2026-08-21', edited:'yesterday 09:05', hash:'#/note/standup-2026-08-21', who:['mara'], date:'yesterday',
+  text:'Yesterday: drift fix. Today: re-test partial refunds on staging, open PR. Blocker: none.', refs:['PAY-228','PR #139'], links:['PAY-228','pr-139'], search:'standup 2026-08-21 drift fix partial refunds'});
+add({id:'nt-creds', kind:'note', src:'note', key:'', title:'Credentials to rotate', edited:'2026-08-18', hash:'#/note/credentials-to-rotate', who:['mara'], date:'week',
+  text:'TeamCity password expires end of August. Jira PAT expires 2026-09-03.', refs:['PAY-219'], links:['PAY-219'], search:'credentials to rotate teamcity password jira pat expires'});
+
+// text → entity chips
+const REF = {'feature/PAY-231-sepa-retry':'br-231','PAY-231':'PAY-231','PAY-228':'PAY-228','PAY-240':'PAY-240','PAY-219':'PAY-219','PAY-236':'PAY-236','PAY-200':'PAY-200','OPS-77':'OPS-77','PR #142':'pr-142','PR #144':'pr-144','PR #139':'pr-139','#1187':'b-1187','#1188':'b-1188','#412':'b-412','a41f2c':'c-a41f2c','c90d11':'c-c90d11','7be0e4':'c-7be0e4','ledger-api':'repo-ledger','payout-service':'repo-payout','SEPA payout retry design':'pg-sepa','Ledger reconciliation runbook':'pg-runbook','On-call handbook':'pg-handbook','Payments architecture overview':'pg-arch','SEPA retry investigation':'nt-sepa','Standup 2026-08-21':'nt-standup21','Credentials to rotate':'nt-creds'};
+const REF_RE = new RegExp('\\[\\[([^\\]]+)\\]\\]|(' + Object.keys(REF).sort((a,b)=>b.length-a.length).map(s=>s.replace(/[.*+?^${}()|[\]\\\/#]/g,'\\$&')).join('|') + ')', 'g');
+
+// chart nodes (hand-laid)
+const NODES = [
+  ['pg-sepa',360,80],['nt-sepa',130,230],['PAY-231',360,240],['br-231',560,180],['pr-142',745,235],['b-1188',905,150],['b-1187',905,315],['c-a41f2c',570,330],
+  ['PAY-200',360,415],['PAY-236',140,400],['pr-144',140,500],['PAY-240',600,470],['pg-arch',800,450],['repo-ledger',950,400],
+  ['nt-standup21',140,640],['PAY-228',360,620],['pr-139',560,640],['pg-runbook',760,660],['OPS-77',360,745],['pg-handbook',600,750]
+];
+const POS = {}; NODES.forEach(([id,x,y]) => POS[id] = {x,y});
+const FREE_SLOTS = [[130,320],[250,800],[130,745],[930,700],[730,560],[890,560],[950,250],[60,150]];
+let EDGES = [
+  ['pg-sepa','PAY-231'],['nt-sepa','PAY-231'],['PAY-231','br-231'],['br-231','pr-142'],['pr-142','b-1188'],['pr-142','b-1187'],['br-231','c-a41f2c'],
+  ['PAY-231','PAY-200','contains'],['PAY-200','PAY-228','contains'],['PAY-200','PAY-240','contains'],['PAY-200','PAY-236','contains'],
+  ['PAY-236','pr-144'],['PAY-228','pr-139'],['pr-139','pg-runbook'],['PAY-228','nt-standup21'],['PAY-228','OPS-77','blocked'],['OPS-77','pg-handbook']
+];
+const SUGG = [
+  {id:'s1', a:'c-a41f2c', b:'PAY-231', reason:'key in commit message', state:'open'},
+  {id:'s2', a:'b-1187', b:'PAY-231', reason:'key in build parameter <code>branch</code>', state:'open'},
+  {id:'s3', a:'pg-arch', b:'repo-ledger', reason:'mentions <code>ledger-api</code> 4×', state:'open'},
+  {id:'s4', a:'PAY-240', b:'pg-arch', reason:'text similarity 0.71 (“dashboard latency”)', state:'open'},
+];
+const CHAINS = [['nt-sepa','PAY-231','br-231','pr-142','b-1187','pg-sepa'],['nt-standup21','PAY-228','pr-139','pg-runbook'],['PAY-219','nt-creds'],['OPS-77','pg-handbook'],['PAY-236','pr-144']];
+const LENSES = [
+  {id:'failing', name:'My tickets with a failing build', n:1, ids:['PAY-231','b-1187'], jql:true, note:'joins Jira ↔ Gitea ↔ TeamCity'},
+  {id:'prs-me', name:'PRs waiting on me', n:1, delta:'+1', ids:['pr-144'], note:'PR #144'},
+  {id:'prs-idle', name:'PRs idle > 5 days', n:2, ids:[], note:'in other repos — not on this chart'},
+  {id:'pages', name:'Pages I edited this week', n:3, ids:['pg-sepa','pg-standups'], note:'SEPA payout retry design · Standup protocols · Standup protocols › 2026-08-21'},
+  {id:'blocked', name:'Blocked tickets', n:1, ids:['PAY-228','OPS-77'], note:'PAY-228'},
+  {id:'unlogged', name:'Unlogged time this week', n:'4h 45m', ids:['PAY-231','PAY-228'], note:'Thu · Fri', time:true},
+];
+
+/* =====================================================================
+   STATE
+   ===================================================================== */
+const state = {
+  sel:null, lastEntityHash:'#/ticket/PAY-231', overlay:null, lens:null, query:'', filters:{src:null,type:null,who:null,date:null,failing:false},
+  layers:{jira:true,wiki:true,git:true,ci:true,note:true},
+  timer:{running:true, ctx:'PAY-231', ctxLabel:null, since:'13:58', baseSec:34*60, startedAt:Date.now()},
+  history:[], pending:[], ciAuth:false, unloggedMin:285, loggedToday:[],
+  inbox:[
+    {id:'i1', t:'today 13:50', node:'pr-144', html:'<b>Jonas</b> requested your review on PR #144 <em>Add payout CSV export</em>', acts:['review','snooze','done']},
+    {id:'i2', t:'today 12:05', node:'pg-sepa', html:'<b>Priya</b> mentioned you on <em>SEPA payout retry design</em>: <q>@Mara can you add the manual-review queue SLA here?</q>', acts:['reply','openpage','done']},
+    {id:'i3', t:'today 10:14', node:'b-1187', html:'Build #1187 Payout_IntegrationTests <b class="coral">failed</b> on feature/PAY-231-sepa-retry', acts:['openlog','rerun','comment231']},
+    {id:'i4', t:'today 09:30', node:'pr-142', html:'<b>Jonas</b> commented on your PR #142: <q>Should the jitter be bounded? ±20 % feels wide.</q>', acts:['replypr','openpr']},
+    {id:'i5', t:'today 08:12', node:'PAY-240', html:'<b>Priya</b> assigned PAY-240 <em>Payout dashboard latency</em> to you', acts:['open240','startwork']},
+    {id:'i6', t:'yesterday 16:30', node:'PAY-228', html:'PAY-228 is blocked by OPS-77 <em>On-call runbook outdated</em>', acts:['open77','ping']},
+  ],
+  snoozed:[{id:'z1', html:'Jira PAT expires in 12 days', back:'returns 2026-08-29'}],
+  blocks:[
+    {s:'08:30', e:'08:45', ctx:null, label:'Inbox + standup digest', sub:'passive · triage', kind:'passive'},
+    {s:'08:45', e:'09:40', ctx:'PAY-228', label:'with note Standup 2026-08-21', kind:'passive'},
+    {s:'09:40', e:'11:50', ctx:'PAY-231', label:'PR #142, design page, investigation note', kind:'passive'},
+    {s:'11:50', e:'12:20', ctx:null, label:'unattributed', kind:'unattr'},
+    {s:'12:20', e:'13:10', ctx:null, label:'no activity', kind:'gap'},
+    {s:'13:10', e:'13:58', ctx:null, label:'Staging DB configuration', kind:'label'},
+    {s:'13:58', e:'14:32', ctx:'PAY-231', label:'manual timer', kind:'manual'},
+  ],
+  nextTicket:241, nextPr:145, nextBuild:1189, newNotes:0,
+};
+
+/* =====================================================================
+   UTILITIES
+   ===================================================================== */
+const $ = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const byHash = {}; Object.values(E).forEach(e => byHash[e.hash] = e.id);
+const glyphOf = (e) => e.kind==='ticket' ? (e.itype==='Epic'?'epic':'pin') : e.kind==='commit' ? 'commit' : e.kind==='branch' ? 'branch' : e.kind==='repo' ? 'repo' : SRCGL[e.src];
+const isDoc = (e) => e.kind==='page' || e.kind==='note';
+const label = (e) => e.key || e.title;
+const srcTag = (e) => `<span class="src">${gl(SRCGL[e.src])}${SRCLBL[e.src]}</span>`;
+const chip = (id) => { const e = E[id]; if(!e) return ''; return `<button class="chip${isDoc(e)?' is-doc':''}" data-nav="${id}">${gl(glyphOf(e))}${esc(label(e))}</button>`; };
+function chipify(text){ // text is raw; escapes then chips
+  return esc(text).replace(REF_RE, (m, inner, lit) => { const key = inner || lit; const id = REF[key]; return id ? chip(id) : m; });
+}
+const toMin = (t) => { const [h,m] = t.split(':').map(Number); return h*60+m; };
+const fmtDur = (min) => { const h = Math.floor(min/60), m = min%60; return h ? `${h}h ${String(m).padStart(2,'0')}m` : `${m}m`; };
+const fmtClock = (sec) => { const h = Math.floor(sec/3600), m = Math.floor(sec%3600/60); return `${h}:${String(m).padStart(2,'0')}`; };
+const NOW_MIN = toMin('14:32');
+let toastSeq = 0;
+function toast(msg, kind='', action){
+  const box = $('#toasts'); const el = document.createElement('div'); el.className = 'toast ' + kind; const id = ++toastSeq;
+  el.innerHTML = `<span>${msg}</span>${action?`<button data-toast-act="${id}">${esc(action.label)}</button>`:''}`;
+  if(action) el.querySelector('[data-toast-act]').addEventListener('click', () => { action.fn(); el.remove(); });
+  box.appendChild(el); setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 320); }, action ? 7000 : 4200);
+}
+const timeNow = () => '14:32';
+
+/* =====================================================================
+   CHART
+   ===================================================================== */
+const R = 13;
+let view = {x:0, y:0, k:1};
+function nodeSvg(id){
+  const e = E[id], p = POS[id]; if(!e||!p) return '';
+  const doc = isDoc(e);
+  const cls = ['node', doc?'node--doc':'', e.state==='failed'?'node--failed':'', e.state==='running'?'node--running':'', e.state==='merged'?'node--merged':''].join(' ');
+  const ttl = e.title.length > 26 ? e.title.slice(0,25) + '…' : e.title;
+  const l1 = doc ? SRCLBL[e.src] : esc(e.key), l2 = doc ? esc(ttl) : (e.kind==='branch' ? '' : esc(ttl));
+  return `<g class="${cls}" data-id="${id}" transform="translate(${p.x},${p.y})" tabindex="0" role="button" aria-label="${esc(label(e))}">
+    <circle class="node-halo" r="16"/><circle class="node-ring" r="18"/><circle class="node-fill" r="${R}"/>
+    <g class="glyph" transform="translate(-6,-6)">${GL[glyphOf(e)]}</g>
+    ${doc ? `<text class="node-name" y="30">${l2}</text><text class="node-key" y="43">${l1}</text>` : `<text class="node-key" y="30">${l1}</text>${l2?`<text class="node-name" y="44">${l2}</text>`:''}`}
+  </g>`;
+}
+function edgeSvg(a, b, kind, extra=''){
+  const pa = POS[a], pb = POS[b]; if(!pa||!pb) return '';
+  const dx = pb.x-pa.x, dy = pb.y-pa.y, d = Math.hypot(dx,dy) || 1, ux = dx/d, uy = dy/d, pad = R + 5;
+  const x1 = pa.x+ux*pad, y1 = pa.y+uy*pad, x2 = pb.x-ux*pad, y2 = pb.y-uy*pad;
+  const mx = (x1+x2)/2, my = (y1+y2)/2;
+  let s = `<path class="route route--${kind}" data-a="${a}" data-b="${b}" d="M${x1.toFixed(1)} ${y1.toFixed(1)}L${x2.toFixed(1)} ${y2.toFixed(1)}" ${extra}/>`;
+  if(kind==='route' || kind==='blocked') s += `<circle class="wp${kind==='blocked'?' wp--blocked':''}" data-a="${a}" data-b="${b}" cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="3"/>`;
+  if(kind==='blocked') s += `<text class="route-tag" style="fill:var(--coral)" data-a="${a}" data-b="${b}" x="${(mx+14).toFixed(1)}" y="${(my+4).toFixed(1)}">blocked</text>`;
+  if(kind==='suggested') s += `<text class="route-tag" data-a="${a}" data-b="${b}" x="${mx.toFixed(1)}" y="${(my-6).toFixed(1)}">?</text>`;
+  return s;
+}
+function renderGraph(){
+  $('#nodes').innerHTML = NODES.map(([id]) => nodeSvg(id)).join('');
+  let eh = EDGES.map(([a,b,k]) => edgeSvg(a,b,k||'route')).join('');
+  eh += SUGG.filter(s => s.state==='open').map(s => edgeSvg(s.a, s.b, 'suggested')).join('');
+  $('#edges').innerHTML = eh;
+  applyVisual();
+}
+function applyVisual(){
+  const visible = visibleSet();
+  $$('#nodes .node').forEach(n => {
+    const id = n.dataset.id, e = E[id];
+    n.classList.toggle('is-sel', id===state.sel);
+    n.classList.toggle('is-timer', state.timer.running && state.timer.ctx===id);
+    const layerOff = !state.layers[e.src];
+    n.style.display = layerOff ? 'none' : '';
+    n.classList.toggle('is-dim', visible && !visible.has(id));
+  });
+  $$('#edges [data-a]').forEach(p => {
+    const a = p.dataset.a, b = p.dataset.b;
+    const off = !state.layers[E[a].src] || !state.layers[E[b].src];
+    p.style.display = off ? 'none' : '';
+    p.classList.toggle('is-dim', visible && !(visible.has(a) && visible.has(b)));
+  });
+  $$('#lenses .lens').forEach(l => l.classList.toggle('is-on', l.dataset.lens===state.lens));
+}
+function visibleSet(){ // null = everything
+  if(state.lens){ const L = LENSES.find(l => l.id===state.lens); return new Set(L.ids); }
+  const q = state.query.trim(); const f = state.filters;
+  if(!q && !f.src && !f.type && !f.who && !f.date && !f.failing) return null;
+  return new Set(searchEntities().map(e => e.id));
+}
+function highlightNode(id){
+  const n = $(`#nodes .node[data-id="${id}"]`); if(!n) return;
+  n.classList.remove('is-hl'); void n.getBBox(); n.classList.add('is-hl'); setTimeout(() => n.classList.remove('is-hl'), 3000);
+}
+function placeNode(id){
+  const used = new Set(Object.values(POS).map(p => p.x+','+p.y));
+  const slot = FREE_SLOTS.find(([x,y]) => !used.has(x+','+y)) || [500,800];
+  POS[id] = {x:slot[0], y:slot[1]}; NODES.push([id, slot[0], slot[1]]);
+}
+function addEdge(a, b, kind='route', animate=true){
+  if(EDGES.some(([x,y]) => (x===a&&y===b)||(x===b&&y===a))) return;
+  EDGES.push([a,b,kind]);
+  if(!POS[a] || !POS[b]) return;
+  $('#edges').insertAdjacentHTML('beforeend', edgeSvg(a,b,kind));
+  if(animate) drawIn(a,b);
+  applyVisual();
+}
+function drawIn(a,b){
+  const p = $(`#edges path[data-a="${a}"][data-b="${b}"]`); if(!p) return;
+  const len = p.getTotalLength();
+  p.classList.add('is-drawing'); p.style.strokeDasharray = len; p.style.strokeDashoffset = len; p.style.transition = 'none';
+  requestAnimationFrame(() => { p.style.transition = 'stroke-dashoffset .4s ease-out'; p.style.strokeDashoffset = 0;
+    setTimeout(() => { p.classList.remove('is-drawing'); p.style.strokeDasharray = ''; p.style.strokeDashoffset = ''; p.style.transition = ''; }, 420); });
+}
+function confirmSugg(id){
+  const s = SUGG.find(x => x.id===id); if(!s || s.state!=='open') return;
+  s.state = 'confirmed';
+  $$(`#edges [data-a="${s.a}"][data-b="${s.b}"]`).forEach(el => el.remove());
+  E[s.a].links = [...new Set([...(E[s.a].links||[]), s.b])]; E[s.b].links = [...new Set([...(E[s.b].links||[]), s.a])];
+  addEdge(s.a, s.b, 'route', true);
+  toast(`Route confirmed: ${esc(label(E[s.a]))} ↔ ${esc(label(E[s.b]))}`, 'teal');
+  renderCard();
+}
+function dismissSugg(id){
+  const s = SUGG.find(x => x.id===id); if(!s) return; s.state = 'dismissed';
+  $$(`#edges [data-a="${s.a}"][data-b="${s.b}"]`).forEach(el => el.remove());
+  toast(`Dismissed suggestion ${esc(label(E[s.a]))} → ${esc(label(E[s.b]))}`, '', {label:'Undo', fn:() => { s.state='open'; renderGraph(); renderCard(); }});
+  renderCard();
+}
+function linkEntities(a, b){
+  if(a===b) return;
+  E[a].links = [...new Set([...(E[a].links||[]), b])]; E[b].links = [...new Set([...(E[b].links||[]), a])];
+  const sg = SUGG.find(s => s.state==='open' && ((s.a===a&&s.b===b)||(s.a===b&&s.b===a)));
+  if(sg){ confirmSugg(sg.id); return; }
+  addEdge(a, b, 'route', true);
+  toast(`Route drawn: ${esc(label(E[a]))} ↔ ${esc(label(E[b]))}`, 'teal');
+  renderCard();
+}
+
+// pan / zoom / drag-to-link
+(function chartInteractions(){
+  const svg = $('#chart'), viewG = $('#view'), drag = $('#draglink');
+  const pt = (ev) => { const p = svg.createSVGPoint(); p.x = ev.clientX; p.y = ev.clientY; return p.matrixTransform(svg.getScreenCTM().inverse()); };
+  let mode = null, start = null, fromId = null, moved = false, targetEl = null;
+  const applyView = () => viewG.setAttribute('transform', `translate(${view.x},${view.y}) scale(${view.k})`);
+  svg.addEventListener('mousedown', (ev) => {
+    if(ev.button!==0) return;
+    const node = ev.target.closest('.node');
+    start = pt(ev); moved = false;
+    if(node){ mode = 'link'; fromId = node.dataset.id; }
+    else { mode = 'pan'; svg.classList.add('is-panning'); }
+    ev.preventDefault();
+  });
+  window.addEventListener('mousemove', (ev) => {
+    if(!mode) return; const p = pt(ev);
+    if(Math.hypot(p.x-start.x, p.y-start.y) > 5) moved = true;
+    if(mode==='pan' && moved){ view.x += (p.x-start.x)*view.k; view.y += (p.y-start.y)*view.k; start = p; applyView(); }
+    if(mode==='link' && moved){
+      svg.classList.add('is-linking'); const a = POS[fromId];
+      const lx = (p.x-view.x)/view.k, ly = (p.y-view.y)/view.k;
+      drag.style.display = ''; drag.setAttribute('d', `M${a.x} ${a.y}L${lx} ${ly}`);
+      const over = document.elementFromPoint(ev.clientX, ev.clientY); const n = over && over.closest ? over.closest('.node') : null;
+      if(targetEl && targetEl!==n) targetEl.classList.remove('is-target');
+      targetEl = (n && n.dataset.id!==fromId) ? n : null; if(targetEl) targetEl.classList.add('is-target');
+    }
+  });
+  window.addEventListener('mouseup', (ev) => {
+    if(!mode) return;
+    svg.classList.remove('is-panning','is-linking'); drag.style.display = 'none';
+    if(mode==='link'){
+      if(!moved){ go(E[fromId].hash); }
+      else if(targetEl){ const to = targetEl.dataset.id; targetEl.classList.remove('is-target');
+        openPop(`<div class="ttl">Draw this route?</div><div>${chip(fromId)} <span class="teal mono">↔</span> ${chip(to)}</div><div class="faint" style="font-size:12.5px;margin-top:4px">Drawn by you · becomes a confirmed link on both</div>
+          <div class="row"><button class="btn btn--gold btn--sm" id="pop-link">Link ${esc(label(E[fromId]))} ↔ ${esc(label(E[to]))}</button><button class="btn btn--ghost btn--sm" data-close-pop>Cancel</button></div>`, ev.clientX, ev.clientY);
+        $('#pop-link').addEventListener('click', () => { closePop(); linkEntities(fromId, to); });
+      }
+    }
+    mode = null; targetEl = null;
+  });
+  svg.addEventListener('wheel', (ev) => { ev.preventDefault(); const p = pt(ev); const k0 = view.k; const k = Math.min(2.2, Math.max(.6, k0 * (ev.deltaY < 0 ? 1.08 : .93)));
+    view.x = p.x - (p.x - view.x) * k/k0; view.y = p.y - (p.y - view.y) * k/k0; view.k = k; applyView(); }, {passive:false});
+  svg.addEventListener('contextmenu', (ev) => { const node = ev.target.closest('.node'); if(!node) return; ev.preventDefault(); openCtxFor(node.dataset.id, ev.clientX, ev.clientY); });
+  svg.addEventListener('keydown', (ev) => { const node = ev.target.closest && ev.target.closest('.node'); if(!node) return;
+    if(ev.key==='Enter' || ev.key===' '){ ev.preventDefault(); go(E[node.dataset.id].hash); }
+    if(ev.key==='ContextMenu' || (ev.shiftKey && ev.key==='F10')){ ev.preventDefault(); const r = node.getBoundingClientRect(); openCtxFor(node.dataset.id, r.right, r.top); } });
+  svg.addEventListener('dblclick', () => { view = {x:0,y:0,k:1}; applyView(); });
+})();
+
+function renderLegend(){
+  $('#legend').innerHTML = ['jira','wiki','git','ci','note'].map(s => `<span class="src">${gl(SRCGL[s])}${SRCLBL[s]}</span>`).join('') +
+    `<svg class="lg" viewBox="0 0 26 10"><path d="M1 5h24" stroke="#3FB8AF" stroke-dasharray="5 3" fill="none"/><circle cx="13" cy="5" r="2.3" fill="#121A2C" stroke="#3FB8AF"/></svg><span>route</span>
+     <svg class="lg" viewBox="0 0 26 10"><path d="M1 5h24" stroke="#3FB8AF" stroke-opacity=".5" stroke-dasharray="2 4" fill="none"/></svg><span>suggested</span>
+     <svg class="lg" viewBox="0 0 26 10"><circle cx="13" cy="5" r="4" fill="none" stroke="#D4A857"/></svg><span>timer here</span>`;
+}
+function renderLenses(){
+  $('#lenses').innerHTML = LENSES.map(L => `<button class="lens${state.lens===L.id?' is-on':''}" data-lens="${L.id}" title="${esc(L.note)}">${esc(L.name)} <span class="n">${L.n}</span>${L.delta?`<span class="delta">${L.delta}</span>`:''}</button>`).join('') +
+    (state.lens ? `<button class="lens-clear" id="lens-clear">Clear lens</button>` : '');
+}
+
+/* =====================================================================
+   SIDE CARD
+   ===================================================================== */
+function chainFor(id){ return CHAINS.find(c => c.includes(id)); }
+function routeStrip(id){
+  const c = chainFor(id); if(!c) return '';
+  const stops = c.map((sid, i) => { const e = E[sid]; const bad = e.state==='failed';
+    return (i ? `<div class="rs-leg${bad?' is-bad':''}"></div>` : '') + `<button class="rs-stop${sid===id?' is-here':''}${isDoc(e)?' is-doc':''}${bad?' is-bad':''}" data-nav="${sid}" title="${esc(e.title)}"><span class="rs-dot"></span><span class="rs-lbl">${esc(label(e))}</span></button>`; }).join('');
+  return `<div class="rstrip"><div class="rstrip-h"><span class="eyebrow">Route · ${c.length} stops</span><span class="t">${esc(label(E[c[0]]))} → ${esc(label(E[c[c.length-1]]))}</span></div><div class="rs">${stops}</div></div>`;
+}
+function linksSec(e){
+  const ids = (e.links||[]).filter(x => E[x]);
+  if(!ids.length) return `<div class="sec"><div class="sec-h"><span class="eyebrow">Links</span><span class="n">0</span></div><div class="faint" style="font-size:13px">No routes yet. Drag this place onto another on the chart, or use <em>Link to…</em></div></div>`;
+  return `<div class="sec"><div class="sec-h"><span class="eyebrow">Links</span><span class="n">${ids.length}</span></div>${ids.map(x => lrow(x)).join('')}</div>`;
+}
+function stOf(e){
+  if(e.kind==='build') return e.state==='failed' ? ['failed','coral'] : e.state==='running' ? ['running · '+e.step.replace(/<[^>]+>/g,''),'gold'] : ['success','ok'];
+  if(e.kind==='pr') return e.state==='merged' ? ['merged','ok'] : [`open · ${e.approvals.filter(a=>a.ok).length}/2 approvals`, e.checks.some(c => E[c].state==='failed') ? 'coral' : ''];
+  if(e.kind==='ticket') return [e.status, e.status==='In Progress' ? 'gold' : ''];
+  if(e.kind==='branch') return [`${e.ahead} ahead · checked out`, ''];
+  if(e.kind==='page') return [`edited ${e.edited}`, ''];
+  if(e.kind==='note') return [`edited ${e.edited}`, ''];
+  if(e.kind==='commit') return [e.when, ''];
+  if(e.kind==='repo') return [e.lang, ''];
+  return ['',''];
+}
+function lrow(id){ const e = E[id]; const [st, cls] = stOf(e); const ttl = e.title===e.key ? '' : e.title;
+  return `<div class="lrow${id===state.sel?' is-sel':''}" data-nav="${id}" role="button" tabindex="0"><span class="src">${gl(glyphOf(e))}</span><span><span class="k">${e.key?esc(e.key)+' ':''}</span><span class="ttl">${esc(ttl)}</span></span><span class="st ${cls}">${esc(st)}</span></div>`; }
+function suggSec(e, all=false){
+  const mine = SUGG.filter(s => s.a===e.id || s.b===e.id);
+  const open = SUGG.filter(s => s.state==='open');
+  const list = all ? SUGG : mine; if(!list.length && !all) return '';
+  const rows = list.map(s => `<div class="srow${s.state==='confirmed'?' is-done':''}${s.state==='dismissed'?' is-gone':''}">
+      <div><div class="pair">${chip(s.a)}<span class="arr">⇢</span>${chip(s.b)}</div><div class="why"><b>${s.state==='confirmed'?'confirmed':s.state==='dismissed'?'dismissed':'why'}</b> · ${s.reason}</div></div>
+      <div style="display:flex;gap:4px">${s.state==='open'?`<button class="btn btn--sm btn--gold" data-confirm="${s.id}">Confirm</button><button class="btn btn--sm btn--ghost" data-dismiss="${s.id}">Dismiss</button>`:''}</div></div>`).join('');
+  return `<div class="sec"><div class="sec-h"><span class="eyebrow">Suggested routes</span><span class="n">${mine.filter(s=>s.state==='open').length} here · ${open.length} on the chart</span></div>${rows || '<div class="faint" style="font-size:13px">No suggestions for this place.</div>'}
+    <div style="margin-top:8px"><button class="btn btn--ghost btn--sm" data-suggall="${all?'0':'1'}">${all?'Show only this place':'Show all 4 on the chart'}</button></div></div>`;
+}
+function commentsSec(e, target){
+  const cs = e.comments || [];
+  return `<div class="sec"><div class="sec-h"><span class="eyebrow">Comments</span><span class="n">${cs.length}</span></div>
+    ${cs.map(c => `<div class="cmt"><div class="cmt-h"><b>${esc(c.who)}</b><span class="t">${esc(c.when)}</span>${c.mention?'<span class="chip" style="cursor:default">@mention</span>':''}</div><p>${chipify(c.text)}</p></div>`).join('')}
+    <div class="addbox"><textarea class="ta" id="cmt-ta" placeholder="${target||'Add a comment'}"></textarea><div class="actions" style="margin-top:6px"><button class="btn btn--gold btn--sm" data-addcmt="${e.id}">Add comment</button><span class="t" style="align-self:center">posts to ${esc(SRCLBL[e.src])} as Mara</span></div></div></div>`;
+}
+function cardHead(e, eyebrowExtra, titleHtml){
+  return `<div class="card-head"><div class="card-eyebrow">${srcTag(e)}${eyebrowExtra||''}<span class="t" style="margin-left:auto">${esc(SYNC[e.src])}</span></div>
+    <h1 class="card-title">${titleHtml}</h1>`;
+}
+function timerBtn(e){
+  const on = state.timer.running && state.timer.ctx===e.id;
+  return on ? `<button class="btn btn--gold btn--sm" data-timer="stop">${compassSvg()}Running here · stop</button>` : `<button class="btn btn--sm" data-timer="start:${e.id}">${compassSvg()}Start timer here</button>`;
+}
+const compassSvg = () => `<svg viewBox="0 0 20 20" style="stroke:none;fill:currentColor"><path d="M10 1l2 7 7 2-7 2-2 7-2-7-7-2 7-2z"/></svg>`;
+
+function cardTicket(e){
+  const sel = ['To Do','In Progress','In Review','Done'].map(s => `<option${s===e.status?' selected':''}>${s}</option>`).join('');
+  const blocked = e.blockedBy ? `<div class="sec"><div class="callout"><span class="coral mono">blocked</span><span>Blocked by ${chip(e.blockedBy)} — staging verification needs the updated runbook. <button class="btn btn--sm" style="margin-left:6px" data-ping="tomasz">Ping Tomasz</button></span></div></div>` : '';
+  const blocks = e.blocks ? `<div class="sec"><div class="callout gold"><span class="gold mono">blocks</span><span>${chip(e.blocks)} is waiting on this ticket.</span></div></div>` : '';
+  const children = e.children ? `<div class="sec"><div class="sec-h"><span class="eyebrow">In this epic</span><span class="n">${e.children.length}</span></div>${e.children.map(lrow).join('')}</div>` : '';
+  const startwork = e.status==='To Do' && e.id!=='OPS-77' && e.assignee.startsWith('Mara') ? `<button class="btn btn--gold btn--sm" data-startwork="${e.id}">Start work</button>` : '';
+  const timeSec = e.itype!=='Epic' ? `<div class="sec"><div class="sec-h"><span class="eyebrow">Time</span><span class="n">estimate ${esc(e.estimate)} · this week ${esc(e.spentWeek)}</span></div>
+      ${(e.worklogs||[]).map(w => `<div class="cmt"><div class="cmt-h"><b class="mono">${esc(w.dur)}</b><span class="t">${esc(w.when)}</span></div><p>${chipify(w.text)}</p></div>`).join('') || '<div class="faint" style="font-size:13px">No worklogs.</div>'}
+      ${e.id==='PAY-231' && !state.loggedToday.length ? `<div class="callout gold" style="margin-top:8px"><span>Nothing logged today · 5h 28m tracked</span><button class="btn btn--sm" style="margin-left:auto" data-worklog="PAY-231">Log today's time</button></div>` : ''}</div>` : '';
+  return cardHead(e, `<span class="faint">${esc(e.itype)}</span>${e.epic?`<span class="faint">· epic ${chip(e.epic)}</span>`:''}`, `<span class="key">${esc(e.key)}</span>${esc(e.title)}`) +
+    `<dl class="meta"><dt>Status</dt><dd><select class="in status-sel" data-status="${e.id}">${sel}</select></dd><dt>Priority</dt><dd>${esc(e.priority)}</dd><dt>Assignee</dt><dd>${esc(e.assignee)}${e.assignedNote?` <span class="faint">· ${esc(e.assignedNote)}</span>`:''}</dd><dt>Updated</dt><dd class="t">${esc(e.updated)}</dd></dl>
+    <div class="actions">${timerBtn(e)}${startwork}<button class="btn btn--sm" data-linkto="${e.id}">Link to…</button><button class="btn btn--ghost btn--sm" data-ctx="${e.id}">⋯</button></div></div>` +
+    routeStrip(e.id) +
+    (e.desc ? `<div class="sec"><div class="eyebrow" style="margin-bottom:6px">Description</div><p class="prose">${e.desc.replace(/PAY-\d+|OPS-\d+|PR #\d+/g, m => REF[m]?chip(REF[m]):m)}</p></div>` : '') +
+    blocked + blocks + children + linksSec(e) + suggSec(e, state.suggAll) + (e.itype!=='Epic' ? commentsSec(e) : '') + timeSec;
+}
+function cardPr(e){
+  const appr = e.approvals.map(a => `<div class="lrow" style="cursor:default"><span class="${a.ok?'ok':'faint'} mono">${a.ok?'✓':'○'}</span><span>${esc(a.who)}${a.note?` <span class="faint">· ${esc(a.note)}</span>`:''}</span><span class="st">${a.ok?'approved':'pending'}</span></div>`).join('');
+  const checks = e.checks.map(lrow).join('');
+  const files = e.files.map(([f,d]) => `<div class="lrow" style="cursor:default"><span class="src">${gl('repo')}</span><span class="k">${esc(f)}</span><span class="st mono">${esc(d)}</span></div>`).join('');
+  const mine = e.by.startsWith('Mara');
+  const reviewActs = !mine && e.state==='open' ? (e.reviewed ? `<span class="ok" style="align-self:center">You ${e.reviewed} · 14:32</span>` : `<button class="btn btn--gold btn--sm" data-review="${e.id}:approved">Approve</button><button class="btn btn--sm" data-review="${e.id}:requested changes">Request changes</button>`) : '';
+  return cardHead(e, `<span class="faint">${chip(e.repo)}</span>`, `<span class="key">${esc(e.key)}</span>${esc(e.title)}`) +
+    `<dl class="meta"><dt>Branch</dt><dd class="mono" style="font-size:12px">${esc(e.from)} → ${esc(e.to)}</dd><dt>State</dt><dd class="${e.state==='merged'?'ok':'gold'}">${esc(e.state)}${e.merged?` · ${esc(e.merged)}`:''}</dd><dt>Author</dt><dd>${esc(e.by)} · opened ${esc(e.opened)}</dd>${e.reviewRequested?`<dt>Review</dt><dd class="gold">${esc(e.reviewRequested)}</dd>`:''}</dl>
+    <div class="actions">${reviewActs}${timerBtn(e)}<button class="btn btn--sm" data-linkto="${e.id}">Link to…</button><button class="btn btn--ghost btn--sm" data-ctx="${e.id}">⋯</button></div></div>` +
+    routeStrip(e.id) +
+    (e.state==='open' ? `<div class="sec"><div class="sec-h"><span class="eyebrow">Approvals</span><span class="n">${e.approvals.filter(a=>a.ok).length} of 2 required</span></div>${appr}</div>` : '') +
+    (checks ? `<div class="sec"><div class="sec-h"><span class="eyebrow">Checks</span><span class="n">${e.checks.length}</span></div>${checks}</div>` : '') +
+    (files ? `<div class="sec"><div class="sec-h"><span class="eyebrow">Files changed</span><span class="n">${e.files.length}</span></div>${files}</div>` : '') +
+    linksSec(e) + commentsSec(e, e.id==='pr-142' ? 'Reply to Jonas' : 'Add a review comment');
+}
+function cardBuild(e){
+  const cls = e.state==='failed' ? 'coral' : e.state==='running' ? 'gold' : 'ok';
+  const acts = e.state==='failed' ? `<button class="btn btn--gold btn--sm" data-rerun="${e.id}">Re-run failed</button>` : '';
+  return cardHead(e, `<span class="faint">${esc(e.cfg)}</span>`, `<span class="key">${esc(e.key)}</span>${esc(e.cfg)} <em class="${cls}">${esc(e.state)}</em>`) +
+    `<dl class="meta"><dt>Branch</dt><dd class="mono" style="font-size:12px">${esc(e.branch)}</dd><dt>When</dt><dd class="t">${esc(e.when)}</dd>${e.state==='running'?`<dt>Progress</dt><dd>${e.step}</dd>`:''}<dt>Parameters</dt><dd class="mono" style="font-size:12px">${esc(e.params)}</dd></dl>
+    <div class="actions">${acts}<button class="btn btn--sm" data-trigger="${e.cfg}">Trigger with parameters…</button><button class="btn btn--ghost btn--sm" data-ctx="${e.id}">⋯</button></div>
+    <div class="callout" style="margin-top:12px"><span class="coral mono">401</span><span>ci.tidewater.internal hasn't synced for 38 min — shown as of the last sync. <button class="btn btn--sm" data-go="#/sources" style="margin-left:4px">Re-enter password</button></span></div></div>` +
+    routeStrip(e.id) +
+    (e.log ? `<div class="sec"><div class="sec-h"><span class="eyebrow">Log excerpt</span><span class="n">tests · last 3 lines</span></div><pre class="log">${e.log}</pre></div>` : '') +
+    (e.state==='running' ? `<div class="sec"><div class="sec-h"><span class="eyebrow">Steps</span><span class="n">3 of 5</span></div><div class="steps"><div class="step is-done"><span class="sd"></span><span>cargo fetch</span></div><div class="step is-done"><span class="sd"></span><span>cargo build</span></div><div class="step is-run"><span class="sd"></span><span>cargo test</span><span class="r">running</span></div><div class="step"><span class="sd"></span><span>clippy</span></div><div class="step"><span class="sd"></span><span>package</span></div></div></div>` : '') +
+    linksSec(e) + suggSec(e, state.suggAll);
+}
+function cardPage(e){
+  return cardHead(e, `<span class="faint">space ${esc(e.space)}</span>`, `<em>${esc(e.title)}</em>`) +
+    `<dl class="meta"><dt>Edited</dt><dd><span class="t">${esc(e.edited)}</span>${e.editedSection?` · section “${esc(e.editedSection)}”`:''} · ${esc(e.by)}</dd></dl>
+    <div class="actions">${timerBtn(e)}<button class="btn btn--sm" data-editpage="${e.id}">Edit section</button><button class="btn btn--sm" data-linkto="${e.id}">Link to…</button><button class="btn btn--ghost btn--sm" data-ctx="${e.id}">⋯</button></div></div>` +
+    routeStrip(e.id) +
+    `<div class="sec"><div class="eyebrow" style="margin-bottom:4px">Excerpt</div><div class="prose">${e.body.replace(/PAY-\d+/g, m => chip(m))}</div></div>` +
+    linksSec(e) + suggSec(e, state.suggAll) + commentsSec(e, e.id==='pg-sepa' ? 'Reply to Priya' : 'Add a page comment');
+}
+function noteBody(e){ return e.rawText !== undefined ? e.rawText : withRefs(e); }
+function cardNote(e){
+  const links = (e.links||[]).filter(x => E[x]);
+  const backlinks = e.id==='nt-sepa' ? [['PAY-231','links here (confirmed route)'],['digest','Standup digest · today — “fix integration test #1187 (off-by-one…)”']] : e.id==='nt-standup21' ? [['PAY-228','links here (confirmed route)']] : e.id==='nt-creds' ? [['PAY-219','links here (confirmed route)']] : (state.timer.ctx && E[state.timer.ctx] ? [[state.timer.ctx,'pre-linked from current context']] : []);
+  const rendered = esc(noteBody(e)).replace(/\[\[([^\]]+)\]\]/g, (m, k) => REF[k] ? chip(REF[k]) : m).replace(/\n/g, '<br>');
+  return cardHead(e, `<span class="faint">local · not synced anywhere</span>`, `<em>${esc(e.title)}</em>`) +
+    `<dl class="meta"><dt>Edited</dt><dd class="t">${esc(e.edited)}</dd><dt>Links</dt><dd>${(e.refs||[]).map(r => REF[r]?chip(REF[r]):esc(r)).join(' ') || '<span class="faint">none</span>'}</dd></dl>
+    <div class="actions">${timerBtn(e)}<button class="btn btn--sm" data-editnote="${e.id}">${state.noteEdit===e.id?'Done':'Edit'}</button><button class="btn btn--sm" data-linkto="${e.id}">Link to…</button><button class="btn btn--ghost btn--sm" data-ctx="${e.id}">⋯</button></div></div>` +
+    routeStrip(e.id) +
+    `<div class="sec"><div class="sec-h"><span class="eyebrow">Note</span><span class="n">[[ ]] links become routes</span></div>
+      ${state.noteEdit===e.id ? `<textarea class="ta" id="note-ta" style="min-height:120px;font-family:var(--sans)">${esc(noteBody(e))}</textarea><div class="actions" style="margin-top:6px"><button class="btn btn--gold btn--sm" data-savenote="${e.id}">Save note</button><span class="t" style="align-self:center">type [[PAY-240]] to link</span></div>` : `<div class="prose" style="font-size:14.5px;line-height:1.6">${rendered}</div>`}</div>` +
+    `<div class="sec"><div class="sec-h"><span class="eyebrow">Linked from</span><span class="n">${backlinks.length}</span></div>${backlinks.map(([id, why]) => id==='digest' ? `<div class="lrow" data-go="#/standup"><span class="src">${gl('flag')}</span><span class="ttl" style="white-space:normal">${esc(why)}</span><span class="st">standup</span></div>` : `<div class="lrow" data-nav="${id}"><span class="src">${gl(glyphOf(E[id]))}</span><span><span class="k">${esc(label(E[id]))}</span> <span class="ttl">${esc(why)}</span></span><span class="st">${esc(stOf(E[id])[0])}</span></div>`).join('') || '<div class="faint" style="font-size:13px">Nothing links here yet.</div>'}</div>` +
+    (links.length ? `<div class="sec"><div class="sec-h"><span class="eyebrow">Routes</span><span class="n">${links.length}</span></div>${links.map(lrow).join('')}</div>` : '');
+}
+function withRefs(e){ const missing = (e.refs||[]).filter(r => !e.text.includes('[['+r+']]')); return missing.length ? e.text + '\n\n' + missing.map(r => `[[${r}]]`).join(' ') : e.text; }
+function cardBranch(e){
+  return cardHead(e, `<span class="faint">${chip(e.repo)}</span>`, `<span class="key" style="font-size:15px">${esc(e.key)}</span><span class="muted" style="font-size:15px;font-family:var(--sans)">${e.ahead} commits ahead of main · ${e.checkedOut?'checked out locally':'not checked out'}</span>`) +
+    `<dl class="meta"><dt>Clone</dt><dd class="mono" style="font-size:12px">${esc(E[e.repo].clone)}</dd><dt>PR</dt><dd>${chip('pr-142')}</dd></dl>
+    <div class="actions"><button class="btn btn--sm" data-git="pull:${e.id}">Pull</button><button class="btn btn--sm" data-git="push:${e.id}">Push 3 commits</button><button class="btn btn--sm" data-newbranch="${e.repo}">New branch…</button>${timerBtn(e)}<button class="btn btn--ghost btn--sm" data-ctx="${e.id}">⋯</button></div></div>` +
+    routeStrip(e.id) +
+    `<div class="sec"><div class="sec-h"><span class="eyebrow">Commits</span><span class="n">${e.commits.length}</span></div>${e.commits.map(lrow).join('')}</div>` + linksSec(e);
+}
+function cardCommit(e){
+  return cardHead(e, `<span class="faint">on ${chip(e.branch)}</span>`, `<span class="key">${esc(e.key)}</span><span style="font-size:17px">${esc(e.title)}</span>`) +
+    `<dl class="meta"><dt>Author</dt><dd>Mara Lindqvist</dd><dt>When</dt><dd class="t">${esc(e.when)}</dd></dl>
+    <div class="actions"><button class="btn btn--sm" data-linkto="${e.id}">Link to…</button><button class="btn btn--ghost btn--sm" data-ctx="${e.id}">⋯</button></div></div>` + routeStrip(e.id) + linksSec(e) + suggSec(e, state.suggAll);
+}
+function cardRepo(e){
+  return cardHead(e, `<span class="faint">org tidewater</span>`, `<span class="key">${esc(e.key)}</span><span class="muted" style="font-size:15px;font-family:var(--sans)">${esc(e.lang)}${e.note?' · ':''}${e.note}</span>`) +
+    `<dl class="meta"><dt>Local clone</dt><dd class="mono" style="font-size:12px">${esc(e.clone)}</dd></dl>
+    <div class="actions"><button class="btn btn--sm" data-git="pull:${e.id}">Pull</button><button class="btn btn--sm" data-git="push:${e.id}">Push</button><button class="btn btn--sm" data-newbranch="${e.id}">New branch…</button><button class="btn btn--ghost btn--sm" data-ctx="${e.id}">⋯</button></div></div>` + linksSec(e) + suggSec(e, state.suggAll);
+}
+function cardLens(L){
+  const rows = L.ids.map(lrow).join('');
+  return `<div class="card-head"><div class="card-eyebrow"><span class="eyebrow">Smart list · lens</span><span class="t" style="margin-left:auto">local query</span></div><h1 class="card-title">${esc(L.name)} <span class="mono gold" style="font-size:15px">${L.n}</span></h1>
+    <div class="actions"><button class="btn btn--sm" data-go="#/graph">Clear lens</button>${L.time?`<button class="btn btn--gold btn--sm" data-go="#/time">Open timesheet</button>`:''}</div></div>
+    <div class="sec">${rows || `<div class="faint" style="font-size:13.5px">${esc(L.note)}</div>`}${L.ids.length && L.note && !L.jql ? `<div class="faint" style="font-size:12.5px;margin-top:6px">${esc(L.note)}</div>` : ''}
+    ${L.jql ? `<div class="jql">assignee = currentUser() AND <b>build.status = failed</b>  — JQL can't express this: the build lives in TeamCity, the branch in Gitea. knobas joins the three locally.</div>` : ''}</div>`;
+}
+function cardEmpty(){
+  return `<div class="empty"><div class="ttl">Pick a place on the chart</div><p>Click a node to open it here. Drag one onto another to draw a route.</p>
+    <div class="kbd-list"><kbd>⌘K</kbd><span>search the chart</span><kbd>⌘T</kbd><span>stop / start the timer</span><kbd>Esc</kbd><span>close what's open</span><kbd>drag</kbd><span>pan the chart · scroll to zoom · double-click to reset</span></div></div>`;
+}
+function renderCard(){
+  const card = $('#card'); const top = card.scrollTop;
+  if(state.lens){ card.innerHTML = cardLens(LENSES.find(l => l.id===state.lens)); return; }
+  const e = E[state.sel]; if(!e){ card.innerHTML = cardEmpty(); return; }
+  const fn = {ticket:cardTicket, pr:cardPr, build:cardBuild, page:cardPage, note:cardNote, branch:cardBranch, commit:cardCommit, repo:cardRepo}[e.kind];
+  card.innerHTML = fn(e); card.scrollTop = state.keepScroll ? top : 0; state.keepScroll = false;
+  const rs = card.querySelector('.rs'), here = card.querySelector('.rs-stop.is-here');
+  if(rs && here) rs.scrollLeft = Math.max(0, here.offsetLeft - rs.clientWidth/2 + here.offsetWidth/2);
+}
+
+/* =====================================================================
+   SEARCH + FILTERS
+   ===================================================================== */
+const KIND_ORDER = {ticket:0, page:1, pr:2, commit:3, build:4, note:5, branch:6, repo:7};
+function searchEntities(){
+  const q = state.query.trim().toLowerCase(); const toks = q ? q.split(/\s+/) : []; const f = state.filters;
+  return Object.values(E).filter(e => {
+    const hay = (e.search + ' ' + e.title + ' ' + (e.key||'')).toLowerCase();
+    if(toks.length && !toks.every(t => hay.includes(t))) return false;
+    if(f.src && e.src!==f.src) return false;
+    if(f.type && e.kind!==f.type) return false;
+    if(f.who && !(e.who||[]).includes(f.who)) return false;
+    if(f.date==='today' && e.date!=='today') return false;
+    if(f.date==='week' && !['today','yesterday','week'].includes(e.date)) return false;
+    if(f.failing && !e.failing) return false;
+    return true;
+  }).sort((a,b) => KIND_ORDER[a.kind]-KIND_ORDER[b.kind]);
+}
+function snippet(e){
+  if(e.kind==='ticket') return `${e.itype} · ${e.status} · ${e.assignee}`;
+  if(e.kind==='page') return `ENG · edited ${e.edited} by ${e.by}`;
+  if(e.kind==='pr') return `${E[e.repo].key} · ${e.state} · ${e.by}`;
+  if(e.kind==='commit') return `${e.when} · ${E[e.branch].key}`;
+  if(e.kind==='build') return `${e.state} · ${e.branch}`;
+  if(e.kind==='note') return `edited ${e.edited} · ${e.text.slice(0,60)}…`;
+  if(e.kind==='branch') return `${E[e.repo].key} · ${e.ahead} ahead`;
+  return e.lang || '';
+}
+function renderSearch(){
+  const f = state.filters; const sf = (k, v, lbl, cls='') => `<button class="sf${f[k]===v?' is-on':''} ${cls}" data-f="${k}:${v}">${lbl}</button>`;
+  const filters = `<div class="sfilters"><span class="sf-lbl">source</span>${['jira','wiki','git','ci','note'].map(s => sf('src', s, SRCLBL[s])).join('')}
+    <span class="sf-lbl">type</span>${[['ticket','Ticket'],['pr','PR'],['build','Build'],['page','Page'],['note','Note'],['commit','Commit']].map(([k,l]) => sf('type', k, l)).join('')}
+    <span class="sf-lbl">people</span>${[['mara','Mara'],['jonas','Jonas'],['priya','Priya'],['tomasz','Tomasz']].map(([k,l]) => sf('who', k, l)).join('')}
+    <span class="sf-lbl">date</span>${sf('date','today','Today')}${sf('date','week','This week')}
+    <span class="sf-lbl">cross-source</span><button class="sf cross${f.failing?' is-on':''}" data-f="failing:1" title="Joins Jira ↔ Gitea ↔ TeamCity">has failing build</button></div>`;
+  let body;
+  const q = state.query.trim(); const active = q || f.src || f.type || f.who || f.date || f.failing;
+  if(active){
+    const res = searchEntities();
+    body = `<div class="sres">${res.map((e, i) => `<div class="sr${i===state.sIdx?' is-sel':''}" data-nav="${e.id}" data-sidx="${i}">${gl(glyphOf(e))}<div><div><span class="k">${e.key?esc(e.key)+' ':''}</span><span class="ttl${isDoc(e)?' doc':''}">${esc(e.title===e.key?'':e.title)}</span></div><div class="snip">${esc(snippet(e))}</div></div><div class="meta2">${srcTag(e)}${esc(SYNC[e.src])}</div></div>`).join('') || `<div class="sempty">Nothing on the chart matches “${esc(q)}”. Try a key (PAY-231), a commit hash, or a word from a page.</div>`}</div>`;
+    body += `<div class="slists" style="display:flex;justify-content:space-between;align-items:center"><span class="faint" style="font-size:12.5px">${res.length} places · chart dims everything else</span><button class="btn btn--ghost btn--sm" data-clear-search>Clear</button></div>`;
+  } else {
+    body = `<div class="slists"><div class="sec-h"><span class="eyebrow">Pinned smart lists</span><span class="n">local queries</span></div>
+      ${LENSES.map(L => `<div class="sl" data-lens-go="${L.id}"><span>${esc(L.name)}${L.jql?' <span class="note">· not expressible in JQL</span>':''}</span><span class="delta">${L.delta||''}</span><span class="n">${L.n}</span></div>`).join('')}
+      <div class="faint" style="font-size:12.5px;margin-top:8px">Type to search the local full-text index (1,284 issues · 3,912 pages · 47 repos · notes). Try “sepa retry”.</div></div>`;
+  }
+  $('#sdrop').innerHTML = filters + body;
+}
+function openSearch(){ $('#sdrop').classList.add('is-on'); renderSearch(); }
+function closeSearch(){ $('#sdrop').classList.remove('is-on'); }
+
+/* =====================================================================
+   OVERLAYS — inbox, notes, standup, sources, time
+   ===================================================================== */
+const OVERLAYS = {inbox:'#ov-inbox', notes:'#ov-notes', standup:'#ov-standup', sources:'#ov-sources', time:'#ov-time'};
+function showOverlay(name){
+  Object.entries(OVERLAYS).forEach(([n, sel]) => $(sel).classList.toggle('is-on', n===name));
+  $('#scrim').classList.toggle('is-on', !!name && name!=='inbox' && name!=='notes');
+  state.overlay = name;
+  $$('.rail-btn').forEach(b => b.classList.toggle('is-on', b.dataset.go === (name ? '#/'+name : '#/graph')));
+  if(name==='inbox') renderInbox(); if(name==='notes') renderNotes(); if(name==='standup') renderStandup(); if(name==='sources') renderSources(); if(name==='time') renderTime();
+  if(name){ const first = $(OVERLAYS[name]).querySelector('button, input, textarea, [tabindex]'); if(first) first.focus(); }
+}
+function closeOverlay(){ if(state.overlay) go(state.lastEntityHash); }
+
+// ---- inbox
+const INBOX_ACTS = {
+  review:['Review', 'gold'], snooze:['Snooze'], done:['Done'], reply:['Reply','gold'], openpage:['Open page'], openlog:['Open log','gold'], rerun:['Re-run'], comment231:['Comment on PAY-231'],
+  replypr:['Reply','gold'], openpr:['Open PR'], open240:['Open'], startwork:['Start work','gold'], open77:['Open OPS-77'], ping:['Ping Tomasz'],
+};
+function inboxCount(){ return state.inbox.length; }
+function renderInbox(){
+  const stamp = (t) => { const i = t.indexOf(' '); return i<0 ? esc(t) : `<span class="day">${esc(t.slice(0,i))}</span>${esc(t.slice(i+1))}`; };
+  const items = state.inbox.map(it => `<div class="ib" data-ib="${it.id}"><span class="t">${stamp(it.t)}</span><div><div class="ib-txt">${it.html}</div>
+      <div class="ib-act">${it.acts.map(a => `<button class="btn btn--sm${INBOX_ACTS[a][1]==='gold'?' btn--gold':''}" data-ibact="${it.id}:${a}">${INBOX_ACTS[a][0]}</button>`).join('')}
+        <button class="locate" data-locate="${it.node}" title="Show on chart"><svg viewBox="0 0 12 12"><circle cx="6" cy="6" r="3.5"/><path d="M6 0v2M6 10v2M0 6h2M10 6h2"/></svg>${esc(label(E[it.node]))}</button></div>
+      <div class="ib-reply"><textarea class="ta" placeholder="${a_reply(it)}"></textarea><div class="actions" style="margin-top:6px"><button class="btn btn--gold btn--sm" data-ibsend="${it.id}">Send reply</button><button class="btn btn--ghost btn--sm" data-ibcancel="${it.id}">Cancel</button></div></div></div></div>`).join('');
+  const snoozed = state.snoozed.map(z => `<div class="ib" style="opacity:.7"><span class="t">snoozed</span><div><div class="ib-txt">${z.html} <span class="faint">— ${esc(z.back)}</span></div><div class="ib-act"><button class="btn btn--sm" data-unsnooze="${z.id}">Bring back</button></div></div></div>`).join('');
+  $('#ov-inbox').innerHTML = `<div class="panel-h"><span class="ttl">Inbox</span><span class="count${items?'':' is-zero'}">${inboxCount()}</span><span class="faint" style="font-size:12.5px">newest first</span><button class="x" data-close-overlay aria-label="Close"><svg viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8"/></svg></button></div>
+    <div class="panel-b">${items || '<div class="empty"><div class="ttl">Inbox clear</div><p>Nothing needs your attention. Snoozed items come back on their date.</p></div>'}
+      ${state.snoozed.length ? `<div class="ib-sub"><span class="eyebrow">Snoozed</span><span class="n mono faint">${state.snoozed.length}</span></div>${snoozed}` : ''}</div>`;
+}
+function a_reply(it){ return it.id==='i2' ? 'Reply to Priya on the page…' : it.id==='i4' ? 'Reply to Jonas on PR #142…' : 'Hi Tomasz — any ETA on the runbook update (OPS-77)? PAY-228 staging verification is waiting on it.'; }
+function updateCounts(){
+  const n = inboxCount(); ['#inbox-count','#rail-count'].forEach(s => { const el = $(s); el.textContent = n; el.classList.toggle('is-zero', n===0); });
+}
+function removeInbox(id){ state.inbox = state.inbox.filter(i => i.id!==id); const el = $(`.ib[data-ib="${id}"]`); if(el){ el.classList.add('is-gone'); setTimeout(renderInbox, 220); } updateCounts(); }
+function inboxAct(id, act){
+  const it = state.inbox.find(i => i.id===id); if(!it) return;
+  switch(act){
+    case 'review': removeInbox(id); go('#/pr/144'); break;
+    case 'snooze': state.inbox = state.inbox.filter(i => i.id!==id); state.snoozed.push({id:'z'+id, html:it.html, back:'returns Mon 2026-08-25 09:00'}); renderInbox(); updateCounts(); toast('Snoozed until Monday 09:00'); break;
+    case 'done': removeInbox(id); toast('Marked done'); break;
+    case 'reply': case 'replypr': case 'ping': { const el = $(`.ib[data-ib="${id}"]`); el.classList.add('is-replying'); const ta = el.querySelector('textarea'); if(act==='ping') ta.value = a_reply(it); ta.focus(); break; }
+    case 'openpage': go('#/page/sepa-payout-retry-design'); break;
+    case 'openlog': go('#/build/1187'); break;
+    case 'rerun': rerunBuild('b-1187'); break;
+    case 'comment231': go('#/ticket/PAY-231'); setTimeout(() => { const ta = $('#cmt-ta'); if(ta){ ta.value = 'Build #1187 failed: gives_up_after_max_attempts counts 6 attempts — off-by-one in the counter, fixing.'; ta.focus(); ta.scrollIntoView({block:'center'}); } }, 50); break;
+    case 'openpr': go('#/pr/142'); break;
+    case 'open240': go('#/ticket/PAY-240'); break;
+    case 'startwork': go('#/ticket/PAY-240'); startWorkFlow('PAY-240'); break;
+    case 'open77': go('#/ticket/OPS-77'); break;
+  }
+}
+function inboxSend(id){
+  const it = state.inbox.find(i => i.id===id); const el = $(`.ib[data-ib="${id}"]`); const txt = el.querySelector('textarea').value.trim();
+  if(!txt){ toast('Write a reply first — the box is empty.', 'bad'); return; }
+  if(id==='i2'){ E['pg-sepa'].comments.push({who:'Mara Lindqvist', when:'today 14:32', text:txt}); toast('Replied to Priya on SEPA payout retry design', 'ok'); }
+  else if(id==='i4'){ E['pr-142'].comments.push({who:'Mara Lindqvist', when:'today 14:32', text:txt}); toast('Replied to Jonas on PR #142', 'ok'); }
+  else { toast('Sent to Tomasz Wójcik', 'ok'); }
+  removeInbox(id); if(state.sel==='pg-sepa' || state.sel==='pr-142') renderCard();
+}
+
+// ---- notes
+function notesList(){ return Object.values(E).filter(e => e.kind==='note'); }
+function renderNotes(){
+  $('#ov-notes').innerHTML = `<div class="panel-h"><span class="ttl">Notes</span><button class="btn btn--gold btn--sm" data-newnote>New note</button><button class="x" data-close-overlay aria-label="Close"><svg viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8"/></svg></button></div>
+    <div class="panel-b">${notesList().map(n => `<div class="nrow${state.sel===n.id?' is-sel':''}" data-nav="${n.id}" data-keep-overlay="1" role="button" tabindex="0"><div class="nt">${esc(n.title)}</div><div class="t">${esc(n.edited)}</div><div class="nl">${(n.refs||[]).map(r => REF[r]?chip(REF[r]):'').join('')}</div></div>`).join('')}
+    <div class="faint" style="padding:12px 16px;font-size:12.5px">Notes stay local. <code>[[PAY-231]]</code> in a note draws a route on the chart.</div></div>`;
+}
+function newNote(){
+  const ctx = state.sel && E[state.sel] ? state.sel : (state.timer.ctx && E[state.timer.ctx] ? state.timer.ctx : null);
+  const id = 'nt-new' + (++state.newNotes); const refName = ctx ? label(E[ctx]) : null;
+  add({id, kind:'note', src:'note', key:'', title:'Untitled note', edited:'today 14:32', hash:'#/note/'+id, who:['mara'], date:'today', text:'', refs:refName?[refName]:[], links:ctx?[ctx]:[], search:'untitled note'});
+  byHash[E[id].hash] = id; REF[E[id].title+' '+id] = id;
+  placeNode(id); $('#nodes').insertAdjacentHTML('beforeend', nodeSvg(id)); $(`#nodes .node[data-id="${id}"]`).classList.add('is-new');
+  if(ctx){ E[ctx].links = [...new Set([...(E[ctx].links||[]), id])]; addEdge(id, ctx, 'route', true); }
+  state.noteEdit = id; toast(`New note${refName?` · pre-linked to ${esc(refName)}`:''}`, 'ok');
+  go(E[id].hash);
+}
+function saveNote(id){
+  const e = E[id]; const raw = $('#note-ta').value; e.rawText = raw; e.edited = 'today 14:32';
+  const refs = [...raw.matchAll(/\[\[([^\]]+)\]\]/g)].map(m => m[1]); e.refs = [...new Set(refs)];
+  e.text = raw.replace(/\s*\[\[[^\]]+\]\]/g, (m) => REF[m.trim().slice(2,-2)] ? m : m).trim();
+  if(e.title==='Untitled note'){ const first = raw.split('\n')[0].replace(/\[\[|\]\]/g,'').trim(); if(first) e.title = first.slice(0,40); }
+  const n = $(`#nodes .node[data-id="${id}"] .node-name`); if(n) n.textContent = e.title.length > 26 ? e.title.slice(0,25)+'…' : e.title;
+  const unknown = [];
+  refs.forEach(r => { const t = REF[r]; if(!t){ unknown.push(r); return; } e.links = [...new Set([...(e.links||[]), t])]; E[t].links = [...new Set([...(E[t].links||[]), id])]; if(POS[t] && POS[id]) addEdge(id, t, 'route', true); });
+  state.noteEdit = null; renderCard(); if(state.overlay==='notes') renderNotes();
+  toast(unknown.length ? `Saved. No place on the chart is called “${esc(unknown[0])}” — check the key.` : 'Note saved', unknown.length ? 'bad' : 'ok');
+}
+
+// ---- standup
+const DIGEST = {
+  yesterday:[['merged PR #139 (ledger-api) fixing partial refund drift', ['pr-139','repo-ledger'], 'merge · yesterday 16:00'], ['PAY-228 → In Review', ['PAY-228'], 'Jira transition · yesterday 16:05'], ['implemented retry loop for PAY-231 (7be0e4)', ['PAY-231','c-7be0e4'], 'commit · yesterday 17:30'], ['logged 4h 30m', ['PAY-228','PAY-231'], 'worklogs · PAY-228 1h 30m + PAY-231 3h']],
+  today:[['PAY-231 backoff + jitter (a41f2c, c90d11)', ['c-a41f2c','c-c90d11'], 'commits · 10:02, 11:42'], ['fix integration test #1187 (off-by-one in attempt counter)', ['b-1187','nt-sepa'], 'build failed 10:10 · note 11:20'], ['reply to Priya about the manual-review SLA', ['pg-sepa'], '@mention on the design page · 12:05'], ['review PR #144', ['pr-144'], 'review request from Jonas · 13:50']],
+  blockers:[['PAY-228 staging verification blocked by OPS-77 (runbook outdated, Tomasz)', ['PAY-228','OPS-77'], 'blocked-by link · yesterday 16:30']],
+};
+const ACTIONS = [['Mara','add SLA to SEPA payout retry design (PAY-231)'],['Tomasz','OPS-77 by Tuesday'],['Lena','clarify PAY-240 acceptance criteria']];
+function renderStandup(){
+  const dg = (k, title) => `<div class="eyebrow">${title}</div><div>${DIGEST[k].map(([t, ids, tr]) => `<div class="dl" data-hl="${ids.join(',')}" title="from ${esc(tr)} — hover to find it on the chart">${chipify(t)}<span class="trace"><span class="src">from</span><span class="faint" style="font-size:11.5px;font-family:var(--mono)">${esc(tr)}</span></span></div>`).join('')}</div>`;
+  const pub = state.published ? `<div class="callout ok" style="margin-top:12px"><span class="ok mono">published</span><span>ENG › Standup protocols › <b>2026-08-22</b> · 14:32 <button class="btn btn--sm" style="margin-left:8px" data-nav="pg-standup22">Open page</button></span></div>` : '';
+  $('#ov-standup').innerHTML = `<div class="panel-h"><span class="ttl">Standup · Friday 2026-08-22</span><span class="faint" style="font-size:12.5px">hover a line to find it on the chart</span><button class="x" data-close-overlay aria-label="Close"><svg viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8"/></svg></button></div>
+  <div class="panel-b"><div class="doc">
+    <h2>Digest <span class="faint" style="font-size:14px;font-family:var(--sans)">generated from yesterday's commits, worklogs, transitions and today's inbox</span></h2>
+    <div class="dg">${dg('yesterday','Yesterday')}${dg('today','Today')}${dg('blockers','Blockers')}</div>
+    <h3>Standup protocol 2026-08-22</h3>
+    <div class="proto" id="proto" contenteditable="true" spellcheck="false">
+      <p><b>Attendees:</b> Mara, Jonas, Priya, Tomasz, Lena</p>
+      <ul><li><b>Jonas:</b> PR #144 CSV export ready for review.</li><li><b>Priya:</b> finance wants the manual-review SLA documented by Monday.</li><li><b>Tomasz:</b> on-call handbook update in progress, ETA Tuesday (OPS-77).</li><li><b>Lena:</b> finance complaints about dashboard latency → PAY-240.</li></ul>
+    </div>
+    <h3>Action items</h3>
+    <div>${ACTIONS.map(([who, what], i) => `<div class="ai"><span class="who">${who}</span><span>${chipify(what)}</span>${state.aiTickets && state.aiTickets[i] ? `<span class="ok mono" style="margin-left:auto">${esc(state.aiTickets[i])} created</span>` : `<button class="btn btn--sm" data-aiticket="${i}">Create ticket</button>`}</div>`).join('')}</div>
+    <div class="doc-foot">
+      ${state.savedNote ? `<span class="ok">Saved as note <em>Standup 2026-08-22</em></span>` : `<button class="btn btn--sm" data-savenotestandup>Save as note</button>`}
+      <button class="btn btn--gold btn--sm" data-publish ${state.published?'disabled':''}>${state.published?'Published':'Publish to Confluence'}</button>
+      <span class="pubtarget">→ <b>ENG</b> › <b>Standup protocols</b> › <b>2026-08-22</b></span>
+    </div>${pub}
+  </div></div>`;
+}
+function saveStandupNote(){
+  const id = 'nt-standup22';
+  if(!E[id]){ add({id, kind:'note', src:'note', key:'', title:'Standup 2026-08-22', edited:'today 14:32', hash:'#/note/standup-2026-08-22', who:['mara'], date:'today', text:$('#proto').innerText.trim(), refs:['PAY-231','OPS-77','PAY-240'], links:['PAY-231','OPS-77','PAY-240'], search:'standup 2026-08-22 protocol attendees action items'});
+    byHash[E[id].hash] = id; REF['Standup 2026-08-22'] = id; placeNode(id); $('#nodes').insertAdjacentHTML('beforeend', nodeSvg(id)); ['OPS-77','PAY-231','PAY-240'].forEach(t => { E[t].links.push(id); addEdge(id, t, 'route', true); }); }
+  state.savedNote = true; renderStandup(); toast('Saved as note · Standup 2026-08-22', 'ok', {label:'Open', fn:() => go('#/note/standup-2026-08-22')});
+}
+function publishStandup(){
+  const b = $('[data-publish]'); b.disabled = true; b.textContent = 'Publishing…';
+  setTimeout(() => { const id = 'pg-standup22';
+    if(!E[id]){ add({id, kind:'page', src:'wiki', key:'', title:'Standup protocol 2026-08-22', space:'ENG', edited:'today 14:32', by:'Mara Lindqvist', hash:'#/page/standup-protocol-2026-08-22', who:['mara'], date:'today', body:'<p>'+esc($('#proto').innerText.trim()).replace(/\n+/g,'</p><p>')+'</p>', comments:[], links:['pg-standups'], search:'standup protocol 2026-08-22'});
+      byHash[E[id].hash] = id; placeNode(id); $('#nodes').insertAdjacentHTML('beforeend', nodeSvg(id)); E['pg-standups'].links.push(id); }
+    state.published = true; renderStandup(); toast('Published to ENG › Standup protocols › 2026-08-22', 'ok'); }, 700);
+}
+
+// ---- sources (layers)
+const SOURCES = [
+  {id:'jira', type:'Jira Cloud', name:'Tidewater Jira', url:'https://tidewater.atlassian.net', auth:'PAT — expires 2026-09-03 (in 12 days)', warn:'pat', state:'synced 4 min ago · 1,284 issues', caps:['search','write','webhooks'], adapter:'jira v1.2'},
+  {id:'wiki', type:'Confluence Cloud', name:'Tidewater Wiki', url:'https://tidewater.atlassian.net/wiki', auth:'same PAT as Jira', state:'synced 4 min ago · 3,912 pages', caps:['search','write'], capsOff:['webhooks'], adapter:'confluence v1.2'},
+  {id:'git', type:'Gitea', name:'git.tidewater.internal', url:'https://git.tidewater.internal', auth:'access token', state:'synced 2 min ago · 47 repos', caps:['search','write','webhooks'], adapter:'gitea v1.1'},
+  {id:'ci', type:'TeamCity', name:'ci.tidewater.internal', url:'https://ci.tidewater.internal', auth:'user + password', err:true, state:'sync failed 38 min ago: 401 Unauthorized', caps:['search','write'], capsOff:['webhooks'], adapter:'teamcity v1.0'},
+];
+const TYPES = [['Jira','pin','v1.2','search · write · webhooks'],['Confluence','book','v1.2','search · write'],['Gitea','fork','v1.1','search · write · webhooks'],['GitHub','fork','v1.3','search · write · webhooks'],['GitLab','fork','v1.0','search · write'],['TeamCity','beacon','v1.0','search · write'],['GitLab CI','beacon','v0.9','search'],['Jenkins','beacon','v0.8','search · write'],['Generic Git remote','repo','v1.0','search']];
+function renderSources(){
+  const rows = SOURCES.map(s => { const on = state.layers[s.id];
+    const st = s.err && !state.ciAuth ? `<div class="state coral">${esc(s.state)}</div><div class="sub">password may have expired</div>${state.pwOpen?`<div class="pwbox"><input class="in" type="password" id="ci-pw" placeholder="Password for mara.lindqvist" aria-label="TeamCity password"><button class="btn btn--gold btn--sm" data-ci-save>Save &amp; retry</button></div>`:''}`
+      : s.err ? `<div class="state ok">synced just now · 3 build configurations</div><div class="sub">password updated 14:32</div>` : `<div class="state">${esc(s.state)}</div>${s.warn?`<div class="sub gold">PAT expires in 12 days — renew before 2026-09-03</div>`:''}`;
+    const ctl = s.err && !state.ciAuth ? `<button class="btn btn--gold btn--sm" data-ci-pw>Re-enter password</button>` : s.warn ? `<button class="btn btn--sm" data-renew>Renew PAT…</button>` : '';
+    return `<div class="srow2${on?'':' is-off'}" data-src="${s.id}"><span class="gl">${gl(SRCGL[s.id])}</span>
+      <div><div class="name">${esc(s.name)}</div><div class="sub">${esc(s.type)} · adapter <span class="mono">${esc(s.adapter)}</span></div><div class="caps">${s.caps.map(c => `<span class="cap">${c}</span>`).join('')}${(s.capsOff||[]).map(c => `<span class="cap off">${c}</span>`).join('')}</div></div>
+      <div><div class="url">${esc(s.url)}</div><div class="auth">${esc(s.auth)}</div></div>
+      <div>${st}</div>
+      <div class="ctl">${ctl}<button class="btn btn--sm" data-syncnow="${s.id}">Sync now</button><label class="toggle${on?' is-on':''}" data-layer="${s.id}"><i></i>on chart</label></div></div>`; }).join('') +
+    (state.extraSources||[]).map(s => `<div class="srow2"><span class="gl">${gl(s.glyph)}</span><div><div class="name">${esc(s.name)}</div><div class="sub">${esc(s.type)} · adapter <span class="mono">${esc(s.adapter)}</span></div></div><div><div class="url">${esc(s.url)}</div><div class="auth">${esc(s.auth)}</div></div><div><div class="state ok">first sync queued · every ${esc(s.sched)}</div></div><div class="ctl"><button class="btn btn--sm" data-syncnow="${s.id}">Sync now</button></div></div>`).join('');
+  const pending = state.pending.length ? `<div class="v gold">${state.pending.length} pending</div><div class="sub faint" style="font-size:12px">${state.pending.map(p => esc(p)).join('<br>')}</div><div class="sub faint" style="font-size:12px;margin-top:4px">Runs as soon as TeamCity accepts the password.</div>` : `<div class="v">0 — all writes delivered</div>`;
+  $('#ov-sources').innerHTML = `<div class="panel-h"><span class="ttl">Sources · chart layers</span><span class="faint" style="font-size:12.5px">each source is a pluggable adapter; toggle a layer to hide its places on the chart</span><button class="btn btn--gold btn--sm" data-addsource>Add source</button><button class="x" data-close-overlay aria-label="Close"><svg viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8"/></svg></button></div>
+    <div class="panel-b"><div class="srcgrid">${rows}</div>
+    <div class="src-foot"><div class="kv"><div class="eyebrow">Sync schedule</div><div class="v" style="display:flex;gap:8px;align-items:center"><select class="in" style="width:160px" id="sched"><option>every 5 minutes</option><option>every 15 minutes</option><option>every hour</option><option>manual</option></select><button class="btn btn--sm" data-syncall>Sync all now</button></div></div>
+      <div class="kv"><div class="eyebrow">Local database</div><div class="v">Postgres <code>knobas</code> · 212 MB</div><div class="sub faint" style="font-size:12px">full-text index up to date · 1,284 issues · 3,912 pages · 47 repos</div></div>
+      <div class="kv"><div class="eyebrow">Pending writes</div>${pending}</div></div></div>`;
+}
+function setCiAuth(){
+  const pw = $('#ci-pw'); if(pw && !pw.value){ toast('Enter the TeamCity password, then save.', 'bad'); pw.focus(); return; }
+  state.ciAuth = true; state.pwOpen = false; SYNC.ci = 'synced just now';
+  $('#sync-dots').innerHTML = '<i></i><i></i><i></i><i></i>'; $('#sync-lbl').textContent = '4 of 4 synced';
+  const flushed = state.pending.splice(0); renderSources(); renderStatus();
+  toast('TeamCity connected · synced 3 build configurations', 'ok');
+  flushed.forEach((p, i) => setTimeout(() => toast(p.replace('queued: ','') + ' — sent', 'ok'), 600 + i*500));
+  if(state.sel && E[state.sel].kind==='build') renderCard();
+}
+function addSourceWizard(){
+  const w = {step:1, type:null, url:'', auth:'PAT', tested:false, sched:'every 5 minutes'};
+  const render = () => {
+    const steps = ['Type','URL','Auth','Test','Schedule'].map((s, i) => `<b class="${w.step===i+1?'is-on':w.step>i+1?'is-done':''}">${i+1} ${s}</b>`).join('');
+    let body = '';
+    if(w.step===1) body = `<div class="tgrid">${TYPES.map(([n, g, v, c]) => `<div class="tcard${w.type===n?' is-on':''}" data-type="${n}" role="button" tabindex="0"><span class="src">${gl(g)}${esc(n)}</span><span class="a">adapter ${v}</span><span class="a">${c}</span></div>`).join('')}</div>`;
+    if(w.step===2) body = `<div class="field"><label>Server URL</label><input class="in" id="w-url" value="${esc(w.url)}" placeholder="https://…"></div><div class="faint" style="font-size:12.5px">${esc(w.type)} adapter — knobas talks to the server directly; nothing leaves your machine except these requests.</div>`;
+    if(w.step===3) body = `<div class="field"><label>Auth method</label><div class="radios">${['user + password','PAT','API token','OAuth'].map(a => `<span class="radio${w.auth===a?' is-on':''}${a==='OAuth'?' faint':''}" data-auth="${a}" role="button" tabindex="0">${a}${a==='OAuth'?' · coming soon':''}</span>`).join('')}</div></div>
+      ${w.auth==='user + password' ? `<div class="row2"><div class="field"><label>User</label><input class="in" value="mara.lindqvist"></div><div class="field"><label>Password</label><input class="in" type="password" placeholder="••••••••"></div></div>` : `<div class="field"><label>${w.auth==='PAT'?'Personal access token':'API token'}</label><input class="in" type="password" placeholder="paste token"></div>`}`;
+    if(w.step===4) body = `<div class="steps"><div class="step ${w.tested?'is-done':'is-run'}"><span class="sd"></span><span>Reach ${esc(w.url)}</span><span class="r">${w.tested?'200 · 84 ms':'…'}</span></div><div class="step ${w.tested?'is-done':''}"><span class="sd"></span><span>Authenticate as mara.lindqvist (${esc(w.auth)})</span><span class="r">${w.tested?'ok':''}</span></div><div class="step ${w.tested?'is-done':''}"><span class="sd"></span><span>Adapter capabilities</span><span class="r">${w.tested?'search · write':''}</span></div></div>
+      ${w.tested?`<div class="callout ok" style="margin-top:12px"><span>Connection works. The first sync runs on save.</span></div>`:''}`;
+    if(w.step===5) body = `<div class="field"><label>Sync schedule</label><select class="in" id="w-sched">${['every 5 minutes','every 15 minutes','every hour','manual'].map(s => `<option${w.sched===s?' selected':''}>${s}</option>`).join('')}</select></div><div class="faint" style="font-size:12.5px">Adds a <b>${esc(w.type)}</b> layer to the chart. You can hide it any time from Sources.</div>`;
+    const nextLbl = w.step===1 ? 'Next: URL' : w.step===2 ? 'Next: auth' : w.step===3 ? 'Test connection' : w.step===4 ? (w.tested ? 'Next: schedule' : 'Testing…') : 'Save source';
+    openModal(`<div class="modal-h"><div class="ttl">Add source</div><div class="sub">Pick an adapter, point it at a server, prove it connects.</div></div><div class="modal-b"><div class="wiz">${steps}</div>${body}</div>
+      <div class="modal-f">${w.step>1?'<button class="btn btn--sm" data-wback>Back</button>':''}<span class="sp"></span><button class="btn btn--ghost btn--sm" data-close-modal>Cancel</button><button class="btn btn--gold btn--sm" data-wnext ${(w.step===1&&!w.type)||(w.step===4&&!w.tested)?'disabled':''}>${nextLbl}</button></div>`);
+    $$('#modal [data-type]').forEach(el => el.addEventListener('click', () => { w.type = el.dataset.type; w.url = 'https://' + w.type.toLowerCase().replace(/[^a-z]+/g,'') + '.tidewater.internal'; render(); }));
+    $$('#modal [data-auth]').forEach(el => el.addEventListener('click', () => { if(el.dataset.auth==='OAuth'){ toast('OAuth is coming soon — use a PAT or API token for now.'); return; } w.auth = el.dataset.auth; render(); }));
+    const back = $('#modal [data-wback]'); if(back) back.addEventListener('click', () => { w.step--; render(); });
+    $('#modal [data-wnext]').addEventListener('click', () => {
+      if(w.step===2){ w.url = $('#w-url').value.trim(); if(!/^https?:\/\/.+/.test(w.url)){ toast('Enter the server URL, starting with https://', 'bad'); $('#w-url').focus(); return; } }
+      if(w.step===3){ w.step = 4; w.tested = false; render(); setTimeout(() => { w.tested = true; render(); }, 900); return; }
+      if(w.step===5){ w.sched = $('#w-sched').value; state.extraSources = state.extraSources || []; const glyph = TYPES.find(t => t[0]===w.type)[1];
+        state.extraSources.push({id:'x'+state.extraSources.length, name:w.url.replace(/^https?:\/\//,''), type:w.type, url:w.url, auth:w.auth, sched:w.sched, adapter:TYPES.find(t => t[0]===w.type)[2], glyph});
+        closeModal(); renderSources(); toast(`Saved ${esc(w.type)} source · first sync queued`, 'ok'); return; }
+      w.step++; render();
+    });
+  };
+  render();
+}
+
+// ---- time: day review + week
+function renderTime(){
+  const T0 = toMin('08:30'), T1 = NOW_MIN, span = T1 - T0;
+  const pct = (t) => ((toMin(t)-T0)/span*100).toFixed(2);
+  const ticks = ['09:00','10:00','11:00','12:00','13:00','14:00'].map(t => `<span class="tick" style="left:${pct(t)}%">${t}</span>`).join('') + `<span class="tick" style="left:0">08:30</span><span class="tick gold" style="left:100%">14:32</span>`;
+  const blocks = state.blocks.map((b, i) => { const l = pct(b.s), w = ((toMin(b.e)-toMin(b.s))/span*100).toFixed(2); const d = fmtDur(toMin(b.e)-toMin(b.s));
+    if(b.kind==='gap') return `<div class="blk blk--gap" style="left:${l}%;width:${w}%">${d} · lunch</div>`;
+    const tight = +w < 11;
+    const k = b.kind==='unattr' ? 'unattributed' : b.kind==='label' ? b.label : (E[b.ctx] ? label(E[b.ctx]) : b.label);
+    const sub = b.kind==='unattr' ? 'app open, no place · assign' : b.kind==='label' ? (b.logged ? `logged to ${b.logged}` : b.local ? 'kept local' : 'ad-hoc label · no ticket') : b.kind==='manual' ? 'manual timer · since 13:58' : (b.sub || b.label);
+    if(tight) return `<div class="blk blk--${b.kind} blk--tight" style="left:${l}%;width:${w}%" data-blk="${i}" role="button" tabindex="0" title="${esc(b.s)}–${esc(b.e)} · ${esc(k)} · ${esc(sub)}"><div class="bk">${esc(k.split(' ')[0])}</div><span class="bh">${d}</span></div>`;
+    return `<div class="blk blk--${b.kind}${state.hlBlock===i?' is-hl':''}" style="left:${l}%;width:${w}%" data-blk="${i}" role="button" tabindex="0" title="${esc(b.s)}–${esc(b.e)} · ${esc(k)}"><div class="bk">${esc(k)}</div><div class="bl">${esc(sub)}</div><span class="bh">${d}</span></div>`; }).join('');
+  const wps = state.blocks.filter(b => b.kind!=='gap').map(b => `<span class="jw" style="left:${pct(b.s)}%"></span>`).join('') + `<span class="jw now" style="left:100%"></span>`;
+  const weekRows = [['Mon','7h 45m',465,'logged'],['Tue','8h 00m',480,'logged'],['Wed','6h 30m',390,'logged'],['Thu','7h 10m',430,'partly'],['Fri','5h 28m',328,'unlogged']].map(([d, t, m, st]) => `<div class="wrow"><span class="t">${d}</span><span class="bar"><i class="${st==='partly'?'part':st==='unlogged'?'none':''}" style="width:${(m/480*100).toFixed(0)}%"></i></span><span class="mono" style="font-size:12px">${t}</span><span class="st ${st==='unlogged'?'gold':st==='partly'?'gold':'ok'}">${state.unloggedMin===0?'logged':st}</span></div>`).join('');
+  $('#ov-time').innerHTML = `<div class="time-grid"><div class="day"><div class="day-h"><span class="ttl">Today's journey</span><span class="t">Fri 2026-08-22 · 08:30 → 14:32 · 5h 28m tracked · nothing logged yet</span><button class="x" data-close-overlay aria-label="Close" style="margin-left:auto"><svg viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8"/></svg></button></div>
+      <div class="strip"><div class="ticks">${ticks}</div>${blocks}<div class="journey"><div class="jl"></div>${wps}</div></div>
+      <div class="legs"><span class="lg"><i style="background:repeating-linear-gradient(135deg,var(--raised) 0 3px,var(--panel) 3px 4px)"></i>passive — from what was open</span><span class="lg"><i style="background:var(--gold-dim);border-color:var(--gold)"></i>manual timer</span><span class="lg"><i style="background:var(--teal-dim);border-color:var(--teal)"></i>ad-hoc label</span><span class="lg"><i style="border:1px dashed var(--coral)"></i>unattributed — needs a place</span><span class="faint" style="margin-left:auto">Nothing here is keyed to git branches.</span></div>
+      <div class="legs" style="margin-top:8px"><span class="eyebrow" style="font-size:12px">Legs</span>${state.blocks.filter(b => b.kind!=='gap').map(b => `<span class="lg mono" style="font-size:11.5px"><span class="faint">${b.s}</span> ${esc(b.kind==='unattr'?'?':b.kind==='label'?b.label:label(E[b.ctx]||{title:b.label}))}</span>`).join('<span class="faint">→</span>')}</div></div>
+    <div class="week"><div class="ttl">Week timesheet</div>${weekRows}
+      <div class="wtot"><span>Tracked</span><span class="v">34h 10m</span><span>Logged</span><span class="v">${fmtDur(2050 - state.unloggedMin)}</span><span class="gold">Unlogged</span><span class="v gold">${fmtDur(state.unloggedMin)}</span></div>
+      <div class="actions"><button class="btn btn--gold btn--sm" data-logall ${state.unloggedMin?'':'disabled'}>${state.unloggedMin?`Log all ${fmtDur(state.unloggedMin)}`:'Everything logged'}</button><button class="btn btn--sm" data-worklog="PAY-231">Worklog draft…</button></div></div></div>`;
+}
+function blockMenu(i, x, y){
+  const b = state.blocks[i];
+  if(b.kind==='unattr'){
+    openPop(`<div class="ttl">Assign 11:50–12:20 to…</div><div class="faint" style="font-size:12.5px">You were on PAY-231 before and after this block.</div><ul style="margin-top:6px">${['PAY-231','PAY-240','PAY-228','OPS-77'].map(id => `<li><button data-assign="${i}:${id}">${esc(label(E[id]))} <span class="faint">· ${esc(E[id].title)}</span></button></li>`).join('')}</ul>
+      <div class="row"><input class="in" id="assign-lbl" placeholder="or an ad-hoc label" style="height:28px"><button class="btn btn--sm" data-assignlbl="${i}">Use label</button></div>`, x, y);
+  } else if(b.kind==='label' && !b.logged && !b.local){
+    openPop(`<div class="ttl">${esc(b.label)} · 48m</div><div class="faint" style="font-size:12.5px">No ticket. Log it somewhere or keep it local.</div><ul style="margin-top:6px"><li><button data-loglbl="${i}:OPS-77">Log to OPS-77 <span class="faint">· suggested — runbook mentions staging</span></button></li><li><button data-loglbl="${i}:PAY-228">Log to PAY-228</button></li><li><button data-loglbl="${i}:PAY-231">Log to PAY-231</button></li><li><button data-keeplocal="${i}">Keep local only</button></li></ul>`, x, y);
+  } else if(b.ctx && E[b.ctx]){
+    openPop(`<div class="ttl">${esc(label(E[b.ctx]))} · ${b.s}–${b.e}</div><div class="faint" style="font-size:12.5px">${esc(b.label)}</div><div class="row"><button class="btn btn--sm" data-nav="${b.ctx}">Open</button>${b.kind==='manual'?`<button class="btn btn--sm" data-worklog="PAY-231">Log today's time</button>`:''}<button class="btn btn--ghost btn--sm" data-close-pop>Close</button></div>`, x, y);
+  } else { openPop(`<div class="ttl">${esc(b.label)}</div><div class="row"><button class="btn btn--ghost btn--sm" data-close-pop>Close</button></div>`, x, y); }
+}
+
+/* =====================================================================
+   MODALS, POPOVERS, CONTEXT MENU
+   ===================================================================== */
+function openModal(html, cls=''){ const m = $('#modal'); m.className = 'modal ' + cls; m.innerHTML = html; $('#mscrim').classList.add('is-on'); const f = m.querySelector('input:not([type=hidden]), textarea, select') || m.querySelector('button.btn--gold') || m.querySelector('button'); if(f) f.focus(); }
+function closeModal(){ $('#mscrim').classList.remove('is-on'); $('#modal').innerHTML = ''; }
+function openPop(html, x, y){ const p = $('#pop'); p.innerHTML = html; p.classList.add('is-on'); const vw = innerWidth, vh = innerHeight; p.style.left = Math.min(x, vw - 360) + 'px'; p.style.top = Math.min(y, vh - p.offsetHeight - 40) + 'px'; const f = p.querySelector('input, button'); if(f) f.focus(); }
+function closePop(){ $('#pop').classList.remove('is-on'); }
+function openCtx(title, items, x, y){
+  const c = $('#ctx'); c.innerHTML = `<div class="ctx-h">${title}</div>` + items.map((it, i) => it==='-' ? '<hr>' : `<button data-ctxi="${i}">${it.label}${it.k?`<span class="k">${it.k}</span>`:''}</button>`).join('');
+  c.classList.add('is-on'); c.style.left = Math.min(x, innerWidth - 230) + 'px'; c.style.top = Math.min(y, innerHeight - c.offsetHeight - 40) + 'px';
+  $$('#ctx [data-ctxi]').forEach(b => b.addEventListener('click', () => { closeCtx(); items[+b.dataset.ctxi].fn(); }));
+  c.querySelector('button').focus();
+}
+function closeCtx(){ $('#ctx').classList.remove('is-on'); }
+function openCtxFor(id, x, y){
+  const e = E[id]; const items = [{label:'Open', fn:() => go(e.hash), k:'↵'}];
+  const timerItem = state.timer.running && state.timer.ctx===id ? {label:'Stop timer', fn:stopTimer, k:'⌘T'} : {label:'Start timer here', fn:() => startTimer(id), k:'⌘T'};
+  if(e.kind==='ticket'){ if(e.status==='To Do' && e.assignee.startsWith('Mara')) items.push({label:'Start work…', fn:() => startWorkFlow(id)}); const FLOW = ['To Do','In Progress','In Review','Done']; const next = FLOW[Math.min(FLOW.length-1, FLOW.indexOf(e.status)+1)];
+    items.push(timerItem, {label:`Move to ${next}`, fn:() => setStatus(id, next)}, {label:'Comment…', fn:() => { go(e.hash); setTimeout(() => { const t = $('#cmt-ta'); if(t) t.focus(); }, 40); }}, '-', {label:'Link to…', fn:() => linkToPicker(id, x, y)}, {label:'New note from here', fn:() => { state.sel = id; newNote(); }}, '-', {label:'Open in Jira ↗', fn:() => toast('Would open tidewater.atlassian.net/browse/'+e.key)}); }
+  if(e.kind==='build'){ items.push({label:'View log', fn:() => go(e.hash)}); if(e.state==='failed') items.push({label:'Re-run failed', fn:() => rerunBuild(id)}); items.push({label:'Trigger with parameters…', fn:() => triggerBuild(e.cfg)}, '-', {label:'Link to…', fn:() => linkToPicker(id, x, y)}, {label:'Open in TeamCity ↗', fn:() => toast('Would open ci.tidewater.internal/viewLog.html?buildId='+e.key.slice(1))}); }
+  if(e.kind==='pr'){ items.push(timerItem, {label:'Reply…', fn:() => { go(e.hash); setTimeout(() => { const t = $('#cmt-ta'); if(t) t.focus(); }, 40); }}, '-', {label:'Link to…', fn:() => linkToPicker(id, x, y)}, {label:'Open in Gitea ↗', fn:() => toast('Would open git.tidewater.internal/tidewater/'+E[e.repo].key+'/pulls/'+e.num)}); }
+  if(e.kind==='branch' || e.kind==='repo'){ items.push({label:'Pull', fn:() => gitAct('pull', id)}, {label:'Push', fn:() => gitAct('push', id)}, {label:'New branch…', fn:() => newBranch(e.kind==='repo'?id:e.repo)}, '-', {label:'Link to…', fn:() => linkToPicker(id, x, y)}, {label:'Open in Gitea ↗', fn:() => toast('Would open git.tidewater.internal/tidewater/'+(e.kind==='repo'?e.key:E[e.repo].key))}); }
+  if(e.kind==='page'){ items.push(timerItem, {label:'Edit section…', fn:() => editPage(id)}, '-', {label:'Link to…', fn:() => linkToPicker(id, x, y)}, {label:'Open in Confluence ↗', fn:() => toast('Would open tidewater.atlassian.net/wiki')}); }
+  if(e.kind==='note'){ items.push(timerItem, {label:'Edit', fn:() => { state.noteEdit = id; go(e.hash); renderCard(); }}, '-', {label:'Link to…', fn:() => linkToPicker(id, x, y)}); }
+  if(e.kind==='commit'){ items.push({label:'Link to…', fn:() => linkToPicker(id, x, y)}); }
+  openCtx(esc(label(e)), items, x, y);
+}
+function linkToPicker(from, x, y){
+  openPop(`<div class="ttl">Link ${esc(label(E[from]))} to…</div><input class="in" id="lt-q" placeholder="type a key, title or hash" style="height:28px"><ul id="lt-res" style="margin-top:6px;max-height:220px;overflow:auto"></ul>`, x, y);
+  const q = $('#lt-q'), res = $('#lt-res');
+  const run = () => { const v = q.value.trim().toLowerCase(); const hits = Object.values(E).filter(e => e.id!==from && (!v || (e.search+' '+e.title+' '+e.key).toLowerCase().includes(v))).slice(0, 8);
+    res.innerHTML = hits.map(e => `<li><button data-lt="${e.id}">${gl(glyphOf(e), 'chipglyph')} <span class="mono">${esc(e.key||'')}</span> ${esc(e.title)} <span class="faint">· ${SRCLBL[e.src]}</span></button></li>`).join('') || '<li class="faint" style="padding:4px 0">No place matches.</li>';
+    $$('#lt-res [data-lt]').forEach(b => b.addEventListener('click', () => { closePop(); linkEntities(from, b.dataset.lt); })); };
+  q.addEventListener('input', run); run(); q.focus();
+}
+
+/* =====================================================================
+   ACTIONS
+   ===================================================================== */
+function setStatus(id, status){ const e = E[id]; if(e.status===status) return; const was = e.status; e.status = status; e.updated = 'today 14:32'; renderCard(); toast(`${esc(e.key)} · ${esc(was)} → ${esc(status)}`, 'ok', {label:'Undo', fn:() => { e.status = was; renderCard(); }}); }
+function addComment(id){
+  const ta = $('#cmt-ta'); const txt = ta.value.trim(); if(!txt){ toast('Write the comment first — the box is empty.', 'bad'); ta.focus(); return; }
+  E[id].comments.push({who:'Mara Lindqvist', when:'today 14:32', text:txt}); state.keepScroll = true; renderCard(); toast(`Comment added to ${esc(label(E[id]))}`, 'ok');
+}
+function queueCi(desc){ state.pending.push('queued: ' + desc); renderStatus(); }
+function rerunBuild(id){
+  const e = E[id];
+  if(!state.ciAuth){ queueCi(`Re-run ${e.cfg} ${e.key} (failed steps)`); toast(`Couldn't reach ci.tidewater.internal (401). Re-run of ${esc(e.key)} queued — it runs once you re-enter the TeamCity password.`, 'bad', {label:'Re-enter password', fn:() => { state.pwOpen = true; go('#/sources'); }}); return; }
+  toast(`Re-running failed steps of ${esc(e.cfg)} ${esc(e.key)} on ${esc(e.branch)}`, 'ok');
+}
+function triggerBuild(cfg){
+  openModal(`<div class="modal-h"><div class="ttl">Trigger ${esc(cfg)}</div><div class="sub">TeamCity · project Payouts</div></div><div class="modal-b">
+    <div class="field"><label>Branch</label><select class="in" id="tb-branch"><option>feature/PAY-231-sepa-retry</option><option>main</option><option>fix/PAY-228-partial-refund-drift</option></select></div>
+    <div class="field"><label>env</label><div class="radios"><span class="radio is-on" data-env="staging">staging</span><span class="radio" data-env="prod-dryrun">prod-dryrun</span></div></div>
+    <label class="check"><input type="checkbox" id="tb-clean"> Clean checkout</label>
+    ${state.ciAuth ? '' : `<div class="callout" style="margin-top:10px"><span class="coral mono">401</span><span>TeamCity rejected the password 38 min ago. The build is queued locally and sent after you re-enter it.</span></div>`}</div>
+    <div class="modal-f"><span class="sp"></span><button class="btn btn--ghost btn--sm" data-close-modal>Cancel</button><button class="btn btn--gold btn--sm" id="tb-go">Trigger build</button></div>`);
+  let env = 'staging'; $$('#modal [data-env]').forEach(r => r.addEventListener('click', () => { env = r.dataset.env; $$('#modal [data-env]').forEach(x => x.classList.toggle('is-on', x===r)); }));
+  $('#tb-go').addEventListener('click', () => { const br = $('#tb-branch').value, clean = $('#tb-clean').checked; closeModal();
+    const desc = `${cfg} #${state.nextBuild++} on ${br} (env=${env}${clean?', clean checkout':''})`;
+    if(!state.ciAuth){ queueCi(`Trigger ${desc}`); toast(`Queued locally: ${esc(desc)} — 1 pending write until TeamCity accepts the password.`, 'bad', {label:'Re-enter password', fn:() => { state.pwOpen = true; go('#/sources'); }}); }
+    else toast(`Triggered ${esc(desc)}`, 'ok'); });
+}
+function startWorkFlow(id){
+  const e = E[id]; const slug = 'feature/' + e.key + '-' + e.title.toLowerCase().replace(/[^a-z0-9]+/g,'-');
+  const steps = [[`Create branch <code>${esc(slug)}</code> in payout-service`, 'from main'], ['Push the branch to git.tidewater.internal', ''], [`Open PR “${esc(e.title)}” → main`, 'body from the ticket description'], [`Link the PR back to ${esc(e.key)}`, 'route on the chart'], [`Move ${esc(e.key)} → In Progress`, 'Jira transition']];
+  openModal(`<div class="modal-h"><div class="ttl">Start work on ${esc(e.key)}</div><div class="sub">${esc(e.title)} · one reviewable action, five steps</div></div><div class="modal-b"><div class="steps" id="sw-steps">${steps.map(([l, s]) => `<div class="step"><span class="sd"></span><span>${l}${s?`<div class="sub">${s}</div>`:''}</span><span class="r"></span></div>`).join('')}</div>
+    <label class="check" style="margin-top:12px"><input type="checkbox" id="sw-timer" checked> Also start the timer on ${esc(e.key)} <span class="faint">(stops the PAY-231 timer and opens its worklog draft)</span></label></div>
+    <div class="modal-f"><span class="faint" style="font-size:12.5px">Nothing happens until you run it.</span><span class="sp"></span><button class="btn btn--ghost btn--sm" data-close-modal>Cancel</button><button class="btn btn--gold btn--sm" id="sw-run">Run all 5 steps</button></div>`);
+  $('#sw-run').addEventListener('click', () => {
+    const wantTimer = $('#sw-timer').checked; const rows = $$('#sw-steps .step'); $('#sw-run').disabled = true; $('#sw-run').textContent = 'Running…';
+    const results = [slug.split('/')[1].slice(0,7)+'…', '3 objects', `PR #${state.nextPr}`, 'linked', 'In Progress'];
+    rows.forEach((r, i) => { setTimeout(() => { r.classList.add('is-run'); }, i*520); setTimeout(() => { r.classList.remove('is-run'); r.classList.add('is-done'); r.querySelector('.r').textContent = results[i]; }, i*520 + 440); });
+    setTimeout(() => {
+      const bid = 'br-' + e.key, pid = 'pr-' + state.nextPr; const num = state.nextPr++;
+      add({id:bid, kind:'branch', src:'git', key:slug, title:slug, repo:'repo-payout', ahead:0, checkedOut:true, hash:'#/branch/'+slug.replace(/\//g,'-'), who:['mara'], date:'today', commits:[], links:[id, pid], search:slug+' branch'});
+      add({id:pid, kind:'pr', src:'git', key:'PR #'+num, num, title:e.title, repo:'repo-payout', from:slug, to:'main', state:'open', by:'Mara Lindqvist', opened:'today 14:32', approvals:[], checks:[], files:[], comments:[], hash:'#/pr/'+num, who:['mara'], date:'today', links:[id, bid], search:'pr '+num+' '+e.title.toLowerCase()});
+      byHash[E[bid].hash] = bid; byHash[E[pid].hash] = pid; REF[slug] = bid; REF['PR #'+num] = pid;
+      e.links = [...new Set([...e.links, bid, pid])]; e.status = 'In Progress'; e.updated = 'today 14:32';
+      POS[bid] = {x:730, y:560}; NODES.push([bid,730,560]); POS[pid] = {x:890, y:560}; NODES.push([pid,890,560]);
+      $('#nodes').insertAdjacentHTML('beforeend', nodeSvg(bid) + nodeSvg(pid)); [bid,pid].forEach(n => $(`#nodes .node[data-id="${n}"]`).classList.add('is-new'));
+      addEdge(id, bid, 'route', true); setTimeout(() => addEdge(bid, pid, 'route', true), 250);
+      CHAINS.push([id, bid, pid]);
+      $('#sw-run').textContent = 'Done'; toast(`Started work on ${esc(e.key)} · branch, PR #${num}, transition`, 'ok');
+      setTimeout(() => { closeModal(); if(state.sel===id) renderCard(); if(wantTimer){ if(state.timer.running) stopTimer(() => startTimer(id)); else startTimer(id); } }, 600);
+    }, rows.length*520 + 300);
+  });
+}
+function createTicket(prefill={}){
+  openModal(`<div class="modal-h"><div class="ttl">Create ticket</div><div class="sub">Jira · Tidewater Jira</div></div><div class="modal-b">
+    <div class="row2"><div class="field"><label>Project</label><select class="in" id="ct-proj"><option value="PAY"${prefill.project==='OPS'?'':' selected'}>PAY — Payments Platform</option><option value="OPS"${prefill.project==='OPS'?' selected':''}>OPS — Operations</option></select></div><div class="field"><label>Type</label><select class="in" id="ct-type"><option>Task</option><option>Story</option><option>Bug</option></select></div></div>
+    <div class="field"><label>Summary</label><input class="in" id="ct-sum" value="${esc(prefill.summary||'')}" placeholder="What needs doing"></div>
+    <div class="field"><label>Description</label><textarea class="ta" id="ct-desc">${esc(prefill.desc||'')}</textarea></div>
+    <div class="row2"><div class="field"><label>Priority</label><select class="in" id="ct-pri"><option>Medium</option><option>High</option><option>Low</option></select></div><div class="field"><label>Epic</label><select class="in" id="ct-epic"><option value="">none</option><option value="PAY-200"${prefill.epic?' selected':''}>PAY-200 Payout reliability</option></select></div></div>
+    ${prefill.link?`<div class="faint" style="font-size:12.5px">Links to ${chip(prefill.link)} on creation.</div>`:''}</div>
+    <div class="modal-f"><span class="sp"></span><button class="btn btn--ghost btn--sm" data-close-modal>Cancel</button><button class="btn btn--gold btn--sm" id="ct-go">Create ticket</button></div>`);
+  $('#ct-go').addEventListener('click', () => {
+    const sum = $('#ct-sum').value.trim(); if(!sum){ toast('Give the ticket a summary first.', 'bad'); $('#ct-sum').focus(); return; }
+    const proj = $('#ct-proj').value; const key = proj + '-' + (proj==='PAY' ? state.nextTicket++ : 78 + (state.nextOps = (state.nextOps||0) + 1) - 1); const id = key;
+    add({id, kind:'ticket', src:'jira', key, title:sum, itype:$('#ct-type').value, status:'To Do', priority:$('#ct-pri').value, assignee:'Mara Lindqvist', updated:'today 14:32', epic:$('#ct-epic').value||undefined, hash:'#/ticket/'+key, who:['mara'], date:'today', desc:esc($('#ct-desc').value), comments:[], estimate:'—', spentWeek:'0h', worklogs:[], links:prefill.link?[prefill.link]:[], search:sum.toLowerCase()});
+    byHash[E[id].hash] = id; REF[key] = id; placeNode(id); $('#nodes').insertAdjacentHTML('beforeend', nodeSvg(id)); $(`#nodes .node[data-id="${id}"]`).classList.add('is-new');
+    if(E[id].epic){ E['PAY-200'].children.push(id); E['PAY-200'].links.push(id); addEdge(id, 'PAY-200', 'contains', false); }
+    if(prefill.link){ E[prefill.link].links.push(id); addEdge(id, prefill.link, 'route', true); }
+    closeModal(); toast(`Created ${esc(key)} · ${esc(sum)}`, 'ok', {label:'Open', fn:() => go(E[id].hash)}); if(prefill.onDone) prefill.onDone(key);
+  });
+}
+function createPage(){
+  openModal(`<div class="modal-h"><div class="ttl">Create page</div><div class="sub">Confluence · Tidewater Wiki</div></div><div class="modal-b">
+    <div class="row2"><div class="field"><label>Space</label><select class="in"><option>ENG — Engineering</option></select></div><div class="field"><label>Parent</label><select class="in" id="cp-parent"><option>Standup protocols</option><option>Payments architecture overview</option><option>(space root)</option></select></div></div>
+    <div class="field"><label>Title</label><input class="in" id="cp-title" placeholder="Page title"></div>
+    <div class="field"><label>Body</label><textarea class="ta" id="cp-body" placeholder="Start writing — the page is created as a draft you can keep editing in the wiki."></textarea></div>
+    ${state.sel && E[state.sel] ? `<div class="faint" style="font-size:12.5px">Links to ${chip(state.sel)} on creation.</div>` : ''}</div>
+    <div class="modal-f"><span class="sp"></span><button class="btn btn--ghost btn--sm" data-close-modal>Cancel</button><button class="btn btn--gold btn--sm" id="cp-go">Create page</button></div>`);
+  $('#cp-go').addEventListener('click', () => {
+    const t = $('#cp-title').value.trim(); if(!t){ toast('Give the page a title first.', 'bad'); $('#cp-title').focus(); return; }
+    const id = 'pg-new' + Date.now(); const ctx = state.sel && E[state.sel] ? state.sel : null;
+    add({id, kind:'page', src:'wiki', key:'', title:t, space:'ENG', edited:'today 14:32', by:'Mara Lindqvist', hash:'#/page/'+id, who:['mara'], date:'today', body:'<p>'+esc($('#cp-body').value||'—')+'</p>', comments:[], links:ctx?[ctx]:[], search:t.toLowerCase()});
+    byHash[E[id].hash] = id; placeNode(id); $('#nodes').insertAdjacentHTML('beforeend', nodeSvg(id)); $(`#nodes .node[data-id="${id}"]`).classList.add('is-new');
+    if(ctx){ E[ctx].links.push(id); addEdge(id, ctx, 'route', true); }
+    closeModal(); toast(`Created page “${esc(t)}” in ENG › ${esc($('#cp-parent').value)}`, 'ok', {label:'Open', fn:() => go(E[id].hash)});
+  });
+}
+function createRepo(){
+  openModal(`<div class="modal-h"><div class="ttl">Create repository</div><div class="sub">Gitea · org tidewater</div></div><div class="modal-b">
+    <div class="field"><label>Name</label><input class="in" id="cr-name" placeholder="e.g. payout-dashboard"></div>
+    <div class="row2"><div class="field"><label>Visibility</label><div class="radios"><span class="radio is-on">internal</span><span class="radio">private</span></div></div><div class="field"><label>Default branch</label><input class="in" value="main"></div></div>
+    <label class="check"><input type="checkbox" checked> Clone to <code>~/code/</code> after creating</label></div>
+    <div class="modal-f"><span class="sp"></span><button class="btn btn--ghost btn--sm" data-close-modal>Cancel</button><button class="btn btn--gold btn--sm" id="cr-go">Create repository</button></div>`);
+  $('#cr-go').addEventListener('click', () => { const n = $('#cr-name').value.trim().toLowerCase().replace(/[^a-z0-9-]+/g,'-'); if(!n){ toast('Name the repository first.', 'bad'); $('#cr-name').focus(); return; }
+    const id = 'repo-'+n; add({id, kind:'repo', src:'git', key:n, title:n, lang:'—', clone:'~/code/'+n, note:'default branch <code>main</code>, 0 commits', hash:'#/repo/'+n, who:['mara'], date:'today', links:[], search:n+' repo'});
+    byHash[E[id].hash] = id; REF[n] = id; placeNode(id); $('#nodes').insertAdjacentHTML('beforeend', nodeSvg(id)); closeModal(); toast(`Created tidewater/${esc(n)} · cloned to ~/code/${esc(n)}`, 'ok', {label:'Open', fn:() => go(E[id].hash)}); });
+}
+function newBranch(repoId){
+  const r = E[repoId];
+  openModal(`<div class="modal-h"><div class="ttl">New branch in ${esc(r.key)}</div><div class="sub">from main · ${esc(r.clone)}</div></div><div class="modal-b"><div class="field"><label>Branch name</label><input class="in" id="nb-name" placeholder="feature/PAY-240-payout-dashboard-latency"></div><label class="check"><input type="checkbox" checked> Check out locally</label><label class="check"><input type="checkbox"> Push to origin now</label></div>
+    <div class="modal-f"><span class="sp"></span><button class="btn btn--ghost btn--sm" data-close-modal>Cancel</button><button class="btn btn--gold btn--sm" id="nb-go">Create branch</button></div>`);
+  $('#nb-go').addEventListener('click', () => { const n = $('#nb-name').value.trim(); if(!n){ toast('Name the branch first.', 'bad'); $('#nb-name').focus(); return; } closeModal(); toast(`Created ${esc(n)} in ${esc(r.key)} · checked out`, 'ok'); });
+}
+function gitAct(act, id){
+  const e = E[id]; const repo = e.kind==='repo' ? e : E[e.repo];
+  if(repo.clone==='not cloned'){ toast(`${esc(repo.key)} isn't cloned locally. Clone it first (Open in Gitea › Clone).`, 'bad'); return; }
+  if(act==='pull') toast(`Pulled ${esc(e.kind==='branch'?e.key:'main')} in ${esc(repo.key)} · already up to date`, 'ok');
+  else toast(e.kind==='branch' ? `Pushed 3 commits to origin/${esc(e.key)}` : `Pushed ${esc(repo.key)} · everything up to date`, 'ok');
+}
+function editPage(id){
+  const e = E[id];
+  openModal(`<div class="modal-h"><div class="ttl">Edit “${esc(e.title)}”</div><div class="sub">section · Manual review queue</div></div><div class="modal-b"><div class="field"><label>Section body</label><textarea class="ta" id="ep-body" style="min-height:110px">SLA: manual-review items are triaged within 1 business day and resolved within 3 (agreed with finance, 2026-08-22).</textarea></div><div class="faint" style="font-size:12.5px">Writes back to Confluence and keeps the local copy in sync.</div></div>
+    <div class="modal-f"><span class="sp"></span><button class="btn btn--ghost btn--sm" data-close-modal>Cancel</button><button class="btn btn--gold btn--sm" id="ep-go">Save section</button></div>`);
+  $('#ep-go').addEventListener('click', () => { const v = $('#ep-body').value.trim(); e.body = e.body.replace(/<p><em>SLA: to be defined\.<\/em><\/p>/, '<p>'+esc(v)+'</p>'); e.edited = 'today 14:32'; e.editedSection = 'Manual review queue'; closeModal(); renderCard(); toast('Saved “Manual review queue” · SEPA payout retry design', 'ok'); });
+}
+function reviewPr(id, verdict){ const e = E[id]; e.reviewed = verdict; e.approvals = e.approvals.map(a => a.who.startsWith('Mara') ? {...a, ok:verdict==='approved', note:'14:32'} : a); renderCard(); toast(`PR #${e.num}: you ${verdict}`, 'ok'); }
+
+/* =====================================================================
+   TIMER + WORKLOG
+   ===================================================================== */
+function timerElapsedSec(){ return state.timer.baseSec + Math.floor((Date.now() - state.timer.startedAt)/1000); }
+function renderTimer(){
+  const b = $('#timerbtn'); b.classList.toggle('is-running', state.timer.running);
+  const ctxName = state.timer.ctxLabel || (state.timer.ctx && E[state.timer.ctx] ? label(E[state.timer.ctx]) : '—');
+  $('#timer-ctx').textContent = state.timer.running ? ctxName : 'timer off';
+  $('#timer-el').textContent = state.timer.running ? fmtClock(timerElapsedSec()) : '⌘T';
+  b.title = state.timer.running ? `Running on ${ctxName} since ${state.timer.since} · click to stop or switch · ⌘T` : 'Start the timer · ⌘T';
+  applyVisual();
+}
+function timerMenu(x, y){
+  const t = state.timer;
+  if(t.running){
+    const ctxName = t.ctxLabel || label(E[t.ctx]);
+    openPop(`<div class="ttl">${compassSvg().replace('<svg','<svg style="width:13px;height:13px;fill:var(--gold);vertical-align:-1px"')} Running on ${esc(ctxName)}</div><div class="faint" style="font-size:12.5px">since <span class="mono">${t.since}</span> · ${fmtClock(timerElapsedSec())} elapsed · started manually</div>
+      <div class="row"><button class="btn btn--gold btn--sm" data-timer="stop">Stop · log time</button>${state.sel && state.sel!==t.ctx && E[state.sel] ? `<button class="btn btn--sm" data-timer="switch:${state.sel}">Switch to ${esc(label(E[state.sel]))}</button>` : ''}</div>
+      <div class="row" style="align-items:center"><input class="in" id="tm-label" placeholder="or an ad-hoc label, e.g. Staging DB configuration" style="height:28px"><button class="btn btn--sm" data-timer="label">Switch</button></div>`, x, y);
+  } else {
+    openPop(`<div class="ttl">Timer is off</div><div class="faint" style="font-size:12.5px">Pick a place or a label to start.</div>
+      <div class="row">${state.sel && E[state.sel] ? `<button class="btn btn--gold btn--sm" data-timer="start:${state.sel}">Start on ${esc(label(E[state.sel]))}</button>` : ''}${t.ctx && E[t.ctx] && t.ctx!==state.sel ? `<button class="btn btn--sm" data-timer="start:${t.ctx}">Resume ${esc(label(E[t.ctx]))}</button>` : ''}</div>
+      <div class="row" style="align-items:center"><input class="in" id="tm-label" placeholder="ad-hoc label, e.g. Staging DB configuration" style="height:28px"><button class="btn btn--sm" data-timer="label">Start</button></div>`, x, y);
+  }
+}
+function startTimer(ctx, labelText){
+  state.timer = {running:true, ctx:labelText?null:ctx, ctxLabel:labelText||null, since:'14:32', baseSec:0, startedAt:Date.now()};
+  state.blocks.push({s:'14:32', e:'14:32', ctx:labelText?null:ctx, label:labelText||'manual timer', kind:labelText?'label':'manual'});
+  renderTimer(); renderStatus(); state.keepScroll = true; renderCard(); toast(`Timer started on ${esc(labelText || label(E[ctx]))}`, 'ok'); closePop();
+}
+function stopTimer(after){
+  if(!state.timer.running) return;
+  const wasCtx = state.timer.ctx, wasLabel = state.timer.ctxLabel; state.timer.running = false; renderTimer(); state.keepScroll = true; renderCard(); closePop();
+  if(wasCtx==='PAY-231' && !state.loggedToday.length) worklogDraft('PAY-231', after);
+  else if(wasLabel){ toast(`Stopped “${esc(wasLabel)}” — log it from the day review`, '', {label:'Day review', fn:() => go('#/time')}); if(after) after(); }
+  else { worklogDraft(wasCtx, after, true); }
+}
+const ACTIVITY = [['commit <code>a41f2c</code> “PAY-231 backoff jitter”','10:02',true,'backoff jitter (a41f2c, c90d11)'],['commit <code>c90d11</code> “PAY-231: jitter in backoff, cap at 5 attempts”','11:42',true,''],['replied to Jonas on PR #142','10:20',true,'replied to review on PR #142'],['triggered build #1188','11:45',false,'triggered build #1188'],['edited <em>SEPA payout retry design</em> › Backoff policy','10:40',true,'updated Backoff policy in the design page'],['edited note <em>SEPA retry investigation</em>','11:20',false,'updated the investigation note']];
+function worklogDraft(ticket, after, generic=false){
+  const e = E[ticket]; const sec = timerElapsedSec();
+  const short = generic || ticket!=='PAY-231';
+  const intervals = short ? [['14:32','14:32']] : [['09:40','11:50'],['13:58','14:32']]; const total = short ? Math.max(1, Math.round(sec/60)) : 164;
+  const gen = () => { const parts = []; $$('#wl-acts input:checked').forEach(i => { const a = ACTIVITY[+i.value]; if(a[3] && !parts.includes(a[3])) parts.push(a[3]); }); if(parts.includes('backoff jitter (a41f2c, c90d11)') && $$('#wl-acts input')[1] && !$$('#wl-acts input')[1].checked) parts[parts.indexOf('backoff jitter (a41f2c, c90d11)')] = 'backoff jitter (a41f2c)';
+    const s = parts.join('; '); return s ? s[0].toUpperCase()+s.slice(1)+'.' : ''; };
+  openModal(`<div class="modal-h"><div class="ttl">Log ${fmtDur(total)} to ${esc(e ? e.key : '…')}</div><div class="sub">Timer stopped · ${short ? 'short run' : 'suggested from today\'s activity on PAY-231'} · interval is editable</div></div><div class="modal-b">
+    <div class="row2"><div class="field"><label>Interval</label>${intervals.map(([a,b]) => `<div style="display:flex;gap:6px;align-items:center;margin-bottom:4px"><input class="in mono" value="${a}" style="width:78px"> <span class="faint">–</span> <input class="in mono" value="${b}" style="width:78px"></div>`).join('')}<div class="t">= ${fmtDur(total)}${short?'':' (09:40–11:50 + 13:58–14:32)'}</div></div>
+      <div class="field"><label>Target ticket <span class="faint">(optional)</span></label><select class="in" id="wl-target">${['PAY-231','PAY-228','PAY-240','OPS-77'].map(k => `<option${k===ticket?' selected':''}>${k} — ${esc(E[k].title)}</option>`).join('')}<option value="">no ticket — keep local</option></select></div></div>
+    ${short ? '' : `<div class="field"><label>Activity in the interval — each checked line goes into the comment</label><div id="wl-acts">${ACTIVITY.map(([l, t, on], i) => `<label class="check"><input type="checkbox" value="${i}"${on?' checked':''}><span>${l}</span><span class="t">${t}</span></label>`).join('')}</div></div>`}
+    <div class="field"><label>Worklog comment</label><textarea class="ta" id="wl-comment">${short ? '' : 'Backoff jitter (a41f2c, c90d11); replied to review on PR #142; updated Backoff policy in the design page.'}</textarea></div></div>
+    <div class="modal-f"><button class="btn btn--ghost btn--sm" data-close-modal id="wl-discard">Discard</button><span class="sp"></span><button class="btn btn--sm" id="wl-edit">Edit interval</button><button class="btn btn--gold btn--sm" id="wl-log">Log ${fmtDur(total)} to ${esc(ticket||'')}</button></div>`);
+  $$('#wl-acts input').forEach(i => i.addEventListener('change', () => { $('#wl-comment').value = gen(); }));
+  $('#wl-edit').addEventListener('click', () => { $('#modal input.mono').focus(); });
+  $('#wl-target').addEventListener('change', (ev) => { const k = ev.target.value.split(' ')[0]; $('#wl-log').textContent = k ? `Log ${fmtDur(total)} to ${k}` : `Keep ${fmtDur(total)} local`; });
+  $('#wl-discard').addEventListener('click', () => { if(after) after(); });
+  $('#wl-log').addEventListener('click', () => { const k = $('#wl-target').value.split(' ')[0]; const c = $('#wl-comment').value.trim(); closeModal();
+    if(k){ E[k].worklogs.push({when:'today 14:32', dur:fmtDur(total), text:c || '(no comment)'}); E[k].spentWeek = k==='PAY-231' && !short ? '9h 14m' : E[k].spentWeek; state.loggedToday.push(k); state.unloggedMin = Math.max(0, state.unloggedMin - total); toast(`Logged ${fmtDur(total)} to ${esc(k)}`, 'ok', {label:'Open', fn:() => go(E[k].hash)}); }
+    else toast(`Kept ${fmtDur(total)} local`, 'ok');
+    if(state.sel===k) renderCard(); renderStatus(); if(state.overlay==='time') renderTime(); if(after) after(); });
+}
+
+/* =====================================================================
+   STATUS BAR — itinerary + sync
+   ===================================================================== */
+function pushHistory(id){
+  const now = Date.now(); const h = state.history; const last = h[h.length-1];
+  if(last && last.id===id) return; if(last) last.left = now;
+  h.push({id, at:now}); if(h.length > 40) h.shift();
+  renderStatus();
+}
+function renderStatus(){
+  const h = state.history.slice(-6);
+  const stops = h.map((s, i) => { const e = E[s.id]; const name = e ? label(e) : s.id.replace('ov:','');
+    const dur = (s.left || Date.now()) - s.at; const d = dur > 59000 ? Math.round(dur/60000)+'m' : Math.max(0, Math.round(dur/1000))+'s';
+    const dest = e ? null : (s.id==='ov:lens' ? '#/graph' : '#/'+s.id.replace('ov:',''));
+    return (i ? '<span class="it-leg"></span>' : '') + `<button class="it-stop${i===h.length-1?' is-here':''}" ${e?`data-nav="${s.id}"`:`data-go="${dest}"`}>${esc(name)}<span class="d">${state.timer.running?d:''}</span></button>`; }).join('');
+  $('#itin').innerHTML = `<span class="eyebrow">Itinerary</span>${stops || '<span class="faint" style="font-size:11.5px">no stops yet — open a place to start the trail</span>'}`;
+  const pend = state.pending.length;
+  $('#sbright').innerHTML = `<span class="src">${gl('pin')}Jira</span><span class="src">${gl('book')}Wiki</span><span class="src">${gl('fork')}Git</span><span class="faint">synced 4 · 4 · 2 min ago</span><span class="sb-sep"></span><span class="src ${state.ciAuth?'ok':'coral'}">${gl('beacon')}CI</span><span class="${state.ciAuth?'ok':'coral'}">${state.ciAuth?'synced just now':'401 · 38 min ago'}</span><span class="sb-sep"></span><span class="faint">every 5 min · 212 MB</span><span class="sb-sep"></span><span class="${pend?'gold':'faint'}">${pend} pending</span>`;
+}
+
+/* =====================================================================
+   ROUTING
+   ===================================================================== */
+function go(hash){ if(location.hash===hash) route(); else location.hash = hash; }
+function route(){
+  const hash = location.hash || '#/ticket/PAY-231';
+  closePop(); closeCtx(); closeSearch();
+  const m = hash.match(/^#\/(inbox|time|standup|sources|notes)$/);
+  if(m){ showOverlay(m[1]); pushHistory('ov:'+m[1]); return; }
+  if(state.overlay && !(state.keepOverlay)) showOverlay(null); state.keepOverlay = false;
+  const lm = hash.match(/^#\/lens\/(.+)$/);
+  if(lm){ state.lens = lm[1]; state.sel = null; renderLenses(); renderCard(); applyVisual(); state.lastEntityHash = hash; pushHistory('ov:lens'); return; }
+  state.lens = null; renderLenses();
+  const id = byHash[hash];
+  if(hash==='#/graph' || !id){ state.sel = null; state.lastEntityHash = '#/graph'; renderCard(); applyVisual(); $$('.rail-btn').forEach(b => b.classList.toggle('is-on', b.dataset.go==='#/graph')); return; }
+  state.sel = id; state.lastEntityHash = hash; if(state.noteEdit && state.noteEdit!==id) state.noteEdit = null;
+  renderCard(); applyVisual(); highlightNode(id); pushHistory(id);
+  if(state.overlay==='notes') renderNotes();
+  document.title = `knobas — ${label(E[id])}`;
+}
+
+/* =====================================================================
+   EVENTS
+   ===================================================================== */
+document.addEventListener('click', (ev) => {
+  const t = ev.target.closest('[data-nav],[data-go],[data-lens],[data-lens-go],[data-confirm],[data-dismiss],[data-suggall],[data-addcmt],[data-timer],[data-startwork],[data-linkto],[data-ctx],[data-rerun],[data-trigger],[data-git],[data-newbranch],[data-editpage],[data-editnote],[data-savenote],[data-review],[data-ping],[data-worklog],[data-close-overlay],[data-close-modal],[data-close-pop],[data-ibact],[data-ibsend],[data-ibcancel],[data-unsnooze],[data-locate],[data-newnote],[data-savenotestandup],[data-publish],[data-aiticket],[data-addsource],[data-ci-pw],[data-ci-save],[data-renew],[data-syncnow],[data-syncall],[data-layer],[data-f],[data-clear-search],[data-logall],[data-blk],[data-assign],[data-assignlbl],[data-loglbl],[data-keeplocal],#lens-clear,#newbtn,#timerbtn,#inboxbtn,#syncbtn');
+  if(!t){ if(!ev.target.closest('#pop')) closePop(); if(!ev.target.closest('#ctx')) closeCtx(); if(!ev.target.closest('#searchbox')) closeSearch(); return; }
+  const d = t.dataset;
+  if(d.nav){ if(d.keepOverlay) state.keepOverlay = true; closePop(); go(E[d.nav].hash); return; }
+  if(d.go){ go(d.go); return; }
+  if(d.lens){ go(state.lens===d.lens ? '#/graph' : '#/lens/'+d.lens); return; }
+  if(d.lensGo){ closeSearch(); go('#/lens/'+d.lensGo); return; }
+  if(t.id==='lens-clear'){ go('#/graph'); return; }
+  if(d.confirm){ confirmSugg(d.confirm); return; }
+  if(d.dismiss){ dismissSugg(d.dismiss); return; }
+  if(d.suggall !== undefined){ state.suggAll = d.suggall==='1'; state.keepScroll = true; renderCard(); return; }
+  if(d.addcmt){ addComment(d.addcmt); return; }
+  if(d.timer){ const [act, arg] = d.timer.split(':'); if(act==='stop') stopTimer(); else if(act==='start') startTimer(arg); else if(act==='switch'){ stopTimer(() => startTimer(arg)); } else if(act==='label'){ const v = $('#tm-label').value.trim(); if(!v){ toast('Type a label first.', 'bad'); $('#tm-label').focus(); return; } if(state.timer.running) stopTimer(() => startTimer(null, v)); else startTimer(null, v); } return; }
+  if(d.startwork){ startWorkFlow(d.startwork); return; }
+  if(d.linkto){ const r = t.getBoundingClientRect(); linkToPicker(d.linkto, r.left, r.bottom + 6); return; }
+  if(d.ctx){ const r = t.getBoundingClientRect(); openCtxFor(d.ctx, r.left, r.bottom + 4); return; }
+  if(d.rerun){ rerunBuild(d.rerun); return; }
+  if(d.trigger){ triggerBuild(d.trigger); return; }
+  if(d.git){ const [a, id] = d.git.split(':'); gitAct(a, id); return; }
+  if(d.newbranch){ newBranch(d.newbranch); return; }
+  if(d.editpage){ editPage(d.editpage); return; }
+  if(d.editnote){ state.noteEdit = state.noteEdit===d.editnote ? null : d.editnote; state.keepScroll = true; renderCard(); const ta = $('#note-ta'); if(ta) ta.focus(); return; }
+  if(d.savenote){ saveNote(d.savenote); return; }
+  if(d.review){ const [id, v] = d.review.split(':'); reviewPr(id, v); return; }
+  if(d.ping){ const r = t.getBoundingClientRect(); openPop(`<div class="ttl">Message Tomasz Wójcik</div><textarea class="ta" id="ping-ta">Hi Tomasz — any ETA on the runbook update (OPS-77)? PAY-228 staging verification is waiting on it.</textarea><div class="row"><button class="btn btn--gold btn--sm" id="ping-send">Send</button><button class="btn btn--ghost btn--sm" data-close-pop>Cancel</button></div>`, r.left, r.bottom + 6); $('#ping-send').addEventListener('click', () => { closePop(); toast('Sent to Tomasz Wójcik', 'ok'); }); return; }
+  if(d.worklog){ closePop(); worklogDraft(d.worklog); return; }
+  if(d.closeOverlay !== undefined){ closeOverlay(); return; }
+  if(d.closeModal !== undefined){ closeModal(); return; }
+  if(d.closePop !== undefined){ closePop(); return; }
+  if(d.ibact){ const [id, act] = d.ibact.split(':'); inboxAct(id, act); return; }
+  if(d.ibsend){ inboxSend(d.ibsend); return; }
+  if(d.ibcancel){ $(`.ib[data-ib="${d.ibcancel}"]`).classList.remove('is-replying'); return; }
+  if(d.unsnooze){ const z = state.snoozed.find(x => x.id===d.unsnooze); state.snoozed = state.snoozed.filter(x => x!==z); state.inbox.unshift({id:'i'+Date.now(), t:'today 14:32', node:'nt-creds', html:z.html + ' <em>(brought back)</em>', acts:['snooze','done']}); renderInbox(); updateCounts(); return; }
+  if(d.locate){ highlightNode(d.locate); const n = $(`#nodes .node[data-id="${d.locate}"]`); if(n) n.focus({preventScroll:true}); return; }
+  if(d.newnote !== undefined){ newNote(); return; }
+  if(d.savenotestandup !== undefined){ saveStandupNote(); return; }
+  if(d.publish !== undefined){ publishStandup(); return; }
+  if(d.aiticket){ const i = +d.aiticket; const [who, what] = ACTIONS[i]; createTicket({summary:what.replace(/\s*\((PAY|OPS)-\d+\)\s*$/,''), project: who==='Tomasz'?'OPS':'PAY', desc:`Action item from standup 2026-08-22 · owner ${who}`, epic: i!==1, link: i===0?'PAY-231':i===1?'OPS-77':'PAY-240', onDone:(key) => { state.aiTickets = state.aiTickets||{}; state.aiTickets[i] = key; if(state.overlay==='standup') renderStandup(); }}); return; }
+  if(d.addsource !== undefined){ addSourceWizard(); return; }
+  if(d.ciPw !== undefined){ state.pwOpen = true; renderSources(); $('#ci-pw').focus(); return; }
+  if(d.ciSave !== undefined){ setCiAuth(); return; }
+  if(d.renew !== undefined){ toast('Opens tidewater.atlassian.net › Personal access tokens — paste the new PAT here when you have it.'); return; }
+  if(d.syncnow){ const s = SOURCES.find(x => x.id===d.syncnow); if(s && s.err && !state.ciAuth){ toast('TeamCity sync failed again: 401 Unauthorized. Re-enter the password to fix it.', 'bad'); return; } toast(`Syncing ${esc(s ? s.name : 'source')}… done · nothing new`, 'ok'); return; }
+  if(d.syncall !== undefined){ toast(state.ciAuth ? 'All 4 sources synced · nothing new' : '3 sources synced · TeamCity still 401', state.ciAuth ? 'ok' : 'bad'); return; }
+  if(d.layer){ state.layers[d.layer] = !state.layers[d.layer]; renderSources(); applyVisual(); return; }
+  if(d.f){ const [k, v] = d.f.split(':'); if(k==='failing') state.filters.failing = !state.filters.failing; else state.filters[k] = state.filters[k]===v ? null : v; state.sIdx = 0; renderSearch(); applyVisual(); return; }
+  if(d.clearSearch !== undefined){ state.query = ''; $('#q').value = ''; state.filters = {src:null,type:null,who:null,date:null,failing:false}; renderSearch(); applyVisual(); return; }
+  if(d.logall !== undefined){ const m = state.unloggedMin; state.unloggedMin = 0; state.loggedToday.push('PAY-231','PAY-228'); E['PAY-231'].worklogs.push({when:'today 14:32', dur:'2h 44m', text:'Backoff jitter (a41f2c, c90d11); replied to review on PR #142; updated Backoff policy in the design page.'}); E['PAY-228'].worklogs.push({when:'Thu 2026-08-21', dur:'2h 01m', text:'Staging verification prep'}); renderTime(); renderStatus(); toast(`Logged ${fmtDur(m)} · PAY-231 2h 44m, PAY-228 2h 01m`, 'ok'); return; }
+  if(d.blk){ const r = t.getBoundingClientRect(); blockMenu(+d.blk, r.left, r.top - 10); return; }
+  if(d.assign){ const [i, id] = d.assign.split(':'); const b = state.blocks[+i]; b.ctx = id; b.kind = 'passive'; b.label = 'assigned by you'; closePop(); renderTime(); toast(`Assigned 11:50–12:20 to ${esc(id)}`, 'ok'); return; }
+  if(d.assignlbl){ const v = $('#assign-lbl').value.trim(); if(!v){ toast('Type a label first.', 'bad'); return; } const b = state.blocks[+d.assignlbl]; b.kind = 'label'; b.label = v; closePop(); renderTime(); toast(`Labelled 11:50–12:20 “${esc(v)}”`, 'ok'); return; }
+  if(d.loglbl){ const [i, id] = d.loglbl.split(':'); const b = state.blocks[+i]; b.logged = id; E[id].worklogs.push({when:'today 14:32', dur:'48m', text:b.label}); closePop(); renderTime(); toast(`Logged 48m to ${esc(id)} · “${esc(b.label)}”`, 'ok'); return; }
+  if(d.keeplocal){ state.blocks[+d.keeplocal].local = true; closePop(); renderTime(); toast('Kept local — not sent to Jira'); return; }
+  if(t.id==='newbtn'){ const r = t.getBoundingClientRect(); openCtx('New', [{label:'Ticket…', fn:() => createTicket()}, {label:'Page…', fn:createPage}, {label:'Note', fn:newNote}, '-', {label:'Branch…', fn:() => newBranch('repo-payout')}, {label:'Repository…', fn:createRepo}, '-', {label:'Source…', fn:addSourceWizard}], r.left, r.bottom + 4); return; }
+  if(t.id==='timerbtn'){ const r = t.getBoundingClientRect(); timerMenu(r.right - 340, r.bottom + 6); return; }
+  if(t.id==='inboxbtn'){ go(state.overlay==='inbox' ? state.lastEntityHash : '#/inbox'); return; }
+  if(t.id==='syncbtn'){ go('#/sources'); return; }
+});
+document.addEventListener('change', (ev) => { const s = ev.target.closest('[data-status]'); if(s) setStatus(s.dataset.status, s.value); });
+document.addEventListener('keydown', (ev) => {
+  const mod = ev.metaKey || ev.ctrlKey;
+  if(mod && ev.key.toLowerCase()==='k'){ ev.preventDefault(); $('#q').focus(); $('#q').select(); openSearch(); return; }
+  if(mod && ev.key.toLowerCase()==='t'){ ev.preventDefault(); if(state.timer.running) stopTimer(); else startTimer(state.sel && E[state.sel] ? state.sel : 'PAY-231'); return; }
+  if(ev.key==='Escape'){
+    if($('#ctx').classList.contains('is-on')){ closeCtx(); return; }
+    if($('#pop').classList.contains('is-on')){ closePop(); return; }
+    if($('#mscrim').classList.contains('is-on')){ closeModal(); return; }
+    if($('#sdrop').classList.contains('is-on')){ closeSearch(); $('#q').blur(); return; }
+    if(state.overlay){ closeOverlay(); return; }
+    if(state.lens){ go('#/graph'); return; }
+    return;
+  }
+  if(ev.target.id==='q'){ const rows = $$('#sdrop .sr'); if(!rows.length) return;
+    if(ev.key==='ArrowDown'){ ev.preventDefault(); state.sIdx = Math.min(rows.length-1, (state.sIdx||0)+1); renderSearch(); }
+    if(ev.key==='ArrowUp'){ ev.preventDefault(); state.sIdx = Math.max(0, (state.sIdx||0)-1); renderSearch(); }
+    if(ev.key==='Enter'){ const r = $('#sdrop .sr.is-sel') || rows[0]; if(r){ closeSearch(); go(E[r.dataset.nav].hash); } }
+  }
+  if((ev.key==='Enter' || ev.key===' ') && ev.target.matches('.lrow,.nrow,.blk,.tcard,.radio')){ ev.preventDefault(); ev.target.click(); }
+});
+$('#q').addEventListener('input', (ev) => { state.query = ev.target.value; state.sIdx = 0; state.lens = null; renderLenses(); openSearch(); applyVisual(); });
+$('#q').addEventListener('focus', openSearch);
+document.addEventListener('mouseover', (ev) => { const l = ev.target.closest('[data-hl]'); if(!l || l===state.hlLine) return; state.hlLine = l; l.dataset.hl.split(',').forEach(highlightNode); });
+$('#scrim').addEventListener('click', closeOverlay);
+$('#mscrim').addEventListener('click', (ev) => { if(ev.target===ev.currentTarget) closeModal(); });
+window.addEventListener('hashchange', route);
+
+/* =====================================================================
+   INIT
+   ===================================================================== */
+renderGraph(); renderLegend(); renderLenses(); renderTimer(); renderStatus(); updateCounts();
+if(!location.hash) history.replaceState(null, '', '#/ticket/PAY-231');
+route();
+setInterval(renderTimer, 15000);
+setInterval(renderStatus, 30000);
+} catch (err) { const el = document.getElementById('errlog'); if(el){ el.hidden = false; el.textContent = 'INIT ERROR: ' + err.message + '\n' + err.stack; el.style.cssText = 'position:fixed;left:10px;top:60px;z-index:999;background:#E2735B;color:#121A2C;padding:10px;font:12px monospace;white-space:pre-wrap;max-width:800px'; } console.error(err); }
+window.addEventListener('error', (ev) => { const el = document.getElementById('errlog'); if(el){ el.hidden = false; el.textContent += '\nRUNTIME ERROR: ' + ev.message + ' @' + ev.lineno; el.style.cssText = 'position:fixed;left:10px;top:60px;z-index:999;background:#E2735B;color:#121A2C;padding:10px;font:12px monospace;white-space:pre-wrap;max-width:800px'; } });
+</script>
+</body>
+</html>
