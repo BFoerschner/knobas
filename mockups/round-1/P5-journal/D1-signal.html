@@ -1,0 +1,1969 @@
+<!--
+knobas mockup
+paradigm: P5 Journal
+design: D1 Signal
+thesis: Your day is one editable document — activity, notes, worklogs and the standup are blocks on the same page, and every remote object is live inside it.
+thesis: A dark departure board: everything is a reading in mono, hairlines instead of boxes, and amber only where something is changing or wants you.
+thesis: Split-flap status cells — timer minutes, ticket status, build state and the inbox count physically flip when they change.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>knobas — Friday 22 August 2026</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#15171A; --panel:#1D2024; --raised:#24282D; --hair:#2E3339;
+  --text:#E7E9EC; --muted:#8B929A; --faint:#5A6169;
+  --amber:#FFB020; --fail:#FF6A5C; --ok:#7FD1A1; --link:#9CC3FF;
+  --disp:'Barlow Condensed','Oswald','Arial Narrow',sans-serif;
+  --body:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  --spine:75px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg);color:var(--text);
+  font-family:var(--body);font-size:13px;line-height:1.45;
+  overflow:hidden;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+}
+button,input,select,textarea{font:inherit;color:inherit;background:none;border:none}
+button{cursor:pointer}
+a{color:var(--link);text-decoration:none}
+:focus-visible{outline:2px solid var(--link);outline-offset:1px}
+::selection{background:rgba(156,195,255,.25)}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:#2E3339;border:2px solid var(--bg)}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ---------- primitives ---------- */
+.lbl{font-family:var(--disp);font-weight:600;font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint)}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.mut{color:var(--muted)}
+.fnt{color:var(--faint)}
+.amb{color:var(--amber)}
+.red{color:var(--fail)}
+.grn{color:var(--ok)}
+.hr{height:1px;background:var(--hair)}
+.key{font-family:var(--mono);font-size:12px;font-weight:500;letter-spacing:.01em;color:var(--text)}
+.mg{display:inline-flex;align-items:center;justify-content:center;width:20px;height:14px;
+  border:1px solid var(--hair);border-radius:2px;font-family:var(--mono);font-size:9px;font-weight:500;
+  letter-spacing:.06em;color:var(--muted);background:var(--panel);flex:none}
+.mg.on{color:var(--text);border-color:#3B4249}
+.tny{font-family:var(--mono);font-size:10px;letter-spacing:.02em;color:var(--faint);font-variant-numeric:tabular-nums}
+
+/* ---------- split-flap ---------- */
+.flap{position:relative;display:inline-flex;align-items:center;justify-content:center;
+  height:20px;padding:0 7px;background:var(--raised);border:1px solid var(--hair);border-radius:2px;
+  font-family:var(--mono);font-size:10.5px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--text);white-space:nowrap;overflow:hidden;font-variant-numeric:tabular-nums;vertical-align:middle}
+.flap::after{content:"";position:absolute;left:0;right:0;top:50%;height:1px;background:#0E1013;opacity:.55;z-index:4;pointer-events:none}
+.flap .fv{display:block;line-height:18px}
+.flap.f-run{color:var(--amber);border-color:#4A3A1A}
+.flap.f-fail{color:var(--fail);border-color:#4A2A28}
+.flap.f-ok{color:var(--ok);border-color:#26382E}
+.flap.f-idle{color:var(--muted)}
+.flap.f-lg{height:24px;font-size:12px;padding:0 9px}
+.fl-top,.fl-bot{position:absolute;left:0;right:0;height:50%;overflow:hidden;background:var(--raised);z-index:3;backface-visibility:hidden}
+.fl-top{top:0;transform-origin:bottom center;animation:flTop 170ms ease-in forwards}
+.fl-bot{bottom:0;transform-origin:top center;transform:rotateX(90deg);animation:flBot 170ms ease-out 170ms forwards}
+.fl-in{display:flex;align-items:center;justify-content:center;width:100%;height:var(--fh,20px);line-height:18px}
+@keyframes flTop{to{transform:rotateX(-90deg)}}
+@keyframes flBot{to{transform:rotateX(0)}}
+
+/* ---------- shell ---------- */
+#app{display:grid;grid-template-rows:22px 44px minmax(0,1fr) 26px;height:100vh;min-width:1080px}
+
+#ticker{display:flex;align-items:center;gap:0;background:#101215;border-bottom:1px solid var(--hair);overflow:hidden}
+#ticker .tk-lbl{flex:none;padding:0 10px;height:100%;display:flex;align-items:center;gap:6px;
+  font-family:var(--disp);font-weight:600;font-size:10px;letter-spacing:.14em;color:var(--amber);
+  border-right:1px solid var(--hair);background:#15171A}
+#ticker .dot{width:5px;height:5px;background:var(--amber);border-radius:1px;animation:blink 2.4s steps(1) infinite}
+@keyframes blink{0%,60%{opacity:1}61%,100%{opacity:.25}}
+.tk-track{flex:1;overflow:hidden;min-width:0}
+.tk-run{display:inline-flex;white-space:nowrap;animation:tkRun 52s linear infinite;will-change:transform}
+#ticker:hover .tk-run{animation-play-state:paused}
+@keyframes tkRun{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+.tk-i{display:inline-flex;align-items:center;gap:7px;padding:0 20px;font-family:var(--mono);font-size:10.5px;
+  letter-spacing:.03em;color:var(--muted);font-variant-numeric:tabular-nums}
+.tk-i b{color:var(--amber);font-weight:500}
+.tk-i .sep{color:#3A4046}
+
+#chrome{display:flex;align-items:center;gap:14px;padding:0 12px 0 14px;background:var(--panel);border-bottom:1px solid var(--hair)}
+.brand{font-family:var(--disp);font-weight:700;font-size:17px;letter-spacing:.16em;text-transform:lowercase;color:var(--text)}
+.brand i{color:var(--amber);font-style:normal}
+.navbtns{display:flex;gap:2px}
+.nb{width:22px;height:22px;display:flex;align-items:center;justify-content:center;border:1px solid transparent;border-radius:2px;color:var(--faint)}
+.nb:hover{color:var(--text);border-color:var(--hair)}
+#crumbs{flex:1;display:flex;align-items:center;gap:8px;min-width:0;font-family:var(--mono);font-size:11px;color:var(--muted);overflow:hidden;white-space:nowrap}
+#crumbs .cb{color:var(--faint)}
+#crumbs .cn{color:var(--text)}
+.chrome-r{display:flex;align-items:center;gap:8px;flex:none}
+.cbtn{display:flex;align-items:center;gap:7px;height:28px;padding:0 8px;border:1px solid var(--hair);border-radius:2px;background:#191C20}
+.cbtn:hover{border-color:#3B4249}
+.cbtn .cl{font-family:var(--disp);font-weight:600;font-size:10px;letter-spacing:.1em;color:var(--faint)}
+#timerBtn.run{border-color:#4A3A1A;background:#1E1B14}
+#timerBtn .tctx{font-family:var(--mono);font-size:11px;color:var(--amber);font-weight:500}
+#timerBtn.idle .tctx{color:var(--muted)}
+#timerSec{font-family:var(--mono);font-size:10px;color:#8A6A22;font-variant-numeric:tabular-nums}
+
+#panes{display:grid;grid-template-columns:210px minmax(0,1fr) 244px;min-height:0;background:var(--bg)}
+#side{border-right:1px solid var(--hair);background:var(--panel);display:flex;flex-direction:column;min-height:0}
+#sideScroll{flex:1;overflow-y:auto;min-height:0}
+#center{overflow-y:auto;min-height:0;position:relative}
+#right{border-left:1px solid var(--hair);background:var(--panel);overflow-y:auto;min-height:0}
+
+#status{display:flex;align-items:center;gap:0;background:#101215;border-top:1px solid var(--hair);padding:0 12px;
+  font-family:var(--mono);font-size:10px;color:var(--faint);letter-spacing:.02em;font-variant-numeric:tabular-nums}
+.st{display:flex;align-items:center;gap:6px;padding:0 11px;height:100%;border-right:1px solid var(--hair)}
+.st:first-child{padding-left:0}
+.st.rt{margin-left:auto;border-right:none;border-left:1px solid var(--hair)}
+.st b{font-weight:500;color:var(--muted)}
+.st .sok{color:var(--ok)}
+.st .sbad{color:var(--fail)}
+kbd{font-family:var(--mono);font-size:9.5px;background:var(--raised);border:1px solid var(--hair);border-radius:2px;padding:1px 4px;color:var(--muted)}
+
+/* ---------- sidebar ---------- */
+.sgrp{padding:12px 0 4px}
+.sgrp .lbl{padding:0 12px 6px}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;padding:0 10px 6px}
+.cal .cd{position:relative;height:24px;display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:10.5px;color:var(--faint);border:1px solid transparent;border-radius:2px}
+.cal .cd.has{color:var(--muted);background:#1F2226}
+.cal .cd.has:hover{border-color:#3B4249;color:var(--text)}
+.cal .cd.sel{background:var(--raised);color:var(--text);border-color:#4A3A1A}
+.cal .cd.sel::after{content:"";position:absolute;bottom:2px;left:50%;transform:translateX(-50%);width:12px;height:2px;background:var(--amber)}
+.cal .cdh{height:16px;display:flex;align-items:center;justify-content:center;font-family:var(--disp);font-size:9px;letter-spacing:.06em;color:#3E444B;text-transform:uppercase}
+.srow{display:flex;align-items:center;gap:8px;height:28px;padding:0 12px;width:100%;text-align:left;border-left:2px solid transparent;color:var(--muted);font-size:12px}
+.srow:hover{background:#22262B;color:var(--text)}
+.srow.act{background:#22262B;color:var(--text);border-left-color:var(--amber)}
+.srow .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.srow .ct{font-family:var(--mono);font-size:10px;color:var(--faint);font-variant-numeric:tabular-nums}
+.srow.act .ct{color:var(--muted)}
+.srow .ct.hot{color:var(--amber)}
+.srow svg{flex:none;opacity:.6}
+.srow.act svg{opacity:1}
+.sfoot{border-top:1px solid var(--hair);padding:4px 0 6px;flex:none;background:var(--panel)}
+.newnote{display:flex;align-items:center;gap:7px;height:26px;padding:0 12px;width:100%;text-align:left;
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.03em;color:var(--faint)}
+.newnote:hover{color:var(--amber)}
+
+/* ---------- page / document ---------- */
+.pg{max-width:none;padding:0 0 120px}
+.phead{padding:20px 26px 0;position:relative}
+.ptitle{font-family:var(--disp);font-weight:600;font-size:29px;line-height:1.05;letter-spacing:.02em;text-transform:uppercase;color:var(--text)}
+.ptitle .thin{color:var(--faint);font-weight:500}
+.psub{display:flex;align-items:center;gap:14px;margin-top:7px;font-family:var(--mono);font-size:10.5px;color:var(--faint);letter-spacing:.03em;font-variant-numeric:tabular-nums;flex-wrap:wrap}
+.psub .pill{display:inline-flex;align-items:center;gap:5px}
+.pnav{position:absolute;top:22px;right:26px;display:flex;gap:4px}
+.pnav .pb{display:flex;align-items:center;gap:5px;height:24px;padding:0 8px;border:1px solid var(--hair);border-radius:2px;
+  font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:.04em}
+.pnav .pb:hover{border-color:#3B4249;color:var(--text)}
+
+/* day strip */
+.dstrip{margin:16px 26px 0;border:1px solid var(--hair);border-radius:2px;background:#191C20}
+.dstrip .dsh{display:flex;align-items:center;justify-content:space-between;padding:5px 9px 4px;border-bottom:1px solid var(--hair)}
+.dsbars{display:flex;height:26px;padding:5px 8px;gap:2px}
+.seg{position:relative;height:16px;border-radius:1px;border:1px solid transparent;min-width:3px}
+.seg:hover{outline:1px solid #4A5158;outline-offset:1px}
+.seg.pas{background:#282D33;border-color:#333A41}
+.seg.man{background:#3C444C}
+.seg.gap{background:repeating-linear-gradient(90deg,#1F2226 0 3px,transparent 3px 6px)}
+.seg.una{background:repeating-linear-gradient(-45deg,rgba(255,176,32,.32) 0 4px,rgba(255,176,32,.08) 4px 8px);border-color:#5A4318}
+.seg.now{background:var(--amber)}
+.dsfoot{display:flex;gap:14px;padding:0 9px 6px;font-family:var(--mono);font-size:9.5px;color:#4E545B;letter-spacing:.04em}
+.dsfoot span{display:inline-flex;align-items:center;gap:5px}
+.dsk{width:10px;height:8px;border-radius:1px;display:inline-block}
+
+/* stream */
+.stream{position:relative;margin-top:8px;padding-top:8px}
+.stream::before{content:"";position:absolute;left:var(--spine);top:0;bottom:0;width:1px;background:#333A41}
+.blk{position:relative;display:grid;grid-template-columns:var(--spine) 1fr;align-items:start}
+.blk>.tm{font-family:var(--mono);font-size:10.5px;color:#4E545B;text-align:right;padding:7px 12px 0 0;font-variant-numeric:tabular-nums;white-space:nowrap}
+.blk>.bd{padding:3px 26px 3px 0;min-width:0;position:relative}
+.blk .glyph{position:absolute;left:-7px;top:9px;width:13px;height:13px;display:flex;align-items:center;justify-content:center;
+  background:var(--bg);color:var(--faint);z-index:2}
+.blk.hi>.bd{background:linear-gradient(90deg,rgba(255,176,32,.05),transparent 60%)}
+.row{display:flex;align-items:center;gap:9px;min-height:28px;padding:2px 10px;border-radius:2px;margin-left:11px}
+.row.klik{width:100%;text-align:left}
+.row.klik:hover{background:#1F2327}
+.row .ttl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;color:var(--muted)}
+.row .ttl b{color:var(--text);font-weight:500}
+.row .dur{font-family:var(--mono);font-size:10px;color:#4E545B;font-variant-numeric:tabular-nums;flex:none}
+.row.act .ttl b{color:var(--text)}
+.tw{display:inline-flex;align-items:center;gap:6px;flex:none}
+.chev{width:12px;height:12px;color:#4E545B;flex:none;transition:transform 120ms}
+.exp .chev{transform:rotate(90deg);color:var(--muted)}
+@media (prefers-reduced-motion:reduce){.chev{transition:none}}
+
+/* my own writing — primary */
+.mine{margin:6px 0 6px 11px;padding:8px 12px 9px;border-left:2px solid #3B4249;background:#191C20;border-radius:0 2px 2px 0}
+.mine .mh{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.mine .mt{font-size:14.5px;line-height:1.55;color:var(--text)}
+.mine .mt em{font-style:normal;color:var(--muted)}
+.chip{display:inline-flex;align-items:center;gap:5px;height:19px;padding:0 6px;border:1px solid var(--hair);border-radius:2px;
+  background:var(--raised);font-family:var(--mono);font-size:10.5px;color:var(--link);vertical-align:baseline;white-space:nowrap}
+.chip:hover{border-color:#3B5070;background:#232A33}
+.chip .mg{width:17px;height:12px;font-size:8px}
+
+/* expanded entity panel */
+.epan{margin:2px 0 10px 11px;border:1px solid var(--hair);border-radius:2px;background:var(--panel)}
+.epan .eh{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--hair);flex-wrap:wrap}
+.epan .es{padding:11px 13px;border-bottom:1px solid var(--hair)}
+.epan .es:last-child{border-bottom:none}
+.esl{margin-bottom:7px}
+.desc{font-size:13px;line-height:1.6;color:var(--muted);max-width:74ch}
+.desc code{font-family:var(--mono);font-size:11.5px;background:var(--raised);padding:1px 4px;border-radius:2px;color:var(--text)}
+.kv{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px 18px}
+.kv .k{font-family:var(--disp);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:#4E545B;display:block;margin-bottom:2px}
+.kv .v{font-family:var(--mono);font-size:11.5px;color:var(--text);display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0;overflow-wrap:anywhere}
+
+.lrow{display:flex;align-items:center;gap:9px;width:100%;text-align:left;height:30px;padding:0 6px;border-radius:2px;border-bottom:1px solid #23272B}
+.lrow:last-child{border-bottom:none}
+.lrow:hover{background:#22262B}
+.lrow .ln{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--muted)}
+.lrow .ln b{color:var(--text);font-weight:400}
+.lrow .rel{font-family:var(--disp);font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:#4A5057;flex:none}
+
+.cmt{padding:8px 0;border-bottom:1px solid #23272B}
+.cmt:last-of-type{border-bottom:none}
+.cmt .ch{display:flex;align-items:center;gap:8px;margin-bottom:3px}
+.cmt .cx{font-size:12.5px;color:var(--muted);line-height:1.55;max-width:74ch}
+.av{width:18px;height:18px;border-radius:2px;background:var(--raised);border:1px solid var(--hair);display:inline-flex;
+  align-items:center;justify-content:center;font-family:var(--mono);font-size:9px;color:var(--muted);flex:none}
+.who{font-size:12px;color:var(--text);font-weight:500}
+
+/* buttons */
+.b{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border:1px solid var(--hair);border-radius:2px;
+  background:#1F2327;font-family:var(--mono);font-size:10.5px;letter-spacing:.04em;color:var(--muted);white-space:nowrap}
+.b:hover{border-color:#3B4249;color:var(--text);background:#242A2F}
+.b.pri{border-color:#5A4318;color:var(--amber);background:#1F1B13}
+.b.pri:hover{background:#2A2317;border-color:#7A5C22}
+.b.dan{color:var(--fail);border-color:#3E2A28}
+.b.sm{height:22px;padding:0 8px;font-size:10px}
+.b[disabled]{opacity:.4;cursor:default}
+.brow{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.gh{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border:1px dashed #3A4148;border-radius:2px;
+  font-family:var(--mono);font-size:10px;color:var(--faint)}
+.gh:hover{color:var(--muted);border-color:#4A5158}
+
+/* inputs */
+.inp{height:28px;padding:0 9px;background:#131619;border:1px solid var(--hair);border-radius:2px;
+  font-family:var(--mono);font-size:11.5px;color:var(--text);width:100%}
+.inp:focus{border-color:#3B5070;outline:none;box-shadow:inset 0 0 0 1px rgba(156,195,255,.25)}
+.inp::placeholder{color:#464C53}
+select.inp{cursor:pointer;-webkit-appearance:none;appearance:none;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><path d='M2 4l3 3 3-3' fill='none' stroke='%238B929A' stroke-width='1.2'/></svg>");
+  background-repeat:no-repeat;background-position:right 8px center;padding-right:24px}
+.fld{margin-bottom:10px}
+.fld>.k{font-family:var(--disp);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:#4E545B;display:block;margin-bottom:4px}
+.ck{display:flex;align-items:flex-start;gap:8px;padding:4px 0;cursor:pointer;font-size:12.5px;color:var(--muted)}
+.ck .box{width:14px;height:14px;border:1px solid #3B4249;border-radius:2px;flex:none;margin-top:2px;display:flex;align-items:center;justify-content:center;background:#131619}
+.ck.on .box{border-color:#5A4318;background:#241E12}
+.ck.on .box svg{display:block}
+.ck .box svg{display:none;color:var(--amber)}
+.ck:hover .box{border-color:#4A5158}
+.ck.on{color:var(--text)}
+
+/* dropdown */
+.dd{position:absolute;z-index:60;min-width:190px;background:#1B1E22;border:1px solid #383F46;border-radius:2px;
+  box-shadow:0 10px 30px rgba(0,0,0,.6);padding:3px}
+.dd .di{display:flex;align-items:center;gap:9px;width:100%;text-align:left;height:28px;padding:0 8px;border-radius:2px;
+  font-size:12px;color:var(--muted)}
+.dd .di:hover,.dd .di.sel{background:#262B31;color:var(--text)}
+.dd .di .mono{font-size:11px}
+.dd .dl{padding:6px 8px 4px}
+
+/* editor line */
+.edline{margin:4px 0 0 11px;padding:6px 10px;border-left:2px solid transparent}
+.ed{min-height:22px;font-size:14.5px;line-height:1.55;color:var(--text);outline:none;caret-color:var(--amber);max-width:78ch}
+.ed:empty::before{content:attr(data-ph);color:#454B52;pointer-events:none}
+.ed:focus{border-color:transparent}
+.edline:focus-within{border-left-color:var(--amber);background:#191C20}
+
+/* suggestion ghost block */
+.sug{margin:3px 0 3px 11px;padding:7px 11px;border:1px dashed #3A4148;border-radius:2px;background:rgba(255,176,32,.03);
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.sug .sx{flex:1;min-width:220px;font-size:12px;color:var(--muted)}
+.sug .why{font-family:var(--mono);font-size:10px;color:#6C7278;letter-spacing:.02em}
+.sug.gone{opacity:0;transition:opacity 120ms}
+
+/* stepper */
+.step{display:flex;align-items:center;gap:10px;height:30px;padding:0 4px;border-bottom:1px solid #23272B}
+.step:last-child{border-bottom:none}
+.step .sn{width:16px;height:16px;border:1px solid var(--hair);border-radius:2px;display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:9px;color:#4E545B;flex:none}
+.step.run .sn{border-color:#5A4318;color:var(--amber)}
+.step.done .sn{border-color:#26382E;color:var(--ok)}
+.step .sx{flex:1;font-size:12.5px;color:#5F666D}
+.step.run .sx,.step.done .sx{color:var(--muted)}
+.step.done .sx b{color:var(--text);font-weight:400}
+
+/* log block */
+.logx{font-family:var(--mono);font-size:11px;line-height:1.7;color:var(--muted);background:#121417;border:1px solid var(--hair);
+  border-radius:2px;padding:9px 11px;overflow-x:auto;white-space:pre}
+.logx .lf{color:var(--fail)}
+.logx .lo{color:var(--ok)}
+
+/* tables */
+.tb{width:100%;border-collapse:collapse}
+.tb th{font-family:var(--disp);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:#4E545B;
+  text-align:left;padding:0 10px 6px;font-weight:600;border-bottom:1px solid var(--hair)}
+.tb td{padding:7px 10px;border-bottom:1px solid #23272B;font-size:12.5px;color:var(--muted);vertical-align:middle}
+.tb tr:last-child td{border-bottom:none}
+.tb tr.klik:hover td{background:#1F2327;cursor:pointer}
+.tb td.m{font-family:var(--mono);font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+
+/* right pane */
+.rgrp{padding:12px 0 8px;border-bottom:1px solid var(--hair)}
+.rgrp .lbl{padding:0 13px 7px;display:flex;justify-content:space-between;align-items:center}
+.rrow{display:flex;align-items:center;gap:8px;width:100%;text-align:left;min-height:28px;padding:3px 13px;font-size:12px;color:var(--muted)}
+.rrow:hover{background:#22262B;color:var(--text)}
+.rrow .rn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rmeter{padding:4px 13px 2px}
+.mtr{height:6px;background:#131619;border:1px solid var(--hair);border-radius:1px;display:flex;overflow:hidden}
+.mtr i{display:block;height:100%}
+.mtr .lg{background:#3C444C}
+.mtr .ul{background:var(--amber);opacity:.75}
+.rstat{display:flex;justify-content:space-between;padding:3px 13px;font-family:var(--mono);font-size:10.5px;color:var(--faint);font-variant-numeric:tabular-nums}
+.rstat b{color:var(--text);font-weight:500}
+
+/* overlays */
+.scrim{position:fixed;inset:0;background:rgba(9,10,12,.72);z-index:100;display:flex;justify-content:center;align-items:flex-start;padding-top:76px}
+.scrim.hide{display:none}
+.omodal{width:min(760px,calc(100vw - 80px));background:#1B1E22;border:1px solid #383F46;border-radius:2px;box-shadow:0 24px 70px rgba(0,0,0,.7);
+  max-height:calc(100vh - 160px);display:flex;flex-direction:column;overflow:hidden}
+.osearch{display:flex;align-items:center;gap:10px;padding:0 14px;height:46px;border-bottom:1px solid var(--hair);flex:none}
+.osearch input{flex:1;background:none;border:none;outline:none;font-family:var(--mono);font-size:15px;color:var(--text);letter-spacing:.01em}
+.osearch input::placeholder{color:#454B52}
+.obody{display:grid;grid-template-columns:172px 1fr;min-height:0;flex:1}
+.ofilters{border-right:1px solid var(--hair);padding:10px 0;overflow-y:auto;background:#181B1F}
+.ofilters .lbl{padding:0 12px 5px}
+.fchip{display:flex;align-items:center;gap:7px;width:100%;text-align:left;height:24px;padding:0 12px;font-family:var(--mono);
+  font-size:10.5px;color:var(--faint);letter-spacing:.02em}
+.fchip:hover{color:var(--text);background:#22262B}
+.fchip.on{color:var(--text);background:#22262B}
+.fchip.on .tick{opacity:1}
+.fchip .tick{opacity:0;color:var(--amber)}
+.fchip.cross{color:var(--amber)}
+.fchip.cross.on{background:#241E12}
+.oresults{overflow-y:auto;min-height:0;padding:6px 0}
+.ores{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:6px 14px;border-left:2px solid transparent}
+.ores:hover,.ores.sel{background:#22262B;border-left-color:var(--amber)}
+.ores .ox{flex:1;min-width:0;display:flex;flex-direction:column}
+.ores .o1{font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+.ores .o2{font-family:var(--mono);font-size:10px;color:#5A6169;margin-top:1px;letter-spacing:.02em;display:block}
+.ofoot{flex:none;border-top:1px solid var(--hair);padding:7px 14px;display:flex;align-items:center;gap:14px;
+  font-family:var(--mono);font-size:10px;color:#4E545B;background:#181B1F;flex-wrap:wrap}
+.ohint{display:inline-flex;align-items:center;gap:5px}
+.empty{padding:30px 16px;text-align:center;color:var(--faint);font-size:12.5px}
+
+/* toasts */
+#toasts{position:fixed;right:16px;bottom:38px;z-index:200;display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+.toast{display:flex;align-items:center;gap:9px;background:#1B1E22;border:1px solid #383F46;border-left:2px solid var(--amber);
+  border-radius:2px;padding:8px 12px;box-shadow:0 8px 24px rgba(0,0,0,.55);max-width:400px;
+  font-size:12px;color:var(--muted);animation:tin 120ms ease-out}
+.toast b{color:var(--text);font-weight:500}
+.toast.ok{border-left-color:var(--ok)}
+.toast.bad{border-left-color:var(--fail)}
+@keyframes tin{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+.saved{font-family:var(--mono);font-size:10px;color:var(--ok);letter-spacing:.03em;opacity:0}
+.saved.on{opacity:1;transition:opacity 120ms}
+
+.note{font-size:12px;color:var(--muted);line-height:1.6}
+.callout{border:1px solid #4A3A1A;background:rgba(255,176,32,.05);border-radius:2px;padding:9px 11px;font-size:12px;color:var(--muted);display:flex;gap:9px;align-items:flex-start}
+.callout .ci{color:var(--amber);flex:none;margin-top:1px}
+.sec{padding:16px 26px 0}
+.sec>.lbl{margin-bottom:9px;display:flex;align-items:center;gap:10px}
+.sec>.lbl::after{content:"";flex:1;height:1px;background:var(--hair)}
+.card{border:1px solid var(--hair);border-radius:2px;background:var(--panel)}
+.card+.card{margin-top:8px}
+.cardh{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--hair);flex-wrap:wrap}
+.cardb{padding:11px 12px}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media (max-width:1240px){#panes{grid-template-columns:196px minmax(0,1fr) 216px}.split{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){
+  *{animation-duration:0s!important;animation-iteration-count:1!important;transition-duration:0s!important}
+  .tk-run{animation:none}
+  #ticker .dot{animation:none}
+}
+.blk .glyph svg{width:11px;height:11px}
+.b svg,.di svg,.step svg,.cbtn svg,.newnote svg,.pb svg{width:12px;height:12px;flex:none}
+.srow svg{width:13px;height:13px}
+.grid9{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:6px}
+.tcol{display:flex;flex-direction:column;min-width:0;line-height:1.25}
+.tcard{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--hair);border-radius:2px;background:#191C20;text-align:left}
+.tcard:hover{border-color:#3B4249}
+.tcard.on{border-color:#5A4318;background:#1F1B13}
+.tcard .tn{font-size:12px;color:var(--text);flex:1;min-width:0}
+.ores{cursor:pointer}
+.ores .b{flex:none;opacity:0}
+.ores:hover .b,.ores.sel .b,.ores:focus-within .b{opacity:1}
+#pklist{max-height:250px;overflow-y:auto}
+.dd .di .flap{pointer-events:none}
+#center:focus{outline:none}
+.epan .ed:focus{outline:1px solid #3B5070;outline-offset:2px;border-radius:2px}
+.cmt code,.desc code,.callout code,.ck code,.sug code{font-family:var(--mono);font-size:11.5px;background:var(--raised);padding:1px 4px;border-radius:2px;color:var(--text)}
+#errbox{display:none}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div id="ticker" role="status" aria-label="Live changes">
+    <div class="tk-lbl"><span class="dot"></span>NOW</div>
+    <div class="tk-track"><div class="tk-run" id="tickRun"></div></div>
+  </div>
+
+  <header id="chrome">
+    <div class="brand">knob<i>a</i>s</div>
+    <div class="navbtns">
+      <button class="nb" data-act="back" title="Back" aria-label="Back"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M10 3L5 8l5 5"/></svg></button>
+      <button class="nb" data-act="fwd" title="Forward" aria-label="Forward"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M6 3l5 5-5 5"/></svg></button>
+    </div>
+    <nav id="crumbs" aria-label="Location"></nav>
+    <div class="chrome-r">
+      <button class="cbtn" id="searchBtn" data-act="open-search" title="Search (Cmd/Ctrl+K)">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2L14 14"/></svg>
+        <span class="cl">Search</span><kbd>⌘K</kbd>
+      </button>
+      <button class="cbtn run" id="timerBtn" data-act="timer-menu" title="Timer (Cmd/Ctrl+T)">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" style="color:var(--amber)"><circle cx="8" cy="8.6" r="5.4"/><path d="M8 5.6v3l2 1.4M6 1.6h4"/></svg>
+        <span class="tctx" id="timerCtx">PAY-231</span>
+        <span class="flap f-run" id="timerFlap" style="min-width:44px"><span class="fv">0:34</span></span>
+        <span id="timerSec">:00</span>
+      </button>
+      <button class="cbtn" id="inboxBtn" data-act="nav" data-href="#/inbox" title="Inbox">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M1.6 8.4h3.2l1 1.8h4.4l1-1.8h3.2M1.6 8.4l2-5.4h8.8l2 5.4v4.2a.8.8 0 01-.8.8H2.4a.8.8 0 01-.8-.8z"/></svg>
+        <span class="cl">Inbox</span>
+        <span class="flap f-run" id="inboxFlap" style="min-width:22px"><span class="fv">6</span></span>
+      </button>
+      <button class="cbtn" id="syncBtn" data-act="nav" data-href="#/sources" title="Sources">
+        <span class="cl">Sync</span>
+        <span class="flap f-ok" id="syncOk" style="min-width:34px"><span class="fv">3 ok</span></span>
+        <span class="flap f-fail" id="syncBad" style="min-width:38px"><span class="fv">TC 401</span></span>
+      </button>
+    </div>
+  </header>
+
+  <main id="panes">
+    <aside id="side">
+      <div id="sideScroll"></div>
+      <div class="sfoot" id="sideFoot"></div>
+    </aside>
+    <section id="center" tabindex="-1"></section>
+    <aside id="right"></aside>
+  </main>
+
+  <footer id="status">
+    <div class="st"><b>DB</b> postgres knobas · 212 MB</div>
+    <div class="st">index up to date</div>
+    <div class="st" id="stPend">queue <b>0 pending</b></div>
+    <div class="st" id="stSync"></div>
+    <div class="st rt"><kbd>⌘K</kbd> search <kbd>⌘T</kbd> timer <kbd>/</kbd> commands <kbd>esc</kbd> close</div>
+  </footer>
+</div>
+
+<div class="scrim hide" id="scrim"></div>
+<div id="toasts" aria-live="polite"></div>
+<div id="errbox" aria-hidden="true"></div>
+
+<script>
+(function(){
+'use strict';
+const ERR=document.getElementById('errbox');
+function boom(e){ERR.setAttribute('data-js-error','1');ERR.textContent='JS ERROR: '+((e&&e.message)||e)+' | '+((e&&e.stack)||'');if(window.console)console.error(e);}
+window.addEventListener('error',function(ev){boom(ev.error||ev.message);});
+
+const RM=window.matchMedia('(prefers-reduced-motion: reduce)');
+const $=s=>document.querySelector(s);
+const CENTER=$('#center'),SIDE=$('#sideScroll'),SFOOT=$('#sideFoot'),RIGHT=$('#right'),SCRIM=$('#scrim'),TOASTS=$('#toasts'),TICK=$('#tickRun');
+
+/* ===================== icons ===================== */
+const sv=(p,w)=>'<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="'+(w||1.3)+'" stroke-linecap="round" stroke-linejoin="round">'+p+'</svg>';
+const I={
+ chev:'<svg class="chev" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4.5 2.5L8 6l-3.5 3.5"/></svg>',
+ ticket:sv('<rect x="2.5" y="2.5" width="11" height="11" rx="1"/><path d="M5.4 8l1.8 1.8L11 5.9"/>'),
+ commit:sv('<circle cx="8" cy="8" r="2.6"/><path d="M8 1.6v3.8M8 10.6v3.8"/>'),
+ build:sv('<path d="M8 1.9l6 3.2v5.8L8 14.1 2 10.9V5.1z"/>'),
+ page:sv('<path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/>'),
+ note:sv('<path d="M3 2.6h10v10.8H3z"/><path d="M5.4 6h5.2M5.4 8.6h5.2M5.4 11.2h3"/>'),
+ pr:sv('<circle cx="4.4" cy="4" r="1.7"/><circle cx="4.4" cy="12" r="1.7"/><circle cx="11.6" cy="12" r="1.7"/><path d="M4.4 5.7v4.6M11.6 10.3V6.4a2 2 0 00-2-2H6.6"/>'),
+ clock:sv('<circle cx="8" cy="8" r="5.6"/><path d="M8 4.6V8l2.3 1.6"/>'),
+ bell:sv('<path d="M4 6.8a4 4 0 018 0c0 3 1.1 4 1.1 4H2.9S4 9.8 4 6.8z"/><path d="M6.6 13.2a1.6 1.6 0 002.8 0"/>'),
+ warn:sv('<path d="M8 2.4l6 10.4H2z"/><path d="M8 6.6v3M8 11.2v.1"/>'),
+ check:'<svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2.5 6.3l2.6 2.6L9.7 3.4"/></svg>',
+ x:sv('<path d="M4 4l8 8M12 4l-8 8"/>'),
+ plus:sv('<path d="M8 3.4v9.2M3.4 8h9.2"/>'),
+ link:sv('<path d="M6.6 9.4a2.6 2.6 0 010-3.7l2-2a2.6 2.6 0 013.7 3.7l-.9.9"/><path d="M9.4 6.6a2.6 2.6 0 010 3.7l-2 2a2.6 2.6 0 01-3.7-3.7l.9-.9"/>'),
+ gear:sv('<circle cx="8" cy="8" r="2.3"/><path d="M8 1.6v1.8M8 12.6v1.8M14.4 8h-1.8M3.4 8H1.6M12.5 3.5l-1.3 1.3M4.8 11.2l-1.3 1.3M12.5 12.5l-1.3-1.3M4.8 4.8L3.5 3.5"/>'),
+ sheet:sv('<rect x="2.4" y="2.4" width="11.2" height="11.2" rx="1"/><path d="M2.4 6h11.2M6 6v7.6"/>'),
+ arrow:sv('<path d="M3 8h9M8.6 4.6L12 8l-3.4 3.4"/>'),
+ pause:sv('<path d="M6 4v8M10 4v8"/>'),
+ play:sv('<path d="M5.4 3.6l7 4.4-7 4.4z"/>'),
+ dot:'<span style="width:5px;height:5px;background:currentColor;border-radius:1px;display:inline-block"></span>'
+};
+
+/* ===================== dataset ===================== */
+const NOW0=14*60+32;                       /* 14:32 */
+const T0=13*60+58;                         /* timer started */
+const st=s=>({'In Progress':'f-run','Done':'f-ok','To Do':'f-idle','In Review':'','failed':'f-fail','running':'f-run','success':'f-ok','open':'','merged':'f-ok','queued':'f-run'})[s]||'';
+
+const E={
+ 'PAY-231':{k:'ticket',mg:'JI',t:'Retry failed SEPA payouts',h:'#/ticket/PAY-231',s:'In Progress',src:'Tidewater Jira',sy:'4 min ago',fb:1,who:'mara'},
+ 'PAY-228':{k:'ticket',mg:'JI',t:'Ledger drift on partial refunds',h:'#/ticket/PAY-228',s:'In Review',src:'Tidewater Jira',sy:'4 min ago',who:'mara'},
+ 'PAY-240':{k:'ticket',mg:'JI',t:'Payout dashboard latency',h:'#/ticket/PAY-240',s:'To Do',src:'Tidewater Jira',sy:'4 min ago',who:'priya'},
+ 'PAY-219':{k:'ticket',mg:'JI',t:'Rotate PSP credentials',h:'#/ticket/PAY-219',s:'Done',src:'Tidewater Jira',sy:'4 min ago',who:'mara'},
+ 'PAY-236':{k:'ticket',mg:'JI',t:'Payout CSV export for finance',h:'#/ticket/PAY-236',s:'To Do',src:'Tidewater Jira',sy:'4 min ago',who:'jonas'},
+ 'OPS-77':{k:'ticket',mg:'JI',t:'On-call runbook outdated',h:'#/ticket/OPS-77',s:'To Do',src:'Tidewater Jira',sy:'4 min ago',who:'tomasz'},
+ 'PAY-200':{k:'ticket',mg:'JI',t:'Payout reliability (epic)',h:'#/ticket/PAY-200',s:'In Progress',src:'Tidewater Jira',sy:'4 min ago',who:'priya'},
+ 'PR #142':{k:'pr',mg:'GT',t:'SEPA retry with exponential backoff',h:'#/pr/142',s:'open',src:'git.tidewater.internal',sy:'2 min ago',fb:1,who:'mara'},
+ 'PR #144':{k:'pr',mg:'GT',t:'Add payout CSV export',h:'#/pr/144',s:'open',src:'git.tidewater.internal',sy:'2 min ago',who:'jonas'},
+ 'PR #139':{k:'pr',mg:'GT',t:'Fix ledger drift on partial refunds',h:'#/pr/139',s:'merged',src:'git.tidewater.internal',sy:'2 min ago',who:'mara'},
+ '#1188':{k:'build',mg:'TC',t:'Payout_Build #1188',h:'#/build/1188',s:'running',src:'ci.tidewater.internal',sy:'38 min ago',who:'mara'},
+ '#1187':{k:'build',mg:'TC',t:'Payout_IntegrationTests #1187',h:'#/build/1187',s:'failed',src:'ci.tidewater.internal',sy:'38 min ago',fb:1,who:'mara'},
+ '#412':{k:'build',mg:'TC',t:'Ledger_Deploy_Staging #412',h:'#/build/412',s:'success',src:'ci.tidewater.internal',sy:'38 min ago',who:'tomasz'},
+ 'SEPA payout retry design':{k:'page',mg:'CF',t:'SEPA payout retry design',h:'#/page/sepa',s:'',src:'Tidewater Wiki · ENG',sy:'4 min ago',who:'mara'},
+ 'Ledger reconciliation runbook':{k:'page',mg:'CF',t:'Ledger reconciliation runbook',h:'#/page/ledger',s:'',src:'Tidewater Wiki · ENG',sy:'4 min ago',who:'tomasz'},
+ 'On-call handbook':{k:'page',mg:'CF',t:'On-call handbook',h:'#/page/oncall',s:'',src:'Tidewater Wiki · ENG',sy:'4 min ago',who:'tomasz'},
+ 'Payments architecture overview':{k:'page',mg:'CF',t:'Payments architecture overview',h:'#/page/arch',s:'',src:'Tidewater Wiki · ENG',sy:'4 min ago',who:'priya'},
+ 'Standup protocols':{k:'page',mg:'CF',t:'Standup protocols',h:'#/page/standups',s:'',src:'Tidewater Wiki · ENG',sy:'4 min ago',who:'mara'},
+ 'SEPA retry investigation':{k:'note',mg:'NT',t:'SEPA retry investigation',h:'#/note/sepa',s:'',src:'Local note',sy:'local',fb:1,who:'mara'},
+ 'Standup 2026-08-21':{k:'note',mg:'NT',t:'Standup 2026-08-21',h:'#/note/standup21',s:'',src:'Local note',sy:'local',who:'mara'},
+ 'Credentials to rotate':{k:'note',mg:'NT',t:'Credentials to rotate',h:'#/note/creds',s:'',src:'Local note',sy:'local',who:'mara'},
+ 'a41f2c':{k:'commit',mg:'GT',t:'PAY-231 backoff jitter',h:'#/pr/142',s:'',src:'payout-service',sy:'2 min ago',fb:1,who:'mara'},
+ 'c90d11':{k:'commit',mg:'GT',t:'PAY-231: jitter in backoff, cap at 5 attempts',h:'#/pr/142',s:'',src:'payout-service',sy:'2 min ago',fb:1,who:'mara'},
+ '7be0e4':{k:'commit',mg:'GT',t:'PAY-231: retry SEPA payouts on transient PSP errors',h:'#/pr/142',s:'',src:'payout-service',sy:'2 min ago',who:'mara'},
+ 'feature/PAY-231-sepa-retry':{k:'branch',mg:'GT',t:'3 commits ahead of main · checked out',h:'#/pr/142',s:'',src:'payout-service',sy:'2 min ago',who:'mara'},
+ 'payout-service':{k:'repo',mg:'GT',t:'Rust · ~/code/payout-service · 312 commits',h:'#/repo/payout-service',s:'',src:'git.tidewater.internal',sy:'2 min ago',who:'mara'}
+};
+const PEOPLE={mara:'Mara Lindqvist',jonas:'Jonas Becker',priya:'Priya Nair',tomasz:'Tomasz Wójcik',lena:'Lena Hoffmann'};
+const INIT={mara:'ML',jonas:'JB',priya:'PN',tomasz:'TW',lena:'LH'};
+
+const TICKETS={
+ 'PAY-231':{type:'Story',pri:'High',assignee:'mara',epic:'PAY-200',updated:'today 11:48',est:'2d',spent:'6h 30m',
+  desc:'When the SEPA batch at the PSP returns a transient error (HTTP 503 or PSP code <code>TEMP_UNAVAILABLE</code>), retry the payout with exponential backoff (base 30 s, factor 2, max 5 attempts, jitter). Permanent failures go to the manual review queue.',
+  links:['feature/PAY-231-sepa-retry','PR #142','#1187','#1188','SEPA payout retry design','SEPA retry investigation'],
+  rel:['branch','pull request','build','build','design page','note']},
+ 'PAY-228':{type:'Bug',pri:'High',assignee:'mara',epic:'PAY-200',updated:'yesterday 16:05',est:'—',spent:'1h 30m',
+  desc:'Partial refunds leave the ledger out of balance: the refund line is written before the payout reversal, so a crash between the two leaves drift. Blocked by OPS-77 — staging verification needs the updated runbook.',
+  links:['PR #139','Ledger reconciliation runbook','Standup 2026-08-21','OPS-77'],rel:['pull request','runbook','note','blocked by']},
+ 'PAY-240':{type:'Task',pri:'Medium',assignee:'mara',epic:'PAY-200',updated:'today 08:12',est:'—',spent:'0m',
+  desc:'Finance reports the payout dashboard takes 8–12 s to load for August. Target &lt; 2 s.',
+  links:['Payments architecture overview'],rel:['suggested page']},
+ 'PAY-219':{type:'Task',pri:'Medium',assignee:'mara',epic:'PAY-200',updated:'2026-08-18',est:'—',spent:'2h 00m',
+  desc:'Rotate the PSP credentials before the end of August. Done on 2026-08-18.',links:['Credentials to rotate'],rel:['note']},
+ 'PAY-236':{type:'Story',pri:'Low',assignee:'jonas',epic:'PAY-200',updated:'2026-08-20',est:'—',spent:'0m',
+  desc:'Finance needs a CSV export of payouts per month, filterable by PSP and status.',links:['PR #144'],rel:['pull request']},
+ 'OPS-77':{type:'Task',pri:'Medium',assignee:'tomasz',epic:'',updated:'2026-08-19',est:'—',spent:'0m',
+  desc:'The on-call runbook still documents the pre-2025 payout topology. Update before the next rotation.',links:['On-call handbook','PAY-228'],rel:['handbook','blocks']},
+ 'PAY-200':{type:'Epic',pri:'High',assignee:'priya',epic:'',updated:'today 11:48',est:'—',spent:'—',
+  desc:'Payout reliability: retries, drift, dashboards and credential hygiene.',
+  links:['PAY-231','PAY-228','PAY-240','PAY-219','PAY-236'],rel:['story','bug','task','task','story']}
+};
+
+const S={
+ route:'',clock:NOW0*60,                    /* seconds since midnight */
+ timer:{run:true,ctx:'PAY-231',kind:'ticket',start:T0},
+ status:{'PAY-231':'In Progress','PAY-228':'In Review','PAY-240':'To Do','PAY-219':'Done','PAY-236':'To Do','OPS-77':'To Do','PAY-200':'In Progress'},
+ comments:{'PAY-231':[{w:'priya',when:'yesterday 14:20',x:'Please make sure the backoff policy matches the design page — finance wants max 5 attempts.'},
+                      {w:'mara',when:'today 10:15',x:'Backoff + jitter implemented in a41f2c, integration test still red (#1187), investigating.'}],
+           'PAY-228':[{w:'tomasz',when:'yesterday 16:30',x:'Staging verification needs the new runbook — see OPS-77.'}],
+           'PAY-240':[{w:'priya',when:'today 08:12',x:'Lena has the finance complaints, acceptance criteria to follow.'}],
+           'PR #142':[{w:'jonas',when:'today 09:30',x:'Should the jitter be bounded? ±20 % feels wide.'},
+                      {w:'mara',when:'today 10:20',x:'Bounded to ±10 % in c90d11.'}],
+           'PAY-236':[],'PAY-219':[],'OPS-77':[],'PAY-200':[],'PR #144':[],'PR #139':[]},
+ worklogs:{'PAY-231':[{d:'yesterday',dur:'3h 00m',x:'Retry loop implementation'}],
+           'PAY-228':[{d:'yesterday',dur:'1h 30m',x:'Review PR #139 fixes, re-test partial refund drift'}]},
+ builds:{'#1187':{s:'failed',cfg:'Payout_IntegrationTests',when:'today 10:10',took:'4 m 12 s'},
+         '#1188':{s:'running',cfg:'Payout_Build',when:'started today 11:45',took:'step 3/5 · cargo test'},
+         '#412':{s:'success',cfg:'Ledger_Deploy_Staging',when:'yesterday 16:20',took:'2 m 04 s'}},
+ inbox:[
+  {id:'i1',t:'13:50',mg:'GT',ent:'PR #144',x:'<b>Jonas Becker</b> requested your review on <b>PR #144</b> Add payout CSV export',acts:[['review','Review'],['snooze','Snooze'],['done','Done']]},
+  {id:'i2',t:'12:05',mg:'CF',ent:'SEPA payout retry design',x:'<b>Priya Nair</b> mentioned you on <b>SEPA payout retry design</b>: “@Mara can you add the manual-review queue SLA here?”',acts:[['reply','Reply'],['open','Open page'],['done','Done']]},
+  {id:'i3',t:'10:14',mg:'TC',ent:'#1187',x:'Build <b>#1187</b> Payout_IntegrationTests <span class="red">failed</span> on feature/PAY-231-sepa-retry',acts:[['log','Open log'],['rerun','Re-run'],['comment','Comment on PAY-231']]},
+  {id:'i4',t:'09:30',mg:'GT',ent:'PR #142',x:'<b>Jonas Becker</b> commented on your <b>PR #142</b>: “Should the jitter be bounded? ±20 % feels wide.”',acts:[['reply','Reply'],['open','Open PR'],['done','Done']]},
+  {id:'i5',t:'08:12',mg:'JI',ent:'PAY-240',x:'<b>Priya Nair</b> assigned <b>PAY-240</b> Payout dashboard latency to you',acts:[['open','Open'],['start','Start work'],['done','Done']]},
+  {id:'i6',t:'yesterday 16:30',mg:'JI',ent:'PAY-228',x:'<b>PAY-228</b> is blocked by <b>OPS-77</b> On-call runbook outdated',acts:[['ops','Open OPS-77'],['ping','Ping Tomasz'],['done','Done']]}],
+ snoozed:[{id:'s1',x:'Jira PAT expires in 12 days',back:'returns 2026-08-29'}],
+ sugg:[
+  {id:'g1',a:'a41f2c',b:'PAY-231',why:'key in commit message',at:'10:02'},
+  {id:'g2',a:'#1187',b:'PAY-231',why:'key in build parameter <code>branch</code>',at:'10:10'},
+  {id:'g3',a:'Payments architecture overview',b:'payout-service',why:'mentions <code>ledger-api</code> 4×',at:''},
+  {id:'g4',a:'PAY-240',b:'Payments architecture overview',why:'text similarity 0.71 (“dashboard latency”)',at:''}],
+ sources:[
+  {id:'jira',mg:'JI',name:'Tidewater Jira',type:'Jira Cloud',url:'https://tidewater.atlassian.net',auth:'PAT',authNote:'expires 2026-09-03 · in 12 days',warn:1,state:'ok',sync:'4 min ago',count:'1,284 issues',adapter:'v1.2',caps:'search · write · webhooks'},
+  {id:'confluence',mg:'CF',name:'Tidewater Wiki',type:'Confluence Cloud',url:'https://tidewater.atlassian.net/wiki',auth:'PAT',authNote:'same token as Jira',state:'ok',sync:'4 min ago',count:'3,912 pages',adapter:'v1.2',caps:'search · write'},
+  {id:'gitea',mg:'GT',name:'git.tidewater.internal',type:'Gitea',url:'https://git.tidewater.internal',auth:'Access token',authNote:'no expiry set',state:'ok',sync:'2 min ago',count:'47 repos',adapter:'v1.4',caps:'search · write · webhooks'},
+  {id:'teamcity',mg:'TC',name:'ci.tidewater.internal',type:'TeamCity',url:'https://ci.tidewater.internal',auth:'User + password',authNote:'mara.lindqvist',state:'fail',sync:'failed 38 min ago',count:'—',adapter:'v0.9',caps:'search · trigger builds'}],
+ notes:{
+  sepa:{t:'SEPA retry investigation',edited:'today 11:20',
+   body:'Test expects 5 attempts, code counts the initial try as attempt 0 → off-by-one in [[PAY-231]]. Fix: start the counter at 1 — build [[#1187]] should go green. Also: ask Priya about the manual-review SLA in [[SEPA payout retry design]].',
+   links:['PAY-231','#1187','SEPA payout retry design']},
+  standup21:{t:'Standup 2026-08-21',edited:'yesterday 09:05',
+   body:'Yesterday: drift fix on [[PAY-228]], merged [[PR #139]]. Today: re-test partial refunds on staging, open PR. Blocker: none.',links:['PAY-228','PR #139']},
+  creds:{t:'Credentials to rotate',edited:'2026-08-18',
+   body:'TeamCity password expires end of August — rotate it with [[PAY-219]]. Jira PAT expires 2026-09-03.',links:['PAY-219']}},
+ pages:{
+  sepa:{t:'SEPA payout retry design',space:'ENG',edited:'today 10:40',by:'mara',sec:'Backoff policy'},
+  ledger:{t:'Ledger reconciliation runbook',space:'ENG',edited:'2026-08-19',by:'tomasz',sec:''},
+  oncall:{t:'On-call handbook',space:'ENG',edited:'2026-07-02',by:'tomasz',sec:''},
+  arch:{t:'Payments architecture overview',space:'ENG',edited:'2026-08-11',by:'priya',sec:''},
+  standups:{t:'Standup protocols',space:'ENG',edited:'yesterday',by:'mara',sec:''}},
+ lists:[
+  {id:'failing',n:'My tickets with a failing build',c:'1',hot:1},
+  {id:'waiting',n:'PRs waiting on me',c:'1',hot:1},
+  {id:'idle',n:'PRs idle > 5 days',c:'2'},
+  {id:'pages',n:'Pages I edited this week',c:'3'},
+  {id:'blocked',n:'Blocked tickets',c:'1'},
+  {id:'unlogged',n:'Unlogged time this week',c:'4h 45m'}],
+ appended:[],expanded:{'PAY-231':true},pending:0,tcFixed:false,inboxOpen:false,standupOpen:true,
+ tracked:328,logged:0,unlogged:285,weekLogged:'29h 25m',dayLogged:{}, wkLogAll:false,
+ una:{state:'open'},adhoc:{state:'open'},f:{src:{},type:{},who:{},date:'all',fb:false},q:'',sel:0,
+ ticks:[],published:false,protoSaved:false,newEnts:0,steps:{},drafts:{}
+};
+
+/* ===================== helpers ===================== */
+const hm=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
+const dur=m=>{const h=Math.floor(m/60),x=m%60;return h?(h+'h '+String(x).padStart(2,'0')+'m'):(x+'m');};
+const el0=m=>Math.floor(m/60)+':'+String(m%60).padStart(2,'0');
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function flapHTML(v,cls,w){return '<span class="flap '+(cls||'')+'"'+(w?' style="min-width:'+w+'px"':'')+'><span class="fv">'+v+'</span></span>';}
+function mgHTML(m,on){return '<span class="mg'+(on?' on':'')+'">'+m+'</span>';}
+function setFlapCls(node,cls){node.className='flap '+(cls||'');}
+function flapSet(node,text,cls){
+  if(!node)return;
+  const cur=node.querySelector('.fv'); if(!cur)return;
+  const old=cur.innerHTML;
+  if(old===text){if(cls!==undefined)setFlapCls(node,cls);return;}
+  const w=node.style.minWidth;
+  if(RM.matches){cur.innerHTML=text;if(cls!==undefined)setFlapCls(node,cls);node.style.minWidth=w;return;}
+  const h=node.offsetHeight||20;
+  const top=document.createElement('span');top.className='fl-top';
+  top.innerHTML='<span class="fl-in" style="--fh:'+h+'px">'+old+'</span>';
+  const bot=document.createElement('span');bot.className='fl-bot';
+  bot.innerHTML='<span class="fl-in" style="--fh:'+h+'px;margin-top:'+(-h/2)+'px">'+text+'</span>';
+  node.appendChild(top);node.appendChild(bot);
+  setTimeout(function(){cur.innerHTML=text;if(cls!==undefined){setFlapCls(node,cls);node.style.minWidth=w;}},170);
+  setTimeout(function(){top.remove();bot.remove();},380);
+}
+function toast(msg,kind){
+  const d=document.createElement('div');d.className='toast'+(kind?' '+kind:'');
+  d.innerHTML=msg;TOASTS.appendChild(d);
+  setTimeout(function(){d.style.transition='opacity 200ms';d.style.opacity='0';},2900);
+  setTimeout(function(){d.remove();},3200);
+}
+function pushTick(html){S.ticks.unshift(html);if(S.ticks.length>7)S.ticks.pop();renderTick();}
+function renderTick(){
+  const one=S.ticks.map(t=>'<span class="tk-i">'+t+'<span class="sep">◆</span></span>').join('');
+  TICK.innerHTML=one+one;
+  if(RM.matches)TICK.style.animation='none';
+}
+function go(h){if(location.hash===h){route();}else{location.hash=h;}}
+function dupName(id){const e=E[id];return !!e&&(e.t===id||e.t.indexOf(id)>=0);}
+function nameOf(id){const e=E[id];if(!e)return '<b>'+id+'</b>';
+  return dupName(id)?('<b>'+e.t+'</b>'):('<b>'+id+'</b> '+e.t);}
+function entRow(id,extra){
+  const e=E[id];if(!e)return '';
+  return mgHTML(e.mg,1)+(dupName(id)?'':'<span class="key">'+id+'</span>')+'<span class="ttl"><b>'+e.t+'</b></span>'+(extra||'');
+}
+function chip(id){
+  const e=E[id];if(!e)return '<span class="chip">'+id+'</span>';
+  return '<button class="chip" data-act="nav" data-href="'+e.h+'">'+mgHTML(e.mg)+id+'</button>';
+}
+function renderChips(txt){return txt.replace(/\[\[([^\]]+)\]\]/g,(m,p)=>chip(p));}
+function statusFlap(id,w){const s=S.status[id];return flapHTML(s,st(s),w||74);}
+
+/* closable overlay stack */
+let DD=null;
+function closeDD(){if(DD){DD.remove();DD=null;}}
+function openDD(anchor,html,opts){
+  closeDD();
+  const d=document.createElement('div');d.className='dd';d.innerHTML=html;
+  document.body.appendChild(d);
+  const r=anchor.getBoundingClientRect();
+  let top=r.bottom+4,left=(opts&&opts.right)?(r.right-d.offsetWidth):r.left;
+  if(top+d.offsetHeight>window.innerHeight-30)top=Math.max(30,r.top-d.offsetHeight-4);
+  if(left<6)left=6; if(left+d.offsetWidth>window.innerWidth-6)left=window.innerWidth-d.offsetWidth-6;
+  d.style.top=top+'px';d.style.left=left+'px';DD=d;
+  const fb=d.querySelector('input,button');if(fb)fb.focus();
+  return d;
+}
+document.addEventListener('mousedown',function(e){
+  if(DD && !DD.contains(e.target) && !e.target.closest('[data-act="timer-menu"]'))closeDD();
+});
+
+/* ===================== sidebar ===================== */
+function renderSide(){
+  const day=(S.route.match(/^#\/day\/(\S+)/)||[])[1];
+  const days=[18,19,20,21,22,23,24];
+  const cal=days.map(function(n){
+    const d='2026-08-'+n, has=n<=22, sel=(day===d);
+    return '<button class="cd'+(has?' has':'')+(sel?' sel':'')+'" '+(has?'data-act="nav" data-href="#/day/'+d+'"':'disabled')+'>'+n+'</button>';
+  }).join('');
+  const notes=Object.keys(S.notes).map(function(k){
+    const n=S.notes[k];
+    return '<button class="srow'+(S.route==='#/note/'+k?' act':'')+'" data-act="nav" data-href="#/note/'+k+'">'+I.note+'<span class="nm">'+n.t+'</span></button>';
+  }).join('');
+  const lists=S.lists.map(function(l){
+    return '<button class="srow'+(S.route==='#/list/'+l.id?' act':'')+'" data-act="nav" data-href="#/list/'+l.id+'"><span class="nm">'+l.n+'</span><span class="ct'+(l.hot?' hot':'')+'">'+l.c+'</span></button>';
+  }).join('');
+  SIDE.innerHTML=
+   '<div class="sgrp"><div class="lbl">August 2026</div>'+
+   '<div class="cal">'+['mon','tue','wed','thu','fri','sat','sun'].map(d=>'<div class="cdh">'+d+'</div>').join('')+cal+'</div></div>'+
+   '<div class="hr"></div>'+
+   '<div class="sgrp"><div class="lbl">Notes</div>'+notes+
+   '<button class="newnote" data-act="new-note">'+I.plus+'New note</button></div>'+
+   '<div class="hr"></div>'+
+   '<div class="sgrp"><div class="lbl">Smart lists</div>'+lists+'</div>';
+  SFOOT.innerHTML=
+   '<button class="srow'+(S.route==='#/inbox'?' act':'')+'" data-act="nav" data-href="#/inbox">'+I.bell+'<span class="nm">Inbox</span><span class="ct'+(S.inbox.length?' hot':'')+'">'+(S.inbox.length||'0')+'</span></button>'+
+   '<button class="srow'+(S.route==='#/timesheet'?' act':'')+'" data-act="nav" data-href="#/timesheet">'+I.sheet+'<span class="nm">Timesheet</span><span class="ct">'+(S.wkLogAll?'0m':'4h 45m')+'</span></button>'+
+   '<button class="srow'+(S.route==='#/sources'?' act':'')+'" data-act="nav" data-href="#/sources">'+I.gear+'<span class="nm">Sources</span><span class="ct'+(S.tcFixed?'':' hot')+'">'+(S.tcFixed?'4 ok':'1 fail')+'</span></button>';
+}
+
+/* ===================== right pane ===================== */
+function rrow(id){
+  const e=E[id];if(!e)return '';
+  const s=(e.k==='ticket')?S.status[id]:(e.k==='build'?S.builds[id].s:e.s);
+  return '<button class="rrow" data-act="nav" data-href="'+e.h+'">'+mgHTML(e.mg)+'<span class="rn">'+id+(e.k==='page'||e.k==='note'?'':'')+'</span>'+(s?flapHTML(s,st(s)):'')+'</button>';
+}
+function renderRight(){
+  let links=[],backs=[],ltitle='Links on this page';
+  const m=S.route.match(/^#\/(\w+)\/?(.*)$/)||[];
+  const kind=m[1],arg=decodeURIComponent(m[2]||'');
+  if(kind==='day'||!kind){links=['PAY-231','PAY-228','PAY-240','PR #142','PR #144','#1187','#1188','SEPA payout retry design','SEPA retry investigation'];}
+  else if(kind==='ticket'&&TICKETS[arg]){links=TICKETS[arg].links;backs=backlinks(arg);}
+  else if(kind==='pr'){links=arg==='142'?['PAY-231','feature/PAY-231-sepa-retry','#1188','#1187']:(arg==='144'?['PAY-236']:['PAY-228']);backs=backlinks('PR #'+arg);}
+  else if(kind==='build'){links=['PAY-231','feature/PAY-231-sepa-retry','PR #142'];backs=backlinks('#'+arg);}
+  else if(kind==='page'){const p={sepa:['PAY-231','SEPA retry investigation'],ledger:['PAY-228'],oncall:['OPS-77'],arch:['PAY-240'],standups:['Standup 2026-08-21']}[arg]||[];links=p;backs=backlinks(S.pages[arg]?S.pages[arg].t:'');}
+  else if(kind==='note'){links=(S.notes[arg]||{links:[]}).links;backs=backlinks(S.notes[arg]?S.notes[arg].t:'');}
+  else if(kind==='inbox'){links=['PR #144','SEPA payout retry design','#1187','PR #142','PAY-240','OPS-77'];}
+  const trk=dur(S.tracked+Math.max(0,Math.floor(S.clock/60)-NOW0));
+  RIGHT.innerHTML=
+   (links.length?'<div class="rgrp"><div class="lbl">'+ltitle+'<span class="mono">'+links.length+'</span></div>'+links.map(rrow).join('')+'</div>':'')+
+   (backs.length?'<div class="rgrp"><div class="lbl">Backlinks<span class="mono">'+backs.length+'</span></div>'+backs.map(rrow).join('')+'</div>':'')+
+   '<div class="rgrp"><div class="lbl">Today · Fri 22 Aug</div>'+
+     '<div class="rstat"><span>tracked</span><b>'+trk+'</b></div>'+
+     '<div class="rstat"><span>logged</span><b'+(S.logged?'':' class="amb"')+'>'+(S.logged?dur(S.logged):'0m')+'</b></div>'+
+     '<div class="rmeter"><div class="mtr"><i class="lg" style="width:'+Math.round(100*S.logged/Math.max(S.tracked,1))+'%"></i><i class="ul" style="width:'+Math.round(100*(S.tracked-S.logged)/Math.max(S.tracked,1))+'%"></i></div></div>'+
+     '<div class="rstat"><span>unlogged this week</span><b class="'+(S.unlogged?'amb':'grn')+'">'+(S.unlogged?dur(S.unlogged):'0m')+'</b></div>'+
+     '<div style="padding:9px 13px 4px" class="brow">'+
+       (S.logged?'':'<button class="b pri" data-act="worklog-draft">'+I.clock+'Log 2h 44m to PAY-231</button>')+
+       '<button class="b" data-act="nav" data-href="#/timesheet">Timesheet</button></div>'+
+   '</div>'+
+   '<div class="rgrp" style="border-bottom:none"><div class="lbl">Timer</div>'+
+     '<div class="rstat"><span>'+(S.timer.run?'running on':'stopped')+'</span><b class="'+(S.timer.run?'amb':'')+'">'+(S.timer.run?S.timer.ctx:'—')+'</b></div>'+
+     '<div style="padding:7px 13px 4px" class="brow">'+
+       (S.timer.run?'<button class="b" data-act="timer-stop">'+I.pause+'Stop and log</button>':'<button class="b pri" data-act="timer-start" data-ctx="PAY-231">'+I.play+'Start on PAY-231</button>')+
+     '</div></div>';
+}
+function backlinks(id){
+  if(!id)return [];
+  const out=[];
+  Object.keys(S.notes).forEach(function(k){if(S.notes[k].links.indexOf(id)>=0)out.push(S.notes[k].t);});
+  Object.keys(TICKETS).forEach(function(k){if(TICKETS[k].links.indexOf(id)>=0)out.push(k);});
+  if(id==='PAY-231')out.push('SEPA payout retry design','PR #142');
+  if(id==='OPS-77')out.push('PAY-228');
+  if(id==='#1187')out.push('PR #142');
+  return out.filter(function(v,i,a){return a.indexOf(v)===i && E[v] && v!==id;});
+}
+
+/* ===================== blocks ===================== */
+const sl=s=>String(s).replace(/[^A-Za-z0-9]+/g,'-');
+function blk(time,glyph,body,o){
+  o=o||{};
+  return '<div class="blk'+(o.hi?' hi':'')+'"'+(o.id?' id="'+o.id+'"':'')+'><div class="tm">'+time+'</div>'+
+    '<div class="bd"><span class="glyph">'+(glyph||'')+'</span>'+body+'</div></div>';
+}
+function rowLink(href,inner,cls){return '<button class="row klik '+(cls||'')+'" data-act="nav" data-href="'+href+'">'+inner+'</button>';}
+function entBlock(id,o){
+  o=o||{};
+  const e=E[id],open=!!S.expanded[id];
+  const s=(e.k==='ticket')?S.status[id]:(e.k==='build'?S.builds[id].s:e.s);
+  const head='<button class="row klik'+(open?' exp':'')+'" data-act="toggle" data-id="'+id+'">'+I.chev+
+    mgHTML(e.mg,1)+(dupName(id)?'':'<span class="key">'+id+'</span>')+'<span class="ttl"><b>'+e.t+'</b></span>'+
+    (o.dur?'<span class="dur">'+o.dur+'</span>':'')+(s?flapHTML(s,st(s)):'')+'</button>';
+  return head+(open?panelFor(id):'');
+}
+function panelFor(id){
+  const k=E[id].k;
+  if(k==='ticket')return ticketPanel(id);
+  if(k==='pr')return prPanel(id.replace('PR #',''));
+  if(k==='build')return buildPanel(id.replace('#',''));
+  if(k==='page')return pagePanel(Object.keys(S.pages).filter(x=>S.pages[x].t===E[id].t)[0]);
+  if(k==='note')return notePanel(Object.keys(S.notes).filter(x=>S.notes[x].t===E[id].t)[0]);
+  return '';
+}
+function commentsSec(id){
+  const cs=S.comments[id]||[];
+  return '<div class="es"><div class="lbl esl">Comments <span class="mono">'+cs.length+'</span></div>'+
+    cs.map(c=>'<div class="cmt"><div class="ch"><span class="av">'+INIT[c.w]+'</span><span class="who">'+PEOPLE[c.w]+'</span><span class="tny">'+c.when+'</span></div><div class="cx">'+c.x+'</div></div>').join('')+
+    '<div class="brow" style="margin-top:8px"><input class="inp" id="ci-'+sl(id)+'" style="flex:1;min-width:200px" placeholder="Write a comment — it posts to '+(E[id].k==='pr'?'Gitea':'Jira')+'"><button class="b" data-act="add-comment" data-id="'+id+'">Comment</button></div></div>';
+}
+function linksSec(id,links,rels){
+  return '<div class="es"><div class="lbl esl">Linked items <span class="mono">'+links.length+'</span></div>'+
+    links.map(function(l,i){
+      const e=E[l];if(!e)return '';
+      const s=(e.k==='ticket')?S.status[l]:(e.k==='build'?S.builds[l].s:e.s);
+      return '<button class="lrow" data-act="nav" data-href="'+e.h+'">'+mgHTML(e.mg)+'<span class="rel">'+((rels&&rels[i])||e.k)+'</span><span class="ln">'+nameOf(l)+'</span>'+(s?flapHTML(s,st(s)):'')+'</button>';
+    }).join('')+
+    '<div class="brow" style="margin-top:8px"><button class="b" data-act="link-picker" data-id="'+id+'">'+I.link+'Link to…</button></div></div>';
+}
+function suggFor(id){
+  const rel=S.sugg.filter(g=>g.a===id||g.b===id);
+  if(!rel.length)return '';
+  return '<div class="es"><div class="lbl esl amb">Suggested links <span class="mono">'+rel.length+'</span></div>'+rel.map(sugBlock).join('')+'</div>';
+}
+function sugBlock(g){
+  return '<div class="sug" id="sug-'+g.id+'" style="margin-left:0">'+
+    '<span class="sx">'+chip(g.a)+' <span class="fnt">→</span> '+chip(g.b)+'<br><span class="why">why: '+g.why+'</span></span>'+
+    '<button class="b sm pri" data-act="sug-ok" data-id="'+g.id+'">'+I.check+'Confirm link</button>'+
+    '<button class="b sm" data-act="sug-no" data-id="'+g.id+'">Dismiss</button></div>';
+}
+function ticketPanel(id){
+  const e=E[id],d=TICKETS[id],s=S.status[id];
+  const wl=S.worklogs[id]||[];
+  return '<div class="epan">'+
+   '<div class="eh">'+mgHTML(e.mg,1)+'<span class="key">'+id+'</span>'+
+     '<span class="lbl">'+d.type+' · '+(d.epic?'epic '+d.epic:'no epic')+'</span>'+
+     '<span style="flex:1"></span><span class="lbl">status</span>'+
+     '<button class="b sm" data-act="status-menu" data-id="'+id+'" style="padding:0 4px;border:none;background:none">'+statusFlap(id)+'</button>'+
+     '<button class="b sm" data-act="nav" data-href="'+e.h+'">Open as page</button></div>'+
+   '<div class="es"><div class="kv">'+
+     '<div><span class="k">Type</span><span class="v">'+d.type+'</span></div>'+
+     '<div><span class="k">Priority</span><span class="v'+(d.pri==='High'?' amb':'')+'">'+d.pri+'</span></div>'+
+     '<div><span class="k">Assignee</span><span class="v"><span class="av">'+INIT[d.assignee]+'</span>'+PEOPLE[d.assignee]+'</span></div>'+
+     (d.epic?'<div><span class="k">Epic</span><span class="v">'+chip(d.epic)+'</span></div>':'')+
+     '<div><span class="k">Estimate</span><span class="v">'+d.est+'</span></div>'+
+     '<div><span class="k">Spent this week</span><span class="v">'+d.spent+'</span></div>'+
+     '<div><span class="k">Updated</span><span class="v">'+d.updated+'</span></div>'+
+   '</div></div>'+
+   '<div class="es"><div class="lbl esl">Description</div><div class="desc">'+d.desc+'</div></div>'+
+   linksSec(id,d.links,d.rel)+suggFor(id)+commentsSec(id)+
+   '<div class="es"><div class="lbl esl">Time</div>'+
+     (wl.length?wl.map(w=>'<div class="lrow" style="cursor:default"><span class="rel">'+w.d+'</span><span class="ln">'+w.x+'</span><span class="mono tny">'+w.dur+'</span></div>').join(''):'<div class="note fnt">No worklogs yet.</div>')+
+     '<div class="brow" style="margin-top:8px">'+
+       (S.timer.run&&S.timer.ctx===id?'<button class="b pri" data-act="timer-stop">'+I.pause+'Stop timer · '+el0(elapsed())+'</button>':'<button class="b" data-act="timer-start" data-ctx="'+id+'">'+I.play+'Start timer on '+id+'</button>')+
+       '<button class="b" data-act="worklog-draft" data-id="'+id+'">Log time…</button></div></div>'+
+  '</div>';
+}
+function prPanel(n){
+  const id='PR #'+n,e=E[id],cs=S.comments[id]||[];
+  if(n==='142'){
+    return '<div class="epan">'+
+     '<div class="eh">'+mgHTML('GT',1)+'<span class="key">'+id+'</span><span class="lbl">pull request · payout-service</span>'+
+       '<span style="flex:1"></span>'+flapHTML('open','',60)+'<button class="b sm" data-act="nav" data-href="#/pr/142">Open as page</button></div>'+
+     '<div class="es"><div class="kv">'+
+       '<div><span class="k">Repo</span><span class="v">payout-service</span></div>'+
+       '<div><span class="k">Branch</span><span class="v">feature/PAY-231-sepa-retry → main</span></div>'+
+       '<div><span class="k">Author</span><span class="v"><span class="av">ML</span>Mara Lindqvist</span></div>'+
+       '<div><span class="k">Opened</span><span class="v">yesterday 17:41</span></div>'+
+       '<div><span class="k">Approvals</span><span class="v amb">1 of 2 · Priya Nair</span></div>'+
+       '<div><span class="k">Review requested</span><span class="v">Jonas Becker · today 09:05</span></div></div></div>'+
+     '<div class="es"><div class="lbl esl">Checks</div>'+
+       '<button class="lrow" data-act="nav" data-href="#/build/1188">'+mgHTML('TC')+'<span class="ln"><b>Payout_Build #1188</b> step 3/5 cargo test</span>'+flapHTML(S.builds['#1188'].s,st(S.builds['#1188'].s),64)+'</button>'+
+       '<button class="lrow" data-act="nav" data-href="#/build/1187">'+mgHTML('TC')+'<span class="ln"><b>Payout_IntegrationTests #1187</b> 4 m 12 s</span>'+flapHTML(S.builds['#1187'].s,st(S.builds['#1187'].s),64)+'</button></div>'+
+     '<div class="es"><div class="lbl esl">Files changed <span class="mono">3</span></div>'+
+       '<div class="lrow" style="cursor:default"><span class="ln mono" style="font-size:11px">src/sepa/retry.rs</span><span class="tny"><span class="grn">+84</span> <span class="red">−12</span></span></div>'+
+       '<div class="lrow" style="cursor:default"><span class="ln mono" style="font-size:11px">tests/sepa_retry.rs</span><span class="tny"><span class="grn">+51</span></span></div>'+
+       '<div class="lrow" style="cursor:default"><span class="ln mono" style="font-size:11px">docs/backoff.md</span><span class="tny"><span class="grn">+9</span></span></div></div>'+
+     linksSec(id,['PAY-231','feature/PAY-231-sepa-retry','#1187','#1188'],['ticket','branch','build','build'])+
+     commentsSec(id)+'</div>';
+  }
+  const meta=n==='144'
+   ?[['Repo','payout-service'],['Author','Jonas Becker'],['Opened','today 13:50'],['Review requested','you · today 13:50'],['Ticket','PAY-236']]
+   :[['Repo','ledger-api'],['Author','Mara Lindqvist'],['Merged','yesterday 16:00'],['Ticket','PAY-228']];
+  return '<div class="epan"><div class="eh">'+mgHTML('GT',1)+'<span class="key">'+id+'</span><span class="lbl">pull request</span><span style="flex:1"></span>'+flapHTML(e.s,st(e.s),60)+'</div>'+
+   '<div class="es"><div class="kv">'+meta.map(m=>'<div><span class="k">'+m[0]+'</span><span class="v">'+m[1]+'</span></div>').join('')+'</div></div>'+
+   (n==='144'?'<div class="es"><div class="brow">'+(S.pr144?'<span class="tny grn">'+I.check+' You approved PR #144 at 14:32 · 2 of 2 approvals':'<button class="b pri" data-act="review-pr">'+I.check+'Approve PR #144</button><button class="b" data-act="pr-comment">Request changes…</button>')+'</div></div>':'')+
+   linksSec(id,n==='144'?['PAY-236']:['PAY-228'],['ticket'])+commentsSec(id)+'</div>';
+}
+function buildPanel(n){
+  const id='#'+n,b=S.builds[id];
+  const log='test sepa::retry::gives_up_after_max_attempts ... <span class="lf">FAILED</span>\nassertion failed: attempts == 5 (left: 6, right: 5)\ntest result: <span class="lf">FAILED</span>. 41 passed; 1 failed';
+  const run='[11:45] step 1/5 checkout       <span class="lo">done</span>\n[11:46] step 2/5 cargo fetch    <span class="lo">done</span>\n[11:47] step 3/5 cargo test     <span class="amb">running…</span>';
+  return '<div class="epan">'+
+   '<div class="eh">'+mgHTML('TC',1)+'<span class="key">'+id+'</span><span class="lbl">'+b.cfg+' · feature/PAY-231-sepa-retry</span><span style="flex:1"></span>'+flapHTML(b.s,st(b.s),64)+
+     '<button class="b sm" data-act="nav" data-href="#/build/'+n+'">Open as page</button></div>'+
+   '<div class="es"><div class="kv">'+
+     '<div><span class="k">Configuration</span><span class="v">'+b.cfg+'</span></div>'+
+     '<div><span class="k">Branch</span><span class="v">feature/PAY-231-sepa-retry</span></div>'+
+     '<div><span class="k">Env</span><span class="v">staging</span></div>'+
+     '<div><span class="k">When</span><span class="v">'+b.when+'</span></div>'+
+     '<div><span class="k">Duration</span><span class="v">'+b.took+'</span></div></div></div>'+
+   '<div class="es"><div class="lbl esl">Log excerpt</div><div class="logx">'+(b.s==='running'?run:log)+'</div>'+
+     '<div class="brow" style="margin-top:9px">'+
+       (b.s==='failed'?'<button class="b pri" data-act="rerun" data-id="'+id+'">Re-run failed tests</button>':'')+
+       '<button class="b" data-act="trigger-form">Trigger with parameters…</button>'+
+       '<button class="b" data-act="comment-on" data-id="PAY-231">Comment on PAY-231</button></div></div>'+
+   linksSec(id,['PAY-231','PR #142','feature/PAY-231-sepa-retry'],['ticket','pull request','branch'])+'</div>';
+}
+function pagePanel(k){
+  const p=S.pages[k];if(!p)return '';
+  const body=k==='sepa'
+   ?'<div class="desc"><b style="color:var(--text)">Backoff policy</b><br>base 30 s, factor 2, max 5 attempts, jitter ±10 %. Transient codes: HTTP 503, <code>TEMP_UNAVAILABLE</code>. After the final attempt the payout is moved to the manual review queue (see '+chip('PAY-231')+').<br><br><b style="color:var(--text)">Manual review queue</b><br>'+(S.sla?'<span class="grn">SLA: 2 business days from the final retry attempt — added by you today at 14:32.</span>':'<span class="amb">SLA: to be defined.</span>')+'</div>'
+   :'<div class="desc fnt">Page body synced from Confluence · last edited '+p.edited+' by '+PEOPLE[p.by]+'.</div>';
+  const cmt=k==='sepa'?'<div class="es"><div class="lbl esl">Comments <span class="mono">'+(S.pageReply?2:1)+'</span></div>'+
+    '<div class="cmt"><div class="ch"><span class="av">PN</span><span class="who">Priya Nair</span><span class="tny">today 12:05</span></div><div class="cx">@Mara can you add the manual-review queue SLA here?</div></div>'+
+    (S.pageReply?'<div class="cmt"><div class="ch"><span class="av">ML</span><span class="who">Mara Lindqvist</span><span class="tny">today 14:32</span></div><div class="cx">'+S.pageReply+'</div></div>':'')+
+    '<div class="brow" style="margin-top:8px"><input class="inp" id="ci-page-sepa" style="flex:1;min-width:200px" placeholder="Reply to Priya — posts to Confluence"><button class="b" data-act="page-reply">Reply</button></div></div>':'';
+  return '<div class="epan">'+
+   '<div class="eh">'+mgHTML('CF',1)+'<span class="lbl">Confluence page · '+p.space+'</span><span style="flex:1"></span><span class="tny">edited '+p.edited+'</span>'+
+     '<button class="b sm" data-act="nav" data-href="#/page/'+k+'">Open as page</button></div>'+
+   '<div class="es"><div class="kv"><div><span class="k">Space</span><span class="v">'+p.space+' · Engineering</span></div>'+
+     '<div><span class="k">Last edited</span><span class="v">'+p.edited+(p.sec?' · '+p.sec:'')+'</span></div>'+
+     '<div><span class="k">By</span><span class="v"><span class="av">'+INIT[p.by]+'</span>'+PEOPLE[p.by]+'</span></div></div></div>'+
+   '<div class="es">'+body+'<div class="brow" style="margin-top:9px"><button class="b" data-act="edit-page" data-id="'+k+'">Edit section</button>'+
+     (k==='sepa'&&!S.sla?'<button class="b pri" data-act="add-sla">Add the manual-review SLA</button>':'')+'</div></div>'+
+   cmt+'</div>';
+}
+function notePanel(k){
+  const n=S.notes[k];if(!n)return '';
+  return '<div class="epan">'+
+   '<div class="eh">'+mgHTML('NT',1)+'<span class="lbl">Local note</span><span style="flex:1"></span><span class="tny">edited '+n.edited+'</span>'+
+     '<span class="saved" id="sv-'+k+'">saved locally</span>'+
+     '<button class="b sm" data-act="nav" data-href="#/note/'+k+'">Open as page</button></div>'+
+   '<div class="es"><div class="ed" contenteditable="true" data-note="'+k+'" data-ph="Write here…">'+renderChips(n.body)+'</div></div>'+
+   '<div class="es"><div class="lbl esl">Links in this note</div>'+n.links.map(function(l){
+      const e=E[l];if(!e)return '';
+      return '<button class="lrow" data-act="nav" data-href="'+e.h+'">'+mgHTML(e.mg)+'<span class="ln">'+nameOf(l)+'</span></button>';}).join('')+
+    '<div class="brow" style="margin-top:8px"><button class="b" data-act="link-picker" data-id="'+n.t+'">'+I.link+'Insert link [[…]]</button></div></div></div>';
+}
+
+/* ===================== day page ===================== */
+const SEGS=[
+ {a:510,b:525,c:'pas',n:'Inbox + standup digest',g:'b-0830'},
+ {a:525,b:580,c:'pas',n:'PAY-228 + note Standup 2026-08-21',g:'b-0845'},
+ {a:580,b:710,c:'pas',n:'PAY-231 · PR #142, design page, note',g:'b-0940'},
+ {a:710,b:740,c:'una',n:'Unattributed · 30 min',g:'b-1150'},
+ {a:740,b:790,c:'gap',n:'No activity',g:'b-1220'},
+ {a:790,b:838,c:'man',n:'Staging DB configuration · 48 min',g:'b-1310'},
+ {a:838,b:872,c:'now',n:'PAY-231 · timer running',g:'b-1358'}];
+function dayStrip(){
+  const total=SEGS[SEGS.length-1].b-SEGS[0].a;
+  return '<div class="dstrip"><div class="dsh"><span class="lbl">Day review · 08:30 → '+hm(Math.floor(S.clock/60))+'</span>'+
+   '<span class="tny">'+dur(S.tracked)+' tracked · '+(S.logged?dur(S.logged)+' logged':'<span class="amb">nothing logged yet</span>')+'</span></div>'+
+   '<div class="dsbars">'+SEGS.map(function(s){
+     const w=(100*(s.b-s.a)/total);
+     return '<button class="seg '+s.c+'" style="width:'+w.toFixed(2)+'%" data-act="goto" data-id="'+s.g+'" title="'+hm(s.a)+'–'+hm(s.b)+' · '+s.n+'"></button>';
+   }).join('')+'</div>'+
+   '<div class="dsfoot"><span><i class="dsk seg pas"></i>passive</span><span><i class="dsk seg man"></i>manual</span>'+
+   '<span><i class="dsk seg una"></i>unattributed</span><span><i class="dsk seg gap"></i>gap</span>'+
+   '<span><i class="dsk seg now"></i>timer running</span></div></div>';
+}
+function inboxBlock(){
+  const open=!!S.expanded.inbox,n=S.inbox.length;
+  const head='<button class="row klik'+(open?' exp':'')+'" data-act="toggle" data-id="inbox">'+I.chev+I.bell+
+   '<span class="ttl"><b>Inbox</b> — '+(n?'newest: '+S.inbox[0].x.replace(/<[^>]+>/g,''):'nothing waiting')+'</span>'+
+   flapHTML(String(n),n?'f-run':'f-ok',24)+'</button>';
+  return blk('<span class="amb mono">new</span>','',head+(open?'<div class="epan"><div class="es" style="padding:4px 8px">'+inboxItems()+'</div></div>':''));
+}
+function inboxItems(){
+  if(!S.inbox.length)return '<div class="empty">Inbox clear. New mentions, reviews and failed builds land here.</div>';
+  return S.inbox.map(function(it){
+    return '<div class="lrow" style="height:auto;padding:8px 6px;align-items:flex-start;cursor:default" id="ib-'+it.id+'">'+
+      '<span class="tny" style="width:64px;flex:none;padding-top:2px">'+it.t+'</span>'+mgHTML(it.mg)+
+      '<span class="ln" style="white-space:normal;flex:1;color:var(--muted);line-height:1.5">'+it.x+'</span>'+
+      '<span class="brow" style="flex:none">'+it.acts.map(function(a){
+        return '<button class="b sm'+(a[0]==='review'||a[0]==='rerun'?' pri':'')+'" data-act="inbox" data-id="'+it.id+'" data-a="'+a[0]+'">'+a[1]+'</button>';
+      }).join('')+'</span></div>';
+  }).join('')+
+  (S.snoozed.length?'<div class="lrow" style="cursor:default;opacity:.6"><span class="tny" style="width:64px;flex:none">snoozed</span>'+mgHTML('JI')+
+   '<span class="ln">'+S.snoozed[0].x+' — '+S.snoozed[0].back+'</span><button class="b sm" data-act="unsnooze">Bring back</button></div>':'');
+}
+const DIGEST={
+ y:[['merged <b>PR #139</b> (ledger-api) fixing partial refund drift',['PR #139']],
+    ['<b>PAY-228</b> → In Review',['PAY-228']],
+    ['implemented the retry loop for <b>PAY-231</b> (7be0e4)',['7be0e4','PAY-231']],
+    ['logged 4h 30m',['PAY-228','PAY-231']]],
+ t:[['<b>PAY-231</b> backoff + jitter (a41f2c, c90d11)',['a41f2c','c90d11']],
+    ['fix integration test <b>#1187</b> — off-by-one in the attempt counter',['#1187','SEPA retry investigation']],
+    ['reply to Priya about the manual-review SLA',['SEPA payout retry design']],
+    ['review <b>PR #144</b>',['PR #144']]],
+ b:[['<b>PAY-228</b> staging verification is blocked by <b>OPS-77</b> (runbook outdated, Tomasz)',['OPS-77','PAY-228']]]};
+function digestGroup(key,label){
+  return '<div style="margin-bottom:9px"><div class="lbl esl">'+label+'</div>'+DIGEST[key].map(function(l,i){
+    const id=key+i,open=!!S.expanded['tr-'+id];
+    return '<div><button class="row klik'+(open?' exp':'')+'" style="margin-left:0;min-height:24px" data-act="toggle" data-id="tr-'+id+'">'+
+      I.chev+'<span class="ttl" style="white-space:normal;color:var(--muted)">'+l[0]+'</span></button>'+
+      (open?'<div style="margin:2px 0 6px 22px">'+l[1].map(function(x){
+        const e=E[x];return '<button class="lrow" data-act="nav" data-href="'+e.h+'">'+mgHTML(e.mg)+'<span class="rel">source</span><span class="ln">'+nameOf(x)+'</span><span class="tny">'+e.src+'</span></button>';
+      }).join('')+'</div>':'')+'</div>';
+  }).join('')+'</div>';
+}
+function standupBlock(){
+  const open=!!S.expanded.standup;
+  const head='<button class="row klik'+(open?' exp':'')+'" data-act="toggle" data-id="standup">'+I.chev+
+   '<span class="ttl"><b>Standup</b> — digest generated from yesterday and today, plus the protocol</span>'+
+   (S.published?flapHTML('published','f-ok',74):flapHTML('draft','f-idle',54))+'</button>';
+  if(!open)return blk('08:30','',head);
+  const body='<div class="epan">'+
+   '<div class="es"><div class="lbl esl">Digest <span class="fnt">— click a line to see where it came from</span></div>'+
+     digestGroup('y','Yesterday')+digestGroup('t','Today')+digestGroup('b','Blockers')+
+     '<div class="brow"><button class="b" data-act="copy-digest">Copy digest</button><button class="b" data-act="digest-note">Save digest as note</button></div></div>'+
+   '<div class="es"><div class="lbl esl">Standup protocol · 2026-08-22 <span class="fnt">— editable</span></div>'+
+     '<div class="ed" contenteditable="true" data-proto="1" style="font-size:13.5px">'+
+       '<div><b>Attendees:</b> Mara, Jonas, Priya, Tomasz, Lena</div>'+
+       '<div style="margin-top:6px">Jonas: PR #144 CSV export ready for review.</div>'+
+       '<div>Priya: finance wants the manual-review SLA documented by Monday.</div>'+
+       '<div>Tomasz: on-call handbook update in progress, ETA Tuesday (OPS-77).</div>'+
+       '<div>Lena: finance complaints about dashboard latency → PAY-240.</div>'+
+     '</div>'+
+     '<div class="lbl esl" style="margin-top:11px">Action items</div>'+
+     [['Mara → add the SLA to <i>SEPA payout retry design</i> (PAY-231)','sla'],
+      ['Tomasz → OPS-77 by Tuesday','ops'],
+      ['Lena → clarify PAY-240 acceptance criteria','ac']].map(function(a){
+       const made=S.drafts['ai-'+a[1]];
+       return '<div class="lrow" style="cursor:default"><span class="ln" style="white-space:normal">'+a[0]+'</span>'+
+        (made?'<span class="tny grn">'+I.check+' '+made+'</span>':'<button class="b sm" data-act="ai-ticket" data-id="'+a[1]+'">Create ticket</button>')+'</div>';
+     }).join('')+
+     '<div class="brow" style="margin-top:10px">'+
+       (S.protoSaved?'<span class="tny grn">'+I.check+' Saved as note “Standup 2026-08-22”</span>':'<button class="b" data-act="proto-note">Save as note</button>')+
+       (S.published
+         ?'<span class="tny grn">'+I.check+' Published 14:32 · <button class="chip" data-act="nav" data-href="#/page/standups">ENG › Standup protocols › 2026-08-22</button></span>'
+         :'<button class="b pri" data-act="publish">Publish to Confluence…</button>')+
+     '</div>'+
+     (S.publishConfirm&&!S.published?'<div class="callout" style="margin-top:9px"><span class="ci">'+I.warn+'</span><span>Publishing to <b class="mono">ENG › Standup protocols › 2026-08-22</b> as a new child page. The protocol text above is what gets published.<div class="brow" style="margin-top:8px"><button class="b pri" data-act="publish-go">Publish page</button><button class="b" data-act="publish-cancel">Cancel</button></div></span></div>':'')+
+   '</div></div>';
+  return blk('08:30','',head+body);
+}
+function sugStream(g){return blk('<span class="fnt">'+(g.at||'sync')+'</span>','',sugBlock(g));}
+function todayStream(){
+  const out=[];
+  const sug=id=>{const g=S.sugg.filter(x=>x.id===id)[0];return g?sugStream(g):'';};
+  out.push(inboxBlock());
+  out.push(standupBlock());
+  out.push(blk('08:12',I.ticket,
+    '<div class="row"><span class="ttl">Priya Nair assigned <b>PAY-240</b> Payout dashboard latency to you</span>'+
+    '<button class="b sm pri" data-act="startwork">Start work…</button></div>',{id:'b-0812'}));
+  out.push(blk('08:30',I.bell,
+    '<div class="row"><span class="ttl">Read the inbox and the standup digest</span><span class="dur">15m · passive</span>'+
+    '<button class="b sm" data-act="nav" data-href="#/inbox">Open inbox</button></div>',{id:'b-0830'}));
+  out.push(blk('08:45',I.ticket,entBlock('PAY-228',{dur:'55m · passive'}),{id:'b-0845'}));
+  out.push(blk('09:40',I.ticket,entBlock('PAY-231',{dur:'2h 10m · passive'}),{id:'b-0940'}));
+  out.push(blk('10:02',I.commit,
+    '<div class="row"><span class="key">a41f2c</span><span class="ttl">PAY-231 backoff jitter</span><span class="dur">payout-service</span></div>'));
+  out.push(sug('g1'));
+  out.push(blk('10:10',I.warn,entBlock('#1187',{}),{id:'b-1010'}));
+  out.push(sug('g2'));
+  out.push(blk('10:20',I.pr,
+    '<div class="row"><span class="ttl">Replied to Jonas on <b>PR #142</b> — “Bounded to ±10 % in c90d11.”</span>'+
+    '<button class="b sm" data-act="nav" data-href="#/pr/142">Open PR</button></div>'));
+  out.push(blk('10:40',I.page,
+    '<div class="row"><span class="ttl">Edited <b>SEPA payout retry design</b> › Backoff policy</span>'+
+    '<button class="b sm" data-act="nav" data-href="#/page/sepa">Open page</button></div>'));
+  out.push(blk('11:20',I.note,
+    '<div class="mine"><div class="mh"><span class="lbl" style="color:var(--muted)">My note</span>'+
+      '<button class="chip" data-act="nav" data-href="#/note/sepa">'+mgHTML('NT')+'SEPA retry investigation</button>'+
+      '<span class="saved" id="sv-inline">saved locally</span></div>'+
+    '<div class="mt ed" contenteditable="true" data-note="sepa">'+renderChips(S.notes.sepa.body)+'</div></div>',{id:'b-1120'}));
+  out.push(blk('11:42',I.commit,
+    '<div class="row"><span class="key">c90d11</span><span class="ttl">PAY-231: jitter in backoff, cap at 5 attempts</span><span class="dur">payout-service</span></div>'));
+  out.push(blk('11:45',I.build,entBlock('#1188',{}),{id:'b-1145'}));
+  out.push(blk('11:50','',unaBlock(),{id:'b-1150'}));
+  out.push(blk('12:05',I.page,
+    '<div class="row"><span class="ttl">Priya mentioned you on <b>SEPA payout retry design</b> — “@Mara can you add the manual-review queue SLA here?”</span>'+
+    '<button class="b sm" data-act="nav" data-href="#/page/sepa">Reply</button></div>'));
+  out.push(blk('12:20','',
+    '<div class="row" style="opacity:.5"><span class="ttl fnt">No activity · 50m</span></div>',{id:'b-1220'}));
+  out.push(blk('13:10',I.clock,adhocBlock(),{id:'b-1310'}));
+  out.push(blk('13:50',I.pr,
+    '<div class="row"><span class="ttl">Jonas requested your review on <b>PR #144</b> Add payout CSV export</span>'+
+    '<button class="b sm" data-act="nav" data-href="#/pr/144">Review</button></div>'));
+  out.push(blk('13:58',I.clock,timerBlock(),{id:'b-1358',hi:S.timer.run}));
+  out.push(S.appended.map(renderApp).join(''));
+  out.push(blk('<span id="nowClock">'+hm(Math.floor(S.clock/60))+'</span>','',
+   '<div class="edline"><div class="ed" id="dayEd" contenteditable="true" data-day="1" data-ph="Write a note, or press / for commands"></div></div>'));
+  return out.join('');
+}
+function unaBlock(){
+  if(S.una.state==='open')
+   return '<div class="row" style="background:rgba(255,176,32,.06);border-left:2px solid var(--amber);margin-left:11px">'+
+    '<span class="mg" style="border-color:#5A4318;color:var(--amber)">??</span>'+
+    '<span class="ttl"><b class="amb">Unattributed</b> — the app was open but nothing was in focus</span><span class="dur">30m · passive</span>'+
+    '<button class="b sm pri" data-act="assign-una">Assign…</button></div>';
+  return '<div class="row" style="margin-left:11px">'+mgHTML(E[S.una.state]?E[S.una.state].mg:'NT',1)+
+   '<span class="ttl">Assigned to <b>'+S.una.state+'</b></span><span class="dur">30m · was unattributed</span>'+
+   '<span class="tny grn">'+I.check+' saved</span></div>';
+}
+function adhocBlock(){
+  if(S.adhoc.state==='open')
+   return '<div class="row" style="margin-left:11px"><span class="mg on">◔</span>'+
+    '<span class="ttl"><b>Staging DB configuration</b> — ad-hoc label, no ticket</span><span class="dur">48m · manual</span>'+
+    '<button class="b sm" data-act="adhoc-log">Log to a ticket…</button><button class="b sm" data-act="adhoc-keep">Keep local only</button></div>';
+  if(S.adhoc.state==='local')
+   return '<div class="row" style="margin-left:11px"><span class="mg on">◔</span>'+
+    '<span class="ttl"><b>Staging DB configuration</b> — kept local, not sent to Jira</span><span class="dur">48m · manual</span>'+
+    '<span class="tny grn">'+I.check+' local only</span></div>';
+  return '<div class="row" style="margin-left:11px"><span class="mg on">◔</span>'+
+   '<span class="ttl"><b>Staging DB configuration</b> → logged to <b>'+S.adhoc.state+'</b></span><span class="dur">48m · manual</span>'+
+   '<span class="tny grn">'+I.check+' worklog saved</span></div>';
+}
+function timerBlock(){
+  if(!S.timer.run)
+   return '<div class="row" style="margin-left:11px"><span class="ttl fnt">Timer stopped at '+hm(Math.floor(S.clock/60))+'</span>'+
+    '<button class="b sm" data-act="timer-start" data-ctx="PAY-231">Start again on PAY-231</button></div>';
+  return '<div class="row" style="margin-left:11px">'+mgHTML(E[S.timer.ctx]?E[S.timer.ctx].mg:'◔',1)+
+   '<span class="ttl"><b>'+S.timer.ctx+'</b> — timer running, started manually</span>'+
+   '<span id="streamTimer">'+flapHTML(el0(elapsed()),'f-run',52)+'</span>'+
+   '<button class="b sm" data-act="timer-stop">Stop and log</button></div>';
+}
+const OTHERDAYS={
+ '2026-08-21':{ttl:'Thursday 21 August 2026',trk:'7h 10m',log:'4h 30m',rows:[
+   ['09:05','note','<div class="mine"><div class="mh"><button class="chip" data-act="nav" data-href="#/note/standup21">'+mgHTML('NT')+'Standup 2026-08-21</button></div><div class="mt">Yesterday: drift fix on PAY-228, merged PR #139. Today: re-test partial refunds on staging, open PR. Blocker: none.</div></div>'],
+   ['14:20','ticket','<div class="row"><span class="ttl">Priya commented on <b>PAY-231</b> — “Please make sure the backoff policy matches the design page — finance wants max 5 attempts.”</span><button class="b sm" data-act="nav" data-href="#/ticket/PAY-231">Open</button></div>'],
+   ['16:00','pr','<div class="row"><span class="ttl"><b>PR #139</b> Fix ledger drift on partial refunds merged into ledger-api</span><button class="b sm" data-act="nav" data-href="#/pr/139">Open PR</button></div>'],
+   ['16:05','ticket','<div class="row"><span class="ttl"><b>PAY-228</b> moved To Do → In Review</span>'+flapHTML('In Review','',74)+'</div>'],
+   ['16:30','warn','<div class="row"><span class="ttl"><b>PAY-228</b> is blocked by <b>OPS-77</b> On-call runbook outdated</span><button class="b sm" data-act="nav" data-href="#/ticket/OPS-77">Open OPS-77</button></div>'],
+   ['17:30','commit','<div class="row"><span class="key">7be0e4</span><span class="ttl">PAY-231: retry SEPA payouts on transient PSP errors</span></div>'],
+   ['17:41','pr','<div class="row"><span class="ttl">Opened <b>PR #142</b> SEPA retry with exponential backoff</span><button class="b sm" data-act="nav" data-href="#/pr/142">Open PR</button></div>'],
+   ['logged','clock','<div class="row"><span class="ttl">Worklogs: <b>PAY-228</b> 1h 30m “Review PR #139 fixes, re-test partial refund drift” · <b>PAY-231</b> 3h 00m “Retry loop implementation”</span></div>']]},
+ '2026-08-20':{ttl:'Wednesday 20 August 2026',trk:'6h 30m',log:'6h 30m',rows:[
+   ['—','note','<div class="row"><span class="ttl fnt">Nothing of yours recorded. PAY-236 was updated by Jonas Becker.</span><button class="b sm" data-act="nav" data-href="#/ticket/PAY-236">Open PAY-236</button></div>']]},
+ '2026-08-19':{ttl:'Tuesday 19 August 2026',trk:'8h 00m',log:'8h 00m',rows:[
+   ['—','page','<div class="row"><span class="ttl fnt">Tomasz edited <b>Ledger reconciliation runbook</b> and updated <b>OPS-77</b>.</span><button class="b sm" data-act="nav" data-href="#/page/ledger">Open page</button></div>']]},
+ '2026-08-18':{ttl:'Monday 18 August 2026',trk:'7h 45m',log:'7h 45m',rows:[
+   ['—','ticket','<div class="row"><span class="ttl"><b>PAY-219</b> Rotate PSP credentials moved to Done</span>'+flapHTML('Done','f-ok',60)+'</div>'],
+   ['—','note','<div class="mine"><div class="mh"><button class="chip" data-act="nav" data-href="#/note/creds">'+mgHTML('NT')+'Credentials to rotate</button></div><div class="mt">TeamCity password expires end of August. Jira PAT expires 2026-09-03.</div></div>']]}
+};
+function viewDay(date){
+  const isToday=(date==='2026-08-22');
+  const d=isToday?null:OTHERDAYS[date];
+  if(!isToday&&!d)return '<div class="empty">No journal page for '+date+'.</div>';
+  const prev={'2026-08-22':'2026-08-21','2026-08-21':'2026-08-20','2026-08-20':'2026-08-19','2026-08-19':'2026-08-18'}[date];
+  const next={'2026-08-18':'2026-08-19','2026-08-19':'2026-08-20','2026-08-20':'2026-08-21','2026-08-21':'2026-08-22'}[date];
+  const head='<div class="phead"><div class="ptitle">'+(isToday?'Friday <span class="thin">22 August 2026</span>':d.ttl.replace(/ (.*)/,' <span class="thin">$1</span>'))+'</div>'+
+   '<div class="psub"><span class="pill">'+(isToday?dur(S.tracked)+' tracked':d.trk+' tracked')+'</span>'+
+   '<span class="pill">'+(isToday?(S.logged?dur(S.logged)+' logged':'<span class="amb">0m logged</span>'):d.log+' logged')+'</span>'+
+   (isToday?'<span class="pill">'+S.inbox.length+' unread</span><span class="pill">3 sources synced · <span class="red">TeamCity 401</span></span>':'')+'</div>'+
+   '<div class="pnav">'+
+     (prev?'<button class="pb" data-act="nav" data-href="#/day/'+prev+'">‹ '+prev.slice(8)+' Aug</button>':'')+
+     (next?'<button class="pb" data-act="nav" data-href="#/day/'+next+'">'+next.slice(8)+' Aug ›</button>':'<button class="pb" disabled>today</button>')+
+   '</div></div>';
+  if(isToday)return '<div class="pg">'+head+dayStrip()+'<div class="stream">'+todayStream()+'</div></div>';
+  return '<div class="pg">'+head+'<div class="stream" style="margin-top:18px">'+
+    d.rows.map(r=>blk(r[0],I[r[1]]||'',r[2])).join('')+'</div></div>';
+}
+
+/* ===================== appended blocks ===================== */
+const ACTS=[
+ {id:'a1',x:'commit <code>a41f2c</code> “PAY-231 backoff jitter”',t:'10:02'},
+ {id:'a2',x:'commit <code>c90d11</code> “PAY-231: jitter in backoff, cap at 5 attempts”',t:'11:42'},
+ {id:'a3',x:'replied to Jonas on PR #142',t:'10:20'},
+ {id:'a4',x:'triggered build #1188',t:'11:45'},
+ {id:'a5',x:'edited <i>SEPA payout retry design</i> › Backoff policy',t:'10:40'},
+ {id:'a6',x:'edited note <i>SEPA retry investigation</i>',t:'11:20'}];
+function genComment(on){
+  const p=[],c=[];
+  if(on.a1)c.push('a41f2c'); if(on.a2)c.push('c90d11');
+  if(c.length)p.push('Backoff jitter ('+c.join(', ')+')');
+  if(on.a3)p.push('replied to review on PR #142');
+  if(on.a4)p.push('triggered build #1188');
+  if(on.a5)p.push('updated Backoff policy in the design page');
+  if(on.a6)p.push('updated the investigation note');
+  return p.length?p.join('; ')+'.':'';
+}
+function worklogBlock(a){
+  const d=a.d;
+  if(d.logged)
+    return '<div class="epan"><div class="eh">'+I.check+'<span style="flex:1;font-size:13px">Logged <b class="mono">'+dur(d.mins)+'</b> to <b class="mono">'+d.target+'</b> — Jira worklog created at 14:32</span>'+
+      flapHTML('logged','f-ok',62)+'<button class="b sm" data-act="nav" data-href="'+(E[d.target]?E[d.target].h:'#/day/2026-08-22')+'">Open '+d.target+'</button></div>'+
+      '<div class="es"><div class="desc" style="font-size:12.5px">'+d.comment+'</div></div></div>';
+  const targets=['PAY-231','PAY-228','PAY-240','OPS-77','__none'];
+  return '<div class="epan"><div class="eh">'+I.clock+'<span class="lbl" style="color:var(--text)">Worklog draft</span>'+
+    '<span style="flex:1"></span>'+flapHTML('draft','f-run',54)+'</div>'+
+   '<div class="es"><div class="kv">'+
+     '<div><span class="k">Interval</span><span class="v">'+(d.editing
+        ?'<input class="inp" id="wl-int" value="09:40–11:50 + 13:58–14:32" style="width:210px">'
+        :'09:40–11:50 + 13:58–14:32')+'</span></div>'+
+     '<div><span class="k">Duration</span><span class="v amb">'+dur(d.mins)+'</span></div>'+
+     '<div><span class="k">Target</span><span class="v"><select class="inp" data-act="wl-target" data-id="'+a.id+'" style="width:170px">'+
+        targets.map(t=>'<option value="'+t+'"'+(d.target===t?' selected':'')+'>'+(t==='__none'?'No ticket — keep local':t)+'</option>').join('')+'</select></span></div>'+
+   '</div></div>'+
+   '<div class="es"><div class="lbl esl">Activity in this interval <span class="fnt">— checked lines go into the comment</span></div>'+
+     ACTS.map(function(x){
+       return '<button class="ck'+(d.on[x.id]?' on':'')+'" data-act="wl-check" data-id="'+a.id+'" data-k="'+x.id+'">'+
+        '<span class="box">'+I.check+'</span><span style="flex:1">'+x.x+'</span><span class="tny">'+x.t+'</span></button>';
+     }).join('')+'</div>'+
+   '<div class="es"><div class="lbl esl">Comment posted with the worklog</div>'+
+     '<div class="ed" id="wl-c-'+a.id+'" contenteditable="true" style="font-size:13px;border:1px solid var(--hair);padding:8px 10px;border-radius:2px;background:#131619">'+d.comment+'</div>'+
+     '<div class="brow" style="margin-top:10px">'+
+       '<button class="b pri" data-act="wl-log" data-id="'+a.id+'">'+I.check+'Log '+dur(d.mins)+' to '+(d.target==='__none'?'local time':d.target)+'</button>'+
+       '<button class="b" data-act="wl-edit" data-id="'+a.id+'">'+(d.editing?'Done editing':'Edit interval')+'</button>'+
+       '<button class="b dan" data-act="wl-discard" data-id="'+a.id+'">Discard</button></div></div></div>';
+}
+const SW_STEPS=[
+ 'Create branch <code>feature/PAY-240-payout-dashboard-latency</code> in payout-service',
+ 'Push the branch to git.tidewater.internal',
+ 'Open <b>PR #145</b> “Payout dashboard latency” → main',
+ 'Link PR #145 ↔ PAY-240',
+ 'Move PAY-240 To Do → <b>In Progress</b>',
+ 'Start the timer on PAY-240'];
+function stepperBlock(a){
+  const d=a.d;
+  if(d.stage==='form')
+   return '<div class="epan"><div class="eh">'+I.arrow+'<span class="lbl" style="color:var(--text)">Start work on PAY-240</span><span style="flex:1"></span>'+
+     '<span class="tny">review before it runs</span></div>'+
+    '<div class="es"><div class="split">'+
+      '<div class="fld"><span class="k">Repo</span><select class="inp" id="sw-repo"><option>payout-service</option><option>ledger-api</option><option>ops-runbooks</option></select></div>'+
+      '<div class="fld"><span class="k">Base branch</span><select class="inp" id="sw-base"><option>main</option></select></div>'+
+      '<div class="fld"><span class="k">New branch</span><input class="inp" id="sw-branch" value="feature/PAY-240-payout-dashboard-latency"></div>'+
+      '<div class="fld"><span class="k">PR title</span><input class="inp" id="sw-title" value="Payout dashboard latency"></div>'+
+    '</div>'+
+    '<button class="ck'+(d.timer?' on':'')+'" data-act="sw-timer" data-id="'+a.id+'"><span class="box">'+I.check+'</span><span>Start the timer on PAY-240 when the flow finishes</span></button>'+
+    '<div class="brow" style="margin-top:10px"><button class="b pri" data-act="sw-run" data-id="'+a.id+'">Run all 6 steps</button>'+
+      '<button class="b" data-act="drop" data-id="'+a.id+'">Cancel</button></div></div></div>';
+  return '<div class="epan"><div class="eh">'+I.arrow+'<span class="lbl" style="color:var(--text)">Start work on PAY-240</span><span style="flex:1"></span>'+
+    flapHTML(d.i>=6?'done':'running',d.i>=6?'f-ok':'f-run',62)+'</div>'+
+   '<div class="es">'+SW_STEPS.map(function(s,i){
+     const cls=i<d.i?'done':(i===d.i?'run':'');
+     if(i===5&&!d.timer&&d.i>5)return '<div class="step"><span class="sn">–</span><span class="sx">Timer left on PAY-231 (unchecked)</span></div>';
+     return '<div class="step '+cls+'"><span class="sn">'+(i<d.i?I.check:(i+1))+'</span><span class="sx">'+s+'</span>'+
+      (i<d.i?'<span class="tny grn">ok</span>':(i===d.i?'<span class="tny amb">…</span>':''))+'</div>';
+   }).join('')+
+   (d.i>=6?'<div class="brow" style="margin-top:10px"><button class="b" data-act="nav" data-href="#/ticket/PAY-240">Open PAY-240</button>'+
+     '<button class="b" data-act="nav" data-href="#/pr/145">Open PR #145</button></div>':'')+'</div></div>';
+}
+function triggerBlock(a){
+  const d=a.d;
+  if(d.stage==='form')
+   return '<div class="epan"><div class="eh">'+mgHTML('TC',1)+'<span class="lbl" style="color:var(--text)">Trigger a build</span></div>'+
+    '<div class="es"><div class="split">'+
+     '<div class="fld"><span class="k">Configuration</span><select class="inp" id="tb-cfg"><option>Payout_IntegrationTests</option><option>Payout_Build</option><option>Ledger_Deploy_Staging</option></select></div>'+
+     '<div class="fld"><span class="k">Branch</span><select class="inp" id="tb-branch"><option>feature/PAY-231-sepa-retry</option><option>main</option><option>fix/PAY-228-partial-refund-drift</option></select></div>'+
+     '<div class="fld"><span class="k">Env</span><select class="inp" id="tb-env"><option>staging</option><option>prod-dryrun</option></select></div>'+
+    '</div>'+
+    '<button class="ck'+(d.clean?' on':'')+'" data-act="tb-clean" data-id="'+a.id+'"><span class="box">'+I.check+'</span><span>Clean checkout</span></button>'+
+    (S.tcFixed?'':'<div class="callout" style="margin-top:9px"><span class="ci">'+I.warn+'</span><span>TeamCity last returned <b class="mono">401 Unauthorized</b>. The trigger will sit in the write queue until the password is re-entered.</span></div>')+
+    '<div class="brow" style="margin-top:10px"><button class="b pri" data-act="tb-go" data-id="'+a.id+'">Trigger build</button>'+
+     '<button class="b" data-act="nav" data-href="#/sources">Fix TeamCity auth</button>'+
+     '<button class="b" data-act="drop" data-id="'+a.id+'">Cancel</button></div></div></div>';
+  if(d.stage==='queued')
+   return '<div class="epan"><div class="eh">'+mgHTML('TC',1)+'<span style="flex:1;font-size:13px">'+d.cfg+' on <span class="mono">'+d.branch+'</span> · env '+d.env+(d.clean?' · clean checkout':'')+'</span>'+flapHTML('queued','f-run',62)+'</div>'+
+    '<div class="es"><div class="callout"><span class="ci">'+I.warn+'</span><span>Not sent: TeamCity returned <b class="mono">401 Unauthorized</b> 38 min ago. The request is in the local write queue (<b>1 pending</b>) and goes out as soon as the password works.'+
+    '<div class="brow" style="margin-top:8px"><button class="b pri" data-act="nav" data-href="#/sources">Re-enter the TeamCity password</button></div></span></div></div></div>';
+  return '<div class="epan"><div class="eh">'+mgHTML('TC',1)+'<span style="flex:1;font-size:13px">'+d.cfg+' <b class="mono">'+d.no+'</b> on <span class="mono">'+d.branch+'</span> · env '+d.env+'</span>'+
+    flapHTML('running','f-run',62)+'<button class="b sm" data-act="nav" data-href="#/build/1187">Compare with #1187</button></div>'+
+   '<div class="es"><div class="logx">[14:32] queued by mara.lindqvist\n[14:32] step 1/5 checkout   <span class="amb">running…</span></div></div></div>';
+}
+function formBlock(a){
+  const d=a.d;
+  if(d.kind==='ticket'){
+    if(d.done)return '<div class="epan"><div class="eh">'+mgHTML('JI',1)+'<span style="flex:1;font-size:13px">Created <b class="mono">'+d.key+'</b> '+d.summary+'</span>'+flapHTML('To Do','f-idle',60)+'<button class="b sm" data-act="nav" data-href="#/ticket/'+d.key+'">Open</button></div></div>';
+    return '<div class="epan"><div class="eh">'+mgHTML('JI',1)+'<span class="lbl" style="color:var(--text)">New Jira ticket</span></div>'+
+     '<div class="es"><div class="split"><div class="fld"><span class="k">Project</span><select class="inp" id="nt-proj"><option>PAY — Payments Platform</option><option>OPS — Operations</option></select></div>'+
+      '<div class="fld"><span class="k">Type</span><select class="inp" id="nt-type"><option>Task</option><option>Story</option><option>Bug</option></select></div></div>'+
+      '<div class="fld"><span class="k">Summary</span><input class="inp" id="nt-sum" value="'+(d.pre||'')+'" placeholder="What needs doing"></div>'+
+      '<div class="fld"><span class="k">Description</span><input class="inp" id="nt-desc" placeholder="Optional"></div>'+
+      '<div class="brow"><button class="b pri" data-act="nt-go" data-id="'+a.id+'">Create ticket</button><button class="b" data-act="drop" data-id="'+a.id+'">Cancel</button></div></div></div>';
+  }
+  if(d.kind==='page'){
+    if(d.done)return '<div class="epan"><div class="eh">'+mgHTML('CF',1)+'<span style="flex:1;font-size:13px">Created <b>ENG › '+d.title+'</b> in Tidewater Wiki</span>'+flapHTML('saved','f-ok',56)+'</div></div>';
+    return '<div class="epan"><div class="eh">'+mgHTML('CF',1)+'<span class="lbl" style="color:var(--text)">New Confluence page</span></div>'+
+     '<div class="es"><div class="split"><div class="fld"><span class="k">Space</span><select class="inp" id="np-space"><option>ENG — Engineering</option></select></div>'+
+      '<div class="fld"><span class="k">Parent</span><select class="inp" id="np-parent"><option>Standup protocols</option><option>SEPA payout retry design</option><option>(space root)</option></select></div></div>'+
+      '<div class="fld"><span class="k">Title</span><input class="inp" id="np-title" placeholder="Page title"></div>'+
+      '<div class="brow"><button class="b pri" data-act="np-go" data-id="'+a.id+'">Create page</button><button class="b" data-act="drop" data-id="'+a.id+'">Cancel</button></div></div></div>';
+  }
+  if(d.kind==='repo'){
+    if(d.done)return '<div class="epan"><div class="eh">'+mgHTML('GT',1)+'<span style="flex:1;font-size:13px">Created <b class="mono">tidewater/'+d.name+'</b> on git.tidewater.internal</span>'+flapHTML('created','f-ok',66)+'</div></div>';
+    return '<div class="epan"><div class="eh">'+mgHTML('GT',1)+'<span class="lbl" style="color:var(--text)">New Gitea repository</span></div>'+
+     '<div class="es"><div class="split"><div class="fld"><span class="k">Organisation</span><select class="inp" id="nr-org"><option>tidewater</option></select></div>'+
+      '<div class="fld"><span class="k">Visibility</span><select class="inp" id="nr-vis"><option>Private</option><option>Internal</option></select></div></div>'+
+      '<div class="fld"><span class="k">Name</span><input class="inp" id="nr-name" placeholder="repository-name"></div>'+
+      '<div class="brow"><button class="b pri" data-act="nr-go" data-id="'+a.id+'">Create repository</button><button class="b" data-act="drop" data-id="'+a.id+'">Cancel</button></div></div></div>';
+  }
+  return '';
+}
+function renderApp(a){
+  const b={worklog:worklogBlock,stepper:stepperBlock,trigger:triggerBlock,form:formBlock}[a.kind];
+  if(a.kind==='text')return blk(a.t,I.note,'<div class="mine"><div class="mt">'+a.d.html+'</div></div>');
+  if(a.kind==='insert')return blk(a.t,I[E[a.d.id].k]||I.ticket,entBlock(a.d.id,{}));
+  if(a.kind==='git')return blk(a.t,I.commit,'<div class="row"><span class="ttl">'+a.d.html+'</span><span class="tny grn">'+I.check+' done</span></div>');
+  return blk(a.t,I.clock,b?b(a):'');
+}
+function addApp(kind,d){
+  const id='ap'+(++S.newEnts);
+  S.appended.push({id:id,kind:kind,t:hm(Math.floor(S.clock/60)),d:d});
+  if(QUIET)render();else if(S.route.indexOf('#/day/')!==0)go('#/day/2026-08-22');else render();
+  setTimeout(function(){const n=document.getElementById('nowClock');if(n)n.scrollIntoView({block:'end'});},30);
+  return id;
+}
+function appById(id){return S.appended.filter(a=>a.id===id)[0];}
+
+/* ===================== full pages ===================== */
+function onPage(h){return h.replace(/<button class="b sm" data-act="nav"[^>]*>Open as page<\/button>/g,'');}
+function ph(title,thin,sub,nav){
+  return '<div class="phead"><div class="ptitle">'+title+(thin?' <span class="thin">'+thin+'</span>':'')+'</div>'+
+   (sub?'<div class="psub">'+sub+'</div>':'')+(nav?'<div class="pnav">'+nav+'</div>':'')+'</div>';
+}
+function viewTicket(k){
+  if(!TICKETS[k])return '<div class="empty">No ticket '+k+' in the local index.</div>';
+  const e=E[k];
+  return '<div class="pg">'+ph(k,e.t,
+    '<span class="pill">'+E[k].src+'</span><span class="pill">synced '+e.sy+'</span><span class="pill">updated '+TICKETS[k].updated+'</span>',
+    '<button class="pb" data-act="worklog-draft" data-id="'+k+'">Log time</button><button class="pb" data-act="nav" data-href="#/day/2026-08-22">Back to today</button>')+
+   '<div class="sec">'+onPage(ticketPanel(k))+'</div></div>';
+}
+function viewPR(n){
+  if(n==='145')
+   return '<div class="pg">'+ph('PR #145','Payout dashboard latency','<span class="pill">payout-service</span><span class="pill">opened by you at 14:32</span>')+
+    '<div class="sec"><div class="epan"><div class="eh">'+mgHTML('GT',1)+'<span style="flex:1">feature/PAY-240-payout-dashboard-latency → main</span>'+flapHTML('open','',56)+'</div>'+
+    '<div class="es"><div class="desc">Finance reports the payout dashboard takes 8–12 s to load for August. Target &lt; 2 s.<br><span class="tny">Description copied from PAY-240 when the PR was opened.</span></div></div>'+
+    linksSec('PR #145',['PAY-240'],['ticket'])+'</div></div></div>';
+  if(!E['PR #'+n])return '<div class="empty">No pull request #'+n+'.</div>';
+  const e=E['PR #'+n];
+  return '<div class="pg">'+ph('PR #'+n,e.t,'<span class="pill">'+e.src+'</span><span class="pill">synced '+e.sy+'</span>',
+    '<button class="pb" data-act="nav" data-href="#/day/2026-08-22">Back to today</button>')+
+   '<div class="sec">'+onPage(prPanel(n))+'</div></div>';
+}
+function viewBuild(n){
+  const b=S.builds['#'+n];if(!b)return '<div class="empty">No build #'+n+'.</div>';
+  return '<div class="pg">'+ph('#'+n,b.cfg,'<span class="pill">ci.tidewater.internal</span><span class="pill red">source sync failed 38 min ago · 401</span>',
+    '<button class="pb" data-act="nav" data-href="#/day/2026-08-22">Back to today</button>')+
+   '<div class="sec">'+onPage(buildPanel(n))+'</div></div>';
+}
+function viewPage(k){
+  const p=S.pages[k];if(!p)return '<div class="empty">No page here.</div>';
+  return '<div class="pg">'+ph(p.t,'','<span class="pill">Tidewater Wiki · '+p.space+'</span><span class="pill">edited '+p.edited+' by '+PEOPLE[p.by]+'</span>',
+    '<button class="pb" data-act="nav" data-href="#/day/2026-08-22">Back to today</button>')+
+   '<div class="sec">'+onPage(pagePanel(k))+'</div></div>';
+}
+function viewNote(k){
+  const n=S.notes[k];if(!n)return '<div class="empty">No note here.</div>';
+  return '<div class="pg">'+ph(n.t,'','<span class="pill">Local note</span><span class="pill">edited '+n.edited+'</span><span class="pill">never leaves this machine</span>',
+    '<button class="pb" data-act="new-note">New note</button><button class="pb" data-act="nav" data-href="#/day/2026-08-22">Back to today</button>')+
+   '<div class="sec">'+onPage(notePanel(k))+'</div></div>';
+}
+function viewRepo(){
+  return '<div class="pg">'+ph('payout-service','Rust','<span class="pill">git.tidewater.internal · tidewater</span><span class="pill">~/code/payout-service</span><span class="pill">312 commits on main</span>')+
+   '<div class="sec"><div class="lbl">Branches</div>'+
+   ['main','feature/PAY-231-sepa-retry','fix/PAY-228-partial-refund-drift'].map(function(b,i){
+     return '<button class="lrow" data-act="nav" data-href="#/pr/142">'+mgHTML('GT')+'<span class="ln mono" style="font-size:11.5px">'+b+'</span><span class="tny">'+
+      ['default','3 commits ahead · checked out','merged'][i]+'</span></button>';}).join('')+
+   '<div class="brow" style="margin-top:12px"><button class="b" data-act="git" data-g="pull">Pull</button><button class="b" data-act="git" data-g="push">Push</button>'+
+   '<button class="b" data-act="slash-run" data-cmd="branch">New branch…</button><button class="b" data-act="slash-run" data-cmd="repo">Create repository…</button></div></div></div>';
+}
+function viewInbox(){
+  return '<div class="pg">'+ph('Inbox',String(S.inbox.length)+' waiting',
+    '<span class="pill">mentions, reviews, failed builds and assignments</span><span class="pill">'+(S.snoozed.length?'1 snoozed':'nothing snoozed')+'</span>',
+    '<button class="pb" data-act="nav" data-href="#/day/2026-08-22">Back to today</button>')+
+   '<div class="sec"><div class="card"><div class="cardb" style="padding:4px 8px">'+inboxItems()+'</div></div>'+
+   '<div class="note fnt" style="margin-top:10px">Acting on an item here also writes a line into today\'s journal page.</div></div></div>';
+}
+function viewList(id){
+  const l=S.lists.filter(x=>x.id===id)[0];if(!l)return '<div class="empty">No such list.</div>';
+  let body='';
+  if(id==='failing')body='<div class="callout"><span class="ci">'+I.warn+'</span><span><b>This list joins three sources.</b> Jira knows the ticket, Gitea knows which branch carries it, TeamCity knows the build went red. JQL cannot express it — the query runs against the local index instead.<br><span class="tny">SELECT ticket WHERE assignee = me AND EXISTS build(status = failed) ON branch(ticket)</span></span></div>'+
+    '<div class="stream" style="margin-top:14px">'+blk('now',I.ticket,entBlock('PAY-231',{}))+blk('10:10',I.warn,'<div class="row">'+entRow('#1187')+flapHTML('failed','f-fail',60)+'</div>')+'</div>';
+  else if(id==='waiting')body='<div class="stream">'+blk('13:50',I.pr,entBlock('PR #144',{}))+'</div>';
+  else if(id==='idle')body='<div class="note">2 pull requests have had no activity for more than 5 days. Both are in repositories outside payout-service and ledger-api, so they are shown by count only until those repos are indexed.</div>';
+  else if(id==='pages')body='<div class="stream">'+blk('10:40',I.page,entBlock('SEPA payout retry design',{}))+
+    blk('yesterday',I.page,'<div class="row">'+entRow('Standup protocols')+'<button class="b sm" data-act="nav" data-href="#/page/standups">Open</button></div>')+
+    blk('—','','<div class="row"><span class="ttl fnt">1 more page edited this week outside ENG</span></div>')+'</div>';
+  else if(id==='blocked')body='<div class="stream">'+blk('16:30',I.ticket,entBlock('PAY-228',{}))+
+    blk('blocker',I.warn,'<div class="row">'+entRow('OPS-77')+flapHTML(S.status['OPS-77'],st(S.status['OPS-77']),60)+'</div>')+'</div>';
+  else body='<div class="note">'+(S.wkLogAll?'Everything is logged.':'4h 45m tracked this week has no Jira worklog yet.')+
+    '<div class="brow" style="margin-top:10px"><button class="b pri" data-act="nav" data-href="#/timesheet">Open the timesheet</button>'+
+    '<button class="b" data-act="worklog-draft">Draft a worklog for PAY-231</button></div></div>';
+  return '<div class="pg">'+ph(l.n,'',
+    '<span class="pill">saved local query</span><span class="pill">'+l.c+' '+(id==='unlogged'?'unlogged':'result'+(l.c==='1'?'':'s'))+'</span><span class="pill">re-runs on every sync</span>',
+    '<button class="pb" data-act="nav" data-href="#/day/2026-08-22">Back to today</button>')+
+   '<div class="sec">'+body+'</div></div>';
+}
+function viewTimesheet(){
+  const days=[['Mon 18','7h 45m',465,465],['Tue 19','8h 00m',480,480],['Wed 20','6h 30m',390,390],
+              ['Thu 21','7h 10m',430,270],['Fri 22','5h 28m',S.tracked,S.logged]];
+  const rows=days.map(function(d){
+    const logged=S.wkLogAll?d[2]:d[3];
+    const pctL=100*logged/480,pctU=100*(d[2]-logged)/480;
+    return '<tr><td class="m">'+d[0]+'</td><td class="m">'+dur(d[2])+'</td>'+
+     '<td style="width:46%"><div class="mtr" style="height:10px"><i class="lg" style="width:'+pctL.toFixed(1)+'%"></i><i class="ul" style="width:'+pctU.toFixed(1)+'%"></i></div></td>'+
+     '<td class="m">'+(logged?dur(logged):'—')+'</td>'+
+     '<td class="m '+(d[2]-logged?'amb':'fnt')+'">'+(d[2]-logged?dur(d[2]-logged):'0m')+'</td></tr>';
+  }).join('');
+  return '<div class="pg">'+ph('Week 34','18 – 22 August 2026',
+    '<span class="pill">tracked 34h 10m</span><span class="pill">logged '+(S.wkLogAll?'34h 10m':'29h 25m')+'</span>'+
+    '<span class="pill '+(S.wkLogAll?'':'amb')+'">unlogged '+(S.wkLogAll?'0m':'4h 45m')+'</span>',
+    '<button class="pb" data-act="nav" data-href="#/day/2026-08-22">Back to today</button>')+
+   '<div class="sec"><div class="card"><div class="cardb">'+
+    '<table class="tb"><thead><tr><th>Day</th><th>Tracked</th><th>Logged vs unlogged</th><th>Logged</th><th>Unlogged</th></tr></thead><tbody>'+rows+'</tbody></table>'+
+    '<div class="brow" style="margin-top:12px">'+
+     (S.wkLogAll?'<span class="tny grn">'+I.check+' Everything logged · 5 worklogs written to Jira</span>'
+      :'<button class="b pri" data-act="log-all">Log all 4h 45m</button><button class="b" data-act="worklog-draft">Review today\'s draft first</button>')+
+    '</div></div></div>'+
+    '<div class="note fnt" style="margin-top:10px">Tracking is passive from what is open in the app, plus manual timers and ad-hoc labels — nothing is derived from git branches. <span class="mut">Log all</span> covers the <span class="mono">4h 45m</span> already closed; today keeps running until you stop the timer.</div>'+
+   '</div></div>';
+}
+const STYPES=[['Jira','JI','v1.2'],['Confluence','CF','v1.2'],['Gitea','GT','v1.4'],['GitHub','GH','v1.1'],['GitLab','GL','v1.1'],
+              ['TeamCity','TC','v0.9'],['GitLab CI','GC','v0.7'],['Jenkins','JN','v0.6'],['Generic Git remote','GR','v1.0']];
+function viewSources(){
+  const cards=S.sources.map(function(s){
+    const ok=(s.id!=='teamcity')||S.tcFixed;
+    return '<div class="card"><div class="cardh">'+mgHTML(s.mg,1)+
+      '<span style="font-size:13.5px;color:var(--text)">'+s.name+'</span>'+
+      '<span class="tny">'+s.type+' · adapter '+s.adapter+'</span><span style="flex:1"></span>'+
+      flapHTML(ok?'synced':'401',ok?'f-ok':'f-fail',ok?58:44)+
+      '<button class="b sm" data-act="sync-now" data-id="'+s.id+'">Sync now</button></div>'+
+     '<div class="cardb"><div class="kv">'+
+       '<div><span class="k">URL</span><span class="v" style="font-size:11px">'+s.url+'</span></div>'+
+       '<div><span class="k">Auth</span><span class="v'+(s.warn?' amb':'')+'" style="font-size:11px">'+s.auth+' · '+s.authNote+'</span></div>'+
+       '<div><span class="k">Capabilities</span><span class="v" style="font-size:11px">'+s.caps+'</span></div>'+
+       '<div><span class="k">Indexed</span><span class="v">'+(ok?s.count:'—')+'</span></div>'+
+       '<div><span class="k">Last sync</span><span class="v">'+(S.tcFixed&&s.id==='teamcity'?'just now':s.sync)+'</span></div>'+
+       '<div><span class="k">Schedule</span><span class="v">every 5 minutes</span></div>'+
+     '</div>'+
+     (s.warn?'<div class="callout" style="margin-top:10px"><span class="ci">'+I.warn+'</span><span>The Jira personal access token expires on <b class="mono">2026-09-03</b> — in 12 days. Confluence uses the same token.'+
+       '<div class="brow" style="margin-top:8px"><button class="b" data-act="renew">Renew token…</button><button class="b" data-act="snooze-pat">Remind me on 29 Aug</button></div></span></div>':'')+
+     (s.id==='teamcity'&&!S.tcFixed?
+       '<div class="callout" style="margin-top:10px;border-color:#4A2A28;background:rgba(255,106,92,.05)"><span class="ci red">'+I.warn+'</span><span>'+
+       '<b class="red">Sync failed 38 min ago: 401 Unauthorized.</b> The stored password no longer works — it expires at the end of August. Builds still show their last known state; new triggers wait in the write queue.'+
+       (S.reauth
+         ?'<div style="margin-top:9px;max-width:420px"><div class="fld"><span class="k">Password for mara.lindqvist</span><input class="inp" type="password" id="tc-pw" value="••••••••••••" autocomplete="off"></div>'+
+          (S.reauthTested?'<div class="tny grn" style="margin-bottom:8px">'+I.check+' Connected · adapter v0.9 · 3 build configurations visible</div>':'')+
+          '<div class="brow"><button class="b" data-act="tc-test">Test connection</button>'+
+          (S.reauthTested?'<button class="b pri" data-act="tc-save">Save and sync</button>':'')+
+          '<button class="b" data-act="tc-cancel">Cancel</button></div></div>'
+         :'<div class="brow" style="margin-top:8px"><button class="b pri" data-act="tc-reauth">Re-enter password</button>'+
+          '<button class="b" data-act="nav" data-href="#/note/creds">Open note “Credentials to rotate”</button></div>')+
+       '</span></div>':'')+
+     (s.id==='teamcity'&&S.tcFixed?'<div class="tny grn" style="margin-top:10px">'+I.check+' Password updated at 14:32 · queue flushed · 3 build configurations indexed</div>':'')+
+     '</div></div>';
+  }).join('');
+  return '<div class="pg">'+ph('Sources',String(S.sources.length)+' configured',
+    '<span class="pill">every source is a pluggable adapter</span><span class="pill">postgres knobas · 212 MB</span><span class="pill">full-text index up to date</span>',
+    '<button class="pb" data-act="add-src">Add source</button><button class="pb" data-act="sync-all">Sync all</button>')+
+   '<div class="sec">'+cards+(S.add?addSourceCard():'')+'</div></div>';
+}
+function addSourceCard(){
+  const a=S.add;
+  const step=(n,label,body,open)=>'<div class="es" style="'+(open?'':'opacity:.45')+'"><div class="lbl esl"><span class="mono">'+n+'</span> '+label+'</div>'+(open?body:'')+'</div>';
+  return '<div class="card" style="margin-top:14px;border-color:#4A3A1A"><div class="cardh">'+I.plus+'<span class="lbl" style="color:var(--text)">Add a source</span>'+
+    '<span style="flex:1"></span><button class="b sm" data-act="add-cancel">Cancel</button></div>'+
+   '<div class="epan" style="border:none">'+
+   step(1,'Source type',
+     '<div class="grid9">'+STYPES.map(t=>'<button class="tcard'+(a.type===t[0]?' on':'')+'" data-act="add-type" data-t="'+t[0]+'">'+mgHTML(t[1],a.type===t[0])+
+       '<span class="tcol"><span class="tn">'+t[0]+'</span><span class="tny">adapter '+t[2]+'</span></span></button>').join('')+'</div>',true)+
+   step(2,'Server URL','<input class="inp" id="as-url" style="max-width:420px" value="'+(a.url||'')+'" placeholder="https://…"><div class="brow" style="margin-top:8px"><button class="b" data-act="add-url">Use this URL</button></div>',!!a.type)+
+   step(3,'Authentication','<div class="brow">'+
+     [['User + password','up'],['Personal access token (PAT)','pat'],['API token','api']].map(m=>'<button class="b'+(a.auth===m[1]?' pri':'')+'" data-act="add-auth" data-m="'+m[1]+'">'+m[0]+'</button>').join('')+
+     '<button class="b" disabled>OAuth — coming soon</button></div>'+
+     (a.auth?'<div class="fld" style="margin-top:9px;max-width:420px"><span class="k">'+(a.auth==='up'?'User and password':'Token')+'</span><input class="inp" type="password" value="••••••••••••"></div>':''),!!a.urlOk)+
+   step(4,'Test connection','<div class="brow"><button class="b" data-act="add-test">Test connection</button>'+
+     (a.tested?'<span class="tny grn">'+I.check+' Connected · '+a.type+' adapter · read access confirmed</span>':'<span class="tny fnt">Not tested yet</span>')+'</div>',!!a.auth)+
+   step(5,'Sync schedule','<div class="brow"><select class="inp" id="as-sched" style="width:190px"><option>every 5 minutes</option><option>every 15 minutes</option><option>hourly</option><option>manual only</option></select>'+
+     '<button class="b pri" data-act="add-save">Save source</button></div>',!!a.tested)+
+   '</div></div>';
+}
+
+/* ===================== search ===================== */
+var QUIET=false;
+const SEARCHDB=[
+ {id:'PAY-231',type:'ticket',src:'jira',who:'mara',date:'today',b:'retry failed sepa payouts backoff exponential psp transient'},
+ {id:'SEPA payout retry design',type:'page',src:'confluence',who:'mara',date:'today',b:'sepa retry backoff policy jitter manual review queue sla'},
+ {id:'PR #142',type:'pr',src:'gitea',who:'mara',date:'yesterday',b:'sepa retry with exponential backoff payout-service'},
+ {id:'a41f2c',type:'commit',src:'gitea',who:'mara',date:'today',b:'pay-231 backoff jitter sepa retry'},
+ {id:'c90d11',type:'commit',src:'gitea',who:'mara',date:'today',b:'pay-231 jitter backoff cap 5 attempts sepa retry'},
+ {id:'#1187',type:'build',src:'teamcity',who:'mara',date:'today',b:'payout integrationtests sepa retry gives_up_after_max_attempts failed'},
+ {id:'SEPA retry investigation',type:'note',src:'notes',who:'mara',date:'today',b:'sepa retry off-by-one attempt counter priya sla'},
+ {id:'PAY-228',type:'ticket',src:'jira',who:'mara',date:'yesterday',b:'ledger drift partial refunds'},
+ {id:'PAY-240',type:'ticket',src:'jira',who:'priya',date:'today',b:'payout dashboard latency finance august'},
+ {id:'PAY-236',type:'ticket',src:'jira',who:'jonas',date:'week',b:'payout csv export finance'},
+ {id:'OPS-77',type:'ticket',src:'jira',who:'tomasz',date:'week',b:'on-call runbook outdated'},
+ {id:'PR #144',type:'pr',src:'gitea',who:'jonas',date:'today',b:'add payout csv export'},
+ {id:'PR #139',type:'pr',src:'gitea',who:'mara',date:'yesterday',b:'fix ledger drift partial refunds'},
+ {id:'#1188',type:'build',src:'teamcity',who:'mara',date:'today',b:'payout build cargo test running'},
+ {id:'Ledger reconciliation runbook',type:'page',src:'confluence',who:'tomasz',date:'week',b:'ledger reconciliation runbook'},
+ {id:'Payments architecture overview',type:'page',src:'confluence',who:'priya',date:'week',b:'payments architecture ledger-api dashboard'},
+ {id:'Standup 2026-08-21',type:'note',src:'notes',who:'mara',date:'yesterday',b:'standup drift fix staging'},
+ {id:'Credentials to rotate',type:'note',src:'notes',who:'mara',date:'week',b:'teamcity password jira pat expires'}];
+const SRCNAME={jira:'Tidewater Jira',confluence:'Tidewater Wiki',gitea:'git.tidewater.internal',teamcity:'ci.tidewater.internal',notes:'Local notes'};
+function searchResults(){
+  const q=S.q.trim().toLowerCase(),terms=q?q.split(/\s+/):[];
+  return SEARCHDB.filter(function(r){
+    const hay=(r.id+' '+(E[r.id]?E[r.id].t:'')+' '+r.b).toLowerCase();
+    if(terms.length&&!terms.every(t=>hay.indexOf(t)>=0))return false;
+    if(Object.keys(S.f.src).length&&!S.f.src[r.src])return false;
+    if(Object.keys(S.f.type).length&&!S.f.type[r.type])return false;
+    if(Object.keys(S.f.who).length&&!S.f.who[r.who])return false;
+    if(S.f.date==='today'&&r.date!=='today')return false;
+    if(S.f.date==='week'&&r.date==='old')return false;
+    if(S.f.fb&&!(E[r.id]&&E[r.id].fb))return false;
+    return true;
+  });
+}
+function searchHTML(){
+  const rs=searchResults();
+  if(S.sel>=rs.length)S.sel=Math.max(0,rs.length-1);
+  const fgroup=(label,key,opts)=>'<div class="lbl">'+label+'</div>'+opts.map(function(o){
+    const on=key==='date'?(S.f.date===o[0]):!!S.f[key][o[0]];
+    return '<button class="fchip'+(on?' on':'')+'" data-act="filter" data-k="'+key+'" data-v="'+o[0]+'"><span class="tick">'+I.check+'</span>'+o[1]+'</button>';
+  }).join('');
+  return '<div class="omodal" role="dialog" aria-label="Search">'+
+   '<div class="osearch">'+sv('<circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2L14 14"/>')+
+     '<input id="sq" value="'+esc(S.q)+'" placeholder="Search all sources — try: sepa retry" autocomplete="off" spellcheck="false">'+
+     '<span class="tny">'+rs.length+' of '+SEARCHDB.length+' indexed items</span></div>'+
+   '<div class="obody"><div class="ofilters">'+
+     fgroup('Source','src',[['jira','JI Jira'],['confluence','CF Wiki'],['gitea','GT Gitea'],['teamcity','TC TeamCity'],['notes','NT Notes']])+
+     '<div style="height:8px"></div>'+
+     fgroup('Type','type',[['ticket','ticket'],['page','page'],['pr','pull request'],['commit','commit'],['build','build'],['note','note']])+
+     '<div style="height:8px"></div>'+
+     fgroup('People','who',[['mara','Mara'],['jonas','Jonas'],['priya','Priya'],['tomasz','Tomasz']])+
+     '<div style="height:8px"></div>'+
+     fgroup('Date','date',[['all','any time'],['today','today'],['week','this week']])+
+     '<div style="height:8px"></div><div class="lbl">Cross-source</div>'+
+     '<button class="fchip cross'+(S.f.fb?' on':'')+'" data-act="filter" data-k="fb" data-v="1" title="Joins Jira, Gitea and TeamCity — JQL cannot express this"><span class="tick">'+I.check+'</span>has a failing build</button>'+
+   '</div><div class="oresults" id="ores">'+
+     (rs.length?rs.map(function(r,i){
+       const e=E[r.id];
+       return '<div class="ores'+(i===S.sel?' sel':'')+'" tabindex="0" role="button" data-act="res" data-i="'+i+'" data-id="'+r.id+'">'+mgHTML(e.mg,1)+
+        '<span class="ox"><span class="o1">'+(r.type==='ticket'||r.type==='pr'||r.type==='build'||r.type==='commit'?'<span class="mono" style="color:var(--muted)">'+r.id+'</span> ':'')+e.t+'</span>'+
+        '<span class="o2">'+r.type+' · '+SRCNAME[r.src]+' · '+(r.src==='notes'?'local':'synced '+e.sy)+'</span></span>'+
+        (E[r.id].fb&&'ticket pr build'.indexOf(r.type)>=0?'<span class="tny red">failing build</span>':'')+
+        '<button class="b sm" data-act="res-insert" data-id="'+r.id+'">Insert as block</button></div>';
+     }).join(''):'<div class="empty">Nothing in the local index matches “'+esc(S.q)+'”.<br><span class="tny">Filters are still on — clear them, or try “sepa retry”.</span></div>')+
+   '</div></div>'+
+   '<div class="ofoot"><span class="ohint">'+(S.q?'':'<button class="b sm" data-act="preset">try “sepa retry”</button>')+'</span>'+
+     S.lists.slice(0,3).map(l=>'<button class="b sm" data-act="nav" data-href="#/list/'+l.id+'">'+l.n+' <span class="'+(l.hot?'amb':'fnt')+'">'+l.c+'</span></button>').join('')+
+     '<span style="flex:1"></span><span class="ohint"><kbd>↵</kbd> open</span><span class="ohint"><kbd>⇧↵</kbd> insert into today</span><span class="ohint"><kbd>esc</kbd> close</span></div>'+
+  '</div>';
+}
+function openSearch(){
+  SCRIM.classList.remove('hide');SCRIM.innerHTML=searchHTML();
+  const i=document.getElementById('sq');if(i){i.focus();i.select();}
+}
+function refreshSearch(){
+  if(SCRIM.classList.contains('hide'))return;
+  const pos=document.getElementById('sq').selectionStart;
+  SCRIM.innerHTML=searchHTML();
+  const i=document.getElementById('sq');i.focus();try{i.setSelectionRange(pos,pos);}catch(e){}
+}
+function closeOverlay(){SCRIM.classList.add('hide');SCRIM.innerHTML='';closeDD();}
+
+/* ===================== router ===================== */
+function viewFor(h){
+  const m=h.match(/^#\/([^/]+)\/?(.*)$/);
+  if(!m)return viewDay('2026-08-22');
+  const k=m[1],a=decodeURIComponent(m[2]||'');
+  if(k==='day')return viewDay(a);
+  if(k==='ticket')return viewTicket(a);
+  if(k==='pr')return viewPR(a);
+  if(k==='build')return viewBuild(a);
+  if(k==='page')return viewPage(a);
+  if(k==='note')return viewNote(a);
+  if(k==='list')return viewList(a);
+  if(k==='inbox')return viewInbox();
+  if(k==='sources')return viewSources();
+  if(k==='timesheet')return viewTimesheet();
+  if(k==='repo')return viewRepo();
+  return viewDay('2026-08-22');
+}
+function crumbLabel(h){
+  const m=h.match(/^#\/([^/]+)\/?(.*)$/)||[];
+  const k=m[1],a=decodeURIComponent(m[2]||'');
+  if(k==='day')return ['Journal',a==='2026-08-22'?'Friday 22 August':a];
+  if(k==='ticket')return ['Jira',a+' '+(E[a]?E[a].t:'')];
+  if(k==='pr')return ['Gitea','PR #'+a];
+  if(k==='build')return ['TeamCity','#'+a];
+  if(k==='page')return ['Confluence · ENG',(S.pages[a]||{t:a}).t];
+  if(k==='note')return ['Notes',(S.notes[a]||{t:a}).t];
+  if(k==='list')return ['Smart list',(S.lists.filter(x=>x.id===a)[0]||{n:a}).n];
+  if(k==='inbox')return ['Attention','Inbox'];
+  if(k==='sources')return ['Settings','Sources'];
+  if(k==='timesheet')return ['Time','Week 34'];
+  if(k==='repo')return ['Gitea',a];
+  return ['Journal','Today'];
+}
+function renderCrumbs(){
+  const c=crumbLabel(S.route);
+  $('#crumbs').innerHTML='<span class="cb">'+c[0]+'</span><span class="cb">/</span><span class="cn">'+c[1]+'</span>';
+}
+function renderStatus(){
+  $('#stPend').innerHTML='write queue <b'+(S.pending?' class="sbad"':'')+'>'+S.pending+' pending</b>';
+  $('#stSync').innerHTML='<b>JI</b> <span class="sok">4m</span> · <b>CF</b> <span class="sok">4m</span> · <b>GT</b> <span class="sok">2m</span> · <b>TC</b> '+
+    (S.tcFixed?'<span class="sok">just now</span>':'<span class="sbad">401 unauthorized</span>');
+}
+function render(){
+  const y=CENTER.scrollTop;
+  CENTER.innerHTML=viewFor(S.route);
+  renderSide();renderRight();renderCrumbs();renderStatus();updateTimerChrome();
+  CENTER.scrollTop=y;
+}
+function route(){S.route=location.hash||'#/day/2026-08-22';render();}
+window.addEventListener('hashchange',route);
+
+/* ===================== timer ===================== */
+function elapsed(){return Math.max(0,Math.floor(S.clock/60)-S.timer.start);}
+function updateTimerChrome(){
+  const b=$('#timerBtn');
+  b.className='cbtn '+(S.timer.run?'run':'idle');
+  $('#timerCtx').textContent=S.timer.run?S.timer.ctx:'no timer';
+  const f=$('#timerFlap');
+  flapSet(f,S.timer.run?el0(elapsed()):'0:00',S.timer.run?'f-run':'f-idle');
+  f.style.minWidth='44px';
+  $('#timerSec').textContent=S.timer.run?':'+String(S.clock%60).padStart(2,'0'):'';
+}
+function startTimer(ctx){
+  S.timer.run=true;S.timer.ctx=ctx;S.timer.start=Math.floor(S.clock/60);
+  updateTimerChrome();toast('Timer started on <b>'+ctx+'</b>');
+  pushTick('<b>'+ctx+'</b> · timer running · since '+hm(S.timer.start));
+  render();
+}
+function stopTimer(){
+  if(!S.timer.run)return;
+  const ctx=S.timer.ctx;S.timer.run=false;
+  updateTimerChrome();
+  toast('Timer stopped on <b>'+ctx+'</b> · worklog draft added to today');
+  makeDraft(ctx);
+}
+function makeDraft(target){
+  const on={a1:1,a2:1,a3:1,a5:1};
+  return addApp('worklog',{mins:164,target:(target&&E[target]&&E[target].k==='ticket')?target:'PAY-231',on:on,comment:genComment(on),logged:false,editing:false});
+}
+function journal(html){QUIET=true;addApp('git',{html:html});QUIET=false;}
+
+/* ===================== interactions ===================== */
+function flash(n){n.style.transition='none';n.style.background='rgba(255,176,32,.10)';
+  setTimeout(function(){n.style.transition='background 500ms';n.style.background='';},700);}
+function setStatus(id,v){
+  S.status[id]=v;closeDD();
+  Array.prototype.forEach.call(document.querySelectorAll('[data-act="status-menu"][data-id="'+id+'"] .flap'),n=>flapSet(n,v,st(v)));
+  toast('<b>'+id+'</b> moved to '+v+' · saved to Jira','ok');
+  pushTick('<b>'+id+'</b> · '+v.toLowerCase());
+  journal('<b>'+id+'</b> moved to '+v+' — saved to Jira');
+  setTimeout(render,480);
+}
+function ctxEntity(){
+  const m=S.route.match(/^#\/(ticket|pr|build|page|note)\/(.+)$/);
+  if(!m)return 'PAY-231';
+  if(m[1]==='ticket')return m[2];
+  if(m[1]==='pr')return 'PR #'+m[2];
+  if(m[1]==='build')return '#'+m[2];
+  if(m[1]==='page')return (S.pages[m[2]]||{}).t||'PAY-231';
+  if(m[1]==='note')return (S.notes[m[2]]||{}).t||'PAY-231';
+  return 'PAY-231';
+}
+function serialize(node){
+  let out='';
+  Array.prototype.forEach.call(node.childNodes,function(c){
+    if(c.nodeType===3)out+=c.textContent;
+    else if(c.classList&&c.classList.contains('chip'))out+='[['+c.textContent.replace(/^(JI|CF|GT|TC|NT)/,'')+']]';
+    else out+=(c.textContent||'');
+  });
+  return out.trim();
+}
+function pickerDD(anchor,act,extra){
+  const ids=Object.keys(E).filter(k=>['ticket','pr','build','page','note'].indexOf(E[k].k)>=0);
+  return openDD(anchor,'<div class="dl"><input class="inp" id="pk" placeholder="Search entities…"></div>'+
+    (extra||'')+'<div id="pklist">'+ids.map(k=>'<button class="di" data-act="'+act+'" data-v="'+esc(k)+'">'+mgHTML(E[k].mg)+'<span class="mono">'+k+'</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+E[k].t+'</span></button>').join('')+'</div>');
+}
+const SLASH=[['startwork','Start work on PAY-240','branch → push → PR → link → In Progress → timer'],
+ ['trigger','Trigger a build','Payout_IntegrationTests, parameters'],['ticket','New ticket','Jira · PAY or OPS'],
+ ['page','New page','Confluence · ENG'],['repo','Create repository','Gitea · tidewater'],
+ ['pull','Pull payout-service','git.tidewater.internal'],['push','Push feature/PAY-231-sepa-retry','3 commits'],
+ ['link','Link something to today','[[ picker'],['search','Search all sources','⌘K']];
+function slashDD(anchor){
+  openDD(anchor,'<div class="dl lbl">Commands</div>'+SLASH.map(s=>'<button class="di" data-act="slash-run" data-cmd="'+s[0]+'"><span style="flex:1">'+s[1]+'</span><span class="tny">'+s[2]+'</span></button>').join(''));
+}
+function runSlash(cmd,anchor){
+  closeDD();
+  if(cmd==='startwork'||cmd==='branch')addApp('stepper',{stage:'form',i:0,timer:true});
+  else if(cmd==='trigger')addApp('trigger',{stage:'form',clean:false});
+  else if(cmd==='ticket')addApp('form',{kind:'ticket'});
+  else if(cmd==='page')addApp('form',{kind:'page'});
+  else if(cmd==='repo')addApp('form',{kind:'repo'});
+  else if(cmd==='pull'){journal('Pulled <b>payout-service</b> — already up to date with <span class="mono">main</span> · 312 commits');toast('payout-service is up to date','ok');}
+  else if(cmd==='push'){journal('Pushed <b>feature/PAY-231-sepa-retry</b> → git.tidewater.internal · 3 commits');toast('Pushed 3 commits to git.tidewater.internal','ok');}
+  else if(cmd==='link')pickerDD(anchor||$('#dayEd')||$('#chrome'),'link-today');
+  else if(cmd==='search')openSearch();
+}
+function inboxAct(id,a){
+  const it=S.inbox.filter(x=>x.id===id)[0];if(!it)return;
+  const drop=()=>{S.inbox=S.inbox.filter(x=>x.id!==id);flapSet($('#inboxFlap'),String(S.inbox.length),S.inbox.length?'f-run':'f-ok');};
+  if(a==='done'){drop();journal('Cleared from the inbox: '+it.x.replace(/<[^>]+>/g,''));toast('Marked done','ok');render();return;}
+  if(a==='snooze'){S.snoozed.push({id:id,x:it.x.replace(/<[^>]+>/g,''),back:'returns Monday 09:00'});drop();toast('Snoozed until Monday 09:00');render();return;}
+  if(a==='review'){drop();journal('Opened <b>PR #144</b> for review');go('#/pr/144');return;}
+  if(a==='reply'){drop();go(id==='i2'?'#/page/sepa':'#/pr/142');return;}
+  if(a==='open'){drop();go(id==='i2'?'#/page/sepa':'#/ticket/PAY-240');return;}
+  if(a==='log'){go('#/build/1187');return;}
+  if(a==='rerun'){drop();doRerun();return;}
+  if(a==='comment'){drop();S.expanded['PAY-231']=true;go('#/ticket/PAY-231');
+    setTimeout(function(){const i=document.getElementById('ci-PAY-231');if(i)i.focus();},60);return;}
+  if(a==='start'){drop();addApp('stepper',{stage:'form',i:0,timer:true});return;}
+  if(a==='ops'){drop();go('#/ticket/OPS-77');return;}
+  if(a==='ping'){journal('Pinged Tomasz Wójcik about <b>OPS-77</b> — comment posted to Jira');toast('Comment posted on OPS-77 for Tomasz','ok');render();return;}
+}
+function doRerun(){
+  const id=addApp('trigger',{stage:S.tcFixed?'run':'queued',cfg:'Payout_IntegrationTests',branch:'feature/PAY-231-sepa-retry',env:'staging',clean:false,no:'#1189'});
+  if(S.tcFixed){toast('Payout_IntegrationTests <b>#1189</b> triggered on feature/PAY-231-sepa-retry','ok');pushTick('<b>#1189</b> · queued · integration tests');}
+  else{S.pending=1;renderStatus();toast('Not sent — TeamCity returned <b>401</b>. Queued as 1 pending write; re-enter the password in Sources.','bad');}
+  render();return id;
+}
+function flushQueue(){
+  const q=S.appended.filter(a=>a.kind==='trigger'&&a.d.stage==='queued');
+  q.forEach(function(a){a.d.stage='run';a.d.no='#1189';});
+  if(q.length){toast('Write queue flushed · <b>#1189</b> triggered on feature/PAY-231-sepa-retry','ok');pushTick('<b>#1189</b> · queued · integration tests');}
+  S.pending=0;renderStatus();
+}
+function newNote(pre){
+  const k='n'+(++S.newEnts),t='Note '+hm(Math.floor(S.clock/60));
+  S.notes[k]={t:t,edited:'just now',body:'',links:[pre||ctxEntity()]};
+  E[t]={k:'note',mg:'NT',t:t,h:'#/note/'+k,s:'',src:'Local note',sy:'local',who:'mara'};
+  go('#/note/'+k);
+  toast('New note created, linked to <b>'+(pre||ctxEntity())+'</b>','ok');
+  setTimeout(function(){const e=document.querySelector('[data-note="'+k+'"]');if(e)e.focus();},80);
+}
+document.addEventListener('click',function(ev){
+ try{
+  const t=ev.target.closest('[data-act]');if(!t)return;
+  const a=t.dataset.act,id=t.dataset.id;
+  if(a!=='timer-menu'&&a!=='status-menu'&&a!=='link-picker'&&a!=='assign-una'&&a!=='adhoc-log'&&a.indexOf('slash')!==0)closeDD();
+  switch(a){
+  case 'nav':closeOverlay();go(t.dataset.href);break;
+  case 'back':history.back();break;
+  case 'fwd':history.forward();break;
+  case 'open-search':openSearch();break;
+  case 'toggle':S.expanded[id]=!S.expanded[id];render();break;
+  case 'goto':{const n=document.getElementById(id);if(n){n.scrollIntoView({block:'center'});flash(n);}break;}
+  case 'status-menu':openDD(t,'<div class="dl lbl">Move '+id+' to</div>'+
+    ['To Do','In Progress','In Review','Done'].map(v=>'<button class="di'+(S.status[id]===v?' sel':'')+'" data-act="set-status" data-id="'+id+'" data-v="'+v+'">'+flapHTML(v,st(v),74)+'</button>').join('')+
+    '<div class="dl tny">Writes straight to Tidewater Jira</div>');break;
+  case 'set-status':setStatus(id,t.dataset.v);break;
+  case 'add-comment':{
+    const i=document.getElementById('ci-'+sl(id));if(!i||!i.value.trim()){if(i)i.focus();break;}
+    S.comments[id].push({w:'mara',when:'today 14:32',x:esc(i.value.trim())});
+    toast('Comment posted to <b>'+id+'</b>','ok');journal('Commented on <b>'+id+'</b>');render();break;}
+  case 'link-picker':{const pn=t.closest('.epan');S.pickTarget=pn?pn.querySelector('[data-note]'):null;pickerDD(t,'link-confirm');break;}
+  case 'link-confirm':{const v=t.dataset.v;closeDD();
+    if(S.pickTarget&&S.pickTarget.dataset.note&&S.notes[S.pickTarget.dataset.note]){
+      const nk=S.pickTarget.dataset.note;
+      S.notes[nk].body=serialize(S.pickTarget).replace(/\[\[$/,'')+' [['+v+']]';
+      if(S.notes[nk].links.indexOf(v)<0)S.notes[nk].links.push(v);
+      S.pickTarget=null;toast('Inserted <b>'+v+'</b> into the note','ok');render();break;}
+    toast('Linked to <b>'+v+'</b> · confirmed link saved locally','ok');journal('Linked <b>'+v+'</b>');render();break;}
+  case 'link-today':{const v=t.dataset.v;closeDD();addApp('insert',{id:v});toast('<b>'+v+'</b> embedded in today\'s page','ok');break;}
+  case 'sug-ok':{const g=S.sugg.filter(x=>x.id===id)[0];S.sugg=S.sugg.filter(x=>x.id!==id);
+    toast('Linked <b>'+g.a+'</b> ↔ <b>'+g.b+'</b>','ok');journal('Confirmed link <b>'+g.a+'</b> ↔ <b>'+g.b+'</b>');render();break;}
+  case 'sug-no':{S.sugg=S.sugg.filter(x=>x.id!==id);toast('Suggestion dismissed · it will not come back');render();break;}
+  case 'worklog-draft':makeDraft(id||S.timer.ctx);break;
+  case 'timer-menu':openDD(t,'<div class="dl lbl">Timer</div>'+
+    (S.timer.run?'<button class="di" data-act="timer-stop">'+I.pause+'Stop and draft a worklog</button>':'')+
+    '<div class="dl lbl">Switch context</div>'+
+    ['PAY-231','PAY-228','PAY-240','PR #144'].map(k=>'<button class="di" data-act="timer-start" data-ctx="'+k+'">'+mgHTML(E[k].mg)+'<span class="mono">'+k+'</span></button>').join('')+
+    '<button class="di" data-act="timer-label">'+I.plus+'Ad-hoc label…</button>'+
+    '<button class="di" data-act="nav" data-href="#/timesheet">'+I.sheet+'This week</button>',{right:true});break;
+  case 'timer-label':{closeDD();S.timer.run=true;S.timer.ctx='Staging DB configuration';S.timer.start=Math.floor(S.clock/60);
+    updateTimerChrome();toast('Timer switched to the ad-hoc label <b>Staging DB configuration</b> — no ticket attached');render();break;}
+  case 'timer-start':startTimer(t.dataset.ctx);break;
+  case 'timer-stop':stopTimer();break;
+  case 'rerun':doRerun();break;
+  case 'trigger-form':addApp('trigger',{stage:'form',clean:false});break;
+  case 'comment-on':S.expanded[id]=true;go('#/ticket/'+id);setTimeout(function(){const i=document.getElementById('ci-'+sl(id));if(i)i.focus();},60);break;
+  case 'edit-page':{const d=t.closest('.es').querySelector('.desc');d.contentEditable='true';d.focus();
+    toast('Editing the page — it saves to Confluence when you click away');break;}
+  case 'add-sla':S.sla=true;toast('Added the manual-review SLA to <b>SEPA payout retry design</b> · saved to Confluence','ok');
+    journal('Added the manual-review SLA to <b>SEPA payout retry design</b>');render();break;
+  case 'page-reply':{const i=document.getElementById('ci-page-sepa');if(!i||!i.value.trim()){if(i)i.focus();break;}
+    S.pageReply=esc(i.value.trim());toast('Reply posted to Priya on the design page','ok');render();break;}
+  case 'review-pr':S.pr144=true;S.inbox=S.inbox.filter(x=>x.id!=='i1');flapSet($('#inboxFlap'),String(S.inbox.length),'f-run');
+    toast('Approved <b>PR #144</b> · Jonas notified','ok');journal('Approved <b>PR #144</b> Add payout CSV export');render();break;
+  case 'pr-comment':{const i=t.closest('.epan').querySelector('input');if(i)i.focus();break;}
+  case 'inbox':inboxAct(id,t.dataset.a);break;
+  case 'unsnooze':{const s=S.snoozed.shift();S.inbox.push({id:'s'+(++S.newEnts),t:'now',mg:'JI',ent:'PAY-219',x:s.x,acts:[['done','Done'],['snooze','Snooze']]});
+    flapSet($('#inboxFlap'),String(S.inbox.length),'f-run');render();break;}
+  case 'copy-digest':{try{navigator.clipboard.writeText('Yesterday: merged PR #139; PAY-228 → In Review; retry loop for PAY-231 (7be0e4); logged 4h 30m. Today: PAY-231 backoff + jitter (a41f2c, c90d11); fix #1187; reply to Priya about the SLA; review PR #144. Blockers: PAY-228 blocked by OPS-77.');}catch(e){}
+    toast('Digest copied','ok');break;}
+  case 'digest-note':newNote('PAY-231');break;
+  case 'ai-ticket':{const key='PAY-24'+(1+Object.keys(S.drafts).length);
+    const sum={sla:'Document the manual-review queue SLA',ops:'On-call runbook update follow-up',ac:'PAY-240 acceptance criteria'}[id];
+    S.drafts['ai-'+id]='Created '+key;
+    E[key]={k:'ticket',mg:'JI',t:sum,h:'#/ticket/'+key,s:'To Do',src:'Tidewater Jira',sy:'just now',who:'mara'};
+    S.status[key]='To Do';S.comments[key]=[];
+    TICKETS[key]={type:'Task',pri:'Medium',assignee:'mara',epic:'PAY-200',updated:'today 14:32',est:'—',spent:'0m',desc:sum+' — created from the standup protocol of 2026-08-22.',links:['SEPA payout retry design'],rel:['page']};
+    toast('Created <b>'+key+'</b> '+sum,'ok');render();break;}
+  case 'proto-note':S.protoSaved=true;S.notes['proto22']={t:'Standup 2026-08-22',edited:'just now',
+    body:'Attendees: Mara, Jonas, Priya, Tomasz, Lena. Jonas: PR #144 ready for review. Priya: SLA by Monday. Tomasz: OPS-77 ETA Tuesday. Lena: dashboard latency → [[PAY-240]].',links:['PAY-240','PAY-231']};
+    E['Standup 2026-08-22']={k:'note',mg:'NT',t:'Standup 2026-08-22',h:'#/note/proto22',s:'',src:'Local note',sy:'local',who:'mara'};
+    toast('Saved as note <b>Standup 2026-08-22</b>','ok');render();break;
+  case 'publish':S.publishConfirm=true;render();break;
+  case 'publish-cancel':S.publishConfirm=false;render();break;
+  case 'publish-go':S.published=true;S.publishConfirm=false;toast('Published to <b>ENG › Standup protocols › 2026-08-22</b>','ok');
+    pushTick('<b>ENG</b> · standup protocol published');journal('Published the standup protocol to ENG › Standup protocols › 2026-08-22');render();break;
+  case 'assign-una':pickerDD(t,'assign-pick','<div class="dl tny">30 minutes, 11:50–12:20</div>');break;
+  case 'assign-pick':S.una.state=t.dataset.v;closeDD();toast('30m assigned to <b>'+t.dataset.v+'</b>','ok');render();break;
+  case 'adhoc-log':openDD(t,'<div class="dl lbl">Log 48m to</div>'+
+    '<button class="di" data-act="adhoc-pick" data-v="OPS-77">'+mgHTML('JI')+'<span class="mono">OPS-77</span><span class="tny amb">suggested</span></button>'+
+    ['PAY-231','PAY-228','PAY-240'].map(k=>'<button class="di" data-act="adhoc-pick" data-v="'+k+'">'+mgHTML('JI')+'<span class="mono">'+k+'</span></button>').join(''));break;
+  case 'adhoc-pick':S.adhoc.state=t.dataset.v;closeDD();toast('Logged 48m to <b>'+t.dataset.v+'</b>','ok');
+    S.logged+=48;S.unlogged=Math.max(0,S.unlogged-48);render();break;
+  case 'adhoc-keep':S.adhoc.state='local';toast('Kept local — nothing sent to Jira');render();break;
+  case 'startwork':addApp('stepper',{stage:'form',i:0,timer:true});break;
+  case 'new-note':newNote();break;
+  case 'wl-check':{const w=appById(id);w.d.on[t.dataset.k]=!w.d.on[t.dataset.k];w.d.comment=genComment(w.d.on);render();break;}
+  case 'wl-edit':{const w=appById(id);w.d.editing=!w.d.editing;render();break;}
+  case 'wl-discard':{S.appended=S.appended.filter(x=>x.id!==id);toast('Draft discarded — the time stays tracked locally');render();break;}
+  case 'wl-log':{const w=appById(id);const c=document.getElementById('wl-c-'+id);
+    if(c)w.d.comment=c.textContent.trim();
+    w.d.logged=true;
+    if(w.d.target!=='__none'){
+      S.worklogs[w.d.target]=S.worklogs[w.d.target]||[];
+      S.worklogs[w.d.target].push({d:'today',dur:dur(w.d.mins),x:w.d.comment});
+      S.logged+=w.d.mins;S.unlogged=Math.max(0,S.unlogged-w.d.mins);
+      toast('Logged <b>'+dur(w.d.mins)+'</b> to '+w.d.target+' · Jira worklog created','ok');
+      pushTick('<b>'+w.d.target+'</b> · worklog '+dur(w.d.mins));
+    }else toast('Kept '+dur(w.d.mins)+' local — no ticket attached');
+    render();break;}
+  case 'sw-timer':{const w=appById(id);w.d.timer=!w.d.timer;render();break;}
+  case 'sw-run':{const w=appById(id);w.d.stage='run';w.d.i=0;render();runStepper(w);break;}
+  case 'drop':S.appended=S.appended.filter(x=>x.id!==id);render();break;
+  case 'tb-clean':{const w=appById(id);w.d.clean=!w.d.clean;render();break;}
+  case 'tb-go':{const w=appById(id);
+    w.d.cfg=document.getElementById('tb-cfg').value;w.d.branch=document.getElementById('tb-branch').value;w.d.env=document.getElementById('tb-env').value;
+    if(S.tcFixed){w.d.stage='run';w.d.no='#1189';toast('Triggered '+w.d.cfg+' <b>#1189</b>','ok');pushTick('<b>#1189</b> · queued · '+w.d.cfg);}
+    else{w.d.stage='queued';S.pending=1;toast('Not sent — TeamCity returned <b>401</b>. Held in the write queue.','bad');}
+    render();break;}
+  case 'nt-go':{const w=appById(id);const s=document.getElementById('nt-sum').value.trim()||'Untitled ticket';
+    const proj=document.getElementById('nt-proj').value.slice(0,3);const key=proj+'-'+(241+S.newEnts);
+    w.d.done=true;w.d.key=key;w.d.summary=s;
+    E[key]={k:'ticket',mg:'JI',t:s,h:'#/ticket/'+key,s:'To Do',src:'Tidewater Jira',sy:'just now',who:'mara'};
+    S.status[key]='To Do';S.comments[key]=[];
+    TICKETS[key]={type:document.getElementById('nt-type').value,pri:'Medium',assignee:'mara',epic:'',updated:'today 14:32',est:'—',spent:'0m',
+      desc:document.getElementById('nt-desc').value||'Created from today\'s journal page.',links:[],rel:[]};
+    toast('Created <b>'+key+'</b>','ok');render();break;}
+  case 'np-go':{const w=appById(id);const ti=document.getElementById('np-title').value.trim()||'Untitled page';
+    w.d.done=true;w.d.title=ti;const k='p'+(++S.newEnts);
+    S.pages[k]={t:ti,space:'ENG',edited:'just now',by:'mara',sec:''};
+    E[ti]={k:'page',mg:'CF',t:ti,h:'#/page/'+k,s:'',src:'Tidewater Wiki · ENG',sy:'just now',who:'mara'};
+    toast('Created <b>ENG › '+ti+'</b>','ok');render();break;}
+  case 'nr-go':{const w=appById(id);w.d.done=true;w.d.name=document.getElementById('nr-name').value.trim()||'new-repo';
+    toast('Created <b>tidewater/'+w.d.name+'</b>','ok');render();break;}
+  case 'git':runSlash(t.dataset.g);break;
+  case 'slash-run':runSlash(t.dataset.cmd,t);break;
+  case 'sync-now':toast('Syncing <b>'+id+'</b>…');setTimeout(function(){toast('<b>'+id+'</b> synced · index up to date','ok');},600);break;
+  case 'sync-all':toast(S.tcFixed?'All four sources synced':'3 sources synced · TeamCity still returns 401',S.tcFixed?'ok':'bad');break;
+  case 'renew':toast('Open Atlassian to mint a new token, then paste it here — the current one works until 2026-09-03');break;
+  case 'snooze-pat':toast('Reminder set for 29 August','ok');break;
+  case 'tc-reauth':S.reauth=true;render();setTimeout(function(){const p=document.getElementById('tc-pw');if(p){p.focus();p.select();}},60);break;
+  case 'tc-test':S.reauthTested=true;render();toast('Connected to ci.tidewater.internal · adapter v0.9','ok');break;
+  case 'tc-save':S.tcFixed=true;S.reauth=false;S.reauthTested=false;
+    flapSet($('#syncOk'),'4 ok','f-ok');flapSet($('#syncBad'),'tc ok','f-ok');
+    toast('TeamCity password saved · sync resumed','ok');pushTick('<b>TC</b> · authenticated · sync resumed');
+    flushQueue();render();break;
+  case 'tc-cancel':S.reauth=false;S.reauthTested=false;render();break;
+  case 'add-src':S.add={type:'',url:'',auth:'',tested:false};render();break;
+  case 'add-cancel':S.add=null;render();break;
+  case 'add-type':S.add.type=t.dataset.t;render();break;
+  case 'add-url':S.add.url=document.getElementById('as-url').value.trim();S.add.urlOk=!!S.add.url;
+    if(!S.add.urlOk)toast('Enter the server URL, for example https://ci.example.com','bad');render();break;
+  case 'add-auth':S.add.auth=t.dataset.m;render();break;
+  case 'add-test':S.add.tested=true;toast('Connected · '+S.add.type+' adapter responded','ok');render();break;
+  case 'add-save':{const s=S.add;
+    S.sources.push({id:'new'+(++S.newEnts),mg:(STYPES.filter(x=>x[0]===s.type)[0]||['','NW'])[1],name:s.url.replace(/^https?:\/\//,''),
+      type:s.type,url:s.url,auth:s.auth==='up'?'User + password':(s.auth==='pat'?'PAT':'API token'),authNote:'added today',
+      state:'ok',sync:'never',count:'indexing…',adapter:(STYPES.filter(x=>x[0]===s.type)[0]||['','','v1.0'])[2],caps:'search'});
+    S.add=null;toast('Source added · first sync started','ok');render();break;}
+  case 'log-all':S.wkLogAll=true;S.unlogged=0;S.logged=S.tracked;toast('Logged 4h 45m across 2 days · 5 worklogs written to Jira','ok');render();break;
+  case 'filter':{const k=t.dataset.k,v=t.dataset.v;
+    if(k==='date')S.f.date=v;else if(k==='fb')S.f.fb=!S.f.fb;else{if(S.f[k][v])delete S.f[k][v];else S.f[k][v]=1;}
+    S.sel=0;refreshSearch();break;}
+  case 'res':{closeOverlay();go(E[id].h);break;}
+  case 'res-insert':{ev.stopPropagation();closeOverlay();addApp('insert',{id:id});toast('<b>'+id+'</b> embedded in today\'s page','ok');break;}
+  case 'preset':S.q='sepa retry';S.sel=0;refreshSearch();break;
+  }
+ }catch(e){boom(e);}
+});
+function runStepper(w){
+  const gap=RM.matches?60:620;
+  const next=function(){
+    w.d.i++;
+    if(w.d.i===5){S.status['PAY-240']='In Progress';}
+    if(w.d.i===6){
+      E['PR #145']={k:'pr',mg:'GT',t:'Payout dashboard latency',h:'#/pr/145',s:'open',src:'git.tidewater.internal',sy:'just now',who:'mara'};
+      TICKETS['PAY-240'].links=['PR #145','Payments architecture overview'];TICKETS['PAY-240'].rel=['pull request','suggested page'];
+      if(w.d.timer){S.timer.ctx='PAY-240';S.timer.start=Math.floor(S.clock/60);S.timer.run=true;}
+      toast('PAY-240 is in progress · branch pushed, <b>PR #145</b> open','ok');
+      pushTick('<b>PAY-240</b> · in progress · PR #145 open');
+      render();return;
+    }
+    render();setTimeout(next,gap);
+  };
+  setTimeout(next,gap);
+}
+document.addEventListener('change',function(ev){
+  const t=ev.target.closest('[data-act]');if(!t)return;
+  if(t.dataset.act==='wl-target'){const w=appById(t.dataset.id);w.d.target=t.value;render();}
+});
+document.addEventListener('input',function(ev){
+  if(ev.target.id==='sq'){S.q=ev.target.value;S.sel=0;refreshSearch();return;}
+  if(ev.target.id==='pk'){const q=ev.target.value.toLowerCase();
+    Array.prototype.forEach.call(document.querySelectorAll('#pklist .di'),function(b){b.style.display=b.textContent.toLowerCase().indexOf(q)>=0?'':'none';});}
+});
+document.addEventListener('focusout',function(ev){
+  const t=ev.target;
+  if(t&&t.dataset&&t.dataset.note&&S.notes[t.dataset.note]){
+    S.notes[t.dataset.note].body=serialize(t);
+    const sv=document.getElementById('sv-'+t.dataset.note)||document.getElementById('sv-inline');
+    if(sv){sv.classList.add('on');setTimeout(function(){sv.classList.remove('on');},1600);}
+  }
+  if(t&&t.classList&&t.classList.contains('desc')&&t.isContentEditable){t.contentEditable='false';toast('Page saved to Confluence','ok');}
+});
+document.addEventListener('keydown',function(ev){
+ try{
+  const k=ev.key,meta=ev.metaKey||ev.ctrlKey;
+  if(meta&&(k==='k'||k==='K')){ev.preventDefault();SCRIM.classList.contains('hide')?openSearch():closeOverlay();return;}
+  if(meta&&(k==='t'||k==='T')){ev.preventDefault();S.timer.run?stopTimer():startTimer(S.timer.ctx||'PAY-231');return;}
+  if(k==='Escape'){if(DD){closeDD();return;}if(!SCRIM.classList.contains('hide')){closeOverlay();CENTER.focus();}return;}
+  if(!SCRIM.classList.contains('hide')){
+    const rs=searchResults();
+    if(k==='ArrowDown'){ev.preventDefault();S.sel=Math.min(rs.length-1,S.sel+1);refreshSearch();
+      const n=document.querySelector('.ores.sel');if(n)n.scrollIntoView({block:'nearest'});return;}
+    if(k==='ArrowUp'){ev.preventDefault();S.sel=Math.max(0,S.sel-1);refreshSearch();
+      const n=document.querySelector('.ores.sel');if(n)n.scrollIntoView({block:'nearest'});return;}
+    if(k==='Enter'&&rs.length){ev.preventDefault();const r=rs[S.sel];
+      if(ev.shiftKey){closeOverlay();addApp('insert',{id:r.id});toast('<b>'+r.id+'</b> embedded in today\'s page','ok');}
+      else{closeOverlay();go(E[r.id].h);}return;}
+    return;
+  }
+  const t=ev.target;
+  if(t&&t.dataset&&t.dataset.day){
+    if(k==='/'&&!t.textContent.trim()){ev.preventDefault();slashDD(t);return;}
+    if(k==='Enter'){ev.preventDefault();const v=t.textContent.trim();if(!v)return;
+      t.textContent='';QUIET=true;addApp('text',{html:renderChips(esc(v))});QUIET=false;
+      toast('Note added to today','ok');return;}
+  }
+  if(t&&t.dataset&&t.dataset.note&&k==='['&&t.textContent.slice(-1)==='['){S.pickTarget=t;setTimeout(function(){pickerDD(t,'link-confirm');},0);}
+ }catch(e){boom(e);}
+});
+
+/* ===================== init ===================== */
+S.ticks=['<b>#1188</b> Payout_Build · step 3/5 · cargo test',
+ '<b>#1187</b> Payout_IntegrationTests · FAILED · attempts == 5 (left: 6)',
+ 'TC · sync failed 38 min ago · <b>401 Unauthorized</b>',
+ '<b>PAY-231</b> · timer running since 13:58',
+ 'PR #142 · 1 of 2 approvals · review requested from Jonas 09:05',
+ 'Jira PAT expires in <b>12 days</b>'];
+renderTick();
+if(!location.hash)location.hash='#/day/2026-08-22';
+route();
+setInterval(function(){
+  S.clock++;
+  const m=Math.floor(S.clock/60);
+  if(S.timer.run){
+    flapSet($('#timerFlap'),el0(elapsed()),'f-run');$('#timerFlap').style.minWidth='44px';
+    $('#timerSec').textContent=':'+String(S.clock%60).padStart(2,'0');
+    const s2=document.querySelector('#streamTimer .flap');if(s2){flapSet(s2,el0(elapsed()),'f-run');s2.style.minWidth='52px';}
+  }
+  const nc=document.getElementById('nowClock');if(nc)nc.textContent=hm(m);
+},1000);
+window.knobas=S;
+})();
+</script>
+</body>
+</html>
