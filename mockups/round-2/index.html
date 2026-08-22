@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>knobas mockups — round-2</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: light dark; --line: #8884; --muted: #888; --accent: #3b6fd6; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 32px 40px; max-width: 900px; }
+  h1 { font-size: 22px; margin: 0 0 4px; } h1 small { font-weight: 400; color: var(--muted); margin-left: 8px; }
+  .intro { color: var(--muted); margin: 0 0 20px; } .intro a { color: var(--accent); }
+  ul.list { list-style: none; padding: 0; margin: 0; } .item { border-top: 1px solid var(--line); padding: 14px 0; }
+  .open { text-decoration: none; color: inherit; display: block; } .open:hover .id { color: var(--accent); text-decoration: underline; }
+  .id { font-weight: 700; font-size: 16px; margin-right: 10px; } .title { color: var(--muted); }
+  .thesis { margin: 6px 0 8px; padding-left: 16px; font-size: 13px; color: var(--muted); }
+  .meta { font-size: 11px; color: var(--muted); font-family: ui-monospace, Menlo, monospace; }
+</style></head><body>
+<h1>knobas mockups <small>round-2 · 2 built</small></h1>
+<p class="intro">All on the Signal shell (context hub + launcher box). Same example data: <a href="../shared/dataset.md">dataset.md</a> + <a href="../shared/assets.md">assets.md</a>; required surfaces in <a href="../shared/round-2-brief.md">round-2-brief.md</a>. Try: <kbd>⌘K</kbd> then <code>asset:</code>, the PAY-231 room's ASSETS tile, and promoting <code>sepa-payout-export</code> stage → prod.</p>
+<ul class="list"><li class="item">
+    <a class="open" href="W3-environment-matrix.html" target="_blank" rel="noopener"><span class="id">W3 Environment matrix</span><span class="title">D1 Signal</span></a>
+    <ul class="thesis"><li>Assets read as a departure board — rows are the things you deploy, columns are dev, stage, prod and shared, so what runs where, and where it has drifted, is one glance.</li><li>The matrix sits under the same context hub and launcher: every room gets a reduced matrix of its own assets, and asset: type: env: health: narrow the same box.</li><li>Version cells are split-flap — promoting sepa-payout-export v13 stage to prod flips the prod cell, and a thin amber rule under two cells is the drift itself.</li></ul>
+    <span class="meta">3923 lines · 306 KB</span></li><li class="item">
+    <a class="open" href="base-signal.html" target="_blank" rel="noopener"><span class="id">P4 Context hub + P1 Launcher box</span><span class="title">D1 Signal</span></a>
+    <ul class="thesis"><li>Pick a context — an epic, a ticket or an ad-hoc label — and every source collapses into one room with its own clock; one box over it searches everything and acts in place.</li><li>The room is a graphite departure board: hairline rows on a strict column grid, every key and time in tabular mono, amber only where something is moving or waiting on you.</li><li>Split-flap cells — ticket status, build state, inbox count and the timer's minutes flip like a departure board when they change, and an amber ticker carries the latest change.</li></ul>
+    <span class="meta">2534 lines · 190 KB</span></li></ul>
+</body></html>
