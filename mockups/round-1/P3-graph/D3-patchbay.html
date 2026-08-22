@@ -1,0 +1,1938 @@
+<!--
+knobas mockup
+paradigm: P3 Graph
+design: D3 Patchbay
+thesis: Seeing which ticket pulls which branch, build, page and note — and patching a missing link by dragging one jack onto another.
+thesis: The graph is a studio patchbay: sources are colored modules, entities are jacks on engraved plates, every cross-source link is a sagging patch cable in the origin's color.
+thesis: Patch cables — drag a jack to another jack and the cable plugs in; suggested links hang as dashed 40 % cables until you confirm them.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>knobas — Patchbay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --chassis:#E3E5E8; --panel:#F1F2F4; --edge:#C9CDD3; --ink:#1E2126; --muted:#6B727C;
+  --jira:#2563EB; --confluence:#7C3AED; --gitea:#2E9E5B; --teamcity:#F0742A; --note:#E0B100;
+  --fail:#D62839; --screw:#AEB4BC;
+  --ui:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --disp:"Space Grotesk","IBM Plex Sans",system-ui,sans-serif;
+  --mono:"Space Mono","SFMono-Regular",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;background:var(--chassis);color:var(--ink);font:13px/1.45 var(--ui)}
+button,input,select,textarea{font:inherit;color:inherit}
+button{background:none;border:0;cursor:pointer}
+:focus{outline:none}
+:focus-visible{outline:2px solid var(--ink);outline-offset:2px;border-radius:3px}
+svg :focus-visible{outline:none}
+::selection{background:var(--ink);color:#fff}
+
+/* ---------- app frame ---------- */
+#app{display:grid;height:100vh;grid-template-columns:52px 1fr 400px;grid-template-rows:52px 1fr 26px;grid-template-areas:"top top top" "rail stage card" "status status status"}
+@media (max-width:1250px){#app{grid-template-columns:52px 1fr 360px}}
+.plate{font:10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink)}
+.plate.dim{color:var(--muted)}
+.mono{font-family:var(--mono)}
+.muted{color:var(--muted)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+/* module = panel with 4 screw heads */
+.mod{background-color:var(--panel);border:1px solid var(--edge);border-radius:4px;
+  background-image:radial-gradient(circle at 7px 7px,var(--screw) 1.6px,transparent 2.2px),
+   radial-gradient(circle at calc(100% - 7px) 7px,var(--screw) 1.6px,transparent 2.2px),
+   radial-gradient(circle at 7px calc(100% - 7px),var(--screw) 1.6px,transparent 2.2px),
+   radial-gradient(circle at calc(100% - 7px) calc(100% - 7px),var(--screw) 1.6px,transparent 2.2px)}
+.mod-head{margin:10px 12px 0;padding:6px 10px;border-radius:3px;background:var(--src,var(--ink));color:#fff;display:flex;align-items:center;gap:10px;min-height:28px}
+.mod-head .plate{color:#fff;opacity:.92;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.mod-head .key{white-space:nowrap;flex:none}
+.mod-head .sp{flex:1}
+.mod-head.dk,.mod-head.dk .plate,.mod-head.dk .key,.mod-head.dk button{color:var(--ink)}
+.mod-head.dk button:hover{background:rgba(30,33,38,.12)}
+.mod-body{padding:12px 14px 14px}
+
+/* jack dot (HTML) */
+.jack{display:inline-block;width:14px;height:14px;border-radius:999px;border:3.5px solid var(--src,var(--muted));background:var(--ink);flex:none;vertical-align:-2px}
+.jack.fail{border-color:var(--fail)}
+.src-jira{--src:var(--jira)} .src-confluence{--src:var(--confluence)} .src-gitea{--src:var(--gitea)} .src-teamcity{--src:var(--teamcity)} .src-note{--src:var(--note)} .src-local{--src:var(--muted)}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border:1px solid var(--edge);border-radius:4px;background:var(--panel);font-weight:500;font-size:12.5px;white-space:nowrap}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--ink);color:#fff;border-color:var(--ink)}
+.btn.primary:hover{background:#000}
+.btn.sm{height:24px;padding:0 9px;font-size:12px}
+.btn.danger{color:var(--fail);border-color:var(--fail)}
+.btn[disabled]{opacity:.45;cursor:default}
+.btn.icon{width:28px;padding:0;justify-content:center}
+.seg{display:inline-flex;border:1px solid var(--edge);border-radius:4px;background:var(--chassis);padding:2px;gap:2px}
+.seg button{height:22px;padding:0 9px;border-radius:3px;font-size:12px;font-weight:500;color:var(--muted)}
+.seg button.on{background:var(--ink);color:#fff}
+.seg button:hover:not(.on){color:var(--ink)}
+.toggle{position:relative;width:48px;height:28px;border-radius:999px;background:var(--edge);border:1px solid #B5BAC2;flex:none;transition:background .12s}
+.toggle::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:999px;background:#fff;border:1px solid #B5BAC2;transition:transform .12s}
+.toggle.on{background:var(--src,var(--ink))}
+.toggle.on::after{transform:translateX(20px)}
+.chip{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px 0 6px;border:1px solid var(--edge);border-radius:4px;background:var(--panel);font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap}
+.chip:hover{border-color:var(--ink)}
+.chip .jack{width:11px;height:11px;border-width:3px}
+.chip .k{font:11px var(--mono)}
+.field{display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:12.5px}
+.field label,.field .fl{width:82px;flex:none;font:10px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+input.tx,textarea.tx,select.tx{width:100%;border:1px solid var(--edge);border-radius:4px;background:#fff;padding:5px 8px;font-size:12.5px}
+textarea.tx{min-height:64px;resize:vertical}
+input.tx:focus,textarea.tx:focus,select.tx:focus{border-color:var(--ink)}
+.kbd{font:10px var(--mono);border:1px solid var(--edge);border-radius:3px;padding:1px 5px;background:var(--panel);color:var(--muted)}
+h2.title{font:600 17px/1.25 var(--disp);margin:10px 0 8px}
+h3.sect{font:10px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:18px 0 8px;display:flex;align-items:center;gap:8px}
+h3.sect::after{content:"";flex:1;height:1px;background:var(--edge)}
+h3.sect .cnt{color:var(--ink)}
+.row{display:flex;align-items:center;gap:8px}
+.pill{font:10px var(--mono);letter-spacing:.08em;text-transform:uppercase;padding:2px 6px;border-radius:3px;border:1px solid var(--edge);color:var(--muted)}
+.pill.fail{color:var(--fail);border-color:var(--fail)}
+.pill.ok{color:var(--ink);border-color:var(--ink)}
+.pill.src{color:#fff;background:var(--src);border-color:var(--src)}
+.av{width:22px;height:22px;border-radius:999px;background:var(--ink);color:#fff;font:700 9px var(--mono);display:inline-flex;align-items:center;justify-content:center;flex:none}
+pre.log{font:11.5px/1.5 var(--mono);background:#fff;border:1px solid var(--edge);border-radius:4px;padding:8px 10px;white-space:pre-wrap;overflow:auto}
+pre.log .bad{color:var(--fail)}
+
+/* ---------- top bar ---------- */
+#top{grid-area:top;display:flex;align-items:center;gap:14px;padding:0 14px 0 12px;border-bottom:1px solid var(--edge);background:var(--chassis)}
+#brand{font:700 15px var(--disp);letter-spacing:.06em;text-transform:uppercase;display:flex;align-items:center;gap:8px}
+#brand i{width:10px;height:10px;border-radius:999px;background:var(--ink);display:inline-block}
+#searchwrap{position:relative;flex:0 1 460px}
+#q{width:100%;height:32px;border:1px solid var(--edge);border-radius:4px;background:#fff;padding:0 64px 0 32px;font-size:13px}
+#q:focus{border-color:var(--ink)}
+#searchwrap>svg{position:absolute;left:10px;top:9px;pointer-events:none}
+#searchwrap .kbd{position:absolute;right:8px;top:8px}
+#spop{position:absolute;top:38px;left:0;width:620px;max-height:520px;overflow:auto;z-index:40;display:none}
+#spop.open{display:block}
+.sfilters{display:flex;gap:6px;flex-wrap:wrap;padding:10px 12px;border-bottom:1px solid var(--edge)}
+.sfilters .chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.sfilters .chip.on .jack{border-color:#fff}
+.sres{display:flex;align-items:center;gap:10px;padding:7px 12px;width:100%;text-align:left;border-bottom:1px solid var(--edge)}
+.sres:hover,.sres.cur{background:#fff}
+.sres .k{font:11px var(--mono);min-width:84px;color:var(--ink)}
+.sres .t{flex:1;font-size:12.5px}
+.sres .m{font:10px var(--mono);color:var(--muted);letter-spacing:.04em;white-space:nowrap}
+.sres mark{background:transparent;color:inherit;font-weight:600;border-bottom:2px solid var(--note)}
+#sync{display:flex;align-items:center;gap:7px;margin-left:auto;height:28px;padding:0 10px;border:1px solid var(--edge);border-radius:4px;background:var(--panel)}
+#sync .led{width:10px;height:10px;border-radius:999px;background:var(--src);border:2px solid var(--panel);box-shadow:0 0 0 1px var(--src)}
+#sync .led.err{background:var(--fail);box-shadow:0 0 0 1px var(--fail)}
+#sync .txt{font:10px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-left:3px}
+#sync .txt b{color:var(--fail);font-weight:400}
+#inboxbtn{display:flex;align-items:center;gap:7px;height:28px;padding:0 10px;border:1px solid var(--edge);border-radius:4px;background:var(--panel);font-weight:500}
+#inboxbtn .n{font:700 11px var(--mono);background:var(--ink);color:#fff;border-radius:3px;padding:2px 6px}
+#inboxbtn .n.zero{background:var(--edge);color:var(--muted)}
+#timer{display:flex;align-items:center;gap:10px;height:40px;padding:0 12px 0 6px;border:1px solid var(--edge);border-radius:4px;background:var(--panel);position:relative}
+#tbtn{width:30px;height:30px;border-radius:999px;background:var(--ink);display:flex;align-items:center;justify-content:center;border:2px solid var(--ink)}
+#tbtn svg{display:block}
+#tbtn.stopped{background:var(--panel)}
+#tbtn.stopped svg path{fill:var(--ink)}
+#tctx{display:flex;flex-direction:column;line-height:1.15;min-width:120px}
+#tctx .plate{font-size:9.5px}
+#tctx .ctx{font-weight:600;font-size:12.5px;display:flex;align-items:center;gap:6px}
+#tel{font:700 18px var(--mono);letter-spacing:.02em;min-width:52px;text-align:right}
+#tel.stopped{color:var(--muted);font-weight:400}
+#tpop{position:absolute;right:0;top:46px;width:330px;z-index:40;display:none}
+#tpop.open{display:block}
+#tpop .opt{display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:6px 8px;border-radius:3px;font-size:12.5px}
+#tpop .opt:hover{background:#fff}
+#tpop .opt .k{font:11px var(--mono);min-width:76px}
+
+/* ---------- rail ---------- */
+#rail{grid-area:rail;display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 0;border-right:1px solid var(--edge);background:var(--chassis)}
+#rail button{width:38px;height:38px;border-radius:4px;display:flex;align-items:center;justify-content:center;position:relative;color:var(--muted)}
+#rail button:hover{background:var(--panel);color:var(--ink)}
+#rail button.on{background:var(--ink);color:#fff}
+#rail button .b{position:absolute;top:3px;right:3px;font:700 9px var(--mono);background:var(--fail);color:#fff;border-radius:3px;padding:0 4px;line-height:14px}
+#rail .sp{flex:1}
+#rail hr{width:22px;border:0;border-top:1px solid var(--edge);margin:6px 0}
+
+/* ---------- stage / canvas ---------- */
+#stage{grid-area:stage;position:relative;overflow:hidden;background:var(--chassis);
+  background-image:radial-gradient(circle,#CDD1D6 1px,transparent 1.2px);background-size:22px 22px}
+#lenses{position:absolute;left:12px;top:10px;right:12px;display:flex;gap:6px;flex-wrap:wrap;z-index:5;align-items:center}
+#lenses .lab{margin-right:4px}
+.lens{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 9px;border:1px solid var(--edge);border-radius:4px;background:var(--panel);font-size:12px;font-weight:500;white-space:nowrap}
+.lens:hover{border-color:var(--ink)}
+.lens.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.lens .n{font:700 10.5px var(--mono);border:1px solid currentColor;border-radius:3px;padding:1px 5px;opacity:.85}
+.lens .d{width:7px;height:7px;border-radius:999px;background:var(--fail)}
+.lens.on .d{background:#fff}
+.lenscall{flex-basis:100%;display:flex;gap:10px;align-items:center;max-width:620px;padding:7px 12px;font-size:12px;margin-top:2px}
+#canvas{width:100%;height:100%;display:block;touch-action:none;user-select:none}
+#canvas.dragging{cursor:grabbing}
+.cable{fill:none;stroke-width:3;stroke-linecap:round}
+.cable.sug{stroke-dasharray:7 6;opacity:.4}
+.cable.hit{fill:none;stroke:transparent;stroke-width:14;cursor:pointer}
+.cable-g.dim{opacity:.12}
+.cable-g.hot .cable{stroke-width:4}
+.cable-g.hot .cable.sug{opacity:.75}
+.plug{stroke:var(--ink);stroke-width:1.2}
+.node{cursor:pointer;transition:opacity .15s}
+.node.dim{opacity:.16}
+.node .jack-o{transition:transform .15s}
+.node:hover .jack-o{transform:scale(1.08)}
+.node.plugged .jack-o{animation:plugin .15s ease-out}
+@keyframes plugin{0%{transform:scale(1.35)}100%{transform:scale(1)}}
+.node .nkey{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;fill:var(--ink);text-anchor:middle}
+.node .ntitle{font:11px var(--ui);fill:var(--muted);text-anchor:middle}
+.node .npl{fill:var(--panel);stroke:var(--edge)}
+.node.sel .npl{stroke:var(--ink);stroke-width:1.5}
+.node.sel .nkey{font-weight:700}
+.selring{fill:none;stroke:var(--ink);stroke-width:2}
+.pulse,.tpulse,.node .jack-o{transform-box:fill-box;transform-origin:center}
+.pulse{fill:none;stroke-width:2;opacity:.9;animation:pulse 2s ease-in-out infinite}
+.tpulse{fill:none;stroke:var(--ink);stroke-width:1.5;stroke-dasharray:3 4;animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{0%{opacity:.9;transform:scale(1)}50%{opacity:.25;transform:scale(1.25)}100%{opacity:.9;transform:scale(1)}}
+.node.drop .jack-o{stroke-width:6}
+.elabel{font:9px var(--mono);letter-spacing:.1em;fill:var(--fail);text-anchor:middle}
+#tmpcable{pointer-events:none}
+#legend{position:absolute;left:12px;bottom:12px;z-index:5;display:flex;align-items:center;gap:14px;padding:6px 12px}
+#legend .it{display:flex;align-items:center;gap:6px;font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+#legend .it.off{opacity:.35;text-decoration:line-through}
+#legend .ln{width:22px;height:3px;border-radius:2px;background:var(--ink)}
+#legend .ln.sug{background:repeating-linear-gradient(90deg,var(--ink) 0 5px,transparent 5px 9px);opacity:.5}
+#legend .it button{display:flex;align-items:center;gap:6px;color:inherit;font:inherit;letter-spacing:inherit;text-transform:inherit}
+#zoom{position:absolute;right:12px;bottom:12px;z-index:5;display:flex;gap:2px;padding:3px}
+#zoom button{width:26px;height:26px;border-radius:3px;font:700 14px var(--mono)}
+#zoom button:hover{background:#fff}
+
+
+/* link confirm popover on canvas */
+#linkpop{position:absolute;z-index:30;width:300px;display:none}
+#linkpop.open{display:block}
+#linkpop .mod-body{padding:10px 12px 12px}
+#linkpop .rs{font-size:12px;color:var(--muted);margin:4px 0 10px}
+
+/* ---------- side card ---------- */
+#card{grid-area:card;border-left:1px solid var(--edge);background:var(--chassis);display:flex;flex-direction:column;min-height:0;padding:10px}
+#card>.mod{flex:1;min-height:0;display:flex;flex-direction:column}
+#card .mod-body{flex:1;min-height:0;overflow:auto}
+#card .mod-head .key{font:700 12px var(--mono);letter-spacing:.06em}
+#card .mod-head button{color:#fff;width:24px;height:24px;border-radius:3px;display:inline-flex;align-items:center;justify-content:center}
+#card .mod-head button:hover{background:rgba(255,255,255,.18)}
+.desc{font-size:12.5px;line-height:1.55}
+.desc code{font:11.5px var(--mono);background:#fff;border:1px solid var(--edge);border-radius:3px;padding:0 4px}
+.cm{display:flex;gap:8px;margin-bottom:10px}
+.cm .body{flex:1;background:#fff;border:1px solid var(--edge);border-radius:4px;padding:6px 9px;font-size:12.5px}
+.cm .who{font-weight:600;font-size:12px}
+.cm .when{font:10px var(--mono);color:var(--muted);letter-spacing:.04em;margin-left:6px}
+.cm .body .at{color:var(--confluence);font-weight:600}
+/* mini patchbay in card */
+.pbay{position:relative;margin:4px 0 2px}
+.pbay svg.pb{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+.pbay .src-jack{position:absolute;left:8px;top:50%;transform:translateY(-50%);width:26px;height:26px;border-radius:999px;border:4px solid var(--src);background:var(--ink);box-shadow:0 0 0 3px var(--panel),0 0 0 4px var(--edge)}
+.pbay .src-jack.fail{border-color:var(--fail)}
+.pbay ul{list-style:none;margin-left:74px}
+.pbay li{display:flex;align-items:center;gap:8px;height:30px;position:relative}
+.pbay li .jack{width:16px;height:16px;border-width:4px;position:relative;z-index:1}
+.pbay li button.lk{flex:1;display:flex;align-items:center;gap:8px;text-align:left;height:26px;padding:0 8px;border-radius:3px;background:#fff;border:1px solid var(--edge);font-size:12px;min-width:0}
+.pbay li button.lk:hover{border-color:var(--ink)}
+.pbay li .k{font:10.5px var(--mono);letter-spacing:.04em;white-space:nowrap}
+.pbay li .t{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
+.pbay li .st{font:9.5px var(--mono);letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}
+.pbay li .st.fail{color:var(--fail)} .pbay li .st.run{color:var(--teamcity)}
+.sug{display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px dashed var(--edge);border-radius:4px;margin-bottom:6px;font-size:12px}
+.sug .jack{width:12px;height:12px;border-width:3px;opacity:.6}
+.sug .t{flex:1;min-width:0}
+.sug .t b{font-weight:600}
+.sug .t .why{display:block;font:10px var(--mono);color:var(--muted);letter-spacing:.04em;margin-top:1px}
+.sug .btn{height:22px;padding:0 7px;font-size:11.5px}
+.sug.done{border-style:solid;border-color:var(--gitea);opacity:.75}
+.wl{display:flex;justify-content:space-between;gap:8px;padding:6px 8px;background:#fff;border:1px solid var(--edge);border-radius:4px;margin-bottom:6px;font-size:12px}
+.wl b{font:700 12px var(--mono)}
+#card .foot{display:flex;gap:6px;padding:10px 12px;border-top:1px solid var(--edge);flex-wrap:wrap;align-items:center}
+#card .foot .sp{flex:1}
+.tbig{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 12px 0 6px;border:1px solid var(--ink);border-radius:999px;background:var(--panel);font-weight:600;font-size:12.5px}
+.tbig i{width:22px;height:22px;border-radius:999px;background:var(--ink);display:inline-flex;align-items:center;justify-content:center}
+.tbig i svg{display:block}
+.tbig:hover{background:#fff}
+/* link picker */
+#picker{position:fixed;z-index:80;width:340px;display:none}
+#picker.open{display:block}
+#picker .mod-body{padding:8px}
+#picker input{margin-bottom:6px}
+#picker .pk{display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:5px 7px;border-radius:3px;font-size:12.5px}
+#picker .pk:hover{background:#fff}
+#picker .pk .k{font:11px var(--mono);min-width:80px}
+/* notes mode */
+.nlist{list-style:none;margin-bottom:8px}
+.nlist li button{display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:6px 8px;border-radius:3px;font-size:12.5px}
+.nlist li button:hover{background:#fff}
+.nlist li button.on{background:#fff;outline:1px solid var(--ink)}
+.nlist .e{margin-left:auto;font:10px var(--mono);color:var(--muted);white-space:nowrap}
+.ned{min-height:120px;background:#fff;border:1px solid var(--edge);border-radius:4px;padding:8px 10px;font-size:12.5px;line-height:1.6;outline:none}
+.ned:focus{border-color:var(--ink)}
+.ned .chip{height:19px;padding:0 6px 0 5px;font-size:11px;vertical-align:1px;user-select:all}
+.ned .chip .jack{width:9px;height:9px;border-width:2.5px}
+.bl{display:flex;align-items:center;gap:8px;padding:5px 8px;background:#fff;border:1px solid var(--edge);border-radius:4px;margin-bottom:5px;font-size:12px}
+.bl .k{font:10.5px var(--mono)}
+.bl .why{margin-left:auto;font:10px var(--mono);color:var(--muted)}
+
+/* ---------- status bar ---------- */
+#status{grid-area:status;display:flex;align-items:center;gap:16px;padding:0 14px;border-top:1px solid var(--edge);font:10px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);background:var(--chassis)}
+#status b{color:var(--ink);font-weight:400}
+#status{overflow:hidden}
+#status>span{white-space:nowrap}
+@media (max-width:1300px){#status .opt,#legend .lg{display:none}}
+#status .pend.warn{color:var(--teamcity)}
+#status .sp{flex:1}
+#jserr{display:none;color:var(--fail)}
+
+/* ---------- overlays ---------- */
+.scrim{position:fixed;inset:52px 0 26px 52px;background:rgba(30,33,38,.18);z-index:50;display:none}
+.scrim.open{display:block}
+.ov{position:fixed;z-index:60;display:none;flex-direction:column;min-height:0}
+.ov.open{display:flex}
+.ov .mod-body{overflow:auto;flex:1;min-height:0}
+#ov-inbox{top:58px;right:14px;width:560px;max-height:calc(100vh - 100px)}
+#ov-standup{top:52px;right:0;bottom:26px;width:600px;border-radius:0;border-width:0 0 0 1px}
+#ov-sources{top:72px;left:50%;transform:translateX(-50%);width:980px;max-width:calc(100vw - 80px);height:calc(100vh - 130px)}
+#ov-time{left:52px;right:400px;bottom:26px;height:352px;border-radius:4px 4px 0 0;border-width:1px 1px 0 1px}
+@media (max-width:1250px){#ov-time{right:360px}}
+.dlg{top:50%;left:50%;transform:translate(-50%,-50%);width:560px;max-height:calc(100vh - 120px)}
+.dlg .mod-body{padding:14px 16px}
+.dlg .acts{display:flex;gap:6px;padding:10px 16px;border-top:1px solid var(--edge);align-items:center}
+.dlg .acts .sp{flex:1}
+.ov .mod-head .x{margin-left:auto;color:#fff;width:24px;height:24px;border-radius:3px;display:inline-flex;align-items:center;justify-content:center}
+.ov .mod-head .x:hover{background:rgba(255,255,255,.18)}
+/* inbox */
+.ib{display:flex;gap:10px;padding:10px 4px;border-bottom:1px solid var(--edge)}
+.ib:last-child{border-bottom:0}
+.ib .when{font:10px var(--mono);color:var(--muted);letter-spacing:.04em;width:78px;flex:none;padding-top:3px}
+.ib .bd{flex:1;min-width:0}
+.ib .bd p{font-size:12.5px;margin-bottom:6px}
+.ib .bd p b{font-weight:600}
+.ib .bd q{color:var(--muted);font-style:italic}
+.ib .acts{display:flex;gap:5px;flex-wrap:wrap}
+.ib .acts .btn{height:24px;padding:0 8px;font-size:11.5px}
+.ib.gone{animation:gone .2s forwards}
+@keyframes gone{to{opacity:0;height:0;padding:0;margin:0;overflow:hidden}}
+.ib .reply{margin-top:6px;display:flex;gap:6px}
+.ib .reply input{flex:1}
+.ibsn{padding:8px 4px;font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:center}
+/* standup */
+.dig li{list-style:none;display:flex;gap:8px;padding:6px 8px;border-radius:3px;font-size:12.5px;align-items:flex-start}
+.dig li:hover{background:#fff}
+.dig li .lab{font:10px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);width:74px;flex:none;padding-top:3px}
+.dig li .tx{flex:1}
+.dig li .trace{display:none;gap:4px;flex-wrap:wrap;margin-top:4px}
+.dig li:hover .trace,.dig li:focus-within .trace{display:flex}
+.proto{background:#fff;border:1px solid var(--edge);border-radius:4px;padding:10px 12px;font-size:12.5px;line-height:1.6;outline:none}
+.proto:focus{border-color:var(--ink)}
+.proto h4{font:600 13px var(--disp);margin:8px 0 2px}
+.proto .ai{display:flex;align-items:center;gap:8px}
+.proto .ai .btn{margin-left:auto;height:22px;font-size:11px}
+.pubbox{margin-top:10px;padding:8px 10px;border:1px solid var(--edge);border-radius:4px;background:var(--chassis);font-size:12px;display:flex;align-items:center;gap:8px}
+.pubbox .path{font:11px var(--mono)}
+/* sources */
+.srcgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.srcmod .mod-head .plate{font-size:10px}
+.srcmod .mod-body{padding:10px 14px 12px;font-size:12.5px}
+.srcmod .kv{display:grid;grid-template-columns:96px 1fr;gap:3px 10px;margin-bottom:8px}
+.srcmod .kv dt{font:10px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding-top:2px}
+.srcmod .kv dd{min-width:0}
+.srcmod .err{border:1px solid var(--fail);border-radius:4px;padding:7px 9px;background:#fff;color:var(--fail);font-size:12px;margin-bottom:8px}
+.srcmod .warn{border:1px solid var(--teamcity);border-radius:4px;padding:7px 9px;background:#fff;font-size:12px;margin-bottom:8px}
+.caps{display:flex;gap:4px;flex-wrap:wrap}
+.caps .pill{text-transform:none;letter-spacing:.04em}
+.wiz{display:grid;grid-template-columns:200px 1fr;gap:14px;margin-top:14px}
+.wiz ol{list-style:none}
+.wiz ol li{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:3px;font-size:12.5px;color:var(--muted)}
+.wiz ol li.on{background:#fff;color:var(--ink);font-weight:500}
+.wiz ol li.done{color:var(--ink)}
+.wiz ol li i{width:18px;height:18px;border-radius:999px;border:2px solid var(--edge);display:inline-flex;align-items:center;justify-content:center;font:700 9px var(--mono);flex:none}
+.wiz ol li.on i{border-color:var(--ink);background:var(--ink);color:#fff}
+.wiz ol li.done i{border-color:var(--ink)}
+.types{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.types button{display:flex;flex-direction:column;gap:4px;align-items:flex-start;padding:10px;border:1px solid var(--edge);border-radius:4px;background:#fff;text-align:left}
+.types button:hover{border-color:var(--ink)}
+.types button.on{outline:2px solid var(--ink)}
+.types button .nm{font:600 13px var(--disp)}
+.types button .v{font:10px var(--mono);color:var(--muted);letter-spacing:.06em}
+.tres{margin-top:10px;padding:8px 10px;border-radius:4px;border:1px solid var(--edge);background:#fff;font-size:12.5px;display:none}
+.tres.open{display:block}
+.tres.ok{border-color:var(--gitea)}
+.tres.bad{border-color:var(--fail);color:var(--fail)}
+/* time strip */
+.strip{position:relative;height:86px;margin:8px 0 4px;border:1px solid var(--edge);border-radius:4px;background:#fff;overflow:hidden}
+.strip .tick{position:absolute;top:0;bottom:0;border-left:1px solid var(--edge)}
+.strip .tick span{position:absolute;top:3px;left:4px;font:9.5px var(--mono);color:var(--muted)}
+.strip .blk{position:absolute;top:24px;height:50px;border-radius:3px;border:2px solid var(--src,var(--muted));background:var(--src,var(--muted));color:#fff;padding:4px 6px;font-size:11px;overflow:hidden;cursor:pointer;text-align:left}
+.strip .blk.passive{background:#fff;color:var(--ink);padding-top:12px}
+.strip .blk.passive::before{content:"";position:absolute;left:0;right:0;top:0;height:7px;background:repeating-linear-gradient(135deg,var(--src,var(--muted)) 0 3px,transparent 3px 6px)}
+.strip .blk .k{font:700 10px var(--mono);letter-spacing:.04em;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.strip .blk .t{display:block;font-size:10.5px;opacity:.9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.strip .blk.unat{--src:var(--fail);background:repeating-linear-gradient(135deg,#fff 0 4px,#FBD5D9 4px 8px);color:var(--fail)}
+.strip .blk.adhoc{--src:var(--muted);border-style:dashed;background:#fff;color:var(--ink)}
+.strip .blk.gap{background:transparent;border:0;color:var(--muted);font:10px var(--mono);text-align:center;padding-top:18px;cursor:default}
+.strip .blk.sel{outline:2px solid var(--ink);outline-offset:1px}
+.strip .now{position:absolute;top:0;bottom:0;border-left:2px solid var(--ink)}
+.strip .now span{position:absolute;top:3px;left:4px;font:700 9.5px var(--mono)}
+.tgrid{display:grid;grid-template-columns:1fr 300px;gap:14px}
+.tinfo{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12.5px;min-height:30px}
+.week{display:grid;grid-template-columns:34px 1fr 60px;gap:4px 8px;align-items:center;font-size:12px}
+.week .bar{height:12px;background:var(--edge);border-radius:2px;position:relative;overflow:hidden}
+.week .bar i{position:absolute;left:0;top:0;bottom:0;background:var(--ink)}
+.week .bar b{position:absolute;top:0;bottom:0;background:repeating-linear-gradient(135deg,var(--teamcity) 0 3px,#fff 3px 6px)}
+.week .d{font:10px var(--mono);letter-spacing:.08em;color:var(--muted)}
+.week .h{font:11px var(--mono);text-align:right}
+/* worklog draft */
+.wdl{display:flex;align-items:flex-start;gap:8px;padding:5px 0;font-size:12.5px}
+.wdl input[type=checkbox]{width:16px;height:16px;margin-top:1px;accent-color:var(--ink)}
+.wdl .k{font:11px var(--mono)}
+.wdl .when{margin-left:auto;font:10px var(--mono);color:var(--muted)}
+/* steps (start work) */
+.steps li{list-style:none;display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:3px;font-size:12.5px}
+.steps li i{width:20px;height:20px;border-radius:999px;border:2px solid var(--edge);flex:none;display:inline-flex;align-items:center;justify-content:center}
+.steps li.run i{border-color:var(--ink);border-top-color:transparent;animation:spin .8s linear infinite}
+.steps li.done i{border-color:var(--ink);background:var(--ink)}
+.steps li.done i::after{content:"";width:9px;height:5px;border-left:2px solid #fff;border-bottom:2px solid #fff;transform:translateY(-1px) rotate(-45deg)}
+.steps li .k{font:11px var(--mono)}
+.steps li .r{margin-left:auto;font:10px var(--mono);color:var(--muted)}
+@keyframes spin{to{transform:rotate(360deg)}}
+/* context menu */
+#cmenu{position:fixed;z-index:70;width:230px;display:none;padding:4px}
+#cmenu.open{display:block}
+#cmenu .mh{font:10px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:6px 8px 4px}
+#cmenu button{display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:6px 8px;border-radius:3px;font-size:12.5px}
+#cmenu button:hover{background:#fff}
+#cmenu button .kbd{margin-left:auto}
+#cmenu hr{border:0;border-top:1px solid var(--edge);margin:4px 0}
+/* toasts */
+#toasts{position:fixed;left:64px;bottom:36px;z-index:90;display:flex;flex-direction:column;gap:6px}
+.toast{display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--ink);color:#fff;border-radius:4px;font-size:12.5px;animation:tin .15s ease-out;max-width:520px}
+.toast .jack{border-color:var(--src,#fff)}
+.toast .tk{font:10.5px var(--mono);color:#fff;opacity:.7;margin-left:4px}
+@keyframes tin{from{transform:translateY(6px);opacity:0}}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <header id="top">
+    <div id="brand"><i></i>knobas</div>
+    <div id="searchwrap">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#6B727C" stroke-width="1.6"><circle cx="6" cy="6" r="4.2"/><path d="M9.2 9.2 13 13"/></svg>
+      <input id="q" type="search" placeholder="Search tickets, pages, PRs, builds, notes…" autocomplete="off" aria-label="Search">
+      <span class="kbd">⌘K</span>
+      <div id="spop" class="mod" role="listbox" aria-label="Search results"></div>
+    </div>
+    <button id="sync" data-go="#/sources" title="Sync state — open Sources"></button>
+    <button id="inboxbtn" aria-label="Inbox"><svg width="14" height="12" viewBox="0 0 14 12" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1 1h12v10H1zM1 1l6 5 6-5"/></svg>Inbox <span class="n" id="inboxn">6</span></button>
+    <div id="timer">
+      <button id="tbtn" aria-label="Stop timer" title="Stop timer (⌘T)"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 1h10v10H1z" fill="#fff"/></svg></button>
+      <div id="tctx"><span class="plate dim">Timer · PAY-231</span><span class="ctx"></span></div>
+      <span id="tel">0:34</span>
+      <button class="btn sm icon" id="tmore" aria-label="Timer options"><svg width="12" height="4" viewBox="0 0 12 4"><circle cx="2" cy="2" r="1.4"/><circle cx="6" cy="2" r="1.4"/><circle cx="10" cy="2" r="1.4"/></svg></button>
+      <div id="tpop" class="mod"></div>
+    </div>
+  </header>
+
+  <nav id="rail" aria-label="Surfaces">
+    <button data-go="#/graph" class="on" title="Patchbay" aria-label="Patchbay"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="5" cy="6" r="2.5"/><circle cx="15" cy="5" r="2.5"/><circle cx="10" cy="15" r="2.5"/><path d="M7 7.5c2 2 1 4.5 2 6M12.6 6.2c-1 2.5-1.5 5-2 6.5"/></svg></button>
+    <button data-go="#/inbox" title="Inbox" aria-label="Inbox"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 4h14v12H3zM3 11h4l1.5 2h3L13 11h4"/></svg><span class="b" id="railn">6</span></button>
+    <button data-go="#/time" title="Time" aria-label="Time"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="10" cy="10" r="7"/><path d="M10 6v4l3 2"/></svg></button>
+    <button data-go="#/notes" title="Notes" aria-label="Notes"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 3h8l3 3v11H5zM8 9h5M8 12h5"/></svg></button>
+    <button data-go="#/standup" title="Standup" aria-label="Standup"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="6" r="2.3"/><circle cx="13.5" cy="7" r="2"/><path d="M3 16c0-3 2-4.5 4-4.5s4 1.5 4 4.5M11 15c.5-2 1.5-3 2.5-3s3 1 3 3.5"/></svg></button>
+    <hr>
+    <button id="createbtn" title="Create…" aria-label="Create"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 4v12M4 10h12"/></svg></button>
+    <span class="sp"></span>
+    <button data-go="#/sources" title="Sources" aria-label="Sources"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="10" cy="10" r="2.6"/><path d="M10 2v2.5M10 15.5V18M2 10h2.5M15.5 10H18M4.3 4.3l1.8 1.8M13.9 13.9l1.8 1.8M4.3 15.7l1.8-1.8M13.9 6.1l1.8-1.8"/></svg><span class="b" id="srcb">401</span></button>
+  </nav>
+
+  <main id="stage">
+    <div id="lenses"><span class="plate dim lab">Lenses</span></div>
+    <svg id="canvas" viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid meet" aria-label="Knowledge graph patchbay">
+      <g id="g-edges"></g>
+      <g id="g-nodes"></g>
+      <g id="g-labels"></g>
+      <path id="tmpcable" class="cable" d="" style="display:none"/>
+      <circle id="tmpplug" r="5" class="plug" style="display:none"/>
+    </svg>
+    <div id="legend" class="mod"></div>
+    <div id="zoom" class="mod"><button data-z="in" aria-label="Zoom in">+</button><button data-z="out" aria-label="Zoom out">−</button><button data-z="fit" aria-label="Fit" style="font-size:10px">FIT</button></div>
+    <div id="linkpop" class="mod"></div>
+  </main>
+
+  <aside id="card" aria-live="polite"></aside>
+
+  <footer id="status">
+    <span>Postgres <b>knobas</b> · 212 MB</span><span>Index <b>up to date</b></span><span>Sync <b>every 5 min</b></span><span class="pend" id="pend">Pending writes <b>0</b></span><span class="sp"></span><span class="opt">Drag a jack onto another to patch a link · right-click a jack for actions</span><span class="sp"></span><span id="jserr"></span><span>Fri 2026-08-22 · <b id="clock">14:32</b></span>
+  </footer>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<div id="ov-inbox" class="ov mod"></div>
+<div id="ov-standup" class="ov mod"></div>
+<div id="ov-sources" class="ov mod"></div>
+<div id="ov-time" class="ov mod"></div>
+<div id="dlg" class="ov mod dlg"></div>
+<div id="picker" class="mod"></div>
+<div id="cmenu" class="mod" role="menu"></div>
+<div id="toasts"></div>
+
+<script>
+window.addEventListener('error',e=>{const j=document.getElementById('jserr');if(j){j.style.display='inline';j.textContent='JS error: '+e.message;}});
+/* =========================================================
+   DATA — Tidewater Freight dataset, verbatim
+   ========================================================= */
+const SRC={
+  jira:{c:'#2563EB',name:'Jira',mod:'Jira Cloud',disp:'Tidewater Jira',url:'https://tidewater.atlassian.net',auth:'PAT — expires 2026-09-03 (in 12 days)',sync:'synced 4 min ago',cnt:'1,284 issues',ver:'adapter v1.4',caps:['search','write','worklogs','transitions']},
+  confluence:{c:'#7C3AED',name:'Confluence',mod:'Confluence Cloud',disp:'Tidewater Wiki',url:'https://tidewater.atlassian.net/wiki',auth:'same PAT as Jira',sync:'synced 4 min ago',cnt:'3,912 pages',ver:'adapter v1.2',caps:['search','write','mentions']},
+  gitea:{c:'#2E9E5B',name:'Gitea',mod:'Gitea',disp:'git.tidewater.internal',url:'https://git.tidewater.internal',auth:'access token',sync:'synced 2 min ago',cnt:'47 repos',ver:'adapter v1.3',caps:['search','write','webhooks','local clones']},
+  teamcity:{c:'#F0742A',name:'TeamCity',mod:'TeamCity',disp:'ci.tidewater.internal',url:'https://ci.tidewater.internal',auth:'user + password',sync:'sync failed 38 min ago',cnt:'3 build configurations',ver:'adapter v1.1',caps:['search','trigger','logs']},
+  note:{c:'#E0B100',name:'Local note',mod:'Local notes',disp:'Local notes',url:'~/Library/Application Support/knobas/notes',auth:'—',sync:'local',cnt:'3 notes',ver:'built in',caps:['search','backlinks']}
+};
+const KIND={ticket:'Ticket',epic:'Epic',pr:'Pull request',branch:'Branch',commit:'Commit',build:'Build',page:'Page',note:'Note',repo:'Repository'};
+const PEOPLE={mara:{n:'Mara Lindqvist',i:'ML'},jonas:{n:'Jonas Becker',i:'JB'},priya:{n:'Priya Nair',i:'PN'},tomasz:{n:'Tomasz Wójcik',i:'TW'},lena:{n:'Lena Hoffmann',i:'LH'}};
+
+const TICKETS={
+ 'PAY-200':{summary:'Payout reliability',type:'Epic',status:'In Progress',priority:'High',assignee:'priya',updated:'2026-08-11',desc:'Epic for SEPA payout retry, ledger drift and payout dashboard work. Children: PAY-231, PAY-228, PAY-240, PAY-219, PAY-236.',comments:[],worklogs:[]},
+ 'PAY-231':{summary:'Retry failed SEPA payouts',type:'Story',status:'In Progress',priority:'High',assignee:'mara',updated:'today 11:48',estimate:'2d',spent:'6h 30m',epic:'PAY-200',
+   desc:'When the SEPA batch at the PSP returns a transient error (HTTP 503 or PSP code <code>TEMP_UNAVAILABLE</code>), retry the payout with exponential backoff (base 30 s, factor 2, max 5 attempts, jitter). Permanent failures go to the manual review queue.',
+   comments:[{who:'priya',when:'yesterday 14:20',t:'Please make sure the backoff policy matches the design page — finance wants max 5 attempts.'},{who:'mara',when:'today 10:15',t:'Backoff + jitter implemented in a41f2c, integration test still red (#1187), investigating.'}],
+   worklogs:[{when:'yesterday',h:'3h',t:'Retry loop implementation'}]},
+ 'PAY-228':{summary:'Ledger drift on partial refunds',type:'Bug',status:'In Review',priority:'High',assignee:'mara',updated:'yesterday 16:05',estimate:'1d',spent:'1h 30m',epic:'PAY-200',desc:'Partial refunds leave the ledger out of balance by the refunded fee. Fixed in PR #139 (ledger-api). Staging verification needs the updated runbook — blocked by OPS-77.',comments:[],worklogs:[{when:'yesterday',h:'1h 30m',t:'Review PR #139 fixes, re-test partial refund drift'}]},
+ 'PAY-240':{summary:'Payout dashboard latency',type:'Task',status:'To Do',priority:'Medium',assignee:'mara',updated:'today 08:12',epic:'PAY-200',desc:'Finance reports the payout dashboard takes 8–12 s to load for August. Target &lt; 2 s.',comments:[],worklogs:[],note:'Assigned to you today 08:12 by Priya Nair'},
+ 'PAY-219':{summary:'Rotate PSP credentials',type:'Task',status:'Done',priority:'Medium',assignee:'mara',updated:'2026-08-18',epic:'PAY-200',desc:'Rotate PSP API credentials before the end-of-August expiry.',comments:[],worklogs:[]},
+ 'PAY-236':{summary:'Payout CSV export for finance',type:'Story',status:'To Do',priority:'Low',assignee:'jonas',updated:'2026-08-20',epic:'PAY-200',desc:'Finance needs a monthly CSV export of all payouts with PSP reference and status.',comments:[],worklogs:[]},
+ 'OPS-77':{summary:'On-call runbook outdated',type:'Task',status:'To Do',priority:'Medium',assignee:'tomasz',updated:'2026-08-19',desc:'The on-call handbook still describes the old staging verification steps. Blocks PAY-228 staging verification.',comments:[],worklogs:[]}
+};
+const STATUSES=['To Do','In Progress','In Review','Done'];
+
+/* nodes: hand-laid positions in a 1000×680 viewBox */
+const NODES=[
+ {id:'note_sepa',src:'note',kind:'note',key:'Note',title:'SEPA retry investigation',x:150,y:235,route:'#/note/sepa-retry-investigation'},
+ {id:'page_sepa',src:'confluence',kind:'page',key:'Page · ENG',title:'SEPA payout retry design',x:420,y:95,route:'#/page/sepa-payout-retry-design'},
+ {id:'pay231',src:'jira',kind:'ticket',key:'PAY-231',title:'Retry failed SEPA payouts',x:420,y:290,route:'#/ticket/PAY-231'},
+ {id:'branch231',src:'gitea',kind:'branch',key:'Branch',title:'feature/PAY-231-sepa-retry',x:590,y:170,route:'#/branch/feature-PAY-231-sepa-retry'},
+ {id:'pr142',src:'gitea',kind:'pr',key:'PR #142',title:'SEPA retry with exponential backoff',x:660,y:300,route:'#/pr/142'},
+ {id:'commit_a41',src:'gitea',kind:'commit',key:'a41f2c',title:'PAY-231 backoff jitter',x:545,y:415,route:'#/commit/a41f2c'},
+ {id:'b1187',src:'teamcity',kind:'build',key:'Build #1187',title:'Payout_IntegrationTests',x:850,y:250,status:'failed',route:'#/build/1187'},
+ {id:'b1188',src:'teamcity',kind:'build',key:'Build #1188',title:'Payout_Build',x:850,y:385,status:'running',route:'#/build/1188'},
+ {id:'pay240',src:'jira',kind:'ticket',key:'PAY-240',title:'Payout dashboard latency',x:760,y:75,route:'#/ticket/PAY-240'},
+ {id:'page_arch',src:'confluence',kind:'page',key:'Page · ENG',title:'Payments architecture overview',x:935,y:140,route:'#/page/payments-architecture-overview'},
+ {id:'pay200',src:'jira',kind:'epic',key:'PAY-200',title:'Payout reliability',x:250,y:370,route:'#/ticket/PAY-200'},
+ {id:'pay236',src:'jira',kind:'ticket',key:'PAY-236',title:'Payout CSV export for finance',x:90,y:425,route:'#/ticket/PAY-236'},
+ {id:'pr144',src:'gitea',kind:'pr',key:'PR #144',title:'Add payout CSV export',x:90,y:555,route:'#/pr/144'},
+ {id:'pay228',src:'jira',kind:'ticket',key:'PAY-228',title:'Ledger drift on partial refunds',x:330,y:530,route:'#/ticket/PAY-228'},
+ {id:'ops77',src:'jira',kind:'ticket',key:'OPS-77',title:'On-call runbook outdated',x:485,y:490,route:'#/ticket/OPS-77'},
+ {id:'page_oncall',src:'confluence',kind:'page',key:'Page · ENG',title:'On-call handbook',x:660,y:470,route:'#/page/on-call-handbook'},
+ {id:'ledger_api',src:'gitea',kind:'repo',key:'Repo',title:'ledger-api',x:935,y:525,route:'#/repo/ledger-api'},
+ {id:'note_standup',src:'note',kind:'note',key:'Note',title:'Standup 2026-08-21',x:190,y:630,route:'#/note/standup-2026-08-21'},
+ {id:'pr139',src:'gitea',kind:'pr',key:'PR #139',title:'Fix ledger drift on partial refunds',x:470,y:625,route:'#/pr/139'},
+ {id:'page_runbook',src:'confluence',kind:'page',key:'Page · ENG',title:'Ledger reconciliation runbook',x:690,y:600,route:'#/page/ledger-reconciliation-runbook'}
+];
+/* edges: a = origin (cable color), b = target; sug = reason for a suggested link */
+let EDGES=[
+ {a:'pay231',b:'branch231'},{a:'pay231',b:'pr142'},{a:'branch231',b:'pr142'},{a:'pr142',b:'b1187'},{a:'pr142',b:'b1188'},
+ {a:'pay231',b:'page_sepa'},{a:'pay231',b:'note_sepa'},{a:'note_sepa',b:'page_sepa'},
+ {a:'pay200',b:'pay231'},{a:'pay200',b:'pay228'},{a:'pay200',b:'pay240'},{a:'pay200',b:'pay236'},
+ {a:'pay228',b:'pr139'},{a:'pay228',b:'page_runbook'},{a:'pay228',b:'note_standup'},{a:'pr139',b:'note_standup'},
+ {a:'pay228',b:'ops77',label:'blocked by'},{a:'ops77',b:'page_oncall'},{a:'pay236',b:'pr144'},
+ {a:'commit_a41',b:'pay231',sug:'key in commit message'},
+ {a:'b1187',b:'pay231',sug:'key in build parameter branch'},
+ {a:'page_arch',b:'ledger_api',sug:'mentions ledger-api 4×'},
+ {a:'pay240',b:'page_arch',sug:'text similarity 0.71 ("dashboard latency")'}
+];
+const NOTES={
+ 'sepa-retry-investigation':{title:'SEPA retry investigation',edited:'today 11:20',node:'note_sepa',body:'Test expects 5 attempts, code counts the initial try as attempt 0 → off-by-one. Fix: start counter at 1. Also: ask Priya about manual-review SLA.\n\nLinks: [[PAY-231]] [[#1187]] [[SEPA payout retry design]]'},
+ 'standup-2026-08-21':{title:'Standup 2026-08-21',edited:'yesterday 09:05',node:'note_standup',body:'Yesterday: drift fix. Today: re-test partial refunds on staging, open PR. Blocker: none.\n\nLinks: [[PAY-228]] [[PR #139]]'},
+ 'credentials-to-rotate':{title:'Credentials to rotate',edited:'2026-08-18',node:null,body:'TeamCity password expires end of August. Jira PAT expires 2026-09-03.\n\nLinks: [[PAY-219]]'}
+};
+const CHIPMAP={'PAY-231':'pay231','PAY-228':'pay228','PAY-240':'pay240','PAY-236':'pay236','PAY-200':'pay200','OPS-77':'ops77','#1187':'b1187','#1188':'b1188','SEPA payout retry design':'page_sepa','PR #139':'pr139','PR #142':'pr142','PR #144':'pr144','PAY-219':null};
+/* searchable extras that are not on the canvas */
+const EXTRA=[
+ {id:'x_c90d11',src:'gitea',kind:'commit',key:'c90d11',title:'PAY-231: jitter in backoff, cap at 5 attempts',text:'feature/PAY-231-sepa-retry sepa retry',route:'#/commit/c90d11'},
+ {id:'x_7be0e4',src:'gitea',kind:'commit',key:'7be0e4',title:'PAY-231: retry SEPA payouts on transient PSP errors',text:'feature/PAY-231-sepa-retry',route:'#/commit/7be0e4'},
+ {id:'x_note_cred',src:'note',kind:'note',key:'Note',title:'Credentials to rotate',text:'TeamCity password Jira PAT PAY-219',route:'#/note/credentials-to-rotate'},
+ {id:'x_pay219',src:'jira',kind:'ticket',key:'PAY-219',title:'Rotate PSP credentials',text:'Done',route:'#/ticket/PAY-219'},
+ {id:'x_page_standup',src:'confluence',kind:'page',key:'Page · ENG',title:'Standup protocols',text:'daily protocol pages',route:'#/page/standup-protocols'},
+ {id:'x_repo_payout',src:'gitea',kind:'repo',key:'Repo',title:'payout-service',text:'Rust ~/code/payout-service main',route:'#/repo/payout-service'},
+ {id:'x_b412',src:'teamcity',kind:'build',key:'Build #412',title:'Ledger_Deploy_Staging',text:'success main yesterday 16:20',route:'#/build/412'}
+];
+const SEARCHTEXT={
+ pay231:'retry failed sepa payouts story in progress high mara backoff jitter psp feature/PAY-231-sepa-retry',
+ page_sepa:'sepa payout retry design backoff policy manual review queue mara priya',
+ pr142:'sepa retry with exponential backoff payout-service feature/PAY-231-sepa-retry open mara jonas priya',
+ commit_a41:'PAY-231 backoff jitter feature/PAY-231-sepa-retry sepa retry mara',
+ b1187:'payout_integrationtests failed feature/PAY-231-sepa-retry sepa retry staging',
+ b1188:'payout_build running feature/PAY-231-sepa-retry sepa retry cargo test',
+ note_sepa:'sepa retry investigation off-by-one attempt counter priya sla',
+ branch231:'feature/PAY-231-sepa-retry sepa retry 3 commits ahead checked out',
+ pay228:'ledger drift partial refunds bug in review blocked ops-77',pay240:'payout dashboard latency finance august 8-12 s to do',
+ pay236:'payout csv export finance jonas',ops77:'on-call runbook outdated tomasz',pay200:'payout reliability epic',
+ page_arch:'payments architecture overview ledger-api priya',page_oncall:'on-call handbook tomasz',page_runbook:'ledger reconciliation runbook tomasz',
+ ledger_api:'ledger-api kotlin ~/code/ledger-api',note_standup:'standup 2026-08-21 drift fix partial refunds',pr139:'fix ledger drift on partial refunds merged ledger-api',pr144:'add payout csv export jonas review requested'
+};
+const LENSES=[
+ {id:'failing',name:'My tickets with a failing build',n:'1',ids:['pay231','b1187'],jql:true,badge:true},
+ {id:'prsme',name:'PRs waiting on me',n:'1',ids:['pr144'],badge:true},
+ {id:'idle',name:'PRs idle > 5 days',n:'2',ids:[],note:'2 PRs in other repos — not on this canvas'},
+ {id:'pages',name:'Pages I edited this week',n:'3',ids:['page_sepa'],note:'SEPA payout retry design, Standup protocols, Standup protocol 2026-08-21 — 1 on canvas'},
+ {id:'blocked',name:'Blocked tickets',n:'1',ids:['pay228','ops77'],badge:true},
+ {id:'unlogged',name:'Unlogged time this week',n:'4h 45m',ids:[],time:true}
+];
+let INBOX=[
+ {id:'i1',when:'today 13:50',node:'pr144',html:'<b>Jonas Becker</b> requested your review on <b>PR #144</b> <i>Add payout CSV export</i>',acts:['Review','Snooze','Done']},
+ {id:'i2',when:'today 12:05',node:'page_sepa',html:'<b>Priya Nair</b> mentioned you on <b>SEPA payout retry design</b>: <q>@Mara can you add the manual-review queue SLA here?</q>',acts:['Reply','Open page','Done']},
+ {id:'i3',when:'today 10:14',node:'b1187',html:'Build <b>#1187</b> Payout_IntegrationTests <b style="color:#D62839">failed</b> on feature/PAY-231-sepa-retry',acts:['Open log','Re-run','Comment on PAY-231']},
+ {id:'i4',when:'today 09:30',node:'pr142',html:'<b>Jonas Becker</b> commented on your <b>PR #142</b>: <q>Should the jitter be bounded? ±20 % feels wide.</q>',acts:['Reply','Open PR']},
+ {id:'i5',when:'today 08:12',node:'pay240',html:'<b>Priya Nair</b> assigned <b>PAY-240</b> <i>Payout dashboard latency</i> to you',acts:['Open','Start work']},
+ {id:'i6',when:'yesterday 16:30',node:'pay228',html:'<b>PAY-228</b> is blocked by <b>OPS-77</b> <i>On-call runbook outdated</i>',acts:['Open OPS-77','Ping Tomasz']}
+];
+let SNOOZED=[{t:'Jira PAT expires in 12 days',back:'returns 2026-08-29'}];
+const BLOCKS=[
+ {s:'08:30',e:'08:45',k:'Inbox',t:'Inbox + standup digest',src:'local',mode:'passive'},
+ {s:'08:45',e:'09:40',k:'PAY-228',t:'PAY-228 + note Standup 2026-08-21',src:'jira',mode:'passive',node:'pay228'},
+ {s:'09:40',e:'11:50',k:'PAY-231',t:'PR #142, design page, investigation note',src:'jira',mode:'passive',node:'pay231'},
+ {s:'11:50',e:'12:20',k:'Unattributed',t:'app open, no entity',mode:'unat'},
+ {s:'12:20',e:'13:10',k:'',t:'no activity',mode:'gap'},
+ {s:'13:10',e:'13:58',k:'Staging DB configuration',t:'ad-hoc label, no ticket',mode:'adhoc'},
+ {s:'13:58',e:'14:32',k:'PAY-231',t:'manual timer',src:'jira',mode:'manual',node:'pay231'}
+];
+const WEEK=[{d:'Mon',t:465,l:465},{d:'Tue',t:480,l:480},{d:'Wed',t:390,l:390},{d:'Thu',t:430,l:430},{d:'Fri',t:328,l:0}];
+</script>
+<script>
+try{
+/* =========================================================
+   STATE + HELPERS
+   ========================================================= */
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const NB=Object.fromEntries(NODES.map(n=>[n.id,n]));
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const state={sel:'pay231',mode:'entity',lens:null,query:'',scur:0,selBlock:null,queued:null,filters:{src:null,failing:false,mine:false},hidden:{},dismissed:{},baseRoute:'#/ticket/PAY-231',overlay:null,noteId:'sepa-retry-investigation',pending:0,tcFixed:false,patExtended:false,syncMin:4};
+const timer={running:true,ctx:'pay231',label:'PAY-231',startedMin:13*60+58};
+const T0=Date.now(); const NOW0=14*60+32;
+const nowMin=()=>NOW0+Math.floor((Date.now()-T0)/60000);
+const fmtEl=m=>`${Math.floor(m/60)}:${String(m%60).padStart(2,'0')}`;
+const hm=m=>m>=60?`${Math.floor(m/60)}h ${String(m%60).padStart(2,'0')}m`:`${m}m`;
+const mins=s=>{const[a,b]=s.split(':').map(Number);return a*60+b};
+const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+let toastN=0;
+function toast(msg,src){const t=document.createElement('div');t.className='toast';t.innerHTML=(src?`<span class="jack src-${src}"></span>`:'')+msg;$('#toasts').appendChild(t);setTimeout(()=>t.remove(),3800)}
+function go(h){location.hash=h}
+function nodeLabel(id){const n=NB[id];return n?(n.kind==='ticket'||n.kind==='epic'||n.kind==='pr'||n.kind==='build'||n.kind==='commit'?n.key:n.title):id}
+function person(k){return PEOPLE[k]||{n:k,i:'?'}}
+function chipFor(id,extra=''){const n=NB[id];if(!n)return esc(id);return `<button class="chip src-${n.src} ${extra}" data-go="${n.route}"><span class="jack"></span><span class="k">${esc(nodeLabel(id))}</span></button>`}
+function linked(id){return EDGES.filter(e=>!e.sug&&(e.a===id||e.b===id)).map(e=>e.a===id?e.b:e.a)}
+function sugsFor(id){return EDGES.filter(e=>e.sug&&!state.dismissed[e.a+'>'+e.b]&&(e.a===id||e.b===id))}
+function allSugs(){return EDGES.filter(e=>e.sug&&!state.dismissed[e.a+'>'+e.b])}
+function ticketOfNode(id){const n=NB[id];return n&&(n.kind==='ticket'||n.kind==='epic')?n.key:null}
+
+/* =========================================================
+   CANVAS — jacks + patch cables
+   ========================================================= */
+const svg=$('#canvas');let vb={x:0,y:0,w:1000,h:700};
+function setVB(){svg.setAttribute('viewBox',`${vb.x} ${vb.y} ${vb.w} ${vb.h}`)}
+function cablePath(p1,p2){const dx=p2.x-p1.x,dy=p2.y-p1.y,d=Math.hypot(dx,dy);const sag=22+d*0.12;const c1={x:p1.x+dx*0.3,y:p1.y+sag},c2={x:p2.x-dx*0.3,y:p2.y+sag};
+  const n1=norm(c1.x-p1.x,c1.y-p1.y),n2=norm(c2.x-p2.x,c2.y-p2.y);const s={x:p1.x+n1.x*17,y:p1.y+n1.y*17},e={x:p2.x+n2.x*17,y:p2.y+n2.y*17};
+  return {d:`M${s.x.toFixed(1)},${s.y.toFixed(1)} C${c1.x.toFixed(1)},${c1.y.toFixed(1)} ${c2.x.toFixed(1)},${c2.y.toFixed(1)} ${e.x.toFixed(1)},${e.y.toFixed(1)}`,s,e,mid:{x:(s.x+e.x)/2+ (c1.x+c2.x-s.x-e.x)*0.375*0, y:(s.y+e.y)/2+sag*0.75}}}
+function norm(x,y){const l=Math.hypot(x,y)||1;return {x:x/l,y:y/l}}
+function nodeVisible(n){return !state.hidden[n.src]}
+function nodeMatches(n){
+  if(state.lens){const L=LENSES.find(l=>l.id===state.lens);if(L&&L.ids.length)return L.ids.includes(n.id)}
+  if(state.query){const q=state.query.toLowerCase().split(/\s+/).filter(Boolean);const txt=(n.key+' '+n.title+' '+(SEARCHTEXT[n.id]||'')).toLowerCase();if(!q.every(w=>txt.includes(w)))return false}
+  if(state.filters.src&&n.src!==state.filters.src)return false;
+  if(state.filters.failing&&!['pay231','b1187','pr142','branch231'].includes(n.id))return false;
+  return true}
+function plateW(n){const a=n.key.length*6.6,b=Math.min(n.title.length,26)*5.9;return Math.max(a,b)+18}
+function renderCanvas(){
+  const ge=$('#g-edges'),gn=$('#g-nodes');let labs='';
+  ge.innerHTML=EDGES.filter(e=>!(e.sug&&state.dismissed[e.a+'>'+e.b])).map((e,i)=>{
+    const A=NB[e.a],B=NB[e.b];if(!A||!B||!nodeVisible(A)||!nodeVisible(B))return '';
+    const c=SRC[A.src].c,p=cablePath(A,B),dim=!(nodeMatches(A)&&nodeMatches(B));const hot=state.sel&&(e.a===state.sel||e.b===state.sel);
+    const out=`<g class="cable-g ${dim?'dim':''} ${hot?'hot':''}" data-e="${i}">
+      <path class="cable hit" d="${p.d}"/><path class="cable ${e.sug?'sug':''}" d="${p.d}" stroke="${c}"/>
+      <circle class="plug" cx="${p.s.x}" cy="${p.s.y}" r="4.5" fill="${c}" ${e.sug?'opacity=".45"':''}/><circle class="plug" cx="${p.e.x}" cy="${p.e.y}" r="4.5" fill="${c}" ${e.sug?'opacity=".45"':''}/>
+    </g>`;
+    if(e.label&&!dim)labs+=`<rect x="${p.mid.x-34}" y="${p.mid.y-8}" width="68" height="15" rx="2" fill="#F1F2F4" stroke="#D62839" stroke-width="1"/><text class="elabel" x="${p.mid.x}" y="${p.mid.y+3}">${e.label}</text>`;
+    return out}).join('');
+  $('#g-labels').innerHTML=labs;
+  gn.innerHTML=NODES.filter(nodeVisible).map(n=>{
+    const c=SRC[n.src].c,w=plateW(n),sel=state.sel===n.id,dim=!nodeMatches(n),tc=timer.running&&timer.ctx===n.id;
+    const title=n.title.length>26?n.title.slice(0,25)+'…':n.title;
+    return `<g class="node ${dim?'dim':''} ${sel?'sel':''}" data-id="${n.id}" transform="translate(${n.x},${n.y})" tabindex="0" role="button" aria-label="${esc(n.key)} ${esc(n.title)}">
+      ${n.status==='running'?`<circle class="pulse" r="21" stroke="${c}"/>`:''}
+      ${tc?`<circle class="tpulse" r="25"/>`:''}
+      ${sel?`<circle class="selring" r="20.5"/>`:''}
+      <circle class="jack-o" r="15" fill="#F1F2F4" stroke="${n.status==='failed'?'#D62839':c}" stroke-width="3.5"/>
+      <circle r="5.5" fill="#1E2126"/>
+      ${n.status==='failed'?`<g transform="translate(12,-12)"><circle r="7" fill="#D62839"/><path d="M-3-3L3 3M3-3L-3 3" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/></g>`:''}
+      ${n.status==='success'?`<g transform="translate(12,-12)"><circle r="7" fill="#F1F2F4" stroke="#1E2126" stroke-width="1.5"/><path d="M-3 0l2 2 4-4" fill="none" stroke="#1E2126" stroke-width="1.8" stroke-linecap="round"/></g>`:''}
+      ${n.status==='queued'?`<g transform="translate(12,-12)"><circle r="7" fill="#F1F2F4" stroke="#F0742A" stroke-width="1.5"/><circle r="2" fill="#F0742A"/></g>`:''}
+      <g transform="translate(0,22)"><rect class="npl" x="${-w/2}" y="0" width="${w}" height="32" rx="3"/>
+        <text class="nkey" y="13">${esc(n.key)}</text><text class="ntitle" y="26">${esc(title)}</text></g>
+    </g>`}).join('');
+}
+/* pointer handling: click selects, drag patches a cable, right-click opens actions */
+let drag=null;
+function svgPt(ev){const p=svg.createSVGPoint();p.x=ev.clientX;p.y=ev.clientY;return p.matrixTransform(svg.getScreenCTM().inverse())}
+svg.addEventListener('pointerdown',ev=>{if(ev.button!==0)return;const g=ev.target.closest('.node');if(!g)return;drag={id:g.dataset.id,x0:ev.clientX,y0:ev.clientY,moved:false};svg.setPointerCapture(ev.pointerId)});
+svg.addEventListener('pointermove',ev=>{if(!drag)return;if(!drag.moved&&Math.hypot(ev.clientX-drag.x0,ev.clientY-drag.y0)<6)return;drag.moved=true;svg.classList.add('dragging');
+  const A=NB[drag.id],p=svgPt(ev),c=SRC[A.src].c,path=cablePath(A,p);const tc=$('#tmpcable'),tp=$('#tmpplug');tc.style.display='';tc.setAttribute('d',path.d);tc.setAttribute('stroke',c);tc.setAttribute('stroke-dasharray','7 6');tp.style.display='';tp.setAttribute('cx',p.x);tp.setAttribute('cy',p.y);tp.setAttribute('fill',c);
+  const over=hitNode(p,drag.id);$$('.node.drop').forEach(n=>n.classList.remove('drop'));if(over)$(`.node[data-id="${over}"]`).classList.add('drop');drag.over=over});
+svg.addEventListener('pointerup',ev=>{if(!drag)return;const d=drag;drag=null;svg.classList.remove('dragging');$('#tmpcable').style.display='none';$('#tmpplug').style.display='none';$$('.node.drop').forEach(n=>n.classList.remove('drop'));
+  if(!d.moved){go(NB[d.id].route);return}
+  if(d.over)askLink(d.id,d.over,ev.clientX,ev.clientY);});
+function hitNode(p,exclude){for(const n of NODES){if(n.id===exclude||!nodeVisible(n))continue;if(Math.hypot(n.x-p.x,n.y-p.y)<28)return n.id}return null}
+svg.addEventListener('click',ev=>{const cg=ev.target.closest('.cable-g');if(cg){const e=EDGES[+cg.dataset.e];if(e.sug)askLink(e.a,e.b,ev.clientX,ev.clientY,e);else go(NB[e.a].route)}});
+svg.addEventListener('keydown',ev=>{const g=ev.target.closest('.node');if(!g)return;if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();go(NB[g.dataset.id].route)}if(ev.key==='ContextMenu'||(ev.shiftKey&&ev.key==='F10')){ev.preventDefault();const r=g.getBoundingClientRect();openMenu(g.dataset.id,r.left+30,r.top+30)}});
+svg.addEventListener('contextmenu',ev=>{ev.preventDefault();const g=ev.target.closest('.node');openMenu(g?g.dataset.id:null,ev.clientX,ev.clientY)});
+svg.addEventListener('wheel',ev=>{if(!ev.ctrlKey&&!ev.metaKey)return;ev.preventDefault();zoom(ev.deltaY<0?0.9:1.1)},{passive:false});
+function zoom(f){const cx=vb.x+vb.w/2,cy=vb.y+vb.h/2;vb.w=Math.min(1600,Math.max(500,vb.w*f));vb.h=vb.w*0.70;vb.x=cx-vb.w/2;vb.y=cy-vb.h/2;setVB()}
+$('#zoom').addEventListener('click',ev=>{const b=ev.target.closest('button');if(!b)return;if(b.dataset.z==='fit'){fitAll()}else zoom(b.dataset.z==='in'?0.85:1.18)});
+
+/* link confirm popover (drag-to-link + suggested cables) */
+function askLink(a,b,cx,cy,edge){
+  const A=NB[a],B=NB[b];const st=$('#stage').getBoundingClientRect();const pop=$('#linkpop');
+  const exists=EDGES.find(e=>!e.sug&&((e.a===a&&e.b===b)||(e.a===b&&e.b===a)));
+  pop.style.left=Math.min(cx-st.left+8,st.width-320)+'px';pop.style.top=Math.min(cy-st.top+8,st.height-150)+'px';
+  pop.innerHTML=`<div class="mod-head" style="--src:${SRC[A.src].c}"><span class="plate">${edge?'Suggested link':'Patch link'}</span><span class="sp"></span><button class="x" data-close aria-label="Close">✕</button></div><div class="mod-body">
+    <div class="row" style="flex-wrap:wrap;gap:6px">${chipFor(a)}<span class="muted">→</span>${chipFor(b)}</div>
+    <div class="rs">${exists?'Already patched.':edge?'Auto-detected: '+esc(edge.sug):'Patch a confirmed cross-source link between these two.'}</div>
+    <div class="row">${exists?'':`<button class="btn primary" id="lp-ok">${edge?'Confirm link':'Patch link'}</button>`}${edge?`<button class="btn" id="lp-no">Dismiss</button>`:''}<button class="btn" data-close>Cancel</button></div></div>`;
+  pop.classList.add('open');state.popAt=Date.now();
+  pop.querySelector('#lp-ok')?.addEventListener('click',()=>{confirmLink(a,b);pop.classList.remove('open')});
+  pop.querySelector('#lp-no')?.addEventListener('click',()=>{dismissLink(a,b);pop.classList.remove('open')});
+  pop.querySelector('#lp-ok')?.focus();
+}
+function confirmLink(a,b){
+  const e=EDGES.find(e=>(e.a===a&&e.b===b)||(e.a===b&&e.b===a));
+  if(e){delete e.sug}else EDGES.push({a,b});
+  renderAll();plugAnim(a);plugAnim(b);toast(`Patched ${esc(nodeLabel(a))} → ${esc(nodeLabel(b))}`,NB[a].src)}
+function dismissLink(a,b){state.dismissed[a+'>'+b]=true;renderAll();toast(`Dismissed suggestion ${esc(nodeLabel(a))} → ${esc(nodeLabel(b))}`)}
+function plugAnim(id){const g=$(`.node[data-id="${id}"]`);if(!g||reduced)return;g.classList.add('plugged');setTimeout(()=>g.classList.remove('plugged'),200)}
+function addNode(n){NODES.push(n);NB[n.id]=n;}
+
+/* lenses + legend */
+function renderLenses(){
+  const L=LENSES.find(l=>l.id===state.lens);
+  const call=L&&(L.jql||L.note)?`<div class="lenscall mod">${L.jql?`<span class="pill fail">not expressible in JQL</span><span>Joins Jira ↔ Gitea ↔ TeamCity locally: PAY-231 is lit because build #1187 on its branch failed.</span>`:`<span class="pill">lens</span><span>${esc(L.note)}</span>`}</div>`:'';
+  $('#lenses').innerHTML=`<span class="plate dim lab">Lenses</span>`+LENSES.map(l=>`<button class="lens ${state.lens===l.id?'on':''}" data-lens="${l.id}">${l.badge?'<span class="d"></span>':''}${esc(l.name)}<span class="n">${l.n}</span></button>`).join('')+call
+  $('#legend').innerHTML=Object.keys(SRC).map(k=>`<span class="it src-${k} ${state.hidden[k]?'off':''}"><button data-layer="${k}" title="Toggle ${SRC[k].name} layer"><span class="jack"></span>${SRC[k].name}</button></span>`).join('')+`<span class="it lg"><span class="ln"></span>link</span><span class="it lg"><span class="ln sug"></span>suggested</span>`;
+}
+$('#lenses').addEventListener('click',ev=>{const b=ev.target.closest('.lens');if(!b)return;const L=LENSES.find(l=>l.id===b.dataset.lens);if(L.time){go('#/time');return}state.lens=state.lens===L.id?null:L.id;state.query='';$('#q').value='';renderAll();if(state.lens&&L.ids[0]&&!L.ids.includes(state.sel))go(NB[L.ids[0]].route)});
+$('#legend').addEventListener('click',ev=>{const b=ev.target.closest('[data-layer]');if(!b)return;state.hidden[b.dataset.layer]=!state.hidden[b.dataset.layer];renderAll()});
+
+/* =========================================================
+   CONTEXT MENU (actions on a node or on the canvas)
+   ========================================================= */
+function openMenu(id,x,y){
+  const m=$('#cmenu');const n=id?NB[id]:null;let items=[];
+  const li=(label,act,kbd)=>`<button data-act="${act}">${label}${kbd?`<span class="kbd">${kbd}</span>`:''}</button>`;
+  if(!n){items=[`<div class="mh">Canvas</div>`,li('Create ticket…','create-ticket'),li('Create page…','create-page'),li('New note','new-note'),li('Create repo…','create-repo'),'<hr>',li('Fit to window','fit')]}
+  else{
+    items.push(`<div class="mh">${esc(n.key)} · ${KIND[n.kind]}</div>`);
+    items.push(li('Open','open'));
+    if(n.kind==='ticket'||n.kind==='epic'){const t=TICKETS[n.key];if(t&&t.status==='To Do')items.push(li('Start work…','start-work'));items.push(li(timer.running&&timer.ctx===id?'Stop timer':'Start timer here','timer','⌘T'));items.push(li('Change status ▸','status'));items.push(li('Add comment','comment'))}
+    if(n.kind==='pr'){items.push(li('Re-request review','rereview'));items.push(li('Start timer here','timer','⌘T'))}
+    if(n.kind==='build'){items.push(li('Open log','open'));items.push(li('Re-run failed','rerun'));items.push(li('Trigger Payout_IntegrationTests…','trigger'))}
+    if(n.kind==='branch'||n.kind==='repo'){items.push(li('Pull','pull'));items.push(li('Push','push'));items.push(li('New branch…','new-branch'));if(n.kind==='repo')items.push(li('Create repo…','create-repo'))}
+    if(n.kind==='page'){items.push(li('Edit page','open'));items.push(li('Create page…','create-page'))}
+    if(n.kind==='note'){items.push(li('New note','new-note'))}
+    items.push('<hr>',li('Link to…','link'));
+  }
+  m.innerHTML=items.join('');m.classList.add('open');
+  const W=230,H=m.offsetHeight;m.style.left=Math.min(x,innerWidth-W-8)+'px';m.style.top=Math.min(y,innerHeight-H-8)+'px';
+  m.querySelector('button')?.focus();
+  m.onclick=ev=>{const b=ev.target.closest('button');if(!b)return;m.classList.remove('open');doAction(b.dataset.act,id,x,y)};
+}
+function doAction(act,id,x,y){
+  const n=id?NB[id]:null;
+  switch(act){
+    case 'open':if(n)go(n.route);break;
+    case 'fit':fitAll();break;
+    case 'start-work':openStartWork(n?n.key:'PAY-240');break;
+    case 'timer':if(timer.running&&timer.ctx===id)stopTimer();else startTimer(id);break;
+    case 'status':go(n.route);setTimeout(()=>$('#card .seg button')?.focus(),50);break;
+    case 'comment':go(n.route);setTimeout(()=>$('#card textarea')?.focus(),50);break;
+    case 'rereview':toast('Review re-requested from Jonas Becker on '+n.key,'gitea');break;
+    case 'rerun':rerunBuild();break;
+    case 'trigger':openTrigger();break;
+    case 'pull':toast(`Pulled ${n.kind==='repo'?n.title:n.title} — already up to date (${n.kind==='repo'?'~/code/'+n.title:'~/code/payout-service'})`,'gitea');break;
+    case 'push':toast(`Pushed ${n.kind==='branch'?'3 commits on '+n.title:n.title} to git.tidewater.internal`,'gitea');break;
+    case 'new-branch':openCreate('branch');break;
+    case 'create-repo':openCreate('repo');break;
+    case 'create-ticket':openCreate('ticket');break;
+    case 'create-page':openCreate('page');break;
+    case 'new-note':newNote();break;
+    case 'link':openPicker(id||state.sel,x,y);break;
+  }
+}
+document.addEventListener('click',ev=>{if(!ev.target.closest('#cmenu'))$('#cmenu').classList.remove('open');if(!ev.target.closest('#linkpop')&&!ev.target.closest('.cable-g')&&Date.now()-(state.popAt||0)>300)$('#linkpop').classList.remove('open');if(!ev.target.closest('#picker')&&!ev.target.closest('[data-pick]'))$('#picker').classList.remove('open');if(!ev.target.closest('#timer'))$('#tpop').classList.remove('open');if(!ev.target.closest('#searchwrap'))$('#spop').classList.remove('open')});
+$('#createbtn').addEventListener('click',ev=>{const r=ev.currentTarget.getBoundingClientRect();openMenu(null,r.right+6,r.top)});
+
+/* link picker: search-as-you-type */
+function openPicker(from,x,y){
+  const p=$('#picker');const st=$('#stage').getBoundingClientRect();
+  p.style.left=Math.max(60,Math.min(x==null?innerWidth/2-170:x,innerWidth-352))+'px';p.style.top=Math.max(60,Math.min(y==null?180:y,innerHeight-330))+'px';
+  const pool=[...NODES,...EXTRA].filter(n=>n.id!==from);
+  const render=q=>{const qq=q.toLowerCase();const hits=pool.filter(n=>!qq||(n.key+' '+n.title).toLowerCase().includes(qq)).slice(0,8);
+    p.querySelector('.list').innerHTML=hits.map(n=>`<button class="pk src-${n.src}" data-id="${n.id}"><span class="jack"></span><span class="k">${esc(n.key)}</span><span>${esc(n.title)}</span></button>`).join('')||`<div class="muted" style="padding:6px 8px">No match in the local index. Try a key, a title or a hash.</div>`};
+  p.innerHTML=`<div class="mod-head" style="--src:${SRC[NB[from].src].c}"><span class="plate">Link ${esc(nodeLabel(from))} to…</span><span class="sp"></span><button class="x" data-close aria-label="Close">✕</button></div><div class="mod-body"><input class="tx" placeholder="Type a key, title or hash" aria-label="Link to"><div class="list"></div></div>`;
+  p.classList.add('open');const inp=p.querySelector('input');render('');inp.focus();inp.addEventListener('input',()=>render(inp.value));
+  p.querySelector('.list').addEventListener('click',ev=>{const b=ev.target.closest('.pk');if(!b)return;let to=b.dataset.id;
+    if(!NB[to]){const x=EXTRA.find(e=>e.id===to);addNode({...x,x:NB[from].x+120,y:NB[from].y+90});to=x.id}
+    confirmLink(from,to);p.classList.remove('open')});
+}
+
+/* =========================================================
+   DETAIL DATA — PRs, builds, pages, branches, commits, repos
+   ========================================================= */
+let PRS={
+ '142':{key:'PR #142',title:'SEPA retry with exponential backoff',repo:'payout-service',head:'feature/PAY-231-sepa-retry',base:'main',state:'open',by:'mara',opened:'opened yesterday 17:41',
+   approvals:1,need:2,approvedBy:'Priya Nair',reviewReq:'Jonas Becker, requested today 09:05',node:'pr142',
+   checks:[{node:'b1188',name:'Payout_Build #1188',st:'running',t:'step 3/5 cargo test'},{node:'b1187',name:'Payout_IntegrationTests #1187',st:'failed',t:'1 test failed'}],
+   comments:[{who:'jonas',when:'today 09:30',t:'Should the jitter be bounded? ±20 % feels wide.'},{who:'mara',when:'today 10:20',t:'Bounded to ±10 % in c90d11.'}],
+   files:[['src/sepa/retry.rs','+84','−12'],['tests/sepa_retry.rs','+51',''],['docs/backoff.md','+9','']]},
+ '144':{key:'PR #144',title:'Add payout CSV export',repo:'payout-service',head:'feature/PAY-236-csv-export',base:'main',state:'open',by:'jonas',opened:'review requested from you today 13:50',
+   approvals:0,need:2,approvedBy:'—',reviewReq:'Mara Lindqvist, requested today 13:50',node:'pr144',checks:[],comments:[],files:[['src/export/csv.rs','+142',''],['docs/export.md','+21','']]},
+ '139':{key:'PR #139',title:'Fix ledger drift on partial refunds',repo:'ledger-api',head:'fix/PAY-228-partial-refund-drift',base:'main',state:'merged',by:'mara',opened:'merged yesterday 16:00',
+   approvals:2,need:2,approvedBy:'Priya Nair, Jonas Becker',reviewReq:'—',node:'pr139',checks:[],comments:[],files:[['src/ledger/refund.kt','+37','−9']]}
+};
+let BUILDS={
+ '1187':{key:'Build #1187',cfg:'Payout_IntegrationTests',st:'failed',branch:'feature/PAY-231-sepa-retry',when:'today 10:10',dur:'4 m 12 s',node:'b1187',
+   params:[['branch','feature/PAY-231-sepa-retry'],['env','staging'],['clean checkout','off']],
+   log:'test sepa::retry::gives_up_after_max_attempts ... FAILED\nassertion failed: attempts == 5 (left: 6, right: 5)\ntest result: FAILED. 41 passed; 1 failed'},
+ '1188':{key:'Build #1188',cfg:'Payout_Build',st:'running',branch:'feature/PAY-231-sepa-retry',when:'started today 11:45',dur:'step 3/5 cargo test',node:'b1188',
+   params:[['branch','feature/PAY-231-sepa-retry'],['env','staging'],['clean checkout','off']],log:'[11:45:02] step 1/5 checkout ... done\n[11:45:19] step 2/5 cargo fmt --check ... done\n[11:46:03] step 3/5 cargo test ... running'},
+ '412':{key:'Build #412',cfg:'Ledger_Deploy_Staging',st:'success',branch:'main',when:'yesterday 16:20',dur:'2 m 05 s',node:null,
+   params:[['branch','main'],['env','staging']],log:'[16:20:44] deploy ledger-api to staging ... done\nBuild finished: success'}
+};
+let PAGES={
+ 'sepa-payout-retry-design':{key:'Page · ENG',title:'SEPA payout retry design',space:'ENG (Engineering)',edited:'today 10:40',section:'Backoff policy',by:'mara',node:'page_sepa',
+   body:'## Backoff policy\nBase 30 s, factor 2, max 5 attempts, jitter ±10 %. Transient codes: HTTP 503, TEMP_UNAVAILABLE. After the final attempt the payout is moved to the manual review queue (see PAY-231).\n\n## Manual review queue\nSLA: to be defined.',
+   comments:[{who:'priya',when:'today 12:05',t:'@Mara can you add the manual-review queue SLA here?'}]},
+ 'ledger-reconciliation-runbook':{key:'Page · ENG',title:'Ledger reconciliation runbook',space:'ENG (Engineering)',edited:'2026-08-19',section:'',by:'tomasz',node:'page_runbook',
+   body:'## Daily reconciliation\nCompare the PSP settlement file against the ledger. Partial refunds are reconciled by fee, see PAY-228.\n\n## Staging verification\nSteps still reference the old staging host.',comments:[]},
+ 'on-call-handbook':{key:'Page · ENG',title:'On-call handbook',space:'ENG (Engineering)',edited:'2026-07-02',section:'',by:'tomasz',node:'page_oncall',
+   body:'## Escalation\nPrimary on-call answers within 15 minutes. Secondary after 30.\n\n## Staging verification\nOutdated — being rewritten under OPS-77.',comments:[]},
+ 'payments-architecture-overview':{key:'Page · ENG',title:'Payments architecture overview',space:'ENG (Engineering)',edited:'2026-08-11',section:'',by:'priya',node:'page_arch',
+   body:'## Services\npayout-service (Rust) submits SEPA batches to the PSP. ledger-api (Kotlin) keeps the double-entry ledger; payout-service calls ledger-api on every settlement. ledger-api also backs the payout dashboard, and ledger-api queries dominate its load.\n\n## Dashboard\nThe payout dashboard reads aggregated ledger-api views. Latency grows with the month size.',comments:[]},
+ 'standup-protocols':{key:'Page · ENG',title:'Standup protocols',space:'ENG (Engineering)',edited:'yesterday',section:'',by:'mara',node:null,
+   body:'Parent page for the daily standup protocol pages of the Payments team.',comments:[]}
+};
+const BRANCHES={
+ 'feature-PAY-231-sepa-retry':{key:'Branch',title:'feature/PAY-231-sepa-retry',repo:'payout-service',state:'3 commits ahead of main · checked out locally',node:'branch231',
+   commits:[['c90d11','today 11:42','PAY-231: jitter in backoff, cap at 5 attempts'],['a41f2c','today 10:02','PAY-231 backoff jitter'],['7be0e4','yesterday 17:30','PAY-231: retry SEPA payouts on transient PSP errors']]}
+};
+const COMMITS={
+ 'a41f2c':{key:'a41f2c',title:'PAY-231 backoff jitter',when:'today 10:02',by:'mara',branch:'feature/PAY-231-sepa-retry',repo:'payout-service',node:'commit_a41',files:['src/sepa/retry.rs']},
+ 'c90d11':{key:'c90d11',title:'PAY-231: jitter in backoff, cap at 5 attempts',when:'today 11:42',by:'mara',branch:'feature/PAY-231-sepa-retry',repo:'payout-service',node:null,files:['src/sepa/retry.rs','tests/sepa_retry.rs']},
+ '7be0e4':{key:'7be0e4',title:'PAY-231: retry SEPA payouts on transient PSP errors',when:'yesterday 17:30',by:'mara',branch:'feature/PAY-231-sepa-retry',repo:'payout-service',node:null,files:['src/sepa/retry.rs','docs/backoff.md']}
+};
+const REPOS={
+ 'payout-service':{key:'Repo',title:'payout-service',lang:'Rust',clone:'~/code/payout-service',def:'main',commits:'312 commits',node:null,
+   branches:[['main','default'],['feature/PAY-231-sepa-retry','3 ahead · checked out'],['fix/PAY-228-partial-refund-drift','merged']]},
+ 'ledger-api':{key:'Repo',title:'ledger-api',lang:'Kotlin',clone:'~/code/ledger-api',def:'main',commits:'',node:'ledger_api',branches:[['main','default'],['fix/PAY-228-partial-refund-drift','merged']]},
+ 'ops-runbooks':{key:'Repo',title:'ops-runbooks',lang:'Markdown',clone:'not cloned',def:'main',commits:'',node:null,branches:[['main','default']]}
+};
+
+/* =========================================================
+   SMALL VIEW HELPERS
+   ========================================================= */
+function av(k){const p=person(k);return `<span class="av" title="${esc(p.n)}">${p.i}</span>`}
+const HC=k=>k==='ink'?'#1E2126':SRC[k].c;
+const DK=k=>k==='note'?' dk':'';
+function head(srcKey,key,plate,extra=''){
+  return `<div class="mod-head${DK(srcKey)}" style="--src:${HC(srcKey)}"><span class="key">${esc(key)}</span><span class="plate">${esc(plate)}</span><span class="sp"></span>${extra}
+    <button data-menu aria-label="Actions" title="Actions"><svg width="12" height="4" viewBox="0 0 12 4" fill="currentColor"><circle cx="2" cy="2" r="1.4"/><circle cx="6" cy="2" r="1.4"/><circle cx="10" cy="2" r="1.4"/></svg></button></div>`}
+function relOf(a,b){const e=EDGES.find(e=>!e.sug&&((e.a===a&&e.b===b)||(e.a===b&&e.b===a)));return e&&e.label?e.label:''}
+function pbayHTML(id){
+  const n=NB[id];const ls=linked(id);
+  if(!ls.length)return `<p class="muted" style="font-size:12.5px">Nothing patched yet. Drag this jack onto another node, or use <b>Link to…</b>.</p>`;
+  return `<div class="pbay"><svg class="pb" aria-hidden="true"></svg>
+    <div class="src-jack src-${n.src} ${n.status==='failed'?'fail':''}"></div>
+    <ul>${ls.map(t=>{const m=NB[t];const rel=relOf(id,t);
+      const st=m.status==='failed'?'<span class="st fail">failed</span>':m.status==='running'?'<span class="st run">running</span>':(rel?`<span class="st">${esc(rel)}</span>`:'');
+      return `<li><span class="jack src-${m.src} ${m.status==='failed'?'fail':''}"></span><button class="lk" data-go="${m.route}"><span class="k">${esc(m.key)}</span><span class="t">${esc(m.title)}</span>${st}</button></li>`}).join('')}</ul></div>`}
+function sugHTML(id){
+  const ss=sugsFor(id);if(!ss.length)return '';
+  return `<h3 class="sect">Suggested links <span class="cnt">${ss.length}</span></h3>`+ss.map(e=>{
+    const other=e.a===id?e.b:e.a,m=NB[other];
+    return `<div class="sug"><span class="jack src-${m.src}"></span><span class="t"><b>${esc(m.key)}</b> ${esc(m.title)}<span class="why">${esc(e.sug)}</span></span>
+      <button class="btn" data-sugok="${e.a}|${e.b}">Confirm</button><button class="btn" data-sugno="${e.a}|${e.b}">Dismiss</button></div>`}).join('');
+}
+function drawPbays(){
+  $$('.pbay').forEach(pb=>{
+    const svgp=pb.querySelector('svg.pb');if(!svgp)return;
+    const R=pb.getBoundingClientRect(),s=pb.querySelector('.src-jack');if(!s||!R.width)return;
+    const sr=s.getBoundingClientRect(),sx=sr.left-R.left+sr.width/2,sy=sr.top-R.top+sr.height/2;
+    let out='';
+    pb.querySelectorAll('li').forEach(li=>{
+      const j=li.querySelector('.jack');if(!j)return;
+      const jr=j.getBoundingClientRect(),ex=jr.left-R.left+jr.width/2,ey=jr.top-R.top+jr.height/2;
+      const c=getComputedStyle(j).borderTopColor,sag=10+Math.abs(ey-sy)*0.2;
+      out+=`<path d="M${(sx+14).toFixed(1)},${sy.toFixed(1)} C${(sx+34).toFixed(1)},${(sy+sag).toFixed(1)} ${(ex-30).toFixed(1)},${(ey+sag).toFixed(1)} ${(ex-9).toFixed(1)},${ey.toFixed(1)}" fill="none" stroke="${c}" stroke-width="3" stroke-linecap="round"/>`;
+    });
+    svgp.setAttribute('viewBox',`0 0 ${R.width} ${R.height}`);svgp.innerHTML=out;
+  });
+}
+function commentHTML(c){return `<div class="cm">${av(c.who)}<div class="body"><span class="who">${esc(person(c.who).n)}</span><span class="when">${esc(c.when)}</span><div>${c.t.replace(/@Mara/g,'<span class="at">@Mara</span>')}</div></div></div>`}
+function timerFoot(id,label){
+  const on=timer.running&&timer.ctx===id;
+  return `<button class="tbig" data-timer="${id}"><i>${on?'<svg width="9" height="9" viewBox="0 0 9 9"><path d="M0 0h9v9H0z" fill="#fff"/></svg>':'<svg width="9" height="10" viewBox="0 0 9 10"><path d="M0 0l9 5-9 5z" fill="#fff"/></svg>'}</i>${on?'Stop timer · '+fmtEl(nowMin()-timer.startedMin):'Start timer on '+esc(label)}</button>`}
+
+/* =========================================================
+   SIDE CARD — one renderer per entity kind
+   ========================================================= */
+function renderCard(){
+  const c=$('#card');const h=state.baseRoute;let inner='';
+  if(h.startsWith('#/ticket/'))inner=cardTicket(h.slice(9));
+  else if(h.startsWith('#/pr/'))inner=cardPR(h.slice(5));
+  else if(h.startsWith('#/build/'))inner=cardBuild(h.slice(8));
+  else if(h.startsWith('#/page/'))inner=cardPage(h.slice(7));
+  else if(h.startsWith('#/note/')||h==='#/notes')inner=cardNotes(h.startsWith('#/note/')?h.slice(7):state.noteId);
+  else if(h.startsWith('#/branch/'))inner=cardBranch(h.slice(9));
+  else if(h.startsWith('#/commit/'))inner=cardCommit(h.slice(9));
+  else if(h.startsWith('#/repo/'))inner=cardRepo(h.slice(7));
+  else inner=cardOverview();
+  c.innerHTML=`<div class="mod">${inner}</div>`;
+  requestAnimationFrame(drawPbays);
+}
+
+function cardOverview(){
+  const sug=allSugs();
+  return `${head('ink','Patchbay','Canvas · '+NODES.length+' jacks')}
+  <div class="mod-body">
+    <h2 class="title">Your work, patched together</h2>
+    <p class="desc muted">Every jack is one entity from one source. Every cable is a confirmed cross-source link. Drag a jack onto another to patch a new one.</p>
+    <h3 class="sect">Smart lists <span class="cnt">saved locally</span></h3>
+    ${LENSES.map(l=>`<button class="lk" data-lensrow="${l.id}" style="display:flex;align-items:center;gap:8px;width:100%;text-align:left;height:30px;padding:0 8px;border:1px solid var(--edge);border-radius:4px;background:#fff;margin-bottom:5px;font-size:12.5px">
+       ${l.badge?'<span class="d" style="width:7px;height:7px;border-radius:999px;background:var(--fail);flex:none"></span>':'<span style="width:7px;flex:none"></span>'}
+       <span style="flex:1">${esc(l.name)}</span><span class="mono" style="font-size:11px">${esc(l.n)}</span></button>`).join('')}
+    <div class="row" style="gap:8px;margin-top:6px"><span class="pill fail">not expressible in JQL</span><span class="muted" style="font-size:12px">The first list joins Jira ↔ Gitea ↔ TeamCity locally.</span></div>
+    <h3 class="sect">Suggested links <span class="cnt">${sug.length}</span></h3>
+    ${sug.length?sug.map(e=>`<div class="sug"><span class="jack src-${NB[e.a].src}"></span><span class="t"><b>${esc(NB[e.a].key)}</b> → <b>${esc(NB[e.b].key)}</b><span class="why">${esc(e.sug)}</span></span>
+      <button class="btn" data-sugok="${e.a}|${e.b}">Confirm</button><button class="btn" data-sugno="${e.a}|${e.b}">Dismiss</button></div>`).join(''):'<p class="muted" style="font-size:12.5px">All proposals handled.</p>'}
+    <h3 class="sect">Layers</h3>
+    ${Object.keys(SRC).map(k=>`<div class="row" style="margin-bottom:6px"><span class="jack src-${k}"></span><span style="flex:1;font-size:12.5px">${esc(SRC[k].name)}</span>
+      <button class="toggle src-${k} ${state.hidden[k]?'':'on'}" role="switch" aria-checked="${!state.hidden[k]}" aria-label="Show ${esc(SRC[k].name)} layer" data-layer="${k}"></button></div>`).join('')}
+  </div>
+  <div class="foot"><button class="btn" data-go="#/sources">Sources</button><button class="btn" data-open="ov-time">Day review</button><span class="sp"></span><button class="btn primary" data-open="ov-standup">Standup</button></div>`;
+}
+
+function cardTicket(key){
+  const t=TICKETS[key];if(!t)return cardMissing(key);
+  const nid=(NODES.find(n=>n.key===key)||{}).id;
+  const p=person(t.assignee);
+  return `${head('jira',key,`${t.type} · Jira`)}
+  <div class="mod-body">
+    <h2 class="title">${esc(t.summary)}</h2>
+    <div class="row" style="flex-wrap:wrap;gap:8px">
+      <div class="seg" role="group" aria-label="Status">${STATUSES.map(s=>`<button class="${t.status===s?'on':''}" data-status="${key}|${s}">${s}</button>`).join('')}</div>
+      <span class="pill ${t.priority==='High'?'ok':''}">${t.priority}</span>
+      ${av(t.assignee)}<span style="font-size:12.5px">${esc(p.n)}</span>
+    </div>
+    <div class="row" style="margin-top:8px;gap:10px"><span class="plate dim">Updated ${esc(t.updated)}</span>${t.epic?`<span class="plate dim">Epic</span>${chipFor(NODES.find(n=>n.key===t.epic)?NODES.find(n=>n.key===t.epic).id:'')}`:''}</div>
+    ${t.note?`<div class="row" style="margin-top:8px"><span class="pill">${esc(t.note)}</span></div>`:''}
+    <h3 class="sect">Description</h3>
+    <div class="desc">${t.desc}</div>
+    ${nid?`<h3 class="sect">Links <span class="cnt">${linked(nid).length}</span></h3>${pbayHTML(nid)}
+      <div class="row" style="margin-top:8px"><button class="btn" data-pick="${nid}">Link to…</button><button class="btn" data-cmenu="${nid}">Actions</button></div>
+      ${sugHTML(nid)}`:''}
+    <h3 class="sect">Comments <span class="cnt">${t.comments.length}</span></h3>
+    ${t.comments.map(commentHTML).join('')||'<p class="muted" style="font-size:12.5px">No comments yet.</p>'}
+    <div style="margin-top:8px"><textarea class="tx" id="newcm" placeholder="Comment on ${esc(key)}…" aria-label="New comment"></textarea>
+      <div class="row" style="margin-top:6px"><button class="btn primary" data-addcm="${key}">Add comment</button><span class="muted" style="font-size:11.5px">Written back to Jira on save</span></div></div>
+    <h3 class="sect">Time</h3>
+    <div class="row" style="gap:14px;font-size:12.5px;margin-bottom:8px">
+      <span><span class="plate dim">Estimate</span> <b class="mono">${esc(t.estimate||'—')}</b></span>
+      <span><span class="plate dim">Spent this week</span> <b class="mono">${esc(t.spent||'0h')}</b></span></div>
+    ${t.worklogs.map(w=>`<div class="wl"><span>${esc(w.when)} · ${esc(w.t)}</span><b>${esc(w.h)}</b></div>`).join('')||'<p class="muted" style="font-size:12.5px">No worklog today.</p>'}
+  </div>
+  <div class="foot">${timerFoot(nid,key)}<span class="sp"></span>
+    ${t.status==='To Do'?`<button class="btn primary" data-startwork="${key}">Start work…</button>`:''}
+    <button class="btn" data-open="ov-time">Day review</button></div>`;
+}
+
+function cardPR(id){
+  const pr=PRS[id];if(!pr)return cardMissing('PR #'+id);
+  return `${head('gitea',pr.key,`Pull request · ${pr.repo}`)}
+  <div class="mod-body">
+    <h2 class="title">${esc(pr.title)}</h2>
+    <div class="row" style="flex-wrap:wrap;gap:8px">
+      <span class="pill ${pr.state==='open'?'ok':''}">${pr.state}</span>
+      <span class="mono" style="font-size:11px">${esc(pr.head)} → ${esc(pr.base)}</span>
+      ${av(pr.by)}<span style="font-size:12.5px">${esc(person(pr.by).n)}</span></div>
+    <div class="row" style="margin-top:8px"><span class="plate dim">${esc(pr.opened)}</span></div>
+    <h3 class="sect">Review</h3>
+    <div class="row" style="gap:10px;font-size:12.5px;flex-wrap:wrap">
+      <span class="pill ${pr.approvals>=pr.need?'ok':''}">${pr.approvals} of ${pr.need} approvals</span>
+      <span class="muted">Approved by ${esc(pr.approvedBy)}</span></div>
+    <div class="row" style="margin-top:6px;font-size:12.5px"><span class="plate dim">Requested</span><span>${esc(pr.reviewReq)}</span></div>
+    ${pr.checks.length?`<h3 class="sect">Checks <span class="cnt">${pr.checks.length}</span></h3>
+      ${pr.checks.map(ck=>`<button class="lk wl" data-go="#/build/${ck.name.match(/#(\d+)/)[1]}" style="width:100%;text-align:left;cursor:pointer">
+        <span class="row" style="gap:8px"><span class="jack src-teamcity ${ck.st==='failed'?'fail':''}"></span><span>${esc(ck.name)}</span></span>
+        <span class="mono" style="font-size:10.5px;color:${ck.st==='failed'?'var(--fail)':'var(--teamcity)'}">${ck.st} · ${esc(ck.t)}</span></button>`).join('')}`:''}
+    ${pr.node?`<h3 class="sect">Links <span class="cnt">${linked(pr.node).length}</span></h3>${pbayHTML(pr.node)}
+      <div class="row" style="margin-top:8px"><button class="btn" data-pick="${pr.node}">Link to…</button></div>${sugHTML(pr.node)}`:''}
+    <h3 class="sect">Comments <span class="cnt">${pr.comments.length}</span></h3>
+    ${pr.comments.map(commentHTML).join('')||'<p class="muted" style="font-size:12.5px">No comments yet.</p>'}
+    <div style="margin-top:8px"><textarea class="tx" id="newcm" placeholder="Comment on ${esc(pr.key)}…" aria-label="New comment"></textarea>
+      <div class="row" style="margin-top:6px"><button class="btn primary" data-prcm="${id}">Add comment</button></div></div>
+    <h3 class="sect">Files changed <span class="cnt">${pr.files.length}</span></h3>
+    ${pr.files.map(f=>`<div class="wl"><span class="mono" style="font-size:11.5px">${esc(f[0])}</span><span><b style="color:var(--gitea)">${f[1]}</b> <b style="color:var(--fail)">${f[2]}</b></span></div>`).join('')}
+  </div>
+  <div class="foot">${timerFoot(pr.node,pr.key)}<span class="sp"></span>
+    ${pr.state==='open'&&pr.by!=='mara'?`<button class="btn primary" data-approve="${id}">Approve</button>`:''}
+    ${pr.state==='open'&&pr.by==='mara'?`<button class="btn" data-rereview="${id}">Re-request review</button>`:''}</div>`;
+}
+
+function cardBuild(id){
+  const b=BUILDS[id];if(!b)return cardMissing('Build #'+id);
+  const col=b.st==='failed'?'var(--fail)':b.st==='running'?'var(--teamcity)':'var(--ink)';
+  return `${head('teamcity',b.key,`${b.cfg} · TeamCity`)}
+  <div class="mod-body">
+    <h2 class="title">${esc(b.cfg)}</h2>
+    <div class="row" style="flex-wrap:wrap;gap:8px">
+      <span class="pill ${b.st==='failed'?'fail':'ok'}" style="color:${col};border-color:${col}">${b.st}</span>
+      <span class="mono" style="font-size:11px">${esc(b.branch)}</span></div>
+    <div class="row" style="margin-top:8px;gap:12px"><span class="plate dim">${esc(b.when)}</span><span class="plate dim">${esc(b.dur)}</span></div>
+    <h3 class="sect">Parameters</h3>
+    ${b.params.map(p=>`<div class="wl"><span class="mono" style="font-size:11.5px">${esc(p[0])}</span><b class="mono">${esc(p[1])}</b></div>`).join('')}
+    <h3 class="sect">Log excerpt</h3>
+    <pre class="log">${b.log.split('\n').map(l=>/FAILED|assertion/.test(l)?`<span class="bad">${esc(l)}</span>`:esc(l)).join('\n')}</pre>
+    ${b.node?`<h3 class="sect">Links <span class="cnt">${linked(b.node).length}</span></h3>${pbayHTML(b.node)}
+      <div class="row" style="margin-top:8px"><button class="btn" data-pick="${b.node}">Link to…</button></div>${sugHTML(b.node)}`:''}
+  </div>
+  <div class="foot">
+    ${b.st==='failed'?`<button class="btn primary" data-rerun="${id}">Re-run failed</button>`:''}
+    <button class="btn" data-trigger>Trigger with parameters…</button><span class="sp"></span>
+    <button class="btn" data-cmtpay data-key="PAY-231">Comment on PAY-231</button></div>`;
+}
+
+function cardPage(slug){
+  const p=PAGES[slug];if(!p)return cardMissing(slug);
+  return `${head('confluence',p.title,`Confluence · ${p.space}`)}
+  <div class="mod-body">
+    <div class="row" style="gap:10px;flex-wrap:wrap"><span class="plate dim">Edited ${esc(p.edited)}${p.section?' · '+esc(p.section):''}</span>${av(p.by)}<span style="font-size:12.5px">${esc(person(p.by).n)}</span></div>
+    <h3 class="sect">Body</h3>
+    <div class="ned" id="pagebody" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Page body">${p.body.split('\n').map(l=>l.startsWith('## ')?`<div style="font:600 13px var(--disp);margin-top:8px">${esc(l.slice(3))}</div>`:l?`<div>${esc(l)}</div>`:'<div><br></div>').join('')}</div>
+    <div class="row" style="margin-top:6px"><button class="btn primary" data-savepage="${slug}">Save page</button><span class="muted" style="font-size:11.5px">Written back to Tidewater Wiki</span></div>
+    ${p.comments.length?`<h3 class="sect">Comments <span class="cnt">${p.comments.length}</span></h3>${p.comments.map(commentHTML).join('')}
+      <div style="margin-top:8px"><textarea class="tx" id="newcm" placeholder="Reply to ${esc(person(p.comments[0].who).n)}…" aria-label="Reply"></textarea>
+      <div class="row" style="margin-top:6px"><button class="btn primary" data-pagecm="${slug}">Reply</button></div></div>`:''}
+    ${p.node?`<h3 class="sect">Links <span class="cnt">${linked(p.node).length}</span></h3>${pbayHTML(p.node)}
+      <div class="row" style="margin-top:8px"><button class="btn" data-pick="${p.node}">Link to…</button></div>${sugHTML(p.node)}`:''}
+  </div>
+  <div class="foot">${timerFoot(p.node,p.title)}<span class="sp"></span><button class="btn" data-create="page">New page…</button></div>`;
+}
+
+function cardBranch(slug){
+  const b=BRANCHES[slug];if(!b)return cardMissing(slug);
+  return `${head('gitea',b.title,`Branch · ${b.repo}`)}
+  <div class="mod-body">
+    <div class="row"><span class="plate dim">${esc(b.state)}</span></div>
+    <h3 class="sect">Commits <span class="cnt">${b.commits.length}</span></h3>
+    ${b.commits.map(c=>`<button class="lk wl" data-go="#/commit/${c[0]}" style="width:100%;text-align:left;cursor:pointer"><span><b class="mono">${c[0]}</b> ${esc(c[2])}</span><span class="mono" style="font-size:10.5px;color:var(--muted)">${esc(c[1])}</span></button>`).join('')}
+    ${b.node?`<h3 class="sect">Links <span class="cnt">${linked(b.node).length}</span></h3>${pbayHTML(b.node)}
+      <div class="row" style="margin-top:8px"><button class="btn" data-pick="${b.node}">Link to…</button></div>`:''}
+  </div>
+  <div class="foot"><button class="btn" data-git="pull" data-arg="${esc(b.repo)}">Pull</button><button class="btn" data-git="push" data-arg="${esc(b.title)}">Push</button>
+    <button class="btn" data-create="branch">New branch…</button><span class="sp"></span><button class="btn" data-go="#/repo/${esc(b.repo)}">Repository</button></div>`;
+}
+
+function cardCommit(hash){
+  const c=COMMITS[hash];if(!c)return cardMissing(hash);
+  return `${head('gitea',c.key,`Commit · ${c.repo}`)}
+  <div class="mod-body">
+    <h2 class="title">${esc(c.title)}</h2>
+    <div class="row" style="gap:10px;flex-wrap:wrap">${av(c.by)}<span style="font-size:12.5px">${esc(person(c.by).n)}</span><span class="plate dim">${esc(c.when)}</span></div>
+    <div class="row" style="margin-top:8px"><span class="mono" style="font-size:11px">${esc(c.branch)}</span></div>
+    <h3 class="sect">Files</h3>
+    ${c.files.map(f=>`<div class="wl"><span class="mono" style="font-size:11.5px">${esc(f)}</span></div>`).join('')}
+    ${c.node?`<h3 class="sect">Links <span class="cnt">${linked(c.node).length}</span></h3>${pbayHTML(c.node)}${sugHTML(c.node)}
+      <div class="row" style="margin-top:8px"><button class="btn" data-pick="${c.node}">Link to…</button></div>`:''}
+  </div>
+  <div class="foot"><button class="btn" data-go="#/branch/feature-PAY-231-sepa-retry">Branch</button><span class="sp"></span><button class="btn" data-go="#/ticket/PAY-231">PAY-231</button></div>`;
+}
+
+function cardRepo(name){
+  const r=REPOS[name];if(!r)return cardMissing(name);
+  return `${head('gitea',r.title,`Repository · tidewater`)}
+  <div class="mod-body">
+    <div class="row" style="gap:10px;flex-wrap:wrap"><span class="pill">${esc(r.lang)}</span><span class="mono" style="font-size:11px">${esc(r.clone)}</span>${r.commits?`<span class="plate dim">${esc(r.commits)}</span>`:''}</div>
+    <h3 class="sect">Branches <span class="cnt">${r.branches.length}</span></h3>
+    ${r.branches.map(b=>`<div class="wl"><span class="mono" style="font-size:11.5px">${esc(b[0])}</span><span class="plate dim">${esc(b[1])}</span></div>`).join('')}
+    ${r.node?`<h3 class="sect">Links <span class="cnt">${linked(r.node).length}</span></h3>${pbayHTML(r.node)}${sugHTML(r.node)}
+      <div class="row" style="margin-top:8px"><button class="btn" data-pick="${r.node}">Link to…</button></div>`:''}
+  </div>
+  <div class="foot"><button class="btn" data-git="pull" data-arg="${esc(r.title)}">Pull</button><button class="btn" data-git="push" data-arg="${esc(r.title)}">Push</button>
+    <button class="btn" data-create="branch">New branch…</button><span class="sp"></span><button class="btn" data-create="repo">Create repo…</button></div>`;
+}
+
+function cardMissing(what){
+  return `${head('ink',esc(what),'Not in the local index')}
+  <div class="mod-body"><h2 class="title">${esc(what)} is not in the local index</h2>
+  <p class="desc muted">The last sync was 4 minutes ago. Sync the source again, or pick another jack on the canvas.</p></div>
+  <div class="foot"><button class="btn" data-syncall>Sync now</button><span class="sp"></span><button class="btn primary" data-go="#/graph">Back to the patchbay</button></div>`;
+}
+
+/* ---------- notes ---------- */
+function noteBody(id){
+  const n=NOTES[id];
+  return esc(n.body).replace(/\[\[([^\]]+)\]\]/g,(m,k)=>{
+    const nid=CHIPMAP[k];
+    if(nid&&NB[nid])return chipFor(nid);
+    return `<button class="chip src-note" data-go="#/page/${k.toLowerCase().replace(/\s+/g,'-')}"><span class="jack"></span><span class="k">${esc(k)}</span></button>`;
+  }).split('\n').map(l=>l?`<div>${l}</div>`:'<div><br></div>').join('');
+}
+function backlinksOf(id){
+  const n=NOTES[id];const out=[];
+  Object.keys(NOTES).forEach(k=>{if(k===id)return;if(NOTES[k].body.includes('[['+n.title+']]'))out.push({k:NOTES[k].title,why:'note link'})});
+  if(n.node)linked(n.node).forEach(t=>out.push({k:NB[t].key+' · '+NB[t].title,why:'patched cable',route:NB[t].route}));
+  return out;
+}
+function cardNotes(id){
+  const n=NOTES[id]||NOTES['sepa-retry-investigation'];const key=NOTES[id]?id:'sepa-retry-investigation';
+  const bl=backlinksOf(key);
+  return `${head('note',n.title,`Local note · edited ${n.edited}`)}
+  <div class="mod-body">
+    <h3 class="sect">Notes <span class="cnt">${Object.keys(NOTES).length}</span></h3>
+    <ul class="nlist">${Object.keys(NOTES).map(k=>`<li><button class="${k===key?'on':''}" data-note="${k}"><span class="jack src-note"></span><span>${esc(NOTES[k].title)}</span><span class="e">${esc(NOTES[k].edited)}</span></button></li>`).join('')}</ul>
+    <div class="row"><button class="btn" data-newnote>New note</button><span class="muted" style="font-size:11.5px">Pre-linked to the current jack</span></div>
+    <h3 class="sect">Editor <span class="cnt">[[ ]] makes a cable</span></h3>
+    <div class="ned" id="notebody" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Note body">${noteBody(key)}</div>
+    <div class="row" style="margin-top:6px"><button class="btn primary" data-savenote="${key}">Save note</button><button class="btn" data-pick="${n.node||'pay231'}">Link to…</button></div>
+    <h3 class="sect">Backlinks <span class="cnt">${bl.length}</span></h3>
+    ${bl.map(b=>`<div class="bl"><span class="jack src-note"></span>${b.route?`<button class="lk" data-go="${b.route}" style="background:none;border:0;padding:0;text-align:left;flex:1;font-size:12px">${esc(b.k)}</button>`:`<span style="flex:1">${esc(b.k)}</span>`}<span class="why">${esc(b.why)}</span></div>`).join('')||'<p class="muted" style="font-size:12.5px">Nothing links here yet.</p>'}
+  </div>
+  <div class="foot">${timerFoot(n.node,n.title)}<span class="sp"></span><button class="btn" data-open="ov-standup">Standup</button></div>`;
+}
+
+/* =========================================================
+   SEARCH — one local full-text index over every source
+   ========================================================= */
+const WHO={pay231:'mara',page_sepa:'mara',pr142:'mara',commit_a41:'mara',b1187:'mara',b1188:'mara',note_sepa:'mara',branch231:'mara',pay228:'mara',pay240:'mara',pay236:'jonas',ops77:'tomasz',pay200:'priya',page_arch:'priya',page_oncall:'tomasz',page_runbook:'tomasz',ledger_api:'mara',note_standup:'mara',pr139:'mara',pr144:'jonas',x_c90d11:'mara',x_7be0e4:'mara',x_note_cred:'mara',x_pay219:'mara',x_page_standup:'mara',x_repo_payout:'mara',x_b412:'tomasz'};
+const WHEN={pay231:'today',page_sepa:'today',pr142:'today',commit_a41:'today',b1187:'today',b1188:'today',note_sepa:'today',branch231:'today',pay240:'today',pr144:'today',pay228:'yesterday',note_standup:'yesterday',pr139:'yesterday',x_c90d11:'today',x_7be0e4:'yesterday',x_page_standup:'yesterday',x_b412:'yesterday'};
+function pool(){return [...NODES,...EXTRA]}
+function whenOf(n){return WHEN[n.id]||'older'}
+function failingSet(){
+  const bad=NODES.filter(n=>n.status==='failed').map(n=>n.id);
+  const s=new Set(bad);bad.forEach(b=>linked(b).forEach(x=>s.add(x)));
+  bad.forEach(b=>linked(b).forEach(x=>linked(x).forEach(y=>{if(NB[y]&&['ticket','branch','pr'].includes(NB[y].kind))s.add(y)})));
+  return s;
+}
+function searchHits(q){
+  const words=q.toLowerCase().split(/\s+/).filter(Boolean);const F=state.filters;const fail=F.failing?failingSet():null;
+  return pool().filter(n=>{
+    if(state.hidden[n.src])return false;
+    if(F.src&&n.src!==F.src)return false;
+    if(F.type&&n.kind!==F.type)return false;
+    if(F.who&&WHO[n.id]!==F.who)return false;
+    if(F.when&&whenOf(n)!==F.when)return false;
+    if(fail&&!fail.has(n.id))return false;
+    if(!words.length)return false;
+    const txt=(n.key+' '+n.title+' '+(SEARCHTEXT[n.id]||n.text||'')).toLowerCase();
+    return words.every(w=>txt.includes(w));
+  });
+}
+function mark(s,q){
+  const words=q.toLowerCase().split(/\s+/).filter(Boolean);let out=esc(s);
+  words.forEach(w=>{out=out.replace(new RegExp('('+w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','ig'),'<mark>$1</mark>')});
+  return out;
+}
+function renderSearch(){
+  const q=state.query,pop=$('#spop'),F=state.filters;
+  const hits=q?searchHits(q):[];
+  const chips=Object.keys(SRC).map(k=>`<button class="chip src-${k} ${F.src===k?'on':''}" data-fsrc="${k}"><span class="jack"></span><span>${esc(SRC[k].name)}</span></button>`).join('');
+  const types=['ticket','page','pr','commit','build','note','branch','repo','epic'];
+  const filters=`<div class="sfilters">
+    ${chips}
+    <select class="tx" style="width:auto" aria-label="Type" data-ftype><option value="">Any type</option>${types.map(t=>`<option value="${t}" ${F.type===t?'selected':''}>${KIND[t]}</option>`).join('')}</select>
+    <select class="tx" style="width:auto" aria-label="Person" data-fwho><option value="">Anyone</option>${Object.keys(PEOPLE).map(p=>`<option value="${p}" ${F.who===p?'selected':''}>${esc(PEOPLE[p].n)}</option>`).join('')}</select>
+    <select class="tx" style="width:auto" aria-label="Updated" data-fwhen><option value="">Any date</option><option value="today" ${F.when==='today'?'selected':''}>Today</option><option value="yesterday" ${F.when==='yesterday'?'selected':''}>Yesterday</option><option value="older" ${F.when==='older'?'selected':''}>Earlier</option></select>
+    <button class="chip ${F.failing?'on':''}" data-ffail title="Joins Jira, Gitea and TeamCity locally"><span class="jack src-teamcity fail"></span><span>Has a failing build</span></button>
+  </div>`;
+  if(!q){
+    pop.innerHTML=filters+`<div style="padding:10px 12px">
+      <div class="plate dim" style="margin-bottom:8px">Smart lists — saved local queries</div>
+      ${LENSES.map(l=>`<button class="sres" data-lensrow="${l.id}"><span class="k">${esc(l.n)}</span><span class="t">${esc(l.name)}</span><span class="m">${l.jql?'no JQL equivalent':l.note?'partly off canvas':'lens'}</span></button>`).join('')}
+      <div class="muted" style="font-size:12px;padding:10px 0 2px">Type to search 1,284 issues, 3,912 pages, 47 repos and 3 notes in the local index. Results dim the canvas to the matches.</div></div>`;
+    return;
+  }
+  pop.innerHTML=filters+(hits.length?hits.map((n,i)=>`<button class="sres src-${n.src} ${i===state.scur?'cur':''}" data-go="${n.route}" data-idx="${i}">
+      <span class="jack"></span><span class="k">${mark(n.key,q)}</span><span class="t">${mark(n.title,q)}</span>
+      <span class="m">${esc(SRC[n.src].name)} · ${esc(n.src==='note'?'local':SRC[n.src].sync)}</span></button>`).join('')
+    :`<div style="padding:14px 12px" class="muted">No match for “${esc(q)}” in the local index. Clear a filter, or sync the sources again.</div>`);
+}
+$('#q').addEventListener('input',()=>{state.query=$('#q').value.trim();state.scur=0;state.lens=null;$('#spop').classList.add('open');renderSearch();renderCanvas();renderLenses()});
+$('#q').addEventListener('focus',()=>{$('#spop').classList.add('open');renderSearch()});
+$('#q').addEventListener('keydown',ev=>{
+  const rows=$$('#spop .sres');
+  if(ev.key==='ArrowDown'||ev.key==='ArrowUp'){ev.preventDefault();if(!rows.length)return;state.scur=(state.scur+(ev.key==='ArrowDown'?1:rows.length-1))%rows.length;renderSearch();$$('#spop .sres')[state.scur]?.scrollIntoView({block:'nearest'})}
+  else if(ev.key==='Enter'){const r=$$('#spop .sres')[state.scur];if(r){ev.preventDefault();$('#spop').classList.remove('open');if(r.dataset.go)go(r.dataset.go);else applyLens(r.dataset.lensrow)}}
+});
+$('#spop').addEventListener('click',ev=>{
+  const s=ev.target.closest('[data-fsrc]');if(s){state.filters.src=state.filters.src===s.dataset.fsrc?null:s.dataset.fsrc;renderSearch();renderCanvas();return}
+  const f=ev.target.closest('[data-ffail]');if(f){state.filters.failing=!state.filters.failing;renderSearch();renderCanvas();return}
+});
+$('#spop').addEventListener('change',ev=>{
+  const t=ev.target;
+  if(t.hasAttribute('data-ftype'))state.filters.type=t.value||null;
+  if(t.hasAttribute('data-fwho'))state.filters.who=t.value||null;
+  if(t.hasAttribute('data-fwhen'))state.filters.when=t.value||null;
+  renderSearch();renderCanvas();
+});
+function applyLens(id){
+  const L=LENSES.find(l=>l.id===id);if(!L)return;
+  if(L.time){go('#/time');return}
+  state.lens=state.lens===id?null:id;state.query='';$('#q').value='';$('#spop').classList.remove('open');
+  renderAll();if(state.lens&&L.ids[0])go(NB[L.ids[0]].route);
+}
+
+/* =========================================================
+   TOP BAR — sync, inbox, timer
+   ========================================================= */
+function renderSync(){
+  const keys=['jira','confluence','gitea','teamcity'];
+  const bad=!state.tcFixed;
+  $('#sync').innerHTML=keys.map(k=>`<span class="led src-${k} ${k==='teamcity'&&bad?'err':''}" title="${esc(SRC[k].disp)} — ${esc(k==='teamcity'&&bad?'401 Unauthorized':SRC[k].sync)}"></span>`).join('')
+    +`<span class="txt">${bad?'3 ok · <b>TeamCity 401</b>':'4 sources ok'}</span>`;
+  $('#srcb').style.display=bad?'':'none';
+  $('#pend').innerHTML=`Pending writes <b>${state.pending}</b>`;
+  $('#pend').classList.toggle('warn',state.pending>0);
+}
+function renderInboxCount(){
+  $('#inboxn').textContent=INBOX.length;$('#inboxn').classList.toggle('zero',INBOX.length===0);
+  const r=$('#railn');r.textContent=INBOX.length;r.style.display=INBOX.length?'':'none';
+}
+function renderTimer(){
+  const on=timer.running,el=on?nowMin()-timer.startedMin:0;
+  $('#tel').textContent=on?fmtEl(el):'0:00';$('#tel').classList.toggle('stopped',!on);
+  const b=$('#tbtn');b.classList.toggle('stopped',!on);
+  b.setAttribute('aria-label',on?'Stop timer':'Start timer');b.title=(on?'Stop timer':'Start timer')+' (⌘T)';
+  b.innerHTML=on?'<svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 1h10v10H1z" fill="#fff"/></svg>':'<svg width="11" height="12" viewBox="0 0 11 12"><path d="M1 1l9 5-9 5z" fill="#1E2126"/></svg>';
+  const src=timer.ctx&&NB[timer.ctx]?NB[timer.ctx].src:'local';
+  $('#tctx').innerHTML=`<span class="plate dim">${on?'Timer running':'Timer stopped'}</span>
+    <span class="ctx"><span class="jack src-${src}" style="width:10px;height:10px;border-width:3px"></span>${esc(timer.label)}</span>`;
+}
+$('#tbtn').addEventListener('click',()=>{if(timer.running)stopTimer();else startTimer(timer.ctx||'pay231')});
+$('#tmore').addEventListener('click',ev=>{ev.stopPropagation();const p=$('#tpop');if(p.classList.contains('open')){p.classList.remove('open');return}renderTimerPop();p.classList.add('open')});
+function renderTimerPop(){
+  const opts=['pay231','pay240','pay228','pr142','note_sepa'];
+  $('#tpop').innerHTML=`<div class="mod-head" style="--src:var(--ink)"><span class="plate">Timer context</span></div>
+   <div class="mod-body" style="padding:8px">
+    ${timer.running?`<button class="opt" data-tstop><span class="k">Stop</span><span>Stop and open the worklog draft</span></button><hr style="border:0;border-top:1px solid var(--edge);margin:6px 0">`:''}
+    <div class="plate dim" style="padding:2px 8px 6px">Switch to</div>
+    ${opts.map(id=>`<button class="opt" data-tswitch="${id}"><span class="jack src-${NB[id].src}"></span><span class="k">${esc(NB[id].key)}</span><span>${esc(NB[id].title)}</span></button>`).join('')}
+    <hr style="border:0;border-top:1px solid var(--edge);margin:6px 0">
+    <div class="plate dim" style="padding:2px 8px 6px">Ad-hoc label — no ticket</div>
+    <div class="row" style="padding:0 4px"><input class="tx" id="adhoc" value="Staging DB configuration" aria-label="Ad-hoc label"><button class="btn" data-tadhoc>Track</button></div>
+   </div>`;
+}
+$('#tpop').addEventListener('click',ev=>{
+  const s=ev.target.closest('[data-tswitch]');if(s){startTimer(s.dataset.tswitch);$('#tpop').classList.remove('open');return}
+  if(ev.target.closest('[data-tstop]')){$('#tpop').classList.remove('open');stopTimer();return}
+  if(ev.target.closest('[data-tadhoc]')){const v=$('#adhoc').value.trim()||'Staging DB configuration';timer.running=true;timer.ctx=null;timer.label=v;timer.startedMin=nowMin();$('#tpop').classList.remove('open');renderAll();toast('Timer running on the ad-hoc label “'+esc(v)+'” — no ticket attached');return}
+});
+function startTimer(id){
+  timer.running=true;timer.ctx=id;timer.label=NB[id]?nodeLabel(id):'PAY-231';timer.startedMin=nowMin();
+  renderAll();toast('Timer running on '+esc(timer.label),NB[id]?NB[id].src:null);
+}
+function stopTimer(){
+  if(!timer.running){toast('The timer is already stopped');return}
+  const target=timer.ctx&&NB[timer.ctx]&&(NB[timer.ctx].kind==='ticket'||NB[timer.ctx].kind==='epic')?NB[timer.ctx].key:'PAY-231';
+  timer.running=false;renderAll();openWorklog(target);
+}
+
+/* =========================================================
+   OVERLAYS
+   ========================================================= */
+const OVR={'ov-inbox':'#/inbox','ov-time':'#/time','ov-standup':'#/standup','ov-sources':'#/sources'};
+function openOverlay(id){
+  $$('.ov').forEach(o=>{if(o.id!==id&&o.id!=='dlg')o.classList.remove('open')});
+  state.overlay=id;
+  if(id==='ov-inbox')renderInboxOv();
+  if(id==='ov-standup')renderStandup();
+  if(id==='ov-sources')renderSources();
+  if(id==='ov-time')renderTime();
+  $('#'+id).classList.add('open');$('#scrim').classList.add('open');
+  renderRail();
+  $('#'+id).querySelector('button, input, [contenteditable]')?.focus();
+}
+function closeOverlay(silent){
+  $$('.ov').forEach(o=>o.classList.remove('open'));$('#scrim').classList.remove('open');
+  state.overlay=null;if(!silent&&OVRT[location.hash])go(state.baseRoute==='#/graph'||!state.baseRoute?'#/graph':state.baseRoute);renderRail();
+}
+$('#scrim').addEventListener('click',()=>{if($('#dlg').classList.contains('open')){$('#dlg').classList.remove('open');if(!state.overlay)$('#scrim').classList.remove('open');return}closeOverlay()});
+function ovHead(srcKey,title,plate){
+  return `<div class="mod-head${DK(srcKey)}" style="--src:${HC(srcKey)}"><span class="key">${esc(title)}</span><span class="plate">${esc(plate)}</span><button class="x" data-close aria-label="Close">✕</button></div>`}
+
+/* ---------- inbox ---------- */
+function renderInboxOv(){
+  $('#ov-inbox').innerHTML=`${ovHead('ink','Inbox',INBOX.length+' needing attention')}
+   <div class="mod-body">
+    ${INBOX.length?INBOX.map(i=>`<div class="ib" data-ib="${i.id}">
+      <span class="when">${esc(i.when)}</span>
+      <div class="bd"><p>${i.html}</p>
+        <div class="acts">${i.acts.map(a=>`<button class="btn" data-ibact="${i.id}|${a}">${esc(a)}</button>`).join('')}
+          ${i.node?`<button class="btn" data-ibpoint="${i.node}">Show on canvas</button>`:''}</div>
+        <div class="reply" style="display:none"><input class="tx" placeholder="Your reply…" aria-label="Reply"><button class="btn primary" data-ibsend="${i.id}">Send</button></div>
+      </div></div>`).join('')
+    :`<div style="padding:24px 8px" class="muted"><b style="color:var(--ink)">Inbox clear.</b><br>Nothing is waiting on you. New mentions, reviews and failed builds land here.</div>`}
+    <div class="ibsn"><span class="plate dim">Snoozed ${SNOOZED.length}</span>${SNOOZED.map(s=>`<span>${esc(s.t)} — ${esc(s.back)}</span>`).join('')}
+      ${SNOOZED.length?'<button class="btn sm" data-unsnooze>Bring back</button>':''}</div>
+   </div>`;
+}
+function ibAct(id,act){
+  const i=INBOX.find(x=>x.id===id);if(!i)return;
+  const el=$(`[data-ib="${id}"]`);
+  const drop=()=>{if(el){el.classList.add('gone');setTimeout(()=>{INBOX=INBOX.filter(x=>x.id!==id);renderInboxCount();renderInboxOv()},200)}else{INBOX=INBOX.filter(x=>x.id!==id);renderInboxCount();renderInboxOv()}};
+  switch(act){
+    case 'Review':go('#/pr/144');toast('PR #144 open for review — 0 of 2 approvals','gitea');break;
+    case 'Reply':el.querySelector('.reply').style.display='flex';el.querySelector('.reply input').focus();break;
+    case 'Open page':go('#/page/sepa-payout-retry-design');break;
+    case 'Open log':go('#/build/1187');break;
+    case 'Open PR':go('#/pr/142');break;
+    case 'Open':go('#/ticket/PAY-240');break;
+    case 'Open OPS-77':go('#/ticket/OPS-77');break;
+    case 'Re-run':rerunBuild();drop();break;
+    case 'Comment on PAY-231':go('#/ticket/PAY-231');setTimeout(()=>$('#newcm')?.focus(),60);break;
+    case 'Start work':closeOverlay();openStartWork('PAY-240');break;
+    case 'Ping Tomasz':toast('Pinged Tomasz Wójcik on OPS-77 — “PAY-228 staging verification is waiting on the runbook.”','jira');drop();break;
+    case 'Snooze':SNOOZED.push({t:i.html.replace(/<[^>]+>/g,''),back:'returns Monday 2026-08-25'});toast('Snoozed until Monday');drop();break;
+    case 'Done':toast('Marked done');drop();break;
+  }
+}
+$('#ov-inbox').addEventListener('click',ev=>{
+  const a=ev.target.closest('[data-ibact]');if(a){const[id,act]=a.dataset.ibact.split('|');ibAct(id,act);return}
+  const s=ev.target.closest('[data-ibsend]');if(s){
+    const id=s.dataset.ibsend,el=$(`[data-ib="${id}"]`),v=el.querySelector('.reply input').value.trim();
+    if(!v){el.querySelector('.reply input').focus();toast('Type a reply first');return}
+    if(id==='i2'){PAGES['sepa-payout-retry-design'].comments.push({who:'mara',when:'today 14:32',t:v});toast('Reply posted on SEPA payout retry design','confluence')}
+    else{PRS['142'].comments.push({who:'mara',when:'today 14:32',t:v});toast('Reply posted on PR #142','gitea')}
+    INBOX=INBOX.filter(x=>x.id!==id);renderInboxCount();renderInboxOv();renderCard();return}
+  const p=ev.target.closest('[data-ibpoint]');if(p){const id=p.dataset.ibpoint;closeOverlay();go(NB[id].route);plugAnim(id);return}
+  if(ev.target.closest('[data-unsnooze]')){
+    SNOOZED.forEach(s=>INBOX.push({id:'s'+(++toastN),when:'today 14:32',node:null,html:'<b>'+esc(s.t)+'</b>',acts:['Done']}));
+    SNOOZED=[];renderInboxCount();renderInboxOv();toast('Snoozed item brought back');return}
+});
+
+/* ---------- standup ---------- */
+const DIGEST=[
+ {lab:'Yesterday',tx:'Merged PR #139 (ledger-api) fixing partial refund drift; PAY-228 → In Review.',trace:['pr139','pay228']},
+ {lab:'Yesterday',tx:'Implemented the retry loop for PAY-231 (7be0e4); logged 4h 30m.',trace:['pay231'],extra:[['7be0e4','#/commit/7be0e4','gitea'],['worklog 3h + 1h 30m','#/ticket/PAY-231','jira']]},
+ {lab:'Today',tx:'PAY-231 backoff + jitter (a41f2c, c90d11).',trace:['commit_a41','pay231'],extra:[['c90d11','#/commit/c90d11','gitea']]},
+ {lab:'Today',tx:'Fix integration test #1187 — off-by-one in the attempt counter.',trace:['b1187','note_sepa']},
+ {lab:'Today',tx:'Reply to Priya about the manual-review SLA.',trace:['page_sepa']},
+ {lab:'Today',tx:'Review PR #144.',trace:['pr144']},
+ {lab:'Blockers',tx:'PAY-228 staging verification is blocked by OPS-77 (runbook outdated, Tomasz).',trace:['pay228','ops77']}
+];
+let PROTO={saved:false,published:false};
+function renderStandup(){
+  $('#ov-standup').innerHTML=`${ovHead('ink','Standup','Friday 2026-08-22 · Payments')}
+   <div class="mod-body">
+    <h3 class="sect">Generated digest <span class="cnt">from today's activity</span></h3>
+    <ul class="dig">${DIGEST.map(d=>`<li tabindex="0"><span class="lab">${d.lab}</span><span class="tx">${esc(d.tx)}
+      <span class="trace">${(d.trace||[]).map(t=>chipFor(t)).join('')}${(d.extra||[]).map(e=>`<button class="chip src-${e[2]}" data-go="${e[1]}"><span class="jack"></span><span class="k">${esc(e[0])}</span></button>`).join('')}</span></span></li>`).join('')}</ul>
+    <div class="row" style="margin-top:6px"><button class="btn" data-copydigest>Copy digest</button><span class="muted" style="font-size:11.5px">Hover a line to see where it came from</span></div>
+
+    <h3 class="sect">Standup protocol 2026-08-22</h3>
+    <div class="proto" id="protobody" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Standup protocol">
+      <div><b>Attendees:</b> Mara, Jonas, Priya, Tomasz, Lena</div>
+      <h4>Notes</h4>
+      <div>Jonas: PR #144 CSV export ready for review.</div>
+      <div>Priya: finance wants the manual-review SLA documented by Monday.</div>
+      <div>Tomasz: on-call handbook update in progress, ETA Tuesday (OPS-77).</div>
+      <div>Lena: finance complaints about dashboard latency → PAY-240.</div>
+    </div>
+    <h3 class="sect">Action items <span class="cnt">3</span></h3>
+    <div class="proto">
+      <div class="ai">Mara → add the SLA to <i>SEPA payout retry design</i> (PAY-231)<button class="btn" data-ai="Add the manual-review SLA to the SEPA payout retry design page">Create ticket</button></div>
+      <div class="ai">Tomasz → OPS-77 by Tuesday<button class="btn" data-ai="OPS-77 runbook update by Tuesday">Create ticket</button></div>
+      <div class="ai">Lena → clarify PAY-240 acceptance criteria<button class="btn" data-ai="Clarify PAY-240 acceptance criteria">Create ticket</button></div>
+    </div>
+    <div class="pubbox"><span class="jack src-confluence"></span><span>Publish target</span><span class="path">ENG › Standup protocols › 2026-08-22</span></div>
+    <div id="pubres" class="tres" role="status"></div>
+   </div>
+   <div class="foot" style="display:flex;gap:6px;padding:10px 12px;border-top:1px solid var(--edge);align-items:center">
+     <button class="btn" data-savestandup>Save as note</button><span class="sp" style="flex:1"></span>
+     <button class="btn primary" data-publish>Publish to Confluence</button></div>`;
+}
+$('#ov-standup').addEventListener('click',ev=>{
+  if(ev.target.closest('[data-copydigest]')){toast('Digest copied — 7 lines, each traceable to its source item');return}
+  const ai=ev.target.closest('[data-ai]');if(ai){openCreate('ticket',ai.dataset.ai);return}
+  if(ev.target.closest('[data-savestandup]')){
+    const id='standup-2026-08-22';
+    NOTES[id]={title:'Standup 2026-08-22',edited:'today 14:32',node:null,body:$('#protobody').innerText.trim()+'\n\nLinks: [[PAY-231]] [[PAY-240]] [[OPS-77]]'};
+    PROTO.saved=true;toast('Saved as the local note “Standup 2026-08-22”','note');renderCard();return}
+  if(ev.target.closest('[data-publish]')){
+    const r=$('#pubres');r.className='tres open ok';
+    r.innerHTML=`<b>Published.</b> ENG › Standup protocols › 2026-08-22 created in Tidewater Wiki at 14:32. <button class="btn sm" data-go="#/page/standup-protocols">Open parent page</button>`;
+    PROTO.published=true;toast('Published to Confluence — ENG › Standup protocols › 2026-08-22','confluence');return}
+});
+
+/* ---------- sources ---------- */
+const ADD_TYPES=[['Jira','adapter v1.4'],['Confluence','adapter v1.2'],['Gitea','adapter v1.3'],['GitHub','adapter v1.5'],['GitLab','adapter v1.1'],['TeamCity','adapter v1.1'],['GitLab CI','adapter v0.9'],['Jenkins','adapter v0.8'],['Generic Git remote','adapter v1.0']];
+const AUTHS=[['user','User + password'],['pat','Personal access token (PAT)'],['api','API token'],['oauth','OAuth (coming soon)']];
+let wiz={open:false,step:1,type:null,url:'',auth:'pat',secret:'',sched:'5',tested:null};
+function srcCard(k){
+  const s=SRC[k],bad=k==='teamcity'&&!state.tcFixed,warn=k==='jira'&&!state.patExtended;
+  return `<div class="mod srcmod">
+    <div class="mod-head" style="--src:${s.c}"><span class="plate" style="font-weight:700">${esc(s.disp)}</span><span class="sp"></span><span class="plate">${esc(s.ver)}</span></div>
+    <div class="mod-body">
+      ${bad?`<div class="err"><b>Sync failed 38 min ago: 401 Unauthorized.</b> The TeamCity password may have expired. Re-enter it to resume syncing and flush queued writes.
+        <div class="row" style="margin-top:6px"><button class="btn danger" data-pwd>Re-enter password</button></div></div>`:''}
+      ${warn?`<div class="warn"><b>PAT expires 2026-09-03 — in 12 days.</b> Jira and Confluence share this token.
+        <div class="row" style="margin-top:6px"><button class="btn" data-pat>Update token</button></div></div>`:''}
+      <dl class="kv">
+        <dt>Type</dt><dd>${esc(s.mod)}</dd>
+        <dt>URL</dt><dd class="mono" style="font-size:11.5px">${esc(s.url)}</dd>
+        <dt>Auth</dt><dd>${esc(k==='teamcity'&&state.tcFixed?'user + password — updated today 14:32':s.auth)}</dd>
+        <dt>Sync</dt><dd>${bad?'<b style="color:var(--fail)">failed 38 min ago</b>':esc(k==='teamcity'?'synced just now':s.sync)} · ${esc(s.cnt)}</dd>
+        <dt>Capabilities</dt><dd><div class="caps">${s.caps.map(c=>`<span class="pill">${esc(c)}</span>`).join('')}</div></dd>
+      </dl>
+      <div class="row" style="gap:6px"><button class="btn" data-syncone="${k}">Sync now</button>
+        <span class="sp" style="flex:1"></span><span class="plate dim">Layer</span>
+        <button class="toggle src-${k} ${state.hidden[k]?'':'on'}" role="switch" aria-checked="${!state.hidden[k]}" aria-label="Show ${esc(s.name)} on the canvas" data-layer="${k}"></button></div>
+    </div></div>`;
+}
+function wizHTML(){
+  if(!wiz.open)return `<div class="row" style="margin-top:14px"><button class="btn primary" data-wizopen>Add source…</button>
+    <span class="muted" style="font-size:12px">Each source type is a pluggable adapter module — Jira, Confluence, Gitea, GitHub, GitLab, TeamCity, GitLab CI, Jenkins, Generic Git remote.</span></div>`;
+  const steps=['Type','URL','Auth','Test connection','Schedule'];
+  return `<div class="wiz">
+    <ol>${steps.map((s,i)=>`<li class="${wiz.step===i+1?'on':wiz.step>i+1?'done':''}"><i>${wiz.step>i+1?'✓':i+1}</i>${s}</li>`).join('')}</ol>
+    <div>${wizStep()}</div></div>`;
+}
+function wizStep(){
+  if(wiz.step===1)return `<div class="plate dim" style="margin-bottom:8px">Pick an adapter</div>
+    <div class="types">${ADD_TYPES.map(t=>`<button class="${wiz.type===t[0]?'on':''}" data-wtype="${esc(t[0])}"><span class="nm">${esc(t[0])}</span><span class="v">${esc(t[1])}</span></button>`).join('')}</div>
+    <div class="row" style="margin-top:12px"><button class="btn primary" data-wnext ${wiz.type?'':'disabled'}>Next: URL</button><button class="btn" data-wcancel>Cancel</button></div>`;
+  if(wiz.step===2)return `<div class="field"><span class="fl">Adapter</span><b>${esc(wiz.type)}</b></div>
+    <div class="field"><label class="fl" for="wurl">Base URL</label><input class="tx" id="wurl" value="${esc(wiz.url)}" placeholder="https://ci.tidewater.internal"></div>
+    <div class="row"><button class="btn primary" data-wnext>Next: Auth</button><button class="btn" data-wback>Back</button></div>`;
+  if(wiz.step===3)return `<div class="field"><span class="fl">Method</span></div>
+    ${AUTHS.map(a=>`<label class="row" style="margin-bottom:6px;font-size:12.5px;${a[0]==='oauth'?'opacity:.5':''}"><input type="radio" name="wauth" value="${a[0]}" ${wiz.auth===a[0]?'checked':''} ${a[0]==='oauth'?'disabled':''} style="accent-color:var(--ink)"> ${esc(a[1])}</label>`).join('')}
+    <div class="field" style="margin-top:8px"><label class="fl" for="wsec">${wiz.auth==='user'?'Password':'Token'}</label><input class="tx" id="wsec" type="password" value="${esc(wiz.secret)}" placeholder="Stored in the OS keychain"></div>
+    <div class="row"><button class="btn primary" data-wnext>Next: Test</button><button class="btn" data-wback>Back</button></div>`;
+  if(wiz.step===4)return `<div class="field"><span class="fl">Adapter</span><b>${esc(wiz.type)}</b></div>
+    <div class="field"><span class="fl">URL</span><span class="mono" style="font-size:11.5px">${esc(wiz.url||'—')}</span></div>
+    <div class="field"><span class="fl">Auth</span>${esc((AUTHS.find(a=>a[0]===wiz.auth)||['','—'])[1])}</div>
+    <div class="row" style="margin-top:8px"><button class="btn primary" data-wtest>Test connection</button><button class="btn" data-wback>Back</button></div>
+    <div class="tres ${wiz.tested?'open '+(wiz.tested==='ok'?'ok':'bad'):''}">${wiz.tested==='ok'?`<b>Connected.</b> ${esc(wiz.type)} adapter v1.1 reached ${esc(wiz.url)} in 240 ms. Capabilities: search, trigger, logs.`:wiz.tested==='bad'?`<b>Could not connect.</b> Enter a base URL first — the adapter needs a host to reach.`:''}</div>
+    ${wiz.tested==='ok'?`<div class="row" style="margin-top:10px"><button class="btn primary" data-wnext>Next: Schedule</button></div>`:''}`;
+  return `<div class="field"><label class="fl" for="wsched">Sync every</label><select class="tx" id="wsched" style="width:auto"><option value="5" ${wiz.sched==='5'?'selected':''}>5 minutes</option><option value="15" ${wiz.sched==='15'?'selected':''}>15 minutes</option><option value="60" ${wiz.sched==='60'?'selected':''}>1 hour</option></select></div>
+    <p class="muted" style="font-size:12.5px;margin-bottom:10px">The first sync indexes everything into the local Postgres database; later syncs are incremental.</p>
+    <div class="row"><button class="btn primary" data-wsave>Save source</button><button class="btn" data-wback>Back</button></div>`;
+}
+function renderSources(){
+  $('#ov-sources').innerHTML=`${ovHead('ink','Sources','4 configured · adapters')}
+   <div class="mod-body">
+    <div class="row" style="gap:14px;flex-wrap:wrap;margin-bottom:12px">
+      <button class="btn" data-syncall>Sync all now</button>
+      <span class="plate dim">Schedule every 5 min</span>
+      <span class="plate dim">Postgres knobas · 212 MB</span>
+      <span class="plate dim">Full-text index up to date</span>
+      <span class="plate dim">Pending writes ${state.pending}</span>
+      <span class="sp" style="flex:1"></span>
+      <span class="plate dim">Local notes are built in — 3 notes, no adapter</span></div>
+    <div class="srcgrid">${['jira','confluence','gitea','teamcity'].map(srcCard).join('')}</div>
+    <h3 class="sect">Add a source</h3>
+    ${wizHTML()}
+   </div>`;
+}
+$('#ov-sources').addEventListener('click',ev=>{
+  const t=ev.target;
+  if(t.closest('[data-pwd]')){openPassword();return}
+  if(t.closest('[data-pat]')){state.patExtended=true;renderSources();renderSync();toast('Jira PAT replaced — now expires 2027-08-22. Confluence uses the same token.','jira');return}
+  const so=t.closest('[data-syncone]');if(so){const k=so.dataset.syncone;
+    if(k==='teamcity'&&!state.tcFixed){toast('TeamCity sync failed again: 401 Unauthorized. Re-enter the password.','teamcity');return}
+    toast('Synced '+SRC[k].disp+' — '+SRC[k].cnt,k);return}
+  if(t.closest('[data-wizopen]')){wiz={open:true,step:1,type:null,url:'',auth:'pat',secret:'',sched:'5',tested:null};renderSources();return}
+  if(t.closest('[data-wcancel]')){wiz.open=false;renderSources();return}
+  const wt=t.closest('[data-wtype]');if(wt){wiz.type=wt.dataset.wtype;if(wiz.type==='TeamCity')wiz.auth='user';renderSources();return}
+  if(t.closest('[data-wback]')){saveWiz();wiz.step=Math.max(1,wiz.step-1);renderSources();return}
+  if(t.closest('[data-wnext]')){saveWiz();wiz.step=Math.min(5,wiz.step+1);renderSources();return}
+  if(t.closest('[data-wtest]')){saveWiz();wiz.tested=wiz.url.trim()?'ok':'bad';renderSources();return}
+  if(t.closest('[data-wsave]')){saveWiz();wiz.open=false;renderSources();renderSync();
+    toast('Source saved — '+esc(wiz.type)+' at '+esc(wiz.url)+', syncing every '+wiz.sched+' min');return}
+});
+$('#ov-sources').addEventListener('change',ev=>{if(ev.target.name==='wauth'){saveWiz();wiz.auth=ev.target.value;renderSources()}});
+function saveWiz(){const u=$('#wurl'),s=$('#wsec'),c=$('#wsched');if(u)wiz.url=u.value;if(s)wiz.secret=s.value;if(c)wiz.sched=c.value}
+function openPassword(){
+  dlg(`${dlgHead('teamcity','Re-enter the TeamCity password','ci.tidewater.internal')}
+   <div class="mod-body">
+    <p class="desc">The last sync failed with <b>401 Unauthorized</b> 38 minutes ago. The password for <span class="mono">mara.lindqvist</span> expires at the end of August.</p>
+    <div class="field" style="margin-top:10px"><label class="fl" for="tcuser">User</label><input class="tx" id="tcuser" value="mara.lindqvist"></div>
+    <div class="field"><label class="fl" for="tcpwd">Password</label><input class="tx" id="tcpwd" type="password" value="" placeholder="Stored in the OS keychain"></div>
+    <div class="tres" id="tctest"></div>
+   </div>
+   <div class="acts"><button class="btn" data-tctest>Test connection</button><span class="sp"></span>
+     <button class="btn" data-close>Cancel</button><button class="btn primary" data-tcsave>Save and sync</button></div>`);
+}
+
+/* ---------- time ---------- */
+const STRIP_S=495,STRIP_E=885,SPAN=STRIP_E-STRIP_S;
+let logged={};let weekLogged=false;
+const pos=m=>((m-STRIP_S)/SPAN*100).toFixed(2)+'%';
+function blockMin(b){return mins(b.e==='now'?'14:32':b.e)-mins(b.s)}
+function renderTime(){
+  const sel=state.selBlock;
+  $('#ov-time').innerHTML=`${ovHead('ink','Time','Friday 2026-08-22 · now 14:32')}
+   <div class="mod-body">
+    <div class="tgrid">
+     <div>
+      <div class="row" style="gap:12px;flex-wrap:wrap"><span class="plate dim">Day review 08:15 – 14:45</span>
+        <span class="plate dim" style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:9px;border-radius:2px;background:repeating-linear-gradient(135deg,var(--jira) 0 3px,#fff 3px 6px);border:1px solid var(--jira)"></span>passive</span>
+        <span class="plate dim" style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:9px;border-radius:2px;background:var(--jira)"></span>manual</span>
+        <span class="plate dim">tracked today <b class="mono">5h 28m</b></span></div>
+      <div class="strip" role="group" aria-label="Today's time blocks">
+        ${[9,10,11,12,13,14].map(h=>`<div class="tick" style="left:${pos(h*60)}"><span>${String(h).padStart(2,'0')}:00</span></div>`).join('')}
+        ${BLOCKS.map((b,i)=>{
+          const s=mins(b.s),e=b.e==='now'?872:mins(b.e),cls=b.mode==='gap'?'gap':b.mode==='unat'?'unat':b.mode==='adhoc'?'adhoc':b.mode==='passive'?'passive':'';
+          const src=logged[i]?'src-jira':(b.src?'src-'+b.src:'');
+          return `<button class="blk ${cls} ${src} ${sel===i?'sel':''}" data-blk="${i}" style="left:${pos(s)};width:${((e-s)/SPAN*100).toFixed(2)}%" ${b.mode==='gap'?'disabled':''}
+            aria-label="${esc(b.s)} to ${esc(b.e==='now'?'14:32':b.e)} ${esc(b.k||'no activity')}">
+            <span class="k">${esc(b.k||'—')}</span><span class="t">${esc(b.s)}–${esc(b.e==='now'?'now':b.e)} · ${esc(b.t)}</span></button>`}).join('')}
+        <div class="now" style="left:${pos(872)}"><span style="left:-30px">now</span></div>
+      </div>
+      <div class="tinfo">${blockInfo(sel)}</div>
+     </div>
+     <div>
+      <h3 class="sect" style="margin-top:0">Week timesheet</h3>
+      <div class="week">
+        ${WEEK.map(w=>{const l=weekLogged?w.t:w.l;return `<span class="d">${w.d}</span>
+          <div class="bar" title="${hm(w.t)} tracked, ${hm(l)} logged"><i style="width:${(l/480*100).toFixed(1)}%"></i><b style="left:${(l/480*100).toFixed(1)}%;width:${((w.t-l)/480*100).toFixed(1)}%"></b></div>
+          <span class="h">${hm(w.t)}</span>`}).join('')}
+      </div>
+      <div class="row" style="margin-top:10px;gap:14px;flex-wrap:wrap;font-size:12.5px">
+        <span><span class="plate dim">Tracked</span> <b class="mono">34h 10m</b></span>
+        <span><span class="plate dim">Logged</span> <b class="mono">${weekLogged?'34h 10m':'29h 25m'}</b></span></div>
+      <div class="row" style="margin-top:6px;font-size:12.5px"><span class="plate dim">Unlogged</span>
+        <b class="mono" style="color:${weekLogged?'var(--ink)':'var(--teamcity)'}">${weekLogged?'0h 00m':'4h 45m'}</b></div>
+      <div class="row" style="margin-top:10px"><button class="btn primary" data-logall ${weekLogged?'disabled':''}>${weekLogged?'Everything logged':'Log all 4h 45m'}</button></div>
+      <p class="muted" style="font-size:11.5px;margin-top:8px">Blocks come from what was open in knobas. Nothing is derived from git branches.</p>
+     </div>
+    </div>
+   </div>`;
+}
+function blockInfo(i){
+  if(i==null)return `<span class="muted">Pick a block to attribute it. The striped ones were recorded passively from what was open.</span>`;
+  const b=BLOCKS[i],m=blockMin(b);
+  if(b.mode==='gap')return `<span class="muted">12:20–13:10 · no activity recorded.</span>`;
+  if(logged[i])return `<span class="jack src-jira"></span><span>Logged <b class="mono">${hm(m)}</b> to ${esc(logged[i])}.</span>`;
+  if(b.mode==='unat')return `<span class="jack src-local" style="border-color:var(--fail)"></span>
+    <span><b>11:50–12:20 is unattributed.</b> knobas was open but no entity was in focus for ${hm(m)}.</span>
+    <button class="btn primary" data-assign="${i}">Assign…</button><button class="btn" data-keeplocal="${i}">Keep local only</button>`;
+  if(b.mode==='adhoc')return `<span class="jack src-local"></span><span><b>“Staging DB configuration”</b> · ${hm(m)} · ad-hoc label, no ticket.</span>
+    <button class="btn primary" data-logto="${i}">Log to a ticket…</button><button class="btn" data-keeplocal="${i}">Keep local only</button>`;
+  if(b.mode==='manual')return `<span class="jack src-jira"></span><span>Manual timer on PAY-231, running for ${hm(m)}.</span><button class="btn primary" data-stoplog>Stop and log</button>`;
+  if(b.src==='jira')return `<span class="jack src-jira"></span><span>Passive block on ${esc(b.k)} · ${hm(m)}.</span><button class="btn primary" data-logblk="${i}">Log ${hm(m)} to ${esc(b.k)}</button>`;
+  return `<span class="jack src-local"></span><span>${esc(b.t)} · ${hm(m)} · no entity to log this to.</span><button class="btn" data-keeplocal="${i}">Keep local only</button>`;
+}
+$('#ov-time').addEventListener('click',ev=>{
+  const b=ev.target.closest('[data-blk]');if(b){state.selBlock=+b.dataset.blk;renderTime();return}
+  const l=ev.target.closest('[data-logblk]');if(l){const i=+l.dataset.logblk,bl=BLOCKS[i];
+    logged[i]=bl.k;addWorklog(bl.k,hm(blockMin(bl)),bl.s+'–'+bl.e+' (passive)');renderTime();toast('Logged '+hm(blockMin(bl))+' to '+bl.k,'jira');return}
+  const k=ev.target.closest('[data-keeplocal]');if(k){logged[+k.dataset.keeplocal]='local only';renderTime();toast('Kept local — not written to Jira');return}
+  const a=ev.target.closest('[data-assign]');if(a){openAssign(+a.dataset.assign,'Assign 11:50–12:20');return}
+  const lt=ev.target.closest('[data-logto]');if(lt){openAssign(+lt.dataset.logto,'Log “Staging DB configuration” to a ticket','OPS-77');return}
+  if(ev.target.closest('[data-stoplog]')){closeOverlay();stopTimer();return}
+  if(ev.target.closest('[data-logall]')){weekLogged=true;renderTime();toast('Logged 4h 45m across PAY-231, PAY-228 and OPS-77','jira');return}
+});
+function addWorklog(key,h,text){const t=TICKETS[key];if(!t)return;t.worklogs.unshift({when:'today',h,t:text});renderCard()}
+function openAssign(i,title,suggest){
+  const b=BLOCKS[i];
+  dlg(`${dlgHead('jira',title,hm(blockMin(b))+' · '+b.s+'–'+(b.e==='now'?'14:32':b.e))}
+   <div class="mod-body">
+    ${suggest?`<div class="row" style="margin-bottom:10px"><span class="pill">suggested</span><span>${esc(suggest)} — the block overlaps the on-call runbook work</span></div>`:''}
+    <div class="field"><label class="fl" for="asg">Ticket</label>
+      <select class="tx" id="asg">${Object.keys(TICKETS).map(k=>`<option value="${k}" ${suggest===k?'selected':k==='PAY-231'&&!suggest?'selected':''}>${k} — ${esc(TICKETS[k].summary)}</option>`).join('')}</select></div>
+    <div class="field"><label class="fl" for="asgc">Comment</label><input class="tx" id="asgc" value="${esc(b.mode==='adhoc'?'Staging DB configuration':'Unattributed app time')}"></div>
+   </div>
+   <div class="acts"><span class="sp"></span><button class="btn" data-close>Cancel</button>
+     <button class="btn primary" data-asgok="${i}">Log ${hm(blockMin(b))}</button></div>`);
+}
+
+/* =========================================================
+   DIALOGS
+   ========================================================= */
+function dlgHead(srcKey,title,plate){
+  return `<div class="mod-head" style="--src:${SRC[srcKey].c}"><span class="key" style="font:700 12px var(--mono)">${esc(title)}</span><span class="plate">${esc(plate)}</span><button class="x" data-close aria-label="Close">✕</button></div>`}
+function dlg(html){const d=$('#dlg');d.innerHTML=html;d.classList.add('open');$('#scrim').classList.add('open');
+  setTimeout(()=>d.querySelector('input,select,textarea,button.primary,button')?.focus(),0)}
+function closeDlg(){$('#dlg').classList.remove('open');if(!state.overlay)$('#scrim').classList.remove('open')}
+
+/* worklog draft */
+const ACT=[
+ {id:'a1',on:true,k:'a41f2c',t:'commit “PAY-231 backoff jitter”',when:'10:02'},
+ {id:'a2',on:true,k:'c90d11',t:'commit “PAY-231: jitter in backoff, cap at 5 attempts”',when:'11:42'},
+ {id:'a3',on:true,k:'PR #142',t:'replied to Jonas on the review',when:'10:20'},
+ {id:'a4',on:false,k:'#1188',t:'triggered build Payout_Build',when:'11:45'},
+ {id:'a5',on:true,k:'Page',t:'edited SEPA payout retry design › Backoff policy',when:'10:40'},
+ {id:'a6',on:false,k:'Note',t:'edited SEPA retry investigation',when:'11:20'}
+];
+function draftComment(){
+  const on=id=>$(`#wl-${id}`)?$(`#wl-${id}`).checked:ACT.find(a=>a.id===id).on;
+  const parts=[];const cs=[];if(on('a1'))cs.push('a41f2c');if(on('a2'))cs.push('c90d11');
+  if(cs.length)parts.push('Backoff jitter ('+cs.join(', ')+')');
+  if(on('a3'))parts.push('replied to review on PR #142');
+  if(on('a4'))parts.push('triggered build #1188');
+  if(on('a5'))parts.push('updated Backoff policy in the design page');
+  if(on('a6'))parts.push('updated the SEPA retry investigation note');
+  return parts.length?parts.join('; ')+'.':'Worked on PAY-231.';
+}
+function wlTotal(){
+  const g=id=>$(id)?$(id).value:'';
+  const a=mins(g('#i1s')||'09:40'),b=mins(g('#i1e')||'11:50'),c=mins(g('#i2s')||'13:58'),d=mins(g('#i2e')||'14:32');
+  return Math.max(0,b-a)+Math.max(0,d-c);
+}
+function openWorklog(target){
+  dlg(`${dlgHead('jira','Worklog draft','timer stopped at 14:32')}
+   <div class="mod-body">
+    <h3 class="sect" style="margin-top:0">Interval</h3>
+    <div class="row" style="gap:6px;margin-bottom:6px"><span class="plate dim" style="width:82px">Passive</span>
+      <input class="tx" id="i1s" value="09:40" style="width:70px" aria-label="Start"><span class="muted">–</span><input class="tx" id="i1e" value="11:50" style="width:70px" aria-label="End"></div>
+    <div class="row" style="gap:6px"><span class="plate dim" style="width:82px">Manual timer</span>
+      <input class="tx" id="i2s" value="13:58" style="width:70px" aria-label="Start"><span class="muted">–</span><input class="tx" id="i2e" value="14:32" style="width:70px" aria-label="End"></div>
+    <div class="row" style="margin-top:8px"><span class="plate dim" style="width:82px">Total</span><b class="mono" id="wltot" style="font-size:15px">2h 44m</b></div>
+    <h3 class="sect">Target</h3>
+    <div class="field"><label class="fl" for="wltarget">Ticket</label>
+      <select class="tx" id="wltarget"><option value="">No ticket — keep local only</option>${Object.keys(TICKETS).map(k=>`<option value="${k}" ${k===target?'selected':''}>${k} — ${esc(TICKETS[k].summary)}</option>`).join('')}</select></div>
+    <h3 class="sect">Activity in the interval</h3>
+    ${ACT.map(a=>`<label class="wdl"><input type="checkbox" id="wl-${a.id}" ${a.on?'checked':''}><span class="k">${esc(a.k)}</span><span>${esc(a.t)}</span><span class="when">${esc(a.when)}</span></label>`).join('')}
+    <h3 class="sect">Comment</h3>
+    <textarea class="tx" id="wlcm">${esc(draftComment())}</textarea>
+   </div>
+   <div class="acts"><button class="btn" data-wldiscard>Discard</button><span class="sp"></span>
+     <button class="btn" data-wledit>Edit comment</button><button class="btn primary" data-wlok>Log 2h 44m to ${esc(target)}</button></div>`);
+  const sync=()=>{const t=wlTotal();$('#wltot').textContent=hm(t);
+    const tk=$('#wltarget').value;$('[data-wlok]').textContent=tk?`Log ${hm(t)} to ${tk}`:`Keep ${hm(t)} local`};
+  ['#i1s','#i1e','#i2s','#i2e'].forEach(id=>$(id).addEventListener('input',sync));
+  $('#wltarget').addEventListener('change',sync);
+  ACT.forEach(a=>$(`#wl-${a.id}`).addEventListener('change',()=>{$('#wlcm').value=draftComment()}));
+}
+
+/* start work */
+const SW_STEPS=[
+ ['Create branch','feature/PAY-240-payout-dashboard-latency from main'],
+ ['Push branch','git.tidewater.internal/tidewater/payout-service'],
+ ['Open pull request','PR #145 → main, title and description from the ticket'],
+ ['Patch the link','PR #145 ↔ PAY-240'],
+ ['Transition ticket','PAY-240 → In Progress'],
+ ['Start timer','context PAY-240']
+];
+function openStartWork(key){
+  const t=TICKETS[key]||TICKETS['PAY-240'];key=TICKETS[key]?key:'PAY-240';
+  dlg(`${dlgHead('jira','Start work on '+key,esc(t.summary))}
+   <div class="mod-body" id="swbody">
+    <p class="desc">Six steps across Jira, Gitea and the local timer. Review them before they run.</p>
+    <div class="field" style="margin-top:10px"><label class="fl" for="swrepo">Repository</label>
+      <select class="tx" id="swrepo"><option>payout-service</option><option>ledger-api</option><option>ops-runbooks</option></select></div>
+    <div class="field"><label class="fl" for="swbr">Branch</label><input class="tx" id="swbr" value="feature/PAY-240-payout-dashboard-latency"></div>
+    <div class="field"><label class="fl" for="swbase">From</label><select class="tx" id="swbase" style="width:auto"><option>main</option></select></div>
+    <div class="row" style="margin:10px 0 4px"><span class="plate dim" style="width:82px">Start timer</span>
+      <button class="toggle src-jira on" id="swtimer" role="switch" aria-checked="true" aria-label="Start the timer on PAY-240"></button>
+      <span class="muted" style="font-size:12px">Switches the running timer from PAY-231 to PAY-240</span></div>
+    <ul class="steps" style="margin-top:8px">${SW_STEPS.map(s=>`<li><i></i><span class="k">${esc(s[0])}</span><span class="r">${esc(s[1])}</span></li>`).join('')}</ul>
+   </div>
+   <div class="acts"><span class="sp"></span><button class="btn" data-close>Cancel</button><button class="btn primary" data-swrun="${key}">Run all six</button></div>`);
+}
+function runStartWork(key){
+  const withTimer=$('#swtimer').classList.contains('on');
+  const branch=$('#swbr').value.trim()||'feature/PAY-240-payout-dashboard-latency';
+  $('#swbody').innerHTML=`<p class="desc">Running six steps on ${esc(key)}.</p>
+    <ul class="steps" id="swlist">${SW_STEPS.map(s=>`<li><i></i><span class="k">${esc(s[0])}</span><span class="r">${esc(s[1])}</span></li>`).join('')}</ul>
+    <div id="swres"></div>`;
+  $('[data-swrun]').disabled=true;
+  const lis=$$('#swlist li');let i=0;
+  const step=()=>{
+    if(i>0)lis[i-1].classList.remove('run'),lis[i-1].classList.add('done');
+    if(i>=lis.length){finish();return}
+    lis[i].classList.add('run');i++;setTimeout(step,reduced?0:420);
+  };
+  const finish=()=>{
+    const bx=freeSpot(),px={x:bx.x,y:Math.min(640,bx.y+150)};
+    addNode({id:'branch240',src:'gitea',kind:'branch',key:'Branch',title:branch,x:bx.x,y:bx.y,route:'#/branch/feature-PAY-240-payout-dashboard-latency'});
+    addNode({id:'pr145',src:'gitea',kind:'pr',key:'PR #145',title:'Payout dashboard latency',x:px.x,y:px.y,route:'#/pr/145'});
+    BRANCHES['feature-PAY-240-payout-dashboard-latency']={key:'Branch',title:branch,repo:'payout-service',state:'0 commits ahead of main · checked out locally',node:'branch240',commits:[]};
+    PRS['145']={key:'PR #145',title:'Payout dashboard latency',repo:'payout-service',head:branch,base:'main',state:'open',by:'mara',opened:'opened today 14:32',
+      approvals:0,need:2,approvedBy:'—',reviewReq:'not requested yet',node:'pr145',checks:[],
+      comments:[],files:[]};
+    EDGES.push({a:'pay240',b:'branch240'},{a:'branch240',b:'pr145'},{a:'pay240',b:'pr145'});
+    TICKETS['PAY-240'].status='In Progress';TICKETS['PAY-240'].updated='today 14:32';
+    if(withTimer)startTimer('pay240');
+    renderAll();fitAll();plugAnim('branch240');plugAnim('pr145');
+    $('#swres').innerHTML=`<div class="tres open ok" style="margin-top:12px"><b>Done.</b> Branch pushed, PR #145 open, PAY-240 is In Progress${withTimer?', timer switched to PAY-240':''}.
+      <div class="row" style="margin-top:8px;gap:6px">${chipFor('branch240')}${chipFor('pr145')}${chipFor('pay240')}</div></div>`;
+    $('[data-swrun]').replaceWith(Object.assign(document.createElement('button'),{className:'btn primary',textContent:'Open PR #145',onclick:()=>{closeDlg();go('#/pr/145')}}));
+    toast('Started work on PAY-240 — branch, PR #145 and the transition are done','gitea');
+  };
+  step();
+}
+
+/* trigger build */
+function openTrigger(){
+  dlg(`${dlgHead('teamcity','Trigger a build','TeamCity · project Payouts')}
+   <div class="mod-body">
+    <div class="field"><label class="fl" for="tbcfg">Configuration</label>
+      <select class="tx" id="tbcfg"><option>Payout_IntegrationTests</option><option>Payout_Build</option><option>Ledger_Deploy_Staging</option></select></div>
+    <div class="field"><label class="fl" for="tbbr">Branch</label><input class="tx" id="tbbr" value="feature/PAY-231-sepa-retry"></div>
+    <div class="field"><span class="fl">Env</span>
+      <div class="seg" id="tbenv"><button class="on" data-env="staging">staging</button><button data-env="prod-dryrun">prod-dryrun</button></div></div>
+    <div class="row" style="margin-top:8px"><span class="plate dim" style="width:82px">Clean checkout</span>
+      <button class="toggle src-teamcity" id="tbclean" role="switch" aria-checked="false" aria-label="Clean checkout"></button></div>
+    <div class="tres ${state.tcFixed?'':'open bad'}" id="tbres">${state.tcFixed?'':'<b>TeamCity is not reachable: 401 Unauthorized.</b> The build will be queued as a pending write and sent as soon as the password works again. <button class="btn sm" data-pwd style="margin-left:6px">Re-enter password</button>'}</div>
+   </div>
+   <div class="acts"><span class="sp"></span><button class="btn" data-close>Cancel</button><button class="btn primary" data-tbgo>${state.tcFixed?'Trigger build':'Queue build'}</button></div>`);
+}
+function fireBuild(cfg,branch,env,clean){
+  if(!state.tcFixed){
+    state.pending++;state.queued={cfg,branch,env,clean};renderSync();
+    toast('Queued: '+cfg+' on '+branch+' — TeamCity is 401, 1 pending write','teamcity');return}
+  const id='1189';
+  BUILDS[id]={key:'Build #1189',cfg,st:'running',branch,when:'started today 14:32',dur:'step 1/5 checkout',node:'b1189',
+    params:[['branch',branch],['env',env],['clean checkout',clean?'on':'off']],log:'[14:32:07] step 1/5 checkout ... running'};
+  if(!NB['b1189']){const s=freeSpot();addNode({id:'b1189',src:'teamcity',kind:'build',key:'Build #1189',title:cfg,x:s.x,y:s.y,status:'running',route:'#/build/1189'});
+    EDGES.push({a:'pr142',b:'b1189'},{a:'pay231',b:'b1189'})}
+  renderAll();plugAnim('b1189');toast('Triggered '+cfg+' #1189 on '+branch+' ('+env+')','teamcity');
+}
+function rerunBuild(){
+  if(!state.tcFixed){state.pending++;state.queued={cfg:'Payout_IntegrationTests',branch:'feature/PAY-231-sepa-retry',env:'staging',clean:false};renderSync();
+    toast('Re-run queued — TeamCity is 401 Unauthorized. Re-enter the password in Sources.','teamcity');return}
+  fireBuild('Payout_IntegrationTests','feature/PAY-231-sepa-retry','staging',false);
+}
+function flushPending(){
+  if(!state.pending)return;const q=state.queued;state.pending=0;state.queued=null;renderSync();
+  if(q)fireBuild(q.cfg,q.branch,q.env,q.clean);
+}
+
+/* create ticket / page / branch / repo */
+let nextKey=241,nextPage=1;
+function openCreate(kind,preset){
+  if(kind==='ticket')return dlg(`${dlgHead('jira','Create ticket','Tidewater Jira')}
+   <div class="mod-body">
+    <div class="field"><label class="fl" for="ctp">Project</label><select class="tx" id="ctp" style="width:auto"><option value="PAY">PAY — Payments Platform</option><option value="OPS">OPS — Operations</option></select></div>
+    <div class="field"><label class="fl" for="ctt">Type</label><select class="tx" id="ctt" style="width:auto"><option>Task</option><option>Story</option><option>Bug</option></select></div>
+    <div class="field"><label class="fl" for="cts">Summary</label><input class="tx" id="cts" value="${esc(preset||'')}" placeholder="What needs doing"></div>
+    <div class="field" style="align-items:flex-start"><label class="fl" for="ctd">Description</label><textarea class="tx" id="ctd" placeholder="Context, acceptance criteria"></textarea></div>
+    <div class="field"><label class="fl" for="cta">Assignee</label><select class="tx" id="cta" style="width:auto">${Object.keys(PEOPLE).map(p=>`<option value="${p}">${esc(PEOPLE[p].n)}</option>`).join('')}</select></div>
+   </div>
+   <div class="acts"><span class="sp"></span><button class="btn" data-close>Cancel</button><button class="btn primary" data-ctok>Create ticket</button></div>`);
+  if(kind==='page')return dlg(`${dlgHead('confluence','Create page','Tidewater Wiki')}
+   <div class="mod-body">
+    <div class="field"><label class="fl" for="cps">Space</label><select class="tx" id="cps" style="width:auto"><option>ENG (Engineering)</option></select></div>
+    <div class="field"><label class="fl" for="cpp">Parent</label><select class="tx" id="cpp" style="width:auto"><option>Standup protocols</option><option>Payments architecture overview</option><option>None</option></select></div>
+    <div class="field"><label class="fl" for="cpt">Title</label><input class="tx" id="cpt" value="${esc(preset||'')}" placeholder="Page title"></div>
+    <div class="field" style="align-items:flex-start"><label class="fl" for="cpb">Body</label><textarea class="tx" id="cpb"></textarea></div>
+   </div>
+   <div class="acts"><span class="sp"></span><button class="btn" data-close>Cancel</button><button class="btn primary" data-cpok>Create page</button></div>`);
+  if(kind==='branch')return dlg(`${dlgHead('gitea','New branch','git.tidewater.internal')}
+   <div class="mod-body">
+    <div class="field"><label class="fl" for="cbr">Repository</label><select class="tx" id="cbr" style="width:auto">${Object.keys(REPOS).map(r=>`<option>${esc(r)}</option>`).join('')}</select></div>
+    <div class="field"><label class="fl" for="cbn">Name</label><input class="tx" id="cbn" value="feature/PAY-236-csv-export"></div>
+    <div class="field"><label class="fl" for="cbf">From</label><select class="tx" id="cbf" style="width:auto"><option>main</option><option>feature/PAY-231-sepa-retry</option></select></div>
+   </div>
+   <div class="acts"><span class="sp"></span><button class="btn" data-close>Cancel</button><button class="btn primary" data-cbok>Create branch</button></div>`);
+  return dlg(`${dlgHead('gitea','Create repository','org tidewater')}
+   <div class="mod-body">
+    <div class="field"><label class="fl" for="crn">Name</label><input class="tx" id="crn" value="payout-reports"></div>
+    <div class="field"><label class="fl" for="crl">Language</label><select class="tx" id="crl" style="width:auto"><option>Rust</option><option>Kotlin</option><option>Markdown</option></select></div>
+    <div class="row" style="margin-top:8px"><span class="plate dim" style="width:82px">Clone locally</span><button class="toggle src-gitea on" id="crc" role="switch" aria-checked="true" aria-label="Clone locally"></button><span class="muted" style="font-size:12px">into ~/code</span></div>
+   </div>
+   <div class="acts"><span class="sp"></span><button class="btn" data-close>Cancel</button><button class="btn primary" data-crok>Create repository</button></div>`);
+}
+function newNote(){
+  const ctx=state.sel&&NB[state.sel]?NB[state.sel]:null;
+  const id='note-'+(Object.keys(NOTES).length+1);
+  const link=ctx&&CHIPMAP[ctx.key]?ctx.key:null;
+  NOTES[id]={title:'New note'+(link?' · '+link:''),edited:'today 14:32',node:null,
+    body:(link?'Links: [['+link+']]\n\n':'')+'Start typing. Use [[PAY-231]] to patch a cable to any entity.'};
+  state.noteId=id;go('#/notes');renderCard();toast('New note created'+(link?' — pre-linked to '+link:''),'note');
+}
+
+/* =========================================================
+   CANVAS EXTRAS
+   ========================================================= */
+function fitAll(){
+  const xs=NODES.map(n=>n.x),ys=NODES.map(n=>n.y);
+  const x0=Math.min(...xs)-90,x1=Math.max(...xs)+90,y0=Math.min(...ys)-60,y1=Math.max(...ys)+80;
+  let w=Math.max(x1-x0,600),h=w*0.70;
+  if(y1-y0>h){h=y1-y0;w=h/0.70}
+  vb={x:(x0+x1)/2-w/2,y:(y0+y1)/2-h/2,w,h};setVB();
+}
+function freeSpot(){
+  for(let y=70;y<=630;y+=30)for(let x=1080;x>=70;x-=30){
+    if(NODES.every(n=>Math.hypot(n.x-x,n.y-y)>150))return {x,y};
+  }
+  return {x:1080,y:80};
+}
+
+/* =========================================================
+   GLOBAL CLICK DELEGATION
+   ========================================================= */
+document.addEventListener('click',ev=>{
+  const t=ev.target;
+  const g=t.closest('[data-go]');
+  if(g){ev.preventDefault();if(t.closest('#spop'))$('#spop').classList.remove('open');go(g.dataset.go);return}
+  if(t.closest('[data-close]')){ if($('#dlg').contains(t)){closeDlg()} else if(t.closest('#picker')){$('#picker').classList.remove('open')} else if(t.closest('#linkpop')){$('#linkpop').classList.remove('open')} else {closeOverlay()} return}
+  const so=t.closest('[data-sugok]');if(so){const[a,b]=so.dataset.sugok.split('|');confirmLink(a,b);return}
+  const sn=t.closest('[data-sugno]');if(sn){const[a,b]=sn.dataset.sugno.split('|');dismissLink(a,b);return}
+  const op=t.closest('[data-open]');if(op){go(OVR[op.dataset.open]);return}
+  const lr=t.closest('[data-lensrow]');if(lr){applyLens(lr.dataset.lensrow);return}
+  const ly=t.closest('[data-layer]');if(ly&&!t.closest('#legend')){state.hidden[ly.dataset.layer]=!state.hidden[ly.dataset.layer];renderAll();if(state.overlay==='ov-sources')renderSources();return}
+  const tg=t.closest('.toggle');if(tg&&!tg.hasAttribute('data-layer')){tg.classList.toggle('on');tg.setAttribute('aria-checked',tg.classList.contains('on'));return}
+  if(t.closest('[data-syncall]')){state.syncMin=0;renderSync();toast(state.tcFixed?'Synced 4 sources — 1,284 issues, 3,912 pages, 47 repos, 3 build configurations':'Synced 3 sources. TeamCity still returns 401 Unauthorized.');return}
+  if(t.closest('[data-pwd]')){openPassword();return}
+  if(t.closest('[data-trigger]')){openTrigger();return}
+  const rr=t.closest('[data-rerun]');if(rr){rerunBuild();return}
+  const sw=t.closest('[data-startwork]');if(sw){openStartWork(sw.dataset.startwork);return}
+  const cr=t.closest('[data-create]');if(cr){openCreate(cr.dataset.create);return}
+  if(t.closest('[data-newnote]')){newNote();return}
+  const gi=t.closest('[data-git]');if(gi){const a=gi.dataset.arg;
+    toast(gi.dataset.git==='pull'?'Pulled '+a+' — already up to date':'Pushed '+a+' to git.tidewater.internal','gitea');return}
+});
+
+/* card-scoped actions */
+$('#card').addEventListener('click',ev=>{
+  const t=ev.target;
+  const st=t.closest('[data-status]');if(st){const[key,s]=st.dataset.status.split('|');
+    if(TICKETS[key].status===s)return;TICKETS[key].status=s;TICKETS[key].updated='today 14:32';
+    renderCard();toast(key+' → '+s,'jira');return}
+  const ac=t.closest('[data-addcm]');if(ac){const v=$('#newcm').value.trim();
+    if(!v){$('#newcm').focus();toast('Write a comment before adding it');return}
+    TICKETS[ac.dataset.addcm].comments.push({who:'mara',when:'today 14:32',t:v});renderCard();toast('Comment added to '+ac.dataset.addcm,'jira');return}
+  const pc=t.closest('[data-prcm]');if(pc){const v=$('#newcm').value.trim();
+    if(!v){$('#newcm').focus();toast('Write a comment before adding it');return}
+    PRS[pc.dataset.prcm].comments.push({who:'mara',when:'today 14:32',t:v});renderCard();toast('Comment added to PR #'+pc.dataset.prcm,'gitea');return}
+  const gc=t.closest('[data-pagecm]');if(gc){const v=$('#newcm').value.trim();
+    if(!v){$('#newcm').focus();toast('Write a reply before sending it');return}
+    PAGES[gc.dataset.pagecm].comments.push({who:'mara',when:'today 14:32',t:v});
+    INBOX=INBOX.filter(i=>i.id!=='i2');renderInboxCount();renderCard();toast('Replied to Priya Nair on the page','confluence');return}
+  const sp=t.closest('[data-savepage]');if(sp){const slug=sp.dataset.savepage;
+    PAGES[slug].body=$('#pagebody').innerText.trim();PAGES[slug].edited='today 14:32';
+    renderCard();toast('Saved '+PAGES[slug].title+' to Tidewater Wiki','confluence');return}
+  const sn=t.closest('[data-savenote]');if(sn){const id=sn.dataset.savenote;
+    NOTES[id].body=$('#notebody').innerText.trim();NOTES[id].edited='today 14:32';
+    renderCard();toast('Saved the note “'+NOTES[id].title+'”','note');return}
+  const nb=t.closest('[data-note]');if(nb){state.noteId=nb.dataset.note;go('#/note/'+nb.dataset.note);return}
+  const pk=t.closest('[data-pick]');if(pk){const r=pk.getBoundingClientRect();openPicker(pk.dataset.pick,r.left-360,r.top-40);return}
+  const cm=t.closest('[data-cmenu]');if(cm){const r=cm.getBoundingClientRect();openMenu(cm.dataset.cmenu,r.left-40,r.bottom+4);return}
+  const tb=t.closest('[data-timer]');if(tb){const id=tb.dataset.timer;
+    if(timer.running&&timer.ctx===id)stopTimer();else if(id&&id!=='undefined')startTimer(id);else toast('Pick an entity or an ad-hoc label from the timer menu');return}
+  const rv=t.closest('[data-rereview]');if(rv){toast('Review re-requested from Jonas Becker on PR #'+rv.dataset.rereview,'gitea');return}
+  const ap=t.closest('[data-approve]');if(ap){const pr=PRS[ap.dataset.approve];pr.approvals=Math.min(pr.need,pr.approvals+1);pr.approvedBy=pr.approvedBy==='—'?'Mara Lindqvist':pr.approvedBy+', Mara Lindqvist';
+    INBOX=INBOX.filter(i=>i.id!=='i1');renderInboxCount();renderCard();toast('Approved PR #'+ap.dataset.approve,'gitea');return}
+  if(t.closest('[data-cmtpay]')){go('#/ticket/PAY-231');setTimeout(()=>$('#newcm')?.focus(),60);return}
+  const mn=t.closest('[data-menu]');if(mn){const r=mn.getBoundingClientRect();openMenu(state.sel,r.left-190,r.bottom+4);return}
+});
+
+/* dialog-scoped actions */
+$('#dlg').addEventListener('click',ev=>{
+  const t=ev.target;
+  const env=t.closest('#tbenv button');if(env){$$('#tbenv button').forEach(b=>b.classList.remove('on'));env.classList.add('on');return}
+  if(t.closest('[data-tctest]')){const r=$('#tctest');const p=$('#tcpwd').value;
+    r.className='tres open '+(p?'ok':'bad');
+    r.innerHTML=p?'<b>Connected.</b> ci.tidewater.internal answered as mara.lindqvist in 180 ms.':'<b>Enter the new password first.</b> The field is empty.';return}
+  if(t.closest('[data-tcsave]')){const p=$('#tcpwd').value;
+    if(!p){$('#tcpwd').focus();$('#tctest').className='tres open bad';$('#tctest').innerHTML='<b>Enter the new password first.</b> The field is empty.';return}
+    state.tcFixed=true;SRC.teamcity.sync='synced just now';closeDlg();renderSync();
+    if(state.overlay==='ov-sources')renderSources();
+    toast('TeamCity password saved — syncing again','teamcity');flushPending();return}
+  const sw=t.closest('[data-swrun]');if(sw){runStartWork(sw.dataset.swrun);return}
+  if(t.closest('[data-tbgo]')){const cfg=$('#tbcfg').value,br=$('#tbbr').value.trim(),env2=$('#tbenv .on').dataset.env,cl=$('#tbclean').classList.contains('on');
+    closeDlg();fireBuild(cfg,br,env2,cl);return}
+  if(t.closest('[data-wldiscard]')){closeDlg();toast('Draft discarded — nothing logged');return}
+  if(t.closest('[data-wledit]')){$('#wlcm').focus();$('#wlcm').setSelectionRange($('#wlcm').value.length,$('#wlcm').value.length);return}
+  if(t.closest('[data-wlok]')){const tk=$('#wltarget').value,tot=hm(wlTotal()),cm=$('#wlcm').value.trim();
+    if(tk){addWorklog(tk,tot,cm||'Worked on '+tk);TICKETS[tk].spent='9h 14m';logged[2]=tk;logged[6]=tk;
+      toast('Logged '+tot+' to '+tk+' — “'+esc(cm.slice(0,52))+(cm.length>52?'…':'')+'”','jira')}
+    else toast('Kept '+tot+' local — no Jira worklog written');
+    closeDlg();if(state.overlay==='ov-time')renderTime();return}
+  const ag=t.closest('[data-asgok]');if(ag){const i=+ag.dataset.asgok,k=$('#asg').value,b=BLOCKS[i];
+    logged[i]=k;addWorklog(k,hm(blockMin(b)),$('#asgc').value);closeDlg();if(state.overlay==='ov-time')renderTime();
+    toast('Logged '+hm(blockMin(b))+' to '+k,'jira');return}
+  if(t.closest('[data-ctok]')){const p=$('#ctp').value,s=$('#cts').value.trim(),d=$('#ctd').value.trim(),a=$('#cta').value,ty=$('#ctt').value;
+    if(!s){$('#cts').focus();toast('Give the ticket a summary first');return}
+    const key=p+'-'+(p==='PAY'?nextKey++:78);
+    TICKETS[key]={summary:s,type:ty,status:'To Do',priority:'Medium',assignee:a,updated:'today 14:32',desc:esc(d||'Created from knobas.'),comments:[],worklogs:[]};
+    const sp2=freeSpot();addNode({id:key.toLowerCase().replace('-',''),src:'jira',kind:'ticket',key,title:s,x:sp2.x,y:sp2.y,route:'#/ticket/'+key});
+    if(state.sel&&NB[state.sel])EDGES.push({a:key.toLowerCase().replace('-',''),b:state.sel});
+    closeDlg();renderAll();fitAll();go('#/ticket/'+key);toast('Created '+key+' — '+s,'jira');return}
+  if(t.closest('[data-cpok]')){const ti=$('#cpt').value.trim(),b=$('#cpb').value.trim(),par=$('#cpp').value;
+    if(!ti){$('#cpt').focus();toast('Give the page a title first');return}
+    const slug=ti.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+    PAGES[slug]={key:'Page · ENG',title:ti,space:'ENG (Engineering)',edited:'today 14:32',section:'',by:'mara',node:'pg'+(nextPage),body:b||'Created from knobas.',comments:[]};
+    const sp3=freeSpot();addNode({id:'pg'+(nextPage++),src:'confluence',kind:'page',key:'Page · ENG',title:ti,x:sp3.x,y:sp3.y,route:'#/page/'+slug});
+    closeDlg();renderAll();fitAll();go('#/page/'+slug);toast('Created ENG › '+par+' › '+ti,'confluence');return}
+  if(t.closest('[data-cbok]')){const r=$('#cbr').value,n=$('#cbn').value.trim(),f=$('#cbf').value;
+    if(!n){$('#cbn').focus();toast('Name the branch first');return}
+    REPOS[r].branches.push([n,'new · checked out']);closeDlg();toast('Created '+n+' from '+f+' in '+r,'gitea');renderCard();return}
+  if(t.closest('[data-crok]')){const n=$('#crn').value.trim(),l=$('#crl').value,c=$('#crc').classList.contains('on');
+    if(!n){$('#crn').focus();toast('Name the repository first');return}
+    REPOS[n]={key:'Repo',title:n,lang:l,clone:c?'~/code/'+n:'not cloned',def:'main',commits:'0 commits',node:null,branches:[['main','default']]};
+    closeDlg();toast('Created tidewater/'+n+(c?' and cloned it to ~/code/'+n:''),'gitea');return}
+});
+
+/* =========================================================
+   ROUTING, KEYBOARD, INIT
+   ========================================================= */
+const OVRT={'#/inbox':'ov-inbox','#/time':'ov-time','#/standup':'ov-standup','#/sources':'ov-sources'};
+function renderRail(){
+  $$('#rail button[data-go]').forEach(b=>{
+    const g=b.dataset.go;let on=false;
+    if(OVRT[g])on=state.overlay===OVRT[g];
+    else if(g==='#/notes')on=!state.overlay&&(state.baseRoute==='#/notes'||state.baseRoute.startsWith('#/note/'));
+    else if(g==='#/graph')on=!state.overlay&&state.baseRoute!=='#/notes'&&!state.baseRoute.startsWith('#/note/');
+    b.classList.toggle('on',on);
+  });
+}
+function renderAll(){renderCanvas();renderLenses();renderCard();renderSync();renderInboxCount();renderTimer();renderRail()}
+function route(){
+  const h=location.hash||'#/ticket/PAY-231';
+  if(OVRT[h]){renderAll();openOverlay(OVRT[h]);return}
+  if(state.overlay)closeOverlay(true);
+  state.baseRoute=h;
+  if(h.startsWith('#/note/'))state.noteId=h.slice(7);
+  const n=NODES.find(x=>x.route===h);state.sel=n?n.id:null;
+  renderAll();
+}
+addEventListener('hashchange',route);
+addEventListener('resize',()=>requestAnimationFrame(drawPbays));
+
+addEventListener('keydown',ev=>{
+  const meta=ev.metaKey||ev.ctrlKey,k=(ev.key||'').toLowerCase();
+  if(meta&&k==='k'){ev.preventDefault();$('#q').focus();$('#q').select();$('#spop').classList.add('open');renderSearch();return}
+  if(meta&&k==='t'){ev.preventDefault();if(timer.running)stopTimer();else startTimer(timer.ctx||'pay231');return}
+  if(ev.key==='Escape'){
+    if($('#cmenu').classList.contains('open')){$('#cmenu').classList.remove('open');return}
+    if($('#picker').classList.contains('open')){$('#picker').classList.remove('open');return}
+    if($('#linkpop').classList.contains('open')){$('#linkpop').classList.remove('open');return}
+    if($('#tpop').classList.contains('open')){$('#tpop').classList.remove('open');return}
+    if($('#spop').classList.contains('open')){$('#spop').classList.remove('open');$('#q').blur();return}
+    if($('#dlg').classList.contains('open')){closeDlg();return}
+    if(state.overlay){closeOverlay();return}
+    if(state.query||state.lens){state.query='';state.lens=null;$('#q').value='';renderAll();return}
+  }
+});
+
+setInterval(()=>{renderTimer();const m=nowMin();$('#clock').textContent=`${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`},20000);
+
+if(!location.hash)location.hash='#/ticket/PAY-231';
+route();
+renderSearch();
+renderTimerPop();
+
+}catch(err){
+  const j=document.getElementById('jserr');
+  if(j){j.style.display='inline';j.textContent='JS error: '+(err&&err.message?err.message:err)}
+  console.error(err);
+}
+</script>
+</body>
+</html>
