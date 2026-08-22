@@ -1,0 +1,1276 @@
+<!--
+knobas mockup
+paradigm: P4 Context hub
+design: D2 Ledger
+thesis: Pick a context (epic, ticket or an ad-hoc label) and every source is already filtered to it — tickets, code, builds, docs, notes, inbox and its own clock.
+thesis: Each context is a page in a ruled ledger: every ticket, commit, build and worklog is one dated line with a reference and a red source stamp; switching context turns to another page.
+thesis: Ledger lines with rotated rubber-stamp source badges, and a red margin line that carries the date column on every page.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>knobas — PAY-200 Payout reliability</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,400..700;1,62..125,400..700&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#FCFCFA;--panel:#F4F5F2;--rule:#D7DEE8;--margin:#E0857C;
+  --ink:#1B2230;--muted:#5F6B7A;--faint:#9AA5B4;--blue:#1F3A8A;--red:#C8372D;
+  --blue-wash:rgba(31,58,138,.07);--red-wash:rgba(200,55,45,.07);
+  --f-ui:'Archivo',system-ui,-apple-system,'Helvetica Neue',sans-serif;
+  --f-serif:'Source Serif 4',Georgia,'Times New Roman',serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
+  --row:34px;--margin-x:64px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font:13px/1.4 var(--f-ui);color:var(--ink);background:var(--paper);overflow:hidden;display:grid;grid-template-rows:44px 1fr 24px;height:100vh;-webkit-font-smoothing:antialiased}
+button,select,input,textarea{font:inherit;color:inherit;border-radius:0}
+button{background:none;border:none;cursor:pointer}
+a{color:var(--blue);text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+[hidden]{display:none!important}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.serif{font-family:var(--f-serif);font-size:14.5px;line-height:1.55}
+.muted{color:var(--muted)}.faint{color:var(--faint)}.red{color:var(--red)}.blue{color:var(--blue)}
+.up{font:600 11px/1 var(--f-ui);letter-spacing:.1em;text-transform:uppercase}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+/* ---------- buttons ---------- */
+.btn{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border:1px solid var(--ink);background:var(--paper);font-weight:500;white-space:nowrap;line-height:1}
+.btn:hover{background:var(--panel)}
+.btn.pri{background:var(--blue);border-color:var(--blue);color:#fff}
+.btn.pri:hover{background:#172d6d}
+.btn.danger{border-color:var(--red);color:var(--red)}
+.btn.quiet{border-color:transparent;color:var(--blue);padding:0 6px}
+.btn.quiet:hover{background:var(--blue-wash)}
+.btn.sm{height:22px;padding:0 7px;font-size:12px}
+.btn:disabled{opacity:.45;cursor:default}
+.link{background:none;border:0;color:var(--blue);padding:0;cursor:pointer;font:inherit}
+.link:hover{text-decoration:underline}
+select.sel,input.inp,textarea.inp{border:1px solid var(--rule);background:var(--paper);height:26px;padding:0 6px;font-size:12.5px}
+select.sel{appearance:none;-webkit-appearance:none;padding-right:20px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%235F6B7A'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 6px center}
+select.sel.inline{border-color:transparent;height:22px;padding-left:2px;font-weight:500;color:var(--blue)}
+select.sel.inline:hover{border-color:var(--rule)}
+textarea.inp{height:auto;padding:6px;resize:vertical;font-family:var(--f-serif);font-size:14px;line-height:1.5}
+input.inp:focus,textarea.inp:focus,select.sel:focus{border-color:var(--blue);outline:none;box-shadow:0 0 0 1px var(--blue)}
+.field{display:grid;grid-template-columns:140px 1fr;align-items:center;gap:8px 12px;padding:7px 0;border-bottom:1px solid var(--rule)}
+.field label{font-size:12px;color:var(--muted)}
+.check{display:inline-flex;align-items:center;gap:7px;cursor:pointer}
+.check input{width:13px;height:13px;accent-color:var(--blue);margin:0}
+.chk{display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-bottom:1px solid var(--rule)}
+.chk input{margin-top:4px;accent-color:var(--blue)}
+
+/* ---------- stamps ---------- */
+.stamp{display:inline-block;font:600 9px/1 var(--f-ui);letter-spacing:.14em;text-transform:uppercase;padding:3px 5px 2px;border:3px double currentColor;color:var(--red);opacity:.85;mix-blend-mode:multiply;transform:rotate(var(--r,0deg));white-space:nowrap;vertical-align:middle}
+.stamp.blue{color:var(--blue)}
+.stamp.ink{color:var(--ink)}
+.stamp.big{font-size:12px;letter-spacing:.18em;padding:5px 9px 4px}
+.stamp.in{animation:stampin .2s cubic-bezier(.2,.9,.3,1.2)}
+@keyframes stampin{from{transform:scale(1.7) rotate(var(--r,0deg));opacity:0}to{transform:scale(1) rotate(var(--r,0deg));opacity:.85}}
+.run{display:inline-block;width:12px;height:12px;border:1.5px dashed var(--ink);border-radius:50%;vertical-align:-2px;animation:spin 3s linear infinite}
+.ok{color:var(--blue);font-weight:600}
+.fail{color:var(--red);font-weight:600}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ---------- top bar ---------- */
+#top,#main,#status{min-width:0}
+#top{display:flex;align-items:stretch;border-bottom:1px solid var(--ink);background:var(--paper);padding:0 0 0 16px;gap:0;position:relative;z-index:30;white-space:nowrap}
+#top .brand{display:flex;align-items:center;gap:10px;padding-right:16px;border-right:1px solid var(--rule)}
+#top .brand b{font-family:var(--f-ui);font-weight:700;font-stretch:125%;letter-spacing:.06em;font-size:15px}
+.tabs{display:flex;align-items:stretch;min-width:0;overflow:hidden}
+.tab{display:flex;flex-direction:column;justify-content:center;padding:0 12px;border-right:1px solid var(--rule);min-width:0;position:relative;color:var(--muted);text-align:left;flex:0 0 auto}
+.tab:hover{background:var(--panel)}
+.tab.on{color:var(--ink);background:var(--paper)}
+.tab.on::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:3px;background:var(--blue)}
+.tab .k{font:500 12px var(--f-mono);display:flex;gap:8px;align-items:center;white-space:nowrap}
+.tab .t{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
+.tab .clk{font:11px var(--f-mono);color:var(--blue)}
+.tab.add{color:var(--blue);padding:0 12px;flex:none;justify-content:center}
+.switch{display:flex;align-items:center;padding:0 4px;border-right:1px solid var(--rule);font-weight:500}
+.switch .btn{height:100%;border:0;gap:6px;padding:0 8px}
+#top .right{margin-left:auto;display:flex;align-items:stretch;flex:none}
+.tb{display:flex;align-items:center;gap:7px;padding:0 11px;border-left:1px solid var(--rule);color:var(--ink);position:relative;white-space:nowrap}
+.tb:hover{background:var(--panel)}
+.tb.on{background:var(--blue-wash);color:var(--blue)}
+.tb kbd{font:11px var(--f-mono);color:var(--faint);border:1px solid var(--rule);padding:1px 4px}
+.cnt{display:inline-block;min-width:18px;padding:1px 5px;text-align:center;font:600 11px var(--f-mono);background:var(--red);color:#fff}
+.cnt.z{background:var(--faint)}
+.tb .here{font:11px var(--f-mono);color:var(--muted)}
+.timer{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.timer .el{font-weight:500;color:var(--blue);font-size:14px}
+.timer .ctx{font-size:11.5px;color:var(--muted)}
+.timer.off .el{color:var(--faint)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--blue)}
+.dot.x{background:none;position:relative;width:10px;height:10px}
+.dot.x::before,.dot.x::after{content:'';position:absolute;left:4px;top:-1px;width:2px;height:12px;background:var(--red);transform:rotate(45deg)}
+.dot.x::after{transform:rotate(-45deg)}
+.sync{gap:5px;font:11px var(--f-mono);color:var(--muted)}
+.sync .nm{margin-right:2px}
+
+/* ---------- status bar ---------- */
+#status{display:flex;align-items:center;gap:18px;padding:0 16px;border-top:1px solid var(--rule);background:var(--panel);font:11px var(--f-mono);color:var(--muted);white-space:nowrap;overflow:hidden}
+#status .sp{margin-left:auto}
+#status b{color:var(--ink);font-weight:500}
+
+/* ---------- main / room ---------- */
+#main{position:relative;overflow:hidden;display:grid;grid-template-columns:1fr;min-height:0}
+#main.split{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.room{display:grid;grid-template-rows:auto minmax(0,1fr) auto;min-height:0;overflow:hidden}
+.rhead{display:flex;align-items:flex-end;gap:16px;padding:12px 20px 10px;border-bottom:1px solid var(--rule);background:var(--paper)}
+.rhead h1{font:700 20px/1.1 var(--f-ui);display:flex;align-items:baseline;gap:10px;letter-spacing:-.01em}
+.rhead h1 .k{font:500 16px var(--f-mono);color:var(--blue)}
+.rhead .meta{font-size:12px;color:var(--muted);display:flex;gap:14px;margin-top:4px;flex-wrap:wrap}
+.rhead .acts{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.prompt{display:flex;align-items:center;gap:10px;padding:7px 20px;background:var(--red-wash);border-bottom:1px solid var(--margin);font-size:12.5px}
+.prompt .mono{color:var(--red)}
+.tiles{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:minmax(0,1.7fr) minmax(0,1fr) minmax(0,1.1fr);min-height:0;overflow:hidden}
+.tiles.four{grid-template-rows:minmax(0,1fr) minmax(0,1fr)}
+.split .tiles{display:block;overflow:auto}
+.tile{display:flex;flex-direction:column;min-height:0;border-bottom:1px solid var(--rule);border-right:1px solid var(--rule);background:var(--paper)}
+.tile:nth-child(2n){border-right:0}
+.split .tile{border-right:0}
+.split .tile .tbody{flex:none;overflow:visible}
+.th{display:flex;align-items:center;gap:10px;height:30px;padding:0 12px 0 var(--margin-x);border-bottom:1px solid var(--rule);background:var(--panel);flex:none}
+.th .up{color:var(--ink);white-space:nowrap}
+.th .n{font:11px var(--f-mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.th .acts{margin-left:auto;display:flex;gap:2px}
+.th .acts .btn{height:22px;font-size:11.5px}
+.tbody{overflow:auto;min-height:0;flex:1;position:relative;scrollbar-width:thin;scrollbar-color:var(--faint) transparent}
+.tbody::-webkit-scrollbar{width:8px;height:8px}
+.tbody::-webkit-scrollbar-thumb{background:var(--rule)}
+.tbody::-webkit-scrollbar-thumb:hover{background:var(--faint)}
+.ledger{position:relative;min-height:100%;background-image:repeating-linear-gradient(to bottom,transparent 0,transparent calc(var(--row) - 1px),var(--rule) calc(var(--row) - 1px),var(--rule) var(--row))}
+.ledger::before{content:'';position:absolute;left:var(--margin-x);top:0;bottom:0;width:1px;background:var(--margin);pointer-events:none}
+.ledger.plain{background-image:none}
+.grp{height:var(--row);display:flex;align-items:center;padding-left:calc(var(--margin-x) + 10px);gap:8px;background:var(--paper);border-bottom:1px solid var(--rule)}
+.grp .up{color:var(--muted)}
+.grp .n{font:11px var(--f-mono);color:var(--faint)}
+.lr{display:grid;grid-template-columns:var(--margin-x) minmax(84px,auto) minmax(0,1fr) auto auto;align-items:center;min-height:var(--row);border-bottom:1px solid var(--rule);column-gap:12px;padding-right:10px;cursor:default;background:var(--paper)}
+.lr[data-go]{cursor:pointer}
+.lr[data-go]:hover{background:var(--panel)}
+.lr.sel{background:var(--blue-wash)}
+.lr.sel .desc{color:var(--blue)}
+.lr .d{font:11px var(--f-mono);color:var(--muted);padding-left:10px;white-space:nowrap}
+.lr .ref{font:500 12px var(--f-mono);color:var(--blue);white-space:nowrap;padding-left:10px}
+.lr .desc{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px}
+.lr .desc small{color:var(--muted);font-size:11.5px;margin-left:6px}
+.lr .st{font:11px var(--f-mono);color:var(--muted);white-space:nowrap;display:flex;gap:8px;align-items:center}
+.lr .stp{width:56px;text-align:right}
+.lr .stp .stamp{font-size:8px;padding:2px 4px 1px}
+.lr .ac{display:flex;gap:2px;justify-content:flex-end}
+.lr.empty{color:var(--muted);font-size:12px;cursor:default;grid-template-columns:var(--margin-x) 1fr}
+.lr.empty .desc{padding-left:10px;white-space:normal;color:var(--muted)}
+.lr.wide{grid-template-columns:var(--margin-x) minmax(0,1fr) auto}
+.lr.wide .desc{padding-left:10px}
+.tray{border-top:2px solid var(--ink);background:var(--paper)}
+.tray .th{background:var(--paper);border-bottom:1px solid var(--rule)}
+.tray .ledger{max-height:140px;overflow:auto;min-height:0}
+.why{color:var(--muted);font-size:11.5px;font-style:italic;font-family:var(--f-serif)}
+
+/* ---------- detail panel ---------- */
+.detail{display:flex;flex-direction:column;min-height:0;border-left:1px solid var(--ink);background:var(--paper)}
+.dh{display:flex;align-items:center;gap:10px;padding:8px 14px 8px 16px;border-bottom:1px solid var(--rule);background:var(--panel);flex:none;min-height:46px}
+.dh .ttl{font:600 15px/1.2 var(--f-ui);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.dh .ttl .k{font:500 13px var(--f-mono);color:var(--blue);margin-right:8px}
+.dh .x{margin-left:auto}
+.db{overflow:auto;min-height:0;flex:1}
+.sec{padding:10px 16px 12px;border-bottom:1px solid var(--rule)}
+.sec > .up{color:var(--muted);display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.sec > .up .acts{margin-left:auto;display:flex;gap:4px}
+.sec .ledger{margin:0 -16px;min-height:0}
+.kv{display:grid;grid-template-columns:110px 1fr;gap:5px 12px;font-size:12.5px;align-items:center}
+.kv dt{color:var(--muted)}
+.kv dd{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.text{font-family:var(--f-serif);font-size:14.5px;line-height:1.55;max-width:62ch}
+.text p{margin:0 0 8px}
+.text code,.text .key{font:12.5px var(--f-mono);background:var(--panel);padding:0 3px}
+.text h3{font:600 15px var(--f-serif);margin:12px 0 4px;border-bottom:1px solid var(--rule)}
+.text h3:first-child{margin-top:0}
+.cm{display:grid;grid-template-columns:var(--margin-x) 1fr;column-gap:12px;padding:8px 0;border-bottom:1px solid var(--rule)}
+.cm .who{font:11px var(--f-mono);color:var(--muted);padding-left:10px;line-height:1.5}
+.cm .who b{display:block;font:600 12px var(--f-ui);color:var(--ink)}
+.cm .body{font-family:var(--f-serif);font-size:14px;line-height:1.5}
+.cm .mention{color:var(--blue);font-weight:600}
+.chip{display:inline-flex;align-items:center;gap:4px;font:500 12px var(--f-mono);color:var(--blue);border:1px solid var(--rule);border-bottom-color:var(--blue);padding:0 5px;height:20px;background:var(--paper);cursor:pointer;white-space:nowrap}
+.chip:hover{background:var(--blue-wash)}
+.chip.red{color:var(--red);border-bottom-color:var(--red)}
+.editor{font-family:var(--f-serif);font-size:15px;line-height:var(--row);padding:0 16px 0 calc(var(--margin-x) + 12px);min-height:calc(var(--row) * 6);outline:none;background-image:repeating-linear-gradient(to bottom,transparent 0,transparent calc(var(--row) - 1px),var(--rule) calc(var(--row) - 1px),var(--rule) var(--row));position:relative}
+.editor:focus{box-shadow:inset 3px 0 0 var(--blue)}
+.edwrap{position:relative;margin:0 -16px}
+.edwrap::before{content:'';position:absolute;left:var(--margin-x);top:0;bottom:0;width:1px;background:var(--margin)}
+.log{font:12px/1.5 var(--f-mono);background:var(--panel);padding:10px 12px;white-space:pre;overflow:auto;border-left:3px solid var(--rule)}
+.log .bad{color:var(--red);font-weight:500}
+.steps .stp2{display:grid;grid-template-columns:28px 1fr auto;gap:10px;align-items:center;min-height:var(--row);border-bottom:1px solid var(--rule);font-size:12.5px}
+.steps .stp2 .i{font:500 11px var(--f-mono);color:var(--muted);text-align:center}
+.steps .stp2.done .i{color:var(--blue)}
+.steps .stp2.run .i .run{border-color:var(--blue)}
+.steps .stp2 .r{font:11px var(--f-mono);color:var(--muted)}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.card{border:1px solid var(--rule);padding:8px 10px;text-align:left;background:var(--paper);display:flex;flex-direction:column;gap:3px}
+.card:hover,.card.on{border-color:var(--blue);background:var(--blue-wash)}
+.card b{font-weight:600}
+.card small{color:var(--muted);font-size:11px}
+.card .caps{font:10px var(--f-mono);color:var(--blue)}
+.res{padding:8px 10px;border:1px solid var(--rule);font-size:12.5px;display:flex;gap:10px;align-items:center}
+.res.ok{border-color:var(--blue);background:var(--blue-wash)}
+.res.bad{border-color:var(--red);background:var(--red-wash)}
+
+/* ---------- global views ---------- */
+.view{display:grid;grid-template-rows:auto minmax(0,1fr);min-height:0;overflow:hidden}
+.view .vbody{overflow:auto;min-height:0;display:flex;flex-direction:column}
+.view .vbody > *{flex:0 0 auto}
+.view .vbody.two{display:grid}
+/* the rest of the page keeps its ruling, like an unwritten ledger page */
+.fill{position:relative;min-height:60px;background-image:repeating-linear-gradient(to bottom,transparent 0,transparent calc(var(--row) - 1px),var(--rule) calc(var(--row) - 1px),var(--rule) var(--row))}
+.view .vbody > .fill{flex:1 0 auto}
+.fill::before{content:'';position:absolute;left:var(--margin-x);top:0;bottom:0;width:1px;background:var(--margin)}
+.two{display:grid;grid-template-columns:minmax(300px,2fr) minmax(0,3fr);min-height:0;overflow:hidden}
+.two > *{min-height:0;overflow:auto}
+.two > .col{display:flex;flex-direction:column}
+.two > .col > *{flex:0 0 auto}
+.two > .col > .fill{flex:1 0 auto}
+.two > :first-child{border-right:1px solid var(--rule)}
+.seg{display:inline-flex;border:1px solid var(--rule)}
+.seg button{height:24px;padding:0 10px;font-size:12px;color:var(--muted);border-right:1px solid var(--rule)}
+.seg button:last-child{border-right:0}
+.seg button.on{background:var(--blue);color:#fff}
+.ib{grid-template-columns:var(--margin-x) minmax(0,1fr) auto}
+.ib .desc{white-space:normal;padding:6px 0}
+.ib .desc q{font-family:var(--f-serif);font-style:italic;quotes:'“' '”'}
+.ib .ac{padding:4px 0}
+.reply{grid-column:2/-1;padding:6px 10px 8px 0;display:flex;gap:6px}
+.reply textarea{flex:1;min-height:48px}
+
+/* time */
+.strip{position:relative;height:64px;margin:8px 0 4px;border-bottom:1px solid var(--ink)}
+.strip .blk{position:absolute;top:14px;height:34px;border:1px solid var(--blue);background:var(--blue);color:#fff;font:11px var(--f-mono);padding:3px 5px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer}
+.strip .blk.passive{background:repeating-linear-gradient(135deg,var(--blue) 0 3px,var(--paper) 3px 7px);color:var(--blue)}
+.strip .blk.passive span{background:var(--paper);padding:0 3px}
+.strip .blk.c2{border-color:var(--ink);background:var(--ink)}
+.strip .blk.c2.passive{background:repeating-linear-gradient(135deg,var(--ink) 0 3px,var(--paper) 3px 7px);color:var(--ink)}
+.strip .blk.c3{border-color:var(--blue);background:var(--paper);color:var(--blue);border-style:double;border-width:3px}
+.strip .blk.c0{border-color:var(--faint);background:var(--paper);color:var(--muted)}
+.strip .blk.c0.passive{background:repeating-linear-gradient(135deg,var(--faint) 0 2px,var(--paper) 2px 7px)}
+.strip .blk.un{border:1px dashed var(--red);background:var(--red-wash);color:var(--red)}
+.strip .blk.gap{border:0;background:none;color:var(--faint);text-align:center}
+.strip .blk.now{box-shadow:2px 0 0 var(--red)}
+.strip .tick{position:absolute;top:0;font:10px var(--f-mono);color:var(--faint);border-left:1px solid var(--rule);padding-left:3px;height:100%}
+.strip .nowl{position:absolute;top:0;bottom:-1px;width:2px;background:var(--red)}
+.legend{display:flex;gap:16px;font-size:11.5px;color:var(--muted);align-items:center}
+.legend i{display:inline-block;width:18px;height:10px;vertical-align:-1px;margin-right:4px;border:1px solid var(--blue);background:var(--blue)}
+.legend i.p{background:repeating-linear-gradient(135deg,var(--blue) 0 3px,var(--paper) 3px 7px)}
+.legend i.u{border:1px dashed var(--red);background:var(--red-wash)}
+.legend i.a{border:3px double var(--blue);background:none}
+.sheet{width:100%;border-collapse:collapse;font-size:12.5px}
+.sheet th{text-align:right;font:600 11px var(--f-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding:6px 10px;border-bottom:1px solid var(--ink)}
+.sheet th:first-child,.sheet td:first-child{text-align:left;padding-left:10px}
+.sheet td{text-align:right;padding:0 10px;height:var(--row);border-bottom:1px solid var(--rule);font-family:var(--f-mono);font-size:12px}
+.sheet td:first-child{font-family:var(--f-ui);font-size:12.5px}
+.sheet tr.tot td{font-weight:500;border-top:1px solid var(--ink);border-bottom:3px double var(--ink)}
+
+/* standup */
+.dg{display:grid;grid-template-columns:var(--margin-x) 1fr;column-gap:12px;border-bottom:1px solid var(--rule);padding:7px 0}
+.dg .lab{font:600 9.5px var(--f-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding-left:10px;padding-top:4px}
+.dg .ln{font-family:var(--f-serif);font-size:14.5px;line-height:1.5}
+.dg .tr{display:inline-flex;gap:4px;margin-left:6px;vertical-align:1px}
+.dg .tr .chip{height:18px;font-size:11px}
+
+/* ---------- overlays ---------- */
+.scrim{position:fixed;inset:0;background:rgba(27,34,48,.22);z-index:40;display:flex;align-items:flex-start;justify-content:center;padding-top:70px}
+.dlg{background:var(--paper);border:1px solid var(--ink);box-shadow:0 12px 30px rgba(27,34,48,.18);width:620px;max-width:calc(100vw - 40px);max-height:calc(100vh - 110px);display:flex;flex-direction:column}
+.dlg .dh{background:var(--paper);border-bottom:1px solid var(--ink)}
+.dlg .db{padding:0}
+.dlg .foot{display:flex;gap:6px;padding:10px 16px;border-top:1px solid var(--ink);background:var(--panel)}
+.dlg .foot .sp{margin-left:auto}
+.srch{width:960px;display:grid;grid-template-rows:auto minmax(0,1fr);max-height:calc(100vh - 110px)}
+.srch .q{display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--ink)}
+.srch .q input{flex:1;border:0;font:500 17px var(--f-ui);background:none;height:34px}
+.srch .q input:focus{outline:none}
+.srch .body{display:grid;grid-template-columns:260px 1fr;min-height:0}
+.srch .body > *{min-height:0;overflow:auto}
+.srch .lists{border-right:1px solid var(--rule);background:var(--panel)}
+.sl{display:grid;grid-template-columns:1fr auto;gap:2px 8px;padding:7px 12px;border-bottom:1px solid var(--rule);text-align:left;width:100%;align-items:center}
+.sl:hover,.sl.on{background:var(--blue-wash)}
+.sl b{font-weight:500;font-size:12.5px}
+.sl .n{font:500 12px var(--f-mono);color:var(--blue)}
+.sl small{grid-column:1/-1;color:var(--muted);font-size:11px}
+.sl .bd{font:600 10px var(--f-mono);color:#fff;background:var(--red);padding:1px 4px;margin-left:6px}
+.filters{display:flex;gap:6px;padding:8px 12px;border-bottom:1px solid var(--rule);flex-wrap:wrap;align-items:center;background:var(--paper)}
+.filters .tog{height:24px;border:1px solid var(--rule);padding:0 8px;font-size:12px;color:var(--muted)}
+.filters .tog.on{border-color:var(--red);color:var(--red);background:var(--red-wash)}
+.pop{position:absolute;top:44px;right:0;min-width:320px;background:var(--paper);border:1px solid var(--ink);box-shadow:0 10px 24px rgba(27,34,48,.16);z-index:45;text-align:left;font-weight:400}
+.pop .sec{padding:10px 14px}
+.pop.left{right:auto;left:0;min-width:380px}
+.pop .sl{padding:6px 14px}
+.toasts{position:fixed;right:16px;bottom:34px;display:flex;flex-direction:column;gap:6px;z-index:60}
+.toast{background:var(--paper);border:1px solid var(--ink);border-left:4px solid var(--blue);padding:8px 12px;font-size:12.5px;box-shadow:0 6px 18px rgba(27,34,48,.14);display:flex;gap:10px;align-items:center;animation:tin .18s ease-out;max-width:420px}
+.toast.bad{border-left-color:var(--red)}
+.toast .mono{color:var(--blue)}
+@keyframes tin{from{transform:translateY(8px);opacity:0}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){.stamp.in,.toast,.run{animation:none}}
+@media (max-width:1260px){.tb kbd,.sync .nm:not(.red),.tb .here{display:none}.tab .t{max-width:96px}.tab{padding:0 8px}.tb{padding:0 8px}.srch{width:calc(100vw - 40px)}}
+@media (max-width:1100px){#main.split{grid-template-columns:minmax(0,1fr) 520px}}
+</style>
+</head>
+<body>
+<header id="top"></header>
+<main id="main"></main>
+<footer id="status"></footer>
+<div id="overlays"></div>
+<div class="toasts" id="toasts"></div>
+<div id="jserr" hidden></div>
+
+<script>
+/* =====================================================================
+   DATA — Tidewater Freight, Friday 2026-08-22 14:32
+   ===================================================================== */
+const PEOPLE={mara:'Mara Lindqvist',jonas:'Jonas Becker',priya:'Priya Nair',tomasz:'Tomasz Wójcik',lena:'Lena Hoffmann'};
+const SOURCES=[
+ {id:'jira',type:'Jira Cloud',name:'Tidewater Jira',url:'https://tidewater.atlassian.net',auth:'PAT — expires 2026-09-03 (in 12 days)',sync:'synced 4 min ago',count:'1,284 issues',adapter:'jira v1.4',caps:'search · write · webhooks',warn:'PAT expires in 12 days',stamp:'JIRA'},
+ {id:'confluence',type:'Confluence Cloud',name:'Tidewater Wiki',url:'https://tidewater.atlassian.net/wiki',auth:'same PAT as Jira',sync:'synced 4 min ago',count:'3,912 pages',adapter:'confluence v1.2',caps:'search · write',stamp:'WIKI'},
+ {id:'gitea',type:'Gitea',name:'git.tidewater.internal',url:'https://git.tidewater.internal',auth:'access token',sync:'synced 2 min ago',count:'47 repos',adapter:'gitea v1.3',caps:'search · write · webhooks',stamp:'GIT'},
+ {id:'teamcity',type:'TeamCity',name:'ci.tidewater.internal',url:'https://ci.tidewater.internal',auth:'user + password',sync:'sync failed 38 min ago',count:'3 build configurations',adapter:'teamcity v1.1',caps:'search · trigger',err:'401 Unauthorized — password may have expired',stamp:'CI'},
+];
+const TK={
+ 'PAY-231':{summary:'Retry failed SEPA payouts',type:'Story',status:'In Progress',priority:'High',assignee:'Mara',updated:'today 11:48',d:'11:48',epic:'PAY-200',estimate:'2d',spent:'6h 30m',
+  desc:'When the SEPA batch at the PSP returns a transient error (HTTP 503 or PSP code <code>TEMP_UNAVAILABLE</code>), retry the payout with exponential backoff (base 30 s, factor 2, max 5 attempts, jitter). Permanent failures go to the manual review queue.',
+  comments:[{who:'priya',when:'yesterday 14:20',text:'Please make sure the backoff policy matches the design page — finance wants max 5 attempts.'},{who:'mara',when:'today 10:15',text:'Backoff + jitter implemented in a41f2c, integration test still red (#1187), investigating.'}],
+  worklogs:[{when:'yesterday',dur:'4h 30m',min:270,text:'Retry loop implementation'}],
+  links:[['branch','feature/PAY-231-sepa-retry'],['pr',142],['build',1187],['build',1188],['page','sepa-design'],['note','sepa-inv']]},
+ 'PAY-228':{summary:'Ledger drift on partial refunds',type:'Bug',status:'In Review',priority:'High',assignee:'Mara',updated:'yesterday 16:05',d:'Thu 16:05',epic:'PAY-200',estimate:'1d',spent:'2h 40m',blockedBy:'OPS-77',
+  desc:'Partial refunds leave the ledger out of balance by the refunded fee share. Staging verification needs the updated on-call runbook (OPS-77).',
+  comments:[],worklogs:[{when:'yesterday',dur:'2h 40m',min:160,text:'Review PR #139 fixes, re-test partial refund drift'}],
+  links:[['pr',139],['page','ledger-runbook'],['note','standup-0821']]},
+ 'PAY-240':{summary:'Payout dashboard latency',type:'Task',status:'To Do',priority:'Medium',assignee:'Mara',updated:'today 08:12',d:'08:12',epic:'PAY-200',estimate:'—',spent:'0',note:'assigned today 08:12 by Priya',
+  desc:'Finance reports the payout dashboard takes 8–12 s to load for August. Target &lt; 2 s.',comments:[],worklogs:[],links:[]},
+ 'PAY-219':{summary:'Rotate PSP credentials',type:'Task',status:'Done',priority:'Medium',assignee:'Mara',updated:'2026-08-18',d:'08-18',epic:'PAY-200',estimate:'4h',spent:'—',desc:'Rotate the PSP API credentials before the end-of-month batch.',comments:[],worklogs:[],links:[['note','creds']]},
+ 'PAY-236':{summary:'Payout CSV export for finance',type:'Story',status:'To Do',priority:'Low',assignee:'Jonas',updated:'2026-08-20',d:'08-20',epic:'PAY-200',estimate:'2d',spent:'—',desc:'Monthly CSV export of payouts for the finance team.',comments:[],worklogs:[],links:[['pr',144]]},
+ 'OPS-77':{summary:'On-call runbook outdated',type:'Task',status:'To Do',priority:'Medium',assignee:'Tomasz',updated:'2026-08-19',d:'08-19',epic:null,estimate:'—',spent:'—',desc:'The on-call handbook no longer matches the staging setup.',comments:[],worklogs:[],links:[['page','oncall-handbook']]},
+};
+const PR={
+ 142:{title:'SEPA retry with exponential backoff',repo:'payout-service',branch:'feature/PAY-231-sepa-retry',base:'main',state:'open',by:'mara',opened:'yesterday 17:41',d:'Thu 17:41',approvals:'1 of 2',reviewers:'Priya approved · review requested from Jonas today 09:05',checks:[['build',1188],['build',1187]],for:'PAY-231',
+  files:[['src/sepa/retry.rs','+84 −12'],['tests/sepa_retry.rs','+51'],['docs/backoff.md','+9']],
+  comments:[{who:'jonas',when:'today 09:30',text:'Should the jitter be bounded? ±20 % feels wide.'},{who:'mara',when:'today 10:20',text:'Bounded to ±10 % in c90d11.'}]},
+ 144:{title:'Add payout CSV export',repo:'payout-service',branch:'feature/PAY-236-csv-export',base:'main',state:'open',by:'jonas',opened:'today 13:50',d:'13:50',approvals:'0 of 2',reviewers:'review requested from you today 13:50',checks:[],for:'PAY-236',files:[],comments:[]},
+ 139:{title:'Fix ledger drift on partial refunds',repo:'ledger-api',branch:'fix/PAY-228-partial-refund-drift',base:'main',state:'merged',by:'mara',opened:'yesterday',d:'Thu 16:00',approvals:'2 of 2',reviewers:'merged yesterday 16:00',checks:[['build',412]],for:'PAY-228',files:[],comments:[]},
+};
+const BUILD={
+ 1188:{cfg:'Payout_Build',status:'running',step:'step 3/5 cargo test',branch:'feature/PAY-231-sepa-retry',when:'started today 11:45',d:'11:45',dur:'',params:'branch=feature/PAY-231-sepa-retry · env=staging',for:'PAY-231'},
+ 1187:{cfg:'Payout_IntegrationTests',status:'failed',branch:'feature/PAY-231-sepa-retry',when:'today 10:10',d:'10:10',dur:'4 m 12 s',params:'branch=feature/PAY-231-sepa-retry · env=staging',for:'PAY-231',
+  log:'test sepa::retry::gives_up_after_max_attempts ... <span class="bad">FAILED</span>\n<span class="bad">assertion failed: attempts == 5 (left: 6, right: 5)</span>\ntest result: <span class="bad">FAILED</span>. 41 passed; 1 failed'},
+ 412:{cfg:'Ledger_Deploy_Staging',status:'success',branch:'main',when:'yesterday 16:20',d:'Thu 16:20',dur:'',params:'branch=main · env=staging',for:'PAY-228'},
+};
+const PAGE={
+ 'sepa-design':{title:'SEPA payout retry design',edited:'today 10:40',d:'10:40',by:'mara',section:'Backoff policy',
+  body:'<h3>Backoff policy</h3><p>base 30 s, factor 2, max 5 attempts, jitter ±10 %. Transient codes: HTTP 503, <code>TEMP_UNAVAILABLE</code>. After the final attempt the payout is moved to the manual review queue (see <span class="key">PAY-231</span>).</p><h3>Manual review queue</h3><p><em>SLA: to be defined.</em></p>',
+  comments:[{who:'priya',when:'today 12:05',text:'<span class="mention">@Mara</span> can you add the manual-review queue SLA here?'}],links:[['ticket','PAY-231'],['note','sepa-inv']]},
+ 'ledger-runbook':{title:'Ledger reconciliation runbook',edited:'2026-08-19',d:'08-19',by:'tomasz',links:[['ticket','PAY-228']]},
+ 'oncall-handbook':{title:'On-call handbook',edited:'2026-07-02',d:'07-02',by:'tomasz',links:[['ticket','OPS-77']]},
+ 'payments-arch':{title:'Payments architecture overview',edited:'2026-08-11',d:'08-11',by:'priya',links:[]},
+ 'standup-protocols':{title:'Standup protocols',edited:'yesterday',d:'Thu',by:'mara',links:[],sub:'parent of daily protocol pages'},
+};
+const NOTE={
+ 'sepa-inv':{title:'SEPA retry investigation',edited:'today 11:20',d:'11:20',links:['PAY-231','#1187','SEPA payout retry design'],
+  text:'Test expects 5 attempts, code counts the initial try as attempt 0 → off-by-one. Fix: start counter at 1. Also: ask Priya about manual-review SLA.'},
+ 'standup-0821':{title:'Standup 2026-08-21',edited:'yesterday 09:05',d:'Thu 09:05',links:['PAY-228','PR #139'],
+  text:'Yesterday: drift fix. Today: re-test partial refunds on staging, open PR. Blocker: none.'},
+ 'creds':{title:'Credentials to rotate',edited:'2026-08-18',d:'08-18',links:['PAY-219'],text:'TeamCity password expires end of August. Jira PAT expires 2026-09-03.'},
+};
+const COMMIT={
+ c90d11:{msg:'PAY-231: jitter in backoff, cap at 5 attempts',when:'today 11:42',d:'11:42',branch:'feature/PAY-231-sepa-retry'},
+ a41f2c:{msg:'PAY-231 backoff jitter',when:'today 10:02',d:'10:02',branch:'feature/PAY-231-sepa-retry'},
+ '7be0e4':{msg:'PAY-231: retry SEPA payouts on transient PSP errors',when:'yesterday 17:30',d:'Thu 17:30',branch:'feature/PAY-231-sepa-retry'},
+};
+const REPO={'payout-service':{lang:'Rust',clone:'~/code/payout-service',note:'default branch main · 312 commits'},'ledger-api':{lang:'Kotlin',clone:'~/code/ledger-api',note:''},'ops-runbooks':{lang:'Markdown',clone:'not cloned',note:''}};
+const BRANCH={
+ 'feature/PAY-231-sepa-retry':{repo:'payout-service',d:'11:42',note:'+3 ahead of main · checked out',st:'3 commits',pr:142,commits:['c90d11','a41f2c','7be0e4']},
+ 'fix/PAY-228-partial-refund-drift':{repo:'ledger-api',d:'Thu 16:00',note:'merged into main',st:'merged',pr:139,commits:[]},
+};
+function brInfo(b){return BRANCH[b]||{repo:'payout-service',d:'14:32',note:'created just now · pushed',st:'0 ahead',commits:[]}}
+const SUGG=[
+ {id:'s1',from:['commit','a41f2c'],to:['ticket','PAY-231'],why:'key in commit message',ctx:['PAY-200','PAY-231']},
+ {id:'s2',from:['page','payments-arch'],to:['repo','ledger-api'],why:'mentions ledger-api 4×',ctx:['PAY-200']},
+ {id:'s3',from:['ticket','PAY-240'],to:['page','payments-arch'],why:'text similarity 0.71 ("dashboard latency")',ctx:['PAY-200']},
+ {id:'s4',from:['build',412],to:['ticket','PAY-228'],why:'deployed the merge commit of PR #139',ctx:['PAY-200','PAY-228']},
+];
+const INBOX=[
+ {id:'i1',when:'today 13:50',d:'13:50',text:'<b>Jonas</b> requested your review on PR #144 <i>Add payout CSV export</i>',ref:['pr',144],ctx:['PAY-200'],acts:[['Review','#/pr/144'],['Snooze','snooze'],['Done','done']]},
+ {id:'i2',when:'today 12:05',d:'12:05',text:'<b>Priya</b> mentioned you on <i>SEPA payout retry design</i>: <q>@Mara can you add the manual-review queue SLA here?</q>',ref:['page','sepa-design'],ctx:['PAY-200','PAY-231'],acts:[['Reply','reply'],['Open page','#/page/sepa-design'],['Done','done']]},
+ {id:'i3',when:'today 10:14',d:'10:14',text:'Build #1187 Payout_IntegrationTests <b class="red">failed</b> on feature/PAY-231-sepa-retry',ref:['build',1187],ctx:['PAY-200','PAY-231'],acts:[['Open log','#/build/1187'],['Re-run','rerun'],['Comment on PAY-231','#/ticket/PAY-231']]},
+ {id:'i4',when:'today 09:30',d:'09:30',text:'<b>Jonas</b> commented on your PR #142: <q>Should the jitter be bounded? ±20 % feels wide.</q>',ref:['pr',142],ctx:['PAY-200','PAY-231'],acts:[['Reply','reply'],['Open PR','#/pr/142']]},
+ {id:'i5',when:'today 08:12',d:'08:12',text:'<b>Priya</b> assigned PAY-240 <i>Payout dashboard latency</i> to you',ref:['ticket','PAY-240'],ctx:['PAY-200'],acts:[['Open','#/ticket/PAY-240'],['Start work','#/start/PAY-240']]},
+ {id:'i6',when:'yesterday 16:30',d:'Thu 16:30',text:'PAY-228 is blocked by OPS-77 <i>On-call runbook outdated</i>',ref:['ticket','PAY-228'],ctx:['PAY-200','PAY-228'],acts:[['Open OPS-77','#/ticket/OPS-77'],['Ping Tomasz','ping']]},
+];
+const SNOOZED=[{id:'z1',text:'Jira PAT expires in 12 days',back:'returns 2026-08-29'}];
+const BLOCKS=[
+ {s:'08:30',e:'08:45',ctx:null,label:'Inbox + standup digest',how:'passive'},
+ {s:'08:45',e:'09:40',ctx:'PAY-228',label:'PAY-228 + note Standup 2026-08-21',how:'passive'},
+ {s:'09:40',e:'11:50',ctx:'PAY-231',label:'PAY-231 (PR #142, design page, investigation note)',how:'passive'},
+ {s:'11:50',e:'12:20',ctx:'?',label:'Unattributed — app open, no entity',how:'passive'},
+ {s:'12:20',e:'13:10',gap:true,label:'No activity (lunch)'},
+ {s:'13:10',e:'13:58',ctx:'staging-db',label:'Staging DB configuration',how:'label'},
+ {s:'13:58',e:'14:32',ctx:'PAY-231',label:'PAY-231',how:'timer',running:true},
+];
+const ACTIVITY=[
+ {on:true,text:'commit <code>a41f2c</code> "PAY-231 backoff jitter" (10:02)',line:'Backoff jitter (a41f2c, c90d11)',k:'c'},
+ {on:true,text:'commit <code>c90d11</code> "PAY-231: jitter in backoff, cap at 5 attempts" (11:42)',line:'',k:'c'},
+ {on:true,text:'replied to Jonas on PR #142 (10:20)',line:'replied to review on PR #142'},
+ {on:false,text:'triggered build #1188 (11:45)',line:'triggered build #1188'},
+ {on:true,text:'edited <i>SEPA payout retry design</i> › Backoff policy (10:40)',line:'updated Backoff policy in the design page'},
+ {on:false,text:'edited note <i>SEPA retry investigation</i> (11:20)',line:'updated the investigation note'},
+];
+const SMART=[
+ {id:'failing',name:'My tickets with a failing build',n:'1',badge:'new',note:'joins Jira ↔ Gitea ↔ TeamCity — JQL can\'t express this',items:[['ticket','PAY-231']]},
+ {id:'prsme',name:'PRs waiting on me',n:'1',badge:'+1 today',items:[['pr',144]]},
+ {id:'idle',name:'PRs idle > 5 days',n:'2',items:[],note:'in other repos'},
+ {id:'pages',name:'Pages I edited this week',n:'3',badge:'+1 today',items:[['page','sepa-design'],['page','standup-protocols']],note:'and Standup protocols › 2026-08-21'},
+ {id:'blocked',name:'Blocked tickets',n:'1',items:[['ticket','PAY-228']]},
+ {id:'unlogged',name:'Unlogged time this week',n:'5h 12m',items:[],go:'#/time'},
+];
+const CTX={
+ 'PAY-200':{kind:'Epic',title:'Payout reliability',status:'In Progress',tickets:['PAY-240','PAY-236','PAY-231','PAY-228','PAY-219'],branches:['feature/PAY-231-sepa-retry'],prs:[142,144,139],builds:[1188,1187,412],pages:['sepa-design','ledger-runbook'],notes:['sepa-inv','standup-0821','creds'],time:{today:'3h 39m',week:'12h 49m'}},
+ 'PAY-231':{kind:'Story',title:'Retry failed SEPA payouts',status:'In Progress',tickets:['PAY-231'],branches:['feature/PAY-231-sepa-retry'],prs:[142],builds:[1188,1187],pages:['sepa-design'],notes:['sepa-inv'],time:{today:'2h 44m',week:'9h 14m'}},
+ 'PAY-228':{kind:'Bug',title:'Ledger drift on partial refunds',status:'In Review',tickets:['PAY-228','OPS-77'],branches:['fix/PAY-228-partial-refund-drift'],prs:[139],builds:[412],pages:['ledger-runbook'],notes:['standup-0821'],time:{today:'55m',week:'3h 35m'}},
+ 'staging-db':{kind:'Ad-hoc',title:'Staging DB configuration',status:'local label',adhoc:true,tickets:[],branches:[],prs:[],builds:[],pages:[],notes:[],time:{today:'48m',week:'48m'}},
+};
+/* today's tracked minutes per context — the ledger's opening balance for Friday */
+const TODAY_MIN={'PAY-231':164,'PAY-228':55,'staging-db':48};
+const OTHER_MIN={un:30,inbox:15}; /* unattributed 11:50–12:20 · inbox + standup 08:30–08:45 */
+const TRACKED_TODAY=312; /* 15 + 55 + 130 + 30 + 48 + 34 */
+const LOGGED_MON_THU=29*60+25;
+
+/* =====================================================================
+   STATE
+   ===================================================================== */
+const S={
+ ctx:'PAY-200',view:'room',detail:null,pop:null,modal:null,
+ timer:{ctx:'PAY-231',since:Date.now()-34*60*1000,running:true,label:null},
+ pending:0,logged:{},dismissed:{},confirmed:{},inboxDone:{},snoozed:SNOOZED.slice(),
+ search:{q:'sepa retry',src:'all',type:'all',who:'all',date:'all',fail:false,list:null},
+ tcPassword:false,switchAsk:null,stepper:null,replyOpen:null,newIds:{ticket:241,pr:145},
+ assigned:{},stagingLogged:false,published:false,saved:false,
+};
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+function rot(seed){let h=0;for(const c of String(seed))h=(h*31+c.charCodeAt(0))&0xffff;return (h%8)-4}
+function stamp(label,cls='',seed){return `<span class="stamp ${cls}" style="--r:${rot(seed||label)}deg">${label}</span>`}
+function fmtEl(ms){const m=Math.max(0,Math.floor(ms/60000));return `${Math.floor(m/60)}:${String(m%60).padStart(2,'0')}`}
+function fmtElS(ms){const s=Math.max(0,Math.floor(ms/1000));return `${Math.floor(s/3600)}:${String(Math.floor(s/60)%60).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`}
+function ctxName(id){if(!id)return '—';if(id==='?')return 'Unattributed';const c=CTX[id];return c?(c.adhoc?c.title:id):id}
+function who(k){return PEOPLE[k]||k}
+function plur(n,w){return n+' '+w+(n===1?'':'s')}
+const DAY='2026-08-22';
+function toast(msg,bad){const t=document.createElement('div');t.className='toast'+(bad?' bad':'');t.innerHTML=msg;$('#toasts').appendChild(t);setTimeout(()=>t.remove(),4200)}
+
+/* references: [type,id] → label/route/stamp */
+function ref(t,id){
+ switch(t){
+  case 'ticket':return {label:id,title:TK[id]?TK[id].summary:'',go:'#/ticket/'+id,stamp:'JIRA'};
+  case 'pr':return {label:'PR #'+id,title:PR[id].title,go:'#/pr/'+id,stamp:'GIT'};
+  case 'build':return {label:'#'+id,title:BUILD[id].cfg,go:'#/build/'+id,stamp:'CI'};
+  case 'page':return {label:PAGE[id].title,title:'',go:'#/page/'+id,stamp:'WIKI'};
+  case 'note':return {label:NOTE[id].title,title:'',go:'#/note/'+id,stamp:'NOTE'};
+  case 'commit':return {label:id,title:COMMIT[id].msg,go:'#/commit/'+id,stamp:'GIT'};
+  case 'branch':return {label:id,title:'',go:'#/branch/'+encodeURIComponent(id),stamp:'GIT'};
+  case 'repo':return {label:id,title:'repo',go:'#/repo/'+id,stamp:'GIT'};
+ }
+}
+function chipOf(t,id){const r=ref(t,id);return `<button class="chip" data-go="${r.go}" title="${esc(r.title)}">${esc(r.label)}</button>`}
+function noteChip(txt){
+ if(TK[txt])return chipOf('ticket',txt);
+ const m=/^PR #(\d+)$/.exec(txt);if(m)return chipOf('pr',+m[1]);
+ const b=/^#(\d+)$/.exec(txt);if(b)return chipOf('build',+b[1]);
+ const p=Object.keys(PAGE).find(k=>PAGE[k].title===txt);if(p)return chipOf('page',p);
+ const cx=CTX[txt]?txt:Object.keys(CTX).find(k=>CTX[k].adhoc&&CTX[k].title===txt);if(cx)return `<button class="chip" data-go="#/ctx/${cx}">${esc(txt)}</button>`;
+ return `<span class="chip">${esc(txt)}</span>`;
+}
+/* minutes tracked today in a context that have not reached a worklog yet */
+function unlogMin(id){
+ if(id==='PAY-200')return unlogMin('PAY-231')+unlogMin('PAY-228');
+ return Math.max(0,(TODAY_MIN[id]||0)-(S.logged[id]||0));
+}
+/* everything on Friday that still has no worklog — Mon–Thu are fully logged */
+function unlogWeek(){
+ let m=OTHER_MIN.inbox+(Object.keys(S.assigned).length?0:OTHER_MIN.un);
+ for(const id in TODAY_MIN)m+=unlogMin(id);
+ return m;
+}
+function inboxFor(ctx){return INBOX.filter(i=>!S.inboxDone[i.id]&&!S.snoozed.find(z=>z.id===i.id)&&(!ctx||i.ctx.includes(ctx)))}
+function inboxOpen(){return INBOX.filter(i=>!S.inboxDone[i.id]&&!S.snoozed.find(z=>z.id===i.id))}
+
+/* =====================================================================
+   TOP BAR + STATUS
+   ===================================================================== */
+function renderTop(){
+ const t=S.timer,el=t.running?fmtEl(Date.now()-t.since):'0:00';
+ const here=S.view==='room'?inboxFor(S.ctx).length:null;
+ const ctxs=['PAY-200','PAY-231','staging-db'];
+ if(!ctxs.includes(S.ctx))ctxs.splice(2,0,S.ctx);
+ $('#top').innerHTML=`
+  <div class="brand"><b>KNOBAS</b></div>
+  <div class="switch" style="position:relative">
+   <button class="btn quiet" data-act="pop" data-pop="switcher" aria-haspopup="true" aria-expanded="${S.pop==='switcher'}" title="Switch context or open a smart list"><span class="up">Context</span> ▾</button>
+   ${S.pop==='switcher'?renderSwitcher():''}
+  </div>
+  <nav class="tabs" aria-label="Open contexts">
+   ${ctxs.map(id=>{const c=CTX[id];const clk=S.timer.running&&S.timer.ctx===id?`<span class="clk">◔ ${el}</span>`:(c.time.today?`<span class="clk faint">${c.time.today}</span>`:'');
+    return `<button class="tab ${S.view==='room'&&S.ctx===id?'on':''}" data-go="#/ctx/${id}" title="${esc(c.title)}"><span class="k">${c.adhoc?'<span class="stamp ink" style="--r:-2deg;font-size:8px;padding:1px 3px 0">label</span>':esc(id)}${clk}</span><span class="t">${esc(c.title)}</span></button>`}).join('')}
+  </nav>
+  <button class="tab add" data-act="newctx" title="New ad-hoc context — work with no ticket">+ new</button>
+  <div class="right">
+   <div style="position:relative;display:flex">
+    <button class="tb ${S.pop==='timer'?'on':''} timer ${t.running?'':'off'}" data-act="pop" data-pop="timer" title="Timer — Cmd/Ctrl+T to stop or start" aria-haspopup="true" aria-expanded="${S.pop==='timer'}">
+     <span class="${t.running?'run':''}" style="${t.running?'':'width:12px;height:12px;border:1.5px solid var(--faint);border-radius:50%;display:inline-block'}"></span>
+     <span class="el">${el}</span><span class="ctx">${t.running?'in '+esc(t.label||ctxName(t.ctx)):'stopped'}</span>
+    </button>
+    ${S.pop==='timer'?renderTimerPop():''}
+   </div>
+   <button class="tb" data-act="search" title="Search everywhere (Cmd/Ctrl+K)">⌕ <span class="lbl">Search</span> <kbd>⌘K</kbd></button>
+   <button class="tb ${S.view==='inbox'?'on':''}" data-go="#/inbox" title="Inbox">✉ Inbox <span class="cnt ${inboxOpen().length?'':'z'}">${inboxOpen().length}</span>${here!==null?`<span class="here">${here} here</span>`:''}</button>
+   <button class="tb ${S.view==='today'?'on':''}" data-go="#/today">Today</button>
+   <button class="tb ${S.view==='time'?'on':''}" data-go="#/time">Time</button>
+   <button class="tb sync ${S.view==='sources'?'on':''}" data-go="#/sources" title="Sources: Jira ok · Confluence ok · Gitea ok · TeamCity 401">
+    <span class="dot"></span><span class="nm">jira</span><span class="dot"></span><span class="nm">wiki</span><span class="dot"></span><span class="nm">git</span>
+    ${S.tcPassword?'<span class="dot"></span><span class="nm">ci</span>':'<span class="dot x"></span><span class="nm red">ci 401</span>'}
+   </button>
+  </div>`;
+ $('#status').innerHTML=`<span>Postgres <b>knobas</b> · 212 MB</span><span>full-text index <b>up to date</b></span><span>sync every 5 min · next in 1 min</span>
+  <span>pending writes <b class="${S.pending?'red':''}">${S.pending?S.pending+' pending (TeamCity 401)':'0'}</b></span>
+  <span class="sp">Fri 2026-08-22 · 14:32 · Mara Lindqvist (ML)</span>`;
+ const VT={inbox:'Inbox',time:'Time',today:'Today',sources:'Sources',notes:'Notes'};
+ document.title=`knobas — ${S.view==='room'?(CTX[S.ctx].adhoc?CTX[S.ctx].title:S.ctx+' '+CTX[S.ctx].title):VT[S.view]||'knobas'}`;
+}
+function renderSwitcher(){
+ return `<div class="pop left" role="menu">
+  <div class="th"><span class="up">Contexts</span><span class="n">each with its own clock</span></div>
+  ${Object.keys(CTX).map(id=>{const c=CTX[id];const run=S.timer.running&&S.timer.ctx===id;
+   return `<button class="sl ${S.ctx===id?'on':''}" data-go="#/ctx/${id}"><b><span class="mono">${c.adhoc?'label':esc(id)}</span> · ${esc(c.title)}</b><span class="n">${run?'◔ '+fmtEl(Date.now()-S.timer.since):c.time.today+' today'}</span><small>${c.kind} · ${c.status} · ${plur(c.tickets.length,'ticket')} · ${plur(c.notes.length,'note')}</small></button>`}).join('')}
+  <button class="sl" data-act="newctx"><b class="blue">+ New ad-hoc context…</b><small>For work that has no ticket. Gets its own clock and notes.</small></button>
+  <div class="th"><span class="up">Smart lists</span><span class="n">global · also usable as filters in a room</span></div>
+  ${SMART.map(l=>`<button class="sl" data-act="smart" data-id="${l.id}"><b>${esc(l.name)}${l.badge?`<span class="bd">${l.badge}</span>`:''}</b><span class="n">${slN(l)}</span>${l.note?`<small>${esc(l.note)}</small>`:''}</button>`).join('')}
+ </div>`;
+}
+function renderTimerPop(){
+ const t=S.timer;
+ return `<div class="pop" role="dialog" aria-label="Timer">
+  <div class="sec">
+   <div class="up" style="margin-bottom:6px">${t.running?'Running':'Stopped'}</div>
+   <div style="font:500 22px var(--f-mono);color:${t.running?'var(--blue)':'var(--faint)'}">${t.running?fmtElS(Date.now()-t.since):'0:00:00'}</div>
+   <div class="muted" style="font-size:12px">${t.running?'on <b class="mono">'+esc(t.label||ctxName(t.ctx))+'</b> since 13:58 · started manually':'press Cmd/Ctrl+T to start on '+esc(ctxName(S.ctx))}</div>
+  </div>
+  <div class="sec" style="display:flex;gap:6px;flex-wrap:wrap">
+   ${t.running?`<button class="btn pri" data-act="stoptimer">Stop and log…</button>`:`<button class="btn pri" data-act="starttimer" data-ctx="${S.ctx}">Start on ${esc(ctxName(S.ctx))}</button>`}
+   ${t.running&&t.ctx!==S.ctx?`<button class="btn" data-act="switchtimer" data-ctx="${S.ctx}">Switch to ${esc(ctxName(S.ctx))}</button>`:''}
+  </div>
+  <div class="sec">
+   <div class="up" style="margin-bottom:6px">Switch context</div>
+   ${Object.keys(CTX).filter(id=>id!==t.ctx).map(id=>`<button class="link" style="display:block;padding:3px 0" data-act="switchtimer" data-ctx="${id}"><span class="mono">${esc(ctxName(id))}</span> <span class="muted">${esc(CTX[id].adhoc?'ad-hoc label':CTX[id].title)}</span></button>`).join('')}
+   <form data-act="adhoclabel" style="display:flex;gap:6px;margin-top:8px"><input class="inp" style="flex:1" placeholder="Ad-hoc label, e.g. Staging DB configuration" aria-label="Ad-hoc label"><button class="btn" type="submit">Start</button></form>
+  </div>
+ </div>`;
+}
+
+/* =====================================================================
+   ROOM
+   ===================================================================== */
+function ticketRow(k,ctx){const t=TK[k];const sel=S.detail&&S.detail[0]==='ticket'&&S.detail[1]===k;
+ const extra=t.blockedBy?`<small class="red">blocked by ${t.blockedBy}</small>`:t.note?`<small>${t.note}</small>`:'';
+ const act=t.status==='To Do'&&t.assignee==='Mara'?`<button class="btn sm quiet" data-act="go" data-go="#/start/${k}">Start work</button>`:'';
+ return `<div class="lr ${sel?'sel':''}" data-go="#/ticket/${k}" tabindex="0" role="link"><span class="d">${t.d}</span><span class="ref">${k}</span><span class="desc">${esc(t.summary)}${extra}</span><span class="st">${t.priority}${act?' '+act:''}</span><span class="stp">${stamp('JIRA','',k)}</span></div>`}
+function tileTickets(c){
+ const order=['To Do','In Progress','In Review','Done'];
+ let rows='';
+ order.forEach(st=>{const ks=c.tickets.filter(k=>TK[k].status===st);if(!ks.length)return;
+  rows+=`<div class="grp"><span class="up">${st}</span><span class="n">${ks.length}</span></div>`+ks.map(k=>ticketRow(k,c)).join('')});
+ if(!c.tickets.length)rows=`<div class="lr empty"><span class="d"></span><span class="desc">No ticket here. ${c.adhoc?'Ad-hoc work doesn\'t need one — link one when it turns into a ticket.':''} <button class="link" data-act="search">Link a ticket…</button></span></div>`;
+ return tile('Tickets',c.tickets.length+' · board by status',rows,`<button class="btn quiet" data-go="#/new/ticket">+ Ticket${c.kind==='Epic'?' in this epic':''}</button>`);
+}
+function tileCode(c){
+ let rows=c.branches.map(b=>{const x=brInfo(b);
+  return `<div class="lr" data-go="#/branch/${encodeURIComponent(b)}" tabindex="0"><span class="d">${x.d}</span><span class="ref">⎇</span><span class="desc">${esc(b)}<small>${x.repo} · ${x.note}</small></span><span class="st">${x.st}</span><span class="stp">${stamp('GIT','',b)}</span></div>`}).join('');
+ rows+=c.prs.map(n=>{const p=PR[n];const sel=S.detail&&S.detail[0]==='pr'&&S.detail[1]===n;
+  const chk=p.checks.map(([,b])=>BUILD[b].status==='failed'?`<span class="fail">✖ #${b}</span>`:BUILD[b].status==='running'?`<span class="run"></span> #${b}`:`<span class="ok">✓ #${b}</span>`).join(' ');
+  return `<div class="lr ${sel?'sel':''}" data-go="#/pr/${n}" tabindex="0"><span class="d">${p.d}</span><span class="ref">PR #${n}</span><span class="desc">${esc(p.title)}<small>${p.repo} · ${who(p.by).split(' ')[0]}</small></span><span class="st">${p.state==='merged'?'<span class="ok">merged</span>':p.approvals+' ✓'} ${chk}</span><span class="stp">${stamp('GIT','','pr'+n)}</span></div>`}).join('');
+ if(!rows)rows=`<div class="lr empty"><span class="d"></span><span class="desc">No code in this context — not all work is code. <button class="link" data-act="search">Link a branch or PR…</button></span></div>`;
+ return tile('Code',(c.branches.length+c.prs.length)+' · payout-service, ledger-api',rows,`<button class="btn quiet" data-act="gitpull">Pull</button><button class="btn quiet" data-act="gitpush">Push</button><button class="btn quiet" data-go="#/git/branch">New branch</button><button class="btn quiet" data-go="#/git/repo">New repo</button>`);
+}
+function buildRow(n){const b=BUILD[n];const sel=S.detail&&S.detail[0]==='build'&&S.detail[1]===n;
+ const st=b.status==='failed'?`${stamp('FAILED','','f'+n)}`:b.status==='running'?`<span class="run"></span> running · ${b.step}`:b.status==='queued'?stamp('QUEUED','blue','q'+n):'<span class="ok">✓ success</span>';
+ return `<div class="lr ${sel?'sel':''}" data-go="#/build/${n}" tabindex="0"><span class="d">${b.d}</span><span class="ref">#${n}</span><span class="desc">${b.cfg}<small>${esc(b.branch)}${b.dur?' · '+b.dur:''}</small></span><span class="st">${st}</span><span class="stp">${stamp('CI','','b'+n)}</span></div>`}
+function tileBuilds(c){
+ let rows=c.builds.map(buildRow).join('');
+ if(!rows)rows=`<div class="lr empty"><span class="d"></span><span class="desc">No builds here.</span></div>`;
+ return tile('Builds',c.builds.length+' · TeamCity Payouts',rows,`<button class="btn quiet" data-go="#/trigger/Payout_IntegrationTests">Trigger build…</button>`);
+}
+function tileDocs(c){
+ let rows=c.pages.map(id=>{const p=PAGE[id];const sel=S.detail&&S.detail[0]==='page'&&S.detail[1]===id;
+  return `<div class="lr ${sel?'sel':''}" data-go="#/page/${id}" tabindex="0"><span class="d">${p.d}</span><span class="ref">ENG</span><span class="desc">${esc(p.title)}<small>${p.section?'edited › '+p.section:'edited '+p.edited} · ${who(p.by).split(' ')[0]}</small></span><span class="st">${p.comments?p.comments.length+' comment · @you':''}</span><span class="stp">${stamp('WIKI','',id)}</span></div>`}).join('');
+ if(!rows)rows=`<div class="lr empty"><span class="d"></span><span class="desc">No pages linked. <button class="link" data-go="#/new/page">Write one</button> or <button class="link" data-act="search">link an existing page…</button></span></div>`;
+ return tile('Docs',c.pages.length+' · Confluence ENG',rows,`<button class="btn quiet" data-go="#/new/page">+ Page</button>`);
+}
+function tileNotes(c){
+ let rows=c.notes.map(id=>{const n=NOTE[id];const sel=S.detail&&S.detail[0]==='note'&&S.detail[1]===id;
+  return `<div class="lr ${sel?'sel':''}" data-go="#/note/${id}" tabindex="0"><span class="d">${n.d}</span><span class="ref">note</span><span class="desc">${esc(n.title)}<small>${n.links.map(l=>'[['+esc(l)+']]').join(' ')}</small></span><span class="st"></span><span class="stp">${stamp('NOTE','',id)}</span></div>`}).join('');
+ if(!rows)rows=`<div class="lr empty"><span class="d"></span><span class="desc">No notes yet in this context. <button class="link" data-act="newnote">Start one</button> — it will be linked to ${esc(ctxName(S.ctx))} automatically.</span></div>`;
+ return tile('Notes',c.notes.length+' · local',rows,`<button class="btn quiet" data-act="newnote">+ Note</button><button class="btn quiet" data-go="#/notes">All notes</button>`);
+}
+function tileTime(c){
+ const id=S.ctx;const run=S.timer.running&&S.timer.ctx===id;
+ const own=c.tickets||[];
+ const blocks=BLOCKS.filter(b=>b.ctx===id||(b.ctx&&own.includes(b.ctx)));
+ const unl=unlogMin(id);const kept=id==='staging-db'&&S.stagingKept;
+ let rows=blocks.map(b=>`<div class="lr"><span class="d">${b.s}</span><span class="ref">${b.e}</span><span class="desc">${esc(b.label)}<small>${b.how==='passive'?'recorded passively':b.how==='label'?'ad-hoc label, no ticket':'manual timer'}</small></span><span class="st">${b.running?'<span class="run"></span> running':dur(b.s,b.e)}</span><span class="stp">${b.how==='passive'?'':stamp('MANUAL','blue',b.s)}</span></div>`).join('');
+ rows+=`<div class="lr"><span class="d"></span><span class="ref">today</span><span class="desc">${run?'<b>'+fmtEl(Date.now()-S.timer.since)+'</b> on the clock now · ':''}<span class="${unl?'red':'muted'}">${kept&&!unl?'kept local':unl?'unlogged '+mins(unl):'all logged to Jira'}</span></span><span class="st mono">${c.time.today}</span><span class="stp">${!unl&&!kept?stamp('LOGGED','blue','t'+id):''}</span></div>`;
+ rows+=`<div class="lr"><span class="d"></span><span class="ref">week</span><span class="desc">tracked in this context${c.adhoc?' — local label, nothing in Jira':''}</span><span class="st mono">${c.time.week}</span><span class="stp"></span></div>`;
+ const acts=c.adhoc?`<button class="btn quiet" data-act="logadhoc">Log to a ticket…</button><button class="btn quiet" data-act="keeplocal">Keep local only</button>`:`<button class="btn quiet" data-act="logtoday" data-ctx="${id}">Log today</button><button class="btn quiet" data-go="#/time">Day review</button>`;
+ const inEpic=!run&&S.timer.running&&c.tickets.includes(S.timer.ctx);
+ const head=`${unl?'<b class="red">'+mins(unl)+' unlogged</b>':kept?'kept local':'<b class="blue">all logged</b>'} · ${c.time.today} today · ${run?'clock running':inEpic?'clock on '+S.timer.ctx:'clock stopped'}`;
+ return tile('Time in this context',head,rows,acts);
+}
+function tileInbox(c){
+ const items=inboxFor(S.ctx);
+ let rows=items.map(i=>`<div class="lr ib" data-go="${i.acts.find(a=>a[1].startsWith('#'))?.[1]||'#/inbox'}" tabindex="0"><span class="d">${i.d}</span><span class="desc">${i.text}</span><span class="ac">${i.acts.slice(0,2).map(([l,a])=>a.startsWith('#')?`<button class="btn sm quiet" data-go="${a}">${l}</button>`:`<button class="btn sm quiet" data-act="inbox" data-id="${i.id}" data-do="${a}">${l}</button>`).join('')}</span></div>`).join('');
+ if(!rows)rows=`<div class="lr empty"><span class="d"></span><span class="desc">Nothing needs your attention in ${esc(ctxName(S.ctx))}. <button class="link" data-go="#/inbox">See the global inbox (${inboxOpen().length})</button></span></div>`;
+ return tile('Inbox · in this context',items.length+' of '+inboxOpen().length,rows,`<button class="btn quiet" data-go="#/inbox">All ${inboxOpen().length}</button>`);
+}
+function tile(name,n,rows,acts){return `<section class="tile" aria-label="${name}"><div class="th"><span class="up">${name}</span><span class="n">${n}</span><div class="acts">${acts||''}</div></div><div class="tbody"><div class="ledger">${rows}</div></div></section>`}
+function slN(l){return l.id==='unlogged'?mins(unlogWeek()):l.n}
+function dur(s,e){const m=tm(e)-tm(s);return mins(m)}
+function tm(s){const[a,b]=s.split(':').map(Number);return a*60+b}
+function mins(m){return m>=60?`${Math.floor(m/60)}h ${String(m%60).padStart(2,'0')}m`:`${m}m`}
+function suggRows(ctx){
+ const list=SUGG.filter(s=>s.ctx.includes(ctx)&&!S.dismissed[s.id]);
+ if(!list.length)return '';
+ const rows=list.map(s=>{const f=ref(...s.from),t=ref(...s.to);const c=S.confirmed[s.id];
+  return `<div class="lr" id="sg-${s.id}"><span class="d">${c?'14:3'+(2+(+s.id[1]%2)):'auto'}</span><span class="ref">${stamp(s.from[0]==='commit'?'GIT':f.stamp,'',s.id)}</span><span class="desc"><button class="link mono" data-go="${f.go}">${esc(f.label)}</button> ${f.title?'<span class="muted">'+esc(f.title)+'</span> ':''}→ <button class="link mono" data-go="${t.go}">${esc(t.label)}</button> <span class="why">${esc(s.why)}</span></span><span class="st"></span><span class="ac">${c?stamp('LINKED','blue in','l'+s.id):`<button class="btn sm pri" data-act="confirm" data-id="${s.id}">Confirm</button><button class="btn sm quiet" data-act="dismiss" data-id="${s.id}">Dismiss</button>`}</span></div>`}).join('');
+ const open=S.trayOpen!==false;
+ return `<div class="tray"><div class="th"><span class="up">Might belong here</span><span class="n">${list.length} suggested link${list.length===1?'':'s'} · unconfirmed · auto-detected</span><div class="acts"><button class="btn quiet" data-act="search">Link to…</button><button class="btn quiet" data-act="tray">${open?'Hide':'Show'}</button></div></div>${open?`<div class="ledger">${rows}</div>`:''}</div>`;
+}
+function renderRoom(){
+ const c=CTX[S.ctx];const run=S.timer.running&&S.timer.ctx===S.ctx;
+ const todo=c.tickets.find(k=>TK[k].status==='To Do'&&TK[k].assignee==='Mara');
+ const ask=S.switchAsk?`<div class="prompt"><span>Timer is running on <span class="mono">${esc(S.timer.label||ctxName(S.timer.ctx))}</span> (${fmtEl(Date.now()-S.timer.since)}). Switch it to <b>${esc(ctxName(S.ctx))}</b>?</span><button class="btn pri sm" data-act="switchtimer" data-ctx="${S.ctx}">Switch timer</button><button class="btn sm" data-act="keeptimer">Keep on ${esc(ctxName(S.timer.ctx))}</button></div>`:'';
+ const head=`<div class="rhead">
+  <div><div class="up muted" style="margin-bottom:4px">${c.kind} · ${c.status}${c.adhoc?' · no ticket, no branch':''}</div>
+   <h1>${c.adhoc?'':`<span class="k">${S.ctx}</span>`}${esc(c.title)}</h1>
+   <div class="meta"><span>${run?'<span class="run"></span> <b class="blue mono">'+fmtEl(Date.now()-S.timer.since)+'</b> on the clock':'<span class="mono">'+c.time.today+'</span> today'}</span><span>${plur(c.tickets.length,'ticket')} · ${c.prs.length} PR${c.prs.length===1?'':'s'} · ${plur(c.builds.length,'build')} · ${plur(c.pages.length,'page')} · ${plur(c.notes.length,'note')}</span><button class="link" data-act="inboxhere">${inboxFor(S.ctx).length} inbox item${inboxFor(S.ctx).length===1?'':'s'} here</button></div></div>
+  <div class="acts">
+   ${todo?`<button class="btn pri" data-go="#/start/${todo}">Start work on ${todo}</button>`:''}
+   ${c.adhoc?'':`<button class="btn" data-go="#/trigger/Payout_IntegrationTests">Trigger build</button><button class="btn" data-go="#/new/ticket">New ticket</button><button class="btn" data-go="#/new/page">New page</button>`}
+   <button class="btn" data-act="newnote">New note</button>
+   ${run?`<button class="btn" data-act="stoptimer">Stop clock</button>`:`<button class="btn" data-act="${S.timer.running?'switchtimer':'starttimer'}" data-ctx="${S.ctx}">${S.timer.running?'Switch clock here':'Start clock'}</button>`}
+  </div></div>`;
+ const tiles=c.adhoc
+  ?[tileNotes(c),tileTime(c),tileTickets(c),tileInbox(c)]
+  :[tileTickets(c),tileCode(c),tileBuilds(c),tileDocs(c),tileNotes(c),tileTime(c)];
+ return `<div class="room"><div>${head}${ask}</div><div class="tiles ${c.adhoc?'four':''}">${tiles.join('')}</div>${suggRows(S.ctx)}</div>`;
+}
+
+/* =====================================================================
+   DETAIL PANEL
+   ===================================================================== */
+function linksLedger(links,sel){
+ if(!links.length)return `<div class="lr empty"><span class="d"></span><span class="desc">Nothing linked yet.</span></div>`;
+ return links.map(([t,id])=>{const r=ref(t,id);let st='';
+  if(t==='pr'){const p=PR[id];st=p.state==='merged'?'<span class="ok">merged</span>':p.approvals+' ✓ · '+p.checks.map(([,b])=>BUILD[b].status==='failed'?`<span class="fail">✖ #${b}</span>`:BUILD[b].status==='running'?`<span class="run"></span> #${b}`:`<span class="ok">✓ #${b}</span>`).join(' ')}
+  if(t==='build'){const b=BUILD[id];st=b.status==='failed'?stamp('FAILED','','f'+id):b.status==='running'?'<span class="run"></span> running':b.status==='queued'?stamp('QUEUED','blue','q'+id):'<span class="ok">✓ success</span>'}
+  if(t==='ticket')st=TK[id].status;
+  if(t==='page')st='edited '+PAGE[id].edited;
+  if(t==='note')st='edited '+NOTE[id].edited;
+  if(t==='branch')st='3 ahead';
+  const d=t==='pr'?PR[id].d:t==='build'?BUILD[id].d:t==='page'?PAGE[id].d:t==='note'?NOTE[id].d:t==='ticket'?TK[id].d:t==='commit'?COMMIT[id].d:'';
+  return `<div class="lr" data-go="${r.go}" tabindex="0"><span class="d">${d}</span><span class="ref">${t==='branch'?'⎇':t==='page'?'ENG':t==='note'?'note':esc(r.label)}</span><span class="desc">${t==='branch'?esc(id):esc(r.title||r.label)}</span><span class="st">${st}</span><span class="stp">${stamp(r.stamp,'',t+id)}</span></div>`}).join('');
+}
+function commentsBlock(list,target){
+ return list.map(c=>`<div class="cm"><div class="who"><b>${who(c.who).split(' ')[0]}</b>${c.when}</div><div class="body">${c.text}</div></div>`).join('')+
+  `<form class="cm" data-act="comment" data-target="${target}"><div class="who"><b>Mara</b>now</div><div style="display:flex;gap:6px;flex-direction:column"><textarea class="inp" rows="2" placeholder="Add a comment…" aria-label="Comment"></textarea><div><button class="btn pri sm" type="submit">Add comment</button></div></div></form>`;
+}
+function detailShell(stampLabel,key,title,body,stampCls=''){
+ return `<aside class="detail" aria-label="Detail"><div class="dh">${stamp(stampLabel,stampCls+' big',key||title)}<div class="ttl">${key?`<span class="k">${esc(key)}</span>`:''}${esc(title)}</div><button class="btn sm x" data-act="closedetail" title="Close (Esc)">Close ✕</button></div><div class="db">${body}</div></aside>`;
+}
+function dTicket(k){
+ const t=TK[k];const ctxOf=CTX[k]?k:null;const sug=SUGG.filter(s=>!S.dismissed[s.id]&&!S.confirmed[s.id]&&s.to[1]===k);
+ const body=`
+  <div class="sec"><dl class="kv">
+   <dt>Status</dt><dd><select class="sel inline" data-act="status" data-key="${k}" aria-label="Status">${['To Do','In Progress','In Review','Done'].map(s=>`<option ${s===t.status?'selected':''}>${s}</option>`).join('')}</select><span class="faint">Jira workflow</span></dd>
+   <dt>Type · priority</dt><dd>${t.type} · ${t.priority}</dd>
+   <dt>Assignee</dt><dd>${t.assignee==='Mara'?'Mara Lindqvist (you)':who(t.assignee.toLowerCase())}${t.note?' <span class="muted">— '+t.note+'</span>':''}</dd>
+   <dt>Epic</dt><dd>${t.epic?chipOf('ticket',t.epic).replace('#/ticket/PAY-200','#/ctx/PAY-200')+' <span class="muted">Payout reliability</span>':'—'}</dd>
+   ${t.blockedBy?`<dt>Blocked by</dt><dd>${chipOf('ticket',t.blockedBy)} <span class="muted">${esc(TK[t.blockedBy].summary)} · Tomasz</span></dd>`:''}
+   <dt>Updated</dt><dd>${t.updated}</dd>
+  </dl>
+  <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+   ${ctxOf&&S.ctx!==k?`<button class="btn" data-go="#/ctx/${k}">Open as context</button>`:''}
+   ${!ctxOf?`<button class="btn" data-act="asctx" data-key="${k}">Open as context</button>`:''}
+   ${t.status==='To Do'&&t.assignee==='Mara'?`<button class="btn pri" data-go="#/start/${k}">Start work</button>`:''}
+   <button class="btn" data-act="search">Link to…</button>
+   ${S.timer.running&&S.timer.ctx===k?'<button class="btn" data-act="stoptimer">Stop clock</button>':`<button class="btn" data-act="${S.timer.running?'switchtimer':'starttimer'}" data-ctx="${k}">${S.timer.running?'Switch clock here':'Start clock'}</button>`}
+  </div></div>
+  <div class="sec"><div class="up">Description</div><div class="text"><p>${t.desc}</p></div></div>
+  <div class="sec"><div class="up">Linked <span class="n muted">${t.links.length}</span><div class="acts"><button class="btn sm quiet" data-act="search">Link to…</button></div></div><div class="ledger plain">${linksLedger(t.links)}</div></div>
+  ${sug.length?`<div class="sec"><div class="up red">Might belong here <span class="muted">${sug.length}</span></div><div class="ledger plain">${sug.map(s=>{const f=ref(...s.from);return `<div class="lr" id="sg-${s.id}"><span class="d">auto</span><span class="ref">${esc(f.label)}</span><span class="desc">${esc(f.title)} <span class="why">${esc(s.why)}</span></span><span class="st"></span><span class="ac"><button class="btn sm pri" data-act="confirm" data-id="${s.id}">Confirm</button><button class="btn sm quiet" data-act="dismiss" data-id="${s.id}">Dismiss</button></span></div>`}).join('')}</div></div>`:''}
+  <div class="sec"><div class="up">Time <span class="muted">estimate ${t.estimate} · spent this week ${t.spent}</span><div class="acts">${CTX[k]?`<button class="btn sm quiet" data-act="logtoday" data-ctx="${k}">Log today</button>`:''}</div></div>
+   <div class="ledger plain">${worklogRows(k)}</div></div>
+  <div class="sec"><div class="up">Comments <span class="muted">${t.comments.length}</span></div>${commentsBlock(t.comments,'ticket:'+k)}</div>`;
+ return detailShell('JIRA',k,t.summary,body);
+}
+function worklogRows(k){
+ const t=TK[k];let run=0;
+ let rows=t.worklogs.map(w=>{run+=w.min;return `<div class="lr"><span class="d">${w.when}</span><span class="ref">${w.dur}</span><span class="desc serif" style="font-size:13.5px">${esc(w.text)}</span><span class="st mono">Σ ${mins(run)}</span><span class="stp">${stamp('LOGGED','blue','w'+w.when+w.dur)}</span></div>`}).join('');
+ if(!rows)rows=`<div class="lr empty"><span class="d"></span><span class="desc">No worklog yet.</span></div>`;
+ const u=unlogMin(k);
+ if(u)rows+=`<div class="lr"><span class="d">today</span><span class="ref red">${mins(u)}</span><span class="desc red">tracked, not logged yet <button class="link" data-act="logtoday" data-ctx="${k}">Log ${mins(u)} to ${k}</button></span><span class="st mono">Σ ${mins(run+u)}</span><span class="stp"></span></div>`;
+ return rows;
+}
+function dPR(n){
+ const p=PR[n];
+ const body=`
+  <div class="sec"><dl class="kv">
+   <dt>Repository</dt><dd>${chipOf('repo',p.repo)} <span class="mono muted">${esc(p.branch)} → ${p.base}</span></dd>
+   <dt>State</dt><dd>${p.state==='merged'?'<span class="ok">merged</span>':'open'} · by ${p.by==='mara'?'you':who(p.by)} · opened ${p.opened}</dd>
+   <dt>Approvals</dt><dd>${p.approvals} required · <span class="muted">${p.reviewers}</span></dd>
+   <dt>For</dt><dd>${chipOf('ticket',p.for)} <span class="muted">${esc(TK[p.for].summary)}</span></dd>
+  </dl>
+  <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+   ${p.by==='jonas'?`<button class="btn pri" data-act="approve" data-id="${n}">Approve</button><button class="btn" data-act="reqchanges" data-id="${n}">Request changes</button>`:p.state==='open'?`<button class="btn" data-act="rereview" data-id="${n}">Ask Jonas to re-review</button>`:''}
+   <a class="btn" href="https://git.tidewater.internal/tidewater/${p.repo}/pulls/${n}" target="_blank" rel="noopener">Open in Gitea ↗</a>
+  </div></div>
+  ${p.checks.length?`<div class="sec"><div class="up">Checks</div><div class="ledger plain">${p.checks.map(([,b])=>buildRow(b)).join('')}</div></div>`:''}
+  ${p.files.length?`<div class="sec"><div class="up">Files changed <span class="muted">${p.files.length}</span></div><div class="ledger plain">${p.files.map(([f,d])=>`<div class="lr"><span class="d"></span><span class="ref mono" style="color:var(--ink)">${esc(d)}</span><span class="desc mono">${esc(f)}</span><span class="st"></span><span class="stp"></span></div>`).join('')}</div></div>`:''}
+  ${n===142?`<div class="sec"><div class="up">Commits <span class="muted">3</span></div><div class="ledger plain">${Object.keys(COMMIT).map(h=>`<div class="lr" data-go="#/commit/${h}" tabindex="0"><span class="d">${COMMIT[h].d}</span><span class="ref">${h}</span><span class="desc">${esc(COMMIT[h].msg)}</span><span class="st">Mara</span><span class="stp">${stamp('GIT','',h)}</span></div>`).join('')}</div></div>`:''}
+  <div class="sec"><div class="up">Review comments <span class="muted">${p.comments.length}</span></div>${commentsBlock(p.comments,'pr:'+n)}</div>`;
+ return detailShell('GIT','PR #'+n,p.title,body,'blue');
+}
+function dBuild(n){
+ const b=BUILD[n];
+ const body=`
+  <div class="sec"><dl class="kv">
+   <dt>Status</dt><dd>${b.status==='failed'?stamp('FAILED','big','f'+n):b.status==='running'?`<span class="run"></span> running · ${b.step}`:b.status==='queued'?stamp('QUEUED','blue big','q'+n)+' <span class="muted">locally — TeamCity is 401</span>':'<span class="ok">✓ success</span>'}</dd>
+   <dt>Branch</dt><dd><span class="mono">${esc(b.branch)}</span></dd>
+   <dt>When</dt><dd>${b.when}${b.dur?' · '+b.dur:''}</dd>
+   <dt>Parameters</dt><dd><span class="mono">${esc(b.params)}</span></dd>
+   <dt>For</dt><dd>${chipOf('ticket',b.for)}</dd>
+  </dl>
+  <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+   ${b.status==='failed'?`<button class="btn pri" data-act="rerun" data-id="${n}">Re-run failed</button>`:''}
+   <button class="btn" data-go="#/trigger/${b.cfg}">Trigger with parameters…</button>
+   <a class="btn" href="https://ci.tidewater.internal/buildConfiguration/${b.cfg}/${n}" target="_blank" rel="noopener">Open in TeamCity ↗</a>
+  </div>
+  ${!S.tcPassword?`<div class="res bad" style="margin-top:10px">TeamCity sync failed 38 min ago (401). Triggers are queued locally until you <button class="link" data-go="#/sources">re-enter the password</button>.</div>`:''}
+  </div>
+  ${b.log?`<div class="sec"><div class="up">Log excerpt</div><div class="log">${b.log}</div><p class="muted" style="margin-top:8px;font-size:12px">Your note <button class="link" data-go="#/note/sepa-inv">SEPA retry investigation</button> points at an off-by-one in the attempt counter.</p></div>`:''}`;
+ return detailShell('CI','#'+n,b.cfg,body,b.status==='failed'?'':'blue');
+}
+function dPage(id){
+ const p=PAGE[id];
+ const body=`
+  <div class="sec"><dl class="kv"><dt>Space</dt><dd>ENG · Engineering${p.sub?' · '+p.sub:''}</dd><dt>Last edited</dt><dd>${p.edited} by ${p.by==='mara'?'you':who(p.by)}${p.section?' · section <i>'+p.section+'</i>':''}</dd></dl>
+   <div style="display:flex;gap:6px;margin-top:10px"><button class="btn" data-act="editpage" data-id="${id}">Edit section</button><a class="btn" href="https://tidewater.atlassian.net/wiki/spaces/ENG" target="_blank" rel="noopener">Open in Confluence ↗</a><button class="btn" data-act="search">Link to…</button></div></div>
+  <div class="sec"><div class="up">Content ${p.body?'':'<span class="muted">preview</span>'}</div>${p.body?`<div class="text">${p.body}</div>`:`<div class="text"><p class="muted"><em>The full text is indexed locally for search; this page has no preview excerpt yet. Open it in Confluence to read it.</em></p></div>`}</div>
+  ${p.links.length?`<div class="sec"><div class="up">Linked</div><div class="ledger plain">${linksLedger(p.links)}</div></div>`:''}
+  ${p.comments?`<div class="sec"><div class="up">Comments <span class="muted">${p.comments.length} · mentions you</span></div>${commentsBlock(p.comments,'page:'+id)}</div>`:''}`;
+ return detailShell('WIKI','',p.title,body);
+}
+function dNote(id){
+ const n=NOTE[id];
+ const back=[...Object.keys(TK).filter(k=>TK[k].links.some(l=>l[0]==='note'&&l[1]===id)).map(k=>['ticket',k]),...Object.keys(PAGE).filter(k=>(PAGE[k].links||[]).some(l=>l[0]==='note'&&l[1]===id)).map(k=>['page',k])];
+ const body=`
+  <div class="sec" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="muted" style="font-size:12px">edited ${n.edited} · local only</span><span style="display:flex;gap:4px;flex-wrap:wrap">${n.links.map(noteChip).join('')}</span><button class="btn sm" style="margin-left:auto" data-act="search">Link to…</button></div>
+  <div class="sec"><div class="edwrap"><div class="editor" contenteditable="true" spellcheck="false" data-act="noteedit" data-id="${id}" aria-label="Note text">${esc(n.text).replace(/\[\[([^\]]+)\]\]/g,(m,x)=>noteChip(x))}${n.links.length&&!n.text.includes('[[')?`<div><span class="faint">Links:</span> ${n.links.map(l=>noteChip(l)).join(' ')}</div>`:''}</div></div><p class="faint" style="font-size:11.5px;margin-top:6px">Type [[PAY-231]] to link an entity. Saved locally as you type.</p></div>
+  <div class="sec"><div class="up">Backlinks <span class="muted">${back.length} link here</span></div><div class="ledger plain">${linksLedger(back)}</div></div>`;
+ return detailShell('NOTE','',n.title,body,'blue');
+}
+function dCommit(h){const c=COMMIT[h];
+ return detailShell('GIT',h,c.msg,`<div class="sec"><dl class="kv"><dt>Branch</dt><dd><span class="mono">${esc(c.branch)}</span></dd><dt>Author</dt><dd>Mara Lindqvist · ${c.when}</dd><dt>Part of</dt><dd>${chipOf('pr',142)} ${chipOf('ticket','PAY-231')}</dd></dl></div>`,'blue');}
+function dBranch(b){const x=brInfo(b);const cs=x.commits||[];
+ return detailShell('GIT','⎇',b,`<div class="sec"><dl class="kv"><dt>Repository</dt><dd>${chipOf('repo',x.repo)}</dd><dt>Tracking</dt><dd>${x.note} · <span class="mono">~/code/${x.repo}</span></dd><dt>Pull request</dt><dd>${x.pr?chipOf('pr',x.pr):'<span class="muted">none yet</span>'}</dd></dl><div style="display:flex;gap:6px;margin-top:10px"><button class="btn" data-act="gitpull">Pull</button><button class="btn" data-act="gitpush">Push</button></div></div>
+ <div class="sec"><div class="up">Commits <span class="muted">${cs.length}</span></div><div class="ledger plain">${cs.length?cs.map(h=>`<div class="lr" data-go="#/commit/${h}" tabindex="0"><span class="d">${COMMIT[h].d}</span><span class="ref">${h}</span><span class="desc">${esc(COMMIT[h].msg)}</span><span class="st">Mara</span><span class="stp">${stamp('GIT','',h)}</span></div>`).join(''):'<div class="lr empty"><span class="d"></span><span class="desc">No commits on this branch yet — it was branched from main and pushed.</span></div>'}</div></div>`,'blue');}
+function dRepo(r){const x=REPO[r];
+ return detailShell('GIT','',r,`<div class="sec"><dl class="kv"><dt>Language</dt><dd>${x.lang}</dd><dt>Local clone</dt><dd><span class="mono">${x.clone}</span></dd>${x.note?`<dt>Branches</dt><dd>${x.note}</dd>`:''}</dl><div style="display:flex;gap:6px;margin-top:10px"><button class="btn" data-act="gitpull">Pull</button><button class="btn" data-act="gitpush">Push</button><button class="btn" data-go="#/git/branch">New branch</button></div></div>`,'blue');}
+
+/* ---- action flows in the panel ---- */
+function dStart(k){
+ const t=TK[k];const st=S.stepper&&S.stepper.key===k?S.stepper:null;
+ const br=`feature/${k}-${t.summary.toLowerCase().replace(/[^a-z0-9]+/g,'-')}`;
+ const steps=[['Create branch',`<span class="mono">${br}</span> in payout-service from main`],['Push',`to git.tidewater.internal`],['Open PR',`"${esc(t.summary)}" with the ticket description`],['Link PR back',`to ${k} as a confirmed link`],['Transition',`${k} → In Progress in Jira`],['Start the clock',`on ${k} (optional)`]];
+ const total=st&&st.timer?6:5;
+ const body=st?`
+  <div class="sec"><p class="muted" style="font-size:12.5px;margin-bottom:8px">${st.done>=total?'<b class="blue">All steps done.</b> PR #'+st.pr+' is open and linked; '+k+' is In Progress.':'Running… each step reports when its source confirms.'}</p>
+   <div class="steps">${steps.map((s,i)=>{if(!st.timer&&i===5)return '';const d=i<st.done,r=i===st.done&&st.done<total;
+    return `<div class="stp2 ${d?'done':r?'run':''}"><span class="i">${d?'✓':r?'<span class="run"></span>':i+1}</span><span><b>${s[0]}</b> <span class="muted">${s[1]}</span></span><span class="r">${d?st.res[i]||'done':r?'working':''}</span></div>`}).join('')}</div>
+   ${st.done>=total?`<div style="display:flex;gap:6px;margin-top:12px"><button class="btn pri" data-go="#/pr/${st.pr}">Open PR #${st.pr}</button><button class="btn" data-go="#/ticket/${k}">Open ${k}</button></div>`:''}</div>`
+ :`
+  <div class="sec"><div class="text"><p>${t.desc}</p></div></div>
+  <div class="sec"><div class="up">One action, ${steps.length-1} steps + one option</div>
+   <div class="field"><label for="sw-br">Branch</label><input id="sw-br" class="inp mono" value="${br}" style="font-size:12px"></div>
+   <div class="field"><label>Repository</label><select class="sel"><option>payout-service</option><option>ledger-api</option></select></div>
+   <div class="field"><label>PR title</label><input class="inp" value="${esc(t.summary)}"></div>
+   <div class="field"><label>After</label><label class="check"><input type="checkbox" id="sw-timer" checked> Start the clock on ${k}${S.timer.running?' (stops '+esc(S.timer.label||ctxName(S.timer.ctx))+')':''}</label></div>
+   <div class="steps" style="margin-top:10px">${steps.map((s,i)=>`<div class="stp2"><span class="i">${i+1}</span><span><b>${s[0]}</b> <span class="muted">${s[1]}</span></span><span class="r"></span></div>`).join('')}</div>
+   <div style="display:flex;gap:6px;margin-top:12px"><button class="btn pri" data-act="runstart" data-key="${k}">Run ${steps.length-1} steps</button><button class="btn" data-act="closedetail">Cancel</button></div></div>`;
+ return detailShell('JIRA',k,'Start work: '+t.summary,body);
+}
+function dTrigger(cfg){
+ const r=S.trigRes;
+ return detailShell('CI','',`Trigger ${cfg}`,`
+  <div class="sec">
+   <div class="field"><label for="tr-br">Branch</label><select id="tr-br" class="sel"><option>feature/PAY-231-sepa-retry</option><option>main</option><option>fix/PAY-228-partial-refund-drift</option></select></div>
+   <div class="field"><label for="tr-env">env</label><select id="tr-env" class="sel"><option>staging</option><option>prod-dryrun</option></select></div>
+   <div class="field"><label>Clean checkout</label><label class="check"><input type="checkbox" id="tr-clean"> wipe the agent workspace first</label></div>
+   <div class="field"><label>Configuration</label><select class="sel"><option ${cfg==='Payout_IntegrationTests'?'selected':''}>Payout_IntegrationTests</option><option ${cfg==='Payout_Build'?'selected':''}>Payout_Build</option><option>Ledger_Deploy_Staging</option></select></div>
+   ${r?`<div class="res ${r.ok?'ok':'bad'}" style="margin-top:10px">${r.msg}</div>`:''}
+   <div style="display:flex;gap:6px;margin-top:12px"><button class="btn pri" data-act="trigger" data-cfg="${cfg}">Trigger build</button><button class="btn" data-go="#/build/1187">View #1187 log</button></div>
+   ${!S.tcPassword?`<p class="muted" style="font-size:12px;margin-top:10px">TeamCity is returning 401. The trigger is queued as a pending write and sent once the password is fixed in <button class="link" data-go="#/sources">Sources</button>.</p>`:''}
+  </div>`,'blue');
+}
+function dNewTicket(){const c=CTX[S.ctx];const r=S.newRes&&S.newRes.kind==='ticket'?S.newRes:null;
+ return detailShell('JIRA','','New ticket'+(c.kind==='Epic'?' in '+S.ctx:''),`<div class="sec">
+  ${r?`<div class="res ok">Created <b class="mono">${r.key}</b> ${esc(r.title)} · To Do · in epic ${S.ctx} <button class="btn sm" style="margin-left:auto" data-go="#/ticket/${r.key}">Open</button></div>`:`
+  <div class="field"><label for="nt-s">Summary</label><input id="nt-s" class="inp" placeholder="What needs to happen" value="${S.prefillTicket?esc(S.prefillTicket):''}"></div>
+  <div class="field"><label>Project</label><select class="sel"><option>PAY — Payments Platform</option><option>OPS — Operations</option></select></div>
+  <div class="field"><label>Type</label><select class="sel"><option>Task</option><option>Story</option><option>Bug</option></select></div>
+  <div class="field"><label>Priority</label><select class="sel"><option>Medium</option><option>High</option><option>Low</option></select></div>
+  <div class="field"><label>Epic</label><select class="sel"><option>${c.kind==='Epic'?S.ctx+' Payout reliability':'none'}</option></select></div>
+  <div class="field"><label for="nt-d">Description</label><textarea id="nt-d" class="inp" rows="3"></textarea></div>
+  <div style="display:flex;gap:6px;margin-top:12px"><button class="btn pri" data-act="createticket">Create ticket</button><button class="btn" data-act="closedetail">Cancel</button></div>`}</div>`);
+}
+function dNewPage(){const r=S.newRes&&S.newRes.kind==='page'?S.newRes:null;
+ return detailShell('WIKI','','New page in ENG',`<div class="sec">
+  ${r?`<div class="res ok">Created page <b>${esc(r.title)}</b> under ENG › Payments · linked to ${S.ctx} <button class="btn sm" style="margin-left:auto" data-go="#/page/${r.id}">Open</button></div>`:`
+  <div class="field"><label for="np-t">Title</label><input id="np-t" class="inp" placeholder="Page title"></div>
+  <div class="field"><label>Space</label><select class="sel"><option>ENG — Engineering</option></select></div>
+  <div class="field"><label>Parent</label><select class="sel"><option>Payments architecture overview</option><option>Standup protocols</option><option>(none)</option></select></div>
+  <div class="field"><label for="np-b">Body</label><textarea id="np-b" class="inp" rows="4" placeholder="Written parts are set in serif."></textarea></div>
+  <div style="display:flex;gap:6px;margin-top:12px"><button class="btn pri" data-act="createpage">Create page</button><button class="btn" data-act="closedetail">Cancel</button></div>`}</div>`);
+}
+function dGit(kind){const r=S.gitRes&&S.gitRes.kind===kind?S.gitRes:null;
+ return detailShell('GIT','',kind==='branch'?'New branch':'Create repository',`<div class="sec">
+  ${r?`<div class="res ok">${r.msg}</div>`:kind==='branch'?`
+  <div class="field"><label>Repository</label><select class="sel" id="gb-repo"><option>payout-service</option><option>ledger-api</option></select></div>
+  <div class="field"><label for="gb-n">Name</label><input id="gb-n" class="inp mono" value="feature/PAY-240-payout-dashboard-latency" style="font-size:12px"></div>
+  <div class="field"><label>From</label><select class="sel"><option>main</option><option>feature/PAY-231-sepa-retry</option></select></div>
+  <div class="field"><label>Push</label><label class="check"><input type="checkbox" checked> push to git.tidewater.internal right away</label></div>
+  <div style="display:flex;gap:6px;margin-top:12px"><button class="btn pri" data-act="gitbranch">Create branch</button><button class="btn" data-act="closedetail">Cancel</button></div>`:`
+  <div class="field"><label for="gr-n">Name</label><input id="gr-n" class="inp mono" placeholder="payout-reports" style="font-size:12px"></div>
+  <div class="field"><label>Organisation</label><select class="sel"><option>tidewater</option></select></div>
+  <div class="field"><label>Visibility</label><select class="sel"><option>private</option><option>internal</option></select></div>
+  <div class="field"><label>Clone to</label><input class="inp mono" value="~/code/" style="font-size:12px"></div>
+  <div style="display:flex;gap:6px;margin-top:12px"><button class="btn pri" data-act="gitrepo">Create repository</button><button class="btn" data-act="closedetail">Cancel</button></div>`}</div>`,'blue');
+}
+function renderDetail(){
+ const [t,id]=S.detail;
+ switch(t){case 'ticket':return dTicket(id);case 'pr':return dPR(id);case 'build':return dBuild(id);case 'page':return dPage(id);case 'note':return dNote(id);case 'commit':return dCommit(id);case 'branch':return dBranch(id);case 'repo':return dRepo(id);case 'start':return dStart(id);case 'trigger':return dTrigger(id);case 'newticket':return dNewTicket();case 'newpage':return dNewPage();case 'git':return dGit(id);}
+ return '';
+}
+
+/* =====================================================================
+   GLOBAL VIEWS
+   ===================================================================== */
+function vhead(title,sub,acts){return `<div class="rhead"><div><div class="up muted" style="margin-bottom:4px">${sub}</div><h1>${title}</h1></div><div class="acts">${acts||''}</div></div>`}
+function vInbox(){
+ const f=S.inboxFilter||'all';const items=f==='all'?inboxOpen():inboxFor(S.ctx);
+ const rows=items.map(i=>`<div class="lr ib" tabindex="0"><span class="d">${i.d}</span><span class="desc">${i.text}<small class="mono" style="display:block;margin:2px 0 0">${i.ctx.map(c=>ctxName(c)).join(' · ')}</small></span><span class="ac">${i.acts.map(([l,a])=>a.startsWith('#')?`<button class="btn sm quiet" data-go="${a}">${l}</button>`:`<button class="btn sm quiet" data-act="inbox" data-id="${i.id}" data-do="${a}">${l}</button>`).join('')}<span class="stp" style="margin-left:6px">${stamp(ref(...i.ref).stamp,'',i.id)}</span></span></div>${S.replyOpen===i.id?`<div class="lr ib"><span class="d"></span><form class="reply" data-act="sendreply" data-id="${i.id}"><textarea class="inp" placeholder="Reply to ${i.ref[0]==='page'?'Priya on the page':'Jonas on PR #142'}…" aria-label="Reply"></textarea><button class="btn pri sm" type="submit">Send reply</button><button class="btn sm" type="button" data-act="inbox" data-id="${i.id}" data-do="reply">Cancel</button></form></div>`:''}`).join('')||`<div class="lr empty"><span class="d"></span><span class="desc">Inbox zero${f==='ctx'?' in '+esc(ctxName(S.ctx)):''}. Nothing is waiting on you.</span></div>`;
+ const sn=S.snoozed.map(z=>`<div class="lr ib"><span class="d">zz</span><span class="desc muted">${esc(z.text)} <small>${z.back||''}</small></span><span class="ac"><button class="btn sm quiet" data-act="unsnooze" data-id="${z.id}">Bring back</button></span></div>`).join('');
+ return `<div class="view">${vhead('Inbox',`attention queue · ${inboxOpen().length} open · newest first`,`<div class="seg"><button class="${f==='all'?'on':''}" data-act="inboxfilter" data-f="all">All ${inboxOpen().length}</button><button class="${f==='ctx'?'on':''}" data-act="inboxfilter" data-f="ctx">In ${esc(ctxName(S.ctx))} ${inboxFor(S.ctx).length}</button></div>`)}
+  <div class="vbody"><div class="ledger">${rows}<div class="grp"><span class="up">Snoozed</span><span class="n">${S.snoozed.length}</span></div>${sn||'<div class="lr empty"><span class="d"></span><span class="desc">Nothing snoozed.</span></div>'}</div></div></div>`;
+}
+function vTime(){
+ const T0=tm('08:30'),T1=tm('14:32'),W=T1-T0;const px=m=>((tm(m)-T0)/W*100).toFixed(2)+'%';
+ const cls=(b,ctx)=>b.gap?'gap':ctx==='?'?'un':ctx==='PAY-231'?'':ctx==='PAY-228'?'c2':ctx==='staging-db'?'c3':'c0';
+ const strip=BLOCKS.map((b,i)=>{const ctx=S.assigned[i]||b.ctx;const c=cls(b,ctx);
+  return `<div class="blk ${c} ${b.how==='passive'?'passive':''} ${b.running?'now':''}" style="left:${px(b.s)};width:calc(${((tm(b.e)-tm(b.s))/W*100).toFixed(2)}% - 2px)" title="${b.s}–${b.e} ${esc(b.label)}" data-act="blk" data-i="${i}"><span>${b.gap?'lunch':ctx?esc(ctxName(ctx)):'Inbox'}</span></div>`}).join('');
+ const ticks=['08:30','09:00','10:00','11:00','12:00','13:00','14:00'].map(t=>`<div class="tick" style="left:${px(t)}">${t}</div>`).join('');
+ let run=0;
+ const rows=BLOCKS.map((b,i)=>{const m=tm(b.e)-tm(b.s);if(!b.gap)run+=m;const ctx=S.assigned[i]||b.ctx;
+  let ac='';if(b.ctx==='?'&&!S.assigned[i])ac=`<select class="sel" data-act="assign" data-i="${i}" aria-label="Assign the unattributed block to a context"><option value="">Assign…</option>${Object.keys(CTX).filter(c=>CTX[c].kind!=='Epic').map(c=>`<option value="${c}">${esc(ctxName(c))}${CTX[c].adhoc?'':' — '+esc(CTX[c].title)}</option>`).join('')}</select>`;
+  else if(b.ctx==='staging-db')ac=S.stagingLogged?stamp('LOGGED','blue in','stg'):S.stagingKept?'<span class="muted">kept local</span>':`<button class="btn sm quiet" data-act="logadhoc">Log to a ticket…</button><button class="btn sm quiet" data-act="keeplocal">Keep local</button>`;
+  else if(b.ctx&&!b.gap)ac=S.logged[ctx]?stamp('LOGGED','blue','lg'+i):`<button class="btn sm quiet" data-act="logtoday" data-ctx="${ctx}">Log…</button>`;
+  return `<div class="lr ${b.gap?'':''}"><span class="d">${b.s}</span><span class="ref">${b.e}</span><span class="desc ${b.gap?'faint':''} ${b.ctx==='?'&&!S.assigned[i]?'red':''}">${S.assigned[i]?'<b>'+esc(ctxName(ctx))+'</b> <small>assigned from unattributed</small>':esc(b.label)}<small>${b.gap?'':b.how==='passive'?'passive':b.how==='label'?'ad-hoc label':'manual timer'}${b.running?' · running':''}</small></span><span class="st mono">${b.gap?'—':mins(m)}${b.gap?'':' · Σ '+mins(run)}</span><span class="ac">${ac}</span></div>`}).join('');
+ const u231=unlogMin('PAY-231'),u228=unlogMin('PAY-228'),ustg=unlogMin('staging-db');
+ const unlW=unlogWeek(),loggedW=LOGGED_MON_THU+(TRACKED_TODAY-unlW);
+ const cell=(v,bad)=>`<td class="${bad?'red':''}">${v}</td>`;
+ const asg=S.assigned[3]||null;
+ const sheet=`<table class="sheet"><thead><tr><th>Week 34 · by context</th><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Tracked</th><th>Logged</th><th>Unlogged</th></tr></thead><tbody>
+  <tr><td>PAY-231 <span class="muted">Retry failed SEPA payouts</span></td><td>·</td><td>·</td><td>2h 00m</td><td>4h 30m</td><td>${mins(TODAY_MIN['PAY-231'])}</td><td>${mins(390+(TODAY_MIN['PAY-231']||0))}</td><td>${mins(390+(S.logged['PAY-231']||0))}</td>${cell(u231?mins(u231):'0',!!u231)}</tr>
+  <tr><td>PAY-228 <span class="muted">Ledger drift on partial refunds</span></td><td>·</td><td>·</td><td>·</td><td>2h 40m</td><td>${mins(TODAY_MIN['PAY-228'])}</td><td>${mins(160+(TODAY_MIN['PAY-228']||0))}</td><td>${mins(160+(S.logged['PAY-228']||0))}</td>${cell(u228?mins(u228):'0',!!u228)}</tr>
+  <tr><td>Staging DB configuration <span class="muted">ad-hoc label, no ticket</span></td><td>·</td><td>·</td><td>·</td><td>·</td><td>48m</td><td>48m</td><td>${S.logged['staging-db']?'48m':'—'}</td>${cell(ustg?(S.stagingKept?'48m local':'48m'):'0',!!ustg&&!S.stagingKept)}</tr>
+  <tr><td>Unattributed <span class="muted">11:50–12:20, no entity was open</span></td><td>·</td><td>·</td><td>·</td><td>·</td><td>${asg?'·':'30m'}</td><td>${asg?'·':'30m'}</td><td>—</td>${cell(asg?'moved to '+esc(ctxName(asg)):'30m',!asg)}</tr>
+  <tr><td>Inbox + standup digest <span class="muted">08:30–08:45</span></td><td>·</td><td>·</td><td>·</td><td>·</td><td>15m</td><td>15m</td><td>—</td>${cell('15m',true)}</tr>
+  <tr><td>Earlier this week <span class="muted">other tickets, closed and logged</span></td><td>7h 45m</td><td>8h 00m</td><td>4h 30m</td><td>·</td><td>·</td><td>20h 15m</td><td>20h 15m</td><td>0</td></tr>
+  <tr class="tot"><td>All contexts</td><td>7h 45m</td><td>8h 00m</td><td>6h 30m</td><td>7h 10m</td><td>5h 12m</td><td>34h 37m</td><td>${mins(loggedW)}</td>${cell(mins(unlW),true)}</tr></tbody></table>`;
+ const doneToday=TRACKED_TODAY-unlW;
+ return `<div class="view">${vhead('Time',`Friday 2026-08-22 · 08:30–14:32 · 5h 12m tracked · ${doneToday?mins(doneToday)+' logged, '+mins(unlW)+' still open':'nothing logged yet today'}`,`${u231?`<button class="btn pri" data-act="logtoday" data-ctx="PAY-231">Log 2h 44m to PAY-231</button>`:`<span class="ok" style="align-self:center">Logged 2h 44m to PAY-231 ✓</span>`}${u231+u228?`<button class="btn" data-act="logall">Log all with a ticket (${mins(u231+u228)})</button>`:`<span class="muted" style="align-self:center;font-size:12px">${mins(unlW)} left needs a decision — assign it or log it to a ticket below</span>`}`)}
+  <div class="vbody">
+   <div class="sec"><div class="up">Day review <span class="muted">blocks coloured by context · nothing is keyed to git branches</span></div>
+    <div class="strip">${ticks}${strip}<div class="nowl" style="left:${px('14:32')}"></div></div>
+    <div class="legend"><span><i></i>manual timer / label</span><span><i class="p"></i>recorded passively</span><span><i class="a"></i>ad-hoc label</span><span><i class="u"></i>unattributed — assign it</span><span style="margin-left:auto" class="mono">PAY-231 ink · PAY-228 black · Staging DB double rule</span></div>
+    <div class="ledger plain" style="margin-top:10px">${rows}</div></div>
+   <div class="sec"><div class="up">Week timesheet <span class="muted">per context and total · Mon–Thu are closed · ${mins(unlW)} unlogged</span></div>${sheet}</div>
+   <div class="fill"></div>
+  </div></div>`;
+}
+function vToday(){
+ const tr=(t,id,extra)=>`<span class="tr">${chipOf(t,id)}</span>`;
+ const pub=S.published;
+ return `<div class="view">${vhead('Today','standup · Friday 2026-08-22 · digest generated from yesterday\'s and today\'s activity',`<button class="btn" data-act="savenote">${S.saved?'Saved as note ✓':'Save as note'}</button><button class="btn pri" data-act="publish">${pub?'Published ✓':'Publish to Confluence'}</button>`)}
+  <div class="vbody two">
+   <div class="col">
+    <div class="sec"><div class="up">Digest <span class="muted">each line points at its source</span></div>
+     <div class="grp" style="margin:0 -16px"><span class="up">PAY-200 Payout reliability</span><span class="n">context</span></div>
+     <div class="dg"><span class="lab">Yesterday</span><div class="ln">Merged PR #139 (ledger-api) fixing partial refund drift${tr('pr',139)}; PAY-228 → In Review${tr('ticket','PAY-228')}; implemented retry loop for PAY-231${tr('commit','7be0e4')}; logged 7h 10m<span class="tr"><button class="chip" data-go="#/time" title="Thursday worklogs: PAY-228 2h 40m + PAY-231 4h 30m">7h 10m</button></span>.</div></div>
+     <div class="dg"><span class="lab">Today</span><div class="ln">PAY-231 backoff + jitter${tr('commit','a41f2c')}${tr('commit','c90d11')}; fix integration test #1187 (off-by-one in attempt counter)${tr('build',1187)}${tr('note','sepa-inv')}; reply to Priya about the manual-review SLA${tr('page','sepa-design')}; review PR #144${tr('pr',144)}.</div></div>
+     <div class="dg"><span class="lab">Blockers</span><div class="ln">PAY-228 staging verification blocked by OPS-77 (runbook outdated, Tomasz)${tr('ticket','OPS-77')}.</div></div>
+     <div class="grp" style="margin:0 -16px"><span class="up">Staging DB configuration</span><span class="n">ad-hoc</span></div>
+     <div class="dg"><span class="lab">Today</span><div class="ln">48m on staging DB configuration, not tied to a ticket<span class="tr"><button class="chip" data-go="#/ctx/staging-db">13:10–13:58</button></span>.</div></div>
+    </div>
+    <div class="sec"><div class="up">Action items <span class="muted">from the protocol</span></div><div class="ledger plain">
+     ${[['Mara','add SLA to SEPA payout retry design (PAY-231)','PAY-231'],['Tomasz','OPS-77 by Tuesday','OPS-77'],['Lena','clarify PAY-240 acceptance criteria','PAY-240']].map(([w,t,k],i)=>`<div class="lr"><span class="d">${w}</span><span class="ref">${k}</span><span class="desc serif" style="font-size:13.5px">${esc(t)}</span><span class="st"></span><span class="ac">${S['ai'+i]?stamp('TICKET','blue in','ai'+i)+` <span class="mono blue">${S['ai'+i]}</span>`:`<button class="btn sm quiet" data-act="aiticket" data-i="${i}" data-t="${esc(t)}">Create ticket</button>`}</span></div>`).join('')}
+    </div></div>
+    <div class="fill"></div>
+   </div>
+   <div class="col">
+    <div class="sec"><div class="up">Standup protocol 2026-08-22 <span class="muted">minutes · editable</span><div class="acts">${pub?`<span class="muted">ENG › Standup protocols › 2026-08-22 · published 14:33 · <a href="https://tidewater.atlassian.net/wiki/spaces/ENG" target="_blank" rel="noopener">open</a></span>`:`<span class="muted">target: ENG › Standup protocols › 2026-08-22</span>`}</div></div>
+     ${pub?`<div class="res ok" style="margin-bottom:10px">Published to Confluence as <b>ENG › Standup protocols › 2026-08-22</b>. ${stamp('WIKI','in','pub')}</div>`:''}
+     <div class="edwrap"><div class="editor" contenteditable="true" spellcheck="false" aria-label="Standup protocol">
+      <div><b>Attendees:</b> Mara, Jonas, Priya, Tomasz, Lena</div>
+      <div><b>Jonas:</b> PR #144 CSV export ready for review.</div>
+      <div><b>Priya:</b> finance wants the manual-review SLA documented by Monday.</div>
+      <div><b>Tomasz:</b> on-call handbook update in progress, ETA Tuesday (OPS-77).</div>
+      <div><b>Lena:</b> finance complaints about dashboard latency → PAY-240.</div>
+      <div><b>Action items:</b></div>
+      <div>· Mara → add SLA to <i>SEPA payout retry design</i> (PAY-231)</div>
+      <div>· Tomasz → OPS-77 by Tuesday</div>
+      <div>· Lena → clarify PAY-240 acceptance criteria</div>
+     </div></div>
+    </div>
+    <div class="fill"></div>
+   </div>
+  </div></div>`;
+}
+function vSources(){
+ const a=S.addSrc;
+ const rows=SOURCES.map(s=>{const bad=s.err&&!S.tcPassword;
+  return `<div class="lr" style="min-height:48px"><span class="d">${s.stamp.toLowerCase()}</span><span class="ref">${stamp(s.stamp,'',s.id)}</span><span class="desc" style="white-space:normal;padding:6px 0"><b>${esc(s.name)}</b> <span class="muted">${s.type} · adapter ${s.adapter}</span><br><span class="mono muted" style="font-size:11px">${esc(s.url)}</span> · <span class="muted">${esc(s.auth)}</span> · <span class="mono" style="font-size:11px;color:var(--blue)">${s.caps}</span></span>
+   <span class="st" style="flex-direction:column;align-items:flex-end;gap:2px">${bad?`<span class="fail">✖ ${s.sync}</span><span class="red" style="font-size:11px">${esc(s.err)}</span>`:s.id==='teamcity'?'<span class="ok">✓ synced just now</span>':`<span class="ok">✓ ${s.sync}</span>${s.warn?'<span class="red" style="font-size:11px">'+s.warn+'</span>':''}`}<span>${s.count}</span></span>
+   <span class="ac">${bad?`<button class="btn sm pri" data-act="tcpass">Re-enter password</button>`:s.warn?`<button class="btn sm" data-act="rotate">Rotate PAT</button>`:''}<button class="btn sm quiet" data-act="syncnow" data-id="${s.id}">Sync now</button></span></div>`}).join('');
+ const types=[['Jira','jira v1.4','search · write · webhooks'],['Confluence','confluence v1.2','search · write'],['Gitea','gitea v1.3','search · write · webhooks'],['GitHub','github v1.0','search · write · webhooks'],['GitLab','gitlab v0.9','search · write'],['TeamCity','teamcity v1.1','search · trigger'],['GitLab CI','gitlab-ci v0.8','search · trigger'],['Jenkins','jenkins v0.7','search · trigger'],['Generic Git remote','git v1.5','search']];
+ const add=a?`<div class="sec" id="addsrc"><div class="up">Add source <span class="muted">step ${a.step} of 5 · every type is a pluggable adapter</span><div class="acts"><button class="btn sm quiet" data-act="addsrc" data-step="0">Cancel</button></div></div>
+  ${a.step===1?`<div class="cards">${types.map(([n,v,c])=>`<button class="card ${a.type===n?'on':''}" data-act="addsrc" data-step="2" data-type="${n}"><b>${n}</b><small>adapter ${v}</small><span class="caps">${c}</span></button>`).join('')}</div>`:''}
+  ${a.step===2?`<div class="field"><label for="as-url">URL</label><input id="as-url" class="inp mono" placeholder="https://" value="${a.url||''}" style="font-size:12px"></div><div class="field"><label for="as-name">Display name</label><input id="as-name" class="inp" placeholder="${a.type}" value="${a.name||''}"></div><div style="display:flex;gap:6px;margin-top:12px"><button class="btn pri" data-act="addsrc" data-step="3">Next: auth</button><button class="btn" data-act="addsrc" data-step="1">Back</button></div>`:''}
+  ${a.step===3?`<div class="field"><label>Auth method</label><select id="as-auth" class="sel"><option>user + password</option><option>personal access token (PAT)</option><option>API token</option><option disabled>OAuth (coming soon)</option></select></div><div class="field"><label for="as-u">User / token</label><input id="as-u" class="inp" placeholder="mara.lindqvist"></div><div class="field"><label for="as-p">Secret</label><input id="as-p" class="inp" type="password" placeholder="••••••••"></div>
+   ${a.test?`<div class="res ${a.test.ok?'ok':'bad'}" style="margin-top:10px">${a.test.msg}</div>`:''}
+   <div style="display:flex;gap:6px;margin-top:12px"><button class="btn" data-act="testconn">Test connection</button><button class="btn pri" data-act="addsrc" data-step="4" ${a.test&&a.test.ok?'':'disabled'}>Next: schedule</button><button class="btn" data-act="addsrc" data-step="2">Back</button></div>`:''}
+  ${a.step===4?`<div class="field"><label>Sync every</label><select class="sel"><option>5 minutes</option><option>15 minutes</option><option>hourly</option><option>manual only</option></select></div><div class="field"><label>Initial sync</label><label class="check"><input type="checkbox" checked> fetch the last 90 days now</label></div><div style="display:flex;gap:6px;margin-top:12px"><button class="btn pri" data-act="addsrc" data-step="5">Save source</button><button class="btn" data-act="addsrc" data-step="3">Back</button></div>`:''}
+  ${a.step===5?`<div class="res ok">Saved <b>${esc(a.name||a.type)}</b> (${a.type}, adapter ${types.find(t=>t[0]===a.type)[1]}). First sync started. ${stamp('ADDED','blue in','added')}</div><div style="margin-top:10px"><button class="btn" data-act="addsrc" data-step="0">Done</button></div>`:''}
+ </div>`:'';
+ return `<div class="view">${vhead('Sources','4 configured · sync every 5 minutes · next in 1 min',`<button class="btn" data-act="syncnow" data-id="all">Sync all now</button><button class="btn pri" data-act="addsrc" data-step="1">Add source</button>`)}
+  <div class="vbody">${add}<div class="ledger plain" style="min-height:0">${rows}${(S.extraSources||[]).map(s=>`<div class="lr" style="min-height:48px"><span class="d">new</span><span class="ref">${stamp(s.stamp,'in','x'+s.name)}</span><span class="desc"><b>${esc(s.name)}</b> <span class="muted">${esc(s.type)}</span></span><span class="st"><span class="run"></span> first sync</span><span class="ac"></span></div>`).join('')}</div>
+   <div class="sec"><div class="up">Local database</div><dl class="kv"><dt>Postgres</dt><dd><span class="mono">knobas</span> · 212 MB</dd><dt>Full-text index</dt><dd>up to date · 1,284 issues · 3,912 pages · 47 repos · 3 notes</dd><dt>Pending writes</dt><dd>${S.pending?`<span class="red">${S.pending} pending</span> — sent when TeamCity accepts the password`:'0'}</dd><dt>Schedule</dt><dd>every 5 minutes <button class="link" data-act="syncnow" data-id="all">sync now</button></dd></dl></div>
+   <div class="fill"></div>
+  </div></div>`;
+}
+function vNotes(){
+ const sel=S.noteSel||'sepa-inv';
+ const rows=Object.keys(NOTE).map(id=>{const n=NOTE[id];return `<div class="lr ${sel===id?'sel':''}" data-go="#/notes/${id}" tabindex="0"><span class="d">${n.d}</span><span class="ref">note</span><span class="desc">${esc(n.title)}<small>${n.links.map(l=>'[['+esc(l)+']]').join(' ')}</small></span><span class="st"></span><span class="stp">${stamp('NOTE','',id)}</span></div>`}).join('');
+ return `<div class="view">${vhead('Notes',Object.keys(NOTE).length+' local notes · [[links]] become entity chips',`<button class="btn pri" data-act="newnote">New note</button>`)}
+  <div class="vbody two"><div class="ledger">${rows}</div><div class="col">${dNote(sel).replace('<aside class="detail"','<div class="detail" style="border-left:0"').replace('</aside>','</div>').replace(/<button class="btn sm x"[^>]*>[^<]*<\/button>/,'')}<div class="fill"></div></div></div></div>`;
+}
+
+/* =====================================================================
+   SEARCH OVERLAY
+   ===================================================================== */
+function searchIndex(){
+ const ix=[];
+ for(const k in TK)ix.push({t:'ticket',id:k,text:k+' '+TK[k].summary+' '+TK[k].desc,src:'jira',who:TK[k].assignee,day:TK[k].updated.startsWith('today')?'today':'week',fail:k==='PAY-231'});
+ for(const k in PAGE)ix.push({t:'page',id:k,text:PAGE[k].title+' '+(PAGE[k].body||''),src:'wiki',who:who(PAGE[k].by).split(' ')[0],day:PAGE[k].edited.startsWith('today')?'today':'week'});
+ for(const k in PR)ix.push({t:'pr',id:+k,text:'PR #'+k+' '+PR[k].title+' '+PR[k].branch,src:'git',who:who(PR[k].by).split(' ')[0],day:PR[k].opened.startsWith('today')?'today':'week',fail:+k===142});
+ for(const k in COMMIT)ix.push({t:'commit',id:k,text:k+' '+COMMIT[k].msg+' '+COMMIT[k].branch,src:'git',who:'Mara',day:COMMIT[k].when.startsWith('today')?'today':'week'});
+ for(const k in BUILD)ix.push({t:'build',id:+k,text:'#'+k+' '+BUILD[k].cfg+' '+BUILD[k].params,src:'ci',who:'Mara',day:BUILD[k].when.includes('today')?'today':'week',fail:+k===1187});
+ for(const k in NOTE)ix.push({t:'note',id:k,text:NOTE[k].title+' '+NOTE[k].text+' '+NOTE[k].links.join(' '),src:'note',who:'Mara',day:NOTE[k].edited.startsWith('today')?'today':'week'});
+ return ix;
+}
+const SYNC={jira:'synced 4 min ago',wiki:'synced 4 min ago',git:'synced 2 min ago',ci:'last sync failed 38 min ago',note:'local'};
+function searchResults(){
+ const s=S.search;let items;
+ if(s.list){const l=SMART.find(x=>x.id===s.list);items=l.items.map(([t,id])=>searchIndex().find(x=>x.t===t&&x.id===id)).filter(Boolean)}
+ else{const toks=s.q.toLowerCase().split(/\s+/).filter(Boolean);if(!toks.length)return [];items=searchIndex().filter(x=>toks.every(t=>x.text.toLowerCase().includes(t)))}
+ return items.filter(x=>(s.src==='all'||x.src===s.src)&&(s.type==='all'||x.t===s.type)&&(s.who==='all'||x.who===s.who)&&(s.date==='all'||x.day===s.date)&&(!s.fail||x.fail));
+}
+function renderSearch(){
+ const s=S.search;const res=searchResults();const l=s.list?SMART.find(x=>x.id===s.list):null;
+ const opt=(v,cur,list)=>list.map(([k,lab])=>`<option value="${k}" ${k===cur?'selected':''}>${lab}</option>`).join('');
+ const inCtx=(t,id)=>{const c=CTX[S.ctx];return (t==='ticket'&&c.tickets.includes(id))||(t==='pr'&&c.prs.includes(id))||(t==='build'&&c.builds.includes(id))||(t==='page'&&c.pages.includes(id))||(t==='note'&&c.notes.includes(id))||(t==='commit'&&c.branches.includes(COMMIT[id].branch))};
+ const rows=res.map((x,i)=>{const r=ref(x.t,x.id);const d=x.t==='ticket'?TK[x.id].d:x.t==='page'?PAGE[x.id].d:x.t==='pr'?PR[x.id].d:x.t==='commit'?COMMIT[x.id].d:x.t==='build'?BUILD[x.id].d:NOTE[x.id].d;
+  return `<div class="lr ${i===0?'sel':''}" data-go="${r.go}" tabindex="0"><span class="d">${d}</span><span class="ref">${x.t==='page'||x.t==='note'?x.t:esc(r.label)}</span><span class="desc">${esc(x.t==='page'||x.t==='note'?r.label:r.title||r.label)}<small>${x.src==='note'?'local note':SYNC[x.src]}${x.fail?' · <span class="red">failing build</span>':''}</small></span><span class="ac">${inCtx(x.t,x.id)?`<span class="faint" style="font-size:11px;padding:0 6px">in ${esc(ctxName(S.ctx))}</span>`:`<button class="btn sm quiet" data-act="addctx" data-t="${x.t}" data-id="${x.id}">Add to ${esc(ctxName(S.ctx))}</button>`}<button class="btn sm quiet" data-go="${r.go}">Open</button></span><span class="stp">${stamp(r.stamp,'','s'+x.t+x.id)}</span></div>`}).join('');
+ const empty=l&&!l.items.length?`<div class="lr empty"><span class="d"></span><span class="desc">${l.id==='idle'?'2 pull requests idle for more than 5 days, both in repos outside your open contexts. Open them in Gitea or add the repos to a context.':'This list is a time view. <button class="link" data-go="#/time">Open Time</button>'}</span></div>`:`<div class="lr empty"><span class="d"></span><span class="desc">${s.q?'Nothing in the local index matches. Try fewer words or clear a filter.':'Type to search 1,284 issues, 3,912 pages, 47 repos, builds and notes — all local, all at once.'}</span></div>`;
+ return `<div class="scrim" data-act="scrim"><div class="dlg srch" role="dialog" aria-label="Search">
+  <div class="q"><span class="muted" style="font-size:18px">⌕</span><input id="sq" value="${esc(s.q)}" placeholder="Search everything…" aria-label="Search" autocomplete="off">${l?`<span class="chip red" data-act="clearlist">${esc(l.name)} ✕</span>`:''}<kbd class="faint mono" style="font-size:11px">Esc</kbd></div>
+  <div class="body">
+   <div class="lists"><div class="th" style="padding-left:12px"><span class="up">Smart lists</span><span class="n">saved local queries</span></div>
+    ${SMART.map(x=>`<button class="sl ${s.list===x.id?'on':''}" data-act="smart" data-id="${x.id}"><b>${esc(x.name)}${x.badge?`<span class="bd">${x.badge}</span>`:''}</b><span class="n">${slN(x)}</span>${x.note?`<small>${esc(x.note)}</small>`:''}</button>`).join('')}
+    <div class="th" style="padding-left:12px"><span class="up">In this room</span></div>
+    <button class="sl" data-act="searchctx"><b>Everything linked to ${esc(ctxName(S.ctx))}</b><span class="n">${CTX[S.ctx].tickets.length+CTX[S.ctx].prs.length+CTX[S.ctx].builds.length+CTX[S.ctx].pages.length+CTX[S.ctx].notes.length}</span><small>the room itself is this smart list</small></button>
+   </div>
+   <div>
+    <div class="filters">
+     <select class="sel" data-act="sf" data-f="src" aria-label="Source">${opt('src',s.src,[['all','All sources'],['jira','Jira'],['wiki','Confluence'],['git','Gitea'],['ci','TeamCity'],['note','Notes']])}</select>
+     <select class="sel" data-act="sf" data-f="type" aria-label="Type">${opt('type',s.type,[['all','Any type'],['ticket','Tickets'],['page','Pages'],['pr','Pull requests'],['commit','Commits'],['build','Builds'],['note','Notes']])}</select>
+     <select class="sel" data-act="sf" data-f="who" aria-label="People">${opt('who',s.who,[['all','Anyone'],['Mara','Mara'],['Jonas','Jonas'],['Priya','Priya'],['Tomasz','Tomasz']])}</select>
+     <select class="sel" data-act="sf" data-f="date" aria-label="Date">${opt('date',s.date,[['all','Any time'],['today','Today'],['week','Earlier this week']])}</select>
+     <button class="tog ${s.fail?'on':''}" data-act="sf" data-f="fail" title="Cross-source: Jira ticket ↔ Gitea branch ↔ TeamCity build">✖ has failing build</button>
+     <span class="faint" style="font-size:11px;margin-left:auto">${res.length} result${res.length===1?'':'s'} · Enter opens the first</span>
+    </div>
+    <div class="ledger">${rows||empty}</div>
+   </div>
+  </div></div></div>`;
+}
+
+/* =====================================================================
+   WORKLOG MODAL
+   ===================================================================== */
+function renderWorklog(){
+ const w=S.modal;const checked=ACTIVITY.filter(a=>a.on);
+ const lines=[];checked.forEach(a=>{if(a.line)lines.push(a.line)});
+ const comment=w.adhoc?'Staging DB configuration (ad-hoc, no ticket at the time)':lines.length?lines.join('; ').replace(/^./,c=>c.toUpperCase())+'.':'';
+ const total=w.total;const tgt=w.target;const local=tgt.startsWith('(');
+ return `<div class="scrim" data-act="scrim"><div class="dlg" role="dialog" aria-label="Worklog draft">
+  <div class="dh">${stamp('WORKLOG','blue big','wl')}<div class="ttl">${w.adhoc?'Log "Staging DB configuration" to a ticket':'Worklog draft'} · ${total}</div><button class="btn sm x" data-act="closemodal">✕</button></div>
+  <div class="db">
+   <div class="sec"><dl class="kv">
+    <dt>Interval</dt><dd><span class="mono">${w.interval}</span> <span class="muted">= ${total}</span> ${w.edit?`<input class="inp mono" value="${w.interval}" data-act="wlint" style="width:220px;font-size:12px" aria-label="Interval">`:`<button class="link" data-act="editint">edit</button>`}</dd>
+    <dt>Target</dt><dd><select class="sel" data-act="wltarget" aria-label="Target ticket">${['PAY-231','PAY-228','PAY-240','OPS-77','(local only, no ticket)'].map(k=>`<option ${k===tgt?'selected':''}>${k}</option>`).join('')}</select><span class="muted">${local?'nothing is sent to Jira':w.adhoc&&tgt==='OPS-77'?'suggested — the on-call runbook covers staging':'Jira worklog'}</span></dd>
+   </dl></div>
+   ${w.adhoc?`<div class="sec"><p class="muted" style="font-size:12.5px">This block was an ad-hoc label, so there is no activity to attach. You can still log it to a ticket, or keep it local.</p></div>`:`<div class="sec"><div class="up">Activity in the interval <span class="muted">checked lines go into the comment</span></div>
+    ${ACTIVITY.map((a,i)=>`<label class="chk"><input type="checkbox" data-act="wlact" data-i="${i}" ${a.on?'checked':''}><span>${a.text}</span></label>`).join('')}</div>`}
+   <div class="sec"><div class="up">Comment <span class="muted">goes on the Jira worklog</span></div><textarea class="inp" id="wlc" rows="3" aria-label="Worklog comment">${esc(comment)}</textarea></div>
+  </div>
+  <div class="foot"><button class="btn pri" data-act="dolog">${local?'Keep '+total+' local':'Log '+total+' to '+tgt}</button>${w.adhoc?`<button class="btn" data-act="keeplocal">Keep local only</button>`:`<button class="btn" data-act="editint">Edit</button>`}<button class="btn sp danger" data-act="closemodal">Discard</button></div>
+ </div></div>`;
+}
+
+function renderNewCtx(){
+ return `<div class="scrim" data-act="scrim"><form class="dlg" data-act="makectx" role="dialog" aria-label="New ad-hoc context" style="width:520px">
+  <div class="dh">${stamp('LABEL','ink big','newctx')}<div class="ttl">New ad-hoc context</div><button class="btn sm x" type="button" data-act="closemodal" title="Close (Esc)">✕</button></div>
+  <div class="db"><div class="sec">
+   <p class="text" style="font-size:14px;margin-bottom:10px">Work that has no ticket still deserves a room. An ad-hoc context gets its own clock, its own notes and its own page in the ledger — you can attach a ticket later if it turns into one.</p>
+   <div class="field"><label for="nc-l">Label</label><input id="nc-l" class="inp" placeholder="Staging DB configuration" autocomplete="off"></div>
+   <div class="field"><label>Clock</label><label class="check"><input type="checkbox" id="nc-start" checked> start it now${S.timer.running?` (stops <span class="mono">${esc(S.timer.label||ctxName(S.timer.ctx))}</span>)`:''}</label></div>
+  </div></div>
+  <div class="foot"><button class="btn pri" type="submit">Create context</button><button class="btn sp" type="button" data-act="closemodal">Cancel</button></div>
+ </form></div>`;
+}
+
+/* =====================================================================
+   ROUTER + RENDER
+   ===================================================================== */
+function route(){
+ const h=location.hash||'#/ctx/PAY-200';const p=h.slice(2).split('/').map(decodeURIComponent);
+ S.view='room';
+ switch(p[0]){
+  case 'ctx':if(CTX[p[1]]){if(S.ctx!==p[1]){S.ctx=p[1];S.inboxFilter='all';if(S.timer.running&&S.timer.ctx!==p[1]&&!(S.keep&&S.keep[p[1]]))S.switchAsk=true;else S.switchAsk=null}S.detail=null;}break;
+  case 'ticket':if(TK[p[1]])S.detail=['ticket',p[1]];break;
+  case 'pr':if(PR[+p[1]])S.detail=['pr',+p[1]];break;
+  case 'build':if(BUILD[+p[1]])S.detail=['build',+p[1]];break;
+  case 'page':if(PAGE[p[1]])S.detail=['page',p[1]];break;
+  case 'note':if(NOTE[p[1]])S.detail=['note',p[1]];break;
+  case 'commit':if(COMMIT[p[1]])S.detail=['commit',p[1]];break;
+  case 'branch':S.detail=['branch',p[1]];break;
+  case 'repo':if(REPO[p[1]])S.detail=['repo',p[1]];break;
+  case 'start':if(TK[p[1]]){S.detail=['start',p[1]];if(!S.stepper||S.stepper.key!==p[1])S.stepper=null}break;
+  case 'trigger':S.detail=['trigger',p[1]];S.trigRes=null;break;
+  case 'new':S.detail=['new'+p[1],null];S.newRes=null;break;
+  case 'git':S.detail=['git',p[1]];S.gitRes=null;break;
+  case 'inbox':S.view='inbox';break;
+  case 'time':S.view='time';break;
+  case 'today':S.view='today';break;
+  case 'sources':S.view='sources';break;
+  case 'notes':S.view='notes';if(p[1])S.noteSel=p[1];break;
+ }
+ render();
+}
+function render(){
+ renderTop();
+ const m=$('#main');
+ if(S.view==='room'){m.className=S.detail?'split':'';m.innerHTML=renderRoom()+(S.detail?renderDetail():'')}
+ else{m.className='';m.innerHTML=S.view==='inbox'?vInbox():S.view==='time'?vTime():S.view==='today'?vToday():S.view==='sources'?vSources():vNotes()}
+ const o=$('#overlays');
+ o.innerHTML=S.modal?(S.modal.kind==='worklog'?renderWorklog():S.modal.kind==='newctx'?renderNewCtx():''):S.searchOpen?renderSearch():'';
+ if(S.searchOpen){const q=$('#sq');if(q){q.focus();if(S.searchFresh){q.select();S.searchFresh=false}}}
+ if(S.detail&&S.scrollDetail){const d=$('.detail .db');if(d)d.scrollTop=0;S.scrollDetail=false}
+}
+
+/* =====================================================================
+   ACTIONS
+   ===================================================================== */
+function go(h){if(location.hash===h)route();else location.hash=h}
+function closeTop(){
+ if(S.pop){S.pop=null;render();return true}
+ if(S.searchOpen){S.searchOpen=false;S.search.list=null;render();return true}
+ if(S.modal){S.modal=null;render();return true}
+ if(S.detail){go('#/ctx/'+S.ctx);return true}
+ return false;
+}
+function startTimer(ctx,label){S.timer={ctx,since:Date.now(),running:true,label:label||null};S.switchAsk=null;S.pop=null;toast(`Clock started on <span class="mono">${esc(label||ctxName(ctx))}</span>`)}
+function stopTimer(){
+ const t=S.timer;const kept=fmtEl(Date.now()-t.since);S.timer={...t,running:false};S.pop=null;
+ if(t.ctx==='PAY-231'&&!t.label){S.modal={kind:'worklog',interval:'09:40–11:50 + 13:58–14:32',total:mins(unlogMin('PAY-231')||164),target:'PAY-231'}}
+ else{toast(`Clock stopped · ${kept} on <span class="mono">${esc(t.label||ctxName(t.ctx))}</span> kept in today's review`)}
+ render();
+}
+function pm(s){const h=/(\d+)h/.exec(s),m=/(\d+)m/.exec(s);return (h?+h[1]*60:0)+(m?+m[1]:0)}
+function logToday(ctx){
+ if(ctx==='PAY-200')ctx=unlogMin('PAY-231')?'PAY-231':'PAY-228';
+ if(ctx==='staging-db'){act('logadhoc');return}
+ const u=unlogMin(ctx);
+ if(!u){toast(`Nothing unlogged in <span class="mono">${esc(ctxName(ctx))}</span>`);return}
+ if(ctx==='PAY-231'){S.modal={kind:'worklog',interval:'09:40–11:50 + 13:58–14:32',total:mins(u),target:'PAY-231'};render();return}
+ S.logged[ctx]=(S.logged[ctx]||0)+u;
+ if(TK[ctx])TK[ctx].worklogs.push({when:'today',dur:mins(u),min:u,text:'Re-tested partial refund drift on staging, standup prep'});
+ toast(`Logged <b>${mins(u)}</b> to <span class="mono">${ctx}</span> · Jira worklog`);render();
+}
+function act(name,el,ev){
+ const d=el?el.dataset:{};
+ switch(name){
+  case 'pop':S.pop=S.pop===d.pop?null:d.pop;render();break;
+  case 'scrim':if(ev&&ev.target===el)closeTop();break;
+  case 'search':S.searchOpen=true;S.searchFresh=true;S.pop=null;render();break;
+  case 'closedetail':go('#/ctx/'+S.ctx);break;
+  case 'closemodal':S.modal=null;render();break;
+  case 'newctx':S.modal={kind:'newctx'};S.pop=null;render();setTimeout(()=>{const i=$('#nc-l');if(i)i.focus()},0);break;
+  case 'makectx':{const v=(el.querySelector('input')||{}).value;const t=(v||'').trim();
+   if(!t){toast('Give the context a label first — for example "Staging DB configuration".',true);return}
+   const id='adhoc-'+Date.now();
+   CTX[id]={kind:'Ad-hoc',title:t,status:'local label',adhoc:true,tickets:[],branches:[],prs:[],builds:[],pages:[],notes:[],time:{today:'0m',week:'0m'}};
+   const startNow=el.querySelector('#nc-start').checked;
+   S.modal=null;
+   if(startNow){startTimer(id)}else{toast(`Context <b>${esc(t)}</b> created · it has its own clock, notes and inbox filter`)}
+   go('#/ctx/'+id);break}
+  case 'asctx':{const k=d.key;const t=TK[k];CTX[k]={kind:t.type,title:t.summary,status:t.status,tickets:[k],branches:[],prs:t.links.filter(l=>l[0]==='pr').map(l=>l[1]),builds:t.links.filter(l=>l[0]==='build').map(l=>l[1]),pages:t.links.filter(l=>l[0]==='page').map(l=>l[1]),notes:t.links.filter(l=>l[0]==='note').map(l=>l[1]),time:{today:'0m',week:'0m',unlogged:''}};go('#/ctx/'+k);break}
+  case 'smart':{S.searchOpen=true;S.search.list=d.id;S.search.q='';S.pop=null;const sl=SMART.find(x=>x.id===d.id);if(sl.go){S.searchOpen=false;go(sl.go)}else render();break}
+  case 'inboxhere':S.inboxFilter='ctx';go('#/inbox');break;
+  case 'tray':S.trayOpen=S.trayOpen===false;render();break;
+  case 'clearlist':S.search.list=null;render();$('#sq').focus();break;
+  case 'searchctx':S.search.list=null;S.search.q=S.ctx==='staging-db'?'staging':S.ctx;render();break;
+  case 'sf':if(d.f==='fail')S.search.fail=!S.search.fail;else S.search[d.f]=el.value;render();break;
+  case 'addctx':{const c=CTX[S.ctx];const id=d.t==='pr'||d.t==='build'?+d.id:d.id;const key={ticket:'tickets',pr:'prs',build:'builds',page:'pages',note:'notes'}[d.t];
+   if(key&&!c[key].includes(id))c[key].push(id);
+   else if(d.t==='commit'&&!c.branches.includes(COMMIT[id].branch))c.branches.push(COMMIT[id].branch);S.searchOpen=false;S.search.list=null;toast(`Added <span class="mono">${esc(ref(d.t,id).label)}</span> to ${esc(ctxName(S.ctx))}`);go('#/ctx/'+S.ctx);break}
+  case 'starttimer':startTimer(d.ctx);render();break;
+  case 'switchtimer':{const prev=fmtEl(Date.now()-S.timer.since),pc=S.timer.label||ctxName(S.timer.ctx);startTimer(d.ctx);toast(`Clock switched · ${prev} on <span class="mono">${esc(pc)}</span> kept for today's review`);render();break}
+  case 'keeptimer':S.switchAsk=null;(S.keep=S.keep||{})[S.ctx]=true;render();break;
+  case 'stoptimer':stopTimer();break;
+  case 'adhoclabel':{const v=el.querySelector('input').value.trim();if(!v)return;startTimer('staging-db',v);render();break}
+  case 'wltarget':S.modal.target=el.value;render();break;
+  case 'wlact':ACTIVITY[+d.i].on=el.checked;render();break;
+  case 'editint':S.modal.edit=true;render();{const i=$('[data-act="wlint"]');if(i)i.focus()}break;
+  case 'wlint':S.modal.interval=el.value;break;
+  case 'dolog':{const m=S.modal;const tgt=m.target;const comment=$('#wlc').value;S.modal=null;const min=pm(m.total);
+   if(m.adhoc){S.stagingLogged=true;S.logged['staging-db']=(S.logged['staging-db']||0)+min}
+   if(TK[tgt]){TK[tgt].worklogs.push({when:'today',dur:m.total,min,text:comment});if(!m.adhoc)S.logged[tgt]=(S.logged[tgt]||0)+min;toast(`Logged <b>${m.total}</b> to <span class="mono">${tgt}</span> · Jira worklog ${stamp('LOGGED','blue in','tl')}`)}
+   else toast(`Kept ${m.total} local only — nothing sent to Jira`);
+   render();break}
+  case 'logtoday':logToday(d.ctx);break;
+  case 'logall':{const a=unlogMin('PAY-231'),b=unlogMin('PAY-228');
+   if(a){S.logged['PAY-231']=(S.logged['PAY-231']||0)+a;TK['PAY-231'].worklogs.push({when:'today',dur:mins(a),min:a,text:'Backoff jitter (a41f2c, c90d11); replied to review on PR #142; updated Backoff policy in the design page.'})}
+   if(b){S.logged['PAY-228']=(S.logged['PAY-228']||0)+b;TK['PAY-228'].worklogs.push({when:'today',dur:mins(b),min:b,text:'Re-tested partial refund drift on staging, standup prep'})}
+   const rest=[];const st=unlogMin('staging-db');
+   if(st)rest.push('Staging DB '+mins(st));if(!S.assigned[3])rest.push('unattributed 30m');rest.push('inbox + standup 15m');
+   toast(`Logged ${a?mins(a)+' to PAY-231':''}${a&&b?' and ':''}${b?mins(b)+' to PAY-228':''}${a||b?' · ':''}${mins(unlogWeek())} still has no ticket: ${rest.join(', ')}`);render();break}
+  case 'logadhoc':S.modal={kind:'worklog',interval:'13:10–13:58',total:'48m',target:'OPS-77',adhoc:true};render();break;
+  case 'keeplocal':S.stagingKept=true;S.modal=null;toast('Kept "Staging DB configuration" local — 48m stays in your day review, nothing goes to Jira');render();break;
+  case 'assign':{if(!el.value)return;const c=el.value;S.assigned[+d.i]=c;
+   TODAY_MIN[c]=(TODAY_MIN[c]||0)+OTHER_MIN.un;
+   CTX[c].time.today=mins(pm(CTX[c].time.today)+OTHER_MIN.un);CTX[c].time.week=mins(pm(CTX[c].time.week)+OTHER_MIN.un);
+   const p=CTX['PAY-200'];if(p.tickets.includes(c)){p.time.today=mins(pm(p.time.today)+OTHER_MIN.un);p.time.week=mins(pm(p.time.week)+OTHER_MIN.un)}
+   toast(`Assigned 11:50–12:20 to <span class="mono">${esc(ctxName(c))}</span> · 30m moved out of unattributed`);render();break}
+  case 'blk':{const b=BLOCKS[+d.i];if(b.gap)return;if(b.ctx==='?'){toast('Unattributed block — pick a context in the Assign… menu below')}else if(b.ctx)go('#/ctx/'+b.ctx);break}
+  case 'status':{TK[d.key].status=el.value;TK[d.key].updated='today 14:32';toast(`<span class="mono">${d.key}</span> → ${el.value} · written to Jira`);render();break}
+  case 'comment':{const ta=el.querySelector('textarea');const v=ta.value.trim();if(!v)return;const [kind,id]=d.target.split(':');const tgt=kind==='ticket'?TK[id]:kind==='pr'?PR[+id]:PAGE[id];tgt.comments.push({who:'mara',when:'today 14:32',text:esc(v)});toast(`Comment added to <span class="mono">${kind==='ticket'?id:kind==='pr'?'PR #'+id:PAGE[id].title}</span>`);render();break}
+  case 'confirm':{const s=SUGG.find(x=>x.id===d.id);S.confirmed[s.id]=true;
+   if(s.to[0]==='ticket'&&TK[s.to[1]]&&!TK[s.to[1]].links.some(l=>l[0]===s.from[0]&&l[1]===s.from[1]))TK[s.to[1]].links.push(s.from);
+   if(s.from[0]==='ticket'&&!TK[s.from[1]].links.some(l=>l[1]===s.to[1]))TK[s.from[1]].links.push(s.to);
+   if(s.from[0]==='page'&&!CTX[S.ctx].pages.includes(s.from[1]))CTX[S.ctx].pages.push(s.from[1]);
+   if(s.to[0]==='page'&&!CTX[S.ctx].pages.includes(s.to[1]))CTX[S.ctx].pages.push(s.to[1]);
+   toast(`Linked ${esc(ref(...s.from).label)} ↔ ${esc(ref(...s.to).label)}`);render();setTimeout(()=>{S.dismissed[s.id]=true;render()},1400);break}
+  case 'dismiss':S.dismissed[d.id]=true;render();break;
+  case 'inbox':{const i=INBOX.find(x=>x.id===d.id);
+   if(d.do==='done'){S.inboxDone[i.id]=true;toast('Done — removed from the inbox')}
+   else if(d.do==='snooze'){S.snoozed.push({id:i.id,text:i.text.replace(/<[^>]+>/g,''),back:'returns Monday 2026-08-25 09:00'});toast('Snoozed until Monday 09:00')}
+   else if(d.do==='reply'){S.replyOpen=S.replyOpen===i.id?null:i.id;if(S.view!=='inbox'){go('#/inbox');return}}
+   else if(d.do==='rerun'){BUILD[1187].status='queued';S.pending++;toast('Re-run of #1187 queued locally — TeamCity is 401, it runs when the password is fixed',true)}
+   else if(d.do==='ping'){toast('Sent to Tomasz on OPS-77: "PAY-228 staging verification is waiting on the runbook — ETA?"');S.inboxDone[i.id]=true}
+   render();break}
+  case 'sendreply':{const v=el.querySelector('textarea').value.trim();if(!v)return;const i=INBOX.find(x=>x.id===d.id);if(i.ref[0]==='page')PAGE[i.ref[1]].comments.push({who:'mara',when:'today 14:32',text:esc(v)});else PR[i.ref[1]].comments.push({who:'mara',when:'today 14:32',text:esc(v)});S.replyOpen=null;S.inboxDone[i.id]=true;toast(`Reply posted on ${esc(ref(...i.ref).label)}`);render();break}
+  case 'unsnooze':S.snoozed=S.snoozed.filter(z=>z.id!==d.id);render();break;
+  case 'inboxfilter':S.inboxFilter=d.f;render();break;
+  case 'rerun':BUILD[+d.id].status='queued';S.pending++;toast('Re-run of #'+d.id+' queued locally — TeamCity is 401, it runs when the password is fixed',true);render();break;
+  case 'trigger':{const br=$('#tr-br').value,env=$('#tr-env').value,cl=$('#tr-clean').checked;const n=1189;BUILD[n]={cfg:d.cfg,status:S.tcPassword?'running':'queued',step:'step 1/5 checkout',branch:br,when:'queued today 14:32',d:'14:32',dur:'',params:`branch=${br} · env=${env}${cl?' · clean checkout':''}`,for:'PAY-231'};if(!CTX[S.ctx].builds.includes(n))CTX[S.ctx].builds.unshift(n);if(!S.tcPassword)S.pending++;S.trigRes={ok:S.tcPassword,msg:S.tcPassword?`#${n} ${d.cfg} started on ${br} (${env}).`:`#${n} ${d.cfg} queued locally for ${br} (${env}${cl?', clean':''}). TeamCity answered 401 — it is sent as soon as the password is fixed.`};toast(`Build #${n} ${S.tcPassword?'started':'queued (1 pending write)'}`);render();break}
+  case 'approve':toast(`Approved PR #${d.id} — Jonas will see it in Gitea`);PR[+d.id].approvals='1 of 2';PR[+d.id].reviewers='you approved today 14:32';S.inboxDone['i1']=true;render();break;
+  case 'reqchanges':toast(`Requested changes on PR #${d.id}`);break;
+  case 'rereview':toast('Asked Jonas to re-review PR #142');break;
+  case 'editpage':toast('Editing the section in place is not part of this mockup — it opens the section in Confluence.');break;
+  case 'noteedit':NOTE[d.id].text=el.innerText;NOTE[d.id].edited='today 14:32';break;
+  case 'newnote':{const id='note-'+Date.now();const c=CTX[S.ctx];NOTE[id]={title:'Untitled note',edited:'today 14:32',d:'14:32',links:[c.adhoc?c.title:S.ctx],text:'[['+(c.adhoc?c.title:S.ctx)+']] '};c.notes.unshift(id);toast(`New note linked to ${esc(ctxName(S.ctx))}`);go('#/note/'+id);break}
+  case 'runstart':{const k=d.key;const br=$('#sw-br').value;const timer=$('#sw-timer').checked;const prn=S.newIds.pr++;S.stepper={key:k,done:0,res:[],pr:prn,timer,br};render();
+   const res=[`branch created`,`pushed 1 commit`,`PR #${prn} opened`,`linked`,`In Progress`,`clock on ${k}`];
+   const rm=matchMedia('(prefers-reduced-motion: reduce)').matches;let i=0;const tick=()=>{S.stepper.res[i]=res[i];S.stepper.done=++i;
+    if(i===3){PR[prn]={title:TK[k].summary,repo:'payout-service',branch:br,base:'main',state:'open',by:'mara',opened:'today 14:32',d:'14:32',approvals:'0 of 2',reviewers:'no review requested yet',checks:[],for:k,files:[],comments:[]};if(!CTX['PAY-200'].prs.includes(prn))CTX['PAY-200'].prs.unshift(prn);if(!CTX['PAY-200'].branches.includes(br)){BRANCH[br]={repo:'payout-service',d:'14:32',note:'created from main · pushed',st:'0 ahead',pr:prn,commits:[]};CTX['PAY-200'].branches.push(br)}}
+    if(i===4)TK[k].links.push(['pr',prn]);if(i===5){TK[k].status='In Progress';TK[k].updated='today 14:32'}
+    if(i===6&&timer)startTimer(k);render();const n=timer?6:5;if(i<n)setTimeout(tick,rm?0:450);else toast(`Started work on ${k}: branch, PR #${prn}, status In Progress${timer?', clock running':''}`)};setTimeout(tick,rm?0:300);break}
+  case 'createticket':{const key='PAY-'+S.newIds.ticket++;const t=$('#nt-s').value.trim()||'Untitled';TK[key]={summary:t,type:'Task',status:'To Do',priority:'Medium',assignee:'Mara',updated:'today 14:32',d:'14:32',epic:CTX[S.ctx].kind==='Epic'?S.ctx:null,estimate:'—',spent:'0',desc:esc($('#nt-d').value)||'—',comments:[],worklogs:[],links:[]};if(CTX[S.ctx].kind==='Epic')CTX[S.ctx].tickets.push(key);S.newRes={kind:'ticket',key,title:t};S.prefillTicket=null;toast(`Created <span class="mono">${key}</span> in Jira`);render();break}
+  case 'createpage':{const t=$('#np-t').value.trim()||'Untitled page';const id='page-'+Date.now();PAGE[id]={title:t,edited:'today 14:32',d:'14:32',by:'mara',links:[],body:`<p>${esc($('#np-b').value)||'<em>empty</em>'}</p>`};CTX[S.ctx].pages.push(id);S.newRes={kind:'page',id,title:t};toast(`Created page <b>${esc(t)}</b> in ENG`);render();break}
+  case 'gitpull':toast('Pulled payout-service · main is up to date, feature/PAY-231-sepa-retry unchanged');break;
+  case 'gitpush':toast('Pushed feature/PAY-231-sepa-retry → git.tidewater.internal · 0 new commits (already up to date)');break;
+  case 'gitbranch':{const n=$('#gb-n').value.trim();const r=$('#gb-repo').value;BRANCH[n]={repo:r,d:'14:32',note:'created from main · pushed',st:'0 ahead',commits:[]};if(!CTX[S.ctx].branches.includes(n))CTX[S.ctx].branches.push(n);S.gitRes={kind:'branch',msg:`Created <span class="mono">${esc(n)}</span> in ${r} from main and pushed it.`};toast(`Branch ${esc(n)} created`);render();break}
+  case 'gitrepo':{const n=$('#gr-n').value.trim()||'new-repo';REPO[n]={lang:'—',clone:'~/code/'+n,note:'empty · default branch main'};S.gitRes={kind:'repo',msg:`Created <span class="mono">tidewater/${esc(n)}</span> on git.tidewater.internal (private) and cloned it to ~/code/${esc(n)}.`};toast(`Repository ${esc(n)} created`);render();break}
+  case 'savenote':{if(S.saved)return;NOTE['standup-0822']={title:'Standup 2026-08-22',edited:'today 14:32',d:'14:32',links:['PAY-231','OPS-77','PAY-240'],text:'Jonas: PR #144 CSV export ready for review. Priya: finance wants the manual-review SLA documented by Monday. Tomasz: on-call handbook update in progress, ETA Tuesday ([[OPS-77]]). Lena: finance complaints about dashboard latency → [[PAY-240]]. Action: Mara → add SLA to SEPA payout retry design ([[PAY-231]]).'};CTX['PAY-200'].notes.unshift('standup-0822');S.saved=true;toast('Saved as note <b>Standup 2026-08-22</b> · linked to PAY-231, OPS-77, PAY-240');render();break}
+  case 'publish':{if(S.published)return;S.published=true;toast('Published to Confluence · ENG › Standup protocols › 2026-08-22');render();break}
+  case 'aiticket':{const key='PAY-'+S.newIds.ticket++;TK[key]={summary:d.t,type:'Task',status:'To Do',priority:'Medium',assignee:['Mara','Tomasz','Lena'][+d.i],updated:'today 14:32',d:'14:32',epic:'PAY-200',estimate:'—',spent:'0',desc:'From the standup protocol 2026-08-22.',comments:[],worklogs:[],links:[]};CTX['PAY-200'].tickets.push(key);S['ai'+d.i]=key;toast(`Created <span class="mono">${key}</span> from the action item`);render();break}
+  case 'tcpass':{S.tcPassword=true;const p=S.pending;S.pending=0;toast(`TeamCity password accepted · synced${p?' · '+p+' pending write'+(p>1?'s':'')+' sent':''}`);Object.keys(BUILD).forEach(k=>{if(BUILD[k].status==='queued')BUILD[k].status='running'});render();break}
+  case 'rotate':toast('Opens the Jira PAT rotation in the browser — paste the new token here afterwards.');break;
+  case 'syncnow':toast(d.id==='all'?'Syncing all sources…'+(S.tcPassword?'':' TeamCity still 401'):`Syncing ${d.id}…`,d.id==='teamcity'&&!S.tcPassword);break;
+  case 'addsrc':{const st=+d.step;if(!st){S.addSrc=null;render();break}const a=S.addSrc||{};if(d.type)a.type=d.type;if(st>=3&&$('#as-url')){a.url=$('#as-url').value;a.name=$('#as-name').value}if(st===5){(S.extraSources=S.extraSources||[]).push({name:a.name||a.type,type:a.type,stamp:a.type.slice(0,4).toUpperCase()})}a.step=st;S.addSrc=a;render();break}
+  case 'testconn':{const a=S.addSrc;const u=$('#as-u').value,p=$('#as-p').value;a.test=u&&p?{ok:true,msg:`Connected to ${esc(a.url||a.type)} as ${esc(u)} · adapter ready · ${a.type.includes('Git')?'47 repos visible':'read and write allowed'}`}:{ok:false,msg:'Connection failed: no credentials given. Enter a user and a secret, then test again.'};render();break}
+  case 'go':go(d.go);break;
+ }
+}
+
+/* =====================================================================
+   EVENTS
+   ===================================================================== */
+document.addEventListener('click',e=>{
+ const a=e.target.closest('[data-act]');
+ if(a&&a.tagName!=='SELECT'&&a.tagName!=='INPUT'&&a.tagName!=='FORM'&&!a.classList.contains('editor')){
+  if(a.classList.contains('scrim')&&e.target!==a){/* click inside dialog */}else{act(a.dataset.act,a,e);return}
+ }
+ const g=e.target.closest('[data-go]');
+ if(g){e.preventDefault();if(g.closest('.scrim')){S.searchOpen=false;S.search.list=null}S.pop=null;S.scrollDetail=true;go(g.dataset.go);return}
+ if(S.pop&&!e.target.closest('.pop')){S.pop=null;render()}
+});
+document.addEventListener('change',e=>{const a=e.target.closest('[data-act]');if(a&&(a.tagName==='SELECT'||a.tagName==='INPUT'))act(a.dataset.act,a,e)});
+document.addEventListener('submit',e=>{const a=e.target.closest('form[data-act]');if(a){e.preventDefault();act(a.dataset.act,a,e)}});
+document.addEventListener('input',e=>{
+ if(e.target.id==='sq'){S.search.q=e.target.value;S.search.list=null;const body=$('.srch .body');const keep=e.target;const tmp=document.createElement('div');tmp.innerHTML=renderSearch();body.replaceWith(tmp.querySelector('.srch .body'));}
+ const ed=e.target.closest('[data-act="noteedit"]');if(ed)act('noteedit',ed,e);
+});
+document.addEventListener('keydown',e=>{
+ const mod=e.metaKey||e.ctrlKey;
+ if(mod&&e.key.toLowerCase()==='k'){e.preventDefault();act('search');return}
+ if(mod&&e.key.toLowerCase()==='t'){e.preventDefault();if(S.timer.running)stopTimer();else{startTimer(S.ctx);render()}return}
+ if(e.key==='Escape'){if(closeTop())e.preventDefault();return}
+ if(e.key==='Enter'){
+  if(e.target.id==='sq'){const f=$('.srch .ledger .lr[data-go]');if(f){S.searchOpen=false;S.search.list=null;go(f.dataset.go)}return}
+  const g=e.target.closest('[data-go]');if(g&&e.target===g){e.preventDefault();go(g.dataset.go)}
+ }
+});
+window.addEventListener('hashchange',route);
+try{route();setInterval(()=>{if(S.timer.running){const el=document.querySelector('#top .timer .el');if(el)el.textContent=fmtEl(Date.now()-S.timer.since);const p=document.querySelector('.pop [style*="22px"]');if(p)p.textContent=fmtElS(Date.now()-S.timer.since)}},1000)}
+catch(err){const j=$('#jserr');j.hidden=false;j.textContent='init error: '+err.message;j.style.cssText='position:fixed;left:8px;bottom:30px;background:#C8372D;color:#fff;padding:6px 10px;z-index:99';console.error(err)}
+</script>
+</body>
+</html>
