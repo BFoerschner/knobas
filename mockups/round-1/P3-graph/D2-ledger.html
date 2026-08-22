@@ -1,0 +1,2115 @@
+<!--
+knobas mockup
+paradigm: P3 Graph
+design: D2 Ledger
+thesis: Seeing the shape of your work — which ticket pulls which branch, build, page and note — and linking things by dragging one onto another instead of filling forms.
+thesis: The graph is drawn in ink on ruled ledger paper: nodes sit on the ruling like entries, confirmed links are ink lines, proposals are pencil-dashed, and every card and row is a dated ledger line with a stamp.
+thesis: Rubber-stamped nodes — each entity on the canvas carries a rotated JIRA / WIKI / GIT / CI / NOTE stamp; confirming a dashed link inks it solid with a 200 ms stamp.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>knobas — Tidewater Freight</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100,400;100,500;100,600;100,700;125,700&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#FCFCFA; --panel:#F4F5F2; --rule:#D7DEE8; --margin:#E0857C;
+  --ink:#1B2230; --muted:#5F6B7A; --faint:#9AA5B4;
+  --blue:#1F3A8A; --red:#C8372D;
+  --blue-tint:#EEF1FA; --red-tint:#FBEDEB;
+  --ff:'Archivo',system-ui,-apple-system,'Helvetica Neue',sans-serif;
+  --serif:'Source Serif 4',Georgia,'Times New Roman',serif;
+  --mono:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
+  --row:34px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;background:var(--paper)}
+body{font:13px/1.45 var(--ff);color:var(--ink);-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit;border-radius:0}
+button{cursor:pointer;background:none;border:0}
+a{color:var(--blue)}
+code,.mono{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px}
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+::selection{background:var(--blue);color:#fff}
+[hidden]{display:none!important}
+
+/* ---------- app frame ---------- */
+#app{display:grid;grid-template-columns:48px 1fr 420px;grid-template-rows:44px 1fr 26px;height:100vh;width:100vw;min-width:1100px;position:relative}
+@media (max-width:1240px){#app{grid-template-columns:48px 1fr 360px}
+  .brand small{display:none}
+  .card .lrow{grid-template-columns:56px 56px 1fr auto 40px}
+  .card .lrow .desc.serif{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+@media (max-width:1320px){.status .s.sched{display:none}}
+
+.top{grid-column:1/4;grid-row:1;display:flex;align-items:center;gap:10px;padding:0 12px 0 12px;background:var(--panel);border-bottom:1px solid var(--rule)}
+.brand{font-family:var(--ff);font-stretch:125%;font-weight:700;font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink);margin-right:6px;display:flex;align-items:center;gap:8px;white-space:nowrap;flex:none}
+.brand small{font-stretch:100%;font-weight:400;letter-spacing:.02em;text-transform:none;color:var(--muted);font-size:12px}
+.search{position:relative;flex:0 1 380px;min-width:220px}
+.search input{width:100%;height:30px;padding:0 58px 0 30px;border:1px solid var(--rule);background:var(--paper);font-size:13px}
+.search input:focus{border-color:var(--blue);outline:0;box-shadow:inset 0 0 0 1px var(--blue)}
+.search .glyph{position:absolute;left:9px;top:7px;color:var(--muted);pointer-events:none}
+.search .kbd{position:absolute;right:8px;top:7px}
+.kbd{font-family:var(--mono);font-size:10px;color:var(--muted);border:1px solid var(--rule);padding:1px 4px;background:var(--paper);line-height:1.2}
+.top .spacer{flex:1}
+.pill{display:flex;align-items:center;gap:7px;height:30px;padding:0 10px;border:1px solid var(--rule);background:var(--paper);font-size:12px;white-space:nowrap}
+.pill:hover{border-color:var(--ink)}
+.pill.timer{border-color:var(--blue);color:var(--blue)}
+.pill.timer.off{border-color:var(--rule);color:var(--muted)}
+.pill .cnt{font-family:var(--mono);font-size:11px;color:#fff;background:var(--red);padding:1px 5px;min-width:18px;text-align:center}
+.pill.sync .dot{width:8px;height:8px;background:var(--blue);display:inline-block}
+.pill.sync.bad .dot{background:var(--red)}
+.pill.sync.bad{color:var(--red);border-color:var(--red)}
+.iconbtn{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border:1px solid transparent;color:var(--muted)}
+.iconbtn:hover{border-color:var(--ink);color:var(--ink)}
+svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:square;stroke-linejoin:miter}
+
+.rail{grid-column:1;grid-row:2;background:var(--panel);border-right:1px solid var(--rule);display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:4px}
+.rail button{width:36px;height:36px;display:flex;align-items:center;justify-content:center;color:var(--muted);position:relative;border:1px solid transparent}
+.rail button:hover{color:var(--ink);border-color:var(--ink)}
+.rail button.on{color:var(--blue);border-color:var(--blue);background:var(--paper)}
+.rail button .b{position:absolute;top:2px;right:2px;font:500 9px/1 var(--mono);background:var(--red);color:#fff;padding:1px 3px}
+.rail .grow{flex:1}
+.rail svg.i{width:18px;height:18px}
+
+/* ---------- canvas ---------- */
+.canvas-wrap{grid-column:2;grid-row:2;position:relative;overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.lenses{height:34px;display:flex;align-items:center;gap:5px;padding:0 10px 0 14px;border-bottom:1px solid var(--rule);background:var(--paper);overflow-x:auto;flex:none}
+.lenses::-webkit-scrollbar{height:0}
+.lens{height:24px;padding:0 6px;border:1px solid var(--rule);background:var(--paper);font-size:11px;white-space:nowrap;display:inline-flex;align-items:center;gap:6px;color:var(--muted)}
+.lens .n{font-family:var(--mono);font-size:11px;color:var(--ink)}
+.lens .up{font-family:var(--mono);font-size:10px;color:var(--red)}
+.lens:hover{border-color:var(--ink);color:var(--ink)}
+.lens.on{border-color:var(--blue);color:var(--blue);background:var(--blue-tint)}
+.lens.on .n{color:var(--blue)}
+.lenses .lbl{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-right:2px}
+.lensnote{position:absolute;top:34px;left:0;right:0;z-index:3;background:var(--blue-tint);border-bottom:1px solid var(--rule);padding:5px 14px 5px 14px;font-size:12px;color:var(--ink);display:flex;gap:12px;align-items:center}
+.lensnote b{font-weight:600}
+.lensnote .x{margin-left:auto}
+#canvas{flex:1;position:relative;overflow:hidden;cursor:grab;
+  background-image:
+    linear-gradient(to right, transparent 55px, var(--margin) 55px, var(--margin) 56px, transparent 56px),
+    repeating-linear-gradient(to bottom, transparent 0 31px, var(--rule) 31px 32px);
+  background-color:var(--paper)}
+#canvas.panning{cursor:grabbing}
+#canvas.linking{cursor:crosshair}
+#graph{width:100%;height:100%;display:block}
+#graph text{font-family:var(--ff);fill:var(--ink);user-select:none;pointer-events:none}
+.edge{stroke:var(--blue);stroke-width:1.3;fill:none}
+.edge.suggested{stroke:var(--red);stroke-dasharray:5 4;stroke-width:1.2;cursor:pointer}
+.edge.blocked{stroke:var(--red)}
+.edge-hit{stroke:transparent;stroke-width:14;fill:none;cursor:pointer}
+.edge-lbl{font-size:10px;fill:var(--red);font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+.edge.dim,.edge-lbl.dim{opacity:.15}
+.edge.hot{stroke-width:2.2}
+.node{cursor:pointer}
+.node .box{fill:var(--paper);stroke:var(--ink);stroke-width:1}
+.node:hover .box{stroke-width:1.6}
+.node.sel .box{stroke:var(--blue);stroke-width:2;fill:var(--blue-tint)}
+.node.hot .box{stroke:var(--blue);stroke-width:2.2;fill:var(--blue-tint)}
+.node.dim{opacity:.22}
+.node.drop .box{stroke:var(--red);stroke-width:2;stroke-dasharray:4 3}
+.node .key{font-family:var(--mono);font-size:12px;font-weight:500}
+.node .sub{font-size:10px;fill:var(--muted)}
+.node .ttl{font-size:11px;fill:var(--ink)}
+.node .ttl.serif{font-family:var(--serif);font-size:12px}
+.node.sel .key,.node.hot .key{fill:var(--blue)}
+.node .ring{fill:none;stroke:var(--blue);stroke-width:1.4;stroke-dasharray:7 5;animation:ringspin 6s linear infinite}
+@keyframes ringspin{to{stroke-dashoffset:-48}}
+.node .runner{fill:none;stroke:var(--ink);stroke-width:1.3;stroke-dasharray:3 2.2;transform-box:fill-box;transform-origin:center;animation:runspin 2.4s linear infinite}
+@keyframes runspin{to{transform:rotate(360deg)}}
+.node:focus-visible{outline:0}
+.node:focus-visible .box{stroke:var(--blue);stroke-width:2.4}
+g.sstamp{mix-blend-mode:multiply;opacity:.85;transform-box:fill-box;transform-origin:center}
+g.sstamp rect{fill:var(--paper);stroke:var(--red);stroke-width:1}
+g.sstamp rect+rect{fill:none}
+g.sstamp text{font-size:8px;font-weight:700;letter-spacing:.14em;fill:var(--red)}
+g.sstamp.blue rect{stroke:var(--blue)} g.sstamp.blue text{fill:var(--blue)}
+g.sstamp.ink rect{stroke:var(--ink)} g.sstamp.ink text{fill:var(--ink)}
+g.sstamp.big rect{fill:none;stroke-width:1.3} g.sstamp.big text{font-size:10px}
+g.sstamp.in{animation:stampin .2s ease-out}
+@keyframes stampin{from{transform:scale(1.7);opacity:0}to{opacity:.85}}
+.ghost{stroke:var(--red);stroke-width:1.3;stroke-dasharray:5 4;fill:none;pointer-events:none}
+.legend{position:absolute;left:14px;bottom:10px;display:flex;gap:14px;align-items:center;font-size:11px;color:var(--muted);pointer-events:none;background:rgba(252,252,250,.85);padding:4px 8px}
+.legend .ln{display:inline-block;width:22px;border-top:1.4px solid var(--blue);vertical-align:middle}
+.legend .ln.dash{border-top:1.3px dashed var(--red)}
+.legend .ln.ring{border-top:1.4px dashed var(--blue);border-radius:50%;width:14px;height:14px;border:1.4px dashed var(--blue)}
+.zoom{position:absolute;right:10px;bottom:10px;display:flex;border:1px solid var(--rule);background:var(--paper)}
+.zoom button{width:28px;height:26px;color:var(--muted);font-size:14px}
+.zoom button:hover{color:var(--ink);background:var(--panel)}
+.zoom button+button{border-left:1px solid var(--rule)}
+.hint{position:absolute;right:10px;top:44px;font-size:11px;color:var(--faint);pointer-events:none}
+
+/* ---------- stamps (HTML) ---------- */
+.stamp{display:inline-block;font:700 9px/1 var(--ff);letter-spacing:.14em;text-transform:uppercase;padding:3px 5px;border:3px double var(--red);color:var(--red);transform:rotate(var(--rot,-3deg));opacity:.85;mix-blend-mode:multiply;white-space:nowrap;background:var(--paper)}
+.stamp.blue{border-color:var(--blue);color:var(--blue)}
+.stamp.ink{border-color:var(--ink);color:var(--ink)}
+.stamp.big{font-size:11px;padding:4px 8px}
+.stamp.in{animation:stampin .2s ease-out}
+
+/* ---------- card (right) ---------- */
+.card{grid-column:3;grid-row:2;overflow:auto;border-left:1px solid var(--rule);background:var(--paper);position:relative;min-width:0}
+.card .margin{position:absolute;left:36px;top:0;bottom:0;width:1px;background:var(--margin);pointer-events:none;min-height:100%}
+.card-in{padding:14px 16px 40px 48px;position:relative}
+.card-in.empty{color:var(--muted);font-size:12.5px}
+.chead{display:flex;align-items:flex-start;gap:10px;margin-bottom:6px}
+.chead .stamp{margin-top:3px}
+.chead .k{font-family:var(--mono);font-size:13px;font-weight:500;color:var(--blue)}
+.chead .meta{font-size:11px;color:var(--muted);margin-top:2px}
+.chead .more{margin-left:auto}
+h1.t{font:600 16px/1.25 var(--ff);margin:2px 0 10px;letter-spacing:-.01em}
+h1.t.serif{font-family:var(--serif);font-weight:600;font-size:17px}
+h2.s{font:600 11px/1 var(--ff);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:18px 0 6px;display:flex;align-items:center;gap:8px}
+h2.s .n{font-family:var(--mono);color:var(--faint);letter-spacing:0}
+h2.s .r{margin-left:auto;letter-spacing:0;text-transform:none;font-weight:500;font-size:11px}
+.fields{display:grid;grid-template-columns:92px 1fr;border-top:1px solid var(--rule)}
+.fields>div{padding:0 6px 0 0;min-height:30px;display:flex;align-items:center;gap:5px;flex-wrap:wrap;border-bottom:1px solid var(--rule);font-size:12.5px}
+.fields>div:nth-child(odd){font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.fields select{height:24px;border:1px solid var(--rule);background:var(--paper);padding:0 4px;font-size:12px}
+.fields select:hover{border-color:var(--ink)}
+.prio.High{color:var(--red);font-weight:500}
+.serif{font-family:var(--serif);font-size:14px;line-height:1.5}
+.desc{font-family:var(--serif);font-size:14px;line-height:1.5;padding:6px 0 4px}
+.desc code{font-size:12px;background:var(--panel);padding:0 3px}
+.desc h3{font:600 14px/1.3 var(--serif);margin:10px 0 4px}
+.desc h3:first-child{margin-top:0}
+.desc em{color:var(--muted)}
+.actions{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 4px}
+.btn{height:26px;padding:0 10px;border:1px solid var(--ink);background:var(--paper);font-size:12px;font-weight:500;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.btn:hover{background:var(--panel)}
+.btn.p{background:var(--blue);border-color:var(--blue);color:#fff}
+.btn.p:hover{background:#172d6d}
+.btn.d{color:var(--red);border-color:var(--red)}
+.btn.d:hover{background:var(--red-tint)}
+.btn.q{border-color:var(--rule);color:var(--muted)}
+.btn.q:hover{color:var(--ink);border-color:var(--ink)}
+.btn.sm{height:22px;padding:0 7px;font-size:11px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn svg.i{width:13px;height:13px}
+
+/* ledger rows */
+.ledger{border-top:1px solid var(--rule)}
+.lrow{display:grid;grid-template-columns:58px 74px 1fr auto 46px;gap:8px;align-items:center;min-height:var(--row);padding:3px 0;border-bottom:1px solid var(--rule);font-size:12.5px}
+.lrow.click{cursor:pointer}
+.lrow.click:hover{background:var(--panel)}
+.lrow .d{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap}
+.lrow .ref{font-family:var(--mono);font-size:12px;color:var(--blue);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lrow .desc{font-family:var(--ff);font-size:12.5px;padding:0;line-height:1.3;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lrow .desc.serif{font-family:var(--serif);font-size:13.5px;white-space:normal}
+.lrow .st{font-size:11px;color:var(--muted);white-space:nowrap;text-align:right}
+.lrow .st.red{color:var(--red);font-weight:500}
+.lrow .st.blue{color:var(--blue)}
+.lrow .stamp{justify-self:end}
+.lrow .tot{font-family:var(--mono);font-size:11.5px;text-align:right;color:var(--ink)}
+.lrow.sum{background:var(--panel);font-weight:500}
+.lrow.sug{grid-template-columns:74px 1fr auto;background:var(--red-tint)}
+.lrow.sug .why{font-size:11px;color:var(--muted);display:block;white-space:normal}
+.lrow.sug .acts{display:flex;gap:4px}
+.lrow.cmt{grid-template-columns:58px 1fr;align-items:start}
+.lrow.cmt .who{font-weight:500;font-size:12px}
+.lrow.cmt .txt{font-family:var(--serif);font-size:13.5px;line-height:1.45;white-space:normal}
+.lrow.wl{grid-template-columns:58px 1fr 62px 62px}
+.lrow.wl .d2{font-family:var(--mono);font-size:11.5px;text-align:right}
+.lrow.two{grid-template-columns:58px 1fr auto}
+.lrow.chk{grid-template-columns:1fr auto}
+.lrow.note{grid-template-columns:58px 1fr 46px}
+.lrow.file{grid-template-columns:1fr auto}
+.lrow.file .diff{font-family:var(--mono);font-size:11px}
+.lrow.file .diff b{color:var(--blue);font-weight:500} .lrow.file .diff i{color:var(--red);font-style:normal}
+.lrow.on{background:var(--blue-tint)}
+.chip{display:inline-flex;align-items:center;gap:4px;font-family:var(--mono);font-size:11px;color:var(--blue);border:1px solid var(--rule);padding:1px 5px;background:var(--paper);cursor:pointer;white-space:nowrap;vertical-align:middle}
+.chip:hover{border-color:var(--blue)}
+.chip.red{color:var(--red)}
+.plus{color:var(--blue);font-family:var(--mono)} .minus{color:var(--red);font-family:var(--mono)}
+textarea.ta{width:100%;min-height:64px;border:1px solid var(--rule);background:var(--paper);padding:6px 8px;font-family:var(--serif);font-size:13.5px;line-height:1.5;resize:vertical}
+textarea.ta:focus{border-color:var(--blue);outline:0;box-shadow:inset 0 0 0 1px var(--blue)}
+textarea.ta.big{min-height:220px}
+input.in,select.in{height:28px;border:1px solid var(--rule);background:var(--paper);padding:0 8px;font-size:12.5px;width:100%}
+input.in:focus,select.in:focus{border-color:var(--blue);outline:0;box-shadow:inset 0 0 0 1px var(--blue)}
+.muted{color:var(--muted)} .faint{color:var(--faint)} .red{color:var(--red)} .blue{color:var(--blue)}
+.small{font-size:11px}
+.pre{font-family:var(--mono);font-size:11.5px;line-height:1.5;background:var(--panel);border:1px solid var(--rule);padding:8px 10px;white-space:pre-wrap;overflow:auto}
+.pre .f{color:var(--red);font-weight:500}
+.checks{display:flex;gap:6px;flex-wrap:wrap}
+.runner-i{display:inline-block;width:11px;height:11px;border:1.4px dashed var(--ink);border-radius:50%;vertical-align:-1px;animation:runspin 2.4s linear infinite}
+.notelist{border-top:1px solid var(--rule);margin-bottom:10px}
+.backlinks .lrow{grid-template-columns:74px 1fr 46px}
+.editorbar{display:flex;gap:6px;align-items:center;margin:6px 0}
+.editorbar .muted{margin-left:auto}
+
+/* ---------- status bar ---------- */
+.status{grid-column:1/4;grid-row:3;display:flex;align-items:center;gap:0;background:var(--panel);border-top:1px solid var(--rule);font-size:11px;color:var(--muted);padding:0 10px;white-space:nowrap;overflow:hidden}
+.status .s{display:flex;align-items:center;gap:5px;padding:0 10px;border-right:1px solid var(--rule);height:100%}
+.status .s:first-child{padding-left:0}
+.status .s b{font-weight:500;color:var(--ink)}
+.status .s.bad{color:var(--red)} .status .s.bad b{color:var(--red)}
+.status .s .dot{width:7px;height:7px;background:var(--blue);display:inline-block}
+.status .s.bad .dot{background:var(--red)}
+.status .s button{color:var(--blue);text-decoration:underline;text-underline-offset:2px;font-size:11px}
+.status .grow{flex:1}
+.status .s.last{border-right:0}
+.status .mono{font-size:11px}
+
+/* ---------- overlays ---------- */
+.sheet{position:absolute;top:44px;right:0;bottom:26px;width:640px;max-width:calc(100vw - 48px - 160px);background:var(--paper);border-left:1px solid var(--ink);box-shadow:-8px 0 24px rgba(27,34,48,.12);z-index:20;display:flex;flex-direction:column;min-width:0}
+.sheet.w{width:880px}
+.sheet.m{width:720px}
+.shead{display:flex;align-items:center;gap:10px;padding:0 16px 0 48px;height:44px;border-bottom:1px solid var(--rule);background:var(--panel);position:relative;flex:none}
+.shead::before{content:"";position:absolute;left:36px;top:0;bottom:0;width:1px;background:var(--margin)}
+.shead h1{font:600 14px/1 var(--ff);letter-spacing:.02em}
+.shead .sub{font-size:11.5px;color:var(--muted)}
+.shead .x{margin-left:auto}
+.sbody{flex:1;overflow:auto;position:relative;padding:12px 16px 30px 48px}
+.sbody::before{content:"";position:absolute;left:36px;top:0;bottom:0;width:1px;background:var(--margin);min-height:100%}
+.sbody.cols{display:grid;grid-template-columns:1fr 1fr;gap:0 28px;align-content:start}
+.sbody.cols>div{min-width:0}
+.sheet h2.s:first-child{margin-top:4px}
+.inbox .lrow{grid-template-columns:50px 46px 1fr;align-items:start;padding:7px 0;cursor:pointer}
+.inbox .lrow:hover{background:var(--panel)}
+.inbox .lrow.hl{background:var(--blue-tint)}
+.inbox .txt{font-size:12.5px;line-height:1.4}
+.inbox .txt q{font-family:var(--serif);font-size:13.5px}
+.inbox .acts{display:flex;gap:4px;margin-top:6px;flex-wrap:wrap}
+.inbox .reply{margin-top:6px;display:flex;gap:6px}
+.inbox .reply input{flex:1}
+.inbox .done{opacity:.55}
+.srcrow{display:grid;grid-template-columns:24px 46px 1fr 150px 170px auto;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--rule);font-size:12px}
+.srcrow .name{font-weight:600;font-size:13px}
+.srcrow .url{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.srcrow .caps{display:flex;gap:4px;margin-top:3px;flex-wrap:wrap}
+.srcrow .cap{font-size:10px;letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--rule);padding:0 4px;color:var(--muted)}
+.srcrow .cap.no{text-decoration:line-through;color:var(--faint)}
+.srcrow .ad{font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+.srcrow.bad{background:var(--red-tint)}
+.srcrow.off{opacity:.5}
+.srcrow input[type=checkbox]{width:15px;height:15px;accent-color:var(--blue)}
+.srcrow .state b{font-weight:500}
+.srcrow .fix{grid-column:2/7;display:flex;gap:6px;align-items:center;padding-top:4px}
+.srcrow .fix input{width:220px}
+.addsrc{border:1px solid var(--rule);padding:12px 14px;margin-top:10px;background:var(--panel)}
+.steps{display:flex;gap:0;margin-bottom:12px;border-bottom:1px solid var(--rule)}
+.steps span{padding:4px 10px 6px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);border-bottom:2px solid transparent;margin-bottom:-1px}
+.steps span.on{color:var(--blue);border-color:var(--blue)}
+.steps span.done{color:var(--ink)}
+.types{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.types button{border:1px solid var(--rule);background:var(--paper);padding:8px 10px;text-align:left;display:flex;gap:8px;align-items:center}
+.types button:hover{border-color:var(--ink)}
+.types button.on{border-color:var(--blue);background:var(--blue-tint)}
+.types .tn{font-weight:600;font-size:12px}
+.types .ad{font-family:var(--mono);font-size:10px;color:var(--faint)}
+.frm{display:grid;grid-template-columns:120px 1fr;gap:8px 12px;align-items:center;margin:8px 0}
+.frm label{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.frm .radios{display:flex;gap:12px;flex-wrap:wrap}
+.frm .radios label{text-transform:none;letter-spacing:0;font-size:12.5px;color:var(--ink);display:flex;align-items:center;gap:4px}
+.frm input[type=radio],.frm input[type=checkbox]{accent-color:var(--blue)}
+.frm .full{grid-column:1/3}
+.result{border:1px solid var(--rule);padding:8px 10px;margin:8px 0;font-size:12.5px;display:flex;gap:10px;align-items:center;background:var(--paper)}
+.result.ok{border-color:var(--blue)} .result.bad{border-color:var(--red);color:var(--red)}
+.sfoot{display:flex;gap:6px;justify-content:flex-end;margin-top:10px}
+.sfoot .l{margin-right:auto}
+/* standup */
+.digest .lrow{grid-template-columns:1fr;padding:6px 0}
+.digest .line{font-family:var(--serif);font-size:13.5px;line-height:1.45}
+.digest .srcs{margin-top:3px;display:flex;gap:4px;flex-wrap:wrap}
+.digest .lrow:hover{background:var(--blue-tint)}
+.proto{font-family:var(--serif);font-size:14px;line-height:1.55;border:1px solid var(--rule);padding:10px 12px;min-height:200px;outline:0}
+.proto:focus{border-color:var(--blue)}
+.proto h3{font:600 14px/1.3 var(--serif);margin:8px 0 2px}
+.proto h3:first-child{margin-top:0}
+.proto ul{padding-left:18px}
+.proto b{font-weight:600}
+.ai .lrow{grid-template-columns:1fr auto}
+.pubbox{border:1px solid var(--rule);padding:8px 10px;margin-top:8px;font-size:12px;display:flex;align-items:center;gap:8px}
+.pubbox.ok{border-color:var(--blue);background:var(--blue-tint)}
+.crumbs{font-family:var(--mono);font-size:11px;color:var(--muted)}
+/* time bottom sheet */
+.bsheet{position:absolute;left:48px;right:0;bottom:26px;height:300px;background:var(--paper);border-top:1px solid var(--ink);box-shadow:0 -8px 24px rgba(27,34,48,.12);z-index:19;display:flex;flex-direction:column}
+.bsheet .shead{padding-left:48px}
+.bsheet .tabs{display:flex;gap:0;margin-left:12px}
+.bsheet .tabs button{padding:0 10px;height:44px;font-size:12px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+.bsheet .tabs button.on{color:var(--blue);border-color:var(--blue)}
+.bsheet .sbody{padding:10px 16px 12px 48px;overflow:auto}
+.strip{position:relative;height:64px;border:1px solid var(--rule);background:var(--paper);margin:16px 0 8px;display:flex}
+.blk{position:absolute;top:0;bottom:0;border-right:1px solid var(--paper);padding:5px 6px;font-size:11px;overflow:hidden;cursor:pointer;min-width:0}
+.blk .k{font-family:var(--mono);font-size:11px;font-weight:500;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.blk .tt{display:block;font-family:var(--mono);font-size:10px;color:var(--muted);white-space:nowrap}
+.blk .how{display:block;font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.blk.passive{background:repeating-linear-gradient(135deg,var(--blue-tint) 0 4px,var(--paper) 4px 8px);border-top:3px solid var(--blue)}
+.blk.manual{background:var(--blue-tint);border-top:3px solid var(--blue)}
+.blk.label{background:var(--paper);border-top:3px dashed var(--blue);outline:1px dashed var(--blue);outline-offset:-2px}
+.blk.un{background:repeating-linear-gradient(135deg,var(--red-tint) 0 4px,var(--paper) 4px 8px);border-top:3px solid var(--red);outline:1.5px solid var(--red);outline-offset:-1.5px}
+.blk.un .k{color:var(--red)}
+.blk.gap{background:var(--panel);color:var(--faint);border-top:3px solid var(--rule)}
+.blk.logged::after{content:"logged";position:absolute;right:4px;top:3px;font:700 8px/1 var(--ff);letter-spacing:.12em;text-transform:uppercase;color:var(--blue);border:2px double var(--blue);padding:2px 3px;transform:rotate(-4deg);opacity:.85}
+.blk{text-align:left;font:inherit}
+.blk:hover{filter:brightness(.97)}
+.blk.sel{box-shadow:inset 0 0 0 2px var(--blue)}
+.ticks{position:relative;height:14px;font-family:var(--mono);font-size:10px;color:var(--faint)}
+.ticks span{position:absolute;transform:translateX(-50%)}
+.ticks span::before{content:"";position:absolute;left:50%;top:14px;height:6px;border-left:1px solid var(--rule)}
+.blkdetail{display:flex;gap:8px;align-items:center;font-size:12px;min-height:28px;flex-wrap:wrap}
+.week{border-top:1px solid var(--rule);max-width:560px}
+.week .lrow{grid-template-columns:70px 1fr 80px 80px 90px}
+.week .lrow .num{font-family:var(--mono);font-size:12px;text-align:right}
+.week .bar{height:8px;background:var(--blue);opacity:.85}
+.week .bar.u{background:var(--red)}
+.week .h{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);min-height:24px}
+.week .h .num{font-family:var(--ff);font-size:10.5px}
+/* dialog */
+.backdrop{position:absolute;inset:0;background:rgba(27,34,48,.18);z-index:40;display:flex;align-items:center;justify-content:center}
+.dialog{background:var(--paper);border:1px solid var(--ink);box-shadow:0 12px 40px rgba(27,34,48,.22);width:560px;max-width:92vw;max-height:86vh;display:flex;flex-direction:column;position:relative}
+.dialog.w{width:680px}
+.dialog::before{content:"";position:absolute;left:30px;top:0;bottom:0;width:1px;background:var(--margin);pointer-events:none}
+.dhead{display:flex;align-items:center;gap:10px;padding:0 14px 0 42px;height:42px;border-bottom:1px solid var(--rule);background:var(--panel)}
+.dhead h1{font:600 14px/1 var(--ff)}
+.dhead .x{margin-left:auto}
+.dbody{padding:12px 16px 12px 42px;overflow:auto;font-size:12.5px}
+.dfoot{display:flex;gap:6px;justify-content:flex-end;padding:10px 14px 12px 42px;border-top:1px solid var(--rule)}
+.dfoot .l{margin-right:auto;align-self:center;font-size:11.5px;color:var(--muted)}
+.stepsl .lrow{grid-template-columns:22px 1fr auto}
+.stepsl .ic{width:14px;height:14px;border:1px solid var(--faint);display:inline-block}
+.stepsl .ic.run{border:1.4px dashed var(--ink);border-radius:50%;animation:runspin 2.4s linear infinite}
+.stepsl .ic.ok{border-color:var(--blue);background:var(--blue);position:relative}
+.stepsl .ic.ok::after{content:"";position:absolute;left:4px;top:1px;width:4px;height:8px;border:solid #fff;border-width:0 1.6px 1.6px 0;transform:rotate(45deg)}
+.stepsl .lrow.pending{color:var(--muted)}
+.gen{font-family:var(--serif);font-size:13.5px;border:1px solid var(--rule);padding:6px 8px;background:var(--paper);min-height:48px}
+.interval{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px;flex-wrap:wrap}
+.interval input{width:62px;height:26px;border:1px solid var(--rule);padding:0 4px;font-family:var(--mono);font-size:12px;text-align:center;background:var(--paper)}
+.tot{font-family:var(--mono);font-weight:500;color:var(--blue)}
+/* popover / menu */
+.pop{position:absolute;z-index:45;background:var(--paper);border:1px solid var(--ink);box-shadow:0 8px 24px rgba(27,34,48,.16);min-width:220px;font-size:12.5px}
+.menu button{display:flex;width:100%;text-align:left;padding:0 12px;height:30px;align-items:center;gap:8px;border-bottom:1px solid var(--rule)}
+.menu button:last-child{border-bottom:0}
+.menu button:hover,.menu button:focus-visible{background:var(--blue-tint);color:var(--blue);outline:0}
+.menu button .k{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--faint)}
+.menu .hd{padding:6px 12px;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);background:var(--panel);border-bottom:1px solid var(--rule)}
+.menu button:disabled{color:var(--faint);cursor:not-allowed;background:none}
+.pop.timerpop{width:300px}
+.pop .pb{padding:10px 12px}
+.pop .pb+.pb{border-top:1px solid var(--rule)}
+.pop .big{font-family:var(--mono);font-size:22px;color:var(--blue);font-weight:500}
+.picker input{width:100%;height:30px;border:0;border-bottom:1px solid var(--rule);padding:0 10px;background:var(--paper)}
+.picker input:focus{outline:0;border-color:var(--blue)}
+.picker .res{max-height:240px;overflow:auto}
+.picker .res button{display:grid;grid-template-columns:40px 1fr auto;gap:8px;align-items:center;width:100%;text-align:left;padding:5px 10px;border-bottom:1px solid var(--rule);font-size:12px}
+.picker .res button:hover,.picker .res button:focus-visible{background:var(--blue-tint);outline:0}
+.picker .res .stamp{font-size:8px;padding:2px 3px}
+.picker .res .src{font-size:10.5px;color:var(--faint);white-space:nowrap}
+/* search dropdown */
+.sdrop{position:absolute;top:40px;left:0;width:640px;max-width:calc(100vw - 120px);z-index:50;background:var(--paper);border:1px solid var(--ink);box-shadow:0 12px 36px rgba(27,34,48,.18)}
+.sdrop .filters{display:flex;gap:6px;flex-wrap:wrap;padding:8px 10px;border-bottom:1px solid var(--rule);background:var(--panel);align-items:center}
+.sdrop .filters .lbl{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-left:6px}
+.sdrop .filters .lbl:first-child{margin-left:0}
+.fchip{height:22px;padding:0 7px;border:1px solid var(--rule);background:var(--paper);font-size:11px;color:var(--muted);display:inline-flex;align-items:center;gap:4px}
+.fchip.on{border-color:var(--blue);color:var(--blue);background:var(--blue-tint)}
+.fchip.x{border-style:dashed}
+.sdrop .res{max-height:400px;overflow:auto}
+.sdrop .lrow{grid-template-columns:58px 80px 1fr auto 46px;cursor:pointer;padding:4px 10px}
+.sdrop .lrow:hover,.sdrop .lrow.cur{background:var(--blue-tint)}
+.sdrop .syn{font-size:10.5px;color:var(--faint);white-space:nowrap}
+.sdrop .foot{padding:6px 10px;font-size:11px;color:var(--muted);border-top:1px solid var(--rule);display:flex;gap:12px}
+.sdrop .none{padding:16px 10px;color:var(--muted)}
+/* toasts */
+#toasts{position:absolute;left:60px;bottom:36px;z-index:60;display:flex;flex-direction:column;gap:6px;pointer-events:none}
+.toast{background:var(--paper);border:1px solid var(--ink);box-shadow:0 6px 20px rgba(27,34,48,.16);padding:8px 12px 8px 10px;font-size:12.5px;display:flex;gap:10px;align-items:center;max-width:520px;pointer-events:auto;animation:toastin .18s ease-out}
+.toast.red{border-color:var(--red)}
+.toast .stamp{font-size:8px;padding:2px 4px}
+@keyframes toastin{from{transform:translateY(8px);opacity:0}}
+#jserr{position:absolute;left:0;top:0;z-index:99;background:var(--red);color:#fff;padding:4px 8px;font:11px var(--mono)}
+@media (prefers-reduced-motion:reduce){
+  .node .ring,.node .runner,.runner-i,.stepsl .ic.run{animation:none}
+  g.sstamp.in,.stamp.in,.toast{animation:none}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="top">
+    <div class="brand">knobas <small>Tidewater Freight · Mara Lindqvist</small></div>
+    <div class="search">
+      <svg class="i glyph" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>
+      <input id="q" type="search" placeholder="Search the local index — tickets, pages, PRs, commits, builds, notes" autocomplete="off" spellcheck="false" aria-label="Search">
+      <span class="kbd">⌘K</span>
+      <div id="sdrop" class="sdrop" hidden></div>
+    </div>
+    <div class="spacer"></div>
+    <button class="pill" id="newbtn" title="Create">
+      <svg class="i" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg> New <span class="muted">▾</span>
+    </button>
+    <button class="pill timer" id="timerbtn" title="Timer — ⌘T stops or starts it">
+      <span class="runner-i" id="timerring"></span><span class="mono" id="timerctx">PAY-231</span><span class="mono" id="timerel">0:34</span>
+    </button>
+    <button class="pill" id="inboxbtn" title="Inbox"><svg class="i" viewBox="0 0 16 16"><path d="M2 3h12v10H2zM2 3l6 5 6-5"/></svg> Inbox <span class="cnt" id="inboxcnt">6</span></button>
+    <button class="pill sync bad" id="syncbtn" title="Sources"><span class="dot"></span><span id="synctxt">3 of 4 synced · TeamCity 401</span></button>
+    <button class="iconbtn" id="gearbtn" title="Sources & settings"><svg class="i" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.5"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/></svg></button>
+  </header>
+
+  <nav class="rail" aria-label="Surfaces">
+    <button data-nav="graph" class="on" title="Graph (home)"><svg class="i" viewBox="0 0 18 18"><circle cx="4" cy="5" r="2"/><circle cx="14" cy="5" r="2"/><circle cx="9" cy="13" r="2"/><path d="M6 5h6M5 6.5l3 4.5M13 6.5l-3 4.5"/></svg></button>
+    <button data-nav="inbox" title="Inbox"><svg class="i" viewBox="0 0 18 18"><path d="M2 4h14v10H2zM2 4l7 6 7-6"/></svg><span class="b" id="railcnt">6</span></button>
+    <button data-nav="notes" title="Notes"><svg class="i" viewBox="0 0 18 18"><path d="M4 2h8l3 3v11H4zM12 2v3h3M7 8h5M7 11h5"/></svg></button>
+    <button data-nav="time" title="Time"><svg class="i" viewBox="0 0 18 18"><circle cx="9" cy="9" r="6.5"/><path d="M9 5v4l3 2"/></svg></button>
+    <button data-nav="standup" title="Standup"><svg class="i" viewBox="0 0 18 18"><path d="M3 3h12v12H3zM6 7h6M6 10h6M6 13h3"/></svg></button>
+    <span class="grow"></span>
+    <button data-nav="sources" title="Sources"><svg class="i" viewBox="0 0 18 18"><path d="M3 5h12M3 9h12M3 13h12"/><circle cx="6" cy="5" r="1.4" fill="currentColor"/><circle cx="12" cy="9" r="1.4" fill="currentColor"/><circle cx="8" cy="13" r="1.4" fill="currentColor"/></svg></button>
+  </nav>
+
+  <main class="canvas-wrap">
+    <div class="lenses" id="lenses"></div>
+    <div id="lensnote" class="lensnote" hidden></div>
+    <div id="canvas">
+      <svg id="graph" xmlns="http://www.w3.org/2000/svg"><g id="world"></g></svg>
+      <div class="legend"><span class="stamp" style="--rot:-2deg">Jira</span><span class="stamp" style="--rot:2deg">Wiki</span><span class="stamp blue" style="--rot:-3deg">Git</span><span class="stamp blue" style="--rot:1deg">CI</span><span class="stamp ink" style="--rot:-1deg">Note</span><span><span class="ln"></span> link</span><span><span class="ln dash"></span> suggested</span><span><span class="ln ring"></span> timer</span></div>
+      <div class="zoom"><button id="zout" title="Zoom out">−</button><button id="zfit" title="Fit graph">fit</button><button id="zin" title="Zoom in">+</button></div>
+      <div class="hint">Drag a node onto another to link them · right-click for actions</div>
+    </div>
+  </main>
+
+  <aside class="card" id="card"><div class="margin"></div><div class="card-in empty" id="cardin">Select a node.</div></aside>
+
+  <footer class="status" id="statusbar"></footer>
+
+  <div id="sheet" hidden></div>
+  <div id="bsheet" hidden></div>
+  <div id="dialog" hidden></div>
+  <div id="pop" hidden></div>
+  <div id="toasts"></div>
+  <div id="jserr" hidden></div>
+</div>
+<script>
+/* ============================================================
+   knobas — P3 Graph × D2 Ledger
+   ============================================================ */
+const $ = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const rotFor = id => { let h = 0; for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) & 0xffff; return (h % 8) - 4; };
+const pad2 = n => String(n).padStart(2, '0');
+const fmtHM = m => { const h = Math.floor(m / 60), mm = m % 60; return h ? `${h}h ${pad2(mm)}m` : `${mm}m`; };
+const tMin = s => { const [h, m] = s.split(':').map(Number); return h * 60 + m; };
+const tStr = m => `${pad2(Math.floor(m / 60))}:${pad2(m % 60)}`;
+
+/* ---------- sources ---------- */
+const SRC = {
+  jira:       { stamp:'JIRA', color:'red',  name:'Tidewater Jira',          type:'Jira Cloud',       url:'https://tidewater.atlassian.net',      auth:'PAT · expires 2026-09-03 (in 12 days)', synced:'4 min ago', count:'1,284 issues', adapter:'jira-cloud v1.4', caps:['search','write','webhooks'], ok:true },
+  confluence: { stamp:'WIKI', color:'red',  name:'Tidewater Wiki',          type:'Confluence Cloud', url:'https://tidewater.atlassian.net/wiki', auth:'same PAT as Jira',                        synced:'4 min ago', count:'3,912 pages',  adapter:'confluence-cloud v1.2', caps:['search','write','webhooks'], ok:true },
+  gitea:      { stamp:'GIT',  color:'blue', name:'git.tidewater.internal',  type:'Gitea',            url:'https://git.tidewater.internal',       auth:'access token',                            synced:'2 min ago', count:'47 repos',     adapter:'gitea v1.3', caps:['search','write','webhooks'], ok:true },
+  teamcity:   { stamp:'CI',   color:'blue', name:'ci.tidewater.internal',   type:'TeamCity',         url:'https://ci.tidewater.internal',        auth:'user + password',                         synced:'38 min ago', count:'3 build configs', adapter:'teamcity v1.1', caps:['search','write'], nocaps:['webhooks'], ok:false, error:'401 Unauthorized — password may have expired' },
+  note:       { stamp:'NOTE', color:'ink',  name:'Local notes', synced:'local' }
+};
+const syncedText = src => src === 'note' ? 'local' : (SRC[src].ok ? `synced ${SRC[src].synced}` : `sync failed ${SRC[src].synced}`);
+
+/* ---------- entities (nodes) ---------- */
+const N = {};
+function def(o) { N[o.id] = o; return o; }
+def({ id:'PAY-200', type:'ticket', src:'jira', key:'PAY-200', title:'Payout reliability', kind:'Epic', status:'In Progress', priority:'High', assignee:'Priya Nair', updated:'2026-08-20', pos:[340,470], children:['PAY-231','PAY-228','PAY-240','PAY-219','PAY-236'], desc:'Epic for the August payout reliability work: retries, ledger drift, dashboard latency, credential rotation and the finance export.' });
+def({ id:'PAY-231', type:'ticket', src:'jira', key:'PAY-231', title:'Retry failed SEPA payouts', kind:'Story', status:'In Progress', priority:'High', assignee:'Mara Lindqvist', updated:'today 11:48', pos:[340,230], epic:'PAY-200', estimate:'2d', spentWeek:'6h 30m',
+  desc:'When the SEPA batch at the PSP returns a transient error (HTTP 503 or PSP code <code>TEMP_UNAVAILABLE</code>), retry the payout with exponential backoff (base 30 s, factor 2, max 5 attempts, jitter). Permanent failures go to the manual review queue.',
+  comments:[ {who:'Priya Nair', when:'yesterday 14:20', txt:'Please make sure the backoff policy matches the design page — finance wants max 5 attempts.'}, {who:'Mara Lindqvist', when:'today 10:15', txt:'Backoff + jitter implemented in a41f2c, integration test still red (#1187), investigating.'} ],
+  worklogs:[ {when:'Thu 21', min:180, txt:'Retry loop implementation'} ] });
+def({ id:'PAY-228', type:'ticket', src:'jira', key:'PAY-228', title:'Ledger drift on partial refunds', kind:'Bug', status:'In Review', priority:'High', assignee:'Mara Lindqvist', updated:'yesterday 16:05', pos:[340,600], epic:'PAY-200', blockedBy:'OPS-77', estimate:'1d', spentWeek:'1h 30m',
+  desc:'Partial refunds on a settled payout leave the ledger balance off by the refund fee. Fix in ledger-api (PR #139, merged). Staging verification needs the updated on-call runbook.',
+  comments:[], worklogs:[ {when:'Thu 21', min:90, txt:'Review PR #139 fixes, re-test partial refund drift'} ] });
+def({ id:'PAY-240', type:'ticket', src:'jira', key:'PAY-240', title:'Payout dashboard latency', kind:'Task', status:'To Do', priority:'Medium', assignee:'Mara Lindqvist', assignedNote:'assigned today 08:12 by Priya', updated:'today 08:12', pos:[580,470], epic:'PAY-200',
+  desc:'Finance reports the payout dashboard takes 8–12 s to load for August. Target &lt; 2 s.', comments:[], worklogs:[] });
+def({ id:'PAY-219', type:'ticket', src:'jira', key:'PAY-219', title:'Rotate PSP credentials', kind:'Task', status:'Done', priority:'Medium', assignee:'Mara Lindqvist', updated:'2026-08-18', pos:null, epic:'PAY-200', desc:'Rotate the PSP API credentials before the end of August; note the TeamCity and Jira expiry dates while at it.', comments:[], worklogs:[] });
+def({ id:'PAY-236', type:'ticket', src:'jira', key:'PAY-236', title:'Payout CSV export for finance', kind:'Story', status:'To Do', priority:'Low', assignee:'Jonas Becker', updated:'2026-08-20', pos:[110,470], epic:'PAY-200', desc:'Finance needs a monthly CSV export of settled payouts with fees and refunds broken out.', comments:[], worklogs:[] });
+def({ id:'OPS-77', type:'ticket', src:'jira', key:'OPS-77', title:'On-call runbook outdated', kind:'Task', status:'To Do', priority:'Medium', assignee:'Tomasz Wójcik', updated:'2026-08-19', pos:[580,600], desc:'The on-call handbook still describes the pre-July staging topology. Update the runbook before the next staging verification.', comments:[], worklogs:[] });
+
+def({ id:'pr-142', type:'pr', src:'gitea', key:'PR #142', title:'SEPA retry with exponential backoff', repo:'payout-service', from:'feature/PAY-231-sepa-retry', to:'main', state:'open', by:'Mara Lindqvist', opened:'yesterday 17:41', pos:[580,230],
+  approvals:{need:2, given:[{who:'Priya Nair', ok:true}], requested:[{who:'Jonas Becker', when:'today 09:05'}]},
+  checks:['build-1188','build-1187'],
+  comments:[ {who:'Jonas Becker', when:'today 09:30', txt:'Should the jitter be bounded? ±20 % feels wide.'}, {who:'Mara Lindqvist', when:'today 10:20', txt:'Bounded to ±10 % in c90d11.'} ],
+  files:[ ['src/sepa/retry.rs','+84','−12'], ['tests/sepa_retry.rs','+51',''], ['docs/backoff.md','+9',''] ] });
+def({ id:'pr-144', type:'pr', src:'gitea', key:'PR #144', title:'Add payout CSV export', repo:'payout-service', from:'feature/PAY-236-csv-export', to:'main', state:'open', by:'Jonas Becker', opened:'today 13:50', pos:[110,360],
+  approvals:{need:2, given:[], requested:[{who:'Mara Lindqvist (you)', when:'today 13:50'}]}, checks:[], comments:[], files:[ ['src/export/csv.rs','+132',''], ['tests/export_csv.rs','+40',''] ] });
+def({ id:'pr-139', type:'pr', src:'gitea', key:'PR #139', title:'Fix ledger drift on partial refunds', repo:'ledger-api', from:'fix/PAY-228-partial-refund-drift', to:'main', state:'merged', by:'Mara Lindqvist', opened:'2026-08-20', merged:'yesterday 16:00', pos:[110,720],
+  approvals:{need:2, given:[{who:'Priya Nair', ok:true},{who:'Jonas Becker', ok:true}], requested:[]}, checks:['build-412'], comments:[], files:[ ['src/ledger/refund.kt','+27','−9'] ] });
+
+def({ id:'branch-231', type:'branch', src:'gitea', key:'feature/PAY-231-sepa-retry', title:'3 commits ahead of main · checked out', repo:'payout-service', ahead:3, local:true, pos:[460,360], commits:['commit-c90d11','commit-a41f2c','commit-7be0e4'] });
+def({ id:'commit-a41f2c', type:'commit', src:'gitea', key:'a41f2c', title:'PAY-231 backoff jitter', by:'Mara Lindqvist', when:'today 10:02', branch:'branch-231', pos:[110,230] });
+def({ id:'commit-c90d11', type:'commit', src:'gitea', key:'c90d11', title:'PAY-231: jitter in backoff, cap at 5 attempts', by:'Mara Lindqvist', when:'today 11:42', branch:'branch-231', pos:null });
+def({ id:'commit-7be0e4', type:'commit', src:'gitea', key:'7be0e4', title:'PAY-231: retry SEPA payouts on transient PSP errors', by:'Mara Lindqvist', when:'yesterday 17:30', branch:'branch-231', pos:null });
+def({ id:'repo-ledger', type:'repo', src:'gitea', key:'ledger-api', title:'Kotlin · ~/code/ledger-api', lang:'Kotlin', clone:'~/code/ledger-api', branches:['main','fix/PAY-228-partial-refund-drift (merged)'], pos:[1020,470] });
+def({ id:'repo-payout', type:'repo', src:'gitea', key:'payout-service', title:'Rust · ~/code/payout-service', lang:'Rust', clone:'~/code/payout-service', branches:['main (312 commits)','feature/PAY-231-sepa-retry (3 ahead, checked out)','fix/PAY-228-partial-refund-drift (merged)'], pos:null });
+def({ id:'repo-runbooks', type:'repo', src:'gitea', key:'ops-runbooks', title:'Markdown · not cloned', lang:'Markdown', clone:'not cloned', branches:['main'], pos:null });
+
+def({ id:'build-1187', type:'build', src:'teamcity', key:'#1187', title:'Payout_IntegrationTests', config:'Payout_IntegrationTests', status:'failed', branch:'feature/PAY-231-sepa-retry', when:'today 10:10', dur:'4 m 12 s', pos:[820,150], params:{branch:'feature/PAY-231-sepa-retry', env:'staging'},
+  log:'test sepa::retry::gives_up_after_max_attempts ... <span class="f">FAILED</span>\nassertion failed: attempts == 5 (left: 6, right: 5)\ntest result: <span class="f">FAILED</span>. 41 passed; 1 failed' });
+def({ id:'build-1188', type:'build', src:'teamcity', key:'#1188', title:'Payout_Build', config:'Payout_Build', status:'running', step:'step 3/5 · cargo test', branch:'feature/PAY-231-sepa-retry', when:'started today 11:45', pos:[820,290], params:{branch:'feature/PAY-231-sepa-retry', env:'staging'}, steps:['checkout','cargo fmt --check','cargo test','cargo build --release','publish artifact'] });
+def({ id:'build-412', type:'build', src:'teamcity', key:'#412', title:'Ledger_Deploy_Staging', config:'Ledger_Deploy_Staging', status:'success', branch:'main', when:'yesterday 16:20', dur:'2 m 48 s', pos:null, params:{branch:'main', env:'staging'} });
+
+def({ id:'page-sepa', type:'page', src:'confluence', key:'ENG', title:'SEPA payout retry design', space:'ENG — Engineering', edited:'today 10:40', section:'Backoff policy', by:'Mara Lindqvist', pos:[340,90],
+  body:'<h3>Backoff policy</h3><p>base 30 s, factor 2, max 5 attempts, jitter ±10 %. Transient codes: HTTP 503, <code>TEMP_UNAVAILABLE</code>. After the final attempt the payout is moved to the manual review queue (see <span class="chip" data-go="PAY-231">PAY-231</span>).</p><h3>Manual review queue</h3><p><em>SLA: to be defined.</em></p>',
+  comments:[ {who:'Priya Nair', when:'today 12:05', txt:'@Mara can you add the manual-review queue SLA here?', mention:true} ] });
+def({ id:'page-runbook', type:'page', src:'confluence', key:'ENG', title:'Ledger reconciliation runbook', space:'ENG — Engineering', edited:'2026-08-19', by:'Tomasz Wójcik', pos:[340,720], body:'<h3>Daily reconciliation</h3><p>Compare the PSP settlement report with the ledger totals per currency. Differences above 0.01 go to the drift report; partial refunds are the usual cause (see <span class="chip" data-go="PAY-228">PAY-228</span>).</p>', comments:[] });
+def({ id:'page-handbook', type:'page', src:'confluence', key:'ENG', title:'On-call handbook', space:'ENG — Engineering', edited:'2026-07-02', by:'Tomasz Wójcik', pos:[820,600], body:'<h3>Escalation</h3><p>Primary on-call pages secondary after 15 minutes. Staging verification steps are out of date — tracked in <span class="chip" data-go="OPS-77">OPS-77</span>.</p>', comments:[] });
+def({ id:'page-arch', type:'page', src:'confluence', key:'ENG', title:'Payments architecture overview', space:'ENG — Engineering', edited:'2026-08-11', by:'Priya Nair', pos:[820,470], body:'<h3>Services</h3><p>payout-service (Rust) runs the SEPA batches; ledger-api (Kotlin) owns balances and reconciliation. The payout dashboard reads aggregated ledger-api views, which is where the August latency comes from.</p>', comments:[] });
+def({ id:'page-standups', type:'page', src:'confluence', key:'ENG', title:'Standup protocols', space:'ENG — Engineering', edited:'yesterday', by:'Mara Lindqvist', pos:null, body:'<p>Parent page of the daily protocol pages.</p>', comments:[] });
+
+def({ id:'note-invest', type:'note', src:'note', key:'note', title:'SEPA retry investigation', edited:'today 11:20', pos:[580,90],
+  body:'Test expects 5 attempts, code counts the initial try as attempt 0 → off-by-one. Fix: start counter at 1. Also: ask Priya about manual-review SLA.\n\nLinks: [[PAY-231]] [[#1187]] [[SEPA payout retry design]]' });
+def({ id:'note-standup', type:'note', src:'note', key:'note', title:'Standup 2026-08-21', edited:'yesterday 09:05', pos:[110,600],
+  body:'Yesterday: drift fix. Today: re-test partial refunds on staging, open PR. Blocker: none.\n\nLinks: [[PAY-228]] [[PR #139]]' });
+def({ id:'note-creds', type:'note', src:'note', key:'note', title:'Credentials to rotate', edited:'2026-08-18', pos:null,
+  body:'TeamCity password expires end of August. Jira PAT expires 2026-09-03.\n\nLinks: [[PAY-219]]' });
+
+/* aliases used by [[...]] links and search */
+const ALIAS = { 'PR #139':'pr-139', 'PR #142':'pr-142', 'PR #144':'pr-144', '#1187':'build-1187', '#1188':'build-1188', '#412':'build-412',
+  'SEPA payout retry design':'page-sepa', 'Ledger reconciliation runbook':'page-runbook', 'On-call handbook':'page-handbook', 'Payments architecture overview':'page-arch',
+  'SEPA retry investigation':'note-invest', 'Standup 2026-08-21':'note-standup', 'Credentials to rotate':'note-creds', 'a41f2c':'commit-a41f2c', 'c90d11':'commit-c90d11', '7be0e4':'commit-7be0e4', 'ledger-api':'repo-ledger', 'payout-service':'repo-payout' };
+const resolve = s => N[s] ? s : ALIAS[s] || null;
+const label = n => n.type === 'ticket' ? n.key : n.type === 'pr' ? n.key : n.type === 'build' ? `${n.config} ${n.key}` : n.type === 'commit' ? n.key : n.type === 'branch' ? n.key : n.type === 'repo' ? n.key : n.title;
+const shortLabel = n => ['ticket','pr','build','commit','branch','repo'].includes(n.type) ? n.key : n.title;
+
+/* ---------- edges ---------- */
+let EID = 0;
+const edge = (a, b, kind='link', reason='') => ({ id:'e' + (++EID), a, b, kind, reason });
+let edges = [
+  edge('page-sepa','PAY-231'), edge('note-invest','PAY-231'), edge('note-invest','page-sepa'), edge('note-invest','build-1187'),
+  edge('PAY-231','pr-142'), edge('PAY-231','branch-231'), edge('branch-231','pr-142'), edge('pr-142','build-1187'), edge('pr-142','build-1188'),
+  edge('PAY-200','PAY-231'), edge('PAY-200','PAY-240'), edge('PAY-200','PAY-228'), edge('PAY-200','PAY-236'), edge('PAY-236','pr-144'),
+  edge('PAY-228','pr-139'), edge('PAY-228','page-runbook'), edge('PAY-228','note-standup'), edge('note-standup','pr-139'),
+  edge('PAY-228','OPS-77','blocked'), edge('OPS-77','page-handbook'),
+  edge('PAY-219','note-creds'), edge('PAY-200','PAY-219'), edge('pr-139','build-412'), edge('branch-231','commit-a41f2c'), edge('branch-231','commit-c90d11'), edge('branch-231','commit-7be0e4'), edge('repo-payout','branch-231'), edge('repo-ledger','pr-139'),
+  edge('commit-a41f2c','PAY-231','suggested','key in commit message'),
+  edge('build-1187','PAY-231','suggested','key in build parameter <code>branch</code>'),
+  edge('page-arch','repo-ledger','suggested','mentions ledger-api 4×'),
+  edge('PAY-240','page-arch','suggested','text similarity 0.71 (“dashboard latency”)')
+];
+const neighbours = id => edges.filter(e => e.kind !== 'suggested' && (e.a === id || e.b === id)).map(e => ({ e, other: N[e.a === id ? e.b : e.a] })).filter(x => x.other);
+const suggestionsFor = id => edges.filter(e => e.kind === 'suggested' && (e.a === id || e.b === id));
+const hasEdge = (a, b) => edges.some(e => e.kind !== 'suggested' && ((e.a === a && e.b === b) || (e.a === b && e.b === a)));
+
+/* ---------- inbox ---------- */
+let inbox = [
+  { id:'i1', when:'13:50', src:'gitea', node:'pr-144', txt:'<b>Jonas</b> requested your review on PR #144 <q>Add payout CSV export</q>', acts:['Review','Snooze','Done'] },
+  { id:'i2', when:'12:05', src:'confluence', node:'page-sepa', txt:'<b>Priya</b> mentioned you on <i>SEPA payout retry design</i>: <q>@Mara can you add the manual-review queue SLA here?</q>', acts:['Reply','Open page','Done'] },
+  { id:'i3', when:'10:14', src:'teamcity', node:'build-1187', txt:'Build #1187 Payout_IntegrationTests <b class="red">failed</b> on feature/PAY-231-sepa-retry', acts:['Open log','Re-run','Comment on PAY-231'] },
+  { id:'i4', when:'09:30', src:'gitea', node:'pr-142', txt:'<b>Jonas</b> commented on your PR #142: <q>Should the jitter be bounded? ±20 % feels wide.</q>', acts:['Reply','Open PR'] },
+  { id:'i5', when:'08:12', src:'jira', node:'PAY-240', txt:'<b>Priya</b> assigned PAY-240 <i>Payout dashboard latency</i> to you', acts:['Open','Start work'] },
+  { id:'i6', when:'Thu 16:30', src:'jira', node:'PAY-228', txt:'PAY-228 is blocked by OPS-77 <i>On-call runbook outdated</i>', acts:['Open OPS-77','Ping Tomasz'] }
+];
+let snoozed = [ { id:'s1', txt:'Jira PAT expires in 12 days', returns:'returns 2026-08-29' } ];
+
+/* ---------- time ---------- */
+let blocks = [
+  { id:'b1', s:'08:30', e:'08:45', ctx:'Inbox + standup digest', how:'passive', node:null, kind:'passive' },
+  { id:'b2', s:'08:45', e:'09:40', ctx:'PAY-228', sub:'+ note Standup 2026-08-21', how:'passive', node:'PAY-228', kind:'passive' },
+  { id:'b3', s:'09:40', e:'11:50', ctx:'PAY-231', sub:'PR #142, design page, investigation note', how:'passive', node:'PAY-231', kind:'passive' },
+  { id:'b4', s:'11:50', e:'12:20', ctx:'unattributed', sub:'app open, no entity', how:'passive — needs assignment', node:null, kind:'un' },
+  { id:'b5', s:'12:20', e:'13:10', ctx:'—', sub:'no activity', how:'gap', node:null, kind:'gap' },
+  { id:'b6', s:'13:10', e:'13:58', ctx:'Staging DB configuration', sub:'ad-hoc label, no ticket', how:'manual label', node:null, kind:'label' },
+  { id:'b7', s:'13:58', e:'14:32', ctx:'PAY-231', sub:'manual timer', how:'manual timer', node:'PAY-231', kind:'manual', live:true }
+];
+const week = [ ['Mon 18','7h 45m',465,0], ['Tue 19','8h 00m',480,0], ['Wed 20','6h 30m',390,0], ['Thu 21','7h 10m',430,121], ['Fri 22','5h 28m',328,164] ];
+const weekTotals = { tracked:'34h 10m', logged:'29h 25m', unlogged:285 };
+const activities = [
+  { on:true,  txt:'commit <code>a41f2c</code> “PAY-231 backoff jitter” (10:02)', line:'Backoff jitter (a41f2c, c90d11)', grp:'commits' },
+  { on:true,  txt:'commit <code>c90d11</code> “PAY-231: jitter in backoff, cap at 5 attempts” (11:42)', line:'', grp:'commits' },
+  { on:true,  txt:'replied to Jonas on PR #142 (10:20)', line:'replied to review on PR #142' },
+  { on:false, txt:'triggered build #1188 (11:45)', line:'triggered build #1188' },
+  { on:true,  txt:'edited <i>SEPA payout retry design</i> › Backoff policy (10:40)', line:'updated Backoff policy in the design page' },
+  { on:false, txt:'edited note <i>SEPA retry investigation</i> (11:20)', line:'updated the investigation note' }
+];
+
+/* ---------- state ---------- */
+const state = {
+  sel: null, overlay: null, lens: 'all', layers: { jira:true, confluence:true, gitea:true, teamcity:true, note:true },
+  focus: null, timer: { running:true, ctx:'PAY-231', label:null, since:'13:58', base:34*60 }, pending:0, inboxDone:new Set(),
+  view: { k:1, x:0, y:0 }, fitted:false, timeTab:'day', selBlock:null, newCount:{ ticket:240, page:0, build:1188 }, ownPush:0
+};
+const NOWM = tMin('14:32');
+const loadedAt = Date.now();
+
+/* ============================================================
+   Graph canvas
+   ============================================================ */
+const NW = 160, NH = 44;
+const world = $('#world'), svg = $('#graph'), canvas = $('#canvas');
+const visibleNode = n => n.pos && state.layers[n.src];
+const anchor = (from, to) => { // point on the border of `from` toward `to`
+  const dx = to.pos[0] - from.pos[0], dy = to.pos[1] - from.pos[1];
+  const hw = NW / 2 + 2, hh = NH / 2 + 2;
+  const t = Math.min(hw / (Math.abs(dx) || 1e-6), hh / (Math.abs(dy) || 1e-6));
+  return [from.pos[0] + dx * t, from.pos[1] + dy * t];
+};
+function edgePath(e) {
+  const a = N[e.a], b = N[e.b];
+  const p = anchor(a, b), q = anchor(b, a);
+  if (e.kind !== 'suggested') return { d:`M${p[0]} ${p[1]}L${q[0]} ${q[1]}`, mid:[(p[0]+q[0])/2, (p[1]+q[1])/2] };
+  const mx = (p[0]+q[0])/2, my = (p[1]+q[1])/2, dx = q[0]-p[0], dy = q[1]-p[1], len = Math.hypot(dx, dy) || 1;
+  const bend = Math.min(46, len * .22);
+  const cx = mx - dy / len * bend, cy = my + dx / len * bend;
+  return { d:`M${p[0]} ${p[1]}Q${cx} ${cy} ${q[0]} ${q[1]}`, mid:[(p[0]+2*cx+q[0])/4, (p[1]+2*cy+q[1])/4] };
+}
+function stampSVG(src, x, y, rot, extra='') {
+  const s = SRC[src]; const w = 8 + s.stamp.length * 7.2;
+  return `<g transform="translate(${x},${y}) rotate(${rot})"><g class="sstamp ${s.color} ${extra}"><rect x="${-w/2}" y="-8" width="${w}" height="16"/><rect x="${-w/2+2}" y="-6" width="${w-4}" height="12"/><text y="3.2" text-anchor="middle">${s.stamp}</text></g></g>`;
+}
+const trunc = (s, n) => s.length > n ? s.slice(0, n - 1) + '…' : s;
+function nodeSVG(n) {
+  const cls = ['node'];
+  if (state.sel === n.id) cls.push('sel');
+  if (state.focus && !state.focus.has(n.id)) cls.push('dim');
+  const timer = state.timer.running && state.timer.ctx === n.id;
+  let key = n.key, sub = '', ttl = n.title, serif = false;
+  if (n.type === 'ticket') sub = n.status;
+  else if (n.type === 'pr') { sub = n.state; }
+  else if (n.type === 'build') { key = n.key; sub = n.status === 'running' ? 'running' : n.status === 'failed' ? '' : n.status; ttl = n.config; }
+  else if (n.type === 'commit') { sub = n.when; }
+  else if (n.type === 'branch') { key = 'branch'; ttl = n.key; sub = n.ahead ? `${n.ahead} ahead` : 'checked out'; }
+  else if (n.type === 'repo') { key = 'repo'; ttl = n.key; sub = n.lang; }
+  else if (n.type === 'page') { key = 'page · ENG'; serif = true; }
+  else if (n.type === 'note') { key = 'note'; serif = true; sub = n.edited.replace('today ', ''); }
+  const x = n.pos[0] - NW / 2, y = n.pos[1] - NH / 2;
+  return `<g class="${cls.join(' ')}" data-id="${n.id}" transform="translate(${x},${y})" tabindex="0" role="button" aria-label="${esc(label(n))}">
+    ${timer ? `<ellipse class="ring" cx="${NW/2}" cy="${NH/2}" rx="${NW/2+14}" ry="${NH/2+13}"/>` : ''}
+    <rect class="box" width="${NW}" height="${NH}"/>
+    <text class="key" x="9" y="17">${esc(key)}</text>
+    ${n.type === 'build' && n.status === 'running' ? `<circle class="runner" cx="${NW-14}" cy="13" r="5"/>` : `<text class="sub" x="${NW-9}" y="17" text-anchor="end">${esc(sub)}</text>`}
+    <text class="ttl${serif ? ' serif' : ''}" x="9" y="35">${esc(trunc(ttl, serif ? 24 : 26))}</text>
+    ${stampSVG(n.src, 18, -3, rotFor(n.id), state.fresh.has(n.id) ? 'in' : '')}
+    ${n.type === 'build' && n.status === 'failed' ? `<g transform="translate(${NW-40},15) rotate(-7)"><g class="sstamp big"><rect x="-28" y="-9" width="56" height="18"/><rect x="-26" y="-7" width="52" height="14"/><text y="3.5" text-anchor="middle">FAILED</text></g></g>` : ''}
+  </g>`;
+}
+function renderGraph() {
+  let out = '';
+  for (const e of edges) {
+    const a = N[e.a], b = N[e.b];
+    if (!a || !b || !visibleNode(a) || !visibleNode(b)) continue;
+    const dim = state.focus && !(state.focus.has(e.a) && state.focus.has(e.b));
+    const { d, mid } = edgePath(e);
+    out += `<path class="edge ${e.kind}${dim ? ' dim' : ''}" data-e="${e.id}" d="${d}"/>`;
+    if (e.kind === 'suggested') out += `<path class="edge-hit" data-e="${e.id}" d="${d}"><title>Suggested: ${esc(e.reason.replace(/<[^>]+>/g,''))} — click to confirm or dismiss</title></path>`;
+    if (e.kind === 'blocked') out += `<text class="edge-lbl${dim ? ' dim' : ''}" x="${mid[0]}" y="${mid[1]-5}" text-anchor="middle">blocked by</text>`;
+  }
+  for (const n of Object.values(N)) if (visibleNode(n)) out += nodeSVG(n);
+  world.innerHTML = out;
+  applyView();
+}
+function applyView() { world.setAttribute('transform', `translate(${state.view.x},${state.view.y}) scale(${state.view.k})`); }
+function bbox() {
+  const ns = Object.values(N).filter(visibleNode);
+  if (!ns.length) return { x:0, y:0, w:1, h:1 };
+  const xs = ns.map(n => n.pos[0]), ys = ns.map(n => n.pos[1]);
+  return { x:Math.min(...xs) - NW/2 - 30, y:Math.min(...ys) - NH/2 - 24, w:Math.max(...xs) - Math.min(...xs) + NW + 60, h:Math.max(...ys) - Math.min(...ys) + NH + 48 };
+}
+function fit() {
+  const r = canvas.getBoundingClientRect(), b = bbox();
+  const k = Math.min(r.width / b.w, (r.height - 40) / b.h, 1.15);
+  state.view = { k, x: (r.width - b.w * k) / 2 - b.x * k + 20, y: (r.height - b.h * k) / 2 - b.y * k };
+  applyView();
+}
+function zoomBy(f, cx, cy) {
+  const r = canvas.getBoundingClientRect();
+  cx = cx ?? r.width / 2; cy = cy ?? r.height / 2;
+  const k = Math.max(.35, Math.min(2.5, state.view.k * f));
+  state.view.x = cx - (cx - state.view.x) * (k / state.view.k);
+  state.view.y = cy - (cy - state.view.y) * (k / state.view.k);
+  state.view.k = k; applyView();
+}
+function panTo(id) {
+  const n = N[id]; if (!n || !visibleNode(n)) return;
+  const r = canvas.getBoundingClientRect();
+  const sheet = $('#sheet'); const sheetW = sheet.hidden ? 0 : sheet.getBoundingClientRect().width - $('#card').getBoundingClientRect().width;
+  const vis = r.width - Math.max(0, sheetW);
+  state.view.x = vis / 2 - n.pos[0] * state.view.k;
+  state.view.y = r.height / 2 - n.pos[1] * state.view.k;
+  applyView();
+}
+function highlight(ids, on) { // transient hot state (hover from inbox/standup)
+  $$('.node.hot', world).forEach(g => g.classList.remove('hot'));
+  $$('.edge.hot', world).forEach(g => g.classList.remove('hot'));
+  if (!on) return;
+  for (const id of ids) { const g = world.querySelector(`.node[data-id="${id}"]`); if (g) g.classList.add('hot'); }
+}
+function toClient(ev) { const r = svg.getBoundingClientRect(); return [ev.clientX - r.left, ev.clientY - r.top]; }
+function toWorld(ev) { const [x, y] = toClient(ev); return [(x - state.view.x) / state.view.k, (y - state.view.y) / state.view.k]; }
+
+/* --- pointer: pan, select, drag-to-link --- */
+let drag = null;
+svg.addEventListener('mousedown', ev => {
+  if (ev.button !== 0) return;
+  closePop();
+  const g = ev.target.closest('.node');
+  const [x, y] = toClient(ev);
+  if (g) drag = { type:'node', id:g.dataset.id, sx:ev.clientX, sy:ev.clientY, moved:false };
+  else { drag = { type:'pan', sx:ev.clientX, sy:ev.clientY, ox:state.view.x, oy:state.view.y, moved:false }; canvas.classList.add('panning'); }
+  ev.preventDefault();
+});
+window.addEventListener('mousemove', ev => {
+  if (!drag) return;
+  const dx = ev.clientX - drag.sx, dy = ev.clientY - drag.sy;
+  if (!drag.moved && Math.hypot(dx, dy) < 6) return;
+  drag.moved = true;
+  if (drag.type === 'pan') { state.view.x = drag.ox + dx; state.view.y = drag.oy + dy; applyView(); return; }
+  canvas.classList.add('linking');
+  let ghost = world.querySelector('.ghost');
+  if (!ghost) { ghost = document.createElementNS('http://www.w3.org/2000/svg', 'path'); ghost.setAttribute('class', 'ghost'); world.appendChild(ghost); }
+  const n = N[drag.id], [wx, wy] = toWorld(ev);
+  ghost.setAttribute('d', `M${n.pos[0]} ${n.pos[1]}L${wx} ${wy}`);
+  $$('.node.drop', world).forEach(g => g.classList.remove('drop'));
+  const under = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.node');
+  if (under && under.dataset.id !== drag.id) { under.classList.add('drop'); drag.over = under.dataset.id; } else drag.over = null;
+});
+window.addEventListener('mouseup', ev => {
+  if (!drag) return;
+  const d = drag; drag = null;
+  canvas.classList.remove('panning'); canvas.classList.remove('linking');
+  world.querySelector('.ghost')?.remove();
+  $$('.node.drop', world).forEach(g => g.classList.remove('drop'));
+  if (d.type === 'node' && !d.moved) { select(d.id); return; }
+  if (d.type === 'node' && d.over) confirmLinkDialog(d.id, d.over, 'drag');
+});
+svg.addEventListener('contextmenu', ev => {
+  const g = ev.target.closest('.node'); if (!g) return;
+  ev.preventDefault(); nodeMenu(g.dataset.id, ev.clientX, ev.clientY);
+});
+svg.addEventListener('click', ev => {
+  const hit = ev.target.closest('.edge-hit'); if (!hit) return;
+  const e = edges.find(x => x.id === hit.dataset.e); if (!e) return;
+  suggestionPop(e, ev.clientX, ev.clientY);
+});
+svg.addEventListener('keydown', ev => {
+  const g = ev.target.closest('.node'); if (!g) return;
+  if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); select(g.dataset.id); }
+  if (ev.key === 'ContextMenu' || (ev.shiftKey && ev.key === 'F10')) { ev.preventDefault(); const r = g.getBoundingClientRect(); nodeMenu(g.dataset.id, r.left + 20, r.bottom); }
+});
+svg.addEventListener('dblclick', ev => { const g = ev.target.closest('.node'); if (g) { panTo(g.dataset.id); } });
+canvas.addEventListener('wheel', ev => {
+  ev.preventDefault();
+  const [cx, cy] = toClient(ev);
+  if (ev.ctrlKey || ev.metaKey) zoomBy(ev.deltaY < 0 ? 1.12 : 0.89, cx, cy);
+  else { state.view.x -= ev.deltaX; state.view.y -= ev.deltaY; applyView(); }
+}, { passive:false });
+$('#zin').onclick = () => zoomBy(1.2); $('#zout').onclick = () => zoomBy(1/1.2); $('#zfit').onclick = fit;
+window.addEventListener('resize', fit);
+
+/* ============================================================
+   Routing + selection
+   ============================================================ */
+const ROUTE = { ticket:'ticket', pr:'pr', build:'build', page:'page', note:'note', commit:'commit', branch:'branch', repo:'repo' };
+const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+function routeOf(id) { const n = N[id]; if (!n) return '#/graph';
+  const tail = n.type === 'ticket' ? n.key : n.type === 'pr' ? n.key.replace('PR #','') : n.type === 'build' ? n.key.replace('#','') : n.type === 'commit' ? n.key : n.type === 'repo' ? n.key : slug(n.type === 'branch' ? n.key : n.title);
+  return `#/${ROUTE[n.type]}/${tail}`; }
+function findByRoute(type, tail) {
+  return Object.values(N).find(n => n.type === type && (routeOf(n.id) === `#/${type}/${tail}`))?.id || null;
+}
+function setHash(h) { if (location.hash === h) return; state.ownPush++; location.hash = h; }
+function select(id, opts = {}) {
+  if (!N[id]) return;
+  if (!N[id].pos) placeNode(id, state.sel);
+  state.sel = id;
+  if (!opts.keepOverlay && state.overlay) closeOverlay(true);
+  renderGraph(); renderCard();
+  if (!opts.noRoute) setHash(routeOf(id));
+  if (opts.pan !== false) panTo(id);
+  $$('.rail button').forEach(b => b.classList.toggle('on', b.dataset.nav === (state.overlay || 'graph')));
+}
+function onHash() {
+  const h = location.hash || '#/graph';
+  const m = h.match(/^#\/([a-z]+)(?:\/(.+))?$/);
+  if (!m) return;
+  const [, head, tail] = m;
+  if (['inbox','time','standup','sources','notes'].includes(head)) { openOverlay(head, { noRoute:true, force:true }); return; }
+  if (head === 'search') { closeOverlay(true); $('#q').value = decodeURIComponent(tail || ''); $('#q').focus(); runSearch(); return; }
+  if (head === 'graph') { closeOverlay(true); state.sel = null; renderGraph(); renderCard(); return; }
+  const id = findByRoute(head, decodeURIComponent(tail || ''));
+  if (id) { closeOverlay(true); select(id, { noRoute:true }); }
+}
+window.addEventListener('hashchange', onHash);
+
+/* ============================================================
+   Toasts, dialogs, popovers, menus
+   ============================================================ */
+function toast(msg, stamp, red) {
+  const t = document.createElement('div'); t.className = 'toast' + (red ? ' red' : '');
+  const cls = SRC[stamp] ? SRC[stamp].color : stamp === 'red' ? '' : 'blue';
+  const lbl = SRC[stamp] ? SRC[stamp].stamp : stamp === 'red' ? 'QUEUED' : stamp === 'blue' ? 'DONE' : String(stamp).toUpperCase();
+  t.innerHTML = (stamp ? `<span class="stamp ${cls} in" style="--rot:${rotFor(msg)}deg">${lbl}</span>` : '') + `<span>${msg}</span>`;
+  $('#toasts').appendChild(t); setTimeout(() => t.remove(), 4200);
+}
+function openDialog(html, cls='') {
+  const d = $('#dialog'); d.hidden = false;
+  d.innerHTML = `<div class="backdrop" data-close><div class="dialog ${cls}" role="dialog" aria-modal="true">${html}</div></div>`;
+  d.querySelector('.backdrop').addEventListener('mousedown', ev => { if (ev.target.dataset.close !== undefined) closeDialog(); });
+  d.querySelectorAll('[data-x]').forEach(b => b.onclick = closeDialog);
+  const f = d.querySelector('input,select,textarea,button.p,button'); if (f) setTimeout(() => f.focus(), 0);
+  return d.querySelector('.dialog');
+}
+function closeDialog() { const d = $('#dialog'); d.hidden = true; d.innerHTML = ''; }
+const dh = (title, sub='') => `<div class="dhead"><h1>${title}</h1>${sub ? `<span class="small muted">${sub}</span>` : ''}<button class="iconbtn x" data-x title="Close (Esc)">✕</button></div>`;
+function openPop(html, x, y, cls='') {
+  const p = $('#pop'); p.hidden = false; p.className = 'pop ' + cls; p.innerHTML = html;
+  const r = document.body.getBoundingClientRect();
+  p.style.left = Math.min(x, r.width - p.offsetWidth - 10) + 'px'; p.style.top = Math.min(y, r.height - p.offsetHeight - 30) + 'px';
+  const f = p.querySelector('input,button'); if (f) f.focus();
+  return p;
+}
+function closePop() { const p = $('#pop'); p.hidden = true; p.innerHTML = ''; }
+document.addEventListener('mousedown', ev => { if (!$('#pop').hidden && !ev.target.closest('#pop') && !ev.target.closest('#timerbtn') && !ev.target.closest('#newbtn')) closePop(); if (!$('#sdrop').hidden && !ev.target.closest('.search')) closeSearch(); });
+function menu(items, x, y, head) {
+  const html = `<div class="menu">${head ? `<div class="hd">${head}</div>` : ''}${items.map((it, i) => it ? `<button data-i="${i}" ${it.disabled ? 'disabled' : ''}>${it.label}${it.k ? `<span class="k">${it.k}</span>` : ''}</button>` : '').join('')}</div>`;
+  const p = openPop(html, x, y);
+  p.querySelectorAll('button[data-i]').forEach(b => b.onclick = () => { closePop(); items[+b.dataset.i].run(); });
+}
+function nodeMenu(id, x, y) {
+  const n = N[id]; const items = [];
+  const timerHere = { label:'Start timer here', k:'⌘T', run:() => startTimer(id) };
+  if (n.type === 'ticket') {
+    if (n.status === 'To Do') items.push({ label:`Start work on ${n.key}`, run:() => startWorkDialog(id) });
+    items.push(timerHere, { label:'Change status → ' + nextStatus(n.status), run:() => setStatus(id, nextStatus(n.status)) }, { label:'Link to…', run:() => linkPicker(id, x, y) }, { label:'Comment', run:() => { select(id); setTimeout(() => $('#cmt')?.focus(), 0); } }, { label:'New note about this', run:() => newNote(id) });
+  } else if (n.type === 'build') {
+    items.push({ label:'Open log', run:() => select(id) }, { label:'Re-run failed', run:() => rerun(id), disabled:n.status !== 'failed' }, { label:'Trigger with parameters…', run:() => triggerDialog(n.config, n.branch) }, { label:'Link to…', run:() => linkPicker(id, x, y) }, timerHere);
+  } else if (n.type === 'pr') {
+    items.push({ label:'Reply', run:() => { select(id); setTimeout(() => $('#cmt')?.focus(), 0); } }, { label:'Request re-review from Jonas', run:() => toast(`Re-review requested from Jonas on ${n.key}`, 'gitea') }, { label:'Merge', disabled:n.approvals.given.length < n.approvals.need, run:() => {} }, { label:'Link to…', run:() => linkPicker(id, x, y) }, timerHere);
+  } else if (n.type === 'branch') {
+    items.push({ label:'Pull', run:() => gitPull('payout-service') }, { label:'Push', run:() => gitPush(n.key) }, { label:'Link to…', run:() => linkPicker(id, x, y) }, timerHere);
+  } else if (n.type === 'repo') {
+    items.push({ label:'Pull', run:() => gitPull(n.key) }, { label:'Push', run:() => gitPush('main') }, { label:'New branch…', run:() => newBranchDialog(n.key) }, { label:'Link to…', run:() => linkPicker(id, x, y) });
+  } else if (n.type === 'note') {
+    items.push({ label:'Edit', run:() => select(id) }, { label:'Link to…', run:() => linkPicker(id, x, y) }, { label:'Delete note', run:() => { delete N[id]; edges = edges.filter(e => e.a !== id && e.b !== id); state.sel = null; renderGraph(); renderCard(); toast('Note deleted'); } }, timerHere);
+  } else {
+    items.push({ label:'Open', run:() => select(id) }, { label:'Link to…', run:() => linkPicker(id, x, y) }, { label:'New note about this', run:() => newNote(id) }, timerHere);
+  }
+  menu(items, x, y, label(n));
+}
+
+/* ============================================================
+   Ledger renderers — shared by the card, the sheets and search
+   ============================================================ */
+state.fresh = new Set();
+state.timer.t0 = loadedAt;
+
+function stampHTML(src, seed, cls) {
+  const s = SRC[src];
+  return `<span class="stamp ${s.color} ${cls || ''}" style="--rot:${rotFor(seed || src)}deg">${s.stamp}</span>`;
+}
+function shortDate(s) {
+  if (!s) return '';
+  s = String(s).replace('started ', '');
+  if (s === 'today') return 'today';
+  if (s.startsWith('today ')) return s.slice(6);
+  if (s.startsWith('yesterday')) return ('Thu ' + s.slice(10)).trim();
+  const m = s.match(/^2026-08-(\d\d)$/);
+  return m ? m[1] + ' Aug' : s;
+}
+const whenOf = n => n.updated || n.edited || n.when || n.opened || '';
+const refKey = n => n.type === 'page' ? 'page · ENG' : n.type === 'note' ? 'local note' : n.type === 'branch' ? 'branch' : n.type === 'repo' ? 'repo' : n.type === 'build' ? `${n.config} ${n.key}` : n.key;
+const refOf = n => ['page'].includes(n.type) ? 'ENG' : n.type === 'note' ? 'note' : n.type === 'branch' ? 'branch' : n.type === 'repo' ? 'repo' : n.key;
+const descOf = n => n.type === 'build' ? n.config : (n.type === 'branch' || n.type === 'repo') ? n.key : n.title;
+function stOf(n) {
+  if (n.type === 'ticket') return [n.status, n.status === 'Done' ? 'blue' : ''];
+  if (n.type === 'pr') return [n.state, n.state === 'merged' ? 'blue' : ''];
+  if (n.type === 'build') return [n.status, n.status === 'failed' ? 'red' : n.status === 'success' ? 'blue' : 'blue'];
+  if (n.type === 'commit') return ['ML', ''];
+  if (n.type === 'branch') return [n.ahead ? n.ahead + ' ahead' : (n.local ? 'checked out' : 'merged'), ''];
+  if (n.type === 'repo') return [n.lang, ''];
+  if (n.type === 'page') return [n.by === 'Mara Lindqvist' ? 'you' : n.by.split(' ')[0], ''];
+  return ['you', ''];
+}
+function entRow(id, cls) {
+  const n = N[id]; if (!n) return '';
+  const [st, sc] = stOf(n);
+  return `<div class="lrow click ${cls || ''}" data-go="${id}">
+    <span class="d">${esc(shortDate(whenOf(n)))}</span>
+    <span class="ref">${esc(refOf(n))}</span>
+    <span class="desc${n.type === 'page' || n.type === 'note' ? ' serif' : ''}">${esc(descOf(n))}</span>
+    <span class="st ${sc}">${esc(st)}</span>
+    ${stampHTML(n.src, id, state.fresh.has(id) ? 'in' : '')}
+  </div>`;
+}
+const chip = (id, txt) => N[id] ? `<span class="chip" data-go="${id}">${esc(txt || shortLabel(N[id]))}</span>` : esc(txt || id);
+function metaOf(n) {
+  if (n.type === 'ticket') return `${n.kind} · Tidewater Jira · ${syncedText('jira')}`;
+  if (n.type === 'pr') return `${n.repo} · ${n.from} → ${n.to} · ${syncedText('gitea')}`;
+  if (n.type === 'build') return `${n.branch} · ${syncedText('teamcity')}`;
+  if (n.type === 'commit') return `${n.by} · ${n.when}`;
+  if (n.type === 'branch') return `${n.repo} · ${syncedText('gitea')}`;
+  if (n.type === 'repo') return `${n.lang} · ${n.clone}`;
+  if (n.type === 'page') return `${n.space} · edited ${n.edited} by ${n.by}`;
+  return `Local note · edited ${n.edited}`;
+}
+function cardHead(n) {
+  return `<div class="chead">${stampHTML(n.src, n.id, state.fresh.has(n.id) ? 'in' : '')}
+    <div style="min-width:0"><div class="k">${esc(refKey(n))}</div><div class="meta">${esc(metaOf(n))}</div></div>
+    <button class="iconbtn more" data-act="nodemenu" data-id="${n.id}" title="Actions on this node">⋯</button></div>`;
+}
+function sugRow(e, self) {
+  const other = N[e.a === self ? e.b : e.a];
+  return `<div class="lrow sug">
+    <span class="ref">${esc(refOf(other))}</span>
+    <span class="desc" style="white-space:normal"><span data-go="${other.id}" style="cursor:pointer">${esc(descOf(other))}</span><span class="why">${e.reason}</span></span>
+    <span class="acts"><button class="btn sm" data-act="confirmsug" data-e="${e.id}">Confirm</button><button class="btn sm q" data-act="dismisssug" data-e="${e.id}">Dismiss</button></span>
+  </div>`;
+}
+function linksSection(n) {
+  const ls = neighbours(n.id), sug = suggestionsFor(n.id);
+  return `<h2 class="s">Links <span class="n">(${ls.length})</span><button class="btn sm q r" data-act="linkto" data-id="${n.id}">Link to…</button></h2>
+    <div class="ledger">${ls.map(x => entRow(x.other.id)).join('') || `<div class="lrow"><span class="d"></span><span class="ref"></span><span class="desc muted">Nothing linked. Drag this node onto another, or use Link to…</span><span class="st"></span><span></span></div>`}</div>
+    ${sug.length ? `<h2 class="s">Suggested links <span class="n">(${sug.length})</span><span class="r muted">auto-detected</span></h2><div class="ledger">${sug.map(e => sugRow(e, n.id)).join('')}</div>` : ''}`;
+}
+function commentsSection(n, ph, where) {
+  const rows = n.comments.map(c => `<div class="lrow cmt"><span class="d">${esc(shortDate(c.when))}</span>
+      <div><div class="who">${esc(c.who)}${c.mention ? ' <span class="chip red">mentions you</span>' : ''}</div><div class="txt">${esc(c.txt)}</div></div></div>`).join('');
+  return `<h2 class="s">Comments <span class="n">(${n.comments.length})</span></h2>
+    <div class="ledger">${rows || `<div class="lrow cmt"><span class="d"></span><div class="muted">No comments yet.</div></div>`}</div>
+    <div style="margin-top:8px"><textarea class="ta" id="cmt" placeholder="${esc(ph)}"></textarea></div>
+    <div class="actions"><button class="btn p" data-act="addcmt" data-id="${n.id}">Add comment</button><span class="small muted" style="align-self:center">Writes to ${where} as Mara</span></div>`;
+}
+function worklogSection(n) {
+  let run = 0;
+  const rows = (n.worklogs || []).map(w => { run += w.min; return `<div class="lrow wl"><span class="d">${esc(w.when)}</span><span class="desc" style="white-space:normal">${esc(w.txt)}</span><span class="d2">${fmtHM(w.min)}</span><span class="d2 tot">${fmtHM(run)}</span></div>`; }).join('');
+  return `<h2 class="s">Worklogs <span class="n">(${(n.worklogs || []).length})</span><span class="r muted">running total</span></h2>
+    <div class="ledger">${rows || `<div class="lrow wl"><span class="d"></span><span class="desc muted">Nothing logged on this ticket.</span><span class="d2"></span><span class="d2"></span></div>`}</div>`;
+}
+function timerBtnFor(id) {
+  const on = state.timer.running && state.timer.ctx === id;
+  return on ? `<button class="btn d" data-act="stoptimer">Stop timer · log time</button>`
+            : `<button class="btn" data-act="starttimer" data-id="${id}">Start timer here</button>`;
+}
+
+/* ============================================================
+   Side card — one entity per type
+   ============================================================ */
+function emptyCard() {
+  return `<h2 class="s">Canvas</h2>
+    <p class="serif" style="margin-bottom:6px">Select a node to open it here. Drag one node onto another to propose a link, or right-click a node for its actions.</p>
+    <p class="small muted" style="margin-bottom:4px">${Object.values(N).filter(n => n.pos).length} nodes from 5 sources on one ledger sheet.</p>
+    <h2 class="s">Open something</h2>
+    <div class="ledger">${['PAY-231', 'pr-142', 'build-1187', 'page-sepa', 'note-invest'].map(id => entRow(id)).join('')}</div>
+    <h2 class="s">Waiting on you</h2>
+    <div class="ledger">${['pr-144', 'PAY-240'].map(id => entRow(id)).join('')}</div>`;
+}
+function ticketCard(n) {
+  const statuses = ['To Do', 'In Progress', 'In Review', 'Done'];
+  return `${cardHead(n)}<h1 class="t">${esc(n.title)}</h1>
+  <div class="fields">
+    <div>Status</div><div><select class="st-sel" data-id="${n.id}" aria-label="Status">${statuses.map(s => `<option${s === n.status ? ' selected' : ''}>${s}</option>`).join('')}</select></div>
+    <div>Priority</div><div><span class="prio ${n.priority}">${n.priority}</span></div>
+    <div>Assignee</div><div>${esc(n.assignee)}${n.assignedNote ? ` <span class="faint small">· ${esc(n.assignedNote)}</span>` : ''}</div>
+    ${n.epic ? `<div>Epic</div><div>${chip(n.epic)} <span class="muted">${esc(N[n.epic].title)}</span></div>` : ''}
+    ${n.blockedBy ? `<div>Blocked by</div><div>${chip(n.blockedBy)} <span class="red">${esc(N[n.blockedBy].title)}</span></div>` : ''}
+    <div>Estimate</div><div>${esc(n.estimate || '—')}${n.spentWeek ? ` <span class="muted">· spent this week</span> <span class="mono">${esc(n.spentWeek)}</span>` : ''}</div>
+    <div>Updated</div><div class="mono">${esc(n.updated)}</div>
+  </div>
+  <div class="actions">${timerBtnFor(n.id)}
+    ${n.status === 'To Do' ? `<button class="btn p" data-act="startwork" data-id="${n.id}">Start work on ${n.key}</button>` : ''}
+    <button class="btn q" data-act="newnote" data-id="${n.id}">New note</button>
+    <button class="btn q" data-act="opensource" data-src="jira">Open in Jira</button></div>
+  <h2 class="s">Description</h2><div class="desc">${n.desc}</div>
+  ${linksSection(n)}
+  ${commentsSection(n, `Comment on ${n.key}…`, 'Jira')}
+  ${worklogSection(n)}`;
+}
+function prCard(n) {
+  const a = n.approvals, missing = a.need - a.given.length;
+  return `${cardHead(n)}<h1 class="t">${esc(n.title)}</h1>
+  <div class="fields">
+    <div>State</div><div>${n.state === 'merged' ? `<span class="blue">Merged ${esc(n.merged)}</span>` : `Open · ${missing} of ${a.need} approvals missing`}</div>
+    <div>Branch</div><div class="mono" style="font-size:11px">${esc(n.from)} → ${esc(n.to)}</div>
+    <div>Repository</div><div>${chip(resolve(n.repo) || 'repo-payout', n.repo)}</div>
+    <div>Author</div><div>${esc(n.by)} · opened ${esc(n.opened)}</div>
+    <div>Review</div><div style="flex-wrap:wrap;gap:4px">${a.given.map(g => `<span class="chip">${esc(g.who.split(' ')[0])} approved</span>`).join('')}${a.requested.map(r => `<span class="chip red">${esc(r.who.split(' ')[0])} requested ${esc(shortDate(r.when))}</span>`).join('')}${!a.given.length && !a.requested.length ? '<span class="muted">no reviewers</span>' : ''}</div>
+  </div>
+  <div class="actions">
+    ${n.state === 'open' ? `<button class="btn p" data-act="rereview" data-id="${n.id}">Request re-review</button>` : ''}
+    <button class="btn" data-act="merge" data-id="${n.id}"${missing > 0 || n.state === 'merged' ? ' disabled' : ''}>Merge</button>
+    ${timerBtnFor(n.id)}</div>
+  ${n.checks.length ? `<h2 class="s">Checks <span class="n">(${n.checks.length})</span></h2><div class="ledger">${n.checks.map(id => entRow(id)).join('')}</div>` : ''}
+  <h2 class="s">Files changed <span class="n">(${n.files.length})</span></h2>
+  <div class="ledger">${n.files.map(f => `<div class="lrow file"><span class="mono" style="font-size:11.5px">${esc(f[0])}</span><span class="diff"><b>${esc(f[1])}</b> ${f[2] ? `<i>${esc(f[2])}</i>` : ''}</span></div>`).join('')}</div>
+  ${linksSection(n)}
+  ${commentsSection(n, `Reply on ${n.key}…`, 'Gitea')}`;
+}
+function buildCard(n) {
+  const failed = n.status === 'failed';
+  return `${cardHead(n)}<h1 class="t">${esc(n.config)} <span class="mono blue">${esc(n.key)}</span></h1>
+  <div class="fields">
+    <div>Result</div><div>${failed ? `<span class="stamp big" style="--rot:-4deg">Failed</span>` : n.status === 'running' ? `<span class="runner-i"></span> <span style="margin-left:6px">running · ${esc(n.step || '')}</span>` : `<span class="blue">Success</span>`}</div>
+    <div>Branch</div><div class="mono" style="font-size:11px">${esc(n.branch)}</div>
+    <div>Started</div><div>${esc(n.when)}${n.dur ? ` · <span class="mono">${esc(n.dur)}</span>` : ''}</div>
+    <div>Parameters</div><div class="mono" style="font-size:11px">branch=${esc(n.params.branch)} env=${esc(n.params.env)}</div>
+  </div>
+  <div class="actions">
+    ${failed ? `<button class="btn p" data-act="rerun" data-id="${n.id}">Re-run failed tests</button>` : ''}
+    <button class="btn" data-act="trigger" data-config="${esc(n.config)}" data-branch="${esc(n.branch)}">Trigger with parameters…</button>
+    <button class="btn q" data-act="newnote" data-id="${n.id}">New note</button></div>
+  ${SRC.teamcity.ok ? '' : `<div class="result bad" style="margin-top:8px"><span>TeamCity has not synced since 10:14 — 401 Unauthorized. Triggers queue locally until the password works.</span><button class="btn sm d" data-act="fixteamcity">Re-enter password</button></div>`}
+  ${n.log ? `<h2 class="s">Log excerpt <span class="r muted">last 3 lines</span></h2><div class="pre">${n.log}</div>` : ''}
+  ${n.steps ? `<h2 class="s">Steps</h2><div class="ledger">${n.steps.map((s, i) => `<div class="lrow two"><span class="d mono">${i + 1}/5</span><span class="desc">${esc(s)}</span><span class="st ${i < 2 ? 'blue' : i === 2 ? '' : 'muted'}">${i < 2 ? 'done' : i === 2 ? 'running' : 'waiting'}</span></div>`).join('')}</div>` : ''}
+  ${linksSection(n)}`;
+}
+function pageCard(n) {
+  const editing = state.editPage === n.id;
+  return `${cardHead(n)}<h1 class="t serif">${esc(n.title)}</h1>
+  <div class="fields">
+    <div>Space</div><div>${esc(n.space)}</div>
+    <div>Edited</div><div>${esc(n.edited)} by ${esc(n.by)}${n.section ? ` · section <span class="mono">${esc(n.section)}</span>` : ''}</div>
+  </div>
+  <div class="actions">
+    ${editing ? `<button class="btn p" data-act="savepage" data-id="${n.id}">Save to Tidewater Wiki</button><button class="btn q" data-act="canceledit">Cancel</button>`
+              : `<button class="btn" data-act="editpage" data-id="${n.id}">Edit page</button><button class="btn q" data-act="newnote" data-id="${n.id}">New note</button>${timerBtnFor(n.id)}`}</div>
+  <h2 class="s">Content</h2>
+  ${editing ? `<div class="proto" id="pagebody" contenteditable="true" role="textbox" aria-label="Page body">${n.body}</div><p class="small muted" style="margin-top:6px">Edits are written back to Confluence when you save.</p>`
+            : `<div class="desc">${n.body}</div>`}
+  ${linksSection(n)}
+  ${commentsSection(n, `Reply on ${n.title}…`, 'Confluence')}`;
+}
+function noteCard(n) {
+  const editing = state.editNote === n.id;
+  const back = edges.filter(e => e.kind !== 'suggested' && (e.a === n.id || e.b === n.id)).map(e => N[e.a === n.id ? e.b : e.a]).filter(Boolean);
+  return `${cardHead(n)}<h1 class="t serif">${esc(n.title)}</h1>
+  <div class="editorbar">
+    ${editing ? `<button class="btn p" data-act="savenote" data-id="${n.id}">Save note</button><button class="btn q" data-act="canceledit">Cancel</button>`
+              : `<button class="btn" data-act="editnote" data-id="${n.id}">Edit</button><button class="btn q" data-act="linkto" data-id="${n.id}">Insert link…</button>${timerBtnFor(n.id)}`}
+    <span class="muted small">edited ${esc(n.edited)} · local only</span></div>
+  ${editing ? `<textarea class="ta big" id="noteta" aria-label="Note body">${esc(n.body)}</textarea><p class="small muted" style="margin-top:6px">Type [[PAY-231]] or [[#1187]] to link an entity — links become edges on the canvas.</p>`
+            : `<div class="desc">${renderNoteBody(n.body)}</div>`}
+  <h2 class="s">Backlinks <span class="n">(${back.length})</span></h2>
+  <div class="ledger backlinks">${back.map(m => `<div class="lrow click" data-go="${m.id}"><span class="ref">${esc(refOf(m))}</span><span class="desc">${esc(descOf(m))}</span>${stampHTML(m.src, m.id)}</div>`).join('') || `<div class="lrow"><span class="desc muted">Nothing links here yet.</span></div>`}</div>`;
+}
+function renderNoteBody(body) {
+  return esc(body).replace(/\[\[([^\]]+)\]\]/g, (m, key) => {
+    const id = resolve(key);
+    return id ? `<span class="chip" data-go="${id}">${esc(key)}</span>` : `<span class="chip red">${esc(key)}</span>`;
+  }).replace(/\n/g, '<br>');
+}
+function commitCard(n) {
+  return `${cardHead(n)}<h1 class="t">${esc(n.title)}</h1>
+  <div class="fields">
+    <div>Hash</div><div class="mono blue">${esc(n.key)}</div>
+    <div>Author</div><div>${esc(n.by)} · ${esc(n.when)}</div>
+    <div>Branch</div><div>${chip(n.branch, N[n.branch].key)}</div>
+  </div>
+  <div class="actions"><button class="btn q" data-act="newnote" data-id="${n.id}">New note</button><button class="btn q" data-act="linkto" data-id="${n.id}">Link to…</button></div>
+  ${linksSection(n)}`;
+}
+function branchCard(n) {
+  return `${cardHead(n)}<h1 class="t mono" style="font-size:14px">${esc(n.key)}</h1>
+  <div class="fields">
+    <div>Repository</div><div>${chip('repo-payout', n.repo)}</div>
+    <div>State</div><div>${n.ahead ? `${n.ahead} commits ahead of main${n.local ? ' · checked out locally' : ''}` : (n.local ? 'even with main · checked out locally' : 'merged')}</div>
+  </div>
+  <div class="actions"><button class="btn" data-act="gitpull" data-repo="${esc(n.repo)}">Pull</button><button class="btn" data-act="gitpush" data-branch="${esc(n.key)}">Push</button>${timerBtnFor(n.id)}</div>
+  <h2 class="s">Commits <span class="n">(${(n.commits || []).length})</span></h2>
+  <div class="ledger">${(n.commits || []).map(id => entRow(id)).join('')}</div>
+  ${linksSection(n)}`;
+}
+function repoCard(n) {
+  return `${cardHead(n)}<h1 class="t mono" style="font-size:14px">${esc(n.key)}</h1>
+  <div class="fields">
+    <div>Language</div><div>${esc(n.lang)}</div>
+    <div>Local clone</div><div class="mono" style="font-size:11px">${esc(n.clone)}</div>
+  </div>
+  <div class="actions"><button class="btn" data-act="gitpull" data-repo="${esc(n.key)}">Pull</button><button class="btn" data-act="gitpush" data-branch="main">Push</button><button class="btn q" data-act="newbranch" data-repo="${esc(n.key)}">New branch…</button></div>
+  <h2 class="s">Branches <span class="n">(${n.branches.length})</span></h2>
+  <div class="ledger">${n.branches.map(b => `<div class="lrow two"><span class="d"></span><span class="desc mono" style="font-size:11.5px">${esc(b)}</span><span></span></div>`).join('')}</div>
+  ${linksSection(n)}`;
+}
+const CARDS = { ticket: ticketCard, pr: prCard, build: buildCard, page: pageCard, note: noteCard, commit: commitCard, branch: branchCard, repo: repoCard };
+function renderCard() {
+  const el = $('#cardin'), n = N[state.sel];
+  el.className = 'card-in' + (n ? '' : ' empty');
+  el.innerHTML = n ? CARDS[n.type](n) : emptyCard();
+  $('#card').scrollTop = 0;
+}
+function placeNode(id, near) {
+  const n = N[id]; if (!n || n.pos) return;
+  const base = (near && N[near] && N[near].pos) || [580, 470];
+  const taken = Object.values(N).filter(m => m.pos).map(m => m.pos);
+  const cand = [[240, 0], [-240, 0], [0, 130], [0, -130], [240, 130], [-240, 130], [240, -130], [-240, -130], [480, 0], [-480, 0], [0, 260], [480, 130], [-480, 130], [0, -260], [480, 260]];
+  for (const [dx, dy] of cand) {
+    const p = [base[0] + dx, base[1] + dy];
+    if (!taken.some(t => Math.abs(t[0] - p[0]) < 190 && Math.abs(t[1] - p[1]) < 70)) { n.pos = p; return; }
+  }
+  n.pos = [base[0] + 240, base[1] + 260];
+}
+
+/* ============================================================
+   Lenses (smart lists) — they filter the canvas
+   ============================================================ */
+const LENSES = [
+  { id: 'all', label: 'All', n: '14' },
+  { id: 'failbuild', label: 'My tickets with a failing build', n: '1', up: '+1', ids: ['PAY-231', 'pr-142', 'branch-231', 'build-1187'],
+    note: '<b>PAY-231</b> — the only ticket of yours whose branch has a red build. This joins Jira ↔ Gitea ↔ TeamCity in one query; JQL cannot express it, because Jira never sees the build.' },
+  { id: 'prsme', label: 'PRs waiting on me', n: '1', ids: ['pr-144', 'PAY-236'],
+    note: '<b>PR #144</b> <i>Add payout CSV export</i> — Jonas requested your review today 13:50. It belongs to PAY-236.' },
+  { id: 'prsidle', label: 'PRs idle > 5 days', n: '2', ids: [],
+    note: '2 pull requests older than 5 days sit in repos you have not pulled onto this canvas. Nothing to highlight here — open <b>Sources</b> to sync the rest of Gitea.' },
+  { id: 'pagesweek', label: 'Pages I edited', full: 'Pages I edited this week', n: '3', ids: ['page-sepa'],
+    note: '<b>SEPA payout retry design</b> (today 10:40) and <b>Standup protocols</b> (yesterday) are on the canvas; the third page is not loaded into this view.' },
+  { id: 'blocked', label: 'Blocked tickets', n: '1', ids: ['PAY-228', 'OPS-77'],
+    note: '<b>PAY-228</b> is blocked by <b>OPS-77</b> — staging verification needs the updated runbook. Tomasz owns OPS-77, ETA Tuesday.' },
+  { id: 'unlogged', label: 'Unlogged time', full: 'Unlogged time this week', n: '4h 45m', ids: ['PAY-231', 'PAY-228'],
+    note: '4h 45m tracked but never written back to Jira. Today alone is 5h 28m tracked with nothing logged.', act: { label: 'Open week timesheet', o: 'time' } }
+];
+function renderLenses() {
+  LENSES[0].n = String(Object.values(N).filter(n => visibleNode(n)).length);
+  $('#lenses').innerHTML = `<span class="lbl">Lenses</span>` + LENSES.map(l =>
+    `<button class="lens${state.lens === l.id ? ' on' : ''}" data-lens="${l.id}" title="${esc(l.full || l.label)}">${esc(l.label)} <span class="n">${l.n}</span>${l.up ? `<span class="up">${l.up}</span>` : ''}</button>`).join('');
+  const l = LENSES.find(x => x.id === state.lens), box = $('#lensnote');
+  if (!l || l.id === 'all') { box.hidden = true; box.innerHTML = ''; }
+  else {
+    box.hidden = false;
+    box.innerHTML = `<span>${l.note}</span>${l.act ? `<button class="btn sm" data-act="overlay" data-o="${l.act.o}">${esc(l.act.label)}</button>` : ''}<button class="btn sm q x" data-act="lens" data-lens="all">Clear lens</button>`;
+  }
+}
+function setLens(id) {
+  state.lens = id;
+  const l = LENSES.find(x => x.id === id);
+  state.lensFocus = (!l || id === 'all') ? null : new Set(l.ids);
+  renderLenses(); applyFocus();
+}
+function applyFocus() {
+  state.focus = state.searchFocus || state.lensFocus || null;
+  renderGraph();
+}
+
+/* ============================================================
+   Timer
+   ============================================================ */
+let BID = 100;
+const nowMin = () => NOWM + Math.floor((Date.now() - loadedAt) / 60000);
+const nowStr = () => tStr(nowMin());
+const blockEnd = b => b.live ? nowStr() : b.e;
+const timerElapsed = () => state.timer.running ? state.timer.base + Math.floor((Date.now() - state.timer.t0) / 1000) : 0;
+const timerLabel = () => state.timer.label || (state.timer.ctx && N[state.timer.ctx] ? shortLabel(N[state.timer.ctx]) : 'no context');
+function renderTimer() {
+  const t = state.timer, s = timerElapsed();
+  $('#timerbtn').classList.toggle('off', !t.running);
+  $('#timerctx').textContent = t.running ? timerLabel() : 'Timer off';
+  $('#timerel').textContent = t.running ? `${Math.floor(s / 3600)}:${pad2(Math.floor(s / 60) % 60)}` : '—';
+  $('#timerring').style.visibility = t.running ? 'visible' : 'hidden';
+  $('#timerbtn').title = t.running ? `Tracking ${timerLabel()} since ${t.since} — Ctrl/Cmd+T stops it` : 'Timer stopped — Ctrl/Cmd+T starts it';
+}
+function closeLiveBlock() {
+  const b = blocks.find(x => x.live);
+  if (b) { b.e = nowStr(); b.live = false; }
+  return b;
+}
+function startTimer(id, lbl) {
+  const t = state.timer;
+  if (t.running) closeLiveBlock();
+  t.running = true; t.ctx = id || null; t.label = lbl || null; t.base = 0; t.t0 = Date.now(); t.since = nowStr();
+  blocks.push({ id: 'b' + (++BID), s: nowStr(), e: nowStr(), ctx: lbl || (id ? shortLabel(N[id]) : '—'), sub: lbl ? 'ad-hoc label, no ticket' : 'manual timer', how: lbl ? 'manual label' : 'manual timer', node: id || null, kind: lbl ? 'label' : 'manual', live: true });
+  closePop(); renderTimer(); renderGraph(); if (state.overlay === 'time') renderTime();
+  toast(`Timer started on ${esc(timerLabel())}`, 'timer');
+}
+function stopTimer() {
+  if (!state.timer.running) return;
+  closePop(); closeLiveBlock();
+  const ctx = state.timer.ctx, lbl = state.timer.label;
+  state.timer.running = false;
+  renderTimer(); renderGraph(); if (state.overlay === 'time') renderTime();
+  worklogDialog(ctx && N[ctx] && N[ctx].type === 'ticket' ? ctx : null, lbl);
+}
+function toggleTimer() {
+  if (state.timer.running) stopTimer();
+  else startTimer(state.sel && ['ticket', 'pr', 'build', 'page', 'note'].includes(N[state.sel].type) ? state.sel : 'PAY-231');
+}
+function timerPop(x, y) {
+  const t = state.timer, s = timerElapsed();
+  if (!t.running) {
+    menu([{ label: 'Start on PAY-231', run: () => startTimer('PAY-231') },
+          { label: 'Start on the selected node', disabled: !state.sel, run: () => startTimer(state.sel) },
+          { label: 'Start with a label…', run: () => adhocPop(x, y) },
+          { label: 'Open day review', run: () => openOverlay('time') }], x, y, 'Timer — stopped');
+    return;
+  }
+  const p = openPop(`<div class="pb"><div class="big">${Math.floor(s / 3600)}:${pad2(Math.floor(s / 60) % 60)}</div>
+      <div class="muted small">${esc(timerLabel())} · started ${esc(t.since)} manually · ${t.label ? 'ad-hoc label, no ticket' : 'entity context'}</div></div>
+    <div class="pb"><div class="actions" style="margin:0"><button class="btn d" data-act="stoptimer">Stop and log…</button><button class="btn q" data-act="switchctx">Switch context…</button></div></div>
+    <div class="pb"><div class="small muted" style="margin-bottom:5px">Or track something with no ticket</div>
+      <div class="actions" style="margin:0"><input class="in" id="adhoc" placeholder="Staging DB configuration" style="width:170px"><button class="btn" data-act="adhoc">Track label</button></div></div>
+    <div class="pb"><button class="btn q sm" data-act="overlay" data-o="time">Open day review</button> <span class="small muted">5h 28m tracked today</span></div>`, x, y, 'timerpop');
+  p.querySelector('#adhoc').addEventListener('keydown', ev => { if (ev.key === 'Enter') { const v = ev.target.value.trim(); if (v) startTimer(null, v); } });
+}
+function adhocPop(x, y) {
+  const p = openPop(`<div class="pb"><div class="small muted" style="margin-bottom:5px">Track a label with no ticket</div>
+    <div class="actions" style="margin:0"><input class="in" id="adhoc" placeholder="Staging DB configuration" style="width:180px"><button class="btn p" data-act="adhoc">Start</button></div></div>`, x, y, 'timerpop');
+  p.querySelector('#adhoc').addEventListener('keydown', ev => { if (ev.key === 'Enter') { const v = ev.target.value.trim(); if (v) startTimer(null, v); } });
+}
+
+/* ============================================================
+   Chrome — rail, counts, sync, status bar
+   ============================================================ */
+function syncRail() { $$('.rail button').forEach(b => b.classList.toggle('on', b.dataset.nav === (state.overlay || 'graph'))); }
+function renderCounts() {
+  const n = inbox.length;
+  $('#inboxcnt').textContent = n;
+  $('#railcnt').textContent = n;
+  $('#railcnt').hidden = n === 0;
+  $('#inboxcnt').hidden = n === 0;
+}
+function renderSync() {
+  const ok = SRC.teamcity.ok;
+  $('#syncbtn').classList.toggle('bad', !ok);
+  $('#synctxt').textContent = ok ? '4 sources synced' : '3 of 4 synced · TeamCity 401';
+}
+function renderStatus() {
+  renderLenses();
+  const nodes = Object.values(N).filter(n => n.pos).length;
+  const ls = edges.filter(e => e.kind !== 'suggested').length, ss = edges.filter(e => e.kind === 'suggested').length;
+  const ok = SRC.teamcity.ok;
+  $('#statusbar').innerHTML =
+    `<span class="s"><span class="dot"></span> Postgres <b>knobas</b> · 212 MB · index up to date</span>
+     <span class="s sched">Sync every 5 min · Jira and Wiki 4 min ago · Gitea 2 min ago</span>
+     ${ok ? `<span class="s">TeamCity synced · pending writes <b>${state.pending}</b></span>`
+          : `<span class="s bad"><span class="dot"></span> TeamCity 401 Unauthorized${state.pending ? ` · <b>${state.pending} write${state.pending > 1 ? 's' : ''} queued</b>` : ''} <button data-act="fixteamcity">Re-enter password</button></span>`}
+     <span class="s">${nodes} nodes · ${ls} links · ${ss} proposals</span>
+     <span class="grow"></span>
+     <span class="s mono">${esc(location.hash || '#/graph')}</span>
+     <span class="s last">Cmd/Ctrl+K search · Cmd/Ctrl+T timer · Esc closes</span>`;
+}
+
+/* ============================================================
+   Search over the local index
+   ============================================================ */
+function indexText(n) {
+  const parts = [n.key, n.title, n.desc, n.body, n.config, n.branch, n.from, n.repo, n.lang, n.space, n.by, n.assignee, n.status, n.state, n.kind, n.step];
+  if (n.params) parts.push(n.params.branch, n.params.env);
+  if (n.comments) n.comments.forEach(c => parts.push(c.who, c.txt));
+  if (n.type === 'commit' && N[n.branch]) parts.push(N[n.branch].key);
+  return parts.filter(Boolean).join(' ').replace(/<[^>]+>/g, ' ').toLowerCase();
+}
+const whoOf = n => n.assignee || n.by || 'Mara Lindqvist';
+const isToday = n => /today/.test(whenOf(n));
+const isThisWeek = n => /today|yesterday|2026-08-1[7-9]|2026-08-2[0-2]/.test(whenOf(n));
+function failingBuildSet() {
+  const bad = Object.values(N).filter(n => n.type === 'build' && n.status === 'failed').map(n => n.id);
+  const s = new Set(bad);
+  for (const id of bad) for (const x of neighbours(id)) { s.add(x.other.id); for (const y of neighbours(x.other.id)) if (y.other.type === 'ticket' || y.other.type === 'branch') s.add(y.other.id); }
+  return s;
+}
+state.f = { src: new Set(), type: new Set(), who: '', date: '', fail: false };
+const TYPES = [['ticket', 'Tickets'], ['page', 'Pages'], ['pr', 'PRs'], ['commit', 'Commits'], ['build', 'Builds'], ['note', 'Notes']];
+function searchHits(q) {
+  const toks = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const fail = state.f.fail ? failingBuildSet() : null;
+  return Object.values(N).map(n => {
+    const t = indexText(n);
+    if (toks.length && !toks.every(k => t.includes(k))) return null;
+    if (state.f.src.size && !state.f.src.has(n.src)) return null;
+    if (state.f.type.size && !state.f.type.has(n.type)) return null;
+    if (state.f.who && whoOf(n) !== state.f.who) return null;
+    if (state.f.date === 'today' && !isToday(n)) return null;
+    if (state.f.date === 'week' && !isThisWeek(n)) return null;
+    if (fail && !fail.has(n.id)) return null;
+    const head = ((n.key || '') + ' ' + (n.title || '') + ' ' + (n.config || '')).toLowerCase();
+    return { n, score: toks.reduce((a, k) => a + (head.includes(k) ? 3 : 1), 0) + (n.type === 'ticket' ? 1 : 0) };
+  }).filter(Boolean).sort((a, b) => b.score - a.score).slice(0, 14);
+}
+function renderSearch() {
+  const q = $('#q').value.trim(), drop = $('#sdrop');
+  const f = state.f;
+  const filters = `<div class="filters">
+    <span class="lbl">Source</span>${Object.keys(SRC).map(k => `<button class="fchip${f.src.has(k) ? ' on' : ''}" data-fs="${k}">${SRC[k].stamp}</button>`).join('')}
+    <span class="lbl">Type</span>${TYPES.map(([t, l]) => `<button class="fchip${f.type.has(t) ? ' on' : ''}" data-ft="${t}">${l}</button>`).join('')}
+    <span class="lbl">Person</span>${['Mara Lindqvist', 'Jonas Becker', 'Priya Nair', 'Tomasz Wójcik'].map(w => `<button class="fchip${f.who === w ? ' on' : ''}" data-fw="${w}">${w.split(' ')[0]}</button>`).join('')}
+    <span class="lbl">Date</span><button class="fchip${f.date === 'today' ? ' on' : ''}" data-fd="today">Today</button><button class="fchip${f.date === 'week' ? ' on' : ''}" data-fd="week">This week</button>
+    <span class="lbl">Cross-source</span><button class="fchip x${f.fail ? ' on' : ''}" data-fx="fail" title="Jira x Gitea x TeamCity — no single source can answer this">Has a failing build</button>
+  </div>`;
+  if (!q && !f.fail && !f.src.size && !f.type.size && !f.who && !f.date) {
+    drop.innerHTML = filters + `<div class="res">
+      <div class="lrow click" data-fill="sepa retry"><span class="d mono">recent</span><span class="ref">query</span><span class="desc">sepa retry</span><span class="syn">7 results</span><span></span></div>
+      <div class="lrow click" data-fill="backoff"><span class="d mono">recent</span><span class="ref">query</span><span class="desc">backoff</span><span class="syn">4 results</span><span></span></div>
+      ${LENSES.filter(l => l.id !== 'all').map(l => `<div class="lrow click" data-lens="${l.id}"><span class="d mono">list</span><span class="ref">saved</span><span class="desc">${esc(l.label)}</span><span class="syn">${l.n}</span><span></span></div>`).join('')}
+    </div><div class="foot"><span>Saved lists run against the local index, not the source APIs.</span><span class="grow"></span></div>`;
+    drop.hidden = false; return;
+  }
+  const hits = searchHits(q);
+  drop.innerHTML = filters + (hits.length ? `<div class="res">${hits.map((h, i) => {
+    const n = h.n, [st, sc] = stOf(n);
+    return `<div class="lrow click${i === 0 ? ' cur' : ''}" data-go="${n.id}"><span class="d">${esc(shortDate(whenOf(n)))}</span><span class="ref">${esc(refOf(n))}</span>
+      <span class="desc${n.type === 'page' || n.type === 'note' ? ' serif' : ''}">${esc(descOf(n))} <span class="muted">${esc(st)}</span></span>
+      <span class="syn">${esc(syncedText(n.src))}</span>${stampHTML(n.src, n.id)}</div>`;
+  }).join('')}</div>` : `<div class="none">Nothing in the local index matches ${esc(q || 'these filters')}. Clear a filter, or check Sources — TeamCity has not synced since 10:14.</div>`) +
+    `<div class="foot"><span>${hits.length} results from the local index · 212 MB</span><span class="grow" style="flex:1"></span><span>Enter opens the first · Esc closes</span></div>`;
+  drop.hidden = false;
+  state.searchFocus = hits.length ? new Set(hits.map(h => h.n.id)) : new Set();
+  applyFocus();
+}
+function runSearch() { renderSearch(); }
+function closeSearch() {
+  $('#sdrop').hidden = true; $('#sdrop').innerHTML = '';
+  state.searchFocus = null; applyFocus();
+}
+function focusSearch() { closeOverlay(true); const q = $('#q'); q.focus(); q.select(); renderSearch(); }
+function moveSearchCur(d) {
+  const rows = $$('#sdrop .res .lrow'); if (!rows.length) return;
+  let i = rows.findIndex(r => r.classList.contains('cur'));
+  rows.forEach(r => r.classList.remove('cur'));
+  i = Math.max(0, Math.min(rows.length - 1, i + d));
+  rows[i].classList.add('cur'); rows[i].scrollIntoView({ block: 'nearest' });
+}
+
+/* ============================================================
+   Overlays — inbox, notes, sources, standup, time
+   ============================================================ */
+function sheetShell(cls, title, sub, body, bodyCls) {
+  return `<div class="sheet ${cls || ''}" role="dialog" aria-label="${esc(title)}">
+    <div class="shead"><h1>${esc(title)}</h1><span class="sub">${sub || ''}</span><button class="iconbtn x" data-act="closeoverlay" title="Close (Esc)">✕</button></div>
+    <div class="sbody ${bodyCls || ''}">${body}</div></div>`;
+}
+function openOverlay(kind, opts = {}) {
+  closePop(); closeSearch();
+  if (state.overlay === kind && !opts.force) { closeOverlay(); return; }
+  state.overlay = kind;
+  if (kind === 'time') { $('#sheet').hidden = true; $('#sheet').innerHTML = ''; renderTime(); }
+  else { $('#bsheet').hidden = true; $('#bsheet').innerHTML = ''; renderSheet(); }
+  syncRail();
+  if (!opts.noRoute) setHash('#/' + kind);
+  renderStatus();
+}
+function closeOverlay(silent) {
+  if (!state.overlay) return;
+  state.overlay = null;
+  $('#sheet').hidden = true; $('#sheet').innerHTML = '';
+  $('#bsheet').hidden = true; $('#bsheet').innerHTML = '';
+  syncRail();
+  if (!silent) { setHash(state.sel ? routeOf(state.sel) : '#/graph'); renderStatus(); }
+}
+function renderSheet() {
+  const el = $('#sheet');
+  el.innerHTML = ({ inbox: inboxSheet, notes: notesSheet, sources: sourcesSheet, standup: standupSheet })[state.overlay]();
+  el.hidden = false;
+}
+
+/* ---------- Inbox ---------- */
+function inboxSheet() {
+  const rows = inbox.map(it => `<div class="lrow${state.reply === it.id ? ' hl' : ''}" data-hl="${it.node}">
+      <span class="d">${esc(it.when)}</span>${stampHTML(it.src, it.id)}
+      <div><div class="txt">${it.txt}</div>
+        <div class="acts">${it.acts.map(a => `<button class="btn sm${a === 'Done' ? ' q' : ''}" data-act="inbox" data-id="${it.id}" data-a="${esc(a)}">${esc(a)}</button>`).join('')}</div>
+        ${state.reply === it.id ? `<div class="reply"><input class="in" id="replybox" placeholder="Reply as Mara…"><button class="btn p" data-act="sendreply" data-id="${it.id}">Send reply</button></div>` : ''}</div>
+    </div>`).join('');
+  return sheetShell('', 'Inbox', `${inbox.length} open · ${snoozed.length} snoozed · newest first`, `
+    <h2 class="s">Needs you <span class="n">(${inbox.length})</span><span class="r muted">click a row to light its node</span></h2>
+    <div class="ledger inbox">${rows || `<div class="lrow"><span class="desc muted">Inbox clear. Nothing is waiting on you.</span></div>`}</div>
+    <h2 class="s">Snoozed <span class="n">(${snoozed.length})</span></h2>
+    <div class="ledger inbox">${snoozed.map(s => `<div class="lrow done"><span class="d">Fri 29</span>${stampHTML('jira', s.id)}
+      <div><div class="txt">${esc(s.txt)}</div><div class="acts"><span class="small muted">${esc(s.returns)}</span><button class="btn sm q" data-act="unsnooze" data-id="${s.id}">Bring back now</button></div></div></div>`).join('')}</div>
+    <h2 class="s">Done today</h2>
+    <div class="ledger inbox"><div class="lrow done"><span class="d">—</span><span></span><div class="txt muted">${state.inboxDone.size} item${state.inboxDone.size === 1 ? '' : 's'} cleared this session.</div></div></div>`);
+}
+function inboxAct(id, a) {
+  const it = inbox.find(x => x.id === id); if (!it) return;
+  const drop = () => { inbox = inbox.filter(x => x.id !== id); state.inboxDone.add(id); renderCounts(); renderSheet(); };
+  if (a === 'Done') { drop(); toast('Cleared from the inbox', 'blue'); return; }
+  if (a === 'Snooze') { inbox = inbox.filter(x => x.id !== id); snoozed.push({ id: 'sn' + id, txt: it.txt.replace(/<[^>]+>/g, ''), returns: 'returns Monday 2026-08-25' }); renderCounts(); renderSheet(); toast('Snoozed until Monday', 'blue'); return; }
+  if (a === 'Reply') { state.reply = state.reply === id ? null : id; renderSheet(); setTimeout(() => $('#replybox') && $('#replybox').focus(), 0); return; }
+  if (a === 'Re-run') { rerun('build-1187'); drop(); return; }
+  if (a === 'Start work') { closeOverlay(); startWorkDialog('PAY-240'); drop(); return; }
+  if (a === 'Ping Tomasz') { toast('Pinged Tomasz on OPS-77 — asked for the runbook ETA', 'jira'); drop(); return; }
+  if (a === 'Comment on PAY-231') { closeOverlay(); select('PAY-231'); setTimeout(() => { const c = $('#cmt'); if (c) { c.focus(); c.value = 'Integration test #1187 is red: the attempt counter starts at 0. Fixing.'; } }, 0); return; }
+  const target = a === 'Open OPS-77' ? 'OPS-77' : it.node;
+  closeOverlay(); select(target);
+}
+function sendReply(id) {
+  const it = inbox.find(x => x.id === id); if (!it) return;
+  const box = $('#replybox'), txt = (box && box.value.trim()) || 'On it.';
+  const n = N[it.node];
+  if (n && n.comments) n.comments.push({ who: 'Mara Lindqvist', when: 'today ' + nowStr(), txt });
+  inbox = inbox.filter(x => x.id !== id); state.inboxDone.add(id); state.reply = null;
+  renderCounts(); renderSheet(); if (state.sel === it.node) renderCard();
+  toast(`Replied on ${esc(shortLabel(n))}`, n.src);
+}
+
+/* ---------- Notes ---------- */
+function notesSheet() {
+  const notes = Object.values(N).filter(n => n.type === 'note');
+  const open = N[state.noteOpen] || notes[0];
+  state.noteOpen = open.id;
+  const editing = state.editNote === open.id;
+  const back = neighbours(open.id).map(x => x.other);
+  return sheetShell('w', 'Notes', `${notes.length} local notes · never leave this machine`, `
+    <div>
+      <h2 class="s">All notes <span class="n">(${notes.length})</span><button class="btn sm q r" data-act="newnote" data-id="${state.sel || ''}">New note</button></h2>
+      <div class="ledger notelist">${notes.map(n => `<div class="lrow note click${n.id === open.id ? ' on' : ''}" data-note="${n.id}">
+        <span class="d">${esc(shortDate(n.edited))}</span><span class="desc serif">${esc(n.title)}</span>${stampHTML('note', n.id)}</div>`).join('')}</div>
+      <h2 class="s">Backlinks <span class="n">(${back.length})</span></h2>
+      <div class="ledger backlinks">${back.map(m => `<div class="lrow click" data-go="${m.id}"><span class="ref">${esc(refOf(m))}</span><span class="desc">${esc(descOf(m))}</span>${stampHTML(m.src, m.id)}</div>`).join('') || `<div class="lrow"><span class="desc muted">No backlinks.</span></div>`}</div>
+    </div>
+    <div>
+      <h2 class="s">${esc(open.title)}<span class="r muted">edited ${esc(open.edited)}</span></h2>
+      <div class="editorbar">${editing
+        ? `<button class="btn p" data-act="savenote" data-id="${open.id}">Save note</button><button class="btn q" data-act="canceledit">Cancel</button>`
+        : `<button class="btn" data-act="editnote" data-id="${open.id}">Edit</button><button class="btn q" data-act="linkto" data-id="${open.id}">Insert link…</button><button class="btn q" data-act="gonode" data-id="${open.id}">Show on canvas</button>`}</div>
+      ${editing ? `<textarea class="ta big" id="noteta" aria-label="Note body">${esc(open.body)}</textarea>
+        <p class="small muted" style="margin-top:6px">Type [[PAY-231]] or [[#1187]] to link an entity — saving draws the edge on the canvas.</p>`
+        : `<div class="desc" style="border:1px solid var(--rule);padding:8px 10px">${renderNoteBody(open.body)}</div>`}
+    </div>`, 'cols');
+}
+function saveNote(id) {
+  const n = N[id], ta = $('#noteta'); if (!n) return;
+  if (ta) n.body = ta.value;
+  n.edited = 'today ' + nowStr();
+  state.editNote = null;
+  let added = 0;
+  (n.body.match(/\[\[([^\]]+)\]\]/g) || []).forEach(m => {
+    const id2 = resolve(m.slice(2, -2));
+    if (id2 && !hasEdge(id, id2)) { placeNode(id2, id); edges.push(edge(id, id2)); added++; }
+  });
+  if (state.overlay === 'notes') renderSheet();
+  renderGraph(); renderCard(); renderStatus();
+  toast(`Saved ${esc(n.title)}${added ? ` · ${added} new link${added > 1 ? 's' : ''} drawn` : ''}`, 'note');
+}
+function newNote(ctx) {
+  const src = ctx && N[ctx] ? ctx : state.sel;
+  const title = src ? `Notes on ${shortLabel(N[src])}` : 'Untitled note';
+  const id = 'note-new-' + (++BID);
+  def({ id, type: 'note', src: 'note', key: 'note', title, edited: 'today ' + nowStr(), pos: null, body: src ? `\n\nLinks: [[${shortLabel(N[src])}]]` : '' });
+  placeNode(id, src);
+  if (src) edges.push(edge(id, src));
+  state.noteOpen = id; state.editNote = id;
+  if (state.overlay === 'notes') renderSheet(); else { closeOverlay(true); select(id); }
+  renderGraph(); renderStatus();
+  toast(`New note created${src ? ` and linked to ${esc(shortLabel(N[src]))}` : ''}`, 'note');
+  setTimeout(() => { const t = $('#noteta'); if (t) { t.focus(); t.setSelectionRange(0, 0); } }, 0);
+}
+
+/* ---------- Sources ---------- */
+const ADAPTERS = [['Jira', 'jira-cloud v1.4'], ['Confluence', 'confluence-cloud v1.2'], ['Gitea', 'gitea v1.3'], ['GitHub', 'github v2.0'], ['GitLab', 'gitlab v1.6'], ['TeamCity', 'teamcity v1.1'], ['GitLab CI', 'gitlab-ci v1.0'], ['Jenkins', 'jenkins v0.9'], ['Generic Git remote', 'git v1.0']];
+state.add = { open: false, step: 0, type: null, url: '', auth: 'pat', tested: null, schedule: '5' };
+function srcRow(k) {
+  const s = SRC[k];
+  const fixing = state.fixing === k;
+  return `<div class="srcrow${s.ok ? '' : ' bad'}${state.layers[k] ? '' : ' off'}">
+    <input type="checkbox" data-layer="${k}"${state.layers[k] ? ' checked' : ''} aria-label="Show ${esc(s.name)} on the canvas" title="Show this source on the canvas">
+    ${stampHTML(k, k)}
+    <div><div class="name">${esc(s.name)}</div><div class="url">${esc(s.url)}</div>
+      <div class="caps"><span class="cap">${esc(s.adapter)}</span>${s.caps.map(c => `<span class="cap">${c}</span>`).join('')}${(s.nocaps || []).map(c => `<span class="cap no">${c}</span>`).join('')}</div></div>
+    <div>${esc(s.type)}<div class="ad">${esc(s.auth)}</div></div>
+    <div class="state">${s.ok ? `<b>synced ${esc(s.synced)}</b><div class="ad">${esc(s.count)}</div>` : `<b class="red">sync failed ${esc(s.synced)}</b><div class="ad red">${esc(s.error)}</div>`}</div>
+    <div class="actions" style="margin:0">${s.ok ? `<button class="btn sm q" data-act="syncnow" data-src="${k}">Sync now</button>` : `<button class="btn sm d" data-act="fixteamcity">Re-enter password</button>`}</div>
+    ${fixing ? `<div class="fix"><label class="small muted">New password</label><input class="in" id="tcpw" type="password" value="hunter-2026-08" aria-label="TeamCity password"><button class="btn p sm" data-act="savepw">Save and retry sync</button><button class="btn q sm" data-act="cancelfix">Cancel</button></div>` : ''}
+  </div>`;
+}
+function addSourceBlock() {
+  const a = state.add;
+  if (!a.open) return `<div class="actions"><button class="btn p" data-act="addsrc">Add source</button><span class="small muted" style="align-self:center">Every source type is a module — pick one and knobas loads its adapter.</span></div>`;
+  const steps = ['Type', 'Connection', 'Auth', 'Schedule'];
+  return `<div class="addsrc">
+    <div class="steps">${steps.map((s, i) => `<span class="${i === a.step ? 'on' : i < a.step ? 'done' : ''}">${i + 1}. ${s}</span>`).join('')}</div>
+    ${a.step === 0 ? `<div class="types">${ADAPTERS.map(([t, ad]) => `<button class="${a.type === t ? 'on' : ''}" data-atype="${esc(t)}"><span>${stampHTML(t === 'Jira' ? 'jira' : t === 'Confluence' ? 'confluence' : /Git(ea|Hub|Lab)|Generic/.test(t) ? 'gitea' : 'teamcity', t)}</span><span><span class="tn">${esc(t)}</span><br><span class="ad">${esc(ad)}</span></span></button>`).join('')}</div>` : ''}
+    ${a.step === 1 ? `<div class="frm"><label for="asurl">Base URL</label><input class="in" id="asurl" value="${esc(a.url)}" placeholder="https://ci.tidewater.internal">
+        <label for="asname">Display name</label><input class="in" id="asname" value="${esc(a.type || '')} — Tidewater" >
+        <div class="full small muted">${esc(a.type || '')} adapter: full-text search, write-back, webhooks. Credentials stay in the local keychain.</div></div>` : ''}
+    ${a.step === 2 ? `<div class="frm"><label>Method</label><div class="radios">
+        <label><input type="radio" name="auth" value="userpass"${a.auth === 'userpass' ? ' checked' : ''}> User + password</label>
+        <label><input type="radio" name="auth" value="pat"${a.auth === 'pat' ? ' checked' : ''}> Personal access token</label>
+        <label><input type="radio" name="auth" value="api"${a.auth === 'api' ? ' checked' : ''}> API token</label>
+        <label class="muted"><input type="radio" disabled> OAuth (coming soon)</label></div>
+        <label for="assecret">${a.auth === 'userpass' ? 'User + password' : 'Token'}</label><input class="in" id="assecret" type="password" value="tw-pat-2026-08-22">
+        <div class="full"><div class="actions" style="margin:4px 0 0"><button class="btn" data-act="testconn">Test connection</button></div></div></div>
+      ${a.tested === 'ok' ? `<div class="result ok"><span class="stamp blue in" style="--rot:-3deg">OK</span><span>Connected to ${esc(a.url || 'the server')} as mara.lindqvist · 47 projects visible · adapter capabilities: search, write, webhooks.</span></div>`
+        : a.tested === 'bad' ? `<div class="result bad"><span>401 Unauthorized. The token was rejected. Check that it has not expired and that it carries read scope.</span></div>` : ''}` : ''}
+    ${a.step === 3 ? `<div class="frm"><label for="assched">Sync every</label><select class="in" id="assched"><option value="5">5 minutes</option><option value="15">15 minutes</option><option value="60">1 hour</option><option value="0">Manual only</option></select>
+        <label>First sync</label><div class="radios"><label><input type="radio" name="first" checked> Now, full index</label><label><input type="radio" name="first"> On next schedule</label></div>
+        <div class="full small muted">Indexing writes into the local Postgres database. A 3,900-page space takes about 90 seconds.</div></div>` : ''}
+    <div class="sfoot"><button class="btn q l" data-act="cancelsrc">Cancel</button>
+      ${a.step > 0 ? `<button class="btn" data-act="srcback">Back</button>` : ''}
+      ${a.step < 3 ? `<button class="btn p" data-act="srcnext"${a.step === 0 && !a.type ? ' disabled' : ''}>Next</button>` : `<button class="btn p" data-act="srcsave">Save source</button>`}</div>
+  </div>`;
+}
+function sourcesSheet() {
+  return sheetShell('w', 'Sources', 'Four configured · one adapter per type · layers toggle the canvas', `
+    <h2 class="s">Configured <span class="n">(4)</span><span class="r muted">checkbox = visible on the canvas</span></h2>
+    <div class="ledger">${['jira', 'confluence', 'gitea', 'teamcity'].map(srcRow).join('')}</div>
+    ${SRC.jira.ok ? `<div class="result" style="margin-top:10px"><span class="stamp" style="--rot:-2deg">Soon</span><span>The Jira PAT expires <b>2026-09-03 — in 12 days</b>. Confluence uses the same token, so both stop at once.</span><button class="btn sm" data-act="snoozepat">Remind me on 2026-08-29</button></div>` : ''}
+    <h2 class="s">Add a source</h2>
+    ${addSourceBlock()}
+    <h2 class="s">Local index</h2>
+    <div class="ledger">
+      <div class="lrow two"><span class="d">db</span><span class="desc">Postgres <span class="mono">knobas</span> · 212 MB · full-text index up to date</span><span class="st blue">healthy</span></div>
+      <div class="lrow two"><span class="d">sync</span><span class="desc">Every 5 minutes · last pass 14:28 · next 14:33</span><span class="st"><button class="btn sm q" data-act="syncall">Sync all now</button></span></div>
+      <div class="lrow two"><span class="d">queue</span><span class="desc">Pending writes: <b>${state.pending}</b>${state.pending ? ' — waiting for TeamCity auth' : ''}</span><span class="st ${state.pending ? 'red' : ''}">${state.pending ? 'blocked' : 'empty'}</span></div>
+      <div class="lrow two"><span class="d">index</span><span class="desc">1,284 issues · 3,912 pages · 47 repos · 3 build configs · 3 notes</span><span class="st">5,249 rows</span></div>
+    </div>`);
+}
+
+/* ---------- Standup ---------- */
+const DIGEST = [
+  { g: 'Yesterday', line: 'Merged <b>PR #139</b> in ledger-api — partial refund drift fixed.', ids: ['pr-139', 'PAY-228'], why: 'merge event, yesterday 16:00' },
+  { g: 'Yesterday', line: 'Moved <b>PAY-228</b> to In Review.', ids: ['PAY-228'], why: 'Jira transition, yesterday 16:05' },
+  { g: 'Yesterday', line: 'Implemented the retry loop for <b>PAY-231</b> (7be0e4).', ids: ['PAY-231', 'commit-7be0e4'], why: 'commit 7be0e4, yesterday 17:30' },
+  { g: 'Yesterday', line: 'Logged 4h 30m — PAY-228 1h 30m, PAY-231 3h.', ids: ['PAY-228', 'PAY-231'], why: 'two Jira worklogs' },
+  { g: 'Today', line: 'Backoff and jitter on <b>PAY-231</b> (a41f2c, c90d11), bounded to ±10 %.', ids: ['PAY-231', 'commit-a41f2c', 'commit-c90d11'], why: 'two commits, 10:02 and 11:42' },
+  { g: 'Today', line: 'Fix integration test <b>#1187</b> — off-by-one in the attempt counter.', ids: ['build-1187', 'note-invest'], why: 'failed build + investigation note 11:20' },
+  { g: 'Today', line: 'Answer Priya on the manual-review SLA in the design page.', ids: ['page-sepa'], why: 'page comment, today 12:05' },
+  { g: 'Today', line: 'Review <b>PR #144</b> for Jonas.', ids: ['pr-144'], why: 'review requested today 13:50' },
+  { g: 'Blockers', line: '<b>PAY-228</b> staging verification is blocked by <b>OPS-77</b> — runbook outdated, Tomasz, ETA Tuesday.', ids: ['PAY-228', 'OPS-77'], why: 'blocked-by link, yesterday 16:30' }
+];
+const ACTIONS = [
+  { who: 'Mara', txt: 'Add the manual-review SLA to SEPA payout retry design', ids: ['page-sepa', 'PAY-231'] },
+  { who: 'Tomasz', txt: 'OPS-77 on-call runbook by Tuesday', ids: ['OPS-77'] },
+  { who: 'Lena', txt: 'Clarify PAY-240 acceptance criteria', ids: ['PAY-240'] }
+];
+function standupSheet() {
+  const groups = ['Yesterday', 'Today', 'Blockers'];
+  return sheetShell('w', 'Standup — Friday 2026-08-22', 'Digest generated from today’s events · protocol editable', `
+    <div>
+      <h2 class="s">Digest <span class="r muted">hover a line to light its node</span></h2>
+      <div class="ledger digest">${groups.map(g => `<div class="lrow"><span class="small" style="letter-spacing:.1em;text-transform:uppercase;color:var(--faint)">${g}</span></div>` +
+        DIGEST.filter(d => d.g === g).map(d => `<div class="lrow" data-hl="${d.ids.join(',')}">
+          <div><div class="line">${d.line}</div><div class="srcs">${d.ids.map(i => chip(i)).join('')}<span class="small faint">${esc(d.why)}</span></div></div></div>`).join('')).join('')}</div>
+      <div class="actions"><button class="btn" data-act="copydigest">Copy digest</button><button class="btn q" data-act="digestnote">Save digest as note</button></div>
+      <h2 class="s">Action items <span class="n">(${ACTIONS.length})</span></h2>
+      <div class="ledger ai">${ACTIONS.map((a, i) => `<div class="lrow" data-hl="${a.ids.join(',')}"><span class="desc" style="white-space:normal"><b>${esc(a.who)}</b> — ${esc(a.txt)}</span>
+        <span>${a.done ? `<span class="chip">${esc(a.done)}</span>` : `<button class="btn sm" data-act="aiticket" data-i="${i}">Create ticket</button>`}</span></div>`).join('')}</div>
+    </div>
+    <div>
+      <h2 class="s">Protocol 2026-08-22<span class="r muted">editable</span></h2>
+      <div class="proto" contenteditable="true" role="textbox" aria-label="Standup protocol" id="proto">
+        <h3>Attendees</h3><p>Mara, Jonas, Priya, Tomasz, Lena</p>
+        <h3>Round</h3>
+        <ul><li><b>Jonas:</b> PR #144 CSV export ready for review.</li>
+        <li><b>Priya:</b> finance wants the manual-review SLA documented by Monday.</li>
+        <li><b>Tomasz:</b> on-call handbook update in progress, ETA Tuesday (OPS-77).</li>
+        <li><b>Lena:</b> finance complaints about dashboard latency → PAY-240.</li>
+        <li><b>Mara:</b> backoff and jitter done; integration test #1187 still red, off-by-one in the attempt counter.</li></ul>
+        <h3>Action items</h3>
+        <ul><li>Mara → add SLA to SEPA payout retry design (PAY-231)</li><li>Tomasz → OPS-77 by Tuesday</li><li>Lena → clarify PAY-240 acceptance criteria</li></ul>
+      </div>
+      <div class="actions"><button class="btn" data-act="protonote">Save as note</button><button class="btn p" data-act="publish">Publish to Confluence</button></div>
+      <div class="pubbox${state.published ? ' ok' : ''}">${state.published
+        ? `<span class="stamp blue in" style="--rot:-3deg">Published</span><span>Live at <span class="crumbs">ENG › Standup protocols › 2026-08-22</span> · <span data-go="page-standups" class="chip">open parent page</span></span>`
+        : `<span class="crumbs">Target: ENG › Standup protocols › 2026-08-22</span><span class="muted small">Creates a child page under Standup protocols and links it to today’s digest.</span>`}</div>
+    </div>`, 'cols');
+}
+
+/* ---------- Time (bottom sheet) ---------- */
+function renderTime() {
+  const el = $('#bsheet');
+  el.innerHTML = `<div class="bsheet" role="dialog" aria-label="Time">
+    <div class="shead"><h1>Time</h1>
+      <div class="tabs"><button class="${state.timeTab === 'day' ? 'on' : ''}" data-tab="day">Day review</button><button class="${state.timeTab === 'week' ? 'on' : ''}" data-tab="week">Week timesheet</button></div>
+      <span class="sub">${state.timer.running ? `tracking ${esc(timerLabel())}` : 'timer stopped'} · 5h 28m today</span>
+      <button class="iconbtn x" data-act="closeoverlay" title="Close (Esc)">✕</button></div>
+    <div class="sbody">${state.timeTab === 'day' ? dayReview() : weekSheet()}</div></div>`;
+  el.hidden = false;
+}
+function dayReview() {
+  const S = tMin('08:00'), E = Math.max(nowMin() + 8, tMin('15:00'));
+  const span = E - S;
+  const ticks = [];
+  for (let m = S; m <= E; m += 60) ticks.push(`<span style="left:${(m - S) / span * 100}%">${tStr(m)}</span>`);
+  const bl = blocks.map(b => {
+    const s = tMin(b.s), e = tMin(blockEnd(b));
+    return `<button class="blk ${b.kind}${b.logged ? ' logged' : ''}${state.selBlock === b.id ? ' sel' : ''}" data-blk="${b.id}"
+      style="left:${(s - S) / span * 100}%;width:${Math.max((e - s) / span * 100, 1.4)}%" title="${esc(b.ctx)} ${b.s}–${blockEnd(b)}">
+      <span class="k">${esc(b.ctx)}</span><span class="tt">${b.s}–${blockEnd(b)}</span><span class="how">${esc(b.how)}</span></button>`;
+  }).join('');
+  const b = blocks.find(x => x.id === state.selBlock);
+  return `<div class="ticks">${ticks.join('')}</div>
+    <div class="strip">${bl}</div>
+    <div class="blkdetail">${b ? blockDetail(b) : `<span class="muted">Click a block to assign or log it. Hatched blocks are passive (what was open in the app), solid blocks are the manual timer, the red block is unattributed.</span>`}</div>
+    <div class="ledger" style="margin-top:8px;max-width:820px">
+      <div class="lrow sum"><span class="d">today</span><span class="ref">tracked</span><span class="desc">08:30 to ${nowStr()} · 5h 28m tracked, 50 m lunch gap</span><span class="st red">nothing logged yet</span><span></span></div>
+      <div class="lrow"><span class="d">11:50</span><span class="ref red">30 m</span><span class="desc">Unattributed — the app was open with no entity in focus</span><span class="st"><button class="btn sm d" data-act="assign" data-blk="b4">Assign…</button></span><span></span></div>
+      <div class="lrow"><span class="d">13:10</span><span class="ref">48 m</span><span class="desc">Ad-hoc label “Staging DB configuration” — no ticket</span><span class="st"><button class="btn sm" data-act="logblk" data-blk="b6">Log to a ticket…</button> <button class="btn sm q" data-act="keeplocal" data-blk="b6">Keep local</button></span><span></span></div>
+    </div>`;
+}
+function blockDetail(b) {
+  const mins = tMin(blockEnd(b)) - tMin(b.s);
+  const head = `<span class="mono">${b.s}–${blockEnd(b)}</span> <b>${esc(b.ctx)}</b> <span class="muted">${esc(b.sub || '')} · ${fmtHM(mins)}</span>`;
+  if (b.kind === 'gap') return head + ` <span class="muted">Nothing to log.</span>`;
+  if (b.kind === 'un') return head + ` <button class="btn d" data-act="assign" data-blk="${b.id}">Assign…</button><button class="btn q" data-act="mergeprev" data-blk="${b.id}">Merge into 09:40 PAY-231</button>`;
+  if (b.kind === 'label') return head + ` <button class="btn" data-act="logblk" data-blk="${b.id}">Log to a ticket…</button><button class="btn q" data-act="keeplocal" data-blk="${b.id}">Keep local only</button>`;
+  if (b.logged) return head + ` <span class="chip">logged to ${esc(b.logged)}</span>`;
+  return head + ` <button class="btn" data-act="logblk" data-blk="${b.id}">Log ${fmtHM(mins)} to ${b.node ? esc(shortLabel(N[b.node])) : 'a ticket'}…</button>${b.node ? `<button class="btn q" data-act="gonode" data-id="${b.node}">Open ${esc(shortLabel(N[b.node]))}</button>` : ''}`;
+}
+function weekSheet() {
+  const max = 480;
+  const rows = week.map(([d, tot, tracked, unl]) => `<div class="lrow">
+      <span>${esc(d)}</span>
+      <span style="display:flex;gap:2px;align-items:center"><span class="bar" style="width:${(tracked - unl) / max * 70}%"></span><span class="bar u" style="width:${unl / max * 70}%"></span></span>
+      <span class="num">${esc(tot)}</span><span class="num">${fmtHM(tracked - unl)}</span><span class="num ${unl ? 'red' : 'faint'}">${unl ? fmtHM(unl) : '—'}</span></div>`).join('');
+  return `<div class="week ledger">
+      <div class="lrow h"><span>Day</span><span>Tracked vs unlogged</span><span class="num">Tracked</span><span class="num">Logged</span><span class="num">Unlogged</span></div>
+      ${rows}
+      <div class="lrow sum"><span>Week</span><span class="muted">Mon 18 – Fri 22</span><span class="num">${esc(weekTotals.tracked)}</span><span class="num">${esc(weekTotals.logged)}</span><span class="num ${weekTotals.unlogged ? 'red' : ''}">${weekTotals.unlogged ? fmtHM(weekTotals.unlogged) : '—'}</span></div>
+    </div>
+    <div class="actions">${weekTotals.unlogged ? `<button class="btn p" data-act="logall">Log all ${fmtHM(weekTotals.unlogged)}</button>` : `<span class="chip">Everything tracked this week is logged</span>`}
+      <button class="btn q" data-act="tab" data-tab="day">Back to day review</button></div>
+    <p class="small muted" style="margin-top:6px">Logging writes a Jira worklog per ticket. Time is attributed from what was open in the app and from the manual timer — never from the git branch you have checked out.</p>`;
+}
+
+/* ============================================================
+   Links — confirm, dismiss, pick, drag-drop
+   ============================================================ */
+function stampFresh(ids) {
+  ids.forEach(i => state.fresh.add(i));
+  renderGraph();
+  setTimeout(() => { ids.forEach(i => state.fresh.delete(i)); renderGraph(); }, 420);
+}
+function confirmLink(a, b, viaEdge) {
+  const e = viaEdge || edges.find(x => x.kind === 'suggested' && ((x.a === a && x.b === b) || (x.a === b && x.b === a)));
+  if (e) { e.kind = 'link'; e.reason = ''; }
+  else if (!hasEdge(a, b)) edges.push(edge(a, b));
+  stampFresh([a, b]);
+  renderCard(); renderStatus();
+  toast(`Linked ${esc(shortLabel(N[a]))} to ${esc(shortLabel(N[b]))}`, 'linked');
+}
+function dismissSug(eid) {
+  const e = edges.find(x => x.id === eid); if (!e) return;
+  edges = edges.filter(x => x.id !== eid);
+  renderGraph(); renderCard(); renderStatus();
+  toast('Proposal dismissed — knobas will not suggest it again', 'dropped');
+}
+function suggestionPop(e, x, y) {
+  const a = N[e.a], b = N[e.b];
+  openPop(`<div class="pb"><div class="small" style="letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-bottom:4px">Suggested link</div>
+      <div><b>${esc(shortLabel(a))}</b> → <b>${esc(shortLabel(b))}</b></div>
+      <div class="muted small" style="margin-top:3px">Reason: ${e.reason}</div></div>
+    <div class="pb"><div class="actions" style="margin:0"><button class="btn p" data-act="confirmsug" data-e="${e.id}">Confirm link</button><button class="btn q" data-act="dismisssug" data-e="${e.id}">Dismiss</button></div></div>`, x, y);
+}
+function confirmLinkDialog(a, b, how) {
+  openDialog(dh('Link these two?', how === 'drag' ? 'dragged on the canvas' : 'picked from the list') + `<div class="dbody">
+      <div class="ledger">${entRow(a)}${entRow(b)}</div>
+      <p class="small muted" style="margin-top:8px">A confirmed link becomes a solid edge and appears in both detail cards. knobas stores it locally; nothing is written to ${SRC[N[a].src].name}.</p></div>
+    <div class="dfoot"><span class="l">${esc(shortLabel(N[a]))} ↔ ${esc(shortLabel(N[b]))}</span>
+      <button class="btn q" data-x>Cancel</button><button class="btn p" data-act="dolink" data-a="${a}" data-b="${b}">Confirm link</button></div>`);
+}
+function linkPicker(id, x, y) {
+  const others = Object.values(N).filter(n => n.id !== id && !hasEdge(id, n.id));
+  const p = openPop(`<div class="picker"><input id="pick" placeholder="Link ${esc(shortLabel(N[id]))} to…" aria-label="Search entities"><div class="res" id="pickres"></div></div>`, x, y, 'picker');
+  const draw = q => {
+    const toks = q.toLowerCase().split(/\s+/).filter(Boolean);
+    const hits = others.filter(n => toks.every(k => indexText(n).includes(k))).slice(0, 8);
+    $('#pickres').innerHTML = hits.map(n => `<button data-pick="${n.id}">${stampHTML(n.src, n.id)}<span>${esc(shortLabel(n))}${n.type === 'ticket' || n.type === 'pr' ? ` <span class="muted">${esc(n.title)}</span>` : ''}</span><span class="src">${esc(n.type)}</span></button>`).join('')
+      || `<div class="none" style="padding:10px">Nothing matches. Everything else is already linked.</div>`;
+    $$('#pickres button').forEach(b => b.onclick = () => { closePop(); confirmLink(id, b.dataset.pick); });
+  };
+  draw('');
+  p.querySelector('#pick').addEventListener('input', ev => draw(ev.target.value));
+}
+
+/* ============================================================
+   Actions — status, git, builds, create, worklog
+   ============================================================ */
+const FLOW = ['To Do', 'In Progress', 'In Review', 'Done'];
+const nextStatus = s => FLOW[Math.min(FLOW.indexOf(s) + 1, 3)];
+function setStatus(id, v) {
+  const n = N[id]; if (!n || n.status === v) return;
+  n.status = v; n.updated = 'today ' + nowStr();
+  renderGraph(); renderCard();
+  toast(`${n.key} moved to ${esc(v)}`, 'jira');
+}
+const gitPull = repo => toast(`Pulled ${esc(repo)} — main is already up to date`, 'gitea');
+const gitPush = br => toast(`Pushed ${esc(br)} to git.tidewater.internal`, 'gitea');
+function queueOrRun(desc, run) {
+  if (SRC.teamcity.ok) { run(); return; }
+  state.queue.push({ desc, run });
+  state.pending = state.queue.length;
+  renderStatus(); if (state.overlay === 'sources') renderSheet(); renderCard();
+  toast(`${desc} — queued. TeamCity returns 401, so knobas holds the write until the password works.`, 'red', true);
+}
+function flushQueue() {
+  const q = state.queue.splice(0);
+  state.pending = 0;
+  q.forEach(item => item.run());
+  if (q.length) toast(`${q.length} queued write${q.length > 1 ? 's' : ''} sent to TeamCity`, 'teamcity');
+}
+function makeBuild(config, branch, env) {
+  const num = ++state.newCount.build;
+  const id = 'build-' + num;
+  def({ id, type: 'build', src: 'teamcity', key: '#' + num, title: config, config, status: 'running', step: 'step 1/5 · checkout', branch, when: 'started today ' + nowStr(), pos: null, params: { branch, env }, steps: ['checkout', 'cargo fmt --check', 'cargo test', 'cargo build --release', 'publish artifact'] });
+  ALIAS['#' + num] = id;
+  placeNode(id, 'build-1188');
+  const src = branch === 'feature/PAY-231-sepa-retry' ? 'pr-142' : null;
+  if (src) edges.push(edge(src, id));
+  stampFresh([id]);
+  toast(`${esc(config)} #${num} started on ${esc(branch)}`, 'teamcity');
+  return id;
+}
+function rerun(id) {
+  const b = N[id];
+  queueOrRun(`Re-run ${b.config} ${b.key}`, () => { const nid = makeBuild(b.config, b.branch, b.params.env); select(nid); });
+}
+function triggerDialog(config, branch) {
+  const cfgs = ['Payout_Build', 'Payout_IntegrationTests', 'Ledger_Deploy_Staging'];
+  const brs = ['feature/PAY-231-sepa-retry', 'main', 'fix/PAY-228-partial-refund-drift'];
+  openDialog(dh('Trigger a build', 'TeamCity · project Payouts') + `<div class="dbody">
+      <div class="frm">
+        <label for="tcfg">Configuration</label><select class="in" id="tcfg">${cfgs.map(c => `<option${c === config ? ' selected' : ''}>${c}</option>`).join('')}</select>
+        <label for="tbr">Branch</label><select class="in" id="tbr">${brs.map(b => `<option${b === branch ? ' selected' : ''}>${b}</option>`).join('')}</select>
+        <label for="tenv">Environment</label><select class="in" id="tenv"><option>staging</option><option>prod-dryrun</option></select>
+        <label for="tclean">Clean checkout</label><div class="radios"><label><input type="checkbox" id="tclean"> Wipe the agent workspace first</label></div>
+      </div>
+      ${SRC.teamcity.ok ? '' : `<div class="result bad"><span>TeamCity last answered 401 Unauthorized 38 minutes ago. The trigger is queued locally and sent as soon as the password works.</span></div>`}</div>
+    <div class="dfoot"><span class="l">Parameters are stored with the build so the log stays reproducible.</span>
+      <button class="btn q" data-x>Cancel</button><button class="btn p" data-act="dotrigger">${SRC.teamcity.ok ? 'Trigger build' : 'Queue build'}</button></div>`);
+}
+function newBranchDialog(repo) {
+  openDialog(dh('New branch', esc(repo)) + `<div class="dbody"><div class="frm">
+      <label for="nbname">Branch</label><input class="in" id="nbname" value="feature/PAY-240-payout-dashboard-latency">
+      <label for="nbfrom">From</label><select class="in" id="nbfrom"><option>main</option><option>feature/PAY-231-sepa-retry</option></select>
+      <label for="nbco">Check out</label><div class="radios"><label><input type="checkbox" id="nbco" checked> Check out locally in ~/code/${esc(repo)}</label></div>
+    </div></div>
+    <div class="dfoot"><button class="btn q" data-x>Cancel</button><button class="btn p" data-act="donewbranch" data-repo="${esc(repo)}">Create branch</button></div>`);
+}
+function createTicketDialog(prefill) {
+  openDialog(dh('New ticket', 'Tidewater Jira') + `<div class="dbody"><div class="frm">
+      <label for="ctproj">Project</label><select class="in" id="ctproj"><option>PAY — Payments Platform</option><option>OPS — Operations</option></select>
+      <label for="cttype">Type</label><select class="in" id="cttype"><option>Task</option><option>Story</option><option>Bug</option></select>
+      <label for="ctsum">Summary</label><input class="in" id="ctsum" value="${esc(prefill || '')}">
+      <label for="ctdesc">Description</label><textarea class="ta" id="ctdesc" style="grid-column:2">From the standup protocol of 2026-08-22.</textarea>
+      <label for="ctepic">Epic</label><select class="in" id="ctepic"><option>PAY-200 Payout reliability</option><option>none</option></select>
+    </div></div>
+    <div class="dfoot"><span class="l">Assigned to Mara · appears on the canvas linked to its epic</span>
+      <button class="btn q" data-x>Cancel</button><button class="btn p" data-act="docreateticket">Create ticket</button></div>`);
+}
+function createPageDialog() {
+  openDialog(dh('New page', 'Tidewater Wiki · space ENG') + `<div class="dbody"><div class="frm">
+      <label for="cpparent">Parent</label><select class="in" id="cpparent"><option>Standup protocols</option><option>Payments architecture overview</option><option>ENG (space root)</option></select>
+      <label for="cptitle">Title</label><input class="in" id="cptitle" value="Manual review queue SLA">
+      <label for="cpbody">Body</label><textarea class="ta" id="cpbody" style="grid-column:2">Payouts that exhaust all 5 retry attempts land in the manual review queue. SLA: first human touch within 1 business day.</textarea>
+    </div></div>
+    <div class="dfoot"><button class="btn q" data-x>Cancel</button><button class="btn p" data-act="docreatepage">Create page</button></div>`);
+}
+function startWorkDialog(id) {
+  const n = N[id], branch = `feature/${n.key}-${slug(n.title)}`;
+  state.sw = { id, branch, timer: true, i: -1 };
+  const steps = swSteps();
+  openDialog(dh(`Start work on ${n.key}`, esc(n.title)) + `<div class="dbody">
+      <p class="small muted" style="margin-bottom:8px">One action, five writes across three sources. Review before it runs.</p>
+      <div class="ledger stepsl" id="swsteps">${steps}</div>
+      <div class="lrow chk" style="border-bottom:0"><label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="swtimer" checked> Start the timer on ${n.key} when this finishes</label><span class="small muted">no branch is ever used to attribute time</span></div></div>
+    <div class="dfoot"><span class="l" id="swfoot">Nothing has run yet.</span>
+      <button class="btn q" data-x>Cancel</button><button class="btn p" data-act="dostartwork" id="swrun">Run all five steps</button></div>`, 'w');
+}
+function swSteps() {
+  const s = state.sw, n = N[s.id];
+  const items = [
+    `Create branch <span class="mono">${esc(s.branch)}</span> in payout-service`,
+    `Push it to git.tidewater.internal`,
+    `Open <b>PR #145</b> — ${esc(n.title)}, description copied from the ticket`,
+    `Link PR #145 to ${n.key} on the canvas`,
+    `Move ${n.key} to In Progress`
+  ];
+  return items.map((t, i) => `<div class="lrow ${s.i < i ? 'pending' : ''}"><span><span class="ic ${s.i > i ? 'ok' : s.i === i ? 'run' : ''}"></span></span><span class="desc" style="white-space:normal">${t}</span><span class="st ${s.i > i ? 'blue' : ''}">${s.i > i ? 'done' : s.i === i ? 'running' : 'waiting'}</span></div>`).join('');
+}
+function runStartWork() {
+  const s = state.sw, n = N[s.id];
+  s.timer = $('#swtimer') ? $('#swtimer').checked : true;
+  const btn = $('#swrun'); if (btn) { btn.disabled = true; btn.textContent = 'Running…'; }
+  const slow = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 420;
+  const step = () => {
+    s.i++;
+    const el = $('#swsteps'); if (el) el.innerHTML = swSteps();
+    if (s.i === 1) {
+      def({ id: 'branch-240', type: 'branch', src: 'gitea', key: s.branch, title: 'new branch', repo: 'payout-service', ahead: 0, local: true, pos: [1020, 600], commits: [] });
+      ALIAS[s.branch] = 'branch-240';
+      edges.push(edge(s.id, 'branch-240'), edge('repo-payout', 'branch-240'));
+      stampFresh(['branch-240']);
+    }
+    if (s.i === 3) {
+      def({ id: 'pr-145', type: 'pr', src: 'gitea', key: 'PR #145', title: n.title, repo: 'payout-service', from: s.branch, to: 'main', state: 'open', by: 'Mara Lindqvist', opened: 'today ' + nowStr(), pos: [1240, 600], approvals: { need: 2, given: [], requested: [] }, checks: [], comments: [], files: [['src/dashboard/query.rs', '+0', '']] });
+      ALIAS['PR #145'] = 'pr-145';
+      edges.push(edge('branch-240', 'pr-145'), edge(s.id, 'pr-145'));
+      stampFresh(['pr-145']);
+    }
+    if (s.i === 4) setStatus(s.id, 'In Progress');
+    if ($('#swfoot')) $('#swfoot').textContent = `${Math.min(s.i + 1, 5)} of 5 done`;
+    if (s.i < 4) setTimeout(step, slow);
+    else setTimeout(() => {
+      closeDialog();
+      if (s.timer) startTimer(s.id); else { renderGraph(); renderCard(); }
+      renderStatus();
+      toast(`${n.key} started — branch, PR #145 and the link are on the canvas`, 'gitea');
+      select(s.id);
+    }, slow);
+  };
+  step();
+}
+
+/* ---------- worklog draft ---------- */
+function wlTotal() { return state.wl.segs.reduce((a, [s, e]) => a + Math.max(0, tMin(e) - tMin(s)), 0); }
+function wlComment() {
+  if (state.wl.custom !== undefined) return state.wl.custom;
+  const parts = activities.filter((a, i) => state.wl.acts[i] && a.line).map(a => a.line);
+  return parts.length ? parts.join('; ') + '.' : 'No activity selected.';
+}
+function worklogDialog(target, lbl, segs) {
+  state.wl = { target: target || (lbl ? '' : 'PAY-231'), lbl: lbl || null, segs: segs || [['09:40', '11:50'], ['13:58', nowStr()]], acts: activities.map(a => a.on), custom: undefined };
+  const tickets = Object.values(N).filter(n => n.type === 'ticket');
+  const d = openDialog(dh('Worklog draft', lbl ? `ad-hoc label “${esc(lbl)}”` : 'assembled from what you actually did') + `<div class="dbody">
+      <h2 class="s" style="margin-top:0">Interval</h2>
+      <div class="interval">${state.wl.segs.map((s, i) => `<span>${i ? '+' : ''}</span><input data-seg="${i}" data-p="0" value="${s[0]}" aria-label="Start"><span>–</span><input data-seg="${i}" data-p="1" value="${s[1]}" aria-label="End">`).join('')}
+        <span>=</span><span class="tot" id="wltot">${fmtHM(wlTotal())}</span><span class="muted small">gap 12:20–13:10 left out</span></div>
+      <h2 class="s">Target</h2>
+      <div class="interval"><select class="in" id="wltarget" style="width:280px"><option value=""${state.wl.target ? '' : ' selected'}>No ticket — keep the entry local</option>${tickets.map(t => `<option value="${t.id}"${state.wl.target === t.id ? ' selected' : ''}>${t.key} — ${esc(t.title)}</option>`).join('')}</select>
+        ${lbl ? `<span class="small muted">suggested: OPS-77</span>` : ''}</div>
+      <h2 class="s">Activity in the interval <span class="r muted">checked lines go into the comment</span></h2>
+      <div class="ledger">${activities.map((a, i) => `<div class="lrow chk"><label style="display:flex;gap:7px;align-items:flex-start;padding:2px 0"><input type="checkbox" data-a="${i}"${state.wl.acts[i] ? ' checked' : ''}><span>${a.txt}</span></label><span></span></div>`).join('')}</div>
+      <h2 class="s">Comment</h2>
+      <div class="gen" id="wlgen">${esc(wlComment())}</div></div>
+    <div class="dfoot"><span class="l">Written as a Jira worklog · nothing leaves this machine until you press log</span>
+      <button class="btn q" data-x>Discard</button><button class="btn" data-act="wledit">Edit comment</button>
+      <button class="btn p" data-act="wllog" id="wlbtn">Log ${fmtHM(wlTotal())} to ${state.wl.target ? N[state.wl.target].key : 'nothing'}</button></div>`, 'w');
+  const refresh = () => {
+    $('#wltot').textContent = fmtHM(wlTotal());
+    if (state.wl.custom === undefined) $('#wlgen').textContent = wlComment();
+    $('#wlbtn').textContent = `Log ${fmtHM(wlTotal())} to ${state.wl.target ? N[state.wl.target].key : 'the local log'}`;
+  };
+  d.querySelectorAll('[data-seg]').forEach(i => i.addEventListener('change', ev => { state.wl.segs[+ev.target.dataset.seg][+ev.target.dataset.p] = ev.target.value; refresh(); }));
+  d.querySelectorAll('[data-a]').forEach(c => c.addEventListener('change', ev => { state.wl.acts[+ev.target.dataset.a] = ev.target.checked; state.wl.custom = undefined; refresh(); }));
+  d.querySelector('#wltarget').addEventListener('change', ev => { state.wl.target = ev.target.value; refresh(); });
+}
+function logWorklog() {
+  const min = wlTotal(), t = state.wl.target, txt = state.wl.custom !== undefined ? state.wl.custom : wlComment();
+  if (t) {
+    N[t].worklogs.push({ when: 'Fri 22', min, txt });
+    N[t].spentWeek = fmtHM((parseInt((N[t].spentWeek || '0h').split('h')[0], 10) || 0) * 60 + (parseInt(((N[t].spentWeek || '').split('h')[1] || '0m').trim(), 10) || 0) + min);
+    blocks.forEach(b => { if (!b.logged && b.node === t) b.logged = N[t].key; });
+  } else {
+    blocks.forEach(b => { if (!b.logged && b.live === false && b.kind === 'label') b.logged = 'local'; });
+  }
+  weekTotals.unlogged = Math.max(0, weekTotals.unlogged - min);
+  week[4][3] = Math.max(0, week[4][3] - min);
+  closeDialog();
+  renderCard(); renderStatus(); if (state.overlay === 'time') renderTime();
+  toast(t ? `Logged ${fmtHM(min)} to ${N[t].key} — “${esc(txt)}”` : `Kept ${fmtHM(min)} in the local log`, t ? 'jira' : 'note');
+}
+
+/* ---------- day-review block actions ---------- */
+function assignBlock(bid, x, y) {
+  const b = blocks.find(z => z.id === bid); if (!b) return;
+  const opts = ['PAY-231', 'PAY-240', 'PAY-228', 'OPS-77'].map(k => ({ label: `${k} — ${esc(N[k].title)}`, run: () => {
+    b.node = k; b.ctx = k; b.sub = 'assigned by you'; b.kind = 'passive'; b.how = 'passive · assigned';
+    renderTime(); toast(`11:50–12:20 assigned to ${k}`, 'blue');
+  } }));
+  opts.push({ label: 'Ad-hoc label instead…', run: () => { b.ctx = 'Staging DB configuration'; b.kind = 'label'; b.how = 'manual label'; renderTime(); toast('Block relabelled', 'blue'); } });
+  menu(opts, x, y, 'Assign 30 m to');
+}
+function logBlockDialog(bid) {
+  const b = blocks.find(z => z.id === bid); if (!b) return;
+  state.selBlock = bid;
+  worklogDialog(b.node || (b.kind === 'label' ? 'OPS-77' : null), b.kind === 'label' ? b.ctx : null, [[b.s, blockEnd(b)]]);
+}
+
+/* ============================================================
+   Action dispatch
+   ============================================================ */
+state.queue = []; state.published = false; state.reply = null; state.fixing = null;
+state.editNote = null; state.editPage = null; state.noteOpen = 'note-invest'; state.sw = null; state.wl = null;
+function handleAct(act, ds, el) {
+  const r = el ? el.getBoundingClientRect() : { left: 400, bottom: 300 };
+  const x = r.left, y = r.bottom + 4;
+  switch (act) {
+    case 'nodemenu': nodeMenu(ds.id, x, y); break;
+    case 'linkto': linkPicker(ds.id, x, y); break;
+    case 'confirmsug': { const e = edges.find(z => z.id === ds.e); closePop(); if (e) confirmLink(e.a, e.b, e); break; }
+    case 'dismisssug': closePop(); dismissSug(ds.e); break;
+    case 'dolink': closeDialog(); confirmLink(ds.a, ds.b); break;
+    case 'addcmt': {
+      const n = N[ds.id], ta = $('#cmt'), txt = (ta && ta.value.trim());
+      if (!txt) { if (ta) ta.focus(); toast('Write something first — the comment box is empty', 'red', true); break; }
+      n.comments.push({ who: 'Mara Lindqvist', when: 'today ' + nowStr(), txt });
+      renderCard(); toast(`Comment added to ${esc(shortLabel(n))}`, n.src); break;
+    }
+    case 'starttimer': startTimer(ds.id); break;
+    case 'stoptimer': stopTimer(); break;
+    case 'switchctx': { closePop(); const ids = ['PAY-231', 'PAY-240', 'PAY-228', 'pr-144', 'page-sepa'];
+      menu(ids.map(i => ({ label: `${esc(shortLabel(N[i]))} — ${esc(N[i].title || '')}`, run: () => startTimer(i) })).concat([{ label: 'Ad-hoc label…', run: () => adhocPop(x, y) }]), x, y, 'Switch timer to'); break; }
+    case 'adhoc': { const v = $('#adhoc') && $('#adhoc').value.trim(); if (v) startTimer(null, v); break; }
+    case 'startwork': startWorkDialog(ds.id); break;
+    case 'dostartwork': runStartWork(); break;
+    case 'newnote': newNote(ds.id); break;
+    case 'gonode': closeOverlay(); select(ds.id); break;
+    case 'opensource': toast(`Opening ${esc(SRC[ds.src].url)} in your browser`, ds.src); break;
+    case 'rereview': toast(`Re-review requested from Jonas on ${esc(N[ds.id].key)}`, 'gitea'); break;
+    case 'merge': { const n = N[ds.id]; n.state = 'merged'; n.merged = 'today ' + nowStr(); renderGraph(); renderCard(); toast(`${n.key} merged into main`, 'gitea'); break; }
+    case 'rerun': rerun(ds.id); break;
+    case 'trigger': triggerDialog(ds.config, ds.branch); break;
+    case 'dotrigger': { const c = $('#tcfg').value, b = $('#tbr').value, e = $('#tenv').value, cl = $('#tclean').checked;
+      closeDialog(); queueOrRun(`${c} on ${b} (${e}${cl ? ', clean checkout' : ''})`, () => makeBuild(c, b, e)); break; }
+    case 'gitpull': gitPull(ds.repo); break;
+    case 'gitpush': gitPush(ds.branch); break;
+    case 'newbranch': newBranchDialog(ds.repo); break;
+    case 'donewbranch': { const name = $('#nbname').value.trim() || 'feature/new';
+      closeDialog(); toast(`Branch ${esc(name)} created in ${esc(ds.repo)} and checked out`, 'gitea'); break; }
+    case 'newticket': createTicketDialog(); break;
+    case 'docreateticket': {
+      const sum = $('#ctsum').value.trim() || 'Untitled', proj = $('#ctproj').value.startsWith('OPS') ? 'OPS' : 'PAY';
+      const key = proj + '-' + (++state.newCount.ticket);
+      def({ id: key, type: 'ticket', src: 'jira', key, title: sum, kind: $('#cttype').value, status: 'To Do', priority: 'Medium', assignee: 'Mara Lindqvist', updated: 'today ' + nowStr(), pos: null, epic: 'PAY-200', desc: esc($('#ctdesc').value), comments: [], worklogs: [] });
+      placeNode(key, 'PAY-200'); edges.push(edge('PAY-200', key));
+      closeDialog(); stampFresh([key]); select(key); renderStatus();
+      toast(`${key} created and linked to PAY-200`, 'jira'); break;
+    }
+    case 'newpage': createPageDialog(); break;
+    case 'docreatepage': {
+      const title = $('#cptitle').value.trim() || 'Untitled', body = $('#cpbody').value;
+      const id = 'page-new-' + (++BID);
+      def({ id, type: 'page', src: 'confluence', key: 'ENG', title, space: 'ENG — Engineering', edited: 'today ' + nowStr(), by: 'Mara Lindqvist', pos: null, body: `<p>${esc(body)}</p>`, comments: [] });
+      ALIAS[title] = id; placeNode(id, 'page-sepa'); edges.push(edge(id, 'page-sepa'));
+      closeDialog(); stampFresh([id]); select(id); renderStatus();
+      toast(`Page created in ENG and linked to SEPA payout retry design`, 'confluence'); break;
+    }
+    case 'editpage': state.editPage = ds.id; renderCard(); break;
+    case 'savepage': { const n = N[ds.id], b = $('#pagebody'); if (b) n.body = b.innerHTML; n.edited = 'today ' + nowStr(); state.editPage = null; renderCard(); toast(`${esc(n.title)} saved to Tidewater Wiki`, 'confluence'); break; }
+    case 'editnote': state.editNote = ds.id; if (state.overlay === 'notes') renderSheet(); else renderCard(); setTimeout(() => $('#noteta') && $('#noteta').focus(), 0); break;
+    case 'savenote': saveNote(ds.id); break;
+    case 'canceledit': state.editNote = null; state.editPage = null; if (state.overlay === 'notes') renderSheet(); else renderCard(); break;
+    case 'closeoverlay': closeOverlay(); break;
+    case 'overlay': openOverlay(ds.o); break;
+    case 'lens': setLens(ds.lens); break;
+    case 'inbox': inboxAct(ds.id, ds.a); break;
+    case 'sendreply': sendReply(ds.id); break;
+    case 'unsnooze': { const s = snoozed.find(z => z.id === ds.id); snoozed = snoozed.filter(z => z.id !== ds.id);
+      inbox.unshift({ id: 'r' + ds.id, when: nowStr(), src: 'jira', node: 'PAY-219', txt: esc(s.txt), acts: ['Open', 'Done'] });
+      renderCounts(); renderSheet(); toast('Back in the inbox', 'blue'); break; }
+    case 'syncnow': SRC[ds.src].synced = 'just now'; renderSheet(); toast(`${esc(SRC[ds.src].name)} synced`, ds.src); break;
+    case 'syncall': ['jira', 'confluence', 'gitea'].forEach(k => SRC[k].synced = 'just now'); renderSheet(); renderStatus(); toast('Jira, Wiki and Gitea synced · TeamCity still 401', 'blue'); break;
+    case 'fixteamcity': openOverlay('sources', { force: true }); state.fixing = 'teamcity'; renderSheet(); setTimeout(() => $('#tcpw') && $('#tcpw').focus(), 0); break;
+    case 'cancelfix': state.fixing = null; renderSheet(); break;
+    case 'savepw': {
+      SRC.teamcity.ok = true; SRC.teamcity.synced = 'just now'; SRC.teamcity.auth = 'user + password (updated today)'; SRC.teamcity.error = '';
+      state.fixing = null; renderSheet(); renderSync(); renderStatus(); renderCard();
+      toast('TeamCity password saved · sync recovered · 3 build configs indexed', 'teamcity');
+      flushQueue(); break;
+    }
+    case 'snoozepat': snoozed.push({ id: 'pat2', txt: 'Jira PAT expires in 12 days', returns: 'returns 2026-08-29' }); renderSheet(); toast('Reminder set for 2026-08-29', 'blue'); break;
+    case 'addsrc': state.add.open = true; state.add.step = 0; renderSheet(); break;
+    case 'cancelsrc': state.add.open = false; renderSheet(); break;
+    case 'srcback': state.add.step--; renderSheet(); break;
+    case 'srcnext': {
+      if (state.add.step === 1) { state.add.url = $('#asurl').value; }
+      if (state.add.step === 2) { const c = document.querySelector('input[name=auth]:checked'); if (c) state.add.auth = c.value; }
+      state.add.step++; renderSheet(); break;
+    }
+    case 'testconn': { const c = document.querySelector('input[name=auth]:checked'); if (c) state.add.auth = c.value;
+      state.add.url = state.add.url || ($('#asurl') && $('#asurl').value) || 'https://jenkins.tidewater.internal';
+      state.add.tested = state.add.auth === 'userpass' ? 'bad' : 'ok'; renderSheet(); break; }
+    case 'srcsave': { const t = state.add.type; state.add.open = false; state.add.tested = null; renderSheet();
+      toast(`${esc(t)} source saved · first index started · adapter loaded`, 'blue'); break; }
+    case 'tab': state.timeTab = ds.tab; renderTime(); break;
+    case 'assign': openOverlay('time', { force: true }); assignBlock(ds.blk, x, y); break;
+    case 'logblk': logBlockDialog(ds.blk); break;
+    case 'keeplocal': { const b = blocks.find(z => z.id === ds.blk); b.logged = 'local'; renderTime(); toast('Kept local — 48 m stays out of Jira', 'note'); break; }
+    case 'mergeprev': { const b = blocks.find(z => z.id === ds.blk), prev = blocks.find(z => z.id === 'b3');
+      prev.e = b.e; blocks = blocks.filter(z => z.id !== b.id); state.selBlock = 'b3'; renderTime();
+      toast('30 m merged into the 09:40 PAY-231 block', 'blue'); break; }
+    case 'logall': { weekTotals.unlogged = 0; weekTotals.logged = weekTotals.tracked; week.forEach(w => w[3] = 0); blocks.forEach(b => { if (b.node && !b.logged) b.logged = N[b.node].key; });
+      const t = N['PAY-231']; t.worklogs.push({ when: 'Fri 22', min: 164, txt: 'Backoff jitter (a41f2c, c90d11); replied to review on PR #142; updated Backoff policy in the design page.' });
+      renderTime(); renderCard(); toast('4h 45m logged across PAY-231, PAY-228 and OPS-77', 'jira'); break; }
+    case 'wledit': { const g = $('#wlgen'); if (!g) break;
+      const ta = document.createElement('textarea'); ta.className = 'ta'; ta.id = 'wlgen'; ta.value = wlComment();
+      ta.addEventListener('input', ev => state.wl.custom = ev.target.value);
+      g.replaceWith(ta); ta.focus(); state.wl.custom = ta.value; break; }
+    case 'wllog': logWorklog(); break;
+    case 'copydigest': toast('Digest copied — paste it into Slack', 'blue'); break;
+    case 'digestnote': {
+      const id = 'note-digest'; if (!N[id]) {
+        def({ id, type: 'note', src: 'note', key: 'note', title: 'Standup 2026-08-22', edited: 'today ' + nowStr(), pos: null,
+          body: 'Yesterday: merged PR #139, PAY-228 to In Review, retry loop for PAY-231 (7be0e4), logged 4h 30m.\nToday: backoff + jitter (a41f2c, c90d11); fix #1187; SLA answer for Priya; review PR #144.\nBlockers: PAY-228 blocked by OPS-77.\n\nLinks: [[PAY-231]] [[PAY-228]] [[#1187]]' });
+        placeNode(id, 'PAY-231'); edges.push(edge(id, 'PAY-231'), edge(id, 'PAY-228'));
+      }
+      state.noteOpen = id; stampFresh([id]); renderStatus(); toast('Digest saved as note Standup 2026-08-22', 'note'); break;
+    }
+    case 'protonote': toast('Protocol saved as note Standup protocol 2026-08-22', 'note'); break;
+    case 'publish': {
+      state.published = true;
+      const id = 'page-proto'; if (!N[id]) {
+        def({ id, type: 'page', src: 'confluence', key: 'ENG', title: 'Standup protocol 2026-08-22', space: 'ENG — Engineering', edited: 'today ' + nowStr(), by: 'Mara Lindqvist', pos: null,
+          body: ($('#proto') ? $('#proto').innerHTML : '<p>Protocol</p>'), comments: [] });
+        ALIAS['Standup protocol 2026-08-22'] = id; placeNode(id, 'page-sepa'); edges.push(edge(id, 'page-standups'));
+      }
+      renderSheet(); stampFresh([id]); renderStatus();
+      toast('Published to ENG › Standup protocols › 2026-08-22', 'confluence'); break;
+    }
+    case 'aiticket': { const a = ACTIONS[+ds.i]; a.done = 'PAY-' + (state.newCount.ticket + 1); createTicketDialog(a.txt); break; }
+    default: toast(`${esc(act)} is not wired in this mockup`, 'red', true);
+  }
+}
+
+/* ============================================================
+   Events
+   ============================================================ */
+document.addEventListener('click', ev => {
+  const go = ev.target.closest('[data-go]');
+  if (go && !ev.target.closest('.menu')) { ev.preventDefault(); const id = resolve(go.dataset.go); if (id) { if (go.closest('#sdrop')) closeSearch(); closePop(); closeOverlay(true); select(id); } return; }
+  const lens = ev.target.closest('[data-lens]');
+  if (lens && !lens.dataset.act) { closeSearch(); setLens(lens.dataset.lens); return; }
+  const fill = ev.target.closest('[data-fill]');
+  if (fill) { $('#q').value = fill.dataset.fill; $('#q').focus(); runSearch(); return; }
+  const note = ev.target.closest('[data-note]');
+  if (note) { state.noteOpen = note.dataset.note; state.editNote = null; renderSheet(); return; }
+  const blk = ev.target.closest('[data-blk]');
+  if (blk && !blk.dataset.act) { state.selBlock = blk.dataset.blk; renderTime(); return; }
+  const tab = ev.target.closest('[data-tab]');
+  if (tab && !tab.dataset.act) { state.timeTab = tab.dataset.tab; renderTime(); return; }
+  const at = ev.target.closest('[data-atype]');
+  if (at) { state.add.type = at.dataset.atype; renderSheet(); return; }
+  for (const [k, apply] of [['fs', k2 => { state.f.src.has(k2) ? state.f.src.delete(k2) : state.f.src.add(k2); }],
+                            ['ft', k2 => { state.f.type.has(k2) ? state.f.type.delete(k2) : state.f.type.add(k2); }],
+                            ['fw', k2 => { state.f.who = state.f.who === k2 ? '' : k2; }],
+                            ['fd', k2 => { state.f.date = state.f.date === k2 ? '' : k2; }],
+                            ['fx', () => { state.f.fail = !state.f.fail; }]]) {
+    const c = ev.target.closest(`[data-${k}]`);
+    if (c) { apply(c.dataset[k]); renderSearch(); $('#q').focus(); return; }
+  }
+  const a = ev.target.closest('[data-act]');
+  if (a && !a.disabled) { ev.preventDefault(); handleAct(a.dataset.act, a.dataset, a); }
+});
+document.addEventListener('change', ev => {
+  const s = ev.target.closest('.st-sel'); if (s) { setStatus(s.dataset.id, s.value); return; }
+  const l = ev.target.closest('[data-layer]');
+  if (l) { state.layers[l.dataset.layer] = l.checked; renderSheet(); renderGraph(); renderStatus(); toast(`${SRC[l.dataset.layer].stamp} layer ${l.checked ? 'shown' : 'hidden'}`, 'blue'); }
+});
+document.addEventListener('mouseover', ev => { const h = ev.target.closest('[data-hl]'); if (h) highlight(h.dataset.hl.split(','), true); });
+document.addEventListener('mouseout', ev => { const h = ev.target.closest('[data-hl]'); if (h) highlight([], false); });
+$$('.rail button').forEach(b => b.onclick = () => { if (b.dataset.nav === 'graph') { closeOverlay(); } else openOverlay(b.dataset.nav); });
+$('#inboxbtn').onclick = () => openOverlay('inbox');
+$('#syncbtn').onclick = () => openOverlay('sources');
+$('#gearbtn').onclick = () => openOverlay('sources');
+$('#timerbtn').onclick = ev => { const r = ev.currentTarget.getBoundingClientRect(); timerPop(r.left - 120, r.bottom + 4); };
+$('#newbtn').onclick = ev => { const r = ev.currentTarget.getBoundingClientRect();
+  menu([{ label: 'Ticket…', run: () => createTicketDialog() }, { label: 'Page…', run: () => createPageDialog() },
+        { label: 'Note', k: '', run: () => newNote(state.sel) }, { label: 'Branch…', run: () => newBranchDialog('payout-service') },
+        { label: 'Build…', run: () => triggerDialog('Payout_IntegrationTests', 'feature/PAY-231-sepa-retry') },
+        { label: 'Source…', run: () => { openOverlay('sources', { force: true }); state.add.open = true; state.add.step = 0; renderSheet(); } }], r.left, r.bottom + 4, 'Create'); };
+$('#q').addEventListener('input', runSearch);
+$('#q').addEventListener('focus', () => { if ($('#sdrop').hidden) renderSearch(); });
+$('#q').addEventListener('keydown', ev => {
+  if (ev.key === 'ArrowDown') { ev.preventDefault(); moveSearchCur(1); }
+  else if (ev.key === 'ArrowUp') { ev.preventDefault(); moveSearchCur(-1); }
+  else if (ev.key === 'Enter') { const c = $('#sdrop .lrow.cur'); if (c) { ev.preventDefault(); c.click(); } }
+  else if (ev.key === 'Escape') { ev.preventDefault(); closeSearch(); $('#q').blur(); }
+});
+document.addEventListener('keydown', ev => {
+  const mod = ev.metaKey || ev.ctrlKey;
+  if (mod && (ev.key === 'k' || ev.key === 'K')) { ev.preventDefault(); focusSearch(); return; }
+  if (mod && (ev.key === 't' || ev.key === 'T')) { ev.preventDefault(); toggleTimer(); return; }
+  if (ev.key !== 'Escape') return;
+  if (!$('#pop').hidden) { closePop(); return; }
+  if (!$('#dialog').hidden) { closeDialog(); return; }
+  if (!$('#sdrop').hidden) { closeSearch(); $('#q').blur(); return; }
+  if (state.overlay) { closeOverlay(); return; }
+  if (state.sel) { state.sel = null; setHash('#/graph'); renderGraph(); renderCard(); return; }
+  if (state.lens !== 'all') setLens('all');
+});
+window.addEventListener('hashchange', renderStatus);
+
+/* ============================================================
+   Boot
+   ============================================================ */
+function boot() {
+  renderLenses(); renderCounts(); renderSync(); renderTimer(); renderStatus();
+  renderGraph(); fit(); renderCard(); syncRail();
+  if (location.hash && location.hash !== '#/graph') onHash(); else renderStatus();
+  setInterval(renderTimer, 1000);
+}
+window.addEventListener('error', ev => { const el = $('#jserr'); el.hidden = false; el.textContent = 'JS error: ' + ev.message + ' (line ' + ev.lineno + ')'; });
+try { boot(); } catch (err) { const el = $('#jserr'); el.hidden = false; el.textContent = 'JS error in boot: ' + (err && err.message); }
+</script>
+</body>
+</html>
