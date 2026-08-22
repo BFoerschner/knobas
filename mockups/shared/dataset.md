@@ -2,7 +2,7 @@
 
 Every mockup uses exactly these keys, names, statuses, people and timestamps, so the 25 mockups are comparable. Do not invent other tickets/repos/pages; you may omit items a screen doesn't need.
 
-**Today is Friday 2026-08-22, current time 14:32.**
+**Today is Friday 2026-08-22, current time 14:32.** (The calendar is fictional: treat 2026-08-22 as a Friday and 2026-08-21 as Thursday; don't cross-check against a real calendar.)
 
 ## You
 **Mara Lindqvist** (`mara.lindqvist`, initials ML) — backend engineer, Payments team, Tidewater Freight (freight forwarding).
@@ -41,7 +41,7 @@ Epic **PAY-200** *Payout reliability* (In Progress) contains PAY-231, PAY-228, P
 
 **PAY-231** description: "When the SEPA batch at the PSP returns a transient error (HTTP 503 or PSP code `TEMP_UNAVAILABLE`), retry the payout with exponential backoff (base 30 s, factor 2, max 5 attempts, jitter). Permanent failures go to the manual review queue."
 - Comments: Priya, yesterday 14:20 — "Please make sure the backoff policy matches the design page — finance wants max 5 attempts." · Mara, today 10:15 — "Backoff + jitter implemented in a41f2c, integration test still red (#1187), investigating."
-- Estimate 2d · time spent this week 6h 30m · no worklog yet today.
+- Estimate 2d · time spent this week 9h 00m (incl. 4h 30m yesterday) · no worklog yet today.
 - Links: see *Confirmed links*.
 
 **PAY-228** is *blocked by* OPS-77 (staging verification needs the updated runbook). **PAY-240** description: "Finance reports the payout dashboard takes 8–12 s to load for August. Target < 2 s."
@@ -109,7 +109,7 @@ Build #1187 parameters: `branch=feature/PAY-231-sepa-retry`, `env=staging`. Trig
 
 ## Suggested links (auto-detected, unconfirmed — show as proposals with a reason and a one-click confirm/dismiss)
 - commit `a41f2c` "PAY-231 backoff jitter" → PAY-231 — *key in commit message*
-- build #1187 → PAY-231 — *key in build parameter `branch`*
+- build #412 Ledger_Deploy_Staging → PAY-228 — *deployed the merge commit of PR #139*
 - page *Payments architecture overview* → repo `ledger-api` — *mentions `ledger-api` 4×*
 - PAY-240 → page *Payments architecture overview* — *text similarity 0.71 ("dashboard latency")*
 
@@ -121,7 +121,7 @@ Build #1187 parameters: `branch=feature/PAY-231-sepa-retry`, `env=staging`. Trig
 | PRs idle > 5 days | 2 | in other repos |
 | Pages I edited this week | 3 | |
 | Blocked tickets | 1 | PAY-228 |
-| Unlogged time this week | 4h 45m | |
+| Unlogged time this week | 5h 12m | all of today |
 
 Example search query to show: **"sepa retry"** → results: PAY-231 (ticket), *SEPA payout retry design* (page), PR #142, commits a41f2c / c90d11, build #1187, note *SEPA retry investigation*. Each result shows its source and "synced N min ago".
 
@@ -150,9 +150,9 @@ Passive blocks recorded today (from what was open in the app; nothing is keyed t
 | 13:10–13:58 | ad-hoc label **"Staging DB configuration"** (no ticket) | manual label |
 | 13:58–now | PAY-231 | manual timer |
 
-Worklogs already logged: yesterday — PAY-228 1h 30m "Review PR #139 fixes, re-test partial refund drift"; yesterday — PAY-231 3h "Retry loop implementation". **Today: nothing logged yet** (5h 28m tracked).
+Worklogs already logged: yesterday — PAY-228 2h 40m "Review PR #139 fixes, re-test partial refund drift"; yesterday — PAY-231 4h 30m "Retry loop implementation" (Thursday fully logged). **Today: nothing logged yet** (5h 12m tracked: 15m + 55m + 2h 10m + 30m + 48m + 34m).
 
-Week: Mon 7h 45m · Tue 8h 00m · Wed 6h 30m · Thu 7h 10m · Fri 5h 28m so far. Tracked 34h 10m, logged 29h 25m, **unlogged 4h 45m**.
+Week: Mon 7h 45m · Tue 8h 00m · Wed 6h 30m · Thu 7h 10m · Fri 5h 12m so far. Tracked 34h 37m, logged 29h 25m (Mon–Thu fully logged), **unlogged 5h 12m** (all of today). These figures add up; use them verbatim.
 
 **Worklog draft** (shown when the PAY-231 timer is stopped; the suggested interval is 09:40–11:50 + 13:58–14:32 = 2h 44m, editable): activity in the interval, each a checkbox that adds a line to the comment —
 - [x] commit `a41f2c` "PAY-231 backoff jitter" (10:02)
@@ -167,7 +167,7 @@ The "Staging DB configuration" block has no ticket: offer *Log to a ticket…* (
 
 ## Standup — today
 **Digest (generated)**
-- Yesterday: merged PR #139 (ledger-api) fixing partial refund drift; PAY-228 → In Review; implemented retry loop for PAY-231 (7be0e4); logged 4h 30m.
+- Yesterday: merged PR #139 (ledger-api) fixing partial refund drift; PAY-228 → In Review; implemented retry loop for PAY-231 (7be0e4); logged 7h 10m.
 - Today: PAY-231 backoff + jitter (a41f2c, c90d11); fix integration test #1187 (off-by-one in attempt counter); reply to Priya about the manual-review SLA; review PR #144.
 - Blockers: PAY-228 staging verification blocked by OPS-77 (runbook outdated, Tomasz).
 
