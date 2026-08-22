@@ -12,9 +12,12 @@
   .thesis { margin: 6px 0 8px; padding-left: 16px; font-size: 13px; color: var(--muted); }
   .meta { font-size: 11px; color: var(--muted); font-family: ui-monospace, Menlo, monospace; }
 </style></head><body>
-<h1>knobas mockups <small>round-2 · 2 built</small></h1>
+<h1>knobas mockups <small>round-2 · 3 built</small></h1>
 <p class="intro">All on the Signal shell (context hub + launcher box). Same example data: <a href="../shared/dataset.md">dataset.md</a> + <a href="../shared/assets.md">assets.md</a>; required surfaces in <a href="../shared/round-2-brief.md">round-2-brief.md</a>. Try: <kbd>⌘K</kbd> then <code>asset:</code>, the PAY-231 room's ASSETS tile, and promoting <code>sepa-payout-export</code> stage → prod.</p>
 <ul class="list"><li class="item">
+    <a class="open" href="W1-inventory.html" target="_blank" rel="noopener"><span class="id">W1 Inventory</span><span class="title">D1 Signal</span></a>
+    <ul class="thesis"><li>Every machine, container, route, scenario and monitor is a row on one typed board — pick a type in the rail and it gets its own columns, group by host and it becomes a tree, so 32 assets read as fast as 300 would.</li><li>The board is the room's missing tile: the same graphite rows, the same mono readings and the same amber the context hub already uses, and the launcher box reaches it with asset:, /assets and type/env/health chips.</li><li>The WIRED column — a chain of two-letter monograms per row (VM CT SV RT DB MO FR SC) that says what a thing is wired to before you open it, and highlights the other end when you touch it.</li></ul>
+    <span class="meta">4021 lines · 309 KB</span></li><li class="item">
     <a class="open" href="W3-environment-matrix.html" target="_blank" rel="noopener"><span class="id">W3 Environment matrix</span><span class="title">D1 Signal</span></a>
     <ul class="thesis"><li>Assets read as a departure board — rows are the things you deploy, columns are dev, stage, prod and shared, so what runs where, and where it has drifted, is one glance.</li><li>The matrix sits under the same context hub and launcher: every room gets a reduced matrix of its own assets, and asset: type: env: health: narrow the same box.</li><li>Version cells are split-flap — promoting sepa-payout-export v13 stage to prod flips the prod cell, and a thin amber rule under two cells is the drift itself.</li></ul>
     <span class="meta">3923 lines · 306 KB</span></li><li class="item">
