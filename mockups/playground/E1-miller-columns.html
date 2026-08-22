@@ -1,0 +1,960 @@
+<!doctype html>
+<!--
+knobas playground
+example: E1 Miller columns
+design: D1 Signal
+thesis: depth becomes direction instead of nesting — one more level is one more column to the right, so level 9 behaves exactly like level 2 and the way you came stays on screen as thin labelled spines.
+thesis: select an exposer and its route rows throw thin amber wires back across the board, landing on the target row where it is visible or on the spine of the column that still holds it.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>knobas — asset topology · Miller columns</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#15171A; --panel:#1D2024; --raised:#24282D; --line:#2E3339; --line2:#3A4047;
+  --text:#E7E9EC; --muted:#8B929A; --faint:#5A6169;
+  --amber:#FFB020; --fail:#FF6A5C; --ok:#7FD1A1; --link:#9CC3FF;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  --cond:"Barlow Condensed","Arial Narrow",sans-serif;
+  --colmin:252px; --spine:30px;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;overflow:hidden;background:var(--bg);color:var(--text);font:13px/1.45 var(--sans);-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:pointer;text-align:left}
+:focus-visible{outline:2px solid var(--amber);outline-offset:1px}
+.row:focus-visible,.spine:focus-visible,.rt:focus-visible,.prow:focus-visible{outline-offset:-2px}
+input,select{font:12px var(--mono);color:var(--text);background:var(--bg);border:1px solid var(--line2);border-radius:2px;padding:5px 7px}
+input::placeholder{color:var(--faint)}
+.eyebrow{display:flex;align-items:center;gap:7px;font:600 10.5px/1 var(--cond);letter-spacing:.13em;text-transform:uppercase;color:var(--muted)}
+.eyebrow .cn{font:500 10px var(--mono);letter-spacing:0;color:var(--faint)}
+.eyebrow::after{content:"";flex:1;height:1px;background:var(--line)}
+.btn{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border:1px solid var(--line2);border-radius:2px;font:500 12px var(--sans);background:var(--raised);white-space:nowrap}
+.btn:hover{border-color:var(--muted)}
+.btn.pri{background:var(--amber);color:#191308;border-color:var(--amber);font-weight:500}
+.btn.pri:hover{background:#ffbe45}
+.btn.sm{height:22px;padding:0 8px;font-size:11px}
+.btn.quiet{background:none;color:var(--muted)}
+.btn.quiet:hover{color:var(--text)}
+.btn.danger:hover{border-color:var(--fail);color:var(--fail)}
+.sp{flex:1}
+
+/* ── status lamps: a 3px bar, not a dot. only trouble is bright ───────── */
+.lamp{width:3px;height:12px;flex:none;background:rgba(90,97,105,.4)}
+.st-up .lamp{background:rgba(127,209,161,.5)}
+.st-warn .lamp{background:var(--amber)}
+.st-down .lamp{background:var(--fail)}
+
+/* ── split-flap cell (D1 signature) ──────────────────────────────────── */
+.flap{display:inline-flex;align-items:center;justify-content:center;position:relative;height:19px;min-width:56px;padding:0 7px;background:var(--raised);border:1px solid var(--line);border-radius:2px;font:500 11px/1 var(--mono);letter-spacing:.09em;color:var(--muted);overflow:hidden;perspective:90px;flex:none}
+.flap::after{content:"";position:absolute;left:0;right:0;top:50%;height:1px;background:var(--bg);opacity:.9;pointer-events:none}
+.flap .v{display:block;backface-visibility:hidden;transform-origin:50% 50%}
+.flap.f1 .v{transform:rotateX(-90deg);transition:transform 165ms cubic-bezier(.45,0,1,1)}
+.flap.f2 .v{transform:rotateX(90deg);transition:none}
+.flap.f3 .v{transform:rotateX(0deg);transition:transform 165ms cubic-bezier(0,0,.55,1)}
+.flap.s-up{color:var(--ok)}
+.flap.s-warn{color:var(--amber)}
+.flap.s-down{color:var(--fail)}
+.flap.fsm{height:17px;min-width:30px;padding:0 5px;font-size:10px;letter-spacing:.04em}
+
+/* ── app frame ───────────────────────────────────────────────────────── */
+body{display:grid;grid-template-rows:20px 44px 1fr 25px}
+
+#ticker{display:flex;align-items:center;gap:10px;padding:0 12px;background:#111316;border-bottom:1px solid var(--line);font:400 10.5px var(--mono);overflow:hidden}
+.tlab{font:600 9.5px/1 var(--cond);letter-spacing:.16em;text-transform:uppercase;color:var(--faint);flex:none}
+#tmsg{color:var(--amber);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:opacity 120ms linear}
+#tmsg.fade{opacity:0}
+.treading{display:flex;align-items:center;gap:6px;color:var(--faint);flex:none;white-space:nowrap}
+
+header{display:flex;align-items:center;gap:16px;padding:0 12px;background:var(--panel);border-bottom:1px solid var(--line)}
+.brand{font:600 15px/1 var(--cond);letter-spacing:.16em;text-transform:uppercase;flex:none}
+.brand span{color:var(--faint);font-size:11px;letter-spacing:.13em;margin-left:9px}
+#crumbs{display:flex;align-items:center;gap:1px;flex:1;min-width:0;overflow:hidden;font:400 11.5px var(--mono)}
+#crumbs .cb{padding:3px 6px;border-radius:2px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px}
+#crumbs .cb:hover{color:var(--text);background:var(--raised)}
+#crumbs .cb.on{color:var(--text)}
+#crumbs .cs{color:var(--faint);flex:none}
+.lvl{display:flex;align-items:center;gap:7px;flex:none}
+.lvl .eyebrow::after{display:none}
+
+.search{position:relative;flex:none;width:250px}
+.search .fld{display:flex;align-items:center;gap:7px;height:28px;padding:0 8px;background:var(--bg);border:1px solid var(--line2);border-radius:2px}
+.search .fld:focus-within{border-color:var(--muted)}
+.search input{flex:1;min-width:0;border:0;background:none;padding:0;font:12px var(--mono)}
+.search input:focus-visible{outline:none}
+.search kbd{font:400 10px var(--mono);color:var(--faint);border:1px solid var(--line);border-radius:2px;padding:1px 4px;flex:none}
+#results{position:absolute;top:32px;right:0;width:420px;max-height:340px;overflow-y:auto;background:var(--panel);border:1px solid var(--line2);border-radius:2px;z-index:40;box-shadow:0 8px 0 -4px rgba(0,0,0,.5)}
+#results[hidden]{display:none}
+.res{display:block;width:100%;padding:6px 9px;border-bottom:1px solid rgba(46,51,57,.7)}
+.res:last-child{border-bottom:0}
+.res:hover,.res.act{background:var(--raised)}
+.res .r1{display:flex;align-items:center;gap:7px}
+.res .mg{font:500 10px var(--mono);color:var(--faint);width:19px;flex:none}
+.res .nm{font:500 12px var(--sans);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.res .ty{font:400 10px var(--mono);color:var(--faint);flex:none}
+.res .pth{display:block;margin-top:2px;padding-left:26px;font:400 10px var(--mono);color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.res .hl{color:var(--amber)}
+.res-none{padding:9px;font:400 11px var(--mono);color:var(--faint)}
+
+/* ── the board ───────────────────────────────────────────────────────── */
+#main{position:relative;display:flex;min-height:0;min-width:0}
+#strip{flex:1;display:flex;min-width:0;overflow:hidden}
+#wires{position:absolute;inset:0;pointer-events:none;z-index:12;overflow:visible}
+#wires path{fill:none;stroke:var(--amber);stroke-linecap:round}
+#wires path.case{stroke:var(--bg);opacity:.92}
+#wires rect{fill:var(--amber)}
+
+.col{flex:1 1 0;min-width:0;max-width:380px;display:flex;flex-direction:column;border-right:1px solid var(--line);background:var(--bg)}
+.colhd{height:26px;flex:none;display:flex;align-items:center;gap:8px;padding-right:5px;background:var(--panel);border-bottom:1px solid var(--line)}
+.colhd .lv{width:28px;flex:none;align-self:stretch;display:flex;align-items:center;justify-content:center;font:500 10px var(--mono);letter-spacing:.02em;color:var(--faint);border-right:1px solid var(--line)}
+.col.here .colhd .lv{color:var(--amber)}
+.colhd .pn{flex:1;min-width:0;font:600 11.5px/1 var(--cond);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.col.here .colhd .pn{color:var(--text)}
+.colhd .n{font:400 10px var(--mono);color:var(--faint);flex:none}
+.colhd .add{width:19px;height:19px;flex:none;display:flex;align-items:center;justify-content:center;border:1px solid var(--line2);border-radius:2px;color:var(--muted);font:400 13px/1 var(--mono)}
+.colhd .add:hover{color:var(--amber);border-color:var(--amber)}
+.rows{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
+
+.row{position:relative;display:block;width:100%;padding:6px 8px 6px 9px;border-bottom:1px solid rgba(46,51,57,.55)}
+.row:hover{background:var(--raised)}
+.row .l1{display:flex;align-items:center;gap:6px}
+.row .mg{width:19px;flex:none;font:500 10px var(--mono);letter-spacing:.04em;color:var(--faint)}
+.row .nm{flex:1;min-width:0;font:500 12.5px/1.25 var(--sans);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .cnt{flex:none;font:400 10.5px var(--mono);color:var(--faint);font-variant-numeric:tabular-nums}
+.row .chev{flex:none;width:7px;font:400 11px/1 var(--mono);color:var(--faint)}
+.row .l2{display:block;margin-top:2px;padding-left:9px;font:400 10.2px/1.3 var(--mono);color:var(--muted);opacity:.78;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .bdg{flex:none;font:500 9.5px/1 var(--mono);padding:2px 3px;border:1px solid;border-radius:1px}
+.row .bdg.warn{color:var(--amber);border-color:rgba(255,176,32,.4)}
+.row .bdg.down{color:var(--fail);border-color:rgba(255,106,92,.45)}
+.row.hit .nm{text-decoration:underline;text-decoration-color:var(--amber);text-underline-offset:3px;text-decoration-thickness:1px}
+.row.on{background:rgba(255,176,32,.05)}
+.row.on::before{content:"";position:absolute;left:0;top:0;bottom:-1px;width:2px;background:var(--amber)}
+.row.on .nm{color:var(--text)}
+.row.on .mg{color:var(--muted)}
+.row.tip{background:var(--raised)}
+.row.on:hover{background:rgba(255,176,32,.09)}
+.row.wired::after{content:"";position:absolute;right:0;top:50%;margin-top:-3px;width:3px;height:6px;background:var(--amber)}
+.col-empty{padding:14px 10px;font:400 10.5px/1.6 var(--mono);color:var(--faint)}
+.col-empty .btn{margin-top:9px}
+
+.col.spine{flex:0 0 var(--spine);max-width:var(--spine);cursor:pointer;background:var(--panel);align-items:center;padding:5px 0 4px}
+.col.spine:hover{background:var(--raised)}
+.col.spine .lamp{margin-bottom:7px}
+.col.spine .smg{font:500 9.5px/1 var(--mono);letter-spacing:.03em;color:var(--muted);border:1px solid var(--line);border-radius:2px;padding:2px 3px;flex:none}
+.col.spine .vn{flex:1;min-height:0;margin:7px 0;writing-mode:vertical-rl;text-orientation:mixed;font:600 11px/1 var(--cond);letter-spacing:.14em;text-transform:uppercase;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.col.spine:hover .vn{color:var(--muted)}
+.col.spine .slv{font:500 9.5px/1 var(--mono);color:var(--faint);flex:none}
+
+/* ── detail pane ─────────────────────────────────────────────────────── */
+#pane{width:372px;flex:none;min-width:0;display:flex;flex-direction:column;background:var(--panel);border-left:1px solid var(--line)}
+.pane-hd{height:26px;flex:none;display:flex;align-items:center;gap:9px;padding:0 12px;border-bottom:1px solid var(--line)}
+.pane-hd .eyebrow::after{display:none}
+#pane-body{flex:1;min-height:0;overflow-y:auto;padding:13px 12px 18px;scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
+#pane-act{flex:none;display:flex;gap:7px;padding:8px 12px;border-top:1px solid var(--line)}
+
+.ptype{display:flex;align-items:center;gap:6px;font:600 10.5px/1 var(--cond);letter-spacing:.13em;text-transform:uppercase;color:var(--faint)}
+.ptype .made{color:var(--amber)}
+.ph{display:flex;align-items:baseline;gap:9px;margin:7px 0 0}
+.ph .pmg{font:500 11px var(--mono);letter-spacing:.05em;color:var(--muted);border:1px solid var(--line2);border-radius:2px;padding:2px 4px;flex:none}
+.ph h2{margin:0;font:600 22px/1.1 var(--cond);letter-spacing:.01em;word-break:break-word}
+.psub{margin:6px 0 0;font:400 11px/1.5 var(--mono);color:var(--muted)}
+.ppath{display:flex;flex-wrap:wrap;align-items:center;gap:1px;margin:9px 0 14px;font:400 10.5px var(--mono)}
+.ppath .pp{padding:2px 4px;border-radius:2px;color:var(--faint)}
+.ppath .pp:hover{color:var(--text);background:var(--raised)}
+.ppath .pp.on{color:var(--muted)}
+.ppath .s{color:#3f454c}
+.sec{margin-bottom:15px}
+.sec>.eyebrow{margin-bottom:7px}
+.note{margin:0;font:400 10.5px/1.55 var(--mono);color:var(--faint)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font:400 11px/1.45 var(--mono)}
+.kv .k{color:var(--faint)}
+.kv .v{color:var(--text);word-break:break-word}
+.inside{display:flex;flex-wrap:wrap;gap:4px 12px;font:400 10.5px var(--mono);color:var(--muted)}
+.inside b{color:var(--text);font-weight:500}
+
+.rt{position:relative;display:block;width:100%;padding:6px 7px;border-bottom:1px solid rgba(46,51,57,.7)}
+.rt:hover{background:var(--raised)}
+.rt .ru{display:block;font:400 11px var(--mono);color:var(--link);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rt .rl{display:flex;align-items:center;gap:5px;margin-top:2px;font:400 10px var(--mono);color:var(--faint);white-space:nowrap;overflow:hidden}
+.rt .rl .ar{color:var(--amber)}
+.rt .rtg{color:var(--muted);overflow:hidden;text-overflow:ellipsis}
+.rt .rn{display:block;margin-top:2px;font:400 9.8px/1.35 var(--mono);color:#4d545b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rt.ep .ru{color:var(--muted)}
+.rt.wired::before{content:"";position:absolute;left:-12px;top:50%;margin-top:-3px;width:6px;height:6px;background:var(--amber)}
+
+.prow{display:flex;align-items:center;gap:7px;width:100%;padding:5px 7px;border-bottom:1px solid rgba(46,51,57,.7)}
+.prow:hover{background:var(--raised)}
+.prow .nm{font:500 11.5px var(--sans);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:none;max-width:150px}
+.prow .pth{flex:1;min-width:0;text-align:right;font:400 9.8px var(--mono);color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+footer{display:flex;align-items:center;gap:12px;padding:0 12px;background:var(--panel);border-top:1px solid var(--line);font:400 10px var(--mono);color:var(--faint)}
+footer .keys b{color:var(--muted);font-weight:400}
+footer .counts{color:var(--muted)}
+
+/* ── dialogs ─────────────────────────────────────────────────────────── */
+dialog{width:460px;max-width:calc(100vw - 40px);padding:0;background:var(--panel);color:var(--text);border:1px solid var(--line2);border-radius:2px}
+dialog::backdrop{background:rgba(10,11,13,.72)}
+dialog form{padding:16px 18px 14px}
+dialog h3{margin:0 0 3px;font:600 17px/1.2 var(--cond);letter-spacing:.04em;text-transform:uppercase}
+dialog h3 em{font-style:normal;color:var(--amber)}
+dialog .dsub{margin:0 0 14px;font:400 10.5px/1.5 var(--mono);color:var(--faint)}
+dialog label{display:block;margin-bottom:9px}
+dialog label .lb{display:block;margin-bottom:4px;font:600 10px/1 var(--cond);letter-spacing:.13em;text-transform:uppercase;color:var(--muted)}
+dialog input,dialog select{width:100%}
+dialog .two{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+.sug{display:flex;flex-wrap:wrap;gap:5px;margin:-4px 0 10px}
+.sug .chip{font:400 10px var(--mono);color:var(--muted);border:1px solid var(--line);border-radius:2px;padding:3px 6px}
+.sug .chip:hover{border-color:var(--amber);color:var(--amber)}
+.sug .lbl{font:600 10px/1.7 var(--cond);letter-spacing:.13em;text-transform:uppercase;color:var(--faint);margin-right:2px}
+#nw-props{display:grid;gap:5px;margin:7px 0 8px}
+.pr{display:grid;grid-template-columns:1fr 1.4fr 22px;gap:6px}
+.pr .x{display:flex;align-items:center;justify-content:center;color:var(--faint);font:400 14px/1 var(--mono);border:1px solid var(--line);border-radius:2px}
+.pr .x:hover{color:var(--fail);border-color:var(--fail)}
+dialog menu{display:flex;justify-content:flex-end;gap:8px;margin:16px 0 0;padding:12px 0 0;border-top:1px solid var(--line)}
+
+#toast{position:fixed;left:50%;bottom:44px;transform:translateX(-50%) translateY(6px);padding:7px 13px;background:var(--raised);border:1px solid var(--line2);border-radius:2px;font:400 11px var(--mono);color:var(--text);opacity:0;pointer-events:none;transition:opacity 120ms linear,transform 120ms linear;z-index:60}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+#toast b{color:var(--amber);font-weight:400}
+
+@media (max-width:1279px){ #pane{width:322px} .search{width:200px} #results{width:360px} }
+@media (max-width:1099px){ :root{--colmin:224px} .brand span{display:none} }
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{transition:none!important;animation:none!important}
+  .flap .v{transform:none!important}
+}
+</style>
+</head>
+<body>
+
+<div id="ticker">
+  <span class="tlab">latest</span>
+  <span id="tmsg"></span>
+  <span class="sp"></span>
+  <span class="treading"><span id="tcount">—</span><span class="flap fsm" id="tprob"><span class="v">0</span></span><span class="tlab">down or warn inside</span></span>
+</div>
+
+<header>
+  <div class="brand">knobas<span>asset topology</span></div>
+  <nav id="crumbs" aria-label="Path to the selected asset"></nav>
+  <div class="lvl"><span class="eyebrow">level</span><span class="flap" id="plevel"><span class="v">L0</span></span></div>
+  <div class="search">
+    <div class="fld">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="#5A6169" stroke-width="1.3" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>
+      <input id="q" type="text" placeholder="Find an asset" aria-label="Find an asset" autocomplete="off" spellcheck="false">
+      <kbd>/</kbd>
+    </div>
+    <div id="results" role="listbox" aria-label="Search results" hidden></div>
+  </div>
+</header>
+
+<main id="main">
+  <div id="strip" role="group" aria-label="Asset columns"></div>
+  <aside id="pane" aria-label="Selected asset">
+    <div class="pane-hd"><span class="eyebrow">selected</span><span class="sp"></span><span class="flap" id="pstatus"><span class="v">—</span></span></div>
+    <div id="pane-body"></div>
+    <div id="pane-act"></div>
+  </aside>
+  <svg id="wires" aria-hidden="true"></svg>
+</main>
+
+<footer>
+  <span class="keys"><b>←→</b> column · <b>↑↓</b> row · <b>⏎</b> open · <b>/</b> find · <b>esc</b> back · <b>n</b> new inside</span>
+  <span class="sp"></span>
+  <span class="counts" id="counts"></span>
+  <button class="btn sm quiet" id="reset">Reset example</button>
+</footer>
+
+<dialog id="dlg-new" aria-labelledby="nw-h">
+  <form id="f-new">
+    <h3 id="nw-h">Put something inside <em id="nw-parent"></em></h3>
+    <p class="dsub" id="nw-where"></p>
+    <div class="sug" id="nw-sug"></div>
+    <div class="two">
+      <label><span class="lb">Type</span><input id="nw-type" list="typelist" autocomplete="off" required placeholder="any type"></label>
+      <label><span class="lb">Status</span><select id="nw-status"><option value="up">up</option><option value="warn">warn</option><option value="down">down</option><option value="none">unknown</option></select></label>
+    </div>
+    <label><span class="lb">Name</span><input id="nw-name" required autocomplete="off" placeholder="what it is called"></label>
+    <label><span class="lb">One-line summary</span><input id="nw-sub" autocomplete="off" placeholder="the reading under the name"></label>
+    <div class="eyebrow">Properties</div>
+    <div id="nw-props"></div>
+    <button type="button" class="btn sm" id="nw-addprop">Add property</button>
+    <menu>
+      <button type="button" class="btn" data-close="dlg-new">Cancel</button>
+      <button type="submit" class="btn pri">Create asset</button>
+    </menu>
+  </form>
+</dialog>
+
+<dialog id="dlg-route" aria-labelledby="rt-h">
+  <form id="f-route">
+    <h3 id="rt-h">Expose a route from <em id="rt-from"></em></h3>
+    <p class="dsub">A route is a URL this asset answers on. Point it at the asset that actually serves it, or leave it as a bare endpoint.</p>
+    <label><span class="lb">URL</span><input id="rt-url" required autocomplete="off" placeholder="https://service.tidewater.internal"></label>
+    <label><span class="lb">Target asset</span><select id="rt-target"></select></label>
+    <label><span class="lb">Note</span><input id="rt-note" autocomplete="off" placeholder="→ :8080 · auth-forward"></label>
+    <menu>
+      <button type="button" class="btn" data-close="dlg-route">Cancel</button>
+      <button type="submit" class="btn pri">Add route</button>
+    </menu>
+  </form>
+</dialog>
+
+<datalist id="typelist"></datalist>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+/* =========================================================================
+   knobas playground — E1 Miller columns
+   Data model (verbatim from topology-explorer.html — data only, new presentation)
+   node  = { id, type, name, sub, status: up|warn|down|none, parent, props:{}, created? }
+   route = { id, from, url, target|null, note }   from = the node that exposes it
+   ========================================================================= */
+const TYPES = {
+  site:       {mg:'DC',label:'Site',              kids:['hypervisor','network','proxy']},
+  hypervisor: {mg:'HV',label:'Hypervisor',        kids:['vm']},
+  vm:         {mg:'VM',label:'Virtual machine',   kids:['engine','service','db','proxy']},
+  engine:     {mg:'EN',label:'Container engine',  kids:['container']},
+  container:  {mg:'CT',label:'Container',         kids:['service','runtime','db','proxy']},
+  service:    {mg:'SV',label:'Service',           kids:['module','app']},
+  module:     {mg:'MD',label:'Module',            kids:[]},
+  runtime:    {mg:'RT',label:'Runtime',           kids:['app']},
+  app:        {mg:'AP',label:'App / scenario',    kids:['step']},
+  step:       {mg:'ST',label:'Step',              kids:['connector']},
+  connector:  {mg:'CN',label:'Connector',         kids:[]},
+  db:         {mg:'DB',label:'Database server',   kids:['database']},
+  database:   {mg:'DB',label:'Database',          kids:['schema']},
+  schema:     {mg:'SC',label:'Schema',            kids:['table']},
+  table:      {mg:'TB',label:'Table',             kids:[]},
+  proxy:      {mg:'RP',label:'Reverse proxy',     kids:['middleware']},
+  middleware: {mg:'MW',label:'Middleware',        kids:[]},
+  network:    {mg:'NW',label:'Network',           kids:[]},
+  custom:     {mg:'··',label:'Custom',            kids:[]},
+};
+const EXPOSERS = new Set(['proxy','runtime','service','app','vm','container']); // types that commonly expose routes; any node may
+
+// [id, type, name, sub, status, parent, props]
+const SEED_NODES = [
+  ['dc','site','tidewater-dc','Hamburg · colocation · 3 hypervisors','up',null,{location:'Hamburg, DE',provider:'colo-north',rack:'R12–R14'}],
+
+  ['pve-01','hypervisor','pve-01','Proxmox VE 8.2 · 2× Xeon Gold · 256 GB','up','dc',{ip:'10.20.0.11',cpu:'2× Xeon Gold 6338',ram:'256 GB',storage:'ceph pool ssd-01'}],
+  ['vm-edge-01','vm','vm-edge-01','Debian 12 · 10.20.1.5 · 2 vCPU · 4 GB','up','pve-01',{ip:'10.20.1.5',os:'Debian 12',vcpu:'2',ram:'4 GB',owner:'Platform (Tomasz)','acme-email':'ops@tidewater.example'}],
+  ['eng-edge','engine','docker','Docker 27.1 · 1 container','up','vm-edge-01',{socket:'/var/run/docker.sock',version:'27.1.1'}],
+  ['ct-traefik','container','traefik','traefik:3.1 · up 41 d · 443/80','up','eng-edge',{image:'traefik:3.1',ports:'443, 80, 8080 (dashboard)',restart:'unless-stopped'}],
+  ['rp-traefik','proxy','Traefik','6 routes · ACME · auth-forward','up','ct-traefik',{software:'Traefik 3.1',resolver:'letsencrypt (internal CA)',dashboard:'http://10.20.1.5:8080'}],
+  ['mw-auth','middleware','auth-forward','forwardAuth → sso.tidewater.internal','up','rp-traefik',{address:'https://sso.tidewater.internal/verify',trustForwardHeader:'true'}],
+
+  ['vm-pay-stage-01','vm','vm-pay-stage-01','Ubuntu 24.04 · 10.20.5.11 · 4 vCPU · 16 GB','up','pve-01',{ip:'10.20.5.11',os:'Ubuntu 24.04',vcpu:'4',ram:'16 GB',owner:'Payments'}],
+  ['eng-stage','engine','docker','Docker 27.1 · 3 containers · compose payments-stage','up','vm-pay-stage-01',{compose:'payments-stage',version:'27.1.1'}],
+  ['ct-payout-stage','container','payout-service','payout-service:1.9.0-rc1 · up 2 h · :8080','up','eng-stage',{image:'ghcr.io/tidewater/payout-service:1.9.0-rc1',ports:'8080',candidate:'PR #142 · build #1188'}],
+  ['svc-payout-stage','service','payout-service','Rust · 1.9.0-rc1 · :8080','up','ct-payout-stage',{language:'Rust',version:'1.9.0-rc1',repo:'tidewater/payout-service',health:'/health'}],
+  ['ct-ledger-stage','container','ledger-api','ledger-api:2.3.0 · :8090','up','eng-stage',{image:'ghcr.io/tidewater/ledger-api:2.3.0',ports:'8090'}],
+  ['svc-ledger-stage','service','ledger-api','Kotlin · 2.3.0 · :8090','up','ct-ledger-stage',{language:'Kotlin',version:'2.3.0',repo:'tidewater/ledger-api'}],
+  ['ct-pg-stage','container','pg-payments-stage','postgres:16.3 · :5432 · 6 GB','up','eng-stage',{image:'postgres:16.3',ports:'5432',volume:'pgdata-stage'}],
+  ['db-stage','db','postgres','PostgreSQL 16.3 · 1 database','up','ct-pg-stage',{version:'16.3',max_connections:'200'}],
+  ['dbn-stage','database','payments','6 GB · 2 schemas','up','db-stage',{owner:'payments',encoding:'UTF8'}],
+  ['sch-stage','schema','public','3 tables','up','dbn-stage',{}],
+  ['tb-stage-1','table','payouts','412 rows pending','up','sch-stage',{}],
+  ['tb-stage-2','table','ledger_entries','1.2 M rows','up','sch-stage',{}],
+  ['tb-stage-3','table','refunds','','up','sch-stage',{}],
+
+  ['pve-02','hypervisor','pve-02','Proxmox VE 8.2 · 2× EPYC · 512 GB','up','dc',{ip:'10.20.0.12',cpu:'2× EPYC 7543',ram:'512 GB'}],
+  ['vm-pay-01','vm','vm-pay-01','Ubuntu 24.04 · 10.20.4.11 · 8 vCPU · 32 GB','warn','pve-02',{ip:'10.20.4.11',os:'Ubuntu 24.04',vcpu:'8',ram:'32 GB',owner:'Payments','backup-window':'02:00–03:00','last-patched':'2026-08-10'}],
+  ['eng-pay','engine','docker','Docker 27.1 · 4 containers · compose payments','warn','vm-pay-01',{compose:'payments',version:'27.1.1'}],
+  ['ct-payout-prod','container','payout-service','payout-service:1.8.2 · up 11 d · :8080','up','eng-pay',{image:'ghcr.io/tidewater/payout-service:1.8.2',ports:'8080','deployed-from':'build #1180'}],
+  ['svc-payout-prod','service','payout-service','Rust · 1.8.2 · :8080','up','ct-payout-prod',{language:'Rust',version:'1.8.2',repo:'tidewater/payout-service',health:'/health'}],
+  ['mod-sepa','module','sepa','SEPA batch builder · retry policy','up','svc-payout-prod',{backoff:'base 30 s · factor 2 · max 5',jitter:'±10 %'}],
+  ['mod-psp','module','psp-client','PSP HTTP client','up','svc-payout-prod',{timeout:'60 s'}],
+  ['ct-ledger-prod','container','ledger-api','ledger-api:2.3.0 · up 11 d · :8090','up','eng-pay',{image:'ghcr.io/tidewater/ledger-api:2.3.0',ports:'8090'}],
+  ['svc-ledger-prod','service','ledger-api','Kotlin · 2.3.0 · :8090','up','ct-ledger-prod',{language:'Kotlin',version:'2.3.0',repo:'tidewater/ledger-api'}],
+  ['ct-worker-prod','container','payout-worker','payout-service:1.8.2 --worker · exited 137 at 11:58','down','eng-pay',{image:'ghcr.io/tidewater/payout-service:1.8.2',command:'--worker',exit:'137 (OOM)'}],
+  ['svc-worker-prod','service','payout-worker','Rust · batch worker · not running','down','ct-worker-prod',{language:'Rust',queue:'payouts.pending'}],
+  ['ct-dash-prod','container','payout-dashboard','payout-dashboard:0.9.4 · :3000 · slow','warn','eng-pay',{image:'ghcr.io/tidewater/payout-dashboard:0.9.4',ports:'3000'}],
+  ['svc-dash-prod','service','payout-dashboard','Node · 0.9.4 · 8 400 ms · PAY-240','warn','ct-dash-prod',{language:'Node 22',version:'0.9.4',ticket:'PAY-240'}],
+
+  ['vm-db-01','vm','vm-db-01','Ubuntu 24.04 · 10.20.4.20 · 8 vCPU · 64 GB · 1 TB','up','pve-02',{ip:'10.20.4.20',os:'Ubuntu 24.04',vcpu:'8',ram:'64 GB',disk:'1 TB nvme',owner:'Platform'}],
+  ['db-prod','db','postgresql','PostgreSQL 16.3 · system service · 2 databases','up','vm-db-01',{version:'16.3',service:'postgresql@16-main',max_connections:'400'}],
+  ['dbn-prod','database','payments','48 GB · 3 schemas','up','db-prod',{owner:'payments',encoding:'UTF8'}],
+  ['sch-prod','schema','public','5 tables','up','dbn-prod',{}],
+  ['tb-prod-1','table','payouts','9.8 M rows','up','sch-prod',{}],
+  ['tb-prod-2','table','ledger_entries','41 M rows','up','sch-prod',{}],
+  ['tb-prod-3','table','refunds','320 k rows','up','sch-prod',{}],
+  ['sch-prod-2','schema','audit','2 tables','up','dbn-prod',{}],
+  ['dbn-prod-2','database','flowrun','2 GB · Flowrun state','up','db-prod',{owner:'flowrun'}],
+
+  ['pve-03','hypervisor','pve-03','Proxmox VE 8.2 · 2× EPYC · 256 GB','warn','dc',{ip:'10.20.0.13',cpu:'2× EPYC 7443',ram:'256 GB'}],
+  ['vm-lowcode-01','vm','vm-lowcode-01','Ubuntu 22.04 · 10.20.6.20 · 8 vCPU · 32 GB','warn','pve-03',{ip:'10.20.6.20',os:'Ubuntu 22.04',vcpu:'8',ram:'32 GB',owner:'Integrations (Lena)'}],
+  ['eng-lc','engine','docker','Docker 26.1 · 2 containers','warn','vm-lowcode-01',{version:'26.1.4'}],
+  ['ct-fr-prod','container','flowrun-prod','flowrun:4.1.7 · up 23 d · :9000','up','eng-lc',{image:'registry.tidewater.internal/flowrun:4.1.7',ports:'9000',volume:'flowrun-prod'}],
+  ['rt-fr-prod','runtime','Flowrun prod','4.1.7 · 3 scenarios · 1 worker pool','up','ct-fr-prod',{version:'4.1.7',workers:'8',state:'database flowrun on vm-db-01'}],
+  ['app-sepa-prod','app','sepa-payout-export','v12 · cron 0 13 * * * · ok 13:00 · 2 m 14 s','up','rt-fr-prod',{version:'v12',trigger:'cron 0 13 * * *',owner:'Mara',lastRun:'#8812 ok 13:00',ticket:'PAY-231'}],
+  ['st-sepa-1','step','fetch-pending-payouts','SQL · 412 rows','up','app-sepa-prod',{kind:'query',timeout:'30 s'}],
+  ['cn-pg-prod','connector','pg-payments','PostgreSQL · payments@vm-db-01','up','st-sepa-1',{dsn:'postgres://flowrun@10.20.4.20/payments',secret:'vault:flowrun/pg-payments'}],
+  ['st-sepa-2','step','build-sepa-batch','transform · pain.001','up','app-sepa-prod',{kind:'transform',schema:'pain.001.001.09'}],
+  ['st-sepa-3','step','post-psp-batch','HTTP POST · 3 retries','up','app-sepa-prod',{kind:'http',retries:'3',backoff:'30 s × 2'}],
+  ['cn-psp-prod','connector','psp-prod','HTTPS · api.psp-partner.example','up','st-sepa-3',{url:'https://api.psp-partner.example/v2/batches',auth:'mTLS',secret:'vault:flowrun/psp-prod'}],
+  ['st-sepa-4','step','write-ledger','HTTP POST → ledger-api','up','app-sepa-prod',{kind:'http'}],
+  ['cn-ledger-prod','connector','ledger-api','HTTPS via traefik · /v1/ledger','up','st-sepa-4',{url:'https://ledger.tidewater.internal/v1/ledger',auth:'service token'}],
+  ['app-invoice-prod','app','invoice-sync','v7 · hourly · ok 14:00 · 41 s','up','rt-fr-prod',{version:'v7',trigger:'cron hourly',owner:'Lena'}],
+  ['st-inv-1','step','pull-invoices','HTTP GET · erp','up','app-invoice-prod',{kind:'http'}],
+  ['st-inv-2','step','upsert-ledger','HTTP POST → ledger-api','up','app-invoice-prod',{kind:'http'}],
+  ['app-customs-prod','app','customs-docs-fetch','v21 · webhook · ok 13:45 · 12 s','up','rt-fr-prod',{version:'v21',trigger:'webhook',owner:'Tomasz'}],
+  ['st-cus-1','step','verify-signature','HMAC','up','app-customs-prod',{kind:'verify'}],
+  ['st-cus-2','step','fetch-document','HTTP GET · customs portal','up','app-customs-prod',{kind:'http'}],
+  ['cn-customs','connector','customs-portal','HTTPS · portal.zoll.example','up','st-cus-2',{url:'https://portal.zoll.example/api/docs',auth:'client cert'}],
+
+  ['ct-fr-stage','container','flowrun-stage','flowrun:4.2.1 · :9001 · down since 12:40','down','eng-lc',{image:'registry.tidewater.internal/flowrun:4.2.1',ports:'9001'}],
+  ['rt-fr-stage','runtime','Flowrun stage','4.2.1 · 3 scenarios · not responding','down','ct-fr-stage',{version:'4.2.1',workers:'4'}],
+  ['app-sepa-stage','app','sepa-payout-export','v13 · failed 12:40 · PSP sandbox timeout','down','rt-fr-stage',{version:'v13',trigger:'cron 0 13 * * *',owner:'Mara',lastRun:'#8811 failed 12:40',ticket:'PAY-231'}],
+  ['st-sepa-s3','step','post-psp-batch','HTTP POST · timed out 3/3','down','app-sepa-stage',{kind:'http',retries:'3'}],
+  ['cn-psp-sandbox','connector','psp-sandbox','HTTPS · sandbox.psp-partner.example','down','st-sepa-s3',{url:'https://sandbox.psp-partner.example/v2/batches',auth:'mTLS'}],
+  ['app-invoice-stage','app','invoice-sync','v7 · hourly','none','rt-fr-stage',{version:'v7'}],
+  ['app-customs-stage','app','customs-docs-fetch','v21 · webhook','none','rt-fr-stage',{version:'v21'}],
+
+  ['vm-lowcode-dev-01','vm','vm-lowcode-dev-01','Ubuntu 22.04 · 10.20.6.30 · 4 vCPU · 16 GB','up','pve-03',{ip:'10.20.6.30',os:'Ubuntu 22.04',owner:'Integrations'}],
+  ['eng-dev','engine','docker','Docker 26.1 · 1 container','up','vm-lowcode-dev-01',{}],
+  ['ct-fr-dev','container','flowrun-dev','flowrun:4.2.1 · :9000 · VPN only','up','eng-dev',{image:'registry.tidewater.internal/flowrun:4.2.1',ports:'9000'}],
+  ['rt-fr-dev','runtime','Flowrun dev','4.2.1 · 4 scenarios','up','ct-fr-dev',{version:'4.2.1'}],
+  ['app-sepa-dev','app','sepa-payout-export','v14 · deployed yesterday 17:45','up','rt-fr-dev',{version:'v14'}],
+  ['app-invoice-dev','app','invoice-sync','v7','up','rt-fr-dev',{version:'v7'}],
+  ['app-refund-dev','app','refund-reconciliation','v3 · manual · ok today · PAY-228','up','rt-fr-dev',{version:'v3',ticket:'PAY-228'}],
+  ['app-customs-dev','app','customs-docs-fetch','v21','up','rt-fr-dev',{version:'v21'}],
+
+  ['net-prod','network','vlan-20 payments','10.20.4.0/24 · prod','up','dc',{cidr:'10.20.4.0/24',gateway:'10.20.4.1'}],
+];
+
+// [id, from, url, target, note]
+const SEED_ROUTES = [
+  ['r-payouts','rp-traefik','https://payouts.tidewater.internal','svc-payout-prod','→ :8080 · cert expires in 9 days · auth-forward'],
+  ['r-ledger','rp-traefik','https://ledger.tidewater.internal','svc-ledger-prod','→ :8090 · auth-forward'],
+  ['r-dashboard','rp-traefik','https://dashboard.tidewater.internal','svc-dash-prod','→ :3000 · 8 400 ms'],
+  ['r-flows','rp-traefik','https://flows.tidewater.internal','rt-fr-prod','→ :9000'],
+  ['r-flows-stage','rp-traefik','https://flows-stage.tidewater.internal','rt-fr-stage','→ :9001 · down'],
+  ['r-payouts-stage','rp-traefik','https://payouts-stage.tidewater.internal','svc-payout-stage','→ :8080 · auth-forward'],
+  ['r-traefik-dash','rp-traefik','http://10.20.1.5:8080/dashboard','rp-traefik','Traefik dashboard · internal only'],
+  ['r-fr-api','rt-fr-prod','https://flows.tidewater.internal/api',null,'Flowrun REST API · PAT'],
+  ['r-fr-hook-customs','rt-fr-prod','https://flows.tidewater.internal/hooks/customs-docs-fetch','app-customs-prod','webhook · HMAC'],
+  ['r-fr-run-sepa','rt-fr-prod','https://flows.tidewater.internal/run/sepa-payout-export','app-sepa-prod','manual trigger · PAT'],
+  ['r-fr-stage-hook','rt-fr-stage','https://flows-stage.tidewater.internal/hooks/customs-docs-fetch','app-customs-stage','webhook'],
+  ['r-payout-health','svc-payout-prod','http://10.20.4.11:8080/health',null,'liveness · monitored'],
+  ['r-payout-v1','svc-payout-prod','http://10.20.4.11:8080/v1/payouts',null,'internal API'],
+  ['r-ledger-v1','svc-ledger-prod','http://10.20.4.11:8090/v1/ledger',null,'internal API · used by Flowrun write-ledger'],
+  ['r-pg','db-prod','postgres://10.20.4.20:5432',null,'TCP · monitored'],
+];
+
+/* ---------- state ---------------------------------------------------- */
+const LS = 'knobas-miller-columns';
+let N = {}, R = [];
+const S = {
+  path: ['dc'],   // one selected id per column; column j lists children of path[j-1]
+  anchor: null,   // index of leftmost fully-drawn column; null = follow the deepest
+  q: '', seq: 1, fcol: 0, hoverRoute: null, wantFocus: false, latest: '', _h: ''
+};
+const RM = matchMedia('(prefers-reduced-motion: reduce)');
+const REDUCED = ()=>RM.matches;   // read live, so a preference change takes effect at once
+
+function seed(){
+  N = {}; R = [];
+  SEED_NODES.forEach(a=>{ N[a[0]] = {id:a[0],type:a[1],name:a[2],sub:a[3],status:a[4],parent:a[5],props:a[6]||{}}; });
+  SEED_ROUTES.forEach(a=>R.push({id:a[0],from:a[1],url:a[2],target:a[3],note:a[4]}));
+  S.path = ['dc','pve-03','vm-lowcode-01','eng-lc']; S.seq = 1; S.anchor = null; S.fcol = 3;
+}
+function persist(){ try{ localStorage.setItem(LS, JSON.stringify({N,R,path:S.path,seq:S.seq})); }catch(e){} }
+function restore(){
+  try{
+    const d = JSON.parse(localStorage.getItem(LS)||'null');
+    if(!d || !d.N || !Object.keys(d.N).length) return false;
+    N = d.N; R = d.R || []; S.path = Array.isArray(d.path)&&d.path.length? d.path : ['dc']; S.seq = d.seq||1;
+    S.fcol = S.path.length-1; return true;
+  }catch(e){ return false; }
+}
+
+/* ---------- helpers --------------------------------------------------- */
+const $ = s=>document.querySelector(s);
+const $$ = s=>Array.prototype.slice.call(document.querySelectorAll(s));
+const esc = s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const T = t=>TYPES[t] || {mg:(t||'??').slice(0,2).toUpperCase(), label:t||'asset', kids:[]};
+let _c = {};
+function kids(id){ const k='k'+id; return _c[k] || (_c[k] = Object.values(N).filter(n=>n.parent===id)); }
+const roots = ()=> _c.roots || (_c.roots = Object.values(N).filter(n=>!n.parent || !N[n.parent]));
+function anc(id){ const a=[]; let n=N[id]; let guard=0; while(n && n.parent && guard++<64){ n=N[n.parent]; if(!n) break; a.unshift(n); } return a; }
+function desc(id){ const k='d'+id; if(_c[k]) return _c[k]; const out=[]; const walk=p=>kids(p).forEach(x=>{out.push(x);walk(x.id)}); walk(id); return (_c[k]=out); }
+function problemsInside(id){ const k='p'+id; return _c[k] || (_c[k] = desc(id).filter(d=>d.status==='down'||d.status==='warn')); }
+const worstOf = list=> list.some(d=>d.status==='down') ? 'down' : (list.length? 'warn' : 'none');
+const RANK = {down:3,warn:2,up:1,none:0};
+function effStatus(n){ let s=n.status; problemsInside(n.id).forEach(d=>{ if(RANK[d.status]>RANK[s]) s=d.status; }); return s; }
+const routesFrom = id=>R.filter(r=>r.from===id);
+const routesTo   = id=>R.filter(r=>r.target===id);
+function reachableVia(id){                       // routes at this asset, or at an ancestor that holds it
+  const out = routesTo(id).map(r=>({r,via:null}));
+  anc(id).forEach(a=>routesTo(a.id).forEach(r=>{ if(r.target!==id) out.push({r,via:a}); }));
+  return out;
+}
+const depthOf = id=>anc(id).length;
+const curSel = ()=>S.path[S.path.length-1];
+const pathOf = id=>anc(id).map(a=>a.name).join(' › ');
+
+function toast(html){ const t=$('#toast'); t.innerHTML=html; t.classList.add('on'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('on'),2000); }
+function ticker(msg){
+  S.latest = msg; const el=$('#tmsg');
+  if(REDUCED()){ el.textContent=msg; return; }
+  el.classList.add('fade');
+  clearTimeout(el._t); el._t=setTimeout(()=>{ el.textContent=msg; el.classList.remove('fade'); },120);
+}
+
+/* split-flap cell: rotateX on the value, two phases, ~340 ms */
+function flapSet(el,val){
+  if(!el) return; val=String(val);
+  let cur=el.querySelector('.v');
+  if(!cur){ el.innerHTML='<span class="v"></span>'; cur=el.querySelector('.v'); }
+  if(el.dataset.v===val) return;
+  const first = el.dataset.v===undefined;
+  el.dataset.v=val;
+  if(REDUCED() || first){ cur.textContent=val; return; }
+  clearTimeout(el._t1); clearTimeout(el._t2);
+  el.classList.remove('f2','f3'); el.classList.add('f1');
+  el._t1=setTimeout(()=>{
+    cur.textContent=val; el.classList.remove('f1'); el.classList.add('f2');
+    requestAnimationFrame(()=>{ el.classList.remove('f2'); el.classList.add('f3');
+      el._t2=setTimeout(()=>el.classList.remove('f3'),180); });
+  },170);
+}
+function flapStatus(el,status,val){ ['s-up','s-warn','s-down','s-none'].forEach(c=>el.classList.remove(c)); el.classList.add('s-'+status); flapSet(el,val); }
+
+/* ---------- navigation ------------------------------------------------ */
+function fixPath(){
+  const p=[];
+  for(let i=0;i<S.path.length;i++){
+    const n=N[S.path[i]]; if(!n) break;
+    if(i===0){ if(n.parent && N[n.parent]) break; }
+    else if(n.parent!==p[i-1]) break;
+    p.push(n.id);
+  }
+  if(!p.length){ const r=roots()[0]; if(r) p.push(r.id); }
+  S.path=p; if(S.fcol>p.length) S.fcol=p.length;
+}
+function columns(){
+  const cols=[{idx:0,parent:null,items:roots()}];
+  for(let i=0;i<S.path.length;i++){ const p=N[S.path[i]]; if(!p) break; cols.push({idx:i+1,parent:p,items:kids(p.id)}); }
+  return cols;
+}
+function selectIn(col,id,focus){ S.path=S.path.slice(0,col).concat([id]); S.fcol=col; S.anchor=null; S.wantFocus=!!focus; render(); }
+function navigate(id,focus){
+  if(!N[id]) return;
+  S.path=anc(id).map(a=>a.id).concat([id]); S.fcol=S.path.length-1; S.anchor=null; S.wantFocus=!!focus; render();
+}
+
+/* ---------- render ---------------------------------------------------- */
+function render(){
+  _c={}; fixPath();
+  renderHeader(); renderColumns(); renderPane(); renderFooter(); syncHash();
+  if(S.wantFocus){ focusRow(); S.wantFocus=false; }
+  requestAnimationFrame(drawWires);
+}
+
+function renderHeader(){
+  const sel=N[curSel()]; const chain=[...anc(sel.id), sel];
+  const shown = chain.length>5 ? chain.slice(-4) : chain;
+  let html = chain.length>5 ? '<button class="cb cs" data-act="go" data-id="'+esc(chain[0].id)+'" title="'+esc(chain[0].name)+'">…</button><span class="cs">›</span>' : '';
+  html += shown.map((n,i)=>(i?'<span class="cs">›</span>':'')+
+    '<button class="cb'+(n.id===sel.id?' on':'')+'" data-act="go" data-id="'+esc(n.id)+'" title="'+esc(T(n.type).label+' · '+n.name)+'">'+esc(n.name)+'</button>').join('');
+  $('#crumbs').innerHTML = html;
+  flapSet($('#plevel'), 'L'+depthOf(sel.id));
+}
+
+function renderColumns(){
+  const cols=columns(), strip=$('#strip');
+  const avail = strip.clientWidth || 1040;
+  const MIN = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--colmin')) || 252;
+  let K=cols.length;
+  while(K>1 && (cols.length-K)*30 + K*MIN > avail) K--;
+  const maxAnchor=Math.max(0,cols.length-K);
+  const anchor = S.anchor==null ? maxAnchor : Math.min(Math.max(0,S.anchor), maxAnchor);
+  const selId=curSel(), wired=wiredSet();
+  strip.innerHTML = cols.map(c=>(c.idx>=anchor && c.idx<anchor+K) ? fullCol(c,selId,wired) : spineCol(c)).join('');
+}
+
+function fullCol(c,selId,wired){
+  const label = c.parent ? c.parent.name : 'top level';
+  const here = c.items.some(n=>n.id===selId);
+  const pid = c.parent ? c.parent.id : '';
+  const body = c.items.length
+    ? c.items.map(n=>rowHTML(n,c.idx,selId,wired)).join('')
+    : '<div class="col-empty">nothing inside '+esc(label)+' yet.<br><button class="btn sm" data-act="new" data-parent="'+esc(pid)+'">Put something inside</button></div>';
+  return '<section class="col'+(here?' here':'')+'" data-ci="'+c.idx+'">'+
+    '<div class="colhd"><span class="lv">L'+c.idx+'</span>'+
+      '<span class="pn" title="'+esc(c.parent?T(c.parent.type).label+' · '+c.parent.name:'assets with no holder')+'">'+esc(label)+'</span>'+
+      '<span class="n">'+c.items.length+'</span>'+
+      '<button class="add" data-act="new" data-parent="'+esc(pid)+'" title="New asset inside '+esc(label)+'" aria-label="New asset inside '+esc(label)+'">+</button>'+
+    '</div><div class="rows" role="group" aria-label="Inside '+esc(label)+'">'+body+'</div></section>';
+}
+
+function rowHTML(n,ci,selId,wired){
+  const ch=kids(n.id).length, probs=problemsInside(n.id), w=worstOf(probs);
+  const on=S.path[ci]===n.id, tip=n.id===selId, hit=S.q&&matchNode(n);
+  return '<button class="row st-'+n.status+(on?' on':'')+(tip?' tip':'')+(hit?' hit':'')+(wired.has(n.id)?' wired':'')+'"'+
+    ' data-act="row" data-ci="'+ci+'" data-id="'+esc(n.id)+'" tabindex="-1" aria-current="'+(on?'true':'false')+'"'+
+    ' title="'+esc(n.name+' — '+T(n.type).label+(n.sub?' · '+n.sub:''))+'">'+
+    '<span class="l1"><span class="lamp"></span><span class="mg">'+esc(T(n.type).mg)+'</span>'+
+    '<span class="nm">'+esc(n.name)+'</span>'+
+    (probs.length?'<span class="bdg '+w+'" title="'+probs.length+' asset'+(probs.length===1?'':'s')+' inside need attention">'+probs.length+'</span>':'')+
+    '<span class="cnt">'+(ch||'')+'</span><span class="chev">'+(ch?'›':'')+'</span></span>'+
+    (n.sub?'<span class="l2">'+esc(n.sub)+'</span>':'')+'</button>';
+}
+
+function spineCol(c){
+  const step = N[S.path[c.idx]] || c.parent;
+  const st = step ? effStatus(step) : worstOf(c.items);
+  const name = step ? step.name : (c.parent?c.parent.name:'top');
+  return '<button class="col spine st-'+st+'" data-act="anchor" data-ci="'+c.idx+'" title="Show level '+c.idx+' — '+esc(name)+'">'+
+    '<span class="lamp"></span><span class="smg">'+esc(T(step?step.type:'custom').mg)+'</span>'+
+    '<span class="vn">'+esc(name)+'</span><span class="slv">L'+c.idx+'</span></button>';
+}
+
+function wiredSet(){
+  const sel=curSel(), s=new Set(); if(!sel) return s;
+  routesFrom(sel).forEach(r=>{ if(r.target&&N[r.target]) s.add(r.target); });
+  reachableVia(sel).forEach(x=>{ if(N[x.r.from]) s.add(x.r.from); });
+  return s;
+}
+
+/* ---------- detail pane ----------------------------------------------- */
+function sec(label,html,count){
+  return '<section class="sec"><div class="eyebrow">'+label+(count?'<span class="cn">'+count+'</span>':'')+'</div>'+html+'</section>';
+}
+const note = t=>'<p class="note">'+t+'</p>';
+
+function routeRow(r,kind,via){
+  const tg = r.target ? N[r.target] : null;
+  const anchorId = kind==='from' ? (tg?r.target:'') : (N[r.from]?r.from:'');
+  const line = kind==='from'
+    ? (tg ? '<span class="ar">→</span><span class="rtg">'+esc(tg.name)+'</span>' : '<span class="rtg">bare endpoint · no target asset</span>')
+    : '<span class="rtg">'+esc(N[r.from]?N[r.from].name:'?')+'</span>'+(via?'<span>→ '+esc(via.name)+', which holds this</span>':'<span>→ this asset</span>');
+  return '<button class="rt'+(tg?'':' ep')+(anchorId?' wired':'')+'" data-act="route" data-r="'+esc(r.id)+'" data-kind="'+kind+'" data-anchor="'+esc(anchorId)+'"'+
+    ' title="'+esc(r.url+(r.note?' · '+r.note:''))+'">'+
+    '<span class="ru">'+esc(r.url.replace(/^https?:\/\//,''))+'</span><span class="rl">'+line+'</span>'+
+    (r.note?'<span class="rn">'+esc(r.note)+'</span>':'')+'</button>';
+}
+function typeCounts(list){
+  const m={}; list.forEach(x=>{ m[x.type]=(m[x.type]||0)+1; });
+  return Object.keys(m).map(t=>'<span><b>'+m[t]+'</b> '+esc(T(t).label.toLowerCase())+(m[t]>1?'s':'')+'</span>').join('');
+}
+function probRow(d){
+  return '<button class="prow st-'+d.status+'" data-act="go" data-id="'+esc(d.id)+'" title="Go to '+esc(d.name)+'">'+
+    '<span class="lamp"></span><span class="nm">'+esc(d.name)+'</span>'+
+    '<span class="pth">'+esc(anc(d.id).slice(-2).map(a=>a.name).join(' › '))+'</span></button>';
+}
+
+function renderPane(){
+  const n=N[curSel()];
+  const ch=kids(n.id), from=routesFrom(n.id), via=reachableVia(n.id), probs=problemsInside(n.id);
+  const props=Object.keys(n.props||{});
+  const chain=[...anc(n.id), n];
+  $('#pane-body').innerHTML =
+    '<div class="ptype"><span>'+esc(T(n.type).label)+'</span><span>·</span><span>level '+depthOf(n.id)+'</span>'+
+      (n.created?'<span>·</span><span class="made">created here</span>':'')+'</div>'+
+    '<div class="ph"><span class="pmg">'+esc(T(n.type).mg)+'</span><h2>'+esc(n.name)+'</h2></div>'+
+    (n.sub?'<p class="psub">'+esc(n.sub)+'</p>':'')+
+    '<div class="ppath">'+chain.map((a,i)=>(i?'<span class="s">›</span>':'')+
+      '<button class="pp'+(a.id===n.id?' on':'')+'" data-act="go" data-id="'+esc(a.id)+'">'+esc(a.name)+'</button>').join('')+'</div>'+
+    sec('Properties', props.length
+        ? '<div class="kv">'+props.map(k=>'<span class="k">'+esc(k)+'</span><span class="v">'+esc(n.props[k])+'</span>').join('')+'</div>'
+        : note('No properties recorded.'), props.length)+
+    sec('Exposes', from.length
+        ? from.map(r=>routeRow(r,'from')).join('')
+        : note('No routes are exposed from here. Use <b>Expose a route</b> below to add one.'), from.length)+
+    sec('Reachable via', via.length
+        ? via.map(x=>routeRow(x.r,'via',x.via)).join('')
+        : note('No route reaches this asset — directly or through anything that holds it.'), via.length)+
+    sec('Inside', ch.length
+        ? '<div class="inside">'+typeCounts(ch)+'<span>·</span><span><b>'+desc(n.id).length+'</b> in total, '+(probs.length?'<b>'+probs.length+'</b> needing attention':'all healthy')+'</span></div>'
+        : note('Nothing inside yet. Every asset can hold assets — put the first one in.'), ch.length)+
+    (probs.length? sec('Problems inside', probs.map(probRow).join(''), probs.length) : '');
+  $('#pane-act').innerHTML =
+    '<button class="btn pri" data-act="new" data-parent="'+esc(n.id)+'">Put something inside</button>'+
+    '<button class="btn" data-act="route-new" data-id="'+esc(n.id)+'">Expose a route</button>'+
+    (n.created?'<button class="btn quiet danger" data-act="del" data-id="'+esc(n.id)+'" title="Remove this created asset">Remove</button>':'');
+  flapStatus($('#pstatus'), n.status, n.status==='none'?'—':n.status.toUpperCase());
+}
+
+function renderFooter(){
+  const total=Object.keys(N).length, probs=Object.values(N).filter(n=>n.status==='down'||n.status==='warn').length;
+  $('#counts').textContent = total+' assets · '+R.length+' routes · '+Object.values(N).filter(n=>n.created).length+' created here';
+  $('#tcount').textContent = total+' assets · '+R.length+' routes';
+  flapSet($('#tprob'), probs);
+}
+
+/* ---------- wires ------------------------------------------------------ */
+function anchorPoint(id,mb,rank){
+  const chain=anc(id).map(a=>a.id).concat([id]);   // chain[d] = the ancestor sitting at depth d
+  let best=-1, col=null;
+  for(let j=0;j<chain.length;j++){
+    if(j>0 && S.path[j-1]!==chain[j-1]) break;
+    const c=$('.col[data-ci="'+j+'"]'); if(!c) break;
+    best=j; col=c;
+  }
+  if(best<0||!col) return null;
+  const exact = chain[best]===id;
+  const cb=col.getBoundingClientRect();
+  // several routes can land on the same spine — fan them down it so each stays readable
+  const fan = 30+((rank||0)%9)*14;
+  if(col.classList.contains('spine')) return {x:cb.right-mb.left-5, y:cb.top-mb.top+fan, exact:false};
+  const row=col.querySelector('.row[data-id="'+chain[best]+'"]');
+  if(!row) return {x:cb.right-mb.left-5, y:cb.top-mb.top+fan+14, exact:false};
+  const rb=row.getBoundingClientRect(), box=col.querySelector('.rows').getBoundingClientRect();
+  let y=rb.top-mb.top+rb.height/2, clipped=false;
+  const top=box.top-mb.top+5, bot=box.bottom-mb.top-5;
+  if(y<top){ y=top; clipped=true; } if(y>bot){ y=bot; clipped=true; }
+  return {x:rb.right-mb.left-2, y:y, exact:exact&&!clipped};
+}
+function drawWires(){
+  const svg=$('#wires'), main=$('#main'); if(!svg||!main) return;
+  const mb=main.getBoundingClientRect();
+  svg.setAttribute('viewBox','0 0 '+Math.round(mb.width)+' '+Math.round(mb.height));
+  const pane=$('#pane').getBoundingClientRect(), body=$('#pane-body').getBoundingClientRect();
+  const sx=pane.left-mb.left, out=[];
+  $$('#pane-body .rt[data-anchor]').forEach((el,i)=>{
+    const aid=el.getAttribute('data-anchor'); if(!aid||!N[aid]) return;
+    const rb=el.getBoundingClientRect();
+    if(rb.bottom<body.top+2 || rb.top>body.bottom-2) return;
+    const a=anchorPoint(aid,mb,i); if(!a || a.x>=sx-4) return;
+    const sy=rb.top-mb.top+rb.height/2;
+    const hov=S.hoverRoute===el.getAttribute('data-r');
+    const dash=(el.getAttribute('data-kind')==='via'||!a.exact) ? ' stroke-dasharray="3 3"' : '';
+    const c=Math.max(36,Math.min(130,(sx-a.x)/2.2)), c2=Math.min(c,52);   // dive in steeply so the wire clears the spine labels
+    const d='M '+sx.toFixed(1)+' '+sy.toFixed(1)+' C '+(sx-c).toFixed(1)+' '+sy.toFixed(1)+', '+(a.x+c2).toFixed(1)+' '+a.y.toFixed(1)+', '+a.x.toFixed(1)+' '+a.y.toFixed(1);
+    out.push('<path class="case" d="'+d+'" stroke-width="'+(hov?4:3.2)+'"/>');
+    out.push('<path d="'+d+'" stroke-width="'+(hov?1.9:1)+'" opacity="'+(hov?1:.6)+'"'+dash+'/>');
+    out.push('<rect x="'+(a.x-3).toFixed(1)+'" y="'+(a.y-3).toFixed(1)+'" width="6" height="6" opacity="'+(hov?1:.8)+'"/>');
+  });
+  svg.innerHTML=out.join('');
+}
+
+/* ---------- search ----------------------------------------------------- */
+function matchNode(n){ return !!matchField(n); }
+function matchField(n){                    // also answers *why* a result is here
+  const q=S.q.trim().toLowerCase(); if(!q) return null;
+  const has=s=>String(s==null?'':s).toLowerCase().indexOf(q)>=0;
+  if(has(n.name)) return 'name';
+  if(has(n.sub)) return 'summary';
+  if(has(n.type)||has(T(n.type).label)) return 'type';
+  const k=Object.keys(n.props||{}).find(k=>has(k)||has(n.props[k]));
+  return k ? k : null;
+}
+function renderResults(){
+  const box=$('#results'), q=S.q.trim();
+  if(!q){ box.hidden=true; box.innerHTML=''; return; }
+  const hits=Object.values(N).filter(matchNode).sort((a,b)=>depthOf(a.id)-depthOf(b.id)||a.name.localeCompare(b.name));
+  if(!hits.length){ box.hidden=false; box.innerHTML='<div class="res-none">Nothing matches “'+esc(q)+'”.</div>'; return; }
+  const mark=s=>{ const i=s.toLowerCase().indexOf(q.toLowerCase()); return i<0?esc(s):esc(s.slice(0,i))+'<span class="hl">'+esc(s.slice(i,i+q.length))+'</span>'+esc(s.slice(i+q.length)); };
+  box.hidden=false;
+  box.innerHTML=hits.slice(0,14).map((n,i)=>{
+    const f=matchField(n);
+    return '<button class="res'+(i===0?' act':'')+'" data-act="reveal" data-id="'+esc(n.id)+'" role="option">'+
+    '<span class="r1"><span class="mg">'+esc(T(n.type).mg)+'</span><span class="nm">'+mark(n.name)+'</span><span class="sp"></span><span class="ty">L'+depthOf(n.id)+' · '+esc(n.type)+'</span></span>'+
+    '<span class="pth">'+(f&&f!=='name'?'<span class="hl">in '+esc(f)+'</span> · ':'')+esc(pathOf(n.id)||'top level')+'</span></button>';
+  }).join('')+
+    (hits.length>14?'<div class="res-none">+'+(hits.length-14)+' more</div>':'');
+}
+function moveResult(d){
+  const items=$$('#results .res'); if(!items.length) return;
+  let i=items.findIndex(x=>x.classList.contains('act'));
+  i=Math.max(0,Math.min(items.length-1,(i<0?0:i)+d));
+  items.forEach(x=>x.classList.remove('act')); items[i].classList.add('act'); items[i].scrollIntoView({block:'nearest'});
+}
+function takeResult(){
+  const a=$('#results .res.act')||$('#results .res'); if(!a) return;
+  const id=a.getAttribute('data-id'); $('#results').hidden=true;
+  navigate(id,true); ticker('found · '+N[id].name+' · level '+depthOf(id)+' · path revealed');
+}
+
+/* ---------- create ------------------------------------------------------ */
+function propRow(k,v){
+  const d=document.createElement('div'); d.className='pr';
+  d.innerHTML='<input class="pk" placeholder="key" autocomplete="off"><input class="pv" placeholder="value" autocomplete="off"><button type="button" class="x" aria-label="Remove property">×</button>';
+  if(k) d.querySelector('.pk').value=k; if(v) d.querySelector('.pv').value=v;
+  d.querySelector('.x').addEventListener('click',()=>d.remove());
+  return d;
+}
+function openNew(parentId){
+  const p=parentId?N[parentId]:null;
+  $('#nw-parent').textContent = p?p.name:'the top level';
+  $('#nw-where').textContent = p ? (T(p.type).label+' · level '+depthOf(p.id)+' · '+(pathOf(p.id)||'top')+' — the new asset lands at level '+(depthOf(p.id)+1))
+                                 : 'A new asset with nothing holding it — it starts its own column at level 0.';
+  const sug=(p?T(p.type).kids:['site']);
+  $('#nw-sug').innerHTML = sug.length? '<span class="lbl">usual</span>'+sug.map(t=>'<button type="button" class="chip" data-type="'+esc(t)+'">'+esc(T(t).label.toLowerCase())+'</button>').join('')+'<span class="lbl">or type anything</span>' : '<span class="lbl">any type — invent one if you need to</span>';
+  $('#f-new').reset();
+  $('#nw-type').value = sug[0]||'';
+  $('#nw-props').innerHTML=''; $('#nw-props').appendChild(propRow('',''));
+  $('#f-new').dataset.parent = p?p.id:'';
+  $('#dlg-new').showModal();
+  setTimeout(()=>$('#nw-name').focus(),0);
+}
+function openRoute(id){
+  const n=N[id]; if(!n) return;
+  $('#rt-from').textContent=n.name;
+  const opts=['<option value="">— no target · bare endpoint —</option>'].concat(
+    Object.values(N).slice().sort((a,b)=>(pathOf(a.id)+a.name).localeCompare(pathOf(b.id)+b.name))
+      .map(x=>'<option value="'+esc(x.id)+'">'+esc(x.name)+' · '+esc(x.type)+(pathOf(x.id)?' · '+esc(pathOf(x.id)):'')+'</option>'));
+  $('#rt-target').innerHTML=opts.join('');
+  $('#f-route').reset(); $('#f-route').dataset.from=id;
+  $('#dlg-route').showModal();
+  setTimeout(()=>$('#rt-url').focus(),0);
+}
+
+/* ---------- events ------------------------------------------------------ */
+document.addEventListener('click',e=>{
+  const el=e.target.closest('[data-act]'); if(!el) return;
+  const act=el.getAttribute('data-act'), id=el.getAttribute('data-id');
+  if(act==='row'){ selectIn(parseInt(el.getAttribute('data-ci'),10), id, false); }
+  else if(act==='go'){ navigate(id,false); }
+  else if(act==='anchor'){ S.anchor=parseInt(el.getAttribute('data-ci'),10); render(); }
+  else if(act==='reveal'){ $$('#results .res').forEach(x=>x.classList.remove('act')); el.classList.add('act'); takeResult(); }
+  else if(act==='new'){ openNew(el.getAttribute('data-parent')||null); }
+  else if(act==='route-new'){ openRoute(id); }
+  else if(act==='del'){ removeAsset(id); }
+  else if(act==='route'){
+    const a=el.getAttribute('data-anchor');
+    if(a&&N[a]){ navigate(a,false); ticker('followed route · '+N[a].name+' · level '+depthOf(a)); }
+    else toast('This route is a bare endpoint — <b>no target asset</b> to jump to.');
+  }
+},true);
+
+document.addEventListener('mouseover',e=>{
+  const rt=e.target.closest('#pane-body .rt');
+  const id=rt?rt.getAttribute('data-r'):null;
+  if(id!==S.hoverRoute){ S.hoverRoute=id; drawWires(); }
+});
+
+$('#q').addEventListener('input',e=>{ S.q=e.target.value; renderResults(); render(); });
+$('#q').addEventListener('keydown',e=>{
+  if(e.key==='ArrowDown'){ e.preventDefault(); moveResult(1); }
+  else if(e.key==='ArrowUp'){ e.preventDefault(); moveResult(-1); }
+  else if(e.key==='Enter'){ e.preventDefault(); takeResult(); }
+});
+$('#q').addEventListener('focus',()=>{ if(S.q) renderResults(); });
+document.addEventListener('mousedown',e=>{ if(!e.target.closest('.search')) $('#results').hidden=true; });
+
+document.addEventListener('keydown',e=>{
+  const dlg=document.querySelector('dialog[open]');
+  const t=e.target, inField = t && (t.tagName==='INPUT'||t.tagName==='SELECT'||t.tagName==='TEXTAREA');
+  if(e.key==='Escape'){
+    if(dlg){ e.preventDefault(); dlg.close(); return; }
+    if(!$('#results').hidden){ e.preventDefault(); $('#results').hidden=true; return; }
+    if($('#q').value){ e.preventDefault(); $('#q').value=''; S.q=''; render(); return; }
+    if(document.activeElement===$('#q')){ $('#q').blur(); return; }
+    if(S.path.length>1){ e.preventDefault(); S.path=S.path.slice(0,-1); S.fcol=S.path.length-1; S.anchor=null; S.wantFocus=true; render(); }
+    return;
+  }
+  if(dlg||inField) return;
+  if(e.key==='/'){ e.preventDefault(); $('#q').focus(); $('#q').select(); return; }
+  if(e.key==='n'||e.key==='N'){ e.preventDefault(); openNew(curSel()); return; }
+  const cols=columns();
+  let j=Math.max(0,Math.min(S.fcol,cols.length-1));
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+    e.preventDefault();
+    const items=cols[j].items; if(!items.length) return;
+    let i=items.findIndex(x=>x.id===S.path[j]);
+    if(i<0) i = e.key==='ArrowDown' ? -1 : items.length;
+    i=Math.max(0,Math.min(items.length-1,i+(e.key==='ArrowDown'?1:-1)));
+    selectIn(j,items[i].id,true);
+  } else if(e.key==='ArrowRight'||e.key==='Enter'){
+    e.preventDefault();
+    const nx=cols[j+1];
+    if(nx&&nx.items.length) selectIn(j+1,nx.items[0].id,true);
+    else toast('Nothing inside <b>'+esc(N[curSel()].name)+'</b> yet — press <b>n</b> to put something in.');
+  } else if(e.key==='ArrowLeft'){
+    e.preventDefault();
+    if(j>0){ S.path=S.path.slice(0,j); S.fcol=j-1; S.anchor=null; S.wantFocus=true; render(); }
+  }
+});
+function focusRow(){
+  const col=$('.col[data-ci="'+S.fcol+'"]');
+  if(!col||col.classList.contains('spine')) return;
+  const el=col.querySelector('.row.on')||col.querySelector('.row');
+  if(el){ el.focus({preventScroll:true}); el.scrollIntoView({block:'nearest',inline:'nearest'}); }
+}
+
+$('#nw-sug').addEventListener('click',e=>{ const c=e.target.closest('.chip'); if(c){ $('#nw-type').value=c.getAttribute('data-type'); $('#nw-name').focus(); } });
+$('#nw-addprop').addEventListener('click',()=>{ const r=propRow('',''); $('#nw-props').appendChild(r); r.querySelector('.pk').focus(); });
+$$('[data-close]').forEach(b=>b.addEventListener('click',()=>document.getElementById(b.getAttribute('data-close')).close()));
+
+$('#f-new').addEventListener('submit',e=>{
+  e.preventDefault();
+  const pid=$('#f-new').dataset.parent||null;
+  const type=($('#nw-type').value||'custom').trim().toLowerCase().replace(/\s+/g,'-');
+  const name=$('#nw-name').value.trim(); if(!name) return;
+  const props={};
+  $$('#nw-props .pr').forEach(r=>{ const k=r.querySelector('.pk').value.trim(); const v=r.querySelector('.pv').value.trim(); if(k) props[k]=v; });
+  const id='new-'+(S.seq++);
+  N[id]={id:id,type:type,name:name,sub:$('#nw-sub').value.trim(),status:$('#nw-status').value,parent:pid,props:props,created:true};
+  persist(); $('#dlg-new').close();
+  navigate(id,false);
+  const lvl=depthOf(id);
+  ticker('created · '+name+' · '+T(type).label.toLowerCase()+' · level '+lvl+(pid?' inside '+N[pid].name:' at the top level'));
+  toast('Created <b>'+esc(name)+'</b> at level '+lvl+(Object.keys(props).length?' with '+Object.keys(props).length+' propert'+(Object.keys(props).length===1?'y':'ies'):''));
+});
+
+$('#f-route').addEventListener('submit',e=>{
+  e.preventDefault();
+  const from=$('#f-route').dataset.from, url=$('#rt-url').value.trim(); if(!from||!url) return;
+  const target=$('#rt-target').value||null;
+  const id='r-new-'+(S.seq++);
+  R.push({id:id,from:from,url:url,target:target,note:$('#rt-note').value.trim()});
+  persist(); $('#dlg-route').close();
+  navigate(from,false);
+  ticker('route added · '+url.replace(/^https?:\/\//,'')+(target?' → '+N[target].name:' · bare endpoint'));
+  toast('Route added from <b>'+esc(N[from].name)+'</b>'+(target?' to <b>'+esc(N[target].name)+'</b>':''));
+});
+
+function removeAsset(id){
+  const n=N[id]; if(!n||!n.created) return;
+  const gone=[id].concat(desc(id).map(d=>d.id));
+  gone.forEach(g=>{ delete N[g]; });
+  R=R.filter(r=>gone.indexOf(r.from)<0 && gone.indexOf(r.target)<0);
+  persist(); navigate(n.parent||roots()[0].id,false);
+  ticker('removed · '+n.name+(gone.length>1?' and '+(gone.length-1)+' inside it':''));
+  toast('Removed <b>'+esc(n.name)+'</b>');
+}
+
+$('#reset').addEventListener('click',()=>{
+  try{ localStorage.removeItem(LS); }catch(e){}
+  seed(); S.q=''; $('#q').value=''; $('#results').hidden=true; render();
+  ticker('reset · the example topology is back · 78 assets · 15 routes');
+  toast('Example restored — everything created here is gone.');
+});
+
+/* ---------- deep link: the column path lives in the URL ----------------- */
+function syncHash(){
+  const h='#'+S.path.join('/')+(S.q?'?q='+encodeURIComponent(S.q):'');
+  if(location.hash!==h){ S._h=h; try{ history.replaceState(null,'',h); }catch(e){ location.hash=h; } }
+}
+function applyHash(){
+  const raw=location.hash.slice(1); if(!raw) return false;
+  const parts=raw.split('?');
+  const ids=parts[0].split('/').filter(Boolean).filter(id=>N[id]);
+  if(parts[1] && parts[1].indexOf('q=')===0){ S.q=decodeURIComponent(parts[1].slice(2)); $('#q').value=S.q; }
+  if(ids.length){ S.path=ids; S.fcol=ids.length-1; S.anchor=null; return true; }
+  return false;
+}
+window.addEventListener('hashchange',()=>{ if(location.hash!==S._h && applyHash()){ renderResults(); render(); } });
+
+let _rt=null;
+window.addEventListener('resize',()=>{ if(_rt) cancelAnimationFrame(_rt); _rt=requestAnimationFrame(()=>{ renderColumns(); drawWires(); }); });
+$('#main').addEventListener('scroll',()=>requestAnimationFrame(drawWires),true);
+document.fonts && document.fonts.ready.then(()=>drawWires());
+
+/* ---------- boot -------------------------------------------------------- */
+$('#typelist').innerHTML = Object.keys(TYPES).map(t=>'<option value="'+t+'">'+T(t).label+'</option>').join('');
+if(!restore()) seed();
+applyHash();
+render();
+if(S.q) renderResults();
+ticker(S.latest || 'ready · '+Object.keys(N).length+' assets · '+R.length+' routes · every asset can hold assets, so the board goes as deep as the estate does');
+</script>
+</body>
+</html>

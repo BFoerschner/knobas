@@ -1,0 +1,1470 @@
+<!--
+knobas playground
+example: E3 Expanding graph
+design: D1 Signal
+thesis: depth stops being a place you fall into — the graph only ever draws the branches you opened, so level 9 costs the same attention as level 2.
+thesis: a node grows its children out of its own right edge on click and folds them back on the next click, while the site→node spine stays lit the whole way.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>knobas · expanding graph</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   D1 SIGNAL — dark instrument panel. Graphite, hairlines, mono
+   readings. Amber is a signal, not a decoration: it appears on
+   the selected asset, on things that are wrong, and on routes.
+   ============================================================ */
+:root{
+  --bg:#15171A; --panel:#1D2024; --raised:#24282D; --hair:#2E3339;
+  --tx:#E7E9EC; --mut:#8B929A; --faint:#5A6169;
+  --amber:#FFB020; --fail:#FF6A5C; --ok:#7FD1A1; --ok-dim:#3B5A4C; --link:#9CC3FF;
+  --mono:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,monospace;
+  --sans:'IBM Plex Sans',-apple-system,'Segoe UI',Roboto,sans-serif;
+  --disp:'Barlow Condensed','Oswald','Helvetica Neue',sans-serif;
+  --h:18px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg); color:var(--tx); font-family:var(--sans); font-size:13px;
+  -webkit-font-smoothing:antialiased; overflow:hidden;
+}
+.lbl{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter-spacing:.08em;font-size:11px;color:var(--faint)}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+:focus-visible{outline:1px solid var(--link);outline-offset:1px}
+input,select,textarea{font:inherit;color:var(--tx);background:var(--bg);border:1px solid var(--hair);border-radius:2px;padding:5px 7px}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--link)}
+::placeholder{color:var(--faint)}
+
+/* ---------- frame ---------- */
+#app{display:grid;grid-template-rows:20px 42px 32px 1fr 24px;height:100vh}
+
+/* ticker — the thin amber line at the very top */
+#ticker{display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--hair);
+  background:#101215;font-family:var(--mono);font-size:10.5px;letter-spacing:.02em;overflow:hidden}
+#ticker .bar{color:var(--amber)}
+#tickTxt{color:var(--amber);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+#tickTxt.in{animation:slidein 120ms ease-out}
+@keyframes slidein{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:none}}
+#tickN{color:var(--faint)}
+
+/* toolbar */
+#bar{display:flex;align-items:center;gap:14px;padding:0 12px;border-bottom:1px solid var(--hair);background:var(--panel)}
+#brand{font-family:var(--disp);font-weight:600;letter-spacing:.14em;text-transform:uppercase;font-size:14px}
+#brand span{color:var(--faint);font-weight:500;letter-spacing:.08em;font-size:11px;margin-left:8px}
+#srchWrap{position:relative;margin-left:auto;display:flex;align-items:center}
+#srch{width:216px;padding-left:22px;height:26px;font-family:var(--mono);font-size:11.5px}
+#srchWrap svg{position:absolute;left:6px;width:12px;height:12px;stroke:var(--faint);fill:none;stroke-width:1.4;pointer-events:none}
+#srchN{font-family:var(--mono);font-size:10.5px;color:var(--faint);min-width:46px;text-align:right;margin-left:8px}
+.tbtn{height:26px;padding:0 9px;border:1px solid var(--hair);border-radius:2px;font-family:var(--disp);
+  font-weight:500;text-transform:uppercase;letter-spacing:.08em;font-size:11px;color:var(--mut)}
+.tbtn:hover{color:var(--tx);border-color:var(--faint)}
+.tbtn.warnish{color:var(--amber);border-color:#4a3a1c}
+
+/* breadcrumb — split-flap cells */
+#crumbs{display:flex;align-items:center;gap:0;padding:0 12px;border-bottom:1px solid var(--hair);
+  background:#191C20;overflow-x:auto;overflow-y:hidden;white-space:nowrap;scrollbar-width:none}
+#crumbs::-webkit-scrollbar{height:0}
+.crumb{position:relative;display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;
+  border:1px solid var(--hair);background:var(--panel);border-radius:2px;font-size:11.5px;color:var(--mut);
+  flex:0 0 auto;max-width:190px;transform-origin:center;backface-visibility:hidden}
+.crumb .mg{font-family:var(--mono);font-size:9.5px;color:var(--faint);letter-spacing:.06em}
+.crumb .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.crumb::after{content:'';position:absolute;left:0;right:0;top:50%;height:1px;background:#0e1013;opacity:.55;pointer-events:none}
+.crumb:hover{color:var(--tx);border-color:var(--faint)}
+.crumb.cur{color:var(--amber);border-color:#4a3a1c;background:var(--raised)}
+.crumb.more .nm{letter-spacing:.12em;padding-bottom:3px}
+.crumb.flip{animation:flap 320ms cubic-bezier(.3,.9,.3,1)}
+@keyframes flap{0%{transform:perspective(240px) rotateX(-88deg)}55%{transform:perspective(240px) rotateX(12deg)}100%{transform:perspective(240px) rotateX(0)}}
+.csep{color:var(--faint);padding:0 5px;font-size:11px;flex:0 0 auto}
+#crumbs .lbl{margin-right:10px}
+
+/* main */
+#main{display:grid;grid-template-columns:1fr 322px;min-height:0}
+#canvasWrap{position:relative;overflow:hidden;background:var(--bg)}
+#dots{position:absolute;inset:0;pointer-events:none;
+  background-image:radial-gradient(circle at 1px 1px,#23272C 1px,transparent 0);background-size:32px 32px}
+#svg{position:absolute;inset:0;width:100%;height:100%;cursor:grab;display:block}
+#svg.drag{cursor:grabbing}
+
+/* canvas controls */
+#ctl{position:absolute;right:12px;top:12px;display:flex;flex-direction:column;align-items:stretch;
+  border:1px solid var(--hair);border-radius:2px;background:var(--panel);overflow:hidden}
+#ctl button{height:24px;padding:0 10px;font-family:var(--disp);font-weight:500;text-transform:uppercase;
+  letter-spacing:.08em;font-size:11px;color:var(--mut);border-bottom:1px solid var(--hair);text-align:left}
+#ctl button:last-child{border-bottom:0}
+#ctl button:hover{background:var(--raised);color:var(--tx)}
+#zoomRow{display:flex;border-bottom:1px solid var(--hair)}
+#zoomRow button{flex:1;text-align:center;border-bottom:0;border-right:1px solid var(--hair);padding:0}
+#zoomRow button:last-child{border-right:0}
+#zoomVal{flex:1.4;display:flex;align-items:center;justify-content:center;font-family:var(--mono);
+  font-size:10.5px;color:var(--faint);border-right:1px solid var(--hair)}
+
+/* legend */
+#legend{position:absolute;left:12px;bottom:12px;display:flex;gap:14px;align-items:center;
+  font-family:var(--mono);font-size:9.5px;color:var(--faint);letter-spacing:.02em;pointer-events:none;
+  background:var(--panel);border:1px solid var(--hair);border-radius:2px;padding:4px 9px}
+#legend i{display:inline-block;width:18px;height:1px;background:var(--hair);vertical-align:middle;margin-right:5px}
+#legend i.p{background:var(--link);opacity:.6;height:2px}
+#legend i.r{background:none;border-top:1px dashed var(--amber);height:0}
+
+/* ---------- graph ---------- */
+.ed{fill:none;stroke:var(--hair);stroke-width:1}
+.ed.path{stroke:var(--link);stroke-opacity:.55;stroke-width:1.75}
+.rt{fill:none;stroke:var(--amber);stroke-width:1.15;stroke-dasharray:4 3;stroke-opacity:.85}
+.rtlab{font-family:var(--mono);font-size:9px;fill:var(--amber);fill-opacity:.85;
+  paint-order:stroke;stroke:var(--bg);stroke-width:3.5;stroke-linejoin:round}
+.enter{animation:fin 120ms ease-out}
+@keyframes fin{from{opacity:0}to{opacity:1}}
+
+.nd{cursor:pointer}
+.nd .bg{fill:var(--panel);stroke:var(--hair);stroke-width:1;rx:2}
+.nd:hover .bg{fill:var(--raised);stroke:var(--faint)}
+.nd .bar{fill:var(--ok-dim)}
+.nd.s-warn .bar{fill:var(--amber)}
+.nd.s-down .bar{fill:var(--fail)}
+.nd.s-none .bar{fill:var(--hair)}
+.nd .sep{stroke:var(--hair);stroke-width:1}
+.nd .mg{font-family:var(--mono);font-size:10px;font-weight:500;fill:var(--faint);letter-spacing:.04em;text-anchor:middle}
+.nd .nm{font-family:var(--sans);font-size:12px;font-weight:500;fill:var(--tx)}
+.nd .tg{font-family:var(--mono);font-size:10px;fill:var(--faint);text-anchor:middle}
+.nd .cnt{font-family:var(--mono);font-size:10px;fill:var(--mut);text-anchor:end}
+.nd .pbx{fill:none;stroke:var(--amber);stroke-width:1;rx:1}
+.nd .pb{font-family:var(--mono);font-size:9.5px;fill:var(--amber);text-anchor:middle}
+.nd.p-down .pbx{stroke:var(--fail)} .nd.p-down .pb{fill:var(--fail)}
+.nd.onpath .mg{fill:var(--mut)}
+.nd.sel .bg{fill:var(--raised);stroke:var(--amber)}
+.nd.sel .nm{fill:var(--amber)}
+.nd.sel .mg{fill:var(--amber);fill-opacity:.7}
+.nd.hit .bg{stroke:var(--link)}
+.nd .ring{fill:none;stroke:var(--link);stroke-width:1;stroke-dasharray:2 2;opacity:0;rx:3}
+.nd:focus{outline:none}
+.nd:focus-visible .ring{opacity:1}
+.ep .chip{fill:#1A1B18;stroke:var(--amber);stroke-opacity:.45;stroke-width:1;stroke-dasharray:3 2;rx:2}
+.ep .u{font-family:var(--mono);font-size:9.5px;fill:var(--amber);fill-opacity:.9}
+.ep .t{font-family:var(--mono);font-size:8.5px;fill:var(--faint)}
+
+/* ---------- side panel ---------- */
+#side{border-left:1px solid var(--hair);background:var(--panel);display:flex;flex-direction:column;min-height:0}
+#sideHead{padding:10px 12px;border-bottom:1px solid var(--hair);flex:0 0 auto}
+#sideBody{overflow-y:auto;flex:1;min-height:0}
+#sideBody::-webkit-scrollbar{width:8px}
+#sideBody::-webkit-scrollbar-thumb{background:var(--hair)}
+.hrow{display:flex;align-items:flex-start;gap:8px}
+.mgcell{flex:0 0 auto;width:26px;height:20px;border:1px solid var(--hair);border-radius:2px;
+  display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:10px;
+  color:var(--faint);letter-spacing:.04em;background:var(--bg)}
+#sName{font-family:var(--disp);font-weight:600;font-size:19px;line-height:20px;letter-spacing:.01em;
+  overflow-wrap:anywhere}
+#sType{font-family:var(--disp);text-transform:uppercase;letter-spacing:.08em;font-size:10.5px;color:var(--faint);margin-top:2px}
+#sSub{color:var(--mut);font-size:12px;margin-top:7px;line-height:1.45}
+#hbtns{display:flex;gap:4px;margin-left:auto;flex:0 0 auto}
+.ibtn{width:22px;height:20px;border:1px solid var(--hair);border-radius:2px;color:var(--mut);
+  display:flex;align-items:center;justify-content:center;font-size:13px;line-height:1}
+.ibtn:hover{color:var(--amber);border-color:#4a3a1c}
+/* split-flap status cell */
+.flap{display:inline-flex;align-items:center;justify-content:center;position:relative;height:20px;min-width:66px;
+  padding:0 8px;border:1px solid var(--hair);border-radius:2px;background:var(--bg);
+  font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);
+  transform-origin:center;backface-visibility:hidden}
+.flap::after{content:'';position:absolute;left:0;right:0;top:50%;height:1px;background:#0e1013;opacity:.6}
+.flap.up{color:var(--ok)} .flap.warn{color:var(--amber);border-color:#4a3a1c} .flap.down{color:var(--fail);border-color:#4a2b28}
+.flap.turn{animation:flap 350ms cubic-bezier(.3,.9,.3,1)}
+#sStatusRow{display:flex;align-items:center;gap:8px;margin-top:9px}
+#sStatusRow .age{font-family:var(--mono);font-size:10px;color:var(--faint)}
+
+.sec{border-bottom:1px solid var(--hair)}
+.sec>h3{display:flex;align-items:baseline;gap:7px;padding:9px 12px 6px;font-family:var(--disp);font-weight:600;
+  text-transform:uppercase;letter-spacing:.08em;font-size:11px;color:var(--faint)}
+.sec>h3 b{font-family:var(--mono);font-weight:400;font-size:10px;color:var(--faint);opacity:.8}
+.sec>h3 .act{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--faint);letter-spacing:0;text-transform:none}
+.sec>h3 .act:hover{color:var(--amber)}
+.kv{display:grid;grid-template-columns:98px 1fr;gap:0 10px;padding:0 12px 8px}
+.kv dt{font-family:var(--mono);font-size:10.5px;color:var(--faint);padding:3px 0;overflow-wrap:anywhere}
+.kv dd{font-family:var(--mono);font-size:10.5px;color:var(--tx);padding:3px 0;border-bottom:1px solid #23272B;overflow-wrap:anywhere}
+.kv dt{border-bottom:1px solid #23272B}
+.row{display:flex;align-items:center;gap:8px;padding:5px 12px;border-top:1px solid #23272B;width:100%;text-align:left}
+.row:first-of-type{border-top:0}
+.row:hover{background:var(--raised)}
+.row .nm{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.row .mg2{font-family:var(--mono);font-size:9.5px;color:var(--faint);flex:0 0 auto;width:20px}
+.row .tail{font-family:var(--mono);font-size:10px;color:var(--faint);flex:0 0 auto}
+.row.bad .nm{color:var(--fail)} .row.wrn .nm{color:var(--amber)}
+.rt-row{padding:6px 12px;border-top:1px solid #23272B}
+.rt-row:first-of-type{border-top:0}
+.rt-row:hover{background:var(--raised)}
+.rt-url{font-family:var(--mono);font-size:10.5px;color:var(--amber);overflow-wrap:anywhere;line-height:1.4}
+.rt-meta{font-family:var(--mono);font-size:9.5px;color:var(--faint);margin-top:2px;line-height:1.45;overflow-wrap:anywhere}
+.rt-meta b{color:var(--mut);font-weight:400}
+.rt-meta .to{color:var(--link)}
+.empty{padding:2px 12px 10px;font-size:11.5px;color:var(--faint);line-height:1.5}
+#sideFoot{flex:0 0 auto;border-top:1px solid var(--hair);display:flex;gap:0}
+#sideFoot button{flex:1;height:34px;font-family:var(--disp);text-transform:uppercase;letter-spacing:.08em;
+  font-size:11.5px;font-weight:500;color:var(--mut);border-right:1px solid var(--hair)}
+#sideFoot button:last-child{border-right:0}
+#sideFoot button:hover{color:var(--amber);background:var(--raised)}
+#sideFoot button .p{color:var(--faint);margin-right:5px;font-family:var(--mono)}
+#sideFoot button:hover .p{color:var(--amber)}
+
+/* status bar */
+#foot{display:flex;align-items:center;gap:16px;padding:0 12px;border-top:1px solid var(--hair);
+  background:#101215;font-family:var(--mono);font-size:10px;color:var(--faint);letter-spacing:.02em;overflow:hidden}
+#foot .r{margin-left:auto;white-space:nowrap}
+#foot kbd{font-family:var(--mono);color:var(--mut);border:1px solid var(--hair);border-radius:2px;padding:0 3px}
+#foot b{color:var(--mut);font-weight:400}
+
+/* context menu */
+#menu{position:fixed;z-index:40;min-width:186px;background:var(--panel);border:1px solid var(--hair);
+  border-radius:2px;padding:3px 0;display:none;box-shadow:0 6px 18px rgba(0,0,0,.5)}
+#menu.on{display:block}
+#menu .mt{padding:5px 10px 6px;border-bottom:1px solid var(--hair);font-family:var(--mono);font-size:9.5px;
+  color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#menu button{display:block;width:100%;text-align:left;padding:5px 10px;font-size:12px;color:var(--mut)}
+#menu button:hover{background:var(--raised);color:var(--tx)}
+#menu button.am:hover{color:var(--amber)}
+#menu button[disabled]{color:#3f454b;pointer-events:none}
+#menu hr{border:0;border-top:1px solid var(--hair);margin:3px 0}
+
+/* dialogs */
+dialog{margin:auto;border:1px solid var(--hair);border-radius:2px;background:var(--panel);color:var(--tx);padding:0;width:430px;max-width:94vw}
+dialog::backdrop{background:rgba(8,9,11,.62)}
+dialog h2{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter-spacing:.08em;font-size:13px;
+  padding:11px 14px;border-bottom:1px solid var(--hair);display:flex;align-items:baseline;gap:8px}
+dialog h2 em{font-style:normal;font-family:var(--mono);font-size:10.5px;color:var(--faint);text-transform:none;letter-spacing:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dbody{padding:12px 14px;max-height:64vh;overflow-y:auto}
+.f{margin-bottom:11px}
+.f>label{display:block;font-family:var(--disp);text-transform:uppercase;letter-spacing:.08em;font-size:10.5px;
+  color:var(--faint);margin-bottom:4px}
+.f input,.f select,.f textarea{width:100%;font-size:12.5px}
+.f input.mono,.f textarea.mono{font-family:var(--mono);font-size:11.5px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+.stat{display:flex;gap:0}
+.stat label{flex:1;border:1px solid var(--hair);border-right:0;padding:5px 0;text-align:center;cursor:pointer;
+  font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint)}
+.stat label:last-child{border-right:1px solid var(--hair)}
+.stat input{position:absolute;opacity:0;width:0;height:0}
+.stat input:checked+span{color:var(--tx)}
+.stat label:has(input:checked){background:var(--raised);border-color:var(--faint)}
+.stat label:has(input[value=warn]:checked){color:var(--amber);border-color:#4a3a1c}
+.stat label:has(input[value=down]:checked){color:var(--fail);border-color:#4a2b28}
+.stat label:has(input[value=up]:checked){color:var(--ok)}
+.stat input:focus-visible+span{outline:1px solid var(--link);outline-offset:2px}
+.prow{display:grid;grid-template-columns:110px 1fr 22px;gap:6px;margin-bottom:5px}
+.prow button{color:var(--faint);font-size:14px;line-height:1}
+.prow button:hover{color:var(--fail)}
+.dfoot{display:flex;gap:8px;padding:11px 14px;border-top:1px solid var(--hair);align-items:center}
+.dfoot .hint{font-family:var(--mono);font-size:10px;color:var(--faint);margin-right:auto}
+.dbtn{height:28px;padding:0 14px;border:1px solid var(--hair);border-radius:2px;font-family:var(--disp);
+  text-transform:uppercase;letter-spacing:.08em;font-size:11.5px;font-weight:500;color:var(--mut)}
+.dbtn:hover{color:var(--tx);border-color:var(--faint)}
+.dbtn.go{color:var(--amber);border-color:#4a3a1c}
+.dbtn.go:hover{background:#251d0e}
+.err{color:var(--fail);font-family:var(--mono);font-size:10px;margin-right:auto}
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:1ms !important;animation-iteration-count:1 !important;transition-duration:1ms !important}
+}
+@media (max-width:1180px){ #main{grid-template-columns:1fr 286px} #srch{width:160px} }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ticker: latest change, the only always-amber line on the page -->
+  <div id="ticker"><span class="bar">&#9613;</span><span id="tickTxt">ready</span><span id="tickN"></span></div>
+
+  <!-- toolbar -->
+  <header id="bar">
+    <div id="brand">knobas<span>expanding graph</span></div>
+    <div id="srchWrap">
+      <svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4 14 14"/></svg>
+      <input id="srch" type="search" placeholder="search assets  /" aria-label="Search assets" autocomplete="off" spellcheck="false">
+      <span id="srchN" aria-live="polite"></span>
+    </div>
+    <button class="tbtn" id="bFit" title="Fit everything on screen (F)">Fit</button>
+    <button class="tbtn" id="bPath" title="Collapse everything except the path to the selected asset">Path only</button>
+    <button class="tbtn" id="bReset" title="Restore the example data">Reset example</button>
+  </header>
+
+  <!-- breadcrumb, split-flap cells -->
+  <nav id="crumbs" aria-label="Path to selected asset"><span class="lbl">Path</span><span id="crumbList" style="display:flex;align-items:center"></span></nav>
+
+  <!-- main -->
+  <div id="main">
+    <div id="canvasWrap">
+      <div id="dots"></div>
+      <svg id="svg" role="tree" aria-label="Asset topology">
+        <defs>
+          <marker id="arw" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M1 1 L7 4 L1 7" fill="none" stroke="#FFB020" stroke-width="1.2" stroke-opacity=".9"/>
+          </marker>
+        </defs>
+        <g id="view">
+          <g id="lEdges"></g>
+          <g id="lRoutes"></g>
+          <g id="lNodes"></g>
+        </g>
+      </svg>
+      <div id="legend">
+        <span><i></i>holds</span><span><i class="p"></i>path to selection</span><span><i class="r"></i>route</span>
+      </div>
+      <div id="ctl">
+        <div id="zoomRow"><button id="bOut" title="Zoom out (-)">&#8722;</button><span id="zoomVal">100%</span><button id="bIn" title="Zoom in (+)">+</button></div>
+        <button id="bFit2">Fit</button>
+        <button id="bHome">Site</button>
+        <button id="bCollapse">Collapse all</button>
+      </div>
+    </div>
+
+    <aside id="side" aria-label="Selected asset">
+      <div id="sideHead"></div>
+      <div id="sideBody"></div>
+      <div id="sideFoot">
+        <button id="bNew"><span class="p">+</span>Put something inside</button>
+        <button id="bRoute"><span class="p">+</span>Expose a route</button>
+      </div>
+    </aside>
+  </div>
+
+  <!-- status bar -->
+  <footer id="foot">
+    <span id="fCount"></span>
+    <span id="fVis"></span>
+    <span id="fSel"></span>
+    <span class="r"><kbd>/</kbd> search &nbsp;<kbd>Esc</kbd> back &nbsp;<kbd>&#8593;&#8595;&#8592;&#8594;</kbd> walk &nbsp;right-click a node for more</span>
+  </footer>
+</div>
+
+<div id="menu" role="menu"></div>
+
+<!-- create asset -->
+<dialog id="dlgNew" aria-labelledby="dlgNewT">
+  <form method="dialog" id="formNew">
+    <h2 id="dlgNewT">Put something inside <em id="newParent"></em></h2>
+    <div class="dbody">
+      <div class="two">
+        <div class="f"><label for="nType">Type</label><select id="nType"></select></div>
+        <div class="f" id="wCustom" hidden><label for="nCustom">Custom type name</label><input id="nCustom" class="mono" placeholder="e.g. queue" maxlength="24"></div>
+      </div>
+      <div class="f"><label for="nName">Name</label><input id="nName" class="mono" placeholder="e.g. deliver-file" maxlength="60"></div>
+      <div class="f"><label for="nSub">One-line summary</label><input id="nSub" placeholder="what it is, in one line" maxlength="90"></div>
+      <div class="f"><label>Status</label>
+        <div class="stat">
+          <label><input type="radio" name="nStat" value="up" checked><span>up</span></label>
+          <label><input type="radio" name="nStat" value="warn"><span>warn</span></label>
+          <label><input type="radio" name="nStat" value="down"><span>down</span></label>
+          <label><input type="radio" name="nStat" value="none"><span>none</span></label>
+        </div>
+      </div>
+      <div class="f"><label>Properties</label><div id="props"></div>
+        <button type="button" class="dbtn" id="bAddProp" style="height:24px;padding:0 9px;font-size:10.5px">+ Add property</button>
+      </div>
+    </div>
+    <div class="dfoot"><span class="hint" id="newErr">It lands inside the asset you picked.</span>
+      <button type="button" class="dbtn" data-close>Cancel</button>
+      <button type="submit" class="dbtn go" id="bCreate">Create</button></div>
+  </form>
+</dialog>
+
+<!-- expose route -->
+<dialog id="dlgRoute" aria-labelledby="dlgRouteT">
+  <form method="dialog" id="formRoute">
+    <h2 id="dlgRouteT">Expose a route from <em id="rtFrom"></em></h2>
+    <div class="dbody">
+      <div class="f"><label for="rUrl">URL or endpoint</label><input id="rUrl" class="mono" placeholder="https://payouts.tidewater.internal/v2" maxlength="140"></div>
+      <div class="f"><label for="rTarget">Lands on</label><select id="rTarget"></select></div>
+      <div class="f"><label for="rNote">Note</label><input id="rNote" placeholder="auth, port, whatever matters" maxlength="90"></div>
+    </div>
+    <div class="dfoot"><span class="hint" id="rtErr">A route with no target is just an endpoint.</span>
+      <button type="button" class="dbtn" data-close>Cancel</button>
+      <button type="submit" class="dbtn go">Expose</button></div>
+  </form>
+</dialog>
+
+<script>
+"use strict";
+/* =========================================================================
+   MODEL
+   node  = { id, type, name, sub, status: up|warn|down|none, parent, props:{}, created? }
+   route = { id, from, url, target|null, note }   from = the node that exposes it
+   Types are open: anything can hold anything; TYPES only supplies monograms
+   and suggestions.
+   ========================================================================= */
+const TYPES = {
+  site:       {mg:'DC',label:'Site',              kids:['hypervisor','network','proxy']},
+  hypervisor: {mg:'HV',label:'Hypervisor',        kids:['vm']},
+  vm:         {mg:'VM',label:'Virtual machine',   kids:['engine','service','db','proxy']},
+  engine:     {mg:'EN',label:'Container engine',  kids:['container']},
+  container:  {mg:'CT',label:'Container',         kids:['service','runtime','db','proxy']},
+  service:    {mg:'SV',label:'Service',           kids:['module','app']},
+  module:     {mg:'MD',label:'Module',            kids:[]},
+  runtime:    {mg:'RT',label:'Runtime',           kids:['app']},
+  app:        {mg:'AP',label:'App / scenario',    kids:['step']},
+  step:       {mg:'ST',label:'Step',              kids:['connector']},
+  connector:  {mg:'CN',label:'Connector',         kids:[]},
+  db:         {mg:'DB',label:'Database server',   kids:['database']},
+  database:   {mg:'DB',label:'Database',          kids:['schema']},
+  schema:     {mg:'SC',label:'Schema',            kids:['table']},
+  table:      {mg:'TB',label:'Table',             kids:[]},
+  proxy:      {mg:'RP',label:'Reverse proxy',     kids:['middleware']},
+  middleware: {mg:'MW',label:'Middleware',        kids:[]},
+  network:    {mg:'NW',label:'Network',           kids:[]},
+  custom:     {mg:'\u00b7\u00b7',label:'Custom',  kids:[]},
+};
+
+// [id, type, name, sub, status, parent, props]
+const SEED_NODES = [
+  ['dc','site','tidewater-dc','Hamburg · colocation · 3 hypervisors','up',null,{location:'Hamburg, DE',provider:'colo-north',rack:'R12–R14'}],
+
+  ['pve-01','hypervisor','pve-01','Proxmox VE 8.2 · 2× Xeon Gold · 256 GB','up','dc',{ip:'10.20.0.11',cpu:'2× Xeon Gold 6338',ram:'256 GB',storage:'ceph pool ssd-01'}],
+  ['vm-edge-01','vm','vm-edge-01','Debian 12 · 10.20.1.5 · 2 vCPU · 4 GB','up','pve-01',{ip:'10.20.1.5',os:'Debian 12',vcpu:'2',ram:'4 GB',owner:'Platform (Tomasz)','acme-email':'ops@tidewater.example'}],
+  ['eng-edge','engine','docker','Docker 27.1 · 1 container','up','vm-edge-01',{socket:'/var/run/docker.sock',version:'27.1.1'}],
+  ['ct-traefik','container','traefik','traefik:3.1 · up 41 d · 443/80','up','eng-edge',{image:'traefik:3.1',ports:'443, 80, 8080 (dashboard)',restart:'unless-stopped'}],
+  ['rp-traefik','proxy','Traefik','6 routes · ACME · auth-forward','up','ct-traefik',{software:'Traefik 3.1',resolver:'letsencrypt (internal CA)',dashboard:'http://10.20.1.5:8080'}],
+  ['mw-auth','middleware','auth-forward','forwardAuth → sso.tidewater.internal','up','rp-traefik',{address:'https://sso.tidewater.internal/verify',trustForwardHeader:'true'}],
+
+  ['vm-pay-stage-01','vm','vm-pay-stage-01','Ubuntu 24.04 · 10.20.5.11 · 4 vCPU · 16 GB','up','pve-01',{ip:'10.20.5.11',os:'Ubuntu 24.04',vcpu:'4',ram:'16 GB',owner:'Payments'}],
+  ['eng-stage','engine','docker','Docker 27.1 · 3 containers · compose payments-stage','up','vm-pay-stage-01',{compose:'payments-stage',version:'27.1.1'}],
+  ['ct-payout-stage','container','payout-service','payout-service:1.9.0-rc1 · up 2 h · :8080','up','eng-stage',{image:'ghcr.io/tidewater/payout-service:1.9.0-rc1',ports:'8080',candidate:'PR #142 · build #1188'}],
+  ['svc-payout-stage','service','payout-service','Rust · 1.9.0-rc1 · :8080','up','ct-payout-stage',{language:'Rust',version:'1.9.0-rc1',repo:'tidewater/payout-service',health:'/health'}],
+  ['ct-ledger-stage','container','ledger-api','ledger-api:2.3.0 · :8090','up','eng-stage',{image:'ghcr.io/tidewater/ledger-api:2.3.0',ports:'8090'}],
+  ['svc-ledger-stage','service','ledger-api','Kotlin · 2.3.0 · :8090','up','ct-ledger-stage',{language:'Kotlin',version:'2.3.0',repo:'tidewater/ledger-api'}],
+  ['ct-pg-stage','container','pg-payments-stage','postgres:16.3 · :5432 · 6 GB','up','eng-stage',{image:'postgres:16.3',ports:'5432',volume:'pgdata-stage'}],
+  ['db-stage','db','postgres','PostgreSQL 16.3 · 1 database','up','ct-pg-stage',{version:'16.3',max_connections:'200'}],
+  ['dbn-stage','database','payments','6 GB · 2 schemas','up','db-stage',{owner:'payments',encoding:'UTF8'}],
+  ['sch-stage','schema','public','3 tables','up','dbn-stage',{}],
+  ['tb-stage-1','table','payouts','412 rows pending','up','sch-stage',{}],
+  ['tb-stage-2','table','ledger_entries','1.2 M rows','up','sch-stage',{}],
+  ['tb-stage-3','table','refunds','','up','sch-stage',{}],
+
+  ['pve-02','hypervisor','pve-02','Proxmox VE 8.2 · 2× EPYC · 512 GB','up','dc',{ip:'10.20.0.12',cpu:'2× EPYC 7543',ram:'512 GB'}],
+  ['vm-pay-01','vm','vm-pay-01','Ubuntu 24.04 · 10.20.4.11 · 8 vCPU · 32 GB','warn','pve-02',{ip:'10.20.4.11',os:'Ubuntu 24.04',vcpu:'8',ram:'32 GB',owner:'Payments','backup-window':'02:00–03:00','last-patched':'2026-08-10'}],
+  ['eng-pay','engine','docker','Docker 27.1 · 4 containers · compose payments','warn','vm-pay-01',{compose:'payments',version:'27.1.1'}],
+  ['ct-payout-prod','container','payout-service','payout-service:1.8.2 · up 11 d · :8080','up','eng-pay',{image:'ghcr.io/tidewater/payout-service:1.8.2',ports:'8080','deployed-from':'build #1180'}],
+  ['svc-payout-prod','service','payout-service','Rust · 1.8.2 · :8080','up','ct-payout-prod',{language:'Rust',version:'1.8.2',repo:'tidewater/payout-service',health:'/health'}],
+  ['mod-sepa','module','sepa','SEPA batch builder · retry policy','up','svc-payout-prod',{backoff:'base 30 s · factor 2 · max 5',jitter:'±10 %'}],
+  ['mod-psp','module','psp-client','PSP HTTP client','up','svc-payout-prod',{timeout:'60 s'}],
+  ['ct-ledger-prod','container','ledger-api','ledger-api:2.3.0 · up 11 d · :8090','up','eng-pay',{image:'ghcr.io/tidewater/ledger-api:2.3.0',ports:'8090'}],
+  ['svc-ledger-prod','service','ledger-api','Kotlin · 2.3.0 · :8090','up','ct-ledger-prod',{language:'Kotlin',version:'2.3.0',repo:'tidewater/ledger-api'}],
+  ['ct-worker-prod','container','payout-worker','payout-service:1.8.2 --worker · exited 137 at 11:58','down','eng-pay',{image:'ghcr.io/tidewater/payout-service:1.8.2',command:'--worker',exit:'137 (OOM)'}],
+  ['svc-worker-prod','service','payout-worker','Rust · batch worker · not running','down','ct-worker-prod',{language:'Rust',queue:'payouts.pending'}],
+  ['ct-dash-prod','container','payout-dashboard','payout-dashboard:0.9.4 · :3000 · slow','warn','eng-pay',{image:'ghcr.io/tidewater/payout-dashboard:0.9.4',ports:'3000'}],
+  ['svc-dash-prod','service','payout-dashboard','Node · 0.9.4 · 8 400 ms · PAY-240','warn','ct-dash-prod',{language:'Node 22',version:'0.9.4',ticket:'PAY-240'}],
+
+  ['vm-db-01','vm','vm-db-01','Ubuntu 24.04 · 10.20.4.20 · 8 vCPU · 64 GB · 1 TB','up','pve-02',{ip:'10.20.4.20',os:'Ubuntu 24.04',vcpu:'8',ram:'64 GB',disk:'1 TB nvme',owner:'Platform'}],
+  ['db-prod','db','postgresql','PostgreSQL 16.3 · system service · 2 databases','up','vm-db-01',{version:'16.3',service:'postgresql@16-main',max_connections:'400'}],
+  ['dbn-prod','database','payments','48 GB · 3 schemas','up','db-prod',{owner:'payments',encoding:'UTF8'}],
+  ['sch-prod','schema','public','5 tables','up','dbn-prod',{}],
+  ['tb-prod-1','table','payouts','9.8 M rows','up','sch-prod',{}],
+  ['tb-prod-2','table','ledger_entries','41 M rows','up','sch-prod',{}],
+  ['tb-prod-3','table','refunds','320 k rows','up','sch-prod',{}],
+  ['sch-prod-2','schema','audit','2 tables','up','dbn-prod',{}],
+  ['dbn-prod-2','database','flowrun','2 GB · Flowrun state','up','db-prod',{owner:'flowrun'}],
+
+  ['pve-03','hypervisor','pve-03','Proxmox VE 8.2 · 2× EPYC · 256 GB','warn','dc',{ip:'10.20.0.13',cpu:'2× EPYC 7443',ram:'256 GB'}],
+  ['vm-lowcode-01','vm','vm-lowcode-01','Ubuntu 22.04 · 10.20.6.20 · 8 vCPU · 32 GB','warn','pve-03',{ip:'10.20.6.20',os:'Ubuntu 22.04',vcpu:'8',ram:'32 GB',owner:'Integrations (Lena)'}],
+  ['eng-lc','engine','docker','Docker 26.1 · 2 containers','warn','vm-lowcode-01',{version:'26.1.4'}],
+  ['ct-fr-prod','container','flowrun-prod','flowrun:4.1.7 · up 23 d · :9000','up','eng-lc',{image:'registry.tidewater.internal/flowrun:4.1.7',ports:'9000',volume:'flowrun-prod'}],
+  ['rt-fr-prod','runtime','Flowrun prod','4.1.7 · 3 scenarios · 1 worker pool','up','ct-fr-prod',{version:'4.1.7',workers:'8',state:'database flowrun on vm-db-01'}],
+  ['app-sepa-prod','app','sepa-payout-export','v12 · cron 0 13 * * * · ok 13:00 · 2 m 14 s','up','rt-fr-prod',{version:'v12',trigger:'cron 0 13 * * *',owner:'Mara',lastRun:'#8812 ok 13:00',ticket:'PAY-231'}],
+  ['st-sepa-1','step','fetch-pending-payouts','SQL · 412 rows','up','app-sepa-prod',{kind:'query',timeout:'30 s'}],
+  ['cn-pg-prod','connector','pg-payments','PostgreSQL · payments@vm-db-01','up','st-sepa-1',{dsn:'postgres://flowrun@10.20.4.20/payments',secret:'vault:flowrun/pg-payments'}],
+  ['st-sepa-2','step','build-sepa-batch','transform · pain.001','up','app-sepa-prod',{kind:'transform',schema:'pain.001.001.09'}],
+  ['st-sepa-3','step','post-psp-batch','HTTP POST · 3 retries','up','app-sepa-prod',{kind:'http',retries:'3',backoff:'30 s × 2'}],
+  ['cn-psp-prod','connector','psp-prod','HTTPS · api.psp-partner.example','up','st-sepa-3',{url:'https://api.psp-partner.example/v2/batches',auth:'mTLS',secret:'vault:flowrun/psp-prod'}],
+  ['st-sepa-4','step','write-ledger','HTTP POST → ledger-api','up','app-sepa-prod',{kind:'http'}],
+  ['cn-ledger-prod','connector','ledger-api','HTTPS via traefik · /v1/ledger','up','st-sepa-4',{url:'https://ledger.tidewater.internal/v1/ledger',auth:'service token'}],
+  ['app-invoice-prod','app','invoice-sync','v7 · hourly · ok 14:00 · 41 s','up','rt-fr-prod',{version:'v7',trigger:'cron hourly',owner:'Lena'}],
+  ['st-inv-1','step','pull-invoices','HTTP GET · erp','up','app-invoice-prod',{kind:'http'}],
+  ['st-inv-2','step','upsert-ledger','HTTP POST → ledger-api','up','app-invoice-prod',{kind:'http'}],
+  ['app-customs-prod','app','customs-docs-fetch','v21 · webhook · ok 13:45 · 12 s','up','rt-fr-prod',{version:'v21',trigger:'webhook',owner:'Tomasz'}],
+  ['st-cus-1','step','verify-signature','HMAC','up','app-customs-prod',{kind:'verify'}],
+  ['st-cus-2','step','fetch-document','HTTP GET · customs portal','up','app-customs-prod',{kind:'http'}],
+  ['cn-customs','connector','customs-portal','HTTPS · portal.zoll.example','up','st-cus-2',{url:'https://portal.zoll.example/api/docs',auth:'client cert'}],
+
+  ['ct-fr-stage','container','flowrun-stage','flowrun:4.2.1 · :9001 · down since 12:40','down','eng-lc',{image:'registry.tidewater.internal/flowrun:4.2.1',ports:'9001'}],
+  ['rt-fr-stage','runtime','Flowrun stage','4.2.1 · 3 scenarios · not responding','down','ct-fr-stage',{version:'4.2.1',workers:'4'}],
+  ['app-sepa-stage','app','sepa-payout-export','v13 · failed 12:40 · PSP sandbox timeout','down','rt-fr-stage',{version:'v13',trigger:'cron 0 13 * * *',owner:'Mara',lastRun:'#8811 failed 12:40',ticket:'PAY-231'}],
+  ['st-sepa-s3','step','post-psp-batch','HTTP POST · timed out 3/3','down','app-sepa-stage',{kind:'http',retries:'3'}],
+  ['cn-psp-sandbox','connector','psp-sandbox','HTTPS · sandbox.psp-partner.example','down','st-sepa-s3',{url:'https://sandbox.psp-partner.example/v2/batches',auth:'mTLS'}],
+  ['app-invoice-stage','app','invoice-sync','v7 · hourly','none','rt-fr-stage',{version:'v7'}],
+  ['app-customs-stage','app','customs-docs-fetch','v21 · webhook','none','rt-fr-stage',{version:'v21'}],
+
+  ['vm-lowcode-dev-01','vm','vm-lowcode-dev-01','Ubuntu 22.04 · 10.20.6.30 · 4 vCPU · 16 GB','up','pve-03',{ip:'10.20.6.30',os:'Ubuntu 22.04',owner:'Integrations'}],
+  ['eng-dev','engine','docker','Docker 26.1 · 1 container','up','vm-lowcode-dev-01',{}],
+  ['ct-fr-dev','container','flowrun-dev','flowrun:4.2.1 · :9000 · VPN only','up','eng-dev',{image:'registry.tidewater.internal/flowrun:4.2.1',ports:'9000'}],
+  ['rt-fr-dev','runtime','Flowrun dev','4.2.1 · 4 scenarios','up','ct-fr-dev',{version:'4.2.1'}],
+  ['app-sepa-dev','app','sepa-payout-export','v14 · deployed yesterday 17:45','up','rt-fr-dev',{version:'v14'}],
+  ['app-invoice-dev','app','invoice-sync','v7','up','rt-fr-dev',{version:'v7'}],
+  ['app-refund-dev','app','refund-reconciliation','v3 · manual · ok today · PAY-228','up','rt-fr-dev',{version:'v3',ticket:'PAY-228'}],
+  ['app-customs-dev','app','customs-docs-fetch','v21','up','rt-fr-dev',{version:'v21'}],
+
+  ['net-prod','network','vlan-20 payments','10.20.4.0/24 · prod','up','dc',{cidr:'10.20.4.0/24',gateway:'10.20.4.1'}],
+];
+
+// [id, from, url, target, note]
+const SEED_ROUTES = [
+  ['r-payouts','rp-traefik','https://payouts.tidewater.internal','svc-payout-prod','→ :8080 · cert expires in 9 days · auth-forward'],
+  ['r-ledger','rp-traefik','https://ledger.tidewater.internal','svc-ledger-prod','→ :8090 · auth-forward'],
+  ['r-dashboard','rp-traefik','https://dashboard.tidewater.internal','svc-dash-prod','→ :3000 · 8 400 ms'],
+  ['r-flows','rp-traefik','https://flows.tidewater.internal','rt-fr-prod','→ :9000'],
+  ['r-flows-stage','rp-traefik','https://flows-stage.tidewater.internal','rt-fr-stage','→ :9001 · down'],
+  ['r-payouts-stage','rp-traefik','https://payouts-stage.tidewater.internal','svc-payout-stage','→ :8080 · auth-forward'],
+  ['r-traefik-dash','rp-traefik','http://10.20.1.5:8080/dashboard','rp-traefik','Traefik dashboard · internal only'],
+  ['r-fr-api','rt-fr-prod','https://flows.tidewater.internal/api',null,'Flowrun REST API · PAT'],
+  ['r-fr-hook-customs','rt-fr-prod','https://flows.tidewater.internal/hooks/customs-docs-fetch','app-customs-prod','webhook · HMAC'],
+  ['r-fr-run-sepa','rt-fr-prod','https://flows.tidewater.internal/run/sepa-payout-export','app-sepa-prod','manual trigger · PAT'],
+  ['r-fr-stage-hook','rt-fr-stage','https://flows-stage.tidewater.internal/hooks/customs-docs-fetch','app-customs-stage','webhook'],
+  ['r-payout-health','svc-payout-prod','http://10.20.4.11:8080/health',null,'liveness · monitored'],
+  ['r-payout-v1','svc-payout-prod','http://10.20.4.11:8080/v1/payouts',null,'internal API'],
+  ['r-ledger-v1','svc-ledger-prod','http://10.20.4.11:8090/v1/ledger',null,'internal API · used by Flowrun write-ledger'],
+  ['r-pg','db-prod','postgres://10.20.4.20:5432',null,'TCP · monitored'],
+];
+
+/* ---------- state ---------- */
+const ROOT = 'dc';
+let N = {}, R = [];
+const S = {
+  sel: null,
+  open: new Set(),          // expanded node ids
+  stack: [],                // expansion order, for Esc
+  q: '', hits: [], hi: 0,
+  seq: 1,
+  focus: null,
+  changes: 0,
+};
+const V = {k:1, x:120, y:60};      // canvas transform
+const LS = 'knobas-playground-E3';
+
+function seed(){
+  N = {}; R = [];
+  SEED_NODES.forEach(a=>{ N[a[0]] = {id:a[0],type:a[1],name:a[2],sub:a[3],status:a[4],parent:a[5],props:a[6]||{}}; });
+  SEED_ROUTES.forEach(a=>R.push({id:a[0],from:a[1],url:a[2],target:a[3],note:a[4]}));
+  S.open = new Set([ROOT]); S.stack = []; S.sel = null; S.seq = 1;
+}
+function persist(){
+  try{ localStorage.setItem(LS, JSON.stringify({N,R,open:[...S.open],stack:S.stack,sel:S.sel,seq:S.seq})); }catch(e){}
+}
+function restore(){
+  try{
+    const d = JSON.parse(localStorage.getItem(LS)||'null');
+    if(!d || !d.N || !d.N[ROOT]) return false;
+    N = d.N; R = d.R||[]; S.open = new Set(d.open&&d.open.length?d.open:[ROOT]);
+    S.stack = d.stack||[]; S.sel = d.sel && d.N[d.sel] ? d.sel : null; S.seq = d.seq||1;
+    return true;
+  }catch(e){ return false; }
+}
+
+/* ---------- helpers ---------- */
+const $ = s=>document.querySelector(s);
+const esc = s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const T = t=>TYPES[t]||{mg:monogram(t),label:t,kids:[]};
+function monogram(t){                    // custom types get an airline-code cell too
+  t = String(t||'??');
+  const w = t.split(/[-_ .]+/).filter(Boolean);
+  return (w.length>1 ? w[0][0]+w[1][0] : t.slice(0,2)).toUpperCase();
+}
+let KIDS = {};                          // id -> [node]  (rebuilt on data change)
+function reindex(){
+  KIDS = {};
+  Object.values(N).forEach(n=>{ (KIDS[n.parent] = KIDS[n.parent] || []).push(n); });
+  PROB = {};
+}
+const kidsOf = id => KIDS[id] || [];
+function ancestors(id){ const a=[]; let n=N[id]; while(n && n.parent && N[n.parent]){ n=N[n.parent]; a.unshift(n.id); } return a; }
+function depthOf(id){ return ancestors(id).length; }
+let PROB = {};                          // id -> {down, warn, n}
+function problems(id){
+  if(PROB[id]) return PROB[id];
+  let d=0,w=0,n=0;
+  for(const c of kidsOf(id)){
+    const sub = problems(c.id);
+    if(c.status==='down') d++; else if(c.status==='warn') w++;
+    d += sub.down; w += sub.warn; n += 1 + sub.n;
+  }
+  return (PROB[id] = {down:d, warn:w, n});
+}
+function problemList(id, out){
+  out = out || [];
+  for(const c of kidsOf(id)){
+    if(c.status==='down'||c.status==='warn') out.push(c);
+    problemList(c.id, out);
+  }
+  return out;
+}
+function reveal(id){                    // open every ancestor so id is visible
+  let n=0; ancestors(id).forEach(a=>{ if(!S.open.has(a)){ S.open.add(a); S.stack.push(a); n++; } });
+  return n;
+}
+function openNode(id){ if(!S.open.has(id) && kidsOf(id).length){ S.open.add(id); S.stack.push(id); return true; } return false; }
+function closeNode(id){ S.open.delete(id); S.stack = S.stack.filter(x=>x!==id); }
+
+/* ---------- text measuring (for truncation) ---------- */
+const mctx = document.createElement('canvas').getContext('2d');
+function fit(str, px, font){
+  mctx.font = font;
+  str = String(str==null?'':str);
+  if(mctx.measureText(str).width <= px) return str;
+  let lo=0, hi=str.length;
+  while(lo<hi){ const m=(lo+hi+1)>>1; if(mctx.measureText(str.slice(0,m)+'\u2026').width<=px) lo=m; else hi=m-1; }
+  return str.slice(0,lo)+'\u2026';
+}
+const F_NAME = "500 12px 'IBM Plex Sans',sans-serif";
+const F_MONO = "400 9.5px 'IBM Plex Mono',monospace";
+
+/* =========================================================================
+   LAYOUT — tidy left-to-right tree. Deterministic, instant, stable:
+   depth sets x, a single in-order sweep sets y, parents centre on children.
+   ========================================================================= */
+const NW = 190, NH = 26, COL = 248, ROW = 34, GAP = 0.24;
+let POS = {}, EPOS = {}, ORDER = [];
+
+function endpointRoutes(id){ return R.filter(r=>r.from===id && !r.target); }
+
+function layout(){
+  POS = {}; EPOS = {}; ORDER = [];
+  let cur = 0;
+  (function walk(id, depth){
+    const kids = S.open.has(id) ? kidsOf(id) : [];
+    const eps  = (S.sel === id) ? endpointRoutes(id) : [];
+    ORDER.push(id);
+    if(!kids.length && !eps.length){
+      POS[id] = {x:depth*COL, y:cur*ROW, d:depth}; cur += 1; return;
+    }
+    if(depth>0) cur += GAP;
+    const ys = [];
+    kids.forEach(c=>{ walk(c.id, depth+1); ys.push(POS[c.id].y); });
+    eps.forEach(r=>{ EPOS[r.id] = {x:(depth+1)*COL, y:cur*ROW}; ys.push(cur*ROW); cur += 1; });
+    POS[id] = {x:depth*COL, y:(ys[0]+ys[ys.length-1])/2, d:depth};
+    if(depth>0) cur += GAP;
+  })(ROOT, 0);
+}
+
+/* routes drawn right now: exposer selected, or the route lands on the
+   selection or on one of its ancestors ("reached via an ancestor") */
+function activeRoutes(){
+  if(!S.sel) return [];
+  const chain = new Set([S.sel, ...ancestors(S.sel)]);
+  return R.filter(r => r.from===S.sel || (r.target && chain.has(r.target)));
+}
+function revealRouteEnds(){
+  if(!S.sel) return 0;
+  let n = 0;
+  activeRoutes().forEach(r=>{
+    n += reveal(r.from);
+    if(r.target && N[r.target]) n += reveal(r.target);
+  });
+  return n;
+}
+
+/* =========================================================================
+   RENDER
+   ========================================================================= */
+const svg = $('#svg'), gView = $('#view'), lEdges = $('#lEdges'), lRoutes = $('#lRoutes'), lNodes = $('#lNodes');
+let prevVisible = new Set();
+
+function statusClass(s){ return s==='warn'?'s-warn':s==='down'?'s-down':s==='none'?'s-none':'s-up'; }
+
+function render(){
+  reindex();
+  if(S.sel && !N[S.sel]) S.sel = null;
+  revealRouteEnds();
+  layout();
+
+  const vis = ORDER;
+  const visSet = new Set(vis);
+  const path = S.sel ? new Set([...ancestors(S.sel), S.sel]) : new Set();
+  const hits = new Set(S.hits);
+
+  /* --- hold edges --- */
+  let e = '';
+  vis.forEach(id=>{
+    const n = N[id]; if(!n || !n.parent || !visSet.has(n.parent)) return;
+    const a = POS[n.parent], b = POS[id];
+    const onPath = path.has(id) && path.has(n.parent);
+    e += '<path class="ed'+(onPath?' path':'')+'" d="'+elbow(a.x+NW, a.y+NH/2, b.x, b.y+NH/2)+'"/>';
+  });
+  lEdges.innerHTML = e;
+
+  /* --- route edges + endpoint chips --- */
+  let rr = '';
+  const acts = activeRoutes();
+  acts.forEach(r=>{
+    const from = POS[r.from]; if(!from) return;
+    if(!r.target){
+      const p = EPOS[r.id]; if(!p) return;
+      const w = Math.max(96, Math.min(206, textW(r.url, F_MONO)+16));
+      rr += '<path class="rt" d="'+elbow(from.x+NW, from.y+NH/2, p.x, p.y+NH/2)+'" marker-end="url(#arw)"/>';
+      rr += '<g class="ep" transform="translate('+p.x+','+p.y+')">'
+          + '<rect class="chip" x="0" y="2" width="'+w+'" height="22"/>'
+          + '<text class="u" x="8" y="12.5">'+esc(fit(r.url, w-16, F_MONO))+'</text>'
+          + '<text class="t" x="8" y="21">endpoint \u00b7 no target</text>'
+          + '<title>'+esc(r.url+' \u2014 '+(r.note||'endpoint'))+'</title></g>';
+      return;
+    }
+    const to = POS[r.target]; if(!to) return;
+    if(r.target === r.from){                     // self-route (Traefik dashboard)
+      const x=from.x+NW, y=from.y+NH/2;
+      rr += '<path class="rt" d="M'+x+','+(y-5)+' C'+(x+54)+','+(y-26)+' '+(x+54)+','+(y+26)+' '+x+','+(y+5)+'" marker-end="url(#arw)"/>';
+      rr += '<text class="rtlab" x="'+(x+16)+'" y="'+(y-14)+'">self</text>';
+      return;
+    }
+    rr += '<path class="rt" d="'+routePath(from.x+NW, from.y+NH/2, to.x, to.y+NH/2)+'" marker-end="url(#arw)"/>';
+  });
+  if(acts.length && acts.length<=4){
+    acts.forEach(r=>{
+      if(!r.target || r.target===r.from) return;
+      const from=POS[r.from], to=POS[r.target]; if(!from||!to) return;
+      const lx = to.x - 10, ly = to.y + NH/2 - 7;
+      rr += '<text class="rtlab" x="'+lx+'" y="'+ly+'" text-anchor="end">'+esc(shortUrl(r.url))+'</text>';
+    });
+  }
+  lRoutes.innerHTML = rr;
+
+  /* --- nodes --- */
+  let s = '';
+  vis.forEach(id=>{
+    const n = N[id], p = POS[id]; if(!n||!p) return;
+    const kids = kidsOf(id), open = S.open.has(id) && kids.length;
+    const pr = problems(id);
+    const bad = kids.length && !open && (pr.down||pr.warn);
+    const cls = ['nd', statusClass(n.status)];
+    if(S.sel===id) cls.push('sel');
+    else if(path.has(id)) cls.push('onpath');
+    if(hits.has(id) && S.q) cls.push('hit');
+    if(bad) cls.push(pr.down?'p-down':'p-warn');
+    if(!prevVisible.has(id)) cls.push('enter');
+
+    let nameW = NW - 35 - 8;
+    if(kids.length) nameW -= 30;
+    if(bad) nameW -= 26;
+
+    s += '<g class="'+cls.join(' ')+'" data-id="'+esc(id)+'" transform="translate('+p.x+','+p.y+')"'
+       + ' tabindex="'+(id===ROOT||S.focus===id?0:-1)+'" role="treeitem" aria-level="'+(p.d+1)+'"'
+       + (kids.length?' aria-expanded="'+(open?'true':'false')+'"':'')
+       + ' aria-selected="'+(S.sel===id)+'" aria-label="'+esc(n.name+', '+T(n.type).label+', '+n.status)+'">'
+       + '<rect class="ring" x="-3" y="-3" width="'+(NW+6)+'" height="'+(NH+6)+'"/>'
+       + '<rect class="bg" x="0" y="0" width="'+NW+'" height="'+NH+'"/>'
+       + '<rect class="bar" x="0" y="0" width="2" height="'+NH+'"/>'
+       + '<line class="sep" x1="28.5" y1="0" x2="28.5" y2="'+NH+'"/>'
+       + '<text class="mg" x="15.5" y="17">'+esc(T(n.type).mg)+'</text>'
+       + '<text class="nm" x="35" y="17">'+esc(fit(n.name, nameW, F_NAME))+'</text>';
+    if(bad){
+      const bx = NW - 30 - 26;
+      s += '<rect class="pbx" x="'+bx+'" y="6" width="22" height="14"/>'
+         + '<text class="pb" x="'+(bx+11)+'" y="16">'+(pr.down+pr.warn)+'</text>';
+    }
+    if(kids.length){
+      s += '<line class="sep" x1="'+(NW-30.5)+'" y1="0" x2="'+(NW-30.5)+'" y2="'+NH+'"/>'
+         + '<g class="tgt">'
+         + '<rect x="'+(NW-30)+'" y="0" width="30" height="'+NH+'" fill="transparent"/>'
+         + '<text class="tg" x="'+(NW-15)+'" y="17">'+(open?'\u25be':('\u25b8'+kids.length))+'</text></g>';
+    }
+    s += '<title>'+esc(n.name+' \u2014 '+T(n.type).label+(n.sub?' \u2014 '+n.sub:'')
+       + (kids.length?' \u2014 holds '+kids.length:'')
+       + (bad?' \u2014 '+(pr.down+pr.warn)+' problems inside':''))+'</title></g>';
+  });
+  lNodes.innerHTML = s;
+  prevVisible = visSet;
+
+  applyView();
+  drawCrumbs(path);
+  drawPanel();
+  drawFoot(vis.length);
+  if(S.focus && visSet.has(S.focus)){
+    const el = lNodes.querySelector('[data-id="'+cssEsc(S.focus)+'"]');
+    if(el && document.activeElement && document.activeElement.tagName!=='INPUT') el.focus({preventScroll:true});
+  }
+}
+const cssEsc = s => (window.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/["\\]/g,'\\$&');
+function textW(t, f){ mctx.font=f; return mctx.measureText(String(t==null?'':t)).width; }
+function elbow(x1,y1,x2,y2){
+  const k = Math.max(24, (x2-x1)*0.45);
+  return 'M'+x1+','+y1+' C'+(x1+k)+','+y1+' '+(x2-k)+','+y2+' '+x2+','+y2;
+}
+function routePath(x1,y1,x2,y2){
+  const dx = x2-x1;
+  const k = dx > 60 ? Math.min(160, dx*0.5) : 96;
+  return 'M'+x1+','+y1+' C'+(x1+k)+','+y1+' '+(x2-k)+','+y2+' '+x2+','+y2;
+}
+function shortUrl(u){
+  return String(u).replace(/^https?:\/\//,'').replace(/^postgres:\/\//,'pg://').replace(/\.tidewater\.internal/,'');
+}
+
+/* ---------- breadcrumb (split-flap cells; the middle folds away when deep) ---------- */
+let lastCrumbs = '', crumbsAll = false;
+const CRUMB_MAX = 8;
+function drawCrumbs(){
+  const list = $('#crumbList');
+  const ids = S.sel ? [...ancestors(S.sel), S.sel] : [ROOT];
+  const prev = lastCrumbs.split('>');
+  let items;
+  if(!crumbsAll && ids.length > CRUMB_MAX){
+    const tail = CRUMB_MAX - 2;
+    items = [{id:ids[0], i:0}, {more:ids.slice(1, ids.length-tail)}]
+      .concat(ids.slice(ids.length-tail).map((id,j)=>({id, i:ids.length-tail+j})));
+  } else items = ids.map((id,i)=>({id, i}));
+  let h = '';
+  items.forEach((it,k)=>{
+    if(k) h += '<span class="csep">\u203a</span>';
+    if(it.more){
+      h += '<button class="crumb more" data-more="1" title="'+esc(it.more.map(x=>N[x].name).join(' \u203a '))+'">'
+         + '<span class="mg">'+it.more.length+'</span><span class="nm">\u2026</span></button>';
+      return;
+    }
+    const n = N[it.id]; if(!n) return;
+    const isNew = prev[it.i] !== it.id;
+    h += '<button class="crumb'+(it.i===ids.length-1&&S.sel?' cur':'')+(isNew&&lastCrumbs?' flip':'')+'" data-crumb="'+esc(it.id)+'" '
+       + 'style="animation-delay:'+(isNew?Math.min(k,6)*28:0)+'ms" title="'+esc(n.name+' \u2014 '+T(n.type).label)+'">'
+       + '<span class="mg">'+esc(T(n.type).mg)+'</span><span class="nm">'+esc(n.name)+'</span></button>';
+  });
+  if(!S.sel) h += '<span class="csep" style="padding-left:8px;color:#4b5158">nothing selected \u2014 click an asset</span>';
+  list.innerHTML = h;
+  lastCrumbs = ids.join('>');
+}
+
+/* ---------- side panel ---------- */
+let lastStatus = null;
+function drawPanel(){
+  const head = $('#sideHead'), body = $('#sideBody');
+  const n = S.sel ? N[S.sel] : null;
+  $('#bNew').disabled = false;
+  if(!n){
+    head.innerHTML = '<div class="hrow"><div class="mgcell">\u00b7\u00b7</div><div><div id="sName" style="color:var(--mut)">No selection</div>'
+      + '<div id="sType">the graph is waiting</div></div></div>'
+      + '<div id="sSub">Click an asset to open it. Its children grow out of its right edge; click it again to fold them back.</div>';
+    body.innerHTML = '<div class="sec"><h3>Start here</h3></div>' + startRows();
+    $('#bNew').innerHTML = '<span class="p">+</span>Put something in the site';
+    $('#bRoute').innerHTML = '<span class="p">+</span>Expose a route';
+    lastStatus = null;
+    return;
+  }
+  const t = T(n.type), kids = kidsOf(n.id), pr = problems(n.id);
+  const flip = (lastStatus!==null && lastStatus!==n.id) ? ' turn' : '';
+  lastStatus = n.id;
+  head.innerHTML =
+     '<div class="hrow"><div class="mgcell">'+esc(t.mg)+'</div>'
+   + '<div style="min-width:0;flex:1"><div id="sName">'+esc(n.name)+'</div><div id="sType">'+esc(t.label)+(n.created?' \u00b7 created here':'')+'</div></div>'
+   + '<div id="hbtns"><button class="ibtn" id="bPlusHead" title="Put something inside">+</button>'
+   + '<button class="ibtn" id="bDots" title="More actions" aria-haspopup="menu">\u22ef</button></div></div>'
+   + (n.sub?'<div id="sSub">'+esc(n.sub)+'</div>':'')
+   + '<div id="sStatusRow"><span class="flap '+(n.status==='none'?'':n.status)+flip+'">'+(n.status==='none'?'no status':esc(n.status))+'</span>'
+   + '<span class="age">holds '+kids.length+' \u00b7 '+pr.n+' inside \u00b7 level '+(depthOf(n.id)+1)+'</span></div>';
+
+  let h = '';
+  /* properties */
+  const pk = Object.keys(n.props||{});
+  h += '<div class="sec"><h3>Properties <b>'+pk.length+'</b></h3>';
+  if(pk.length){
+    h += '<dl class="kv">';
+    pk.forEach(k=>{ h += '<dt>'+esc(k)+'</dt><dd>'+esc(n.props[k])+'</dd>'; });
+    h += '</dl>';
+  } else h += '<div class="empty">No properties recorded.</div>';
+  h += '</div>';
+
+  /* holds */
+  h += '<div class="sec"><h3>Holds <b>'+kids.length+'</b>'
+     + (kids.length?'<button class="act" data-toggle="'+esc(n.id)+'">'+(S.open.has(n.id)?'fold':'open')+'</button>':'')+'</h3>';
+  if(kids.length){
+    kids.slice(0,9).forEach(c=>{
+      const cp = problems(c.id);
+      h += '<button class="row '+(c.status==='down'?'bad':c.status==='warn'?'wrn':'')+'" data-go="'+esc(c.id)+'">'
+         + '<span class="mg2">'+esc(T(c.type).mg)+'</span><span class="nm">'+esc(c.name)+'</span>'
+         + '<span class="tail">'+(kidsOf(c.id).length?kidsOf(c.id).length+' in':'')
+         + (cp.down||cp.warn?' <span style="color:'+(cp.down?'var(--fail)':'var(--amber)')+'">'+(cp.down+cp.warn)+'!</span>':'')+'</span></button>';
+    });
+    if(kids.length>9) h += '<div class="empty">+ '+(kids.length-9)+' more \u2014 open it on the canvas.</div>';
+  } else {
+    h += '<div class="empty">Nothing inside yet. Anything can hold anything \u2014 put the next level in.</div>';
+  }
+  h += '</div>';
+
+  /* exposes */
+  const mine = R.filter(r=>r.from===n.id);
+  h += '<div class="sec"><h3>Exposes <b>'+mine.length+'</b></h3>';
+  if(mine.length){
+    mine.forEach(r=>{
+      const tgt = r.target ? N[r.target] : null;
+      h += '<div class="rt-row"'+(tgt?' role="button" tabindex="0" data-go="'+esc(r.target)+'"':'')+'>'
+         + '<div class="rt-url">'+esc(r.url)+'</div><div class="rt-meta">'
+         + (tgt ? 'lands on <span class="to">'+esc(tgt.name)+'</span> <b>'+esc(T(tgt.type).label.toLowerCase())+'</b>' : 'endpoint \u00b7 no target')
+         + (r.note?' \u00b7 '+esc(r.note):'') + '</div></div>';
+    });
+  } else h += '<div class="empty">Exposes nothing. A proxy, runtime or service usually does.</div>';
+  h += '</div>';
+
+  /* reachable via */
+  const chain = ancestors(n.id);
+  const reach = R.filter(r=>r.target===n.id || chain.indexOf(r.target)>=0);
+  h += '<div class="sec"><h3>Reachable via <b>'+reach.length+'</b></h3>';
+  if(reach.length){
+    reach.forEach(r=>{
+      const src = N[r.from], land = N[r.target];
+      const direct = r.target===n.id;
+      h += '<div class="rt-row" role="button" tabindex="0" data-go="'+esc(r.from)+'">'
+         + '<div class="rt-url">'+esc(r.url)+'</div><div class="rt-meta">'
+         + 'exposed by <span class="to">'+esc(src?src.name:r.from)+'</span>'
+         + (direct ? ' \u00b7 lands here' : ' \u00b7 lands on <span class="to">'+esc(land?land.name:r.target)+'</span>, which holds this')
+         + (r.note?'<br>'+esc(r.note):'') + '</div></div>';
+    });
+  } else h += '<div class="empty">Nothing routes here \u2014 not directly, not through anything holding it.</div>';
+  h += '</div>';
+
+  /* problems inside */
+  const pl = problemList(n.id);
+  h += '<div class="sec"><h3>Problems inside <b>'+pl.length+'</b></h3>';
+  if(pl.length){
+    pl.slice(0,8).forEach(c=>{
+      h += '<button class="row '+(c.status==='down'?'bad':'wrn')+'" data-go="'+esc(c.id)+'">'
+         + '<span class="mg2">'+esc(T(c.type).mg)+'</span><span class="nm">'+esc(c.name)+'</span>'
+         + '<span class="tail">'+esc(c.status)+'</span></button>';
+    });
+    if(pl.length>8) h += '<div class="empty">+ '+(pl.length-8)+' more.</div>';
+  } else h += '<div class="empty">Everything inside reports up.</div>';
+  h += '</div>';
+
+  body.innerHTML = h;
+  $('#bNew').innerHTML = '<span class="p">+</span>Put something inside';
+  $('#bRoute').innerHTML = '<span class="p">+</span>Expose a route';
+}
+function startRows(){
+  const kids = kidsOf(ROOT);
+  let h = '';
+  kids.forEach(c=>{
+    const cp = problems(c.id);
+    h += '<button class="row '+(c.status==='down'?'bad':c.status==='warn'?'wrn':'')+'" data-go="'+esc(c.id)+'">'
+       + '<span class="mg2">'+esc(T(c.type).mg)+'</span><span class="nm">'+esc(c.name)+'</span>'
+       + '<span class="tail">'+cp.n+' inside'+(cp.down||cp.warn?' <span style="color:'+(cp.down?'var(--fail)':'var(--amber)')+'">'+(cp.down+cp.warn)+'!</span>':'')+'</span></button>';
+  });
+  return h;
+}
+
+/* ---------- status bar ---------- */
+function drawFoot(visN){
+  const all = Object.keys(N).length;
+  let maxd = 0; Object.keys(N).forEach(id=>{ const d=depthOf(id); if(d>maxd) maxd=d; });
+  $('#fCount').innerHTML = '<b>'+all+'</b> assets \u00b7 <b>'+(maxd+1)+'</b> levels \u00b7 <b>'+R.length+'</b> routes';
+  $('#fVis').innerHTML = '<b>'+visN+'</b> drawn \u00b7 <b>'+S.open.size+'</b> open';
+  $('#fSel').innerHTML = S.sel ? 'selected <b>'+esc(N[S.sel].name)+'</b> at level <b>'+(depthOf(S.sel)+1)+'</b>' : '';
+}
+
+/* ---------- ticker ---------- */
+function tick(msg){
+  S.changes++;
+  const el = $('#tickTxt');
+  const t = new Date();
+  const hh = String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0')+':'+String(t.getSeconds()).padStart(2,'0');
+  el.textContent = hh+'  '+msg;
+  el.classList.remove('in'); void el.offsetWidth; el.classList.add('in');
+  $('#tickN').textContent = S.changes>1 ? String(S.changes).padStart(3,'0') : '';
+}
+
+/* =========================================================================
+   VIEW — pan / zoom
+   ========================================================================= */
+function applyView(){
+  gView.setAttribute('transform','translate('+V.x.toFixed(2)+','+V.y.toFixed(2)+') scale('+V.k.toFixed(4)+')');
+  $('#zoomVal').textContent = Math.round(V.k*100)+'%';
+  const d = $('#dots'), sz = 32*V.k;
+  d.style.backgroundSize = sz+'px '+sz+'px';
+  d.style.backgroundPosition = (V.x%sz)+'px '+(V.y%sz)+'px';
+  d.style.opacity = V.k<0.5 ? 0.35 : 1;
+}
+function canvasBox(){ const r = $('#canvasWrap').getBoundingClientRect(); return {w:r.width, h:r.height, r}; }
+const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+let anim = null;
+function animateTo(x,y,k){
+  if(anim) cancelAnimationFrame(anim);
+  if(REDUCED){ V.x=x; V.y=y; V.k=k; applyView(); return; }
+  const x0=V.x, y0=V.y, k0=V.k, t0=performance.now(), D=200;
+  (function step(t){
+    const p = Math.min(1,(t-t0)/D), e = 1-Math.pow(1-p,3);
+    V.x = x0+(x-x0)*e; V.y = y0+(y-y0)*e; V.k = k0+(k-k0)*e; applyView();
+    if(p<1) anim = requestAnimationFrame(step);
+  })(t0);
+}
+function centerOn(id, opt){
+  const p = POS[id]; if(!p) return;
+  const b = canvasBox(), k = (opt&&opt.k)||V.k;
+  const fx = (opt&&opt.fx)!=null ? opt.fx : 0.34;
+  animateTo(b.w*fx - (p.x+NW/2)*k, b.h*0.5 - (p.y+NH/2)*k, k);
+}
+/* keep the node AND the column it just grew inside the viewport */
+function ensureVisible(id){
+  const p = POS[id]; if(!p) return;
+  const b = canvasBox(), k = V.k, m = 44;
+  let x0=p.x, x1=p.x+NW, y0=p.y, y1=p.y+NH;
+  const ks = S.open.has(id) ? kidsOf(id).filter(c=>POS[c.id]).map(c=>POS[c.id]) : [];
+  if(ks.length){
+    x1 = Math.max(x1, ks[0].x + NW);
+    y0 = Math.min(y0, ks[0].y);
+    y1 = Math.max(y1, ks[ks.length-1].y + NH);
+  }
+  if(S.sel===id) Object.keys(EPOS).forEach(rid=>{ const e=EPOS[rid];
+    x1=Math.max(x1,e.x+210); y0=Math.min(y0,e.y); y1=Math.max(y1,e.y+NH); });
+  /* if the node or the column it grew falls outside, advance the camera so the
+     node sits a third in — that leaves room for the next level to grow into */
+  let nx = V.x, ny = V.y;
+  const stepped = x0*k+nx < m || x1*k+nx > b.w-m;
+  if(stepped) nx = b.w*0.30 - x0*k;                     // step the camera forward
+  if(stepped || y0*k+ny < m || y1*k+ny > b.h-m) ny = b.h*0.5 - (p.y+NH/2)*k;
+  if(Math.abs(nx-V.x)>0.5 || Math.abs(ny-V.y)>0.5) animateTo(nx,ny,k);
+}
+/* frame two nodes at once — used after a route is added, so you see it land */
+function frameTwo(a,b){
+  const pa=POS[a], pb=POS[b]; if(!pa||!pb) return;
+  const x0=Math.min(pa.x,pb.x), x1=Math.max(pa.x,pb.x)+NW;
+  const y0=Math.min(pa.y,pb.y), y1=Math.max(pa.y,pb.y)+NH;
+  const bx=canvasBox(), pad=70;
+  const k=Math.max(0.32, Math.min(1, Math.min((bx.w-pad*2)/(x1-x0), (bx.h-pad*2)/(y1-y0))));
+  animateTo(bx.w/2-(x0+x1)/2*k, bx.h/2-(y0+y1)/2*k, k);
+}
+function bbox(){
+  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+  Object.keys(POS).forEach(id=>{ const p=POS[id];
+    x0=Math.min(x0,p.x); y0=Math.min(y0,p.y); x1=Math.max(x1,p.x+NW); y1=Math.max(y1,p.y+NH); });
+  Object.keys(EPOS).forEach(id=>{ const p=EPOS[id];
+    x0=Math.min(x0,p.x); y0=Math.min(y0,p.y); x1=Math.max(x1,p.x+210); y1=Math.max(y1,p.y+NH); });
+  if(x0>x1) return null;
+  return {x0,y0,x1,y1,w:x1-x0,h:y1-y0};
+}
+function fitAll(quiet){
+  const bb = bbox(); if(!bb) return 1;
+  const b = canvasBox(), pad = 46;
+  const k = Math.max(0.22, Math.min(1, Math.min((b.w-pad*2)/bb.w, (b.h-pad*2)/bb.h)));
+  animateTo(b.w/2 - (bb.x0+bb.w/2)*k, b.h/2 - (bb.y0+bb.h/2)*k, k);
+  if(!quiet) tick('fit \u00b7 '+Object.keys(POS).length+' assets drawn at '+Math.round(k*100)+'%');
+  return k;
+}
+function zoomBy(f, cx, cy){
+  const b = canvasBox();
+  if(cx==null){ cx = b.w/2; cy = b.h/2; }
+  const k2 = Math.max(0.15, Math.min(2.2, V.k*f));
+  V.x = cx - (cx - V.x)*(k2/V.k); V.y = cy - (cy - V.y)*(k2/V.k); V.k = k2; applyView();
+}
+
+/* =========================================================================
+   ACTIONS
+   ========================================================================= */
+function select(id, opt){
+  opt = opt||{};
+  if(!N[id]) return;
+  const before = S.open.size;
+  reveal(id);
+  if(S.sel !== id) crumbsAll = false;
+  S.sel = id; S.focus = id;
+  if(opt.expand!==false && kidsOf(id).length) openNode(id);
+  render();
+  const gained = S.open.size - before;
+  if(opt.center) centerOn(id, opt.centerOpt); else ensureVisible(id);
+  persist();
+  if(opt.quiet) return;
+  const n = N[id], k = kidsOf(id).length;
+  tick(n.name+' \u00b7 '+T(n.type).label.toLowerCase()+' \u00b7 level '+(depthOf(id)+1)
+     + (k?' \u00b7 '+k+' inside':' \u00b7 nothing inside yet')
+     + (gained>1?' \u00b7 opened '+gained+' levels on the way':''));
+}
+function toggle(id, silent){
+  const kids = kidsOf(id);
+  if(!kids.length){ if(!silent) tick(N[id].name+' holds nothing yet \u2014 put something inside'); return; }
+  if(S.open.has(id)){
+    collapseSubtree(id);
+    if(!silent) tick('folded '+N[id].name+' \u00b7 '+kids.length+' hidden');
+  } else {
+    openNode(id);
+    if(!silent) tick('opened '+N[id].name+' \u00b7 '+kids.length+' inside');
+  }
+  render(); persist();
+}
+function collapseSubtree(id){
+  closeNode(id);
+  (function w(i){ kidsOf(i).forEach(c=>{ if(S.open.has(c.id)){ closeNode(c.id); w(c.id); } }); })(id);
+}
+function pathOnly(){
+  if(!S.sel){ tick('nothing selected \u2014 pick an asset first'); return; }
+  const keep = new Set([...ancestors(S.sel), S.sel]);
+  const before = S.open.size;
+  S.open = new Set([...S.open].filter(x=>keep.has(x)));
+  S.open.add(ROOT);
+  S.stack = S.stack.filter(x=>S.open.has(x));
+  render(); persist();
+  const k = fitAll(true);
+  tick('path only \u00b7 folded '+Math.max(0,before-S.open.size)+' branches, kept '+(ancestors(S.sel).length+1)
+     + ' levels \u00b7 '+Math.round(k*100)+'%');
+}
+function expandInside(id, cap){
+  cap = cap||140; let n=0;
+  (function w(i){
+    if(n>=cap) return;
+    kidsOf(i).forEach(c=>{ if(n>=cap) return; if(kidsOf(c.id).length && !S.open.has(c.id)){ openNode(c.id); n++; } w(c.id); });
+  })(id);
+  if(kidsOf(id).length) openNode(id);
+  render(); persist();
+  tick('opened everything inside '+N[id].name+' \u00b7 '+n+' branches');
+}
+
+/* ---------- search ---------- */
+function runSearch(q, jump){
+  S.q = q.trim();
+  const el = $('#srchN');
+  if(!S.q){ S.hits=[]; S.hi=0; el.textContent=''; render(); return; }
+  const t = S.q.toLowerCase();
+  S.hits = Object.values(N).filter(n=>
+    n.name.toLowerCase().includes(t) || String(n.sub||'').toLowerCase().includes(t) ||
+    n.type.toLowerCase().includes(t) || n.id.toLowerCase().includes(t) ||
+    Object.values(n.props||{}).some(v=>String(v).toLowerCase().includes(t))
+  ).map(n=>n.id).sort((a,b)=>depthOf(a)-depthOf(b));
+  el.textContent = S.hits.length ? S.hits.length+(S.hits.length===1?' hit':' hits') : 'no hits';
+  if(jump && S.hits.length){ gotoHit(0); } else render();
+}
+function gotoHit(i){
+  if(!S.hits.length) return;
+  S.hi = ((i % S.hits.length) + S.hits.length) % S.hits.length;
+  const id = S.hits[S.hi];
+  $('#srchN').textContent = (S.hi+1)+'/'+S.hits.length;
+  const opened = reveal(id);
+  select(id, {center:true, expand:false, quiet:true, centerOpt:{fx:0.42}});
+  tick('"'+S.q+'" \u2192 '+N[id].name+' at level '+(depthOf(id)+1)
+     + (opened?' \u00b7 opened '+opened+(opened===1?' level':' levels')+' to reach it':'')
+     + ' \u00b7 '+(S.hi+1)+' of '+S.hits.length);
+}
+
+/* =========================================================================
+   CREATE
+   ========================================================================= */
+let newParent = null;
+function openNew(pid){
+  newParent = pid || S.sel || ROOT;
+  const p = N[newParent];
+  $('#newParent').textContent = p.name + '  \u00b7  ' + T(p.type).label.toLowerCase();
+  const sug = T(p.type).kids || [];
+  const all = Object.keys(TYPES).filter(t=>t!=='custom');
+  let o = '';
+  if(sug.length){ o += '<optgroup label="Usual inside a '+esc(T(p.type).label.toLowerCase())+'">'
+    + sug.map(t=>'<option value="'+t+'">'+esc(T(t).label)+'</option>').join('') + '</optgroup>'; }
+  o += '<optgroup label="Any type">'+all.filter(t=>sug.indexOf(t)<0).map(t=>'<option value="'+t+'">'+esc(T(t).label)+'</option>').join('')+'</optgroup>';
+  o += '<option value="__custom">Custom type\u2026</option>';
+  $('#nType').innerHTML = o;
+  $('#nType').value = sug[0] || all[0];
+  $('#wCustom').hidden = true; $('#nCustom').value='';
+  $('#nName').value=''; $('#nSub').value='';
+  document.querySelector('input[name=nStat][value=up]').checked = true;
+  $('#props').innerHTML=''; addProp();
+  $('#newErr').className='hint'; $('#newErr').textContent='It lands inside '+p.name+', attached to it on the canvas.';
+  $('#dlgNew').showModal();
+  setTimeout(()=>$('#nName').focus(),20);
+}
+function addProp(k,v){
+  const d = document.createElement('div'); d.className='prow';
+  d.innerHTML = '<input class="mono pk" placeholder="key" maxlength="28" value="'+esc(k||'')+'">'
+    + '<input class="mono pv" placeholder="value" maxlength="90" value="'+esc(v||'')+'">'
+    + '<button type="button" title="Remove">\u00d7</button>';
+  d.querySelector('button').onclick = ()=>d.remove();
+  $('#props').appendChild(d);
+}
+$('#bAddProp').onclick = ()=>addProp();
+$('#nType').onchange = e=>{
+  const c = e.target.value==='__custom';
+  $('#wCustom').hidden = !c;
+  if(c) setTimeout(()=>$('#nCustom').focus(),10);
+};
+$('#formNew').addEventListener('submit', ev=>{
+  ev.preventDefault();
+  const name = $('#nName').value.trim();
+  if(!name){ $('#newErr').className='err'; $('#newErr').textContent='Give it a name first.'; $('#nName').focus(); return; }
+  let type = $('#nType').value;
+  if(type==='__custom'){
+    type = $('#nCustom').value.trim().toLowerCase().replace(/\s+/g,'-');
+    if(!type){ $('#newErr').className='err'; $('#newErr').textContent='Name the custom type, or pick one from the list.'; $('#nCustom').focus(); return; }
+  }
+  const props = {};
+  $('#props').querySelectorAll('.prow').forEach(r=>{
+    const k = r.querySelector('.pk').value.trim(), v = r.querySelector('.pv').value.trim();
+    if(k) props[k]=v;
+  });
+  const status = (document.querySelector('input[name=nStat]:checked')||{}).value || 'up';
+  const id = 'new-'+(S.seq++)+'-'+Math.random().toString(36).slice(2,6);
+  N[id] = {id, type, name, sub:$('#nSub').value.trim(), status, parent:newParent, props, created:true};
+  reindex();
+  openNode(newParent);
+  $('#dlgNew').close();
+  select(id, {center:true, quiet:true, expand:false, centerOpt:{fx:0.45}});
+  persist();
+  tick('created '+T(type).label.toLowerCase()+' \u00b7 '+name+' inside '+N[newParent].name+' \u00b7 level '+(depthOf(id)+1));
+});
+
+/* ---------- route ---------- */
+let routeFrom = null;
+function openRoute(fid){
+  routeFrom = fid || S.sel || ROOT;
+  const f = N[routeFrom];
+  $('#rtFrom').textContent = f.name + '  \u00b7  ' + T(f.type).label.toLowerCase();
+  const opts = Object.values(N).map(n=>({id:n.id, lab:pathLabel(n.id)})).sort((a,b)=>a.lab.localeCompare(b.lab));
+  $('#rTarget').innerHTML = '<option value="">No target \u2014 just an endpoint</option>'
+    + opts.map(o=>'<option value="'+esc(o.id)+'">'+esc(o.lab)+'</option>').join('');
+  $('#rUrl').value=''; $('#rNote').value='';
+  $('#rtErr').className='hint'; $('#rtErr').textContent='A route with no target is just an endpoint.';
+  $('#dlgRoute').showModal();
+  setTimeout(()=>$('#rUrl').focus(),20);
+}
+function pathLabel(id){
+  const a = ancestors(id).map(x=>N[x].name);
+  const tail = a.length>2 ? [a[0],'\u2026',a[a.length-1]] : a;
+  return (tail.length?tail.join(' \u203a ')+' \u203a ':'') + N[id].name;
+}
+$('#formRoute').addEventListener('submit', ev=>{
+  ev.preventDefault();
+  const url = $('#rUrl').value.trim();
+  if(!url){ $('#rtErr').className='err'; $('#rtErr').textContent='A route needs a URL or an endpoint address.'; $('#rUrl').focus(); return; }
+  const target = $('#rTarget').value || null;
+  const id = 'r-new-'+(S.seq++);
+  R.push({id, from:routeFrom, url, target, note:$('#rNote').value.trim()});
+  $('#dlgRoute').close();
+  select(routeFrom, {expand:false, quiet:true});
+  if(target && POS[target]) frameTwo(routeFrom, target);
+  persist();
+  tick('route added \u00b7 '+shortUrl(url)+(target?' \u2192 '+N[target].name:' \u00b7 endpoint')+' from '+N[routeFrom].name);
+});
+document.querySelectorAll('dialog [data-close]').forEach(b=>b.onclick=()=>b.closest('dialog').close());
+
+/* =========================================================================
+   CONTEXT MENU
+   ========================================================================= */
+const menu = $('#menu');
+function showMenu(id, x, y){
+  const n = N[id], kids = kidsOf(id).length;
+  menu.innerHTML =
+     '<div class="mt">'+esc(T(n.type).mg)+' \u00b7 '+esc(n.name)+'</div>'
+   + '<button class="am" data-a="new">+ Put something inside</button>'
+   + '<button class="am" data-a="route">+ Expose a route</button><hr>'
+   + '<button data-a="toggle"'+(kids?'':' disabled')+'>'+(S.open.has(id)&&kids?'Fold it back':'Open it')+'</button>'
+   + '<button data-a="all"'+(kids?'':' disabled')+'>Open everything inside</button>'
+   + '<button data-a="only">Collapse all but this path</button><hr>'
+   + '<button data-a="center">Centre on it</button>';
+  menu.classList.add('on');
+  const r = menu.getBoundingClientRect();
+  menu.style.left = Math.min(x, innerWidth-r.width-8)+'px';
+  menu.style.top  = Math.min(y, innerHeight-r.height-8)+'px';
+  menu.dataset.id = id;
+  const first = menu.querySelector('button'); if(first) first.focus();
+}
+function hideMenu(){ menu.classList.remove('on'); }
+menu.addEventListener('click', e=>{
+  const b = e.target.closest('button[data-a]'); if(!b) return;
+  const id = menu.dataset.id; hideMenu();
+  switch(b.dataset.a){
+    case 'new': openNew(id); break;
+    case 'route': openRoute(id); break;
+    case 'toggle': toggle(id); break;
+    case 'all': expandInside(id); break;
+    case 'only': select(id,{quiet:true, expand:false}); pathOnly(); break;
+    case 'center': select(id,{center:true, expand:false}); break;
+  }
+});
+document.addEventListener('pointerdown', e=>{ if(!menu.contains(e.target)) hideMenu(); }, true);
+
+/* =========================================================================
+   EVENTS
+   ========================================================================= */
+/* canvas: click / toggle / context */
+let down = null, moved = false;
+svg.addEventListener('pointerdown', e=>{
+  if(e.button===2) return;
+  const g = e.target.closest('.nd');
+  down = {x:e.clientX, y:e.clientY, vx:V.x, vy:V.y, node:g?g.dataset.id:null,
+          tog: !!(e.target.closest('.tgt'))};
+  moved = false;
+  if(!g){ svg.classList.add('drag'); svg.setPointerCapture(e.pointerId); }
+});
+svg.addEventListener('pointermove', e=>{
+  if(!down) return;
+  const dx = e.clientX-down.x, dy = e.clientY-down.y;
+  if(!moved && Math.abs(dx)+Math.abs(dy) > 4) moved = true;
+  if(moved && !down.node){ V.x = down.vx+dx; V.y = down.vy+dy; applyView(); }
+});
+svg.addEventListener('pointerup', e=>{
+  svg.classList.remove('drag');
+  if(!down) return;
+  const d = down; down = null;
+  if(moved) return;
+  if(!d.node){ if(S.sel){ S.sel=null; render(); persist(); tick('deselected'); } return; }
+  if(d.tog){ S.focus = d.node; toggle(d.node); return; }
+  const id = d.node;
+  if(S.sel===id && S.open.has(id) && kidsOf(id).length){ toggle(id); return; }
+  select(id);
+});
+svg.addEventListener('pointercancel', ()=>{ down=null; svg.classList.remove('drag'); });
+svg.addEventListener('contextmenu', e=>{
+  const g = e.target.closest('.nd'); if(!g) return;
+  e.preventDefault();
+  S.focus = g.dataset.id;
+  showMenu(g.dataset.id, e.clientX, e.clientY);
+});
+svg.addEventListener('wheel', e=>{
+  e.preventDefault();
+  const b = canvasBox();
+  if(e.ctrlKey || Math.abs(e.deltaY) > Math.abs(e.deltaX)*1.5){
+    zoomBy(Math.pow(0.9985, e.deltaY*(e.ctrlKey?3:1)), e.clientX-b.r.left, e.clientY-b.r.top);
+  } else { V.x -= e.deltaX; applyView(); }
+}, {passive:false});
+
+/* keyboard on nodes */
+svg.addEventListener('keydown', e=>{
+  const g = e.target.closest && e.target.closest('.nd'); if(!g) return;
+  const id = g.dataset.id, n = N[id];
+  const idx = ORDER.indexOf(id);
+  let go = null;
+  if(e.key==='Enter' || e.key===' '){ e.preventDefault(); select(id); return; }
+  if(e.key==='ArrowRight'){
+    e.preventDefault();
+    if(kidsOf(id).length && !S.open.has(id)){ S.focus=id; toggle(id); return; }
+    if(S.open.has(id) && kidsOf(id).length) go = kidsOf(id)[0].id;
+  } else if(e.key==='ArrowLeft'){
+    e.preventDefault();
+    if(S.open.has(id) && kidsOf(id).length){ S.focus=id; toggle(id); return; }
+    go = n.parent;
+  } else if(e.key==='ArrowDown'){ e.preventDefault(); go = ORDER[idx+1]; }
+  else if(e.key==='ArrowUp'){ e.preventDefault(); go = ORDER[idx-1]; }
+  else if(e.key==='+'){ e.preventDefault(); openNew(id); return; }
+  else return;
+  if(go && POS[go]){ S.focus = go; const el = lNodes.querySelector('[data-id="'+cssEsc(go)+'"]'); if(el){ el.setAttribute('tabindex','0'); el.focus(); ensureVisible(go); } }
+});
+
+/* panel + crumbs delegation */
+document.addEventListener('click', e=>{
+  const c = e.target.closest('[data-crumb]');
+  if(c){ select(c.dataset.crumb, {center:true, expand:false}); return; }
+  if(e.target.closest('[data-more]')){ crumbsAll = true; drawCrumbs(); $('#crumbs').scrollLeft = 9999; return; }
+  const go = e.target.closest('[data-go]');
+  if(go && (go.closest('#side'))){ select(go.dataset.go, {center:true, expand:false}); return; }
+  const tg = e.target.closest('[data-toggle]');
+  if(tg){ toggle(tg.dataset.toggle); return; }
+});
+document.addEventListener('keydown', e=>{
+  const t = e.target;
+  if(t && t.matches && t.matches('[data-go]') && (e.key==='Enter'||e.key===' ')){ e.preventDefault(); select(t.dataset.go,{center:true,expand:false}); }
+});
+
+$('#bNew').onclick = ()=>openNew(S.sel||ROOT);
+$('#bRoute').onclick = ()=>openRoute(S.sel||ROOT);
+document.addEventListener('click', e=>{
+  if(e.target.closest('#bPlusHead')) openNew(S.sel||ROOT);
+  if(e.target.closest('#bDots')){
+    const r = e.target.closest('#bDots').getBoundingClientRect();
+    showMenu(S.sel||ROOT, r.left-150, r.bottom+4);
+  }
+});
+$('#bFit').onclick = ()=>fitAll(); $('#bFit2').onclick = ()=>fitAll();
+$('#bIn').onclick = ()=>zoomBy(1.25); $('#bOut').onclick = ()=>zoomBy(0.8);
+$('#bPath').onclick = pathOnly;
+$('#bHome').onclick = ()=>{ select(ROOT,{center:true, expand:false, quiet:true}); tick('back at the site \u00b7 '+kidsOf(ROOT).length+' inside'); };
+$('#bCollapse').onclick = ()=>{
+  const before = S.open.size;
+  S.open = new Set([ROOT]); S.stack = [];
+  render(); persist(); centerOn(ROOT,{fx:0.3});
+  tick('collapsed everything \u00b7 '+(before-1)+' branches folded');
+};
+let resetArmed = false, resetTimer = null;
+$('#bReset').onclick = ()=>{
+  if(!resetArmed){
+    resetArmed = true; $('#bReset').textContent = 'Reset \u2014 click again';
+    $('#bReset').classList.add('warnish');
+    resetTimer = setTimeout(()=>{ resetArmed=false; $('#bReset').textContent='Reset example'; $('#bReset').classList.remove('warnish'); }, 3200);
+    return;
+  }
+  clearTimeout(resetTimer); resetArmed=false;
+  $('#bReset').textContent='Reset example'; $('#bReset').classList.remove('warnish');
+  seed(); try{ localStorage.removeItem(LS); }catch(err){}
+  lastCrumbs=''; prevVisible=new Set(); render();
+  centerOn(ROOT,{fx:0.3, k:1});
+  tick('example restored \u00b7 '+Object.keys(N).length+' assets \u00b7 '+R.length+' routes \u00b7 anything you made is gone');
+};
+
+/* search: Enter lands on the first match, Enter again walks the rest */
+const srch = $('#srch');
+let jumped = false;
+srch.addEventListener('input', ()=>{ jumped = false; runSearch(srch.value, false); });
+srch.addEventListener('keydown', e=>{
+  if(e.key==='Enter'){
+    e.preventDefault();
+    if(!S.hits.length) return;
+    if(!jumped){ jumped = true; gotoHit(0); } else gotoHit(S.hi + (e.shiftKey?-1:1));
+  }
+  if(e.key==='Escape'){ e.preventDefault(); e.stopPropagation();
+    if(srch.value){ srch.value=''; jumped=false; runSearch('',false); tick('search cleared'); } else srch.blur(); }
+});
+
+/* global keys */
+document.addEventListener('keydown', e=>{
+  const inField = e.target.matches && e.target.matches('input,textarea,select');
+  if(e.key==='/' && !inField){ e.preventDefault(); srch.focus(); srch.select(); return; }
+  if(e.key==='Escape'){
+    if(menu.classList.contains('on')){ hideMenu(); return; }
+    const d = document.querySelector('dialog[open]'); if(d) return;      // dialog closes itself
+    if(inField) return;
+    if(srch.value){ srch.value=''; runSearch('',false); tick('search cleared'); return; }
+    if(S.sel){ const n=N[S.sel]; S.sel=null; render(); persist(); tick('deselected '+n.name); return; }
+    for(let i=S.stack.length-1;i>=0;i--){
+      const id = S.stack[i];
+      if(id!==ROOT && S.open.has(id)){ collapseSubtree(id); render(); persist(); tick('folded '+N[id].name+' \u00b7 back one step'); return; }
+      S.stack.splice(i,1);
+    }
+    tick('nothing left to fold \u2014 you are at the site');
+    return;
+  }
+  if(inField) return;
+  if(e.key==='f'||e.key==='F'){ fitAll(); }
+  else if(e.key==='+'||e.key==='='){ zoomBy(1.25); }
+  else if(e.key==='-'||e.key==='_'){ zoomBy(0.8); }
+  else if(e.key==='0'){ if(S.sel) centerOn(S.sel,{k:1}); else animateTo(120,60,1); }
+  else if(e.key==='n'&&S.sel){ openNew(S.sel); }
+});
+$('#dlgNew').addEventListener('close', ()=>{ if(S.focus) render(); });
+addEventListener('resize', ()=>applyView());
+
+/* =========================================================================
+   BOOT
+   ========================================================================= */
+function boot(){
+  if(!restore()) seed();
+  reindex();
+  render();
+  const b = canvasBox();
+  V.k = 1; V.x = 90; V.y = b.h/2 - (POS[ROOT] ? POS[ROOT].y + NH/2 : 0);
+  applyView();
+  if(S.sel) centerOn(S.sel,{fx:0.34});
+  tick('tidewater-dc \u00b7 '+Object.keys(N).length+' assets \u00b7 click an asset to grow it open');
+}
+boot();
+if(document.fonts && document.fonts.ready) document.fonts.ready.then(()=>{ prevVisible = new Set(Object.keys(POS)); render(); });
+
+/* expose a tiny hook for scripted checks */
+window.__knobas = {
+  select, toggle, openNew, openRoute, fitAll, pathOnly, search:runSearch, gotoHit,
+  state:()=>({sel:S.sel, open:[...S.open], nodes:Object.keys(N).length, routes:R.length,
+              visible:ORDER.length, k:V.k, hits:S.hits.length}),
+  addNode(parent, type, name, sub, status, props){
+    const id='new-'+(S.seq++);
+    N[id]={id,type,name,sub:sub||'',status:status||'up',parent,props:props||{},created:true};
+    reindex(); openNode(parent); select(id,{center:true,quiet:true,expand:false}); persist();
+    tick('created '+type+' \u00b7 '+name+' inside '+N[parent].name); return id;
+  },
+  addRoute(from, url, target, note){
+    const id='r-new-'+(S.seq++); R.push({id,from,url,target:target||null,note:note||''});
+    select(from,{expand:false,quiet:true}); if(target&&POS[target]) frameTwo(from,target); persist();
+    tick('route added \u00b7 '+shortUrl(url)+(target?' \u2192 '+N[target].name:'')); return id;
+  },
+  routesDrawn:()=>document.querySelectorAll('#lRoutes .rt').length,
+  panelText:()=>document.querySelector('#side').innerText,
+};
+</script>
+</body>
+</html>

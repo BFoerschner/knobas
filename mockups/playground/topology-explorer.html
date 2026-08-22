@@ -1,0 +1,587 @@
+<!doctype html>
+<!--
+knobas playground — topology explorer
+A standalone idea page: every asset can hold assets, without limit. Click a rack to open it,
+focus to zoom in, + to put something inside, select a proxy / runtime / service to see its wires.
+Design: D1 Signal. Self-contained; created assets persist in localStorage (Reset clears).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>knobas — topology explorer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#15171A;--panel:#1D2024;--raised:#24282D;--line:#2E3339;--line2:#3A4047;
+  --text:#E7E9EC;--muted:#8B929A;--faint:#5A6169;
+  --amber:#FFB020;--fail:#FF6A5C;--ok:#7FD1A1;--link:#9CC3FF;
+  --sans:"IBM Plex Sans",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;--cond:"Barlow Condensed","Arial Narrow",sans-serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font:13px/1.45 var(--sans)}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--amber);outline-offset:1px}
+input,select,textarea{font:12px var(--mono);color:var(--text);background:var(--bg);border:1px solid var(--line2);border-radius:2px;padding:5px 7px}
+textarea{font-size:11.5px;line-height:1.5}
+.mono{font-family:var(--mono)}
+.eyebrow{font:600 11px/1 var(--cond);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.btn{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 9px;border:1px solid var(--line2);border-radius:2px;font:500 12px var(--sans);background:var(--raised);white-space:nowrap}
+.btn:hover{border-color:var(--muted)}
+.btn.pri{background:var(--amber);color:#1a1405;border-color:var(--amber)}
+.btn.sm{height:22px;padding:0 7px;font-size:11px}
+.btn.quiet{background:none}
+.btn.danger:hover{border-color:var(--fail);color:var(--fail)}
+
+/* ---------- app grid ---------- */
+#app{height:100%;display:grid;grid-template-rows:44px 1fr 24px;grid-template-columns:1fr 380px}
+header{grid-column:1/3;display:flex;align-items:center;gap:14px;padding:0 14px;border-bottom:1px solid var(--line);background:var(--panel)}
+.brand{font:600 15px var(--cond);letter-spacing:.12em;text-transform:uppercase}
+.brand small{color:var(--muted);font:500 11px var(--cond);letter-spacing:.1em;margin-left:8px}
+#crumbs{display:flex;align-items:center;gap:2px;flex:1;min-width:0;overflow-x:auto;scrollbar-width:none;font-family:var(--mono);font-size:12px}
+#crumbs::-webkit-scrollbar{display:none}
+#crumbs .c{display:inline-flex;align-items:center;gap:6px;padding:3px 7px;border-radius:2px;color:var(--muted);white-space:nowrap}
+#crumbs .c:hover{color:var(--text);background:var(--raised)}
+#crumbs .c.on{color:var(--text)}
+#crumbs .sep{color:var(--faint)}
+#crumbs .depth{margin-left:10px;color:var(--faint);font:500 11px var(--cond);letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}
+.search{display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;border:1px solid var(--line2);border-radius:2px;background:var(--bg);width:260px}
+.search input{border:0;background:none;padding:0;flex:1;min-width:0}
+.search kbd{font:11px var(--mono);color:var(--faint)}
+
+#canvas{position:relative;overflow:auto;padding:14px 10px 40px}
+#wires{position:absolute;left:0;top:0;pointer-events:none;overflow:visible}
+#wires path{fill:none;stroke:var(--amber);stroke-width:1.25;opacity:.9}
+#wires path.in{stroke-dasharray:4 3}
+#wires circle{fill:var(--amber)}
+#wires text{font:10px var(--mono);fill:var(--amber)}
+
+aside{border-left:1px solid var(--line);background:var(--panel);overflow:auto;padding:14px 16px 40px}
+footer{grid-column:1/3;display:flex;align-items:center;gap:18px;padding:0 14px;border-top:1px solid var(--line);font:11px var(--mono);color:var(--muted);background:var(--panel)}
+footer .sp{flex:1}
+footer .amber{color:var(--amber)}
+
+/* ---------- racks (nested nodes) ---------- */
+.node{position:relative;flex:1 1 260px;max-width:100%;margin:5px;border:1px solid var(--line);border-radius:2px;background:rgba(255,255,255,.022);min-width:0}
+.node.root{margin:0;flex:1 1 100%}
+.node.open{flex-basis:100%}
+.node.sel{border-color:var(--amber)}
+.node.dim{opacity:.28}
+.node.flash{animation:flash 1.2s ease-out}
+@keyframes flash{0%{box-shadow:0 0 0 2px var(--amber)}100%{box-shadow:0 0 0 0 transparent}}
+.hd{display:flex;align-items:center;gap:8px;padding:6px 8px;min-height:32px;cursor:pointer;user-select:none}
+.hd:hover{background:rgba(255,255,255,.03)}
+.node.sel>.hd{background:rgba(255,176,32,.06)}
+.lamp{width:7px;height:7px;border-radius:50%;background:var(--line2);flex:none;border:1px solid transparent}
+.st-up>.hd .lamp{background:var(--ok)}
+.st-warn>.hd .lamp{background:var(--amber)}
+.st-down>.hd .lamp{background:var(--fail)}
+.st-none>.hd .lamp{background:none;border-color:var(--faint)}
+.mg{display:inline-flex;align-items:center;justify-content:center;width:24px;height:16px;border:1px solid var(--line2);border-radius:2px;font:500 10px var(--mono);color:var(--muted);letter-spacing:.05em;flex:none}
+.nm{font:500 12.5px var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sub{font:11px var(--mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+.cnt{font:11px var(--mono);color:var(--faint);white-space:nowrap;margin-left:auto}
+.cnt b{font-weight:400;color:var(--amber)}
+.hd .tools{display:none;gap:2px;margin-left:4px}
+.hd:hover .tools,.node.sel>.hd .tools{display:inline-flex}
+.ib{width:22px;height:20px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line2);border-radius:2px;color:var(--muted);font:500 12px var(--mono)}
+.ib:hover{color:var(--text);border-color:var(--muted)}
+.chev{width:10px;color:var(--faint);font:10px var(--mono);flex:none;text-align:center}
+.peek{display:flex;flex-wrap:wrap;gap:4px;padding:0 8px 8px 28px}
+.pk{display:inline-flex;align-items:center;gap:5px;height:18px;padding:0 6px;border:1px solid var(--line);border-radius:2px;font:11px var(--mono);color:var(--muted);cursor:pointer;max-width:100%}
+.pk:hover{color:var(--text);border-color:var(--muted)}
+.pk .lamp{width:5px;height:5px}
+.pk.st-up .lamp{background:var(--ok)}.pk.st-warn .lamp{background:var(--amber)}.pk.st-down .lamp{background:var(--fail)}.pk.st-none .lamp{background:none;border-color:var(--faint)}
+.pk.more{border-style:dashed}
+.kids{display:flex;flex-wrap:wrap;align-items:flex-start;padding:4px 4px 4px 10px;margin-left:12px;border-left:1px solid var(--line2);border-top:1px solid var(--line)}
+.kids.empty{padding:10px 12px;color:var(--faint);font:11px var(--mono)}
+.kids.empty button{color:var(--link);font:inherit}
+.rts{display:flex;flex-wrap:wrap;gap:4px;padding:0 8px 8px 28px}
+.rt{display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 7px;border:1px solid var(--line2);border-radius:2px;font:11px var(--mono);color:var(--link);cursor:pointer;max-width:100%;min-width:0}
+.rt .u{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.rt:hover{border-color:var(--link)}
+.rt .arr{color:var(--faint)}
+.rt .tg{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rt.ep{color:var(--muted)}
+.rt.sel{border-color:var(--amber);color:var(--amber)}
+.empty-root{padding:40px;color:var(--muted);text-align:center}
+
+/* ---------- side panel ---------- */
+.ph{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+.ph .mg{width:28px;height:18px;font-size:11px}
+.ph h2{margin:0;font:500 18px var(--mono);letter-spacing:-.01em}
+.ptype{font:600 12px var(--cond);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.pstat{display:inline-flex;align-items:center;gap:6px;font:11px var(--mono);color:var(--muted)}
+.pstat .lamp{width:7px;height:7px}
+.sec{margin-top:18px;padding-top:10px;border-top:1px solid var(--line)}
+.sec .eyebrow{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.sec .eyebrow .sp{flex:1}
+.sec .eyebrow .n{color:var(--faint);letter-spacing:0;font:11px var(--mono);text-transform:none}
+.kv{display:grid;grid-template-columns:minmax(90px,auto) 1fr;gap:3px 12px;font:12px var(--mono)}
+.kv .k{color:var(--muted)}
+.kv .v{word-break:break-word}
+.kv .v.secret{color:var(--faint);letter-spacing:.15em}
+.chain{display:flex;flex-wrap:wrap;gap:4px;align-items:center;font:11px var(--mono);color:var(--faint)}
+.row{display:flex;align-items:center;gap:8px;padding:5px 6px;margin:0 -6px;border-radius:2px;font:12px var(--mono);cursor:pointer}
+.row:hover{background:var(--raised)}
+.row .nm{flex:1}
+.row .r{color:var(--muted);font-size:11px;white-space:nowrap}
+.row.amber .r{color:var(--amber)}
+.row.fail .r{color:var(--fail)}
+.rrow{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:6px;margin:0 -6px;border-radius:2px;font:11.5px var(--mono);cursor:pointer}
+.rrow:hover{background:var(--raised)}
+.rrow .u{color:var(--link);word-break:break-all}
+.rrow .t{color:var(--muted);grid-column:1/3}
+.rrow .t b{font-weight:400;color:var(--text)}
+.note{font-size:12px;color:var(--muted);margin:0}
+.acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.prop-add{display:grid;grid-template-columns:1fr 1fr auto;gap:6px;margin-top:8px}
+.prop-add input{min-width:0}
+.hint{font:11px var(--mono);color:var(--faint);margin-top:6px}
+.muted{color:var(--muted)}
+
+/* ---------- dialog ---------- */
+#scrim{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:20}
+#scrim.on{display:flex}
+.dlg{width:520px;max-width:calc(100vw - 40px);max-height:calc(100vh - 60px);overflow:auto;background:var(--panel);border:1px solid var(--line2);border-radius:2px;padding:16px 18px 18px}
+.dlg h3{margin:0 0 2px;font:500 16px var(--mono)}
+.dlg .where{font:11px var(--mono);color:var(--muted);margin-bottom:14px}
+.f{display:grid;grid-template-columns:120px 1fr;gap:8px 12px;align-items:center;margin-bottom:8px}
+.f label{font:600 11px var(--cond);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.f textarea{min-height:64px}
+.types{display:flex;flex-wrap:wrap;gap:4px}
+.tp{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border:1px solid var(--line2);border-radius:2px;font:11px var(--mono);color:var(--muted)}
+.tp:hover{color:var(--text)}
+.tp.on{border-color:var(--amber);color:var(--text)}
+.tp.sug{border-style:solid}
+.tp:not(.sug){border-style:dashed}
+.dlg .foot{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+.toast{position:fixed;left:50%;bottom:40px;transform:translateX(-50%);background:var(--raised);border:1px solid var(--line2);border-left:2px solid var(--amber);padding:8px 12px;font:12px var(--mono);z-index:30;opacity:0;transition:opacity .15s}
+.toast.on{opacity:1}
+@media (prefers-reduced-motion:reduce){.node.flash{animation:none}.toast{transition:none}}
+@media (max-width:1100px){#app{grid-template-columns:1fr 320px}.search{width:180px}}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="brand">knobas<small>topology explorer</small></div>
+    <div id="crumbs"></div>
+    <label class="search"><span class="muted">⌕</span><input id="q" placeholder="find anything inside…" autocomplete="off"><kbd>/</kbd></label>
+    <button class="btn" data-act="new-in-root">+ New in view</button>
+    <button class="btn quiet" data-act="reset" title="Forget everything you created here">Reset</button>
+  </header>
+  <main id="canvas"><svg id="wires"></svg><div id="tree"></div></main>
+  <aside id="panel"></aside>
+  <footer><span id="fcount"></span><span id="fdepth"></span><span class="sp"></span><span id="fwires"></span><span>local only · nothing syncs from this page</span></footer>
+</div>
+<div id="scrim"><div class="dlg" id="dlg" role="dialog" aria-modal="true"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* =========================================================================
+   Data model
+   node  = { id, type, name, sub, status: up|warn|down|none, parent, props:{}, created?:true }
+   route = { id, from, url, target|null, note }   from = the node that exposes it
+   Types are open: anything can hold anything; TYPES only supplies monograms and suggestions.
+   ========================================================================= */
+const TYPES = {
+  site:       {mg:'DC',label:'Site',              kids:['hypervisor','network','proxy']},
+  hypervisor: {mg:'HV',label:'Hypervisor',        kids:['vm']},
+  vm:         {mg:'VM',label:'Virtual machine',   kids:['engine','service','db','proxy']},
+  engine:     {mg:'EN',label:'Container engine',  kids:['container']},
+  container:  {mg:'CT',label:'Container',         kids:['service','runtime','db','proxy']},
+  service:    {mg:'SV',label:'Service',           kids:['module','app']},
+  module:     {mg:'MD',label:'Module',            kids:[]},
+  runtime:    {mg:'RT',label:'Runtime',           kids:['app']},
+  app:        {mg:'AP',label:'App / scenario',    kids:['step']},
+  step:       {mg:'ST',label:'Step',              kids:['connector']},
+  connector:  {mg:'CN',label:'Connector',         kids:[]},
+  db:         {mg:'DB',label:'Database server',   kids:['database']},
+  database:   {mg:'DB',label:'Database',          kids:['schema']},
+  schema:     {mg:'SC',label:'Schema',            kids:['table']},
+  table:      {mg:'TB',label:'Table',             kids:[]},
+  proxy:      {mg:'RP',label:'Reverse proxy',     kids:['middleware']},
+  middleware: {mg:'MW',label:'Middleware',        kids:[]},
+  network:    {mg:'NW',label:'Network',           kids:[]},
+  custom:     {mg:'··',label:'Custom',            kids:[]},
+};
+const EXPOSERS = new Set(['proxy','runtime','service','app','vm','container']); // types that commonly expose routes; any node may
+
+// [id, type, name, sub, status, parent, props]
+const SEED_NODES = [
+  ['dc','site','tidewater-dc','Hamburg · colocation · 3 hypervisors','up',null,{location:'Hamburg, DE',provider:'colo-north',rack:'R12–R14'}],
+
+  ['pve-01','hypervisor','pve-01','Proxmox VE 8.2 · 2× Xeon Gold · 256 GB','up','dc',{ip:'10.20.0.11',cpu:'2× Xeon Gold 6338',ram:'256 GB',storage:'ceph pool ssd-01'}],
+  ['vm-edge-01','vm','vm-edge-01','Debian 12 · 10.20.1.5 · 2 vCPU · 4 GB','up','pve-01',{ip:'10.20.1.5',os:'Debian 12',vcpu:'2',ram:'4 GB',owner:'Platform (Tomasz)','acme-email':'ops@tidewater.example'}],
+  ['eng-edge','engine','docker','Docker 27.1 · 1 container','up','vm-edge-01',{socket:'/var/run/docker.sock',version:'27.1.1'}],
+  ['ct-traefik','container','traefik','traefik:3.1 · up 41 d · 443/80','up','eng-edge',{image:'traefik:3.1',ports:'443, 80, 8080 (dashboard)',restart:'unless-stopped'}],
+  ['rp-traefik','proxy','Traefik','6 routes · ACME · auth-forward','up','ct-traefik',{software:'Traefik 3.1',resolver:'letsencrypt (internal CA)',dashboard:'http://10.20.1.5:8080'}],
+  ['mw-auth','middleware','auth-forward','forwardAuth → sso.tidewater.internal','up','rp-traefik',{address:'https://sso.tidewater.internal/verify',trustForwardHeader:'true'}],
+
+  ['vm-pay-stage-01','vm','vm-pay-stage-01','Ubuntu 24.04 · 10.20.5.11 · 4 vCPU · 16 GB','up','pve-01',{ip:'10.20.5.11',os:'Ubuntu 24.04',vcpu:'4',ram:'16 GB',owner:'Payments'}],
+  ['eng-stage','engine','docker','Docker 27.1 · 3 containers · compose payments-stage','up','vm-pay-stage-01',{compose:'payments-stage',version:'27.1.1'}],
+  ['ct-payout-stage','container','payout-service','payout-service:1.9.0-rc1 · up 2 h · :8080','up','eng-stage',{image:'ghcr.io/tidewater/payout-service:1.9.0-rc1',ports:'8080',candidate:'PR #142 · build #1188'}],
+  ['svc-payout-stage','service','payout-service','Rust · 1.9.0-rc1 · :8080','up','ct-payout-stage',{language:'Rust',version:'1.9.0-rc1',repo:'tidewater/payout-service',health:'/health'}],
+  ['ct-ledger-stage','container','ledger-api','ledger-api:2.3.0 · :8090','up','eng-stage',{image:'ghcr.io/tidewater/ledger-api:2.3.0',ports:'8090'}],
+  ['svc-ledger-stage','service','ledger-api','Kotlin · 2.3.0 · :8090','up','ct-ledger-stage',{language:'Kotlin',version:'2.3.0',repo:'tidewater/ledger-api'}],
+  ['ct-pg-stage','container','pg-payments-stage','postgres:16.3 · :5432 · 6 GB','up','eng-stage',{image:'postgres:16.3',ports:'5432',volume:'pgdata-stage'}],
+  ['db-stage','db','postgres','PostgreSQL 16.3 · 1 database','up','ct-pg-stage',{version:'16.3',max_connections:'200'}],
+  ['dbn-stage','database','payments','6 GB · 2 schemas','up','db-stage',{owner:'payments',encoding:'UTF8'}],
+  ['sch-stage','schema','public','3 tables','up','dbn-stage',{}],
+  ['tb-stage-1','table','payouts','412 rows pending','up','sch-stage',{}],
+  ['tb-stage-2','table','ledger_entries','1.2 M rows','up','sch-stage',{}],
+  ['tb-stage-3','table','refunds','','up','sch-stage',{}],
+
+  ['pve-02','hypervisor','pve-02','Proxmox VE 8.2 · 2× EPYC · 512 GB','up','dc',{ip:'10.20.0.12',cpu:'2× EPYC 7543',ram:'512 GB'}],
+  ['vm-pay-01','vm','vm-pay-01','Ubuntu 24.04 · 10.20.4.11 · 8 vCPU · 32 GB','warn','pve-02',{ip:'10.20.4.11',os:'Ubuntu 24.04',vcpu:'8',ram:'32 GB',owner:'Payments','backup-window':'02:00–03:00','last-patched':'2026-08-10'}],
+  ['eng-pay','engine','docker','Docker 27.1 · 4 containers · compose payments','warn','vm-pay-01',{compose:'payments',version:'27.1.1'}],
+  ['ct-payout-prod','container','payout-service','payout-service:1.8.2 · up 11 d · :8080','up','eng-pay',{image:'ghcr.io/tidewater/payout-service:1.8.2',ports:'8080','deployed-from':'build #1180'}],
+  ['svc-payout-prod','service','payout-service','Rust · 1.8.2 · :8080','up','ct-payout-prod',{language:'Rust',version:'1.8.2',repo:'tidewater/payout-service',health:'/health'}],
+  ['mod-sepa','module','sepa','SEPA batch builder · retry policy','up','svc-payout-prod',{backoff:'base 30 s · factor 2 · max 5',jitter:'±10 %'}],
+  ['mod-psp','module','psp-client','PSP HTTP client','up','svc-payout-prod',{timeout:'60 s'}],
+  ['ct-ledger-prod','container','ledger-api','ledger-api:2.3.0 · up 11 d · :8090','up','eng-pay',{image:'ghcr.io/tidewater/ledger-api:2.3.0',ports:'8090'}],
+  ['svc-ledger-prod','service','ledger-api','Kotlin · 2.3.0 · :8090','up','ct-ledger-prod',{language:'Kotlin',version:'2.3.0',repo:'tidewater/ledger-api'}],
+  ['ct-worker-prod','container','payout-worker','payout-service:1.8.2 --worker · exited 137 at 11:58','down','eng-pay',{image:'ghcr.io/tidewater/payout-service:1.8.2',command:'--worker',exit:'137 (OOM)'}],
+  ['svc-worker-prod','service','payout-worker','Rust · batch worker · not running','down','ct-worker-prod',{language:'Rust',queue:'payouts.pending'}],
+  ['ct-dash-prod','container','payout-dashboard','payout-dashboard:0.9.4 · :3000 · slow','warn','eng-pay',{image:'ghcr.io/tidewater/payout-dashboard:0.9.4',ports:'3000'}],
+  ['svc-dash-prod','service','payout-dashboard','Node · 0.9.4 · 8 400 ms · PAY-240','warn','ct-dash-prod',{language:'Node 22',version:'0.9.4',ticket:'PAY-240'}],
+
+  ['vm-db-01','vm','vm-db-01','Ubuntu 24.04 · 10.20.4.20 · 8 vCPU · 64 GB · 1 TB','up','pve-02',{ip:'10.20.4.20',os:'Ubuntu 24.04',vcpu:'8',ram:'64 GB',disk:'1 TB nvme',owner:'Platform'}],
+  ['db-prod','db','postgresql','PostgreSQL 16.3 · system service · 2 databases','up','vm-db-01',{version:'16.3',service:'postgresql@16-main',max_connections:'400'}],
+  ['dbn-prod','database','payments','48 GB · 3 schemas','up','db-prod',{owner:'payments',encoding:'UTF8'}],
+  ['sch-prod','schema','public','5 tables','up','dbn-prod',{}],
+  ['tb-prod-1','table','payouts','9.8 M rows','up','sch-prod',{}],
+  ['tb-prod-2','table','ledger_entries','41 M rows','up','sch-prod',{}],
+  ['tb-prod-3','table','refunds','320 k rows','up','sch-prod',{}],
+  ['sch-prod-2','schema','audit','2 tables','up','dbn-prod',{}],
+  ['dbn-prod-2','database','flowrun','2 GB · Flowrun state','up','db-prod',{owner:'flowrun'}],
+
+  ['pve-03','hypervisor','pve-03','Proxmox VE 8.2 · 2× EPYC · 256 GB','warn','dc',{ip:'10.20.0.13',cpu:'2× EPYC 7443',ram:'256 GB'}],
+  ['vm-lowcode-01','vm','vm-lowcode-01','Ubuntu 22.04 · 10.20.6.20 · 8 vCPU · 32 GB','warn','pve-03',{ip:'10.20.6.20',os:'Ubuntu 22.04',vcpu:'8',ram:'32 GB',owner:'Integrations (Lena)'}],
+  ['eng-lc','engine','docker','Docker 26.1 · 2 containers','warn','vm-lowcode-01',{version:'26.1.4'}],
+  ['ct-fr-prod','container','flowrun-prod','flowrun:4.1.7 · up 23 d · :9000','up','eng-lc',{image:'registry.tidewater.internal/flowrun:4.1.7',ports:'9000',volume:'flowrun-prod'}],
+  ['rt-fr-prod','runtime','Flowrun prod','4.1.7 · 3 scenarios · 1 worker pool','up','ct-fr-prod',{version:'4.1.7',workers:'8',state:'database flowrun on vm-db-01'}],
+  ['app-sepa-prod','app','sepa-payout-export','v12 · cron 0 13 * * * · ok 13:00 · 2 m 14 s','up','rt-fr-prod',{version:'v12',trigger:'cron 0 13 * * *',owner:'Mara',lastRun:'#8812 ok 13:00',ticket:'PAY-231'}],
+  ['st-sepa-1','step','fetch-pending-payouts','SQL · 412 rows','up','app-sepa-prod',{kind:'query',timeout:'30 s'}],
+  ['cn-pg-prod','connector','pg-payments','PostgreSQL · payments@vm-db-01','up','st-sepa-1',{dsn:'postgres://flowrun@10.20.4.20/payments',secret:'vault:flowrun/pg-payments'}],
+  ['st-sepa-2','step','build-sepa-batch','transform · pain.001','up','app-sepa-prod',{kind:'transform',schema:'pain.001.001.09'}],
+  ['st-sepa-3','step','post-psp-batch','HTTP POST · 3 retries','up','app-sepa-prod',{kind:'http',retries:'3',backoff:'30 s × 2'}],
+  ['cn-psp-prod','connector','psp-prod','HTTPS · api.psp-partner.example','up','st-sepa-3',{url:'https://api.psp-partner.example/v2/batches',auth:'mTLS',secret:'vault:flowrun/psp-prod'}],
+  ['st-sepa-4','step','write-ledger','HTTP POST → ledger-api','up','app-sepa-prod',{kind:'http'}],
+  ['cn-ledger-prod','connector','ledger-api','HTTPS via traefik · /v1/ledger','up','st-sepa-4',{url:'https://ledger.tidewater.internal/v1/ledger',auth:'service token'}],
+  ['app-invoice-prod','app','invoice-sync','v7 · hourly · ok 14:00 · 41 s','up','rt-fr-prod',{version:'v7',trigger:'cron hourly',owner:'Lena'}],
+  ['st-inv-1','step','pull-invoices','HTTP GET · erp','up','app-invoice-prod',{kind:'http'}],
+  ['st-inv-2','step','upsert-ledger','HTTP POST → ledger-api','up','app-invoice-prod',{kind:'http'}],
+  ['app-customs-prod','app','customs-docs-fetch','v21 · webhook · ok 13:45 · 12 s','up','rt-fr-prod',{version:'v21',trigger:'webhook',owner:'Tomasz'}],
+  ['st-cus-1','step','verify-signature','HMAC','up','app-customs-prod',{kind:'verify'}],
+  ['st-cus-2','step','fetch-document','HTTP GET · customs portal','up','app-customs-prod',{kind:'http'}],
+  ['cn-customs','connector','customs-portal','HTTPS · portal.zoll.example','up','st-cus-2',{url:'https://portal.zoll.example/api/docs',auth:'client cert'}],
+
+  ['ct-fr-stage','container','flowrun-stage','flowrun:4.2.1 · :9001 · down since 12:40','down','eng-lc',{image:'registry.tidewater.internal/flowrun:4.2.1',ports:'9001'}],
+  ['rt-fr-stage','runtime','Flowrun stage','4.2.1 · 3 scenarios · not responding','down','ct-fr-stage',{version:'4.2.1',workers:'4'}],
+  ['app-sepa-stage','app','sepa-payout-export','v13 · failed 12:40 · PSP sandbox timeout','down','rt-fr-stage',{version:'v13',trigger:'cron 0 13 * * *',owner:'Mara',lastRun:'#8811 failed 12:40',ticket:'PAY-231'}],
+  ['st-sepa-s3','step','post-psp-batch','HTTP POST · timed out 3/3','down','app-sepa-stage',{kind:'http',retries:'3'}],
+  ['cn-psp-sandbox','connector','psp-sandbox','HTTPS · sandbox.psp-partner.example','down','st-sepa-s3',{url:'https://sandbox.psp-partner.example/v2/batches',auth:'mTLS'}],
+  ['app-invoice-stage','app','invoice-sync','v7 · hourly','none','rt-fr-stage',{version:'v7'}],
+  ['app-customs-stage','app','customs-docs-fetch','v21 · webhook','none','rt-fr-stage',{version:'v21'}],
+
+  ['vm-lowcode-dev-01','vm','vm-lowcode-dev-01','Ubuntu 22.04 · 10.20.6.30 · 4 vCPU · 16 GB','up','pve-03',{ip:'10.20.6.30',os:'Ubuntu 22.04',owner:'Integrations'}],
+  ['eng-dev','engine','docker','Docker 26.1 · 1 container','up','vm-lowcode-dev-01',{}],
+  ['ct-fr-dev','container','flowrun-dev','flowrun:4.2.1 · :9000 · VPN only','up','eng-dev',{image:'registry.tidewater.internal/flowrun:4.2.1',ports:'9000'}],
+  ['rt-fr-dev','runtime','Flowrun dev','4.2.1 · 4 scenarios','up','ct-fr-dev',{version:'4.2.1'}],
+  ['app-sepa-dev','app','sepa-payout-export','v14 · deployed yesterday 17:45','up','rt-fr-dev',{version:'v14'}],
+  ['app-invoice-dev','app','invoice-sync','v7','up','rt-fr-dev',{version:'v7'}],
+  ['app-refund-dev','app','refund-reconciliation','v3 · manual · ok today · PAY-228','up','rt-fr-dev',{version:'v3',ticket:'PAY-228'}],
+  ['app-customs-dev','app','customs-docs-fetch','v21','up','rt-fr-dev',{version:'v21'}],
+
+  ['net-prod','network','vlan-20 payments','10.20.4.0/24 · prod','up','dc',{cidr:'10.20.4.0/24',gateway:'10.20.4.1'}],
+];
+
+// [id, from, url, target, note]
+const SEED_ROUTES = [
+  ['r-payouts','rp-traefik','https://payouts.tidewater.internal','svc-payout-prod','→ :8080 · cert expires in 9 days · auth-forward'],
+  ['r-ledger','rp-traefik','https://ledger.tidewater.internal','svc-ledger-prod','→ :8090 · auth-forward'],
+  ['r-dashboard','rp-traefik','https://dashboard.tidewater.internal','svc-dash-prod','→ :3000 · 8 400 ms'],
+  ['r-flows','rp-traefik','https://flows.tidewater.internal','rt-fr-prod','→ :9000'],
+  ['r-flows-stage','rp-traefik','https://flows-stage.tidewater.internal','rt-fr-stage','→ :9001 · down'],
+  ['r-payouts-stage','rp-traefik','https://payouts-stage.tidewater.internal','svc-payout-stage','→ :8080 · auth-forward'],
+  ['r-traefik-dash','rp-traefik','http://10.20.1.5:8080/dashboard','rp-traefik','Traefik dashboard · internal only'],
+  ['r-fr-api','rt-fr-prod','https://flows.tidewater.internal/api',null,'Flowrun REST API · PAT'],
+  ['r-fr-hook-customs','rt-fr-prod','https://flows.tidewater.internal/hooks/customs-docs-fetch','app-customs-prod','webhook · HMAC'],
+  ['r-fr-run-sepa','rt-fr-prod','https://flows.tidewater.internal/run/sepa-payout-export','app-sepa-prod','manual trigger · PAT'],
+  ['r-fr-stage-hook','rt-fr-stage','https://flows-stage.tidewater.internal/hooks/customs-docs-fetch','app-customs-stage','webhook'],
+  ['r-payout-health','svc-payout-prod','http://10.20.4.11:8080/health',null,'liveness · monitored'],
+  ['r-payout-v1','svc-payout-prod','http://10.20.4.11:8080/v1/payouts',null,'internal API'],
+  ['r-ledger-v1','svc-ledger-prod','http://10.20.4.11:8090/v1/ledger',null,'internal API · used by Flowrun write-ledger'],
+  ['r-pg','db-prod','postgres://10.20.4.20:5432',null,'TCP · monitored'],
+];
+
+/* ---------- state ---------- */
+let N = {}, R = [];
+const S = { root:'dc', sel:null, open:new Set(), q:'', seq:1 };
+const LS = 'knobas-topology-playground';
+
+function seed(){
+  N = {}; R = [];
+  SEED_NODES.forEach(a=>{ N[a[0]] = {id:a[0],type:a[1],name:a[2],sub:a[3],status:a[4],parent:a[5],props:a[6]||{}}; });
+  SEED_ROUTES.forEach(a=>R.push({id:a[0],from:a[1],url:a[2],target:a[3],note:a[4]}));
+  S.open = new Set(['dc','pve-02','vm-pay-01','eng-pay','pve-03','vm-lowcode-01','eng-lc','ct-fr-prod']);
+}
+function persist(){ try{ localStorage.setItem(LS, JSON.stringify({N,R,open:[...S.open],root:S.root,seq:S.seq})); }catch(e){} }
+function restore(){ try{ const d=JSON.parse(localStorage.getItem(LS)||'null'); if(!d||!d.N||!d.N.dc) return false; N=d.N; R=d.R; S.open=new Set(d.open||['dc']); S.root=N[d.root]?d.root:'dc'; S.seq=d.seq||1; return true; }catch(e){ return false; } }
+
+/* ---------- helpers ---------- */
+const $ = s=>document.querySelector(s);
+const esc = s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const T = t=>TYPES[t]||{mg:(t||'??').slice(0,2).toUpperCase(),label:t,kids:[]};
+const kids = id=>Object.values(N).filter(n=>n.parent===id);
+function anc(id){ const a=[]; let n=N[id]; while(n&&n.parent){ n=N[n.parent]; if(!n) break; a.unshift(n); } return a; }
+function desc(id){ const out=[]; const walk=p=>kids(p).forEach(k=>{out.push(k);walk(k.id)}); walk(id); return out; }
+const RANK = {down:3,warn:2,up:1,none:0};
+function worst(id){ let w='none'; desc(id).forEach(d=>{ if(RANK[d.status]>RANK[w]) w=d.status; }); return w; }
+function problemsInside(id){ return desc(id).filter(d=>d.status==='down'||d.status==='warn'); }
+const routesFrom = id=>R.filter(r=>r.from===id);
+const routesTo = id=>R.filter(r=>r.target===id);
+function reachableVia(id){ // routes targeting this node or any ancestor (you are reachable through your parents' routes)
+  const out = routesTo(id).map(r=>({r,via:null}));
+  anc(id).forEach(a=>routesTo(a.id).forEach(r=>{ if(r.target!==id) out.push({r,via:a}); }));
+  return out;
+}
+function depthOf(id){ return anc(id).length; }
+function inView(id){ return id===S.root || anc(id).some(a=>a.id===S.root); }
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('on'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('on'),1800); }
+
+/* ---------- render ---------- */
+function render(){
+  syncHash(); renderCrumbs(); renderTree(); renderPanel(); renderFooter();
+  requestAnimationFrame(drawWires);
+}
+function renderCrumbs(){
+  const chain=[...anc(S.root), N[S.root]];
+  $('#crumbs').innerHTML = chain.map((n,i)=>`${i?'<span class="sep">›</span>':''}<button class="c ${n.id===S.root?'on':''}" data-act="focus" data-id="${n.id}"><span class="mg">${esc(T(n.type).mg)}</span>${esc(n.name)}</button>`).join('')
+    + `<span class="depth">depth ${depthOf(S.root)} · ${desc(S.root).length} inside</span>`;
+}
+function renderTree(){
+  const root=N[S.root]; if(!root){ S.root='dc'; return renderTree(); }
+  const q=S.q.trim().toLowerCase();
+  let matches=null;
+  if(q){ matches=new Set(); Object.values(N).forEach(n=>{ if((n.name+' '+n.sub+' '+n.type+' '+Object.values(n.props).join(' ')).toLowerCase().includes(q)) matches.add(n.id); });
+    // open the path to every match inside the view
+    matches.forEach(id=>anc(id).forEach(a=>S.open.add(a.id))); }
+  const keep = matches? new Set([...matches].flatMap(id=>[id,...anc(id).map(a=>a.id)])) : null;
+  $('#tree').innerHTML = box(root, true, keep);
+}
+function box(n, isRoot, keep){
+  const ch=kids(n.id), open=isRoot||S.open.has(n.id), w=worst(n.id), probs=problemsInside(n.id);
+  const rts=routesFrom(n.id);
+  const dim = keep && !keep.has(n.id);
+  const cnt = ch.length? `<span class="cnt">${open?'':ch.length+' inside'}${!open&&probs.length? ` · <b>${probs.length} ${probs.length===1?'problem':'problems'}</b>`:''}${open&&probs.length&&n.status!=='down'&&n.status!=='warn'?`<b>${probs.length} inside</b>`:''}</span>`
+                        : `<span class="cnt">empty</span>`;
+  return `<div class="node st-${n.status} ${isRoot?'root':''} ${open&&ch.length?'open':''} ${S.sel===n.id?'sel':''} ${dim?'dim':''}" data-id="${n.id}">
+    <div class="hd" data-act="toggle" data-id="${n.id}" tabindex="0" role="button" aria-expanded="${open}">
+      <span class="chev">${ch.length?(open?'▾':'▸'):'·'}</span><span class="lamp"></span><span class="mg" title="${esc(T(n.type).label)}">${esc(T(n.type).mg)}</span>
+      <span class="nm">${esc(n.name)}</span><span class="sub">${esc(n.sub)}</span>${cnt}
+      <span class="tools">${isRoot?'':`<button class="ib" data-act="focus" data-id="${n.id}" title="Zoom into ${esc(n.name)}">⤢</button>`}<button class="ib" data-act="new" data-id="${n.id}" title="Put something inside ${esc(n.name)}">+</button></span>
+    </div>
+    ${rts.length? `<div class="rts">${rts.map(r=>routeChip(r)).join('')}</div>`:''}
+    ${open
+      ? (ch.length? `<div class="kids">${ch.map(k=>box(k,false,keep)).join('')}</div>`
+                  : `<div class="kids empty">nothing inside yet — <button data-act="new" data-id="${n.id}">put something here</button></div>`)
+      : (ch.length? `<div class="peek">${ch.slice(0,8).map(k=>`<button class="pk st-${k.status}" data-act="select" data-id="${k.id}" title="${esc(T(k.type).label)}"><span class="lamp"></span>${esc(k.name)}</button>`).join('')}${ch.length>8?`<button class="pk more" data-act="toggle" data-id="${n.id}">+${ch.length-8} more</button>`:''}</div>`:'')}
+  </div>`;
+}
+function routeChip(r){
+  const tg = r.target? N[r.target] : null;
+  const selr = S.sel && (r.from===S.sel || r.target===S.sel);
+  return `<button class="rt ${tg?'':'ep'} ${selr?'sel':''}" data-act="route" data-id="${r.id}" data-route="${r.id}" title="${esc(r.note||'')}"><span class="u">${esc(r.url.replace(/^https?:\/\//,''))}</span>${tg?`<span class="arr">→</span><span class="tg">${esc(tg.name)}</span>`:'<span class="tg">endpoint</span>'}</button>`;
+}
+
+function renderPanel(){
+  const p=$('#panel');
+  const n=S.sel? N[S.sel] : null;
+  if(!n){
+    const root=N[S.root];
+    p.innerHTML = `<div class="eyebrow">Nothing selected</div>
+      <p class="note" style="margin-top:8px">Click a rack to open it and see what it holds. <b>⤢</b> zooms into it so its contents become the whole view — there is no bottom: a hypervisor holds machines, a machine holds an engine, an engine holds containers, a container can hold a runtime, a runtime holds apps, an app holds steps, a step holds connectors.</p>
+      <p class="note">Select a reverse proxy, a runtime or a service to see the routes it exposes as wires. Select anything to see which routes reach it.</p>
+      <div class="sec"><div class="eyebrow">In view <span class="sp"></span><span class="n">${desc(root.id).length}</span></div>
+        ${typeCounts(desc(root.id))}</div>
+      <div class="sec"><div class="eyebrow">Problems inside</div>${problemsInside(root.id).map(d=>row(d)).join('')||'<p class="note">none</p>'}</div>
+      <div class="sec"><div class="eyebrow">Keys</div><div class="kv"><span class="k">click</span><span class="v">open / close a rack</span><span class="k">⤢ · double-click</span><span class="v">zoom into it</span><span class="k">Esc</span><span class="v">deselect, then zoom out</span><span class="k">/</span><span class="v">find</span><span class="k">n</span><span class="v">new inside the selection</span></div></div>`;
+    return;
+  }
+  const ch=kids(n.id), rts=routesFrom(n.id), via=reachableVia(n.id), probs=problemsInside(n.id);
+  const chain=anc(n.id);
+  const props=Object.entries(n.props);
+  p.innerHTML = `
+    <div class="ptype">${esc(T(n.type).label)}${n.created?' · created here':''}</div>
+    <div class="ph"><span class="mg">${esc(T(n.type).mg)}</span><h2>${esc(n.name)}</h2></div>
+    <div class="mono muted" style="font-size:11.5px">${esc(n.sub)||'&nbsp;'}</div>
+    <div class="pstat" style="margin-top:6px"><span class="lamp" style="background:${{up:'var(--ok)',warn:'var(--amber)',down:'var(--fail)',none:'transparent'}[n.status]};border:1px solid ${n.status==='none'?'var(--faint)':'transparent'}"></span>
+      <select data-act="status" data-id="${n.id}" style="padding:2px 4px;font-size:11px">${['up','warn','down','none'].map(s=>`<option ${s===n.status?'selected':''}>${s}</option>`).join('')}</select>
+      ${probs.length?`<span style="color:var(--amber)">· ${probs.length} problem${probs.length>1?'s':''} inside</span>`:''}</div>
+    <div class="acts"><button class="btn sm pri" data-act="new" data-id="${n.id}">+ Put something inside</button><button class="btn sm" data-act="add-route" data-id="${n.id}">+ Expose a route</button>${n.id!==S.root?`<button class="btn sm" data-act="focus" data-id="${n.id}">⤢ Zoom in</button>`:''}</div>
+
+    <div class="sec"><div class="eyebrow">Where it lives</div>
+      <div class="chain">${chain.length? chain.map((a,i)=>`${i?'›':''}<button class="pk st-${a.status}" data-act="select" data-id="${a.id}"><span class="lamp"></span>${esc(a.name)}</button>`).join(' ') : '<span>top of the tree</span>'}</div>
+      <div class="hint">depth ${depthOf(n.id)}</div></div>
+
+    <div class="sec"><div class="eyebrow">Holds <span class="sp"></span><span class="n">${ch.length}${ch.length?' · '+desc(n.id).length+' in total':''}</span></div>
+      ${ch.map(k=>row(k)).join('') || '<p class="note">Nothing inside yet.</p>'}
+      ${ch.length? `<div class="hint">${typeCounts(desc(n.id),true)}</div>`:''}</div>
+
+    <div class="sec"><div class="eyebrow">Exposes <span class="sp"></span><span class="n">${rts.length}</span></div>
+      ${rts.map(r=>rrow(r,'out')).join('') || `<p class="note">No routes exposed by ${esc(n.name)} itself.${EXPOSERS.has(n.type)?' Add one with <em>Expose a route</em>.':''}</p>`}</div>
+
+    <div class="sec"><div class="eyebrow">Reachable via <span class="sp"></span><span class="n">${via.length}</span></div>
+      ${via.map(v=>rrow(v.r,'in',v.via)).join('') || '<p class="note">No route points here. Internal only, or reached through something that is not a route (a queue, a socket).</p>'}</div>
+
+    <div class="sec"><div class="eyebrow">Properties <span class="sp"></span><span class="n">${props.length}</span></div>
+      <div class="kv">${props.map(([k,v])=>`<span class="k">${esc(k)}</span><span class="v ${/secret|password|token/i.test(k)||/^vault:/.test(v)?'secret':''}">${/secret|password|token/i.test(k)?'••••••••':esc(v)}</span>`).join('')}</div>
+      <form class="prop-add" data-act="prop-add" data-id="${n.id}"><input name="k" placeholder="key" aria-label="key"><input name="v" placeholder="value" aria-label="value"><button class="btn sm" type="submit">Add</button></form></div>
+
+    <div class="sec"><div class="eyebrow">Type</div><p class="note">${esc(T(n.type).label)} — usually holds ${T(n.type).kids.length? T(n.type).kids.map(k=>esc(T(k).label.toLowerCase())).join(', ') : 'nothing by convention'}; you can put anything inside regardless.</p></div>
+    <div class="sec"><div class="acts" style="margin-top:0"><button class="btn sm quiet danger" data-act="remove" data-id="${n.id}">Remove ${esc(n.name)}${desc(n.id).length?` and ${desc(n.id).length} inside`:''}</button></div></div>`;
+}
+function row(k){ const w=worst(k.id), pr=problemsInside(k.id).length; return `<div class="row ${k.status==='down'?'fail':k.status==='warn'||pr?'amber':''}" data-act="select" data-id="${k.id}"><span class="lamp" style="background:${{up:'var(--ok)',warn:'var(--amber)',down:'var(--fail)',none:'transparent'}[k.status]};border:1px solid ${k.status==='none'?'var(--faint)':'transparent'}"></span><span class="mg">${esc(T(k.type).mg)}</span><span class="nm">${esc(k.name)}</span><span class="r">${kids(k.id).length?kids(k.id).length+' inside':''}${pr?` · ${pr} ⚠`:''}</span></div>`; }
+function rrow(r,dir,via){ const tg=r.target?N[r.target]:null, fr=N[r.from];
+  return `<div class="rrow" data-act="route" data-id="${r.id}"><span class="u">${esc(r.url)}</span><span class="mono muted">${dir==='out'?'exposed':'incoming'}</span>
+    <span class="t">${dir==='out'? (tg? `→ <b>${esc(tg.name)}</b> <span class="muted">${esc(T(tg.type).label.toLowerCase())}</span>` : 'endpoint · no target inside the tree') : `from <b>${esc(fr?fr.name:'?')}</b>${via?` · reaches <b>${esc(via.name)}</b>, which holds this`:''}`}${r.note?` · ${esc(r.note)}`:''}</span></div>`; }
+function typeCounts(list,inline){ const c={}; list.forEach(d=>c[d.type]=(c[d.type]||0)+1); const e=Object.entries(c).sort((a,b)=>b[1]-a[1]);
+  if(inline) return e.map(([t,n])=>`${n} ${esc(T(t).label.toLowerCase())}`).join(' · ');
+  return `<div class="kv">${e.map(([t,n])=>`<span class="k">${esc(T(t).label)}</span><span class="v">${n}</span>`).join('')}</div>`; }
+function renderFooter(){
+  const all=Object.values(N); const probs=all.filter(n=>n.status==='down'||n.status==='warn');
+  $('#fcount').textContent=`${all.length} assets · ${R.length} routes`;
+  $('#fdepth').textContent=`deepest: ${Math.max(...all.map(n=>depthOf(n.id)))} levels`;
+  $('#fwires').innerHTML = probs.length? `<span class="amber">${probs.length} problems</span>`:'all up';
+}
+
+/* ---------- wires (routes drawn across the nesting) ---------- */
+function visibleEl(id){ // the element for id, or for its nearest ancestor that is rendered
+  let n=N[id]; while(n){ const el=$(`#tree .node[data-id="${n.id}"]`); if(el) return {el,node:n,proxy:n.id!==id}; n=N[n.parent]; } return null;
+}
+function drawWires(){
+  const svg=$('#wires'), cv=$('#canvas');
+  svg.setAttribute('width',cv.scrollWidth); svg.setAttribute('height',cv.scrollHeight);
+  svg.innerHTML='';
+  if(!S.sel){ return; }
+  const cr=cv.getBoundingClientRect();
+  const pt=(r,side)=>side==='b' ? {x:r.left+r.width/2-cr.left+cv.scrollLeft, y:r.bottom-cr.top+cv.scrollTop} : {x:(side==='r'?r.right:r.left)-cr.left+cv.scrollLeft, y:r.top+r.height/2-cr.top+cv.scrollTop};
+  const wires=[];
+  routesFrom(S.sel).forEach(r=>{ if(!r.target||r.target===r.from) return; const chip=$(`#tree [data-route="${r.id}"]`); const v=visibleEl(r.target); if(!chip||!v) return; wires.push({a:chip.getBoundingClientRect(),b:v.el.querySelector(':scope > .hd').getBoundingClientRect(),cls:'out',label:v.proxy?`inside ${v.node.name}`:''}); });
+  reachableVia(S.sel).forEach(({r})=>{ if(r.target===r.from) return; const chip=$(`#tree [data-route="${r.id}"]`); const src=chip||(visibleEl(r.from)||{}).el?.querySelector(':scope > .hd'); const dst=$(`#tree .node[data-id="${S.sel}"] > .hd`); if(!src||!dst) return; wires.push({a:src.getBoundingClientRect(),b:dst.getBoundingClientRect(),cls:'in',label:''}); });
+  let h='';
+  wires.forEach(w=>{ const a=pt(w.a,'b'), b=pt(w.b,'l'); const dy=Math.max(30,Math.abs(b.y-a.y)*.5), dx=Math.max(30,Math.abs(b.x-a.x)*.3);
+    const c1={x:a.x,y:a.y+dy}, c2={x:b.x-dx,y:b.y};
+    const mid={x:(a.x+3*c1.x+3*c2.x+b.x)/8, y:(a.y+3*c1.y+3*c2.y+b.y)/8};
+    h+=`<path class="${w.cls}" d="M${a.x},${a.y} C${c1.x},${c1.y} ${c2.x},${c2.y} ${b.x},${b.y}"/><circle cx="${a.x}" cy="${a.y}" r="2.5"/><circle cx="${b.x}" cy="${b.y}" r="2.5"/>${w.label?`<text x="${mid.x+6}" y="${mid.y-4}">${esc(w.label)}</text>`:''}`; });
+  svg.innerHTML=h;
+}
+
+/* ---------- actions ---------- */
+function select(id,{revealIt=true}={}){
+  S.sel=id;
+  if(revealIt && !inView(id)){ S.root='dc'; }
+  anc(id).forEach(a=>S.open.add(a.id));
+  render();
+  const el=$(`#tree .node[data-id="${id}"] > .hd`); if(el) el.scrollIntoView({block:'nearest',inline:'nearest'});
+}
+function toggle(id){ if(id===S.root) return; if(S.open.has(id)) S.open.delete(id); else S.open.add(id); S.sel=id; render(); persist(); }
+function focus(id){ S.root=id; S.open.add(id); S.sel=null; render(); persist(); $('#canvas').scrollTop=0; }
+function syncHash(){ try{ history.replaceState(null,'',`#root=${S.root}${S.sel?'&sel='+S.sel:''}`); }catch(e){} }
+function readHash(){ const m=Object.fromEntries(location.hash.slice(1).split('&').filter(Boolean).map(kv=>kv.split('='))); if(m.root&&N[m.root]) S.root=m.root; if(m.sel&&N[m.sel]){ S.sel=m.sel; anc(m.sel).forEach(a=>S.open.add(a.id)); } }
+function zoomOut(){ const n=N[S.root]; if(n&&n.parent){ const prev=S.root; S.root=n.parent; S.sel=prev; render(); persist(); } }
+function setStatus(id,s){ N[id].status=s; render(); persist(); toast(`${N[id].name} marked ${s}`); }
+function addProp(id,k,v){ if(!k) return; N[id].props[k]=v; renderPanel(); persist(); toast(`${k} set on ${N[id].name}`); }
+function remove(id){ const n=N[id]; if(!n||!n.parent) return; const ids=new Set([id,...desc(id).map(d=>d.id)]); ids.forEach(i=>delete N[i]); R=R.filter(r=>!ids.has(r.from)&&!ids.has(r.target)); if(ids.has(S.root)) S.root=n.parent; S.sel=n.parent; render(); persist(); toast(`Removed ${n.name}`); }
+function onRoute(rid){ const r=R.find(x=>x.id===rid); if(!r) return;
+  if(r.target && r.target!==S.sel) select(r.target); else select(r.from);
+  // flash the chip
+  const chip=$(`#tree [data-route="${rid}"]`); if(chip) chip.scrollIntoView({block:'nearest'}); }
+
+/* ---------- dialogs ---------- */
+function openDlg(html){ $('#dlg').innerHTML=html; $('#scrim').classList.add('on'); const f=$('#dlg').querySelector('input:not([type=hidden]),select,textarea'); if(f) f.focus(); }
+function closeDlg(){ $('#scrim').classList.remove('on'); $('#dlg').innerHTML=''; }
+function newDialog(parentId){
+  const p=N[parentId]; const sug=T(p.type).kids; const all=Object.keys(TYPES).filter(t=>t!=='custom');
+  const order=[...sug, ...all.filter(t=>!sug.includes(t))];
+  openDlg(`<h3>Put something inside ${esc(p.name)}</h3><div class="where">${[...anc(p.id),p].map(a=>esc(a.name)).join(' › ')} › <b>new</b></div>
+    <form data-act="new-save" data-parent="${p.id}">
+      <div class="f"><label>Type</label><div><div class="types" id="types">${order.map((t,i)=>`<button type="button" class="tp ${sug.includes(t)?'sug':''} ${i===0?'on':''}" data-type="${t}"><span class="mg">${esc(T(t).mg)}</span>${esc(T(t).label)}</button>`).join('')}<button type="button" class="tp" data-type="custom"><span class="mg">··</span>custom…</button></div>
+        <input type="hidden" name="type" value="${order[0]}"><input name="customType" placeholder="custom type name" style="display:none;margin-top:6px;width:100%"><div class="hint">${sug.length?`${esc(T(p.type).label)}s usually hold ${sug.map(t=>esc(T(t).label.toLowerCase())).join(', ')} — solid chips. Dashed ones are allowed too.`:'Anything goes.'}</div></div></div>
+      <div class="f"><label>Name</label><input name="name" required placeholder="e.g. vm-pay-02, flowrun-worker, refund-export"></div>
+      <div class="f"><label>One line</label><input name="sub" placeholder="what a colleague needs at a glance · version · address"></div>
+      <div class="f"><label>Status</label><select name="status"><option>up</option><option>warn</option><option>down</option><option selected>none</option></select></div>
+      <div class="f"><label>Properties</label><textarea name="props" placeholder="key = value, one per line&#10;ip = 10.20.4.12&#10;owner = Payments"></textarea></div>
+      <div class="f"><label>Expose a route</label><div><input name="url" placeholder="https://… (optional)" style="width:100%"><select name="target" style="width:100%;margin-top:6px"><option value="">→ nowhere inside the tree (endpoint)</option>${targetOptions()}</select></div></div>
+      <div class="foot"><button type="button" class="btn" data-act="dlg-close">Cancel</button><button type="submit" class="btn pri">Create inside ${esc(p.name)}</button></div>
+    </form>`);
+}
+function routeDialog(fromId){
+  const n=N[fromId];
+  openDlg(`<h3>Expose a route from ${esc(n.name)}</h3><div class="where">${[...anc(n.id),n].map(a=>esc(a.name)).join(' › ')}</div>
+    <form data-act="route-save" data-from="${n.id}">
+      <div class="f"><label>URL</label><input name="url" required placeholder="https://something.tidewater.internal/path"></div>
+      <div class="f"><label>Points to</label><select name="target"><option value="">nowhere inside the tree (endpoint)</option>${targetOptions(n.id)}</select></div>
+      <div class="f"><label>Note</label><input name="note" placeholder="→ :8080 · auth-forward · cert …"></div>
+      <div class="foot"><button type="button" class="btn" data-act="dlg-close">Cancel</button><button type="submit" class="btn pri">Expose</button></div>
+    </form>`);
+}
+function targetOptions(selfId){ return Object.values(N).filter(n=>n.id!==selfId).sort((a,b)=>depthOf(a.id)-depthOf(b.id)||a.name.localeCompare(b.name)).map(n=>`<option value="${n.id}">${'· '.repeat(depthOf(n.id))}${esc(n.name)} — ${esc(T(n.type).label.toLowerCase())}</option>`).join(''); }
+function parseProps(txt){ const o={}; String(txt||'').split('\n').forEach(l=>{ const m=l.match(/^\s*([^=:]+?)\s*[=:]\s*(.*)$/); if(m) o[m[1]]=m[2]; }); return o; }
+function createNode(parentId,fd){
+  let type=fd.get('type'); if(type==='custom') type=(fd.get('customType')||'custom').trim().toLowerCase()||'custom';
+  const base=(fd.get('name')||'new').trim(); let id=base.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'node'; while(N[id]) id=`${id}-${S.seq++}`;
+  N[id]={id,type,name:base,sub:(fd.get('sub')||'').trim(),status:fd.get('status')||'none',parent:parentId,props:parseProps(fd.get('props')),created:true};
+  const url=(fd.get('url')||'').trim(); if(url) R.push({id:'r-'+id+'-'+(S.seq++),from:id,url,target:fd.get('target')||null,note:'created here'});
+  S.open.add(parentId); closeDlg(); select(id); persist();
+  const el=$(`#tree .node[data-id="${id}"]`); if(el) el.classList.add('flash');
+  toast(`Created ${base} inside ${N[parentId].name}`);
+}
+
+/* ---------- events ---------- */
+document.addEventListener('click',e=>{
+  const b=e.target.closest('[data-act]'); if(!b) return;
+  const act=b.dataset.act, id=b.dataset.id;
+  if(act==='toggle'){ if(e.target.closest('.tools')) return; toggle(id); }
+  else if(act==='select'){ e.stopPropagation(); select(id); }
+  else if(act==='focus'){ e.stopPropagation(); focus(id); }
+  else if(act==='new'){ e.stopPropagation(); newDialog(id); }
+  else if(act==='new-in-root'){ newDialog(S.root); }
+  else if(act==='add-route'){ routeDialog(id); }
+  else if(act==='route'){ e.stopPropagation(); onRoute(id); }
+  else if(act==='remove'){ remove(id); }
+  else if(act==='dlg-close'){ closeDlg(); }
+  else if(act==='reset'){ localStorage.removeItem(LS); seed(); S.root='dc'; S.sel=null; render(); toast('Back to the example'); }
+});
+document.addEventListener('dblclick',e=>{ const hd=e.target.closest('.hd'); if(hd&&hd.dataset.id&&hd.dataset.id!==S.root&&!e.target.closest('.tools')) focus(hd.dataset.id); });
+document.addEventListener('submit',e=>{
+  const f=e.target; if(!f.dataset.act) return; e.preventDefault(); const fd=new FormData(f);
+  if(f.dataset.act==='new-save') createNode(f.dataset.parent,fd);
+  else if(f.dataset.act==='route-save'){ R.push({id:'r-'+(S.seq++),from:f.dataset.from,url:fd.get('url').trim(),target:fd.get('target')||null,note:(fd.get('note')||'').trim()}); closeDlg(); select(f.dataset.from); persist(); toast('Route exposed'); }
+  else if(f.dataset.act==='prop-add'){ addProp(f.dataset.id,fd.get('k').trim(),fd.get('v').trim()); f.reset(); }
+});
+document.addEventListener('change',e=>{ const s=e.target.closest('[data-act="status"]'); if(s) setStatus(s.dataset.id,s.value); });
+$('#dlg').addEventListener('click',e=>{ const t=e.target.closest('.tp'); if(!t) return; $('#dlg [name=type]').value=t.dataset.type; $('#dlg .tp.on')?.classList.remove('on'); t.classList.add('on'); const c=$('#dlg [name=customType]'); c.style.display=t.dataset.type==='custom'?'block':'none'; if(t.dataset.type==='custom') c.focus(); });
+$('#scrim').addEventListener('click',e=>{ if(e.target.id==='scrim') closeDlg(); });
+$('#q').addEventListener('input',e=>{ S.q=e.target.value; render(); });
+$('#q').addEventListener('keydown',e=>{ if(e.key==='Enter'){ const first=$('#tree .node:not(.dim)[data-id] .hd'); const q=S.q.trim().toLowerCase(); const m=Object.values(N).find(n=>q&&(n.name+' '+n.sub+' '+n.type).toLowerCase().includes(q)); if(m) select(m.id); } if(e.key==='Escape'){ e.target.value=''; S.q=''; render(); e.target.blur(); } });
+document.addEventListener('keydown',e=>{
+  if(e.target.matches('input,textarea,select')) { return; }
+  if(e.key==='/'){ e.preventDefault(); $('#q').focus(); }
+  else if(e.key==='Escape'){ if($('#scrim').classList.contains('on')) closeDlg(); else if(S.sel){ S.sel=null; render(); } else zoomOut(); }
+  else if(e.key==='n' && S.sel){ newDialog(S.sel); }
+  else if((e.key==='Enter'||e.key===' ') && e.target.classList.contains('hd')){ e.preventDefault(); toggle(e.target.dataset.id); }
+});
+$('#canvas').addEventListener('scroll',()=>requestAnimationFrame(drawWires));
+window.addEventListener('resize',()=>requestAnimationFrame(drawWires));
+
+/* ---------- boot ---------- */
+try{ if(!restore()) seed(); readHash(); render(); }
+catch(err){ document.body.innerHTML=`<pre style="padding:20px;color:#FF6A5C">topology explorer failed to start: ${esc(err.message)}</pre>`; }
+</script>
+</body>
+</html>
