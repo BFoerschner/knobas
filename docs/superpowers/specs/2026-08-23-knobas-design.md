@@ -181,12 +181,15 @@ Principles that came out of the rounds:
 | Environment matrix / drift view (stage ≠ prod) | In mockup (R2 W3) | Keep as a secondary view? **Open** |
 | Blast radius ("what breaks if this goes down") | In mockup (R2 W2) | Worth keeping as an action on a VM? **Open** |
 
-### 12.3 Monitoring (Uptime Kuma-style adapter)
+### 12.3 Monitoring (Uptime Kuma adapter)
+**knobas does not own monitoring.** Uptime Kuma stays the system of record for monitors, checks, notifications and status pages; knobas syncs from it, attaches monitors to assets and contexts, and routes alerts into the inbox. **Decided 2026-08-23.**
+
 | Feature | Status | Notes |
 |---|---|---|
-| Monitor types: HTTP, TCP, ping, Docker container, certificate expiry; state up / down / warning (response-time threshold); uptime 30 d; 24 h status bar; last checks | Decided | |
+| Adapter reads monitors, current state, response time, uptime, heartbeat history and cert expiry from Uptime Kuma (socket.io API for full data; `/metrics` with an API key for cheap state polling) | Decided | Uptime Kuma has no official REST API; the adapter speaks the socket.io protocol the web UI uses (as `uptime-kuma-api` does). |
+| Monitor types shown as Uptime Kuma defines them (HTTP, TCP, ping, Docker, cert expiry, …); states up / down / pending / warning (response-time threshold is knobas-side) | Decided | |
 | Monitors attach to assets (and through them to contexts); alerts → inbox with Open asset / Ack / Snooze / Restart; Ack marks the alert on the asset | Decided | |
-| *Create monitor for this asset* (type, target, interval), pause, status page link | In mockup | |
+| Write-back limited to what Uptime Kuma exposes: *Create monitor for this asset*, pause/resume, (ack is knobas-local — Uptime Kuma has no ack); deep link to the monitor and to the status page | In mockup | |
 | Smart list: assets with no monitor | In mockup | |
 
 ### 12.4 Low-code runtime (Flowrun-style adapter)
@@ -239,7 +242,7 @@ Rust workspace: `knobas-core` (entities, links, contexts, notes, time), `knobas-
 5. Which asset actions must really write back in v1 (restart container, create monitor, promote scenario)?
 6. Keep the environment-matrix and blast-radius views as secondary asset views, or drop them?
 7. Conflict handling for queued writes: last-write-wins with a diff, or always ask?
-8. Monitoring: Uptime Kuma only for v1, or also a Prometheus/Alertmanager adapter?
+8. ~~Monitoring: Uptime Kuma only for v1, or also a Prometheus/Alertmanager adapter?~~ **Answered 2026-08-23: Uptime Kuma is the monitoring system; knobas syncs from it and does not own monitoring.** A Grafana/Alertmanager adapter is a later option, not v1.
 9. Frontend framework preference (Svelte / Solid / React / keep vanilla)?
 10. Anything from §13 that should move up into v1?
 
