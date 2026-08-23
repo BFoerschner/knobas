@@ -19,7 +19,8 @@ A desktop app (Rust + Tauri) that puts the tools of a working day — Jira-like 
 Principles that came out of the rounds:
 1. **Context first.** You always work *on something*; the app should know what, and everything should be one click from it. **Decided** (Context hub paradigm).
 2. **One box.** Typed search with prefixes and filters reaches everything, including actions. **Decided** (Launcher box).
-3. **Links are the product.** Ticket ↔ branch ↔ PR ↔ build ↔ page ↔ note ↔ asset ↔ monitor. Suggested automatically, confirmed in one click. **Decided**.
+3. **Links are the product.** Ticket ↔ branch ↔ PR ↔ build ↔ page ↔ note ↔ asset ↔ monitor ↔ context. Made by hand anywhere, suggested automatically, confirmed in one click — and **stored locally, never written into the source systems**. **Decided 2026-08-23.** See §5a.
+6. **Your data is a file.** Everything knobas owns (links, contexts, notes, assets, time, smart lists, source configs without secrets) is exportable and importable in plain formats. **Decided 2026-08-23.** See §14.
 4. **Nothing is keyed to git branches** except git itself. Time and context follow what you have open, not HEAD. **Decided**.
 5. **Quiet instrument panel.** Signal design: graphite, hairlines, mono readings, amber only where something moves or is wrong. **Decided** (no ticker strip — **Decided 2026-08-23**).
 
@@ -76,12 +77,27 @@ Principles that came out of the rounds:
 | Feature | Status | Notes |
 |---|---|---|
 | Detail views per type with inline edit: ticket status/priority/assignee/comment; PR approve/comment; build log excerpt, re-run, trigger with parameters; page section edit; note editor | In mockup | Page editing in-app is a stub in most mockups. **Open**: full Confluence editor vs. "edit in browser". |
-| **Links panel** on every item: confirmed links grouped by type, with status readings (build failed, PR 1/2 approvals) | Decided | |
-| **Suggested links** strip with the reason (key in commit message, key in branch name, build parameter, text similarity, tag matches build, host name matches service) and Confirm / Dismiss; dismissed suggestions are not re-proposed | Decided | |
-| *Link to…* picker (search-as-you-type across everything, relation label) | Decided | |
+| **Links panel** on every item: confirmed links grouped by type, with status readings (build failed, PR 1/2 approvals) | Decided | Details in §5a. |
 | **Linked assets** section on work items; *Link asset…*; *Open in Assets* | In mockup (R3) | |
 | Worklogs, estimate, time spent on tickets | In mockup | |
 | Write-back targets: Jira (status, comment, worklog, create), Confluence (page create/edit, publish protocol), Gitea (branch, PR, comment, approve, create repo, pull/push), TeamCity (trigger, re-run), Uptime Kuma (create/pause/ack monitor), Flowrun (run, promote) | Decided | |
+
+---
+
+## 5a. Links — the core object
+
+Links are what knobas adds that no source system has. They are **local**: created and stored in knobas, never pushed into Jira, Confluence, Gitea, TeamCity, Uptime Kuma or Flowrun (those systems keep whatever native links they already have; knobas reads those as *source links* and shows them alongside). **Decided 2026-08-23.**
+
+| Feature | Status | Notes |
+|---|---|---|
+| **A link** = `from` (any entity) · `to` (any entity) · `relation` · `origin` (manual / suggested-confirmed / imported / source) · `created by` · `created at` · optional note | Decided | Entities are addressed by stable ids: source + key/URL for synced items (`jira:PAY-231`, `gitea:tidewater/payout-service#142`, `confluence:ENG/SEPA payout retry design`), local ids for notes/assets/contexts. |
+| **Manual linking everywhere**: *Link to…* on every detail, in the Tab action chain of every search result, by drag where a view supports it (columns, rooms), by typing `[[…]]` in notes; relation picked from a list or typed | Decided | |
+| **Relation types** (open list): related · blocks / blocked by · implements · documents · deploys · runs-on · hosts · exposes · depends-on · monitored-by · in-context · mentions; users can add their own | Decided | |
+| **Suggestions**: detected from keys in commit messages / branch names / build parameters / page text / scenario descriptions, image tags matching builds, host names matching services, text similarity via FTS, and native links in the sources; each shows its reason; Confirm / Dismiss; dismissed pairs are remembered and not re-proposed | Decided | Suggestions are stored too, with their reason and state. |
+| Links are **bidirectional in the UI** (every panel shows both ends), and **transitive for contexts** (a context's members are what it links to, plus what those link to one hop out — configurable) | In mockup | Hop depth: **Open** |
+| Backlinks on notes and assets | In mockup | |
+| Link history: who linked what when; unlink keeps a tombstone so an import can't resurrect it | Proposed | |
+| Bulk linking: multi-select in search results / columns → *Link selected to…* | In mockup (R2 W1) | |
 
 ---
 
@@ -224,6 +240,7 @@ Principles that came out of the rounds:
 | Secrets | OS keychain via Tauri; never in the DB; masked in the UI. |
 | Performance | Local search < 100 ms for ~100 k items; sync incremental per adapter; UI never blocks on a source. |
 | Offline | Everything read works offline; writes queue. |
+| **Export / import** | Everything knobas owns is exportable and importable: links (with relation, origin, reason, dismissed state), contexts and memberships, notes (markdown files with front-matter), the asset tree with properties/routes/relations (YAML or JSON), worklogs and day blocks, smart lists, source configurations **without secrets**. Format: a folder of plain files (`links.jsonl`, `contexts.yaml`, `assets.yaml`, `notes/*.md`, `time.jsonl`, `lists.yaml`, `sources.yaml`) that diffs well and can live in git; a single `.knobas.zip` wraps it. Entity references use the stable ids above so an export re-imports on another machine or after a re-sync. Import = merge by id with a preview (added / changed / conflicting), never a blind overwrite. Synced source data is *not* part of the export (it is re-synced) except as an optional snapshot. **Decided 2026-08-23.** |
 | Accessibility | Keyboard-complete, visible focus, reduced motion, contrast ≥ 4.5:1 on readings. |
 | Privacy | Passive time attribution is opt-in and local only. |
 
@@ -245,6 +262,8 @@ Rust workspace: `knobas-core` (entities, links, contexts, notes, time), `knobas-
 8. ~~Monitoring: Uptime Kuma only for v1, or also a Prometheus/Alertmanager adapter?~~ **Answered 2026-08-23: Uptime Kuma is the monitoring system; knobas syncs from it and does not own monitoring.** A Grafana/Alertmanager adapter is a later option, not v1.
 9. Frontend framework preference (Svelte / Solid / React / keep vanilla)?
 10. Anything from §13 that should move up into v1?
+11. Context membership: direct links only, or one hop out (ticket's PR's build counts)? Configurable per context?
+12. Export: should a shared export (to a colleague) include notes by default, or links/assets/contexts only?
 
 ## Appendix — mockup map
 
