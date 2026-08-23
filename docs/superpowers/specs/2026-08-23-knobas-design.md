@@ -20,9 +20,9 @@ Principles that came out of the rounds:
 1. **Context first.** You always work *on something*; the app should know what, and everything should be one click from it. **Decided** (Context hub paradigm).
 2. **One box.** Typed search with prefixes and filters reaches everything, including actions. **Decided** (Launcher box).
 3. **Links are the product.** Ticket ↔ branch ↔ PR ↔ build ↔ page ↔ note ↔ asset ↔ monitor ↔ context. Made by hand anywhere, suggested automatically, confirmed in one click — and **stored locally, never written into the source systems**. **Decided 2026-08-23.** See §5a.
-6. **Your data is a file.** Everything knobas owns (links, contexts, notes, assets, time, smart lists, source configs without secrets) is exportable and importable in plain formats. **Decided 2026-08-23.** See §14.
 4. **Nothing is keyed to git branches** except git itself. Time and context follow what you have open, not HEAD. **Decided**.
 5. **Quiet instrument panel.** Signal design: graphite, hairlines, mono readings, amber only where something moves or is wrong. **Decided** (no ticker strip — **Decided 2026-08-23**).
+6. **Postgres is the one store.** Everything — the synced copy of every source *and* everything knobas owns (links, contexts, notes, assets, time, smart lists, source configs minus secrets) — lives in one local Postgres database. Export and import are a dump and restore of that database's contents, nothing more. **Decided 2026-08-23.** See §14.
 
 ---
 
@@ -51,7 +51,7 @@ Principles that came out of the rounds:
 | **Sync schedule** per source (default every 5 min); *Sync now* | In mockup | |
 | **Credential health**: PAT expiry countdown, 401 detection → *Re-enter password*, reminder in inbox (snoozable) | In mockup | |
 | **Offline / failed-source write queue**: edits made while a source is 401/offline queue as "pending writes", flush after re-auth; conflicts shown | In mockup | Conflict UI not designed yet. **Open**: merge strategy. |
-| **Local database**: Postgres, full-text index over everything synced, provenance ("synced 4 min ago") on every item | Decided | **Open**: user-installed Postgres as a prerequisite vs. bundled/embedded. |
+| **Local database**: one Postgres database holds the synced copy of every source (with provenance, "synced 4 min ago") **and** all knobas-owned data (links, contexts, notes, assets, time, smart lists, source configs); full-text index over all of it | Decided | Owned tables and synced tables are separate schemas (`knobas` / `sync`) so a dump can include or exclude the cache. **Open**: user-installed Postgres as a prerequisite vs. bundled/embedded. |
 | **Import adapters** (Proxmox, Docker host, Traefik): preview what would be imported, imported assets stay editable | In mockup (R2) | |
 
 ---
@@ -240,7 +240,7 @@ Links are what knobas adds that no source system has. They are **local**: create
 | Secrets | OS keychain via Tauri; never in the DB; masked in the UI. |
 | Performance | Local search < 100 ms for ~100 k items; sync incremental per adapter; UI never blocks on a source. |
 | Offline | Everything read works offline; writes queue. |
-| **Export / import** | Everything knobas owns is exportable and importable: links (with relation, origin, reason, dismissed state), contexts and memberships, notes (markdown files with front-matter), the asset tree with properties/routes/relations (YAML or JSON), worklogs and day blocks, smart lists, source configurations **without secrets**. Format: a folder of plain files (`links.jsonl`, `contexts.yaml`, `assets.yaml`, `notes/*.md`, `time.jsonl`, `lists.yaml`, `sources.yaml`) that diffs well and can live in git; a single `.knobas.zip` wraps it. Entity references use the stable ids above so an export re-imports on another machine or after a re-sync. Import = merge by id with a preview (added / changed / conflicting), never a blind overwrite. Synced source data is *not* part of the export (it is re-synced) except as an optional snapshot. **Decided 2026-08-23.** |
+| **Export / import** | Export = a dump of the knobas database contents; import = restoring it. One archive file (`*.knobas`, a compressed logical dump of the `knobas` schema — links with relation/origin/reason/dismissed state, contexts and memberships, notes, the asset tree with properties/routes/relations, worklogs and day blocks, smart lists, source configurations **without secrets**; the `sync` schema optional since it re-syncs). Entity references use the stable ids from §5a so a dump restores on another machine or after a re-sync. Restore into an empty database is the primary path; restore into a populated one merges by id with a preview (added / changed / conflicting) rather than overwriting. Scheduled automatic exports as backups. Plain-file formats (markdown notes, YAML assets) are at most a secondary *view* of the same data, not the source of truth. **Decided 2026-08-23.** |
 | Accessibility | Keyboard-complete, visible focus, reduced motion, contrast ≥ 4.5:1 on readings. |
 | Privacy | Passive time attribution is opt-in and local only. |
 
@@ -263,7 +263,7 @@ Rust workspace: `knobas-core` (entities, links, contexts, notes, time), `knobas-
 9. Frontend framework preference (Svelte / Solid / React / keep vanilla)?
 10. Anything from §13 that should move up into v1?
 11. Context membership: direct links only, or one hop out (ticket's PR's build counts)? Configurable per context?
-12. Export: should a shared export (to a colleague) include notes by default, or links/assets/contexts only?
+12. Export: should a shared export (to a colleague) include notes by default, or links/assets/contexts only? And should the synced `sync` schema be included by default (faster restore) or excluded (smaller, always fresh)?
 
 ## Appendix — mockup map
 
