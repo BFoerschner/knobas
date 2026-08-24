@@ -15,7 +15,7 @@
 - Postgres runs on **TCP 127.0.0.1** with a per-install port; never Unix sockets (macOS 103-byte socket-path limit under `~/Library/Application Support`).
 - PG version pinned **`=18.6.0`** via `postgresql_embedded = "0.21"`.
 - Every generated FTS column is `GENERATED ALWAYS AS (...) STORED` — PG 18 silently makes unqualified generated columns VIRTUAL, which cannot be GIN-indexed.
-- sqlx: `default-features = false, features = ["runtime-tokio", "tls-none", "postgres", "migrate", "uuid", "chrono", "json"]`. **Runtime-checked queries only in M0** (`sqlx::query`, `query_as` + `FromRow`) — no `query!` macros, no compile-time DATABASE_URL, no offline cache yet. Never pin sqlx 0.8.4 (yanked).
+- sqlx: `default-features = false, features = ["runtime-tokio", "tls-none", "postgres", "derive", "macros", "migrate", "uuid", "chrono", "json"]` (`derive` for `FromRow`, `macros` for `sqlx::migrate!` — both required to compile in sqlx 0.9; amended by ruling, Task 3). **Runtime-checked queries only in M0** (`sqlx::query`, `query_as` + `FromRow`) — no `query!` macros, no compile-time DATABASE_URL, no offline cache yet. Never pin sqlx 0.8.4 (yanked).
 - FTS queries bind **text** into `websearch_to_tsquery('english', $1)` computed once as a FROM item; never bind or SELECT a raw `tsvector`/`tsquery`.
 - Migrations are embedded (`sqlx::migrate!`) and run at startup; `knobas-db` has a `build.rs` with `cargo:rerun-if-changed=migrations`.
 - Entity ids are strings `"<namespace>:<key>"` (namespace = source id like `jira`, or local kind like `note`, `ctx`); the entity's kind lives in `knobas.entity.kind`, not in the id.
@@ -135,7 +135,7 @@ git commit -m "workspace scaffold with quality gate"
 - Produces:
   - `knobas_db::DbConfig { pub root_dir: PathBuf, pub existing_url: Option<String> }` (derives `Clone, Debug`)
   - `knobas_db::EmbeddedDb` with `pub async fn start(cfg: DbConfig) -> Result<EmbeddedDb, DbError>`, `pub fn pool(&self) -> &sqlx::PgPool`, `pub async fn stop(self) -> Result<(), DbError>`
-  - `knobas_db::test_util::test_pool() -> &'static sqlx::PgPool` (one shared embedded instance per test binary; each caller gets the same pool — tests must use unique keys, not truncate)
+  - `knobas_db::test_util::test_pool() -> sqlx::PgPool` (one shared embedded server per test binary; the pool is per-caller/owned — a `&'static PgPool` cannot cross `#[tokio::test]` runtimes without leaking semaphore permits; ruled in Task 3. Tests must use unique keys, not truncate)
 
 - [ ] **Step 1: Write the failing integration test**
 
