@@ -974,6 +974,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "knobas-sync"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "knobas-core",
+ "knobas-db",
+ "knobas-source",
+ "knobas-source-mock",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"

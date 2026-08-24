@@ -1,0 +1,27 @@
+[package]
+name = "knobas-sync"
+edition.workspace = true
+version.workspace = true
+
+# The sync engine: it owns the write side of a sync run. It takes a `PgPool`
+# rather than opening one, so it needs `sqlx` but not `knobas-db` -- the
+# database crate is a test dependency only, which keeps the engine usable from
+# anything holding a pool.
+[dependencies]
+async-trait.workspace = true
+knobas-core = { path = "../knobas-core" }
+knobas-source = { path = "../knobas-source" }
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+# A real PostgreSQL, and the reference adapter to sync out of it. `chrono` is
+# only ever named by the tests: the engine moves the SPI's timestamps straight
+# into the database without looking at them.
+chrono.workspace = true
+knobas-db = { path = "../knobas-db", features = ["test-util"] }
+knobas-source-mock = { path = "../knobas-source-mock" }
+tokio.workspace = true
+uuid.workspace = true
