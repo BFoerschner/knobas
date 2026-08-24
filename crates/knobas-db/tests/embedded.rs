@@ -144,11 +144,50 @@ fn running_url(root_dir: &std::path::Path) -> String {
 #[tokio::test]
 async fn test_pool_is_shared_and_usable() {
     let first = knobas_db::test_util::test_pool().await;
-    let one: (i32,) = sqlx::query_as("select 1").fetch_one(first).await.unwrap();
+    let one: (i32,) = sqlx::query_as("select 1").fetch_one(&first).await.unwrap();
     assert_eq!(one.0, 1);
 
-    // One embedded instance per test binary: the second call must not start
-    // another server.
+    // One embedded instance per test binary: the second call gets a pool of
+    // its own (pools are per-runtime) but must not start another server.
     let second = knobas_db::test_util::test_pool().await;
-    assert!(std::ptr::eq(first, second));
+    assert_eq!(
+        server_identity(&first).await,
+        server_identity(&second).await
+    );
+}
+
+/// What server a pool is talking to: its loopback port plus the cluster's
+/// `system_identifier`, which `initdb` stamps into a fresh data directory.
+async fn server_identity(pool: &sqlx::PgPool) -> (i32, String) {
+    sqlx::query_as(
+        "select inet_server_port(), (select system_identifier::text from pg_control_system())",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// A pool from `test_pool` must keep working after an earlier runtime that
+/// used the shared database is gone. Sharing one `static` pool across tokio
+/// runtimes silently leaks the pool's semaphore permits -- a connection
+/// released while its runtime shuts down never runs the task that returns it
+/// -- and the next test to ask for a connection dies with `PoolTimedOut`.
+#[test]
+fn test_pool_survives_an_earlier_runtimes_death() {
+    for _ in 0..3 {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let pool = knobas_db::test_util::test_pool().await;
+            // A migration plus a query: the shape that starved the pool. The
+            // migrator's advisory-lock connection is released last, right as
+            // the runtime winds down.
+            knobas_db::migrate::run(&pool).await.unwrap();
+            let one: (i32,) = sqlx::query_as("select 1").fetch_one(&pool).await.unwrap();
+            assert_eq!(one.0, 1);
+        });
+        drop(rt);
+    }
 }

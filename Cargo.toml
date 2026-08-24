@@ -15,4 +15,8 @@ thiserror = "2"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 async-trait = "0.1"
-sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-none", "postgres", "migrate", "uuid", "chrono", "json"] }
+# `derive` is for `#[derive(FromRow)]`, `macros` for the `sqlx::migrate!` that
+# embeds `migrations/` in the binary -- sqlx 0.9 moved both behind these gates.
+# Neither implies compile-time-checked queries: no `query!`, no DATABASE_URL,
+# no offline cache in M0 (runtime-checked `query`/`query_as` only).
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-none", "postgres", "migrate", "derive", "macros", "uuid", "chrono", "json"] }

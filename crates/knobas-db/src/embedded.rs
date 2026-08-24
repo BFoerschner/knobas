@@ -63,6 +63,9 @@ pub enum DbError {
     #[error("postgres connection: {0}")]
     Sqlx(#[from] sqlx::Error),
 
+    #[error("schema migration: {0}")]
+    Migrate(#[from] sqlx::migrate::MigrateError),
+
     #[error("{path}: {source}")]
     Io {
         path: PathBuf,
@@ -86,6 +89,9 @@ impl DbError {
 /// then just the pool and `stop` only closes it.
 pub struct EmbeddedDb {
     pool: PgPool,
+    /// Connection URL of the running server, for callers that need a pool of
+    /// their own rather than the shared one.
+    url: String,
     /// `None` when connected to a server we do not manage.
     postgresql: Option<PostgreSQL>,
 }
@@ -108,6 +114,7 @@ impl EmbeddedDb {
             tracing::info!("connecting to externally managed postgres");
             return Ok(EmbeddedDb {
                 pool: connect(url).await?,
+                url: url.to_string(),
                 postgresql: None,
             });
         }
@@ -139,6 +146,7 @@ impl EmbeddedDb {
 
         Ok(EmbeddedDb {
             pool,
+            url,
             postgresql: Some(postgresql),
         })
     }
@@ -147,6 +155,16 @@ impl EmbeddedDb {
     #[must_use]
     pub fn pool(&self) -> &PgPool {
         &self.pool
+    }
+
+    /// The URL this handle is connected to, credentials included.
+    ///
+    /// For callers that must open a pool of their own -- a `PgPool` may not be
+    /// shared across tokio runtimes, so anything outliving the runtime that
+    /// built [`pool`](Self::pool) needs its own.
+    #[must_use]
+    pub fn url(&self) -> &str {
+        &self.url
     }
 
     /// Close the pool and shut the server down.
@@ -163,7 +181,7 @@ impl EmbeddedDb {
     }
 }
 
-async fn connect(url: &str) -> Result<PgPool, sqlx::Error> {
+pub(crate) async fn connect(url: &str) -> Result<PgPool, sqlx::Error> {
     PgPoolOptions::new()
         .max_connections(MAX_CONNECTIONS)
         .connect(url)
