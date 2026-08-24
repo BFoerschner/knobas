@@ -4,8 +4,15 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+chrono.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
 thiserror.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
+# The stores are tested against a real PostgreSQL: `test-util` exposes the
+# embedded per-binary test server.
+knobas-db = { path = "../knobas-db", features = ["test-util"] }
+tokio.workspace = true

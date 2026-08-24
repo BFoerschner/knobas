@@ -1,0 +1,187 @@
+//! The link and activity stores, against a real PostgreSQL.
+//!
+//! The embedded test database is shared by every test in the binary *and*
+//! outlives the run, so each test seeds entity ids carrying a fresh uuid
+//! rather than fixed ones: fixed ids would collide with the rows left by the
+//! previous run, and truncating shared tables would break tests running
+//! concurrently beside us.
+
+use knobas_core::entity::EntityRef;
+use knobas_core::{CoreError, activity, link};
+use uuid::Uuid;
+
+/// A migrated pool plus a ticket and a note entity unique to this run.
+async fn seeded_pool() -> (sqlx::PgPool, EntityRef, EntityRef) {
+    let pool = knobas_db::test_util::test_pool().await;
+    knobas_db::migrate::run(&pool).await.unwrap();
+
+    let run = Uuid::new_v4();
+    let ticket = EntityRef::new("jira", &format!("LNK-{run}"));
+    let note = EntityRef::new("note", &format!("lnk-{run}"));
+    for (entity, kind) in [(&ticket, "ticket"), (&note, "note")] {
+        sqlx::query(
+            "insert into knobas.entity (id, kind) values ($1,$2) on conflict (id) do nothing",
+        )
+        .bind(entity.to_string())
+        .bind(kind)
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+    }
+    (pool, ticket, note)
+}
+
+#[tokio::test]
+async fn link_lifecycle_with_tombstone() {
+    let (pool, t, n) = seeded_pool().await;
+
+    let id = link::create(&pool, &t, &n, "documents", link::Origin::Manual, "mara")
+        .await
+        .unwrap();
+    // duplicate active link is rejected
+    let dup = link::create(&pool, &t, &n, "documents", link::Origin::Manual, "mara").await;
+    assert!(matches!(dup, Err(CoreError::Duplicate)), "{dup:?}");
+    // visible from both ends
+    assert_eq!(link::links_of(&pool, &t).await.unwrap().len(), 1);
+    assert_eq!(link::links_of(&pool, &n).await.unwrap().len(), 1);
+
+    link::unlink(&pool, id).await.unwrap();
+    assert!(link::links_of(&pool, &t).await.unwrap().is_empty());
+    // tombstone remains in the table
+    let (cnt,): (i64,) = sqlx::query_as("select count(*) from knobas.link where id = $1")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(cnt, 1);
+    // and re-linking after unlink is allowed again
+    link::create(&pool, &t, &n, "documents", link::Origin::Manual, "mara")
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn link_row_carries_its_origin_and_direction() {
+    let (pool, t, n) = seeded_pool().await;
+
+    let id = link::create(
+        &pool,
+        &t,
+        &n,
+        "documents",
+        link::Origin::Suggested,
+        "sync:jira",
+    )
+    .await
+    .unwrap();
+
+    let rows = link::links_of(&pool, &n).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    let row = &rows[0];
+    assert_eq!(row.id, id);
+    assert_eq!(row.from_id, t.to_string());
+    assert_eq!(row.to_id, n.to_string());
+    assert_eq!(row.relation, "documents");
+    assert_eq!(row.origin, link::Origin::Suggested);
+    assert_eq!(row.created_by, "sync:jira");
+}
+
+#[tokio::test]
+async fn same_pair_may_carry_several_relations() {
+    let (pool, t, n) = seeded_pool().await;
+
+    link::create(&pool, &t, &n, "documents", link::Origin::Manual, "mara")
+        .await
+        .unwrap();
+    link::create(&pool, &t, &n, "blocks", link::Origin::Manual, "mara")
+        .await
+        .unwrap();
+
+    let mut relations: Vec<String> = link::links_of(&pool, &t)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.relation)
+        .collect();
+    relations.sort();
+    assert_eq!(relations, ["blocks", "documents"]);
+}
+
+#[tokio::test]
+async fn unlink_is_idempotent_but_unknown_ids_are_reported() {
+    let (pool, t, n) = seeded_pool().await;
+
+    let id = link::create(&pool, &t, &n, "documents", link::Origin::Manual, "mara")
+        .await
+        .unwrap();
+    link::unlink(&pool, id).await.unwrap();
+    // unlinking an already-tombstoned link changes nothing and is not an error
+    link::unlink(&pool, id).await.unwrap();
+
+    let missing = link::unlink(&pool, Uuid::new_v4()).await;
+    assert!(
+        matches!(missing, Err(CoreError::LinkNotFound(_))),
+        "{missing:?}"
+    );
+}
+
+#[tokio::test]
+async fn activity_records_and_lists() {
+    let (pool, t, _n) = seeded_pool().await;
+
+    activity::record(
+        &pool,
+        "user",
+        "commented",
+        Some(&t),
+        serde_json::json!({"len": 42}),
+    )
+    .await
+    .unwrap();
+
+    let entity_id = t.to_string();
+    let rows = activity::recent(&pool, 10).await.unwrap();
+    assert!(
+        rows.iter()
+            .any(|r| r.verb == "commented" && r.entity_id.as_deref() == Some(entity_id.as_str()))
+    );
+}
+
+#[tokio::test]
+async fn activity_defaults_and_orders_newest_first() {
+    let (pool, t, _n) = seeded_pool().await;
+    // The activity table is shared with every other test, so this run's rows
+    // are found by an actor nobody else uses.
+    let actor = format!("sync:{}", Uuid::new_v4());
+
+    activity::record(&pool, &actor, "synced", None, serde_json::Value::Null)
+        .await
+        .unwrap();
+    activity::record(
+        &pool,
+        &actor,
+        "linked",
+        Some(&t),
+        serde_json::json!({"n": 1}),
+    )
+    .await
+    .unwrap();
+
+    let mine: Vec<_> = activity::recent(&pool, 200)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|row| row.actor == actor)
+        .collect();
+
+    assert_eq!(mine.len(), 2);
+    // newest first
+    assert_eq!(mine[0].verb, "linked");
+    assert_eq!(mine[0].entity_id.as_deref(), Some(t.to_string().as_str()));
+    assert_eq!(mine[0].detail, serde_json::json!({"n": 1}));
+    assert!(mine[0].at >= mine[1].at);
+    // a null detail is stored as the column's empty-object default
+    assert_eq!(mine[1].verb, "synced");
+    assert_eq!(mine[1].entity_id, None);
+    assert_eq!(mine[1].detail, serde_json::json!({}));
+}
