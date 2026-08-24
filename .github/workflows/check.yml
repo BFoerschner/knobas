@@ -1,0 +1,99 @@
+# The quality gate, run by the same `just check` a developer runs locally.
+# Nothing about the gate is spelled out here on purpose: if CI and the justfile
+# can disagree, they eventually will, and the disagreement is only ever found
+# on `main`. This file's whole job is to put a Linux machine in front of that
+# one command.
+name: check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A push to a PR branch makes the run for the previous push irrelevant; keeping
+# it alive only queues work behind itself. `main` is exempt -- every commit that
+# lands there is a distinct answer to "is main green", and cancelling one loses
+# that answer for good.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+# Read-only: the gate builds and tests, it never writes to the repository. The
+# GITHUB_TOKEN handed to the `just check` step below inherits this, so the
+# worst a compromised build script can do with it is read what is already
+# public.
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # `cargo test` compiles knobas-app, which links webkit2gtk through
+      # tauri/wry; none of it is on the runner image. This is the development
+      # subset of Tauri's documented Linux prerequisites -- the packages the
+      # `-sys` build scripts pkg-config for. The bundling-only ones
+      # (librsvg2-dev and friends) are left out: `tauri build` never runs here.
+      # build-essential, curl, wget, file and libssl-dev are already installed
+      # on ubuntu-latest.
+      - name: Install Tauri's Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            libxdo-dev
+
+      # `rust-toolchain.toml` is the single toolchain knob for this repo -- it
+      # is what `cargo` obeys, both here and on a developer's machine, and the
+      # justfile strips any inherited RUSTUP_TOOLCHAIN so nothing can quietly
+      # shadow it. The channel is read out of that file rather than written
+      # again here so CI cannot end up gating on a compiler nobody uses.
+      - id: toolchain
+        name: Read the pinned toolchain
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          test -n "$channel"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+      # Installs that channel up front (with a `--profile minimal` install's
+      # missing components) instead of leaving rustup to fetch it mid-build.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: taiki-e/install-action@just
+
+      # The embedded PostgreSQL the database tests run against is downloaded on
+      # first use into `~/.theseus`, which Swatinem/rust-cache does not cover.
+      # The key is fixed rather than hashed: the version is pinned in
+      # `knobas-db` (`PG_VERSION_REQ = "=18.6.0"`), so a bump is a deliberate
+      # edit that renames this key with it.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.theseus
+          key: postgres-18.6.0-linux
+
+      # `just check` provisions `app/node_modules` itself (the `deps` recipe),
+      # so there is no `npm ci` step -- setup-node above is here for the node
+      # version and the npm download cache.
+      #
+      # GITHUB_TOKEN is for postgresql_embedded, not for anything git: on a
+      # cache miss it asks api.github.com which release asset to fetch, and
+      # unauthenticated requests from a shared runner IP share a 60/hour budget
+      # with every other repository on that machine.
+      - name: just check
+        run: just check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
