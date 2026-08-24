@@ -555,7 +555,7 @@ async fn activity_records_and_lists() {
 - Produces (⚠️ **this is the frozen SPI** — changing it after M0 requires an orchestrator decision + spec update):
 
 ```rust
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SourceDescriptor {
     pub id: String,             // instance id, e.g. "jira"
     pub kind: String,           // adapter kind, e.g. "jira", "mock"
@@ -571,7 +571,7 @@ pub struct SourceDescriptor {
     pub config_schema: serde_json::Value,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct KindInfo {
     pub id: String,       // "ticket"
     pub label: String,    // "Ticket"
@@ -579,10 +579,10 @@ pub struct KindInfo {
     pub monogram: String, // "JI" — 2 chars
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Capability { Search, Write, Import }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SyncItem {
     pub entity: knobas_core::entity::EntityRef,
     pub kind: String,                       // ticket|pr|build|page|commit|branch|repo|monitor|…
@@ -597,7 +597,7 @@ pub struct SyncItem {
 /// Opaque incremental-sync position, adapter-defined content.
 pub type Cursor = String;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, serde::Serialize, serde::Deserialize)]
 pub enum SourceError {
     #[error("unauthorized")] Unauthorized,
     #[error("unreachable: {0}")] Unreachable(String),
