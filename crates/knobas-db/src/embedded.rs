@@ -461,9 +461,15 @@ fn fresh_settings() -> Settings {
 /// `build_settings` does not call this -- it leaves `installation_dir` at the
 /// very default this returns. The readers are all test-side: `test_util`'s
 /// reaper, which needs the `pg_ctl` under it, and this module's own unit tests
-/// asserting where the default points. Hence the cfg: outside those two builds
-/// the function has no caller at all.
-#[cfg(any(test, feature = "test-util"))]
+/// asserting where the default points. Hence the cfg: outside `test-util` the
+/// function has no caller at all.
+///
+/// The cfg needs no `test` arm for those unit tests. This crate dev-depends on
+/// itself with `test-util` on, so building any of its own test targets unifies
+/// the feature onto the library -- `cfg(test)` here always implies
+/// `feature = "test-util"`. That unification is the same one `just check`'s
+/// `clippy-libs` pass exists to see past.
+#[cfg(feature = "test-util")]
 pub(crate) fn installation_dir() -> PathBuf {
     fresh_settings().installation_dir
 }

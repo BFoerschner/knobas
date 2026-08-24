@@ -11,11 +11,18 @@ on:
     branches: [main]
 
 # A push to a PR branch makes the run for the previous push irrelevant; keeping
-# it alive only queues work behind itself. `main` is exempt -- every commit that
-# lands there is a distinct answer to "is main green", and cancelling one loses
-# that answer for good.
+# it alive only queues work behind itself, so PR runs share one group per ref
+# and supersede each other.
+#
+# Every commit on `main`, by contrast, is a distinct answer to "is main green",
+# and a lost answer is lost for good. `cancel-in-progress: false` alone is not
+# enough to protect them: within a shared group GitHub keeps only *one* pending
+# run, so a third push silently discards the second one's run while the first
+# still holds the group. Keying `main` on `github.run_id` gives every commit a
+# group of its own, where there is nothing to queue behind and nothing to
+# replace.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # Read-only: the gate builds and tests, it never writes to the repository. The
@@ -75,20 +82,39 @@ jobs:
 
       - uses: taiki-e/install-action@just
 
+      # `hashFiles` returns the empty string when its pattern matches nothing,
+      # and the cache step below would take that quietly: the key collapses to
+      # the constant `postgres--linux`, which then hits forever and can never
+      # be invalidated by anything. Renaming or moving `embedded.rs` is exactly
+      # how that happens, and it is invisible -- the cache still works, it just
+      # stops tracking the thing it is keyed on. Fail here instead.
+      - name: Check the postgres cache key resolved
+        env:
+          hash: ${{ hashFiles('crates/knobas-db/src/embedded.rs') }}
+        run: |
+          if [ -z "$hash" ]; then
+            echo "::error::hashFiles matched no crates/knobas-db/src/embedded.rs, so the ~/.theseus cache key would be the constant 'postgres--linux'. Repoint the key below (and this guard) at wherever PG_VERSION_REQ lives now."
+            exit 1
+          fi
+
       # The embedded PostgreSQL the database tests run against is downloaded on
       # first use into `~/.theseus`, which Swatinem/rust-cache does not cover.
       #
       # The key is derived from the file that pins the version
       # (`PG_VERSION_REQ` in `knobas-db`'s `embedded.rs`) rather than spelling
-      # `18.6.0` out here, because the two failure directions are not
-      # comparable. Hashing the whole file over-invalidates: an edit to
-      # anything else in it costs one 13 MB re-download. A hand-written key
-      # under-invalidates: bump the pin, forget to rename the key, and the
-      # cache restores the *old* Postgres into `~/.theseus` -- whereupon the
-      # archive extractor, which skips extraction whenever the target directory
-      # already exists, leaves it there. The tests then pass against a
-      # different server than the pin says, and nothing anywhere reports it.
-      # A wasted download is the safe direction.
+      # `18.6.0` out here. Neither direction can serve the *wrong* Postgres:
+      # the install directory is itself version-keyed
+      # (`~/.theseus/postgresql/<version>`) and `setup()` re-validates it, so a
+      # stale cache simply does not contain the version being asked for. What
+      # the two directions cost is download time.
+      #
+      # Over-invalidating (this key) costs one 13 MB re-download whenever
+      # anything in `embedded.rs` changes, cache included. Under-invalidating
+      # -- a hand-written `postgres-18.6.0-linux` left un-renamed across a
+      # version bump -- costs that download on *every run, forever*: the key
+      # keeps hitting, so `actions/cache` restores the old version and, because
+      # an exact-key hit skips the save, never stores the new one. A wasted
+      # download now beats a permanent one.
       - uses: actions/cache@v4
         with:
           path: ~/.theseus
