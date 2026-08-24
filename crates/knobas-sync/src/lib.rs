@@ -21,10 +21,22 @@
 //!
 //! The engine takes a `PgPool` rather than opening one: it is called from the
 //! app, from a scheduler and from tests, none of which want a second database.
+//!
+//! # What the engine refuses
+//!
+//! An adapter is a plugin, and a plugin regresses. The SPI's contract battery
+//! catches that in the adapter's own test suite; the engine catches it at the
+//! moment it would corrupt the store, because entity ids are global and
+//! `sync.item.entity_id` is a primary key -- one adapter emitting another's ids
+//! would silently overwrite its rows. So [`run_once`] rejects an unusable
+//! source id before it opens a transaction, and the sink rejects an item whose
+//! id does not round-trip, is outside the source's namespace, or carries a kind
+//! the descriptor never declared.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use knobas_core::activity;
+use knobas_core::entity::EntityRef;
 use knobas_source::{Cursor, Sink, Source, SourceError, SyncItem};
 use sqlx::{PgPool, Postgres, Transaction};
 
@@ -32,22 +44,28 @@ use sqlx::{PgPool, Postgres, Transaction};
 ///
 /// The sink buffers up to this many items and then writes them as two
 /// array-valued statements, so a 5,000-item source costs 20 round trips rather
-/// than 10,000. Large enough to amortise the latency, small enough that the
-/// arrays stay a sane size to encode.
-const BATCH: usize = 500;
+/// than 10,000. Public because it is the boundary a source's behaviour changes
+/// at -- a test that means to exercise a mid-run flush has to cross it.
+pub const BATCH: usize = 500;
+
+/// Namespaces knobas keeps for its own entities (spec: the namespace is either
+/// a source id or a local kind). A source claiming one of these would write
+/// its items where notes and contexts live.
+const RESERVED_NAMESPACES: [&str; 5] = ["note", "ctx", "asset", "route", "monitor"];
 
 /// What one run wrote.
 ///
-/// `deleted` is a *subset* of `upserted`: every item the source pushed is
-/// written to both tables, and `deleted` says how many of them arrived
-/// tombstoned. So after a full sync,
+/// Counts are per *entity*, deduplicated across the whole run: an adapter that
+/// emits the same entity twice contributes one. `deleted` is a subset of
+/// `upserted` -- every item is written to both tables and `deleted` says how
+/// many of them ended the run tombstoned -- so after a full sync,
 /// `upserted == count(sync.item where source_id = <id>)`.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SyncReport {
     pub source_id: String,
-    /// Items written this run.
+    /// Distinct entities written this run.
     pub upserted: u64,
-    /// How many of them carried `deleted`, and so tombstoned their entity.
+    /// How many of them ended the run tombstoned.
     pub deleted: u64,
     /// Where the source says the next run should resume.
     pub cursor: Cursor,
@@ -57,11 +75,15 @@ pub struct SyncReport {
 ///
 /// The database appears twice on purpose: [`Source`] surfaces a sink failure as
 /// [`SourceError::Sink`] because that is the only channel the SPI gives an
-/// adapter, so a write that failed *under* the adapter arrives as
-/// [`SyncError::Source`], while one the engine issued itself arrives as
+/// adapter, so every failed *item write* arrives as [`SyncError::Source`],
+/// while statements the engine issues around the adapter arrive as
 /// [`SyncError::Db`].
 #[derive(Debug, thiserror::Error)]
 pub enum SyncError {
+    /// The descriptor's id cannot be used as an entity namespace. Raised
+    /// before the transaction opens: nothing was read or written.
+    #[error("source id {id:?} is unusable: {reason}")]
+    BadSourceId { id: String, reason: &'static str },
     /// The adapter failed, or propagated a sink failure back to us.
     #[error("source: {0}")]
     Source(#[from] SourceError),
@@ -71,6 +93,35 @@ pub enum SyncError {
     /// The data committed, but the activity line did not.
     #[error("activity log: {0}")]
     Activity(#[from] knobas_core::CoreError),
+}
+
+/// Reject a source id that cannot serve as an entity namespace.
+///
+/// Checked against the descriptor rather than trusted, because the namespace
+/// guard in the sink is only as good as the id it compares against: a source
+/// calling itself `jira:eu` would make `jira:eu:PAY-1` parse as namespace
+/// `jira`, and one calling itself `note` would write into the local notes'
+/// namespace. Both defeat the guard completely.
+fn check_source_id(id: &str) -> Result<(), SyncError> {
+    let bad = |reason| {
+        Err(SyncError::BadSourceId {
+            id: id.to_owned(),
+            reason,
+        })
+    };
+    if id.trim().is_empty() {
+        return bad("blank");
+    }
+    if id.contains(':') {
+        return bad("contains ':', which would split it into a different namespace");
+    }
+    if RESERVED_NAMESPACES
+        .iter()
+        .any(|reserved| id.eq_ignore_ascii_case(reserved))
+    {
+        return bad("reserved for knobas-local entities");
+    }
+    Ok(())
 }
 
 /// Pull everything `source` changed since `cursor` into `pool`.
@@ -84,14 +135,40 @@ pub enum SyncError {
 /// The activity line is written after the commit, from the same pool but
 /// outside the transaction: it records what happened, so it must not be rolled
 /// back with the run it is describing, and must not be written before that run
-/// is durable.
+/// is durable. A run that changed nothing -- no entities, no new cursor --
+/// writes no line: a five-minute scheduler would otherwise bury the log under
+/// 288 "synced nothing" entries per source per day.
+///
+/// # Concurrency
+///
+/// The run takes `pg_advisory_xact_lock` on the source id, so two runs of the
+/// same source serialise instead of interleaving their upserts. Different
+/// sources run concurrently, and cannot collide anyway: the sink refuses items
+/// outside the source's own namespace.
+///
+/// A run **pins one pool connection for its whole duration**, which for a real
+/// adapter means for as long as the remote system takes to answer. A scheduler
+/// syncing many sources at once must cap its concurrency below the pool size
+/// (or hold a pool of its own), or the sync will starve the UI's queries.
+///
+/// # Limitations
+///
+/// A full sync does not reconcile: an item the source deleted *and stopped
+/// mentioning* (a hard delete, rather than one reported with `deleted`) keeps
+/// its row, because the engine sees only what the adapter pushes and has no way
+/// to tell "gone" from "unchanged". Sweeping rows a full sync did not touch is
+/// an M1 sync-engine feature.
 ///
 /// # Errors
 ///
+/// * [`SyncError::BadSourceId`] if the descriptor's id cannot be a namespace.
+///   Raised first: nothing is read or written.
 /// * [`SyncError::Source`] if the adapter failed, or if it propagated one of
-///   our own sink failures. The transaction is rolled back: nothing is written
-///   and the cursor is left where it was.
-/// * [`SyncError::Db`] if the cursor update or the commit failed.
+///   our own sink failures (a rejected item, or a failed write). The
+///   transaction is rolled back: nothing is written and the cursor is left
+///   where it was.
+/// * [`SyncError::Db`] if the advisory lock, the cursor update or the commit
+///   failed.
 /// * [`SyncError::Activity`] if only the activity line failed -- the run's data
 ///   is committed at that point, and a later run will overwrite it anyway.
 pub async fn run_once(
@@ -99,11 +176,27 @@ pub async fn run_once(
     source: &dyn Source,
     cursor: Option<Cursor>,
 ) -> Result<SyncReport, SyncError> {
-    let source_id = source.descriptor().id;
+    let descriptor = source.descriptor();
+    check_source_id(&descriptor.id)?;
+    let source_id = descriptor.id;
+    let kinds: HashSet<String> = descriptor
+        .entity_kinds
+        .into_iter()
+        .map(|kind| kind.id)
+        .collect();
+    let previous = cursor.clone();
 
     let mut tx = pool.begin().await?;
+    // Held until this transaction ends, however it ends. Two runs of one source
+    // would otherwise take the same rows in whatever order their batches
+    // happened to fall in, and a run holds its locks across every batch.
+    sqlx::query("select pg_advisory_xact_lock(hashtext($1::text))")
+        .bind(&source_id)
+        .execute(&mut *tx)
+        .await?;
+
     let (cursor, upserted, deleted) = {
-        let mut sink = PgSink::new(&mut tx, source_id.clone());
+        let mut sink = PgSink::new(&mut tx, source_id.clone(), kinds);
         let cursor = source.sync(cursor, &mut sink).await?;
         // The adapter is done, so whatever is still buffered belongs to this
         // run: flush it before the cursor claims to cover it.
@@ -124,21 +217,22 @@ pub async fn run_once(
         deleted,
         cursor,
     };
-    activity::record(
-        pool,
-        &format!("sync:{}", report.source_id),
-        "synced",
-        // A run is about a source, not about any one of the entities it
-        // touched, so the line carries no entity id.
-        None,
-        serde_json::json!({
-            "source_id": report.source_id,
-            "upserted": report.upserted,
-            "deleted": report.deleted,
-            "cursor": report.cursor,
-        }),
-    )
-    .await?;
+    let changed_nothing =
+        report.upserted == 0 && report.deleted == 0 && previous.as_deref() == Some(&report.cursor);
+    if !changed_nothing {
+        activity::record(
+            pool,
+            &format!("sync:{}", report.source_id),
+            "synced",
+            // A run is about a source, not about any one of the entities it
+            // touched, so the line carries no entity id.
+            None,
+            // The report *is* the detail; hand-copying its fields here is how
+            // the two drift apart.
+            serde_json::to_value(&report).expect("a SyncReport serializes"),
+        )
+        .await?;
+    }
     Ok(report)
 }
 
@@ -152,32 +246,88 @@ struct PgSink<'t, 'c> {
     tx: &'t mut Transaction<'c, Postgres>,
     /// The descriptor id, which is also the namespace every item must be in.
     source_id: String,
+    /// The kinds the descriptor declared; nothing else may be emitted.
+    kinds: HashSet<String>,
     buf: Vec<SyncItem>,
+    /// Every entity id written this run, against whether its most recent write
+    /// tombstoned it. Run-scoped rather than per-batch because the counts end
+    /// up in a durable activity line, and an entity re-emitted in a later batch
+    /// is still one row -- counting it twice would report 501 rows written for
+    /// a source that has 500. One entry per distinct entity, so a very large
+    /// source pays for this in memory; batching alone cannot dedupe a run.
+    seen: HashMap<String, bool>,
     upserted: u64,
     deleted: u64,
 }
 
 impl<'t, 'c> PgSink<'t, 'c> {
-    fn new(tx: &'t mut Transaction<'c, Postgres>, source_id: String) -> Self {
+    fn new(
+        tx: &'t mut Transaction<'c, Postgres>,
+        source_id: String,
+        kinds: HashSet<String>,
+    ) -> Self {
         Self {
             tx,
             source_id,
+            kinds,
             buf: Vec::new(),
+            seen: HashMap::new(),
             upserted: 0,
             deleted: 0,
         }
     }
 
-    /// Write everything buffered, as two array-valued upserts.
-    async fn flush(&mut self) -> Result<(), sqlx::Error> {
+    /// Whether this item is this source's to emit, and addressable at all.
+    fn check(&self, item: &SyncItem) -> Result<(), SourceError> {
+        let id = item.entity.to_string();
+        // `EntityRef::new` does not validate, so an adapter can hand us a blank
+        // or unparseable key; the store would then hold an id nothing can
+        // address. Round-tripping through `parse` is the same check the SPI's
+        // contract battery makes.
+        let parsed = EntityRef::parse(&id).map_err(|e| SourceError::Sink(e.to_string()))?;
+        if parsed != item.entity {
+            return Err(SourceError::Sink(format!(
+                "entity {id:?} does not round-trip: namespace {:?} is not addressable",
+                item.entity.namespace
+            )));
+        }
+        if parsed.namespace != self.source_id {
+            return Err(SourceError::Sink(format!(
+                "source {:?} emitted {id} outside its namespace",
+                self.source_id
+            )));
+        }
+        // The UI renders this source's items from the kinds it declared, so an
+        // item of an undeclared kind is one nothing knows how to show.
+        if !self.kinds.contains(&item.kind) {
+            return Err(SourceError::Sink(format!(
+                "source {:?} emitted {id} of undeclared kind {:?}",
+                self.source_id, item.kind
+            )));
+        }
+        Ok(())
+    }
+
+    /// Write everything buffered.
+    ///
+    /// Failures surface as [`SourceError::Sink`] from both call sites -- the
+    /// adapter's mid-run flush and [`run_once`]'s final one -- so the same
+    /// database failure is reported the same way wherever it happens.
+    async fn flush(&mut self) -> Result<(), SourceError> {
+        self.write_batch()
+            .await
+            .map_err(|e| SourceError::Sink(e.to_string()))
+    }
+
+    /// One batch, as two array-valued upserts.
+    async fn write_batch(&mut self) -> Result<(), sqlx::Error> {
         if self.buf.is_empty() {
             return Ok(());
         }
         // Keyed by entity id, so an adapter that pushes the same entity twice
         // in one batch gets last-write-wins instead of Postgres' "ON CONFLICT
-        // DO UPDATE command cannot affect row a second time". Ordered, so two
-        // concurrent syncs touching the same rows take them in the same order
-        // and cannot deadlock against each other.
+        // DO UPDATE command cannot affect row a second time". Ordered, so a
+        // batch's writes have a stable order.
         let batch: BTreeMap<String, SyncItem> = self
             .buf
             .drain(..)
@@ -203,7 +353,6 @@ impl<'t, 'c> PgSink<'t, 'c> {
             deleted.push(item.deleted);
             payloads.push(item.payload);
         }
-        let tombstoned = deleted.iter().filter(|d| **d).count() as u64;
 
         // The entity first: `sync.item.entity_id` references it.
         sqlx::query(ENTITY_UPSERT)
@@ -226,33 +375,75 @@ impl<'t, 'c> PgSink<'t, 'c> {
             .execute(&mut **self.tx)
             .await?;
 
-        self.upserted += n as u64;
-        self.deleted += tombstoned;
+        // Counted only once the rows are actually in the transaction.
+        for (id, tombstoned) in ids.iter().zip(&deleted) {
+            self.count(id, *tombstoned);
+        }
         Ok(())
+    }
+
+    /// Fold one written row into the run's counts, at most once per entity.
+    fn count(&mut self, id: &str, tombstoned: bool) {
+        if let Some(was) = self.seen.get_mut(id) {
+            // Same entity again in a later batch: it is still one row, but the
+            // later write decides whether that row is now a tombstone.
+            if *was != tombstoned {
+                *was = tombstoned;
+                if tombstoned {
+                    self.deleted += 1;
+                } else {
+                    self.deleted -= 1;
+                }
+            }
+            return;
+        }
+        self.seen.insert(id.to_owned(), tombstoned);
+        self.upserted += 1;
+        if tombstoned {
+            self.deleted += 1;
+        }
     }
 }
 
 /// `knobas.entity`: identity, kind, title, and the deletion tombstone.
 ///
-/// `deleted_at` keeps the *first* deletion's timestamp rather than being
-/// restamped by every later run, and is cleared when the item comes back --
-/// sources do resurrect things, and a stale tombstone would hide a live entity.
+/// The left join reads the row this upsert is about to replace, which is what
+/// lets both timestamps keep their history:
+///
+/// * `updated_at` keeps the stored value when the source does not say when the
+///   item changed (`SyncItem::updated_at` is `None`), instead of restamping it
+///   to `now()` on every run and making an untouched item look freshly edited.
+///   Only a genuinely new row falls back to `now()`.
+/// * `deleted_at` keeps the *first* deletion's timestamp rather than being
+///   restamped by every later run, and is cleared when the item comes back --
+///   sources do resurrect things, and a stale tombstone would hide a live
+///   entity.
+///
+/// Reading the old row and writing the new one is only atomic because
+/// [`run_once`] holds the source's advisory lock: same-source runs cannot
+/// interleave, and no other source may write this namespace.
 const ENTITY_UPSERT: &str = r#"
-insert into knobas.entity as e (id, kind, title, updated_at, deleted_at)
-select t.id, t.kind, t.title, coalesce(t.updated_at, now()),
-       case when t.deleted then now() end
-  from unnest($1::text[], $2::text[], $3::text[], $4::timestamptz[], $5::bool[])
-       as t(id, kind, title, updated_at, deleted)
+with incoming as (
+  select *
+    from unnest($1::text[], $2::text[], $3::text[], $4::timestamptz[], $5::bool[])
+         as t(id, kind, title, updated_at, deleted)
+)
+insert into knobas.entity (id, kind, title, updated_at, deleted_at)
+select i.id, i.kind, i.title,
+       coalesce(i.updated_at, old.updated_at, now()),
+       case when i.deleted then coalesce(old.deleted_at, now()) end
+  from incoming i
+       left join knobas.entity old on old.id = i.id
     on conflict (id) do update set
        kind       = excluded.kind,
        title      = excluded.title,
        updated_at = excluded.updated_at,
-       deleted_at = case when excluded.deleted_at is null then null
-                         else coalesce(e.deleted_at, excluded.deleted_at) end
+       deleted_at = excluded.deleted_at
 "#;
 
 /// `sync.item`: the mirror, refreshed wholesale. `synced_at` is when this run
-/// saw the item; `item_updated_at` is when the source says it changed.
+/// saw the item; `item_updated_at` is when the source says it changed, and
+/// stays null when the source does not say.
 const ITEM_UPSERT: &str = r#"
 insert into sync.item
        (entity_id, source_id, kind, title, body_text, author, item_updated_at,
@@ -284,22 +475,25 @@ impl Sink for PgSink<'_, '_> {
     /// the adapter must propagate it and abandon the sync, which rolls the
     /// whole run back.
     async fn item(&mut self, item: SyncItem) -> Result<(), SourceError> {
-        // Entity ids are global: an adapter emitting outside its own namespace
-        // would overwrite another source's rows, since `sync.item.entity_id` is
-        // the primary key. The descriptor id *is* the namespace (SPI), so this
-        // is a contract violation, not a data condition.
-        if item.entity.namespace != self.source_id {
-            return Err(SourceError::Sink(format!(
-                "source {:?} emitted {} outside its namespace",
-                self.source_id, item.entity
-            )));
-        }
+        self.check(&item)?;
         self.buf.push(item);
         if self.buf.len() >= BATCH {
-            self.flush()
-                .await
-                .map_err(|e| SourceError::Sink(e.to_string()))?;
+            self.flush().await?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_source_id_must_be_usable_as_a_namespace() {
+        check_source_id("jira").unwrap();
+        check_source_id("uptime-kuma").unwrap();
+        for bad in ["", "   ", "jira:eu", ":", "note", "CTX", "monitor"] {
+            assert!(check_source_id(bad).is_err(), "{bad:?} should be refused");
+        }
     }
 }

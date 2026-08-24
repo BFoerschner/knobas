@@ -57,6 +57,17 @@ async fn mock_sync_lands_in_postgres_and_is_searchable() {
         acts.iter()
             .any(|a| a.actor == "sync:mock" && a.verb == "synced")
     );
+    // ...one per run that changed something, and none for the no-op: a
+    // five-minute scheduler must not bury the log in "synced nothing".
+    let (lines,): (i64,) =
+        sqlx::query_as("select count(*) from knobas.activity where actor = 'sync:mock'")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        lines, 2,
+        "two runs changed something, the incremental did not"
+    );
 }
 
 /// An adapter under the test's control: it emits exactly the items it is given
@@ -142,6 +153,13 @@ fn item(source: &str, key: &str, title: &str, deleted: bool) -> SyncItem {
         payload: serde_json::json!({ "key": key }),
         deleted,
     }
+}
+
+/// `n` distinct items in `source`'s namespace.
+fn many(source: &str, n: usize) -> Vec<SyncItem> {
+    (0..n)
+        .map(|i| item(source, &format!("BULK-{i}"), &format!("bulk {i}"), false))
+        .collect()
 }
 
 /// A migrated pool, and a source id no other test uses.
@@ -258,14 +276,23 @@ async fn the_cursor_lands_in_an_existing_source_config_only() {
     assert_eq!(rows, 0, "a sync must not configure a source for itself");
 }
 
-/// A run is all-or-nothing: an adapter that fails after the sink accepted items
-/// leaves no rows, no cursor and no activity line behind.
+/// A run is all-or-nothing: an adapter that fails *after a batch has already
+/// been written* leaves no rows, no cursor and no activity line behind.
+///
+/// The item count crosses `BATCH` deliberately. Below it nothing is ever sent
+/// to the database before the failure, so the test would pass on an engine with
+/// no transaction at all.
 #[tokio::test]
 async fn an_adapter_failure_rolls_the_whole_run_back() {
     let (pool, id) = fixture().await;
     configure(&pool, &id).await;
 
-    let src = FakeSource::failing(&id, vec![item(&id, "TIDE-3", "half written", false)]);
+    let items = many(&id, knobas_sync::BATCH + 1);
+    assert!(
+        items.len() > knobas_sync::BATCH,
+        "must force a mid-run flush"
+    );
+    let src = FakeSource::failing(&id, items);
     let err = knobas_sync::run_once(&pool, &src, None).await.unwrap_err();
     assert!(
         matches!(
@@ -275,7 +302,12 @@ async fn an_adapter_failure_rolls_the_whole_run_back() {
         "{err:?}"
     );
 
-    assert_eq!(rows_for(&pool, &id).await, 0);
+    assert_eq!(
+        rows_for(&pool, &id).await,
+        0,
+        "the flushed batch rolled back"
+    );
+    assert_eq!(entities_for(&pool, &id).await, 0);
     assert_eq!(cursor_of(&pool, &id).await.as_deref(), Some("before"));
     let (acts,): (i64,) = sqlx::query_as("select count(*) from knobas.activity where actor = $1")
         .bind(format!("sync:{id}"))
@@ -287,6 +319,10 @@ async fn an_adapter_failure_rolls_the_whole_run_back() {
 
 /// Entity ids are global, so a source may only write its own namespace --
 /// otherwise one adapter could overwrite another's rows.
+///
+/// Probed by entity id, not by `source_id`: the stray row would have been
+/// written with *this* source's id in the `source_id` column, so counting by
+/// `somebody-else` would be zero whether the guard works or not.
 #[tokio::test]
 async fn an_item_outside_the_sources_namespace_is_refused() {
     let (pool, id) = fixture().await;
@@ -298,7 +334,123 @@ async fn an_item_outside_the_sources_namespace_is_refused() {
         matches!(err, knobas_sync::SyncError::Source(SourceError::Sink(_))),
         "{err:?}"
     );
-    assert_eq!(rows_for(&pool, "somebody-else").await, 0);
+    assert!(!entity_exists(&pool, "somebody-else:TIDE-4").await);
+    assert!(!mirror_exists(&pool, "somebody-else:TIDE-4").await);
+    assert_eq!(rows_for(&pool, &id).await, 0);
+}
+
+/// An id `EntityRef::parse` would reject, and a kind the descriptor never
+/// declared, are both refused: `EntityRef::new` validates nothing, and the SPI
+/// battery only proves an adapter *was* well-behaved when it was last tested.
+#[tokio::test]
+async fn an_unaddressable_id_or_undeclared_kind_is_refused() {
+    let (pool, id) = fixture().await;
+
+    let blank_key = SyncItem {
+        entity: EntityRef::new(&id, "   "),
+        ..item(&id, "ignored", "blank key", false)
+    };
+    let err = knobas_sync::run_once(&pool, &FakeSource::new(&id, vec![blank_key]), None)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, knobas_sync::SyncError::Source(SourceError::Sink(_))),
+        "{err:?}"
+    );
+
+    let undeclared = SyncItem {
+        kind: "monitor".to_owned(),
+        ..item(&id, "TIDE-5", "wrong kind", false)
+    };
+    let err = knobas_sync::run_once(&pool, &FakeSource::new(&id, vec![undeclared]), None)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, knobas_sync::SyncError::Source(SourceError::Sink(_))),
+        "{err:?}"
+    );
+    assert_eq!(rows_for(&pool, &id).await, 0);
+}
+
+/// A source id that cannot be a namespace is refused before any work happens:
+/// `jira:eu` would make `jira:eu:PAY-1` parse as namespace `jira`, and `note`
+/// would write into the local notes' namespace -- either one defeats the
+/// per-item namespace guard, which can only compare against the id it is given.
+#[tokio::test]
+async fn a_source_id_that_cannot_be_a_namespace_is_refused() {
+    let (pool, id) = fixture().await;
+
+    for bad in ["", "   ", "jira:eu", "note", "CTX"] {
+        let src = FakeSource::new(bad, vec![item(bad, "TIDE-6", "nope", false)]);
+        let err = knobas_sync::run_once(&pool, &src, None).await.unwrap_err();
+        assert!(
+            matches!(err, knobas_sync::SyncError::BadSourceId { .. }),
+            "{bad:?}: {err:?}"
+        );
+    }
+    // the well-formed neighbour still syncs
+    knobas_sync::run_once(&pool, &FakeSource::new(&id, many(&id, 1)), None)
+        .await
+        .unwrap();
+    assert_eq!(rows_for(&pool, &id).await, 1);
+}
+
+/// The counts end up in a durable activity line, so they have to be per entity
+/// across the whole run -- not per batch. An entity re-emitted after a batch
+/// boundary is still one row.
+#[tokio::test]
+async fn a_duplicate_across_a_batch_boundary_counts_once() {
+    let (pool, id) = fixture().await;
+
+    let mut items = many(&id, knobas_sync::BATCH);
+    // The batch flushes on the 500th push, so these two land in the next one.
+    items.push(items[0].clone());
+    items.push(item(&id, "BULK-extra", "extra", false));
+
+    let report = knobas_sync::run_once(&pool, &FakeSource::new(&id, items), None)
+        .await
+        .unwrap();
+    let rows = rows_for(&pool, &id).await as u64;
+    assert_eq!(rows, knobas_sync::BATCH as u64 + 1);
+    assert_eq!(
+        report.upserted, rows,
+        "the report must count rows, not pushes"
+    );
+    assert_eq!(entities_for(&pool, &id).await as u64, rows);
+}
+
+/// An item the source gives no `updated_at` for keeps the timestamp already
+/// stored. Restamping it to `now()` every run would make an untouched item look
+/// freshly edited on every poll -- and "recently updated" is what the UI sorts
+/// by.
+#[tokio::test]
+async fn a_re_sync_without_an_updated_at_does_not_restamp_the_entity() {
+    let (pool, id) = fixture().await;
+    let entity = format!("{id}:TIDE-8");
+
+    let undated = FakeSource::new(&id, vec![item(&id, "TIDE-8", "no timestamp", false)]);
+    knobas_sync::run_once(&pool, &undated, None).await.unwrap();
+    let first = updated_at(&pool, &entity).await;
+
+    knobas_sync::run_once(&pool, &undated, None).await.unwrap();
+    assert_eq!(
+        updated_at(&pool, &entity).await,
+        first,
+        "a re-sync with no source timestamp must not bump updated_at"
+    );
+
+    // but a source that *does* say when it changed still wins
+    let stated = chrono::DateTime::parse_from_rfc3339("2026-08-24T09:15:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let dated = SyncItem {
+        updated_at: Some(stated),
+        ..item(&id, "TIDE-8", "timestamped", false)
+    };
+    knobas_sync::run_once(&pool, &FakeSource::new(&id, vec![dated]), None)
+        .await
+        .unwrap();
+    assert_eq!(updated_at(&pool, &entity).await, stated);
 }
 
 async fn rows_for(pool: &PgPool, source_id: &str) -> i64 {
@@ -308,6 +460,47 @@ async fn rows_for(pool: &PgPool, source_id: &str) -> i64 {
         .await
         .unwrap();
     rows
+}
+
+/// Entities in `source_id`'s namespace, counted without going through
+/// `sync.item` -- the two tables are what a rollback has to clear together.
+async fn entities_for(pool: &PgPool, source_id: &str) -> i64 {
+    let (rows,): (i64,) = sqlx::query_as("select count(*) from knobas.entity where id like $1")
+        .bind(format!("{source_id}:%"))
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    rows
+}
+
+async fn entity_exists(pool: &PgPool, entity: &str) -> bool {
+    let (found,): (bool,) =
+        sqlx::query_as("select exists(select 1 from knobas.entity where id=$1)")
+            .bind(entity)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    found
+}
+
+async fn mirror_exists(pool: &PgPool, entity: &str) -> bool {
+    let (found,): (bool,) =
+        sqlx::query_as("select exists(select 1 from sync.item where entity_id=$1)")
+            .bind(entity)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    found
+}
+
+async fn updated_at(pool: &PgPool, entity: &str) -> chrono::DateTime<chrono::Utc> {
+    let (at,): (chrono::DateTime<chrono::Utc>,) =
+        sqlx::query_as("select updated_at from knobas.entity where id = $1")
+            .bind(entity)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    at
 }
 
 /// A tombstone hides the entity from search while its mirror row stays put:

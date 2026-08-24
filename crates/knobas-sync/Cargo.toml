@@ -9,7 +9,6 @@ version.workspace = true
 # anything holding a pool.
 [dependencies]
 async-trait.workspace = true
-chrono.workspace = true
 knobas-core = { path = "../knobas-core" }
 knobas-source = { path = "../knobas-source" }
 serde.workspace = true
@@ -18,7 +17,10 @@ sqlx.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-# A real PostgreSQL, and the reference adapter to sync out of it.
+# A real PostgreSQL, and the reference adapter to sync out of it. `chrono` is
+# only ever named by the tests: the engine moves the SPI's timestamps straight
+# into the database without looking at them.
+chrono.workspace = true
 knobas-db = { path = "../knobas-db", features = ["test-util"] }
 knobas-source-mock = { path = "../knobas-source-mock" }
 tokio.workspace = true
