@@ -93,17 +93,27 @@ pub struct AppState {
     db: Mutex<Option<knobas_db::EmbeddedDb>>,
 }
 
+#[cfg(feature = "test-util")]
 impl AppState {
-    /// The shared state over a pool this process did not start.
-    ///
-    /// `db` is `None`, which is the truth: [`shutdown_database`] stops only a
-    /// server knobas owns, and there is none here.
+    /// The shared state over a pool this process did not start. **Tests only.**
     ///
     /// It exists because a [`tauri::State`] cannot be built by hand, so a
     /// command body is unreachable from a mock app until its state is managed
     /// -- see `tests/ipc.rs`, where `demo_load`'s profile guard is checked
     /// against a pool pointing at nothing (the guard has to refuse before any
-    /// query, and that is what makes the test say so).
+    /// query, and that is what makes the test say so). Streams D, E and F test
+    /// their commands through this one blessed path rather than each inventing
+    /// a way in.
+    ///
+    /// `db` is `None`, which is the truth: [`shutdown_database`] stops only a
+    /// server knobas owns, and there is none here. That is also why the
+    /// constructor is behind `test-util` and not merely `#[doc(hidden)]`: a
+    /// production caller would build an `AppState` whose server nothing ever
+    /// stops, leaving a postmaster running after every quit. Hidden-but-present
+    /// makes that a review catch; absent from the shipping build makes it a
+    /// compile error. `cargo build`, `tauri build` and the `clippy --lib` half
+    /// of `just check` all see the crate without this feature, so a stream that
+    /// reaches for it outside `tests/` cannot get the gate green.
     #[must_use]
     pub fn over_pool(pool: PgPool) -> Self {
         Self {

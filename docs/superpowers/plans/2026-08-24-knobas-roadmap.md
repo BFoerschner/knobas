@@ -187,9 +187,16 @@ Per-task discipline (unchanged from superpowers): TDD, frequent commits, `superp
 | Plan | Covers | Status |
 |---|---|---|
 | `2026-08-24-plan-01-foundation.md` | M0 | **executed 2026-08-24** — 11/11 tasks merged via the PR loop (PRs #1-#11), CI green, contracts frozen |
-| plan-02 … | M1 streams (one plan per stream or one plan with parallel task groups) | write at M1 start |
-| plan-03 … | M2 | write at M2 start |
-| plan-04 … | M3 | write at M3 start |
-| plan-05 … | M4 | write at M4 start |
+| `2026-08-24-m1-plan-02-contract.md` | M1 checkpoint 0: migration 0002, SPI/IPC rulings, `knobas-search` + `knobas-http` seeds | **executed** |
+| `2026-08-24-m1-plan-03-testenv.md` | M1 stream **T** — `knobas-mockd`, `testenv/` compose stack, CI | written |
+| `2026-08-24-m1-plan-04-jira.md` | M1 stream **A** — Jira Data Center adapter (read-only) | written |
+| `2026-08-24-m1-plan-05-gitea.md` | M1 stream **B** — Gitea adapter (read-only) | written |
+| `2026-08-24-m1-plan-06-teamcity.md` | M1 stream **C** — TeamCity adapter (read-only) | written |
+| `2026-08-24-m1-plan-07-frontend.md` | M1 stream **D** — frontend shell, rooms, detail view, sources UI | written |
+| `2026-08-24-m1-plan-08-search.md` | M1 stream **E** — search parser, query builder, launcher, smart lists | written |
+| `2026-08-24-m1-plan-09-sync-engine.md` | M1 stream **F** — scheduler, backoff, sweep, secrets, run log | written |
+| m2-plan-… | M2 | write at M2 start |
+| m3-plan-… | M3 | write at M3 start |
+| m4-plan-… | M4 | write at M4 start |
 
-Plans are written just-in-time so they never argue from a stale spec; each one re-reads the design doc first.
+Plans are written just-in-time so they never argue from a stale spec; each one re-reads the design doc first. M1's eight plans were written in one round against `2026-08-24-m1-interfaces.md`; the contract plan runs first and alone (checkpoint 0), and the seven stream plans are executed against **§10 of that document** — the as-built record — rather than against its §1-§7 draft.

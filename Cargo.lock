@@ -2194,6 +2194,7 @@ name = "knobas-app"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "knobas-app",
  "knobas-core",
  "knobas-db",
  "knobas-search",

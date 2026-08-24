@@ -204,3 +204,56 @@ async fn sync_now_refuses_an_adapter_that_does_not_exist() {
         "unexpected error: {error}"
     );
 }
+
+/// The README's demo-mode promise, end to end: load the fixture, then find
+/// `mock:PAY-231` by searching for `sepa retry`.
+///
+/// This is the acceptance check the contract PR's exit checklist asks a human
+/// to perform by clicking *Load demo data* and typing in the search box. Every
+/// step between those two gestures is here -- the fixture through the mock
+/// adapter, the mirror upsert, the generated `fts` column, `sync.live_item`,
+/// and `knobas_search::search` -- so what a human still has to verify is the
+/// button and the rendering, not the pipeline. It also pins the item count the
+/// README states, which nothing else did.
+#[tokio::test]
+async fn the_loaded_fixture_is_searchable_the_way_the_readme_promises() {
+    let _guard = MOCK.lock().await;
+    let pool = knobas_db::test_util::test_pool().await;
+    let pool = &pool;
+    knobas_db::migrate::run(pool).await.unwrap();
+
+    let report = demo::demo_load_inner(pool).await.unwrap();
+    assert_eq!(
+        report.upserted, 21,
+        "the README promises 21 items from the Tidewater fixture"
+    );
+
+    let response = knobas_search::search(
+        pool,
+        &knobas_search::SearchQuery {
+            raw: "sepa retry".to_owned(),
+            limit: 20,
+            filters: knobas_search::SearchFilters::default(),
+        },
+    )
+    .await
+    .unwrap();
+
+    let ticket = response
+        .groups
+        .iter()
+        .find(|group| group.kind == "ticket")
+        .expect("a ticket group");
+    assert!(
+        ticket
+            .hits
+            .iter()
+            .any(|hit| hit.row.entity_id == "mock:PAY-231"),
+        "`sepa retry` must find mock:PAY-231 in the ticket group; got {:?}",
+        response
+            .groups
+            .iter()
+            .flat_map(|g| g.hits.iter().map(|h| h.row.entity_id.clone()))
+            .collect::<Vec<_>>()
+    );
+}
