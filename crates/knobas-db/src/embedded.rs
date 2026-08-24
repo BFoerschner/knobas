@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use postgresql_embedded::{PostgreSQL, Settings, VersionReq};
-use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
+use sqlx::{Connection, PgConnection, PgPool};
 
 /// The exact PostgreSQL version knobas runs against. Pinned rather than
 /// ranged: PG 18 changed generated-column defaults, and the schema depends on
@@ -25,6 +25,12 @@ pub const PG_VERSION_REQ: &str = "=18.6.0";
 
 /// Name of the application database inside the server.
 pub const DATABASE_NAME: &str = "knobas";
+
+/// The database `initdb` always leaves behind, used to ask a server about
+/// itself and to create [`DATABASE_NAME`] when it is missing. Connecting to
+/// [`DATABASE_NAME`] cannot do either job -- on a server that has not got it
+/// yet, the connection is what fails.
+const MAINTENANCE_DATABASE: &str = "postgres";
 
 /// Loopback host. Never a Unix socket -- see the module docs.
 const HOST: &str = "127.0.0.1";
@@ -120,6 +126,11 @@ impl EmbeddedDb {
     /// a signal-killed run left behind, or a second instance's -- is *adopted*
     /// rather than fought over: see [`adopt`].
     ///
+    /// A `postmaster.pid` whose port turns out to be answered by some *other*
+    /// server is proof that no postmaster holds this data directory -- one that
+    /// did would have recorded its own port. That lock is removed and the start
+    /// is retried, rather than reported as a conflict that does not exist.
+    ///
     /// # Errors
     ///
     /// Returns [`DbError`] if the install, `initdb`, start, database creation
@@ -137,52 +148,36 @@ impl EmbeddedDb {
 
         let settings = build_settings(&cfg.root_dir)?;
         let data_dir = settings.data_dir.clone();
-        // `PostgreSQL::new` consumes the settings, and the adoption path needs
-        // them after the handle is gone.
-        let adoption = settings.clone();
-        let mut postgresql = PostgreSQL::new(settings);
 
-        postgresql.setup().await?;
-
-        if let Err(error) = postgresql.start().await {
-            match inspect_lock(&data_dir)? {
-                // A hard-killed process (crash, `kill -9`, laptop shutdown)
-                // leaves `postmaster.pid` behind and PostgreSQL then refuses to
-                // start. The lock is gone now, so the start is worth retrying.
-                Lock::Cleared => postgresql.start().await?,
-                // No lock at all: the start failed for some other reason, and
-                // that reason is the one worth reporting.
-                Lock::Absent => return Err(error.into()),
-                Lock::Live { port } => {
-                    // `PostgreSQL::drop` runs `pg_ctl stop -m fast` whenever
-                    // `postmaster.pid` merely *exists* -- it has no idea
-                    // whether this handle is the one that started that server.
-                    // Dropping it here would therefore shut down the live
-                    // server that just refused us, taking the database out from
-                    // under whoever is using it. Forget it instead: it owns no
-                    // OS resource, only paths and strings, so the leak is a few
-                    // hundred bytes for the rest of the process -- a trade
-                    // worth making against killing a sibling's database.
-                    std::mem::forget(postgresql);
-                    return adopt(adoption, port).await;
+        match start_managed(settings.clone()).await? {
+            Started::Ready(db) => Ok(*db),
+            Started::StaleLock { port, serving } => {
+                // The lock file sent us to a stranger, so it is not describing
+                // any live postmaster of ours. Ephemeral ports are recycled:
+                // after a crash and a reboot, the port a dead server recorded
+                // can belong to anything. Clear the lock and start normally --
+                // the alternative, `AlreadyRunning`, would be both false and
+                // unrecoverable, leaving the user to find and delete
+                // `postmaster.pid` by hand before knobas would launch again.
+                tracing::warn!(
+                    port,
+                    serving,
+                    "postmaster.pid points at a server that is not ours: clearing the stale lock"
+                );
+                clear_lock(&data_dir)?;
+                match start_managed(settings).await? {
+                    Started::Ready(db) => Ok(*db),
+                    // Only reachable if something recreated the lock file in
+                    // between; at that point it is genuinely ambiguous.
+                    Started::StaleLock { port, serving } => Err(DbError::AlreadyRunning {
+                        data_dir,
+                        reason: format!(
+                            "postmaster.pid keeps naming port {port}, which is served by {serving}"
+                        ),
+                    }),
                 }
             }
         }
-
-        if !postgresql.database_exists(DATABASE_NAME).await? {
-            postgresql.create_database(DATABASE_NAME).await?;
-        }
-
-        let url = postgresql.settings().url(DATABASE_NAME);
-        let pool = connect(&url).await?;
-
-        tracing::info!(port = postgresql.settings().port, "embedded postgres ready");
-
-        Ok(EmbeddedDb {
-            pool,
-            url,
-            postgresql: Some(postgresql),
-        })
     }
 
     /// The connection pool for the `knobas` database.
@@ -216,6 +211,76 @@ impl EmbeddedDb {
     }
 }
 
+/// What one attempt at bringing the managed server up produced.
+enum Started {
+    /// A pool on the right server -- one this attempt started, or one it
+    /// adopted after confirming which data directory it serves.
+    ///
+    /// Boxed only to keep the two variants a similar size: an `EmbeddedDb` is
+    /// two orders of magnitude larger than the other one's `(u16, String)`, and
+    /// this enum is constructed at most twice per process.
+    Ready(Box<EmbeddedDb>),
+    /// `postmaster.pid` is provably stale: the port it records is answered, but
+    /// by a server serving `serving` rather than our data directory. Clearing
+    /// the lock and attempting the start again is the recovery.
+    StaleLock { port: u16, serving: String },
+}
+
+/// One attempt at starting (or joining) the server for `settings`.
+///
+/// Factored out of [`EmbeddedDb::start`] because the stale-lock recovery has to
+/// run the whole sequence again -- `setup`, `start`, database creation --
+/// against a fresh `PostgreSQL` handle.
+async fn start_managed(settings: Settings) -> Result<Started, DbError> {
+    let data_dir = settings.data_dir.clone();
+    // `PostgreSQL::new` consumes the settings, and the adoption path needs
+    // them after the handle is gone.
+    let adoption = settings.clone();
+    let mut postgresql = PostgreSQL::new(settings);
+
+    postgresql.setup().await?;
+
+    if let Err(error) = postgresql.start().await {
+        match inspect_lock(&data_dir)? {
+            // A hard-killed process (crash, `kill -9`, laptop shutdown)
+            // leaves `postmaster.pid` behind and PostgreSQL then refuses to
+            // start. The lock is gone now, so the start is worth retrying.
+            Lock::Cleared => postgresql.start().await?,
+            // No lock at all: the start failed for some other reason, and
+            // that reason is the one worth reporting.
+            Lock::Absent => return Err(error.into()),
+            Lock::Live { port } => {
+                // `PostgreSQL::drop` runs `pg_ctl stop -m fast` whenever
+                // `postmaster.pid` merely *exists* -- it has no idea
+                // whether this handle is the one that started that server.
+                // Dropping it here would therefore shut down the live
+                // server that just refused us, taking the database out from
+                // under whoever is using it. Forget it instead: it owns no
+                // OS resource, only paths and strings, so the leak is a few
+                // hundred bytes for the rest of the process -- a trade
+                // worth making against killing a sibling's database.
+                std::mem::forget(postgresql);
+                return adopt(adoption, port).await;
+            }
+        }
+    }
+
+    if !postgresql.database_exists(DATABASE_NAME).await? {
+        postgresql.create_database(DATABASE_NAME).await?;
+    }
+
+    let url = postgresql.settings().url(DATABASE_NAME);
+    let pool = connect(&url).await?;
+
+    tracing::info!(port = postgresql.settings().port, "embedded postgres ready");
+
+    Ok(Started::Ready(Box::new(EmbeddedDb {
+        pool,
+        url,
+        postgresql: Some(postgresql),
+    })))
+}
+
 /// Connect to a server that is already serving our data directory, instead of
 /// failing because it exists.
 ///
@@ -242,10 +307,12 @@ impl EmbeddedDb {
 ///
 /// # Errors
 ///
-/// [`DbError::AlreadyRunning`] if the server cannot be reached, or if it turns
-/// out to be serving a *different* data directory than the one whose lock file
-/// pointed us at it.
-async fn adopt(mut settings: Settings, port: u16) -> Result<EmbeddedDb, DbError> {
+/// [`DbError::AlreadyRunning`] if the server cannot be reached or queried, or
+/// if the [`DATABASE_NAME`] database cannot be created on it. A server that
+/// turns out to serve a *different* data directory is not an error at all: it
+/// is returned as [`Started::StaleLock`], because the mismatch proves the lock
+/// file we came from is stale.
+async fn adopt(mut settings: Settings, port: u16) -> Result<Started, DbError> {
     let data_dir = settings.data_dir.clone();
     // The recorded port, not the 0 that `build_settings` asks a fresh start to
     // pick: this server chose its port long ago.
@@ -257,7 +324,10 @@ async fn adopt(mut settings: Settings, port: u16) -> Result<EmbeddedDb, DbError>
         reason,
     };
 
-    let pool = connect(&url)
+    // Through the maintenance database, not `knobas`: the identity check has to
+    // happen before we trust the server, and creating `knobas` when it is
+    // missing needs a connection that does not depend on it existing.
+    let mut admin = PgConnection::connect(&settings.url(MAINTENANCE_DATABASE))
         .await
         .map_err(|source| unreachable(format!("cannot connect on port {port}: {source}")))?;
 
@@ -265,30 +335,63 @@ async fn adopt(mut settings: Settings, port: u16) -> Result<EmbeddedDb, DbError>
     // the lock file: a data directory that was copied elsewhere carries a
     // `postmaster.pid` naming a port some unrelated server may now hold, and
     // connecting to that would silently read the wrong database.
-    let serving: (String,) = match sqlx::query_as("show data_directory").fetch_one(&pool).await {
-        Ok(row) => row,
-        Err(source) => {
-            pool.close().await;
-            return Err(unreachable(format!("cannot query it: {source}")));
-        }
-    };
+    let serving: (String,) = sqlx::query_as("show data_directory")
+        .fetch_one(&mut admin)
+        .await
+        .map_err(|source| unreachable(format!("cannot query it: {source}")))?;
     if !same_dir(Path::new(&serving.0), &data_dir) {
-        pool.close().await;
-        return Err(unreachable(format!(
-            "port {port} is served by {} instead",
-            serving.0
-        )));
+        let _ = admin.close().await;
+        return Ok(Started::StaleLock {
+            port,
+            serving: serving.0,
+        });
     }
+
+    // The same step the managed path performs, for the same reason: a first run
+    // that died between `initdb` and `create database` leaves a server with no
+    // `knobas` in it, and adopting it must finish the job rather than report an
+    // unreachable database. `create database` has no `if not exists`, hence the
+    // lookup, and `AssertSqlSafe` for the statement: a database name cannot be
+    // a bind parameter, and the audit sqlx is asking for is that `DATABASE_NAME`
+    // is a compile-time constant of this crate -- no input reaches the string.
+    let existing: Option<(i32,)> = sqlx::query_as("select 1 from pg_database where datname = $1")
+        .bind(DATABASE_NAME)
+        .fetch_optional(&mut admin)
+        .await
+        .map_err(|source| unreachable(format!("cannot query it: {source}")))?;
+    if existing.is_none() {
+        tracing::warn!(
+            port,
+            "the adopted server has no {DATABASE_NAME} database: creating it"
+        );
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            r#"create database "{DATABASE_NAME}""#
+        )))
+        .execute(&mut admin)
+        .await
+        .map_err(|source| {
+            unreachable(format!(
+                "cannot create the {DATABASE_NAME} database: {source}"
+            ))
+        })?;
+    }
+    let _ = admin.close().await;
+
+    let pool = connect(&url).await.map_err(|source| {
+        unreachable(format!(
+            "cannot connect to {DATABASE_NAME} on port {port}: {source}"
+        ))
+    })?;
 
     tracing::warn!(
         port,
         "adopting the postgres already serving this data directory"
     );
-    Ok(EmbeddedDb {
+    Ok(Started::Ready(Box::new(EmbeddedDb {
         pool,
         url,
         postgresql: None,
-    })
+    })))
 }
 
 /// Whether two paths name the same directory.
@@ -420,8 +523,22 @@ fn inspect_lock(data_dir: &Path) -> Result<Lock, DbError> {
     }
 
     tracing::warn!(pid_file = %pid_file.display(), "removing stale postmaster.pid");
-    std::fs::remove_file(&pid_file).map_err(|source| DbError::io(pid_file, source))?;
+    clear_lock(data_dir)?;
     Ok(Lock::Cleared)
+}
+
+/// Remove `data_dir`'s `postmaster.pid`, if it is still there.
+///
+/// Missing is success: the only callers are recoveries from a lock that has
+/// already been proven not to describe a live server, and losing a race to
+/// remove it is the outcome they wanted.
+fn clear_lock(data_dir: &Path) -> Result<(), DbError> {
+    let pid_file = data_dir.join("postmaster.pid");
+    match std::fs::remove_file(&pid_file) {
+        Ok(()) => Ok(()),
+        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(DbError::io(pid_file, source)),
+    }
 }
 
 fn port_answers(port: u16) -> bool {
