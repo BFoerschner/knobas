@@ -9,8 +9,14 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 knobas-core = { path = "../knobas-core" }
 knobas-db = { path = "../knobas-db" }
-# Only for the `PgPool` handle held in `AppState`; no queries live in this crate.
+# The SPI, for the `Source` trait the M0 registry hands to the sync engine.
+knobas-source = { path = "../knobas-source" }
+# M0's only adapter, and the source demo mode loads.
+knobas-source-mock = { path = "../knobas-source-mock" }
+knobas-sync = { path = "../knobas-sync" }
+# The `PgPool` in `AppState`, plus demo mode's two `source_config` statements.
 sqlx.workspace = true
+thiserror.workspace = true
 tauri = { version = "2", features = [] }
 tracing = "0.1"
 # Without a subscriber every `tracing` line the database layer emits -- which

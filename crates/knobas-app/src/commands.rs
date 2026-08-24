@@ -22,6 +22,31 @@ pub fn ping() -> &'static str {
     "pong"
 }
 
+/// Register the demo source if absent, then sync it in full.
+///
+/// Safe to call repeatedly: see [`crate::demo::demo_load_inner`], which owns
+/// the behaviour and the test for it.
+#[tauri::command]
+pub async fn demo_load(state: State<'_, AppState>) -> Result<knobas_sync::SyncReport, String> {
+    crate::demo::demo_load_inner(&state.pool)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Sync one configured source from where it last stopped.
+///
+/// M0 has exactly one adapter, `"mock"`; anything else is refused rather than
+/// silently doing nothing.
+#[tauri::command]
+pub async fn sync_now(
+    state: State<'_, AppState>,
+    source_id: String,
+) -> Result<knobas_sync::SyncReport, String> {
+    crate::demo::sync_now_inner(&state.pool, &source_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
 /// The best `limit` full-text matches for `q`.
 ///
 /// `q` is user text in the `websearch_to_tsquery` dialect and is bound as a

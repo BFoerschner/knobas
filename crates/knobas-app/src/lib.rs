@@ -6,6 +6,7 @@
 //! against by an integration test.
 
 pub mod commands;
+pub mod demo;
 
 use std::sync::{Mutex, PoisonError};
 
@@ -62,6 +63,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::ping,
+            commands::demo_load,
+            commands::sync_now,
             commands::search,
             commands::recent_activity,
         ])

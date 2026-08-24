@@ -2006,9 +2006,13 @@ version = "0.1.0"
 dependencies = [
  "knobas-core",
  "knobas-db",
+ "knobas-source",
+ "knobas-source-mock",
+ "knobas-sync",
  "sqlx",
  "tauri",
  "tauri-build",
+ "thiserror 2.0.20",
  "tokio",
  "tracing",
  "tracing-subscriber",
