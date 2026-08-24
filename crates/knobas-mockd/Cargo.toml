@@ -10,7 +10,7 @@ license.workspace = true
 # that vendors its own `http` would put a second copy in the tree; check with
 # `cargo tree -p knobas-mockd -d` after any bump.
 axum = "0.8"
-tokio = { workspace = true, features = ["net", "sync"] }
+tokio = { workspace = true, features = ["net", "sync", "time"] }
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true

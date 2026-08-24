@@ -212,6 +212,15 @@ impl MockState {
         self.read().issues.clone()
     }
 
+    /// The mock's own clock: `fixture().today` plus one minute per mutation.
+    ///
+    /// This is what `serverInfo.serverTime` reports, so the server's idea of
+    /// "now" is always at least as new as the newest `updated` it will serve —
+    /// and never the wall clock, which would make responses irreproducible.
+    pub fn now(&self) -> DateTime<Utc> {
+        self.read().clock
+    }
+
     pub fn set_max_results_cap(&self, cap: u32) {
         self.write().max_results_cap = cap;
     }
