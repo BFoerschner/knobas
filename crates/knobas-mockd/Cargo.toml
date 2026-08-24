@@ -20,6 +20,7 @@ knobas-source-mock = { path = "../knobas-source-mock" }
 quick-xml = "0.41"
 
 [dev-dependencies]
+jsonschema = "0.51.0"
 # Inherited rather than re-declared: the workspace pins reqwest 0.13 with the
 # platform-verifier rustls backend, and a second feature set here would be a
 # second reqwest build for no reason.

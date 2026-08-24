@@ -1,0 +1,81 @@
+{
+  "comments": [
+    {
+      "author": {
+        "active": true,
+        "avatarUrls": {
+          "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=priya.nair",
+          "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=priya.nair",
+          "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=priya.nair",
+          "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=priya.nair"
+        },
+        "displayName": "Priya Nair",
+        "emailAddress": "priya.nair@tidewater.example",
+        "key": "JIRAUSER10102",
+        "name": "priya.nair",
+        "self": "http://mockd.test/rest/api/2/user?username=priya.nair",
+        "timeZone": "Europe/Berlin"
+      },
+      "body": "Please make sure the backoff policy matches the design page — finance wants max 5 attempts.",
+      "created": "2026-08-21T16:20:00.000+0200",
+      "id": "20000",
+      "self": "http://mockd.test/rest/api/2/issue/10001/comment/20000",
+      "updateAuthor": {
+        "active": true,
+        "avatarUrls": {
+          "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=priya.nair",
+          "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=priya.nair",
+          "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=priya.nair",
+          "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=priya.nair"
+        },
+        "displayName": "Priya Nair",
+        "emailAddress": "priya.nair@tidewater.example",
+        "key": "JIRAUSER10102",
+        "name": "priya.nair",
+        "self": "http://mockd.test/rest/api/2/user?username=priya.nair",
+        "timeZone": "Europe/Berlin"
+      },
+      "updated": "2026-08-21T16:20:00.000+0200"
+    },
+    {
+      "author": {
+        "active": true,
+        "avatarUrls": {
+          "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=mara.lindqvist",
+          "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=mara.lindqvist",
+          "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=mara.lindqvist",
+          "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=mara.lindqvist"
+        },
+        "displayName": "Mara Lindqvist",
+        "emailAddress": "mara.lindqvist@tidewater.example",
+        "key": "JIRAUSER10100",
+        "name": "mara.lindqvist",
+        "self": "http://mockd.test/rest/api/2/user?username=mara.lindqvist",
+        "timeZone": "Europe/Berlin"
+      },
+      "body": "Backoff + jitter implemented in a41f2c, integration test still red (#1187), investigating.",
+      "created": "2026-08-22T12:15:00.000+0200",
+      "id": "20001",
+      "self": "http://mockd.test/rest/api/2/issue/10001/comment/20001",
+      "updateAuthor": {
+        "active": true,
+        "avatarUrls": {
+          "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=mara.lindqvist",
+          "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=mara.lindqvist",
+          "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=mara.lindqvist",
+          "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=mara.lindqvist"
+        },
+        "displayName": "Mara Lindqvist",
+        "emailAddress": "mara.lindqvist@tidewater.example",
+        "key": "JIRAUSER10100",
+        "name": "mara.lindqvist",
+        "self": "http://mockd.test/rest/api/2/user?username=mara.lindqvist",
+        "timeZone": "Europe/Berlin"
+      },
+      "updated": "2026-08-22T12:15:00.000+0200"
+    }
+  ],
+  "maxResults": 50,
+  "startAt": 0,
+  "total": 2
+}

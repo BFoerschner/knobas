@@ -1,0 +1,17 @@
+{
+  "active": true,
+  "avatarUrls": {
+    "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=mara.lindqvist",
+    "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=mara.lindqvist",
+    "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=mara.lindqvist",
+    "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=mara.lindqvist"
+  },
+  "deleted": false,
+  "displayName": "Mara Lindqvist",
+  "emailAddress": "mara.lindqvist@tidewater.example",
+  "key": "JIRAUSER10100",
+  "locale": "en_GB",
+  "name": "mara.lindqvist",
+  "self": "http://mockd.test/rest/api/2/user?username=mara.lindqvist",
+  "timeZone": "Europe/Berlin"
+}
