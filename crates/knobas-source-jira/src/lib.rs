@@ -26,8 +26,10 @@
 //! recorded violation, so an invented endpoint fails this crate's own suite.
 
 mod config;
+mod cursor;
 mod descriptor;
 mod http;
+mod jql;
 mod map;
 mod model;
 mod time;
