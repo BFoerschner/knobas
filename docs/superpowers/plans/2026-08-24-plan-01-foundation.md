@@ -557,15 +557,22 @@ async fn activity_records_and_lists() {
 ```rust
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SourceDescriptor {
-    pub id: String,             // instance id, e.g. "jira"
-    pub kind: String,           // adapter kind, e.g. "jira", "mock"
+    pub id: String,             // instance id, e.g. "jira"; non-empty (battery-enforced)
+    pub adapter_kind: String,   // adapter kind, e.g. "jira", "mock" (renamed from `kind` — Task 6 ruling 7)
     pub name: String,
     pub capabilities: Vec<Capability>,
     pub adapter_version: String,
+    /// Auth methods this adapter supports (spec §3; secrets live in the keychain,
+    /// never in config_schema). Task 6 ruling 6.
+    pub auth_methods: Vec<AuthMethod>,
+    /// Stable snake_case identifiers of the WriteOps this adapter supports
+    /// ("comment", …) — the UI renders actions from this, never from a
+    /// hardcoded per-adapter table. Task 6 ruling 9.
+    pub write_ops: Vec<String>,
     /// Entity kinds this adapter emits, with display metadata — the UI renders
     /// a new source's items (launcher groups, chips, monograms) from this
     /// alone, never from hardcoded kind lists (spec §3a extensibility).
-    pub kinds: Vec<KindInfo>,
+    pub entity_kinds: Vec<KindInfo>,   // renamed from `kinds` — Task 6 ruling 7
     /// JSON Schema for this adapter's configuration; the Add-source form is
     /// generated from it (spec §3a). M0: the mock declares an empty object schema.
     pub config_schema: serde_json::Value,
@@ -580,7 +587,10 @@ pub struct KindInfo {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum Capability { Search, Write, Import }
+pub enum Capability { Search, Write, Webhooks, Import }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum AuthMethod { UserPassword, Pat, ApiToken, OAuth }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SyncItem {
@@ -602,6 +612,7 @@ pub enum SourceError {
     #[error("unauthorized")] Unauthorized,
     #[error("unreachable: {0}")] Unreachable(String),
     #[error("protocol: {0}")] Protocol(String),
+    #[error("sink: {0}")] Sink(String),   // Task 6 ruling 8 — a failing Sink::item propagates as this
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -622,7 +633,8 @@ pub trait Source: Send + Sync {
 
 #[async_trait::async_trait]
 pub trait Sink {
-    async fn item(&mut self, item: SyncItem);
+    /// Adapters MUST propagate a sink error with `?` (battery-enforced). Task 6 ruling 8.
+    async fn item(&mut self, item: SyncItem) -> Result<(), SourceError>;
 }
 ```
 
