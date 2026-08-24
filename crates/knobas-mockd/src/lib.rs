@@ -37,6 +37,8 @@
 //!    serve without one. Same reason: credentials must be on every request.
 
 pub mod allowlist;
+pub mod state;
 pub mod validate;
 
+pub use state::{MockFault, MockState};
 pub use validate::{Violation, ViolationKind, ViolationLog};
