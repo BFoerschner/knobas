@@ -562,6 +562,21 @@ pub struct SourceDescriptor {
     pub name: String,
     pub capabilities: Vec<Capability>,
     pub adapter_version: String,
+    /// Entity kinds this adapter emits, with display metadata — the UI renders
+    /// a new source's items (launcher groups, chips, monograms) from this
+    /// alone, never from hardcoded kind lists (spec §3a extensibility).
+    pub kinds: Vec<KindInfo>,
+    /// JSON Schema for this adapter's configuration; the Add-source form is
+    /// generated from it (spec §3a). M0: the mock declares an empty object schema.
+    pub config_schema: serde_json::Value,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct KindInfo {
+    pub id: String,       // "ticket"
+    pub label: String,    // "Ticket"
+    pub plural: String,   // "Tickets"
+    pub monogram: String, // "JI" — 2 chars
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -634,8 +649,12 @@ where F: Fn(Fault) -> Box<dyn crate::Source> {
     let mut sink = VecSink(Vec::new());
     let cursor = s.sync(None, &mut sink).await.expect("full sync must succeed");
     assert!(!sink.0.is_empty(), "full sync yielded no items");
+    let declared: std::collections::HashSet<String> =
+        s.descriptor().kinds.iter().map(|k| k.id.clone()).collect();
     for it in &sink.0 {
         assert_eq!(it.entity.namespace, src_id, "item {} not namespaced to source", it.entity);
+        assert!(declared.contains(&it.kind),
+                "item {} has kind {:?} not declared in descriptor.kinds", it.entity, it.kind);
     }
     // 2. Incremental sync from the returned cursor yields no items when nothing changed.
     let mut sink2 = VecSink(Vec::new());
@@ -723,6 +742,7 @@ async fn fixture_matches_the_brief() {
 - [ ] **Step 4: Implement the mock**
 
 - `fixture()`: `include_str!("../../../fixtures/tidewater/work.json")` + `serde_json` into typed `Fixture` structs mirroring the schema above, in a `std::sync::OnceLock`.
+- `MockSource::descriptor()`: id/kind `"mock"`, kinds declared for `ticket`/`pr`/`build`/`page`/`commit` (with labels, plurals, monograms), `config_schema` = empty JSON object schema.
 - `MockSource::sync`: full sync emits every ticket/pr/build/page/commit as a `SyncItem` (`entity = EntityRef::new("mock", key)`, `body_text` = summary/description/comments concatenated, `payload` = the raw JSON record); returns cursor `"tidewater-v1"`. Incremental sync with cursor `Some("tidewater-v1")` emits nothing (the fixture never changes) and returns the same cursor.
 - Faults short-circuit `test_connection` and `sync` with the mapped `SourceError`.
 - `write(WriteOp::Comment { .. })` returns `Ok(())` and records the op in a `Mutex<Vec<WriteOp>>` exposed as `written_ops()` for later tests; simulated-fault instances return the fault error instead.

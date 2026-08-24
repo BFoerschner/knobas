@@ -70,8 +70,9 @@ Why first-class: three already-decided features are views over exactly this data
 
 | Feature | Status | Notes |
 |---|---|---|
-| **One configuration per source**; sources are pluggable adapters with a declared capability set (search / write / webhooks / import) and version | Decided | Adapters seen so far: Jira, Confluence, Gitea, TeamCity, Uptime Kuma, Flowrun; listed as available: GitHub, GitLab, GitLab CI, Jenkins, generic git, Proxmox VE, Docker host, Traefik. |
-| **Auth methods**: user + password, PAT, API token, (OAuth later) | Decided | Stored in the OS keychain. |
+| **One configuration per source**; sources are pluggable adapters with a declared capability set (search / write / webhooks / import) and version | Decided | Adapters seen so far: Jira, Confluence, Gitea, TeamCity, Uptime Kuma, Flowrun; listed as available: GitHub, GitLab, GitLab CI, Jenkins, generic git, Proxmox VE, Docker host, Traefik. Extensibility guarantees: §3a. |
+| **Deployment flavor per source: `datacenter` (self-hosted) is the primary target** — Björn's real Jira/Confluence are self-hosted. Jira adapter speaks **DC REST v2** (`/rest/api/2/search`, `startAt` pagination — the Cloud `/search` removal never happened on DC); Confluence adapter speaks **DC REST v1** (`/rest/api/content` + CQL; the Cloud v2 API doesn't exist on DC). `cloud` is a config flavor to add later | Decided (Björn 08-24) | Contract sources vendored in `testenv/specs/` (official Jira DC WADL; **Atlassian publishes no machine-readable Confluence DC spec** — its contract is the official docs + validation against the real `atlassian/confluence` container, available with free dev licenses behind an opt-in compose profile). Pin WADL + container tags to the real instance versions once known. |
+| **Auth methods**: user + password, PAT (DC: Bearer, supported since Jira 8.14 / Confluence 7.9), API token, (OAuth later) | Decided | Stored in the OS keychain. |
 | **Add source** flow: type → URL → auth → *Test connection* → sync schedule → save | In mockup | |
 | **Sync schedule** per source (default every 5 min); *Sync now* | In mockup | |
 | **Credential health**: PAT expiry countdown, 401 detection → *Re-enter password*, reminder in inbox (snoozable) | In mockup | |
@@ -80,6 +81,20 @@ Why first-class: three already-decided features are views over exactly this data
 | **Diagnostics** (Rec 08-24): per-source sync log with errors, last-run durations, item counts, FTS index state, re-index button, DB size | Proposed | The status bar shows the summary; this is where you look when a sync misbehaves. Cheap to build, saves debugging pain later. |
 | **Local database**: one Postgres database holds the synced copy of every source (with provenance, "synced 4 min ago") **and** all knobas-owned data (links, contexts, notes, assets, time, smart lists, source configs); full-text index over all of it | Decided | Owned tables and synced tables are separate schemas (`knobas` / `sync`) so a dump can include or exclude the cache. **Rec 08-24 (answers Q1): embedded Postgres via the `postgresql_embedded` crate** (v0.21, pinned PG 18.6, native arm64) — downloads once on first run (~13 MB), `initdb` 2.6 s once, starts in ~0.12 s, idles at ~21 MB, ships `pg_dump`/`pg_restore`/`pg_upgrade` (export/import comes free). TCP on 127.0.0.1 (the macOS socket-path length limit bites under `~/Library/Application Support`). A settings field accepts an existing Postgres URL for anyone who already runs one. Proven in production by Retrom (Tauri 2 + postgresql_embedded). |
 | **Import adapters** (Proxmox, Docker host, Traefik): preview what would be imported, imported assets stay editable | In mockup (R2) | |
+
+---
+
+## 3a. Adapter SPI and extensibility (Decided — Björn 08-24: "just make it extensible")
+
+The promise: **adding a new source later — another document management system, another ticket system — is one new adapter and zero changes to knobas core, search, or UI.** What makes that true:
+
+| Guarantee | How |
+|---|---|
+| **Self-describing adapters** | An adapter's descriptor declares everything the app needs to host it: its config schema (the *Add source* form is **generated** from it, not hand-built per adapter), auth methods, capability set (search / write / webhooks / import), and the **entity kinds it emits with display metadata** (label, plural, monogram) — so a new source's items get grouped, chipped, and labeled in the launcher without touching core. |
+| **One generic sync pipeline** | Anything that emits `SyncItem`s lands in `sync.item` and automatically gets: Postgres FTS search, launcher grouping + filter chips, per-row provenance ("synced N min ago"), linkability (§5a), context membership, inbox eligibility, and smart-list reachability. Search does not know adapter names — it knows `sync.item`. |
+| **Open kinds, generic detail view** | Kind strings are open (like asset types). Known kinds get their tailored detail views; an **unknown kind gets a generic detail view** — title, metadata fields projected from the raw payload, body text, the links panel, and actions derived from the adapter's declared capabilities. A new ticket system is browsable on day one; a bespoke detail view is optional polish later. |
+| **Compile-time plugins now, out-of-process later** | v1 plugins are Rust crates: one crate implementing `Source` + one registry line. The SPI is deliberately **transport-agnostic** — every type crossing it (`SourceDescriptor`, `SyncItem`, `Cursor`, `WriteOp`) is plain serde-serializable data, and sync streams through a sink — so a v2 can host adapters **out of process** (JSON-RPC over stdio, MCP-style, any language) or as WASM without changing the model. No dynamic-library ABI risk now, no dead end later. |
+| **Raw payload kept** | `sync.item.payload` stores the source's raw record, so a later, smarter mapping (or a new detail view) can re-project existing data without re-syncing. |
 
 ---
 
