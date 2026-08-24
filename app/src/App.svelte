@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { onMount } from "svelte";
+
   import {
     demoLoad,
     ipcErrorMessage,
@@ -17,7 +19,13 @@
 
   let query = $state("");
   let hits = $state<SearchHit[]>([]);
-  let searching = $state(false);
+  /**
+   * The query `hits` actually answers, or `null` when nothing has been
+   * answered yet. `query !== searched` is precisely "the box has moved on" —
+   * during the debounce window and while a request is in flight — and it is
+   * what keeps "No matches." off the screen for a query nobody has run.
+   */
+  let searched = $state<string | null>(null);
   let searchError = $state<string | null>(null);
 
   let report = $state<SyncReport | null>(null);
@@ -34,6 +42,10 @@
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   $effect(() => () => clearTimeout(timer));
+
+  // The activity log is not empty just because this window is new: a previous
+  // session's syncs are in it, and so is a demo load from before a restart.
+  onMount(() => void refreshActivity());
 
   const groups = $derived(groupByKind(hits));
 
@@ -53,6 +65,8 @@
 
   function onInput(event: Event) {
     query = (event.currentTarget as HTMLInputElement).value;
+    // A stale error belongs to a query that is no longer in the box.
+    searchError = null;
     clearTimeout(timer);
     timer = setTimeout(() => void runSearch(query), DEBOUNCE_MS);
   }
@@ -62,22 +76,21 @@
     const token = ++issued;
     if (trimmed === "") {
       hits = [];
-      searching = false;
+      searched = "";
       searchError = null;
       return;
     }
-    searching = true;
     try {
       const found = await search(trimmed, SEARCH_LIMIT);
       if (token !== issued) return;
       hits = found;
+      searched = trimmed;
       searchError = null;
     } catch (error) {
       if (token !== issued) return;
       hits = [];
+      searched = trimmed;
       searchError = ipcErrorMessage(error);
-    } finally {
-      if (token === issued) searching = false;
     }
   }
 
@@ -155,8 +168,13 @@
     <p class="error">Search failed: {searchError}</p>
   {:else if query.trim() === ""}
     <p class="hint">Load the demo data, then type to search it.</p>
+  {:else if query.trim() !== searched}
+    <!-- Debouncing, or waiting on the backend: there is no answer for what is
+         in the box yet, and claiming "No matches." would be a lie that flashes
+         on every keystroke. -->
+    <p class="hint">Searching…</p>
   {:else if hits.length === 0}
-    <p class="hint">{searching ? "Searching…" : "No matches."}</p>
+    <p class="hint">No matches.</p>
   {:else}
     {#each groups as group (group.kind)}
       <section class="group">
@@ -169,9 +187,9 @@
                 <span class="id">{hit.entity_id}</span>
               </div>
               <!--
-                `snippet` is ts_headline output: `<b>` marks around unescaped
-                source text. Interpolating it as text is the whole defence —
-                never `{@html hit.snippet}`.
+                `snippet` is an excerpt of raw source text — whatever someone
+                typed into a ticket. Interpolating it as text is the whole
+                defence; never `{@html hit.snippet}`.
               -->
               <p class="snippet">{hit.snippet}</p>
               <div class="meta">

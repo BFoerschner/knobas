@@ -24,8 +24,11 @@ export interface SearchHit {
   source_id: string;
   title: string;
   /**
-   * XSS-UNSAFE. `ts_headline` output: `<b>` marks wrapped around *unescaped*
-   * source text. Render it as text (`{snippet}`), never with `{@html}`.
+   * XSS-UNSAFE. Plain text, but *source* text: an excerpt of whatever a person
+   * typed into a ticket, `<script>` included. Render it as text (`{snippet}`),
+   * never with `{@html}`. It carries no markup of its own — the match is not
+   * marked up, because highlighting via a string that must be escaped anyway
+   * can only produce literal tags.
    */
   snippet: string;
   rank: number;
@@ -97,5 +100,8 @@ export function ipcErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
   }
-  return JSON.stringify(error);
+  // `JSON.stringify` returns `undefined` — not the string `"undefined"` — for
+  // an undefined, a function or a symbol, which would break the return type
+  // this function promises.
+  return JSON.stringify(error) ?? String(error);
 }

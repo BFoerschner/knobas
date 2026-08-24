@@ -50,6 +50,7 @@ pub struct AppState {
 /// neither leaves a usable window to report the failure in.
 pub fn run() {
     init_tracing();
+    install_panic_hook();
 
     tauri::Builder::default()
         .setup(|app| {
@@ -57,6 +58,13 @@ pub fn run() {
             // deliberate, since every command would have to wait for the pool
             // anyway. No `emit` from here (M0 has no events): a listener
             // registered by the frontend cannot exist yet.
+            //
+            // It also means the window does not appear until the database is
+            // up, and a first run -- which downloads and `initdb`s PostgreSQL
+            // -- looks like a hang with no UI to say so. Bringing the database
+            // up behind a loading state needs a window to put that state in,
+            // which is M1 stream D; until then the panic hook below is what
+            // makes a failure legible.
             let handle = app.handle().clone();
             tauri::async_runtime::block_on(async move { start_database(&handle).await })?;
             Ok(())
@@ -115,10 +123,21 @@ async fn start_database(handle: &tauri::AppHandle) -> Result<(), Box<dyn std::er
 
 /// Stop the embedded server, once.
 ///
-/// Best-effort by design: the process is on its way out, and a server left
-/// running is recovered on the next start (`EmbeddedDb::start` clears a stale
-/// `postmaster.pid`). Failing loudly here would only replace a clean exit with
-/// a panic in an exit handler.
+/// Best-effort by design: the process is on its way out, and failing loudly
+/// here would only replace a clean exit with a panic in an exit handler.
+///
+/// This runs only on an exit knobas is told about. A signal -- Ctrl-C under
+/// `just dev`, a `kill`, a crash -- delivers no `RunEvent` at all, so the
+/// server outlives the process. It is *not* cleaned up on the next start
+/// either: what happens is that the next start finds it alive and adopts it
+/// (see `knobas_db::EmbeddedDb::start`), reusing it as a warm start. Nothing
+/// stops it but the run that started it, so a signal-killed session leaves a
+/// PostgreSQL running until the next clean quit.
+///
+/// `db.stop()` closes the pool first, which waits for in-flight queries. A quit
+/// during a long sync therefore blocks the exit for as long as that sync's
+/// connection is busy. Bounding it -- a timeout, or cancelling the run --
+/// belongs with the sync scheduler in M1 stream F.
 fn shutdown_database(app: &tauri::AppHandle) {
     let Some(state) = app.try_state::<AppState>() else {
         // Startup failed before the state was managed; nothing was started.
@@ -151,5 +170,25 @@ fn init_tracing() {
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_target(false)
+        // Explicit, and not the `fmt()` default of stdout: diagnostics are not
+        // this program's output, and anything piping knobas' stdout should get
+        // nothing but what knobas means to say.
+        .with_writer(std::io::stderr)
         .init();
+}
+
+/// Route panics through `tracing` as well as the default handler.
+///
+/// The whole of startup happens before there is a window, so a failure there --
+/// a database that will not start, a corrupt data directory -- can only be
+/// reported by the process dying. The default hook writes to stderr, which is
+/// exactly nothing in a release build launched from Finder or, on Windows,
+/// launched at all. Sending it through the subscriber too means it lands
+/// wherever the logs land, and keeps the default hook's backtrace.
+fn install_panic_hook() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        tracing::error!("{info}");
+        default(info);
+    }));
 }

@@ -52,8 +52,9 @@ pub async fn sync_now(
 /// `q` is user text in the `websearch_to_tsquery` dialect and is bound as a
 /// parameter all the way down; it is never interpolated into SQL.
 ///
-/// The returned `snippet` carries `<b>` marks around **unescaped** source text.
-/// It is the frontend's job to render it as text -- see `ipc.ts`.
+/// The returned `snippet` is an excerpt of **raw source text** -- unescaped,
+/// and written by whoever filed the ticket. It is the frontend's job to render
+/// it as text; see `ipc.ts`.
 #[tauri::command]
 pub async fn search(
     state: State<'_, AppState>,

@@ -17,22 +17,33 @@ clippy:
 test:
     env -u RUSTUP_TOOLCHAIN cargo test --workspace
 
-front:
+# Install app/ dependencies if they are missing or older than the lockfile.
+#
+# `npm ci` deletes and reinstalls node_modules wholesale: right on a fresh
+# clone or after the lockfile moves, pure waste on every other run. Staleness
+# is a timestamp comparison, not a content one -- npm's hidden
+# `node_modules/.package-lock.json` is its own flattened view of the tree and is
+# never byte-equal to `package-lock.json`, so comparing the two files would
+# reinstall every single time. npm rewrites the hidden file on install, so
+# "lockfile is newer" means exactly "installed against an older lockfile",
+# including after a pull or a branch switch.
+deps:
     #!/usr/bin/env bash
     set -euo pipefail
     cd app
-    # `npm ci` only when the tree is absent: it deletes and reinstalls
-    # node_modules wholesale, which is right for a fresh clone and pure waste
-    # on every subsequent gate run.
-    [ -d node_modules ] || npm ci
-    npm run check
-    npm run build
+    if [ ! -d node_modules ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then
+        npm ci
+    fi
+
+front: deps
+    cd app && npm run check && npm run build
 
 # The desktop app against the embedded database. Set KNOBAS_DB_URL to point it
 # at a server you manage instead.
 #
 # The Tauri CLI is a devDependency of `app/` (there is no `cargo tauri-cli` in
-# this repo), and it has to run from the crate that owns `tauri.conf.json`, so
-# the binary is named by path rather than found on PATH.
-dev:
-    cd crates/knobas-app && ../../app/node_modules/.bin/tauri dev
+# this repo), so `deps` is what provisions it; it then has to run from the crate
+# that owns `tauri.conf.json`, which is why the CLI comes off PATH rather than
+# from the current directory.
+dev: deps
+    cd crates/knobas-app && PATH="$PWD/../../app/node_modules/.bin:$PATH" tauri dev
