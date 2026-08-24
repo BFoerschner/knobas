@@ -39,35 +39,24 @@ impl crate::Sink for FailingSink {
     }
 }
 
-/// The stable identifier adapters declare in
-/// [`SourceDescriptor::write_ops`](crate::SourceDescriptor::write_ops) for `op`.
-///
-/// **No wildcard arm, deliberately.** `WriteOp` is documented to grow per
-/// milestone, and a stale table here does not fail quietly -- it falsely
-/// rejects the first adapter to declare the new identifier, with a message
-/// pointing at that adapter's descriptor instead of at this file. So the
-/// reminder is the compiler: adding a variant stops this module compiling until
-/// the variant is given an identifier here and a probe value in
-/// [`known_write_ops`] below.
-fn write_op_identifier(op: &crate::WriteOp) -> &'static str {
-    match op {
-        crate::WriteOp::Comment { .. } => "comment",
-    }
-}
-
-/// One probe value per [`WriteOp`](crate::WriteOp) variant, each paired with its
-/// identifier from [`write_op_identifier`] -- so the two can never disagree.
+/// One probe value per [`WriteOp`](crate::WriteOp) variant, each paired with
+/// its own [`WriteOp::identifier`](crate::WriteOp::identifier) -- so the two
+/// can never disagree.
 ///
 /// This is what lets the battery call `write` with an op the adapter did not
 /// declare, and what makes a typo'd identifier in a descriptor a test failure
 /// rather than an action the UI silently never renders.
+///
+/// The list is exhaustive by construction: a new `WriteOp` variant stops
+/// `WriteOp::identifier` compiling, and adding it there is the moment to add
+/// its probe value here.
 fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
     [crate::WriteOp::Comment {
         entity: format!("{src_id}:contract-battery"),
         body: "contract battery probe".into(),
     }]
     .into_iter()
-    .map(|op| (write_op_identifier(&op), op))
+    .map(|op| (op.identifier(), op))
     .collect()
 }
 
