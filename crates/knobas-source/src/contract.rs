@@ -39,21 +39,36 @@ impl crate::Sink for FailingSink {
     }
 }
 
-/// One representative of every [`WriteOp`](crate::WriteOp) variant, paired with
-/// the stable identifier adapters declare in
-/// [`SourceDescriptor::write_ops`](crate::SourceDescriptor::write_ops).
+/// The stable identifier adapters declare in
+/// [`SourceDescriptor::write_ops`](crate::SourceDescriptor::write_ops) for `op`.
 ///
-/// Extend this when `WriteOp` grows: it is what lets the battery probe an op an
-/// adapter did not declare, and what makes a typo'd identifier in a descriptor
-/// a test failure rather than an action the UI silently never renders.
+/// **No wildcard arm, deliberately.** `WriteOp` is documented to grow per
+/// milestone, and a stale table here does not fail quietly -- it falsely
+/// rejects the first adapter to declare the new identifier, with a message
+/// pointing at that adapter's descriptor instead of at this file. So the
+/// reminder is the compiler: adding a variant stops this module compiling until
+/// the variant is given an identifier here and a probe value in
+/// [`known_write_ops`] below.
+fn write_op_identifier(op: &crate::WriteOp) -> &'static str {
+    match op {
+        crate::WriteOp::Comment { .. } => "comment",
+    }
+}
+
+/// One probe value per [`WriteOp`](crate::WriteOp) variant, each paired with its
+/// identifier from [`write_op_identifier`] -- so the two can never disagree.
+///
+/// This is what lets the battery call `write` with an op the adapter did not
+/// declare, and what makes a typo'd identifier in a descriptor a test failure
+/// rather than an action the UI silently never renders.
 fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
-    vec![(
-        "comment",
-        crate::WriteOp::Comment {
-            entity: format!("{src_id}:contract-battery"),
-            body: "contract battery probe".into(),
-        },
-    )]
+    [crate::WriteOp::Comment {
+        entity: format!("{src_id}:contract-battery"),
+        body: "contract battery probe".into(),
+    }]
+    .into_iter()
+    .map(|op| (write_op_identifier(&op), op))
+    .collect()
 }
 
 /// Every adapter must pass. Panics with a descriptive message on violation.
@@ -172,8 +187,13 @@ where
     );
     for (id, op) in known {
         if d.write_ops.iter().any(|w| w.as_str() == id) {
-            // Declared: performing it would touch a live system, so it is the
-            // adapter's own tests that must cover it.
+            // Declared: an adapter runs this battery against its real backend,
+            // so performing the op would post an actual comment on a live
+            // system. Covering a declared op is the adapter's own job.
+            //
+            // This branch is a safety property, not an assertion, so the
+            // mutation sweep cannot see it -- `accepts_a_declared_write_op_without_calling_write`
+            // pins it instead, with an adapter whose `write` panics if reached.
             continue;
         }
         let refused = s.write(op).await;
@@ -205,8 +225,13 @@ mod tests {
     /// test red.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum Behavior {
-        /// Honours the whole contract.
+        /// Honours the whole contract, declaring no write ops.
         Good,
+        /// Honours the whole contract and declares `comment`, shaped like Task
+        /// 7's mock. Its `write` panics, so the battery accepting it is proof
+        /// that the declared-op guard skipped it rather than performing a real
+        /// write against what would be a live system.
+        DeclaresAWriteOp,
         /// Emits nothing at all: the do-nothing adapter.
         Null,
         /// Declares a blank source id, so every id it emits is unparseable.
@@ -275,7 +300,9 @@ mod tests {
                 // Kept coherent with `write_ops` below for every behavior but
                 // the two that exist to violate exactly that.
                 capabilities: match self.behavior {
-                    Behavior::UnknownWriteOpId | Behavior::WriteCapabilityWithoutOps => {
+                    Behavior::DeclaresAWriteOp
+                    | Behavior::UnknownWriteOpId
+                    | Behavior::WriteCapabilityWithoutOps => {
                         vec![Capability::Search, Capability::Write]
                     }
                     _ => vec![Capability::Search],
@@ -286,7 +313,9 @@ mod tests {
                 // expects a refusal -- except where the behavior needs otherwise.
                 write_ops: match self.behavior {
                     Behavior::UnknownWriteOpId => vec!["Comment".into()],
-                    Behavior::WriteOpsWithoutCapability => vec!["comment".into()],
+                    Behavior::DeclaresAWriteOp | Behavior::WriteOpsWithoutCapability => {
+                        vec!["comment".into()]
+                    }
                     _ => Vec::new(),
                 },
                 entity_kinds: vec![KindInfo {
@@ -357,6 +386,10 @@ mod tests {
         }
 
         async fn write(&self, op: WriteOp) -> Result<(), SourceError> {
+            if self.behavior == Behavior::DeclaresAWriteOp {
+                // A real adapter would post a comment to a live system here.
+                unreachable!("battery must not perform a write the descriptor declares");
+            }
             if self.behavior == Behavior::AcceptsUndeclaredWrite {
                 return Ok(());
             }
@@ -400,6 +433,20 @@ mod tests {
     #[tokio::test]
     async fn accepts_a_conforming_adapter() {
         run(Behavior::Good).await.expect("conforming adapter");
+    }
+
+    /// Pins the guard that skips declared ops -- the one part of clause 5 that
+    /// is control flow rather than an assertion, so the mutation sweep cannot
+    /// reach it. This adapter's `write` panics; the battery accepting it proves
+    /// `write` was never called. Delete the guard and this goes red, which is
+    /// what stops the battery from posting a real comment through an adapter
+    /// running it against a live backend -- and from rejecting every adapter
+    /// that correctly implements the op it declared, Task 7's mock included.
+    #[tokio::test]
+    async fn accepts_a_declared_write_op_without_calling_write() {
+        run(Behavior::DeclaresAWriteOp)
+            .await
+            .expect("an adapter that declares an op it supports must pass, uncalled");
     }
 
     // -- clause 1: full sync ------------------------------------------------
