@@ -2496,6 +2496,8 @@ dependencies = [
 name = "knobas-source-jira"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "knobas-core",
  "knobas-http",
  "knobas-source",
  "serde",

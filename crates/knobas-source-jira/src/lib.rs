@@ -28,6 +28,9 @@
 mod config;
 mod descriptor;
 mod http;
+mod map;
+mod model;
+mod time;
 
 pub use config::{Flavor, JiraConfig};
 pub use descriptor::descriptor_template;
