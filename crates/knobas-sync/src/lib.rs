@@ -351,6 +351,7 @@ impl<'t, 'c> PgSink<'t, 'c> {
         let mut updated = Vec::with_capacity(n);
         let mut deleted = Vec::with_capacity(n);
         let mut payloads = Vec::with_capacity(n);
+        let mut web_urls = Vec::with_capacity(n);
         for (id, item) in batch {
             ids.push(id);
             kinds.push(item.kind);
@@ -360,6 +361,7 @@ impl<'t, 'c> PgSink<'t, 'c> {
             updated.push(item.updated_at);
             deleted.push(item.deleted);
             payloads.push(item.payload);
+            web_urls.push(item.web_url);
         }
 
         // The entity first: `sync.item.entity_id` references it.
@@ -379,6 +381,7 @@ impl<'t, 'c> PgSink<'t, 'c> {
             .bind(&authors)
             .bind(&updated)
             .bind(&payloads)
+            .bind(&web_urls)
             .bind(&self.source_id)
             .execute(&mut **self.tx)
             .await?;
@@ -459,18 +462,23 @@ select i.id, i.kind, i.title,
 /// either. It stays null only while the source has never dated the item --
 /// unlike the entity's, which is `not null` and falls back to `now()` on a
 /// genuinely new row.
+///
+/// `web_url` is refreshed wholesale like the title, **not** coalesced like
+/// `item_updated_at`: an adapter that stops reporting a URL is reporting that
+/// there is no page, and the two timestamps coalesce only because they hold the
+/// same fact as `knobas.entity.updated_at`.
 const ITEM_UPSERT: &str = r#"
 with incoming as (
   select *
     from unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[],
-                $6::timestamptz[], $7::jsonb[])
-         as t(id, kind, title, body_text, author, item_updated_at, payload)
+                $6::timestamptz[], $7::jsonb[], $8::text[])
+         as t(id, kind, title, body_text, author, item_updated_at, payload, web_url)
 )
 insert into sync.item
        (entity_id, source_id, kind, title, body_text, author, item_updated_at,
-        synced_at, payload)
-select i.id, $8, i.kind, i.title, i.body_text, i.author,
-       coalesce(i.item_updated_at, old.item_updated_at), now(), i.payload
+        synced_at, payload, web_url)
+select i.id, $9, i.kind, i.title, i.body_text, i.author,
+       coalesce(i.item_updated_at, old.item_updated_at), now(), i.payload, i.web_url
   from incoming i
        left join sync.item old on old.entity_id = i.id
     on conflict (entity_id) do update set
@@ -481,7 +489,8 @@ select i.id, $8, i.kind, i.title, i.body_text, i.author,
        author          = excluded.author,
        item_updated_at = excluded.item_updated_at,
        synced_at       = excluded.synced_at,
-       payload         = excluded.payload
+       payload         = excluded.payload,
+       web_url         = excluded.web_url
 "#;
 
 #[async_trait::async_trait]
@@ -534,6 +543,7 @@ mod tests {
             author: None,
             updated_at: None,
             payload: serde_json::json!({}),
+            web_url: None,
             deleted: false,
         }
     }

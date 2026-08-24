@@ -9,7 +9,7 @@ use std::sync::Mutex;
 
 use knobas_core::entity::EntityRef;
 use knobas_source::{
-    Capability, Cursor, KindInfo, Sink, Source, SourceDescriptor, SourceError, SyncItem, WriteOp,
+    Cursor, KindInfo, Sink, Source, SourceDescriptor, SourceError, SyncItem, WriteOp,
 };
 use knobas_source_mock::MockSource;
 use sqlx::PgPool;
@@ -106,7 +106,9 @@ impl Source for FakeSource {
             id: self.id.clone(),
             adapter_kind: "fake".to_owned(),
             name: "Fake".to_owned(),
-            capabilities: vec![Capability::Search],
+            // P12: `Search` means server-side search, which this fake has no
+            // entry point for; it is read-only, so it declares nothing.
+            capabilities: Vec::new(),
             adapter_version: "0.1.0".to_owned(),
             auth_methods: Vec::new(),
             write_ops: Vec::new(),
@@ -116,12 +118,17 @@ impl Source for FakeSource {
                 plural: "Tickets".to_owned(),
                 monogram: "TK".to_owned(),
             }],
+            // Everything it is given, every run: the engine's sweep may
+            // tombstone what it stops emitting.
+            full_sync_exhaustive: true,
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
         }
     }
 
-    async fn test_connection(&self) -> Result<(), SourceError> {
-        Ok(())
+    async fn test_connection(&self) -> Result<knobas_source::ConnectionInfo, SourceError> {
+        // A fake that connects to nothing: `Default` is exactly "connected,
+        // nothing to report".
+        Ok(knobas_source::ConnectionInfo::default())
     }
 
     async fn sync(
@@ -162,8 +169,10 @@ impl Source for LockProbingSource {
         FakeSource::new(&self.id, Vec::new()).descriptor()
     }
 
-    async fn test_connection(&self) -> Result<(), SourceError> {
-        Ok(())
+    async fn test_connection(&self) -> Result<knobas_source::ConnectionInfo, SourceError> {
+        // A fake that connects to nothing: `Default` is exactly "connected,
+        // nothing to report".
+        Ok(knobas_source::ConnectionInfo::default())
     }
 
     async fn sync(
@@ -217,6 +226,7 @@ fn item(source: &str, key: &str, title: &str, deleted: bool) -> SyncItem {
         author: Some("mara".to_owned()),
         updated_at: None,
         payload: serde_json::json!({ "key": key }),
+        web_url: None,
         deleted,
     }
 }
@@ -267,6 +277,48 @@ async fn deleted_at(pool: &PgPool, entity: &str) -> Option<chrono::DateTime<chro
             .await
             .unwrap();
     at
+}
+
+/// The adapter's `web_url` reaches the mirror, or *Open in browser* has
+/// nothing to open (interfaces §2.5, P5).
+#[tokio::test]
+async fn the_mirror_stores_the_item_web_url() {
+    let (pool, id) = fixture().await;
+    let with_url = SyncItem {
+        web_url: Some("https://tidewater.example/browse/TIDE-9".to_owned()),
+        ..item(&id, "TIDE-9", "has a page", false)
+    };
+    knobas_sync::run_once(&pool, &FakeSource::new(&id, vec![with_url]), None)
+        .await
+        .unwrap();
+
+    let (stored,): (Option<String>,) =
+        sqlx::query_as("select web_url from sync.item where entity_id = $1")
+            .bind(format!("{id}:TIDE-9"))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        stored.as_deref(),
+        Some("https://tidewater.example/browse/TIDE-9")
+    );
+
+    // An adapter that stops reporting one clears it, exactly like the title:
+    // the mirror is refreshed wholesale, never merged.
+    knobas_sync::run_once(
+        &pool,
+        &FakeSource::new(&id, vec![item(&id, "TIDE-9", "has a page", false)]),
+        None,
+    )
+    .await
+    .unwrap();
+    let (stored,): (Option<String>,) =
+        sqlx::query_as("select web_url from sync.item where entity_id = $1")
+            .bind(format!("{id}:TIDE-9"))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored, None);
 }
 
 /// A remote deletion tombstones the entity without dropping it -- links point

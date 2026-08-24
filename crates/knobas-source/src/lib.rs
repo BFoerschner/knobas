@@ -25,6 +25,7 @@
 //! against themselves in their own test suite.
 
 pub mod contract;
+pub mod instance;
 
 /// Everything knobas needs to know about a configured adapter instance.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -65,11 +66,54 @@ pub struct SourceDescriptor {
     /// alone, never from hardcoded kind lists (spec §3a extensibility).
     /// [`SyncItem::kind`] must name one of these.
     pub entity_kinds: Vec<KindInfo>,
+    /// Whether a `cursor: None` sync emits this source's **complete** current
+    /// corpus.
+    ///
+    /// This is the precondition of the full-sync sweep (interfaces §4.1): after
+    /// an exhaustive full sync, every row of this source whose `synced_at`
+    /// predates the run is an item the source stopped returning, and the engine
+    /// tombstones it -- which is the only way a hard delete upstream ever
+    /// reaches knobas.
+    ///
+    /// `false` says the full sync is a *window*, not the world: TeamCity emits
+    /// the newest N builds per configuration, so a sweep after it would
+    /// tombstone the entire build history on every run. For such a source
+    /// vanished items are never swept, and the mirror keeps what it last saw.
+    ///
+    /// M1: mock `true`, Jira `true`, Gitea `true`, TeamCity `false`. It is a
+    /// claim the adapter makes about its own read path -- the battery cannot
+    /// check it without knowing the remote corpus, so the adapter's own
+    /// integration tests are what hold it honest.
+    pub full_sync_exhaustive: bool,
     /// JSON Schema for this adapter's configuration; the Add-source form is
     /// generated from it (spec §3a). Never holds secrets -- those live in the
     /// OS keychain, keyed by the chosen [`AuthMethod`]. M0: the mock declares
     /// an empty object schema.
     pub config_schema: serde_json::Value,
+}
+
+/// What a successful [`Source::test_connection`] learned about the far end.
+///
+/// Every field is optional and an adapter fills only what its API actually
+/// exposes: the Add-source flow renders what it got and says nothing about
+/// what it did not (§3 "Credential health: PAT expiry countdown"). A source
+/// whose API has no "who am I" endpoint is not a broken source.
+///
+/// Plain serde data, like everything else crossing this SPI (§3a).
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ConnectionInfo {
+    /// Whom knobas is authenticated as, in the source's own spelling
+    /// (`"mara.lindqvist"`), so *Test connection* can say **Connected as …**
+    /// and the user can tell a wrong-account PAT from a working one.
+    pub account: Option<String>,
+    /// The remote product version, for the sources view and for the bug report
+    /// that follows a dialect mismatch (`flavor: datacenter|cloud`).
+    pub server_version: Option<String>,
+    /// When the credential that just worked stops working, if the source will
+    /// say. Feeds the PAT expiry countdown and `source_config.secret_expires_at`.
+    pub secret_expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Anything else worth putting on screen in one line.
+    pub detail: Option<String>,
 }
 
 /// Display metadata for one entity kind an adapter emits.
@@ -88,6 +132,14 @@ pub struct KindInfo {
 /// What an adapter can do beyond plain syncing (spec §3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Capability {
+    /// The source can search **server-side**, on its own corpus.
+    ///
+    /// Reserved: the SPI has no `Source::search` yet, so nothing calls this in
+    /// M1 and knobas' own launcher answers from the local index either way
+    /// (§3a "Search does not know adapter names -- it knows `sync.item`").
+    /// M1's read-only adapters therefore declare **no** capabilities at all;
+    /// the alternative reading -- "syncs into the local index" -- would be
+    /// true of every adapter ever written and would assert nothing.
     Search,
     /// Must be accompanied by a non-empty
     /// [`SourceDescriptor::write_ops`], which says *which* writes.
@@ -123,6 +175,11 @@ pub struct SyncItem {
     pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
     /// Raw source payload, kept for re-mapping.
     pub payload: serde_json::Value,
+    /// Where a human reads this item in the source's own UI, if the adapter
+    /// can say. The detail view's *Open in browser* renders from this and
+    /// nothing else -- deriving a URL downstream would need the per-adapter
+    /// table §3a forbids (interfaces §8 P5). Stored in `sync.item.web_url`.
+    pub web_url: Option<String>,
     pub deleted: bool,
 }
 
@@ -204,7 +261,15 @@ impl WriteOp {
 #[async_trait::async_trait]
 pub trait Source: Send + Sync {
     fn descriptor(&self) -> SourceDescriptor;
-    async fn test_connection(&self) -> Result<(), SourceError>;
+    /// Reach the remote system with the configured credential and report what
+    /// answered.
+    ///
+    /// Called when a source is added, when its secret is re-entered, and by
+    /// the credential-health poll. The same fault classification as
+    /// [`sync`](Source::sync) applies: 401/403 → [`SourceError::Unauthorized`],
+    /// connect/DNS/TLS/timeout → [`SourceError::Unreachable`], anything else →
+    /// [`SourceError::Protocol`].
+    async fn test_connection(&self) -> Result<ConnectionInfo, SourceError>;
     /// Push every item changed since `cursor` (None = full sync); return the new cursor.
     ///
     /// Sink failures are **not** the adapter's to swallow: propagate every
@@ -261,6 +326,7 @@ mod tests {
                 plural: "Tickets".into(),
                 monogram: "JI".into(),
             }],
+            full_sync_exhaustive: true,
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
         }
     }
@@ -280,6 +346,7 @@ mod tests {
         assert_eq!(v["entity_kinds"][0]["monogram"], "JI");
         assert_eq!(v["write_ops"], serde_json::json!(["comment"]));
         assert_eq!(v["adapter_kind"], "jira");
+        assert_eq!(v["full_sync_exhaustive"], true);
         assert_eq!(v["config_schema"]["type"], "object");
     }
 
@@ -298,6 +365,9 @@ mod tests {
         assert_eq!(back.auth_methods, d.auth_methods);
         assert_eq!(back.entity_kinds[0].plural, "Tickets");
         assert_eq!(back.write_ops, d.write_ops);
+        // The sweep's precondition travels with the descriptor: a flag that
+        // did not survive the hop would default to "sweep it" downstream.
+        assert_eq!(back.full_sync_exhaustive, d.full_sync_exhaustive);
         assert_eq!(back.config_schema, d.config_schema);
 
         let item = SyncItem {
@@ -312,6 +382,7 @@ mod tests {
                     .with_timezone(&chrono::Utc),
             ),
             payload: serde_json::json!({ "fields": { "status": "In Progress" } }),
+            web_url: Some("https://jira.example/browse/PAY-231".into()),
             deleted: false,
         };
         let json = serde_json::to_value(&item).unwrap();
@@ -325,6 +396,9 @@ mod tests {
         assert_eq!(back.author, item.author);
         assert_eq!(back.updated_at, item.updated_at);
         assert_eq!(back.payload, item.payload);
+        // *Open in browser* renders from this alone, so it has to survive the
+        // hop like everything else the detail view reads.
+        assert_eq!(back.web_url, item.web_url);
         assert!(!back.deleted);
 
         // Errors travel structurally, not as their Display text.
