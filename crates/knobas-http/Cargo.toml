@@ -1,0 +1,24 @@
+[package]
+name = "knobas-http"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+# Shared by the Jira, Gitea and TeamCity adapters, and read-only for M1
+# (interfaces §8 P8): a three-writer crate is a collision magnet, so changes
+# route through the orchestrator.
+[dependencies]
+governor.workspace = true
+knobas-source = { path = "../knobas-source" }
+reqwest.workspace = true
+reqwest-middleware.workspace = true
+reqwest-retry.workspace = true
+serde.workspace = true
+tokio = { workspace = true, features = ["time"] }
+tracing = "0.1"
+url = "2"
+
+[dev-dependencies]
+http = "1"
+serde_json.workspace = true
+tokio.workspace = true
