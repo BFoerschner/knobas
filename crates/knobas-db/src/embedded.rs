@@ -261,14 +261,31 @@ enum Started {
 /// time. The guard is a local, so it is released whichever way this returns --
 /// including into [`EmbeddedDb::start`]'s stale-lock retry, which takes it
 /// again.
-async fn start_managed(root_dir: &Path, settings: Settings) -> Result<Started, DbError> {
+///
+/// The superuser password is read **here**, under that lock, and deliberately
+/// not by [`build_settings`]: see [`adopt_recorded_password`].
+async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Started, DbError> {
     let _guard = bring_up_lock(root_dir).await?;
+    adopt_recorded_password(&mut settings)?;
 
     let data_dir = settings.data_dir.clone();
     // `PostgreSQL::new` consumes the settings, and the adoption path needs
     // them after the handle is gone.
     let adoption = settings.clone();
     let mut postgresql = PostgreSQL::new(settings);
+
+    // One yield before the work starts, so a *warm* install interleaves the
+    // way a cold one does. On a machine without the binaries, `setup()`
+    // downloads and unpacks PostgreSQL and suspends here for seconds; with
+    // them already present it runs all the way to `initdb` without suspending
+    // once, and a second launch on the same profile is then never polled until
+    // the first has finished. That difference costs nothing in production and
+    // decides everything in a test:
+    // `two_concurrent_first_launches_serialise_instead_of_racing` only
+    // exercises the contended path if both launches are really in flight, and
+    // without this it passes for the wrong reason on a warm machine while CI
+    // -- which re-downloads whenever this file changes -- runs the cold one.
+    tokio::task::yield_now().await;
 
     postgresql.setup().await?;
 
@@ -560,14 +577,33 @@ fn build_settings(root_dir: &Path) -> Result<Settings, DbError> {
     settings.socket_dir = None;
     settings.timeout = Some(COMMAND_TIMEOUT);
 
-    // `Settings::new()` invents a fresh random password every call, but
-    // `initdb` burned the first one into the data directory. Reuse what was
-    // recorded, otherwise every restart authenticates with the wrong password.
+    // The password `Settings::new()` invented is left in place here. Reading
+    // the recorded one is `adopt_recorded_password`'s job, and it has to
+    // happen under the bring-up lock -- see there.
+
+    Ok(settings)
+}
+
+/// Replace the invented superuser password with the one `initdb` recorded.
+///
+/// `Settings::new()` invents a fresh random password on every call, but
+/// `initdb` burned the *first* one into the data directory: without this,
+/// every restart authenticates with the wrong password.
+///
+/// **Called under [`bring_up_lock`], never before it.** On a genuine first
+/// launch `.pgpass` does not exist yet, and reading it early is how the loser
+/// of a two-launch race keeps the password it invented for itself: it waits
+/// for the lock correctly, finds the directory already initialised, skips
+/// `initialize()` (which writes `.pgpass` only when the file is absent), and
+/// then fails to authenticate against the winner's server -- the same
+/// unrecoverable lockout the rest of this module exists to prevent. Under the
+/// lock the file is either already there (adopt it) or genuinely absent (keep
+/// the invented one, and `initialize()` records it).
+fn adopt_recorded_password(settings: &mut Settings) -> Result<(), DbError> {
     if let Some(password) = read_password(&settings.password_file)? {
         settings.password = password;
     }
-
-    Ok(settings)
+    Ok(())
 }
 
 fn read_password(password_file: &Path) -> Result<Option<String>, DbError> {
@@ -849,23 +885,100 @@ mod tests {
     }
 
     #[test]
-    fn build_settings_reuses_the_recorded_password() {
+    fn the_recorded_password_is_adopted_under_the_lock_not_before_it() {
         let dir = tempfile::tempdir().unwrap();
+        // Recorded before the settings are even built, so the assertion below
+        // is about *where* the file is read, not about whether it exists.
         write(dir.path(), ".pgpass", "s3cret\n");
 
-        let settings = build_settings(dir.path()).unwrap();
+        let mut settings = build_settings(dir.path()).unwrap();
+        assert_ne!(
+            settings.password, "s3cret",
+            "build_settings must not read the password file: doing it there is what leaves a \
+             launch that started before the winner wrote .pgpass holding a password nothing \
+             accepts"
+        );
+
+        adopt_recorded_password(&mut settings).unwrap();
 
         assert_eq!(settings.password, "s3cret");
     }
 
     #[test]
-    fn build_settings_ignores_an_empty_password_file() {
+    fn an_empty_password_file_leaves_the_invented_password_alone() {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), ".pgpass", "");
+        let mut settings = build_settings(dir.path()).unwrap();
+        let invented = settings.password.clone();
 
-        let settings = build_settings(dir.path()).unwrap();
+        adopt_recorded_password(&mut settings).unwrap();
 
+        assert_eq!(settings.password, invented);
         assert!(!settings.password.is_empty());
+    }
+
+    /// The loser of a first-launch race joins the winner's server, using the
+    /// password `initdb` recorded rather than the one it invented.
+    ///
+    /// This is the cold machine, deterministically: `build_settings` runs
+    /// while the profile is empty -- which is all a loser has to do to be
+    /// holding a random password nothing accepts -- and only then does the
+    /// winner initialise the directory. If the recorded password were read
+    /// anywhere but under the bring-up lock, the loser would fail
+    /// `start()` against the winner's live server, reach `adopt`, and be told
+    /// its own profile belongs to another instance. Permanently: every later
+    /// launch that lost by a microsecond does the same thing.
+    #[tokio::test]
+    async fn a_launch_that_started_cold_authenticates_with_the_recorded_password() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let cold = build_settings(dir.path()).unwrap();
+
+        // The winner: initialises the profile, records the password, stays up.
+        let winner = EmbeddedDb::start(DbConfig {
+            root_dir: dir.path().to_path_buf(),
+            existing_url: None,
+        })
+        .await
+        .expect("the winner brings the profile up");
+        let recorded = read_password(&cold.password_file)
+            .unwrap()
+            .expect("initdb records a password");
+        assert_ne!(
+            cold.password, recorded,
+            "settings built cold must carry a password the winner's server does not know"
+        );
+
+        // The loser, with the settings it built before any of that happened.
+        let db = match start_managed(dir.path(), cold).await {
+            Ok(Started::Ready(db)) => db,
+            Ok(Started::StaleLock { serving, .. }) => {
+                panic!("the winner serves this very directory, not {serving:?}")
+            }
+            Err(error) => panic!("the loser must join the winner's server: {error}"),
+        };
+        let one: (i32,) = sqlx::query_as("select 1")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+        assert_eq!(one.0, 1);
+
+        // Adopted, so it owns nothing; the winner still owns the server.
+        (*db).stop().await.unwrap();
+        winner.stop().await.unwrap();
+    }
+
+    /// ...and an absent one too, which is the winner's own first launch:
+    /// `initialize()` is what records the invented password.
+    #[test]
+    fn an_absent_password_file_leaves_the_invented_password_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut settings = build_settings(dir.path()).unwrap();
+        let invented = settings.password.clone();
+
+        adopt_recorded_password(&mut settings).unwrap();
+
+        assert_eq!(settings.password, invented);
     }
 
     /// A pid that is certainly not running: a child that has already been

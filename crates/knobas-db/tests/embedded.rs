@@ -121,6 +121,13 @@ async fn a_lock_naming_a_live_process_is_reported_until_that_process_is_gone() {
 /// no `postmaster.pid` to adopt yet -- so without the bring-up lock the two
 /// interleave inside one data directory. This is the shape of a double-click on
 /// the app icon, or `just dev` started beside a packaged build.
+///
+/// Both halves of the loser's story are covered, and neither depends on how
+/// warm the machine is: `start_managed` yields before `setup()`, so the two
+/// launches really are both in flight here whether or not the binaries had to
+/// be downloaded, and the credential half -- settings built before the winner
+/// wrote `.pgpass` -- is pinned deterministically by
+/// `a_launch_that_started_cold_authenticates_with_the_recorded_password`.
 #[tokio::test]
 async fn two_concurrent_first_launches_serialise_instead_of_racing() {
     let dir = tempfile::tempdir().unwrap();
