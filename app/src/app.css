@@ -1,0 +1,14 @@
+/*
+  Document-level resets only. Everything with an opinion lives in the
+  component that owns it; the M0 shell deliberately has almost no chrome.
+*/
+:root {
+  color-scheme: light;
+  -webkit-font-smoothing: antialiased;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}

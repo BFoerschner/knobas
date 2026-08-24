@@ -7,7 +7,15 @@ pub struct SearchHit {
     pub kind: String,
     pub source_id: String,
     pub title: String,
-    /// May contain `<b>` marks AND raw source text -- escape before rendering.
+    /// Plain text, and **raw source text** -- a ticket body can contain
+    /// anything a person typed, `<script>` included. Render it as text; it is
+    /// never safe to interpolate as markup.
+    ///
+    /// The match is not marked up: `ts_headline`'s selectors are emptied, so
+    /// what comes back is the excerpt and nothing else. Highlighting means
+    /// returning the match *offsets* alongside the text, which is M1's --
+    /// smuggling `<b>` through a string that must be escaped anyway only ever
+    /// produced literal tags on screen.
     pub snippet: String,
     pub rank: f32,
     pub synced_at: chrono::DateTime<chrono::Utc>,
@@ -40,8 +48,12 @@ pub async fn search(
 ) -> Result<Vec<SearchHit>, crate::DbError> {
     let hits = sqlx::query_as::<_, SearchHit>(
         r#"select i.entity_id, i.kind, i.source_id, i.title,
+                  -- Empty selectors: the excerpt comes back as plain text.
+                  -- Anything else would be markup inside a string every caller
+                  -- has to escape, which renders as literal tags.
                   ts_headline('english', i.body_text, q,
-                              'MaxWords=18, MinWords=8') as snippet,
+                              'MaxWords=18, MinWords=8, StartSel="", StopSel=""')
+                    as snippet,
                   ts_rank_cd(i.fts, q) as rank,
                   i.synced_at
            from sync.item i

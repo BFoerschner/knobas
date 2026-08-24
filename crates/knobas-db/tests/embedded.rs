@@ -35,8 +35,8 @@ async fn starts_answers_and_survives_restart() {
 /// binary is the grandparent). Either shortcut lets `start()` succeed on the
 /// first attempt and the recovery path is never entered -- which is what made
 /// the previous version of this test vacuous. A spawned child satisfies both
-/// conditions, so PostgreSQL genuinely refuses and `clear_stale_lock` has to
-/// do the work.
+/// conditions, so PostgreSQL genuinely refuses and `inspect_lock` has to do the
+/// work.
 #[tokio::test]
 async fn recovers_from_a_stale_postmaster_pid() {
     let dir = tempfile::tempdir().unwrap();
@@ -84,6 +84,197 @@ async fn recovers_from_a_stale_postmaster_pid() {
     db.stop().await.unwrap();
 }
 
+/// A `postmaster.pid` whose port is answered by a server serving *someone
+/// else's* data directory is a stale lock, not a conflict -- and the identity
+/// check that establishes this is what keeps adoption safe.
+///
+/// The scenario is a knobas profile copied elsewhere (data directory *and*
+/// `.pgpass`, so the superuser password is shared) and both copies used: the
+/// original's lock file records a port its own server no longer holds, and the
+/// copy's server answers there. Without the `show data_directory` check, this
+/// run would silently attach to the copy's database -- same password, same
+/// database name, entirely different content. With it, the mismatch proves
+/// nothing holds *our* directory, so the lock is cleared and the start proceeds
+/// normally.
+///
+/// The assertion on `show data_directory` is what pins the check: delete the
+/// `same_dir` guard in `adopt` and this test attaches to the stranger and fails
+/// here.
+#[tokio::test]
+async fn a_lock_naming_a_strangers_port_is_cleared_instead_of_reported_as_a_conflict() {
+    let ours = tempfile::tempdir().unwrap();
+    let theirs = tempfile::tempdir().unwrap();
+    let cfg = DbConfig {
+        root_dir: ours.path().to_path_buf(),
+        existing_url: None,
+    };
+
+    // Our data directory, initialised and then left with nothing running on it.
+    EmbeddedDb::start(cfg.clone())
+        .await
+        .unwrap()
+        .stop()
+        .await
+        .unwrap();
+
+    // The copy: the same superuser password, its own data directory, live.
+    std::fs::copy(ours.path().join(".pgpass"), theirs.path().join(".pgpass")).unwrap();
+    let stranger = EmbeddedDb::start(DbConfig {
+        root_dir: theirs.path().to_path_buf(),
+        existing_url: None,
+    })
+    .await
+    .unwrap();
+    let stranger_port = running_port(theirs.path());
+
+    // A lock file in *our* data directory naming a live process and the
+    // stranger's port -- what a hard kill plus a recycled ephemeral port
+    // leaves behind. The PID has to be alive and unrelated to the postmaster's
+    // ancestry, or PostgreSQL removes the file itself and never refuses.
+    let mut sleeper = std::process::Command::new("sleep")
+        .arg("120")
+        .spawn()
+        .unwrap();
+    let data_dir = ours.path().join("data");
+    std::fs::write(
+        data_dir.join("postmaster.pid"),
+        format!(
+            "{}\n{}\n1700000000\n{stranger_port}\n",
+            sleeper.id(),
+            data_dir.display()
+        ),
+    )
+    .unwrap();
+
+    let result = EmbeddedDb::start(cfg).await;
+
+    // Reap the child before asserting, so a failure does not leak it.
+    let _ = sleeper.kill();
+    let _ = sleeper.wait();
+
+    let db = result.expect("a lock naming a stranger's port is stale, not a conflict");
+    let (serving,): (String,) = sqlx::query_as("show data_directory")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::canonicalize(&serving).unwrap(),
+        std::fs::canonicalize(&data_dir).unwrap(),
+        "the start attached to the server the stale lock pointed at, not to its own"
+    );
+
+    // And the stranger was neither stopped nor otherwise disturbed.
+    let one: (i32,) = sqlx::query_as("select 1")
+        .fetch_one(stranger.pool())
+        .await
+        .expect("clearing our own stale lock must not touch someone else's server");
+    assert_eq!(one.0, 1);
+
+    db.stop().await.unwrap();
+    stranger.stop().await.unwrap();
+}
+
+/// A second `start()` on a data directory a **live** server already holds must
+/// join that server, and must leave it standing.
+///
+/// This is the shape of two real situations: a knobas killed by a signal, whose
+/// PostgreSQL outlives it and is still there at the next launch, and a second
+/// instance opened on the same profile. Both used to end the same way --
+/// `postgresql_embedded`'s `Drop` runs `pg_ctl stop -m fast` whenever
+/// `postmaster.pid` merely exists, so the *failed* second handle killed the
+/// first one's database on its way out. The assertion that the first pool still
+/// answers afterwards is what pins that down.
+#[tokio::test]
+async fn a_second_start_adopts_the_running_server_instead_of_killing_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = DbConfig {
+        root_dir: dir.path().to_path_buf(),
+        existing_url: None,
+    };
+
+    let first = EmbeddedDb::start(cfg.clone()).await.unwrap();
+
+    // Same root_dir, server already up: this is the path that used to fail.
+    let second = EmbeddedDb::start(cfg)
+        .await
+        .expect("second start should adopt");
+    let one: (i32,) = sqlx::query_as("select 1")
+        .fetch_one(second.pool())
+        .await
+        .unwrap();
+    assert_eq!(one.0, 1);
+
+    // Both handles talk to the same server, so a write through one is visible
+    // through the other -- adoption, not a second server on a second port.
+    sqlx::query("create table if not exists adoption_probe (n int)")
+        .execute(second.pool())
+        .await
+        .unwrap();
+    let (probes,): (i64,) =
+        sqlx::query_as("select count(*) from information_schema.tables where table_name = $1")
+            .bind("adoption_probe")
+            .fetch_one(first.pool())
+            .await
+            .unwrap();
+    assert_eq!(probes, 1, "the two handles are on different servers");
+
+    // Dropping the adopted handle must not take the server with it.
+    second.stop().await.unwrap();
+    let one: (i32,) = sqlx::query_as("select 1")
+        .fetch_one(first.pool())
+        .await
+        .expect("adopting a running server must never stop it");
+    assert_eq!(one.0, 1);
+
+    first.stop().await.unwrap();
+}
+
+/// Adoption must finish the setup the managed path performs, not assume it
+/// already happened: a server serving our data directory but with no `knobas`
+/// database in it gets one.
+///
+/// That is the shape a run killed between `initdb` and `create database` leaves
+/// behind. Without this step the adopted server is reported as unreachable --
+/// the connection to a database that does not exist is what fails -- and knobas
+/// never starts again on that profile.
+#[tokio::test]
+async fn adoption_creates_the_database_when_the_running_server_has_none() {
+    use sqlx::Connection;
+
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = DbConfig {
+        root_dir: dir.path().to_path_buf(),
+        existing_url: None,
+    };
+
+    let owner = EmbeddedDb::start(cfg.clone()).await.unwrap();
+
+    // Take the database away from under the running server. `with (force)`
+    // terminates the pool's sessions, which is what makes the drop possible at
+    // all while `owner` is connected.
+    let mut admin = sqlx::PgConnection::connect(&maintenance_url(dir.path()))
+        .await
+        .unwrap();
+    sqlx::query("drop database knobas with (force)")
+        .execute(&mut admin)
+        .await
+        .unwrap();
+    admin.close().await.unwrap();
+
+    let adopted = EmbeddedDb::start(cfg)
+        .await
+        .expect("adopting a server with no knobas database must create it");
+    let (current,): (String,) = sqlx::query_as("select current_database()")
+        .fetch_one(adopted.pool())
+        .await
+        .unwrap();
+    assert_eq!(current, "knobas");
+
+    // The adopted handle owns nothing; the original still owns the server.
+    adopted.stop().await.unwrap();
+    owner.stop().await.unwrap();
+}
+
 /// `existing_url` must connect to a server we do not own -- and `stop()` must
 /// leave that server running. Getting this wrong shuts down a user's own
 /// production PostgreSQL.
@@ -127,14 +318,29 @@ async fn existing_url_connects_without_taking_ownership() {
     owned.stop().await.unwrap();
 }
 
+/// The port a running managed instance recorded in `postmaster.pid` line 4.
+fn running_port(root_dir: &std::path::Path) -> u16 {
+    let pid_file = std::fs::read_to_string(root_dir.join("data").join("postmaster.pid")).unwrap();
+    pid_file.lines().nth(3).unwrap().trim().parse().unwrap()
+}
+
 /// Reconstruct the URL of a running managed instance from what it wrote to
 /// disk: the port from `postmaster.pid` line 4, the password from `.pgpass`.
 fn running_url(root_dir: &std::path::Path) -> String {
-    let pid_file = std::fs::read_to_string(root_dir.join("data").join("postmaster.pid")).unwrap();
-    let port: u16 = pid_file.lines().nth(3).unwrap().trim().parse().unwrap();
+    database_url(root_dir, "knobas")
+}
+
+/// The same, against the `postgres` maintenance database -- the one that stays
+/// connectable while `knobas` is being dropped or created.
+fn maintenance_url(root_dir: &std::path::Path) -> String {
+    database_url(root_dir, "postgres")
+}
+
+fn database_url(root_dir: &std::path::Path, database: &str) -> String {
+    let port = running_port(root_dir);
     let password = std::fs::read_to_string(root_dir.join(".pgpass")).unwrap();
     format!(
-        "postgresql://postgres:{}@127.0.0.1:{port}/knobas",
+        "postgresql://postgres:{}@127.0.0.1:{port}/{database}",
         password.trim_end()
     )
 }

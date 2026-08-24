@@ -1,0 +1,30 @@
+[package]
+name = "knobas-app"
+edition.workspace = true
+version.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+knobas-core = { path = "../knobas-core" }
+knobas-db = { path = "../knobas-db" }
+# The SPI, for the `Source` trait the M0 registry hands to the sync engine.
+knobas-source = { path = "../knobas-source" }
+# M0's only adapter, and the source demo mode loads.
+knobas-source-mock = { path = "../knobas-source-mock" }
+knobas-sync = { path = "../knobas-sync" }
+# The `PgPool` in `AppState`, plus demo mode's two `source_config` statements.
+sqlx.workspace = true
+thiserror.workspace = true
+tauri = { version = "2", features = [] }
+tracing = "0.1"
+# Without a subscriber every `tracing` line the database layer emits -- which
+# port the server came up on, whether it reused an existing data directory --
+# is dropped on the floor, and `tauri dev` is exactly when those are wanted.
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+# The command tests need a real PostgreSQL: `test-util` starts one per binary.
+knobas-db = { path = "../knobas-db", features = ["test-util"] }
+tokio.workspace = true

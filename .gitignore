@@ -4,3 +4,6 @@ node_modules/
 .DS_Store
 !.claude/agents
 dist
+# Written by tauri-build on every compile: the permission schemas for the
+# capability files. Regenerated, never edited.
+crates/knobas-app/gen/
