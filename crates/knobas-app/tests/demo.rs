@@ -14,6 +14,19 @@ async fn demo_load_registers_once_and_syncs_the_same_rows_every_time() {
     let pool = &pool;
     knobas_db::migrate::run(pool).await.unwrap();
 
+    // Before anything registers it, the mock is an adapter knobas *has* but has
+    // not been told to use. Syncing it anyway would run a full fetch whose
+    // cursor the engine has no row to store, so every later sync would refetch
+    // the world -- silently. This assertion has to come first: the demo loads
+    // below are what create the row.
+    let unconfigured = demo::sync_now_inner(pool, "mock")
+        .await
+        .expect_err("an unregistered source must be refused");
+    assert!(
+        matches!(&unconfigured, demo::DemoError::NotConfigured(id) if id == "mock"),
+        "unexpected error: {unconfigured}"
+    );
+
     let first = demo::demo_load_inner(pool).await.unwrap();
     assert_eq!(first.source_id, "mock");
     assert!(
@@ -61,8 +74,11 @@ async fn demo_load_registers_once_and_syncs_the_same_rows_every_time() {
     assert_eq!(incremental.cursor, first.cursor);
 }
 
+/// An id no adapter answers to is a different failure from one that is merely
+/// unconfigured, and the two must not collapse into each other: `"jira"` is not
+/// something loading the demo data would fix.
 #[tokio::test]
-async fn sync_now_refuses_a_source_that_is_not_configured() {
+async fn sync_now_refuses_an_adapter_that_does_not_exist() {
     let pool = knobas_db::test_util::test_pool().await;
     let pool = &pool;
     knobas_db::migrate::run(pool).await.unwrap();

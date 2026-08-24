@@ -22,6 +22,10 @@ pub enum DemoError {
     #[error("no source with id {0:?} -- M0 ships only the mock source")]
     UnknownSource(String),
 
+    /// The adapter exists, but nothing has configured it yet.
+    #[error("source {0:?} is not configured -- load the demo data first")]
+    NotConfigured(String),
+
     /// Registering the source failed.
     #[error("database: {0}")]
     Db(#[from] sqlx::Error),
@@ -51,17 +55,32 @@ pub async fn demo_load_inner(pool: &PgPool) -> Result<SyncReport, DemoError> {
     Ok(knobas_sync::run_once(pool, &source, None).await?)
 }
 
-/// Sync one configured source, resuming from where it last stopped.
+/// Sync one **configured** source, resuming from where it last stopped.
+///
+/// Both halves of that are checked, because failing either one silently is
+/// worse than refusing: an id no adapter answers to would do nothing at all,
+/// and an id with no `source_config` row would run a full sync whose cursor
+/// the engine then has nowhere to persist (`run_once` updates a row, and
+/// deliberately never invents one) -- so every later call would sync
+/// everything again, for ever, with no sign that anything was wrong.
+///
+/// The cursor is read outside the run's advisory lock, so a concurrent run of
+/// the same source can move it between the read and the lock; the worst case
+/// is one redundant fetch from a position that has already advanced, and the
+/// upserts are idempotent. Reading it inside the transaction that holds the
+/// lock is the real fix, and cursor lifecycle belongs to M1 stream F.
 ///
 /// # Errors
 ///
 /// [`DemoError::UnknownSource`] if no adapter answers to `source_id`,
-/// [`DemoError::Db`] if the stored cursor cannot be read, [`DemoError::Sync`]
-/// if the run fails.
+/// [`DemoError::NotConfigured`] if it has no `knobas.source_config` row,
+/// [`DemoError::Db`] if the lookup fails, [`DemoError::Sync`] if the run does.
 pub async fn sync_now_inner(pool: &PgPool, source_id: &str) -> Result<SyncReport, DemoError> {
     let source =
         adapter_for(source_id).ok_or_else(|| DemoError::UnknownSource(source_id.to_owned()))?;
-    let cursor = stored_cursor(pool, source_id).await?;
+    let cursor = stored_cursor(pool, source_id)
+        .await?
+        .ok_or_else(|| DemoError::NotConfigured(source_id.to_owned()))?;
     Ok(knobas_sync::run_once(pool, source.as_ref(), cursor).await?)
 }
 
@@ -75,17 +94,22 @@ fn adapter_for(source_id: &str) -> Option<Box<dyn Source>> {
     (mock.descriptor().id == source_id).then(|| Box::new(mock) as Box<dyn Source>)
 }
 
-/// Where the last run of `source_id` stopped, or `None` for a full sync.
+/// The configured position of `source_id`.
 ///
-/// `None` covers both "configured but never synced" and "not configured at
-/// all": either way there is no position to resume from.
-async fn stored_cursor(pool: &PgPool, source_id: &str) -> Result<Option<String>, sqlx::Error> {
+/// Two layers of absence, kept apart on purpose: the outer `None` means the
+/// source has no `knobas.source_config` row at all, which is a caller error;
+/// the inner one means it is configured but has never synced, which is an
+/// ordinary full sync.
+async fn stored_cursor(
+    pool: &PgPool,
+    source_id: &str,
+) -> Result<Option<Option<String>>, sqlx::Error> {
     let row: Option<(Option<String>,)> =
         sqlx::query_as("select cursor from knobas.source_config where id = $1")
             .bind(source_id)
             .fetch_optional(pool)
             .await?;
-    Ok(row.and_then(|(cursor,)| cursor))
+    Ok(row.map(|(cursor,)| cursor))
 }
 
 /// Write the source's configuration row, unless it already has one.
