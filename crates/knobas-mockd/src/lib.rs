@@ -38,9 +38,15 @@
 //! 5. **`fields=` and `expand=` values are validated against a closed set**;
 //!    real Jira ignores names it does not know. A typo that silently drops a
 //!    field from a sync is worth a 400.
+//! 6. *(Reserved: TeamCity `fields=` strictness, documented with the TeamCity
+//!    side of mockd.)*
 //! 7. **No wiki rendering.** `expand=renderedFields` returns the description
 //!    verbatim rather than the HTML a real instance would render, because
 //!    nothing in knobas reads the rendering — only that the field is there.
+//! 8. **[`MockFault`] carries payloads and a `None` variant**, where the SPI's
+//!    `knobas_source::contract::Fault` does not. mockd has to reproduce a
+//!    concrete `Retry-After` value and a concrete hang duration, which a
+//!    payload-free enum cannot express.
 //!
 //! ## The shared credentials
 //!
