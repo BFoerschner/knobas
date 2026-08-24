@@ -163,6 +163,111 @@ async fn two_concurrent_first_launches_serialise_instead_of_racing() {
     first.stop().await.unwrap();
 }
 
+/// A start that fails *after* clearing a stale lock must not shut down a
+/// server that appeared in the meantime.
+///
+/// `PostgreSQL::drop` runs `pg_ctl stop -m fast` whenever `postmaster.pid`
+/// merely exists, and it reads the pid out of that file: after this handle
+/// cleared the stale lock, any lock file standing there belongs to somebody
+/// else. Dropping the failed handle therefore signals *their* postmaster --
+/// the database of a sibling that won the race by a hair, killed by the
+/// process that lost it.
+///
+/// The window is two statements wide and lives under the bring-up lock, so
+/// nothing outside can be in it; the `test-util` seam is what lets this test
+/// stand where the sibling would. Everything else here is real: a real second
+/// server, a real forged lock file naming it, and a real failed retry.
+#[tokio::test]
+async fn a_failed_retry_never_stops_the_server_that_appeared_in_the_window() {
+    let ours = tempfile::tempdir().unwrap();
+    let cfg = DbConfig {
+        root_dir: ours.path().to_path_buf(),
+        existing_url: None,
+    };
+    let data_dir = ours.path().join("data");
+
+    // Our profile, initialised and then made unstartable: an unrecognised
+    // parameter is a FATAL during config parsing, before PostgreSQL touches
+    // the lock file, so both the first attempt and the retry fail the same way
+    // and neither writes a `postmaster.pid` of its own.
+    EmbeddedDb::start(cfg.clone())
+        .await
+        .unwrap()
+        .stop()
+        .await
+        .unwrap();
+    let conf = data_dir.join("postgresql.conf");
+    let mut text = std::fs::read_to_string(&conf).unwrap();
+    text.push_str("\nknobas_cannot_start = on\n");
+    std::fs::write(&conf, text).unwrap();
+
+    // The sibling: a real server on a profile of its own, which this run has
+    // no business touching.
+    let theirs = tempfile::tempdir().unwrap();
+    let sibling = EmbeddedDb::start(DbConfig {
+        root_dir: theirs.path().to_path_buf(),
+        existing_url: None,
+    })
+    .await
+    .unwrap();
+    let sibling_pid: u32 = {
+        let pid_file =
+            std::fs::read_to_string(theirs.path().join("data").join("postmaster.pid")).unwrap();
+        pid_file.lines().next().unwrap().trim().parse().unwrap()
+    };
+    let sibling_port = running_port(theirs.path());
+
+    // A stale lock of our own: dead process, silent port, so `inspect_lock`
+    // clears it and the start is retried.
+    let mut reaped = std::process::Command::new("true").spawn().unwrap();
+    let dead_pid = reaped.id();
+    reaped.wait().unwrap();
+    let silent_port = {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.local_addr().unwrap().port()
+    };
+    std::fs::write(
+        data_dir.join("postmaster.pid"),
+        format!(
+            "{dead_pid}\n{}\n1700000000\n{silent_port}\n",
+            data_dir.display()
+        ),
+    )
+    .unwrap();
+
+    // In the window: exactly what a sibling's own bring-up leaves behind --
+    // a fresh lock file, naming its live postmaster, in the directory we just
+    // cleared.
+    let forged = data_dir.clone();
+    knobas_db::embedded::seam::after_clearing_a_stale_lock(move || {
+        std::fs::write(
+            forged.join("postmaster.pid"),
+            format!(
+                "{sibling_pid}\n{}\n1700000000\n{sibling_port}\n",
+                forged.display()
+            ),
+        )
+        .unwrap();
+    });
+
+    let refused = EmbeddedDb::start(cfg).await;
+    knobas_db::embedded::seam::forget_hooks();
+
+    assert!(
+        refused.is_err(),
+        "the retry cannot succeed against a config PostgreSQL refuses"
+    );
+
+    // The whole point: the sibling is still serving.
+    let one: (i32,) = sqlx::query_as("select 1")
+        .fetch_one(sibling.pool())
+        .await
+        .expect("a failed retry must not stop a server this process never started");
+    assert_eq!(one.0, 1);
+
+    sibling.stop().await.unwrap();
+}
+
 /// A `postmaster.pid` whose port is answered by a server serving *someone
 /// else's* data directory is a stale lock, not a conflict -- and the identity
 /// check that establishes this is what keeps adoption safe.
@@ -179,6 +284,13 @@ async fn two_concurrent_first_launches_serialise_instead_of_racing() {
 /// The assertion on `show data_directory` is what pins the check: delete the
 /// `same_dir` guard in `adopt` and this test attaches to the stranger and fails
 /// here.
+///
+/// It also pins the ruling that a directory mismatch clears the lock
+/// regardless of whether the recorded pid is alive -- the pid written below is
+/// a live process on purpose, and the start must still recover. A postmaster
+/// serves one data directory for its whole life, so a server answering on our
+/// recorded port for *someone else's* directory proves no postmaster of ours
+/// is there; the argument is spelled out at that branch in `embedded.rs`.
 #[tokio::test]
 async fn a_lock_naming_a_strangers_port_is_cleared_instead_of_reported_as_a_conflict() {
     let ours = tempfile::tempdir().unwrap();

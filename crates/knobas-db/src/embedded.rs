@@ -302,6 +302,8 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
             // leaves `postmaster.pid` behind and PostgreSQL then refuses to
             // start. The lock is gone now, so the start is worth retrying.
             Lock::Cleared => {
+                #[cfg(feature = "test-util")]
+                seam::stale_lock_cleared();
                 if let Err(retry) = postgresql.start().await {
                     // The lock file this handle would stop on is no longer
                     // the one it cleared: a sibling that lost the same race
@@ -438,6 +440,23 @@ async fn adopt(mut settings: Settings, port: u16, pid: Option<u32>) -> Result<St
         .await
         .map_err(|source| unreachable(format!("cannot query it: {source}")))?;
     if !same_dir(Path::new(&serving.0), &data_dir) {
+        // A mismatch clears the lock **whatever the recorded pid is doing** --
+        // deliberately, and not an oversight of the rule the wire-level arm
+        // above applies ("a live recorded process means the lock may still be
+        // owned"). Ruled, and here is the argument:
+        //
+        // A postmaster serves exactly one data directory for its whole life.
+        // This one answered on the port our lock file names and reported some
+        // *other* directory, so it is not the postmaster our lock describes --
+        // and no postmaster of ours can be listening there either, since that
+        // port is taken. Whatever the recorded pid is, it is not a live
+        // postmaster holding this directory. That is strictly more evidence
+        // than the wire-level arm has, where nothing identifies what answered
+        // and the pid is the only witness left.
+        //
+        // Clearing endangers nothing: the foreign server does not hold our
+        // directory, and nothing here ever stops it -- the lock file we remove
+        // is our own, and it is provably stale.
         let _ = admin.close().await;
         return Ok(Started::StaleLock {
             port,
@@ -743,6 +762,54 @@ fn is_wire_level(error: &sqlx::Error) -> bool {
         error,
         sqlx::Error::Io(_) | sqlx::Error::Tls(_) | sqlx::Error::Protocol(_)
     )
+}
+
+/// A window this module cannot otherwise be caught in, opened for tests.
+///
+/// The property at stake is what happens to *somebody else's* database, and it
+/// only goes wrong in the two statements between clearing a stale
+/// `postmaster.pid` and retrying the start: a racing process writes a fresh
+/// lock file in there, and a handle dropped afterwards runs `pg_ctl stop -m
+/// fast` against it. Nothing outside this function can get in there -- the
+/// window is two statements wide and it is held under the bring-up lock -- so
+/// a test that wants to occupy it has to be let in.
+///
+/// Compiled only with `test-util`, a feature no application build enables:
+/// `knobas-app` depends on `knobas-db` without it, so none of this exists in
+/// the shipped binary.
+#[cfg(feature = "test-util")]
+pub mod seam {
+    use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+
+    type Hook = Arc<dyn Fn() + Send + Sync>;
+
+    fn slot() -> &'static Mutex<Option<Hook>> {
+        static SLOT: OnceLock<Mutex<Option<Hook>>> = OnceLock::new();
+        SLOT.get_or_init(|| Mutex::new(None))
+    }
+
+    /// Run `hook` after a stale lock is cleared and before the start is
+    /// retried. Process-wide; call [`forget_hooks`] when the test is done.
+    pub fn after_clearing_a_stale_lock(hook: impl Fn() + Send + Sync + 'static) {
+        *slot().lock().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(hook));
+    }
+
+    /// Drop whatever [`after_clearing_a_stale_lock`] installed.
+    pub fn forget_hooks() {
+        *slot().lock().unwrap_or_else(PoisonError::into_inner) = None;
+    }
+
+    /// Cloned out before it is called, so the lock is not held across a hook
+    /// that might reach back in here.
+    pub(crate) fn stale_lock_cleared() {
+        let hook = slot()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
 }
 
 /// Name of the file whose OS lock serialises bring-up within one `root_dir`.
