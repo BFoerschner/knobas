@@ -35,8 +35,8 @@ async fn starts_answers_and_survives_restart() {
 /// binary is the grandparent). Either shortcut lets `start()` succeed on the
 /// first attempt and the recovery path is never entered -- which is what made
 /// the previous version of this test vacuous. A spawned child satisfies both
-/// conditions, so PostgreSQL genuinely refuses and `clear_stale_lock` has to
-/// do the work.
+/// conditions, so PostgreSQL genuinely refuses and `inspect_lock` has to do the
+/// work.
 #[tokio::test]
 async fn recovers_from_a_stale_postmaster_pid() {
     let dir = tempfile::tempdir().unwrap();
@@ -82,6 +82,61 @@ async fn recovers_from_a_stale_postmaster_pid() {
         .unwrap();
     assert_eq!(one.0, 1);
     db.stop().await.unwrap();
+}
+
+/// A second `start()` on a data directory a **live** server already holds must
+/// join that server, and must leave it standing.
+///
+/// This is the shape of two real situations: a knobas killed by a signal, whose
+/// PostgreSQL outlives it and is still there at the next launch, and a second
+/// instance opened on the same profile. Both used to end the same way --
+/// `postgresql_embedded`'s `Drop` runs `pg_ctl stop -m fast` whenever
+/// `postmaster.pid` merely exists, so the *failed* second handle killed the
+/// first one's database on its way out. The assertion that the first pool still
+/// answers afterwards is what pins that down.
+#[tokio::test]
+async fn a_second_start_adopts_the_running_server_instead_of_killing_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = DbConfig {
+        root_dir: dir.path().to_path_buf(),
+        existing_url: None,
+    };
+
+    let first = EmbeddedDb::start(cfg.clone()).await.unwrap();
+
+    // Same root_dir, server already up: this is the path that used to fail.
+    let second = EmbeddedDb::start(cfg)
+        .await
+        .expect("second start should adopt");
+    let one: (i32,) = sqlx::query_as("select 1")
+        .fetch_one(second.pool())
+        .await
+        .unwrap();
+    assert_eq!(one.0, 1);
+
+    // Both handles talk to the same server, so a write through one is visible
+    // through the other -- adoption, not a second server on a second port.
+    sqlx::query("create table if not exists adoption_probe (n int)")
+        .execute(second.pool())
+        .await
+        .unwrap();
+    let (probes,): (i64,) =
+        sqlx::query_as("select count(*) from information_schema.tables where table_name = $1")
+            .bind("adoption_probe")
+            .fetch_one(first.pool())
+            .await
+            .unwrap();
+    assert_eq!(probes, 1, "the two handles are on different servers");
+
+    // Dropping the adopted handle must not take the server with it.
+    second.stop().await.unwrap();
+    let one: (i32,) = sqlx::query_as("select 1")
+        .fetch_one(first.pool())
+        .await
+        .expect("adopting a running server must never stop it");
+    assert_eq!(one.0, 1);
+
+    first.stop().await.unwrap();
 }
 
 /// `existing_url` must connect to a server we do not own -- and `stop()` must
