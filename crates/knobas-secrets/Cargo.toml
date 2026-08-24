@@ -1,0 +1,50 @@
+[package]
+name = "knobas-secrets"
+edition.workspace = true
+version.workspace = true
+
+# The keychain, behind a trait, so `just check` can run on a Linux CI box that
+# has no secret service and no D-Bus (interfaces §3: the store is injected and
+# every test uses `MemoryStore`).
+[dependencies]
+knobas-source = { path = "../knobas-source" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+# `rt` for `spawn_blocking`: every async caller of this crate must go through
+# it, because a locked keychain blocks on a user prompt.
+tokio = { workspace = true, features = ["rt"] }
+tracing = "0.1"
+
+# `keyring-core` rather than the all-in-one `keyring` crate, and per platform.
+#
+# This is what keyring 4's own docs tell an application to do: "applications
+# which want to control which credential stores they use on which platforms
+# ... should instead be linking to keyring-core ... and any specific credential
+# stores they want to use". Here it is not a preference but a requirement --
+# `keyring` needs one of its `v1`/`cli` features to compile at all, and both of
+# them turn on `zbus-secret-service-keyring-store` for every non-Apple unix,
+# which is exactly the secret-service/D-Bus stack that must stay out of the
+# Linux CI build. `default-features = false` alone cannot avoid it, because
+# with no feature at all `keyring` is a `compile_error!`.
+keyring-core = "1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# `keychain` is the legacy (login) keychain, which is the one a non-sandboxed
+# desktop app writes to; `protected` is the sandboxed data store and would need
+# a provisioning profile. The crate has no default features.
+apple-native-keyring-store = { version = "1", default-features = false, features = [
+  "keychain",
+] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-native-keyring-store = { version = "1", default-features = false }
+
+# The kernel keyutils backend: pure Rust (`keyring-core` + `linux-keyutils`),
+# no D-Bus and no system library -- so CI compiles it without extra apt
+# packages even though no test there ever calls it.
+[target.'cfg(target_os = "linux")'.dependencies]
+linux-keyutils-keyring-store = { version = "1", default-features = false }
+
+[dev-dependencies]
+tokio = { workspace = true }
