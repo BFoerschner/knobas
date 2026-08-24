@@ -18,6 +18,36 @@ export function demoLoad(): Promise<SyncReport> {
   return invoke<SyncReport>("demo_load");
 }
 
+/**
+ * Whether a source's credential works — `knobas_sync::AuthState`.
+ *
+ * `unauthorized` is the one the UI must act on: it is what puts *Re-enter
+ * password* on the row rather than a shrug, and the scheduler never retries it
+ * on its own (interfaces §8 P7). `missing_secret` is configured-but-no-secret,
+ * which is a different prompt from a secret that was rejected.
+ */
+export type AuthState =
+  | "ok"
+  | "unauthorized"
+  | "unreachable"
+  | "missing_secret"
+  | "unknown";
+
+/**
+ * One source's credential health — `knobas_sync::CredentialHealth`, the
+ * payload of `EVENTS.sourceHealth` and the return of `credentialHealth()`.
+ */
+export interface CredentialHealth {
+  source_id: string;
+  state: AuthState;
+  /** RFC 3339, or null if it has never been checked. */
+  checked_at: string | null;
+  /** One line for the sources view. Never a secret. */
+  detail: string | null;
+  /** RFC 3339 — feeds the PAT expiry countdown. Null if the source will not say. */
+  secret_expires_at: string | null;
+}
+
 /** How a run ended — `knobas_sync::SyncOutcome`. */
 export type SyncOutcome = "ok" | "unauthorized" | "unreachable" | "error";
 

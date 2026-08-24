@@ -438,36 +438,41 @@ async fn sync_now_answers_before_the_run_and_reports_it_on_the_event() {
     assert_eq!(started["run_id"], serde_json::json!(returned));
     assert_eq!(started["source_id"], serde_json::json!("mock"));
 
-    // The run itself lands on its own task; wait for the log row to close.
-    let mut outcome = None;
-    for _ in 0..100 {
-        let row: Option<(Option<String>,)> = sqlx::query_as(
-            "select outcome from knobas.sync_run where id = $1 and finished_at is not null",
-        )
-        .bind(returned)
-        .fetch_optional(&pool)
-        .await
-        .unwrap();
-        if let Some((Some(value),)) = row {
-            outcome = Some(value);
+    // The run lands on its own task. Wait for the **event**, not for the log
+    // row: the terminal emit happens after `run_log::finish` commits, so a
+    // poll that stops at the closed row can read `seen` before the emit that
+    // follows it and fail intermittently. The event is the last thing to
+    // happen, so waiting for it is what makes both assertions safe.
+    let mut terminal = None;
+    for _ in 0..200 {
+        terminal = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|status| status["running"] == serde_json::json!(false))
+            .cloned();
+        if terminal.is_some() {
             break;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     }
+    let terminal = terminal.expect("a terminal sync:state must follow the run");
+    assert_eq!(terminal["run_id"], serde_json::json!(returned));
+    assert_eq!(terminal["last_outcome"], serde_json::json!("ok"));
+
+    // And by then the row it describes is closed, because the emit is the last
+    // thing the task does.
+    let outcome: Option<String> = sqlx::query_scalar(
+        "select outcome from knobas.sync_run where id = $1 and finished_at is not null",
+    )
+    .bind(returned)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(
         outcome.as_deref(),
         Some("ok"),
         "the spawned run must close its own log row"
     );
-
-    let terminal = seen
-        .lock()
-        .unwrap()
-        .iter()
-        .rev()
-        .find(|status| status["running"] == serde_json::json!(false))
-        .cloned()
-        .expect("a terminal sync:state must follow the run");
-    assert_eq!(terminal["run_id"], serde_json::json!(returned));
-    assert_eq!(terminal["last_outcome"], serde_json::json!("ok"));
 }

@@ -72,6 +72,34 @@ mod tests {
 
     /// The enum and the CHECK constraint are one list in two places. The other
     /// half of this pin lives in `crates/knobas-db/tests/schema.rs`.
+    /// The five states are also a TypeScript union, and the frontend branches
+    /// on them: `unauthorized` is what puts *Re-enter password* on a row. A
+    /// spelling that exists on one side only is a branch that can never be
+    /// taken.
+    #[test]
+    fn the_states_match_their_typescript_mirror() {
+        let mirror = include_str!("../../../app/src/lib/ipc/sources.ts");
+        for state in AuthState::ALL {
+            let wire = serde_json::to_string(&state).unwrap();
+            assert!(
+                mirror.contains(&wire),
+                "{wire} is missing from app/src/lib/ipc/sources.ts"
+            );
+        }
+        for field in [
+            "source_id:",
+            "state:",
+            "checked_at:",
+            "detail:",
+            "secret_expires_at:",
+        ] {
+            assert!(
+                mirror.contains(field),
+                "CredentialHealth.{field} is missing from the TS mirror"
+            );
+        }
+    }
+
     #[test]
     fn the_wire_spelling_is_the_stored_spelling() {
         for state in AuthState::ALL {

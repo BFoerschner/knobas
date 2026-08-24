@@ -25,7 +25,7 @@ pub mod retry;
 
 use std::num::NonZeroU32;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use governor::clock::DefaultClock;
 use governor::state::{InMemoryState, NotKeyed};
@@ -42,15 +42,46 @@ pub use classify::{reqwest_error, status_error};
 // and three Cargo.toml edits for a bump that P8 says routes through the
 // orchestrator.
 //
-// `reqwest::RequestBuilder` is deliberately **not** among them: see
-// [`Request`].
-pub use reqwest::{self, Method, Response, StatusCode, header};
+// **Named types only, never `self`.** `pub use reqwest::{self, ..}` would
+// re-export the whole crate under `knobas_http::reqwest`, and from there
+// `Client::new()` is one line away -- a client with no rate limiter, no retry
+// budget, no `Retry-After` and no `SourceError` mapping, reached without an
+// adapter adding a single dependency. That is the same hole [`Request`] closes
+// on the builder, left open one level up, so it is closed the same way: if a
+// type is not named here, it cannot be reached through this crate.
+// `RequestBuilder` and `Client` are both deliberately absent.
+pub use reqwest::{Method, Response, StatusCode, header};
 
 /// Total attempts per request, the first one included.
 ///
 /// Three *in total*, not three retries on top of a first try: a source that is
 /// down should cost one sync three requests, not four.
 pub const MAX_ATTEMPTS: u32 = 3;
+
+/// The longest one [`HttpClient::send`] may take, retries and waits included.
+///
+/// Attempts, timeouts and `Retry-After` multiply: three 30 s timeouts plus two
+/// 60 s capped waits is about 210 s for a single call. That is not an abstract
+/// worry, because of where the call happens -- `knobas_sync::run_once` holds
+/// an advisory-locked transaction across `Source::sync`, so every second a
+/// request spends is a second that transaction stays open, blocking the same
+/// source's next run and pinning one of the pool's five connections. Waiting
+/// minutes inside a transaction is the exact thing
+/// [`classify::RETRY_AFTER_CAP`] was introduced to prevent, and the cap alone
+/// does not prevent it: it bounds one wait, not their sum.
+///
+/// So the whole call is bounded, not just its parts. Each attempt's timeout is
+/// shortened to whatever is left, which makes this a real ceiling rather than
+/// a check between attempts that a single slow attempt can still overshoot.
+///
+/// Well under a minute on purpose: a source that cannot answer in this long is
+/// a source the scheduler should back off from, not one to keep a transaction
+/// open for. The retries that matter -- 429 and 503, which answer immediately
+/// -- all fit inside it with room to spare.
+///
+/// The structural fix is for the transaction not to span the network at all;
+/// that is stream F's (interfaces §10.6).
+pub const SEND_BUDGET: Duration = Duration::from_secs(45);
 
 type Limiter = RateLimiter<NotKeyed, InMemoryState, DefaultClock>;
 
@@ -130,6 +161,9 @@ impl Default for HttpConfig {
 /// One adapter instance's HTTP client.
 pub struct HttpClient {
     inner: reqwest::Client,
+    /// The per-request timeout, kept so [`HttpClient::send`] can shorten it to
+    /// whatever is left of [`SEND_BUDGET`].
+    request_timeout: Duration,
     /// Trailing slash trimmed; see [`HttpClient::url_for`].
     base_url: String,
     auth: Auth,
@@ -204,6 +238,7 @@ impl HttpClient {
 
         Ok(Self {
             inner: client,
+            request_timeout: config.request_timeout,
             base_url: config.base_url.trim_end_matches('/').to_owned(),
             auth: config.auth,
             limiter: Arc::new(RateLimiter::direct(quota)),
@@ -238,26 +273,32 @@ impl HttpClient {
         Request { inner: request }
     }
 
-    /// Send a request: rate-limited, retried, `Retry-After`-aware, classified.
+    /// Send a request: rate-limited, retried, `Retry-After`-aware, classified,
+    /// and bounded.
     ///
     /// [`MAX_ATTEMPTS`] attempts at most, the first included. Every attempt --
     /// retries too -- waits for the rate limiter first. A retryable answer is
     /// followed by the delay the server asked for (`Retry-After`, capped at
     /// [`classify::RETRY_AFTER_CAP`]) if it asked for one, and by the
-    /// exponential [`retry::backoff`] if it did not.
+    /// exponential [`retry::backoff`] if it did not. The whole call, waits
+    /// included, is bounded by [`SEND_BUDGET`].
     ///
-    /// A request that cannot be cloned is never retried: a retry has to
-    /// re-send the same bytes, and guessing is worse than one attempt. Nothing
-    /// in M1 builds such a request (they are all GETs with no body).
+    /// A request that cannot be cloned is never retried -- a retry has to
+    /// re-send the same bytes, and guessing is worse than one attempt -- but
+    /// it still fails with *its own* classification, not with a message about
+    /// cloning. Nothing in M1 builds such a request (they are all GETs with no
+    /// body).
     ///
     /// # Errors
     ///
     /// The [`SourceError`] the failure maps to (see [`classify`]). A retryable
-    /// failure that exhausts the attempts surfaces as the *last* failure, not
-    /// as a retry-specific one: what the caller needs to know is what the
-    /// source finally said.
+    /// failure that exhausts the attempts, or the budget, surfaces as the
+    /// *last* failure rather than as a retry-specific one: what the caller
+    /// needs to know is what the source finally said.
     pub async fn send(&self, request: Request) -> Result<reqwest::Response, SourceError> {
+        let started = Instant::now();
         let mut request = request.inner;
+
         for attempt in 1..=MAX_ATTEMPTS {
             // Cloned before sending, because sending consumes it. `None` for a
             // streaming body, which M1 never builds.
@@ -265,35 +306,55 @@ impl HttpClient {
             let last = attempt == MAX_ATTEMPTS;
 
             // Every attempt, not just the first: a retry that skips the
-            // limiter is the burst this crate exists to prevent.
+            // limiter is the burst this crate exists to prevent. Before the
+            // budget is measured out, because waiting for a token is part of
+            // what the call costs.
             self.limiter.until_ready().await;
 
-            let delay = match request.send().await {
+            let Some(remaining) = self.remaining(started) else {
+                return Err(SourceError::Unreachable(format!(
+                    "no answer within {}s",
+                    SEND_BUDGET.as_secs()
+                )));
+            };
+
+            // `delay` is how long to wait before the next attempt; `give_up`
+            // is what to report if there is not going to be one. Carrying both
+            // is what keeps a 503-that-cannot-be-retried a 503.
+            let (delay, give_up) = match request.timeout(remaining).send().await {
                 Ok(response) if response.status().is_success() => return Ok(response),
                 Ok(response) => {
                     let status = response.status();
-                    if last || !retry::status_is_transient(status.as_u16()) {
-                        return Err(classify::status_error(status, &body_of(response).await));
+                    let transient = retry::status_is_transient(status.as_u16());
+                    // Read before the body is consumed to build the message.
+                    let asked_for = classify::parse_retry_after(response.headers());
+                    let error = classify::status_error(status, &body_of(response).await);
+                    if last || !transient {
+                        return Err(error);
                     }
                     // The server's own instruction wins over our guess, and it
                     // is read *before* the wait it applies to.
-                    classify::parse_retry_after(response.headers())
-                        .unwrap_or_else(|| retry::backoff(attempt))
+                    (asked_for.unwrap_or_else(|| retry::backoff(attempt)), error)
                 }
                 Err(error) => {
+                    let mapped = classify::reqwest_error(&error);
                     if last || !retry::error_is_transient(&error) {
-                        return Err(classify::reqwest_error(&error));
+                        return Err(mapped);
                     }
-                    retry::backoff(attempt)
+                    (retry::backoff(attempt), mapped)
                 }
             };
 
+            // Unretryable in practice: re-send what, exactly? Reported as the
+            // failure that actually happened.
             let Some(next) = next else {
-                // Unretryable in practice: re-send what, exactly?
-                return Err(SourceError::Protocol(
-                    "the request cannot be retried: its body is not replayable".to_owned(),
-                ));
+                return Err(give_up);
             };
+            // A wait that would run past the budget is a wait not worth
+            // starting: the answer would arrive after the caller gave up.
+            if self.remaining(started).is_none_or(|left| delay >= left) {
+                return Err(give_up);
+            }
             tracing::debug!(attempt, ?delay, "retrying");
             tokio::time::sleep(delay).await;
             request = next;
@@ -301,6 +362,14 @@ impl HttpClient {
 
         // `MAX_ATTEMPTS` is a non-zero constant, so the loop always returns.
         unreachable!("the attempt loop returns on its last attempt")
+    }
+
+    /// How long the next attempt may take: what is left of [`SEND_BUDGET`],
+    /// never more than the configured per-request timeout. `None` once the
+    /// budget is gone.
+    fn remaining(&self, started: Instant) -> Option<Duration> {
+        let left = SEND_BUDGET.checked_sub(started.elapsed())?;
+        (!left.is_zero()).then(|| left.min(self.request_timeout))
     }
 
     /// GET a JSON document.

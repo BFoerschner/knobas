@@ -79,7 +79,18 @@ create table knobas.sync_run (
   deleted      bigint not null default 0,
   swept        bigint not null default 0, -- rows the full-sync sweep tombstoned
   error        text,
-  cursor_after text
+  cursor_after text,
+  -- The same discipline `source_config.auth_state` gets above, for the same
+  -- reason: these are plain `text` with a closed vocabulary, and the enum that
+  -- writes them lives in another language. `outcome` is nullable and a CHECK
+  -- passes on NULL, so "running" is still expressible.
+  --
+  -- Stream F's backoff branches on `outcome` -- `unauthorized` is never
+  -- retried, `unreachable` is -- so a value outside this list is not a
+  -- cosmetic problem: it is a source that hammers or stalls. Constrained here
+  -- because 0002 is the only M1 migration; adding it later costs a 0003.
+  constraint sync_run_trigger_chk check (trigger in ('schedule','manual','first_run')),
+  constraint sync_run_outcome_chk check (outcome in ('ok','unauthorized','unreachable','error'))
 );
 create index sync_run_source_idx  on knobas.sync_run (source_id, started_at desc);
 create index sync_run_running_idx on knobas.sync_run (source_id) where finished_at is null;

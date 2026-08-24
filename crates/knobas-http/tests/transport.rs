@@ -285,3 +285,103 @@ async fn retry_after_is_waited_out_before_the_retry() {
         "Retry-After was not waited out: {elapsed:?}"
     );
 }
+
+/// **Every attempt passes the rate limiter, retries included.**
+///
+/// This is the guarantee that justified writing the retry loop instead of
+/// using `reqwest-retry`, and it needs a quota tight enough to see. The other
+/// tests here run at the default `burst: 10`, which swallows three attempts
+/// whole -- so hoisting `until_ready()` out of the loop leaves every one of
+/// them green while the guarantee is gone.
+///
+/// At one request per second with a burst of one: attempt 1 goes immediately,
+/// attempt 2 cannot start before t=1 s, attempt 3 not before t=2 s. The
+/// exponential backoff between them (250 ms + 500 ms) is far shorter, so the
+/// limiter is what sets the pace and ~2 s is what it costs. Ungated, the same
+/// three attempts cost only the backoff: ~0.75 s. The assertion sits between
+/// the two and cannot be satisfied by the backoff alone.
+#[tokio::test(flavor = "multi_thread")]
+async fn every_attempt_waits_for_the_rate_limiter() {
+    let server = CountingServer::always(503, "");
+    let client = HttpClient::new(HttpConfig {
+        requests_per_second: 1,
+        burst: 1,
+        ..config(server.url())
+    })
+    .expect("client");
+
+    let started = std::time::Instant::now();
+    client
+        .get_json::<serde_json::Value>("/thing", &[])
+        .await
+        .expect_err("503 every time");
+    let elapsed = started.elapsed();
+
+    assert_eq!(server.hits(), knobas_http::MAX_ATTEMPTS as usize);
+    assert!(
+        elapsed >= std::time::Duration::from_millis(1900),
+        "three attempts at 1/s must take ~2s; {elapsed:?} means the retries \
+         skipped the limiter (the backoff alone is 750ms)"
+    );
+}
+
+/// The whole call is bounded, and the bound is real even when a single attempt
+/// is the thing that is slow.
+///
+/// A server that accepts the connection and then says nothing would otherwise
+/// cost `MAX_ATTEMPTS` × the request timeout. The per-attempt timeout is
+/// shortened to whatever is left of [`SEND_BUDGET`], so the ceiling holds; here
+/// the budget is squeezed by a short `request_timeout` so the test costs a
+/// second rather than forty-five.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_silent_server_cannot_outlast_the_budget() {
+    let server = SilentServer::new();
+    let client = HttpClient::new(HttpConfig {
+        request_timeout: std::time::Duration::from_millis(300),
+        connect_timeout: std::time::Duration::from_millis(300),
+        ..config(server.url())
+    })
+    .expect("client");
+
+    let started = std::time::Instant::now();
+    let error = client
+        .get_json::<serde_json::Value>("/thing", &[])
+        .await
+        .expect_err("nothing ever answers");
+    let elapsed = started.elapsed();
+
+    // A timeout is `Unreachable`, which is the class the scheduler backs off
+    // on -- not `Protocol`, which would read as knobas' own bug.
+    assert!(matches!(error, SourceError::Unreachable(_)), "{error:?}");
+    assert!(
+        elapsed < knobas_http::SEND_BUDGET,
+        "the call must be bounded by SEND_BUDGET, took {elapsed:?}"
+    );
+}
+
+/// A server that accepts connections and never replies.
+struct SilentServer {
+    port: u16,
+    _keep: tokio::task::JoinHandle<()>,
+}
+
+impl SilentServer {
+    fn new() -> Self {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        listener.set_nonblocking(true).expect("nonblocking");
+        let listener = tokio::net::TcpListener::from_std(listener).expect("tokio listener");
+        let keep = tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((socket, _)) = listener.accept().await {
+                // Held, never answered, never closed.
+                held.push(socket);
+            }
+        });
+        Self { port, _keep: keep }
+    }
+
+    fn url(&self) -> String {
+        format!("http://127.0.0.1:{}", self.port)
+    }
+}

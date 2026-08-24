@@ -247,6 +247,36 @@ mod tests {
         }
     }
 
+    /// The two vocabularies are also CHECK constraints in migration 0002.
+    /// A spelling added to the enum and not to the constraint is a run that
+    /// cannot be logged at all; the other half of this pin is
+    /// `crates/knobas-db/tests/schema.rs`.
+    #[test]
+    fn the_spellings_are_the_ones_the_migration_allows() {
+        let migration = include_str!("../../knobas-db/migrations/0002_m1_cockpit.sql");
+        for trigger in [
+            SyncTrigger::Schedule,
+            SyncTrigger::Manual,
+            SyncTrigger::FirstRun,
+        ] {
+            assert!(
+                migration.contains(&format!("'{}'", trigger.as_str())),
+                "{trigger:?} is missing from sync_run_trigger_chk"
+            );
+        }
+        for outcome in [
+            SyncOutcome::Ok,
+            SyncOutcome::Unauthorized,
+            SyncOutcome::Unreachable,
+            SyncOutcome::Error,
+        ] {
+            assert!(
+                migration.contains(&format!("'{}'", outcome.as_str())),
+                "{outcome:?} is missing from sync_run_outcome_chk"
+            );
+        }
+    }
+
     /// The classification stream F's backoff reads. `Unauthorized` is the one
     /// that must never be retried, so it is the one that must never be
     /// swallowed into `Error`.

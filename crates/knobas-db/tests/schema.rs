@@ -396,3 +396,65 @@ async fn setting_stores_json_by_key() {
             .unwrap();
     assert_eq!(stored, serde_json::json!(true));
 }
+
+/// `trigger` and `outcome` are closed vocabularies, and the database says so.
+///
+/// The same pin `auth_state` gets: the enums live in `knobas_sync::run_log`,
+/// the columns are plain `text`, and nothing but a constraint keeps the two
+/// lists the same. It matters more here than for a display column, because
+/// stream F's backoff branches on `outcome` — `unauthorized` is never retried,
+/// `unreachable` is — so an unrecognised value is a source that hammers or
+/// stalls rather than a label that looks wrong.
+///
+/// `outcome` must still accept NULL: that is what "running" is.
+#[tokio::test]
+async fn the_run_log_constrains_its_two_vocabularies() {
+    let pool = &knobas_db::test_util::test_pool().await;
+    migrate::run(pool).await.unwrap();
+
+    let source = format!("chk-{}", uuid::Uuid::new_v4().simple());
+
+    // A run in flight: no outcome yet, and that is not a violation.
+    let (id,): (i64,) = sqlx::query_as(
+        "insert into knobas.sync_run (source_id, trigger) values ($1, 'schedule') returning id",
+    )
+    .bind(&source)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+
+    for bad in ["cron", "Manual", ""] {
+        let refused = sqlx::query("update knobas.sync_run set trigger = $2 where id = $1")
+            .bind(id)
+            .bind(bad)
+            .execute(pool)
+            .await;
+        assert!(refused.is_err(), "trigger {bad:?} should be refused");
+    }
+    for bad in ["failed", "OK", ""] {
+        let refused = sqlx::query("update knobas.sync_run set outcome = $2 where id = $1")
+            .bind(id)
+            .bind(bad)
+            .execute(pool)
+            .await;
+        assert!(refused.is_err(), "outcome {bad:?} should be refused");
+    }
+
+    // Every spelling the enums produce is accepted.
+    for trigger in ["schedule", "manual", "first_run"] {
+        sqlx::query("update knobas.sync_run set trigger = $2 where id = $1")
+            .bind(id)
+            .bind(trigger)
+            .execute(pool)
+            .await
+            .unwrap_or_else(|error| panic!("trigger {trigger:?} refused: {error}"));
+    }
+    for outcome in ["ok", "unauthorized", "unreachable", "error"] {
+        sqlx::query("update knobas.sync_run set outcome = $2 where id = $1")
+            .bind(id)
+            .bind(outcome)
+            .execute(pool)
+            .await
+            .unwrap_or_else(|error| panic!("outcome {outcome:?} refused: {error}"));
+    }
+}

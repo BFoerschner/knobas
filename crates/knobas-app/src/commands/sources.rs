@@ -150,18 +150,17 @@ async fn spawn_sync<R: tauri::Runtime>(
     let pool = pool.clone();
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        let outcome = match knobas_sync::run(
+        let result = knobas_sync::run(
             &pool,
             prepared.source.as_ref(),
             prepared.cursor,
             run_id,
             sink.as_deref(),
         )
-        .await
-        {
+        .await;
+        match &result {
             Ok(report) => {
                 tracing::info!(run_id, source_id = %source_id, upserted = report.upserted, "sync finished");
-                knobas_sync::SyncOutcome::Ok
             }
             // Nowhere to return it to -- the command answered long ago. The
             // run log has it (`knobas_sync::run` wrote it there before
@@ -169,9 +168,9 @@ async fn spawn_sync<R: tauri::Runtime>(
             // makes it visible in a terminal.
             Err(error) => {
                 tracing::warn!(run_id, source_id = %source_id, %error, "sync failed");
-                knobas_sync::SyncOutcome::of(&error)
             }
-        };
+        }
+        let outcome = outcome_of(&result);
         emit_sync_state(
             &app,
             &knobas_sync::SourceSyncStatus::finished(&source_id, run_id, outcome),
@@ -179,6 +178,21 @@ async fn spawn_sync<R: tauri::Runtime>(
     });
 
     Ok(run_id)
+}
+
+/// How the run ended, in the log's vocabulary.
+///
+/// Separated from the task body so it can be asserted without a database and a
+/// spawn: it is the only *decision* the spawned task makes, and getting it
+/// wrong means stream F's backoff reads the wrong class -- retrying a 401 for
+/// ever, or never retrying something transient.
+fn outcome_of(
+    result: &Result<knobas_sync::SyncReport, knobas_sync::SyncError>,
+) -> knobas_sync::SyncOutcome {
+    match result {
+        Ok(_) => knobas_sync::SyncOutcome::Ok,
+        Err(error) => knobas_sync::SyncOutcome::of(error),
+    }
 }
 
 /// Emit one coarse `sync:state`.
@@ -192,5 +206,45 @@ fn emit_sync_state<R: tauri::Runtime>(
 ) {
     if let Err(error) = app.emit(crate::events::SYNC_STATE, status) {
         tracing::debug!(%error, "nobody is listening to sync:state");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use knobas_source::SourceError;
+    use knobas_sync::{SyncError, SyncOutcome};
+
+    /// The classification that reaches `sync:state` -- and through it stream
+    /// F's backoff, which never retries `unauthorized` and does retry
+    /// `unreachable`. A failed run that reported `ok` would look to the
+    /// scheduler like a source that is fine.
+    #[test]
+    fn the_terminal_outcome_is_the_class_of_the_failure() {
+        let report = knobas_sync::SyncReport {
+            source_id: "mock".to_owned(),
+            upserted: 1,
+            deleted: 0,
+            cursor: "c".to_owned(),
+        };
+        assert_eq!(super::outcome_of(&Ok(report)), SyncOutcome::Ok);
+
+        for (error, expected) in [
+            (SourceError::Unauthorized, SyncOutcome::Unauthorized),
+            (
+                SourceError::Unreachable("dns".to_owned()),
+                SyncOutcome::Unreachable,
+            ),
+            (
+                SourceError::Protocol("bad json".to_owned()),
+                SyncOutcome::Error,
+            ),
+        ] {
+            let described = format!("{error:?}");
+            assert_eq!(
+                super::outcome_of(&Err(SyncError::Source(error))),
+                expected,
+                "{described}"
+            );
+        }
     }
 }
