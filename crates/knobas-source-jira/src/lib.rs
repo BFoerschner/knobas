@@ -1,3 +1,11 @@
+// The adapter is built bottom-up: every module below has its own tests, but
+// nothing reaches `http`, `model`, `map`, `cursor` or `jql` from the crate's
+// public surface until `source.rs` lands (task 6, the second stream-A PR), and
+// `just check`'s `clippy --workspace --lib` pass deliberately excludes test
+// targets. Task 6 deletes this line; the reviewer of that PR checks that it is
+// gone.
+#![allow(dead_code)]
+
 //! The Jira **Data Center** adapter: `/rest/api/2/…`, `startAt` pagination.
 //!
 //! Read-only in M1 (interfaces doc §4.1): it declares no capabilities and no
@@ -19,6 +27,7 @@
 
 mod config;
 mod descriptor;
+mod http;
 
 pub use config::{Flavor, JiraConfig};
 pub use descriptor::descriptor_template;

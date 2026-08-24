@@ -2496,9 +2496,11 @@ dependencies = [
 name = "knobas-source-jira"
 version = "0.1.0"
 dependencies = [
+ "knobas-http",
  "knobas-source",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
