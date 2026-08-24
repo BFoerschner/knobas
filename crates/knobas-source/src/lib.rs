@@ -12,11 +12,14 @@
 //!   process behind a pipe or socket without a contract change. No handles, no
 //!   connections, no trait objects in the payload types.
 //! * **Self-describing.** The UI renders a source's items from
-//!   [`SourceDescriptor::kinds`] and builds its configuration form from
-//!   [`SourceDescriptor::config_schema`]. Nothing downstream is allowed to
-//!   carry a hardcoded list of kinds, so a new adapter needs no UI work --
-//!   which is why [`contract::battery`] rejects any adapter that emits an item
-//!   of a kind it did not declare.
+//!   [`SourceDescriptor::entity_kinds`], its action bar from
+//!   [`SourceDescriptor::write_ops`], its Add-source form from
+//!   [`SourceDescriptor::config_schema`] and
+//!   [`SourceDescriptor::auth_methods`]. Nothing downstream is allowed to carry
+//!   a hardcoded per-adapter table, so a new adapter needs no UI work (spec §3a:
+//!   "one new adapter and zero changes to knobas core, search, or UI") -- which
+//!   is why [`contract::battery`] rejects an adapter that emits an item of an
+//!   undeclared kind, or accepts a write op it never declared.
 //!
 //! Adapters prove they honour the contract by running [`contract::battery`]
 //! against themselves in their own test suite.
@@ -27,23 +30,39 @@ pub mod contract;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SourceDescriptor {
     /// Instance id, e.g. `"jira"`. Doubles as the [`EntityRef`] namespace for
-    /// every item this instance emits.
+    /// every item this instance emits, so it must be non-blank and free of `:`.
     ///
     /// [`EntityRef`]: knobas_core::entity::EntityRef
     pub id: String,
-    /// Adapter kind, e.g. `"jira"`, `"mock"`.
-    pub kind: String,
+    /// Which adapter this is an instance of, e.g. `"jira"`, `"mock"`. Distinct
+    /// from [`Self::entity_kinds`], which is about the *items* it emits.
+    pub adapter_kind: String,
     /// Human-readable name for the source list.
     pub name: String,
     pub capabilities: Vec<Capability>,
+    /// How this adapter can authenticate (spec §3, §3a). The Add-source form
+    /// offers these; the chosen method's secret goes to the OS keychain and
+    /// never into [`Self::config_schema`]'s config blob.
+    pub auth_methods: Vec<AuthMethod>,
     pub adapter_version: String,
     /// Entity kinds this adapter emits, with display metadata -- the UI renders
     /// a new source's items (launcher groups, chips, monograms) from this
     /// alone, never from hardcoded kind lists (spec §3a extensibility).
-    pub kinds: Vec<KindInfo>,
+    /// [`SyncItem::kind`] must name one of these.
+    pub entity_kinds: Vec<KindInfo>,
+    /// Which [`WriteOp`]s this adapter supports, as the stable snake_case
+    /// identifiers documented on that enum (`Comment` → `"comment"`).
+    ///
+    /// The UI renders its action bar from this rather than from a hardcoded
+    /// per-adapter table, which is why [`Capability::Write`] alone is not
+    /// enough: once `WriteOp` grows, "supports writes" no longer says *which*
+    /// actions to offer. An adapter must reject any op absent from this list
+    /// with [`SourceError::Protocol`].
+    pub write_ops: Vec<String>,
     /// JSON Schema for this adapter's configuration; the Add-source form is
-    /// generated from it (spec §3a). M0: the mock declares an empty object
-    /// schema.
+    /// generated from it (spec §3a). Never holds secrets -- those live in the
+    /// OS keychain, keyed by the chosen [`AuthMethod`]. M0: the mock declares
+    /// an empty object schema.
     pub config_schema: serde_json::Value,
 }
 
@@ -60,19 +79,33 @@ pub struct KindInfo {
     pub monogram: String,
 }
 
-/// What an adapter can do beyond plain syncing.
+/// What an adapter can do beyond plain syncing (spec §3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Capability {
     Search,
     Write,
+    Webhooks,
     Import,
+}
+
+/// How an adapter authenticates against its remote system (spec §3).
+///
+/// The descriptor declares which of these it accepts; the secret itself is
+/// stored in the OS keychain, never in the source's configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum AuthMethod {
+    UserPassword,
+    Pat,
+    ApiToken,
+    OAuth,
 }
 
 /// One entity pushed across the SPI during a sync.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SyncItem {
     pub entity: knobas_core::entity::EntityRef,
-    /// One of the kind ids the descriptor declares:
+    /// The *entity* kind, naming one of the descriptor's
+    /// [`entity_kinds`](SourceDescriptor::entity_kinds):
     /// ticket|pr|build|page|commit|branch|repo|monitor|…
     pub kind: String,
     pub title: String,
@@ -88,14 +121,18 @@ pub struct SyncItem {
 /// Opaque incremental-sync position, adapter-defined content.
 pub type Cursor = String;
 
-/// The three failure classes knobas distinguishes; everything else an adapter
-/// hits collapses into [`SourceError::Protocol`].
+/// The failure classes knobas distinguishes; everything else an adapter hits
+/// collapses into [`SourceError::Protocol`].
+///
+/// The distinction is user-visible: [`Unauthorized`](Self::Unauthorized) is
+/// what makes the UI offer *re-authenticate* rather than shrug at a protocol
+/// error, so an adapter must classify the same failure the same way whether it
+/// surfaces from [`Source::test_connection`] or mid-[`sync`](Source::sync).
 ///
 /// Every variant carries at most a string, so the error crosses a process
 /// boundary as plain data (spec §3a). The serde form is structural, not the
 /// [`Display`](std::fmt::Display) text thiserror generates: `Unauthorized`
-/// round-trips as the bare variant, the other two as
-/// `{"Unreachable": "<detail>"}`.
+/// round-trips as the bare variant, the others as `{"Unreachable": "<detail>"}`.
 #[derive(Debug, thiserror::Error, serde::Serialize, serde::Deserialize)]
 pub enum SourceError {
     #[error("unauthorized")]
@@ -104,16 +141,29 @@ pub enum SourceError {
     Unreachable(String),
     #[error("protocol: {0}")]
     Protocol(String),
+    /// The [`Sink`] rejected an item and the sync was abandoned. Raised by the
+    /// sink, propagated -- never manufactured -- by the adapter.
+    #[error("sink: {0}")]
+    Sink(String),
 }
 
 /// A write knobas asks an adapter to perform on the remote system.
+///
+/// Each variant has a stable snake_case identifier that adapters list in
+/// [`SourceDescriptor::write_ops`] and the UI renders its action bar from:
+///
+/// | variant | identifier |
+/// | --- | --- |
+/// | [`Comment`](Self::Comment) | `"comment"` |
+///
+/// The enum grows per milestone; an adapter must reject every op it does not
+/// declare with [`SourceError::Protocol`].
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum WriteOp {
-    /// `entity` is an [`EntityRef`] in string form.
+    /// Identifier `"comment"`. `entity` is an [`EntityRef`] in string form.
     ///
     /// [`EntityRef`]: knobas_core::entity::EntityRef
     Comment { entity: String, body: String },
-    // grows per milestone; every adapter rejects ops it lacks with Protocol
 }
 
 /// The adapter interface. One implementation per configured source instance.
@@ -122,11 +172,20 @@ pub trait Source: Send + Sync {
     fn descriptor(&self) -> SourceDescriptor;
     async fn test_connection(&self) -> Result<(), SourceError>;
     /// Push every item changed since `cursor` (None = full sync); return the new cursor.
+    ///
+    /// Sink failures are **not** the adapter's to swallow: propagate every
+    /// [`Sink::item`] error with `?` and abandon the sync. A sink that has lost
+    /// its database has no use for the remaining 4,988 items, and returning a
+    /// fresh cursor after a partial write would silently skip everything the
+    /// sink dropped.
     async fn sync(
         &self,
         cursor: Option<Cursor>,
         sink: &mut (dyn Sink + Send),
     ) -> Result<Cursor, SourceError>;
+    /// Perform a write on the remote system. Ops absent from
+    /// [`SourceDescriptor::write_ops`] must be refused with
+    /// [`SourceError::Protocol`] rather than attempted.
     async fn write(&self, op: WriteOp) -> Result<(), SourceError>;
 }
 
@@ -134,7 +193,11 @@ pub trait Source: Send + Sync {
 /// [`contract::VecSink`] is the in-memory one the battery uses.
 #[async_trait::async_trait]
 pub trait Sink {
-    async fn item(&mut self, item: SyncItem);
+    /// Accept one item, or fail the sync.
+    ///
+    /// Returning [`SourceError::Sink`] is how a sink applies back-pressure or
+    /// aborts: the adapter must propagate it with `?` and stop syncing.
+    async fn item(&mut self, item: SyncItem) -> Result<(), SourceError>;
 }
 
 #[cfg(test)]
@@ -144,27 +207,37 @@ mod tests {
     fn a_descriptor() -> SourceDescriptor {
         SourceDescriptor {
             id: "jira".into(),
-            kind: "jira".into(),
+            adapter_kind: "jira".into(),
             name: "Jira".into(),
-            capabilities: vec![Capability::Search, Capability::Write],
+            capabilities: vec![Capability::Search, Capability::Write, Capability::Webhooks],
+            auth_methods: vec![AuthMethod::Pat, AuthMethod::OAuth],
             adapter_version: "0.1.0".into(),
-            kinds: vec![KindInfo {
+            entity_kinds: vec![KindInfo {
                 id: "ticket".into(),
                 label: "Ticket".into(),
                 plural: "Tickets".into(),
                 monogram: "JI".into(),
             }],
+            write_ops: vec!["comment".into()],
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
         }
     }
 
     /// The descriptor is what the UI reads, so it has to survive the IPC hop
-    /// as plain data -- including the kind metadata the launcher renders from.
+    /// as plain data -- including the kind metadata the launcher renders from,
+    /// the auth methods the Add-source form offers, and the write-op
+    /// identifiers the action bar renders instead of a hardcoded table.
     #[test]
     fn descriptor_serializes_to_plain_json() {
         let v = serde_json::to_value(a_descriptor()).unwrap();
-        assert_eq!(v["capabilities"], serde_json::json!(["Search", "Write"]));
-        assert_eq!(v["kinds"][0]["monogram"], "JI");
+        assert_eq!(
+            v["capabilities"],
+            serde_json::json!(["Search", "Write", "Webhooks"])
+        );
+        assert_eq!(v["auth_methods"], serde_json::json!(["Pat", "OAuth"]));
+        assert_eq!(v["entity_kinds"][0]["monogram"], "JI");
+        assert_eq!(v["write_ops"], serde_json::json!(["comment"]));
+        assert_eq!(v["adapter_kind"], "jira");
         assert_eq!(v["config_schema"]["type"], "object");
     }
 
@@ -178,8 +251,11 @@ mod tests {
         let back: SourceDescriptor =
             serde_json::from_str(&serde_json::to_string(&d).unwrap()).unwrap();
         assert_eq!(back.id, d.id);
+        assert_eq!(back.adapter_kind, d.adapter_kind);
         assert_eq!(back.capabilities, d.capabilities);
-        assert_eq!(back.kinds[0].plural, "Tickets");
+        assert_eq!(back.auth_methods, d.auth_methods);
+        assert_eq!(back.entity_kinds[0].plural, "Tickets");
+        assert_eq!(back.write_ops, d.write_ops);
         assert_eq!(back.config_schema, d.config_schema);
 
         let item = SyncItem {
@@ -216,6 +292,10 @@ mod tests {
         assert!(matches!(back, SourceError::Unreachable(d) if d == "refused"));
         let back: SourceError = serde_json::from_value(serde_json::json!("Unauthorized")).unwrap();
         assert_eq!(back.to_string(), "unauthorized");
+        let json = serde_json::to_value(SourceError::Sink("pool closed".into())).unwrap();
+        assert_eq!(json, serde_json::json!({ "Sink": "pool closed" }));
+        let back: SourceError = serde_json::from_value(json).unwrap();
+        assert_eq!(back.to_string(), "sink: pool closed");
     }
 
     /// Write ops travel adapter-ward, so they round-trip in both directions.
