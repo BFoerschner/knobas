@@ -1,0 +1,19 @@
+[package]
+name = "knobas-source-mock"
+edition.workspace = true
+version.workspace = true
+
+# The reference adapter: it serves the Tidewater Freight dataset every mockup
+# was drawn against, so the app can be built and demoed end to end before a
+# single real backend exists. It talks to nothing, so it needs nothing beyond
+# the SPI and serde.
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+knobas-core = { path = "../knobas-core" }
+knobas-source = { path = "../knobas-source" }
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
