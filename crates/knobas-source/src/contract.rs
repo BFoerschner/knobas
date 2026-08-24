@@ -253,20 +253,20 @@ mod tests {
                 adapter_kind: "test".into(),
                 name: "Test".into(),
                 capabilities: vec![Capability::Search],
-                auth_methods: vec![AuthMethod::Pat],
                 adapter_version: "0.1.0".into(),
-                entity_kinds: vec![KindInfo {
-                    id: "ticket".into(),
-                    label: "Ticket".into(),
-                    plural: "Tickets".into(),
-                    monogram: "TE".into(),
-                }],
+                auth_methods: vec![AuthMethod::Pat],
                 // Declares no write ops, so the battery probes `comment` and
                 // expects a refusal -- except for the typo'd-identifier case.
                 write_ops: match self.behavior {
                     Behavior::UnknownWriteOpId => vec!["Comment".into()],
                     _ => Vec::new(),
                 },
+                entity_kinds: vec![KindInfo {
+                    id: "ticket".into(),
+                    label: "Ticket".into(),
+                    plural: "Tickets".into(),
+                    monogram: "TE".into(),
+                }],
                 config_schema: serde_json::json!({ "type": "object", "properties": {} }),
             }
         }

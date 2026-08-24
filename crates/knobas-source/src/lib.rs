@@ -40,16 +40,11 @@ pub struct SourceDescriptor {
     /// Human-readable name for the source list.
     pub name: String,
     pub capabilities: Vec<Capability>,
+    pub adapter_version: String,
     /// How this adapter can authenticate (spec §3, §3a). The Add-source form
     /// offers these; the chosen method's secret goes to the OS keychain and
     /// never into [`Self::config_schema`]'s config blob.
     pub auth_methods: Vec<AuthMethod>,
-    pub adapter_version: String,
-    /// Entity kinds this adapter emits, with display metadata -- the UI renders
-    /// a new source's items (launcher groups, chips, monograms) from this
-    /// alone, never from hardcoded kind lists (spec §3a extensibility).
-    /// [`SyncItem::kind`] must name one of these.
-    pub entity_kinds: Vec<KindInfo>,
     /// Which [`WriteOp`]s this adapter supports, as the stable snake_case
     /// identifiers documented on that enum (`Comment` → `"comment"`).
     ///
@@ -59,6 +54,11 @@ pub struct SourceDescriptor {
     /// actions to offer. An adapter must reject any op absent from this list
     /// with [`SourceError::Protocol`].
     pub write_ops: Vec<String>,
+    /// Entity kinds this adapter emits, with display metadata -- the UI renders
+    /// a new source's items (launcher groups, chips, monograms) from this
+    /// alone, never from hardcoded kind lists (spec §3a extensibility).
+    /// [`SyncItem::kind`] must name one of these.
+    pub entity_kinds: Vec<KindInfo>,
     /// JSON Schema for this adapter's configuration; the Add-source form is
     /// generated from it (spec §3a). Never holds secrets -- those live in the
     /// OS keychain, keyed by the chosen [`AuthMethod`]. M0: the mock declares
@@ -210,15 +210,15 @@ mod tests {
             adapter_kind: "jira".into(),
             name: "Jira".into(),
             capabilities: vec![Capability::Search, Capability::Write, Capability::Webhooks],
-            auth_methods: vec![AuthMethod::Pat, AuthMethod::OAuth],
             adapter_version: "0.1.0".into(),
+            auth_methods: vec![AuthMethod::Pat, AuthMethod::OAuth],
+            write_ops: vec!["comment".into()],
             entity_kinds: vec![KindInfo {
                 id: "ticket".into(),
                 label: "Ticket".into(),
                 plural: "Tickets".into(),
                 monogram: "JI".into(),
             }],
-            write_ops: vec!["comment".into()],
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
         }
     }
