@@ -2,10 +2,14 @@
 # decides the toolchain. An inherited RUSTUP_TOOLCHAIN would silently
 # override the pin and let the gate pass on an unpinned compiler.
 
-# `front` runs before the cargo recipes, not after: `tauri::generate_context!`
-# embeds the built frontend at compile time, so `app/dist` has to exist before
-# anything compiles knobas-app. On a fresh clone the reverse order fails to
-# build rather than failing a test.
+# `front` runs before the cargo recipes because it is the fast half: a
+# svelte-check error or a broken `vite build` is reported in seconds instead of
+# after a full workspace compile. It is *not* a build dependency of the cargo
+# recipes -- `tauri::generate_context!` only reads `frontendDist` when the
+# `custom-protocol` feature is on (production, i.e. `tauri build`); a dev build
+# with `devUrl` set takes the empty default asset set and never looks at
+# `app/dist`. Nothing here may create that directory either: a missing one is
+# exactly how `tauri build` refuses to bundle an app with no frontend in it.
 check: fmt front clippy test
 
 fmt:

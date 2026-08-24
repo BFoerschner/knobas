@@ -35,6 +35,25 @@ async fn demo_load_registers_once_and_syncs_the_same_rows_every_time() {
         first.upserted
     );
 
+    // *One* load has to be enough to leave the cursor behind, and that is what
+    // pins the ordering inside `demo_load_inner`: registration first, then the
+    // run. Reversed, the run finds no `source_config` row to persist into --
+    // `run_once` updates a row and deliberately never invents one -- so the
+    // cursor is dropped on the floor and the row the registration then creates
+    // has `cursor` NULL. Reading this only after a *second* load would hide
+    // exactly that: the first load would create the row and the second would
+    // fill it in, and the assertion would hold either way.
+    let (stored,): (Option<String>,) =
+        sqlx::query_as("select cursor from knobas.source_config where id = 'mock'")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        stored.as_deref(),
+        Some(first.cursor.as_str()),
+        "one demo load must leave a resumable cursor -- did the run happen before the registration?"
+    );
+
     // Loading the demo twice is something a user can do by double-clicking the
     // button: it must not double the corpus, nor add a second configuration.
     let second = demo::demo_load_inner(pool).await.unwrap();
@@ -58,17 +77,8 @@ async fn demo_load_registers_once_and_syncs_the_same_rows_every_time() {
         "a re-run duplicated rows instead of upserting them"
     );
 
-    // The registration has to happen *before* the run, or the engine finds no
-    // row to persist the cursor into and `sync_now` has nothing to resume from.
-    let (stored,): (Option<String>,) =
-        sqlx::query_as("select cursor from knobas.source_config where id = 'mock'")
-            .fetch_one(pool)
-            .await
-            .unwrap();
-    assert_eq!(stored.as_deref(), Some(first.cursor.as_str()));
-
-    // ...which is exactly what `sync_now` picks up: an incremental run from the
-    // stored cursor has nothing left to do.
+    // The stored cursor is exactly what `sync_now` picks up: an incremental run
+    // from it has nothing left to do.
     let incremental = demo::sync_now_inner(pool, "mock").await.unwrap();
     assert_eq!(incremental.upserted, 0);
     assert_eq!(incremental.cursor, first.cursor);

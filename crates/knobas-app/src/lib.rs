@@ -4,6 +4,25 @@
 //! The crate is a library with a one-line binary in front of it so the command
 //! bodies stay reachable from `tests/`; a binary target cannot be linked
 //! against by an integration test.
+//!
+//! ## The CSP in `tauri.conf.json`
+//!
+//! Recorded here because JSON has no comments. **`app.security.csp` governs
+//! production only.** Tauri attaches it in `Asset::csp_header`, on the
+//! `tauri://` asset protocol; `tauri dev` on desktop navigates straight to
+//! `devUrl` (`PROXY_DEV_SERVER = cfg!(all(dev, mobile))` is false off mobile),
+//! so a dev window is served by Vite over `http://` with no CSP header at all.
+//! Nothing about the policy can therefore be verified by running `just dev` --
+//! only a bundle built with `custom-protocol` exercises it.
+//!
+//! What the directives are for: `default-src 'self'` covers the extracted
+//! `assets/index-*.js`; `style-src 'self'` covers `assets/index-*.css`, and
+//! carries no `'unsafe-inline'` because `vite build` extracts every Svelte
+//! component style into that file and the emitted `dist/index.html` has no
+//! inline `<style>` or `style="..."` anywhere. `connect-src ipc:
+//! http://ipc.localhost` is what the IPC needs: Tauri's `ipc-protocol.js`
+//! reaches the backend with a `fetch`, and without it every command call is
+//! blocked in a release build while working perfectly in dev.
 
 pub mod commands;
 pub mod demo;
@@ -130,9 +149,17 @@ async fn start_database(handle: &tauri::AppHandle) -> Result<(), Box<dyn std::er
 /// `just dev`, a `kill`, a crash -- delivers no `RunEvent` at all, so the
 /// server outlives the process. It is *not* cleaned up on the next start
 /// either: what happens is that the next start finds it alive and adopts it
-/// (see `knobas_db::EmbeddedDb::start`), reusing it as a warm start. Nothing
-/// stops it but the run that started it, so a signal-killed session leaves a
-/// PostgreSQL running until the next clean quit.
+/// (see `knobas_db::EmbeddedDb::start`), reusing it as a warm start.
+///
+/// Adoption is a **one-way door for that server's lifetime**, and an accepted
+/// M0 limitation: an adopted handle owns nothing, so no clean quit ever stops
+/// it -- not this one, not any later run's, since every later run adopts it in
+/// turn. The `info` line below is logged all the same, because the handle
+/// cannot say whether it owns a server; read it as "shutting the database
+/// down", not as proof a postmaster died. From then until the machine reboots
+/// or the user stops it by hand there is one PostgreSQL running per profile.
+/// Owning that properly -- a supervisor, or a handle that knows it adopted --
+/// is M1 stream F's.
 ///
 /// `db.stop()` closes the pool first, which waits for in-flight queries. A quit
 /// during a long sync therefore blocks the exit for as long as that sync's
