@@ -442,17 +442,29 @@ select i.id, i.kind, i.title,
 "#;
 
 /// `sync.item`: the mirror, refreshed wholesale. `synced_at` is when this run
-/// saw the item; `item_updated_at` is when the source says it changed, and
-/// stays null when the source does not say.
+/// saw the item; `item_updated_at` is when the source says it changed.
+///
+/// `item_updated_at` keeps the stored value when the source does not say, for
+/// the same reason and by the same left join as `knobas.entity.updated_at`:
+/// the two columns hold the same fact, and a mirror whose timestamp disagreed
+/// with its entity's on identical input would be a trap for anything reading
+/// either. It stays null only while the source has never dated the item --
+/// unlike the entity's, which is `not null` and falls back to `now()` on a
+/// genuinely new row.
 const ITEM_UPSERT: &str = r#"
+with incoming as (
+  select *
+    from unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[],
+                $6::timestamptz[], $7::jsonb[])
+         as t(id, kind, title, body_text, author, item_updated_at, payload)
+)
 insert into sync.item
        (entity_id, source_id, kind, title, body_text, author, item_updated_at,
         synced_at, payload)
-select t.id, $8, t.kind, t.title, t.body_text, t.author, t.item_updated_at,
-       now(), t.payload
-  from unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[],
-              $6::timestamptz[], $7::jsonb[])
-       as t(id, kind, title, body_text, author, item_updated_at, payload)
+select i.id, $8, i.kind, i.title, i.body_text, i.author,
+       coalesce(i.item_updated_at, old.item_updated_at), now(), i.payload
+  from incoming i
+       left join sync.item old on old.entity_id = i.id
     on conflict (entity_id) do update set
        source_id       = excluded.source_id,
        kind            = excluded.kind,
@@ -495,5 +507,75 @@ mod tests {
         for bad in ["", "   ", "jira:eu", ":", "note", "CTX", "monitor"] {
             assert!(check_source_id(bad).is_err(), "{bad:?} should be refused");
         }
+    }
+
+    fn unit_item(source_id: &str, n: usize) -> SyncItem {
+        SyncItem {
+            entity: EntityRef::new(source_id, &format!("U-{n}")),
+            kind: "ticket".to_owned(),
+            title: format!("unit {n}"),
+            body_text: String::new(),
+            author: None,
+            updated_at: None,
+            payload: serde_json::json!({}),
+            deleted: false,
+        }
+    }
+
+    async fn mirrored(tx: &mut Transaction<'_, Postgres>, source_id: &str) -> i64 {
+        let (rows,): (i64,) = sqlx::query_as("select count(*) from sync.item where source_id = $1")
+            .bind(source_id)
+            .fetch_one(&mut **tx)
+            .await
+            .unwrap();
+        rows
+    }
+
+    /// A full batch is written **while the adapter is still syncing**, not
+    /// saved up until it returns.
+    ///
+    /// Everything else about batching rests on this: the run-scoped counters
+    /// only differ from per-batch ones once a boundary has been crossed
+    /// mid-run, and the rollback test is vacuous unless rows really were
+    /// written before the failure. Driving the sink directly is the only way
+    /// to observe the moment, because the transaction it writes into is
+    /// invisible from any other connection and gone by the time `run_once`
+    /// returns.
+    #[tokio::test]
+    async fn a_full_batch_is_written_while_the_adapter_is_still_running() {
+        let pool = knobas_db::test_util::test_pool().await;
+        knobas_db::migrate::run(&pool).await.unwrap();
+        let source_id = format!("unit-{}", uuid::Uuid::new_v4());
+
+        let mut tx = pool.begin().await.unwrap();
+        let mid_run = {
+            let kinds = HashSet::from(["ticket".to_owned()]);
+            let mut sink = PgSink::new(&mut tx, source_id.clone(), kinds);
+            for n in 0..BATCH {
+                sink.item(unit_item(&source_id, n)).await.unwrap();
+            }
+            assert!(
+                sink.buf.is_empty(),
+                "a full batch must be flushed, not left buffered"
+            );
+            assert_eq!(sink.upserted, BATCH as u64);
+            // Read back through the sink's own transaction: the adapter has not
+            // returned and nothing has committed.
+            mirrored(sink.tx, &source_id).await
+        };
+        assert_eq!(
+            mid_run, BATCH as i64,
+            "the batch must already be in the transaction"
+        );
+
+        // ...and it is still only in the transaction.
+        tx.rollback().await.unwrap();
+        let (after,): (i64,) =
+            sqlx::query_as("select count(*) from sync.item where source_id = $1")
+                .bind(&source_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(after, 0);
     }
 }

@@ -5,6 +5,8 @@
 //! Only the mock's own test uses `mock`, which is why it may assert absolute
 //! row counts for that source.
 
+use std::sync::Mutex;
+
 use knobas_core::entity::EntityRef;
 use knobas_source::{
     Capability, Cursor, KindInfo, Sink, Source, SourceDescriptor, SourceError, SyncItem, WriteOp,
@@ -139,6 +141,70 @@ impl Source for FakeSource {
     async fn write(&self, _op: WriteOp) -> Result<(), SourceError> {
         Err(SourceError::Protocol("read-only".to_owned()))
     }
+}
+
+/// An adapter that looks the engine's transaction up in `pg_locks` from a
+/// *second* connection while its own sync is still running.
+///
+/// The advisory lock is only observable from outside for as long as the run
+/// holds it, and a run is over by the time `run_once` returns -- so the check
+/// has to happen from inside the sync itself.
+struct LockProbingSource {
+    id: String,
+    pool: PgPool,
+    /// Whether the source's advisory lock was held mid-run.
+    held: Mutex<Option<bool>>,
+}
+
+#[async_trait::async_trait]
+impl Source for LockProbingSource {
+    fn descriptor(&self) -> SourceDescriptor {
+        FakeSource::new(&self.id, Vec::new()).descriptor()
+    }
+
+    async fn test_connection(&self) -> Result<(), SourceError> {
+        Ok(())
+    }
+
+    async fn sync(
+        &self,
+        _cursor: Option<Cursor>,
+        sink: &mut (dyn Sink + Send),
+    ) -> Result<Cursor, SourceError> {
+        sink.item(item(&self.id, "TIDE-11", "locked", false))
+            .await?;
+        let held = advisory_lock_held(&self.pool, &self.id).await;
+        *self.held.lock().unwrap() = Some(held);
+        Ok("locked".to_owned())
+    }
+
+    async fn write(&self, _op: WriteOp) -> Result<(), SourceError> {
+        Err(SourceError::Protocol("read-only".to_owned()))
+    }
+}
+
+/// Whether anyone holds the transaction-scoped advisory lock for `source_id`.
+///
+/// `pg_advisory_xact_lock(bigint)` records the key split across `classid`
+/// (high 32 bits) and `objid` (low 32), with `objsubid = 1`; matching on the
+/// exact key is what keeps this from seeing a *concurrent* test's lock.
+async fn advisory_lock_held(pool: &PgPool, source_id: &str) -> bool {
+    let (held,): (bool,) = sqlx::query_as(
+        r#"select exists(
+             select 1
+               from pg_locks l, (select hashtext($1::text)::bigint as k) x
+              where l.locktype = 'advisory'
+                and l.objsubid = 1
+                and l.classid = ((x.k >> 32) & 4294967295)::oid
+                and l.objid   = (x.k & 4294967295)::oid
+                and l.granted
+           )"#,
+    )
+    .bind(source_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    held
 }
 
 /// One item in `source`'s namespace.
@@ -451,6 +517,106 @@ async fn a_re_sync_without_an_updated_at_does_not_restamp_the_entity() {
         .await
         .unwrap();
     assert_eq!(updated_at(&pool, &entity).await, stated);
+    assert_eq!(item_updated_at(&pool, &entity).await, Some(stated));
+
+    // and the mirror keeps it too: the two columns hold the same fact, so a
+    // later undated sync must not leave them disagreeing.
+    knobas_sync::run_once(&pool, &undated, None).await.unwrap();
+    assert_eq!(updated_at(&pool, &entity).await, stated);
+    assert_eq!(
+        item_updated_at(&pool, &entity).await,
+        Some(stated),
+        "sync.item.item_updated_at must survive an undated re-sync too"
+    );
+}
+
+/// Two pushes of one entity inside a *single* batch collapse into one upsert.
+///
+/// Postgres refuses an `on conflict do update` that would touch the same row
+/// twice in one statement ("cannot affect row a second time"), so without the
+/// dedupe this run fails outright rather than miscounting.
+#[tokio::test]
+async fn the_same_entity_twice_in_one_batch_is_one_upsert() {
+    let (pool, id) = fixture().await;
+
+    let items = vec![
+        item(&id, "TIDE-10", "first", false),
+        item(&id, "TIDE-10", "second", false),
+    ];
+    let report = knobas_sync::run_once(&pool, &FakeSource::new(&id, items), None)
+        .await
+        .unwrap();
+
+    assert_eq!(report.upserted, 1);
+    assert_eq!(rows_for(&pool, &id).await, 1);
+    let (title,): (String,) = sqlx::query_as("select title from sync.item where entity_id = $1")
+        .bind(format!("{id}:TIDE-10"))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(title, "second", "the last push in a batch wins");
+}
+
+/// The run takes its source's advisory lock, so two runs of one source
+/// serialise instead of interleaving their batches -- a run holds row locks
+/// across every batch, which is exactly the shape that cycles.
+#[tokio::test]
+async fn a_run_holds_the_sources_advisory_lock() {
+    let (pool, id) = fixture().await;
+
+    assert!(
+        !advisory_lock_held(&pool, &id).await,
+        "nothing should hold it before the run"
+    );
+    let src = LockProbingSource {
+        id: id.clone(),
+        pool: pool.clone(),
+        held: Mutex::new(None),
+    };
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+
+    assert_eq!(
+        *src.held.lock().unwrap(),
+        Some(true),
+        "the run must hold its source's advisory lock while syncing"
+    );
+    assert!(
+        !advisory_lock_held(&pool, &id).await,
+        "and release it with the transaction"
+    );
+}
+
+/// An entity that flips state across a batch boundary is still one row, and
+/// the run's `deleted` count follows its *latest* write in both directions.
+#[tokio::test]
+async fn a_state_flip_across_a_batch_boundary_adjusts_the_deleted_count() {
+    let (pool, id) = fixture().await;
+    let flipper = format!("{id}:BULK-0");
+
+    // live in the first batch, tombstoned in the second
+    let mut items = many(&id, knobas_sync::BATCH);
+    items.push(item(&id, "BULK-0", "bulk 0", true));
+    let report = knobas_sync::run_once(&pool, &FakeSource::new(&id, items), None)
+        .await
+        .unwrap();
+    assert_eq!(
+        (report.upserted, report.deleted),
+        (knobas_sync::BATCH as u64, 1)
+    );
+    assert!(deleted_at(&pool, &flipper).await.is_some());
+
+    // tombstoned in the first batch, alive again in the second
+    let mut items = many(&id, knobas_sync::BATCH);
+    items[0] = item(&id, "BULK-0", "bulk 0", true);
+    items.push(item(&id, "BULK-0", "bulk 0", false));
+    let report = knobas_sync::run_once(&pool, &FakeSource::new(&id, items), None)
+        .await
+        .unwrap();
+    assert_eq!(
+        (report.upserted, report.deleted),
+        (knobas_sync::BATCH as u64, 0)
+    );
+    assert_eq!(deleted_at(&pool, &flipper).await, None);
 }
 
 async fn rows_for(pool: &PgPool, source_id: &str) -> i64 {
@@ -491,6 +657,16 @@ async fn mirror_exists(pool: &PgPool, entity: &str) -> bool {
             .await
             .unwrap();
     found
+}
+
+async fn item_updated_at(pool: &PgPool, entity: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    let (at,): (Option<chrono::DateTime<chrono::Utc>>,) =
+        sqlx::query_as("select item_updated_at from sync.item where entity_id = $1")
+            .bind(entity)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    at
 }
 
 async fn updated_at(pool: &PgPool, entity: &str) -> chrono::DateTime<chrono::Utc> {
