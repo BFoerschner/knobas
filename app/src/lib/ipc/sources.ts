@@ -52,6 +52,16 @@ export interface CredentialHealth {
 export type SyncOutcome = "ok" | "unauthorized" | "unreachable" | "error";
 
 /**
+ * Why a run happened — `knobas_sync::SyncTrigger`, the `trigger` of a
+ * `knobas.sync_run` row.
+ *
+ * The diagnostics list labels a run with it: a scheduled poll, the user's
+ * *Sync now*, or the initial sync the first-run wizard drew a progress bar
+ * for.
+ */
+export type SyncTrigger = "schedule" | "manual" | "first_run";
+
+/**
  * The coarse state one source's syncing is in — `knobas_sync::SourceSyncStatus`,
  * the payload of `EVENTS.syncState`.
  *

@@ -281,7 +281,7 @@ mod tests {
         }
     }
 
-    /// The classification stream F's backoff reads.    /// The classification stream F's backoff reads. `Unauthorized` is the one
+    /// The classification stream F's backoff reads. `Unauthorized` is the one
     /// that must never be retried, so it is the one that must never be
     /// swallowed into `Error`.
     #[test]
@@ -317,6 +317,87 @@ mod tests {
             }),
             SyncOutcome::Error
         );
+    }
+
+    /// **The enum half of the `SourceSyncStatus` mirror pin** (M0 carry-over,
+    /// stream F). The twin of `health::the_states_match_their_typescript_mirror`
+    /// and, like it, driven by `::ALL` -- so a variant added to either
+    /// vocabulary reaches this test rather than reaching a frontend `switch`
+    /// that can never take the new branch.
+    ///
+    /// Both enums, because both are `SourceSyncStatus`/`SyncRunRow` fields on
+    /// the wire: `last_outcome` is what puts *Re-enter password* on a row, and
+    /// `trigger` is what the diagnostics list labels a run with.
+    #[test]
+    fn the_run_vocabularies_match_their_typescript_mirror() {
+        let mirror = include_str!("../../../app/src/lib/ipc/sources.ts");
+        for outcome in SyncOutcome::ALL {
+            let wire = serde_json::to_string(&outcome).unwrap();
+            assert!(
+                mirror.contains(&wire),
+                "SyncOutcome {wire} is missing from app/src/lib/ipc/sources.ts"
+            );
+        }
+        for trigger in SyncTrigger::ALL {
+            let wire = serde_json::to_string(&trigger).unwrap();
+            assert!(
+                mirror.contains(&wire),
+                "SyncTrigger {wire} is missing from app/src/lib/ipc/sources.ts"
+            );
+        }
+    }
+
+    /// **The struct half** (M0 carry-over, stream F): the *exact* key set
+    /// `SourceSyncStatus` puts on the wire, then each key in the mirror.
+    ///
+    /// Modelled on `knobas_search::types::the_hit_shape_matches_its_typescript_mirror`
+    /// rather than on a `contains` walk over a hardcoded list, and the
+    /// difference is the whole reason this exists: a list-walking test sees
+    /// only the fields someone remembered to list, so a Rust field added with
+    /// no TS counterpart is invisible to it. Serializing an instance and
+    /// asserting the key set makes the *addition* the failure, which is the
+    /// direction stream F breaks first -- it fills `next_run_at` and
+    /// `backoff_until` and will add fields.
+    #[test]
+    fn the_sync_status_shape_matches_its_typescript_mirror() {
+        let mirror = include_str!("../../../app/src/lib/ipc/sources.ts");
+        let status = SourceSyncStatus {
+            source_id: "mock".to_owned(),
+            running: false,
+            run_id: Some(7),
+            started_at: Some(chrono::Utc::now()),
+            last_finished_at: Some(chrono::Utc::now()),
+            last_outcome: Some(SyncOutcome::Ok),
+            next_run_at: Some(chrono::Utc::now()),
+            backoff_until: Some(chrono::Utc::now()),
+        };
+
+        let wire = serde_json::to_value(&status).expect("a status serializes");
+        let object = wire.as_object().expect("a status is a JSON object");
+        let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "backoff_until",
+                "last_finished_at",
+                "last_outcome",
+                "next_run_at",
+                "run_id",
+                "running",
+                "source_id",
+                "started_at",
+            ],
+            "SourceSyncStatus grew or lost a field; app/src/lib/ipc/sources.ts \
+             has to grow or lose it too"
+        );
+
+        for key in &keys {
+            assert!(
+                mirror.contains(&format!("{key}:")),
+                "SourceSyncStatus.{key} is missing from app/src/lib/ipc/sources.ts"
+            );
+        }
     }
 
     /// A run that opened and never closed is what `finished_at is null` means,

@@ -370,14 +370,19 @@ async fn a_retry_after_longer_than_the_budget_ends_the_call() {
     );
 }
 
-/// The whole call is bounded even when a single attempt is the slow thing.
+/// A server that accepts the connection and then says nothing is
+/// **`Unreachable`, not `Protocol`** -- which is the class the scheduler backs
+/// off on, so the classification is the whole assertion.
 ///
-/// A server that accepts the connection and then says nothing: each attempt's
-/// timeout is shortened to what is left of the budget, so the ceiling holds
-/// rather than being three full request timeouts. Kept cheap with a short
-/// `request_timeout`; the budget's own discriminating case is the test above.
+/// Named for what it checks. It used to be called
+/// `a_silent_server_is_unreachable_within_the_attempt_budget`, but it asserts
+/// no budget and must not: with a 300 ms `request_timeout` the call is already
+/// far inside [`SEND_BUDGET`](knobas_http::SEND_BUDGET), so an `elapsed <
+/// SEND_BUDGET` bound here would stay green with the budget mechanism deleted
+/// -- exactly the vacuity the test above spells out. The budget's
+/// discriminating case is `a_retry_after_longer_than_the_budget_ends_the_call`.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_silent_server_is_unreachable_within_the_attempt_budget() {
+async fn a_silent_server_is_unreachable_rather_than_a_protocol_error() {
     let server = SilentServer::new();
     let client = HttpClient::new(HttpConfig {
         request_timeout: std::time::Duration::from_millis(300),
