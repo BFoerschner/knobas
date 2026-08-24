@@ -1,0 +1,342 @@
+{
+  "today": "2026-08-22T14:32:00Z",
+  "people": [
+    { "id": "mara", "name": "Mara Lindqvist", "initials": "ML", "username": "mara.lindqvist", "role": "backend engineer, Payments team" },
+    { "id": "jonas", "name": "Jonas Becker", "initials": "JB", "username": "jonas.becker", "role": "senior engineer, reviewer" },
+    { "id": "priya", "name": "Priya Nair", "initials": "PN", "username": "priya.nair", "role": "tech lead, Payments" },
+    { "id": "tomasz", "name": "Tomasz Wójcik", "initials": "TW", "username": "tomasz.wojcik", "role": "SRE, on-call" },
+    { "id": "lena", "name": "Lena Hoffmann", "initials": "LH", "username": "lena.hoffmann", "role": "product manager" }
+  ],
+  "tickets": [
+    {
+      "key": "PAY-200",
+      "epic": null,
+      "summary": "Payout reliability",
+      "type": "Epic",
+      "status": "In Progress",
+      "priority": null,
+      "assignee": null,
+      "updated": null,
+      "description": null,
+      "estimate_h": null,
+      "spent_week_m": null,
+      "comments": [],
+      "worklogs": []
+    },
+    {
+      "key": "PAY-231",
+      "epic": "PAY-200",
+      "summary": "Retry failed SEPA payouts",
+      "type": "Story",
+      "status": "In Progress",
+      "priority": "High",
+      "assignee": "mara",
+      "updated": "2026-08-22T11:48:00Z",
+      "description": "When the SEPA batch at the PSP returns a transient error (HTTP 503 or PSP code `TEMP_UNAVAILABLE`), retry the payout with exponential backoff (base 30 s, factor 2, max 5 attempts, jitter). Permanent failures go to the manual review queue.",
+      "estimate_h": 16,
+      "spent_week_m": 540,
+      "comments": [
+        { "who": "priya", "when": "2026-08-21T14:20:00Z", "text": "Please make sure the backoff policy matches the design page — finance wants max 5 attempts." },
+        { "who": "mara", "when": "2026-08-22T10:15:00Z", "text": "Backoff + jitter implemented in a41f2c, integration test still red (#1187), investigating." }
+      ],
+      "worklogs": [
+        { "who": "mara", "date": "2026-08-21", "minutes": 270, "text": "Retry loop implementation" }
+      ]
+    },
+    {
+      "key": "PAY-228",
+      "epic": "PAY-200",
+      "summary": "Ledger drift on partial refunds",
+      "type": "Bug",
+      "status": "In Review",
+      "priority": "High",
+      "assignee": "mara",
+      "updated": "2026-08-21T16:05:00Z",
+      "description": null,
+      "estimate_h": null,
+      "spent_week_m": null,
+      "blocked_by": ["OPS-77"],
+      "comments": [],
+      "worklogs": [
+        { "who": "mara", "date": "2026-08-21", "minutes": 160, "text": "Review PR #139 fixes, re-test partial refund drift" }
+      ]
+    },
+    {
+      "key": "PAY-240",
+      "epic": "PAY-200",
+      "summary": "Payout dashboard latency",
+      "type": "Task",
+      "status": "To Do",
+      "priority": "Medium",
+      "assignee": "mara",
+      "assigned_by": "priya",
+      "updated": "2026-08-22T08:12:00Z",
+      "description": "Finance reports the payout dashboard takes 8–12 s to load for August. Target < 2 s.",
+      "estimate_h": null,
+      "spent_week_m": null,
+      "comments": [],
+      "worklogs": []
+    },
+    {
+      "key": "PAY-219",
+      "epic": "PAY-200",
+      "summary": "Rotate PSP credentials",
+      "type": "Task",
+      "status": "Done",
+      "priority": "Medium",
+      "assignee": "mara",
+      "updated": "2026-08-18T00:00:00Z",
+      "description": null,
+      "estimate_h": null,
+      "spent_week_m": null,
+      "comments": [],
+      "worklogs": []
+    },
+    {
+      "key": "PAY-236",
+      "epic": "PAY-200",
+      "summary": "Payout CSV export for finance",
+      "type": "Story",
+      "status": "To Do",
+      "priority": "Low",
+      "assignee": "jonas",
+      "updated": "2026-08-20T00:00:00Z",
+      "description": null,
+      "estimate_h": null,
+      "spent_week_m": null,
+      "comments": [],
+      "worklogs": []
+    },
+    {
+      "key": "OPS-77",
+      "epic": null,
+      "summary": "On-call runbook outdated",
+      "type": "Task",
+      "status": "To Do",
+      "priority": "Medium",
+      "assignee": "tomasz",
+      "updated": "2026-08-19T00:00:00Z",
+      "description": null,
+      "estimate_h": null,
+      "spent_week_m": null,
+      "comments": [],
+      "worklogs": []
+    }
+  ],
+  "prs": [
+    {
+      "num": 142,
+      "title": "SEPA retry with exponential backoff",
+      "repo": "payout-service",
+      "from": "feature/PAY-231-sepa-retry",
+      "to": "main",
+      "state": "open",
+      "by": "mara",
+      "opened": "2026-08-21T17:41:00Z",
+      "approvals": "1/2",
+      "approved_by": ["priya"],
+      "review_requested_from": [{ "who": "jonas", "when": "2026-08-22T09:05:00Z" }],
+      "checks": [1188, 1187],
+      "ticket": "PAY-231",
+      "comments": [
+        { "who": "jonas", "when": "2026-08-22T09:30:00Z", "text": "Should the jitter be bounded? ±20 % feels wide." },
+        { "who": "mara", "when": "2026-08-22T10:20:00Z", "text": "Bounded to ±10 % in c90d11." }
+      ],
+      "files": [
+        { "path": "src/sepa/retry.rs", "added": 84, "removed": 12 },
+        { "path": "tests/sepa_retry.rs", "added": 51, "removed": 0 },
+        { "path": "docs/backoff.md", "added": 9, "removed": 0 }
+      ]
+    },
+    {
+      "num": 144,
+      "title": "Add payout CSV export",
+      "repo": "payout-service",
+      "from": null,
+      "to": null,
+      "state": "open",
+      "by": "jonas",
+      "opened": null,
+      "approvals": null,
+      "approved_by": [],
+      "review_requested_from": [{ "who": "mara", "when": "2026-08-22T13:50:00Z" }],
+      "checks": [],
+      "ticket": "PAY-236",
+      "comments": [],
+      "files": []
+    },
+    {
+      "num": 139,
+      "title": "Fix ledger drift on partial refunds",
+      "repo": "ledger-api",
+      "from": null,
+      "to": null,
+      "state": "merged",
+      "by": "mara",
+      "opened": null,
+      "merged": "2026-08-21T16:00:00Z",
+      "approvals": null,
+      "approved_by": [],
+      "review_requested_from": [],
+      "checks": [],
+      "ticket": "PAY-228",
+      "comments": [],
+      "files": []
+    }
+  ],
+  "builds": [
+    {
+      "num": 1188,
+      "cfg": "Payout_Build",
+      "status": "running",
+      "branch": "feature/PAY-231-sepa-retry",
+      "when": "2026-08-22T11:45:00Z",
+      "ticket": "PAY-231",
+      "step": "step 3/5 `cargo test`",
+      "duration": null,
+      "log": null,
+      "params": {}
+    },
+    {
+      "num": 1187,
+      "cfg": "Payout_IntegrationTests",
+      "status": "failed",
+      "branch": "feature/PAY-231-sepa-retry",
+      "when": "2026-08-22T10:10:00Z",
+      "ticket": "PAY-231",
+      "step": null,
+      "duration": "4 m 12 s",
+      "log": "test sepa::retry::gives_up_after_max_attempts ... FAILED\nassertion failed: attempts == 5 (left: 6, right: 5)\ntest result: FAILED. 41 passed; 1 failed\n",
+      "params": { "branch": "feature/PAY-231-sepa-retry", "env": "staging" }
+    },
+    {
+      "num": 412,
+      "cfg": "Ledger_Deploy_Staging",
+      "status": "success",
+      "branch": "main",
+      "when": "2026-08-21T16:20:00Z",
+      "ticket": null,
+      "step": null,
+      "duration": null,
+      "log": null,
+      "params": {}
+    }
+  ],
+  "pages": [
+    {
+      "id": "sepa-design",
+      "title": "SEPA payout retry design",
+      "space": "ENG",
+      "edited": "2026-08-22T10:40:00Z",
+      "section": "Backoff policy",
+      "by": "mara",
+      "body": "## Backoff policy — base 30 s, factor 2, max 5 attempts, jitter ±10 %. Transient codes: HTTP 503, `TEMP_UNAVAILABLE`. After the final attempt the payout is moved to the manual review queue (see PAY-231). ## Manual review queue — *SLA: to be defined.*",
+      "comments": [
+        { "who": "priya", "when": "2026-08-22T12:05:00Z", "text": "@Mara can you add the manual-review queue SLA here?" }
+      ]
+    },
+    {
+      "id": "ledger-reconciliation-runbook",
+      "title": "Ledger reconciliation runbook",
+      "space": "ENG",
+      "edited": "2026-08-19T00:00:00Z",
+      "section": null,
+      "by": "tomasz",
+      "body": null,
+      "comments": []
+    },
+    {
+      "id": "on-call-handbook",
+      "title": "On-call handbook",
+      "space": "ENG",
+      "edited": "2026-07-02T00:00:00Z",
+      "section": null,
+      "by": "tomasz",
+      "body": null,
+      "comments": []
+    },
+    {
+      "id": "payments-architecture-overview",
+      "title": "Payments architecture overview",
+      "space": "ENG",
+      "edited": "2026-08-11T00:00:00Z",
+      "section": null,
+      "by": "priya",
+      "body": null,
+      "comments": []
+    },
+    {
+      "id": "standup-protocols",
+      "title": "Standup protocols",
+      "space": "ENG",
+      "edited": "2026-08-21T00:00:00Z",
+      "section": null,
+      "by": "mara",
+      "body": null,
+      "note": "parent of daily protocol pages",
+      "comments": []
+    }
+  ],
+  "notes": [
+    {
+      "id": "n1",
+      "title": "Standup 2026-08-21",
+      "body_md": "Yesterday: drift fix. Today: re-test partial refunds on staging, open PR. Blocker: none.",
+      "edited": "2026-08-21T09:05:00Z",
+      "links": ["PAY-228", "PR #139"]
+    },
+    {
+      "id": "n2",
+      "title": "SEPA retry investigation",
+      "body_md": "Test expects 5 attempts, code counts the initial try as attempt 0 → off-by-one. Fix: start counter at 1. Also: ask Priya about manual-review SLA.",
+      "edited": "2026-08-22T11:20:00Z",
+      "links": ["PAY-231", "#1187", "SEPA payout retry design"]
+    },
+    {
+      "id": "n3",
+      "title": "Credentials to rotate",
+      "body_md": "TeamCity password expires end of August. Jira PAT expires 2026-09-03.",
+      "edited": "2026-08-18T00:00:00Z",
+      "links": ["PAY-219"]
+    }
+  ],
+  "commits": [
+    {
+      "sha": "c90d11",
+      "when": "2026-08-22T11:42:00Z",
+      "msg": "PAY-231: jitter in backoff, cap at 5 attempts",
+      "branch": "feature/PAY-231-sepa-retry",
+      "repo": "payout-service",
+      "by": "mara",
+      "ticket": "PAY-231"
+    },
+    {
+      "sha": "a41f2c",
+      "when": "2026-08-22T10:02:00Z",
+      "msg": "PAY-231 backoff jitter",
+      "branch": "feature/PAY-231-sepa-retry",
+      "repo": "payout-service",
+      "by": "mara",
+      "ticket": "PAY-231"
+    },
+    {
+      "sha": "7be0e4",
+      "when": "2026-08-21T17:30:00Z",
+      "msg": "PAY-231: retry SEPA payouts on transient PSP errors",
+      "branch": "feature/PAY-231-sepa-retry",
+      "repo": "payout-service",
+      "by": "mara",
+      "ticket": "PAY-231"
+    }
+  ],
+  "branches": [
+    { "name": "main", "repo": "payout-service", "ticket": null, "state": "default", "ahead": null, "checked_out": false },
+    { "name": "feature/PAY-231-sepa-retry", "repo": "payout-service", "ticket": "PAY-231", "state": "open", "ahead": 3, "checked_out": true },
+    { "name": "fix/PAY-228-partial-refund-drift", "repo": "payout-service", "ticket": "PAY-228", "state": "merged", "ahead": null, "checked_out": false }
+  ],
+  "repos": [
+    { "name": "payout-service", "lang": "Rust", "clone": "~/code/payout-service", "default_branch": "main", "commit_count": 312 },
+    { "name": "ledger-api", "lang": "Kotlin", "clone": "~/code/ledger-api", "default_branch": null, "commit_count": null },
+    { "name": "ops-runbooks", "lang": "Markdown", "clone": null, "default_branch": null, "commit_count": null }
+  ]
+}
