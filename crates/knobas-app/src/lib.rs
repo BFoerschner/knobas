@@ -68,7 +68,16 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("build the tauri application")
         .run(|app, event| {
-            if let tauri::RunEvent::ExitRequested { .. } = event {
+            // Both, because they are different exits. Closing the last window
+            // raises `ExitRequested`; quitting the application (Cmd-Q on
+            // macOS) goes straight to `Exit` without ever raising it, and
+            // measurably leaves the server running if only the first is
+            // handled. `shutdown_database` takes the handle, so whichever
+            // arrives first does the work and the other is a no-op.
+            if matches!(
+                event,
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+            ) {
                 shutdown_database(app);
             }
         });
