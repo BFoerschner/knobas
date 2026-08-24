@@ -1,6 +1,6 @@
 # knobas M0 — Foundation Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** Execute via the **PR loop** in `2026-08-24-knobas-roadmap.md` §3 (decided 2026-08-24): one `implementer` agent (Opus 5, high) per task in its own worktree/branch → PR → `pr-reviewer` agent (Opus 5, xhigh) reviews with comments → iterate (max 3 rounds) → squash-merge on approval + green `just check`. Agent definitions: `.claude/agents/`. Fable orchestrates; superpowers:subagent-driven-development supplies the dispatch discipline. Steps use checkbox (`- [ ]`) syntax for tracking. M0 is sequential: tasks run in order, one PR each.
 
 **Goal:** A booting Tauri 2 + Svelte 5 app with an embedded Postgres it provisions itself, the frozen `Source` trait with a mock adapter serving the Tidewater seed dataset, a working sync run into the `sync` schema, and FTS search answering over IPC — the contract layer every later milestone builds on.
 

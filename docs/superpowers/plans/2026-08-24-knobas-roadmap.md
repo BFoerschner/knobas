@@ -75,7 +75,21 @@ Open in editor/terminal · paste-URL → entity chip · quick capture hotkey · 
 
 ## 3. Working model for parallel agents
 
-Process facts already established for this repo (HANDOFF §6) stay in force: per-stream git worktrees under `.worktrees/`, **agents never run git** (orchestrator commits/merges; GPG signing may need Björn), harness cap 20 but **never launch more than agreed — ask before scaling** (suggested default for code work: 4–6 concurrent), agents report raw data.
+**Decided by Björn 2026-08-24: implementation runs as a PR loop between two pinned agent roles, orchestrated by the Fable session.** Agent definitions live in `.claude/agents/` (versioned in this repo):
+
+| Role | Model / effort | Does |
+|---|---|---|
+| `implementer` | Opus 5 / **high** | one plan task per dispatch, own worktree + branch, TDD, `just check` green, opens the PR; addresses review findings on follow-up |
+| `pr-reviewer` | Opus 5 / **xhigh** | checks the PR out into its own throwaway worktree, **runs the tests itself**, judges against the plan task + design doc + global constraints, posts findings as `gh pr review --request-changes` comments or approves |
+| orchestrator | Fable (this session) | dispatches, relays review ↔ fix rounds (continuing the same agents so context is kept), adjudicates disputes, merges, syncs `main`, prunes worktrees, owns the frozen contracts |
+
+**The loop per task:** dispatch implementer → PR opens → dispatch pr-reviewer → findings posted on the PR → orchestrator relays them to the *same* implementer (continuation, not a fresh agent) → fix commits pushed → *same* reviewer re-reviews the delta → repeat. **Termination is objective, not vibes:** merge when the reviewer approves AND `just check` is green. **Hard cap: 3 review rounds** — if agents still disagree, the orchestrator adjudicates with a written rationale or escalates to Björn. This prevents both infinite ping-pong and mutual rubber-stamping.
+
+**Merging & signing:** `commit.gpgsign=true` is set globally, and subagents cannot serve pinentry prompts — so implementers set `commit.gpgsign false` in their worktrees, and the orchestrator merges with `gh pr merge --squash --delete-branch`: `main` stays linear (one commit per task, short imperative subject taken from the PR title) and every `main` commit is GitHub-signed/verified. Björn's own commits stay GPG-signed as before.
+
+**Git rules (supersedes the earlier "agents never run git"):** agents run git **only inside their own worktree/branch** and `gh` only against their own PR; nobody but the orchestrator touches `main` or merges; the repo-root checkout belongs to the orchestrator. Human gate: Björn reviews at milestone exits and whenever a frozen contract (Source trait / migrations baseline / IPC) needs changing; day-to-day PRs merge on reviewer approval (he can watch them live on GitHub).
+
+Other standing rules (HANDOFF §6) stay in force: worktrees under `.worktrees/` (gitignored), harness cap 20 but **never launch more than agreed — ask before scaling** (suggested default: 4–6 concurrent; M0 is sequential anyway — one implementer + one reviewer alive at a time), agents report raw data. Cost note: xhigh reviews are the expensive step by design; re-reviews stay affordable because the continued reviewer only examines the delta.
 
 What makes the streams independent (all built in M0):
 
