@@ -44,8 +44,9 @@ Contents: Cargo workspace + Tauri 2 + Svelte 5/Vite scaffold · embedded Postgre
 | D | **Frontend shell**: top strip, status bar, room + tiles (read-only), detail slide-over (read-only), sources view, first-run wizard | M0 IPC + seed data |
 | E | **Search**: FTS corpus incl. ancestor paths, launcher (prefixes, chips, aliases, empty-query board), grouped results, built-in smart lists (read-only counts) | M0 IPC + seed data |
 | F | **Sync engine**: scheduler (per-source interval, *Sync now*), cursors, backoff, 401 detection → credential health, keychain integration, diagnostics view | M0 SPI |
+| T | **Test environment** (dispatched first): `knobas-mockd` HTTP mock server (Jira + TeamCity subsets to start), `testenv/docker-compose.yml` (real Gitea, real Uptime Kuma v2, mockd container, Flowrun stub), `testenv/seed` script that populates Gitea/Kuma with the Tidewater content via their APIs | M0 fixtures |
 
-A/B/C develop against recorded HTTP fixtures + the shared contract battery; D/E develop entirely against the mock source and seed data; F uses the mock's simulated failures. **Integration checkpoint at the end:** connect a real Jira, Gitea, TeamCity; full initial sync; search everything.
+A/B/C develop against the shared contract battery + `knobas-mockd` run **in-process** in their integration tests (stream T delivers the Jira/TeamCity mocks first; adapters start on unit tests and the battery meanwhile); D/E develop entirely against the mock source and seed data; F uses the mock's simulated failures. **Integration checkpoint at the end:** `docker compose up` the test environment on this machine, connect the app to it end-to-end, then connect a real Jira, Gitea, TeamCity; full initial sync; search everything.
 
 **Exit criteria:** real credentials entered once, land in the keychain; initial + incremental sync works; `⌘K` < 100 ms over the synced corpus; rooms and details browsable; sources view shows sync health. **This build is the MVP — start using it daily.**
 
@@ -109,7 +110,15 @@ What makes the streams independent (all built in M0):
 
 Per-task discipline (unchanged from superpowers): TDD, frequent commits, `superpowers:requesting-code-review` before merging a stream, verification-before-completion with command output.
 
-**Test strategy by layer:** unit tests per crate (TDD) · adapter contract battery + recorded HTTP fixtures (wiremock-style) for Jira/Confluence/TeamCity · a `docker-compose.dev.yml` with **real Gitea and real Uptime Kuma v2** (both trivially self-hostable) for live integration tests, plus a tiny Flowrun stub server in-repo · frontend QA in headless Chrome against `--demo` (per-agent `--user-data-dir`/port — parallel agents have collided before) · milestone exit = manual checklist against real systems.
+**Test strategy by layer (decided by Björn 2026-08-24: containerized test environment + faithful API mocks, all on the dev machine — Docker 29.x / Compose v5 verified present):**
+
+- **Unit tests** per crate (TDD), plain `cargo test`.
+- **Trait-level mock** (`knobas-source-mock`, M0): fakes a source at the `Source`-trait layer — what the UI, sync engine, and contract battery test against. Cheap, no HTTP.
+- **HTTP-level mocks** (`knobas-mockd`, M1 stream T): one axum binary serving *faithful, stateful* subsets of the APIs that cannot be self-hosted — **Jira Cloud v3** (incl. `/search/jql` with `nextPageToken` pagination, real error shapes, 401/429 behaviors), **TeamCity REST**, later **Confluence** (v2 content + v1 CQL, added in M3) and the **Flowrun stub** — each on its own 127.0.0.1 port, backed by the Tidewater fixture, stateful in memory (a POSTed comment shows up in subsequent GETs, so write-back paths are testable). Used two ways: **in-process** in adapter integration tests (spun up on a random port inside `cargo test` — fast, deterministic, no Docker needed, runs in CI), and **as a container** in the compose environment.
+  *Fidelity guards, because a hand-built mock's failure mode is drift:* endpoints are built from the official OpenAPI specs (Atlassian publishes Jira v3 / Confluence specs; mockd's own tests schema-validate its responses against them), and a *record mode* lets an adapter run once against the real Jira Cloud to capture golden responses the mock is diffed against.
+- **Real containers where the real thing is self-hostable** (`testenv/docker-compose.yml`): **Gitea** and **Uptime Kuma v2** (version-pinned images) — the adapters for these test against the genuine APIs, not mocks; `testenv/seed` populates both with the Tidewater content via their APIs so the whole environment matches the fixture. `jetbrains/teamcity-server` available behind `--profile real-teamcity` (heavy, off by default; the mock is the daily driver).
+- **Whole-app e2e, local only:** `docker compose up` in `testenv/` gives a complete fake company on this machine — the app connects to it exactly as it would to production systems (real HTTP, real auth flows, real 401s). Run by the orchestrator at integration checkpoints and milestone exits; CI (GitHub Actions) runs only the docker-free layers above it.
+- **Frontend QA** in headless Chrome against `--demo` (per-agent `--user-data-dir`/port — parallel agents have collided before) · milestone exit = e2e against the compose environment, then the manual checklist against Björn's real systems.
 
 ---
 
