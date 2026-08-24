@@ -10,7 +10,7 @@
 //! above them adds nothing but argument decoding, and a `#[tauri::command]`
 //! cannot be called from a test.
 
-use knobas_source::Source;
+use knobas_source::{Source, SourceDescriptor};
 use knobas_source_mock::MockSource;
 use knobas_sync::{SyncError, SyncReport};
 use sqlx::PgPool;
@@ -37,10 +37,11 @@ pub enum DemoError {
 
 /// Register the demo source if it is not registered yet, then sync it in full.
 ///
-/// Idempotent in both halves: the insert leaves an existing configuration
-/// alone (keeping the cursor a previous run stored), and a full sync upserts
-/// the same rows rather than adding to them. Double-clicking the button is
-/// therefore harmless, which is the whole reason this is one function.
+/// Idempotent in both halves: the registration refreshes the descriptor's own
+/// columns and leaves the rest of an existing configuration alone (the cursor
+/// a previous run stored included), and a full sync upserts the same rows
+/// rather than adding to them. Double-clicking the button is therefore
+/// harmless, which is the whole reason this is one function.
 ///
 /// # Errors
 ///
@@ -48,7 +49,7 @@ pub enum DemoError {
 /// does.
 pub async fn demo_load_inner(pool: &PgPool) -> Result<SyncReport, DemoError> {
     let source = MockSource::new();
-    register(pool, &source).await?;
+    register(pool, &source.descriptor()).await?;
     // `None`: demo mode means "give me the whole fixture", regardless of what
     // a previous run recorded. The run is idempotent, so this costs rows
     // rewritten, not rows duplicated.
@@ -112,27 +113,109 @@ async fn stored_cursor(
     Ok(row.map(|(cursor,)| cursor))
 }
 
-/// Write the source's configuration row, unless it already has one.
+/// Write the source's configuration row, refreshing the columns the descriptor
+/// owns if it already has one.
 ///
-/// `do nothing` rather than an upsert: the stored row is the *user's* -- it
-/// carries the cursor, and from M1 the sync interval and enabled flag -- and
-/// re-registering must not reset any of that. Every column comes from the
-/// descriptor, so a renamed adapter shows up here without this function
-/// knowing anything about it.
-async fn register(pool: &PgPool, source: &dyn Source) -> Result<(), sqlx::Error> {
-    let descriptor = source.descriptor();
+/// The row has two kinds of column in it, and they belong to different people:
+///
+/// * The **descriptor's** -- `kind` and `display_name`. The adapter is the
+///   authority on these, so re-registering overwrites them: renaming an
+///   adapter, or shipping a version that reports a different kind, has to show
+///   up here. `do nothing` froze them at whatever the first registration saw,
+///   for the lifetime of the row.
+/// * The **user's** -- the cursor, and from M1 the sync interval and the
+///   enabled flag. Those are deliberately absent from the update: re-running
+///   the demo load must not throw away a sync position or a setting.
+///
+/// Both halves come from the descriptor rather than from a literal, so this
+/// function knows nothing about which adapter it is registering.
+async fn register(pool: &PgPool, descriptor: &SourceDescriptor) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
            values ($1, $2, $3, '', 'none')
-           on conflict (id) do nothing"#,
+           on conflict (id) do update set
+             kind         = excluded.kind,
+             display_name = excluded.display_name"#,
     )
     // The fixture is compiled into the binary and needs no credentials, hence
     // the empty `base_url` and `auth_kind = 'none'`: there is nothing to reach
     // and nothing to unlock. A real adapter fills both from its config.
+    //
+    // They are left out of the update for that reason too -- a real source's
+    // are the user's to set, and an M1 adapter that re-registers must not
+    // reset the URL somebody typed.
     .bind(&descriptor.id)
     .bind(&descriptor.adapter_kind)
     .bind(&descriptor.name)
     .execute(pool)
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A descriptor of the mock's shape, under an id no other test uses.
+    fn descriptor(id: &str) -> SourceDescriptor {
+        SourceDescriptor {
+            id: id.to_owned(),
+            ..MockSource::new().descriptor()
+        }
+    }
+
+    async fn row(pool: &PgPool, id: &str) -> (String, String, Option<String>) {
+        sqlx::query_as("select kind, display_name, cursor from knobas.source_config where id = $1")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    /// Re-registering refreshes what the descriptor owns and leaves what the
+    /// user owns alone. Both halves in one test, because the interesting thing
+    /// is that one statement does both.
+    #[tokio::test]
+    async fn re_registering_refreshes_the_descriptor_columns_and_keeps_the_cursor() {
+        let pool = knobas_db::test_util::test_pool().await;
+        knobas_db::migrate::run(&pool).await.unwrap();
+        // Unique per run: this table is shared with every other test in the
+        // binary, and the row is asserted on by absolute value.
+        let id = format!("registry-{}", std::process::id());
+        sqlx::query("delete from knobas.source_config where id = $1")
+            .bind(&id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let mut d = descriptor(&id);
+        d.adapter_kind = "before".to_owned();
+        d.name = "Before".to_owned();
+        register(&pool, &d).await.unwrap();
+        assert_eq!(
+            row(&pool, &id).await,
+            ("before".to_owned(), "Before".to_owned(), None)
+        );
+
+        // A position the user's syncs have earned since.
+        sqlx::query("update knobas.source_config set cursor = 'earned' where id = $1")
+            .bind(&id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        d.adapter_kind = "after".to_owned();
+        d.name = "After".to_owned();
+        register(&pool, &d).await.unwrap();
+
+        assert_eq!(
+            row(&pool, &id).await,
+            (
+                "after".to_owned(),
+                "After".to_owned(),
+                Some("earned".to_owned())
+            ),
+            "the descriptor's columns must follow the adapter, the cursor must not"
+        );
+    }
 }
