@@ -157,13 +157,14 @@ impl EmbeddedDb {
         &self.pool
     }
 
-    /// The URL this handle is connected to, credentials included.
+    /// The URL this handle is connected to.
     ///
-    /// For callers that must open a pool of their own -- a `PgPool` may not be
+    /// Crate-internal on purpose: it carries the superuser password, and the
+    /// only reason to need it is opening a second pool -- a `PgPool` may not be
     /// shared across tokio runtimes, so anything outliving the runtime that
-    /// built [`pool`](Self::pool) needs its own.
+    /// built [`pool`](Self::pool) needs its own. `test_util` is the one caller.
     #[must_use]
-    pub fn url(&self) -> &str {
+    pub(crate) fn url(&self) -> &str {
         &self.url
     }
 

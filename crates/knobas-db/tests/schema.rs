@@ -1,8 +1,8 @@
 //! The migration baseline and the full-text search built on it.
 //!
-//! Every test shares one database (see `test_util`), so seeds use ids unique
-//! to the test that writes them and are idempotent -- `migrate::run` is
-//! re-entrant and the tests never truncate.
+//! Every test shares one database (see `test_util`), and that database can
+//! outlive a run, so seeds are idempotent (`on conflict do nothing`) or carry
+//! ids unique per run. `migrate::run` is re-entrant and nothing truncates.
 
 use knobas_db::{migrate, search};
 
@@ -39,53 +39,73 @@ async fn migrates_and_finds_by_fts() {
     assert!(hits[0].snippet.to_lowercase().contains("sepa"));
 }
 
-/// `link_active_idx` is what makes re-linking an existing pair fail with
-/// SQLSTATE 23505, and unlinking a tombstone rather than a delete. Both halves
-/// matter to the link commands built on top of this schema.
+/// `link_active_idx` is what the link commands built on this schema rest on,
+/// in all three of its parts: a second *active* link over the same
+/// `(from, to, relation)` fails with SQLSTATE 23505; a different `relation`
+/// over the same pair is a distinct link and must be allowed; and the index
+/// being partial means a tombstone never blocks re-linking.
 #[tokio::test]
-async fn active_links_are_unique_while_tombstoned_ones_are_not() {
+async fn active_links_are_unique_per_relation_and_tombstones_do_not_block() {
     let pool = &knobas_db::test_util::test_pool().await;
     migrate::run(pool).await.unwrap();
 
-    for id in ["test:link-a", "test:link-b"] {
-        sqlx::query(
-            "insert into knobas.entity (id, kind) values ($1,'ticket') on conflict (id) do nothing",
-        )
-        .bind(id)
-        .execute(pool)
-        .await
-        .unwrap();
+    // The database outlives a single run, so every run gets its own pair.
+    let run = uuid::Uuid::new_v4();
+    let from = format!("test:link-{run}-a");
+    let to = format!("test:link-{run}-b");
+    for id in [&from, &to] {
+        sqlx::query("insert into knobas.entity (id, kind) values ($1,'ticket')")
+            .bind(id)
+            .execute(pool)
+            .await
+            .unwrap();
     }
-    let link = || {
-        sqlx::query(
-            "insert into knobas.link (from_id, to_id, origin, created_by)
-             values ('test:link-a','test:link-b','manual','user')",
-        )
-        .execute(pool)
-    };
 
-    link().await.unwrap();
+    link(pool, &from, &to, "related").await.unwrap();
 
-    let duplicate = link().await.unwrap_err();
+    let duplicate = link(pool, &from, &to, "related").await.unwrap_err();
     assert_eq!(
         duplicate
             .as_database_error()
             .and_then(|e| e.code())
             .as_deref(),
         Some("23505"),
-        "a second active link over the same pair must be a unique violation"
+        "a second active link over the same pair and relation must be a unique violation"
     );
+
+    // Third index column: the same pair under another relation is its own link.
+    link(pool, &from, &to, "blocks").await.unwrap();
 
     sqlx::query(
         "update knobas.link set deleted_at = now()
-         where from_id = 'test:link-a' and deleted_at is null",
+         where from_id = $1 and relation = 'related' and deleted_at is null",
     )
+    .bind(&from)
     .execute(pool)
     .await
     .unwrap();
 
     // The index is partial, so the tombstone does not block a fresh link.
-    link().await.unwrap();
+    link(pool, &from, &to, "related").await.unwrap();
+}
+
+/// Insert one active link, surfacing the database error rather than panicking.
+async fn link(
+    pool: &sqlx::PgPool,
+    from: &str,
+    to: &str,
+    relation: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "insert into knobas.link (from_id, to_id, relation, origin, created_by)
+         values ($1,$2,$3,'manual','user')",
+    )
+    .bind(from)
+    .bind(to)
+    .bind(relation)
+    .execute(pool)
+    .await
+    .map(|_| ())
 }
 
 #[tokio::test]
