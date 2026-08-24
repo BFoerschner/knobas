@@ -126,13 +126,13 @@ fn is_abandoned(root: &Path) -> bool {
 
 /// Ask an abandoned server to shut down before its files are removed.
 ///
-/// Runs the `pg_ctl` from that directory's own installation, so no assumption
-/// is made about where else PostgreSQL might live.
+/// The binaries live in the shared installation directory, not under the
+/// scratch directory being reaped.
 fn stop_server(root: &Path) {
     if !root.join("data").join("postmaster.pid").exists() {
         return;
     }
-    let Some(pg_ctl) = find_pg_ctl(&root.join("pg")) else {
+    let Some(pg_ctl) = find_pg_ctl(&crate::embedded::installation_dir()) else {
         return;
     };
     let _ = std::process::Command::new(pg_ctl)

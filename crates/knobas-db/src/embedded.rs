@@ -162,21 +162,47 @@ async fn connect(url: &str) -> Result<PgPool, sqlx::Error> {
         .await
 }
 
+/// `Settings::new()` with its litter cleaned up.
+///
+/// It eagerly materialises two throwaway temp directories for the `data_dir`
+/// and `password_file` defaults, which every caller here overrides. Reclaim
+/// them -- `remove_dir` only succeeds while they are still empty, which is
+/// exactly the safety check we want.
+fn fresh_settings() -> Settings {
+    let settings = Settings::new();
+
+    let _ = std::fs::remove_dir(&settings.data_dir);
+    if let Some(dir) = settings.password_file.parent() {
+        let _ = std::fs::remove_dir(dir);
+    }
+
+    settings
+}
+
+/// Where the PostgreSQL binaries live: the crate's shared, version-keyed
+/// default (`~/.theseus/postgresql/<version>`), deliberately *not* under any
+/// `root_dir`.
+///
+/// The binaries are immutable and version-pinned, so one copy per machine is
+/// enough; putting them under each `root_dir` would re-download ~13 MB for
+/// every fresh data directory and make the test suite need the network on
+/// every run. The archive extractor takes its own cross-process lock and
+/// renames into place atomically, so concurrent bootstraps are safe -- but it
+/// skips extraction entirely if the target directory already exists, so
+/// nothing here may pre-create it.
+pub(crate) fn installation_dir() -> PathBuf {
+    fresh_settings().installation_dir
+}
+
 fn build_settings(root_dir: &Path) -> Result<Settings, DbError> {
     std::fs::create_dir_all(root_dir).map_err(|source| DbError::io(root_dir, source))?;
 
-    let mut settings = Settings::new();
-
-    // `Settings::new()` eagerly materialises throwaway temp directories for
-    // the defaults it is about to hand us. We override both, so reclaim them
-    // -- `remove_dir` only succeeds while they are still empty, which is
-    // exactly the safety check we want.
-    let discarded_data_dir = settings.data_dir.clone();
-    let discarded_password_dir = settings.password_file.parent().map(Path::to_path_buf);
+    let mut settings = fresh_settings();
 
     settings.version =
         VersionReq::parse(PG_VERSION_REQ).expect("PG_VERSION_REQ is a valid semver requirement");
-    settings.installation_dir = root_dir.join("pg");
+    // `installation_dir` is left at its shared default on purpose -- see
+    // `installation_dir()`. Only state lives under `root_dir`.
     settings.data_dir = root_dir.join("data");
     settings.password_file = root_dir.join(".pgpass");
     settings.host = HOST.to_string();
@@ -186,11 +212,6 @@ fn build_settings(root_dir: &Path) -> Result<Settings, DbError> {
     // Explicit: `None` keeps `Settings::url` on the TCP form.
     settings.socket_dir = None;
     settings.timeout = Some(COMMAND_TIMEOUT);
-
-    let _ = std::fs::remove_dir(&discarded_data_dir);
-    if let Some(dir) = discarded_password_dir {
-        let _ = std::fs::remove_dir(dir);
-    }
 
     // `Settings::new()` invents a fresh random password every call, but
     // `initdb` burned the first one into the data directory. Reuse what was
@@ -272,11 +293,35 @@ mod tests {
         assert_eq!(settings.port, 0);
         assert!(!settings.temporary);
         assert!(settings.socket_dir.is_none());
-        assert_eq!(settings.installation_dir, dir.path().join("pg"));
         assert_eq!(settings.data_dir, dir.path().join("data"));
         assert_eq!(settings.password_file, dir.path().join(".pgpass"));
         // No `?host=` query -- a Unix-socket URL would carry one.
         assert!(settings.url(DATABASE_NAME).contains("@127.0.0.1:0/knobas"));
+    }
+
+    #[test]
+    fn build_settings_keeps_the_binaries_out_of_the_root_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = build_settings(dir.path()).unwrap();
+
+        // Shared across every `root_dir` so the archive is fetched once per
+        // machine, not once per data directory.
+        assert_eq!(settings.installation_dir, installation_dir());
+        assert!(!settings.installation_dir.starts_with(dir.path()));
+        assert!(settings.installation_dir.ends_with("postgresql"));
+    }
+
+    #[test]
+    fn build_settings_does_not_create_the_installation_dir() {
+        // The extractor skips extraction when the target already exists, so
+        // nothing may bring it into being ahead of `setup()`.
+        let install = installation_dir();
+        let existed = install.exists();
+        let dir = tempfile::tempdir().unwrap();
+
+        build_settings(dir.path()).unwrap();
+
+        assert_eq!(install.exists(), existed);
     }
 
     #[test]
