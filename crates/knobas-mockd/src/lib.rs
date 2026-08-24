@@ -36,6 +36,7 @@
 //!    `/rest/api/2/serverInfo`, which a real anonymous-browsing instance would
 //!    serve without one. Same reason: credentials must be on every request.
 
+pub mod allowlist;
 pub mod validate;
 
 pub use validate::{Violation, ViolationKind, ViolationLog};
