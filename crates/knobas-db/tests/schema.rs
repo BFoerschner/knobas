@@ -37,6 +37,14 @@ async fn migrates_and_finds_by_fts() {
     let hits = search::search(pool, "sepa retry", 10).await.unwrap();
     assert_eq!(hits[0].entity_id, "jira:TST-1");
     assert!(hits[0].snippet.to_lowercase().contains("sepa"));
+    // The excerpt is plain text: `ts_headline`'s default `<b>` marks would
+    // reach the UI as literal tags, because a snippet carrying raw source text
+    // has to be escaped wherever it is rendered.
+    assert!(
+        !hits[0].snippet.contains('<'),
+        "snippet should carry no markup: {:?}",
+        hits[0].snippet
+    );
 }
 
 /// `link_active_idx` is what the link commands built on this schema rest on,
