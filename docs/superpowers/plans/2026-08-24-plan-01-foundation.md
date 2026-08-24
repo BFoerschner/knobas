@@ -754,7 +754,7 @@ async fn fixture_matches_the_brief() {
 - [ ] **Step 4: Implement the mock**
 
 - `fixture()`: `include_str!("../../../fixtures/tidewater/work.json")` + `serde_json` into typed `Fixture` structs mirroring the schema above, in a `std::sync::OnceLock`.
-- `MockSource::descriptor()`: id/kind `"mock"`, kinds declared for `ticket`/`pr`/`build`/`page`/`commit` (with labels, plurals, monograms), `config_schema` = empty JSON object schema.
+- `MockSource::descriptor()`: id/adapter_kind `"mock"`, `entity_kinds` declared for `ticket`/`pr`/`build`/`page`/`commit` (with labels, plurals, monograms), `config_schema` = empty JSON object schema, `auth_methods` = `[]`, `write_ops` = `["comment"]` (Task 6 rulings 6/7/9).
 - `MockSource::sync`: full sync emits every ticket/pr/build/page/commit as a `SyncItem` (`entity = EntityRef::new("mock", key)`, `body_text` = summary/description/comments concatenated, `payload` = the raw JSON record); returns cursor `"tidewater-v1"`. Incremental sync with cursor `Some("tidewater-v1")` emits nothing (the fixture never changes) and returns the same cursor.
 - Faults short-circuit `test_connection` and `sync` with the mapped `SourceError`.
 - `write(WriteOp::Comment { .. })` returns `Ok(())` and records the op in a `Mutex<Vec<WriteOp>>` exposed as `written_ops()` for later tests; simulated-fault instances return the fault error instead.
@@ -815,7 +815,7 @@ async fn mock_sync_lands_in_postgres_and_is_searchable() {
 
 - [ ] **Step 2: Run to verify failure** — `cargo test -p knobas-sync` → FAIL.
 
-- [ ] **Step 3: Implement** `run_once` with a `PgSink` implementing `Sink` that batches upserts (`insert … on conflict (id|entity_id) do update set …`) inside one transaction, then the activity line.
+- [ ] **Step 3: Implement** `run_once` with a `PgSink` implementing `Sink` that batches upserts (`insert … on conflict (id|entity_id) do update set …`) inside one transaction, then the activity line. Note (Task 6 ruling 8): `Sink::item` returns `Result<(), SourceError>` — PgSink maps DB failures to `SourceError::Sink(reason)`, and `run_once` surfaces an `Err` from `sync` as `SyncError`.
 
 - [ ] **Step 4: Run until green** — `cargo test -p knobas-sync && just check` → PASS.
 
