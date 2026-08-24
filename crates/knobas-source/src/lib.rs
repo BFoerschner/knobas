@@ -24,7 +24,7 @@
 pub mod contract;
 
 /// Everything knobas needs to know about a configured adapter instance.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SourceDescriptor {
     /// Instance id, e.g. `"jira"`. Doubles as the [`EntityRef`] namespace for
     /// every item this instance emits.
@@ -48,7 +48,7 @@ pub struct SourceDescriptor {
 }
 
 /// Display metadata for one entity kind an adapter emits.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct KindInfo {
     /// Matches [`SyncItem::kind`], e.g. `"ticket"`.
     pub id: String,
@@ -61,7 +61,7 @@ pub struct KindInfo {
 }
 
 /// What an adapter can do beyond plain syncing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Capability {
     Search,
     Write,
@@ -69,7 +69,7 @@ pub enum Capability {
 }
 
 /// One entity pushed across the SPI during a sync.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SyncItem {
     pub entity: knobas_core::entity::EntityRef,
     /// One of the kind ids the descriptor declares:
@@ -90,7 +90,13 @@ pub type Cursor = String;
 
 /// The three failure classes knobas distinguishes; everything else an adapter
 /// hits collapses into [`SourceError::Protocol`].
-#[derive(Debug, thiserror::Error)]
+///
+/// Every variant carries at most a string, so the error crosses a process
+/// boundary as plain data (spec §3a). The serde form is structural, not the
+/// [`Display`](std::fmt::Display) text thiserror generates: `Unauthorized`
+/// round-trips as the bare variant, the other two as
+/// `{"Unreachable": "<detail>"}`.
+#[derive(Debug, thiserror::Error, serde::Serialize, serde::Deserialize)]
 pub enum SourceError {
     #[error("unauthorized")]
     Unauthorized,
@@ -135,11 +141,8 @@ pub trait Sink {
 mod tests {
     use super::*;
 
-    /// The descriptor is what the UI reads, so it has to survive the IPC hop
-    /// as plain data -- including the kind metadata the launcher renders from.
-    #[test]
-    fn descriptor_serializes_to_plain_json() {
-        let d = SourceDescriptor {
+    fn a_descriptor() -> SourceDescriptor {
+        SourceDescriptor {
             id: "jira".into(),
             kind: "jira".into(),
             name: "Jira".into(),
@@ -152,11 +155,67 @@ mod tests {
                 monogram: "JI".into(),
             }],
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
-        };
-        let v = serde_json::to_value(&d).unwrap();
+        }
+    }
+
+    /// The descriptor is what the UI reads, so it has to survive the IPC hop
+    /// as plain data -- including the kind metadata the launcher renders from.
+    #[test]
+    fn descriptor_serializes_to_plain_json() {
+        let v = serde_json::to_value(a_descriptor()).unwrap();
         assert_eq!(v["capabilities"], serde_json::json!(["Search", "Write"]));
         assert_eq!(v["kinds"][0]["monogram"], "JI");
         assert_eq!(v["config_schema"]["type"], "object");
+    }
+
+    /// Spec §3a: every type crossing the SPI is plain serde data, so an adapter
+    /// can later run out of process. That is only true if the types survive a
+    /// round trip in *both* directions -- an out-of-process adapter sends its
+    /// descriptor and its items, and reports its errors, across the boundary.
+    #[test]
+    fn spi_types_round_trip_in_both_directions() {
+        let d = a_descriptor();
+        let back: SourceDescriptor =
+            serde_json::from_str(&serde_json::to_string(&d).unwrap()).unwrap();
+        assert_eq!(back.id, d.id);
+        assert_eq!(back.capabilities, d.capabilities);
+        assert_eq!(back.kinds[0].plural, "Tickets");
+        assert_eq!(back.config_schema, d.config_schema);
+
+        let item = SyncItem {
+            entity: knobas_core::entity::EntityRef::new("jira", "PAY-231"),
+            kind: "ticket".into(),
+            title: "SEPA payout fails".into(),
+            body_text: "the batch job times out".into(),
+            author: Some("bjoern".into()),
+            updated_at: Some(
+                chrono::DateTime::parse_from_rfc3339("2026-08-24T09:15:00Z")
+                    .unwrap()
+                    .with_timezone(&chrono::Utc),
+            ),
+            payload: serde_json::json!({ "fields": { "status": "In Progress" } }),
+            deleted: false,
+        };
+        let json = serde_json::to_value(&item).unwrap();
+        // The entity keeps EntityRef's string form, not a nested object.
+        assert_eq!(json["entity"], "jira:PAY-231");
+        let back: SyncItem = serde_json::from_value(json).unwrap();
+        assert_eq!(back.entity, item.entity);
+        assert_eq!(back.kind, item.kind);
+        assert_eq!(back.title, item.title);
+        assert_eq!(back.body_text, item.body_text);
+        assert_eq!(back.author, item.author);
+        assert_eq!(back.updated_at, item.updated_at);
+        assert_eq!(back.payload, item.payload);
+        assert!(!back.deleted);
+
+        // Errors travel structurally, not as their Display text.
+        let json = serde_json::to_value(SourceError::Unreachable("refused".into())).unwrap();
+        assert_eq!(json, serde_json::json!({ "Unreachable": "refused" }));
+        let back: SourceError = serde_json::from_value(json).unwrap();
+        assert!(matches!(back, SourceError::Unreachable(d) if d == "refused"));
+        let back: SourceError = serde_json::from_value(serde_json::json!("Unauthorized")).unwrap();
+        assert_eq!(back.to_string(), "unauthorized");
     }
 
     /// Write ops travel adapter-ward, so they round-trip in both directions.
