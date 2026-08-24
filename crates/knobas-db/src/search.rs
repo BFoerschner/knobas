@@ -11,6 +11,10 @@ pub struct SearchHit {
     /// anything a person typed, `<script>` included. Render it as text; it is
     /// never safe to interpolate as markup.
     ///
+    /// Taken from the title and the body together, in that order, because a
+    /// query can match either: an excerpt of the body alone would be unrelated
+    /// text for every hit that matched on the title.
+    ///
     /// The match is not marked up: `ts_headline`'s selectors are emptied, so
     /// what comes back is the excerpt and nothing else. Highlighting means
     /// returning the match *offsets* alongside the text, which is M1's --
@@ -48,10 +52,17 @@ pub async fn search(
 ) -> Result<Vec<SearchHit>, crate::DbError> {
     let hits = sqlx::query_as::<_, SearchHit>(
         r#"select i.entity_id, i.kind, i.source_id, i.title,
+                  -- Over the same text the index covers -- title *and* body.
+                  -- `fts` weights the title into the match, so a query that
+                  -- hits the title alone is a hit with nothing to quote from
+                  -- the body: `ts_headline` then falls back to the opening
+                  -- words of the body, and the result is a row whose excerpt
+                  -- has no visible relation to what was searched for.
+                  --
                   -- Empty selectors: the excerpt comes back as plain text.
                   -- Anything else would be markup inside a string every caller
                   -- has to escape, which renders as literal tags.
-                  ts_headline('english', i.body_text, q,
+                  ts_headline('english', i.title || ' — ' || i.body_text, q,
                               'MaxWords=18, MinWords=8, StartSel="", StopSel=""')
                     as snippet,
                   ts_rank_cd(i.fts, q) as rank,

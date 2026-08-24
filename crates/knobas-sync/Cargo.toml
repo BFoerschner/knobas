@@ -15,6 +15,9 @@ serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
+# The one diagnostic channel the engine has: a committed run whose activity
+# line failed is reported here rather than as a failed sync.
+tracing = "0.1"
 
 [dev-dependencies]
 # A real PostgreSQL, and the reference adapter to sync out of it. `chrono` is

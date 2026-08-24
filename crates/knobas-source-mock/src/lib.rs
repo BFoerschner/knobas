@@ -20,6 +20,13 @@
 //! performed -- [`MockSource::written_ops`] is how a test asserts that the app
 //! issued the write it claims to have issued.
 //!
+//! Deletions are simulated too, but only when asked for:
+//! [`MockSource::with_tombstone`] emits one extra item marked `deleted`, so the
+//! channel that tombstones an entity can be exercised -- and demoed -- from the
+//! reference adapter instead of from a hand-rolled test source. The plain
+//! [`MockSource::new`] never reports a deletion: the fixture is what the
+//! mockups were drawn against, and a demo load must show exactly that.
+//!
 //! ## Fixture conventions
 //!
 //! The dataset is prose, so transcribing it fixes two things it leaves open:
@@ -301,10 +308,13 @@ pub fn fixture() -> &'static Fixture {
 
 // -- the adapter ------------------------------------------------------------
 
-/// A [`Source`] serving [`fixture()`], optionally pretending to be broken.
+/// A [`Source`] serving [`fixture()`], optionally pretending to be broken or
+/// to have lost an item upstream.
 #[derive(Debug)]
 pub struct MockSource {
     fault: Fault,
+    /// Whether a full sync also reports [`TOMBSTONED_KEY`] as deleted.
+    tombstone: bool,
     written: Mutex<Vec<WriteOp>>,
 }
 
@@ -328,7 +338,29 @@ impl MockSource {
     pub fn with_fault(fault: Fault) -> Self {
         Self {
             fault,
+            tombstone: false,
             written: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// A healthy mock whose **full sync also reports one item as deleted**:
+    /// [`TOMBSTONED_KEY`], a ticket the dataset does not otherwise contain.
+    ///
+    /// Opt-in, because the fixture is the dataset the mockups were drawn
+    /// against and a demo load has to match it. What this buys is the one part
+    /// of the sync contract the fixture cannot express: `SyncItem::deleted`,
+    /// which tombstones the entity while leaving its mirror row (and therefore
+    /// its last-known title) in place. Without it, the deletion channel is
+    /// reachable only from a test-local adapter -- and a real adapter has
+    /// nothing to copy.
+    ///
+    /// Deterministic: the same key, title and body on every run and every
+    /// sync, so re-syncing is idempotent and the tombstone can be asserted on
+    /// by value.
+    pub fn with_tombstone() -> Self {
+        Self {
+            tombstone: true,
+            ..Self::new()
         }
     }
 
@@ -357,17 +389,6 @@ impl MockSource {
                 "simulated: connection refused".into(),
             )),
         }
-    }
-}
-
-/// The identifier a descriptor declares for `op`.
-///
-/// No wildcard arm, for the same reason [`knobas_source::contract`] has none:
-/// when `WriteOp` grows, the compiler is the reminder that this mock has to
-/// decide whether it supports the new op.
-fn write_op_identifier(op: &WriteOp) -> &'static str {
-    match op {
-        WriteOp::Comment { .. } => "comment",
     }
 }
 
@@ -406,6 +427,31 @@ fn item(
 /// Descriptor id, adapter kind, and therefore the [`EntityRef`] namespace of
 /// every item this adapter emits.
 const SOURCE_ID: &str = "mock";
+
+/// The item [`MockSource::with_tombstone`] reports as deleted.
+///
+/// Deliberately *not* one of the fixture's own keys: an item that is both
+/// emitted live and tombstoned in one sync would come down to which one the
+/// engine wrote last, and the fixture's tickets are the ones every mockup
+/// refers to by name.
+pub const TOMBSTONED_KEY: &str = "PAY-198";
+
+/// The tombstoned item itself: an entity that has been withdrawn upstream but
+/// whose title the UI still has to be able to show.
+fn tombstoned_item() -> SyncItem {
+    SyncItem {
+        deleted: true,
+        ..item(
+            "ticket",
+            TOMBSTONED_KEY.to_owned(),
+            "Legacy payout reconciliation (withdrawn)".to_owned(),
+            "Withdrawn upstream: superseded by the SEPA retry work.".to_owned(),
+            None,
+            None,
+            &serde_json::json!({ "key": TOMBSTONED_KEY, "status": "Deleted" }),
+        )
+    }
+}
 
 /// Every work item in the fixture, in the order the mock emits them.
 fn items() -> Vec<SyncItem> {
@@ -568,11 +614,19 @@ impl Source for MockSource {
             // it and a fresh cursor handed back over the gap.
             sink.item(it).await?;
         }
+        if self.tombstone {
+            // Last, and still inside the sync: a deletion is an item like any
+            // other, carrying the last-known title so the UI can render what
+            // vanished.
+            sink.item(tombstoned_item()).await?;
+        }
         Ok(CURSOR.to_owned())
     }
 
     async fn write(&self, op: WriteOp) -> Result<(), SourceError> {
-        let id = write_op_identifier(&op);
+        // The SPI's own mapping, not a copy of it: a per-adapter table drifts
+        // from the identifiers descriptors are validated against.
+        let id = op.identifier();
         // Refused locally, before the fault check: an op this source never
         // advertised is a caller bug, and stays one whether or not the remote
         // system happens to be reachable.

@@ -47,6 +47,50 @@ async fn migrates_and_finds_by_fts() {
     );
 }
 
+/// A hit that matched on the **title** must be able to quote the title.
+///
+/// `fts` weights the title in, so a title-only query is a perfectly good hit
+/// with nothing to quote from the body -- and `ts_headline` over the body
+/// alone then returns its opening words, an excerpt with no visible relation
+/// to what the user typed. In a launcher that is worse than no excerpt: it
+/// looks like the wrong row was matched.
+#[tokio::test]
+async fn a_title_only_match_is_quoted_from_the_title() {
+    let pool = &knobas_db::test_util::test_pool().await;
+    migrate::run(pool).await.unwrap();
+
+    // A token nothing else in the shared corpus contains, in the title only.
+    let token = format!("zq{}", uuid::Uuid::new_v4().simple());
+    let id = format!("jira:{token}");
+    let title = format!("Quarterly {token} rollout");
+    let body = "Unrelated prose about batch windows, ledgers and reconciliation.";
+
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'ticket',$2)")
+        .bind(&id)
+        .bind(&title)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+         values ($1,'jira','ticket',$2,$3,'{}'::jsonb)",
+    )
+    .bind(&id)
+    .bind(&title)
+    .bind(body)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let hits = search::search(pool, &token, 10).await.unwrap();
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert!(
+        hits[0].snippet.contains(&token),
+        "the excerpt must contain what matched, got {:?}",
+        hits[0].snippet
+    );
+}
+
 /// `link_active_idx` is what the link commands built on this schema rest on,
 /// in all three of its parts: a second *active* link over the same
 /// `(from, to, relation)` fails with SQLSTATE 23505; a different `relation`

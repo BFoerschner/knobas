@@ -9,6 +9,7 @@
 //! `~/Library/Application Support/...` would blow past macOS' 103-byte
 //! `sun_path` limit.
 
+use std::fs::{File, TryLockError};
 use std::io;
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
@@ -136,9 +137,16 @@ impl EmbeddedDb {
     /// rather than fought over: see [`adopt`].
     ///
     /// A `postmaster.pid` whose port turns out to be answered by some *other*
-    /// server is proof that no postmaster holds this data directory -- one that
-    /// did would have recorded its own port. That lock is removed and the start
-    /// is retried, rather than reported as a conflict that does not exist.
+    /// server -- or, once the process it names is gone, by something that is
+    /// not a PostgreSQL at all -- is proof that no postmaster holds this data
+    /// directory: one that did would have recorded its own port. That lock is
+    /// removed and the start is retried, rather than reported as a conflict
+    /// that does not exist.
+    ///
+    /// The first `setup()` and `start()` for a `root_dir` run under an
+    /// exclusive file lock in it, so two processes launching against one
+    /// profile at the same time `initdb` it one after the other instead of on
+    /// top of each other.
     ///
     /// # Errors
     ///
@@ -159,7 +167,7 @@ impl EmbeddedDb {
         let settings = build_settings(&cfg.root_dir)?;
         let data_dir = settings.data_dir.clone();
 
-        match start_managed(settings.clone()).await? {
+        match start_managed(&cfg.root_dir, settings.clone()).await? {
             Started::Ready(db) => Ok(*db),
             Started::StaleLock { port, serving } => {
                 // The lock file sent us to a stranger, so it is not describing
@@ -175,7 +183,7 @@ impl EmbeddedDb {
                     "postmaster.pid points at a server that is not ours: clearing the stale lock"
                 );
                 clear_lock(&data_dir)?;
-                match start_managed(settings).await? {
+                match start_managed(&cfg.root_dir, settings).await? {
                     Started::Ready(db) => Ok(*db),
                     // Only reachable if something recreated the lock file in
                     // between; at that point it is genuinely ambiguous.
@@ -233,9 +241,12 @@ enum Started {
     /// two orders of magnitude larger than the other one's `(u16, String)`, and
     /// this enum is constructed at most twice per process.
     Ready(Box<EmbeddedDb>),
-    /// `postmaster.pid` is provably stale: the port it records is answered, but
-    /// by a server serving `serving` rather than our data directory. Clearing
-    /// the lock and attempting the start again is the recovery.
+    /// `postmaster.pid` is provably stale: the port it records is answered by
+    /// `serving` -- a PostgreSQL serving some other data directory, or (once
+    /// the process the lock names is gone) something that does not speak
+    /// PostgreSQL at all. Either way no postmaster of ours holds this
+    /// directory, so clearing the lock and attempting the start again is the
+    /// recovery.
     StaleLock { port: u16, serving: String },
 }
 
@@ -244,36 +255,81 @@ enum Started {
 /// Factored out of [`EmbeddedDb::start`] because the stale-lock recovery has to
 /// run the whole sequence again -- `setup`, `start`, database creation --
 /// against a fresh `PostgreSQL` handle.
-async fn start_managed(settings: Settings) -> Result<Started, DbError> {
+///
+/// The whole attempt runs under [`bring_up_lock`], so two processes launching
+/// against one `root_dir` for the first time cannot `initdb` it at the same
+/// time. The guard is a local, so it is released whichever way this returns --
+/// including into [`EmbeddedDb::start`]'s stale-lock retry, which takes it
+/// again.
+///
+/// The superuser password is read **here**, under that lock, and deliberately
+/// not by [`build_settings`]: see [`adopt_recorded_password`].
+async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Started, DbError> {
+    let _guard = bring_up_lock(root_dir).await?;
+    adopt_recorded_password(&mut settings)?;
+
     let data_dir = settings.data_dir.clone();
     // `PostgreSQL::new` consumes the settings, and the adoption path needs
     // them after the handle is gone.
     let adoption = settings.clone();
     let mut postgresql = PostgreSQL::new(settings);
 
+    // One yield before the work starts, so a *warm* install interleaves the
+    // way a cold one does. On a machine without the binaries, `setup()`
+    // downloads and unpacks PostgreSQL and suspends here for seconds; with
+    // them already present it runs all the way to `initdb` without suspending
+    // once, and a second launch on the same profile is then never polled until
+    // the first has finished. That difference costs nothing in production and
+    // decides everything in a test:
+    // `two_concurrent_first_launches_serialise_instead_of_racing` only
+    // exercises the contended path if both launches are really in flight, and
+    // without this it passes for the wrong reason on a warm machine while CI
+    // -- which re-downloads whenever this file changes -- runs the cold one.
+    tokio::task::yield_now().await;
+
     postgresql.setup().await?;
 
     if let Err(error) = postgresql.start().await {
+        // `PostgreSQL::drop` runs `pg_ctl stop -m fast` whenever
+        // `postmaster.pid` merely *exists* -- it has no idea whether this
+        // handle is the one that started that server. So every arm below that
+        // leaves a lock file standing forgets the handle rather than dropping
+        // it: it owns no OS resource, only paths and strings, so the leak is a
+        // few hundred bytes for the rest of the process -- a trade worth
+        // making against shutting down a database somebody else is using.
         match inspect_lock(&data_dir)? {
             // A hard-killed process (crash, `kill -9`, laptop shutdown)
             // leaves `postmaster.pid` behind and PostgreSQL then refuses to
             // start. The lock is gone now, so the start is worth retrying.
-            Lock::Cleared => postgresql.start().await?,
+            Lock::Cleared => {
+                #[cfg(feature = "test-util")]
+                seam::stale_lock_cleared();
+                if let Err(retry) = postgresql.start().await {
+                    // The lock file this handle would stop on is no longer
+                    // the one it cleared: a sibling that lost the same race
+                    // may have started its server in between, and `pg_ctl
+                    // stop` against *that* pid file kills a database this
+                    // process never started.
+                    std::mem::forget(postgresql);
+                    return Err(retry.into());
+                }
+            }
             // No lock at all: the start failed for some other reason, and
             // that reason is the one worth reporting.
             Lock::Absent => return Err(error.into()),
-            Lock::Live { port } => {
-                // `PostgreSQL::drop` runs `pg_ctl stop -m fast` whenever
-                // `postmaster.pid` merely *exists* -- it has no idea
-                // whether this handle is the one that started that server.
-                // Dropping it here would therefore shut down the live
-                // server that just refused us, taking the database out from
-                // under whoever is using it. Forget it instead: it owns no
-                // OS resource, only paths and strings, so the leak is a few
-                // hundred bytes for the rest of the process -- a trade
-                // worth making against killing a sibling's database.
+            Lock::Live { port, pid } => {
                 std::mem::forget(postgresql);
-                return adopt(adoption, port).await;
+                return adopt(adoption, port, pid).await;
+            }
+            Lock::LiveProcess { pid } => {
+                std::mem::forget(postgresql);
+                return Err(DbError::AlreadyRunning {
+                    data_dir,
+                    reason: format!(
+                        "postmaster.pid records process {pid}, which is still running, but \
+                         nothing answers on the port it recorded"
+                    ),
+                });
             }
         }
     }
@@ -321,12 +377,24 @@ async fn start_managed(settings: Settings) -> Result<Started, DbError> {
 ///
 /// # Errors
 ///
-/// [`DbError::AlreadyRunning`] if the server cannot be reached or queried, or
-/// if the [`DATABASE_NAME`] database cannot be created on it. A server that
-/// turns out to serve a *different* data directory is not an error at all: it
-/// is returned as [`Started::StaleLock`], because the mismatch proves the lock
-/// file we came from is stale.
-async fn adopt(mut settings: Settings, port: u16) -> Result<Started, DbError> {
+/// [`DbError::AlreadyRunning`] if the server answered as a PostgreSQL and then
+/// could not be queried, or if the [`DATABASE_NAME`] database cannot be created
+/// on it. Two outcomes are *not* errors, and both come back as
+/// [`Started::StaleLock`] so the caller clears the lock and starts normally:
+///
+/// * a PostgreSQL that turns out to serve a **different** data directory, and
+/// * a listener on the recorded port that does not speak PostgreSQL at all,
+///   provided the process the lock file names is gone.
+///
+/// The second is the recycled-ephemeral-port case: some unrelated program now
+/// owns the port a dead postmaster recorded. Reporting that as "another knobas
+/// instance" is both false and unrecoverable -- the user has no way to make the
+/// stranger release the port, and knobas would refuse to launch until they
+/// found and deleted `postmaster.pid` by hand. The pid check is what keeps the
+/// recovery honest: while the recorded process is still alive, the lock may
+/// still be owned, and a non-PostgreSQL answer on its port is not enough to
+/// condemn it.
+async fn adopt(mut settings: Settings, port: u16, pid: Option<u32>) -> Result<Started, DbError> {
     let data_dir = settings.data_dir.clone();
     // The recorded port, not the 0 that `build_settings` asks a fresh start to
     // pick: this server chose its port long ago.
@@ -341,9 +409,27 @@ async fn adopt(mut settings: Settings, port: u16) -> Result<Started, DbError> {
     // Through the maintenance database, not `knobas`: the identity check has to
     // happen before we trust the server, and creating `knobas` when it is
     // missing needs a connection that does not depend on it existing.
-    let mut admin = PgConnection::connect(&settings.url(MAINTENANCE_DATABASE))
-        .await
-        .map_err(|source| unreachable(format!("cannot connect on port {port}: {source}")))?;
+    let admin = PgConnection::connect(&settings.url(MAINTENANCE_DATABASE)).await;
+    let mut admin = match admin {
+        Ok(admin) => admin,
+        Err(source) if is_wire_level(&source) && !recorded_pid_alive(pid) => {
+            tracing::warn!(
+                port,
+                %source,
+                "the recorded port is held by something that does not speak postgres, and the \
+                 recorded process is gone: the lock is stale"
+            );
+            return Ok(Started::StaleLock {
+                port,
+                serving: format!("something that does not speak postgres ({source})"),
+            });
+        }
+        Err(source) => {
+            return Err(unreachable(format!(
+                "cannot connect on port {port}: {source}"
+            )));
+        }
+    };
 
     // Ask the server which directory it serves rather than trusting line 2 of
     // the lock file: a data directory that was copied elsewhere carries a
@@ -354,6 +440,23 @@ async fn adopt(mut settings: Settings, port: u16) -> Result<Started, DbError> {
         .await
         .map_err(|source| unreachable(format!("cannot query it: {source}")))?;
     if !same_dir(Path::new(&serving.0), &data_dir) {
+        // A mismatch clears the lock **whatever the recorded pid is doing** --
+        // deliberately, and not an oversight of the rule the wire-level arm
+        // above applies ("a live recorded process means the lock may still be
+        // owned"). Ruled, and here is the argument:
+        //
+        // A postmaster serves exactly one data directory for its whole life.
+        // This one answered on the port our lock file names and reported some
+        // *other* directory, so it is not the postmaster our lock describes --
+        // and no postmaster of ours can be listening there either, since that
+        // port is taken. Whatever the recorded pid is, it is not a live
+        // postmaster holding this directory. That is strictly more evidence
+        // than the wire-level arm has, where nothing identifies what answered
+        // and the pid is the only witness left.
+        //
+        // Clearing endangers nothing: the foreign server does not hold our
+        // directory, and nothing here ever stops it -- the lock file we remove
+        // is our own, and it is provably stale.
         let _ = admin.close().await;
         return Ok(Started::StaleLock {
             port,
@@ -493,14 +596,33 @@ fn build_settings(root_dir: &Path) -> Result<Settings, DbError> {
     settings.socket_dir = None;
     settings.timeout = Some(COMMAND_TIMEOUT);
 
-    // `Settings::new()` invents a fresh random password every call, but
-    // `initdb` burned the first one into the data directory. Reuse what was
-    // recorded, otherwise every restart authenticates with the wrong password.
+    // The password `Settings::new()` invented is left in place here. Reading
+    // the recorded one is `adopt_recorded_password`'s job, and it has to
+    // happen under the bring-up lock -- see there.
+
+    Ok(settings)
+}
+
+/// Replace the invented superuser password with the one `initdb` recorded.
+///
+/// `Settings::new()` invents a fresh random password on every call, but
+/// `initdb` burned the *first* one into the data directory: without this,
+/// every restart authenticates with the wrong password.
+///
+/// **Called under [`bring_up_lock`], never before it.** On a genuine first
+/// launch `.pgpass` does not exist yet, and reading it early is how the loser
+/// of a two-launch race keeps the password it invented for itself: it waits
+/// for the lock correctly, finds the directory already initialised, skips
+/// `initialize()` (which writes `.pgpass` only when the file is absent), and
+/// then fails to authenticate against the winner's server -- the same
+/// unrecoverable lockout the rest of this module exists to prevent. Under the
+/// lock the file is either already there (adopt it) or genuinely absent (keep
+/// the invented one, and `initialize()` records it).
+fn adopt_recorded_password(settings: &mut Settings) -> Result<(), DbError> {
     if let Some(password) = read_password(&settings.password_file)? {
         settings.password = password;
     }
-
-    Ok(settings)
+    Ok(())
 }
 
 fn read_password(password_file: &Path) -> Result<Option<String>, DbError> {
@@ -522,11 +644,30 @@ enum Lock {
     /// The lock belonged to a server that is gone, and has been removed: the
     /// start is worth retrying.
     Cleared,
-    /// A live server is answering on the port the lock records.
-    Live { port: u16 },
+    /// Something is answering on the port the lock records. Whether it is
+    /// *our* server is [`adopt`]'s to establish; `pid` is line 1 of the lock
+    /// file, which that decision needs too.
+    Live { port: u16, pid: Option<u32> },
+    /// Nothing answers on the recorded port, but the process the lock records
+    /// is still alive. Not clearable: see [`inspect_lock`].
+    LiveProcess { pid: u32 },
 }
 
 /// Classify `data_dir`'s `postmaster.pid`, clearing it when it is stale.
+///
+/// Two independent pieces of evidence, because either one alone lies:
+///
+/// * The **port** (line 4): a TCP handshake proves *something* is listening,
+///   but a recycled ephemeral port can put a stranger there, so an answer is
+///   not proof the lock is live -- which is why [`adopt`] asks the server what
+///   it serves before trusting it.
+/// * The **pid** (line 1): a live process is proof the lock may still be
+///   owned. A postmaster that is still starting up, one wedged before it
+///   opened its socket, or one listening on an interface this probe does not
+///   reach all fail the 500 ms handshake while owning the data directory --
+///   and clearing the lock under a live postmaster is how two servers end up
+///   writing one data directory. So a dead port is only clearable once the
+///   recorded process is gone too.
 fn inspect_lock(data_dir: &Path) -> Result<Lock, DbError> {
     let pid_file = data_dir.join("postmaster.pid");
 
@@ -536,7 +677,12 @@ fn inspect_lock(data_dir: &Path) -> Result<Lock, DbError> {
         Err(source) => return Err(DbError::io(pid_file, source)),
     };
 
-    // Line 4 of postmaster.pid is the port the server last listened on.
+    // Line 1 is the postmaster's pid, line 4 the port it last listened on.
+    let recorded_pid = contents
+        .lines()
+        .next()
+        .and_then(|line| line.trim().parse::<u32>().ok())
+        .filter(|pid| *pid != 0);
     let recorded_port = contents
         .lines()
         .nth(3)
@@ -546,13 +692,193 @@ fn inspect_lock(data_dir: &Path) -> Result<Lock, DbError> {
     if let Some(port) = recorded_port
         && port_answers(port)
     {
-        tracing::warn!(port, "postmaster.pid is held by a live server");
-        return Ok(Lock::Live { port });
+        tracing::warn!(
+            port,
+            "postmaster.pid names a port something is answering on"
+        );
+        return Ok(Lock::Live {
+            port,
+            pid: recorded_pid,
+        });
+    }
+
+    if let Some(pid) = recorded_pid
+        && process_alive(pid)
+    {
+        tracing::warn!(
+            pid,
+            "postmaster.pid names a live process, though its port is silent: keeping the lock"
+        );
+        return Ok(Lock::LiveProcess { pid });
     }
 
     tracing::warn!(pid_file = %pid_file.display(), "removing stale postmaster.pid");
     clear_lock(data_dir)?;
     Ok(Lock::Cleared)
+}
+
+/// Whether a process with `pid` exists right now.
+///
+/// `ps -p` rather than `kill(pid, 0)`: this crate has no `libc` dependency and
+/// nothing here is worth one. `ps` exits 0 when it printed a matching process
+/// and 1 when it did not, on both macOS and Linux.
+///
+/// A pid is *not* proof of identity -- pids are recycled, so the process may
+/// be anything at all. It is only ever used here as evidence that the lock
+/// might still be owned, never as evidence that it is.
+#[cfg(unix)]
+fn process_alive(pid: u32) -> bool {
+    std::process::Command::new("ps")
+        .arg("-p")
+        .arg(pid.to_string())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+/// No `ps` to ask, so nothing is known: the pid contributes no evidence and
+/// the port decides alone, exactly as it did before the check existed.
+#[cfg(not(unix))]
+fn process_alive(_pid: u32) -> bool {
+    false
+}
+
+/// Whether the pid `postmaster.pid` recorded belongs to a process that is
+/// still running. An unparseable or absent pid is no evidence of life.
+fn recorded_pid_alive(pid: Option<u32>) -> bool {
+    pid.is_some_and(process_alive)
+}
+
+/// Whether a connection failure happened *below* the PostgreSQL protocol.
+///
+/// [`sqlx::Error::Database`] means a PostgreSQL answered and refused us (a
+/// wrong password, a missing database): there is a postmaster on that port,
+/// whatever else is wrong. `Io`, `Tls` and `Protocol` mean the bytes never
+/// added up to a PostgreSQL conversation at all -- the shape of an unrelated
+/// listener sitting on a recycled ephemeral port.
+fn is_wire_level(error: &sqlx::Error) -> bool {
+    matches!(
+        error,
+        sqlx::Error::Io(_) | sqlx::Error::Tls(_) | sqlx::Error::Protocol(_)
+    )
+}
+
+/// A window this module cannot otherwise be caught in, opened for tests.
+///
+/// The property at stake is what happens to *somebody else's* database, and it
+/// only goes wrong in the two statements between clearing a stale
+/// `postmaster.pid` and retrying the start: a racing process writes a fresh
+/// lock file in there, and a handle dropped afterwards runs `pg_ctl stop -m
+/// fast` against it. Nothing outside this function can get in there -- the
+/// window is two statements wide and it is held under the bring-up lock -- so
+/// a test that wants to occupy it has to be let in.
+///
+/// Compiled only with `test-util`, a feature no application build enables:
+/// `knobas-app` depends on `knobas-db` without it, so none of this exists in
+/// the shipped binary.
+#[cfg(feature = "test-util")]
+pub mod seam {
+    use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+
+    type Hook = Arc<dyn Fn() + Send + Sync>;
+
+    fn slot() -> &'static Mutex<Option<Hook>> {
+        static SLOT: OnceLock<Mutex<Option<Hook>>> = OnceLock::new();
+        SLOT.get_or_init(|| Mutex::new(None))
+    }
+
+    /// Run `hook` after a stale lock is cleared and before the start is
+    /// retried. Process-wide; call [`forget_hooks`] when the test is done.
+    pub fn after_clearing_a_stale_lock(hook: impl Fn() + Send + Sync + 'static) {
+        *slot().lock().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(hook));
+    }
+
+    /// Drop whatever [`after_clearing_a_stale_lock`] installed.
+    pub fn forget_hooks() {
+        *slot().lock().unwrap_or_else(PoisonError::into_inner) = None;
+    }
+
+    /// Cloned out before it is called, so the lock is not held across a hook
+    /// that might reach back in here.
+    pub(crate) fn stale_lock_cleared() {
+        let hook = slot()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
+}
+
+/// Name of the file whose OS lock serialises bring-up within one `root_dir`.
+const BRING_UP_LOCK: &str = ".bring-up.lock";
+
+/// How long to wait for another process to finish bringing this `root_dir` up.
+/// A cold first run is an `initdb` plus a server start; the wait has to cover
+/// both, and expiring is a hard failure rather than a race to run in parallel.
+const BRING_UP_TIMEOUT: Duration = Duration::from_secs(180);
+
+/// How often to retry the lock while another process holds it.
+const BRING_UP_POLL: Duration = Duration::from_millis(50);
+
+/// Take the exclusive bring-up lock for `root_dir`, waiting for whoever holds
+/// it.
+///
+/// `initdb` is not safe to run twice against one data directory, and neither
+/// process can see the other coming: `PostgreSQL::setup` decides whether to
+/// initialise by looking at the directory, so two first launches on one profile
+/// (a double-click, a `just dev` beside a packaged build) both find it empty
+/// and both proceed. The loser then finds a half-written data directory rather
+/// than a server it could adopt -- `postmaster.pid` does not exist yet, so
+/// none of the recovery paths above apply.
+///
+/// The lock is an OS lock on a file *beside* the data directory, so the kernel
+/// releases it however the process dies, and it is only ever held for the
+/// duration of one bring-up.
+///
+/// Returned rather than dropped here: the guard must outlive the work it
+/// protects, and holding the returned `File` is what does that.
+async fn bring_up_lock(root_dir: &Path) -> Result<File, DbError> {
+    let path = root_dir.join(BRING_UP_LOCK);
+    let file = File::create(&path).map_err(|source| DbError::io(&path, source))?;
+
+    let deadline = std::time::Instant::now() + BRING_UP_TIMEOUT;
+    let mut waited = false;
+    loop {
+        match file.try_lock() {
+            Ok(()) => {
+                if waited {
+                    tracing::info!("the other process finished bringing the database up");
+                }
+                return Ok(file);
+            }
+            Err(TryLockError::WouldBlock) if std::time::Instant::now() < deadline => {
+                if !waited {
+                    waited = true;
+                    tracing::info!(
+                        lock = %path.display(),
+                        "another process is bringing this database up: waiting"
+                    );
+                }
+                tokio::time::sleep(BRING_UP_POLL).await;
+            }
+            Err(TryLockError::WouldBlock) => {
+                return Err(DbError::io(
+                    &path,
+                    io::Error::new(
+                        io::ErrorKind::WouldBlock,
+                        format!(
+                            "another process has held the bring-up lock for over {} seconds",
+                            BRING_UP_TIMEOUT.as_secs()
+                        ),
+                    ),
+                ));
+            }
+            Err(TryLockError::Error(source)) => return Err(DbError::io(&path, source)),
+        }
+    }
 }
 
 /// Remove `data_dir`'s `postmaster.pid`, if it is still there.
@@ -626,23 +952,148 @@ mod tests {
     }
 
     #[test]
-    fn build_settings_reuses_the_recorded_password() {
+    fn the_recorded_password_is_adopted_under_the_lock_not_before_it() {
         let dir = tempfile::tempdir().unwrap();
+        // Recorded before the settings are even built, so the assertion below
+        // is about *where* the file is read, not about whether it exists.
         write(dir.path(), ".pgpass", "s3cret\n");
 
-        let settings = build_settings(dir.path()).unwrap();
+        let mut settings = build_settings(dir.path()).unwrap();
+        assert_ne!(
+            settings.password, "s3cret",
+            "build_settings must not read the password file: doing it there is what leaves a \
+             launch that started before the winner wrote .pgpass holding a password nothing \
+             accepts"
+        );
+
+        adopt_recorded_password(&mut settings).unwrap();
 
         assert_eq!(settings.password, "s3cret");
     }
 
     #[test]
-    fn build_settings_ignores_an_empty_password_file() {
+    fn an_empty_password_file_leaves_the_invented_password_alone() {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), ".pgpass", "");
+        let mut settings = build_settings(dir.path()).unwrap();
+        let invented = settings.password.clone();
 
-        let settings = build_settings(dir.path()).unwrap();
+        adopt_recorded_password(&mut settings).unwrap();
 
+        assert_eq!(settings.password, invented);
         assert!(!settings.password.is_empty());
+    }
+
+    /// The loser of a first-launch race joins the winner's server, using the
+    /// password `initdb` recorded rather than the one it invented.
+    ///
+    /// This is the cold machine, deterministically: `build_settings` runs
+    /// while the profile is empty -- which is all a loser has to do to be
+    /// holding a random password nothing accepts -- and only then does the
+    /// winner initialise the directory. If the recorded password were read
+    /// anywhere but under the bring-up lock, the loser would fail
+    /// `start()` against the winner's live server, reach `adopt`, and be told
+    /// its own profile belongs to another instance. Permanently: every later
+    /// launch that lost by a microsecond does the same thing.
+    #[tokio::test]
+    async fn a_launch_that_started_cold_authenticates_with_the_recorded_password() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let cold = build_settings(dir.path()).unwrap();
+
+        // The winner: initialises the profile, records the password, stays up.
+        let winner = EmbeddedDb::start(DbConfig {
+            root_dir: dir.path().to_path_buf(),
+            existing_url: None,
+        })
+        .await
+        .expect("the winner brings the profile up");
+        let recorded = read_password(&cold.password_file)
+            .unwrap()
+            .expect("initdb records a password");
+        assert_ne!(
+            cold.password, recorded,
+            "settings built cold must carry a password the winner's server does not know"
+        );
+
+        // The loser, with the settings it built before any of that happened.
+        let db = match start_managed(dir.path(), cold).await {
+            Ok(Started::Ready(db)) => db,
+            Ok(Started::StaleLock { serving, .. }) => {
+                panic!("the winner serves this very directory, not {serving:?}")
+            }
+            Err(error) => panic!("the loser must join the winner's server: {error}"),
+        };
+        let one: (i32,) = sqlx::query_as("select 1")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+        assert_eq!(one.0, 1);
+
+        // Adopted, so it owns nothing; the winner still owns the server.
+        (*db).stop().await.unwrap();
+        winner.stop().await.unwrap();
+    }
+
+    /// ...and an absent one too, which is the winner's own first launch:
+    /// `initialize()` is what records the invented password.
+    #[test]
+    fn an_absent_password_file_leaves_the_invented_password_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut settings = build_settings(dir.path()).unwrap();
+        let invented = settings.password.clone();
+
+        adopt_recorded_password(&mut settings).unwrap();
+
+        assert_eq!(settings.password, invented);
+    }
+
+    /// A pid that is certainly not running: a child that has already been
+    /// reaped. Nothing else about a number is provably dead -- pids recycle.
+    fn dead_pid() -> u32 {
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        pid
+    }
+
+    /// A port nothing is listening on right now: bind it, read it back, drop
+    /// the listener.
+    ///
+    /// Only *probably* still free by the time anything probes it -- ephemeral
+    /// ports are handed out round-robin, and a concurrent test in this binary
+    /// can be given the same one moments later. Nothing can reserve a silent
+    /// port, so callers that need the probe to find silence redraw instead:
+    /// see [`inspect_with_a_silent_port`].
+    fn free_port() -> u16 {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.local_addr().unwrap().port()
+    }
+
+    /// `inspect_lock` against a lock file naming `pid` and a port nothing
+    /// answers on, redrawing the port if something took it in between.
+    ///
+    /// A `Lock::Live` here means the draw lost, not that the classification is
+    /// wrong: the port answered, so `inspect_lock` did exactly what it should.
+    fn inspect_with_a_silent_port(dir: &Path, pid: u32) -> (Lock, PathBuf) {
+        for _ in 0..8 {
+            let file = pid_file(dir, pid, free_port());
+            let lock = inspect_lock(dir).unwrap();
+            if !matches!(lock, Lock::Live { .. }) {
+                return (lock, file);
+            }
+        }
+        panic!("every port drawn was taken by something else");
+    }
+
+    /// A `postmaster.pid` as PostgreSQL writes it: pid, data directory, start
+    /// time, port.
+    fn pid_file(dir: &Path, pid: u32, port: u16) -> PathBuf {
+        write(
+            dir,
+            "postmaster.pid",
+            &format!("{pid}\n{}\n1700000000\n{port}\n", dir.display()),
+        )
     }
 
     #[test]
@@ -652,21 +1103,30 @@ mod tests {
     }
 
     #[test]
-    fn inspect_lock_removes_a_pid_file_nobody_answers_for() {
+    fn inspect_lock_removes_a_pid_file_with_no_process_and_no_listener() {
         let dir = tempfile::tempdir().unwrap();
-        // A free port: bind it, read it back, drop the listener.
-        let port = {
-            let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-            listener.local_addr().unwrap().port()
-        };
-        let pid_file = write(
-            dir.path(),
-            "postmaster.pid",
-            &format!("4242\n{}\n1700000000\n{port}\n", dir.path().display()),
-        );
+        let (lock, pid_file) = inspect_with_a_silent_port(dir.path(), dead_pid());
 
-        assert_eq!(inspect_lock(dir.path()).unwrap(), Lock::Cleared);
+        assert_eq!(lock, Lock::Cleared);
         assert!(!pid_file.exists());
+    }
+
+    /// A silent port is *not* on its own proof that the lock is free: a
+    /// postmaster still starting up, or wedged before it opened its socket,
+    /// fails the handshake while owning the data directory. Clearing the lock
+    /// there is how a second server ends up writing the same files.
+    #[test]
+    fn inspect_lock_keeps_a_pid_file_whose_process_is_still_alive() {
+        let dir = tempfile::tempdir().unwrap();
+        // Our own pid: alive for certain, for as long as this test runs.
+        let alive = std::process::id();
+        let (lock, pid_file) = inspect_with_a_silent_port(dir.path(), alive);
+
+        assert_eq!(lock, Lock::LiveProcess { pid: alive });
+        assert!(
+            pid_file.exists(),
+            "a lock whose process is still running must not be cleared"
+        );
     }
 
     #[test]
@@ -674,13 +1134,121 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let port = listener.local_addr().unwrap().port();
-        let pid_file = write(
-            dir.path(),
-            "postmaster.pid",
-            &format!("4242\n{}\n1700000000\n{port}\n", dir.path().display()),
+        let pid = dead_pid();
+        let pid_file = pid_file(dir.path(), pid, port);
+
+        assert_eq!(
+            inspect_lock(dir.path()).unwrap(),
+            Lock::Live {
+                port,
+                pid: Some(pid)
+            }
+        );
+        assert!(pid_file.exists());
+    }
+
+    #[test]
+    fn process_liveness_tells_a_running_process_from_a_reaped_one() {
+        // Both directions, because a `process_alive` stuck at either answer
+        // would satisfy one of the `inspect_lock` cases above on its own.
+        assert!(process_alive(std::process::id()));
+        assert!(!process_alive(dead_pid()));
+    }
+
+    /// A listener that accepts connections and immediately drops them: an
+    /// unrelated program on a recycled ephemeral port, as far as a client can
+    /// tell. Returns the port; the accept loop lives until the process exits.
+    fn squatter() -> u16 {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                drop(stream);
+            }
+        });
+        port
+    }
+
+    fn adoption_settings(dir: &Path) -> Settings {
+        let mut settings = build_settings(dir).unwrap();
+        // `adopt` never starts anything, so the data directory need not exist;
+        // what matters is that it is *this* root's.
+        settings.data_dir = dir.join("data");
+        settings
+    }
+
+    /// The recycled-port lockout: a dead postmaster's port now belongs to some
+    /// unrelated program. That is not another knobas instance, and reporting it
+    /// as one leaves the user with an app that refuses to launch until they
+    /// delete `postmaster.pid` by hand.
+    #[tokio::test]
+    async fn adopt_treats_a_non_postgres_listener_as_a_stale_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let port = squatter();
+
+        match adopt(adoption_settings(dir.path()), port, Some(dead_pid())).await {
+            Ok(Started::StaleLock { port: p, .. }) => assert_eq!(p, port),
+            Ok(Started::Ready(_)) => panic!("nothing on that port could have been adopted"),
+            Err(error) => panic!("a stranger on the port is a stale lock, not {error:?}"),
+        }
+    }
+
+    /// The same stranger, while the recorded process is still alive: the lock
+    /// may still be owned -- a postmaster that has not opened its socket yet
+    /// looks exactly like this -- so it is reported, not cleared.
+    #[tokio::test]
+    async fn adopt_refuses_while_the_recorded_process_is_alive() {
+        let dir = tempfile::tempdir().unwrap();
+        let port = squatter();
+
+        // `Started` carries an `EmbeddedDb`, which is not `Debug`, so the
+        // success arm is matched rather than unwrapped.
+        match adopt(
+            adoption_settings(dir.path()),
+            port,
+            Some(std::process::id()),
+        )
+        .await
+        {
+            Err(DbError::AlreadyRunning { .. }) => {}
+            Err(other) => panic!("expected AlreadyRunning, got {other:?}"),
+            Ok(_) => panic!("a live recorded process must not have its lock cleared"),
+        }
+    }
+
+    /// A failure the *PostgreSQL protocol* produced -- a wrong password, say --
+    /// means there is a postmaster on that port. Clearing the lock under it
+    /// would start a second server on the same data directory.
+    #[test]
+    fn only_sub_protocol_failures_count_as_a_stranger_on_the_port() {
+        assert!(is_wire_level(&sqlx::Error::Io(io::Error::from(
+            io::ErrorKind::ConnectionReset
+        ))));
+        assert!(is_wire_level(&sqlx::Error::Protocol("garbage".into())));
+        assert!(!is_wire_level(&sqlx::Error::RowNotFound));
+        assert!(!is_wire_level(&sqlx::Error::PoolClosed));
+    }
+
+    /// Two bring-ups of one `root_dir` cannot overlap -- which is what keeps
+    /// two first launches from running `initdb` on top of each other.
+    #[tokio::test]
+    async fn the_bring_up_lock_is_exclusive_and_released_with_its_guard() {
+        let dir = tempfile::tempdir().unwrap();
+        let held = bring_up_lock(dir.path()).await.unwrap();
+
+        // A second holder from *this* process would prove nothing about
+        // another one on some platforms, so the contention is probed the way
+        // the loser sees it: the same file, an independent handle.
+        let contender = File::open(dir.path().join(BRING_UP_LOCK)).unwrap();
+        assert!(
+            matches!(contender.try_lock(), Err(TryLockError::WouldBlock)),
+            "the bring-up lock must exclude a second process"
         );
 
-        assert_eq!(inspect_lock(dir.path()).unwrap(), Lock::Live { port });
-        assert!(pid_file.exists());
+        drop(held);
+        assert!(
+            bring_up_lock(dir.path()).await.is_ok(),
+            "dropping the guard must release the lock"
+        );
     }
 }

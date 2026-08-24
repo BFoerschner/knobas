@@ -39,35 +39,24 @@ impl crate::Sink for FailingSink {
     }
 }
 
-/// The stable identifier adapters declare in
-/// [`SourceDescriptor::write_ops`](crate::SourceDescriptor::write_ops) for `op`.
-///
-/// **No wildcard arm, deliberately.** `WriteOp` is documented to grow per
-/// milestone, and a stale table here does not fail quietly -- it falsely
-/// rejects the first adapter to declare the new identifier, with a message
-/// pointing at that adapter's descriptor instead of at this file. So the
-/// reminder is the compiler: adding a variant stops this module compiling until
-/// the variant is given an identifier here and a probe value in
-/// [`known_write_ops`] below.
-fn write_op_identifier(op: &crate::WriteOp) -> &'static str {
-    match op {
-        crate::WriteOp::Comment { .. } => "comment",
-    }
-}
-
-/// One probe value per [`WriteOp`](crate::WriteOp) variant, each paired with its
-/// identifier from [`write_op_identifier`] -- so the two can never disagree.
+/// One probe value per [`WriteOp`](crate::WriteOp) variant, each paired with
+/// its own [`WriteOp::identifier`](crate::WriteOp::identifier) -- so the two
+/// can never disagree.
 ///
 /// This is what lets the battery call `write` with an op the adapter did not
 /// declare, and what makes a typo'd identifier in a descriptor a test failure
 /// rather than an action the UI silently never renders.
+///
+/// The list is exhaustive by construction: a new `WriteOp` variant stops
+/// `WriteOp::identifier` compiling, and adding it there is the moment to add
+/// its probe value here.
 fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
     [crate::WriteOp::Comment {
         entity: format!("{src_id}:contract-battery"),
         body: "contract battery probe".into(),
     }]
     .into_iter()
-    .map(|op| (write_op_identifier(&op), op))
+    .map(|op| (op.identifier(), op))
     .collect()
 }
 
@@ -86,6 +75,13 @@ where
     assert!(
         !src_id.trim().is_empty(),
         "descriptor.id must not be blank -- it is the namespace of every item this source emits"
+    );
+    assert!(
+        !knobas_core::entity::is_reserved_namespace(&src_id),
+        "descriptor.id {src_id:?} is a namespace knobas keeps for its own entities \
+         ({:?}) -- the sync engine refuses such a source outright, so an adapter named this \
+         certifies here and then fails every real run",
+        knobas_core::entity::RESERVED_NAMESPACES
     );
     let mut sink = VecSink(Vec::new());
     let cursor = s
@@ -121,14 +117,27 @@ where
             it.kind
         );
     }
-    // 2. Incremental sync from the returned cursor yields no items when nothing changed.
+    // 2. Incremental sync from the returned cursor yields no items when nothing
+    //    changed, and hands the same cursor straight back.
     let mut sink2 = VecSink(Vec::new());
-    s.sync(Some(cursor), &mut sink2)
+    let idle = s
+        .sync(Some(cursor.clone()), &mut sink2)
         .await
         .expect("incremental sync must succeed");
     assert!(
         sink2.0.is_empty(),
         "incremental sync after no changes must be empty"
+    );
+    // The engine decides whether a run is worth an activity line by comparing
+    // the cursor it handed in with the one that comes back. An adapter that
+    // returns a fresh cursor for a run that fetched nothing -- a timestamp of
+    // "now", say -- makes every idle poll look like a change, and a
+    // five-minute scheduler then writes 288 "synced nothing" lines a day per
+    // source.
+    assert_eq!(
+        idle, cursor,
+        "an incremental sync that emitted nothing must return the cursor it was given, not a \
+         new one"
     );
     // 3. Auth failure maps to Unauthorized, connectivity failure to Unreachable.
     let unauthorized = make(Fault::Unauthorized).test_connection().await;
@@ -236,6 +245,8 @@ mod tests {
         Null,
         /// Declares a blank source id, so every id it emits is unparseable.
         BlankSourceId,
+        /// Names itself after a namespace knobas keeps for its own entities.
+        ReservedSourceId,
         /// Emits an item namespaced to something other than the source id.
         ForeignNamespace,
         /// Emits an item with a blank key -- `EntityRef::new` does not check.
@@ -244,6 +255,9 @@ mod tests {
         UndeclaredKind,
         /// Ignores the cursor and re-emits everything on an incremental sync.
         IgnoresCursor,
+        /// Emits nothing on an incremental sync but hands back a *new* cursor,
+        /// so every idle poll reads as a change.
+        MovesTheCursorWhenIdle,
         /// `test_connection` reports an auth failure as `Protocol`.
         MisclassifiesAuthOnConnect,
         /// `test_connection` reports a connectivity failure as `Protocol`.
@@ -293,6 +307,10 @@ mod tests {
             SourceDescriptor {
                 id: match self.behavior {
                     Behavior::BlankSourceId => String::new(),
+                    // A real one: knobas' own monitor entities live here, and
+                    // an Uptime Kuma adapter calling itself `monitor` is the
+                    // obvious mistake.
+                    Behavior::ReservedSourceId => "monitor".into(),
                     _ => "test".into(),
                 },
                 adapter_kind: "test".into(),
@@ -352,7 +370,12 @@ mod tests {
             let quiet = self.behavior == Behavior::Null
                 || (cursor.is_some() && self.behavior != Behavior::IgnoresCursor);
             if quiet {
-                return Ok("1".into());
+                return Ok(match self.behavior {
+                    // Nothing fetched, yet the position moved: the shape of an
+                    // adapter that stamps `now()` into its cursor.
+                    Behavior::MovesTheCursorWhenIdle => "2".into(),
+                    _ => "1".into(),
+                });
             }
             let namespace = match self.behavior {
                 Behavior::ForeignNamespace => "elsewhere",
@@ -461,6 +484,19 @@ mod tests {
         rejects(Behavior::BlankSourceId, "descriptor.id must not be blank").await;
     }
 
+    /// An adapter named after one of knobas' own namespaces passes every other
+    /// clause and then fails every real sync: the engine refuses the run
+    /// outright. Catching it here is the difference between a red test in the
+    /// adapter's own suite and a source that installs and never works.
+    #[tokio::test]
+    async fn rejects_a_source_id_knobas_keeps_for_itself() {
+        rejects(
+            Behavior::ReservedSourceId,
+            "is a namespace knobas keeps for its own entities",
+        )
+        .await;
+    }
+
     #[tokio::test]
     async fn rejects_a_foreign_namespace() {
         rejects(Behavior::ForeignNamespace, "not namespaced").await;
@@ -485,6 +521,19 @@ mod tests {
     #[tokio::test]
     async fn rejects_an_adapter_that_ignores_the_cursor() {
         rejects(Behavior::IgnoresCursor, "incremental sync").await;
+    }
+
+    /// The other half of clause 2: an idle sync must not move the position.
+    /// The engine's "this run changed nothing" test is exactly `no items and
+    /// the same cursor`, so an adapter that fails this one quietly fills the
+    /// activity log instead of failing anything.
+    #[tokio::test]
+    async fn rejects_an_adapter_whose_cursor_moves_while_idle() {
+        rejects(
+            Behavior::MovesTheCursorWhenIdle,
+            "must return the cursor it was given",
+        )
+        .await;
     }
 
     // -- clauses 3 and 4: fault classification -------------------------------

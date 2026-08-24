@@ -2009,6 +2009,7 @@ dependencies = [
  "knobas-source",
  "knobas-source-mock",
  "knobas-sync",
+ "serde_json",
  "sqlx",
  "tauri",
  "tauri-build",
@@ -2091,6 +2092,7 @@ dependencies = [
  "sqlx",
  "thiserror 2.0.20",
  "tokio",
+ "tracing",
  "uuid",
 ]
 

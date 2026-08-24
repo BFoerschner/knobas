@@ -283,3 +283,67 @@ fn is_mapped(fault: Fault, err: &SourceError) -> bool {
             | (Fault::Unreachable, SourceError::Unreachable(_))
     )
 }
+
+/// The opt-in tombstone: one deterministic deletion on a full sync, and none
+/// at all from the plain mock.
+///
+/// This is the only way the deletion channel is reachable from the reference
+/// adapter -- a real one reports deletions from its remote system, and until
+/// there is one, anything exercising tombstones end to end has to have this to
+/// sync.
+#[tokio::test]
+async fn the_opt_in_tombstone_reports_one_deterministic_deletion() {
+    let s = MockSource::with_tombstone();
+    let mut sink = VecSink(Vec::new());
+    s.sync(None, &mut sink).await.expect("full sync");
+
+    let deleted: Vec<_> = sink.0.iter().filter(|i| i.deleted).collect();
+    assert_eq!(
+        deleted.len(),
+        1,
+        "exactly one deletion, or it is not a fixture"
+    );
+    let gone = deleted[0];
+    assert_eq!(
+        gone.entity.to_string(),
+        format!("mock:{}", knobas_source_mock::TOMBSTONED_KEY)
+    );
+    // A tombstone still carries its last-known title: that is what the UI has
+    // left to render for something that vanished upstream.
+    assert!(!gone.title.trim().is_empty());
+    let declared = MockSource::new().descriptor().entity_kinds;
+    assert!(
+        declared.iter().any(|k| k.id == gone.kind),
+        "a tombstone is an item like any other, and its kind {:?} must be declared",
+        gone.kind
+    );
+
+    // Same again, byte for byte: a re-sync must be idempotent.
+    let mut again = VecSink(Vec::new());
+    s.sync(None, &mut again).await.expect("second full sync");
+    assert_eq!(sink.0.len(), again.0.len());
+    assert_eq!(
+        serde_json::to_value(&again.0[again.0.len() - 1]).unwrap(),
+        serde_json::to_value(gone).unwrap()
+    );
+
+    // ...and the fixture the mockups were drawn against is untouched.
+    let mut plain = VecSink(Vec::new());
+    MockSource::new().sync(None, &mut plain).await.unwrap();
+    assert!(
+        plain.0.iter().all(|i| !i.deleted),
+        "the plain mock must report no deletions"
+    );
+    assert_eq!(plain.0.len() + 1, sink.0.len());
+}
+
+/// A tombstoning adapter is still an adapter: the contract battery holds for
+/// it exactly as it does for the plain mock.
+#[tokio::test]
+async fn the_tombstoning_mock_passes_the_contract_battery() {
+    battery(|fault| match fault {
+        Fault::None => Box::new(MockSource::with_tombstone()) as Box<dyn knobas_source::Source>,
+        other => Box::new(MockSource::with_fault(other)) as Box<dyn knobas_source::Source>,
+    })
+    .await;
+}

@@ -61,6 +61,34 @@ impl EntityRef {
     }
 }
 
+/// Namespaces knobas keeps for its own entities.
+///
+/// The namespace half of an id is either a source id or a local kind, and
+/// these are the local kinds: `note:…`, `ctx:…`, `asset:…`, `route:…` and
+/// `monitor:…` are written by knobas itself, never by an adapter. A source
+/// that called itself `monitor` would write its items where monitors live, and
+/// the per-item namespace guard could not tell -- it can only compare an item
+/// against the source id it was given.
+///
+/// Here rather than in the sync engine because two independent places have to
+/// agree on it: the engine rejects a run whose descriptor claims one of these,
+/// and the SPI's contract battery rejects the adapter *before* it ever gets
+/// that far. A second copy is how an adapter ends up certified against a list
+/// that no longer matches the one that will refuse it.
+pub const RESERVED_NAMESPACES: [&str; 5] = ["note", "ctx", "asset", "route", "monitor"];
+
+/// Whether `namespace` is one knobas keeps for itself.
+///
+/// Case-insensitive: `NOTE:7f2c` addresses the same namespace as `note:7f2c`
+/// to every human reading it, and a guard that disagreed would be trivially
+/// side-stepped.
+#[must_use]
+pub fn is_reserved_namespace(namespace: &str) -> bool {
+    RESERVED_NAMESPACES
+        .iter()
+        .any(|reserved| namespace.eq_ignore_ascii_case(reserved))
+}
+
 impl fmt::Display for EntityRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}:{}", self.namespace, self.key)
@@ -109,6 +137,19 @@ mod tests {
     fn rejects_malformed() {
         for bad in ["", "jira", ":PAY-1", "jira:", "  :  "] {
             assert!(EntityRef::parse(bad).is_err(), "{bad:?} should be rejected");
+        }
+    }
+
+    /// The list is matched the way ids are actually written, which includes
+    /// the case a person types.
+    #[test]
+    fn reserved_namespaces_are_matched_case_insensitively() {
+        for reserved in RESERVED_NAMESPACES {
+            assert!(is_reserved_namespace(reserved));
+            assert!(is_reserved_namespace(&reserved.to_uppercase()));
+        }
+        for open in ["jira", "gitea", "mock", "uptime-kuma", "notes", "context"] {
+            assert!(!is_reserved_namespace(open), "{open:?} is not reserved");
         }
     }
 

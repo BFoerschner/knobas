@@ -174,6 +174,32 @@ pub enum WriteOp {
     Comment { entity: String, body: String },
 }
 
+impl WriteOp {
+    /// The stable snake_case identifier adapters declare for this op in
+    /// [`SourceDescriptor::write_ops`].
+    ///
+    /// Defined once, beside the enum, because everything that maps a variant
+    /// to a name has to agree: the contract battery (which rejects a
+    /// descriptor naming an op the SPI does not define), and every adapter
+    /// deciding whether it supports the op it was handed. A per-crate copy of
+    /// this table is how an adapter comes to reject `"comment"` while
+    /// declaring it.
+    ///
+    /// **No wildcard arm, deliberately.** `WriteOp` is documented to grow per
+    /// milestone, and a stale table does not fail quietly -- it falsely
+    /// rejects the first adapter to declare the new identifier, with a message
+    /// pointing at that adapter's descriptor instead of at this file. So the
+    /// reminder is the compiler: adding a variant stops this module compiling
+    /// until the variant is given an identifier here, and the battery's
+    /// `known_write_ops` stops compiling until it is given a probe value.
+    #[must_use]
+    pub fn identifier(&self) -> &'static str {
+        match self {
+            WriteOp::Comment { .. } => "comment",
+        }
+    }
+}
+
 /// The adapter interface. One implementation per configured source instance.
 #[async_trait::async_trait]
 pub trait Source: Send + Sync {
@@ -186,6 +212,14 @@ pub trait Source: Send + Sync {
     /// its database has no use for the remaining 4,988 items, and returning a
     /// fresh cursor after a partial write would silently skip everything the
     /// sink dropped.
+    ///
+    /// A sync that emitted **nothing** must return the cursor it was given,
+    /// unchanged. The cursor is a position, not a timestamp of the attempt:
+    /// the engine reads "same cursor, no items" as "nothing happened" and
+    /// writes no activity line for it, so an adapter that stamps a fresh
+    /// cursor onto an idle poll turns a five-minute schedule into 288 "synced
+    /// nothing" log lines per source per day. [`contract::battery`] enforces
+    /// it.
     async fn sync(
         &self,
         cursor: Option<Cursor>,

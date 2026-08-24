@@ -39,6 +39,12 @@ use tauri::Manager;
 /// wanted. An empty value counts as unset.
 pub const DB_URL_ENV: &str = "KNOBAS_DB_URL";
 
+/// Label of the one window `tauri.conf.json` declares.
+///
+/// It is created hidden (`"visible": false`) and shown once the database is
+/// up -- see [`run`] -- so this name is load-bearing in two files at once.
+const MAIN_WINDOW: &str = "main";
+
 /// Everything a command needs, managed by Tauri and shared by every window.
 pub struct AppState {
     /// The pool commands run their queries on. Cloned out of [`EmbeddedDb`], so
@@ -78,14 +84,27 @@ pub fn run() {
             // anyway. No `emit` from here (M0 has no events): a listener
             // registered by the frontend cannot exist yet.
             //
-            // It also means the window does not appear until the database is
-            // up, and a first run -- which downloads and `initdb`s PostgreSQL
-            // -- looks like a hang with no UI to say so. Bringing the database
-            // up behind a loading state needs a window to put that state in,
-            // which is M1 stream D; until then the panic hook below is what
-            // makes a failure legible.
+            // It also means the whole bring-up happens before the app is
+            // usable, and a first run -- which downloads and `initdb`s
+            // PostgreSQL -- can take tens of seconds. `tauri.conf.json`
+            // therefore declares the window `"visible": false` and it is shown
+            // here, once there is something behind it: a window created up
+            // front would sit on screen as an empty white frame that does not
+            // repaint, which reads as a hung application rather than as a slow
+            // start. Nothing is lost by waiting -- the frontend has no loading
+            // state to render either, since it cannot be told when the
+            // database is ready until M0 grows events (M1 stream D). Until
+            // then the panic hook below is what makes a *failure* legible: the
+            // process dies without ever showing a window.
             let handle = app.handle().clone();
             tauri::async_runtime::block_on(async move { start_database(&handle).await })?;
+
+            // By label, and a hard failure if it is missing: a config whose
+            // window was renamed would otherwise start knobas with no window
+            // at all and no hint as to why.
+            app.get_webview_window(MAIN_WINDOW)
+                .ok_or_else(|| format!("no {MAIN_WINDOW:?} window in tauri.conf.json"))?
+                .show()?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -218,4 +237,31 @@ fn install_panic_hook() {
         tracing::error!("{info}");
         default(info);
     }));
+}
+
+#[cfg(test)]
+mod tests {
+    /// The window `tauri.conf.json` declares is created hidden, and `run`
+    /// shows it once the database is up.
+    ///
+    /// The two halves live in different files and neither compiles against the
+    /// other, so the config is asserted here. A `"visible": true` puts an
+    /// empty white frame on screen for the length of a first run -- which is a
+    /// PostgreSQL download plus an `initdb` -- and a renamed label makes `run`
+    /// fail to find the window it is supposed to show.
+    #[test]
+    fn the_main_window_is_declared_hidden_under_the_label_run_shows() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("tauri.conf.json");
+        let windows = config["app"]["windows"]
+            .as_array()
+            .expect("app.windows is an array");
+
+        assert_eq!(windows.len(), 1, "run() shows exactly one window");
+        assert_eq!(windows[0]["label"], super::MAIN_WINDOW);
+        assert_eq!(
+            windows[0]["visible"], false,
+            "the window must not appear before the database is up"
+        );
+    }
 }
