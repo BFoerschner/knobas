@@ -14,12 +14,17 @@ M1 and later — see the roadmap.
 
 ## Dev quickstart
 
-Prerequisites: [rustup](https://rustup.rs) (the toolchain itself is pinned to
-**1.94** by `rust-toolchain.toml` and installed on first build) and Node
-20.19+ / 22.12+ for the frontend, which is what Vite 8 requires.
+Prerequisites:
+
+- [rustup](https://rustup.rs) — the toolchain itself is pinned to **1.94** by
+  `rust-toolchain.toml` and installed on first build.
+- Node **20.19+ / 22.12+** for the frontend, which is what Vite 8 requires.
+- [`just`](https://github.com/casey/just) — every command below is one of its
+  recipes, and nothing in the repo provisions it: `brew install just`, or
+  `cargo install just`.
 
 ```bash
-just deps     # npm ci in app/, only when the lockfile moved
+just deps     # npm ci in app/, on a fresh clone and whenever the lockfile moved
 just check    # fmt + svelte-check + vite build + clippy -D warnings + tests
 just dev      # the desktop app against its own embedded Postgres
 ```
@@ -27,12 +32,16 @@ just dev      # the desktop app against its own embedded Postgres
 The first `cargo test` (and the first `just dev`) **downloads PostgreSQL 18.6
 once** into the shared `~/.theseus/postgresql/<version>` and runs `initdb`;
 expect that run to take a few minutes and to need network. Every later run
-reuses it. Set `KNOBAS_DB_URL` to point the app at a Postgres you manage
-instead of starting an embedded one.
+reuses it.
 
 `just check` is the whole quality gate: `cargo fmt --check`, `svelte-check` and
 `vite build`, `cargo clippy --workspace --all-targets -- -D warnings`, and
 `cargo test --workspace`. Nothing is pushed without it green.
+
+Setting `KNOBAS_DB_URL` points **the app** at a Postgres you manage instead of
+starting an embedded one — for developing against a server with real data in
+it. It has no effect on `just check`: the tests always stand up their own
+throwaway server, so it is not a way to skip the download above.
 
 ## Demo mode
 
@@ -47,11 +56,23 @@ idempotent; pressing it twice rewrites the same rows. Afterwards, searching for
 
 Quitting the app (Cmd-Q, or closing the last window) stops the embedded server.
 A signal does not: Ctrl-C under `just dev`, a `kill`, or a crash leaves the
-postmaster running. The next start **adopts** that orphan and reuses it as a
-warm start rather than fighting it for the data directory — but an adopted
-server is not owned, so from then on no clean quit stops it. Owning that
-properly is M1 stream F; until then, `pg_ctl stop` or a reboot is the manual
-escape.
+postmaster running.
+
+That orphan needs no cleanup — **just start knobas again**. The next start
+finds the server already serving its data directory and *adopts* it rather than
+fighting it for the lock, which also makes it a warm start. The catch is that an
+adopted server is not owned, so from then on no clean quit stops it; owning it
+properly is M1 stream F.
+
+To stop one by hand, the server's own `pg_ctl` is the one that works — it is not
+on `PATH`, and it needs the data directory:
+
+```bash
+~/.theseus/postgresql/18.6.0/bin/pg_ctl \
+  -D "$HOME/Library/Application Support/dev.knobas.desktop/db/data" stop
+```
+
+A reboot does the same thing.
 
 ## Crate map
 
