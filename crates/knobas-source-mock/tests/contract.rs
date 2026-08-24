@@ -140,13 +140,21 @@ async fn fixture_keeps_the_prose_verbatim() {
 
 /// The descriptor is the only thing the UI reads to render this source, so it
 /// is asserted rather than assumed.
+///
+/// P12: `Capability::Search` now means "the source supports server-side
+/// search, reserved for a future `Source::search`" -- the mock has no such
+/// entry point, so it declares no Search. It keeps `Write` + `"comment"`,
+/// which is the battery's exercise vehicle for the write path.
 #[tokio::test]
-async fn descriptor_declares_search_write_and_five_kinds() {
+async fn descriptor_declares_write_only_and_five_kinds() {
     let d = MockSource::new().descriptor();
     assert_eq!(d.id, "mock");
     assert_eq!(d.adapter_kind, "mock");
-    assert_eq!(d.capabilities, [Capability::Search, Capability::Write]);
+    assert_eq!(d.capabilities, [Capability::Write]);
     assert_eq!(d.write_ops, ["comment"]);
+    // The fixture is the whole world, so a full sync is exhaustive and the
+    // engine's sweep may tombstone what it stops emitting.
+    assert!(d.full_sync_exhaustive);
     assert!(d.auth_methods.is_empty(), "the mock authenticates nothing");
     let kinds: Vec<&str> = d.entity_kinds.iter().map(|k| k.id.as_str()).collect();
     assert_eq!(kinds, ["ticket", "pr", "build", "page", "commit"]);
@@ -346,4 +354,119 @@ async fn the_tombstoning_mock_passes_the_contract_battery() {
         other => Box::new(MockSource::with_fault(other)) as Box<dyn knobas_source::Source>,
     })
     .await;
+}
+
+/// P4: a successful connection reports who answered, so the Add-source flow
+/// can say more than "Connected". Every field is optional and the mock fills
+/// what a compiled-in fixture can honestly claim.
+#[tokio::test]
+async fn test_connection_reports_what_it_reached() {
+    let info = MockSource::new()
+        .test_connection()
+        .await
+        .expect("the mock always connects");
+    assert_eq!(info.account.as_deref(), Some("mara.lindqvist"));
+    assert!(
+        info.server_version
+            .as_deref()
+            .is_some_and(|v| v.starts_with("knobas-source-mock")),
+        "{:?}",
+        info.server_version
+    );
+    // Nothing to expire: the fixture is compiled in.
+    assert!(info.secret_expires_at.is_none());
+}
+
+/// P5: *Open in browser* needs a URL from the adapter, because deriving it in
+/// the frontend would need exactly the per-adapter table §3a forbids.
+#[tokio::test]
+async fn every_emitted_item_carries_a_web_url() {
+    let s = MockSource::new();
+    let mut sink = VecSink(Vec::new());
+    s.sync(None, &mut sink).await.expect("full sync");
+
+    let ticket = sink
+        .0
+        .iter()
+        .find(|i| i.entity.key == "PAY-231")
+        .expect("PAY-231");
+    assert_eq!(
+        ticket.web_url.as_deref(),
+        Some("https://tidewater.example/browse/PAY-231")
+    );
+    let pr = sink
+        .0
+        .iter()
+        .find(|i| i.entity.key == "payout-service#142")
+        .expect("PR #142");
+    assert_eq!(
+        pr.web_url.as_deref(),
+        Some("https://tidewater.example/tidewater/payout-service/pulls/142")
+    );
+    assert!(
+        sink.0.iter().all(|i| i.web_url.is_some()),
+        "the fixture's world is fictional but complete: every item has a page"
+    );
+}
+
+/// §4.2: one descriptor template per adapter kind, with `id == adapter_kind`.
+#[tokio::test]
+async fn the_descriptor_template_is_the_default_instance() {
+    let template = knobas_source_mock::descriptor_template();
+    assert_eq!(template.id, template.adapter_kind);
+    assert_eq!(template.id, "mock");
+}
+
+/// Ruling P10's multi-instance form, proven rather than assumed: a second
+/// instance emits into its own namespace, so two of them cannot overwrite each
+/// other's rows.
+#[tokio::test]
+async fn build_honours_the_instance_id() {
+    let instance = knobas_source::instance::SourceInstance {
+        id: "mock-eu".to_owned(),
+        kind: "mock".to_owned(),
+        display_name: "Tidewater EU".to_owned(),
+        base_url: String::new(),
+        auth: None,
+        secret: None,
+        config: serde_json::json!({}),
+    };
+    let source = knobas_source_mock::build(instance.clone()).expect("built");
+    assert_eq!(source.descriptor().id, "mock-eu");
+    assert_eq!(source.descriptor().adapter_kind, "mock");
+
+    let mut sink = VecSink(Vec::new());
+    source.sync(None, &mut sink).await.expect("full sync");
+    assert!(
+        sink.0.iter().all(|item| item.entity.namespace == "mock-eu"),
+        "every item must be namespaced to the instance that emitted it"
+    );
+
+    // And a second instance is a whole adapter, not a half one.
+    battery(move |fault| match fault {
+        Fault::None => knobas_source_mock::build(instance.clone()).expect("built"),
+        other => Box::new(MockSource::with_fault(other)) as Box<dyn knobas_source::Source>,
+    })
+    .await;
+}
+
+/// An id that cannot be an entity namespace is refused at build time, not at
+/// the first sync -- it is baked into every row the source would ever write.
+#[tokio::test]
+async fn build_refuses_an_unusable_instance_id() {
+    for bad in ["Mock", "note", "mock:eu", ""] {
+        let instance = knobas_source::instance::SourceInstance {
+            id: bad.to_owned(),
+            kind: "mock".to_owned(),
+            display_name: "bad".to_owned(),
+            base_url: String::new(),
+            auth: None,
+            secret: None,
+            config: serde_json::json!({}),
+        };
+        assert!(
+            knobas_source_mock::build(instance).is_err(),
+            "{bad:?} must be refused"
+        );
+    }
 }

@@ -9,7 +9,7 @@ use std::sync::Mutex;
 
 use knobas_core::entity::EntityRef;
 use knobas_source::{
-    Capability, Cursor, KindInfo, Sink, Source, SourceDescriptor, SourceError, SyncItem, WriteOp,
+    Cursor, KindInfo, Sink, Source, SourceDescriptor, SourceError, SyncItem, WriteOp,
 };
 use knobas_source_mock::MockSource;
 use sqlx::PgPool;
@@ -44,14 +44,16 @@ async fn mock_sync_lands_in_postgres_and_is_searchable() {
         .unwrap();
     assert_eq!(inc.upserted, 0);
 
-    // and the synced corpus answers FTS
-    let hits = knobas_db::search::search(pool, "sepa retry", 10)
-        .await
-        .unwrap();
-    assert!(
-        hits.iter().any(|h| h.entity_id == "mock:PAY-231"),
-        "hits: {hits:?}"
-    );
+    // and the synced corpus is visible to the launcher's view
+    let (found,): (i64,) = sqlx::query_as(
+        "select count(*) from sync.live_item
+          where entity_id = 'mock:PAY-231'
+            and fts @@ websearch_to_tsquery('english', 'sepa retry')",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(found, 1, "the mock's PAY-231 must be findable after a sync");
 
     // sync wrote an activity line
     let acts = knobas_core::activity::recent(pool, 50).await.unwrap();
@@ -106,7 +108,9 @@ impl Source for FakeSource {
             id: self.id.clone(),
             adapter_kind: "fake".to_owned(),
             name: "Fake".to_owned(),
-            capabilities: vec![Capability::Search],
+            // P12: `Search` means server-side search, which this fake has no
+            // entry point for; it is read-only, so it declares nothing.
+            capabilities: Vec::new(),
             adapter_version: "0.1.0".to_owned(),
             auth_methods: Vec::new(),
             write_ops: Vec::new(),
@@ -116,12 +120,17 @@ impl Source for FakeSource {
                 plural: "Tickets".to_owned(),
                 monogram: "TK".to_owned(),
             }],
+            // Everything it is given, every run: the engine's sweep may
+            // tombstone what it stops emitting.
+            full_sync_exhaustive: true,
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
         }
     }
 
-    async fn test_connection(&self) -> Result<(), SourceError> {
-        Ok(())
+    async fn test_connection(&self) -> Result<knobas_source::ConnectionInfo, SourceError> {
+        // A fake that connects to nothing: `Default` is exactly "connected,
+        // nothing to report".
+        Ok(knobas_source::ConnectionInfo::default())
     }
 
     async fn sync(
@@ -162,8 +171,10 @@ impl Source for LockProbingSource {
         FakeSource::new(&self.id, Vec::new()).descriptor()
     }
 
-    async fn test_connection(&self) -> Result<(), SourceError> {
-        Ok(())
+    async fn test_connection(&self) -> Result<knobas_source::ConnectionInfo, SourceError> {
+        // A fake that connects to nothing: `Default` is exactly "connected,
+        // nothing to report".
+        Ok(knobas_source::ConnectionInfo::default())
     }
 
     async fn sync(
@@ -217,6 +228,7 @@ fn item(source: &str, key: &str, title: &str, deleted: bool) -> SyncItem {
         author: Some("mara".to_owned()),
         updated_at: None,
         payload: serde_json::json!({ "key": key }),
+        web_url: None,
         deleted,
     }
 }
@@ -267,6 +279,48 @@ async fn deleted_at(pool: &PgPool, entity: &str) -> Option<chrono::DateTime<chro
             .await
             .unwrap();
     at
+}
+
+/// The adapter's `web_url` reaches the mirror, or *Open in browser* has
+/// nothing to open (interfaces §2.5, P5).
+#[tokio::test]
+async fn the_mirror_stores_the_item_web_url() {
+    let (pool, id) = fixture().await;
+    let with_url = SyncItem {
+        web_url: Some("https://tidewater.example/browse/TIDE-9".to_owned()),
+        ..item(&id, "TIDE-9", "has a page", false)
+    };
+    knobas_sync::run_once(&pool, &FakeSource::new(&id, vec![with_url]), None)
+        .await
+        .unwrap();
+
+    let (stored,): (Option<String>,) =
+        sqlx::query_as("select web_url from sync.item where entity_id = $1")
+            .bind(format!("{id}:TIDE-9"))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        stored.as_deref(),
+        Some("https://tidewater.example/browse/TIDE-9")
+    );
+
+    // An adapter that stops reporting one clears it, exactly like the title:
+    // the mirror is refreshed wholesale, never merged.
+    knobas_sync::run_once(
+        &pool,
+        &FakeSource::new(&id, vec![item(&id, "TIDE-9", "has a page", false)]),
+        None,
+    )
+    .await
+    .unwrap();
+    let (stored,): (Option<String>,) =
+        sqlx::query_as("select web_url from sync.item where entity_id = $1")
+            .bind(format!("{id}:TIDE-9"))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored, None);
 }
 
 /// A remote deletion tombstones the entity without dropping it -- links point
@@ -669,6 +723,24 @@ async fn item_updated_at(pool: &PgPool, entity: &str) -> Option<chrono::DateTime
     at
 }
 
+/// Entity ids matching `term` in the launcher's corpus.
+///
+/// Asked of `sync.live_item` rather than through `knobas-search`: what the
+/// engine owes the launcher is a *view* with the tombstoned rows gone, and a
+/// test that went through the search crate would be asserting that crate's
+/// ranking as much as this one's writes.
+async fn live_matches(pool: &PgPool, term: &str) -> Vec<String> {
+    sqlx::query_scalar(
+        "select entity_id from sync.live_item
+          where fts @@ websearch_to_tsquery('english', $1)
+          order by entity_id",
+    )
+    .bind(term)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
 async fn updated_at(pool: &PgPool, entity: &str) -> chrono::DateTime<chrono::Utc> {
     let (at,): (chrono::DateTime<chrono::Utc>,) =
         sqlx::query_as("select updated_at from knobas.entity where id = $1")
@@ -761,16 +833,15 @@ async fn a_tombstoned_item_leaves_search_but_keeps_its_mirror_row() {
 
     let live = FakeSource::new(&id, vec![item(&id, "TIDE-7", &token, false)]);
     knobas_sync::run_once(&pool, &live, None).await.unwrap();
-    let hits = knobas_db::search::search(&pool, &token, 10).await.unwrap();
-    assert_eq!(hits.len(), 1, "{hits:?}");
-    assert_eq!(hits[0].entity_id, entity);
+    let matches = live_matches(&pool, &token).await;
+    assert_eq!(matches, vec![entity.clone()]);
 
     let gone = FakeSource::new(&id, vec![item(&id, "TIDE-7", &token, true)]);
     knobas_sync::run_once(&pool, &gone, None).await.unwrap();
-    let hits = knobas_db::search::search(&pool, &token, 10).await.unwrap();
+    let matches = live_matches(&pool, &token).await;
     assert!(
-        hits.is_empty(),
-        "a tombstoned entity must not answer search: {hits:?}"
+        matches.is_empty(),
+        "a tombstoned entity must not answer search: {matches:?}"
     );
 
     let (title,): (String,) = sqlx::query_as("select title from sync.item where entity_id = $1")
@@ -779,4 +850,135 @@ async fn a_tombstoned_item_leaves_search_but_keeps_its_mirror_row() {
         .await
         .unwrap();
     assert_eq!(title, token, "the mirror row survives the tombstone");
+}
+
+// ---------------------------------------------------------------------------
+// `knobas_sync::run` -- the composition around a run, both ways it can end.
+// ---------------------------------------------------------------------------
+
+/// A sink that keeps every message, so the phase sequence can be asserted.
+#[derive(Default)]
+struct Recorder(Mutex<Vec<knobas_sync::SyncProgress>>);
+
+impl knobas_sync::ProgressSink for Recorder {
+    fn report(&self, progress: knobas_sync::SyncProgress) {
+        self.0.lock().unwrap().push(progress);
+    }
+}
+
+impl Recorder {
+    fn phases(&self) -> Vec<knobas_sync::SyncPhase> {
+        self.0.lock().unwrap().iter().map(|p| p.phase).collect()
+    }
+}
+
+/// The row `run_id` left behind: outcome, whether it closed, and its error.
+async fn finished_run(pool: &PgPool, run_id: i64) -> (Option<String>, bool, Option<String>) {
+    sqlx::query_as(
+        "select outcome, finished_at is not null, error from knobas.sync_run where id = $1",
+    )
+    .bind(run_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// **A run that fails still closes its log row, correctly classified.**
+///
+/// The one that matters most, and the one that is easiest to leave untested
+/// because the caller already sees the error: an open `sync_run` row is a run
+/// the diagnostics view shows as *still running* for ever, and stream F's
+/// backoff reads `outcome` to decide whether to retry at all -- `unauthorized`
+/// is never retried, `unreachable` is. A failure that writes no outcome is
+/// therefore a source that either hammers or stalls, silently, long after the
+/// command that started it returned.
+///
+/// Asserted together with the phases because they are one contract: whoever is
+/// watching the channel has to be told the run ended, not just left waiting.
+#[tokio::test]
+async fn a_failed_run_closes_its_log_row_and_reports_the_failure() {
+    let pool = knobas_db::test_util::test_pool().await;
+    let pool = &pool;
+    knobas_db::migrate::run(pool).await.unwrap();
+
+    let id = format!("runner-fail-{}", Uuid::new_v4());
+    let source = FakeSource::failing(&id, vec![item(&id, "T-1", "One", false)]);
+    let run_id = knobas_sync::run_log::start(pool, &id, knobas_sync::SyncTrigger::Manual)
+        .await
+        .unwrap();
+    let sink = Recorder::default();
+
+    let error = knobas_sync::run(pool, &source, None, run_id, Some(&sink))
+        .await
+        .expect_err("the fake gives up mid-sync");
+    assert!(
+        matches!(
+            error,
+            knobas_sync::SyncError::Source(SourceError::Unreachable(_))
+        ),
+        "{error:?}"
+    );
+
+    let (outcome, closed, logged) = finished_run(pool, run_id).await;
+    assert!(closed, "a failed run must not stay open for ever");
+    assert_eq!(
+        outcome.as_deref(),
+        Some("unreachable"),
+        "stream F's backoff branches on this: unreachable retries, unauthorized never does"
+    );
+    assert!(
+        logged.is_some_and(|message| message.contains("gave up")),
+        "the failure's own message belongs in the log row"
+    );
+
+    use knobas_sync::SyncPhase::{Failed, Started};
+    assert_eq!(sink.phases(), vec![Started, Failed]);
+    let last = sink.0.lock().unwrap().last().cloned().unwrap();
+    assert_eq!(last.run_id, run_id);
+    assert_eq!(last.source_id, id);
+    assert!(last.message.is_some(), "a Failed phase carries the reason");
+}
+
+/// The other way it ends: the row closes `ok`, with the counts and the cursor
+/// the run earned.
+#[tokio::test]
+async fn a_successful_run_closes_its_log_row_with_the_counts() {
+    let pool = knobas_db::test_util::test_pool().await;
+    let pool = &pool;
+    knobas_db::migrate::run(pool).await.unwrap();
+
+    let id = format!("runner-ok-{}", Uuid::new_v4());
+    let source = FakeSource::new(
+        &id,
+        vec![
+            item(&id, "T-1", "One", false),
+            item(&id, "T-2", "Two", false),
+        ],
+    );
+    let run_id = knobas_sync::run_log::start(pool, &id, knobas_sync::SyncTrigger::Schedule)
+        .await
+        .unwrap();
+    let sink = Recorder::default();
+
+    let report = knobas_sync::run(pool, &source, None, run_id, Some(&sink))
+        .await
+        .expect("the fake syncs cleanly");
+    assert_eq!(report.upserted, 2);
+
+    let (outcome, closed, logged) = finished_run(pool, run_id).await;
+    assert!(closed);
+    assert_eq!(outcome.as_deref(), Some("ok"));
+    assert_eq!(logged, None, "a clean run logs no error");
+
+    let (upserted, cursor_after): (i64, Option<String>) =
+        sqlx::query_as("select upserted, cursor_after from knobas.sync_run where id = $1")
+            .bind(run_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(upserted, 2);
+    assert_eq!(cursor_after.as_deref(), Some(report.cursor.as_str()));
+
+    use knobas_sync::SyncPhase::{Finished, Started};
+    assert_eq!(sink.phases(), vec![Started, Finished]);
 }

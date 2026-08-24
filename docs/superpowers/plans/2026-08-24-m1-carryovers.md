@@ -2,10 +2,12 @@
 
 Extracted from the M0 execution ledger at milestone exit (2026-08-24). Every M1 plan writer reads this alongside the roadmap.
 
+Items struck through were discharged by the M1 contract PR (checkpoint 0); everything else is still its stream's to do. A carry-over marked done by the wrong PR is a carry-over nobody does.
+
 ## Owed to specific M1 streams
 
 **Stream F (sync engine):**
-- **Migration `0002`** (single-writer, orchestrator-owned): `live_item` view (makes the tombstone filter structural for every reader — smart-list authors must not need to remember the `deleted_at` join) + index on `knobas.activity (at desc, id desc)` (its only consumer is a global newest-first query; today's index is per-entity only).
+- ~~**Migration `0002`** (single-writer, orchestrator-owned): `live_item` view (makes the tombstone filter structural for every reader — smart-list authors must not need to remember the `deleted_at` join) + index on `knobas.activity (at desc, id desc)` (its only consumer is a global newest-first query; today's index is per-entity only).~~ **Done (contract PR, task 1).** `sync.live_item` and `activity_recent_idx` are in `0002_m1_cockpit.sql`, each with a schema test. Read the mirror through `sync.live_item` — never `sync.item` — and never `select *` from it (`fts` is a `tsvector`).
 - **Hard-delete reconciliation**: a full sync cannot express items the source stopped returning; rows stay live forever. Documented limitation on `run_once`.
 - **Sync concurrency**: `run_once` pins one of the pool's 5 connections for the whole network-bound run; the scheduler must cap concurrent syncs or use a dedicated pool. Also: quitting mid-sync stalls on `pool.close()` until the run's transaction drains; and the cursor is read outside `run_once`'s advisory lock (overlapping same-source triggers double-fetch).
 - **PID-liveness residual**: a live *recycled* PID plus a non-Postgres squatter on the recorded port still yields `AlreadyRunning` (manual `postmaster.pid` deletion required). Accepted narrow residual; `ps -p` probing landed in the exit wave, this is the last uncovered corner.
@@ -13,7 +15,7 @@ Extracted from the M0 execution ledger at milestone exit (2026-08-24). Every M1 
 
 **Stream D (frontend shell):**
 - **Async DB bring-up with a loading state** — the exit wave hid the frozen window (`visible: false` + show-when-ready), but first-run download/initdb still blocks the event loop; a real loading screen replaces that.
-- Structured snippet highlighting (sentinel selectors → segments); M0 ships plain text over title+body.
+- ~~Structured snippet highlighting (sentinel selectors → segments); M0 ships plain text over title+body.~~ **Done (contract PR, task 4).** `knobas_search::snippet` owns the sentinel selectors (`headline_options()`) and the split (`segments()`); `SearchHit.snippet` is `Vec<Segment>`. Every `Segment.text` is raw source text: render as text, never as markup (gotcha 7).
 - `capabilities/default.json` grants only `core:default` — the first plugin (notifications, shortcuts) must extend it. CSP note: desktop dev builds get NO CSP; verify CSP changes against production builds only.
 
 **Stream T / CI:**

@@ -24,14 +24,17 @@ postgresql_archive = { version = "0.21", default-features = false, features = [
     "theseus",
     "tls-native-tls",
 ] }
-chrono.workspace = true
-serde.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tracing = "0.1"
 
 [dev-dependencies]
+# Only `tests/schema.rs` reaches for the column types the migrations declare;
+# nothing in `src/` mentions a timestamp. A dependency here rather than above
+# for the same reason `serde` left with `knobas_db::search` (ruling P9): the
+# library a consumer builds should not carry what only its tests use.
+chrono.workspace = true
 # Self-dev-dependency so this crate's own integration tests see `test_util`.
 knobas-db = { path = ".", features = ["test-util"] }
 serde_json.workspace = true

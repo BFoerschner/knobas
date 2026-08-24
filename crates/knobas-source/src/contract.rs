@@ -83,6 +83,14 @@ where
          certifies here and then fails every real run",
         knobas_core::entity::RESERVED_NAMESPACES
     );
+    // §4.1: the id is the entity namespace, immutable once chosen, and typed
+    // by a human into the Add-source form -- so it is a slug, not free text.
+    // Certifying here is the difference between a red test in the adapter's
+    // own suite and a source that installs and can never be renamed out of
+    // its mistake.
+    if let Err(error) = crate::instance::validate_instance_id(&src_id) {
+        panic!("descriptor.id {src_id:?} is not a usable instance id: {error}");
+    }
     let mut sink = VecSink(Vec::new());
     let cursor = s
         .sync(None, &mut sink)
@@ -139,7 +147,15 @@ where
         "an incremental sync that emitted nothing must return the cursor it was given, not a \
          new one"
     );
-    // 3. Auth failure maps to Unauthorized, connectivity failure to Unreachable.
+    // 3. A healthy adapter connects, and says what it reached. Everything the
+    //    Add-source flow renders comes from here (P4), and an adapter that
+    //    fails its own happy path would otherwise only be caught by `sync`.
+    let healthy = s.test_connection().await;
+    assert!(
+        healthy.is_ok(),
+        "a healthy adapter's test_connection must succeed, got {healthy:?}"
+    );
+    //    Auth failure maps to Unauthorized, connectivity failure to Unreachable.
     let unauthorized = make(Fault::Unauthorized).test_connection().await;
     assert!(
         matches!(unauthorized, Err(crate::SourceError::Unauthorized)),
@@ -224,8 +240,8 @@ where
 mod tests {
     use super::{Fault, battery};
     use crate::{
-        AuthMethod, Capability, Cursor, KindInfo, Sink, Source, SourceDescriptor, SourceError,
-        SyncItem, WriteOp,
+        AuthMethod, Capability, ConnectionInfo, Cursor, KindInfo, Sink, Source, SourceDescriptor,
+        SourceError, SyncItem, WriteOp,
     };
     use knobas_core::entity::EntityRef;
 
@@ -247,6 +263,15 @@ mod tests {
         BlankSourceId,
         /// Names itself after a namespace knobas keeps for its own entities.
         ReservedSourceId,
+        /// Names itself with something that is not a slug -- uppercase and an
+        /// underscore, the two things a human types first. Otherwise perfect:
+        /// it emits into its own odd namespace consistently, so the slug rule
+        /// is the *only* clause it fails.
+        NonSlugSourceId,
+        /// Fails `test_connection` when nothing is wrong, while classifying
+        /// both faults correctly -- so it fails the healthy-connect clause
+        /// alone.
+        FailsWhileHealthy,
         /// Emits an item namespaced to something other than the source id.
         ForeignNamespace,
         /// Emits an item with a blank key -- `EntityRef::new` does not check.
@@ -311,6 +336,7 @@ mod tests {
                     // an Uptime Kuma adapter calling itself `monitor` is the
                     // obvious mistake.
                     Behavior::ReservedSourceId => "monitor".into(),
+                    Behavior::NonSlugSourceId => "Test_Source".into(),
                     _ => "test".into(),
                 },
                 adapter_kind: "test".into(),
@@ -342,17 +368,27 @@ mod tests {
                     plural: "Tickets".into(),
                     monogram: "TE".into(),
                 }],
+                full_sync_exhaustive: true,
                 config_schema: serde_json::json!({ "type": "object", "properties": {} }),
             }
         }
 
-        async fn test_connection(&self) -> Result<(), SourceError> {
+        async fn test_connection(&self) -> Result<ConnectionInfo, SourceError> {
+            // Only the healthy path: a faulted instance still classifies its
+            // fault correctly, so this behavior fails clause 3's new
+            // assertion and nothing else.
+            if self.behavior == Behavior::FailsWhileHealthy && self.fault == Fault::None {
+                return Err(SourceError::Protocol("the server said no".into()));
+            }
             match self.faulted(
                 self.behavior == Behavior::MisclassifiesAuthOnConnect,
                 self.behavior == Behavior::MisclassifiesReachOnConnect,
             ) {
                 Some(err) => Err(err),
-                None => Ok(()),
+                None => Ok(ConnectionInfo {
+                    account: Some("test".into()),
+                    ..ConnectionInfo::default()
+                }),
             }
         }
 
@@ -380,6 +416,9 @@ mod tests {
             let namespace = match self.behavior {
                 Behavior::ForeignNamespace => "elsewhere",
                 Behavior::BlankSourceId => "",
+                // Consistent with its own descriptor id, so the only thing
+                // wrong with this adapter is that the id is not a slug.
+                Behavior::NonSlugSourceId => "Test_Source",
                 _ => "test",
             };
             let key = match self.behavior {
@@ -399,6 +438,7 @@ mod tests {
                     author: None,
                     updated_at: None,
                     payload: serde_json::json!({}),
+                    web_url: None,
                     deleted: false,
                 })
                 .await;
@@ -497,6 +537,14 @@ mod tests {
         .await;
     }
 
+    /// The id is also what a human types into the Add-source form and what
+    /// every entity id this source writes is prefixed with, so free text is
+    /// refused before it becomes immutable.
+    #[tokio::test]
+    async fn rejects_an_id_that_is_not_a_slug() {
+        rejects(Behavior::NonSlugSourceId, "is not a usable instance id").await;
+    }
+
     #[tokio::test]
     async fn rejects_a_foreign_namespace() {
         rejects(Behavior::ForeignNamespace, "not namespaced").await;
@@ -536,7 +584,15 @@ mod tests {
         .await;
     }
 
-    // -- clauses 3 and 4: fault classification -------------------------------
+    // -- clauses 3 and 4: connection and fault classification -----------------
+
+    /// The happy path of `test_connection` is what the Add-source flow runs
+    /// first, so an adapter that cannot connect when nothing is wrong is
+    /// caught here rather than by a user staring at a red dialog.
+    #[tokio::test]
+    async fn rejects_an_adapter_that_cannot_connect_when_nothing_is_wrong() {
+        rejects(Behavior::FailsWhileHealthy, "test_connection must succeed").await;
+    }
 
     #[tokio::test]
     async fn rejects_an_auth_failure_misclassified_by_test_connection() {

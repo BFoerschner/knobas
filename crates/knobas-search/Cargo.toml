@@ -1,0 +1,19 @@
+[package]
+name = "knobas-search"
+edition.workspace = true
+version.workspace = true
+
+# The launcher's read side. It takes a `PgPool` rather than opening one, so it
+# needs `sqlx` but not `knobas-db` -- the database crate is a test dependency
+# only. Stream E owns this crate from M1's contract PR onwards.
+[dependencies]
+chrono.workspace = true
+serde.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+knobas-db = { path = "../knobas-db", features = ["test-util"] }
+serde_json.workspace = true
+tokio.workspace = true
+uuid.workspace = true

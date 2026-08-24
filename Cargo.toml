@@ -20,3 +20,33 @@ async-trait = "0.1"
 # Neither implies compile-time-checked queries: no `query!`, no DATABASE_URL,
 # no offline cache in M0 (runtime-checked `query`/`query_as` only).
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-none", "postgres", "migrate", "derive", "macros", "uuid", "chrono", "json"] }
+
+# The adapter HTTP stack (roadmap §4), shared by `knobas-http`'s three
+# consumers (Jira, Gitea, TeamCity) and pinned here so they cannot drift.
+#
+# No `tauri-plugin-http`: it pins reqwest 0.12 and we would ship two copies.
+# Exactly one reqwest may end up in the tree -- check with `cargo tree -i
+# reqwest` after any version bump.
+#
+# Features, spelled for reqwest **0.13** (the names differ from 0.12):
+# * `rustls` is 0.13's rustls-with-`rustls-platform-verifier` backend, i.e.
+#   rustls validating against the *platform's* root store -- the macOS keychain
+#   here, so a corporate CA installed for the browser works for knobas too.
+#   0.12's `rustls-tls-native-roots` no longer exists; this is its successor,
+#   and it is a better one (the platform verifier, not a snapshot of the roots).
+#   `default-features = false` is what keeps `default-tls` (and with it any
+#   native-tls backend) out.
+# * `charset` gates `Response::text()`, which is how an error body reaches a
+#   `SourceError::Protocol` message.
+# * `query` and `form` are not default in 0.13; `query` is what `get_json`'s
+#   parameter list rides on. `form` stays off -- M1 issues no writes.
+# * `system-proxy` reads the OS proxy settings, the other half of working from
+#   inside a corporate network.
+#
+# No `reqwest-middleware`/`reqwest-retry`: `knobas-http` owns its retry loop, so
+# that every attempt passes the rate limiter and `Retry-After` is honoured
+# before the retry it applies to -- neither of which a retry policy running
+# *inside* one `send` can do (it never sees the limiter, and never sees a
+# response header).
+reqwest = { version = "0.13.4", default-features = false, features = ["charset", "gzip", "http2", "json", "query", "rustls", "system-proxy"] }
+governor = "0.10.4"

@@ -28,6 +28,8 @@ just deps     # npm ci in app/, on a fresh clone and whenever the lockfile moved
 just check    # fmt + svelte-check + vite build + clippy -D warnings + tests
               # (also what CI runs on every PR)
 just dev      # the desktop app against its own embedded Postgres
+just demo     # the same app in the demo profile (own directory, database,
+              # keychain) — the only profile Load demo data works in
 ```
 
 The first `cargo test` (and the first `just dev`) **downloads PostgreSQL 18.6
@@ -58,14 +60,25 @@ starting an embedded one — for developing against a server with real data in
 it. It has no effect on `just check`: the tests always stand up their own
 throwaway server, so it is not a way to skip the download above.
 
-## Demo mode
+## Profiles
 
-There is no source to configure yet. Press **Load demo data** in the title bar:
-it registers the compiled-in `mock` source and syncs the Tidewater Freight
-fixture (`fixtures/tidewater/work.json`) — the same dataset every mockup was
-drawn against — then reports how many items were upserted. The button is
-idempotent; pressing it twice rewrites the same rows. Afterwards, searching for
-`sepa retry` finds `mock:PAY-231` in the `ticket` group.
+`just dev` runs the **default** profile: the real data directory, the real
+database, the real keychain service. `just demo` runs the **demo** profile,
+which is that same application pointed at its own data directory — and
+therefore its own embedded server on its own port — with its own keychain
+service, so fixture data can never mix into a real corpus and a demo run is not
+even offered the real credentials. Only in the demo profile does **Load demo
+data** work; elsewhere the command refuses and says to start knobas with
+`--demo`. The reasoning is in the design doc (§14a) and the ruling is interfaces
+§8 P13.
+
+There is no source to configure yet, which is what the demo profile is for.
+Press **Load demo data** in the title bar: it registers the compiled-in `mock`
+source and syncs the Tidewater Freight fixture
+(`fixtures/tidewater/work.json`) — the same dataset every mockup was drawn
+against — then reports how many items were upserted. The button is idempotent;
+pressing it twice rewrites the same rows. Afterwards, searching for `sepa retry`
+finds `mock:PAY-231` in the `ticket` group.
 
 ## Shutting down
 
@@ -87,6 +100,9 @@ on `PATH`, and it needs the data directory:
   -D "$HOME/Library/Application Support/dev.knobas.desktop/db/data" stop
 ```
 
+The demo profile keeps its server one level down, under
+`dev.knobas.desktop/demo/db/data`; running both profiles leaves two postmasters.
+
 A reboot does the same thing.
 
 ## Crate map
@@ -94,12 +110,14 @@ A reboot does the same thing.
 | Crate | What it is |
 | --- | --- |
 | `crates/knobas-core` | The domain: entity addressing (`<namespace>:<key>`), links, the activity stream, and the stores that read and write them. |
-| `crates/knobas-db` | The database: embedded PostgreSQL lifecycle (start / adopt / stop), the embedded migrations, and the FTS query. |
-| `crates/knobas-source` | The adapter SPI — the `Source` trait and the plain serde data every adapter exchanges. No database dependency, on purpose. |
+| `crates/knobas-db` | The database: embedded PostgreSQL lifecycle (start / adopt / stop) and the embedded migrations. |
+| `crates/knobas-source` | The adapter SPI — the `Source` trait, the contract battery, and the plain serde data every adapter exchanges. No database dependency, on purpose. |
 | `crates/knobas-source-mock` | The reference adapter: serves the Tidewater Freight fixture, talks to nothing. |
-| `crates/knobas-sync` | The sync engine — one run in one transaction: pull from a `Source`, upsert into `knobas.entity` and `sync.item`, advance the cursor. |
-| `crates/knobas-app` | The Tauri shell: window, app state, database lifecycle, and the M0 IPC commands. |
-| `app/` | The frontend — Svelte 5 runes on plain Vite, TypeScript strict. `app/src/lib/ipc.ts` mirrors the command surface. |
+| `crates/knobas-search` | *(new in M1)* The launcher's read side: the FTS query over `sync.live_item`, in the `SearchQuery` → `SearchResponse` shape, with snippets as segments. |
+| `crates/knobas-http` | *(new in M1)* The HTTP transport the three real adapters share: one reqwest stack, retry classes, rate limiting, and the status → `SourceError` mapping. |
+| `crates/knobas-sync` | The sync engine — one run in one transaction: pull from a `Source`, upsert into `knobas.entity` and `sync.item`, advance the cursor — plus the run log, progress and credential-health types. |
+| `crates/knobas-app` | The Tauri shell: window, app state, database lifecycle, profiles, and the IPC commands. |
+| `app/` | The frontend — Svelte 5 runes on plain Vite, TypeScript strict. `app/src/lib/ipc/` mirrors the command surface, one file per Rust command module. |
 
 ## Where the documents live
 

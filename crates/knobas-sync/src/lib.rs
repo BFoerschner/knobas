@@ -15,9 +15,11 @@
 //!   the generated `fts` column search reads. It is refreshed wholesale on
 //!   every run, including for a tombstoned entity, so the UI can still render
 //!   the last-known title of something that vanished upstream. "Deleted"
-//!   therefore lives on the entity alone: `knobas_db::search` joins
-//!   `knobas.entity` to skip tombstoned rows, and anything else reading the
-//!   mirror directly has to filter on `deleted_at` the same way.
+//!   therefore lives on the entity alone, and the way to respect it is to read
+//!   the mirror through the **`sync.live_item`** view (migration 0002), which
+//!   has the `knobas.entity` join and the `deleted_at is null` filter built in.
+//!   Anything reading `sync.item` directly has to filter for itself, and a
+//!   smart list that forgets offers rows that no longer exist.
 //!
 //! The engine takes a `PgPool` rather than opening one: it is called from the
 //! app, from a scheduler and from tests, none of which want a second database.
@@ -32,6 +34,60 @@
 //! source id before it opens a transaction, and the sink rejects an item whose
 //! id does not round-trip, is outside the source's namespace, or carries a kind
 //! the descriptor never declared.
+
+/// Declare an enum whose variants are a **closed vocabulary shared with the
+/// database**: each one has a stored spelling, and migration 0002 has a CHECK
+/// constraint listing exactly those spellings.
+///
+/// The point is that `ALL` and `as_str` are generated from the *same* variant
+/// list as the enum itself, so the three cannot drift. A hand-written `ALL`
+/// beside a hand-written enum is a list that a new variant silently misses --
+/// and for these enums that is not a cosmetic bug: the value reaches a `text`
+/// column with a CHECK constraint on it, so an unlisted spelling is a failed
+/// `INSERT` at runtime. `run_log::finish` is called on the failure path of a
+/// run, where the error is deliberately logged and swallowed, so the row would
+/// simply never close and stream F's backoff would read nothing.
+///
+/// With this, adding a variant necessarily adds it to `ALL`, and the tests
+/// that walk `ALL` against `0002` then fail until the constraint knows about
+/// it too -- which is a red test instead of a broken write.
+macro_rules! closed_vocabulary {
+    (
+        $(#[$enum_meta:meta])*
+        pub enum $name:ident {
+            $( $(#[$variant_meta:meta])* $variant:ident => $wire:literal ),+ $(,)?
+        }
+    ) => {
+        $(#[$enum_meta])*
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        pub enum $name {
+            $( $(#[$variant_meta])* $variant, )+
+        }
+
+        impl $name {
+            /// Every variant, generated from the same list as the variants --
+            /// so one cannot be added without appearing here.
+            pub const ALL: &'static [$name] = &[ $( $name::$variant ),+ ];
+
+            /// The spelling stored in the database and put on the wire.
+            #[must_use]
+            pub fn as_str(self) -> &'static str {
+                match self { $( $name::$variant => $wire ),+ }
+            }
+        }
+    };
+}
+
+pub mod health;
+pub mod progress;
+pub mod run_log;
+pub mod runner;
+
+pub use health::{AuthState, CredentialHealth};
+pub use progress::{ProgressSink, SyncPhase, SyncProgress};
+pub use run_log::{RunCounts, SourceSyncStatus, SyncOutcome, SyncTrigger};
+pub use runner::run;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -351,6 +407,7 @@ impl<'t, 'c> PgSink<'t, 'c> {
         let mut updated = Vec::with_capacity(n);
         let mut deleted = Vec::with_capacity(n);
         let mut payloads = Vec::with_capacity(n);
+        let mut web_urls = Vec::with_capacity(n);
         for (id, item) in batch {
             ids.push(id);
             kinds.push(item.kind);
@@ -360,6 +417,7 @@ impl<'t, 'c> PgSink<'t, 'c> {
             updated.push(item.updated_at);
             deleted.push(item.deleted);
             payloads.push(item.payload);
+            web_urls.push(item.web_url);
         }
 
         // The entity first: `sync.item.entity_id` references it.
@@ -379,6 +437,7 @@ impl<'t, 'c> PgSink<'t, 'c> {
             .bind(&authors)
             .bind(&updated)
             .bind(&payloads)
+            .bind(&web_urls)
             .bind(&self.source_id)
             .execute(&mut **self.tx)
             .await?;
@@ -459,18 +518,23 @@ select i.id, i.kind, i.title,
 /// either. It stays null only while the source has never dated the item --
 /// unlike the entity's, which is `not null` and falls back to `now()` on a
 /// genuinely new row.
+///
+/// `web_url` is refreshed wholesale like the title, **not** coalesced like
+/// `item_updated_at`: an adapter that stops reporting a URL is reporting that
+/// there is no page, and the two timestamps coalesce only because they hold the
+/// same fact as `knobas.entity.updated_at`.
 const ITEM_UPSERT: &str = r#"
 with incoming as (
   select *
     from unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[],
-                $6::timestamptz[], $7::jsonb[])
-         as t(id, kind, title, body_text, author, item_updated_at, payload)
+                $6::timestamptz[], $7::jsonb[], $8::text[])
+         as t(id, kind, title, body_text, author, item_updated_at, payload, web_url)
 )
 insert into sync.item
        (entity_id, source_id, kind, title, body_text, author, item_updated_at,
-        synced_at, payload)
-select i.id, $8, i.kind, i.title, i.body_text, i.author,
-       coalesce(i.item_updated_at, old.item_updated_at), now(), i.payload
+        synced_at, payload, web_url)
+select i.id, $9, i.kind, i.title, i.body_text, i.author,
+       coalesce(i.item_updated_at, old.item_updated_at), now(), i.payload, i.web_url
   from incoming i
        left join sync.item old on old.entity_id = i.id
     on conflict (entity_id) do update set
@@ -481,7 +545,8 @@ select i.id, $8, i.kind, i.title, i.body_text, i.author,
        author          = excluded.author,
        item_updated_at = excluded.item_updated_at,
        synced_at       = excluded.synced_at,
-       payload         = excluded.payload
+       payload         = excluded.payload,
+       web_url         = excluded.web_url
 "#;
 
 #[async_trait::async_trait]
@@ -534,6 +599,7 @@ mod tests {
             author: None,
             updated_at: None,
             payload: serde_json::json!({}),
+            web_url: None,
             deleted: false,
         }
     }

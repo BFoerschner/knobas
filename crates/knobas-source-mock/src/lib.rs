@@ -44,8 +44,10 @@ use std::sync::{Mutex, OnceLock};
 use chrono::{DateTime, NaiveDate, Utc};
 use knobas_core::entity::EntityRef;
 use knobas_source::contract::Fault;
+use knobas_source::instance::SourceInstance;
 use knobas_source::{
-    Capability, Cursor, KindInfo, Sink, Source, SourceDescriptor, SourceError, SyncItem, WriteOp,
+    Capability, ConnectionInfo, Cursor, KindInfo, Sink, Source, SourceDescriptor, SourceError,
+    SyncItem, WriteOp,
 };
 use serde::{Deserialize, Serialize};
 
@@ -58,6 +60,11 @@ const FIXTURE_JSON: &str = include_str!("../../../fixtures/tidewater/work.json")
 /// every stored cursor stops matching, which is exactly the "re-sync from
 /// scratch" the new data would need.
 const CURSOR: &str = "tidewater-v1";
+
+/// Where the fictional company's systems live. Nothing is served from here --
+/// it exists so *Open in browser* has a shape to render and a stream building
+/// the detail view can see the button (interfaces §8 P5).
+const MOCK_BASE: &str = "https://tidewater.example";
 
 // -- the fixture ------------------------------------------------------------
 
@@ -312,6 +319,9 @@ pub fn fixture() -> &'static Fixture {
 /// to have lost an item upstream.
 #[derive(Debug)]
 pub struct MockSource {
+    /// This instance's id, and therefore the namespace of every item it
+    /// emits. `"mock"` unless [`build`] was given another one.
+    id: String,
     fault: Fault,
     /// Whether a full sync also reports [`TOMBSTONED_KEY`] as deleted.
     tombstone: bool,
@@ -337,6 +347,7 @@ impl MockSource {
     /// [`Fault::None`] is a healthy one, same as [`MockSource::new`].
     pub fn with_fault(fault: Fault) -> Self {
         Self {
+            id: SOURCE_ID.to_owned(),
             fault,
             tombstone: false,
             written: Mutex::new(Vec::new()),
@@ -403,7 +414,13 @@ fn body_text(parts: impl IntoIterator<Item = String>) -> String {
 
 /// One [`SyncItem`], with `payload` carrying the fixture record verbatim so a
 /// later milestone can re-map it without re-reading the fixture.
+// One positional argument per `SyncItem` field the fixture fills, which is the
+// point: adding a field to the SPI must not compile until all five call sites
+// below have decided what to put in it. A parameter struct would take a
+// `..Default::default()` instead and let one kind silently keep the old value.
+#[allow(clippy::too_many_arguments)]
 fn item(
+    source_id: &str,
     kind: &str,
     key: String,
     title: String,
@@ -411,15 +428,17 @@ fn item(
     author: Option<String>,
     updated_at: Option<DateTime<Utc>>,
     payload: &impl Serialize,
+    web_url: Option<String>,
 ) -> SyncItem {
     SyncItem {
-        entity: EntityRef::new(SOURCE_ID, &key),
+        entity: EntityRef::new(source_id, &key),
         kind: kind.to_owned(),
         title,
         body_text: body,
         author,
         updated_at,
         payload: serde_json::to_value(payload).expect("a fixture record must serialize"),
+        web_url,
         deleted: false,
     }
 }
@@ -438,10 +457,11 @@ pub const TOMBSTONED_KEY: &str = "PAY-198";
 
 /// The tombstoned item itself: an entity that has been withdrawn upstream but
 /// whose title the UI still has to be able to show.
-fn tombstoned_item() -> SyncItem {
+fn tombstoned_item(source_id: &str) -> SyncItem {
     SyncItem {
         deleted: true,
         ..item(
+            source_id,
             "ticket",
             TOMBSTONED_KEY.to_owned(),
             "Legacy payout reconciliation (withdrawn)".to_owned(),
@@ -449,16 +469,19 @@ fn tombstoned_item() -> SyncItem {
             None,
             None,
             &serde_json::json!({ "key": TOMBSTONED_KEY, "status": "Deleted" }),
+            // An item withdrawn upstream has no page left to open.
+            None,
         )
     }
 }
 
 /// Every work item in the fixture, in the order the mock emits them.
-fn items() -> Vec<SyncItem> {
+fn items(source_id: &str) -> Vec<SyncItem> {
     let f = fixture();
     let mut out = Vec::new();
     for t in &f.tickets {
         out.push(item(
+            source_id,
             "ticket",
             t.key.clone(),
             t.summary.clone(),
@@ -471,10 +494,12 @@ fn items() -> Vec<SyncItem> {
             t.assignee.clone(),
             t.updated,
             t,
+            Some(format!("{MOCK_BASE}/browse/{}", t.key)),
         ));
     }
     for p in &f.prs {
         out.push(item(
+            source_id,
             "pr",
             format!("{}#{}", p.repo, p.num),
             p.title.clone(),
@@ -486,11 +511,13 @@ fn items() -> Vec<SyncItem> {
             Some(p.by.clone()),
             p.merged.or(p.opened),
             p,
+            Some(format!("{MOCK_BASE}/tidewater/{}/pulls/{}", p.repo, p.num)),
         ));
     }
     for b in &f.builds {
         let title = format!("{} #{}", b.cfg, b.num);
         out.push(item(
+            source_id,
             "build",
             format!("{}#{}", b.cfg, b.num),
             title.clone(),
@@ -502,10 +529,15 @@ fn items() -> Vec<SyncItem> {
             None,
             Some(b.when),
             b,
+            Some(format!(
+                "{MOCK_BASE}/teamcity/viewLog.html?buildId={}",
+                b.num
+            )),
         ));
     }
     for p in &f.pages {
         out.push(item(
+            source_id,
             "page",
             p.id.clone(),
             p.title.clone(),
@@ -518,10 +550,12 @@ fn items() -> Vec<SyncItem> {
             Some(p.by.clone()),
             Some(p.edited),
             p,
+            Some(format!("{MOCK_BASE}/wiki/{}/{}", p.space, p.id)),
         ));
     }
     for c in &f.commits {
         out.push(item(
+            source_id,
             "commit",
             c.sha.clone(),
             c.msg.clone(),
@@ -529,6 +563,7 @@ fn items() -> Vec<SyncItem> {
             Some(c.by.clone()),
             Some(c.when),
             c,
+            Some(format!("{MOCK_BASE}/tidewater/{}/commit/{}", c.repo, c.sha)),
         ));
     }
     out
@@ -538,12 +573,16 @@ fn items() -> Vec<SyncItem> {
 impl Source for MockSource {
     fn descriptor(&self) -> SourceDescriptor {
         SourceDescriptor {
-            id: SOURCE_ID.to_owned(),
+            // The instance, which `build` may have renamed; the kind below is
+            // the adapter and never moves.
+            id: self.id.clone(),
             adapter_kind: SOURCE_ID.to_owned(),
             name: "Tidewater (mock)".to_owned(),
-            // `Write` and `write_ops` are two signals for one fact; the SPI
-            // requires them to agree.
-            capabilities: vec![Capability::Search, Capability::Write],
+            // P12: `Search` means server-side search, which the fixture has no
+            // entry point for. `Write` stays -- it and `write_ops` are two
+            // signals for one fact, and the battery needs a declared op to
+            // exercise the write path against.
+            capabilities: vec![Capability::Write],
             adapter_version: env!("CARGO_PKG_VERSION").to_owned(),
             // Nothing to authenticate against: the fixture is compiled in.
             auth_methods: Vec::new(),
@@ -582,16 +621,33 @@ impl Source for MockSource {
                     monogram: "CM".to_owned(),
                 },
             ],
+            // The fixture is the entire world this source has: a full sync
+            // emits all of it, so the engine's sweep is safe here.
+            full_sync_exhaustive: true,
             // Nothing to configure, so the Add-source form for the mock is empty.
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
         }
     }
 
-    async fn test_connection(&self) -> Result<(), SourceError> {
-        match self.fault_error() {
-            Some(err) => Err(err),
-            None => Ok(()),
+    async fn test_connection(&self) -> Result<ConnectionInfo, SourceError> {
+        if let Some(err) = self.fault_error() {
+            return Err(err);
         }
+        // The mock authenticates nothing, but stream D develops the whole
+        // Add-source flow against it (roadmap §3: "the mock source is the
+        // frontend's backend"), so it reports what a real source would: the
+        // fixture's owner, and its own version as the server's.
+        Ok(ConnectionInfo {
+            account: Some(
+                fixture()
+                    .person("mara")
+                    .map_or_else(|| "mara".to_owned(), |p| p.username.clone()),
+            ),
+            server_version: Some(format!("knobas-source-mock {}", env!("CARGO_PKG_VERSION"))),
+            // Nothing to expire: the fixture is compiled in.
+            secret_expires_at: None,
+            detail: Some("compiled-in fixture; nothing was contacted".to_owned()),
+        })
     }
 
     async fn sync(
@@ -608,7 +664,7 @@ impl Source for MockSource {
         if cursor.as_deref() == Some(CURSOR) {
             return Ok(CURSOR.to_owned());
         }
-        for it in items() {
+        for it in items(&self.id) {
             // Not the adapter's failure to swallow: a sink that rejected an
             // item wants the sync abandoned, not the remaining items pushed at
             // it and a fresh cursor handed back over the gap.
@@ -618,7 +674,7 @@ impl Source for MockSource {
             // Last, and still inside the sync: a deletion is an item like any
             // other, carrying the last-known title so the UI can render what
             // vanished.
-            sink.item(tombstoned_item()).await?;
+            sink.item(tombstoned_item(&self.id)).await?;
         }
         Ok(CURSOR.to_owned())
     }
@@ -639,4 +695,43 @@ impl Source for MockSource {
         self.lock().push(op);
         Ok(())
     }
+}
+
+// -- construction, the shape every adapter crate exposes ---------------------
+
+/// The mock's descriptor template: one per adapter kind, `id == adapter_kind`
+/// (§4.2). This is what `list_adapters` serves the Add-source form.
+#[must_use]
+pub fn descriptor_template() -> SourceDescriptor {
+    MockSource::new().descriptor()
+}
+
+/// Build a mock instance from its stored configuration.
+///
+/// The same signature every adapter crate exposes, so stream F's registry has
+/// one shape to call and something to exercise it against before a real
+/// adapter exists.
+///
+/// The fixture is compiled in, so `base_url`, `auth`, `secret` and `config`
+/// are ignored -- every other adapter uses all four.
+///
+/// # Errors
+///
+/// [`SourceError::Protocol`] if the instance is not this adapter's to build,
+/// or if its id cannot be an entity namespace -- both are configuration
+/// mistakes, and both are worth catching before a sync writes rows under a
+/// namespace nothing can address.
+pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
+    if instance.kind != SOURCE_ID {
+        return Err(SourceError::Protocol(format!(
+            "knobas-source-mock cannot build an instance of kind {:?}",
+            instance.kind
+        )));
+    }
+    knobas_source::instance::validate_instance_id(&instance.id)
+        .map_err(|error| SourceError::Protocol(error.to_string()))?;
+    Ok(Box::new(MockSource {
+        id: instance.id,
+        ..MockSource::new()
+    }))
 }

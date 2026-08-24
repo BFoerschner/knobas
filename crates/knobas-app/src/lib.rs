@@ -26,6 +26,34 @@
 
 pub mod commands;
 pub mod demo;
+mod error;
+mod profile;
+
+pub use error::{IpcError, IpcErrorCode};
+pub use profile::{APP_IDENTIFIER, DEMO_FLAG, Profile};
+
+/// Tauri event names, mirrored in `app/src/lib/ipc/index.ts` as `EVENTS`.
+///
+/// Orchestrator-owned and append-only: a stream that needs a new event asks
+/// for the constant. Tauri 2 permits `:` in event names, and the prefix is the
+/// subject -- `db:`, `sync:`, `source:` -- so a listener reads as what it is
+/// listening to.
+///
+/// Rule (roadmap §4: events are not for throughput): these carry **coarse
+/// state**, at most a handful per run. Per-item progress goes on an
+/// `ipc::Channel` and nowhere else.
+pub mod events {
+    /// Payload: `DbState` (stream D). Fired during bring-up, replayed by
+    /// `frontend_ready` -- the webview cannot listen before it says it can
+    /// (roadmap §4 gotcha 9).
+    pub const DB_STATE: &str = "db:state";
+    /// Payload: `SourceSyncStatus` (stream F), on every run transition.
+    pub const SYNC_STATE: &str = "sync:state";
+    /// Payload: `CredentialHealth` (stream F), on a health *change* only.
+    pub const SOURCE_HEALTH: &str = "source:health";
+    /// Payload: `ActivityRow`, coalesced to at most one per second.
+    pub const ACTIVITY_NEW: &str = "activity:new";
+}
 
 use std::sync::{Mutex, PoisonError};
 
@@ -65,6 +93,36 @@ pub struct AppState {
     db: Mutex<Option<knobas_db::EmbeddedDb>>,
 }
 
+#[cfg(feature = "test-util")]
+impl AppState {
+    /// The shared state over a pool this process did not start. **Tests only.**
+    ///
+    /// It exists because a [`tauri::State`] cannot be built by hand, so a
+    /// command body is unreachable from a mock app until its state is managed
+    /// -- see `tests/ipc.rs`, where `demo_load`'s profile guard is checked
+    /// against a pool pointing at nothing (the guard has to refuse before any
+    /// query, and that is what makes the test say so). Streams D, E and F test
+    /// their commands through this one blessed path rather than each inventing
+    /// a way in.
+    ///
+    /// `db` is `None`, which is the truth: [`shutdown_database`] stops only a
+    /// server knobas owns, and there is none here. That is also why the
+    /// constructor is behind `test-util` and not merely `#[doc(hidden)]`: a
+    /// production caller would build an `AppState` whose server nothing ever
+    /// stops, leaving a postmaster running after every quit. Hidden-but-present
+    /// makes that a review catch; absent from the shipping build makes it a
+    /// compile error. `cargo build`, `tauri build` and the `clippy --lib` half
+    /// of `just check` all see the crate without this feature, so a stream that
+    /// reaches for it outside `tests/` cannot get the gate green.
+    #[must_use]
+    pub fn over_pool(pool: PgPool) -> Self {
+        Self {
+            pool,
+            db: Mutex::new(None),
+        }
+    }
+}
+
 /// Build the application, bring the database up, and run the event loop.
 ///
 /// Returns when the last window has closed and the database has been stopped.
@@ -97,7 +155,18 @@ pub fn run() {
             // then the panic hook below is what makes a *failure* legible: the
             // process dies without ever showing a window.
             let handle = app.handle().clone();
-            tauri::async_runtime::block_on(async move { start_database(&handle).await })?;
+
+            // Managed first, and synchronously: `app_status` (stream D) has to
+            // answer "which knobas is this, and is the database up yet?" from
+            // the very first frame, and when bring-up becomes asynchronous the
+            // profile must already be in state -- a command that waits for the
+            // database to know whether it is the demo is a command that cannot
+            // report a database that is still starting.
+            let profile = Profile::from_args(std::env::args(), &handle.path().app_data_dir()?);
+            tracing::info!(demo = profile.demo, dir = %profile.dir.display(), "profile");
+            handle.manage(profile.clone());
+
+            tauri::async_runtime::block_on(async move { start_database(&handle, &profile).await })?;
 
             // By label, and a hard failure if it is missing: a config whose
             // window was renamed would otherwise start knobas with no window
@@ -107,12 +176,15 @@ pub fn run() {
                 .show()?;
             Ok(())
         })
+        // Append-only, orchestrator-owned, grouped by owning module so a
+        // stream adding a command touches one line in one group.
         .invoke_handler(tauri::generate_handler![
-            commands::ping,
-            commands::demo_load,
-            commands::sync_now,
-            commands::search,
-            commands::recent_activity,
+            commands::app::ping,
+            commands::entity::recent_activity,
+            commands::search::search,
+            commands::sources::demo_load,
+            commands::sources::sync_now,
+            commands::sources::sync_now_with_progress,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")
@@ -133,23 +205,23 @@ pub fn run() {
 }
 
 /// Start (or connect to) the database, migrate it, and hand it to Tauri.
-async fn start_database(handle: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    let root_dir = handle.path().app_data_dir()?.join("db");
-    let existing_url = std::env::var(DB_URL_ENV)
-        .ok()
-        .filter(|url| !url.trim().is_empty());
+///
+/// Which database that is belongs to the [`Profile`] (ruling P13): the demo
+/// runs its own server out of its own directory, and declines `KNOBAS_DB_URL`
+/// rather than loading a fixture into a corpus somebody manages.
+async fn start_database(
+    handle: &tauri::AppHandle,
+    profile: &Profile,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let config = profile.db_config(std::env::var(DB_URL_ENV).ok());
 
-    if existing_url.is_some() {
+    if config.existing_url.is_some() {
         tracing::info!("{DB_URL_ENV} is set: using an externally managed postgres");
     } else {
-        tracing::info!(root_dir = %root_dir.display(), "starting the embedded postgres");
+        tracing::info!(root_dir = %config.root_dir.display(), "starting the embedded postgres");
     }
 
-    let db = knobas_db::EmbeddedDb::start(knobas_db::DbConfig {
-        root_dir,
-        existing_url,
-    })
-    .await?;
+    let db = knobas_db::EmbeddedDb::start(config).await?;
     knobas_db::migrate::run(db.pool()).await?;
 
     handle.manage(AppState {
@@ -263,5 +335,24 @@ mod tests {
             windows[0]["visible"], false,
             "the window must not appear before the database is up"
         );
+    }
+
+    /// The event names are one list in two languages. A rename on one side is
+    /// a listener that silently never fires -- the failure mode this test
+    /// exists to make loud.
+    #[test]
+    fn the_event_names_match_their_typescript_mirror() {
+        let mirror = include_str!("../../../app/src/lib/ipc/index.ts");
+        for name in [
+            super::events::DB_STATE,
+            super::events::SYNC_STATE,
+            super::events::SOURCE_HEALTH,
+            super::events::ACTIVITY_NEW,
+        ] {
+            assert!(
+                mirror.contains(&format!("\"{name}\"")),
+                "{name:?} is missing from app/src/lib/ipc/index.ts"
+            );
+        }
     }
 }

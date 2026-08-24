@@ -12,7 +12,7 @@
 
 use knobas_source::{Source, SourceDescriptor};
 use knobas_source_mock::MockSource;
-use knobas_sync::{SyncError, SyncReport};
+use knobas_sync::{ProgressSink, SyncError, SyncReport, SyncTrigger};
 use sqlx::PgPool;
 
 /// Why a demo load or a sync did not happen.
@@ -30,9 +30,47 @@ pub enum DemoError {
     #[error("database: {0}")]
     Db(#[from] sqlx::Error),
 
-    /// The sync run itself failed.
-    #[error("{0}")]
-    Sync(#[from] SyncError),
+    /// The sync run itself failed, for this source.
+    ///
+    /// The id is carried rather than derived: [`SyncError`] does not know
+    /// which source it belongs to, and `unauthorized` is precisely the case
+    /// the sources view routes by `source_id` (see
+    /// [`crate::IpcError::from_sync_error`]).
+    #[error("{error}")]
+    Sync {
+        source_id: String,
+        #[source]
+        error: SyncError,
+    },
+}
+
+/// What a demo failure looks like on the bridge.
+///
+/// It lives here rather than in `error.rs` because this is the only module
+/// that knows what each variant *means*: which of them a user can act on, and
+/// which source the failure belongs to. `Sync` keeps the adapter's own
+/// classification by deferring to [`crate::IpcError`]'s `SyncError`
+/// conversion, so a 401 mid-demo-load is still a 401 by the time the sources
+/// view sees it.
+impl From<DemoError> for crate::IpcError {
+    fn from(error: DemoError) -> Self {
+        match error {
+            // Nothing the user can do: no such adapter is compiled in.
+            DemoError::UnknownSource(id) => crate::IpcError::not_found(format!(
+                "no source with id {id:?} -- M0 ships only the mock source"
+            ))
+            .with_source(id),
+            // Add the source (or load the demo data) and it will work.
+            DemoError::NotConfigured(id) => crate::IpcError::not_ready(format!(
+                "source {id:?} is not configured -- load the demo data first"
+            ))
+            .with_source(id),
+            DemoError::Db(err) => crate::IpcError::internal(err),
+            DemoError::Sync { source_id, error } => {
+                crate::IpcError::from_sync_error(&error, Some(&source_id))
+            }
+        }
+    }
 }
 
 /// Register the demo source if it is not registered yet, then sync it in full.
@@ -53,17 +91,45 @@ pub async fn demo_load_inner(pool: &PgPool) -> Result<SyncReport, DemoError> {
     // `None`: demo mode means "give me the whole fixture", regardless of what
     // a previous run recorded. The run is idempotent, so this costs rows
     // rewritten, not rows duplicated.
-    Ok(knobas_sync::run_once(pool, &source, None).await?)
+    knobas_sync::run_once(pool, &source, None)
+        .await
+        .map_err(|error| DemoError::Sync {
+            source_id: source.descriptor().id,
+            error,
+        })
 }
 
-/// Sync one **configured** source, resuming from where it last stopped.
+/// Everything a sync needs before it can run: which adapter, from where, and
+/// the log row that already records it.
 ///
-/// Both halves of that are checked, because failing either one silently is
-/// worse than refusing: an id no adapter answers to would do nothing at all,
-/// and an id with no `source_config` row would run a full sync whose cursor
-/// the engine then has nowhere to persist (`run_once` updates a row, and
-/// deliberately never invents one) -- so every later call would sync
-/// everything again, for ever, with no sign that anything was wrong.
+/// Returned as a unit because `sync_now` has to hand the run id back to the
+/// caller *before* the run executes (ruling P3), so the three cannot be
+/// resolved lazily inside the run.
+pub struct PreparedSync {
+    /// The adapter that answers to this id.
+    pub source: Box<dyn Source>,
+    /// Where it should resume, or `None` for a full sync.
+    pub cursor: Option<String>,
+    /// The open `knobas.sync_run` row. Closing it is
+    /// [`knobas_sync::run`]'s job.
+    pub run_id: i64,
+}
+
+/// Resolve a sync of one **configured** source and open its log row.
+///
+/// This module's whole remaining share of a sync: which adapter answers to
+/// `source_id`, and where it left off. The composition around the run --
+/// phases, classification, closing the log row -- is [`knobas_sync::run`],
+/// where stream F's scheduler can extend it without importing this module.
+///
+/// Both halves of "configured" are checked, because failing either one
+/// silently is worse than refusing: an id no adapter answers to would do
+/// nothing at all, and an id with no `source_config` row would run a full sync
+/// whose cursor the engine then has nowhere to persist (`run_once` updates a
+/// row, and deliberately never invents one) -- so every later call would sync
+/// everything again, for ever, with no sign that anything was wrong. Neither
+/// refusal writes a log line: neither is a run, and a diagnostics view showing
+/// a phantom run for a typo would be worse than showing nothing.
 ///
 /// The cursor is read outside the run's advisory lock, so a concurrent run of
 /// the same source can move it between the read and the lock; the worst case
@@ -75,14 +141,60 @@ pub async fn demo_load_inner(pool: &PgPool) -> Result<SyncReport, DemoError> {
 ///
 /// [`DemoError::UnknownSource`] if no adapter answers to `source_id`,
 /// [`DemoError::NotConfigured`] if it has no `knobas.source_config` row,
-/// [`DemoError::Db`] if the lookup fails, [`DemoError::Sync`] if the run does.
-pub async fn sync_now_inner(pool: &PgPool, source_id: &str) -> Result<SyncReport, DemoError> {
+/// [`DemoError::Db`] if the lookup or the log write fails.
+pub async fn prepare_sync(
+    pool: &PgPool,
+    source_id: &str,
+    trigger: SyncTrigger,
+) -> Result<PreparedSync, DemoError> {
     let source =
         adapter_for(source_id).ok_or_else(|| DemoError::UnknownSource(source_id.to_owned()))?;
     let cursor = stored_cursor(pool, source_id)
         .await?
         .ok_or_else(|| DemoError::NotConfigured(source_id.to_owned()))?;
-    Ok(knobas_sync::run_once(pool, source.as_ref(), cursor).await?)
+
+    // Last, and only once the two refusals above are past: an open row for a
+    // run that was never going to happen is a phantom in the diagnostics view.
+    let run_id = knobas_sync::run_log::start(pool, source_id, trigger).await?;
+    Ok(PreparedSync {
+        source,
+        cursor,
+        run_id,
+    })
+}
+
+/// Prepare a manual sync and run it to completion, returning its run id.
+///
+/// The **blocking** composition, which is what a test wants: the run is over
+/// by the time this returns. The commands do not use it -- `sync_now` returns
+/// the id and lets the run continue on its own task (ruling P3) -- so this is
+/// the shape that makes "did the run do what it should" assertable without
+/// polling.
+///
+/// # Errors
+///
+/// Whatever [`prepare_sync`] refuses with, or [`DemoError::Sync`] if the run
+/// itself fails.
+pub async fn sync_now_inner(
+    pool: &PgPool,
+    source_id: &str,
+    progress: Option<&dyn ProgressSink>,
+) -> Result<i64, DemoError> {
+    let prepared = prepare_sync(pool, source_id, SyncTrigger::Manual).await?;
+    let run_id = prepared.run_id;
+    knobas_sync::run(
+        pool,
+        prepared.source.as_ref(),
+        prepared.cursor,
+        run_id,
+        progress,
+    )
+    .await
+    .map_err(|error| DemoError::Sync {
+        source_id: source_id.to_owned(),
+        error,
+    })?;
+    Ok(run_id)
 }
 
 /// The adapter for `source_id`, if knobas has one compiled in.

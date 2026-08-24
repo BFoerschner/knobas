@@ -4,10 +4,11 @@
   import {
     demoLoad,
     ipcErrorMessage,
+    noFilters,
     recentActivity,
     search,
     type ActivityRow,
-    type SearchHit,
+    type SearchResponse,
     type SyncReport,
   } from "./lib/ipc";
 
@@ -18,9 +19,10 @@
   const ACTIVITY_LIMIT = 20;
 
   let query = $state("");
-  let hits = $state<SearchHit[]>([]);
+  /** The last answered query's whole response — grouping included (ruling P2). */
+  let response = $state<SearchResponse | null>(null);
   /**
-   * The query `hits` actually answers, or `null` when nothing has been
+   * The query `response` actually answers, or `null` when nothing has been
    * answered yet. `query !== searched` is precisely "the box has moved on" —
    * during the debounce window and while a request is in flight — and it is
    * what keeps "No matches." off the screen for a query nobody has run.
@@ -36,7 +38,8 @@
 
   /**
    * Results arrive out of order — a slow query for `sep` can land after the
-   * fast one for `sepa retry`. Only the newest issued query may write `hits`.
+   * fast one for `sepa retry`. Only the newest issued query may write
+   * `response`.
    */
   let issued = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -47,21 +50,9 @@
   // session's syncs are in it, and so is a demo load from before a restart.
   onMount(() => void refreshActivity());
 
-  const groups = $derived(groupByKind(hits));
-
-  /** Results in `kind` buckets, each bucket keeping the server's rank order. */
-  function groupByKind(rows: SearchHit[]): Array<{ kind: string; hits: SearchHit[] }> {
-    const byKind = new Map<string, SearchHit[]>();
-    for (const hit of rows) {
-      const bucket = byKind.get(hit.kind);
-      if (bucket) {
-        bucket.push(hit);
-      } else {
-        byKind.set(hit.kind, [hit]);
-      }
-    }
-    return [...byKind].map(([kind, kindHits]) => ({ kind, hits: kindHits }));
-  }
+  // The backend groups, labels and counts (interfaces §2.4): the launcher
+  // renders what it is handed rather than keeping a kind list of its own.
+  const groups = $derived(response?.groups ?? []);
 
   function onInput(event: Event) {
     query = (event.currentTarget as HTMLInputElement).value;
@@ -75,20 +66,20 @@
     const trimmed = text.trim();
     const token = ++issued;
     if (trimmed === "") {
-      hits = [];
+      response = null;
       searched = "";
       searchError = null;
       return;
     }
     try {
-      const found = await search(trimmed, SEARCH_LIMIT);
+      const found = await search({ raw: trimmed, limit: SEARCH_LIMIT, filters: noFilters() });
       if (token !== issued) return;
-      hits = found;
+      response = found;
       searched = trimmed;
       searchError = null;
     } catch (error) {
       if (token !== issued) return;
-      hits = [];
+      response = null;
       searched = trimmed;
       searchError = ipcErrorMessage(error);
     }
@@ -173,25 +164,29 @@
          in the box yet, and claiming "No matches." would be a lie that flashes
          on every keystroke. -->
     <p class="hint">Searching…</p>
-  {:else if hits.length === 0}
+  {:else if groups.length === 0}
     <p class="hint">No matches.</p>
   {:else}
     {#each groups as group (group.kind)}
       <section class="group">
-        <h2>{group.kind} <span class="count">{group.hits.length}</span></h2>
+        <h2>{group.plural} <span class="count">{group.total}</span></h2>
         <ul>
           {#each group.hits as hit (hit.entity_id)}
             <li>
               <div class="row">
+                <span class="monogram">{group.monogram}</span>
                 <span class="title">{hit.title}</span>
                 <span class="id">{hit.entity_id}</span>
               </div>
               <!--
-                `snippet` is an excerpt of raw source text — whatever someone
-                typed into a ticket. Interpolating it as text is the whole
-                defence; never `{@html hit.snippet}`.
+                Every segment is raw source text — whatever someone typed into
+                a ticket. Interpolating it as text is the whole defence; the
+                match is marked by the `hit` flag, never by markup in the
+                string, so `{@html}` is never needed and never allowed.
               -->
-              <p class="snippet">{hit.snippet}</p>
+              <p class="snippet">{#each hit.snippet as segment}{#if segment.hit}<mark
+                    >{segment.text}</mark
+                  >{:else}{segment.text}{/if}{/each}</p>
               <div class="meta">
                 <span>{hit.source_id}</span>
                 <span>synced {formatTime(hit.synced_at)}</span>
@@ -363,9 +358,20 @@
     font-size: 0.8rem;
   }
 
+  .monogram {
+    font-variant-numeric: tabular-nums;
+    color: #7a808a;
+    font-size: 0.8rem;
+  }
+
   .snippet {
     margin: 0.25rem 0;
     color: #40454d;
+  }
+
+  mark {
+    background: #ffe9b0;
+    color: inherit;
   }
 
   .meta {
