@@ -90,9 +90,6 @@ pub enum SyncError {
     /// A statement the engine issued failed.
     #[error("database: {0}")]
     Db(#[from] sqlx::Error),
-    /// The data committed, but the activity line did not.
-    #[error("activity log: {0}")]
-    Activity(#[from] knobas_core::CoreError),
 }
 
 /// Reject a source id that cannot serve as an entity namespace.
@@ -139,6 +136,11 @@ fn check_source_id(id: &str) -> Result<(), SyncError> {
 /// writes no line: a five-minute scheduler would otherwise bury the log under
 /// 288 "synced nothing" entries per source per day.
 ///
+/// Because it is written after the commit, a failure to write it **does not
+/// fail the run**: it is logged at `warn` and the report is returned. The sync
+/// is durable at that point, and reporting it as failed would tell a scheduler
+/// to run it again and the UI to show an error over data that landed.
+///
 /// # Concurrency
 ///
 /// The run takes `pg_advisory_xact_lock` on the source id, so two runs of the
@@ -169,8 +171,8 @@ fn check_source_id(id: &str) -> Result<(), SyncError> {
 ///   where it was.
 /// * [`SyncError::Db`] if the advisory lock, the cursor update or the commit
 ///   failed.
-/// * [`SyncError::Activity`] if only the activity line failed -- the run's data
-///   is committed at that point, and a later run will overwrite it anyway.
+///
+/// A failed activity line is deliberately *not* in that list -- see above.
 pub async fn run_once(
     pool: &PgPool,
     source: &dyn Source,
@@ -219,8 +221,8 @@ pub async fn run_once(
     };
     let changed_nothing =
         report.upserted == 0 && report.deleted == 0 && previous.as_deref() == Some(&report.cursor);
-    if !changed_nothing {
-        activity::record(
+    if !changed_nothing
+        && let Err(error) = activity::record(
             pool,
             &format!("sync:{}", report.source_id),
             "synced",
@@ -231,7 +233,18 @@ pub async fn run_once(
             // the two drift apart.
             serde_json::to_value(&report).expect("a SyncReport serializes"),
         )
-        .await?;
+        .await
+    {
+        // Warned about, never raised. Everything this run wrote is already
+        // durable, so a failure here is one missing log line -- and reporting
+        // it as a failed sync would make the caller believe none of it landed:
+        // a scheduler would repeat a run that already happened, and the UI
+        // would show an error over data sitting in the database.
+        tracing::warn!(
+            source_id = %report.source_id,
+            %error,
+            "the sync committed, but its activity line did not"
+        );
     }
     Ok(report)
 }

@@ -679,6 +679,74 @@ async fn updated_at(pool: &PgPool, entity: &str) -> chrono::DateTime<chrono::Utc
     at
 }
 
+/// The activity line is written *after* the commit, so its failure cannot
+/// un-write the sync -- and must not be reported as if it had.
+///
+/// Failing the run there tells the caller nothing landed while the entities,
+/// the mirror rows and the cursor are all durable. A scheduler would retry a
+/// run that already happened; the UI would show an error over data that is
+/// sitting in the database. The line is a log entry: losing one is worth a
+/// warning, not a lie about the outcome.
+///
+/// The failure is arranged with a trigger keyed on *this* run's actor, so
+/// nothing else writing the shared log is disturbed.
+#[tokio::test]
+async fn a_failing_activity_line_does_not_fail_a_committed_sync() {
+    let (pool, id) = fixture().await;
+    configure(&pool, &id).await;
+    let actor = format!("sync:{id}");
+    let guard = format!("reject_{}", Uuid::new_v4().simple());
+
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        r#"create function knobas.{guard}() returns trigger language plpgsql as $$
+           begin
+             if new.actor = '{actor}' then
+               raise exception 'the activity log is down';
+             end if;
+             return new;
+           end $$"#
+    )))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "create trigger {guard} before insert on knobas.activity
+         for each row execute function knobas.{guard}()"
+    )))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let src = FakeSource::new(&id, vec![item(&id, "TIDE-12", "committed", false)]);
+    let outcome = knobas_sync::run_once(&pool, &src, None).await;
+
+    // Dropped before asserting: a failure here must not leave the shared log
+    // with a trigger on it for the rest of the binary.
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "drop trigger {guard} on knobas.activity"
+    )))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "drop function knobas.{guard}()"
+    )))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let report = outcome.expect("a committed sync must survive a failed activity line");
+    assert_eq!(report.upserted, 1);
+    assert_eq!(rows_for(&pool, &id).await, 1, "the run's data is committed");
+    assert_eq!(cursor_of(&pool, &id).await.as_deref(), Some("at-1"));
+    let (lines,): (i64,) = sqlx::query_as("select count(*) from knobas.activity where actor = $1")
+        .bind(&actor)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(lines, 0, "the line is the part that did not land");
+}
+
 /// A tombstone hides the entity from search while its mirror row stays put:
 /// the launcher must stop offering something that no longer exists upstream,
 /// but the row is what still holds its last-known title for anything already
