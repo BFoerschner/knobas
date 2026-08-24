@@ -9,9 +9,11 @@ use uuid::Uuid;
 /// than on SQLSTATE strings. Everything else stays wrapped.
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
-    /// An identical row already exists -- for links, an active link with the
-    /// same `(from, to, relation)`.
-    #[error("that link already exists")]
+    /// A unique constraint rejected the write: an identical row already
+    /// exists. For links that is an active link with the same
+    /// `(from, to, relation)`; the classifier is crate-wide, so the message
+    /// stays about rows rather than claiming links.
+    #[error("that row already exists")]
     Duplicate,
 
     /// `unlink` was given an id no link row carries.
@@ -19,8 +21,11 @@ pub enum CoreError {
     LinkNotFound(Uuid),
 
     /// Any other database failure.
+    ///
+    /// `#[source]`, not `#[from]`: the conversion is hand-written below so it
+    /// can classify, and a derived `From` would collide with it.
     #[error("database: {0}")]
-    Db(sqlx::Error),
+    Db(#[source] sqlx::Error),
 }
 
 /// SQLSTATE of a unique-violation, which is how the partial unique index

@@ -1,10 +1,11 @@
 //! The link and activity stores, against a real PostgreSQL.
 //!
-//! The embedded test database is shared by every test in the binary *and*
-//! outlives the run, so each test seeds entity ids carrying a fresh uuid
-//! rather than fixed ones: fixed ids would collide with the rows left by the
-//! previous run, and truncating shared tables would break tests running
-//! concurrently beside us.
+//! `test_util` roots its server at `$TMPDIR/knobas-test-<pid>` and reaps
+//! earlier runs, so each `cargo test` gets a freshly `initdb`-ed database --
+//! but one database, shared by every test in this binary, and those tests run
+//! concurrently. Each test therefore seeds entity ids unique to itself rather
+//! than fixed ones, so that its rows are its own; truncating the shared tables
+//! instead would break the tests running beside it.
 
 use knobas_core::entity::EntityRef;
 use knobas_core::{CoreError, activity, link};
@@ -87,24 +88,39 @@ async fn link_row_carries_its_origin_and_direction() {
 }
 
 #[tokio::test]
-async fn same_pair_may_carry_several_relations() {
+async fn several_relations_coexist_and_come_back_newest_first() {
     let (pool, t, n) = seeded_pool().await;
 
-    link::create(&pool, &t, &n, "documents", link::Origin::Manual, "mara")
+    let before = chrono::Utc::now();
+    let documents = link::create(&pool, &t, &n, "documents", link::Origin::Manual, "mara")
         .await
         .unwrap();
-    link::create(&pool, &t, &n, "blocks", link::Origin::Manual, "mara")
+    let blocks = link::create(&pool, &t, &n, "blocks", link::Origin::Manual, "mara")
         .await
         .unwrap();
+    let after = chrono::Utc::now();
 
-    let mut relations: Vec<String> = link::links_of(&pool, &t)
-        .await
-        .unwrap()
-        .into_iter()
-        .map(|row| row.relation)
-        .collect();
-    relations.sort();
+    let rows = link::links_of(&pool, &t).await.unwrap();
+    // Newest first -- asserted on ids, and asserted *first*, because these two
+    // relation names happen to sort into the same order and so would hide a
+    // flipped `order by` behind a passing name comparison.
+    let ids: Vec<Uuid> = rows.iter().map(|row| row.id).collect();
+    assert_eq!(ids, [blocks, documents]);
+    // The pair carries both relations: `link_active_idx` is three-column.
+    let relations: Vec<&str> = rows.iter().map(|row| row.relation.as_str()).collect();
     assert_eq!(relations, ["blocks", "documents"]);
+
+    // `created_at` is the stored insertion time, not the reading query's clock:
+    // `links_of` runs strictly after `after`.
+    for row in &rows {
+        assert!(
+            row.created_at >= before && row.created_at <= after,
+            "created_at {} outside [{before}, {after}]",
+            row.created_at
+        );
+    }
+    // ... and the two inserts, being separate transactions, are distinct.
+    assert!(rows[0].created_at > rows[1].created_at);
 }
 
 #[tokio::test]
@@ -179,9 +195,13 @@ async fn activity_defaults_and_orders_newest_first() {
     assert_eq!(mine[0].verb, "linked");
     assert_eq!(mine[0].entity_id.as_deref(), Some(t.to_string().as_str()));
     assert_eq!(mine[0].detail, serde_json::json!({"n": 1}));
-    assert!(mine[0].at >= mine[1].at);
+    // strict: two separate transactions, so a flipped `order by` shows up here
+    assert!(mine[0].at > mine[1].at);
     // a null detail is stored as the column's empty-object default
     assert_eq!(mine[1].verb, "synced");
     assert_eq!(mine[1].entity_id, None);
     assert_eq!(mine[1].detail, serde_json::json!({}));
+
+    // the limit actually caps the result -- the table holds our two rows at least
+    assert_eq!(activity::recent(&pool, 1).await.unwrap().len(), 1);
 }
