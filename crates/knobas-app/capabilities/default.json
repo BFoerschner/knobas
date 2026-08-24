@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "What the main window may call. Custom `#[tauri::command]`s need no permission; this is only Tauri's own core API surface, kept at its default (path, event, window, webview basics) with no plugin added.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
