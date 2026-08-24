@@ -8,8 +8,22 @@ use crate::{AppState, IpcError};
 ///
 /// Safe to call repeatedly: see [`crate::demo::demo_load_inner`], which owns
 /// the behaviour and the test for it.
+///
+/// Refused outside the demo profile (ruling P13): the Tidewater fixture is
+/// twenty-one items of fiction, and a corpus that mixes it with real work is
+/// one nobody can search again. The refusal comes before the first query, so
+/// the wrong profile writes nothing at all.
 #[tauri::command]
-pub async fn demo_load(state: State<'_, AppState>) -> Result<knobas_sync::SyncReport, IpcError> {
+pub async fn demo_load(
+    state: State<'_, AppState>,
+    profile: State<'_, crate::Profile>,
+) -> Result<knobas_sync::SyncReport, IpcError> {
+    if !profile.allows_demo_data() {
+        return Err(IpcError::invalid(format!(
+            "demo data belongs to the demo profile -- start knobas with {} (or `just demo`)",
+            crate::DEMO_FLAG
+        )));
+    }
     Ok(crate::demo::demo_load_inner(&state.pool).await?)
 }
 

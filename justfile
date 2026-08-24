@@ -68,3 +68,13 @@ front: deps
 # from the current directory.
 dev: deps
     cd crates/knobas-app && PATH="$PWD/../../app/node_modules/.bin:$PATH" tauri dev
+
+# The demo profile: its own data directory, its own database on its own port,
+# its own keychain service. Demo data never mixes with a real corpus
+# (interfaces §8 P13), and `demo_load` is refused outside it.
+#
+# Two `--`: the first ends the Tauri CLI's own arguments, the second ends
+# cargo's, so `--demo` reaches the knobas binary itself. The startup log line
+# `profile demo=true` is the acceptance test for that.
+demo: deps
+    cd crates/knobas-app && PATH="$PWD/../../app/node_modules/.bin:$PATH" tauri dev -- -- --demo

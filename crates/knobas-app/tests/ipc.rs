@@ -36,10 +36,17 @@
 //! -- before `progress` is looked at. (2) therefore uses commands of the same
 //! two argument shapes with no state in front of them, which is the only way
 //! to watch the decoding itself happen.
+//!
+//! A fourth section rides along, for a different contract: ruling P13's demo
+//! guard. Argument resolution runs to completion *before* any command body, so
+//! reaching the guard means managing both the `Profile` and an `AppState` --
+//! the latter over a pool pointing at a closed port, so that "the guard
+//! refused" and "the database was touched" cannot be confused for one another.
 
 use std::marker::PhantomData;
 
 use knobas_sync::{SyncPhase, SyncProgress};
+use tauri::Manager;
 use tauri::ipc::{CallbackFn, Channel, CommandArg};
 use tauri::test::MockRuntime;
 
@@ -171,8 +178,23 @@ const LOCAL_ORIGIN: &str = "tauri://localhost";
 /// Invoke `cmd` on a mock app carrying both the app's sync commands and the
 /// two shapes above, and return the outcome with the rejection stringified.
 fn invoke(cmd: &str, body: serde_json::Value) -> Result<tauri::ipc::InvokeResponseBody, String> {
+    invoke_managing(cmd, body, |_| {})
+}
+
+/// [`invoke`], with `manage` given the app first.
+///
+/// A `#[tauri::command]` resolves *every* argument before its body runs, so a
+/// command guarding on managed state is unreachable until that state exists --
+/// which is why the demo tests below hand this a `Profile` and an `AppState`
+/// rather than asserting against "state not managed".
+fn invoke_managing(
+    cmd: &str,
+    body: serde_json::Value,
+    manage: impl FnOnce(&tauri::App<MockRuntime>),
+) -> Result<tauri::ipc::InvokeResponseBody, String> {
     let app = tauri::test::mock_builder()
         .invoke_handler(tauri::generate_handler![
+            knobas_app::commands::sources::demo_load,
             knobas_app::commands::sources::sync_now,
             knobas_app::commands::sources::sync_now_with_progress,
             shapes::without_progress,
@@ -180,6 +202,7 @@ fn invoke(cmd: &str, body: serde_json::Value) -> Result<tauri::ipc::InvokeRespon
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("mock app");
+    manage(&app);
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", tauri::WebviewUrl::default())
         .build()
         .expect("mock webview");
@@ -279,4 +302,82 @@ fn both_halves_of_sync_now_are_registered_and_reachable() {
             "{cmd} was not dispatched: {rejection}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// 4. The demo profile's guard, through the same pipeline (ruling P13).
+// ---------------------------------------------------------------------------
+
+/// A pool over a port nothing listens on.
+///
+/// `connect_lazy` opens no connection, so this costs nothing while the guard
+/// holds -- and *fails* the moment a command gets past the guard and tries to
+/// query, which is exactly the signal the second test below reads. The timeout
+/// bounds that failure: nothing is listening on port 1, so the only question is
+/// how long the pool retries before saying so.
+///
+/// Built inside Tauri's runtime because sqlx spawns the pool's reaper on the
+/// ambient one, and this is the runtime the command bodies will run on anyway.
+fn unreachable_pool() -> sqlx::PgPool {
+    tauri::async_runtime::block_on(async {
+        sqlx::postgres::PgPoolOptions::new()
+            .acquire_timeout(std::time::Duration::from_secs(1))
+            .connect_lazy("postgres://knobas@127.0.0.1:1/knobas")
+            .expect("a lazy pool needs no server")
+    })
+}
+
+/// Invoke `demo_load` with `profile` and a database nothing is listening on.
+fn invoke_demo_load(profile: knobas_app::Profile) -> Result<(), String> {
+    invoke_managing("demo_load", serde_json::json!({}), move |app| {
+        app.manage(profile);
+        app.manage(knobas_app::AppState::over_pool(unreachable_pool()));
+    })
+    .map(|_| ())
+}
+
+/// The fixture is refused outside the demo profile -- and refused *before* the
+/// database is touched, which is what the unreachable pool proves: a guard that
+/// ran after the first query would surface a connection error instead.
+#[test]
+fn demo_load_is_refused_outside_the_demo_profile() {
+    let real = knobas_app::Profile::from_args(
+        Vec::<String>::new(),
+        std::path::Path::new("/tmp/knobas-test"),
+    );
+    assert!(!real.demo, "the control profile is not the demo one");
+
+    let rejection = invoke_demo_load(real).expect_err("demo data belongs to the demo profile");
+    assert!(
+        rejection.contains(knobas_app::DEMO_FLAG),
+        "the refusal must name the flag that fixes it: {rejection}"
+    );
+    assert!(
+        rejection.contains("invalid"),
+        "the refusal carries IpcErrorCode::Invalid: {rejection}"
+    );
+    assert!(
+        !rejection.contains(REACHED_THE_BODY),
+        "the command was never dispatched, so this proves nothing: {rejection}"
+    );
+}
+
+/// ...and the demo profile is let through. Without this the test above would
+/// pass just as well against a `demo_load` that refuses everybody.
+///
+/// It gets as far as the database and no further -- the pool points at nothing
+/// -- so the assertion is that the failure is *not* the guard's.
+#[test]
+fn demo_load_passes_the_guard_in_the_demo_profile() {
+    let demo = knobas_app::Profile::from_args(
+        vec![knobas_app::DEMO_FLAG.to_owned()],
+        std::path::Path::new("/tmp/knobas-test"),
+    );
+    assert!(demo.demo, "the flag selects the demo profile");
+
+    let rejection = invoke_demo_load(demo).expect_err("the pool points at no server");
+    assert!(
+        !rejection.contains(knobas_app::DEMO_FLAG),
+        "the demo profile was refused its own fixture: {rejection}"
+    );
 }

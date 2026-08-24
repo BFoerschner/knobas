@@ -27,8 +27,10 @@
 pub mod commands;
 pub mod demo;
 mod error;
+mod profile;
 
 pub use error::{IpcError, IpcErrorCode};
+pub use profile::{APP_IDENTIFIER, DEMO_FLAG, Profile};
 
 /// Tauri event names, mirrored in `app/src/lib/ipc/index.ts` as `EVENTS`.
 ///
@@ -91,6 +93,26 @@ pub struct AppState {
     db: Mutex<Option<knobas_db::EmbeddedDb>>,
 }
 
+impl AppState {
+    /// The shared state over a pool this process did not start.
+    ///
+    /// `db` is `None`, which is the truth: [`shutdown_database`] stops only a
+    /// server knobas owns, and there is none here.
+    ///
+    /// It exists because a [`tauri::State`] cannot be built by hand, so a
+    /// command body is unreachable from a mock app until its state is managed
+    /// -- see `tests/ipc.rs`, where `demo_load`'s profile guard is checked
+    /// against a pool pointing at nothing (the guard has to refuse before any
+    /// query, and that is what makes the test say so).
+    #[must_use]
+    pub fn over_pool(pool: PgPool) -> Self {
+        Self {
+            pool,
+            db: Mutex::new(None),
+        }
+    }
+}
+
 /// Build the application, bring the database up, and run the event loop.
 ///
 /// Returns when the last window has closed and the database has been stopped.
@@ -123,7 +145,18 @@ pub fn run() {
             // then the panic hook below is what makes a *failure* legible: the
             // process dies without ever showing a window.
             let handle = app.handle().clone();
-            tauri::async_runtime::block_on(async move { start_database(&handle).await })?;
+
+            // Managed first, and synchronously: `app_status` (stream D) has to
+            // answer "which knobas is this, and is the database up yet?" from
+            // the very first frame, and when bring-up becomes asynchronous the
+            // profile must already be in state -- a command that waits for the
+            // database to know whether it is the demo is a command that cannot
+            // report a database that is still starting.
+            let profile = Profile::from_args(std::env::args(), &handle.path().app_data_dir()?);
+            tracing::info!(demo = profile.demo, dir = %profile.dir.display(), "profile");
+            handle.manage(profile.clone());
+
+            tauri::async_runtime::block_on(async move { start_database(&handle, &profile).await })?;
 
             // By label, and a hard failure if it is missing: a config whose
             // window was renamed would otherwise start knobas with no window
@@ -162,23 +195,23 @@ pub fn run() {
 }
 
 /// Start (or connect to) the database, migrate it, and hand it to Tauri.
-async fn start_database(handle: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    let root_dir = handle.path().app_data_dir()?.join("db");
-    let existing_url = std::env::var(DB_URL_ENV)
-        .ok()
-        .filter(|url| !url.trim().is_empty());
+///
+/// Which database that is belongs to the [`Profile`] (ruling P13): the demo
+/// runs its own server out of its own directory, and declines `KNOBAS_DB_URL`
+/// rather than loading a fixture into a corpus somebody manages.
+async fn start_database(
+    handle: &tauri::AppHandle,
+    profile: &Profile,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let config = profile.db_config(std::env::var(DB_URL_ENV).ok());
 
-    if existing_url.is_some() {
+    if config.existing_url.is_some() {
         tracing::info!("{DB_URL_ENV} is set: using an externally managed postgres");
     } else {
-        tracing::info!(root_dir = %root_dir.display(), "starting the embedded postgres");
+        tracing::info!(root_dir = %config.root_dir.display(), "starting the embedded postgres");
     }
 
-    let db = knobas_db::EmbeddedDb::start(knobas_db::DbConfig {
-        root_dir,
-        existing_url,
-    })
-    .await?;
+    let db = knobas_db::EmbeddedDb::start(config).await?;
     knobas_db::migrate::run(db.pool()).await?;
 
     handle.manage(AppState {
