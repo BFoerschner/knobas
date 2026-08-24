@@ -1,0 +1,459 @@
+# knobas -- how the system actually couples together.
+#
+# Everything here is derived from the code, not from the plan documents:
+#   merged   = on `main` (milestone M0, complete)
+#   in flight = branch `m1/contract`, worktree .worktrees/m1-contract (NOT merged)
+#   planned  = named in the roadmap, no code yet -- one dimmed node each
+#
+# The spine reads top to bottom and is the data path:
+#   source system -> adapter -> [Source SPI] -> knobas-sync -> Postgres
+#     -> search -> Tauri command -> [IPC boundary] -> Svelte UI
+# The inset at the top right is the exact Cargo dependency graph.
+#
+# Render (dagre is d2's default layout; the flag is spelled out so a future
+# run cannot drift onto another engine -- elk turns this graph into spaghetti):
+#   d2 --layout dagre --pad 40 docs/architecture.d2 docs/architecture.svg
+#
+# The PNG is rasterised from that SVG rather than by d2 itself: `d2 ... .png`
+# wants to download its own Chromium, and a browser is already on the machine.
+#   printf '<body style="margin:0"><img src="architecture.svg" style="width:6879px">' > /tmp/w.html
+#   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless \
+#     --screenshot=docs/architecture.png --window-size=6879,4803 --hide-scrollbars file:///tmp/w.html
+
+# Palette: graphite + hairlines, amber reserved for the one thing that is
+# moving (the in-flight branch). The page paints its own soft ground rather
+# than inheriting the viewer's, so the SVG reads the same embedded in a light
+# or a dark document -- an SVG cannot re-style explicit fills per colour scheme.
+
+direction: down
+
+style.fill: "#FAFAF9"
+
+classes: {
+  merged: {
+    style: {
+      fill: "#F1F1EF"
+      stroke: "#5A5A62"
+      stroke-width: 1
+      font-color: "#232327"
+      border-radius: 4
+      font-size: 13
+    }
+  }
+  flight: {
+    style: {
+      fill: "#FBF2DF"
+      stroke: "#B4802A"
+      stroke-width: 2
+      font-color: "#4A3608"
+      border-radius: 4
+      font-size: 13
+    }
+  }
+  planned: {
+    style: {
+      fill: "#F5F5F3"
+      stroke: "#A9A9A3"
+      stroke-width: 1
+      stroke-dash: 4
+      font-color: "#77777E"
+      border-radius: 4
+      font-size: 13
+    }
+  }
+  seam: {
+    style: {
+      fill: "#E6E6E2"
+      stroke: "#1F1F23"
+      stroke-width: 3
+      font-color: "#17171A"
+      border-radius: 2
+      bold: true
+      font-size: 14
+    }
+  }
+  store: {
+    style: {
+      fill: "#EAEDF0"
+      stroke: "#4F5C67"
+      stroke-width: 1
+      font-color: "#1E252B"
+      border-radius: 4
+      font-size: 13
+    }
+  }
+  seamband: {
+    style: {
+      fill: "#EFEFEB"
+      stroke: "#1F1F23"
+      stroke-width: 3
+      font-color: "#17171A"
+      border-radius: 3
+      font-size: 15
+      bold: true
+    }
+  }
+  band: {
+    style: {
+      fill: "#F6F6F4"
+      stroke: "#CFCFC9"
+      stroke-width: 1
+      font-color: "#3F3F46"
+      border-radius: 6
+      font-size: 15
+    }
+  }
+  note: {
+    style: {
+      fill: "#FFFFFF"
+      stroke: "#DCDBD5"
+      stroke-width: 1
+      font-color: "#3F3F46"
+      border-radius: 4
+      font-size: 12
+    }
+  }
+  flow: {
+    style: {
+      stroke: "#2F2F35"
+      stroke-width: 2
+      font-color: "#2F2F35"
+      font-size: 11
+    }
+  }
+  dep: {
+    style: {
+      stroke: "#8B8B92"
+      stroke-width: 1
+      font-color: "#5C5C64"
+      font-size: 11
+    }
+  }
+  amberedge: {
+    style: {
+      stroke: "#B4802A"
+      stroke-width: 2
+      font-color: "#7A5615"
+      font-size: 11
+    }
+  }
+  ghostedge: {
+    style: {
+      stroke: "#AAAAA4"
+      stroke-width: 1
+      stroke-dash: 4
+      font-color: "#8B8B92"
+      font-size: 11
+    }
+  }
+}
+
+# ======================================================== 1. source systems ==
+
+sys: "Source systems" {
+  class: band
+  direction: right
+
+  fixture: "fixtures/tidewater/work.json\nthe dataset all 25 mockups were drawn against\ncompiled into the mock with include_str!" {class: merged}
+
+  mockd: "knobas-mockd + testenv/docker-compose\nstateful HTTP mocks, real Gitea + Uptime Kuma\n(planned — stream T)" {class: planned}
+
+  real: "Real Jira DC · Gitea · TeamCity\n(planned)" {class: planned}
+}
+
+# ============================================================== 2. adapters ==
+
+adapters: "Adapters — one per system.\nThe extension point: adding one changes no core, search or UI code." {
+  class: band
+  direction: right
+
+  mock: "knobas-source-mock  (M0)\nthe CERTIFIED reference Source, not a stub\nemits ticket · pr · build · page · commit\nsimulated faults, tombstones, in-memory writes" {class: merged}
+
+  jira: "Jira DC adapter (planned — stream A)" {class: planned}
+  gitea: "Gitea adapter (planned — stream B)" {class: planned}
+  teamcity: "TeamCity adapter (planned — stream C)" {class: planned}
+
+  http: "knobas-http  (in flight)\nthe one HTTP stack all three share:\nreqwest + rustls platform roots, 3 retries,\nRetry-After, per-instance rate limit, fault classes" {class: flight}
+
+  http -> jira: "" {class: ghostedge}
+  http -> gitea: "" {class: ghostedge}
+  http -> teamcity: "" {class: ghostedge}
+}
+
+# ============================== 3. the app as composition root (drives sync) ==
+
+boot: "crates/knobas-app — the composition root (this crate appears twice: here it DRIVES, at the bottom it SERVES)" {
+  class: band
+  direction: right
+
+  state: "AppState  (M0)\nPgPool + Mutex<Option<EmbeddedDb>>\nsetup() brings the database up before the\nwindow is shown; ExitRequested/Exit stops it" {class: merged}
+
+  registry: "demo.rs — M0's entire source registry\nadapter_for(id) → Box<dyn Source>\ndemo_load = register + full sync, idempotent" {class: merged}
+
+  profile: "profile.rs — `knobas --demo`  (in flight)\nown data dir → own Postgres → own keychain\nservice; demo data can never mix with real work" {class: flight}
+
+  profile -> state: "" {class: amberedge}
+}
+
+# ============================================================== 4. SPI seam ==
+
+spi: "▲  FROZEN CONTRACT  ▲   knobas-source — THE SOURCE SPI" {
+  class: seamband
+  direction: right
+
+  frozen: "trait Source { descriptor · test_connection · sync · write }\ntrait Sink { item }\nSourceDescriptor   SyncItem   Cursor   SourceError   WriteOp\ncontract::battery — the certification every adapter runs on itself\n\nPlain serde data only: no handles, no connections, so an adapter can\nlater run out of process behind a pipe. The descriptor is self-describing —\nentity kinds, auth methods and write ops drive the UI, so nothing\ndownstream is allowed a per-adapter table. Freezing it was the M0 exit:\nchanging anything here breaks every adapter at once." {
+    class: seam
+    width: 470
+  }
+
+  m1: "in flight — the only additions on m1/contract:\n• test_connection now returns ConnectionInfo\n   (account · server_version · secret_expires_at)\n• SourceInstance { id, kind, base_url, auth, secret, config }\n   config + keychain secret ⇒ Box<dyn Source>; Debug redacts the secret\n• SyncItem.web_url — the only source of Open in browser\n• SourceDescriptor.full_sync_exhaustive — precondition of the\n   full-sync sweep; TeamCity will say false, everyone else true\n• Capability::Search re-read as server-side search, so M1's\n   read-only adapters declare no capabilities at all" {
+    class: flight
+    width: 470
+  }
+}
+
+# ========================================================= 5. the write side ==
+
+engine: "Write side" {
+  class: band
+  direction: right
+
+  sync: "knobas-sync :: run_once  (M0)\none transaction per run; PgSink batches 500\npg_advisory_xact_lock(source_id)\nrefuses ids, namespaces and kinds the\ndescriptor never declared" {class: merged}
+
+  sync_m1: "knobas-sync  (in flight)\nrun_log → knobas.sync_run · ProgressSink\nhealth::AuthState · SourceInstance builders" {class: flight}
+
+  sched: "scheduler · backoff · keychain ·\nfull-sync sweep (planned — stream F)" {class: planned}
+
+  core: "knobas-core  (M0)\nEntityRef \"<namespace>:<key>\"\nlink store (tombstoned, never deleted)\nactivity store · RESERVED_NAMESPACES" {class: merged}
+
+  sync -> core: "activity::record,\nafter the commit" {class: dep}
+  sched -> sync: "" {class: ghostedge}
+  sync_m1 -> sync: "" {class: amberedge}
+}
+
+# =============================================================== 6. storage ==
+
+store: "Storage — the embedded PostgreSQL knobas runs itself" {
+  class: band
+  direction: right
+
+  db: "knobas-db  (M0)\nEmbeddedDb::start — provision, start, or ADOPT\nsqlx::migrate! baked into the binary\ndepends on no other knobas crate" {class: store}
+
+  mirror: "schema `sync` — THE MIRROR (source-owned)\nsync.item: title · body_text · author\n            payload jsonb (raw, kept for re-mapping)\n            fts tsvector, GENERATED … STORED\nrewritten wholesale every run, tombstones included" {class: store}
+
+  mirror_m1: "in flight: sync.item.web_url\nview sync.live_item — the entity join, made structural" {class: flight}
+
+  owned: "schema `knobas` — OWNED DATA\nentity (identity + deleted_at) · link · activity\nnote · context · source_config\nlinks and notes point here, so they outlive a\nremote deletion" {class: store}
+
+  owned_m1: "in flight: knobas.sync_run (per-run diagnostics)\nknobas.setting · source_config.{config, auth_state,\nsecret_expires_at, backoff_until}" {class: flight}
+
+  db -> mirror: "migrations 0001" {class: dep}
+  db -> owned: "" {class: dep}
+  mirror -> mirror_m1: "0002" {class: amberedge}
+  owned -> owned_m1: "0002" {class: amberedge}
+}
+
+# ============================================================= 7. read side ==
+
+read: "Read side" {
+  class: band
+  direction: right
+
+  search_m0: "knobas_db::search  (M0)\nsearch(q, limit) → Vec<SearchHit>\nwebsearch_to_tsquery, ts_rank_cd, ts_headline" {class: merged}
+
+  search_m1: "knobas-search  (in flight, new crate)\nSearchQuery / SearchResponse / Segment\nFTS moved OUT of knobas-db — moved, not copied\ntakes a PgPool; depends on sqlx alone" {class: flight}
+
+  activity_read: "knobas_core::activity::recent\nthe activity stream, newest first\n(same crate as the write side)" {class: merged}
+
+  search_m1 -> search_m0: "replaces" {class: amberedge}
+}
+
+# ================================================= 8. the app as IPC surface ==
+
+api: "crates/knobas-app — the IPC surface (same crate as the composition root above)" {
+  class: band
+  direction: right
+
+  cmds: "commands.rs  (M0)\nping · demo_load · sync_now · search · recent_activity\nthin shims: decode, call the crate that owns the\nbehaviour, flatten the error to a String\nevery one takes State<'_, AppState>" {class: merged}
+
+  cmds_m1: "commands/{app,entity,search,sources}  (in flight)\none module per owning stream; typed IpcError\nsync_now returns a sync_run.id and does NOT wait\nsync_now_with_progress takes an ipc::Channel" {class: flight}
+
+  events: "events (in flight): db:state · sync:state\nsource:health · activity:new\ncoarse state only — never throughput" {class: flight}
+}
+
+# ============================================================== 9. IPC seam ==
+
+ipc: "▲  FROZEN CONTRACT  ▲\nTHE IPC BOUNDARY\n\ninvoke(name, args)  ⇄  #[tauri::command]\n\nArguments are renamed to camelCase; struct fields stay snake_case.\napp/src/lib/ipc*.ts is a HAND-WRITTEN mirror of the Rust serde shapes\n(tauri-specta is still an RC), kept honest by tests on both sides.\nM0: 5 commands, Err(String). In flight: typed IpcError + 4 events,\nand per-item progress on an ipc::Channel — never on an event." {
+  class: seam
+  width: 470
+}
+
+# ============================================================= 10. frontend ==
+
+fe: "Frontend — app/ · Svelte 5 + Vite" {
+  class: band
+  direction: right
+
+  ipcts: "lib/ipc.ts  (M0)\none function per command + the mirrored types" {class: merged}
+
+  ipcts_m1: "lib/ipc/{app,entity,search,sources,index}.ts\nIpcError · IpcErrorCode · EVENTS  (in flight)" {class: flight}
+
+  app: "App.svelte\nsearch box, grouped hits, activity list,\nLoad demo data button" {class: merged}
+
+  shellui: "Signal shell: top strip, rooms + tiles, detail\nslide-over, sources view, first-run wizard\n(planned — stream D)" {class: planned}
+
+  ipcts -> app: "" {class: dep}
+  ipcts_m1 -> app: "" {class: amberedge}
+  ipcts_m1 -> shellui: "" {class: ghostedge}
+}
+
+# ================================================================ the spine ==
+
+sys.fixture -> adapters.mock: "compiled in" {class: flow}
+sys.mockd -> adapters.jira: "" {class: ghostedge}
+sys.mockd -> adapters.teamcity: "" {class: ghostedge}
+sys.real -> adapters.gitea: "" {class: ghostedge}
+sys.real -> adapters.jira: "" {class: ghostedge}
+
+adapters.mock -> spi: "impl Source\ncertified by contract::battery" {class: flow}
+adapters.jira -> spi: "" {class: ghostedge}
+adapters.gitea -> spi: "" {class: ghostedge}
+adapters.teamcity -> spi: "" {class: ghostedge}
+adapters.http -> spi: "maps every fault to\nSourceError, once" {class: amberedge}
+
+spi -> engine.sync: "Source::sync(cursor, &mut Sink)\nSink::item(SyncItem) ×N" {class: flow}
+
+engine.sync -> store.mirror: "sync.item upsert" {class: flow}
+engine.sync -> store.owned: "knobas.entity upsert\n+ source_config.cursor\nsame transaction" {class: flow}
+engine.core -> store.owned: "link · activity" {class: dep}
+engine.sync_m1 -> store.owned_m1: "" {class: amberedge}
+
+store.mirror -> read.search_m0: "FTS: sync.item ⨝ knobas.entity\n(the join is what hides tombstones)" {class: flow}
+store.mirror_m1 -> read.search_m1: "FTS over sync.live_item" {class: amberedge}
+store.owned -> read.activity_read: "" {class: dep}
+
+read.search_m0 -> api.cmds: "search" {class: flow}
+read.activity_read -> api.cmds: "recent_activity" {class: dep}
+read.search_m1 -> api.cmds_m1: "" {class: amberedge}
+
+boot.registry -> spi: "hands the engine a Box<dyn Source>\n(M0 registry: exactly one entry, the mock)" {class: flow}
+boot.registry -> engine.sync: "run_once(pool, source, cursor)" {class: flow}
+boot.state -> store.db: "starts it, owns it, stops it on exit" {class: flow}
+
+api.cmds -> ipc: "" {class: flow}
+api.cmds_m1 -> ipc: "" {class: amberedge}
+ipc -> fe.ipcts: "" {class: flow}
+ipc -> fe.ipcts_m1: "" {class: amberedge}
+
+# =============================================== inset: real Cargo edges ==
+
+cargo: "Cargo dependency graph — the real edges in crates/*/Cargo.toml" {
+  class: band
+  near: top-right
+  direction: down
+
+  app: "knobas-app" {class: merged}
+  sync: "knobas-sync" {class: merged}
+  mock: "knobas-source-mock" {class: merged}
+  src: "knobas-source" {class: merged}
+  core: "knobas-core" {class: merged}
+  db: "knobas-db" {class: merged}
+  search: "knobas-search" {class: flight}
+  http: "knobas-http" {class: flight}
+
+  app -> core: "" {class: dep}
+  app -> db: "" {class: dep}
+  app -> src: "" {class: dep}
+  app -> mock: "" {class: dep}
+  app -> sync: "" {class: dep}
+  app -> search: "" {class: amberedge}
+  sync -> core: "" {class: dep}
+  sync -> src: "" {class: dep}
+  mock -> src: "" {class: dep}
+  mock -> core: "" {class: dep}
+  src -> core: "" {class: dep}
+  http -> src: "" {class: amberedge}
+
+  gap: |md
+    `knobas-db` and `knobas-search` depend on **no** knobas crate at all. \
+    `knobas-sync` does **not** depend on `knobas-db`: the engine takes a `PgPool` \
+    it is handed and never opens one, so it is usable from the app, from a \
+    scheduler and from a test. `knobas-db` is its dev-dependency only.
+  |
+  gap.class: note
+}
+
+# ===================================================== notes, legend, gate ==
+
+notes: "What a newcomer gets wrong" {
+  class: band
+  near: top-left
+  direction: right
+
+  n1: |md
+    **① knobas provisions and ADOPTS its own PostgreSQL.**
+
+    Nothing is installed or configured by hand. There is no `brew install postgresql`. \
+    `EmbeddedDb::start` downloads PG 18.6 once per machine into `~/.theseus` (shared binaries), \
+    `initdb`s a data directory under the app data dir, and serves it on **loopback TCP** — \
+    never a unix socket, whose path under Application Support would exceed macOS' 103 bytes. \
+    If a server is **already serving that data directory** — a knobas killed by Ctrl-C never \
+    runs its shutdown — it is **adopted**, not refused and not killed: the orphan becomes \
+    this run's warm start. An adopted handle owns nothing, so no later quit ever stops it. \
+    A stale `postmaster.pid` is cleared only when *both* the port is dead *and* the pid is gone. \
+    `KNOBAS_DB_URL` points the app at a server somebody else manages instead.
+  |
+  n1.class: note
+
+  n2: |md
+    **② `sync.item` is a MIRROR; `knobas.*` is OWNED data.**
+
+    Every synced item writes two rows, and they answer different questions. \
+    `knobas.entity` is the durable identity: links, notes and activity all reference it. \
+    `sync.item` is the refreshable mirror — title, body, author, and the **raw source payload**, \
+    kept so items can be re-mapped later without re-fetching. Rewritten wholesale every run. \
+    A remote deletion therefore only sets `knobas.entity.deleted_at`. The mirror row stays, so \
+    the UI can still show the last-known title of something that vanished upstream. \
+    "Deleted" lives on the entity alone ⇒ **every reader of the mirror must join `knobas.entity`**. \
+    The in-flight migration makes that structural: the view `sync.live_item`. \
+    A full sync does not yet reconcile hard deletes; the sweep is still to come.
+  |
+  n2.class: note
+
+  n3: |md
+    **③ The mock adapter is a certified Source, not a test double.**
+
+    `knobas-source-mock` passes the identical `contract::battery` every real adapter must pass: \
+    declared kinds only · the same fault classes from `test_connection` and from `sync` · \
+    undeclared write ops refused · sink failures propagated, never swallowed · \
+    an idle sync returning the cursor it was given, unchanged. \
+    So the whole app can be built, demoed and tested end to end before Jira, Gitea or \
+    TeamCity exist — and a new adapter has a correct worked example to copy.
+  |
+  n3.class: note
+
+  n4: |md
+    **④ One gate, run identically by a developer and by CI.**
+
+    `just check` = `cargo fmt` · `svelte-check` + `vite build` · `clippy --all-targets` · \
+    `clippy --lib` (the features a consumer actually gets) · `cargo test` over a real \
+    embedded PostgreSQL that the test harness starts once per test binary. \
+    `.github/workflows/check.yml` does nothing but put a Linux machine in front of that \
+    one command, so the gate and the developer can never disagree. \
+    The in-flight branch adds `tests/ipc.rs`, which drives real commands through \
+    `tauri::test`'s mock runtime rather than trusting the documentation.
+  |
+  n4.class: note
+}
+
+legend: "Legend" {
+  class: band
+  near: bottom-left
+  direction: down
+
+  l1: "merged — on `main` (M0, complete)" {class: merged}
+  l2: "in flight — branch m1/contract, not merged yet" {class: flight}
+  l3: "planned — roadmap only, no code exists" {class: planned}
+  l4: "frozen contract — changing it breaks every consumer at once" {class: seam}
+  l5: "solid dark arrow = data or control flow · thin grey arrow = dependency\ndashed arrow = planned · amber = in flight" {class: note}
+}
