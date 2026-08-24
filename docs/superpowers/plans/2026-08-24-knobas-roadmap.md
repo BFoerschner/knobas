@@ -12,7 +12,7 @@ Björn's stated pain: **bad source-system search (JQL/Confluence) and credential
 
 > **MVP = end of M1: sources connected once (credentials in the keychain), everything synced locally, one `⌘K` box that finds any ticket/PR/build/page in <100 ms, context rooms and detail views to read it all in one window.**
 
-That build is read-only toward the sources, has no links UI, no timer, no assets — and is already worth opening every morning. Everything after M1 makes knobas *knobas* rather than a fast index:
+That build is read-only toward the sources, has no links UI, no timer, no assets — and is already worth opening every morning. (Since no real Jira/Confluence/TeamCity instance is available during development, every milestone is developed and accepted against the local test environment — §3 — and "start using it daily" begins at the deferred real-system gate, the day real credentials exist.) Everything after M1 makes knobas *knobas* rather than a fast index:
 
 - **M2** is the identity release (links, suggestions, write-back, start-work, inbox).
 - **M3** makes it the whole workday (time, standup, Confluence).
@@ -44,29 +44,29 @@ Contents: Cargo workspace + Tauri 2 + Svelte 5/Vite scaffold · embedded Postgre
 | D | **Frontend shell**: top strip, status bar, room + tiles (read-only), detail slide-over (read-only), sources view, first-run wizard | M0 IPC + seed data |
 | E | **Search**: FTS corpus incl. ancestor paths, launcher (prefixes, chips, aliases, empty-query board), grouped results, built-in smart lists (read-only counts) | M0 IPC + seed data |
 | F | **Sync engine**: scheduler (per-source interval, *Sync now*), cursors, backoff, 401 detection → credential health, keychain integration, diagnostics view | M0 SPI |
-| T | **Test environment** (dispatched first): `knobas-mockd` HTTP mock server (Jira + TeamCity subsets to start), `testenv/docker-compose.yml` (real Gitea, real Uptime Kuma v2, mockd container, Flowrun stub), `testenv/seed` script that populates Gitea/Kuma with the Tidewater content via their APIs | M0 fixtures |
+| T | **Test environment** (dispatched first): `knobas-mockd` HTTP mock server (Jira + TeamCity subsets to start) validated against the vendored specs (`testenv/specs/`, already fetched + pinned 08-24; TeamCity's spec extracted from its container per `testenv/specs/fetch.sh`), `testenv/docker-compose.yml` (real Gitea, real Uptime Kuma v2, mockd container, Flowrun stub), `testenv/seed` script that populates Gitea/Kuma with the Tidewater content via their APIs | M0 fixtures |
 
-A/B/C develop against the shared contract battery + `knobas-mockd` run **in-process** in their integration tests (stream T delivers the Jira/TeamCity mocks first; adapters start on unit tests and the battery meanwhile); D/E develop entirely against the mock source and seed data; F uses the mock's simulated failures. **Integration checkpoint at the end:** `docker compose up` the test environment on this machine, connect the app to it end-to-end, then connect a real Jira, Gitea, TeamCity; full initial sync; search everything.
+A/B/C develop against the shared contract battery + `knobas-mockd` run **in-process** in their integration tests (stream T delivers the Jira/TeamCity mocks first; adapters start on unit tests and the battery meanwhile — the vendored specs in `testenv/specs/` are their contract source, no real instances exist during development); D/E develop entirely against the mock source and seed data; F uses the mock's simulated failures. **Integration checkpoint at the end:** `docker compose up` the test environment on this machine and connect the app to it end-to-end — real-container Gitea/Kuma plus mockd Jira/TeamCity; full initial sync; search everything.
 
-**Exit criteria:** real credentials entered once, land in the keychain; initial + incremental sync works; `⌘K` < 100 ms over the synced corpus; rooms and details browsable; sources view shows sync health. **This build is the MVP — start using it daily.**
+**Exit criteria (all against the test environment):** credentials entered once, land in the keychain; initial + incremental sync works; `⌘K` < 100 ms over the synced corpus; rooms and details browsable; sources view shows sync health. **This build is the MVP** — feature-complete for reading; it becomes the daily driver the day it's pointed at real systems (the deferred real-system gate).
 
 ### M2 — Links & actions (the identity release; 4–5 streams)
 
 Links UI everywhere (panels, *Link to…*, Tab action chains, `[[refs]]`) over the one link table · suggestion engine (keys in commits/branches/build params/page text, FTS similarity, native source links; reasons; dismissals persisted) + room tray · write-back: Jira status/comment/create, Gitea branch/PR/comment/approve, TeamCity trigger/re-run · write queue with conflict UI (re-read before flush, ask with diff) · **start-work flow** + reverse (PR merged → In Review) · inbox v1 (mentions, review requests, failed builds, assignments, credential expiry; actions; snooze with date) · notes (markdown, `[[…]]` chips, backlinks) · contexts complete (promote ticket, ad-hoc, 1-hop membership, per-context inbox filter) · scheduled **backup export** (`pg_dump` of `knobas`).
 
-**Exit criteria:** ticket→branch→PR round-trip against real systems; a morning driven from the inbox; links/suggestions in daily use; a nightly backup archive exists.
+**Exit criteria:** ticket→branch→PR round-trip against the test environment (real-container Gitea; mockd Jira transitions); inbox populated and actionable end-to-end; links/suggestions working over the synced corpus; a nightly backup archive exists.
 
 ### M3 — Time & the daily flow (3–4 streams)
 
 Global timer (`⌘T`, any entity or ad-hoc label, switch-on-context-change) · worklog draft (concatenated intervals, activity checkboxes, generated comment) → Jira · ad-hoc block dialog · passive attribution (opt-in) · day review strip · week timesheet with correct *Log all* · standup digest (from the activity stream, traceable lines) + protocol (save as note / publish) · **Confluence adapter** (read + CQL search via v1, create-from-template, comment, macro-free section edit) · desktop notifications.
 
-**Exit criteria:** a full real workday tracked, reviewed, logged to Jira; standup protocol published to Confluence.
+**Exit criteria:** a full workday tracked, reviewed, and logged end-to-end against the test environment (worklogs land in mockd Jira and read back; standup protocol published to mockd Confluence and read back).
 
 ### M4 — Assets, monitoring, estate (4–5 streams)
 
 Asset model (infinite tree, typed+custom properties, routes, relations, env/owner inheritance, history) · Miller columns UI + spines + wires + pane (+ "Depends on this" panel) · **Uptime Kuma adapter** (v2: `/metrics` poll → own timeseries; `kuma-client` for config; create/pause write-back) · monitors tab, alerts → inbox with routing rule + ack semantics · **Flowrun adapter** (instances, scenarios, Run/Log/**Promote**) + tab · asset smart lists + "save search as list" · **export/import complete** (share export, merge-restore with preview) · seed-fixture extension for assets.
 
-**Exit criteria:** the real estate modeled and browsable; an alert flows Kuma → inbox → ack; a scenario promoted from knobas; export restores on a clean machine.
+**Exit criteria:** an estate modeled and browsable (the Tidewater assets, plus Björn's real infrastructure where it exists locally); an alert flows from the real Kuma container → inbox → ack; a scenario promoted against the Flowrun stub; export restores on a clean machine.
 
 ### v1.5 — fast follows (any order, one stream each)
 
@@ -115,10 +115,10 @@ Per-task discipline (unchanged from superpowers): TDD, frequent commits, `superp
 - **Unit tests** per crate (TDD), plain `cargo test`.
 - **Trait-level mock** (`knobas-source-mock`, M0): fakes a source at the `Source`-trait layer — what the UI, sync engine, and contract battery test against. Cheap, no HTTP.
 - **HTTP-level mocks** (`knobas-mockd`, M1 stream T): one axum binary serving *faithful, stateful* subsets of the APIs that cannot be self-hosted — **Jira Cloud v3** (incl. `/search/jql` with `nextPageToken` pagination, real error shapes, 401/429 behaviors), **TeamCity REST**, later **Confluence** (v2 content + v1 CQL, added in M3) and the **Flowrun stub** — each on its own 127.0.0.1 port, backed by the Tidewater fixture, stateful in memory (a POSTed comment shows up in subsequent GETs, so write-back paths are testable). Used two ways: **in-process** in adapter integration tests (spun up on a random port inside `cargo test` — fast, deterministic, no Docker needed, runs in CI), and **as a container** in the compose environment.
-  *Fidelity guards, because a hand-built mock's failure mode is drift:* endpoints are built from the official OpenAPI specs (Atlassian publishes Jira v3 / Confluence specs; mockd's own tests schema-validate its responses against them), and a *record mode* lets an adapter run once against the real Jira Cloud to capture golden responses the mock is diffed against.
+  *Fidelity guards (Björn 08-24: no real Jira Cloud / TeamCity is available during development — the official OpenAPI documents are the only ground truth):* the real vendor specs are **fetched and vendored, checksum-pinned, in `testenv/specs/`** (done 2026-08-24: Jira Cloud v3 — 421 paths incl. `/search/jql`; Confluence v1 — CQL search; Confluence v2 — content CRUD; TeamCity's is extracted from the pinned `jetbrains/teamcity-server` container since JetBrains only serves it from a running server). mockd's own tests schema-validate every response it produces against these specs, and mockd runs *request-validation middleware* so a malformed adapter request fails the test instead of being silently accepted. When real systems become available later, a validation pass against them is a bonus gate — not a development dependency.
 - **Real containers where the real thing is self-hostable** (`testenv/docker-compose.yml`): **Gitea** and **Uptime Kuma v2** (version-pinned images) — the adapters for these test against the genuine APIs, not mocks; `testenv/seed` populates both with the Tidewater content via their APIs so the whole environment matches the fixture. `jetbrains/teamcity-server` available behind `--profile real-teamcity` (heavy, off by default; the mock is the daily driver).
 - **Whole-app e2e, local only:** `docker compose up` in `testenv/` gives a complete fake company on this machine — the app connects to it exactly as it would to production systems (real HTTP, real auth flows, real 401s). Run by the orchestrator at integration checkpoints and milestone exits; CI (GitHub Actions) runs only the docker-free layers above it.
-- **Frontend QA** in headless Chrome against `--demo` (per-agent `--user-data-dir`/port — parallel agents have collided before) · milestone exit = e2e against the compose environment, then the manual checklist against Björn's real systems.
+- **Frontend QA** in headless Chrome against `--demo` (per-agent `--user-data-dir`/port — parallel agents have collided before) · **milestone exit = e2e against the compose environment** — that *is* the acceptance environment for now. A **real-system validation gate** (the same checklists re-run against actual Jira/Confluence/TeamCity/Flowrun) happens once Björn has access to real instances; until then nothing in development depends on one existing.
 
 ---
 
@@ -156,7 +156,8 @@ Per-task discipline (unchanged from superpowers): TDD, frequent commits, `superp
 | PG major upgrades (data dir incompatible) | pin `=18.6.0`; upgrade = sequenced dump → initdb → restore at startup on version change (we own it; export format is already a dump) |
 | First-run binary download (GitHub rate limit / offline) | pinned version skips release lookup; `bundled` feature is the fallback if offline first-run ever matters |
 | `rust_socketio` unmaintained (Kuma config channel) | socket.io isolated behind the adapter trait; `/metrics` alone still covers state + telemetry |
-| Flowrun API unknown (internal system) | adapter stream starts with a discovery task against the real instance; the in-repo stub encodes whatever it finds |
+| Flowrun API unknown (internal system, no instance available during development) | the mockd stub *defines* the assumed contract and the adapter is kept deliberately thin; both get validated and adjusted at the real-system gate when an instance exists |
+| No real Jira/Confluence/TeamCity during development — mocks could drift from reality | vendored, checksum-pinned official OpenAPI specs (`testenv/specs/`) as ground truth; mockd schema-validates responses AND adapter requests against them; real-system validation gate re-runs every milestone checklist once instances exist |
 | Full-page-rerender habits from the mockup leaking into the port | Svelte components own local state; the mockup is a *behavior* reference, its rendering strategy is explicitly not carried over |
 | Scope creep before MVP | M2+ features need a milestone, not a slot in the current one; the design doc's tiering is the arbiter |
 | Session/usage limits during agent waves | agreed concurrency before each wave; Opus for agents per established preference; worktree isolation so a killed wave loses nothing merged |
