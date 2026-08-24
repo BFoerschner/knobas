@@ -1,12 +1,25 @@
 # knobas — design document (feature walkthrough)
 
-Status of this document: **draft for review**, 2026-08-23. It collects every feature that has been decided, explored in a mockup, or proposed, so you can go through it and mark each one *keep / change / drop*. Nothing here is implemented in Rust yet.
+Status of this document: **draft for review**, 2026-08-23, **revised 2026-08-24**. It collects every feature that has been decided, explored in a mockup, or proposed, so you can go through it and mark each one *keep / change / drop*. Nothing here is implemented in Rust yet.
+
+## Revision 2026-08-24 (Claude) — what changed, veto per line
+
+Per your go-ahead ("add or modify features as you see fit"), this revision was made autonomously. Everything new is tagged **Rec 08-24** (= recommended, not user-decided) so you can scan and override. Summary:
+
+1. **Open questions §16 all answered with recommendations** (embedded Postgres, flaps only on live values, smart lists = saved searches first, Confluence section-edit only, v1 write-back list, matrix/blast-radius post-v1, conflicts ask-with-diff, Svelte 5, backlog promotions, 1-hop membership, export defaults).
+2. **Rules the round-3 mockup implements but the doc never stated** are now written down: entity addressing (§2), health rollup / env / owner inheritance (§12.1), alert routing + ack semantics (§12.3), Monitors & Flowrun as first-class tabs (§12.2), launcher details (§4).
+3. **Three mockup design flaws fixed in the spec, not carried over**: links get one uniform record for all pairs incl. relation (§5a); environment becomes a stored/inherited property, not id-string guessing (§12.1); asset search must match ancestor paths (§4).
+4. **New: §2a Activity stream** (first-class — it already feeds standup, day review, and inbox history), **§14a first-run + demo seed mode + mock source** (the Tidewater dataset becomes the dev/test fixture — this is what lets parallel agents build UI without live sources), **diagnostics view** (§3).
+5. §13 backlog re-tiered; §15 architecture extended (sync engine, mock source crate, IPC contract-first).
+
+Companion documents: `docs/superpowers/plans/2026-08-24-knobas-roadmap.md` (MVP, milestones, parallel workstreams) and `docs/superpowers/plans/2026-08-24-plan-01-foundation.md` (first implementation plan).
 
 Legend for the status tags:
 - **Decided** — you said yes; it will be built as described.
 - **In mockup** — exists in a clickable mockup; the behaviour is a proposal until you confirm it.
 - **Proposed** — suggested, not yet in a mockup.
-- **Open** — needs your answer; the question is stated.
+- **Open** — needs your answer; the question is stated. *(As of 08-24 nothing carries this tag — every open question got a recommendation, tagged as below.)*
+- **Rec 08-24** — recommended by Claude on 2026-08-24 under your "as you see fit" delegation; treated as decided for planning, but yours to override on review.
 
 Mockups referenced: round 1 `mockups/round-1/` (25 paradigm × design cells), round 2 `mockups/round-2/` (Signal shell + three asset ways), round 3 `mockups/round-3/signal-miller.html` (the integrated view), playground `mockups/playground/` (E1–E4 depth explorers).
 
@@ -34,10 +47,22 @@ Principles that came out of the rounds:
 | **Room** per context: tiles Tickets (mini board) · Code (branches/PRs/commits) · Builds · Docs · Notes · Time-in-this-context · Assets | In mockup | Every tile is filtered by the context. Tile grid changed in every R2 way; R3 settles it. |
 | **Persistent top strip**: search field (`⌘K`), timer with context + elapsed, inbox count, Assets with open-alert count, sync monograms (one per source, 401 highlighted), Today / Day buttons | In mockup | The amber **ticker** from Signal is **removed**. |
 | **Status bar**: DB size, FTS freshness, sync cadence, counts, pending writes, user, clock | In mockup | |
-| **Detail slide-over** (right half of the room) for any entity; `Esc` unwinds | In mockup | |
-| **Split-flap cells** for values that change (status, build state, timer minutes, inbox count, versions) | In mockup | Signal signature; keep or tone down? **Open** |
-| Keyboard: `⌘K` search, `⌘T` timer, `Esc` unwind, visible focus, reduced-motion respected | Decided | |
+| **Detail slide-over** (right half of the room) for any entity; `Esc` unwinds | In mockup | **Two detail idioms are intentional** (R3): slide-over for work items; assets use a fixed right pane inside the Miller view so the column path stays visible. **Rec 08-24: keep both.** |
+| **Entity addressing**: every entity has exactly one stable in-app address (`#/ctx/<id>`, `#/ticket/<key>`, `#/asset/<id>`, `#/route/<id>`, `#/monitor/<id>`, `#/inbox`, `#/time`, `#/standup`, `#/sources`, `#/assets/{board\|monitors\|flowrun}`, `#/start-work/<key>`); opening an asset address re-opens the columns at its path | In mockup (R3) | Was implemented but never specified. **Rec 08-24: adopt as the navigation contract** — it's also what paste-URL chips, notifications, and inbox items deep-link to. Branch/repo get addresses too (dead ends in R3). |
+| **Adaptive room action bar**: the primary action follows the context's state (*Start work on X* / *Trigger build* / *New note*) | In mockup (R3) | |
+| **Suggestion tray** "Might belong here" per room: work-item + asset suggestions with reasons, Confirm / Dismiss | In mockup (R3) | Feeds from the §5a suggestion store. |
+| **Toasts** with optional action button (*Fix now*, *Open PR #145*); status bar carries a "latest change" one-liner (the ticker's quiet replacement) | In mockup (R3) | |
+| **Split-flap cells** | In mockup | **Rec 08-24: flaps only for values that change while you watch** — timer, sync countdown, build/monitor state transitions, inbox/alert counts. Static readings (versions, ids, dates) are plain mono. Disabled under reduced motion. Cuts port cost, keeps the signature. |
+| Keyboard: `⌘K` search, `⌘T` timer, `Esc` unwind, visible focus, reduced-motion respected | Decided | `Esc` unwind ladder as in R3 (chain → query → launcher → overlay → detail → column step → room). `⌘T` on the assets board times the selected asset. |
 | Window: desktop, 1440×900 design target, usable ≥ 1100 wide | Decided | |
+
+---
+
+## 2a. Activity stream (Rec 08-24 — promoted to first-class)
+
+A local, append-only log of (a) every action taken through knobas (status change, comment, link created, worklog sent, build triggered, restart, ack …) and (b) notable synced events on your work (build finished, PR approved, monitor changed). Each line: when, actor, verb, entity refs, origin (user / sync).
+
+Why first-class: three already-decided features are views over exactly this data — the standup digest ("built from 3 commits, 2 worklogs …"), the day review's passive attribution, and the inbox's "acting on an item records a line". The mockup writes such lines ad-hoc; the real app should have one table and one writer. Also gives the status-bar "latest change" line and, later, "what was I doing before lunch" (§13) for free.
 
 ---
 
@@ -50,8 +75,10 @@ Principles that came out of the rounds:
 | **Add source** flow: type → URL → auth → *Test connection* → sync schedule → save | In mockup | |
 | **Sync schedule** per source (default every 5 min); *Sync now* | In mockup | |
 | **Credential health**: PAT expiry countdown, 401 detection → *Re-enter password*, reminder in inbox (snoozable) | In mockup | |
-| **Offline / failed-source write queue**: edits made while a source is 401/offline queue as "pending writes", flush after re-auth; conflicts shown | In mockup | Conflict UI not designed yet. **Open**: merge strategy. |
-| **Local database**: one Postgres database holds the synced copy of every source (with provenance, "synced 4 min ago") **and** all knobas-owned data (links, contexts, notes, assets, time, smart lists, source configs); full-text index over all of it | Decided | Owned tables and synced tables are separate schemas (`knobas` / `sync`) so a dump can include or exclude the cache. **Open**: user-installed Postgres as a prerequisite vs. bundled/embedded. |
+| **Offline / failed-source write queue**: edits made while a source is 401/offline queue as "pending writes", flush after re-auth; conflicts shown | In mockup | **Rec 08-24 (answers Q7):** the queue is inspectable (a list, not just a count — R3 only had the integer). Before flushing, the adapter re-reads the target; if it changed since the edit was queued, the write is held and shown as both-versions-side-by-side → you pick (apply anyway / discard / edit). No silent last-write-wins in v1; a per-source "just apply my version" toggle can come later. |
+| **Work adapters vs asset-import adapters** are listed separately in Sources (Jira/Gitea/… vs Proxmox/Docker host/Traefik); asset adapters show configured / "not configured — import creates editable assets" | In mockup (R3) | |
+| **Diagnostics** (Rec 08-24): per-source sync log with errors, last-run durations, item counts, FTS index state, re-index button, DB size | Proposed | The status bar shows the summary; this is where you look when a sync misbehaves. Cheap to build, saves debugging pain later. |
+| **Local database**: one Postgres database holds the synced copy of every source (with provenance, "synced 4 min ago") **and** all knobas-owned data (links, contexts, notes, assets, time, smart lists, source configs); full-text index over all of it | Decided | Owned tables and synced tables are separate schemas (`knobas` / `sync`) so a dump can include or exclude the cache. **Rec 08-24 (answers Q1): embedded Postgres via the `postgresql_embedded` crate** (v0.21, pinned PG 18.6, native arm64) — downloads once on first run (~13 MB), `initdb` 2.6 s once, starts in ~0.12 s, idles at ~21 MB, ships `pg_dump`/`pg_restore`/`pg_upgrade` (export/import comes free). TCP on 127.0.0.1 (the macOS socket-path length limit bites under `~/Library/Application Support`). A settings field accepts an existing Postgres URL for anyone who already runs one. Proven in production by Retrom (Tauri 2 + postgresql_embedded). |
 | **Import adapters** (Proxmox, Docker host, Traefik): preview what would be imported, imported assets stay editable | In mockup (R2) | |
 
 ---
@@ -63,10 +90,14 @@ Principles that came out of the rounds:
 | Full-text search over all synced sources + local notes + assets, results grouped by type with source monogram and sync age | Decided | |
 | **Prefixes**: `>` actions · `#` tickets · `@` people · `/` source · `t ` time · `note:` · `list:` · `asset:` · `?` help | In mockup | |
 | **Filter chips**: per source, per type, `@me`, `today`, cross-source chips (e.g. *has failing build* — a join JQL can't express); asset chips `type:` `env:` `health:` | In mockup | |
+| **Source aliases + inline key:value filters**: `/ji` `/gt` `/tc` `/cf` `/nt` `/as` (and long forms), `type:` `env:` `health:` `owner:` typed inline as an alternative to chips | In mockup (R3) | |
+| **Per-row provenance**: every result shows its sync age ("synced 4 min ago", "local · always current", "read at import"); asset rows are double-height with their path underneath; footer reads "local index · N pending writes" | In mockup (R3) | |
+| **"Do it here" rows**: contextual actions appended to results (Start/Stop timer on the current ticket, Comment on it); `>` with empty query doubles as the app's navigation menu | In mockup (R3) | |
+| **Asset search matches ancestor path names** (searching "pve-02" finds the containers under it), in both the launcher and the board filter | Decided (E1) | **R3 gap to fix in the real app**: the corpus indexed only the asset's own fields, and the board filter was dead code. The implementation must index the path. |
 | **Empty query** shows smart lists, contexts, inbox preview, today's time, recent items | In mockup | |
 | **Tab → action chain** on a result (Change status › Comment › Link to… › Add to context › Start timer › Start work › Open) with breadcrumb chips | In mockup | |
 | *Add to <context>* on every result | In mockup | |
-| **Smart lists** = saved local queries with counts and change badges: *My tickets with a failing build*, *PRs waiting on me*, *PRs idle > 5 days*, *Pages I edited this week*, *Blocked tickets*, *Unlogged time this week*, *Assets with open alerts in my contexts*, *Drifted between stage and prod*, *Certificates expiring < 30 days*, *Assets with no monitor* | In mockup | **Open**: a query language for defining new ones (SQL-ish vs. a builder). |
+| **Smart lists** = saved local queries with counts and change badges: *My tickets with a failing build*, *PRs waiting on me*, *PRs idle > 5 days*, *Pages I edited this week*, *Blocked tickets*, *Unlogged time this week*, *Assets with open alerts in my contexts*, *Drifted between stage and prod*, *Certificates expiring < 30 days*, *Assets with no monitor* | In mockup | **Rec 08-24 (answers Q3):** v1 = the built-in lists above (hand-written SQL inside knobas) **plus "Save this search as a list"** — any launcher query with its chips/prefixes becomes a smart list. That covers most needs at near-zero design cost. A real query language (SQL-ish over the schema) is v2; a visual builder only if the language proves too hostile. |
 | Local code search across cloned repos from the same box; open in editor / terminal | Proposed | |
 | Paste a Jira/Confluence/Gitea URL anywhere → resolves to an entity chip | Proposed | |
 
@@ -76,7 +107,8 @@ Principles that came out of the rounds:
 
 | Feature | Status | Notes |
 |---|---|---|
-| Detail views per type with inline edit: ticket status/priority/assignee/comment; PR approve/comment; build log excerpt, re-run, trigger with parameters; page section edit; note editor | In mockup | Page editing in-app is a stub in most mockups. **Open**: full Confluence editor vs. "edit in browser". |
+| Detail views per type with inline edit: ticket status/priority/assignee/comment; PR approve/comment; build log excerpt, re-run, trigger with parameters; page section edit; note editor | In mockup | **Rec 08-24 (answers Q4):** Confluence editing in v1 = **create page from template** (standup protocol needs it), **comment**, and **section-level text edit** (round-trip one storage-format section, refuse sections with macros/tables and offer *Open in browser* instead). No full editor — the storage-format round-trip risk isn't worth it while search/links are the product. |
+| Branch and repo get detail views too (R3 left them as dead-end chips): branch → commits/PR/build state + *Open in editor*; repo → branches, clone state, *Clone…* | Rec 08-24 | Small, but link targets must all be openable. |
 | **Links panel** on every item: confirmed links grouped by type, with status readings (build failed, PR 1/2 approvals) | Decided | Details in §5a. |
 | **Linked assets** section on work items; *Link asset…*; *Open in Assets* | In mockup (R3) | |
 | Worklogs, estimate, time spent on tickets | In mockup | |
@@ -91,10 +123,14 @@ Links are what knobas adds that no source system has. They are **local**: create
 | Feature | Status | Notes |
 |---|---|---|
 | **A link** = `from` (any entity) · `to` (any entity) · `relation` · `origin` (manual / suggested-confirmed / imported / source) · `created by` · `created at` · optional note | Decided | Entities are addressed by stable ids: source + key/URL for synced items (`jira:PAY-231`, `gitea:tidewater/payout-service#142`, `confluence:ENG/SEPA payout retry design`), local ids for notes/assets/contexts. |
+| **One table for every pair** — work↔work, asset↔work, asset↔asset, context membership, note `[[refs]]` are all rows of the same record above | Rec 08-24 | **Explicit spec fix**: R3 stored these in five different shapes and work↔work links had no relation at all. The real app has one `link` table; every link carries a relation (`related` as the default); backlinks are a query, not a scan. |
+| **Inverse labels** per relation (runs-on↔hosts, exposes↔exposed by, depends-on↔needed by, monitored-by↔monitors, deployed-from↔deploys, documented-in↔documents, blocks↔blocked by) so each end reads naturally | In mockup (R3) | |
+| **Linking an asset to a ticket auto-adds the asset to that ticket's contexts** | In mockup (R3) | Was implemented but unstated. **Rec 08-24: keep** — it's why the room's asset tile fills itself. Shown as origin `implied`, removable. |
+| A suggestion can also propose a **route target** ("host name alone — confirm it"); confirming writes the route's target | In mockup (R3) | |
 | **Manual linking everywhere**: *Link to…* on every detail, in the Tab action chain of every search result, by drag where a view supports it (columns, rooms), by typing `[[…]]` in notes; relation picked from a list or typed | Decided | |
 | **Relation types** (open list): related · blocks / blocked by · implements · documents · deploys · runs-on · hosts · exposes · depends-on · monitored-by · in-context · mentions; users can add their own | Decided | |
 | **Suggestions**: detected from keys in commit messages / branch names / build parameters / page text / scenario descriptions, image tags matching builds, host names matching services, text similarity via FTS, and native links in the sources; each shows its reason; Confirm / Dismiss; dismissed pairs are remembered and not re-proposed | Decided | Suggestions are stored too, with their reason and state. |
-| Links are **bidirectional in the UI** (every panel shows both ends), and **transitive for contexts** (a context's members are what it links to, plus what those link to one hop out — configurable) | In mockup | Hop depth: **Open** |
+| Links are **bidirectional in the UI** (every panel shows both ends), and **transitive for contexts** (a context's members are what it links to, plus what those link to one hop out) | In mockup | **Rec 08-24 (answers Q11):** fixed rule in v1 — explicit adds + direct links + **one hop** (a member ticket's PRs, their builds). Not configurable until real use shows the need; R3 never actually implemented a general rule, so nothing is lost. Asset membership also counts through ancestors (a context holding a VM holds its containers for alert routing). |
 | Backlinks on notes and assets | In mockup | |
 | Link history: who linked what when; unlink keeps a tombstone so an import can't resurrect it | Proposed | |
 | Bulk linking: multi-select in search results / columns → *Link selected to…* | In mockup (R2 W1) | |
@@ -130,8 +166,8 @@ Links are what knobas adds that no source system has. They are **local**: create
 | Feature | Status | Notes |
 |---|---|---|
 | One queue: review requests, @mentions (Jira/Confluence), failed builds on your work, new assignments, blocked tickets, monitor alerts (down / warning / cert expiry), credential expiry | Decided | |
-| Actions per item: Open · Reply · Review · Re-run · Comment on ticket · Ping · Restart container · Ack · Snooze (returns on a date) · Done | In mockup | |
-| "In this context" filter; count in the top strip; acting on an item records a line in the activity stream | In mockup | |
+| Actions per item: Open · Reply · Review · Re-run · Comment on ticket · Ping · Restart container · Ack · Snooze (returns on a date) · Done | In mockup | Snooze gets a real date picker with presets (tomorrow / next Monday / after the PAT expires) — R3 hard-coded the date. |
+| "In this context" filter; count in the top strip; **every** inbox action records a line in the §2a activity stream | In mockup | R3 only logged some actions; the real app logs all of them (one writer). |
 | Desktop notification when a watched build/monitor changes | Proposed | |
 
 ---
@@ -144,7 +180,8 @@ Links are what knobas adds that no source system has. They are **local**: create
 | **No git-branch awareness** | Decided | |
 | **Worklog draft** on stop: interval (editable), target ticket (optional), activity in the interval as checkboxes (commits, PR comments, builds triggered, pages/notes edited), generated comment, *Log Nh to PAY-xxx* → Jira worklog + local copy | Decided | |
 | **Passive attribution** (opt-in): app records which entity/label was open → **Day review** strip: passive vs. manual blocks, unattributed gaps → *Assign…*, ad-hoc blocks → *Log to a ticket… / Keep local*, *Log all* | Decided | Drag/merge of blocks: nice-to-have. |
-| **Week timesheet**: tracked / logged / unlogged per day and per context | In mockup | |
+| **Worklog interval** = the day's blocks for that context concatenated ("09:40–11:50 + 13:58–14:32"), editable; stopping the timer on a non-ticket entity opens **"Log an ad-hoc block"** with a *suggested* ticket + reason instead of the worklog draft | In mockup (R3) | |
+| **Week timesheet**: tracked / logged / unlogged per day and per context; rows can be an asset or "no context — app open, no entity" | In mockup | *Log all* must distribute per-day correctly (R3 zeroed rows wholesale — mockup shortcut, not the spec). |
 | Per-context clocks; switching context prompts to move the timer | In mockup | |
 
 ---
@@ -182,29 +219,32 @@ Links are what knobas adds that no source system has. They are **local**: create
 | **Typed properties** per type + **custom properties** (text / number / date / url / secret; secrets masked) | Decided | |
 | **Routes**: any asset can *expose* routes (URL → target asset, or an endpoint with no target); an asset is *reachable via* routes that land on it or on something that holds it | Decided | Shown from both ends. |
 | **Relations** beyond containment: depends-on, monitored-by, deployed-from (repo/build), documented-in (page), in-context, linked-to (ticket/PR/note) | Decided | |
-| **Status** up / warn / down / none; problems roll up so a closed branch shows "N problems inside" | Decided | |
-| Change history per asset | In mockup | |
+| **Status** up / warn / down / none; problems roll up so a closed branch shows "N problems inside" | Decided | **Rollup rule (R3, now spec):** an asset's health = worst of its own status and its monitors' states (down > warn > up > none); its *effective* status also takes the worst descendant; a paused monitor reads as none. |
+| **Environment** (`dev`/`stage`/`prod`/`shared`) is a **stored property, inherited from the nearest ancestor that sets it**; import adapters set it where the source knows it | Rec 08-24 | **Spec fix**: R3 inferred env by pattern-matching id substrings — accident-prone. Same inheritance rule for **owner**. |
+| **Routes and monitors are addressable entities** in their own right: searchable, linkable, chip-able, with their own `#/route/<id>` / `#/monitor/<id>` addresses (a monitor can attach to several assets and to routes) | In mockup (R3) | Was implemented but unstated; matters for the schema. |
+| Change history per asset: **every mutation appends a line** (old → new for property edits); sync-originated lines marked as such; imported assets get an "imported from X" origin line | In mockup | Backed by the §2a activity stream, filtered to the asset. |
 
 ### 12.2 UI
 | Feature | Status | Notes |
 |---|---|---|
-| **Miller columns** as the Assets view: one column per level, older columns collapse to labelled spines, `←→↑↓ Enter`, search reveals the path, wires from route rows to their targets/spines, `+` on every column header | Decided (E1 chosen) | Rejected: nested boxes (topology-explorer), semantic zoom, expanding graph, drill-in stack; R2's inventory board, topology map, environment matrix remain as references. |
-| Asset detail pane: properties, held-by path, holds, exposes, reachable via, monitoring, linked work, actions, history | In mockup (R3) | |
-| Create at any level; import from a source (preview) | Decided | |
+| **Miller columns** as the Assets view: one column per level, older columns collapse to labelled spines, `←→↑↓ Enter`, search reveals the path, wires from route rows to their targets/spines, `+` on every column header | Decided (E1 chosen) | Rejected: nested boxes (topology-explorer), semantic zoom, expanding graph, drill-in stack; R2's inventory board, topology map, environment matrix remain as references. Column rows carry two badges (linked-work count; amber/red "N problems inside"); wires are dashed when the target is reached through an ancestor. "Search reveals the path" must actually be wired up (dead code in R3). |
+| **Assets view has three tabs: Board · Monitors · Flowrun** (counts in the tab labels) | In mockup (R3) | The doc previously treated monitors/Flowrun as detail sections only. **Monitors tab**: state filter chips with counts, per-monitor 24 h bar + last checks + uptime/cert days, Pause/Resume, open-alert cards, "Not monitored" roster, status-page dialog. **Flowrun tab**: instances per env, scenario matrix (dev/stage/prod version cells), Run now / View log / Promote. |
+| Asset detail pane: properties, held-by path, holds, exposes, reachable via, monitoring, linked work, actions, history | In mockup (R3) | Property display: per-type schema orders known keys first, custom keys after; secrets masked with Show/Hide, stored in the keychain. |
+| Create at any level (type conventions suggest children — "usual here: …", any type allowed); import from a source (preview: already-in-tree vs. new; imported assets stay editable and custom properties/links/routes survive the next sync) | Decided | |
 | *Link to…* from an asset to work items / contexts / other assets with relation label; suggested asset links with reasons | Decided | |
 | Assets in the launcher (with path), in rooms (ASSETS tile), on the timer, in the inbox (alerts), in smart lists | Decided | |
-| Actions on an asset: open URL, copy SSH, open in Proxmox / Portainer, restart container, create monitor, add to context, start timer | In mockup | Which of these write back for real: **Open** (restart container needs a Docker host adapter). |
-| Environment matrix / drift view (stage ≠ prod) | In mockup (R2 W3) | Keep as a secondary view? **Open** |
-| Blast radius ("what breaks if this goes down") | In mockup (R2 W2) | Worth keeping as an action on a VM? **Open** |
+| Actions on an asset: open URL, copy SSH, open in Proxmox / Portainer, restart container, create monitor, add to context, start timer | In mockup | **Rec 08-24 (answers Q5):** v1 write-backs = open URL / copy SSH (no adapter needed), **create + pause monitor** (Uptime Kuma), **Run now / View log / Promote** (Flowrun — it's a decided first-class flow). **Restart container ships only with the Docker-host adapter** (v2); until then the button deep-links to Portainer/Proxmox instead. Nothing pretends to write back without an adapter behind it. |
+| Environment matrix / drift view (stage ≠ prod) | In mockup (R2 W3) | **Rec 08-24 (answers Q6):** keep — but post-v1 and rebuilt as a *view over the same data* (env property + Flowrun versions). The `drift` smart list covers the need until then. |
+| Blast radius ("what breaks if this goes down") | In mockup (R2 W2) | **Rec 08-24 (answers Q6):** don't keep the dedicated view. Instead a **"Depends on this" panel** in the asset pane (transitive closure over depends-on/runs-on/routes), which is 90 % of the value for 10 % of the work. |
 
 ### 12.3 Monitoring (Uptime Kuma adapter)
 **knobas does not own monitoring.** Uptime Kuma stays the system of record for monitors, checks, notifications and status pages; knobas syncs from it, attaches monitors to assets and contexts, and routes alerts into the inbox. **Decided 2026-08-23.**
 
 | Feature | Status | Notes |
 |---|---|---|
-| Adapter reads monitors, current state, response time, uptime, heartbeat history and cert expiry from Uptime Kuma (socket.io API for full data; `/metrics` with an API key for cheap state polling) | Decided | Uptime Kuma has no official REST API; the adapter speaks the socket.io protocol the web UI uses (as `uptime-kuma-api` does). |
+| Adapter reads monitors, current state, response time, uptime, heartbeat history and cert expiry from Uptime Kuma | Decided | **Rec 08-24 — updated for Uptime Kuma v2 (stable since 2025-10, now 2.5.x; 1.x is EOL; still no REST API):** primary channel is **polling `/metrics` with an API key** — v2 added a `monitor_id` label plus uptime-ratio and response-time metrics, so plain `reqwest` covers state/telemetry. **v2 prunes raw heartbeats to ~24 h**, so knobas appends samples into its own Postgres timeseries from day one (it will quickly hold more history than Kuma). Config detail (intervals, paused, groups) via the `kuma-client` crate (socket.io) on a slow cadence; `rust_socketio` itself is stalled since 2024, so socket.io stays a secondary, replaceable channel. |
 | Monitor types shown as Uptime Kuma defines them (HTTP, TCP, ping, Docker, cert expiry, …); states up / down / pending / warning (response-time threshold is knobas-side) | Decided | |
-| Monitors attach to assets (and through them to contexts); alerts → inbox with Open asset / Ack / Snooze / Restart; Ack marks the alert on the asset | Decided | |
+| Monitors attach to assets (and through them to contexts); alerts → inbox with Open asset / Ack / Snooze / Restart; Ack marks the alert on the asset | Decided | **Alert routing rule (R3, now spec):** an alert reaches the *inbox* only when some context holds the affected asset (directly or via an ancestor or via the context's monitors); all open alerts always show in the Assets views and the top-strip count. **Ack** is knobas-local: clears the inbox item, writes history, the alert stays open until the monitor recovers; a restart that recovers the monitor auto-resolves it. |
 | Write-back limited to what Uptime Kuma exposes: *Create monitor for this asset*, pause/resume, (ack is knobas-local — Uptime Kuma has no ack); deep link to the monitor and to the status page | In mockup | |
 | Smart list: assets with no monitor | In mockup | |
 
@@ -218,16 +258,23 @@ Links are what knobas adds that no source system has. They are **local**: create
 
 ---
 
-## 13. Secondary features (proposed, not yet in a mockup)
+## 13. Secondary features (Rec 08-24: tiered — answers Q10)
 
-- Desktop notifications (build finished, monitor changed, PAT expiring).
-- Quick capture hotkey; paste-URL → entity chip.
-- Local code grep across clones; open in editor / terminal.
-- Runbook → checklist; build-failure → ticket/comment shortcuts.
-- Context handoff bundle (markdown).
-- Conflict resolution UI for queued writes.
+**Pulled into v1** (no longer backlog):
+- Conflict resolution UI for queued writes — required by the §3 write-queue decision (ask-with-diff).
+
+**v1.5 — first releases after the MVP** (each is small and rides on existing plumbing):
+- Desktop notifications (build finished, monitor changed, PAT expiring) — Tauri notification plugin over the same events the inbox consumes.
+- Open in editor (VS Code / JetBrains) / terminal at the checkout — completes the ticket→branch flow.
+- Paste a Jira/Confluence/Gitea URL anywhere → entity chip — the resolver is a lookup on ids the sync already stores.
+- Quick capture hotkey (global) with current context attached.
+
+**v2 backlog:**
+- Local code grep across clones from the launcher.
+- Runbook page → interactive checklist; build-failure → create-ticket shortcut (→ comment exists in v1).
+- Context handoff bundle (markdown of everything linked).
 - Personal templates (ticket, page, PR description).
-- Navigation history ("what was I doing before lunch") feeding the day review.
+- Navigation history ("what was I doing before lunch") — derivable from the §2a activity stream when wanted.
 
 ---
 
@@ -235,35 +282,47 @@ Links are what knobas adds that no source system has. They are **local**: create
 
 | Topic | Decision / proposal |
 |---|---|
-| Platform | Tauri 2 desktop app; Rust backend; frontend framework chosen to port the winning mockup (vanilla → Svelte/Solid/React all viable). **Open**. |
+| Platform | Tauri 2 desktop app; Rust backend. **Rec 08-24 (answers Q9): Svelte 5 (runes) + Vite, no SvelteKit.** Reasons: runes are fine-grained signals so the mockup's "mutate this when that changes" logic maps ~1:1; `mount()` allows porting region-by-region as islands; the mockup's CSS carries over wholesale as a global stylesheet; smallest runtime; Bits UI provides Svelte-5-native keyboard/dialog/command primitives. React's runtime+StrictMode friction and Solid's 2.0-at-RC timing both lose for this app. |
 | Storage | Postgres (local), full-text search via its FTS; one schema for entities, links, notes, assets, worklogs, activity; per-source raw payload kept for re-mapping. |
 | Secrets | OS keychain via Tauri; never in the DB; masked in the UI. |
 | Performance | Local search < 100 ms for ~100 k items; sync incremental per adapter; UI never blocks on a source. |
 | Offline | Everything read works offline; writes queue. |
-| **Export / import** | Export = a dump of the knobas database contents; import = restoring it. One archive file (`*.knobas`, a compressed logical dump of the `knobas` schema — links with relation/origin/reason/dismissed state, contexts and memberships, notes, the asset tree with properties/routes/relations, worklogs and day blocks, smart lists, source configurations **without secrets**; the `sync` schema optional since it re-syncs). Entity references use the stable ids from §5a so a dump restores on another machine or after a re-sync. Restore into an empty database is the primary path; restore into a populated one merges by id with a preview (added / changed / conflicting) rather than overwriting. Scheduled automatic exports as backups. Plain-file formats (markdown notes, YAML assets) are at most a secondary *view* of the same data, not the source of truth. **Decided 2026-08-23.** |
+| **Export / import** | Export = a dump of the knobas database contents; import = restoring it. One archive file (`*.knobas`, a compressed logical dump of the `knobas` schema — links with relation/origin/reason/dismissed state, contexts and memberships, notes, the asset tree with properties/routes/relations, worklogs and day blocks, smart lists, source configurations **without secrets**; the `sync` schema optional since it re-syncs). Entity references use the stable ids from §5a so a dump restores on another machine or after a re-sync. Restore into an empty database is the primary path; restore into a populated one merges by id with a preview (added / changed / conflicting) rather than overwriting. Scheduled automatic exports as backups. Plain-file formats (markdown notes, YAML assets) are at most a secondary *view* of the same data, not the source of truth. **Decided 2026-08-23.** **Rec 08-24 (answers Q12):** defaults — *Backup* export: everything in `knobas` incl. notes, `sync` excluded (it re-syncs; keeps archives small). *Share with a colleague* export: links/assets/contexts/smart lists, **notes excluded** by default (they're personal), each toggleable in the export dialog. Needs a small settings surface (export now / schedule / restore) — no mockup yet, plain dialogs are fine. |
 | Accessibility | Keyboard-complete, visible focus, reduced motion, contrast ≥ 4.5:1 on readings. |
 | Privacy | Passive time attribution is opt-in and local only. |
 
-## 15. Architecture direction (to validate in the implementation plan)
+## 14a. First run, demo mode, and the mock source (Rec 08-24 — new)
 
-Rust workspace: `knobas-core` (entities, links, contexts, notes, time), `knobas-db` (sqlx + Postgres, FTS, migrations), `knobas-source-*` (one crate per adapter behind a `Source` trait: config schema, auth, incremental sync, search mapping, write-back, capabilities), `knobas-assets` (tree, routes, relations, monitors), `knobas-git` (gix/git2: clone, pull, push, branch), `knobas-app` (Tauri commands, events, keychain). Frontend talks to commands only; all sync runs in the backend on a schedule.
+| Feature | Status | Notes |
+|---|---|---|
+| **First-run wizard**: initialize the database → add the first source (the §3 flow) → initial sync with progress → land in the launcher | Rec 08-24 | The doc had no onboarding story; an empty cockpit with no guidance would be the first thing you ever see. |
+| **Demo seed mode** (`knobas --demo` or a hidden setting): loads the Tidewater Freight dataset (`mockups/shared/dataset.md` + `assets.md`, made machine-readable) into a scratch database | Rec 08-24 | Three jobs: (1) every UI workstream develops against identical, rich data without live credentials — this is what makes parallel agents possible; (2) golden data for integration tests; (3) safe screenshots/demos. |
+| **Mock source adapter** (`knobas-source-mock`): a full `Source` implementation serving the fictional dataset, including simulated failures (401, timeout) and write-back | Rec 08-24 | Doubles as the contract test suite for the `Source` trait: every real adapter runs the same test battery the mock defines. |
 
 ---
 
-## 16. Open questions (answer inline or in chat)
+## 15. Architecture direction (to validate in the implementation plan)
 
-1. Postgres: require a local install, or bundle/embed?
-2. Split-flap cells: keep as the Signal signature, or reduce to the timer and build state only?
-3. Smart lists: how should you define new ones — a small query language, a builder, or both?
-4. Page editing: in-app editor for Confluence, or "open in browser" plus section-level edits only?
-5. Which asset actions must really write back in v1 (restart container, create monitor, promote scenario)?
-6. Keep the environment-matrix and blast-radius views as secondary asset views, or drop them?
-7. Conflict handling for queued writes: last-write-wins with a diff, or always ask?
-8. ~~Monitoring: Uptime Kuma only for v1, or also a Prometheus/Alertmanager adapter?~~ **Answered 2026-08-23: Uptime Kuma is the monitoring system; knobas syncs from it and does not own monitoring.** A Grafana/Alertmanager adapter is a later option, not v1.
-9. Frontend framework preference (Svelte / Solid / React / keep vanilla)?
-10. Anything from §13 that should move up into v1?
-11. Context membership: direct links only, or one hop out (ticket's PR's build counts)? Configurable per context?
-12. Export: should a shared export (to a colleague) include notes by default, or links/assets/contexts only? And should the synced `sync` schema be included by default (faster restore) or excluded (smaller, always fresh)?
+Rust workspace: `knobas-core` (entities, links, contexts, notes, time, activity), `knobas-db` (sqlx + Postgres, FTS, migrations), **`knobas-source`** (the SPI: the `Source` trait, capability/cursor/event types, and the contract-test battery every adapter must pass), `knobas-source-*` (one crate per adapter implementing it: config schema, auth, incremental sync, search mapping, write-back, capabilities), **`knobas-source-mock`** (the §14a fictional-dataset adapter), **`knobas-sync`** (the scheduler: per-source cursors, incremental runs, backoff, the write queue and its conflict checks, events out), `knobas-assets` (tree, routes, relations, monitors), `knobas-git` (gix/git2: clone, pull, push, branch), `knobas-app` (Tauri commands, events, keychain). Frontend talks to commands only; all sync runs in the backend on a schedule.
+
+**Contract-first (Rec 08-24, this is what enables parallel work):** three interfaces get frozen before fan-out — (1) the `Source` trait, (2) the DB schema (`knobas` + `sync`), (3) the Tauri command/event API as a typed IPC schema shared with the frontend (generated TS types). Adapter agents build against the trait + contract tests; frontend agents build against the IPC schema + the mock source; neither waits for the other.
+
+---
+
+## 16. Open questions — all answered with recommendations 2026-08-24 (Claude); override any of them
+
+1. **Postgres: embedded** via `postgresql_embedded`, download-on-first-run, PG 18.6 pinned, TCP on 127.0.0.1; "use existing Postgres URL" as a setting. Not a user-installed prerequisite; not a Tauri sidecar (macOS notarization of external binaries is a known open Tauri bug — the crate's extract-to-home approach sidesteps it). → §3.
+2. **Split-flaps: only on values that change while you watch** (timer, sync countdown, build/monitor transitions, inbox/alert counts); everything else plain mono. → §2.
+3. **Smart lists: built-ins + "save this search as a list" in v1**; query language v2. → §4.
+4. **Page editing: create-from-template + comment + macro-free section edits in v1**; *Open in browser* for everything else. No full editor. → §5.
+5. **v1 asset write-backs: create/pause monitor (Uptime Kuma) and Run/Log/Promote (Flowrun)**; restart-container waits for a Docker-host adapter (v2), deep-link to Portainer/Proxmox until then. → §12.2.
+6. **Environment matrix: keep, post-v1, as a view over the env property + Flowrun versions. Blast radius: fold into a "Depends on this" panel** in the asset pane instead of a dedicated view. → §12.2.
+7. **Queued-write conflicts: re-read before flush; if the target changed, hold and ask with both versions side by side.** No silent last-write-wins in v1. The queue is a visible list. → §3.
+8. ~~Monitoring~~ **Answered 2026-08-23: Uptime Kuma is the monitoring system.** 08-24 note: adapter plan updated for Kuma **v2** (`/metrics` primary, own timeseries, `kuma-client` for config). → §12.3.
+9. **Frontend: Svelte 5 + Vite** (no SvelteKit); port region-by-region, keep the mockup CSS global. → §14.
+10. **Backlog promotions:** conflict UI → v1 (follows from 7); desktop notifications, open-in-editor/terminal, paste-URL→chip, quick capture → v1.5; rest stays v2. → §13.
+11. **Context membership: explicit adds + direct links + one hop, fixed rule, not configurable in v1.** Asset membership counts through ancestors. → §5a.
+12. **Export defaults: backup = all of `knobas` incl. notes, no `sync`; share = links/assets/contexts/smart lists, no notes; every part toggleable.** → §14.
 
 ## Appendix — mockup map
 
