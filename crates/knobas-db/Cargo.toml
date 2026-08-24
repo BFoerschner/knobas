@@ -1,0 +1,35 @@
+[package]
+name = "knobas-db"
+edition.workspace = true
+version.workspace = true
+
+[features]
+# Exposes `knobas_db::test_util` to other crates' tests. Gated on the feature
+# alone rather than `cfg(test)`, which is not set for a crate's own `tests/`
+# directory nor for downstream crates.
+test-util = []
+
+[dependencies]
+# `default-features = false` drops the crate's `tls-native-tls` default, which
+# would turn on `sqlx/tls-native-tls` and -- through feature unification --
+# override the workspace's `tls-none` sqlx build. The archive downloader still
+# needs TLS, so it is enabled directly on `postgresql_archive` below.
+postgresql_embedded = { version = "0.21", default-features = false, features = [
+    "theseus",
+    "tokio",
+] }
+# Not used directly: present to give the downloader a TLS backend without
+# dragging TLS into sqlx.
+postgresql_archive = { version = "0.21", default-features = false, features = [
+    "theseus",
+    "tls-native-tls",
+] }
+sqlx.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+tracing = "0.1"
+
+[dev-dependencies]
+# Self-dev-dependency so this crate's own integration tests see `test_util`.
+knobas-db = { path = ".", features = ["test-util"] }
+tempfile = "3"
