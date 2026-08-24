@@ -7,9 +7,14 @@
 //!   without a bundled root store (roadmap §4).
 //! * **Timeouts**: 10 s to connect, 30 s for the whole request. A sync that
 //!   hangs is worse than one that fails: the scheduler retries a failure.
-//! * **Retries**: three attempts, exponential, transient statuses only, and
-//!   `Retry-After` obeyed up to [`classify::RETRY_AFTER_CAP`].
-//! * **Rate limiting**: per instance, so two Jiras do not share a budget.
+//! * **Retries**: [`MAX_ATTEMPTS`] attempts in total -- the first one included
+//!   -- exponential, transient statuses only, and `Retry-After` obeyed
+//!   *before* the retry it applies to, up to [`classify::RETRY_AFTER_CAP`].
+//! * **Rate limiting**: per instance, so two Jiras do not share a budget, and
+//!   **every attempt passes it**, retries included.
+//! * **One way out**: [`HttpClient::send`] is the only thing that puts a
+//!   request on the wire. [`HttpClient::request`] hands back a [`Request`],
+//!   which has no `send` of its own -- see that type for why.
 //! * **One fault mapping** ([`classify`]), because `Unauthorized` is the fault
 //!   the user is asked to act on.
 //! * **`User-Agent: knobas/<version> (<adapter_kind>/<adapter_version>)`** --
@@ -27,22 +32,24 @@ use governor::state::{InMemoryState, NotKeyed};
 use governor::{Quota, RateLimiter};
 use knobas_source::SourceError;
 use reqwest::header::{ACCEPT, HeaderMap, HeaderValue, USER_AGENT};
-use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
-use reqwest_retry::RetryTransientMiddleware;
-use reqwest_retry::policies::ExponentialBackoff;
 
-pub use classify::{reqwest_error, status_error, transport_error};
+pub use classify::{reqwest_error, status_error};
 
 // Every type this crate's signatures name, re-exported: an adapter depends on
 // `knobas-http` and on nothing else for its transport. Otherwise all three
-// would list `reqwest` and `reqwest-middleware` themselves just to spell
-// `Method` and `RequestBuilder` -- three chances to pick a different version
-// of the stack this crate exists to make singular, and three Cargo.toml edits
-// for a bump that P8 says routes through the orchestrator.
+// would list `reqwest` themselves just to spell `Method` -- three chances to
+// pick a different version of the stack this crate exists to make singular,
+// and three Cargo.toml edits for a bump that P8 says routes through the
+// orchestrator.
+//
+// `reqwest::RequestBuilder` is deliberately **not** among them: see
+// [`Request`].
 pub use reqwest::{self, Method, Response, StatusCode, header};
-pub use reqwest_middleware::{self, RequestBuilder};
 
 /// Total attempts per request, the first one included.
+///
+/// Three *in total*, not three retries on top of a first try: a source that is
+/// down should cost one sync three requests, not four.
 pub const MAX_ATTEMPTS: u32 = 3;
 
 type Limiter = RateLimiter<NotKeyed, InMemoryState, DefaultClock>;
@@ -122,7 +129,7 @@ impl Default for HttpConfig {
 
 /// One adapter instance's HTTP client.
 pub struct HttpClient {
-    inner: ClientWithMiddleware,
+    inner: reqwest::Client,
     /// Trailing slash trimmed; see [`HttpClient::url_for`].
     base_url: String,
     auth: Auth,
@@ -192,20 +199,11 @@ impl HttpClient {
             .build()
             .map_err(|error| SourceError::Protocol(format!("building the http client: {error}")))?;
 
-        let backoff =
-            ExponentialBackoff::builder().build_with_max_retries(MAX_ATTEMPTS.saturating_sub(1));
-        let inner = ClientBuilder::new(client)
-            .with(RetryTransientMiddleware::new_with_policy_and_strategy(
-                backoff,
-                retry::TransientOnly,
-            ))
-            .build();
-
         let quota = Quota::per_second(nonzero(config.requests_per_second))
             .allow_burst(nonzero(config.burst));
 
         Ok(Self {
-            inner,
+            inner: client,
             base_url: config.base_url.trim_end_matches('/').to_owned(),
             auth: config.auth,
             limiter: Arc::new(RateLimiter::direct(quota)),
@@ -225,53 +223,84 @@ impl HttpClient {
 
     /// A request with the base URL, auth and default headers applied.
     ///
-    /// No `#[must_use]`: `RequestBuilder` already carries one.
-    pub fn request(&self, method: Method, path: &str) -> RequestBuilder {
+    /// Returns a [`Request`], which is a builder with **no way to send
+    /// itself**: [`HttpClient::send`] is the only thing that puts it on the
+    /// wire. That is the point -- see [`Request`].
+    #[must_use]
+    pub fn request(&self, method: Method, path: &str) -> Request {
         let request = self.inner.request(method, self.url_for(path));
-        match &self.auth {
+        let request = match &self.auth {
             Auth::None => request,
             Auth::Bearer(token) => request.bearer_auth(token),
             Auth::Basic { username, password } => request.basic_auth(username, Some(password)),
             Auth::GiteaToken(token) => request.header("Authorization", format!("token {token}")),
-        }
+        };
+        Request { inner: request }
     }
 
     /// Send a request: rate-limited, retried, `Retry-After`-aware, classified.
     ///
+    /// [`MAX_ATTEMPTS`] attempts at most, the first included. Every attempt --
+    /// retries too -- waits for the rate limiter first. A retryable answer is
+    /// followed by the delay the server asked for (`Retry-After`, capped at
+    /// [`classify::RETRY_AFTER_CAP`]) if it asked for one, and by the
+    /// exponential [`retry::backoff`] if it did not.
+    ///
+    /// A request that cannot be cloned is never retried: a retry has to
+    /// re-send the same bytes, and guessing is worse than one attempt. Nothing
+    /// in M1 builds such a request (they are all GETs with no body).
+    ///
     /// # Errors
     ///
-    /// The [`SourceError`] the failure maps to (see [`classify`]).
-    pub async fn send(&self, request: RequestBuilder) -> Result<reqwest::Response, SourceError> {
-        // Cloned before the first send so a `Retry-After` can be honoured:
-        // the retry middleware's policy never sees response headers, so this
-        // is the only place that can read one.
-        let retry = request.try_clone();
-        let response = self.dispatch(request).await?;
-        let status = response.status();
-        if status.is_success() {
-            return Ok(response);
-        }
-        if let (Some(delay), Some(retry)) = (classify::parse_retry_after(response.headers()), retry)
-        {
-            tracing::debug!(?delay, %status, "honouring Retry-After");
-            tokio::time::sleep(delay).await;
-            let response = self.dispatch(retry).await?;
-            if response.status().is_success() {
-                return Ok(response);
-            }
-            let status = response.status();
-            return Err(classify::status_error(status, &body_of(response).await));
-        }
-        Err(classify::status_error(status, &body_of(response).await))
-    }
+    /// The [`SourceError`] the failure maps to (see [`classify`]). A retryable
+    /// failure that exhausts the attempts surfaces as the *last* failure, not
+    /// as a retry-specific one: what the caller needs to know is what the
+    /// source finally said.
+    pub async fn send(&self, request: Request) -> Result<reqwest::Response, SourceError> {
+        let mut request = request.inner;
+        for attempt in 1..=MAX_ATTEMPTS {
+            // Cloned before sending, because sending consumes it. `None` for a
+            // streaming body, which M1 never builds.
+            let next = request.try_clone();
+            let last = attempt == MAX_ATTEMPTS;
 
-    /// One `limit → send` pass.
-    async fn dispatch(&self, request: RequestBuilder) -> Result<reqwest::Response, SourceError> {
-        self.limiter.until_ready().await;
-        request
-            .send()
-            .await
-            .map_err(|error| classify::transport_error(&error))
+            // Every attempt, not just the first: a retry that skips the
+            // limiter is the burst this crate exists to prevent.
+            self.limiter.until_ready().await;
+
+            let delay = match request.send().await {
+                Ok(response) if response.status().is_success() => return Ok(response),
+                Ok(response) => {
+                    let status = response.status();
+                    if last || !retry::status_is_transient(status.as_u16()) {
+                        return Err(classify::status_error(status, &body_of(response).await));
+                    }
+                    // The server's own instruction wins over our guess, and it
+                    // is read *before* the wait it applies to.
+                    classify::parse_retry_after(response.headers())
+                        .unwrap_or_else(|| retry::backoff(attempt))
+                }
+                Err(error) => {
+                    if last || !retry::error_is_transient(&error) {
+                        return Err(classify::reqwest_error(&error));
+                    }
+                    retry::backoff(attempt)
+                }
+            };
+
+            let Some(next) = next else {
+                // Unretryable in practice: re-send what, exactly?
+                return Err(SourceError::Protocol(
+                    "the request cannot be retried: its body is not replayable".to_owned(),
+                ));
+            };
+            tracing::debug!(attempt, ?delay, "retrying");
+            tokio::time::sleep(delay).await;
+            request = next;
+        }
+
+        // `MAX_ATTEMPTS` is a non-zero constant, so the loop always returns.
+        unreachable!("the attempt loop returns on its last attempt")
     }
 
     /// GET a JSON document.
@@ -293,6 +322,83 @@ impl HttpClient {
             .json::<T>()
             .await
             .map_err(|error| SourceError::Protocol(format!("decoding {path}: {error}")))
+    }
+}
+
+/// A request under construction, bound to the client that built it.
+///
+/// **This type exists to have no `send`.** A bare
+/// `reqwest::RequestBuilder` carries an inherent `.send()`, and an adapter
+/// holding one can reach the network directly -- skipping the rate limiter,
+/// the retry budget, `Retry-After`, and the status → [`SourceError`] mapping
+/// that are the entire reason three adapters share this crate. The bypass is
+/// one character shorter than the correct call
+/// (`client.send(req)` vs `req.send()`), it compiles, and it works, so it
+/// would be found in review or not at all. Wrapping the builder makes
+/// [`HttpClient::send`] the only door.
+///
+/// The builder surface is deliberately narrow: what a read-only M1 adapter
+/// needs on a GET, and nothing that could carry a write. Anything more routes
+/// through the orchestrator (P8: this crate is read-only for M1).
+pub struct Request {
+    inner: reqwest::RequestBuilder,
+}
+
+impl std::fmt::Debug for Request {
+    /// Never the headers: `Authorization` is in them.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("Request").finish_non_exhaustive()
+    }
+}
+
+#[cfg(feature = "test-util")]
+impl Request {
+    /// The request as `reqwest` would send it. **Tests only.**
+    ///
+    /// Behind `test-util` for the same reason [`Request`] exists at all: a
+    /// built `reqwest::Request` can be handed to any `reqwest::Client`, which
+    /// is a second route to the network past the limiter and the retry
+    /// budget. Tests need it to assert what a request *carries* (the
+    /// `Authorization` spelling per [`Auth`] variant, which is the one thing
+    /// no adapter can be trusted to get right by inspection), and the feature
+    /// is off in every build an adapter compiles against.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError::Protocol`] if the builder cannot produce a request --
+    /// a malformed header value, in practice.
+    pub fn build(self) -> Result<reqwest::Request, SourceError> {
+        self.inner
+            .build()
+            .map_err(|error| SourceError::Protocol(format!("building the request: {error}")))
+    }
+}
+
+impl Request {
+    /// Append query parameters, as `reqwest`'s own `query` does.
+    #[must_use]
+    pub fn query<T: serde::Serialize + ?Sized>(self, query: &T) -> Self {
+        Self {
+            inner: self.inner.query(query),
+        }
+    }
+
+    /// Set one header. The client's defaults (`Accept`, `User-Agent`) and its
+    /// `Authorization` are already applied.
+    ///
+    /// Typed rather than generic over `TryInto`: a header built from a bad
+    /// string then fails at *send* time, where it reads as a transport fault.
+    /// Both types are re-exported as [`header`], so an adapter constructs them
+    /// -- and handles a malformed one -- where the mistake actually is.
+    #[must_use]
+    pub fn header(
+        self,
+        name: reqwest::header::HeaderName,
+        value: reqwest::header::HeaderValue,
+    ) -> Self {
+        Self {
+            inner: self.inner.header(name, value),
+        }
     }
 }
 

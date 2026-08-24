@@ -125,28 +125,39 @@ async fn demo_load_registers_once_and_syncs_the_same_rows_every_time() {
     );
 }
 
-/// A run that never started leaves no log line: the diagnostics view must not
-/// show a phantom run for a source the caller got wrong.
+/// An unknown adapter is refused *as* an unknown adapter, and leaves no log
+/// line behind.
+///
+/// Both halves of one refusal, because they fail together and for one reason:
+/// `prepare_sync` resolves the adapter before it opens the `sync_run` row. The
+/// class matters because "no such adapter" is not "not configured yet" --
+/// `"jira"` is not something loading the demo data would fix -- and the
+/// absence of a row matters because the diagnostics view must not show a
+/// phantom run for a source the caller got wrong.
 #[tokio::test]
-async fn a_refused_sync_writes_no_run() {
+async fn a_refused_sync_is_classified_and_writes_no_run() {
     let pool = knobas_db::test_util::test_pool().await;
     let pool = &pool;
     knobas_db::migrate::run(pool).await.unwrap();
 
-    let before: (i64,) =
-        sqlx::query_as("select count(*) from knobas.sync_run where source_id = 'jira'")
-            .fetch_one(pool)
-            .await
-            .unwrap();
-    demo::sync_now_inner(pool, "jira", None)
+    let runs = || async {
+        sqlx::query_scalar::<_, i64>(
+            "select count(*) from knobas.sync_run where source_id = 'jira'",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    };
+
+    let before = runs().await;
+    let error = demo::sync_now_inner(pool, "jira", None)
         .await
         .expect_err("M0 has no jira adapter");
-    let after: (i64,) =
-        sqlx::query_as("select count(*) from knobas.sync_run where source_id = 'jira'")
-            .fetch_one(pool)
-            .await
-            .unwrap();
-    assert_eq!(before, after);
+    assert!(
+        matches!(&error, demo::DemoError::UnknownSource(id) if id == "jira"),
+        "unexpected error: {error}"
+    );
+    assert_eq!(before, runs().await, "a refusal is not a run");
 }
 
 /// Ruling P3: per-item progress goes on the sink and nowhere else, and the run
@@ -184,24 +195,6 @@ async fn a_run_reports_its_phases_to_the_progress_sink() {
     assert!(
         seen.iter()
             .all(|p| p.run_id == run_id && p.source_id == "mock")
-    );
-}
-
-/// An id no adapter answers to is a different failure from one that is merely
-/// unconfigured, and the two must not collapse into each other: `"jira"` is not
-/// something loading the demo data would fix.
-#[tokio::test]
-async fn sync_now_refuses_an_adapter_that_does_not_exist() {
-    let pool = knobas_db::test_util::test_pool().await;
-    let pool = &pool;
-    knobas_db::migrate::run(pool).await.unwrap();
-
-    let error = demo::sync_now_inner(pool, "jira", None)
-        .await
-        .expect_err("M0 has no jira adapter");
-    assert!(
-        matches!(&error, demo::DemoError::UnknownSource(id) if id == "jira"),
-        "unexpected error: {error}"
     );
 }
 

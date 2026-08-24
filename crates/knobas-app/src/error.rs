@@ -122,16 +122,40 @@ impl From<knobas_core::CoreError> for IpcError {
     }
 }
 
-impl From<knobas_sync::SyncError> for IpcError {
-    fn from(error: knobas_sync::SyncError) -> Self {
-        match &error {
-            knobas_sync::SyncError::Source(source) => Self::from_source_error(source, None),
+impl IpcError {
+    /// A failed run, keeping both the classification and the source it belongs
+    /// to.
+    ///
+    /// `source_id` is threaded in by the caller because [`knobas_sync::SyncError`]
+    /// does not carry it and the sources view needs it: `unauthorized` is
+    /// exactly the code this field exists to route -- the row to highlight and
+    /// offer *Re-enter password* on is the one the run was for. Dropping it
+    /// makes a 401 arrive as a 401 belonging to nobody.
+    #[must_use]
+    pub fn from_sync_error(error: &knobas_sync::SyncError, source_id: Option<&str>) -> Self {
+        let mut mapped = match error {
+            knobas_sync::SyncError::Source(source) => Self::from_source_error(source, source_id),
             // A descriptor whose id cannot be a namespace is a packaging bug,
             // not something the user typed -- but it is also the one failure
             // whose message names the fix, so it is not swallowed as internal.
-            knobas_sync::SyncError::BadSourceId { .. } => Self::invalid(error),
+            // Its own `id` is the source when the caller named none.
+            knobas_sync::SyncError::BadSourceId { id, .. } => {
+                Self::invalid(error).with_source(source_id.unwrap_or(id))
+            }
             knobas_sync::SyncError::Db(_) => Self::internal(error),
+        };
+        if mapped.source_id.is_none() {
+            mapped.source_id = source_id.map(ToOwned::to_owned);
         }
+        mapped
+    }
+}
+
+/// Without a source id, for the callers that genuinely have none. A caller
+/// that *does* know which source failed uses [`IpcError::from_sync_error`].
+impl From<knobas_sync::SyncError> for IpcError {
+    fn from(error: knobas_sync::SyncError) -> Self {
+        Self::from_sync_error(&error, None)
     }
 }
 
@@ -210,6 +234,42 @@ mod tests {
             assert_eq!(mapped.source_id.as_deref(), Some("jira"));
             assert!(!mapped.message.is_empty());
         }
+    }
+
+    /// The run failed *for a source*, and the sources view highlights a row by
+    /// `source_id`. A 401 that arrives belonging to nobody is a 401 the UI
+    /// cannot offer *Re-enter password* for -- which is the whole reason the
+    /// field exists.
+    #[test]
+    fn a_failed_run_keeps_the_source_it_belongs_to() {
+        use knobas_source::SourceError;
+        let unauthorized = knobas_sync::SyncError::Source(SourceError::Unauthorized);
+
+        let routed = IpcError::from_sync_error(&unauthorized, Some("jira-eu"));
+        assert_eq!(routed.code, IpcErrorCode::Unauthorized);
+        assert_eq!(routed.source_id.as_deref(), Some("jira-eu"));
+
+        // A database failure mid-run belongs to the source too: it is that
+        // source's run that died.
+        let db = knobas_sync::SyncError::Db(sqlx::Error::PoolClosed);
+        let routed = IpcError::from_sync_error(&db, Some("jira-eu"));
+        assert_eq!(routed.code, IpcErrorCode::Internal);
+        assert_eq!(routed.source_id.as_deref(), Some("jira-eu"));
+
+        // A bad descriptor id names itself when the caller named nothing.
+        let bad = knobas_sync::SyncError::BadSourceId {
+            id: "jira:eu".to_owned(),
+            reason: "contains ':'",
+        };
+        let routed = IpcError::from_sync_error(&bad, None);
+        assert_eq!(routed.code, IpcErrorCode::Invalid);
+        assert_eq!(routed.source_id.as_deref(), Some("jira:eu"));
+
+        // And the plain `From` still works, for callers with no id at all.
+        assert_eq!(
+            IpcError::from(knobas_sync::SyncError::Source(SourceError::Unauthorized)).source_id,
+            None
+        );
     }
 
     /// The conversions the command shims lean on: a `?` in a command must

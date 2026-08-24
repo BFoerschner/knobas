@@ -46,17 +46,6 @@ pub fn reqwest_error(error: &reqwest::Error) -> SourceError {
     }
 }
 
-/// The fault a middleware-wrapped failure means.
-#[must_use]
-pub fn transport_error(error: &reqwest_middleware::Error) -> SourceError {
-    match error {
-        reqwest_middleware::Error::Reqwest(inner) => reqwest_error(inner),
-        // The only middleware in this stack is the retrier, and what it fails
-        // with is a transport failure it gave up on.
-        reqwest_middleware::Error::Middleware(inner) => SourceError::Unreachable(inner.to_string()),
-    }
-}
-
 /// How long the server asked us to wait, capped, and only in the
 /// `delay-seconds` form.
 ///

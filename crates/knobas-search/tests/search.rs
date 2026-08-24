@@ -219,3 +219,49 @@ async fn a_filtered_query_is_refused_until_stream_e_lands() {
         Err(knobas_search::SearchError::Unsupported(_))
     ));
 }
+
+/// `total` is how many rows *match*, not how many came back.
+///
+/// The trap it pins: the count used to ride on the first returned row
+/// (`count(*) over ()`), so a query that returned no rows reported no matches
+/// -- and `limit: 0` returns no rows by definition. The launcher draws its
+/// group headers and its board counts from this number, so a silent zero is a
+/// wrong number on screen rather than a short list.
+#[tokio::test]
+async fn the_total_counts_matches_not_the_page() {
+    let pool = knobas_db::test_util::test_pool().await;
+    knobas_db::migrate::run(&pool).await.unwrap();
+
+    let tag = format!("zzq{}", uuid::Uuid::new_v4().simple());
+    for n in 0..3 {
+        seed(
+            &pool,
+            &format!("mock:{tag}-{n}"),
+            "ticket",
+            &format!("{tag} number {n}"),
+            "body",
+        )
+        .await;
+    }
+
+    let full = knobas_search::search(&pool, &query(&tag)).await.unwrap();
+    assert_eq!(full.total, 3);
+    assert_eq!(full.groups[0].hits.len(), 3);
+
+    // One row of three: the page shrinks, the total does not.
+    let mut one = query(&tag);
+    one.limit = 1;
+    let one = knobas_search::search(&pool, &one).await.unwrap();
+    assert_eq!(one.groups[0].hits.len(), 1);
+    assert_eq!(one.total, 3, "the total must count matches, not the page");
+
+    // No rows at all, and still three matches.
+    let mut none = query(&tag);
+    none.limit = 0;
+    let none = knobas_search::search(&pool, &none).await.unwrap();
+    assert!(none.groups.is_empty());
+    assert_eq!(
+        none.total, 3,
+        "limit 0 must report the matches, not zero -- the count cannot ride on a row"
+    );
+}

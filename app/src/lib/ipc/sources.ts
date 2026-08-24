@@ -18,6 +18,31 @@ export function demoLoad(): Promise<SyncReport> {
   return invoke<SyncReport>("demo_load");
 }
 
+/** How a run ended — `knobas_sync::SyncOutcome`. */
+export type SyncOutcome = "ok" | "unauthorized" | "unreachable" | "error";
+
+/**
+ * The coarse state one source's syncing is in — `knobas_sync::SourceSyncStatus`,
+ * the payload of `EVENTS.syncState`.
+ *
+ * Coarse by rule: a transition each, at most a handful per run. Per-item
+ * progress is {@link SyncProgress} on a channel and nowhere else.
+ */
+export interface SourceSyncStatus {
+  source_id: string;
+  running: boolean;
+  run_id: number | null;
+  /** RFC 3339, on the `running: true` transition. */
+  started_at: string | null;
+  /** RFC 3339, on the terminal transition. */
+  last_finished_at: string | null;
+  last_outcome: SyncOutcome | null;
+  /** Always null until stream F's scheduler exists. */
+  next_run_at: string | null;
+  /** Always null until stream F writes and honours backoff. */
+  backoff_until: string | null;
+}
+
 /** Where a run is — `knobas_sync::SyncPhase`. */
 export type SyncPhase = "started" | "fetching" | "writing" | "finished" | "failed";
 

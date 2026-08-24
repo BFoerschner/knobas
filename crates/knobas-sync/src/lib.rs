@@ -15,9 +15,11 @@
 //!   the generated `fts` column search reads. It is refreshed wholesale on
 //!   every run, including for a tombstoned entity, so the UI can still render
 //!   the last-known title of something that vanished upstream. "Deleted"
-//!   therefore lives on the entity alone: `knobas_db::search` joins
-//!   `knobas.entity` to skip tombstoned rows, and anything else reading the
-//!   mirror directly has to filter on `deleted_at` the same way.
+//!   therefore lives on the entity alone, and the way to respect it is to read
+//!   the mirror through the **`sync.live_item`** view (migration 0002), which
+//!   has the `knobas.entity` join and the `deleted_at is null` filter built in.
+//!   Anything reading `sync.item` directly has to filter for itself, and a
+//!   smart list that forgets offers rows that no longer exist.
 //!
 //! The engine takes a `PgPool` rather than opening one: it is called from the
 //! app, from a scheduler and from tests, none of which want a second database.
@@ -36,10 +38,12 @@
 pub mod health;
 pub mod progress;
 pub mod run_log;
+pub mod runner;
 
 pub use health::{AuthState, CredentialHealth};
 pub use progress::{ProgressSink, SyncPhase, SyncProgress};
-pub use run_log::{RunCounts, SyncOutcome, SyncTrigger};
+pub use run_log::{RunCounts, SourceSyncStatus, SyncOutcome, SyncTrigger};
+pub use runner::run;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 

@@ -7,18 +7,29 @@ license.workspace = true
 # Shared by the Jira, Gitea and TeamCity adapters, and read-only for M1
 # (interfaces §8 P8): a three-writer crate is a collision magnet, so changes
 # route through the orchestrator.
+[features]
+# Exposes `Request::build`, which turns a request into something any
+# `reqwest::Client` could execute -- i.e. a second way onto the network, past
+# the limiter and the retry budget. Tests need it to assert what a request
+# carries; adapters must never have it, so it is off in every build they
+# compile against (`cargo build`, and the `clippy --lib` half of the gate).
+test-util = []
+
 [dependencies]
 governor.workspace = true
 knobas-source = { path = "../knobas-source" }
 reqwest.workspace = true
-reqwest-middleware.workspace = true
-reqwest-retry.workspace = true
 serde.workspace = true
 tokio = { workspace = true, features = ["time"] }
 tracing = "0.1"
 url = "2"
 
 [dev-dependencies]
-http = "1"
+# Self-dev-dependency so this crate's own integration tests see
+# `Request::build` (the convention `knobas-db` and `knobas-app` use).
+knobas-http = { path = ".", features = ["test-util"] }
 serde_json.workspace = true
-tokio.workspace = true
+# `net` for the counting socket the retry-budget tests answer from. Named here
+# rather than inherited: reqwest happens to turn it on, and a test relying on
+# another crate's feature is a test that breaks when that crate changes.
+tokio = { workspace = true, features = ["net", "io-util"] }

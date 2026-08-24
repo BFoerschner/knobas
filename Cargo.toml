@@ -42,7 +42,11 @@ sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio",
 #   parameter list rides on. `form` stays off -- M1 issues no writes.
 # * `system-proxy` reads the OS proxy settings, the other half of working from
 #   inside a corporate network.
+#
+# No `reqwest-middleware`/`reqwest-retry`: `knobas-http` owns its retry loop, so
+# that every attempt passes the rate limiter and `Retry-After` is honoured
+# before the retry it applies to -- neither of which a retry policy running
+# *inside* one `send` can do (it never sees the limiter, and never sees a
+# response header).
 reqwest = { version = "0.13.4", default-features = false, features = ["charset", "gzip", "http2", "json", "query", "rustls", "system-proxy"] }
-reqwest-middleware = { version = "0.5.2", features = ["json", "query"] }
-reqwest-retry = "0.9.1"
 governor = "0.10.4"

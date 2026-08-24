@@ -44,8 +44,10 @@ pub enum SearchError {
 
 /// The tsquery is computed once as a FROM item so the match, the rank and the
 /// headline all reuse it; the raw text is **bound**, never interpolated
-/// (roadmap §4 gotcha 2). `count(*) over ()` yields the true totals in the
-/// same round trip, because window functions run before `LIMIT`.
+/// (roadmap §4 gotcha 2). The per-kind total is a window function -- it runs
+/// before `LIMIT`, so it counts the matches, not the page. The overall total
+/// is [`COUNT_SQL`] instead, because a window needs a row to ride on and an
+/// empty page has none.
 const SEARCH_SQL: &str = r#"
 select i.entity_id,
        i.kind,
@@ -60,7 +62,6 @@ select i.entity_id,
        -- over the body alone would then be an excerpt with no visible
        -- relation to what was searched for.
        ts_headline('english', i.title || ' — ' || i.body_text, q, $2::text) as headline,
-       count(*) over ()                                               as total,
        count(*) over (partition by i.kind)                            as kind_total
   from sync.live_item i,
        websearch_to_tsquery('english', $1) q
@@ -68,6 +69,19 @@ select i.entity_id,
  -- entity_id breaks rank ties, so grouping and pagination are stable.
  order by rank desc, i.entity_id
  limit $3
+"#;
+
+/// How many rows the query matches, independent of `limit`.
+///
+/// A second statement rather than a window function on the first: the window
+/// only produces a value where there is a row, so `limit 0` -- or any query
+/// whose page is empty -- would report zero matches instead of the real total.
+/// Same bound text, same `websearch_to_tsquery`, same index.
+const COUNT_SQL: &str = r#"
+select count(*)
+  from sync.live_item i,
+       websearch_to_tsquery('english', $1) q
+ where i.fts @@ q
 "#;
 
 #[derive(sqlx::FromRow)]
@@ -80,7 +94,6 @@ struct HitRow {
     synced_at: DateTime<Utc>,
     rank: f32,
     headline: String,
-    total: i64,
     kind_total: i64,
 }
 
@@ -129,7 +142,17 @@ pub async fn search(pool: &PgPool, query: &SearchQuery) -> Result<SearchResponse
         .fetch_all(pool)
         .await?;
 
-    let total = rows.first().map_or(0, |row| saturating_u32(row.total));
+    // Read independently of the rows: `count(*) over ()` rides on a row, and
+    // `limit 0` returns none -- so a caller asking "how many are there?"
+    // without wanting the hits would have been told zero. The count is what
+    // the empty-query board and the group headers are drawn from, so a
+    // silently wrong zero is a wrong number on screen, not an empty list.
+    let total = saturating_u32(
+        sqlx::query_scalar::<_, i64>(COUNT_SQL)
+            .bind(&text)
+            .fetch_one(pool)
+            .await?,
+    );
     let mut groups: Vec<ResultGroup> = Vec::new();
     for row in rows {
         let hit = SearchHit {
@@ -189,9 +212,57 @@ fn kind_display(kind: &str) -> (String, String, String) {
         None => String::new(),
     };
     let plural = format!("{label}s");
-    let mut monogram: String = kind.chars().take(2).collect::<String>().to_uppercase();
+    // Uppercase *then* take two, not the other way round: Unicode uppercasing
+    // is not length-preserving (`"ß"` uppercases to `"SS"`), so taking two
+    // characters first can yield three and break the fixed-width invariant the
+    // chip is drawn to -- the one the test below asserts.
+    let mut monogram: String = kind.to_uppercase().chars().take(2).collect();
     while monogram.chars().count() < 2 {
         monogram.push('·');
     }
     (label, plural, monogram)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The monogram is drawn into a fixed-width chip, so "two characters" is
+    /// an invariant and not a rough size.
+    ///
+    /// The trap is Unicode: uppercasing is not length-preserving, so taking
+    /// two characters and *then* uppercasing can yield three -- `"ßx"` becomes
+    /// `"SSX"`. Uppercasing first is what makes the invariant hold for every
+    /// kind an adapter can name, and only a non-ASCII kind shows the
+    /// difference.
+    #[test]
+    fn a_monogram_is_always_two_characters() {
+        for kind in [
+            "ticket",
+            "pr",
+            "b",
+            "",
+            "ßx",
+            "straße",
+            "über",
+            "日本語",
+            "É",
+        ] {
+            let (_, _, monogram) = kind_display(kind);
+            assert_eq!(
+                monogram.chars().count(),
+                2,
+                "kind {kind:?} produced {monogram:?}"
+            );
+        }
+    }
+
+    /// A short kind is padded rather than left ragged, and the padding is the
+    /// same character every time.
+    #[test]
+    fn a_short_kind_is_padded() {
+        assert_eq!(kind_display("pr").2, "PR");
+        assert_eq!(kind_display("b").2, "B·");
+        assert_eq!(kind_display("").2, "··");
+    }
 }

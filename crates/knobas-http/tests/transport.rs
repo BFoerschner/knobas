@@ -140,3 +140,148 @@ fn a_path_is_appended_to_the_whole_base_url() {
         "https://example.test/prefix/api/v1/user"
     );
 }
+
+// ---------------------------------------------------------------------------
+// The retry budget, the limiter and `Retry-After` -- against a real socket.
+// ---------------------------------------------------------------------------
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// A one-response HTTP server that counts what it was asked.
+///
+/// Hand-rolled rather than `wiremock`: the whole assertion is *how many
+/// requests arrived and how far apart*, which needs a counter and a socket and
+/// nothing else. It answers every request with the same canned status until it
+/// is dropped.
+struct CountingServer {
+    port: u16,
+    hits: Arc<AtomicUsize>,
+}
+
+impl CountingServer {
+    /// Serve `status` (with optional extra headers) forever, counting requests.
+    fn always(status: u16, extra: &'static str) -> Self {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        listener.set_nonblocking(true).expect("nonblocking");
+        let listener = tokio::net::TcpListener::from_std(listener).expect("tokio listener");
+
+        let hits = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&hits);
+        tauri_free_spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                let counter = Arc::clone(&counter);
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                    // Read the request head; the body is never used.
+                    let mut buffer = [0u8; 2048];
+                    let _ = socket.read(&mut buffer).await;
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    let response = format!(
+                        "HTTP/1.1 {status} X\r\n{extra}content-length: 0\r\nconnection: close\r\n\r\n"
+                    );
+                    let _ = socket.write_all(response.as_bytes()).await;
+                    let _ = socket.shutdown().await;
+                });
+            }
+        });
+        Self { port, hits }
+    }
+
+    fn url(&self) -> String {
+        format!("http://127.0.0.1:{}", self.port)
+    }
+
+    fn hits(&self) -> usize {
+        self.hits.load(Ordering::SeqCst)
+    }
+}
+
+fn tauri_free_spawn<F: std::future::Future<Output = ()> + Send + 'static>(future: F) {
+    tokio::spawn(future);
+}
+
+/// A transient status costs exactly [`MAX_ATTEMPTS`] requests -- not one more.
+///
+/// The bug this pins: with the retry living in middleware *inside* one send,
+/// `send` saw only the middleware's final answer and then retried once more
+/// itself, so a 503 cost four requests while the crate documented three.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_transient_failure_costs_exactly_the_documented_attempts() {
+    let server = CountingServer::always(503, "");
+    let client = HttpClient::new(config(server.url())).expect("client");
+
+    let error = client
+        .get_json::<serde_json::Value>("/thing", &[])
+        .await
+        .expect_err("503 every time");
+    assert!(matches!(error, SourceError::Protocol(_)), "{error:?}");
+    assert_eq!(
+        server.hits(),
+        knobas_http::MAX_ATTEMPTS as usize,
+        "a transient failure must cost MAX_ATTEMPTS requests in total"
+    );
+}
+
+/// A non-transient failure is not retried at all: one request, one answer.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_deterministic_failure_is_asked_once() {
+    let server = CountingServer::always(500, "");
+    let client = HttpClient::new(config(server.url())).expect("client");
+
+    let error = client
+        .get_json::<serde_json::Value>("/thing", &[])
+        .await
+        .expect_err("500");
+    assert!(matches!(error, SourceError::Protocol(_)), "{error:?}");
+    assert_eq!(server.hits(), 1, "500 is deliberately not retried");
+}
+
+/// 401 short-circuits the budget too, and keeps its class: this is the failure
+/// the sources view offers *Re-enter password* for.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unauthorized_answer_is_not_retried_and_keeps_its_class() {
+    let server = CountingServer::always(401, "");
+    let client = HttpClient::new(config(server.url())).expect("client");
+
+    let error = client
+        .get_json::<serde_json::Value>("/thing", &[])
+        .await
+        .expect_err("401");
+    assert!(matches!(error, SourceError::Unauthorized), "{error:?}");
+    assert_eq!(server.hits(), 1, "a credential does not improve on retry");
+}
+
+/// `Retry-After` is obeyed **before** the retry it applies to.
+///
+/// The bug this pins: the header was read only after the retry budget was
+/// already spent, so a server asking for a one-second pause was ignored twice
+/// first -- which is the opposite of what the header is for. One second is the
+/// smallest value the `delay-seconds` form can express, so it is also the
+/// cheapest way to prove the wait happened.
+#[tokio::test(flavor = "multi_thread")]
+async fn retry_after_is_waited_out_before_the_retry() {
+    let server = CountingServer::always(429, "retry-after: 1\r\n");
+    let client = HttpClient::new(config(server.url())).expect("client");
+
+    let started = std::time::Instant::now();
+    let error = client
+        .get_json::<serde_json::Value>("/thing", &[])
+        .await
+        .expect_err("429 every time");
+    let elapsed = started.elapsed();
+
+    assert!(matches!(error, SourceError::Protocol(_)), "{error:?}");
+    assert_eq!(server.hits(), knobas_http::MAX_ATTEMPTS as usize);
+    // Two waits of one second each between three attempts. Compared against
+    // the exponential it replaces (250 ms + 500 ms), so this cannot pass by
+    // accident if the header is ignored.
+    assert!(
+        elapsed >= std::time::Duration::from_millis(1900),
+        "Retry-After was not waited out: {elapsed:?}"
+    );
+}

@@ -46,9 +46,9 @@
 use std::marker::PhantomData;
 
 use knobas_sync::{SyncPhase, SyncProgress};
-use tauri::Manager;
 use tauri::ipc::{CallbackFn, Channel, CommandArg};
 use tauri::test::MockRuntime;
+use tauri::{Listener, Manager};
 
 // ---------------------------------------------------------------------------
 // 1. The verdict, asked of the trait solver.
@@ -380,4 +380,94 @@ fn demo_load_passes_the_guard_in_the_demo_profile() {
         !rejection.contains(knobas_app::DEMO_FLAG),
         "the demo profile was refused its own fixture: {rejection}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// 5. `sync_now` answers before the run does, and says so on `sync:state`.
+// ---------------------------------------------------------------------------
+
+/// Ruling P3's other half: the id comes back immediately and the coarse event
+/// is what a UI watches.
+///
+/// The docs on both commands promise `EVENTS.syncState` carries the run, so
+/// the promise is asserted rather than written: a `running: true` status must
+/// already have been emitted by the time the command returns (it is emitted
+/// before the spawn, so this is deterministic), and a terminal one must follow
+/// with the same `run_id` once the spawned run lands.
+///
+/// What is deliberately *not* asserted is a timing race -- "the row was still
+/// open when the command returned" is true and unprovable, because the mock
+/// syncs an in-memory fixture and can beat the assertion. The evidence that
+/// the run is not awaited is structural instead: the command's own value
+/// arrives with only the `started` event behind it, and the counts only turn
+/// up later.
+#[tokio::test(flavor = "multi_thread")]
+async fn sync_now_answers_before_the_run_and_reports_it_on_the_event() {
+    let pool = knobas_db::test_util::test_pool().await;
+    knobas_db::migrate::run(&pool).await.unwrap();
+    // Registers `mock` in `source_config`, which is what `prepare_sync`
+    // requires. The sync it performs is incidental.
+    knobas_app::demo::demo_load_inner(&pool).await.unwrap();
+
+    let seen: std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>> = Default::default();
+    let recorder = std::sync::Arc::clone(&seen);
+
+    let pool_for_state = pool.clone();
+    let returned = invoke_managing(
+        "sync_now",
+        serde_json::json!({ "sourceId": "mock" }),
+        move |app| {
+            app.manage(knobas_app::AppState::over_pool(pool_for_state));
+            app.listen("sync:state", move |event| {
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(event.payload()) {
+                    recorder.lock().unwrap().push(value);
+                }
+            });
+        },
+    )
+    .expect("sync_now must answer")
+    .deserialize::<i64>()
+    .expect("a run id came back");
+
+    // Emitted before the spawn, so it is already there.
+    let started = seen.lock().unwrap().first().cloned().expect(
+        "a `running` sync:state must be emitted before sync_now returns -- \
+         otherwise EVENTS.syncState is a promise the docs make and nothing keeps",
+    );
+    assert_eq!(started["running"], serde_json::json!(true));
+    assert_eq!(started["run_id"], serde_json::json!(returned));
+    assert_eq!(started["source_id"], serde_json::json!("mock"));
+
+    // The run itself lands on its own task; wait for the log row to close.
+    let mut outcome = None;
+    for _ in 0..100 {
+        let row: Option<(Option<String>,)> = sqlx::query_as(
+            "select outcome from knobas.sync_run where id = $1 and finished_at is not null",
+        )
+        .bind(returned)
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+        if let Some((Some(value),)) = row {
+            outcome = Some(value);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert_eq!(
+        outcome.as_deref(),
+        Some("ok"),
+        "the spawned run must close its own log row"
+    );
+
+    let terminal = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|status| status["running"] == serde_json::json!(false))
+        .cloned()
+        .expect("a terminal sync:state must follow the run");
+    assert_eq!(terminal["run_id"], serde_json::json!(returned));
+    assert_eq!(terminal["last_outcome"], serde_json::json!("ok"));
 }

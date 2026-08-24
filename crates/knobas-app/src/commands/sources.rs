@@ -1,6 +1,6 @@
 //! Sources, secrets, sync and diagnostics -- stream F (interfaces §2.2, §2.3).
 
-use tauri::State;
+use tauri::{Emitter, State};
 
 use crate::{AppState, IpcError};
 
@@ -46,12 +46,26 @@ impl knobas_sync::ProgressSink for ChannelProgress {
 
 /// Start a sync of one configured source and return its `sync_run.id`.
 ///
-/// Returns as soon as the run is recorded rather than when it finishes
-/// (ruling P3): a UI must never wait on a source. What the run did is read
-/// back from `knobas.sync_run`; while it is in flight, `sync:state` says so.
+/// **Returns before the run finishes** (ruling P3): the log row is written,
+/// the run is spawned onto its own task, and the id comes back immediately. A
+/// UI must never wait on a source. What the run did is read back from
+/// `knobas.sync_run`; while it is in flight, `sync:state` says so -- one event
+/// when the run starts and one when it ends, which is what makes
+/// `EVENTS.syncState` worth listening to.
 ///
-/// M0 has exactly one adapter, `"mock"`; anything else is refused rather than
-/// silently doing nothing.
+/// The two refusals happen *before* the return, so a typo is still an error
+/// the caller sees rather than a run id for a run that never started: an id no
+/// adapter answers to, and an id with no `knobas.source_config` row.
+///
+/// **Stream F replaces the bare `spawn`.** What is here is one spawn per
+/// call and nothing else: no concurrency cap, no queue, no backoff. That is
+/// adequate for M0's single in-memory adapter and a human pressing a button;
+/// it is *not* adequate for real sources, because a run holds one of the
+/// pool's five connections for its whole network-bound duration (M0
+/// carry-over). F's scheduler owns the cap, the queue, the backoff and the
+/// cursor-inside-the-lock fix. The **shape** is what this freezes: id out
+/// immediately, log row written first, coarse state on the event, per-item
+/// progress on the channel only.
 ///
 /// # Why there are two of these
 ///
@@ -63,25 +77,120 @@ impl knobas_sync::ProgressSink for ChannelProgress {
 /// fallback is therefore in force -- this command for callers that want no
 /// per-item progress, [`sync_now_with_progress`] for the ones that do. The
 /// evidence is pinned in `crates/knobas-app/tests/ipc.rs`.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) for an unknown
+/// adapter, [`NotReady`](crate::IpcErrorCode::NotReady) for an unconfigured
+/// source. A failure of the run *itself* arrives on `sync:state` and in the
+/// run log, not here -- by then this command has already returned.
 #[tauri::command]
-pub async fn sync_now(state: State<'_, AppState>, source_id: String) -> Result<i64, IpcError> {
-    Ok(crate::demo::sync_now_inner(&state.pool, &source_id, None).await?)
+pub async fn sync_now<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, AppState>,
+    source_id: String,
+) -> Result<i64, IpcError> {
+    spawn_sync(&app, &state.pool, source_id, None).await
 }
 
 /// [`sync_now`], reporting per-item progress on `progress`.
 ///
-/// Same return value and same semantics; the channel is the only difference,
-/// and it is **required** -- see [`sync_now`] for why the two are separate
-/// commands. Ruling P3 and roadmap §4: per-item progress goes on the channel
-/// and nowhere else, so a caller that only wants to know a run started should
-/// call [`sync_now`] and listen to `sync:state` instead of opening a channel
-/// it will not read.
+/// Same return value and same semantics -- it too returns as soon as the run
+/// is recorded. The channel is the only difference, and it is **required**;
+/// see [`sync_now`] for why the two are separate commands. Ruling P3 and
+/// roadmap §4: per-item progress goes on the channel and nowhere else, so a
+/// caller that only wants to know a run started should call [`sync_now`] and
+/// listen to `sync:state` instead of opening a channel it will not read.
+///
+/// # Errors
+///
+/// As [`sync_now`].
 #[tauri::command]
-pub async fn sync_now_with_progress(
+pub async fn sync_now_with_progress<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: State<'_, AppState>,
     source_id: String,
     progress: tauri::ipc::Channel<knobas_sync::SyncProgress>,
 ) -> Result<i64, IpcError> {
-    let sink = ChannelProgress(progress);
-    Ok(crate::demo::sync_now_inner(&state.pool, &source_id, Some(&sink)).await?)
+    spawn_sync(
+        &app,
+        &state.pool,
+        source_id,
+        Some(Box::new(ChannelProgress(progress))),
+    )
+    .await
+}
+
+/// Record a run, start it on its own task, and hand back its id.
+///
+/// Generic over the runtime because a bare `tauri::AppHandle` means
+/// `AppHandle<Wry>`, which `tests/ipc.rs`'s `MockRuntime` is not -- a
+/// non-generic command taking a handle simply cannot be registered on a mock
+/// app, and the IPC tests would have to stop covering these two.
+///
+/// The order is the contract: refuse what cannot run, open the log row, say
+/// `running` on the event, *then* spawn. A caller holding the id can read the
+/// run's fate out of `knobas.sync_run` whatever happens to the task.
+async fn spawn_sync<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    pool: &sqlx::PgPool,
+    source_id: String,
+    sink: Option<Box<dyn knobas_sync::ProgressSink>>,
+) -> Result<i64, IpcError> {
+    let prepared =
+        crate::demo::prepare_sync(pool, &source_id, knobas_sync::SyncTrigger::Manual).await?;
+    let run_id = prepared.run_id;
+    emit_sync_state(
+        app,
+        &knobas_sync::SourceSyncStatus::started(&source_id, run_id),
+    );
+
+    // Owned clones: the task outlives this call by design. `PgPool` and
+    // `AppHandle` are both handle types, so this is a refcount each.
+    let pool = pool.clone();
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let outcome = match knobas_sync::run(
+            &pool,
+            prepared.source.as_ref(),
+            prepared.cursor,
+            run_id,
+            sink.as_deref(),
+        )
+        .await
+        {
+            Ok(report) => {
+                tracing::info!(run_id, source_id = %source_id, upserted = report.upserted, "sync finished");
+                knobas_sync::SyncOutcome::Ok
+            }
+            // Nowhere to return it to -- the command answered long ago. The
+            // run log has it (`knobas_sync::run` wrote it there before
+            // returning), the event carries its class, and this line is what
+            // makes it visible in a terminal.
+            Err(error) => {
+                tracing::warn!(run_id, source_id = %source_id, %error, "sync failed");
+                knobas_sync::SyncOutcome::of(&error)
+            }
+        };
+        emit_sync_state(
+            &app,
+            &knobas_sync::SourceSyncStatus::finished(&source_id, run_id, outcome),
+        );
+    });
+
+    Ok(run_id)
+}
+
+/// Emit one coarse `sync:state`.
+///
+/// Failure is logged and dropped: a webview that is not listening (or not
+/// there yet) is not a sync failure, and the run log is the durable record
+/// either way.
+fn emit_sync_state<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    status: &knobas_sync::SourceSyncStatus,
+) {
+    if let Err(error) = app.emit(crate::events::SYNC_STATE, status) {
+        tracing::debug!(%error, "nobody is listening to sync:state");
+    }
 }

@@ -72,6 +72,67 @@ impl SyncOutcome {
     }
 }
 
+/// The coarse state one source's syncing is in -- the `sync:state` payload
+/// (interfaces §2.3).
+///
+/// **Coarse by rule.** Roadmap §4: events are not for throughput. At most a
+/// handful of these per run -- a transition each -- and per-item progress goes
+/// on a [`Channel`](crate::progress::ProgressSink) and nowhere else.
+///
+/// Seeded here rather than by stream F because the contract PR emits the first
+/// `sync:state` and an event needs a payload type; F extends it (and fills the
+/// two scheduler fields) rather than defining a second one.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SourceSyncStatus {
+    pub source_id: String,
+    /// Whether a run is in flight right now.
+    pub running: bool,
+    /// The run this status is about, when there is one.
+    pub run_id: Option<i64>,
+    pub started_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_finished_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_outcome: Option<SyncOutcome>,
+    /// Derived from the interval and the previous run's `finished_at`
+    /// (ruling P7). **Always `None` until stream F's scheduler exists** --
+    /// there is no schedule to derive it from yet.
+    pub next_run_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// `knobas.source_config.backoff_until`. **Always `None` until stream F**,
+    /// which is what writes and honours it.
+    pub backoff_until: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl SourceSyncStatus {
+    /// A run has just been recorded and is about to execute.
+    #[must_use]
+    pub fn started(source_id: &str, run_id: i64) -> Self {
+        Self {
+            source_id: source_id.to_owned(),
+            running: true,
+            run_id: Some(run_id),
+            started_at: Some(chrono::Utc::now()),
+            last_finished_at: None,
+            last_outcome: None,
+            next_run_at: None,
+            backoff_until: None,
+        }
+    }
+
+    /// A run has ended, one way or the other.
+    #[must_use]
+    pub fn finished(source_id: &str, run_id: i64, outcome: SyncOutcome) -> Self {
+        Self {
+            source_id: source_id.to_owned(),
+            running: false,
+            run_id: Some(run_id),
+            started_at: None,
+            last_finished_at: Some(chrono::Utc::now()),
+            last_outcome: Some(outcome),
+            next_run_at: None,
+            backoff_until: None,
+        }
+    }
+}
+
 /// What a finished run wrote, in the log's own units.
 #[derive(Debug, Clone, Default)]
 pub struct RunCounts {
