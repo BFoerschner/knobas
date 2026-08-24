@@ -30,8 +30,9 @@ expect that run to take a few minutes and to need network. Every later run
 reuses it. Set `KNOBAS_DB_URL` to point the app at a Postgres you manage
 instead of starting an embedded one.
 
-`just check` is the whole quality gate and is what CI would run; nothing gets
-pushed without it green.
+`just check` is the whole quality gate: `cargo fmt --check`, `svelte-check` and
+`vite build`, `cargo clippy --workspace --all-targets -- -D warnings`, and
+`cargo test --workspace`. Nothing is pushed without it green.
 
 ## Demo mode
 
