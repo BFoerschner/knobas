@@ -389,7 +389,7 @@ pub async fn search(pool: &sqlx::PgPool, query: &str, limit: i64)
     let hits = sqlx::query_as::<_, SearchHit>(
         r#"select i.entity_id, i.kind, i.source_id, i.title,
                   ts_headline('english', i.body_text, q,
-                              'MaxWords=18, MinWords=8') as snippet,
+                              'MaxWords=18, MinWords=8') as snippet,  -- amended by ruling: selectors emptied (StartSel/StopSel='') for plain-text M0 snippets, headline runs over title+body
                   ts_rank_cd(i.fts, q) as rank,
                   i.synced_at
            from sync.item i, websearch_to_tsquery('english', $1) q
@@ -778,7 +778,7 @@ async fn fixture_matches_the_brief() {
 - Produces:
   - `knobas_sync::run_once(pool: &PgPool, source: &dyn Source, cursor: Option<Cursor>) -> Result<SyncReport, SyncError>`
   - `SyncReport { pub source_id: String, pub upserted: u64, pub deleted: u64, pub cursor: Cursor }` (serde `Serialize`)
-  - Behavior: for each `SyncItem` — upsert `knobas.entity` (id/kind/title/updated_at; set `deleted_at` when `item.deleted`) and upsert `sync.item`; afterwards write one `knobas.activity` row (`actor = "sync:<id>"`, `verb = "synced"`, detail = counts); persist the returned cursor into `knobas.source_config.cursor` when a row for the source exists.
+  - Behavior: for each `SyncItem` — upsert `knobas.entity` (id/kind/title/updated_at; set `deleted_at` when `item.deleted`) and upsert `sync.item`; afterwards write one `knobas.activity` row (`actor = "sync:<id>"`, `verb = "synced"`, detail = counts) — **amended by ruling: skipped for no-op runs (0 upserted, 0 deleted, cursor unchanged), and a post-commit activity-write failure warns instead of failing the committed run**; persist the returned cursor into `knobas.source_config.cursor` when a row for the source exists.
 
 - [ ] **Step 1: Write the failing test**
 
