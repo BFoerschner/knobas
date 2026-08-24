@@ -877,10 +877,33 @@ mod tests {
         pid
     }
 
-    /// A port nothing is listening on: bind it, read it back, drop the listener.
+    /// A port nothing is listening on right now: bind it, read it back, drop
+    /// the listener.
+    ///
+    /// Only *probably* still free by the time anything probes it -- ephemeral
+    /// ports are handed out round-robin, and a concurrent test in this binary
+    /// can be given the same one moments later. Nothing can reserve a silent
+    /// port, so callers that need the probe to find silence redraw instead:
+    /// see [`inspect_with_a_silent_port`].
     fn free_port() -> u16 {
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
         listener.local_addr().unwrap().port()
+    }
+
+    /// `inspect_lock` against a lock file naming `pid` and a port nothing
+    /// answers on, redrawing the port if something took it in between.
+    ///
+    /// A `Lock::Live` here means the draw lost, not that the classification is
+    /// wrong: the port answered, so `inspect_lock` did exactly what it should.
+    fn inspect_with_a_silent_port(dir: &Path, pid: u32) -> (Lock, PathBuf) {
+        for _ in 0..8 {
+            let file = pid_file(dir, pid, free_port());
+            let lock = inspect_lock(dir).unwrap();
+            if !matches!(lock, Lock::Live { .. }) {
+                return (lock, file);
+            }
+        }
+        panic!("every port drawn was taken by something else");
     }
 
     /// A `postmaster.pid` as PostgreSQL writes it: pid, data directory, start
@@ -902,9 +925,9 @@ mod tests {
     #[test]
     fn inspect_lock_removes_a_pid_file_with_no_process_and_no_listener() {
         let dir = tempfile::tempdir().unwrap();
-        let pid_file = pid_file(dir.path(), dead_pid(), free_port());
+        let (lock, pid_file) = inspect_with_a_silent_port(dir.path(), dead_pid());
 
-        assert_eq!(inspect_lock(dir.path()).unwrap(), Lock::Cleared);
+        assert_eq!(lock, Lock::Cleared);
         assert!(!pid_file.exists());
     }
 
@@ -917,12 +940,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         // Our own pid: alive for certain, for as long as this test runs.
         let alive = std::process::id();
-        let pid_file = pid_file(dir.path(), alive, free_port());
+        let (lock, pid_file) = inspect_with_a_silent_port(dir.path(), alive);
 
-        assert_eq!(
-            inspect_lock(dir.path()).unwrap(),
-            Lock::LiveProcess { pid: alive }
-        );
+        assert_eq!(lock, Lock::LiveProcess { pid: alive });
         assert!(
             pid_file.exists(),
             "a lock whose process is still running must not be cleared"
