@@ -1,0 +1,29 @@
+[package]
+name = "knobas-mockd"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+# 0.8 is the axum line that builds on http 1 / hyper 1, i.e. the versions the
+# workspace lock already carries for `reqwest` and `knobas-http`. A newer major
+# that vendors its own `http` would put a second copy in the tree; check with
+# `cargo tree -p knobas-mockd -d` after any bump.
+axum = "0.8"
+tokio = { workspace = true, features = ["net", "sync", "time"] }
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+knobas-source-mock = { path = "../knobas-source-mock" }
+
+[build-dependencies]
+quick-xml = "0.41"
+
+[dev-dependencies]
+# Inherited rather than re-declared: the workspace pins reqwest 0.13 with the
+# platform-verifier rustls backend, and a second feature set here would be a
+# second reqwest build for no reason.
+reqwest.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+tokio = { workspace = true, features = ["net", "sync", "macros", "rt-multi-thread", "time"] }
