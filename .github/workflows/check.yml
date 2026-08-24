@@ -77,13 +77,22 @@ jobs:
 
       # The embedded PostgreSQL the database tests run against is downloaded on
       # first use into `~/.theseus`, which Swatinem/rust-cache does not cover.
-      # The key is fixed rather than hashed: the version is pinned in
-      # `knobas-db` (`PG_VERSION_REQ = "=18.6.0"`), so a bump is a deliberate
-      # edit that renames this key with it.
+      #
+      # The key is derived from the file that pins the version
+      # (`PG_VERSION_REQ` in `knobas-db`'s `embedded.rs`) rather than spelling
+      # `18.6.0` out here, because the two failure directions are not
+      # comparable. Hashing the whole file over-invalidates: an edit to
+      # anything else in it costs one 13 MB re-download. A hand-written key
+      # under-invalidates: bump the pin, forget to rename the key, and the
+      # cache restores the *old* Postgres into `~/.theseus` -- whereupon the
+      # archive extractor, which skips extraction whenever the target directory
+      # already exists, leaves it there. The tests then pass against a
+      # different server than the pin says, and nothing anywhere reports it.
+      # A wasted download is the safe direction.
       - uses: actions/cache@v4
         with:
           path: ~/.theseus
-          key: postgres-18.6.0-linux
+          key: postgres-${{ hashFiles('crates/knobas-db/src/embedded.rs') }}-linux
 
       # `just check` provisions `app/node_modules` itself (the `deps` recipe),
       # so there is no `npm ci` step -- setup-node above is here for the node
