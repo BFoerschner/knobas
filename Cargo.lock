@@ -919,9 +919,14 @@ dependencies = [
 name = "knobas-core"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "knobas-db",
  "serde",
  "serde_json",
+ "sqlx",
  "thiserror",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
