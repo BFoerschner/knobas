@@ -294,3 +294,39 @@ pub(crate) async fn unimplemented(State(state): State<Arc<MockState>>, req: Requ
     );
     r
 }
+
+/// Records one violation against `req`, so every handler spells the fields the
+/// same way.
+fn record_violation(state: &MockState, req: &Request, kind: ViolationKind, detail: String) {
+    state.violations().record(Violation {
+        kind,
+        method: req.method().as_str().to_ascii_uppercase(),
+        path: req.uri().path().to_owned(),
+        query: req.uri().query().unwrap_or_default().to_owned(),
+        detail,
+        at: Utc::now(),
+    });
+}
+
+/// A JQL query outside the subset mockd implements: 400, plus the violation
+/// that makes an adapter's own test fail.
+pub(crate) fn unsupported_query(state: &MockState, req: &Request, message: &str) -> Response {
+    record_violation(
+        state,
+        req,
+        ViolationKind::UnsupportedQuery,
+        message.to_owned(),
+    );
+    jira_error(StatusCode::BAD_REQUEST, message)
+}
+
+/// A `fields=`/`expand=` name outside the closed set (deviation 5).
+pub(crate) fn unknown_field(state: &MockState, req: &Request, name: &str) -> Response {
+    let message = format!(
+        "Field or expand name {name:?} is not one mockd serves. Real Jira ignores names it \
+         does not know; mockd refuses them, because a typo that silently drops a field from \
+         a sync is worth a 400."
+    );
+    record_violation(state, req, ViolationKind::UnknownField, message.clone());
+    jira_error(StatusCode::BAD_REQUEST, message)
+}

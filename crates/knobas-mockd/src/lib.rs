@@ -35,9 +35,22 @@
 //! 4. **Every Jira endpoint requires an `Authorization` header**, including
 //!    `/rest/api/2/serverInfo`, which a real anonymous-browsing instance would
 //!    serve without one. Same reason: credentials must be on every request.
+//! 5. **`fields=` and `expand=` values are validated against a closed set**;
+//!    real Jira ignores names it does not know. A typo that silently drops a
+//!    field from a sync is worth a 400.
+//! 7. **No wiki rendering.** `expand=renderedFields` returns the description
+//!    verbatim rather than the HTML a real instance would render, because
+//!    nothing in knobas reads the rendering — only that the field is there.
+//!
+//! ## The shared credentials
+//!
+//! Adapter tests send [`JIRA_TOKEN`] and [`TEAMCITY_TOKEN`]. mockd accepts any
+//! non-empty `Bearer`/`Basic` credential; the constants exist so no test
+//! hard-codes a string that silently stops meaning anything.
 
 pub mod allowlist;
 pub mod jira;
+pub mod jql;
 pub mod state;
 pub mod validate;
 
