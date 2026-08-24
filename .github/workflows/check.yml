@@ -1,0 +1,134 @@
+# The quality gate, run by the same `just check` a developer runs locally.
+# Nothing about the gate is spelled out here on purpose: if CI and the justfile
+# can disagree, they eventually will, and the disagreement is only ever found
+# on `main`. This file's whole job is to put a Linux machine in front of that
+# one command.
+name: check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A push to a PR branch makes the run for the previous push irrelevant; keeping
+# it alive only queues work behind itself, so PR runs share one group per ref
+# and supersede each other.
+#
+# Every commit on `main`, by contrast, is a distinct answer to "is main green",
+# and a lost answer is lost for good. `cancel-in-progress: false` alone is not
+# enough to protect them: within a shared group GitHub keeps only *one* pending
+# run, so a third push silently discards the second one's run while the first
+# still holds the group. Keying `main` on `github.run_id` gives every commit a
+# group of its own, where there is nothing to queue behind and nothing to
+# replace.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+# Read-only: the gate builds and tests, it never writes to the repository. The
+# GITHUB_TOKEN handed to the `just check` step below inherits this, so the
+# worst a compromised build script can do with it is read what is already
+# public.
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # `cargo test` compiles knobas-app, which links webkit2gtk through
+      # tauri/wry; none of it is on the runner image. This is the development
+      # subset of Tauri's documented Linux prerequisites -- the packages the
+      # `-sys` build scripts pkg-config for. The bundling-only ones
+      # (librsvg2-dev and friends) are left out: `tauri build` never runs here.
+      # build-essential, curl, wget, file and libssl-dev are already installed
+      # on ubuntu-latest.
+      - name: Install Tauri's Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            libxdo-dev
+
+      # `rust-toolchain.toml` is the single toolchain knob for this repo -- it
+      # is what `cargo` obeys, both here and on a developer's machine, and the
+      # justfile strips any inherited RUSTUP_TOOLCHAIN so nothing can quietly
+      # shadow it. The channel is read out of that file rather than written
+      # again here so CI cannot end up gating on a compiler nobody uses.
+      - id: toolchain
+        name: Read the pinned toolchain
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          test -n "$channel"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+      # Installs that channel up front (with a `--profile minimal` install's
+      # missing components) instead of leaving rustup to fetch it mid-build.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: taiki-e/install-action@just
+
+      # `hashFiles` returns the empty string when its pattern matches nothing,
+      # and the cache step below would take that quietly: the key collapses to
+      # the constant `postgres--linux`, which then hits forever and can never
+      # be invalidated by anything. Renaming or moving `embedded.rs` is exactly
+      # how that happens, and it is invisible -- the cache still works, it just
+      # stops tracking the thing it is keyed on. Fail here instead.
+      - name: Check the postgres cache key resolved
+        env:
+          hash: ${{ hashFiles('crates/knobas-db/src/embedded.rs') }}
+        run: |
+          if [ -z "$hash" ]; then
+            echo "::error::hashFiles matched no crates/knobas-db/src/embedded.rs, so the ~/.theseus cache key would be the constant 'postgres--linux'. Repoint the key below (and this guard) at wherever PG_VERSION_REQ lives now."
+            exit 1
+          fi
+
+      # The embedded PostgreSQL the database tests run against is downloaded on
+      # first use into `~/.theseus`, which Swatinem/rust-cache does not cover.
+      #
+      # The key is derived from the file that pins the version
+      # (`PG_VERSION_REQ` in `knobas-db`'s `embedded.rs`) rather than spelling
+      # `18.6.0` out here. Neither direction can serve the *wrong* Postgres:
+      # the install directory is itself version-keyed
+      # (`~/.theseus/postgresql/<version>`) and `setup()` re-validates it, so a
+      # stale cache simply does not contain the version being asked for. What
+      # the two directions cost is download time.
+      #
+      # Over-invalidating (this key) costs one 13 MB re-download whenever
+      # anything in `embedded.rs` changes, cache included. Under-invalidating
+      # -- a hand-written `postgres-18.6.0-linux` left un-renamed across a
+      # version bump -- costs that download on *every run, forever*: the key
+      # keeps hitting, so `actions/cache` restores the old version and, because
+      # an exact-key hit skips the save, never stores the new one. A wasted
+      # download now beats a permanent one.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.theseus
+          key: postgres-${{ hashFiles('crates/knobas-db/src/embedded.rs') }}-linux
+
+      # `just check` provisions `app/node_modules` itself (the `deps` recipe),
+      # so there is no `npm ci` step -- setup-node above is here for the node
+      # version and the npm download cache.
+      #
+      # GITHUB_TOKEN is for postgresql_embedded, not for anything git: on a
+      # cache miss it asks api.github.com which release asset to fetch, and
+      # unauthenticated requests from a shared runner IP share a 60/hour budget
+      # with every other repository on that machine.
+      - name: just check
+        run: just check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -26,6 +26,7 @@ Prerequisites:
 ```bash
 just deps     # npm ci in app/, on a fresh clone and whenever the lockfile moved
 just check    # fmt + svelte-check + vite build + clippy -D warnings + tests
+              # (also what CI runs on every PR)
 just dev      # the desktop app against its own embedded Postgres
 ```
 
@@ -35,8 +36,22 @@ expect that run to take a few minutes and to need network. Every later run
 reuses it.
 
 `just check` is the whole quality gate: `cargo fmt --check`, `svelte-check` and
-`vite build`, `cargo clippy --workspace --all-targets -- -D warnings`, and
-`cargo test --workspace`. Nothing is pushed without it green.
+`vite build`, `cargo clippy --workspace --all-targets -- -D warnings`,
+`cargo clippy --workspace --lib -- -D warnings`, and `cargo test --workspace`.
+Nothing is pushed without it green.
+
+The clippy pass runs twice on purpose. `--all-targets` pulls in every crate's
+dev-dependencies and cargo unifies features across the invocation, so
+`knobas-db`'s self-dev-dependency (which turns on `test-util`) silently enables
+that feature for the *library* build too — linting it in a configuration
+nothing ships. The `--lib` pass drops the dev-dependencies, and with them the
+feature, so each library is also checked the way something that merely depends
+on it will build it.
+
+GitHub Actions runs this same `just check` on every pull request and on every
+push to `main` (`.github/workflows/check.yml`). CI deliberately does not
+restate the gate — it only provides a Linux machine to run it on, so the two
+cannot drift apart.
 
 Setting `KNOBAS_DB_URL` points **the app** at a Postgres you manage instead of
 starting an embedded one — for developing against a server with real data in

@@ -10,13 +10,30 @@
 # with `devUrl` set takes the empty default asset set and never looks at
 # `app/dist`. Nothing here may create that directory either: a missing one is
 # exactly how `tauri build` refuses to bundle an app with no frontend in it.
-check: fmt front clippy test
+check: fmt front clippy clippy-libs test
 
 fmt:
     env -u RUSTUP_TOOLCHAIN cargo fmt --all --check
 
 clippy:
     env -u RUSTUP_TOOLCHAIN cargo clippy --workspace --all-targets -- -D warnings
+
+# The same lint pass over the libraries alone -- which is the only way to see
+# them the way something that merely *depends* on them does.
+#
+# `--all-targets` pulls in every crate's dev-dependencies, and cargo unifies
+# features across the whole invocation. `knobas-db` dev-depends on itself with
+# `test-util` on, so that one dev-dependency silently turns the feature on for
+# the library build too, and the lib gets linted in a configuration nothing
+# ships. Items whose only callers are behind `test-util` then look live, and
+# their dead-code warnings surface only later -- in `tauri dev`, or for any
+# consumer building `knobas-db` without the feature.
+#
+# Dropping `--all-targets` for `--lib` drops the dev-dependencies with it, so
+# each library is checked with the features a consumer actually gets. Almost
+# free after the pass above: same crates, same profile, a subset of the units.
+clippy-libs:
+    env -u RUSTUP_TOOLCHAIN cargo clippy --workspace --lib -- -D warnings
 
 test:
     env -u RUSTUP_TOOLCHAIN cargo test --workspace
