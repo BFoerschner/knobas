@@ -108,6 +108,15 @@ pub struct EmbeddedDb {
     pool: PgPool,
     /// Connection URL of the running server, for callers that need a pool of
     /// their own rather than the shared one.
+    ///
+    /// Only [`test_util`](crate::test_util) ever asks for it, so the field
+    /// exists only when that feature does. Keeping it unconditionally would
+    /// mean an application build carries a string holding the superuser
+    /// password that nothing in that build can read -- and, because the field
+    /// is private and its one reader is feature-gated, a `dead_code` warning
+    /// that only appears when the crate is compiled the way a consumer
+    /// compiles it.
+    #[cfg(feature = "test-util")]
     url: String,
     /// `None` when connected to a server we do not manage.
     postgresql: Option<PostgreSQL>,
@@ -141,6 +150,7 @@ impl EmbeddedDb {
             tracing::info!("connecting to externally managed postgres");
             return Ok(EmbeddedDb {
                 pool: connect(url).await?,
+                #[cfg(feature = "test-util")]
                 url: url.to_string(),
                 postgresql: None,
             });
@@ -191,7 +201,10 @@ impl EmbeddedDb {
     /// Crate-internal on purpose: it carries the superuser password, and the
     /// only reason to need it is opening a second pool -- a `PgPool` may not be
     /// shared across tokio runtimes, so anything outliving the runtime that
-    /// built [`pool`](Self::pool) needs its own. `test_util` is the one caller.
+    /// built [`pool`](Self::pool) needs its own. `test_util` is the one caller,
+    /// which is why this compiles only under that feature -- along with the
+    /// field it reads.
+    #[cfg(feature = "test-util")]
     #[must_use]
     pub(crate) fn url(&self) -> &str {
         &self.url
@@ -276,6 +289,7 @@ async fn start_managed(settings: Settings) -> Result<Started, DbError> {
 
     Ok(Started::Ready(Box::new(EmbeddedDb {
         pool,
+        #[cfg(feature = "test-util")]
         url,
         postgresql: Some(postgresql),
     })))
@@ -389,6 +403,7 @@ async fn adopt(mut settings: Settings, port: u16) -> Result<Started, DbError> {
     );
     Ok(Started::Ready(Box::new(EmbeddedDb {
         pool,
+        #[cfg(feature = "test-util")]
         url,
         postgresql: None,
     })))
@@ -442,6 +457,13 @@ fn fresh_settings() -> Settings {
 /// renames into place atomically, so concurrent bootstraps are safe -- but it
 /// skips extraction entirely if the target directory already exists, so
 /// nothing here may pre-create it.
+///
+/// `build_settings` does not call this -- it leaves `installation_dir` at the
+/// very default this returns. The readers are all test-side: `test_util`'s
+/// reaper, which needs the `pg_ctl` under it, and this module's own unit tests
+/// asserting where the default points. Hence the cfg: outside those two builds
+/// the function has no caller at all.
+#[cfg(any(test, feature = "test-util"))]
 pub(crate) fn installation_dir() -> PathBuf {
     fresh_settings().installation_dir
 }
