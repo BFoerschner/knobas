@@ -53,6 +53,12 @@ pub struct SourceDescriptor {
     /// enough: once `WriteOp` grows, "supports writes" no longer says *which*
     /// actions to offer. An adapter must reject any op absent from this list
     /// with [`SourceError::Protocol`].
+    ///
+    /// This and [`Capability::Write`] are two signals for one fact and must
+    /// agree: declaring `Write` with no ops leaves the UI nothing to offer,
+    /// and listing ops without `Write` makes the source read as read-only
+    /// while advertising actions. [`contract::battery`] enforces both
+    /// directions.
     pub write_ops: Vec<String>,
     /// Entity kinds this adapter emits, with display metadata -- the UI renders
     /// a new source's items (launcher groups, chips, monograms) from this
@@ -83,6 +89,8 @@ pub struct KindInfo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Capability {
     Search,
+    /// Must be accompanied by a non-empty
+    /// [`SourceDescriptor::write_ops`], which says *which* writes.
     Write,
     Webhooks,
     Import,

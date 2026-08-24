@@ -154,6 +154,22 @@ where
              silently never appears"
         );
     }
+    // `Capability::Write` and `write_ops` are two signals for one fact. Left
+    // unchecked they drift, and neither of the two ways they can disagree is a
+    // valid state: a source that advertises writing with nothing to offer, or
+    // one whose actions the UI renders while the source reads as read-only.
+    let declares_write = d.capabilities.contains(&crate::Capability::Write);
+    assert!(
+        !declares_write || !d.write_ops.is_empty(),
+        "descriptor declares Capability::Write but lists no write_ops -- there is no action for \
+         the UI to offer"
+    );
+    assert!(
+        declares_write || d.write_ops.is_empty(),
+        "descriptor lists write_ops {:?} but does not declare Capability::Write -- the source \
+         reads as read-only while advertising actions",
+        d.write_ops
+    );
     for (id, op) in known {
         if d.write_ops.iter().any(|w| w.as_str() == id) {
             // Declared: performing it would touch a live system, so it is the
@@ -214,6 +230,10 @@ mod tests {
         MisclassifiesReachOnSync,
         /// Declares a write-op identifier that is not one the SPI defines.
         UnknownWriteOpId,
+        /// Advertises `Capability::Write` while listing no write ops.
+        WriteCapabilityWithoutOps,
+        /// Lists write ops while reading as read-only.
+        WriteOpsWithoutCapability,
         /// Accepts a write op it never declared instead of refusing it.
         AcceptsUndeclaredWrite,
         /// Swallows the sink's error and reports a successful sync.
@@ -252,13 +272,21 @@ mod tests {
                 },
                 adapter_kind: "test".into(),
                 name: "Test".into(),
-                capabilities: vec![Capability::Search],
+                // Kept coherent with `write_ops` below for every behavior but
+                // the two that exist to violate exactly that.
+                capabilities: match self.behavior {
+                    Behavior::UnknownWriteOpId | Behavior::WriteCapabilityWithoutOps => {
+                        vec![Capability::Search, Capability::Write]
+                    }
+                    _ => vec![Capability::Search],
+                },
                 adapter_version: "0.1.0".into(),
                 auth_methods: vec![AuthMethod::Pat],
                 // Declares no write ops, so the battery probes `comment` and
-                // expects a refusal -- except for the typo'd-identifier case.
+                // expects a refusal -- except where the behavior needs otherwise.
                 write_ops: match self.behavior {
                     Behavior::UnknownWriteOpId => vec!["Comment".into()],
+                    Behavior::WriteOpsWithoutCapability => vec!["comment".into()],
                     _ => Vec::new(),
                 },
                 entity_kinds: vec![KindInfo {
@@ -457,6 +485,24 @@ mod tests {
         rejects(
             Behavior::UnknownWriteOpId,
             "is not a WriteOp identifier the SPI knows",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_write_capability_with_no_write_ops() {
+        rejects(
+            Behavior::WriteCapabilityWithoutOps,
+            "declares Capability::Write but lists no write_ops",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_write_ops_without_the_write_capability() {
+        rejects(
+            Behavior::WriteOpsWithoutCapability,
+            "but does not declare Capability::Write",
         )
         .await;
     }
