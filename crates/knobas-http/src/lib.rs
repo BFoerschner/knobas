@@ -26,13 +26,21 @@ use governor::clock::DefaultClock;
 use governor::state::{InMemoryState, NotKeyed};
 use governor::{Quota, RateLimiter};
 use knobas_source::SourceError;
-use reqwest::Method;
 use reqwest::header::{ACCEPT, HeaderMap, HeaderValue, USER_AGENT};
-use reqwest_middleware::{ClientBuilder, ClientWithMiddleware, RequestBuilder};
+use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_retry::RetryTransientMiddleware;
 use reqwest_retry::policies::ExponentialBackoff;
 
 pub use classify::{reqwest_error, status_error, transport_error};
+
+// Every type this crate's signatures name, re-exported: an adapter depends on
+// `knobas-http` and on nothing else for its transport. Otherwise all three
+// would list `reqwest` and `reqwest-middleware` themselves just to spell
+// `Method` and `RequestBuilder` -- three chances to pick a different version
+// of the stack this crate exists to make singular, and three Cargo.toml edits
+// for a bump that P8 says routes through the orchestrator.
+pub use reqwest::{self, Method, Response, StatusCode, header};
+pub use reqwest_middleware::{self, RequestBuilder};
 
 /// Total attempts per request, the first one included.
 pub const MAX_ATTEMPTS: u32 = 3;

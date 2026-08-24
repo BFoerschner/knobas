@@ -4,7 +4,9 @@
 //! against, and this crate's own risk is the *classification* -- getting 403
 //! wrong is a source that looks broken instead of one that needs a password.
 
-use knobas_http::{Auth, HttpClient, HttpConfig};
+// `Method` comes from `knobas_http`, not from `reqwest`: an adapter depends on
+// this crate alone for its transport, and this import is what proves it can.
+use knobas_http::{Auth, HttpClient, HttpConfig, Method};
 use knobas_source::SourceError;
 
 fn config(base_url: String) -> HttpConfig {
@@ -40,6 +42,47 @@ async fn a_refused_connection_is_unreachable() {
 async fn a_bad_base_url_is_refused_up_front() {
     let error = HttpClient::new(config("not a url".to_owned())).expect_err("bad base url");
     assert!(matches!(error, SourceError::Protocol(_)), "{error:?}");
+}
+
+/// Each `Auth` variant's exact wire spelling. Gitea's is the one that bites:
+/// it is `token <pat>`, not `Bearer <pat>`, and a Gitea that does not
+/// recognise the scheme answers 401 -- which knobas then correctly reports as
+/// *Re-enter password* for a password that was right all along.
+#[test]
+fn each_auth_variant_has_its_own_wire_spelling() {
+    fn authorization(auth: Auth) -> Option<String> {
+        let client = HttpClient::new(HttpConfig {
+            auth,
+            ..config("https://example.test".to_owned())
+        })
+        .expect("client");
+        let request = client
+            .request(Method::GET, "/api/v1/user")
+            .build()
+            .expect("a GET with no body always builds");
+        request
+            .headers()
+            .get("authorization")
+            .map(|value| value.to_str().expect("ascii").to_owned())
+    }
+
+    assert_eq!(authorization(Auth::None), None);
+    assert_eq!(
+        authorization(Auth::Bearer("t".to_owned())),
+        Some("Bearer t".to_owned())
+    );
+    assert_eq!(
+        authorization(Auth::GiteaToken("t".to_owned())),
+        Some("token t".to_owned())
+    );
+    // Basic is base64("someone:secret").
+    assert_eq!(
+        authorization(Auth::Basic {
+            username: "someone".to_owned(),
+            password: "secret".to_owned(),
+        }),
+        Some("Basic c29tZW9uZTpzZWNyZXQ=".to_owned())
+    );
 }
 
 /// The secret reaches the wire and nothing else. `Auth` and `HttpClient` both
