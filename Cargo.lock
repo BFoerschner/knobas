@@ -2493,6 +2493,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "knobas-source-jira"
+version = "0.1.0"
+dependencies = [
+ "knobas-source",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "knobas-source-mock"
 version = "0.1.0"
 dependencies = [
