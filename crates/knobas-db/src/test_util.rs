@@ -7,6 +7,16 @@
 //! with unique keys. Truncating shared tables would break tests running
 //! concurrently in the same binary.
 //!
+//! # Why the pool is not shared too
+//!
+//! The *server* is process-wide; the pool is not. A `PgPool` belongs to the
+//! tokio runtime that used it, and `#[tokio::test]` builds a fresh runtime per
+//! test. Handing a `static` pool to a second runtime starves it: a connection
+//! released while its runtime is shutting down never gets to run the task that
+//! returns its permit to the pool's semaphore, so after a test or two every
+//! `acquire` fails with `PoolTimedOut`. Each call therefore opens its own pool
+//! against the shared server, and the caller drops it with its runtime.
+//!
 //! # Why there is a reaper in here
 //!
 //! The instance lives in a `static`, and Rust never drops statics -- so
@@ -50,13 +60,17 @@ const PG_CTL: &str = if cfg!(windows) {
     "pg_ctl"
 };
 
-/// The shared pool for this test binary, starting the server on first use.
+/// A pool onto this test binary's shared database, starting the server on
+/// first use.
+///
+/// The returned pool belongs to the calling runtime and should be dropped with
+/// it -- see the module docs for why it is not shared.
 ///
 /// # Panics
 ///
-/// Panics if the database cannot be started -- there is no useful way for a
-/// test to continue without one.
-pub async fn test_pool() -> &'static PgPool {
+/// Panics if the database cannot be started, or if the pool cannot connect --
+/// there is no useful way for a test to continue without one.
+pub async fn test_pool() -> PgPool {
     static DB: tokio::sync::OnceCell<EmbeddedDb> = tokio::sync::OnceCell::const_new();
 
     let db = DB
@@ -73,7 +87,9 @@ pub async fn test_pool() -> &'static PgPool {
         })
         .await;
 
-    db.pool()
+    crate::embedded::connect(db.url())
+        .await
+        .expect("connect a test pool to the shared embedded postgres")
 }
 
 /// The ownership lock path for a scratch directory: a sibling, never a child.

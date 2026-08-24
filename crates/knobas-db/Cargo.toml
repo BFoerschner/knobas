@@ -24,6 +24,8 @@ postgresql_archive = { version = "0.21", default-features = false, features = [
     "theseus",
     "tls-native-tls",
 ] }
+chrono.workspace = true
+serde.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["sync"] }
@@ -32,4 +34,6 @@ tracing = "0.1"
 [dev-dependencies]
 # Self-dev-dependency so this crate's own integration tests see `test_util`.
 knobas-db = { path = ".", features = ["test-util"] }
+serde_json.workspace = true
 tempfile = "3"
+uuid.workspace = true
