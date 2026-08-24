@@ -887,3 +887,53 @@ Paste the actual command output (abridged) into the final task report — verifi
 - [ ] **Step 3: Commit** — `git add README.md && git commit -m "readme: dev quickstart and crate map"`.
 
 - [ ] **Step 4: Declare the freeze.** From this commit on, `Source` trait / migration baseline / IPC schema changes require an orchestrator decision and a design-doc update (roadmap §3). M1 streams may now fan out.
+
+---
+
+### Task 11: CI — `just check` on every pull request
+
+**Files:**
+- Create: `.github/workflows/check.yml`
+
+**Interfaces:**
+- Consumes: the `just check` gate (Task 1) and everything it exercises.
+- Produces: a required-in-practice `check` status on every PR and on `main` — the machine-enforced backstop of the roadmap's branching model (no branch merges that would break `main`).
+
+- [ ] **Step 1: Write the workflow**
+
+`.github/workflows/check.yml`:
+```yaml
+name: check
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: taiki-e/install-action@just
+      - run: npm ci
+        working-directory: app
+      - run: just check
+```
+Note: `postgresql_embedded` downloads Linux PG binaries on the first test run; `Swatinem/rust-cache` does not cache `~/.theseus`, so add a plain `actions/cache@v4` step for `~/.theseus` keyed on `postgres-18.6.0` if the download proves slow in practice.
+
+- [ ] **Step 2: Prove it runs (this task's own PR is the test)**
+
+Open this task's PR per the loop; then:
+Run: `gh pr checks <n> --watch`
+Expected: the `check` job appears and finishes green. A red first run is fine — fix forward on the branch until green; that iteration *is* the verification.
+
+- [ ] **Step 3: Commit / merge per the PR loop.** Commit message: `ci: just check on every PR`.

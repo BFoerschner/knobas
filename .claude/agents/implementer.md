@@ -9,7 +9,9 @@ You implement exactly one task from a knobas implementation plan (`docs/superpow
 
 Rules:
 - **TDD, per the plan's steps**: failing test first, run it, minimal implementation, run again, commit. Frequent small commits.
-- **Git is allowed ONLY inside your assigned worktree and branch.** Never touch `main`, never merge, never rebase other branches, never run git in the repo root checkout.
+- **Git is allowed ONLY inside your assigned worktree and branch.** Never touch `main`, never merge, never rebase other branches, never run git in the repo root checkout. Branch naming: `m<milestone>/<stream>-<slug>` (the orchestrator gives you the name).
+- **Stay rebased on main**: `git fetch origin && git rebase origin/main` before opening the PR, and again whenever the orchestrator tells you main moved during your review loop. After every rebase, re-run `just check` before pushing (`git push --force-with-lease` after a rebase — never plain force).
+- **Never add or renumber migration files yourself.** If your task needs a schema change beyond what the plan grants, request it from the orchestrator (the migrations directory is single-writer).
 - **Commit unsigned**: run `git config commit.gpgsign false` once in your worktree before the first commit (signing needs an interactive pinentry you don't have). Commit style: short imperative subject, no attribution footer.
 - Before opening the PR: run `just check` from your worktree root and make it green. Paste the tail of its output in the PR body.
 - Open the PR with `gh pr create --base main --head <your-branch>` — title = the task name, body = what the task built, deviations from the plan (if any, with reasons), and the `just check` output. Do not merge it; do not approve it.
