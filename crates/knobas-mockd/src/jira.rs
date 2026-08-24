@@ -8,16 +8,17 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use axum::extract::{Request, State};
+use axum::extract::{Path, Request, State};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::FixedOffset;
 use serde_json::{Value, json};
 
 use crate::jql::parse_jql;
 use crate::state::{JiraComment, JiraIssue, JiraWorklog, MockState, jira_date};
-use crate::validate::{jira_guard, unimplemented, unknown_field, unsupported_query};
+use crate::validate::{jira_error, jira_guard, unimplemented, unknown_field, unsupported_query};
 
 /// The Jira version mockd claims to be — the same one the pinned WADL
 /// documents, so an adapter that gates on it sees a consistent story.
@@ -34,6 +35,15 @@ pub fn router(state: Arc<MockState>) -> Router {
         .route("/rest/api/2/serverInfo", get(server_info))
         .route("/rest/api/2/myself", get(myself))
         .route("/rest/api/2/search", get(search))
+        .route("/rest/api/2/issue/{issueIdOrKey}", get(issue))
+        .route(
+            "/rest/api/2/issue/{issueIdOrKey}/comment",
+            get(issue_comments).merge(post(post_comment)),
+        )
+        .route(
+            "/rest/api/2/issue/{issueIdOrKey}/worklog",
+            get(issue_worklogs),
+        )
         .fallback(unimplemented)
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -482,4 +492,141 @@ async fn search(State(s): State<Arc<MockState>>, req: Request) -> Response {
         "issues": page,
     }))
     .into_response()
+}
+
+// -- GET/POST /rest/api/2/issue/{issueIdOrKey}[/comment|/worklog] -----------
+
+/// `{issueIdOrKey}` really is either: an adapter that kept the numeric `id`
+/// from a search response and fetched by it must work.
+fn find_issue(s: &MockState, id_or_key: &str) -> Option<JiraIssue> {
+    s.issue(id_or_key).or_else(|| {
+        s.issues()
+            .into_iter()
+            .find(|i| i.id.to_string() == id_or_key)
+    })
+}
+
+fn no_such_issue(id_or_key: &str) -> Response {
+    jira_error(
+        StatusCode::NOT_FOUND,
+        format!("Issue does not exist or you do not have permission to see it: {id_or_key}"),
+    )
+}
+
+async fn issue(
+    State(s): State<Arc<MockState>>,
+    Path(id_or_key): Path<String>,
+    req: Request,
+) -> Response {
+    let q = query_map(&req);
+    let (fields, expand) = match selections(&q) {
+        Ok(v) => v,
+        Err(bad) => return unknown_field(&s, &req, &bad),
+    };
+    let Some(i) = find_issue(&s, &id_or_key) else {
+        return no_such_issue(&id_or_key);
+    };
+    Json(issue_json(
+        &i,
+        &s.base_url(),
+        s.server_offset(),
+        &fields,
+        &expand,
+    ))
+    .into_response()
+}
+
+async fn issue_comments(
+    State(s): State<Arc<MockState>>,
+    Path(id_or_key): Path<String>,
+    req: Request,
+) -> Response {
+    let q = query_map(&req);
+    // `expand` is declared by the WADL; mockd serves the same body either way,
+    // so only its spelling is checked.
+    if let Err(bad) = ExpandSel::parse(q.get("expand").map(String::as_str)) {
+        return unknown_field(&s, &req, &bad);
+    }
+    let newest_first = match q.get("orderBy").map(String::as_str) {
+        None | Some("created") | Some("+created") => false,
+        Some("-created") => true,
+        Some(other) => {
+            return unsupported_query(
+                &s,
+                &req,
+                &format!("orderBy={other:?} is not supported; use created or -created"),
+            );
+        }
+    };
+    let Some(mut i) = find_issue(&s, &id_or_key) else {
+        return no_such_issue(&id_or_key);
+    };
+    if newest_first {
+        i.comments.reverse();
+    }
+    let start = num_param(&q, "startAt", 0) as usize;
+    let max = num_param(&q, "maxResults", DEFAULT_MAX_RESULTS).min(s.max_results_cap());
+    Json(comments_envelope(
+        &s.base_url(),
+        &i,
+        s.server_offset(),
+        start,
+        max as usize,
+    ))
+    .into_response()
+}
+
+async fn issue_worklogs(
+    State(s): State<Arc<MockState>>,
+    Path(id_or_key): Path<String>,
+) -> Response {
+    let Some(i) = find_issue(&s, &id_or_key) else {
+        return no_such_issue(&id_or_key);
+    };
+    Json(worklogs_envelope(&s.base_url(), &i, s.server_offset())).into_response()
+}
+
+/// The M2 write-back path, built now because it costs nothing (interfaces §5).
+/// **No M1 adapter may call it** — every M1 adapter declares `write_ops: []`.
+async fn post_comment(
+    State(s): State<Arc<MockState>>,
+    Path(id_or_key): Path<String>,
+    body: Option<Json<Value>>,
+) -> Response {
+    let Some(i) = find_issue(&s, &id_or_key) else {
+        return no_such_issue(&id_or_key);
+    };
+    let text = body
+        .as_ref()
+        .and_then(|Json(v)| v.get("body"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if text.is_empty() {
+        return jira_error(StatusCode::BAD_REQUEST, "Comment body must not be empty");
+    }
+    // mockd authenticates as Mara, matching `myself`.
+    let author = knobas_source_mock::fixture()
+        .person(MYSELF)
+        .expect("the fixture has Mara")
+        .username
+        .clone();
+    let Some(id) = s.add_comment(&i.key, &author, text) else {
+        return no_such_issue(&id_or_key);
+    };
+    let after = s.issue(&i.key).expect("the issue was just commented on");
+    let created = after
+        .comments
+        .iter()
+        .find(|c| c.id == id)
+        .expect("the comment that was just added");
+    (
+        StatusCode::CREATED,
+        Json(comment_json(
+            &s.base_url(),
+            &after,
+            created,
+            s.server_offset(),
+        )),
+    )
+        .into_response()
 }
