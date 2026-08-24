@@ -10,4 +10,4 @@ test:
     cargo test --workspace
 
 front:
-    test -d app && (cd app && npm run check && npm run build) || echo "no app/ yet"
+    if [ -d app ]; then cd app && npm run check && npm run build; else echo "no app/ yet"; fi
