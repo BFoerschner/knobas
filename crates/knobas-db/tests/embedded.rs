@@ -26,6 +26,17 @@ async fn starts_answers_and_survives_restart() {
     db.stop().await.unwrap();
 }
 
+/// Pins that `EmbeddedDb::start` recovers a data directory whose
+/// `postmaster.pid` PostgreSQL itself refuses to clear.
+///
+/// The recorded PID must belong to a process that is **alive** and is not the
+/// postmaster's own ancestry: `CreateLockFile` unlinks the file itself for a
+/// dead PID, and exempts its own PID, its parent and its grandparent (the test
+/// binary is the grandparent). Either shortcut lets `start()` succeed on the
+/// first attempt and the recovery path is never entered -- which is what made
+/// the previous version of this test vacuous. A spawned child satisfies both
+/// conditions, so PostgreSQL genuinely refuses and `clear_stale_lock` has to
+/// do the work.
 #[tokio::test]
 async fn recovers_from_a_stale_postmaster_pid() {
     let dir = tempfile::tempdir().unwrap();
@@ -37,27 +48,95 @@ async fn recovers_from_a_stale_postmaster_pid() {
     let db = EmbeddedDb::start(cfg.clone()).await.unwrap();
     db.stop().await.unwrap();
 
-    // Imitate a hard-killed server: the lock file survives, nothing listens.
-    // The recorded port is one we bound and released, so it is free.
+    // Imitate a hard-killed server: the lock file survives and names a live
+    // process, but nothing listens on the port it recorded.
+    let mut sleeper = std::process::Command::new("sleep")
+        .arg("120")
+        .spawn()
+        .unwrap();
+    let live_pid = sleeper.id();
     let dead_port = {
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
         listener.local_addr().unwrap().port()
     };
     let data_dir = dir.path().join("data");
-    let pid_file = data_dir.join("postmaster.pid");
     std::fs::write(
-        &pid_file,
-        format!("999999\n{}\n1700000000\n{dead_port}\n", data_dir.display()),
+        data_dir.join("postmaster.pid"),
+        format!(
+            "{live_pid}\n{}\n1700000000\n{dead_port}\n",
+            data_dir.display()
+        ),
     )
     .unwrap();
 
-    let db = EmbeddedDb::start(cfg).await.unwrap();
+    let result = EmbeddedDb::start(cfg).await;
+
+    // Reap the child before asserting, so a failure does not leak it.
+    let _ = sleeper.kill();
+    let _ = sleeper.wait();
+
+    let db = result.expect("start should recover from the stale lock");
     let one: (i32,) = sqlx::query_as("select 1")
         .fetch_one(db.pool())
         .await
         .unwrap();
     assert_eq!(one.0, 1);
     db.stop().await.unwrap();
+}
+
+/// `existing_url` must connect to a server we do not own -- and `stop()` must
+/// leave that server running. Getting this wrong shuts down a user's own
+/// production PostgreSQL.
+#[tokio::test]
+async fn existing_url_connects_without_taking_ownership() {
+    let dir = tempfile::tempdir().unwrap();
+    let owned = EmbeddedDb::start(DbConfig {
+        root_dir: dir.path().to_path_buf(),
+        existing_url: None,
+    })
+    .await
+    .unwrap();
+
+    let borrowed = EmbeddedDb::start(DbConfig {
+        // Ignored on this branch; a path that does not exist proves it.
+        root_dir: dir.path().join("never-touched"),
+        existing_url: Some(running_url(dir.path())),
+    })
+    .await
+    .unwrap();
+
+    let one: (i32,) = sqlx::query_as("select 1")
+        .fetch_one(borrowed.pool())
+        .await
+        .unwrap();
+    assert_eq!(one.0, 1);
+
+    borrowed.stop().await.unwrap();
+    assert!(
+        !dir.path().join("never-touched").exists(),
+        "existing_url must not touch root_dir"
+    );
+
+    // The borrowed handle owned nothing, so the server is still up.
+    let one: (i32,) = sqlx::query_as("select 1")
+        .fetch_one(owned.pool())
+        .await
+        .expect("stopping a borrowed handle must not stop the server");
+    assert_eq!(one.0, 1);
+
+    owned.stop().await.unwrap();
+}
+
+/// Reconstruct the URL of a running managed instance from what it wrote to
+/// disk: the port from `postmaster.pid` line 4, the password from `.pgpass`.
+fn running_url(root_dir: &std::path::Path) -> String {
+    let pid_file = std::fs::read_to_string(root_dir.join("data").join("postmaster.pid")).unwrap();
+    let port: u16 = pid_file.lines().nth(3).unwrap().trim().parse().unwrap();
+    let password = std::fs::read_to_string(root_dir.join(".pgpass")).unwrap();
+    format!(
+        "postgresql://postgres:{}@127.0.0.1:{port}/knobas",
+        password.trim_end()
+    )
 }
 
 /// `test_util` is what downstream crates get; exercise it the same way they

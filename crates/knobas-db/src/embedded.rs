@@ -1,7 +1,11 @@
 //! Lifecycle for the embedded PostgreSQL server knobas ships with.
 //!
-//! The server is installed and initialised under a caller-supplied `root_dir`
-//! and always speaks TCP on `127.0.0.1`: a Unix socket path under
+//! State -- the data directory and the password file -- lives under a
+//! caller-supplied `root_dir`. The binaries do not: they are installed once
+//! per machine and version into the shared `~/.theseus/postgresql/<version>`
+//! (see the private `installation_dir` helper), so a `root_dir` holds only the user's data.
+//!
+//! The server always speaks TCP on `127.0.0.1`: a Unix socket path under
 //! `~/Library/Application Support/...` would blow past macOS' 103-byte
 //! `sun_path` limit.
 
@@ -40,8 +44,11 @@ const LIVENESS_TIMEOUT: Duration = Duration::from_millis(500);
 /// Where the database lives and how to reach it.
 #[derive(Clone, Debug)]
 pub struct DbConfig {
-    /// Directory owning the PostgreSQL installation, data directory and
-    /// password file. Ignored when `existing_url` is set.
+    /// Directory owning this instance's state: the `data/` directory and the
+    /// `.pgpass` password file. The PostgreSQL binaries are *not* stored here
+    /// -- they are shared per machine, so this only needs room for the user's
+    /// data, and deleting it resets the database without forcing a
+    /// re-download. Ignored when `existing_url` is set.
     pub root_dir: PathBuf,
     /// Connect to an already-running PostgreSQL instead of managing one.
     pub existing_url: Option<String>,
@@ -86,10 +93,11 @@ pub struct EmbeddedDb {
 impl EmbeddedDb {
     /// Bring the database up and return a connected pool.
     ///
-    /// For a managed server this installs PostgreSQL under `root_dir/pg` (a
-    /// no-op once present), runs `initdb` into `root_dir/data` the first time,
-    /// starts the server on an ephemeral loopback port and creates the
-    /// `knobas` database if it does not exist yet.
+    /// For a managed server this installs PostgreSQL into the shared,
+    /// version-keyed `~/.theseus/postgresql/<version>` (a no-op once present,
+    /// and shared with every other `root_dir` on the machine), runs `initdb` into `root_dir/data` the
+    /// first time, starts the server on an ephemeral loopback port and creates
+    /// the `knobas` database if it does not exist yet.
     ///
     /// # Errors
     ///
