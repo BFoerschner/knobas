@@ -48,11 +48,6 @@ use sqlx::{PgPool, Postgres, Transaction};
 /// at -- a test that means to exercise a mid-run flush has to cross it.
 pub const BATCH: usize = 500;
 
-/// Namespaces knobas keeps for its own entities (spec: the namespace is either
-/// a source id or a local kind). A source claiming one of these would write
-/// its items where notes and contexts live.
-const RESERVED_NAMESPACES: [&str; 5] = ["note", "ctx", "asset", "route", "monitor"];
-
 /// What one run wrote.
 ///
 /// Counts are per *entity*, deduplicated across the whole run: an adapter that
@@ -112,10 +107,10 @@ fn check_source_id(id: &str) -> Result<(), SyncError> {
     if id.contains(':') {
         return bad("contains ':', which would split it into a different namespace");
     }
-    if RESERVED_NAMESPACES
-        .iter()
-        .any(|reserved| id.eq_ignore_ascii_case(reserved))
-    {
+    // The list lives beside `EntityRef`, not here: the SPI's contract battery
+    // rejects the same ids at certification time, and two copies of it are how
+    // an adapter passes its own suite and then fails every real sync.
+    if knobas_core::entity::is_reserved_namespace(id) {
         return bad("reserved for knobas-local entities");
     }
     Ok(())
@@ -517,8 +512,16 @@ mod tests {
     fn a_source_id_must_be_usable_as_a_namespace() {
         check_source_id("jira").unwrap();
         check_source_id("uptime-kuma").unwrap();
-        for bad in ["", "   ", "jira:eu", ":", "note", "CTX", "monitor"] {
+        for bad in ["", "   ", "jira:eu", ":", "CTX"] {
             assert!(check_source_id(bad).is_err(), "{bad:?} should be refused");
+        }
+        // Iterated rather than spelled out again: the engine has to refuse
+        // every namespace knobas keeps, including any added later.
+        for reserved in knobas_core::entity::RESERVED_NAMESPACES {
+            assert!(
+                check_source_id(reserved).is_err(),
+                "{reserved:?} should be refused"
+            );
         }
     }
 

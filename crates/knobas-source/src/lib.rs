@@ -186,6 +186,14 @@ pub trait Source: Send + Sync {
     /// its database has no use for the remaining 4,988 items, and returning a
     /// fresh cursor after a partial write would silently skip everything the
     /// sink dropped.
+    ///
+    /// A sync that emitted **nothing** must return the cursor it was given,
+    /// unchanged. The cursor is a position, not a timestamp of the attempt:
+    /// the engine reads "same cursor, no items" as "nothing happened" and
+    /// writes no activity line for it, so an adapter that stamps a fresh
+    /// cursor onto an idle poll turns a five-minute schedule into 288 "synced
+    /// nothing" log lines per source per day. [`contract::battery`] enforces
+    /// it.
     async fn sync(
         &self,
         cursor: Option<Cursor>,
