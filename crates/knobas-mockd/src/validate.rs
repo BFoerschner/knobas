@@ -225,10 +225,13 @@ pub(crate) async fn jira_guard(
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default()
         .trim();
-    let has_credential = credential
-        .strip_prefix("Bearer ")
-        .or_else(|| credential.strip_prefix("Basic "))
-        .is_some_and(|c| !c.trim().is_empty());
+    // RFC 7235 §2.1: the auth-scheme token is case-insensitive, so `bearer`
+    // is as valid as `Bearer`. Rejecting it would invent a non-bug for an
+    // adapter author to chase.
+    let has_credential = credential.split_once(' ').is_some_and(|(scheme, value)| {
+        (scheme.eq_ignore_ascii_case("Bearer") || scheme.eq_ignore_ascii_case("Basic"))
+            && !value.trim().is_empty()
+    });
     if !has_credential {
         record(
             ViolationKind::MissingHeader,

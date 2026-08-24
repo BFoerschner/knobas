@@ -45,6 +45,15 @@ pub fn router(state: Arc<MockState>) -> Router {
             get(issue_worklogs),
         )
         .fallback(unimplemented)
+        // A verb the WADL declares on a path mockd *does* serve (`POST
+        // /search`, `PUT /myself`, `PUT`/`DELETE /issue/{key}`, `POST
+        // .../worklog`) is not a method violation: the middleware already let
+        // it through, because the contract has it. Without this, axum answers
+        // its own 405 -- an `Allow` header describing mockd's routing table
+        // rather than the contract, an empty body instead of the Jira error
+        // shape, and no violation recorded at all. Send it to the same 501
+        // fallback an unserved *path* gets.
+        .method_not_allowed_fallback(unimplemented)
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             jira_guard,
@@ -420,10 +429,27 @@ pub(crate) fn issue_json(
 
 // -- GET /rest/api/2/search -------------------------------------------------
 
-fn num_param(q: &HashMap<String, String>, key: &str, default: u32) -> u32 {
-    q.get(key)
-        .and_then(|v| v.parse::<u32>().ok())
-        .unwrap_or(default)
+/// A paging parameter, or the message naming why the value is not one.
+///
+/// Deviation 3 applied to values rather than names: swallowing `startAt=abc`
+/// as a 200 from row 0 would certify an adapter whose cursor serialises
+/// non-integrally into paging from the start on every run.
+fn num_param(q: &HashMap<String, String>, key: &str, default: u32) -> Result<u32, String> {
+    match q.get(key) {
+        None => Ok(default),
+        Some(raw) => raw
+            .parse::<u32>()
+            .map_err(|_| format!("{key}={raw:?} is not a non-negative integer")),
+    }
+}
+
+/// `startAt` and `maxResults` together, so every paged endpoint refuses the
+/// same values for the same reason.
+fn paging(q: &HashMap<String, String>) -> Result<(u32, u32), String> {
+    Ok((
+        num_param(q, "startAt", 0)?,
+        num_param(q, "maxResults", DEFAULT_MAX_RESULTS)?,
+    ))
 }
 
 /// Jira's own default page size when the client does not ask for one.
@@ -472,11 +498,15 @@ async fn search(State(s): State<Arc<MockState>>, req: Request) -> Response {
     });
 
     let total = hits.len();
-    let start = num_param(&q, "startAt", 0) as usize;
+    let (start, asked) = match paging(&q) {
+        Ok(v) => v,
+        Err(m) => return unsupported_query(&s, &req, &m),
+    };
+    let start = start as usize;
     // The server caps the page size and reports the value it actually used: an
     // adapter that reads "fewer rows than I asked for" as "last page" would
     // otherwise truncate a sync.
-    let max = num_param(&q, "maxResults", DEFAULT_MAX_RESULTS).min(s.max_results_cap());
+    let max = asked.min(s.max_results_cap());
     let page: Vec<Value> = hits
         .iter()
         .skip(start)
@@ -558,14 +588,18 @@ async fn issue_comments(
             );
         }
     };
+    let (start, asked) = match paging(&q) {
+        Ok(v) => v,
+        Err(m) => return unsupported_query(&s, &req, &m),
+    };
     let Some(mut i) = find_issue(&s, &id_or_key) else {
         return no_such_issue(&id_or_key);
     };
     if newest_first {
         i.comments.reverse();
     }
-    let start = num_param(&q, "startAt", 0) as usize;
-    let max = num_param(&q, "maxResults", DEFAULT_MAX_RESULTS).min(s.max_results_cap());
+    let start = start as usize;
+    let max = asked.min(s.max_results_cap());
     Json(comments_envelope(
         &s.base_url(),
         &i,

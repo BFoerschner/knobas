@@ -148,3 +148,25 @@ async fn comment_order_by_is_honoured_and_an_unknown_ordering_is_refused() {
         knobas_mockd::ViolationKind::UnsupportedQuery
     );
 }
+
+#[tokio::test]
+async fn a_non_integer_paging_parameter_on_comments_is_a_400_and_a_violation() {
+    let s = spawn_mock_jira().await;
+    let (st, body) = get(
+        &s.base_url(),
+        "/rest/api/2/issue/PAY-231/comment?maxResults=lots",
+    )
+    .await;
+    assert_eq!(st, 400);
+    assert!(
+        body["errorMessages"][0]
+            .as_str()
+            .unwrap()
+            .contains("maxResults"),
+        "body was {body}"
+    );
+    assert_eq!(
+        s.violations()[0].kind,
+        knobas_mockd::ViolationKind::UnsupportedQuery
+    );
+}

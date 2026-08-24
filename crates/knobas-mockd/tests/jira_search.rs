@@ -298,3 +298,33 @@ async fn the_issue_envelope_is_the_data_center_shape() {
     assert!(epic["fields"]["assignee"].is_null());
     s.assert_no_violations();
 }
+
+#[tokio::test]
+async fn a_non_integer_paging_parameter_is_a_400_and_a_violation() {
+    // Accepting `startAt=abc` as 0 would certify an adapter whose cursor
+    // serialises non-integrally into paging from the start forever, and it
+    // contradicts deviation 3: a parameter that does nothing is a bug the
+    // adapter author must see.
+    let s = spawn_mock_jira().await;
+    let (st, body) = search(&s.base_url(), "jql=&startAt=abc").await;
+    assert_eq!(st, 400);
+    assert!(
+        body["errorMessages"][0]
+            .as_str()
+            .unwrap()
+            .contains("startAt"),
+        "body was {body}"
+    );
+    assert_eq!(s.violations()[0].kind, ViolationKind::UnsupportedQuery);
+
+    let (st, body) = search(&s.base_url(), "jql=&maxResults=-1").await;
+    assert_eq!(st, 400);
+    assert!(
+        body["errorMessages"][0]
+            .as_str()
+            .unwrap()
+            .contains("maxResults"),
+        "body was {body}"
+    );
+    assert_eq!(s.violations().len(), 2);
+}

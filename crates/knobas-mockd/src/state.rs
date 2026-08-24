@@ -175,22 +175,33 @@ impl MockState {
     }
 
     /// Bumps `key`'s `updated` to the next tick of the clock, leaving every
-    /// other issue alone. A no-op for a key the fixture does not have.
+    /// other issue alone.
+    ///
+    /// A **complete** no-op for a key the fixture does not have: the clock does
+    /// not move either.
     pub fn touch_issue(&self, key: &str) {
         let mut inner = self.write();
+        // Resolve the issue *before* ticking: the clock is what
+        // `serverInfo.serverTime` reports and what every incremental query
+        // orders by, so moving it for a mutation that did not happen would
+        // make a failed write observable as a phantom sync tick.
+        let Some(idx) = inner.issues.iter().position(|i| i.key == key) else {
+            return;
+        };
         let now = inner.tick();
-        if let Some(i) = inner.issues.iter_mut().find(|i| i.key == key) {
-            i.updated = now;
-        }
+        inner.issues[idx].updated = now;
     }
 
     /// Appends a comment and bumps the issue's `updated`; returns the new
     /// comment's id, or `None` if there is no such issue.
     pub fn add_comment(&self, key: &str, author: &str, body: &str) -> Option<u64> {
         let mut inner = self.write();
+        // Same ordering rule as `touch_issue`: no issue, no tick, and no id
+        // consumed either.
+        let idx = inner.issues.iter().position(|i| i.key == key)?;
         let now = inner.tick();
         let id = inner.next_comment_id;
-        let issue = inner.issues.iter_mut().find(|i| i.key == key)?;
+        let issue = &mut inner.issues[idx];
         issue.comments.push(JiraComment {
             id,
             author: author.to_owned(),

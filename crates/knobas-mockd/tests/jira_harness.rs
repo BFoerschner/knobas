@@ -160,3 +160,64 @@ async fn refused_url_points_at_nothing() {
         .await;
     assert!(err.is_err(), "{url} answered");
 }
+
+#[tokio::test]
+async fn a_contract_verb_mockd_does_not_serve_is_a_501_not_a_bare_405() {
+    // These five (verb, path) pairs ARE in the WADL, so they are not method
+    // violations -- the contract declares them and mockd simply has no handler.
+    // Routing them through axum's own 405 would answer with an `Allow` header
+    // describing mockd's routing table rather than the contract, an empty body
+    // instead of the Jira error shape, and no violation at all -- i.e. mockd
+    // going silent exactly where it exists to be loud.
+    let s = spawn_mock_jira().await;
+    let cases = [
+        (reqwest::Method::POST, "/rest/api/2/search"),
+        (reqwest::Method::PUT, "/rest/api/2/myself"),
+        (reqwest::Method::PUT, "/rest/api/2/issue/PAY-231"),
+        (reqwest::Method::DELETE, "/rest/api/2/issue/PAY-231"),
+        (reqwest::Method::POST, "/rest/api/2/issue/PAY-231/worklog"),
+    ];
+    for (method, path) in &cases {
+        let r = client()
+            .request(method.clone(), format!("{}{path}", s.base_url()))
+            .header("Authorization", format!("Bearer {JIRA_TOKEN}"))
+            .json(&serde_json::json!({}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 501, "{method} {path}");
+        assert!(r.headers().contains_key("X-Mockd-Hint"), "{method} {path}");
+        let body: serde_json::Value = r.json().await.unwrap();
+        assert!(
+            !body["errorMessages"].as_array().unwrap().is_empty(),
+            "{method} {path} answered {body}"
+        );
+    }
+    let kinds: Vec<ViolationKind> = s.violations().iter().map(|v| v.kind).collect();
+    assert_eq!(kinds, vec![ViolationKind::Unimplemented; cases.len()]);
+}
+
+#[tokio::test]
+async fn the_authorization_scheme_is_case_insensitive() {
+    // RFC 7235 §2.1: the auth-scheme token is case-insensitive. A lowercase
+    // `bearer` that got a 401 plus a violation would invent a non-bug for an
+    // adapter author to chase.
+    let s = spawn_mock_jira().await;
+    for scheme in ["Bearer", "bearer", "BEARER", "Basic", "basic"] {
+        let r = client()
+            .get(format!("{}/rest/api/2/myself", s.base_url()))
+            .header("Authorization", format!("{scheme} {JIRA_TOKEN}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 200, "Authorization scheme {scheme:?}");
+    }
+    // A scheme mockd does not know is still a 401: only the casing is free.
+    let r = client()
+        .get(format!("{}/rest/api/2/myself", s.base_url()))
+        .header("Authorization", format!("Token {JIRA_TOKEN}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 401);
+}

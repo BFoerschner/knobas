@@ -114,3 +114,36 @@ fn reset_restores_the_fixture() {
         "2026-08-22T13:48:00.000+0200"
     );
 }
+
+#[test]
+fn a_mutation_against_an_unknown_key_moves_nothing_including_the_clock() {
+    // The clock is the mock's `serverInfo.serverTime` and the ordering key
+    // every incremental query compares against, so advancing it for a no-op
+    // would make a failed write observable as a phantom sync tick.
+    let s = MockState::from_fixture();
+    let clock = s.now();
+    let before: Vec<_> = s.issues().iter().map(|i| i.updated).collect();
+
+    s.touch_issue("PAY-999");
+    assert!(
+        s.add_comment("PAY-999", "mara.lindqvist", "nobody home")
+            .is_none()
+    );
+
+    assert_eq!(
+        s.now(),
+        clock,
+        "the clock moved for a key that does not exist"
+    );
+    assert_eq!(
+        s.issues().iter().map(|i| i.updated).collect::<Vec<_>>(),
+        before
+    );
+
+    // And the next real touch is one minute past the fixture's now, not three.
+    s.touch_issue("PAY-231");
+    assert_eq!(
+        s.issue("PAY-231").unwrap().updated,
+        clock + chrono::Duration::minutes(1)
+    );
+}
