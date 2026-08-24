@@ -7,8 +7,13 @@ name: check
 
 on:
   pull_request:
+    # Docs-only commits cannot change the build. Skipping them saves a full
+    # ~2.5 min Rust run per commit (measured: the architecture-diagram commit
+    # burned one compiling code it could not have touched).
+    paths-ignore: ['docs/**', '**/*.md', 'mockups/**']
   push:
     branches: [main]
+    paths-ignore: ['docs/**', '**/*.md', 'mockups/**']
 
 # A push to a PR branch makes the run for the previous push irrelevant; keeping
 # it alive only queues work behind itself, so PR runs share one group per ref
