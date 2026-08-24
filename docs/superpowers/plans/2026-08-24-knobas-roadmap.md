@@ -171,7 +171,7 @@ Per-task discipline (unchanged from superpowers): TDD, frequent commits, `superp
 
 | Plan | Covers | Status |
 |---|---|---|
-| `2026-08-24-plan-01-foundation.md` | M0 | **written**, awaiting review |
+| `2026-08-24-plan-01-foundation.md` | M0 | **executed 2026-08-24** — 11/11 tasks merged via the PR loop (PRs #1-#11), CI green, contracts frozen |
 | plan-02 … | M1 streams (one plan per stream or one plan with parallel task groups) | write at M1 start |
 | plan-03 … | M2 | write at M2 start |
 | plan-04 … | M3 | write at M3 start |
