@@ -22,7 +22,7 @@
 - No `tauri-plugin-http`, no `tauri-plugin-stronghold` (deprecated). Secrets via the `keyring` crate (first used in M1; nothing in M0 stores secrets).
 - Do not `emit` Tauri events from the `setup` hook; commands only in M0.
 - Frontend: Svelte 5 runes, plain Vite (no SvelteKit), TypeScript strict.
-- Commit style: short imperative subject, no attribution footer (repo convention). Commits are GPG-signed; if signing fails (pinentry expired), stop and ask Björn to commit.
+- Commit style: short imperative subject, no attribution footer (repo convention). Task-branch commits are intentionally unsigned (roadmap §3: `main` receives a GitHub-signed squash commit). Signing is disabled **per-worktree only** — `git config extensions.worktreeConfig true` once, then `git config --worktree commit.gpgsign false` inside the worktree; never write `commit.gpgsign` to the shared repo-local config.
 - Quality gate: `just check` = `cargo fmt --check` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo test --workspace` + `npm run check && npm run build` in `app/`.
 
 ---
