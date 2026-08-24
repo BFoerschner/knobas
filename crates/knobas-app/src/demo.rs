@@ -35,6 +35,33 @@ pub enum DemoError {
     Sync(#[from] SyncError),
 }
 
+/// What a demo failure looks like on the bridge.
+///
+/// It lives here rather than in `error.rs` because this is the only module
+/// that knows what each variant *means*: which of them a user can act on, and
+/// which source the failure belongs to. `Sync` keeps the adapter's own
+/// classification by deferring to [`crate::IpcError`]'s `SyncError`
+/// conversion, so a 401 mid-demo-load is still a 401 by the time the sources
+/// view sees it.
+impl From<DemoError> for crate::IpcError {
+    fn from(error: DemoError) -> Self {
+        match error {
+            // Nothing the user can do: no such adapter is compiled in.
+            DemoError::UnknownSource(id) => crate::IpcError::not_found(format!(
+                "no source with id {id:?} -- M0 ships only the mock source"
+            ))
+            .with_source(id),
+            // Add the source (or load the demo data) and it will work.
+            DemoError::NotConfigured(id) => crate::IpcError::not_ready(format!(
+                "source {id:?} is not configured -- load the demo data first"
+            ))
+            .with_source(id),
+            DemoError::Db(err) => crate::IpcError::internal(err),
+            DemoError::Sync(err) => crate::IpcError::from(err),
+        }
+    }
+}
+
 /// Register the demo source if it is not registered yet, then sync it in full.
 ///
 /// Idempotent in both halves: the registration refreshes the descriptor's own

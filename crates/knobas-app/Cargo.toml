@@ -14,6 +14,8 @@ knobas-source = { path = "../knobas-source" }
 # M0's only adapter, and the source demo mode loads.
 knobas-source-mock = { path = "../knobas-source-mock" }
 knobas-sync = { path = "../knobas-sync" }
+# `IpcError` is what every command rejects with, so it has to serialize.
+serde.workspace = true
 # The `PgPool` in `AppState`, plus demo mode's two `source_config` statements.
 sqlx.workspace = true
 thiserror.workspace = true

@@ -26,6 +26,32 @@
 
 pub mod commands;
 pub mod demo;
+mod error;
+
+pub use error::{IpcError, IpcErrorCode};
+
+/// Tauri event names, mirrored in `app/src/lib/ipc/index.ts` as `EVENTS`.
+///
+/// Orchestrator-owned and append-only: a stream that needs a new event asks
+/// for the constant. Tauri 2 permits `:` in event names, and the prefix is the
+/// subject -- `db:`, `sync:`, `source:` -- so a listener reads as what it is
+/// listening to.
+///
+/// Rule (roadmap §4: events are not for throughput): these carry **coarse
+/// state**, at most a handful per run. Per-item progress goes on an
+/// `ipc::Channel` and nowhere else.
+pub mod events {
+    /// Payload: `DbState` (stream D). Fired during bring-up, replayed by
+    /// `frontend_ready` -- the webview cannot listen before it says it can
+    /// (roadmap §4 gotcha 9).
+    pub const DB_STATE: &str = "db:state";
+    /// Payload: `SourceSyncStatus` (stream F), on every run transition.
+    pub const SYNC_STATE: &str = "sync:state";
+    /// Payload: `CredentialHealth` (stream F), on a health *change* only.
+    pub const SOURCE_HEALTH: &str = "source:health";
+    /// Payload: `ActivityRow`, coalesced to at most one per second.
+    pub const ACTIVITY_NEW: &str = "activity:new";
+}
 
 use std::sync::{Mutex, PoisonError};
 
@@ -107,12 +133,14 @@ pub fn run() {
                 .show()?;
             Ok(())
         })
+        // Append-only, orchestrator-owned, grouped by owning module so a
+        // stream adding a command touches one line in one group.
         .invoke_handler(tauri::generate_handler![
-            commands::ping,
-            commands::demo_load,
-            commands::sync_now,
-            commands::search,
-            commands::recent_activity,
+            commands::app::ping,
+            commands::entity::recent_activity,
+            commands::search::search,
+            commands::sources::demo_load,
+            commands::sources::sync_now,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")
@@ -263,5 +291,24 @@ mod tests {
             windows[0]["visible"], false,
             "the window must not appear before the database is up"
         );
+    }
+
+    /// The event names are one list in two languages. A rename on one side is
+    /// a listener that silently never fires -- the failure mode this test
+    /// exists to make loud.
+    #[test]
+    fn the_event_names_match_their_typescript_mirror() {
+        let mirror = include_str!("../../../app/src/lib/ipc/index.ts");
+        for name in [
+            super::events::DB_STATE,
+            super::events::SYNC_STATE,
+            super::events::SOURCE_HEALTH,
+            super::events::ACTIVITY_NEW,
+        ] {
+            assert!(
+                mirror.contains(&format!("\"{name}\"")),
+                "{name:?} is missing from app/src/lib/ipc/index.ts"
+            );
+        }
     }
 }
