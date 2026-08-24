@@ -36,4 +36,5 @@ tracing = "0.1"
 knobas-db = { path = ".", features = ["test-util"] }
 serde_json.workspace = true
 tempfile = "3"
+tokio = { workspace = true }
 uuid.workspace = true
