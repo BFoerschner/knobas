@@ -325,16 +325,59 @@ async fn every_attempt_waits_for_the_rate_limiter() {
     );
 }
 
-/// The whole call is bounded, and the bound is real even when a single attempt
-/// is the thing that is slow.
+/// **A `Retry-After` longer than the budget is refused, not waited out.**
 ///
-/// A server that accepts the connection and then says nothing would otherwise
-/// cost `MAX_ATTEMPTS` × the request timeout. The per-attempt timeout is
-/// shortened to whatever is left of [`SEND_BUDGET`], so the ceiling holds; here
-/// the budget is squeezed by a short `request_timeout` so the test costs a
-/// second rather than forty-five.
+/// The discriminating test for [`SEND_BUDGET`], and the one that also pins
+/// finding 4's real shape: two capped waits. A server answering `429` with
+/// `retry-after: 60` asks for 60 s, `RETRY_AFTER_CAP` caps each wait at
+/// exactly that, and there are two of them between three attempts -- so
+/// without a budget one call costs **120 s and 3 requests** while the caller's
+/// advisory-locked transaction stays open. With it, the first wait is seen to
+/// be longer than the whole call may take, and the call ends immediately:
+/// **1 request, ~2 ms**.
+///
+/// The gap between those two outcomes is the entire point, which is why this
+/// test asserts the request *count* and a millisecond-scale bound rather than
+/// "faster than 45 s". An earlier version asserted `elapsed < SEND_BUDGET`
+/// with a 300 ms `request_timeout`, which proved nothing at all: the timeout
+/// was already shorter than the budget, so deleting the budget mechanism
+/// entirely left it green.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_silent_server_cannot_outlast_the_budget() {
+async fn a_retry_after_longer_than_the_budget_ends_the_call() {
+    let server = CountingServer::always(429, "retry-after: 60\r\n");
+    let client = HttpClient::new(config(server.url())).expect("client");
+
+    let started = std::time::Instant::now();
+    let error = client
+        .get_json::<serde_json::Value>("/thing", &[])
+        .await
+        .expect_err("429 every time");
+    let elapsed = started.elapsed();
+
+    // The 429 itself, classified -- not a budget-specific error. What the
+    // caller needs to know is what the source said.
+    assert!(matches!(error, SourceError::Protocol(_)), "{error:?}");
+    assert_eq!(
+        server.hits(),
+        1,
+        "a wait longer than the whole budget must not be started, so there is \
+         no second attempt"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(5),
+        "the call must end at once rather than serving out two 60s waits; \
+         took {elapsed:?}"
+    );
+}
+
+/// The whole call is bounded even when a single attempt is the slow thing.
+///
+/// A server that accepts the connection and then says nothing: each attempt's
+/// timeout is shortened to what is left of the budget, so the ceiling holds
+/// rather than being three full request timeouts. Kept cheap with a short
+/// `request_timeout`; the budget's own discriminating case is the test above.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_silent_server_is_unreachable_within_the_attempt_budget() {
     let server = SilentServer::new();
     let client = HttpClient::new(HttpConfig {
         request_timeout: std::time::Duration::from_millis(300),
@@ -343,20 +386,14 @@ async fn a_silent_server_cannot_outlast_the_budget() {
     })
     .expect("client");
 
-    let started = std::time::Instant::now();
     let error = client
         .get_json::<serde_json::Value>("/thing", &[])
         .await
         .expect_err("nothing ever answers");
-    let elapsed = started.elapsed();
 
     // A timeout is `Unreachable`, which is the class the scheduler backs off
     // on -- not `Protocol`, which would read as knobas' own bug.
     assert!(matches!(error, SourceError::Unreachable(_)), "{error:?}");
-    assert!(
-        elapsed < knobas_http::SEND_BUDGET,
-        "the call must be bounded by SEND_BUDGET, took {elapsed:?}"
-    );
 }
 
 /// A server that accepts connections and never replies.

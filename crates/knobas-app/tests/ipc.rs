@@ -31,11 +31,13 @@
 //!    app's own two commands are in the handler list and dispatch.
 //!
 //! Why (2) and (3) are separate: a `#[tauri::command]` resolves its arguments
-//! in declaration order, and both real commands take `State<'_, AppState>`
-//! first. A mock app manages no `AppState`, so every call to them stops there
-//! -- before `progress` is looked at. (2) therefore uses commands of the same
-//! two argument shapes with no state in front of them, which is the only way
-//! to watch the decoding itself happen.
+//! in declaration order, and both real commands take `app: AppHandle<R>` and
+//! then `State<'_, AppState>` before they reach `source_id` or `progress`. The
+//! handle always resolves; the state does not, because a mock app manages no
+//! `AppState` -- so every call to them stops there, before `progress` is
+//! looked at. (2) therefore uses commands of the same two *trailing* argument
+//! shapes with nothing in front of them, which is the only way to watch the
+//! decoding itself happen.
 //!
 //! A fourth section rides along, for a different contract: ruling P13's demo
 //! guard. Argument resolution runs to completion *before* any command body, so
@@ -287,8 +289,9 @@ const REACHED_THE_BODY: &str = "state not managed";
 /// Both halves of the split are registered under the names the TypeScript
 /// mirror invokes, and both dispatch.
 ///
-/// Not a decoding test -- `State<'_, AppState>` is the first argument of each,
-/// so neither call gets past it -- but the one that catches the mistake a
+/// Not a decoding test -- each takes `app: AppHandle<R>` and then
+/// `State<'_, AppState>`, and the unmanaged state stops the call before any
+/// caller-supplied argument is read -- but the one that catches the mistake a
 /// two-command surface invites: adding the command and forgetting the handler
 /// list, which is a frontend that fails at runtime with "command not found"
 /// and a Rust side that compiles perfectly.

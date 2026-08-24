@@ -35,6 +35,50 @@
 //! id does not round-trip, is outside the source's namespace, or carries a kind
 //! the descriptor never declared.
 
+/// Declare an enum whose variants are a **closed vocabulary shared with the
+/// database**: each one has a stored spelling, and migration 0002 has a CHECK
+/// constraint listing exactly those spellings.
+///
+/// The point is that `ALL` and `as_str` are generated from the *same* variant
+/// list as the enum itself, so the three cannot drift. A hand-written `ALL`
+/// beside a hand-written enum is a list that a new variant silently misses --
+/// and for these enums that is not a cosmetic bug: the value reaches a `text`
+/// column with a CHECK constraint on it, so an unlisted spelling is a failed
+/// `INSERT` at runtime. `run_log::finish` is called on the failure path of a
+/// run, where the error is deliberately logged and swallowed, so the row would
+/// simply never close and stream F's backoff would read nothing.
+///
+/// With this, adding a variant necessarily adds it to `ALL`, and the tests
+/// that walk `ALL` against `0002` then fail until the constraint knows about
+/// it too -- which is a red test instead of a broken write.
+macro_rules! closed_vocabulary {
+    (
+        $(#[$enum_meta:meta])*
+        pub enum $name:ident {
+            $( $(#[$variant_meta:meta])* $variant:ident => $wire:literal ),+ $(,)?
+        }
+    ) => {
+        $(#[$enum_meta])*
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        pub enum $name {
+            $( $(#[$variant_meta])* $variant, )+
+        }
+
+        impl $name {
+            /// Every variant, generated from the same list as the variants --
+            /// so one cannot be added without appearing here.
+            pub const ALL: &'static [$name] = &[ $( $name::$variant ),+ ];
+
+            /// The spelling stored in the database and put on the wire.
+            #[must_use]
+            pub fn as_str(self) -> &'static str {
+                match self { $( $name::$variant => $wire ),+ }
+            }
+        }
+    };
+}
+
 pub mod health;
 pub mod progress;
 pub mod run_log;

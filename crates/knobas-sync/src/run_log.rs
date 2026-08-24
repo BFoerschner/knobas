@@ -8,50 +8,38 @@
 
 use crate::{SyncError, SyncReport};
 
-/// Why a run happened.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SyncTrigger {
-    /// The scheduler's interval elapsed.
-    Schedule,
-    /// *Sync now*.
-    Manual,
-    /// The first sync after a source was added (the first-run wizard's).
-    FirstRun,
-}
-
-impl SyncTrigger {
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            SyncTrigger::Schedule => "schedule",
-            SyncTrigger::Manual => "manual",
-            SyncTrigger::FirstRun => "first_run",
-        }
+closed_vocabulary! {
+    /// Why a run happened.
+    ///
+    /// Stored in `knobas.sync_run.trigger`, whose `sync_run_trigger_chk`
+    /// allows exactly these spellings.
+    pub enum SyncTrigger {
+        /// The scheduler's interval elapsed.
+        Schedule => "schedule",
+        /// *Sync now*.
+        Manual => "manual",
+        /// The first sync after a source was added (the first-run wizard's).
+        FirstRun => "first_run",
     }
 }
 
-/// How a run ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SyncOutcome {
-    Ok,
-    Unauthorized,
-    Unreachable,
-    Error,
+closed_vocabulary! {
+    /// How a run ended.
+    ///
+    /// Stored in `knobas.sync_run.outcome`, whose `sync_run_outcome_chk`
+    /// allows exactly these spellings. Stream F's backoff branches on it, so a
+    /// variant the constraint does not know about is not a display bug: the
+    /// `UPDATE` that closes the run is refused, `runner`'s failure path logs
+    /// and swallows that, and the row never closes.
+    pub enum SyncOutcome {
+        Ok => "ok",
+        Unauthorized => "unauthorized",
+        Unreachable => "unreachable",
+        Error => "error",
+    }
 }
 
 impl SyncOutcome {
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            SyncOutcome::Ok => "ok",
-            SyncOutcome::Unauthorized => "unauthorized",
-            SyncOutcome::Unreachable => "unreachable",
-            SyncOutcome::Error => "error",
-        }
-    }
-
     /// Classify a failed run.
     ///
     /// The same three-way split the scheduler's backoff reads: `Unreachable`
@@ -222,23 +210,14 @@ mod tests {
     /// string.
     #[test]
     fn the_wire_spellings_are_the_stored_spellings() {
-        for trigger in [
-            SyncTrigger::Schedule,
-            SyncTrigger::Manual,
-            SyncTrigger::FirstRun,
-        ] {
+        for trigger in SyncTrigger::ALL {
             assert_eq!(
                 serde_json::to_value(trigger).unwrap(),
                 serde_json::json!(trigger.as_str()),
                 "{trigger:?}"
             );
         }
-        for outcome in [
-            SyncOutcome::Ok,
-            SyncOutcome::Unauthorized,
-            SyncOutcome::Unreachable,
-            SyncOutcome::Error,
-        ] {
+        for outcome in SyncOutcome::ALL {
             assert_eq!(
                 serde_json::to_value(outcome).unwrap(),
                 serde_json::json!(outcome.as_str()),
@@ -247,37 +226,62 @@ mod tests {
         }
     }
 
-    /// The two vocabularies are also CHECK constraints in migration 0002.
-    /// A spelling added to the enum and not to the constraint is a run that
-    /// cannot be logged at all; the other half of this pin is
-    /// `crates/knobas-db/tests/schema.rs`.
+    /// **Every variant is a spelling migration 0002's CHECK allows, and every
+    /// spelling it allows is a variant.**
+    ///
+    /// Driven by `ALL`, which the `closed_vocabulary!` macro generates from
+    /// the same list as the variants -- so a variant cannot be added without
+    /// reaching this test. Adding `SyncOutcome::Cancelled` fails here rather
+    /// than at the `UPDATE` that closes a run, which is the failure that
+    /// matters: `runner` logs and swallows a failed `finish`, so the row would
+    /// simply never close and the diagnostics view would show a run that is
+    /// still going, for ever.
+    ///
+    /// Both directions, because "the constraint allows a spelling nothing can
+    /// produce" is dead vocabulary that the next reader has to reason about.
     #[test]
-    fn the_spellings_are_the_ones_the_migration_allows() {
+    fn the_vocabularies_are_exactly_what_the_migration_allows() {
         let migration = include_str!("../../knobas-db/migrations/0002_m1_cockpit.sql");
-        for trigger in [
-            SyncTrigger::Schedule,
-            SyncTrigger::Manual,
-            SyncTrigger::FirstRun,
+
+        for (constraint, spellings) in [
+            (
+                "sync_run_trigger_chk",
+                SyncTrigger::ALL
+                    .iter()
+                    .map(|t| t.as_str())
+                    .collect::<Vec<_>>(),
+            ),
+            (
+                "sync_run_outcome_chk",
+                SyncOutcome::ALL
+                    .iter()
+                    .map(|o| o.as_str())
+                    .collect::<Vec<_>>(),
+            ),
         ] {
-            assert!(
-                migration.contains(&format!("'{}'", trigger.as_str())),
-                "{trigger:?} is missing from sync_run_trigger_chk"
-            );
-        }
-        for outcome in [
-            SyncOutcome::Ok,
-            SyncOutcome::Unauthorized,
-            SyncOutcome::Unreachable,
-            SyncOutcome::Error,
-        ] {
-            assert!(
-                migration.contains(&format!("'{}'", outcome.as_str())),
-                "{outcome:?} is missing from sync_run_outcome_chk"
+            let line = migration
+                .lines()
+                .find(|line| line.contains(constraint))
+                .unwrap_or_else(|| panic!("{constraint} is missing from 0002"));
+
+            for spelling in &spellings {
+                assert!(
+                    line.contains(&format!("'{spelling}'")),
+                    "{spelling:?} is a variant but {constraint} does not allow it: {line}"
+                );
+            }
+            // And nothing the enum cannot produce.
+            let allowed = line.matches('\'').count() / 2;
+            assert_eq!(
+                allowed,
+                spellings.len(),
+                "{constraint} lists {allowed} spellings but the enum has {}: {line}",
+                spellings.len()
             );
         }
     }
 
-    /// The classification stream F's backoff reads. `Unauthorized` is the one
+    /// The classification stream F's backoff reads.    /// The classification stream F's backoff reads. `Unauthorized` is the one
     /// that must never be retried, so it is the one that must never be
     /// swallowed into `Error`.
     #[test]

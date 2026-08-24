@@ -311,7 +311,7 @@ impl HttpClient {
             // what the call costs.
             self.limiter.until_ready().await;
 
-            let Some(remaining) = self.remaining(started) else {
+            let Some(attempt_timeout) = self.attempt_timeout(started) else {
                 return Err(SourceError::Unreachable(format!(
                     "no answer within {}s",
                     SEND_BUDGET.as_secs()
@@ -321,7 +321,7 @@ impl HttpClient {
             // `delay` is how long to wait before the next attempt; `give_up`
             // is what to report if there is not going to be one. Carrying both
             // is what keeps a 503-that-cannot-be-retried a 503.
-            let (delay, give_up) = match request.timeout(remaining).send().await {
+            let (delay, give_up) = match request.timeout(attempt_timeout).send().await {
                 Ok(response) if response.status().is_success() => return Ok(response),
                 Ok(response) => {
                     let status = response.status();
@@ -351,8 +351,11 @@ impl HttpClient {
                 return Err(give_up);
             };
             // A wait that would run past the budget is a wait not worth
-            // starting: the answer would arrive after the caller gave up.
-            if self.remaining(started).is_none_or(|left| delay >= left) {
+            // starting: the answer would arrive after the caller has given up.
+            // This is the branch a `Retry-After` longer than the budget takes
+            // -- a source asking for a minute is telling us to come back on
+            // the next schedule, not to hold a transaction open for it.
+            if self.budget_left(started).is_none_or(|left| delay >= left) {
                 return Err(give_up);
             }
             tracing::debug!(attempt, ?delay, "retrying");
@@ -364,12 +367,22 @@ impl HttpClient {
         unreachable!("the attempt loop returns on its last attempt")
     }
 
-    /// How long the next attempt may take: what is left of [`SEND_BUDGET`],
-    /// never more than the configured per-request timeout. `None` once the
-    /// budget is gone.
-    fn remaining(&self, started: Instant) -> Option<Duration> {
-        let left = SEND_BUDGET.checked_sub(started.elapsed())?;
-        (!left.is_zero()).then(|| left.min(self.request_timeout))
+    /// What is left of [`SEND_BUDGET`]. `None` once it is gone.
+    ///
+    /// This is the *call's* remaining time and nothing else -- deliberately
+    /// not clamped to the request timeout, because it also has to answer "is
+    /// there room to wait this long before retrying?", where the per-request
+    /// timeout is irrelevant.
+    fn budget_left(&self, started: Instant) -> Option<Duration> {
+        SEND_BUDGET
+            .checked_sub(started.elapsed())
+            .filter(|left| !left.is_zero())
+    }
+
+    /// How long the next attempt may take: the configured per-request timeout,
+    /// or the rest of the budget if that is shorter.
+    fn attempt_timeout(&self, started: Instant) -> Option<Duration> {
+        Some(self.budget_left(started)?.min(self.request_timeout))
     }
 
     /// GET a JSON document.

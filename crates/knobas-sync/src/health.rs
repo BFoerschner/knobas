@@ -6,48 +6,26 @@
 
 use chrono::{DateTime, Utc};
 
-/// What the last attempt to use a source's credential established.
-///
-/// The wire spellings are the same five literals `source_config_auth_state_chk`
-/// allows -- one list, two places, pinned by tests on both sides.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AuthState {
-    /// The credential worked.
-    Ok,
-    /// 401/403: the credential is wrong, expired, or locked out. **No
-    /// automatic retry** -- a human must act (interfaces §8 P7).
-    Unauthorized,
-    /// The system could not be reached. Retried with backoff.
-    Unreachable,
-    /// The source is configured but the keychain has no secret for it: the
-    /// scheduler skips it entirely rather than churning backoff on a request
-    /// it knows will fail (§3).
-    MissingSecret,
-    /// Never tested, or not tested since something changed.
-    Unknown,
-}
-
-impl AuthState {
-    /// Every state, so a caller cannot miss one when mapping.
-    pub const ALL: [AuthState; 5] = [
-        AuthState::Ok,
-        AuthState::Unauthorized,
-        AuthState::Unreachable,
-        AuthState::MissingSecret,
-        AuthState::Unknown,
-    ];
-
-    /// The stored spelling, for binding into `knobas.source_config.auth_state`.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            AuthState::Ok => "ok",
-            AuthState::Unauthorized => "unauthorized",
-            AuthState::Unreachable => "unreachable",
-            AuthState::MissingSecret => "missing_secret",
-            AuthState::Unknown => "unknown",
-        }
+closed_vocabulary! {
+    /// What the last attempt to use a source's credential established.
+    ///
+    /// The wire spellings are the same five literals
+    /// `source_config_auth_state_chk` allows -- one list, two places, pinned
+    /// by tests on both sides.
+    pub enum AuthState {
+        /// The credential worked.
+        Ok => "ok",
+        /// 401/403: the credential is wrong, expired, or locked out. **No
+        /// automatic retry** -- a human must act (interfaces §8 P7).
+        Unauthorized => "unauthorized",
+        /// The system could not be reached. Retried with backoff.
+        Unreachable => "unreachable",
+        /// The source is configured but the keychain has no secret for it: the
+        /// scheduler skips it entirely rather than churning backoff on a
+        /// request it knows will fail (§3).
+        MissingSecret => "missing_secret",
+        /// Never tested, or not tested since something changed.
+        Unknown => "unknown",
     }
 }
 
@@ -69,6 +47,30 @@ pub struct CredentialHealth {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The same both-directions pin the run log's two vocabularies get: every
+    /// variant is a spelling `source_config_auth_state_chk` allows, and it
+    /// allows nothing the enum cannot produce.
+    #[test]
+    fn the_states_are_exactly_what_the_migration_allows() {
+        let migration = include_str!("../../knobas-db/migrations/0002_m1_cockpit.sql");
+        let line = migration
+            .lines()
+            .find(|line| line.contains("auth_state in ("))
+            .expect("source_config_auth_state_chk is missing from 0002");
+
+        for state in AuthState::ALL {
+            assert!(
+                line.contains(&format!("'{}'", state.as_str())),
+                "{state:?} is a variant the constraint does not allow: {line}"
+            );
+        }
+        assert_eq!(
+            line.matches('\'').count() / 2,
+            AuthState::ALL.len(),
+            "the constraint and the enum list different numbers of states: {line}"
+        );
+    }
 
     /// The enum and the CHECK constraint are one list in two places. The other
     /// half of this pin lives in `crates/knobas-db/tests/schema.rs`.
