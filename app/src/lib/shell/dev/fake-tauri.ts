@@ -106,7 +106,7 @@ export function installFakeTauri(handlers: Record<string, Handler>): FakeBridge 
 
   return {
     emit(event, payload) {
-      for (const listener of listeners.values()) {
+      for (const [id, listener] of listeners) {
         if (listener.event === event) {
           listener.callback({ event, id, payload });
         }
