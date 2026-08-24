@@ -1,5 +1,5 @@
 /** Sources, sync and diagnostics — `crates/knobas-app/src/commands/sources.rs`. */
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 
 /** What one sync run did — `knobas_sync::SyncReport`. */
 export interface SyncReport {
@@ -18,7 +18,46 @@ export function demoLoad(): Promise<SyncReport> {
   return invoke<SyncReport>("demo_load");
 }
 
-/** Run one sync for an already-registered source. */
-export function syncNow(sourceId: string): Promise<SyncReport> {
-  return invoke<SyncReport>("sync_now", { sourceId });
+/** Where a run is — `knobas_sync::SyncPhase`. */
+export type SyncPhase = "started" | "fetching" | "writing" | "finished" | "failed";
+
+/** One progress message — `knobas_sync::SyncProgress`. */
+export interface SyncProgress {
+  /** `knobas.sync_run.id`, so two runs on two channels stay distinguishable. */
+  run_id: number;
+  source_id: string;
+  phase: SyncPhase;
+  items: number;
+  elapsed_ms: number;
+  message: string | null;
+}
+
+/**
+ * Start a sync of one configured source; resolves with its `sync_run.id` as
+ * soon as the run is recorded, **not** when it finishes — watch
+ * `EVENTS.syncState` for that.
+ *
+ * Use {@link syncNowWithProgress} when you are drawing per-item progress.
+ * There are two functions rather than one optional argument because
+ * `Option<Channel<_>>` is not a valid Tauri 2.11 command argument (`Channel`
+ * has no `Deserialize` impl); the Rust side splits for the same reason, and
+ * the evidence is in `crates/knobas-app/tests/ipc.rs`.
+ */
+export function syncNow(sourceId: string): Promise<number> {
+  return invoke<number>("sync_now", { sourceId });
+}
+
+/**
+ * {@link syncNow}, reporting per-item progress on `progress`.
+ *
+ * The channel is required. A caller that only needs to know a run started
+ * should call {@link syncNow} and listen to `EVENTS.syncState`: per-item
+ * progress goes on the channel and nowhere else, and events carry coarse state
+ * only.
+ */
+export function syncNowWithProgress(
+  sourceId: string,
+  progress: Channel<SyncProgress>,
+): Promise<number> {
+  return invoke<number>("sync_now_with_progress", { sourceId, progress });
 }

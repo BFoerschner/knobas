@@ -33,6 +33,14 @@
 //! id does not round-trip, is outside the source's namespace, or carries a kind
 //! the descriptor never declared.
 
+pub mod health;
+pub mod progress;
+pub mod run_log;
+
+pub use health::{AuthState, CredentialHealth};
+pub use progress::{ProgressSink, SyncPhase, SyncProgress};
+pub use run_log::{RunCounts, SyncOutcome, SyncTrigger};
+
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use knobas_core::activity;

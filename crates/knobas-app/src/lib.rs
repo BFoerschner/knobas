@@ -141,6 +141,7 @@ pub fn run() {
             commands::search::search,
             commands::sources::demo_load,
             commands::sources::sync_now,
+            commands::sources::sync_now_with_progress,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

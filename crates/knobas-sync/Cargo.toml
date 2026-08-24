@@ -9,6 +9,9 @@ version.workspace = true
 # anything holding a pool.
 [dependencies]
 async-trait.workspace = true
+# `CredentialHealth` carries three timestamps across the bridge; the run log's
+# own timestamps stay in the database and are never read back here.
+chrono.workspace = true
 knobas-core = { path = "../knobas-core" }
 knobas-source = { path = "../knobas-source" }
 serde.workspace = true
@@ -20,10 +23,7 @@ thiserror.workspace = true
 tracing = "0.1"
 
 [dev-dependencies]
-# A real PostgreSQL, and the reference adapter to sync out of it. `chrono` is
-# only ever named by the tests: the engine moves the SPI's timestamps straight
-# into the database without looking at them.
-chrono.workspace = true
+# A real PostgreSQL, and the reference adapter to sync out of it.
 knobas-db = { path = "../knobas-db", features = ["test-util"] }
 knobas-source-mock = { path = "../knobas-source-mock" }
 tokio.workspace = true

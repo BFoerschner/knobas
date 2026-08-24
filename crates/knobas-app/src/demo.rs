@@ -10,9 +10,14 @@
 //! above them adds nothing but argument decoding, and a `#[tauri::command]`
 //! cannot be called from a test.
 
+use std::time::Instant;
+
 use knobas_source::{Source, SourceDescriptor};
 use knobas_source_mock::MockSource;
-use knobas_sync::{SyncError, SyncReport};
+use knobas_sync::{
+    ProgressSink, RunCounts, SyncError, SyncOutcome, SyncPhase, SyncProgress, SyncReport,
+    SyncTrigger,
+};
 use sqlx::PgPool;
 
 /// Why a demo load or a sync did not happen.
@@ -83,14 +88,21 @@ pub async fn demo_load_inner(pool: &PgPool) -> Result<SyncReport, DemoError> {
     Ok(knobas_sync::run_once(pool, &source, None).await?)
 }
 
-/// Sync one **configured** source, resuming from where it last stopped.
+/// Sync one **configured** source, resuming from where it last stopped, and
+/// return the id of the `knobas.sync_run` row that records it.
 ///
-/// Both halves of that are checked, because failing either one silently is
-/// worse than refusing: an id no adapter answers to would do nothing at all,
-/// and an id with no `source_config` row would run a full sync whose cursor
-/// the engine then has nowhere to persist (`run_once` updates a row, and
-/// deliberately never invents one) -- so every later call would sync
-/// everything again, for ever, with no sign that anything was wrong.
+/// The id rather than the report is ruling P3: an M1 sync is network-bound, so
+/// a command that blocked until the run finished would make the UI wait on a
+/// source -- which §14 forbids. What the run did is read back from the log.
+///
+/// Both halves of "configured" are checked, because failing either one
+/// silently is worse than refusing: an id no adapter answers to would do
+/// nothing at all, and an id with no `source_config` row would run a full sync
+/// whose cursor the engine then has nowhere to persist (`run_once` updates a
+/// row, and deliberately never invents one) -- so every later call would sync
+/// everything again, for ever, with no sign that anything was wrong. Neither
+/// refusal writes a log line: neither is a run, and a diagnostics view showing
+/// a phantom run for a typo would be worse than showing nothing.
 ///
 /// The cursor is read outside the run's advisory lock, so a concurrent run of
 /// the same source can move it between the read and the lock; the worst case
@@ -98,18 +110,126 @@ pub async fn demo_load_inner(pool: &PgPool) -> Result<SyncReport, DemoError> {
 /// upserts are idempotent. Reading it inside the transaction that holds the
 /// lock is the real fix, and cursor lifecycle belongs to M1 stream F.
 ///
+/// # Progress
+///
+/// [`SyncPhase::Started`] and [`SyncPhase::Finished`] (or
+/// [`SyncPhase::Failed`]) are the only phases sent from here, and
+/// [`SyncPhase::Fetching`] / [`SyncPhase::Writing`] are deliberately **absent
+/// rather than faked**: M0's run is one blocking call with no observable
+/// middle, and a `Fetching` message that corresponds to no fetch would make
+/// stream D's progress bar lie about what it is watching. Stream F emits them
+/// from inside the run, where they are true.
+///
+/// **Transitional.** The run still happens inline, on the caller's task, with
+/// M0's one compiled-in adapter, and nothing here emits the coarse
+/// `sync:state` event (this plan adds the event *name* and no emitter). Stream
+/// F replaces this body with the scheduler: a spawned run, concurrency capped
+/// below the pool size, the cursor read inside the run's advisory lock,
+/// backoff, the full-sync sweep, and `sync:state` on every transition. The
+/// *shape* is what this function freezes -- id out, log row written, progress
+/// on the sink only.
+///
 /// # Errors
 ///
 /// [`DemoError::UnknownSource`] if no adapter answers to `source_id`,
-/// [`DemoError::NotConfigured`] if it has no `knobas.source_config` row,
-/// [`DemoError::Db`] if the lookup fails, [`DemoError::Sync`] if the run does.
-pub async fn sync_now_inner(pool: &PgPool, source_id: &str) -> Result<SyncReport, DemoError> {
+/// [`DemoError::NotConfigured`] if it has no `knobas.source_config` row.
+/// [`DemoError::Db`] if the lookup or the log write fails,
+/// [`DemoError::Sync`] if the run does.
+pub async fn sync_now_inner(
+    pool: &PgPool,
+    source_id: &str,
+    progress: Option<&dyn ProgressSink>,
+) -> Result<i64, DemoError> {
     let source =
         adapter_for(source_id).ok_or_else(|| DemoError::UnknownSource(source_id.to_owned()))?;
     let cursor = stored_cursor(pool, source_id)
         .await?
         .ok_or_else(|| DemoError::NotConfigured(source_id.to_owned()))?;
-    Ok(knobas_sync::run_once(pool, source.as_ref(), cursor).await?)
+
+    let run_id = knobas_sync::run_log::start(pool, source_id, SyncTrigger::Manual).await?;
+    let started = Instant::now();
+    report(
+        progress,
+        run_id,
+        source_id,
+        SyncPhase::Started,
+        0,
+        started,
+        None,
+    );
+
+    match knobas_sync::run_once(pool, source.as_ref(), cursor).await {
+        Ok(done) => {
+            knobas_sync::run_log::finish(
+                pool,
+                run_id,
+                SyncOutcome::Ok,
+                &RunCounts::of(&done),
+                None,
+            )
+            .await?;
+            report(
+                progress,
+                run_id,
+                source_id,
+                SyncPhase::Finished,
+                done.upserted,
+                started,
+                None,
+            );
+            Ok(run_id)
+        }
+        Err(error) => {
+            let outcome = SyncOutcome::of(&error);
+            let message = error.to_string();
+            // Logged, never raised: the run failed and *that* is what the
+            // caller must hear. A failed log write on top of it would replace
+            // a diagnosable error with a database one.
+            if let Err(log_error) = knobas_sync::run_log::finish(
+                pool,
+                run_id,
+                outcome,
+                &RunCounts::default(),
+                Some(&message),
+            )
+            .await
+            {
+                tracing::warn!(run_id, %log_error, "the run failed, and so did logging it");
+            }
+            report(
+                progress,
+                run_id,
+                source_id,
+                SyncPhase::Failed,
+                0,
+                started,
+                Some(message),
+            );
+            Err(DemoError::Sync(error))
+        }
+    }
+}
+
+/// Send one progress message, if anyone is listening.
+fn report(
+    sink: Option<&dyn ProgressSink>,
+    run_id: i64,
+    source_id: &str,
+    phase: SyncPhase,
+    items: u64,
+    started: Instant,
+    message: Option<String>,
+) {
+    if let Some(sink) = sink {
+        sink.report(SyncProgress {
+            run_id,
+            source_id: source_id.to_owned(),
+            phase,
+            items,
+            elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            message,
+        });
+    }
 }
 
 /// The adapter for `source_id`, if knobas has one compiled in.
