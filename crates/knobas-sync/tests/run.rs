@@ -309,3 +309,37 @@ async fn rows_for(pool: &PgPool, source_id: &str) -> i64 {
         .unwrap();
     rows
 }
+
+/// A tombstone hides the entity from search while its mirror row stays put:
+/// the launcher must stop offering something that no longer exists upstream,
+/// but the row is what still holds its last-known title for anything already
+/// pointing at it.
+#[tokio::test]
+async fn a_tombstoned_item_leaves_search_but_keeps_its_mirror_row() {
+    let (pool, id) = fixture().await;
+    let entity = format!("{id}:TIDE-7");
+    // A token no other test's corpus contains, so the query matches this item
+    // alone even though every test shares one database.
+    let token = format!("zq{}", Uuid::new_v4().simple());
+
+    let live = FakeSource::new(&id, vec![item(&id, "TIDE-7", &token, false)]);
+    knobas_sync::run_once(&pool, &live, None).await.unwrap();
+    let hits = knobas_db::search::search(&pool, &token, 10).await.unwrap();
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert_eq!(hits[0].entity_id, entity);
+
+    let gone = FakeSource::new(&id, vec![item(&id, "TIDE-7", &token, true)]);
+    knobas_sync::run_once(&pool, &gone, None).await.unwrap();
+    let hits = knobas_db::search::search(&pool, &token, 10).await.unwrap();
+    assert!(
+        hits.is_empty(),
+        "a tombstoned entity must not answer search: {hits:?}"
+    );
+
+    let (title,): (String,) = sqlx::query_as("select title from sync.item where entity_id = $1")
+        .bind(&entity)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(title, token, "the mirror row survives the tombstone");
+}

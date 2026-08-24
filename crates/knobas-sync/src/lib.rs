@@ -14,8 +14,10 @@
 //! * `sync.item` is the synced mirror: title, body, author, raw payload, and
 //!   the generated `fts` column search reads. It is refreshed wholesale on
 //!   every run, including for a tombstoned entity, so the UI can still render
-//!   the last-known title of something that vanished upstream. Consumers that
-//!   want only live items filter on `knobas.entity.deleted_at`.
+//!   the last-known title of something that vanished upstream. "Deleted"
+//!   therefore lives on the entity alone: `knobas_db::search` joins
+//!   `knobas.entity` to skip tombstoned rows, and anything else reading the
+//!   mirror directly has to filter on `deleted_at` the same way.
 //!
 //! The engine takes a `PgPool` rather than opening one: it is called from the
 //! app, from a scheduler and from tests, none of which want a second database.
