@@ -9,6 +9,8 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 knobas-core = { path = "../knobas-core" }
 knobas-db = { path = "../knobas-db" }
+# The launcher's read side: the search command is a shim over this crate.
+knobas-search = { path = "../knobas-search" }
 # The SPI, for the `Source` trait the M0 registry hands to the sync engine.
 knobas-source = { path = "../knobas-source" }
 # M0's only adapter, and the source demo mode loads.

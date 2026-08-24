@@ -44,14 +44,16 @@ async fn mock_sync_lands_in_postgres_and_is_searchable() {
         .unwrap();
     assert_eq!(inc.upserted, 0);
 
-    // and the synced corpus answers FTS
-    let hits = knobas_db::search::search(pool, "sepa retry", 10)
-        .await
-        .unwrap();
-    assert!(
-        hits.iter().any(|h| h.entity_id == "mock:PAY-231"),
-        "hits: {hits:?}"
-    );
+    // and the synced corpus is visible to the launcher's view
+    let (found,): (i64,) = sqlx::query_as(
+        "select count(*) from sync.live_item
+          where entity_id = 'mock:PAY-231'
+            and fts @@ websearch_to_tsquery('english', 'sepa retry')",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(found, 1, "the mock's PAY-231 must be findable after a sync");
 
     // sync wrote an activity line
     let acts = knobas_core::activity::recent(pool, 50).await.unwrap();
@@ -721,6 +723,24 @@ async fn item_updated_at(pool: &PgPool, entity: &str) -> Option<chrono::DateTime
     at
 }
 
+/// Entity ids matching `term` in the launcher's corpus.
+///
+/// Asked of `sync.live_item` rather than through `knobas-search`: what the
+/// engine owes the launcher is a *view* with the tombstoned rows gone, and a
+/// test that went through the search crate would be asserting that crate's
+/// ranking as much as this one's writes.
+async fn live_matches(pool: &PgPool, term: &str) -> Vec<String> {
+    sqlx::query_scalar(
+        "select entity_id from sync.live_item
+          where fts @@ websearch_to_tsquery('english', $1)
+          order by entity_id",
+    )
+    .bind(term)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
 async fn updated_at(pool: &PgPool, entity: &str) -> chrono::DateTime<chrono::Utc> {
     let (at,): (chrono::DateTime<chrono::Utc>,) =
         sqlx::query_as("select updated_at from knobas.entity where id = $1")
@@ -813,16 +833,15 @@ async fn a_tombstoned_item_leaves_search_but_keeps_its_mirror_row() {
 
     let live = FakeSource::new(&id, vec![item(&id, "TIDE-7", &token, false)]);
     knobas_sync::run_once(&pool, &live, None).await.unwrap();
-    let hits = knobas_db::search::search(&pool, &token, 10).await.unwrap();
-    assert_eq!(hits.len(), 1, "{hits:?}");
-    assert_eq!(hits[0].entity_id, entity);
+    let matches = live_matches(&pool, &token).await;
+    assert_eq!(matches, vec![entity.clone()]);
 
     let gone = FakeSource::new(&id, vec![item(&id, "TIDE-7", &token, true)]);
     knobas_sync::run_once(&pool, &gone, None).await.unwrap();
-    let hits = knobas_db::search::search(&pool, &token, 10).await.unwrap();
+    let matches = live_matches(&pool, &token).await;
     assert!(
-        hits.is_empty(),
-        "a tombstoned entity must not answer search: {hits:?}"
+        matches.is_empty(),
+        "a tombstoned entity must not answer search: {matches:?}"
     );
 
     let (title,): (String,) = sqlx::query_as("select title from sync.item where entity_id = $1")

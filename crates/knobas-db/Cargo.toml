@@ -24,8 +24,10 @@ postgresql_archive = { version = "0.21", default-features = false, features = [
     "theseus",
     "tls-native-tls",
 ] }
+# Used by this crate's own schema tests, which reach for the column types the
+# migrations declare. `serde` went with `knobas_db::search` (ruling P9): after
+# the move nothing here derives or implements it.
 chrono.workspace = true
-serde.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["sync"] }
