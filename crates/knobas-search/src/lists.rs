@@ -18,33 +18,69 @@
 //!
 //! # The list that was measured out, and what it costs to bring back
 //!
-//! A fifth list shipped in review round 1 and does not ship now:
-//! `cross-key`, *"tickets another system mentions by key"* -- spec §4's *"a
-//! query JQL cannot express"*, attempted without `knobas.link` (which is M2).
-//! Its predicate was a correlated `exists` probing the FTS index once per
-//! ticket in a 14-day window. Measured on an `analyze`d corpus, warm cache:
+//! A fifth list shipped in review round 1 and does not ship now: `cross-key`,
+//! *"tickets another system mentions by key"* -- spec §4's *"a query JQL cannot
+//! express"*, attempted without `knobas.link` (which is M2). Its predicate was
+//! a correlated `exists` probing the FTS index once per ticket in a 14-day
+//! window, evaluated on the `⌘K` path because the board asks every list for a
+//! count.
 //!
-//! | mirror rows | tickets in window | the scan | the probe | total |
+//! ## The measurement, and the trap under it
+//!
+//! **Read the method before the numbers.** `ANALYZE` is *not* enough to
+//! benchmark a GIN index. `fastupdate` parks freshly inserted entries in an
+//! unsorted **pending list** that every index scan reads linearly until a
+//! `VACUUM` merges it, and `ANALYZE` does not flush it. Round 1 was measured
+//! `ANALYZE`d but never `VACUUM`ed, and every probe it timed was re-scanning
+//! that list.
+//!
+//! Measured here on a fixture with realistic `body_text`, best of three, warm:
+//!
+//! | mirror rows | tickets in window | `ANALYZE` only | after `VACUUM` | per probe |
 //! |---|---|---|---|---|
-//! | 3,200 | 800 | 0.78 ms | **183 ms** | 184 ms |
-//! | 12,800 | 3,200 | 3.1 ms | **2,892 ms** | 2,896 ms |
+//! | 12,800 | 3,200 | 6,327 ms | **52 ms** | 16.3 µs |
+//! | 48,000 | 12,000 | 14,443 ms | **115 ms** | 9.6 µs |
+//! | 100,000 | 25,000 | 176 ms | **174 ms** | 6.9 µs |
 //!
-//! Two facts, and the second is the one that settles it. It was already over a
-//! 100 ms budget at **1/30th** of M1's target corpus -- and the *per-probe*
-//! cost grew with the corpus too (0.23 ms → 0.90 ms), because a GIN lookup on
-//! a ticket key returns more candidate rows to filter as the mirror fills. The
-//! cost is therefore quadratic in corpus size, so capping the candidate set
-//! does not rescue it: at 100k rows even ten probes would blow the budget.
+//! Two things in that table are worth more than the list it is about.
 //!
-//! It also read like the cheap one. The comment justifying it said the
-//! candidate set was *"tens of rows"*; it was 800 rows at 3,200, and the term
-//! this module's author had flagged as the thing to watch -- the full scan --
-//! turned out to be the cheapest term in the statement by three orders of
-//! magnitude. An unmeasured performance claim in a comment is worth exactly
-//! what it cost to write.
+//! **The artifact is size-dependent, which is what makes it dangerous.** It
+//! inflates the 12,800-row measurement 121× and has vanished by 100,000 (ratio
+//! 1.0), because a bulk load eventually pushes the pending list past
+//! `gin_pending_list_limit` and Postgres merges it on its own. So it corrupts
+//! exactly the mid-sized fixtures a benchmark author reaches for, and leaves
+//! the large one looking fine -- a benchmark reporting both would show one
+//! honest number beside one that is 100× wrong, with nothing to say which.
 //!
-//! **M2 gets it back for free.** With `knobas.link` populated, "referenced
-//! across sources" stops being a text probe and becomes an index probe:
+//! **Corrected, the cost is linear and the per-probe cost is flat.** It falls,
+//! if anything: 16.3 → 9.6 → 6.9 µs as the corpus grows. Round 1's conclusion
+//! that this was *quadratic* -- and that no cap could rescue it -- was an
+//! artifact of the unvacuumed index and is simply false. M2 should not read
+//! this section as "the text-probe approach is hopeless". It is not hopeless;
+//! it is merely worse than the link-table form.
+//!
+//! ## Why it was still right to remove it
+//!
+//! The case needs no false exponent:
+//!
+//! * It was the only list that could not be expressed as a `count(*) filter`
+//!   over the single scan. Removing it let the `bounded:` arm leave the
+//!   `builtins!` macro entirely, so the one-pass rule below is now
+//!   **structurally impossible to violate** rather than merely stated.
+//! * Even corrected it costs an order of magnitude more than all four
+//!   remaining lists put together, and it spends that on the `⌘K` path.
+//! * At a 100k corpus with a pessimistic quarter of the mirror in the window it
+//!   is **60–175 ms on its own** -- the spread is how much text the mirror
+//!   holds, which is the one variable a fixture cannot honestly pin. That is at
+//!   or over the whole board's budget for one list, and which side of it you
+//!   land on depends on the corpus rather than on the code.
+//! * `knobas.link` makes the same question **exact and O(1)** in M2, so the
+//!   text probe is a stopgap with a known replacement rather than the design.
+//!
+//! ## What M2 restores
+//!
+//! With `knobas.link` populated the predicate stops being a text probe and
+//! becomes an index probe:
 //!
 //! ```sql
 //! count(*) filter (where i.kind = 'ticket'
@@ -54,8 +90,7 @@
 //! ```
 //!
 //! `link_from_idx` makes that O(1) per ticket, so it collapses into the single
-//! scan below like every other list -- which is why the rule that every list is
-//! a `count(*) filter` over one pass is now stated as a rule.
+//! scan like every other list -- which is why that is now a rule.
 //!
 //! # Why they are constants and not a little query language
 //!
@@ -75,9 +110,10 @@
 //! `@me` is the second query, and it is [`crate::vocab::Vocabulary::load`]'s --
 //! the same one every search already makes.
 //!
-//! There is no exception to that single pass, and the section above is why:
-//! the one list that could not be written as a `count(*) filter` over it was
-//! also the one that could not be afforded.
+//! There is no exception to that single pass, and after the removal above there
+//! is no way to write one: the `builtins!` macro takes `scan:` entries and
+//! nothing else, so a list that is not a `count(*) filter` over this scan
+//! cannot be declared at all.
 //!
 //! # The change badge
 //!
