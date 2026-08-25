@@ -21,7 +21,19 @@ vi.mock("../ipc/entity", () => ({
   },
 }));
 
+/** What the OS opener was handed, and whether it refused. */
+const opened: string[] = [];
+let openerFails = false;
+
+vi.mock("@tauri-apps/plugin-opener", () => ({
+  openUrl: async (url: string) => {
+    opened.push(url);
+    if (openerFails) throw new Error("no handler");
+  },
+}));
+
 const { default: Detail } = await import("./Detail.svelte");
+const { toasts } = await import("../shell/toasts.svelte");
 
 function detail(over: Partial<EntityDetail> = {}): EntityDetail {
   return {
@@ -81,8 +93,17 @@ function render(props: { entityId?: string; kind?: string | null } = {}) {
 
 beforeEach(() => {
   calls.length = 0;
+  opened.length = 0;
+  openerFails = false;
   answer = () => Promise.resolve(detail());
 });
+
+/** The header's *Open in browser*, if the panel is showing one. */
+function openButton(target: HTMLElement) {
+  return [...target.querySelectorAll<HTMLButtonElement>(".d-h button")].find((button) =>
+    button.textContent?.includes("Open in browser"),
+  );
+}
 
 test("draws the title, the provenance and the projected payload", async () => {
   const screen = render();
@@ -428,5 +449,75 @@ test("history arrives with the entity rather than in a second call", async () =>
   expect(calls).toEqual(["mock:PAY-231"]);
   expect(screen.text()).toContain("synced by mock");
 
+  screen.done();
+});
+
+
+// -- Open in browser --------------------------------------------------------
+
+/**
+ * The button exists only when there is somewhere to go (P5).
+ *
+ * Both directions. A `web_url` of `null` is the ordinary state for a source
+ * with no per-item page and for anything withdrawn upstream, and a disabled
+ * button there would claim a page exists.
+ */
+test("Open in browser appears exactly when the adapter reported a url", async () => {
+  const screen = render();
+  await vi.waitFor(() => expect(screen.text()).toContain("Retry failed SEPA payouts"));
+  flushSync();
+  expect(openButton(screen.target), "no url, so no button").toBeUndefined();
+  screen.done();
+
+  answer = () => Promise.resolve(detail({ web_url: "https://127.0.0.1:8443/browse/PAY-231" }));
+  const withUrl = render();
+  await vi.waitFor(() => expect(openButton(withUrl.target)).toBeDefined());
+  flushSync();
+
+  openButton(withUrl.target)?.click();
+  await vi.waitFor(() => expect(opened).toEqual(["https://127.0.0.1:8443/browse/PAY-231"]));
+
+  withUrl.done();
+});
+
+/**
+ * A refused scheme is reported, not swallowed.
+ *
+ * `web_url` is a remote system's data; a source configured with an `ftp://`
+ * base URL produces one, and a button that silently did nothing would look
+ * like a bug in knobas rather than like something a person can fix.
+ */
+test("a url the guard refuses never reaches the opener, and says so", async () => {
+  answer = () => Promise.resolve(detail({ web_url: "file:///etc/passwd" }));
+  const screen = render();
+  await vi.waitFor(() => expect(openButton(screen.target)).toBeDefined());
+  flushSync();
+
+  openButton(screen.target)?.click();
+  await vi.waitFor(() =>
+    expect(toasts.items.map((toast) => toast.text).join(" ")).toMatch(/Could not open the link/),
+  );
+  expect(opened, "file:// reached the OS opener").toEqual([]);
+  expect(toasts.items.map((toast) => toast.text).join(" ")).toMatch(/file:/);
+
+  toasts.items = [];
+  screen.done();
+});
+
+/** ...and so is a failure from the OS itself. */
+test("a failure from the opener becomes a toast", async () => {
+  openerFails = true;
+  answer = () => Promise.resolve(detail({ web_url: "https://127.0.0.1:8443/x" }));
+  const screen = render();
+  await vi.waitFor(() => expect(openButton(screen.target)).toBeDefined());
+  flushSync();
+
+  openButton(screen.target)?.click();
+  await vi.waitFor(() =>
+    expect(toasts.items.map((toast) => toast.text).join(" ")).toMatch(/no handler/),
+  );
+  expect(opened).toEqual(["https://127.0.0.1:8443/x"]);
+
+  toasts.items = [];
   screen.done();
 });

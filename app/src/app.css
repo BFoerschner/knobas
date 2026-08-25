@@ -420,3 +420,9 @@ kbd{font:400 10px var(--mono);color:var(--faint);border:1px solid var(--hair);bo
 
 /* A room with a single tile is a list, not a two-column board. */
 .tiles.one{grid-template-columns:1fr}
+
+/* The detail header's action area, between the crumb and the close button.
+   `.d-h .x` already claims `margin-left:auto`, so this only needs its own
+   spacing -- the mockup put the same rule in an inline style, which the CSP
+   forbids. */
+.d-h .d-acts{margin-left:auto;display:flex;gap:4px;align-items:center}

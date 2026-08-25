@@ -131,6 +131,10 @@ pub fn run() {
     install_panic_hook();
 
     tauri::Builder::default()
+        // *Open in browser*, the app's only plugin. Its permission is granted
+        // in `capabilities/default.json`; without that entry the command is
+        // registered and every call is denied at run time.
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // Both managed synchronously, before anything can call in, and
             // both for the same reason: they are what a command asks when the

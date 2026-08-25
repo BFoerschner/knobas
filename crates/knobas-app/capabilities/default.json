@@ -1,7 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the main window may call. Custom `#[tauri::command]`s need no permission; this is only Tauri's own core API surface, kept at its default (path, event, window, webview basics) with no plugin added.",
+  "description": "What the main window may call. Custom `#[tauri::command]`s need no permission; this is Tauri's own core API surface at its default, plus the one plugin the app registers. `opener:allow-open-url` is granted rather than `opener:default`, which would also carry `allow-reveal-item-in-dir` (a file-manager call knobas never makes) and `allow-default-urls` (which adds `mailto:` and `tel:`). The scope is the second wall behind `openExternal`'s own scheme check: `web_url` is data an adapter mirrored from a remote system, and `file://` or `vscode://` reaching the OS opener would be a remote-code path that starts in somebody's backlog.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "http://*" }, { "url": "https://*" }]
+    }
+  ]
 }

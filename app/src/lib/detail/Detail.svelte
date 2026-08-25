@@ -13,7 +13,9 @@
   import { getEntity, type EntityDetail } from "../ipc/entity";
   import Monogram from "../shell/Monogram.svelte";
   import { kindMonogram, kindSingular } from "../shell/kinds";
+  import { openExternal } from "../shell/open-external";
   import { ago } from "../shell/time";
+  import { push } from "../shell/toasts.svelte";
   import HistoryPanel from "./HistoryPanel.svelte";
   import LinksPanel from "./LinksPanel.svelte";
   import PayloadView from "./PayloadView.svelte";
@@ -84,11 +86,45 @@
   const label = $derived(kindSingular(shownKind, detail?.kind_info));
   const key = $derived(entityId.slice(entityId.indexOf(":") + 1));
   const fields = $derived(detail ? projectPayload(detail.payload) : []);
+  /** Narrowed once, so the button and its handler agree that it is a string. */
+  const webUrl = $derived(detail?.web_url ?? null);
+
+  /**
+   * Hand the item's own URL to the OS browser.
+   *
+   * `web_url` is a value an adapter mirrored out of a remote system, so
+   * `openExternal` refuses anything that is not `http:`/`https:` — and its
+   * refusal is shown, not swallowed: a source configured with an `ftp://`
+   * base URL is something a person can fix.
+   */
+  async function open(url: string) {
+    try {
+      await openExternal(url);
+    } catch (rejection) {
+      push({ text: `Could not open the link: ${ipcErrorMessage(rejection)}`, tone: "err" });
+    }
+  }
 </script>
 
 <aside class="detail" aria-labelledby={titleId}>
   <div class="d-h" bind:this={header} tabindex="-1">
     <span class="crumb">{contextLabel} <b>›</b> {label}</span>
+    <span class="d-acts">
+      <!--
+        Absent when the adapter reported no page (P5), which is the honest
+        state for an item withdrawn upstream and for any source that has no
+        per-item URL. A disabled button would claim there is somewhere to go.
+      -->
+      {#if webUrl}
+        <button class="btn sm" onclick={() => void open(webUrl)}>
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M9 3h4v4M13 3 7.5 8.5" />
+            <path d="M12 9.5V13H3V4h3.5" />
+          </svg>
+          Open in browser
+        </button>
+      {/if}
+    </span>
     <button class="x" aria-label="Close panel" title="Close (Esc)" onclick={onclose}>
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
     </button>

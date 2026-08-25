@@ -41,6 +41,13 @@ serde_json.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 tauri = { version = "2", features = [] }
+# *Open in browser* (interfaces §8 P5). The first Tauri plugin in the app, and
+# the one that discharges the M0 carry-over about `capabilities/default.json`
+# holding only `core:default`. Pinned exactly, and to the same version as
+# `@tauri-apps/plugin-opener` in `app/package.json`: the two halves speak one
+# protocol, and a mismatch fails at run time with "command not found" rather
+# than at build time.
+tauri-plugin-opener = "=2.5.4"
 tracing = "0.1"
 # Without a subscriber every `tracing` line the database layer emits -- which
 # port the server came up on, whether it reused an existing data directory --

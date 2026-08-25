@@ -11,7 +11,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@tauri-apps/api": "2.11.1"
+    "@tauri-apps/api": "2.11.1",
+    "@tauri-apps/plugin-opener": "2.5.4"
   },
   "devDependencies": {
     "@fontsource/barlow-condensed": "^5.3.0",
