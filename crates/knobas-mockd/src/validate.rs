@@ -300,7 +300,12 @@ pub(crate) async fn unimplemented(State(state): State<Arc<MockState>>, req: Requ
 
 /// Records one violation against `req`, so every handler spells the fields the
 /// same way.
-fn record_violation(state: &MockState, req: &Request, kind: ViolationKind, detail: String) {
+pub(crate) fn record_violation(
+    state: &MockState,
+    req: &Request,
+    kind: ViolationKind,
+    detail: String,
+) {
     state.violations().record(Violation {
         kind,
         method: req.method().as_str().to_ascii_uppercase(),

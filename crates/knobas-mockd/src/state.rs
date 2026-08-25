@@ -40,6 +40,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use chrono::{DateTime, Duration, FixedOffset, NaiveTime, TimeZone, Utc};
 use knobas_source_mock::fixture;
 
+use crate::tc_state::{TcBuild, TcBuildType, TcState, TcStatus};
 use crate::validate::ViolationLog;
 
 /// Jira DC serialises timestamps as `2026-08-22T13:48:00.000+0200` — **not**
@@ -118,6 +119,9 @@ struct Inner {
     /// Advances one minute per mutation; see the module docs.
     clock: DateTime<Utc>,
     max_results_cap: u32,
+    build_types: Vec<TcBuildType>,
+    /// Ascending by id, and kept that way by `queue_build`.
+    builds: Vec<TcBuild>,
 }
 
 /// The mutable fixture one mock server serves.
@@ -232,6 +236,78 @@ impl MockState {
         self.read().clock
     }
 
+    // -- the TeamCity half --------------------------------------------------
+
+    /// Every build configuration, ascending by id.
+    pub fn build_types(&self) -> Vec<TcBuildType> {
+        self.read().build_types.clone()
+    }
+
+    /// Every build, ascending by id.
+    pub fn builds(&self) -> Vec<TcBuild> {
+        self.read().builds.clone()
+    }
+
+    pub fn build(&self, id: u64) -> Option<TcBuild> {
+        self.read().builds.iter().find(|b| b.id == id).cloned()
+    }
+
+    /// Moves a `running`/`queued` build to `finished` with `status`, setting
+    /// `finish_date` to the ticked clock.
+    ///
+    /// # Panics
+    ///
+    /// If there is no such build. This is a test-driver API: a silent no-op
+    /// would make a caller's test pass for the wrong reason.
+    pub fn finish_build(&self, id: u64, status: TcStatus) {
+        let mut inner = self.write();
+        // Resolve before ticking, exactly as `touch_issue` does: a mutation
+        // that did not happen must not move the clock.
+        let Some(idx) = inner.builds.iter().position(|b| b.id == id) else {
+            panic!("finish_build: no build {id} in the fixture");
+        };
+        let now = inner.tick();
+        let b = &mut inner.builds[idx];
+        b.state = TcState::Finished;
+        b.status = status;
+        b.finish_date = Some(now);
+        b.status_text = match status {
+            TcStatus::Success => "Success".to_owned(),
+            TcStatus::Failure => "Failure".to_owned(),
+        };
+        b.percentage_complete = None;
+        b.current_stage_text = None;
+    }
+
+    /// Appends a `queued` build with `id = max(existing ids) + 1` and returns
+    /// it. Ids stay monotonic, which is what makes `sinceBuild` meaningful.
+    ///
+    /// # Panics
+    ///
+    /// If `build_type_id` is not one of the fixture's build configurations.
+    pub fn queue_build(&self, build_type_id: &str, branch: &str) -> u64 {
+        let mut inner = self.write();
+        if !inner.build_types.iter().any(|t| t.id == build_type_id) {
+            panic!("queue_build: no build type {build_type_id:?} in the fixture");
+        }
+        let id = inner.builds.iter().map(|b| b.id).max().unwrap_or(0) + 1;
+        let now = inner.tick();
+        inner.builds.push(TcBuild {
+            id,
+            build_type_id: build_type_id.to_owned(),
+            number: id.to_string(),
+            status: TcStatus::Success,
+            state: TcState::Queued,
+            branch_name: branch.to_owned(),
+            start_date: now,
+            finish_date: None,
+            status_text: "Queued".to_owned(),
+            percentage_complete: None,
+            current_stage_text: None,
+        });
+        id
+    }
+
     pub fn set_max_results_cap(&self, cap: u32) {
         self.write().max_results_cap = cap;
     }
@@ -276,6 +352,8 @@ impl Inner {
             next_comment_id,
             clock: fixture().today,
             max_results_cap: DEFAULT_MAX_RESULTS_CAP,
+            build_types: crate::tc_state::build_types(),
+            builds: crate::tc_state::builds(),
         }
     }
 

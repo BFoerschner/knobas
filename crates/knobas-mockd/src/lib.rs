@@ -38,8 +38,12 @@
 //! 5. **`fields=` and `expand=` values are validated against a closed set**;
 //!    real Jira ignores names it does not know. A typo that silently drops a
 //!    field from a sync is worth a 400.
-//! 6. *(Reserved: TeamCity `fields=` strictness, documented with the TeamCity
-//!    side of mockd.)*
+//! 6. **TeamCity `fields=` is mandatory on the collections, strict about
+//!    names, and only `$long` of its presets is honoured.** Real TeamCity has a
+//!    default projection and silently drops names it does not know; mockd
+//!    answers 400 + [`ViolationKind::UnknownField`]. `$short` and `$locator`
+//!    are refused rather than approximated — a mock that guesses at a preset's
+//!    contents teaches the adapter a shape the real server does not serve.
 //! 7. **No wiki rendering.** `expand=renderedFields` returns the description
 //!    verbatim rather than the HTML a real instance would render, because
 //!    nothing in knobas reads the rendering — only that the field is there.
@@ -47,6 +51,32 @@
 //!    `knobas_source::contract::Fault` does not. mockd has to reproduce a
 //!    concrete `Retry-After` value and a concrete hang duration, which a
 //!    payload-free enum cannot express.
+//! 9. **A 501 carries an `Allow` header naming mockd's routing table.** Both
+//!    routers send a declared-but-unserved verb to their `unimplemented`
+//!    fallback, and axum attaches `Allow` to that response downstream of the
+//!    handler. The header therefore describes what mockd routes rather than
+//!    what the contract declares. Removing it inside the handler does **not**
+//!    work (verified in PR #14's review — axum adds it after the handler
+//!    returns), and both real fixes are worse than the wart: a `map_response`
+//!    layer that strips `Allow` from every 501 would also strip a legitimate
+//!    one, and dropping `method_not_allowed_fallback` reinstates the bare 405
+//!    with no violation at all, which is the failure mode the fallback exists
+//!    to remove. The status code, the body and the violation are all correct;
+//!    only the header is noise.
+//! 10. **TeamCity's `/app/rest/users/current` reports the same e-mail address
+//!    Jira's `myself` does** (`mara.lindqvist@tidewater.example`). One fake
+//!    company has one seat, and a cross-source test over [`spawn_all`] sees a
+//!    single coherent person rather than two spellings of Mara.
+//! 11. **A TeamCity object's absent keys are omitted, never `null`.** The
+//!    serialisers build every key an object can have so that `fields=` has a
+//!    stable set of known names to validate against; the projection then drops
+//!    the nulls, which is TeamCity's own wire shape. The consequence is that
+//!    `fields=` accepts a name that is legal for the *type* even when this
+//!    particular instance does not carry it — asking a finished build for
+//!    `running-info` is a 200 without the key, not a 400.
+//! 12. **Builds come back ascending by id**, where real TeamCity returns the
+//!    newest first. Ascending is what makes `sinceBuild` paging obvious to read
+//!    in a test, and no knobas adapter depends on the order.
 //!
 //! ## The shared credentials
 //!
@@ -58,12 +88,16 @@ pub mod allowlist;
 pub mod jira;
 pub mod jql;
 pub mod state;
+pub mod tc_fields;
+pub mod tc_state;
+pub mod teamcity;
 pub mod validate;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 pub use state::{MockFault, MockState};
+pub use tc_state::{TC_DATE_FMT, TcBuild, TcBuildType, TcState, TcStatus};
 pub use validate::{Violation, ViolationKind, ViolationLog};
 
 /// The credential adapter tests should send.
@@ -95,6 +129,28 @@ pub const TEAMCITY_TOKEN: &str = "mockd-teamcity-token";
 pub async fn spawn_mock_jira() -> MockServer {
     let state = MockState::from_fixture();
     serve(jira::router(state.clone()), state, "jira").await
+}
+
+/// A running mock TeamCity on `127.0.0.1:0`, shut down when the guard drops.
+///
+/// # Examples
+///
+/// ```
+/// # tokio::runtime::Runtime::new().unwrap().block_on(async {
+/// let tc = knobas_mockd::spawn_mock_teamcity().await;
+/// let body = reqwest::Client::new()
+///     .get(format!("{}/app/rest/server", tc.base_url()))
+///     .header("Accept", "application/json")
+///     .header("Authorization", format!("Bearer {}", knobas_mockd::TEAMCITY_TOKEN))
+///     .send().await.unwrap()
+///     .json::<serde_json::Value>().await.unwrap();
+/// assert_eq!(body["role"], "main_node");
+/// tc.assert_no_violations();
+/// # });
+/// ```
+pub async fn spawn_mock_teamcity() -> MockServer {
+    let state = MockState::from_fixture();
+    serve(teamcity::router(state.clone()), state, "teamcity").await
 }
 
 async fn serve(app: axum::Router, state: Arc<MockState>, api: &'static str) -> MockServer {
