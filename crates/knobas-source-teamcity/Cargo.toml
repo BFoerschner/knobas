@@ -1,0 +1,19 @@
+[package]
+name = "knobas-source-teamcity"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+# The read-only TeamCity adapter (M1 stream C). Four REST endpoints, JSON only,
+# every response trimmed with an explicit `fields=`.
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+knobas-core = { path = "../knobas-core" }
+knobas-source = { path = "../knobas-source" }
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tokio.workspace = true
