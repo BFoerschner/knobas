@@ -34,30 +34,60 @@
 //! `ANALYZE`d but never `VACUUM`ed, and every probe it timed was re-scanning
 //! that list.
 //!
-//! Measured here on a fixture with realistic `body_text`, best of three, warm:
+//! Measured across three fixtures, best of three, warm. The `after VACUUM`
+//! column is the real cost; the `ANALYZE only` column is what the same
+//! statement reports when the pending list has not been merged:
 //!
-//! | mirror rows | tickets in window | `ANALYZE` only | after `VACUUM` | per probe |
+//! | mirror rows | tickets in window | `ANALYZE` only | after `VACUUM` | ratio |
 //! |---|---|---|---|---|
-//! | 12,800 | 3,200 | 6,327 ms | **52 ms** | 16.3 µs |
-//! | 48,000 | 12,000 | 14,443 ms | **115 ms** | 9.6 µs |
-//! | 100,000 | 25,000 | 176 ms | **174 ms** | 6.9 µs |
+//! | 12,800 | 3,200 | 1,652 ms | **9.1 ms** | 182× |
+//! | 12,800 | 3,200 | 6,327 ms | **52 ms** | 121× |
+//! | 48,000 | 12,000 | 3,374 ms | **52.3 ms** | 64.5× |
+//! | 48,000 | 12,000 | 14,443 ms | **115 ms** | 126× |
+//! | 100,000 | 25,000 | 2,863 ms | **133.2 ms** | 21.5× |
+//! | 100,000 | 25,000 | 5,722 ms | **97.4 ms** | 58.8× |
+//! | 200,000 | 50,000 | 11,607 ms | **237.4 ms** | 48.9× |
+//! | 300,000 | 75,000 | 17,460 ms | **514.7 ms** | 33.9× |
 //!
 //! Two things in that table are worth more than the list it is about.
 //!
-//! **The artifact is size-dependent, which is what makes it dangerous.** It
-//! inflates the 12,800-row measurement 121× and has vanished by 100,000 (ratio
-//! 1.0), because a bulk load eventually pushes the pending list past
-//! `gin_pending_list_limit` and Postgres merges it on its own. So it corrupts
-//! exactly the mid-sized fixtures a benchmark author reaches for, and leaves
-//! the large one looking fine -- a benchmark reporting both would show one
-//! honest number beside one that is 100× wrong, with nothing to say which.
+//! **The artifact's severity *declines* with corpus size, but never to zero.**
+//! 182× at 12,800 rows against 21.5× at 100,000 on one curve; 58.8× at 100,000
+//! and still 33.9× at 300,000 on another with autovacuum disabled. The cause is
+//! that crossing `gin_pending_list_limit` (4 MB) makes Postgres merge most of
+//! the pending list unasked. What survives is the residue since the last merge,
+//! **bounded by that limit rather than by corpus size** -- so how wrong a given
+//! measurement is depends on where the load happened to stop and whether
+//! autovacuum ran, which is why two runs at exactly 100,000 rows disagree by
+//! nearly 3×. It does **not** reliably reach zero: a run measuring 1.0 has been
+//! rescued by autovacuum, not by scale.
 //!
-//! **Corrected, the cost is linear and the per-probe cost is flat.** It falls,
-//! if anything: 16.3 → 9.6 → 6.9 µs as the corpus grows. Round 1's conclusion
-//! that this was *quadratic* -- and that no cap could rescue it -- was an
-//! artifact of the unvacuumed index and is simply false. M2 should not read
-//! this section as "the text-probe approach is hopeless". It is not hopeless;
-//! it is merely worse than the link-table form.
+//! So the practical rule has **no size exemption** -- vacuum before every
+//! timing. A benchmark that vacuums nothing publishes a set of numbers each
+//! wrong by a different and unpredictable factor, with nothing on the face of
+//! them to say which is worst; and the temptation to trust the largest fixture
+//! because it looks saner is precisely the trap, since 21.5× is still wrong
+//! enough to invert a decision.
+//!
+//! An earlier draft of this section said the artifact "has vanished by 100,000
+//! (ratio 1.0)". That was one cell of one curve promoted to a property of size,
+//! and it did not reproduce. Its cause is worth naming because it is the same
+//! rule applied to a harness: that curve was **cumulative** -- each size seeded
+//! on top of the last, with a `VACUUM` between steps -- so its 100,000-row
+//! `ANALYZE only` figure was taken against an index vacuumed one step earlier,
+//! with only the increment pending. A fresh single load at the same size never
+//! behaves that way. The rows above are kept from both curves rather than
+//! reconciled, because the disagreement *is* the finding.
+//!
+//! **Corrected, the cost is linear and the per-probe cost is flat.** Six
+//! measurements across five corpus sizes: 16.3 → 9.6 → 6.9 µs per probe on one
+//! curve, 2.8 → 4.4 → 5.3 µs to 100,000 on another and 4.7 → 6.9 µs at 200,000
+//! and 300,000. One drifts down and one drifts up, which is fixture noise
+//! around a flat line; nothing in any of them is quadratic. Round 1's
+//! conclusion that this was *quadratic* -- and that no cap could rescue it --
+//! was an artifact of the unvacuumed index and is dead twice over. M2 should
+//! not read this section as "the text-probe approach is hopeless". It is not
+//! hopeless; it is merely worse than the link-table form.
 //!
 //! ## Why it was still right to remove it
 //!
@@ -70,10 +100,13 @@
 //! * Even corrected it costs an order of magnitude more than all four
 //!   remaining lists put together, and it spends that on the `⌘K` path.
 //! * At a 100k corpus with a pessimistic quarter of the mirror in the window it
-//!   is **60–175 ms on its own** -- the spread is how much text the mirror
-//!   holds, which is the one variable a fixture cannot honestly pin. That is at
-//!   or over the whole board's budget for one list, and which side of it you
-//!   land on depends on the corpus rather than on the code.
+//!   is **60–175 ms on its own**, and both endpoints are demonstrated: 57 ms on
+//!   a sparse-text fixture, 97.4 and 133.2 ms on richer ones, 174 ms on the
+//!   richest. Four measurements, three fixtures, and the variable that moves
+//!   them is how much text the mirror holds -- the one thing a fixture cannot
+//!   honestly pin. That is at or over the whole board's budget for one list,
+//!   and which side of it you land on is a property of the corpus rather than
+//!   of the code.
 //! * `knobas.link` makes the same question **exact and O(1)** in M2, so the
 //!   text probe is a stopgap with a known replacement rather than the design.
 //!
