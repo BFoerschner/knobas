@@ -21,6 +21,7 @@
 //! exists.
 
 mod config;
+mod cursor;
 mod descriptor;
 mod map;
 mod rest;
