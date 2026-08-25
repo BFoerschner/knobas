@@ -21,6 +21,8 @@ test-util = []
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+# `EntityRow`'s two timestamps: `DateTime<Utc>` on the wire is RFC 3339.
+chrono.workspace = true
 knobas-core = { path = "../knobas-core" }
 knobas-db = { path = "../knobas-db" }
 # The launcher's read side: the search command is a shim over this crate.
@@ -32,6 +34,9 @@ knobas-source-mock = { path = "../knobas-source-mock" }
 knobas-sync = { path = "../knobas-sync" }
 # `IpcError` is what every command rejects with, so it has to serialize.
 serde.workspace = true
+# `EntityDetail::payload` is the source record verbatim (§3a), which is a
+# `serde_json::Value` all the way to the webview.
+serde_json.workspace = true
 # The `PgPool` in `AppState`, plus demo mode's two `source_config` statements.
 sqlx.workspace = true
 thiserror.workspace = true
@@ -43,16 +48,11 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
-# The sync-run log's timestamps, read back by the demo tests.
-chrono.workspace = true
 # Self-dev-dependency so this crate's own integration tests see
 # `AppState::over_pool` (same convention as `knobas-db`'s `test_util`).
 knobas-app = { path = ".", features = ["test-util"] }
 # The command tests need a real PostgreSQL: `test-util` starts one per binary.
 knobas-db = { path = "../knobas-db", features = ["test-util"] }
-# Reads `tauri.conf.json` back, so the window settings `run` depends on cannot
-# be changed in the one file without the other noticing.
-serde_json.workspace = true
 # `tauri::test`: the mock runtime `tests/ipc.rs` invokes commands through, so
 # ruling P3's decode question is answered by the real IPC pipeline rather than
 # by reading documentation. Feature-unified with the `[dependencies]` entry
