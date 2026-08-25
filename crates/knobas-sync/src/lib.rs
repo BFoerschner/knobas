@@ -95,7 +95,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use knobas_core::activity;
 use knobas_core::entity::EntityRef;
 use knobas_source::{Cursor, Sink, Source, SourceError, SyncItem};
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::{Connection, PgConnection, PgPool, Postgres, Transaction};
 
 /// How many items one pair of round trips writes.
 ///
@@ -241,18 +241,40 @@ pub async fn run_once(
     source: &dyn Source,
     cursor: Option<Cursor>,
 ) -> Result<SyncReport, SyncError> {
-    run_inner(pool, source, CursorSource::Explicit(cursor)).await
+    run_inner(
+        pool,
+        Host::Pool(pool),
+        source,
+        CursorSource::Explicit(cursor),
+    )
+    .await
 }
 
-/// Run `source` from the position `knobas.source_config` recorded for it.
+/// Run `source` from the position `knobas.source_config` recorded for it, on a
+/// connection that belongs to this run alone.
 ///
-/// This is what the scheduler calls, and the difference from [`run_once`] is
-/// the whole point: the cursor is read **inside the transaction that holds the
-/// source's advisory lock**, so two triggers arriving together -- a scheduler
-/// tick and a *Sync now* -- serialise, and the second resumes from the position
-/// the first stored instead of repeating its fetch. (M0 read it before the
-/// lock; the carry-over records the cost: on a 40,000-issue Jira, a wasted
-/// full re-fetch.)
+/// This is what the scheduler calls, and two things separate it from
+/// [`run_once`].
+///
+/// **The cursor is read inside the lock.** Two triggers arriving together -- a
+/// scheduler tick and a *Sync now* -- serialise, and the second resumes from
+/// the position the first stored instead of repeating its fetch. (M0 read it
+/// before the lock; the carry-over records the cost: on a 40,000-issue Jira, a
+/// wasted full re-fetch.)
+///
+/// **The lock and the transaction live on `conn`, not on a pool.** That is
+/// interfaces §10.6(c), and it is a signature rather than a convention on
+/// purpose: a run holds its transaction open for as long as the remote system
+/// takes to answer, so a run on a *pooled* connection is a run competing with
+/// every query the UI makes for the connection the network has parked. Worse
+/// than slow -- an adapter loop with no reachable exit pins that connection and
+/// that source's lock until the process dies. A caller cannot reach this
+/// function with a pool, which is what makes the property structural.
+///
+/// `pool` is used for exactly one thing: the activity line, written **after**
+/// the commit, when nothing is held. It is a single insert on a connection
+/// borrowed for microseconds, and it goes through `knobas_core::activity` so
+/// that this crate does not carry a second copy of the activity schema.
 ///
 /// # Errors
 ///
@@ -261,10 +283,27 @@ pub async fn run_once(
 /// would sync everything again, for ever, with nothing to show that anything
 /// was wrong.
 pub async fn run_from_stored_cursor(
+    conn: &mut PgConnection,
     pool: &PgPool,
     source: &dyn Source,
 ) -> Result<SyncReport, SyncError> {
-    run_inner(pool, source, CursorSource::Stored).await
+    run_inner(pool, Host::Dedicated(conn), source, CursorSource::Stored).await
+}
+
+/// Where a run's transaction -- and therefore its advisory lock -- lives.
+///
+/// The distinction exists because of interfaces §10.6(c). It is not a
+/// performance knob: which of these a run uses decides whether a slow remote
+/// system can starve the rest of the application.
+enum Host<'h> {
+    /// The caller's pool. [`run_once`] only, and only because its callers do
+    /// no network work worth speaking of: *Load demo data* reads a fixture
+    /// compiled into the binary, and an ad-hoc import in a test is over in
+    /// milliseconds. A scheduled run must never come through here.
+    Pool(&'h PgPool),
+    /// A connection this run owns for its whole duration, drawn from no pool
+    /// (`knobas_db::Connector::connect`). What every scheduled run gets.
+    Dedicated(&'h mut PgConnection),
 }
 
 /// Where a run gets the position it resumes from.
@@ -290,6 +329,7 @@ enum CursorSource {
 
 async fn run_inner(
     pool: &PgPool,
+    host: Host<'_>,
     source: &dyn Source,
     from: CursorSource,
 ) -> Result<SyncReport, SyncError> {
@@ -304,71 +344,44 @@ async fn run_inner(
         .map(|kind| kind.id)
         .collect();
 
-    let mut tx = pool.begin().await?;
-    // Held until this transaction ends, however it ends. Two runs of one source
-    // would otherwise take the same rows in whatever order their batches
-    // happened to fall in, and a run holds its locks across every batch.
-    sqlx::query("select pg_advisory_xact_lock(hashtext($1::text))")
-        .bind(&source_id)
-        .execute(&mut *tx)
-        .await?;
+    let mut tx = match host {
+        Host::Pool(pool) => pool.begin().await?,
+        Host::Dedicated(conn) => conn.begin().await?,
+    };
 
-    // Inside the lock, deliberately: see `run_from_stored_cursor`.
-    let cursor = match from {
-        CursorSource::Explicit(cursor) => cursor,
-        CursorSource::Stored => {
-            let row: Option<(Option<Cursor>,)> =
-                sqlx::query_as("select cursor from knobas.source_config where id = $1")
-                    .bind(&source_id)
-                    .fetch_optional(&mut *tx)
-                    .await?;
-            match row {
-                Some((cursor,)) => cursor,
-                // The transaction is dropped here, which releases the advisory
-                // lock: nothing was read from the source and nothing written.
-                None => return Err(SyncError::NotConfigured { id: source_id }),
+    // Every exit from the locked section goes through here, and the rollback
+    // is **explicit**.
+    //
+    // Dropping a `Transaction` does not send a `ROLLBACK`; it queues one for
+    // the next time the connection is used. On a pooled connection the pool
+    // flushes it as the connection goes back, which is why M0 could drop and
+    // forget. On a run's own connection (§10.6(c)) there is no pool to do it,
+    // so a failed run would leave `pg_advisory_xact_lock` **held** until that
+    // connection happened to be used again -- and the next run of the same
+    // source would block on it for ever. Found by a test that failed one run
+    // and then ran another on the same connection.
+    let locked = run_locked(&mut tx, source, &source_id, kinds, exhaustive, from).await;
+    let locked = match locked {
+        Ok(locked) => locked,
+        Err(error) => {
+            if let Err(rollback) = tx.rollback().await {
+                // The lock goes with the connection either way -- closing it
+                // aborts the transaction server-side -- so this is a
+                // diagnostic, not a second failure to report over the first.
+                tracing::warn!(source_id, %rollback, "rolling the failed run back failed");
             }
+            return Err(error);
         }
     };
-    let previous = cursor.clone();
-    let full_sync = cursor.is_none();
-
-    let (cursor, upserted, deleted) = {
-        let mut sink = PgSink::new(&mut tx, source_id.clone(), kinds);
-        let cursor = source.sync(cursor, &mut sink).await?;
-        // The adapter is done, so whatever is still buffered belongs to this
-        // run: flush it before the cursor claims to cover it.
-        sink.flush().await?;
-        (cursor, sink.upserted, sink.deleted)
-    };
-
-    // Reconcile what a full sync did not see. Inside the same transaction as
-    // the writes, so a failure rolls the tombstones back with them.
-    //
-    // Three conditions, and dropping any one of them alone is a bug:
-    //  * `full_sync` -- an incremental run has not seen the whole source;
-    //  * `exhaustive` -- a *bounded* full sync (TeamCity: newest N builds per
-    //    configuration) does not return everything, so absence is not deletion;
-    //  * `upserted > 0` -- a full sync that emitted nothing is
-    //    indistinguishable from an adapter that silently failed, and sweeping
-    //    there would tombstone the whole source.
-    let swept = if full_sync && exhaustive && upserted > 0 {
-        sqlx::query(SWEEP)
-            .bind(&source_id)
-            .execute(&mut *tx)
-            .await?
-            .rows_affected()
-    } else {
-        0
-    };
-
-    sqlx::query("update knobas.source_config set cursor = $1 where id = $2")
-        .bind(&cursor)
-        .bind(&source_id)
-        .execute(&mut *tx)
-        .await?;
     tx.commit().await?;
 
+    let Locked {
+        cursor,
+        upserted,
+        deleted,
+        swept,
+        previous,
+    } = locked;
     let report = SyncReport {
         source_id,
         upserted,
@@ -406,6 +419,106 @@ async fn run_inner(
         );
     }
     Ok(report)
+}
+
+/// What the locked section produced, before the commit.
+struct Locked {
+    cursor: Cursor,
+    upserted: u64,
+    deleted: u64,
+    swept: u64,
+    /// The position the run started from, for the "changed nothing" test.
+    previous: Option<Cursor>,
+}
+
+/// Everything that happens under the source's advisory lock.
+///
+/// Factored out of [`run_inner`] so that **one** place decides between commit
+/// and rollback: a `?` in here returns to a caller that always closes the
+/// transaction, rather than dropping it and leaving the lock queued behind an
+/// unsent `ROLLBACK`.
+async fn run_locked(
+    tx: &mut Transaction<'_, Postgres>,
+    source: &dyn Source,
+    source_id: &str,
+    kinds: HashSet<String>,
+    exhaustive: bool,
+    from: CursorSource,
+) -> Result<Locked, SyncError> {
+    // Held until this transaction ends, however it ends. Two runs of one source
+    // would otherwise take the same rows in whatever order their batches
+    // happened to fall in, and a run holds its locks across every batch.
+    sqlx::query("select pg_advisory_xact_lock(hashtext($1::text))")
+        .bind(source_id)
+        .execute(&mut **tx)
+        .await?;
+
+    // Inside the lock, deliberately: see `run_from_stored_cursor`.
+    let cursor = match from {
+        CursorSource::Explicit(cursor) => cursor,
+        CursorSource::Stored => {
+            let row: Option<(Option<Cursor>,)> =
+                sqlx::query_as("select cursor from knobas.source_config where id = $1")
+                    .bind(source_id)
+                    .fetch_optional(&mut **tx)
+                    .await?;
+            match row {
+                Some((cursor,)) => cursor,
+                // Nothing was read from the source and nothing written; the
+                // caller rolls back, which is what releases the lock.
+                None => {
+                    return Err(SyncError::NotConfigured {
+                        id: source_id.to_owned(),
+                    });
+                }
+            }
+        }
+    };
+    let previous = cursor.clone();
+    let full_sync = cursor.is_none();
+
+    let (cursor, upserted, deleted) = {
+        let mut sink = PgSink::new(tx, source_id.to_owned(), kinds);
+        let cursor = source.sync(cursor, &mut sink).await?;
+        // The adapter is done, so whatever is still buffered belongs to this
+        // run: flush it before the cursor claims to cover it.
+        sink.flush().await?;
+        (cursor, sink.upserted, sink.deleted)
+    };
+
+    // Reconcile what a full sync did not see. Inside the same transaction as
+    // the writes, so a failure rolls the tombstones back with them.
+    //
+    // Three conditions, and dropping any one of them alone is a bug:
+    //  * `full_sync` -- an incremental run has not seen the whole source;
+    //  * `exhaustive` -- a *bounded* full sync (TeamCity: newest N builds per
+    //    configuration) does not return everything, so absence is not deletion;
+    //  * `upserted > 0` -- a full sync that emitted nothing is
+    //    indistinguishable from an adapter that silently failed, and sweeping
+    //    there would tombstone the whole source.
+    let swept = if full_sync && exhaustive && upserted > 0 {
+        sqlx::query(SWEEP)
+            .bind(source_id)
+            .execute(&mut **tx)
+            .await?
+            .rows_affected()
+    } else {
+        0
+    };
+
+    sqlx::query("update knobas.source_config set cursor = $1 where id = $2")
+        .bind(&cursor)
+        .bind(source_id)
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(Locked {
+        cursor,
+        upserted,
+        deleted,
+        swept,
+        previous,
+    })
 }
 
 /// Hard-delete reconciliation for a full sync (interfaces §1, point 4), run

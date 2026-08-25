@@ -84,6 +84,17 @@ async fn pool() -> PgPool {
     pool
 }
 
+/// A connection of this run's own -- what `run_from_stored_cursor` now
+/// requires, and what interfaces §10.6(c) is about. `tests/dedicated.rs` is
+/// where the property itself is pinned; here it is only the plumbing.
+async fn dedicated() -> sqlx::PgConnection {
+    knobas_db::test_util::test_connector()
+        .await
+        .connect()
+        .await
+        .expect("a connection outside every pool")
+}
+
 fn unique() -> String {
     format!("cur-{}", uuid::Uuid::new_v4().simple())
 }
@@ -115,9 +126,10 @@ async fn two_overlapping_runs_of_one_source_do_not_both_start_from_scratch() {
         seen: Arc::clone(&seen),
     };
 
+    let (mut ca, mut cb) = (dedicated().await, dedicated().await);
     let (ra, rb) = tokio::join!(
-        knobas_sync::run_from_stored_cursor(&pool, &a),
-        knobas_sync::run_from_stored_cursor(&pool, &b),
+        knobas_sync::run_from_stored_cursor(&mut ca, &pool, &a),
+        knobas_sync::run_from_stored_cursor(&mut cb, &pool, &b),
     );
     ra.unwrap();
     rb.unwrap();
@@ -152,10 +164,11 @@ async fn a_later_run_resumes_from_the_cursor_the_previous_one_stored() {
         seen: Arc::clone(&seen),
     };
 
-    knobas_sync::run_from_stored_cursor(&pool, &source)
+    let mut conn = dedicated().await;
+    knobas_sync::run_from_stored_cursor(&mut conn, &pool, &source)
         .await
         .unwrap();
-    knobas_sync::run_from_stored_cursor(&pool, &source)
+    knobas_sync::run_from_stored_cursor(&mut conn, &pool, &source)
         .await
         .unwrap();
 
@@ -180,7 +193,8 @@ async fn a_source_with_no_configuration_row_is_refused_rather_than_syncing_into_
         seen: Arc::new(Mutex::new(Vec::new())),
     };
 
-    match knobas_sync::run_from_stored_cursor(&pool, &source).await {
+    let mut conn = dedicated().await;
+    match knobas_sync::run_from_stored_cursor(&mut conn, &pool, &source).await {
         Err(knobas_sync::SyncError::NotConfigured { id: got }) => assert_eq!(got, id),
         other => panic!("expected NotConfigured, got {other:?}"),
     }
@@ -209,7 +223,8 @@ async fn run_once_still_obeys_the_cursor_it_was_handed() {
     };
 
     // Store a cursor by running once…
-    knobas_sync::run_from_stored_cursor(&pool, &source)
+    let mut conn = dedicated().await;
+    knobas_sync::run_from_stored_cursor(&mut conn, &pool, &source)
         .await
         .unwrap();
     // …then ask for a full sync explicitly.
