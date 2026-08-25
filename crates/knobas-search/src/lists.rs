@@ -34,33 +34,54 @@
 //! `ANALYZE`d but never `VACUUM`ed, and every probe it timed was re-scanning
 //! that list.
 //!
-//! Measured across three fixtures, best of three, warm. The `after VACUUM`
+//! Measured across four fixtures, best of three, warm. The `after VACUUM`
 //! column is the real cost; the `ANALYZE only` column is what the same
-//! statement reports when the pending list has not been merged:
+//! statement reports when the pending list has not been merged. **The harness
+//! column is load-bearing** -- see below:
 //!
-//! | mirror rows | tickets in window | `ANALYZE` only | after `VACUUM` | ratio |
-//! |---|---|---|---|---|
-//! | 12,800 | 3,200 | 1,652 ms | **9.1 ms** | 182× |
-//! | 12,800 | 3,200 | 6,327 ms | **52 ms** | 121× |
-//! | 48,000 | 12,000 | 3,374 ms | **52.3 ms** | 64.5× |
-//! | 48,000 | 12,000 | 14,443 ms | **115 ms** | 126× |
-//! | 100,000 | 25,000 | 2,863 ms | **133.2 ms** | 21.5× |
-//! | 100,000 | 25,000 | 5,722 ms | **97.4 ms** | 58.8× |
-//! | 200,000 | 50,000 | 11,607 ms | **237.4 ms** | 48.9× |
-//! | 300,000 | 75,000 | 17,460 ms | **514.7 ms** | 33.9× |
+//! | mirror rows | tickets | harness | `ANALYZE` only | after `VACUUM` | ratio |
+//! |---|---|---|---|---|---|
+//! | 12,800 | 3,200 | first step (= fresh) | 1,652 ms | **9.1 ms** | 182× |
+//! | 12,800 | 3,200 | first step (= fresh) | 6,327 ms | **52 ms** | 121× |
+//! | 48,000 | 12,000 | cumulative | 3,374 ms | **52.3 ms** | 64.5× |
+//! | 48,000 | 12,000 | cumulative | 14,443 ms | **115 ms** | 126× |
+//! | 100,000 | 25,000 | cumulative | 2,863 ms | **133.2 ms** | 21.5× |
+//! | 100,000 | 25,000 | cumulative | 176 ms | **174 ms** | **1.0×** |
+//! | 100,000 | 25,000 | fresh single load | 5,722 ms | **97.4 ms** | 58.8× |
+//! | 200,000 | 50,000 | fresh single load | 11,607 ms | **237.4 ms** | 48.9× |
+//! | 300,000 | 75,000 | fresh single load | 17,460 ms | **514.7 ms** | 33.9× |
+//!
+//! That `1.0×` is the sharpest disagreement in the table and it is kept
+//! deliberately, because reconciling it away would delete the finding. Three
+//! runs at exactly 100,000 rows report 21.5×, 58.8× and 1.0×.
 //!
 //! Two things in that table are worth more than the list it is about.
 //!
 //! **The artifact's severity *declines* with corpus size, but never to zero.**
-//! 182× at 12,800 rows against 21.5× at 100,000 on one curve; 58.8× at 100,000
-//! and still 33.9× at 300,000 on another with autovacuum disabled. The cause is
-//! that crossing `gin_pending_list_limit` (4 MB) makes Postgres merge most of
-//! the pending list unasked. What survives is the residue since the last merge,
-//! **bounded by that limit rather than by corpus size** -- so how wrong a given
-//! measurement is depends on where the load happened to stop and whether
-//! autovacuum ran, which is why two runs at exactly 100,000 rows disagree by
-//! nearly 3×. It does **not** reliably reach zero: a run measuring 1.0 has been
-//! rescued by autovacuum, not by scale.
+//! 182× at 12,800 rows against 21.5× at 100,000; 58.8× at 100,000 on a fresh
+//! load and still 33.9× at 300,000. The cause is that crossing
+//! `gin_pending_list_limit` (4 MB) makes Postgres merge most of the pending
+//! list unasked. What survives is the residue since the last merge, **bounded
+//! by that limit rather than by corpus size** -- so how wrong a given
+//! measurement is depends on where the load happened to stop, not on how big
+//! the corpus got.
+//!
+//! **Autovacuum does not rescue an unvacuumed GIN benchmark.** Measured as a
+//! 2×2 on one fixture in one session, `TRUNCATE` + `VACUUM FULL` between
+//! conditions, at 100,000 rows:
+//!
+//! | harness | autovacuum | `ANALYZE` only | after `VACUUM` | ratio |
+//! |---|---|---|---|---|
+//! | fresh single load | on | 5,733 ms | 96.9 ms | 59.2× |
+//! | fresh single load | off | 5,708 ms | 98.0 ms | 58.3× |
+//! | cumulative | on | 2,861 ms | 135.5 ms | 21.1× |
+//! | cumulative | off | 2,857 ms | 135.0 ms | 21.2× |
+//!
+//! The autovacuum setting moves **nothing**; the harness shape moves
+//! everything. So explicit vacuuming is not merely the safer rule, it is the
+//! only one that works -- an earlier draft of this section guessed that a run
+//! measuring 1.0 had been "rescued by autovacuum", and that guess is
+//! falsified above.
 //!
 //! So the practical rule has **no size exemption** -- vacuum before every
 //! timing. A benchmark that vacuums nothing publishes a set of numbers each
@@ -69,21 +90,28 @@
 //! because it looks saner is precisely the trap, since 21.5× is still wrong
 //! enough to invert a decision.
 //!
-//! An earlier draft of this section said the artifact "has vanished by 100,000
-//! (ratio 1.0)". That was one cell of one curve promoted to a property of size,
-//! and it did not reproduce. Its cause is worth naming because it is the same
-//! rule applied to a harness: that curve was **cumulative** -- each size seeded
-//! on top of the last, with a `VACUUM` between steps -- so its 100,000-row
-//! `ANALYZE only` figure was taken against an index vacuumed one step earlier,
-//! with only the increment pending. A fresh single load at the same size never
-//! behaves that way. The rows above are kept from both curves rather than
-//! reconciled, because the disagreement *is* the finding.
+//! An earlier draft said the artifact "has vanished by 100,000 (ratio 1.0)".
+//! That was one cell of one curve promoted to a property of size, and it did
+//! not reproduce. Its cause is worth naming because it is the same rule applied
+//! to a harness: that curve was **cumulative** -- each size seeded on top of the
+//! last, with a `VACUUM` between steps -- so its 100,000-row `ANALYZE only`
+//! figure was taken against an index vacuumed one step earlier, with only the
+//! increment pending. The numerators show it directly: 2,861 ms cumulative
+//! against 5,733 ms fresh, almost exactly half.
 //!
-//! **Corrected, the cost is linear and the per-probe cost is flat.** Six
-//! measurements across five corpus sizes: 16.3 → 9.6 → 6.9 µs per probe on one
-//! curve, 2.8 → 4.4 → 5.3 µs to 100,000 on another and 4.7 → 6.9 µs at 200,000
-//! and 300,000. One drifts down and one drifts up, which is fixture noise
-//! around a flat line; nothing in any of them is quadratic. Round 1's
+//! **Harness shape accounts for about two thirds of the divergence, not all of
+//! it.** The numerator gap is 2× but the ratio gap is ~2.8×; the rest is the
+//! denominator. A cumulative fixture re-seeds overlapping key ranges, so ticket
+//! keys repeat and the honest vacuumed cost rises too -- 135 ms against 97 ms
+//! for the same nominal corpus. Two variables, one number, which is the reason
+//! the table names its harness.
+//!
+//! **Corrected, the cost is linear and the per-probe cost is flat.** Nine
+//! measurements across five corpus sizes and four harness/autovacuum
+//! combinations: 16.3 → 9.6 → 6.9 µs per probe on one curve, 2.8 → 4.4 → 5.3 µs
+//! to 100,000 on another, and 4.7 → 6.9 µs at 200,000 and 300,000. One drifts
+//! down and one drifts up, which is fixture noise around a flat line; nothing
+//! in any of them is quadratic. Round 1's
 //! conclusion that this was *quadratic* -- and that no cap could rescue it --
 //! was an artifact of the unvacuumed index and is dead twice over. M2 should
 //! not read this section as "the text-probe approach is hopeless". It is not
@@ -101,9 +129,9 @@
 //!   remaining lists put together, and it spends that on the `⌘K` path.
 //! * At a 100k corpus with a pessimistic quarter of the mirror in the window it
 //!   is **60–175 ms on its own**, and both endpoints are demonstrated: 57 ms on
-//!   a sparse-text fixture, 97.4 and 133.2 ms on richer ones, 174 ms on the
-//!   richest. Four measurements, three fixtures, and the variable that moves
-//!   them is how much text the mirror holds -- the one thing a fixture cannot
+//!   a sparse-text fixture, 96.9 / 97.4 / 133.2 / 135.5 ms on richer ones,
+//!   174 ms on the richest. Six measurements, four fixtures, and the variable
+//!   that moves them is how much text the mirror holds -- the one thing a fixture cannot
 //!   honestly pin. That is at or over the whole board's budget for one list,
 //!   and which side of it you land on is a property of the corpus rather than
 //!   of the code.
