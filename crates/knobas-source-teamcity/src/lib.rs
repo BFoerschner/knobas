@@ -22,6 +22,7 @@
 
 mod config;
 mod descriptor;
+mod rest;
 
 pub use config::{TeamCityConfig, config_schema};
 pub use descriptor::descriptor_template;
