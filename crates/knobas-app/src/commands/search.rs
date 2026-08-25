@@ -8,10 +8,66 @@
 //! the frontend to branch on. `Lifecycle` is managed at build time and is
 //! always there; `lifecycle.pool()?` is the single place `not_ready` comes
 //! from.
+//!
+//! # Why every command has an `_inner`
+//!
+//! A `#[tauri::command]` cannot be called without a window, and a
+//! `tauri::State` cannot be built by hand -- so a command whose body is the
+//! only place a behaviour lives is a behaviour no test can reach. Each command
+//! here is therefore two lines (resolve the pool, call the inner function) and
+//! everything worth asserting is in the `_inner`, which takes a `&PgPool` and
+//! is exercised by `tests/search_ipc.rs`. `demo_load_inner` set the pattern.
 
+use sqlx::PgPool;
 use tauri::State;
 
+#[cfg(test)]
+use crate::IpcErrorCode;
 use crate::{IpcError, Lifecycle};
+
+/// What an empty launcher box shows (interfaces §2.4).
+///
+/// **The one DTO in this stream that composes two streams' data**, which is
+/// why it lives in the command module rather than in `knobas-search`:
+/// `smart_lists` and `recent` are the search crate's [`LauncherBoard`], while
+/// `sources` is stream F's [`CredentialHealth`] and `pending_writes` counts a
+/// write queue that is stream G's and does not exist yet. `knobas-search`
+/// takes a `PgPool` and deliberately depends on neither of those crates.
+///
+/// [`LauncherBoard`]: knobas_search::LauncherBoard
+/// [`CredentialHealth`]: knobas_sync::CredentialHealth
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct LauncherHome {
+    pub smart_lists: Vec<knobas_search::SmartListSummary>,
+    pub recent: Vec<knobas_search::EntityRow>,
+    /// Stream F's credential health, read straight from `knobas.source_config`
+    /// -- **not** a second copy of the type (interfaces §2.2, open question
+    /// **E-Q5**, resolved: `knobas_sync::CredentialHealth` has merged, so the
+    /// planned field-identical stand-in is not needed).
+    pub sources: Vec<knobas_sync::CredentialHealth>,
+    /// Always 0 in M1: the offline write queue is M2 (interfaces §4.1). The
+    /// field is here because the launcher's footer reads *"local index · N
+    /// pending writes"* and a footer that appears in M2 is a layout change; a
+    /// zero is not.
+    pub pending_writes: u32,
+}
+
+/// A search failure, as something the frontend can branch on (ruling P1).
+///
+/// The whole mapping, in one place, because it is the only decision this
+/// module makes: a malformed query is the caller's fault (`invalid`), a
+/// `list:` nobody ships is `not_found` -- which is what lets the box say *no
+/// such list* rather than *something went wrong* -- and a database failure is
+/// `internal`, because nothing downstream can do anything about it.
+impl From<knobas_search::SearchError> for IpcError {
+    fn from(error: knobas_search::SearchError) -> Self {
+        match error {
+            knobas_search::SearchError::Invalid(_) => Self::invalid(error),
+            knobas_search::SearchError::UnknownList(_) => Self::not_found(error),
+            knobas_search::SearchError::Db(_) => Self::internal(error),
+        }
+    }
+}
 
 /// Answer one launcher query.
 ///
@@ -24,18 +80,249 @@ use crate::{IpcError, Lifecycle};
 /// as a parameter all the way down; it is never interpolated into SQL. Every
 /// `Segment.text` in the result is an excerpt of **raw source text** -- render
 /// it as text, never as markup.
+///
+/// # Errors
+///
+/// `invalid` for a query outside the engine's bounds, `not_found` for a
+/// `list:` nobody ships, `not_ready` before the database is up, `internal` for
+/// anything else.
 #[tauri::command]
 pub async fn search(
     lifecycle: State<'_, Lifecycle>,
     query: knobas_search::SearchQuery,
 ) -> Result<knobas_search::SearchResponse, IpcError> {
-    let pool = lifecycle.pool()?;
-    knobas_search::Searcher::new(pool)
+    search_inner(&lifecycle.pool()?, query).await
+}
+
+/// What the launcher shows before anything is typed: the smart lists, the
+/// newest items, and the health of every configured source.
+///
+/// # Errors
+///
+/// `not_ready` before the database is up, `internal` if either read fails.
+#[tauri::command]
+pub async fn launcher_home(lifecycle: State<'_, Lifecycle>) -> Result<LauncherHome, IpcError> {
+    launcher_home_inner(&lifecycle.pool()?).await
+}
+
+/// Every built-in smart list, with its count and its change badge.
+///
+/// The rail on its own, for a launcher refreshing it without re-reading the
+/// whole board.
+///
+/// # Errors
+///
+/// `not_ready` before the database is up, `internal` if the summary fails.
+#[tauri::command]
+pub async fn smart_lists(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<Vec<knobas_search::SmartListSummary>, IpcError> {
+    smart_lists_inner(&lifecycle.pool()?).await
+}
+
+/// The rows of one smart list, shaped exactly like a search.
+///
+/// Opening a list is also what clears its badge.
+///
+/// # Errors
+///
+/// `not_found` if nobody ships a list by that id, `not_ready` before the
+/// database is up, `internal` if the statement fails.
+#[tauri::command]
+pub async fn smart_list_items(
+    lifecycle: State<'_, Lifecycle>,
+    id: String,
+    limit: u32,
+) -> Result<knobas_search::SearchResponse, IpcError> {
+    smart_list_items_inner(&lifecycle.pool()?, &id, limit).await
+}
+
+/// [`search`], against a pool.
+///
+/// # Errors
+///
+/// See [`search`].
+pub async fn search_inner(
+    pool: &PgPool,
+    query: knobas_search::SearchQuery,
+) -> Result<knobas_search::SearchResponse, IpcError> {
+    Ok(knobas_search::Searcher::new(pool.clone())
         .search(query)
-        .await
-        .map_err(|error| match error {
-            knobas_search::SearchError::Invalid(_) => IpcError::invalid(error),
-            knobas_search::SearchError::UnknownList(_) => IpcError::not_found(error),
-            knobas_search::SearchError::Db(_) => IpcError::internal(error),
+        .await?)
+}
+
+/// [`launcher_home`], against a pool.
+///
+/// Two reads, deliberately not one: the board is `knobas-search`'s and the
+/// health is stream F's, and neither crate may learn about the other to save a
+/// round trip that a local socket answers in microseconds.
+///
+/// # Errors
+///
+/// See [`launcher_home`].
+pub async fn launcher_home_inner(pool: &PgPool) -> Result<LauncherHome, IpcError> {
+    let board = knobas_search::Searcher::new(pool.clone())
+        .launcher_board()
+        .await?;
+    Ok(LauncherHome {
+        smart_lists: board.smart_lists,
+        recent: board.recent,
+        sources: knobas_sync::config::health_all(pool).await?,
+        // Not a placeholder for a count nobody wrote: M1 is read-only toward
+        // every source, so the number of queued writes is exactly zero.
+        pending_writes: 0,
+    })
+}
+
+/// [`smart_lists`], against a pool.
+///
+/// # Errors
+///
+/// See [`smart_lists`].
+pub async fn smart_lists_inner(
+    pool: &PgPool,
+) -> Result<Vec<knobas_search::SmartListSummary>, IpcError> {
+    Ok(knobas_search::Searcher::new(pool.clone())
+        .smart_lists()
+        .await?)
+}
+
+/// [`smart_list_items`], against a pool.
+///
+/// # Errors
+///
+/// See [`smart_list_items`].
+pub async fn smart_list_items_inner(
+    pool: &PgPool,
+    id: &str,
+    limit: u32,
+) -> Result<knobas_search::SearchResponse, IpcError> {
+    Ok(knobas_search::Searcher::new(pool.clone())
+        .smart_list_items(id, limit)
+        .await?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The wire keys of the two DTOs this module owns, in the spelling
+    /// `app/src/lib/ipc/search.ts` declares.
+    ///
+    /// The mirror is hand-written, so nothing but this connects the two: a
+    /// renamed field compiles on both sides and renders `undefined` in the
+    /// launcher. The expected list is taken from `serde_json` rather than
+    /// written out, so it is the **wire** that is compared against the mirror,
+    /// not a third copy of the field names that could drift from both.
+    #[test]
+    fn the_launcher_home_shape_matches_its_typescript_mirror() {
+        let mirror = include_str!("../../../../app/src/lib/ipc/search.ts");
+        let home = LauncherHome {
+            smart_lists: vec![knobas_search::SmartListSummary {
+                id: "mine".to_owned(),
+                label: "My items".to_owned(),
+                count: 3,
+                changed: true,
+                description: "Yours.".to_owned(),
+            }],
+            recent: Vec::new(),
+            sources: Vec::new(),
+            pending_writes: 0,
+        };
+
+        let wire = serde_json::to_value(&home).expect("LauncherHome serializes");
+        let mut keys: Vec<&str> = wire
+            .as_object()
+            .expect("an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["pending_writes", "recent", "smart_lists", "sources"]);
+        for key in &keys {
+            assert!(
+                mirror.contains(&format!("{key}:")),
+                "LauncherHome.{key} is missing from app/src/lib/ipc/search.ts"
+            );
+        }
+
+        let list = &wire["smart_lists"][0];
+        let mut list_keys: Vec<&str> = list
+            .as_object()
+            .expect("an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        list_keys.sort_unstable();
+        assert_eq!(
+            list_keys,
+            ["changed", "count", "description", "id", "label"]
+        );
+        for key in &list_keys {
+            assert!(
+                mirror.contains(&format!("{key}:")),
+                "SmartListSummary.{key} is missing from app/src/lib/ipc/search.ts"
+            );
+        }
+    }
+
+    /// `LauncherHome.recent` and a room's rows are **one** TypeScript type over
+    /// **two** Rust structs, so the two have to keep agreeing.
+    ///
+    /// `knobas_search::EntityRow` (stream E's, the search corpus) and
+    /// `knobas_app::commands::entity::EntityRow` (stream D's, a room line) were
+    /// declared independently and serialize identically. `app/src/lib/ipc/
+    /// search.ts` imports D's declaration rather than repeating it, which is
+    /// only honest while that holds -- and neither crate compiles against the
+    /// other, so nothing but this notices the day one of them gains a field.
+    #[test]
+    fn the_two_entity_rows_are_one_wire_shape() {
+        let at = chrono::Utc::now();
+        let search = serde_json::to_value(knobas_search::EntityRow {
+            entity_id: "jira:PAY-231".to_owned(),
+            kind: "ticket".to_owned(),
+            source_id: "jira".to_owned(),
+            title: "Retry failed SEPA payouts".to_owned(),
+            updated_at: Some(at),
+            synced_at: at,
         })
+        .expect("serializes");
+        let room = serde_json::to_value(crate::commands::entity::EntityRow {
+            entity_id: "jira:PAY-231".to_owned(),
+            kind: "ticket".to_owned(),
+            source_id: "jira".to_owned(),
+            title: "Retry failed SEPA payouts".to_owned(),
+            updated_at: Some(at),
+            synced_at: at,
+        })
+        .expect("serializes");
+
+        assert_eq!(
+            search, room,
+            "the two EntityRow structs no longer share a wire shape, so \
+             app/src/lib/ipc/search.ts must stop importing entity.ts's"
+        );
+    }
+
+    /// A search failure arrives as a code the frontend can branch on.
+    ///
+    /// The database arm is covered against a real closed pool in
+    /// `tests/search_ipc.rs`; this pins the two that a caller can provoke, and
+    /// pins them here because the `From` impl is the only decision this module
+    /// makes.
+    #[test]
+    fn search_failures_keep_their_kind() {
+        assert_eq!(
+            IpcError::from(knobas_search::SearchError::Invalid("too long".into())).code,
+            IpcErrorCode::Invalid
+        );
+        assert_eq!(
+            IpcError::from(knobas_search::SearchError::UnknownList("nope".into())).code,
+            IpcErrorCode::NotFound
+        );
+        assert_eq!(
+            IpcError::from(knobas_search::SearchError::Db(sqlx::Error::PoolClosed)).code,
+            IpcErrorCode::Internal
+        );
+    }
 }

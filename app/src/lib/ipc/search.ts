@@ -1,6 +1,9 @@
 /** Search and the launcher — `crates/knobas-app/src/commands/search.rs`. */
 import { invoke } from "@tauri-apps/api/core";
 
+import type { EntityRow } from "./entity";
+import type { CredentialHealth } from "./sources";
+
 /** `knobas_search::SearchFilters`. */
 export interface SearchFilters {
   sources: string[];
@@ -89,4 +92,58 @@ export function noFilters(): SearchFilters {
 /** Answer one launcher query. */
 export function search(query: SearchQuery): Promise<SearchResponse> {
   return invoke<SearchResponse>("search", { query });
+}
+
+/** One built-in smart list — `knobas_search::SmartListSummary`. */
+export interface SmartListSummary {
+  /** Stable id; also what `list:<id>` in the box names. */
+  id: string;
+  label: string;
+  /** How many items are in the list right now. */
+  count: number;
+  /** Something in it is newer than the last time it was opened. */
+  changed: boolean;
+  /** The list's blurb, or the reason it is empty. */
+  description: string;
+}
+
+/**
+ * What an empty launcher box shows — `knobas_app::commands::search::LauncherHome`.
+ *
+ * The one DTO here that is a composition: the lists and the recent rows come
+ * from the search engine, `sources` is `CredentialHealth` (`./sources`), and
+ * `pending_writes` counts an offline write queue that is M2 — it is 0 in M1,
+ * by rule rather than by omission.
+ */
+export interface LauncherHome {
+  smart_lists: SmartListSummary[];
+  /**
+   * `knobas_search::EntityRow`, which is a *different Rust struct* from
+   * `knobas_app::commands::entity::EntityRow` with the same six fields on the
+   * wire. One TypeScript type for both is the truth about the JSON, and a Rust
+   * test in `commands/search.rs` fails if the two ever stop agreeing.
+   */
+  recent: EntityRow[];
+  sources: CredentialHealth[];
+  pending_writes: number;
+}
+
+/** The launcher board: the lists, the newest items, and source health. */
+export function launcherHome(): Promise<LauncherHome> {
+  return invoke<LauncherHome>("launcher_home");
+}
+
+/** Every built-in smart list, with its count and its change badge. */
+export function smartLists(): Promise<SmartListSummary[]> {
+  return invoke<SmartListSummary[]>("smart_lists");
+}
+
+/**
+ * The rows of one smart list, shaped exactly like a search — so the launcher
+ * renders a list with the component it renders results with.
+ *
+ * Opening a list is also what clears its badge.
+ */
+export function smartListItems(id: string, limit: number): Promise<SearchResponse> {
+  return invoke<SearchResponse>("smart_list_items", { id, limit });
 }
