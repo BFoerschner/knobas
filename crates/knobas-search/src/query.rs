@@ -816,4 +816,60 @@ mod tests {
         assert_eq!(tokenize(r#"a "b c"#), ["a", r#""b c"#]);
         assert!(tokenize("   ").is_empty());
     }
+
+    /// The chips the launcher redraws are the *merged* filters, so every
+    /// dimension the query actually ran with has to survive the echo. A
+    /// dimension dropped here is a chip row that disagrees with the results
+    /// under it, which is a lie nobody on screen can see.
+    #[test]
+    fn the_echo_carries_every_dimension_the_query_ran_with() {
+        let filters = EffectiveFilters {
+            sources: vec!["jira".to_owned()],
+            kinds: vec!["ticket".to_owned()],
+            updated_within_days: Some(7),
+            mine: true,
+            // `mine` resolved. `SearchFilters` has no home for it (E-Q1), and
+            // an echo that invented one would put usernames the user never
+            // typed into the chip row.
+            authors: vec!["mara.lindqvist".to_owned()],
+        };
+        let echo = filters.echo();
+        assert_eq!(echo.sources, ["jira"]);
+        assert_eq!(echo.kinds, ["ticket"]);
+        assert_eq!(echo.updated_within_days, Some(7));
+        assert!(echo.mine);
+        assert!(!echo.is_empty());
+        assert_eq!(EffectiveFilters::default().echo(), SearchFilters::default());
+    }
+
+    /// Every dimension counts as a filter on its own -- the engine asks this to
+    /// decide whether a text-free query is a browse the user asked for or the
+    /// unbounded scan that belongs to the board instead.
+    #[test]
+    fn each_dimension_alone_makes_a_query_filtered() {
+        assert!(EffectiveFilters::default().is_empty());
+        let cases = [
+            EffectiveFilters {
+                sources: vec!["jira".to_owned()],
+                ..EffectiveFilters::default()
+            },
+            EffectiveFilters {
+                kinds: vec!["ticket".to_owned()],
+                ..EffectiveFilters::default()
+            },
+            EffectiveFilters {
+                updated_within_days: Some(1),
+                ..EffectiveFilters::default()
+            },
+            // `mine` with nothing resolved is still a filter: knobas not
+            // knowing who the user is must not widen the query to everything.
+            EffectiveFilters {
+                mine: true,
+                ..EffectiveFilters::default()
+            },
+        ];
+        for filters in cases {
+            assert!(!filters.is_empty(), "{filters:?}");
+        }
+    }
 }

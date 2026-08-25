@@ -12,6 +12,7 @@
 //! sound against rows this run left behind *and* against rows an earlier run
 //! left behind, which no absolute count is.
 
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use chrono::{DateTime, Duration, Utc};
@@ -312,16 +313,22 @@ async fn the_change_badge_clears_when_the_list_is_opened() {
     .unwrap();
     assert!(is_changed(&s, "changed-today").await);
 
-    // Opening one list does not clear another's badge: the stamps share one
-    // row, and a write that replaced the object instead of merging into it
-    // would silence every list at once.
+    // Opening one list must not forget that another was opened. The five
+    // stamps share one `knobas.setting` row, so a write that *replaced* the
+    // object instead of merging into it would wipe every other list's stamp --
+    // and the symptom is not a badge that stays on, it is one that comes back.
+    //
+    // The order is the whole test: `changed-today` has to be **quiet** first,
+    // or a stamp that was wiped is indistinguishable from one that was never
+    // written (both read as "never opened", which is `changed`).
+    s.smart_list_items("changed-today", 20).await.unwrap();
+    assert!(!is_changed(&s, "changed-today").await);
     s.smart_list_items("just-synced", 20).await.unwrap();
-    let after = s.smart_lists().await.unwrap();
     assert!(
-        after.iter().any(|l| l.id == "changed-today" && l.changed),
-        "opening `just-synced` cleared `changed-today` too: {after:?}"
+        !is_changed(&s, "changed-today").await,
+        "opening `just-synced` forgot that `changed-today` had been opened"
     );
-    assert!(after.iter().any(|l| l.id == "just-synced" && !l.changed));
+    assert!(!is_changed(&s, "just-synced").await);
 }
 
 /// A ticket key mentioned in another system's text: the join spec §4 sells as
@@ -436,6 +443,44 @@ async fn the_limit_cuts_the_page_and_not_the_count() {
     assert_eq!(paged.total, full.total, "the totals are not the page");
     assert!(full.total >= 5);
 
+    // And the page is the *newest* two, not any two. Asserted as "nothing that
+    // was dropped is newer than anything that was kept" rather than as a list
+    // of ids, because the corpus is shared and this test does not own every
+    // row in the list -- but it does own the ordering.
+    let kept: HashSet<&str> = paged
+        .groups
+        .iter()
+        .flat_map(|g| &g.hits)
+        .map(|h| h.row.entity_id.as_str())
+        .collect();
+    let oldest_kept = paged
+        .groups
+        .iter()
+        .flat_map(|g| &g.hits)
+        .map(|h| h.row.updated_at)
+        .min()
+        .expect("the page has rows");
+    let newest_dropped = full
+        .groups
+        .iter()
+        .flat_map(|g| &g.hits)
+        .filter(|h| !kept.contains(h.row.entity_id.as_str()))
+        .map(|h| h.row.updated_at)
+        .max()
+        .expect("more rows than fit on the page");
+    assert!(
+        oldest_kept >= newest_dropped,
+        "the limit kept {oldest_kept:?} and dropped {newest_dropped:?}"
+    );
+
+    // A limit of nothing is a caller asking for a page smaller than the
+    // launcher draws, not for silence.
+    let clamped = s.smart_list_items("just-synced", 0).await.unwrap();
+    assert_eq!(
+        clamped.groups.iter().map(|g| g.hits.len()).sum::<usize>(),
+        1
+    );
+
     // Newest first within the group.
     let stamps: Vec<_> = full.groups[0]
         .hits
@@ -501,4 +546,111 @@ async fn a_configured_identity_leaves_the_blurb_alone() {
         .unwrap();
     assert_eq!(mine.description, lists::find("mine").unwrap().blurb);
     assert!(!mine.description.contains("username"));
+}
+
+/// "Changed today" starts at **midnight**, not 24 hours ago.
+///
+/// The distinction is invisible for most of the day and is exactly what a
+/// user notices: a ticket touched at 23:59 yesterday is not something that
+/// changed today, however recently it happened. Both rows are placed against
+/// the server's own `date_trunc('day', now())` rather than a Rust clock, so
+/// the test does not depend on the session's time zone matching UTC.
+#[tokio::test]
+async fn changed_today_starts_at_midnight_and_is_not_a_rolling_day() {
+    let _guard = SERIAL.lock().await;
+    let pool = pool().await;
+    let s = searcher(&pool);
+    let t = token("midnight");
+    let at_midnight = format!("jira:{t}-in");
+    let just_before = format!("jira:{t}-out");
+
+    let before = count_of(&s, "changed-today").await;
+    for id in [&at_midnight, &just_before] {
+        seed(
+            &pool,
+            id,
+            "ticket",
+            "jira",
+            id,
+            None,
+            Utc::now(),
+            Utc::now(),
+        )
+        .await;
+    }
+    sqlx::query(
+        "update sync.item set item_updated_at = date_trunc('day', now()) where entity_id = $1",
+    )
+    .bind(&at_midnight)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "update sync.item
+            set item_updated_at = date_trunc('day', now()) - interval '1 microsecond'
+          where entity_id = $1",
+    )
+    .bind(&just_before)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(
+        count_of(&s, "changed-today").await - before,
+        1,
+        "the first instant of today counts and the last instant of yesterday does not"
+    );
+    let rows = s.smart_list_items("changed-today", 200).await.unwrap();
+    let ids: Vec<&str> = rows
+        .groups
+        .iter()
+        .flat_map(|g| &g.hits)
+        .map(|h| h.row.entity_id.as_str())
+        .collect();
+    assert!(ids.contains(&at_midnight.as_str()), "{ids:?}");
+    assert!(!ids.contains(&just_before.as_str()), "{ids:?}");
+}
+
+/// A caller asking for more rows than the launcher draws gets the page the
+/// launcher draws.
+///
+/// The bound is the engine's, not the UI's: `smart_list_items` is an IPC
+/// command, so "how many rows" is a number a caller sends, and an unbounded
+/// one is an unbounded response over the bridge.
+#[tokio::test]
+async fn a_list_page_is_bounded_however_much_the_caller_asks_for() {
+    let _guard = SERIAL.lock().await;
+    let pool = pool().await;
+    let s = searcher(&pool);
+    let t = token("bound");
+
+    sqlx::query(
+        "insert into knobas.entity (id, kind, title)
+         select $1 || ':' || g, 'ticket', 'row ' || g from generate_series(1, $2) g",
+    )
+    .bind(&t)
+    .bind(250_i32)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "insert into sync.item
+           (entity_id, source_id, kind, title, body_text, item_updated_at, synced_at, payload)
+         select $1 || ':' || g, 'jira', 'ticket', 'row ' || g, 'body',
+                now() - make_interval(secs => g), now(), '{}'::jsonb
+           from generate_series(1, $2) g",
+    )
+    .bind(&t)
+    .bind(250_i32)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let r = s.smart_list_items("just-synced", 10_000).await.unwrap();
+    assert_eq!(
+        r.groups.iter().map(|g| g.hits.len()).sum::<usize>(),
+        200,
+        "the engine's page cap, not the caller's number"
+    );
+    assert!(r.total >= 250, "and the total still counts the whole list");
 }

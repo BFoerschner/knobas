@@ -194,6 +194,14 @@ async fn recency_reads_are_index_backed_per_kind() {
         "the board must not seq-scan sync.item:\n{plan}"
     );
     assert!(!plan.contains("Seq Scan on item"), "{plan}");
+    // Two `Limit` nodes: one bounding each kind's branch inside the lateral,
+    // one bounding the merge. The inner one is what keeps the read off the
+    // busiest kind's whole history, and its absence is visible only here --
+    // the rows that come back are identical either way.
+    assert!(
+        plan.matches("Limit").count() >= 2,
+        "the per-kind read is unbounded:\n{plan}"
+    );
 
     // And it still answers correctly at that size: bounded, newest first.
     let board = searcher(&pool).launcher_board().await.unwrap();
