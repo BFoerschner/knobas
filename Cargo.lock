@@ -2709,6 +2709,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "knobas-db",
+ "knobas-search",
  "knobas-source",
  "knobas-source-mock",
  "serde",
