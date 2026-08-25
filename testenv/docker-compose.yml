@@ -57,14 +57,27 @@ services:
   uptime-kuma:
     image: ${KUMA_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
     container_name: knobas-uptime-kuma
+    environment:
+      # WITHOUT THIS, `docker compose up` GIVES YOU A KUMA THAT NEVER STARTS.
+      # Uptime Kuma v2 added a database-choice step that runs BEFORE the real
+      # server: it logs "Starting Setup Database ... Waiting for user action"
+      # and serves an entirely different express app on 3001 until a human
+      # picks a backend in a browser. Setting the type here supplies that
+      # answer, `Database.writeDBConfig` persists it, and the real server
+      # starts unattended. (Verified on the pinned image, 2.5.3.)
+      UPTIME_KUMA_DB_TYPE: sqlite
     ports:
       - "127.0.0.1:3001:3001"
     volumes:
       - kuma-data:/app/data
     healthcheck:
-      # Kuma v2 has no health endpoint; `/` serving the SPA is the readiness
-      # signal, and it is what the seed's socket.io client needs anyway.
-      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:3001/"]
+      # NOT `curl /`. The setup-database app above answers `/` with a 302 to
+      # its own wizard, so a check on `/` reports HEALTHY for a Kuma that has
+      # no socket.io server at all -- which is how this environment first came
+      # up "green" with a Kuma nothing could seed. The engine.io handshake is
+      # the real server's own signal and is the exact channel the seed uses:
+      # it returns `0{"sid":...}` there and the wizard's HTML here.
+      test: ["CMD-SHELL", "curl -fsS 'http://localhost:3001/socket.io/?EIO=4&transport=polling' | grep -q '\"sid\"'"]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -127,10 +140,20 @@ services:
       # written by a container (which on Linux would leave root-owned files).
       - ./:/seed:ro
     # The only step in the whole environment that needs network access at seed
-    # time; noted in README.md. --prefix keeps it out of the read-only mount.
+    # time; noted in README.md.
+    #
+    # The script is COPIED to /tmp/k next to its node_modules rather than run
+    # from the read-only /seed mount. ESM ignores NODE_PATH -- an `import` from
+    # /seed/kuma-seed.mjs resolves against /seed/node_modules and /node_modules
+    # and nowhere else, so the obvious `NODE_PATH=... node /seed/kuma-seed.mjs`
+    # fails with ERR_MODULE_NOT_FOUND. Copying puts the script in the directory
+    # whose node_modules npm just populated. monitors.json travels with it
+    # because the script resolves it relative to import.meta.url.
     command: >
-      sh -c "npm --prefix /tmp/k i --no-save --silent socket.io-client@4 &&
-             NODE_PATH=/tmp/k/node_modules node /seed/kuma-seed.mjs"
+      sh -c "mkdir -p /tmp/k &&
+             cp /seed/kuma-seed.mjs /seed/monitors.json /tmp/k/ &&
+             npm --prefix /tmp/k i --no-save --silent socket.io-client@4 &&
+             node /tmp/k/kuma-seed.mjs"
 
   # ------------------------------------------------------ opt-in: real -----
   teamcity:
