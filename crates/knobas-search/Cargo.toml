@@ -3,11 +3,21 @@ name = "knobas-search"
 edition.workspace = true
 version.workspace = true
 
+# Test support that `cfg(test)` cannot reach: that cfg is set for neither
+# `tests/` nor `benches/` of this crate, so the shared fixtures (and, from
+# task 10, the deterministic corpus generator the perf test and the bench
+# share) live behind a feature instead.
+[features]
+test-util = []
+
 # The launcher's read side. It takes a `PgPool` rather than opening one, so it
 # needs `sqlx` but not `knobas-db` -- the database crate is a test dependency
 # only. Stream E owns this crate from M1's contract PR onwards.
 [dependencies]
 chrono.workspace = true
+# For `KindInfo`/`SourceDescriptor` only: the launcher labels a group from the
+# adapter's declared kind metadata (spec §3a), never from a hardcoded list.
+knobas-source = { path = "../knobas-source" }
 serde.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true

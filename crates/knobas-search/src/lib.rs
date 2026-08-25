@@ -10,27 +10,37 @@
 //!
 //! Seeded (this crate's contract PR): the frozen types, the FTS query over
 //! `sync.live_item`, sentinel-based snippet segments, grouping by kind.
-//! **Stream E's:** the query parser (prefixes, aliases, `key:value`), the
-//! dynamic query builder that applies [`SearchFilters`] -- the one reviewed
-//! module allowed to use `AssertSqlSafe` (roadmap §4 gotcha 2) -- the built-in
-//! smart lists, and the empty-query board. Until then a filtered query is
-//! refused rather than silently answered unfiltered.
+//! **Stream E's:** the query parser ([`query`], [`vocab`]), the dynamic query
+//! builder that applies [`SearchFilters`] (`sql` -- the one reviewed module
+//! allowed to wrap a runtime-built statement, roadmap §4 gotcha 2), the
+//! built-in smart lists, and the empty-query board. Until the builder is wired
+//! into [`search`] a filtered query is refused rather than silently answered
+//! unfiltered.
+//!
+//! The gotcha-2 confinement is enforced, not merely intended: `tests/
+//! sql_containment.rs` fails the build if any file in this crate outside
+//! `sql.rs` so much as names the type, which is also why no other module here
+//! spells it out.
 //!
 //! The corpus is `sync.live_item` and nothing else: notes are M2 and asset
 //! ancestor paths are M4 (interfaces §2.4).
 
+pub mod query;
 pub mod snippet;
 pub mod types;
+pub mod vocab;
 
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
+pub use query::{EffectiveFilters, Parsed, merge, parse};
 pub use types::{
     EntityRow, ParsedQuery, Prefix, ResultGroup, SearchFilters, SearchHit, SearchQuery,
     SearchResponse, Segment,
 };
+pub use vocab::{KindCatalog, SourceVocab, Vocabulary};
 
 /// Why a search could not be answered.
 #[derive(Debug, thiserror::Error)]
