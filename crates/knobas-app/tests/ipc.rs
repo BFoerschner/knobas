@@ -205,8 +205,21 @@ fn invoke_managing(
             knobas_app::commands::app::frontend_ready,
             knobas_app::commands::entity::recent_activity,
             knobas_app::commands::sources::demo_load,
+            knobas_app::commands::sources::list_adapters,
+            knobas_app::commands::sources::list_sources,
+            knobas_app::commands::sources::add_source,
+            knobas_app::commands::sources::update_source,
+            knobas_app::commands::sources::delete_source,
+            knobas_app::commands::sources::set_source_secret,
+            knobas_app::commands::sources::test_source,
+            knobas_app::commands::sources::credential_health,
             knobas_app::commands::sources::sync_now,
             knobas_app::commands::sources::sync_now_with_progress,
+            knobas_app::commands::sources::sync_all,
+            knobas_app::commands::sources::sync_status,
+            knobas_app::commands::sources::list_sync_runs,
+            knobas_app::commands::sources::db_stats,
+            knobas_app::commands::sources::reindex_fts,
             shapes::without_progress,
             shapes::with_progress
         ])
@@ -286,38 +299,99 @@ fn the_two_argument_shapes_decode_as_the_split_needs() {
 // 3. The app's own commands, in the handler list.
 // ---------------------------------------------------------------------------
 
-/// What a rejection from *inside* a command looks like.
+/// Tauri's own refusal when a command declares state that is not managed.
 ///
-/// A mock app built by [`invoke`] manages no `Lifecycle`, so a call that Tauri
-/// accepted and dispatched gets exactly this far. It is therefore the marker
-/// for "this command is registered and was reached", as distinct from "no such
-/// command" or "the ACL refused it".
-///
-/// Note what it is *not*: with a `Lifecycle` managed (which is how the app
-/// really runs) this string never appears, and an early call gets
-/// `IpcErrorCode::NotReady` instead -- see
-/// [`a_command_that_beats_the_database_is_told_to_try_again`].
-const REACHED_THE_BODY: &str = "state not managed";
+/// Not an `IpcError`: no code, nothing the frontend can branch on. Carry-over
+/// §10.6(a) is that this must never be what a call during bring-up gets, which
+/// is why no command declares `State<'_, AppState>` or `State<'_, SourcesState>`.
+const TAURI_STATE_REFUSAL: &str = "state not managed";
 
-/// Both halves of the split are registered under the names the TypeScript
-/// mirror invokes, and both dispatch.
+/// What a stream-F command answers when the sync engine has not started.
 ///
-/// Not a decoding test -- each takes `app: AppHandle<R>` and then
-/// `State<'_, Lifecycle>`, and the unmanaged state stops the call before any
-/// caller-supplied argument is read -- but the one that catches the mistake a
-/// two-command surface invites: adding the command and forgetting the handler
-/// list, which is a frontend that fails at runtime with "command not found"
-/// and a Rust side that compiles perfectly.
+/// A real `IpcErrorCode::NotReady`, produced by the command's own body after
+/// `crate::sources::state(&app)` found nothing -- which is only possible
+/// because those commands take an `AppHandle` (always resolvable) rather than
+/// declaring the state as an argument. It is therefore the marker for "this
+/// command is registered and its body ran", as distinct from "no such command".
+const SOURCES_NOT_READY: &str = "not_ready";
+
+/// Every stream-F command is registered under the name the TypeScript mirror
+/// invokes, and dispatches.
+///
+/// The mistake this catches is the one an append-only handler list invites:
+/// adding a command and forgetting the list, which is a frontend failing at run
+/// time with "command not found" and a Rust side that compiles perfectly.
+/// Sixteen commands is well past the point where that is noticed by hand.
 #[test]
-fn both_halves_of_sync_now_are_registered_and_reachable() {
-    for cmd in ["sync_now", "sync_now_with_progress"] {
-        let rejection = invoke(cmd, serde_json::json!({ "sourceId": "mock" }))
-            .expect_err("no AppState is managed");
+fn every_sources_command_is_registered_and_reachable() {
+    // A complete argument list per command, in the camelCase spelling Tauri
+    // renames arguments to -- which is the spelling `app/src/lib/ipc/sources.ts`
+    // sends. A missing or misspelled key fails here as an argument-resolution
+    // error rather than as `not_ready`, so this covers the mirror's call sites
+    // as well as the handler list.
+    let draft = serde_json::json!({
+        "source_id": null, "adapter_kind": "mock", "base_url": "",
+        "auth_kind": null, "config": {}, "secret": null
+    });
+    let new_source = serde_json::json!({
+        "id": "mock2", "adapter_kind": "mock", "display_name": "M", "base_url": "",
+        "auth_kind": "Pat", "config": {}, "secret": { "value": "x" },
+        "sync_interval_secs": 300, "enabled": true
+    });
+    for (cmd, args) in [
+        ("list_sources", serde_json::json!({})),
+        ("add_source", serde_json::json!({ "input": new_source })),
+        (
+            "update_source",
+            serde_json::json!({ "id": "mock", "patch": {} }),
+        ),
+        (
+            "delete_source",
+            serde_json::json!({ "id": "mock", "purgeItems": false }),
+        ),
+        (
+            "set_source_secret",
+            serde_json::json!({ "id": "mock", "secret": { "value": "x" } }),
+        ),
+        ("test_source", serde_json::json!({ "draft": draft })),
+        ("credential_health", serde_json::json!({})),
+        ("sync_now", serde_json::json!({ "sourceId": "mock" })),
+        (
+            "sync_now_with_progress",
+            serde_json::json!({ "sourceId": "mock", "progress": "__CHANNEL__:1" }),
+        ),
+        ("sync_all", serde_json::json!({})),
+        ("sync_status", serde_json::json!({})),
+        (
+            "list_sync_runs",
+            serde_json::json!({ "sourceId": null, "limit": 5 }),
+        ),
+        ("db_stats", serde_json::json!({})),
+        ("reindex_fts", serde_json::json!({})),
+    ] {
+        let rejection = invoke(cmd, args).expect_err("no SourcesState is managed");
         assert!(
-            rejection.contains(REACHED_THE_BODY),
-            "{cmd} was not dispatched: {rejection}"
+            rejection.contains(SOURCES_NOT_READY),
+            "{cmd} was not dispatched, or its arguments do not decode: {rejection}"
+        );
+        assert!(
+            !rejection.contains(TAURI_STATE_REFUSAL),
+            "{cmd} declares managed state as an argument -- carry-over §10.6(a): \
+             {rejection}"
         );
     }
+
+    // `list_adapters` is the exception, deliberately: it touches neither the
+    // database nor the keychain, so it answers on a cold start -- which is what
+    // lets the Add-source form be drawn before bring-up finishes.
+    let adapters = invoke("list_adapters", serde_json::json!({}))
+        .expect("list_adapters must answer without any managed state")
+        .deserialize::<serde_json::Value>()
+        .expect("a descriptor list came back");
+    assert!(
+        adapters.as_array().is_some_and(|a| !a.is_empty()),
+        "list_adapters returned nothing: {adapters}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -344,6 +418,34 @@ fn unreachable_pool() -> sqlx::PgPool {
 }
 
 /// A lifecycle holding a live-looking pool, the way bring-up leaves one.
+/// A real, running `SourcesState` over `pool` -- the state the sync commands
+/// ask the `AppHandle` for.
+///
+/// Built by the same `sources::start`-shaped call the app makes, so this test
+/// drives the scheduler rather than a stand-in: the run it triggers is a real
+/// run on a real dedicated connection.
+fn sources_state(
+    app: &tauri::App<MockRuntime>,
+    pool: sqlx::PgPool,
+) -> knobas_app::sources::SourcesState {
+    use std::sync::Arc;
+    let handle = app.handle().clone();
+    // `block_in_place` first: this runs inside the test's multi-thread runtime,
+    // and `block_on` from within one panics.
+    tokio::task::block_in_place(|| {
+        tauri::async_runtime::block_on(async move {
+            knobas_app::sources::SourcesState {
+                scheduler: knobas_app::sources::test_scheduler(&handle, pool.clone())
+                    .await
+                    .expect("a scheduler over the test pool"),
+                pool,
+                secrets: Arc::new(knobas_secrets::MemoryStore::new()),
+                registry: Arc::new(knobas_app::sources::Registry::builtin()),
+            }
+        })
+    })
+}
+
 fn ready_over(pool: sqlx::PgPool) -> knobas_app::Lifecycle {
     let lifecycle = knobas_app::Lifecycle::new();
     lifecycle.install(knobas_app::AppState::over_pool(pool));
@@ -381,7 +483,7 @@ fn demo_load_is_refused_outside_the_demo_profile() {
         "the refusal carries IpcErrorCode::Invalid: {rejection}"
     );
     assert!(
-        !rejection.contains(REACHED_THE_BODY),
+        !rejection.contains(TAURI_STATE_REFUSAL),
         "the command was never dispatched, so this proves nothing: {rejection}"
     );
 }
@@ -443,7 +545,8 @@ async fn sync_now_answers_before_the_run_and_reports_it_on_the_event() {
         "sync_now",
         serde_json::json!({ "sourceId": "mock" }),
         move |app| {
-            app.manage(ready_over(pool_for_state));
+            app.manage(ready_over(pool_for_state.clone()));
+            app.manage(sources_state(app, pool_for_state));
             app.listen("sync:state", move |event| {
                 if let Ok(value) = serde_json::from_str::<serde_json::Value>(event.payload()) {
                     recorder.lock().unwrap().push(value);
@@ -535,7 +638,7 @@ fn a_command_that_beats_the_database_is_told_to_try_again() {
          tell a starting database from a broken one: {rejection}"
     );
     assert!(
-        !rejection.contains(REACHED_THE_BODY),
+        !rejection.contains(TAURI_STATE_REFUSAL),
         "Tauri refused this while resolving arguments, so the command's own \
          answer was never reached: {rejection}"
     );

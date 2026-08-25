@@ -77,3 +77,6 @@ knobas-db = { path = "../knobas-db", features = ["test-util"] }
 # is how the mock runtime reaches the commands.
 tauri = { version = "2", features = ["test"] }
 tokio.workspace = true
+# Per-test source ids: the database is shared across a test binary, and a
+# hardcoded id would make two tests each other's fixture.
+uuid.workspace = true

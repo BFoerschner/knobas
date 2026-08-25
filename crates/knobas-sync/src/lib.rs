@@ -83,13 +83,12 @@ pub mod config;
 pub mod health;
 pub mod progress;
 pub mod run_log;
-pub mod runner;
 pub mod scheduler;
+pub mod stats;
 
 pub use health::{AuthState, CredentialHealth};
 pub use progress::{ProgressSink, SyncPhase, SyncProgress};
 pub use run_log::{RunCounts, RunResult, SourceSyncStatus, SyncOutcome, SyncTrigger};
-pub use runner::run;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 

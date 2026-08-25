@@ -116,7 +116,14 @@ pub struct SchedulerDeps {
 /// in the sources view -- it just has no next run.
 const STATUS: &str = r"
 select c.id as source_id,
-       r.id as run_id,
+       r.id is not null as running,
+       -- The run this status is *about*: the one in flight, or the last one to
+       -- finish. Not `r.id` alone -- `last_finished_at` and `last_outcome`
+       -- already describe that finished run, so leaving its id out made the
+       -- terminal `sync:state` unattributable: a progress bar keyed on the run
+       -- id it was handed could not tell which run had just ended. `running` is
+       -- what says which of the two this is.
+       coalesce(r.id, f.id) as run_id,
        r.started_at,
        f.finished_at as last_finished_at,
        f.outcome     as last_outcome,
@@ -139,7 +146,7 @@ select c.id as source_id,
        order by started_at desc, id desc limit 1
   ) r on true
   left join lateral (
-      select finished_at, outcome from knobas.sync_run
+      select id, finished_at, outcome from knobas.sync_run
        where source_id = c.id and finished_at is not null
        order by started_at desc, id desc limit 1
   ) f on true
@@ -150,6 +157,7 @@ select c.id as source_id,
 #[derive(sqlx::FromRow)]
 struct StatusRow {
     source_id: String,
+    running: bool,
     run_id: Option<i64>,
     started_at: Option<DateTime<Utc>>,
     last_finished_at: Option<DateTime<Utc>>,
@@ -161,7 +169,7 @@ struct StatusRow {
 impl From<StatusRow> for SourceSyncStatus {
     fn from(r: StatusRow) -> Self {
         SourceSyncStatus {
-            running: r.run_id.is_some(),
+            running: r.running,
             source_id: r.source_id,
             run_id: r.run_id,
             started_at: r.started_at,
@@ -281,10 +289,6 @@ pub async fn execute_run(
     progress: Option<Arc<dyn ProgressSink>>,
 ) -> RunResult {
     let started = std::time::Instant::now();
-    // The row exists by now (the caller opened it), so this is the `running`
-    // half of the pair `settle` closes.
-    emit_state(deps, source_id).await;
-
     match attempt(deps, source_id, run_id, progress.as_ref(), started).await {
         Ok(report) => RunResult {
             outcome: SyncOutcome::Ok,
@@ -684,6 +688,15 @@ impl Inner {
         let run_id = run_log::start(&self.deps.pool, source_id, trigger).await?;
         inflight.insert(source_id.to_owned(), run_id);
         drop(inflight);
+
+        // **Before the spawn, and therefore before this returns.** `sync_now`
+        // hands the caller a run id (P3) and the docs promise `sync:state` says
+        // `running` for it; emitting from inside the spawned task would make
+        // that promise a race the frontend loses on a busy machine. The row
+        // exists, so the status read is accurate -- including for a run that is
+        // still waiting on a permit, which *is* running as far as the UI is
+        // concerned.
+        emit_state(&self.deps, source_id).await;
 
         let inner = Arc::clone(self);
         let id = source_id.to_owned();

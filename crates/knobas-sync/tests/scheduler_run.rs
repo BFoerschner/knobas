@@ -219,13 +219,16 @@ async fn a_healthy_run_is_logged_ok_clears_backoff_and_marks_the_credential_good
         "run_from_stored_cursor persisted the position"
     );
 
-    // Coarse state on start and on finish -- a handful per run, never per item.
+    // Coarse state, and one message -- these tests drive `execute_run` by hand,
+    // so the *start* transition (which `Scheduler::trigger` emits, before it
+    // returns) is not in play here; `scheduler_loop::a_trigger_says_running_...`
+    // pins that one. Never per item, in either case.
     let states = h.events.states.lock().unwrap();
-    assert_eq!(states.len(), 2, "one sync:state at start, one at finish");
-    assert!(states[0].running && !states[1].running);
-    assert_eq!(states[1].last_outcome, Some(SyncOutcome::Ok));
+    assert_eq!(states.len(), 1, "one sync:state at the finish");
+    assert!(!states[0].running);
+    assert_eq!(states[0].last_outcome, Some(SyncOutcome::Ok));
     assert!(
-        states[1].next_run_at.is_some(),
+        states[0].next_run_at.is_some(),
         "the UI can count down to the next run"
     );
     assert_eq!(
@@ -430,7 +433,12 @@ async fn status_reports_running_then_the_finished_shape() {
         .unwrap()
         .unwrap();
     assert!(!done.running);
-    assert!(done.run_id.is_none());
+    assert_eq!(
+        done.run_id,
+        Some(run_id),
+        "the terminal status names the run it is reporting on, or a progress \
+         bar keyed on the run id cannot tell which run ended"
+    );
     assert_eq!(done.last_outcome, Some(SyncOutcome::Ok));
     assert!(done.last_finished_at.is_some());
     assert!(
@@ -546,10 +554,76 @@ async fn a_never_synced_source_is_due_immediately() {
         .unwrap()
         .unwrap();
     assert!(!status.running);
+    assert!(
+        status.run_id.is_none(),
+        "it has never run, so there is no run"
+    );
     assert!(status.last_finished_at.is_none());
     let next = status.next_run_at.expect("a new source runs at once");
     assert!(
         next <= chrono::Utc::now() + chrono::Duration::seconds(1),
         "a never-synced source is due now, not in an interval: {next}"
+    );
+}
+
+/// A run with a channel attached reports its phases, and every message names
+/// the run so two channels stay distinguishable (P3).
+///
+/// This is the coverage `runner::run`'s tests used to carry. That composition
+/// is gone -- §10.8 warns that a stream which treats the engine as frozen ends
+/// the milestone with two sync paths, and this is the surviving one -- so the
+/// assertion moved here rather than being deleted with it.
+#[tokio::test]
+async fn a_run_with_a_channel_attached_reports_its_phases() {
+    #[derive(Default)]
+    struct Recorder(Mutex<Vec<knobas_sync::progress::SyncProgress>>);
+    impl knobas_sync::progress::ProgressSink for Recorder {
+        fn report(&self, progress: knobas_sync::progress::SyncProgress) {
+            self.0.lock().unwrap().push(progress);
+        }
+    }
+
+    let h = harness(AuthKind::None, false).await;
+    let sink = Arc::new(Recorder::default());
+
+    let run_id = run_log::start(&h.deps.pool, &h.id, SyncTrigger::Manual)
+        .await
+        .unwrap();
+    let result = knobas_sync::scheduler::execute_run(
+        &h.deps,
+        &h.id,
+        run_id,
+        Some(Arc::clone(&sink) as Arc<dyn knobas_sync::progress::ProgressSink>),
+    )
+    .await;
+    knobas_sync::scheduler::settle(&h.deps, &h.id, run_id, &result).await;
+
+    let seen = sink.0.lock().unwrap().clone();
+    assert!(!seen.is_empty(), "a channel that was attached saw nothing");
+    assert!(
+        seen.iter()
+            .all(|p| p.run_id == run_id && p.source_id == h.id),
+        "every message names its run: {seen:?}"
+    );
+    assert!(
+        seen.iter()
+            .any(|p| p.phase == knobas_sync::progress::SyncPhase::Fetching && p.items > 0),
+        "the item count has to move, or the bar does not: {seen:?}"
+    );
+    assert_eq!(
+        seen.last().unwrap().phase,
+        knobas_sync::progress::SyncPhase::Writing,
+        "the last message `execute_run` sends is the write phase; the terminal \
+         Finished/Failed is the ticker's, which this test does not drive"
+    );
+
+    // ...and a run with **no** channel allocates and reports nothing, which is
+    // what makes a five-minute schedule free (P3).
+    let quiet = knobas_sync::scheduler::execute_run(&h.deps, &h.id, run_id, None).await;
+    assert_eq!(quiet.outcome, SyncOutcome::Ok);
+    assert_eq!(
+        sink.0.lock().unwrap().len(),
+        seen.len(),
+        "a run with no sink must not report to a previous run's"
     );
 }

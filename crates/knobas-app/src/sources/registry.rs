@@ -59,13 +59,13 @@ impl Registry {
 
     /// One descriptor **template** per compiled-in kind.
     #[must_use]
-    pub fn templates() -> Vec<SourceDescriptor> {
+    pub fn templates(&self) -> Vec<SourceDescriptor> {
         ADAPTERS.iter().map(|a| (a.template)()).collect()
     }
 
     /// The template for one kind, or `None` if no adapter answers to it.
     #[must_use]
-    pub fn template_for(kind: &str) -> Option<SourceDescriptor> {
+    pub fn template_for(&self, kind: &str) -> Option<SourceDescriptor> {
         ADAPTERS
             .iter()
             .find(|a| a.kind == kind)
@@ -81,7 +81,7 @@ impl Registry {
     /// # Errors
     /// [`SourceError::Protocol`] if no adapter answers to the instance's kind,
     /// or if the adapter rejected the configuration.
-    pub fn build_instance(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
+    pub fn build_instance(&self, instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
         let adapter = ADAPTERS
             .iter()
             .find(|a| a.kind == instance.kind)
@@ -97,10 +97,10 @@ impl Registry {
 
 impl knobas_sync::scheduler::AdapterRegistry for Registry {
     fn descriptors(&self) -> Vec<SourceDescriptor> {
-        Registry::templates()
+        self.templates()
     }
 
     fn build(&self, instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
-        Registry::build_instance(instance)
+        self.build_instance(instance)
     }
 }

@@ -86,7 +86,10 @@ pub struct SourceSyncStatus {
     pub source_id: String,
     /// Whether a run is in flight right now.
     pub running: bool,
-    /// The run this status is about, when there is one.
+    /// The run this status is about: the one in flight, or -- once
+    /// [`running`](Self::running) is false -- the last one to finish, which is
+    /// the run [`last_outcome`](Self::last_outcome) describes. `None` only for
+    /// a source that has never run.
     pub run_id: Option<i64>,
     pub started_at: Option<chrono::DateTime<chrono::Utc>>,
     pub last_finished_at: Option<chrono::DateTime<chrono::Utc>>,

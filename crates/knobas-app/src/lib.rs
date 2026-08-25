@@ -174,8 +174,21 @@ pub fn run() {
             commands::entity::recent_activity,
             commands::search::search,
             commands::sources::demo_load,
+            commands::sources::list_adapters,
+            commands::sources::list_sources,
+            commands::sources::add_source,
+            commands::sources::update_source,
+            commands::sources::delete_source,
+            commands::sources::set_source_secret,
+            commands::sources::test_source,
+            commands::sources::credential_health,
             commands::sources::sync_now,
             commands::sources::sync_now_with_progress,
+            commands::sources::sync_all,
+            commands::sources::sync_status,
+            commands::sources::list_sync_runs,
+            commands::sources::db_stats,
+            commands::sources::reindex_fts,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

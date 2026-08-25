@@ -506,3 +506,64 @@ async fn trigger_all_skips_the_disabled_and_the_ones_needing_a_human() {
     assert!(!started.is_empty());
     retire(&pool, &ids).await;
 }
+
+/// `trigger` says `running` **before it returns**.
+///
+/// P3 hands the caller a run id at once and the command's docs promise
+/// `sync:state` carries the run; emitting from inside the spawned task would
+/// make that a race the frontend loses on a busy machine -- and loses silently,
+/// because the terminal event still arrives. The assertion is therefore taken
+/// the instant `trigger` returns, with nothing awaited in between.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_trigger_says_running_before_it_returns() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed(&pool, 1).await;
+    let id = ids[0].clone();
+
+    #[derive(Default)]
+    struct Recorder(std::sync::Mutex<Vec<SourceSyncStatus>>);
+    impl SyncEvents for Recorder {
+        fn sync_state(&self, s: SourceSyncStatus) {
+            self.0.lock().unwrap().push(s);
+        }
+        fn source_health(&self, _h: knobas_sync::config::CredentialHealth) {}
+        fn activity_new(&self, _r: knobas_core::activity::ActivityRow) {}
+    }
+
+    let events = Arc::new(Recorder::default());
+    let connector = knobas_db::test_util::test_connector().await;
+    let scheduler = Scheduler::start(SchedulerDeps {
+        pool: sched_pool,
+        connections: Arc::new(TestConnections(connector)),
+        registry: Arc::new(SlowRegistry {
+            inside: Arc::new(AtomicUsize::new(0)),
+            peak: Arc::new(AtomicUsize::new(0)),
+            dwell: Duration::from_secs(5),
+        }),
+        secrets: Arc::new(MemoryStore::new()),
+        events: Arc::clone(&events) as Arc<dyn SyncEvents>,
+    })
+    .await
+    .unwrap();
+
+    let run_id = scheduler
+        .trigger(&id, SyncTrigger::Manual, None)
+        .await
+        .unwrap();
+    // No await between the trigger and this read.
+    let seen = events.0.lock().unwrap().clone();
+    let first = seen
+        .first()
+        .expect("a running sync:state must be emitted before trigger returns");
+    assert!(first.running);
+    assert_eq!(first.run_id, Some(run_id));
+    assert_eq!(first.source_id, id);
+    assert!(
+        first.next_run_at.is_none(),
+        "a run in flight has no next time to count down to"
+    );
+
+    scheduler.shutdown().await;
+    retire(&pool, &ids).await;
+}

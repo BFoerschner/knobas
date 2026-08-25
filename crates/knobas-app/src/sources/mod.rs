@@ -5,7 +5,9 @@
 //! lives here, with tests, because a `#[tauri::command]` cannot be called from
 //! one.
 
+pub mod crud;
 pub mod demo;
+pub mod progress;
 pub mod registry;
 
 mod events;
@@ -90,6 +92,105 @@ pub fn state<R: tauri::Runtime>(
 ) -> Result<tauri::State<'_, SourcesState>, crate::IpcError> {
     app.try_state::<SourcesState>()
         .ok_or_else(|| crate::IpcError::not_ready("the sync engine is still starting".to_owned()))
+}
+
+/// What the Add-source form submits. Carries the typed secret, which goes to
+/// the keychain and never to Postgres (§14).
+#[derive(Debug, serde::Deserialize)]
+pub struct NewSource {
+    pub id: String,
+    pub adapter_kind: String,
+    pub display_name: String,
+    pub base_url: String,
+    pub auth_kind: knobas_source::AuthMethod,
+    pub config: serde_json::Value,
+    pub secret: SecretInput,
+    pub sync_interval_secs: u32,
+    pub enabled: bool,
+}
+
+/// What *Edit source* may change.
+///
+/// `id` and `adapter_kind` are absent **on purpose**: the instance id is the
+/// entity namespace, baked into every entity id, link and activity row, and is
+/// therefore immutable (P10). `display_name` is the renameable one.
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct SourcePatch {
+    pub display_name: Option<String>,
+    pub base_url: Option<String>,
+    pub config: Option<serde_json::Value>,
+    pub sync_interval_secs: Option<u32>,
+    pub enabled: Option<bool>,
+}
+
+/// A typed credential on its way in. Never logged, never returned.
+#[derive(Clone, serde::Deserialize)]
+pub struct SecretInput {
+    pub value: String,
+}
+
+/// Hand-written for the reason `knobas_secrets::Secret`'s is: a derived
+/// `Debug` puts the credential into every `tracing` line and every panic
+/// message that ever formats a struct containing one.
+impl std::fmt::Debug for SecretInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SecretInput")
+            .field("value", &"<redacted>")
+            .finish()
+    }
+}
+
+/// An unsaved (or saved) source to test a connection for.
+///
+/// `secret: None` **with** `source_id` set re-tests the stored credential,
+/// which is what *Test connection* on an existing source does.
+#[derive(Debug, serde::Deserialize)]
+pub struct SourceDraft {
+    pub source_id: Option<String>,
+    pub adapter_kind: String,
+    pub base_url: String,
+    /// `None` for a source that needs no credential at all -- the mock, and
+    /// any read-only internal service. Not a placeholder method with an empty
+    /// secret: an adapter must be able to tell "no auth" from "auth
+    /// configured, secret missing" (P6).
+    pub auth_kind: Option<knobas_source::AuthMethod>,
+    pub config: serde_json::Value,
+    pub secret: Option<SecretInput>,
+}
+
+/// One row of the sources view.
+#[derive(Debug, serde::Serialize)]
+pub struct SourceSummary {
+    pub id: String,
+    pub adapter_kind: String,
+    pub display_name: String,
+    pub base_url: String,
+    pub enabled: bool,
+    pub sync_interval_secs: u32,
+    pub config: serde_json::Value,
+    pub health: knobas_sync::config::CredentialHealth,
+    pub last_run: Option<knobas_sync::run_log::SyncRunRow>,
+    pub next_run_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub item_count: i64,
+    /// From the adapter's descriptor template, so the sources view labels a
+    /// source's kinds without a hardcoded table (§3a).
+    pub kinds: Vec<knobas_source::KindInfo>,
+}
+
+/// What *Test connection* found.
+#[derive(Debug, serde::Serialize)]
+pub struct ConnectionReport {
+    pub ok: bool,
+    pub account: Option<String>,
+    pub server_version: Option<String>,
+    pub secret_expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// One line for the form, or `None` when it connected.
+    pub error: Option<String>,
+    /// The class the UI branches on -- `unauthorized` is what turns *Test*
+    /// into *Re-enter*, and a message is not something to branch on.
+    pub code: Option<crate::IpcErrorCode>,
+    pub elapsed_ms: u32,
+    pub detail: Option<String>,
 }
 
 /// Why a sources operation did not happen.
@@ -202,6 +303,32 @@ pub async fn start<R: tauri::Runtime>(
         );
     }
     Ok(())
+}
+
+/// A scheduler over an already-open pool, for the IPC tests. **Tests only.**
+///
+/// It exists because `start` needs an `EmbeddedDb` -- the thing that hands out
+/// connections outside every pool -- and `tests/ipc.rs` has a `test_pool`, not
+/// a database handle. Everything else is the real thing: the real registry, the
+/// real `TauriEvents`, real runs on real dedicated connections. Behind
+/// `test-util` for the reason `AppState::over_pool` is: a production caller
+/// would get a scheduler whose pool nothing owns.
+///
+/// # Errors
+/// [`sqlx::Error`] if the startup reconciliation fails.
+#[cfg(feature = "test-util")]
+pub async fn test_scheduler<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    pool: PgPool,
+) -> Result<Scheduler, sqlx::Error> {
+    Scheduler::start(SchedulerDeps {
+        connections: Arc::new(DbConnections(knobas_db::test_util::test_connector().await)),
+        pool,
+        registry: Arc::new(Registry::builtin()),
+        secrets: Arc::new(knobas_secrets::MemoryStore::new()),
+        events: Arc::new(TauriEvents::new(app.clone())),
+    })
+    .await
 }
 
 /// Stop the scheduler, cancelling whatever is in flight.
