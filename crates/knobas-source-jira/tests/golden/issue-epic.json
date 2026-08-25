@@ -1,0 +1,31 @@
+{
+  "id": "10200",
+  "self": "https://jira.tidewater.example/rest/api/2/issue/10200",
+  "key": "PAY-200",
+  "fields": {
+    "summary": "SEPA payout reliability",
+    "description": "Umbrella for the payout retry work.",
+    "issuetype": { "id": "10000", "name": "Epic", "subtask": false },
+    "status": { "id": "3", "name": "In Progress" },
+    "project": { "id": "10000", "key": "PAY", "name": "Payments" },
+    "assignee": null,
+    "reporter": { "name": "lena.hoffmann", "displayName": "Lena Hoffmann", "active": true },
+    "created": "2026-07-30T09:00:00.000+0200",
+    "updated": "2026-08-22T16:32:00.000+0200",
+    "customfield_10009": "SEPA reliability",
+    "comment": {
+      "startAt": 0,
+      "maxResults": 1,
+      "total": 3,
+      "comments": [
+        {
+          "id": "20010",
+          "author": { "name": "lena.hoffmann", "displayName": "Lena Hoffmann", "active": true },
+          "body": "Scope is retries only; reconciliation stays out.",
+          "created": "2026-08-01T10:00:00.000+0200",
+          "updated": "2026-08-01T10:00:00.000+0200"
+        }
+      ]
+    }
+  }
+}

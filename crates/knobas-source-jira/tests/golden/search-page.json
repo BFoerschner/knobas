@@ -1,0 +1,86 @@
+{
+  "expand": "schema,names",
+  "startAt": 0,
+  "maxResults": 2,
+  "total": 3,
+  "issues": [
+    {
+      "expand": "operations,editmeta,changelog",
+      "id": "10231",
+      "self": "https://jira.tidewater.example/rest/api/2/issue/10231",
+      "key": "PAY-231",
+      "fields": {
+        "summary": "Retry failed SEPA payouts",
+        "description": "Payouts that bounce with a retryable SEPA error should be retried with backoff.",
+        "issuetype": { "id": "10001", "name": "Story", "subtask": false },
+        "status": { "id": "3", "name": "In Progress" },
+        "priority": { "id": "2", "name": "High" },
+        "project": { "id": "10000", "key": "PAY", "name": "Payments" },
+        "assignee": { "name": "mara.lindqvist", "key": "JIRAUSER10100", "displayName": "Mara Lindqvist", "active": true },
+        "reporter": { "name": "priya.raman", "key": "JIRAUSER10101", "displayName": "Priya Raman", "active": true },
+        "created": "2026-08-14T09:02:11.000+0200",
+        "updated": "2026-08-22T13:48:00.000+0200",
+        "labels": ["payments", "sepa"],
+        "customfield_10008": "PAY-200",
+        "comment": {
+          "startAt": 0,
+          "maxResults": 2,
+          "total": 2,
+          "comments": [
+            {
+              "id": "20001",
+              "author": { "name": "priya.raman", "displayName": "Priya Raman", "active": true },
+              "body": "The bank returns AC04 for closed accounts - those must not be retried.",
+              "created": "2026-08-21T11:10:00.000+0200",
+              "updated": "2026-08-21T11:10:00.000+0200"
+            },
+            {
+              "id": "20002",
+              "author": { "name": "mara.lindqvist", "displayName": "Mara Lindqvist", "active": true },
+              "body": "Backoff is in; the retry budget still needs a cap.",
+              "created": "2026-08-22T13:48:00.000+0200",
+              "updated": "2026-08-22T13:48:00.000+0200"
+            }
+          ]
+        },
+        "worklog": {
+          "startAt": 0,
+          "maxResults": 1,
+          "total": 1,
+          "worklogs": [
+            {
+              "id": "30001",
+              "author": { "name": "mara.lindqvist", "displayName": "Mara Lindqvist", "active": true },
+              "comment": "pairing on the retry budget",
+              "started": "2026-08-22T09:00:00.000+0200",
+              "timeSpent": "1h 30m",
+              "timeSpentSeconds": 5400,
+              "created": "2026-08-22T10:31:00.000+0200",
+              "updated": "2026-08-22T10:31:00.000+0200",
+              "issueId": "10231"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "10240",
+      "self": "https://jira.tidewater.example/rest/api/2/issue/10240",
+      "key": "PAY-240",
+      "fields": {
+        "summary": "Add a retry budget metric",
+        "description": null,
+        "issuetype": { "id": "10002", "name": "Task", "subtask": false },
+        "status": { "id": "1", "name": "To Do" },
+        "project": { "id": "10000", "key": "PAY", "name": "Payments" },
+        "assignee": null,
+        "reporter": { "name": "mara.lindqvist", "displayName": "Mara Lindqvist", "active": true },
+        "created": "2026-08-20T08:00:00.000+0200",
+        "updated": "2026-08-22T10:12:00.000+0200",
+        "labels": [],
+        "comment": { "startAt": 0, "maxResults": 0, "total": 0, "comments": [] },
+        "worklog": { "startAt": 0, "maxResults": 0, "total": 0, "worklogs": [] }
+      }
+    }
+  ]
+}
