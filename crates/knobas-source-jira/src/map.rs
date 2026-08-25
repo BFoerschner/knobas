@@ -271,9 +271,18 @@ mod tests {
         // The zone every JQL literal is rendered in, read off the server's own
         // clock rather than guessed from a timezone database.
         assert_eq!(info.offset_secs(), 7_200);
-        // A server that will not say is read as UTC: over-fetching by an hour
-        // is safe, under-fetching loses items.
-        assert_eq!(crate::model::ServerInfo::default().offset_secs(), 0);
+        // A server that will not say is read as the *lowest* real offset, not
+        // as UTC: guessing high moves the query's lower bound forward and
+        // skips edits permanently (a UTC-05 server would lose five hours on
+        // every run), guessing low only re-reads what was already delivered.
+        assert_eq!(
+            crate::model::ServerInfo::default().offset_secs(),
+            crate::time::MIN_UTC_OFFSET_SECS
+        );
+        // An unparseable serverTime takes the same safe road as a missing one.
+        let broken: crate::model::ServerInfo =
+            serde_json::from_value(serde_json::json!({ "serverTime": "yesterday" })).unwrap();
+        assert_eq!(broken.offset_secs(), crate::time::MIN_UTC_OFFSET_SECS);
 
         let me: crate::model::Myself = serde_json::from_value(serde_json::json!({
             "name": "mara.lindqvist",

@@ -213,13 +213,22 @@ pub(crate) struct ServerInfo {
 }
 
 impl ServerInfo {
-    /// The server's UTC offset in seconds; `0` when the field is missing or
-    /// unreadable (over-fetching is safe, under-fetching loses items).
+    /// The server's UTC offset in seconds.
+    ///
+    /// A server that will not say falls back to
+    /// [`crate::time::MIN_UTC_OFFSET_SECS`], **not** to zero. Zero looks like
+    /// the neutral choice and is not: the JQL literal is read back in the
+    /// server's own zone, so assuming an offset higher than the truth moves the
+    /// query's lower bound *forward*. For a Jira at UTC-05 that silently skips
+    /// five hours of edits on every run and never goes back for them, while the
+    /// error in the other direction only re-reads work already done -- and
+    /// upserts are idempotent. Over-fetching is recoverable; under-fetching is
+    /// not, so the fallback is the lowest offset any real zone uses.
     pub(crate) fn offset_secs(&self) -> i32 {
         self.server_time
             .as_deref()
             .and_then(crate::time::parse_offset_secs)
-            .unwrap_or(0)
+            .unwrap_or(crate::time::MIN_UTC_OFFSET_SECS)
     }
 }
 

@@ -78,6 +78,15 @@ impl JiraCursor {
     }
 
     /// The lower bound of the next `updated >=` clause.
+    ///
+    /// On the one run after the server's offset changed this reaches further
+    /// back than the window [`Self::advanced`] recorded `seen` for, so that run
+    /// re-delivers what falls in between. That is deliberate -- widening is how
+    /// no item falls in the daylight-saving seam, and `advanced` cannot know an
+    /// offset that has not been observed yet. It is safe only because the run
+    /// takes its new watermark as `max(previous, newest delivered)`: without
+    /// that, a re-delivered older item would drag the watermark backwards, the
+    /// same oscillation the minute-flooring above exists to prevent.
     pub(crate) fn since(&self, current_offset_secs: i32) -> Option<DateTime<Utc>> {
         let watermark = self.updated_to?;
         let minutes = if current_offset_secs == self.tz_offset_secs {
@@ -105,7 +114,24 @@ impl JiraCursor {
         tz_offset_secs: i32,
         delivered: &[(String, DateTime<Utc>)],
     ) -> Self {
-        let floor = watermark - chrono::Duration::minutes(OVERLAP_MINUTES);
+        // The band the next query will really return, not the band the
+        // arithmetic suggests. `since` subtracts whole minutes, but the literal
+        // it is rendered into has minute resolution and truncates *downwards*,
+        // so the query's true lower bound is up to 59 s earlier than
+        // `watermark - OVERLAP_MINUTES`. Filtering `seen` on the un-truncated
+        // value drops every pair delivered in that band while the query keeps
+        // returning them: run N+1 re-emits one, its watermark moves *backwards*
+        // to that item, run N+2 moves it forward again, and an idle poll
+        // oscillates between two cursors forever -- battery clause 2 failing in
+        // steady state, not at a DST edge.
+        //
+        // Asking `jql_floor` rather than truncating here keeps the two
+        // definitions from drifting apart again: it renders the literal and
+        // reads it back, so the floor is the query's meaning by construction.
+        let floor = crate::time::jql_floor(
+            watermark - chrono::Duration::minutes(OVERLAP_MINUTES),
+            tz_offset_secs,
+        );
         let mut seen: Vec<Seen> = delivered
             .iter()
             .filter(|(_, u)| *u >= floor)
@@ -273,6 +299,95 @@ mod tests {
             encode(["PAY-231", "PAY-240", "PAY-219"]),
             encode(["PAY-219", "PAY-231", "PAY-240"])
         );
+    }
+
+    /// The instant Jira will read this cursor's next `updated >=` literal as.
+    ///
+    /// Deliberately goes *through* [`crate::time::format_jql_time`] and parses
+    /// the literal back by hand, rather than calling `jql_floor` or
+    /// recomputing a constant: the property under test is that the `seen`
+    /// filter and the rendered query agree, so a test that recomputed the
+    /// floor its own way could agree with neither and still pass.
+    fn query_floor(c: &JiraCursor, offset: i32) -> DateTime<Utc> {
+        let literal = crate::time::format_jql_time(
+            c.since(offset).expect("this cursor has a watermark"),
+            offset,
+        );
+        let zone = chrono::FixedOffset::east_opt(offset).expect("a real offset");
+        chrono::NaiveDateTime::parse_from_str(&literal, "%Y-%m-%d %H:%M")
+            .expect("a literal this crate rendered")
+            .and_local_timezone(zone)
+            .single()
+            .expect("a fixed offset has no ambiguous local times")
+            .with_timezone(&Utc)
+    }
+
+    /// **Everything the next query returns and this run already delivered must
+    /// be recognised.** Otherwise the overlap re-emits an item the sink has
+    /// seen, and -- because the run takes its watermark from what it emitted --
+    /// the watermark moves *backwards* onto that older item. The next run
+    /// pushes it forward again, and an idle source alternates between two
+    /// cursors on every poll, forever.
+    ///
+    /// The gap this pins was real: `advanced` filtered on
+    /// `watermark - 2min` at full precision while the query truncates to the
+    /// minute, so up to 59 s of delivered pairs sat inside the window and
+    /// outside `seen`. A watermark carrying seconds is what exposes it, which
+    /// is why this test does not use a round minute.
+    #[test]
+    fn nothing_the_next_query_returns_is_forgotten() {
+        let watermark = t("2026-08-22T11:48:30.000+0000");
+        let offset = 7_200;
+        let delivered = [
+            // Inside the truncated minute the literal will name, outside the
+            // un-truncated arithmetic. This is the one that used to be lost.
+            ("PAY-1".to_owned(), t("2026-08-22T11:46:10.000+0000")),
+            ("PAY-2".to_owned(), t("2026-08-22T11:48:30.000+0000")),
+            // Genuinely older than the window; the query will not return it.
+            ("PAY-0".to_owned(), t("2026-08-22T11:40:00.000+0000")),
+        ];
+        let c = JiraCursor::advanced(watermark, offset, &delivered);
+        let floor = query_floor(&c, offset);
+
+        for (key, updated) in &delivered {
+            if *updated >= floor {
+                assert!(
+                    c.already_delivered(key, Some(*updated)),
+                    "{key} @ {updated} is inside the next query's window (>= {floor}) \
+                     but is not in seen -- it will be re-emitted and drag the watermark back"
+                );
+            }
+        }
+        // The reviewer's demonstration, named outright.
+        assert!(c.already_delivered("PAY-1", Some(t("2026-08-22T11:46:10.000+0000"))));
+        // And the set is still bounded: what the query cannot return is dropped.
+        assert!(!c.already_delivered("PAY-0", Some(t("2026-08-22T11:40:00.000+0000"))));
+    }
+
+    /// The same invariant swept across zones and second-offsets, because the
+    /// truncation interacts with both.
+    #[test]
+    fn nothing_the_next_query_returns_is_forgotten_in_any_zone() {
+        for hours in [-5, 0, 2, 5, 14] {
+            let offset = hours * 3_600;
+            for second in [0, 1, 17, 30, 59] {
+                let watermark = t(&format!("2026-08-22T11:48:{second:02}.000+0000"));
+                let delivered: Vec<(String, DateTime<Utc>)> = (0..150)
+                    .map(|i| (format!("PAY-{i}"), watermark - chrono::Duration::seconds(i)))
+                    .collect();
+                let c = JiraCursor::advanced(watermark, offset, &delivered);
+                let floor = query_floor(&c, offset);
+                for (key, updated) in &delivered {
+                    if *updated >= floor {
+                        assert!(
+                            c.already_delivered(key, Some(*updated)),
+                            "offset {hours}h second {second}: {key} @ {updated} \
+                             is in the window (>= {floor}) but not in seen"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     /// A cursor is stored in a text column and read on every run; an unbounded
