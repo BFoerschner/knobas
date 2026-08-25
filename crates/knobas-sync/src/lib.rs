@@ -79,6 +79,7 @@ macro_rules! closed_vocabulary {
     };
 }
 
+pub mod config;
 pub mod health;
 pub mod progress;
 pub mod run_log;

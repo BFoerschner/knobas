@@ -13,6 +13,7 @@ async-trait.workspace = true
 # own timestamps stay in the database and are never read back here.
 chrono.workspace = true
 knobas-core = { path = "../knobas-core" }
+knobas-secrets = { path = "../knobas-secrets" }
 knobas-source = { path = "../knobas-source" }
 serde.workspace = true
 serde_json.workspace = true
