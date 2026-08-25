@@ -35,6 +35,7 @@
 
 pub mod corpus;
 pub mod group;
+pub mod home;
 pub mod lists;
 pub mod query;
 pub mod snippet;
@@ -47,6 +48,7 @@ use std::time::Instant;
 use sqlx::PgPool;
 
 pub use group::RawHit;
+pub use home::LauncherBoard;
 pub use lists::{BuiltinList, SmartListSummary};
 pub use query::{EffectiveFilters, Parsed, merge, parse};
 pub use types::{
@@ -185,6 +187,32 @@ impl Searcher {
             groups,
             took_ms: took_ms(started),
         })
+    }
+
+    /// What an empty box answers with: the smart lists and the newest items.
+    ///
+    /// Spec §4's board. Deliberately not a search: a query with no text and no
+    /// filter would scan the whole mirror to return nothing, and the two reads
+    /// here are index-backed instead.
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Db`] if either half cannot be read.
+    pub async fn launcher_board(&self) -> Result<LauncherBoard, SearchError> {
+        Ok(LauncherBoard {
+            smart_lists: self.smart_lists().await?,
+            recent: home::recent(&self.pool, home::RECENT_LIMIT).await?,
+        })
+    }
+
+    /// The plan the board's recency read runs under.
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Db`] if the plan cannot be read.
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn explain_recent(&self) -> Result<String, SearchError> {
+        home::explain_recent(&self.pool, home::RECENT_LIMIT).await
     }
 
     /// Every built-in smart list, with its count and its change badge.
