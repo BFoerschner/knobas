@@ -30,6 +30,9 @@ const JIRA_BUILD_NUMBER: u64 = 917_000;
 /// authenticates as.
 const MYSELF: &str = "mara";
 
+/// This router's key in [`MockState`]'s per-API base-URL map.
+pub(crate) const API: &str = "jira";
+
 pub fn router(state: Arc<MockState>) -> Router {
     Router::new()
         .route("/rest/api/2/serverInfo", get(server_info))
@@ -58,7 +61,11 @@ pub fn router(state: Arc<MockState>) -> Router {
             state.clone(),
             jira_guard,
         ))
-        .with_state(state)
+        .with_state(state.clone())
+        // Merged *after* the layer, which is what exempts `/__mock/*` from the
+        // product middleware: axum applies a layer to the routes present when
+        // it is added, never to ones merged in later.
+        .merge(crate::admin::router(state))
 }
 
 /// A Jira user object, as the WADL's `user` definition declares it.
@@ -109,7 +116,7 @@ async fn server_info(State(s): State<Arc<MockState>>) -> Json<Value> {
         .expect("a literal RFC 3339 timestamp")
         .with_timezone(&chrono::Utc);
     Json(json!({
-        "baseUrl": s.base_url(),
+        "baseUrl": s.base_url(API),
         "version": JIRA_VERSION,
         "versionNumbers": [9, 17, 0],
         "deploymentType": "Server",
@@ -122,7 +129,7 @@ async fn server_info(State(s): State<Arc<MockState>>) -> Json<Value> {
 }
 
 async fn myself(State(s): State<Arc<MockState>>) -> Json<Value> {
-    let base = s.base_url();
+    let base = s.base_url(API);
     let username = knobas_source_mock::fixture()
         .person(MYSELF)
         .expect("the fixture has Mara")
@@ -472,7 +479,7 @@ fn selections(q: &HashMap<String, String>) -> Result<(FieldSel, ExpandSel), Stri
 
 async fn search(State(s): State<Arc<MockState>>, req: Request) -> Response {
     let q = query_map(&req);
-    let base = s.base_url();
+    let base = s.base_url(API);
     let off = s.server_offset();
 
     let jql = match parse_jql(q.get("jql").map(String::as_str).unwrap_or_default(), off) {
@@ -558,7 +565,7 @@ async fn issue(
     };
     Json(issue_json(
         &i,
-        &s.base_url(),
+        &s.base_url(API),
         s.server_offset(),
         &fields,
         &expand,
@@ -601,7 +608,7 @@ async fn issue_comments(
     let start = start as usize;
     let max = asked.min(s.max_results_cap());
     Json(comments_envelope(
-        &s.base_url(),
+        &s.base_url(API),
         &i,
         s.server_offset(),
         start,
@@ -617,7 +624,7 @@ async fn issue_worklogs(
     let Some(i) = find_issue(&s, &id_or_key) else {
         return no_such_issue(&id_or_key);
     };
-    Json(worklogs_envelope(&s.base_url(), &i, s.server_offset())).into_response()
+    Json(worklogs_envelope(&s.base_url(API), &i, s.server_offset())).into_response()
 }
 
 /// The M2 write-back path, built now because it costs nothing (interfaces §5).
@@ -656,7 +663,7 @@ async fn post_comment(
     (
         StatusCode::CREATED,
         Json(comment_json(
-            &s.base_url(),
+            &s.base_url(API),
             &after,
             created,
             s.server_offset(),

@@ -98,7 +98,11 @@ pub struct JiraWorklog {
 }
 
 /// The failure a mock server should exhibit instead of answering normally.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+///
+/// Serde-tagged so `POST /__mock/fault` can carry one as
+/// `{"kind":"rate_limited","retry_after_secs":5}`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MockFault {
     #[default]
     None,
@@ -130,7 +134,13 @@ pub struct MockState {
     inner: RwLock<Inner>,
     violations: ViolationLog,
     fault: Mutex<MockFault>,
-    base_url: RwLock<String>,
+    /// One entry per served API (`"jira"`, `"teamcity"`).
+    ///
+    /// Per-API and not a single string because [`spawn_all`](crate::spawn_all)
+    /// mounts both routers over **one** state on **two** ports: a shared field
+    /// would make whichever server bound last own every `self` link in the
+    /// other one's bodies.
+    base_urls: RwLock<std::collections::HashMap<String, String>>,
     server_offset: RwLock<FixedOffset>,
 }
 
@@ -141,7 +151,7 @@ impl MockState {
             inner: RwLock::new(Inner::fresh()),
             violations: ViolationLog::default(),
             fault: Mutex::new(MockFault::None),
-            base_url: RwLock::new(String::new()),
+            base_urls: RwLock::new(std::collections::HashMap::new()),
             server_offset: RwLock::new(default_server_offset()),
         })
     }
@@ -154,16 +164,23 @@ impl MockState {
         *self.write() = Inner::fresh();
     }
 
-    /// Called once the listener has bound, so `self` links can name the port.
-    pub fn set_base_url(&self, url: &str) {
-        *self.base_url.write().unwrap_or_else(|e| e.into_inner()) = url.to_owned();
+    /// Called once `api`'s listener has bound, so its `self` links can name
+    /// the port it actually got.
+    pub fn set_base_url(&self, api: &str, url: &str) {
+        self.base_urls
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(api.to_owned(), url.to_owned());
     }
 
-    pub fn base_url(&self) -> String {
-        self.base_url
+    /// `api`'s public base URL, or the empty string before it has bound.
+    pub fn base_url(&self, api: &str) -> String {
+        self.base_urls
             .read()
             .unwrap_or_else(|e| e.into_inner())
-            .clone()
+            .get(api)
+            .cloned()
+            .unwrap_or_default()
     }
 
     pub fn violations(&self) -> &ViolationLog {

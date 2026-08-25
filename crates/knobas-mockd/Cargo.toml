@@ -10,11 +10,17 @@ license.workspace = true
 # that vendors its own `http` would put a second copy in the tree; check with
 # `cargo tree -p knobas-mockd -d` after any bump.
 axum = "0.8"
-tokio = { workspace = true, features = ["net", "sync", "time"] }
+tokio = { workspace = true, features = ["net", "sync", "time", "rt-multi-thread", "macros", "signal"] }
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
 knobas-source-mock = { path = "../knobas-source-mock" }
+
+# The container entry point. The library half needs none of this; the binary is
+# what `testenv/docker-compose.yml` runs.
+[[bin]]
+name = "mockd"
+path = "src/bin/mockd.rs"
 
 [build-dependencies]
 quick-xml = "0.41"

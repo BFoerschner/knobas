@@ -18,7 +18,7 @@ use crate::allowlist;
 use crate::state::{MockFault, MockState};
 
 /// One request that the vendored contract does not define, as mockd saw it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Violation {
     pub kind: ViolationKind,
     /// Upper-case HTTP verb.
@@ -34,7 +34,8 @@ pub struct Violation {
 }
 
 /// Why a request violated the contract.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ViolationKind {
     /// The path is not in the contract at all (a Cloud-dialect path, say).
     UnknownPath,

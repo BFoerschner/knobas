@@ -84,6 +84,7 @@
 //! non-empty `Bearer`/`Basic` credential; the constants exist so no test
 //! hard-codes a string that silently stops meaning anything.
 
+pub mod admin;
 pub mod allowlist;
 pub mod jira;
 pub mod jql;
@@ -153,6 +154,52 @@ pub async fn spawn_mock_teamcity() -> MockServer {
     serve(teamcity::router(state.clone()), state, "teamcity").await
 }
 
+/// Both mock servers over **one** [`MockState`], each on its own ephemeral
+/// port.
+///
+/// One state and not two because a cross-source test — a TeamCity build whose
+/// branch carries a Jira issue key — has to see one coherent company. Each
+/// server still owns its own base URL, so the links in a Jira body point at the
+/// Jira port and the links in a TeamCity body point at the TeamCity one.
+pub async fn spawn_all() -> MockCluster {
+    let state = MockState::from_fixture();
+    let jira = serve(jira::router(state.clone()), state.clone(), "jira").await;
+    let teamcity = serve(teamcity::router(state.clone()), state, "teamcity").await;
+    MockCluster { jira, teamcity }
+}
+
+/// Every mock server in one handle. Dropping it shuts both down.
+#[derive(Debug)]
+pub struct MockCluster {
+    pub jira: MockServer,
+    pub teamcity: MockServer,
+}
+
+impl MockCluster {
+    /// The state behind **both** servers.
+    pub fn state(&self) -> Arc<MockState> {
+        self.jira.state()
+    }
+
+    /// # Panics
+    ///
+    /// If either server recorded a contract violation. The two share one log,
+    /// so this reports everything once.
+    pub fn assert_no_violations(&self) {
+        self.jira.assert_no_violations();
+    }
+
+    pub fn violations(&self) -> Vec<Violation> {
+        self.jira.violations()
+    }
+
+    /// Shuts both servers down and waits for their tasks to finish.
+    pub async fn stop(self) {
+        self.jira.stop().await;
+        self.teamcity.stop().await;
+    }
+}
+
 async fn serve(app: axum::Router, state: Arc<MockState>, api: &'static str) -> MockServer {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -160,7 +207,7 @@ async fn serve(app: axum::Router, state: Arc<MockState>, api: &'static str) -> M
     let addr = listener
         .local_addr()
         .expect("a bound listener has an address");
-    state.set_base_url(&format!("http://{addr}"));
+    state.set_base_url(api, &format!("http://{addr}"));
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
     let handle = tokio::spawn(async move {
         axum::serve(listener, app)

@@ -43,6 +43,9 @@ const TC_BUILD_NUMBER: &str = "187654";
 /// seat: the same person Jira's `myself` returns.
 const MYSELF: &str = "mara";
 
+/// This router's key in [`MockState`]'s per-API base-URL map.
+pub(crate) const API: &str = "teamcity";
+
 /// TeamCity's own default page size when a locator does not give a `count`.
 const DEFAULT_COUNT: usize = 100;
 
@@ -60,7 +63,11 @@ pub fn router(state: Arc<MockState>) -> Router {
         // verb it does not have is as unserved as a path it does not have.
         .method_not_allowed_fallback(unimplemented)
         .layer(axum::middleware::from_fn_with_state(state.clone(), guard))
-        .with_state(state)
+        .with_state(state.clone())
+        // Merged *after* the layer, which is what exempts `/__mock/*` from the
+        // product middleware: axum applies a layer to the routes present when
+        // it is added, never to ones merged in later.
+        .merge(crate::admin::router(state))
 }
 
 // -- errors, violations, the guard ------------------------------------------
@@ -305,7 +312,7 @@ fn build_json(b: &TcBuild, base: &str, s: &MockState, types: &[TcBuildType]) -> 
 }
 
 fn server_json(s: &MockState) -> Value {
-    let base = s.base_url();
+    let base = s.base_url(API);
     json!({
         "version": TC_VERSION,
         "versionMajor": 2025,
@@ -382,7 +389,7 @@ async fn build_types(State(s): State<Arc<MockState>>, req: Request) -> Response 
     if let Some(r) = fault(&s).await {
         return r;
     }
-    let base = s.base_url();
+    let base = s.base_url(API);
     let types = s.build_types();
     let full = json!({
         "count": types.len(),
@@ -410,7 +417,7 @@ async fn builds(State(s): State<Arc<MockState>>, req: Request) -> Response {
     if let Some(r) = fault(&s).await {
         return r;
     }
-    let base = s.base_url();
+    let base = s.base_url(API);
     let types = s.build_types();
     let hits: Vec<TcBuild> = loc.apply(s.builds());
     let full = json!({
@@ -451,7 +458,7 @@ async fn build_by_locator(
     let Some(b) = s.build(id) else {
         return tc_error(StatusCode::NOT_FOUND, format!("No build found by id {id}"));
     };
-    let full = build_json(&b, &s.base_url(), &s, &s.build_types());
+    let full = build_json(&b, &s.base_url(API), &s, &s.build_types());
     match project(full, sel.as_ref()) {
         Ok(v) => Json(v).into_response(),
         Err(name) => unknown_field(&s, &req, &name),
