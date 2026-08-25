@@ -99,6 +99,7 @@ The limits, until measurement says otherwise:
 - **At most 2 concurrent implementers** doing Rust work on this machine (~9.4 cores of build alone). A third is affordable only when it does no Rust compile — a docs, fixture, or pure-frontend batch.
 - **Reviewers count too.** They build and mutate in their own worktrees; treat one reviewer as roughly one implementer. Two implementers + one active reviewer is the practical ceiling.
 - **Commit per task, always.** What survived the wipe was what had been committed (4, 3, 2, 1 commits across four streams); one stream had committed nothing and lost its whole batch to the working tree. This is why the implementer rule says commit before going idle.
+- **Reclaim disk on every merge.** Each worktree carries its own `target/` (~6 GB once warm), so a five-stream fan-out is ~30 GB of duplicated build artifacts on top of the main checkout. Delete a stream's `target/` when its PR merges and when it is parked — it costs a rebuild, not any source. Do **not** collapse the worktrees onto one shared `CARGO_TARGET_DIR`: cargo locks that directory during a build, so concurrent agents would serialize and look like the no-progress stalls above.
 - **Sweep before dispatching a wave**: `ps aux | grep -E 'postgres|cargo|rustc'` and stop orphans. A crashed agent can leave an embedded Postgres cluster running, and the next wave inherits the contention.
 - Wall-clock parallelism is still the goal — it just comes from *pipelining* (implementer on stream X while a reviewer works stream Y) rather than from starting everything at once.
 
