@@ -60,6 +60,32 @@ project,created,updated,comment,worklog";
 
 /// A stop so a server that keeps reporting "more" cannot spin a run forever.
 /// At the default page size this is half a million issues.
+///
+/// Reaching it is a **failure**, never a quiet end to the walk. The descriptor
+/// claims `full_sync_exhaustive: true`, which is the engine's licence to
+/// tombstone every row a `cursor: None` run did not return -- so a truncated
+/// walk reported as `Ok` authorises deleting whatever fell off the end. The
+/// query is `ORDER BY updated ASC`, so what falls off the end is the *most
+/// recently updated* work: the tickets someone is looking at today. And it is
+/// not a first-sync-only hazard, because any later `cursor: None` run
+/// re-enters the same path against a populated mirror.
+///
+/// An incremental run gets the same refusal, and unconditionally. Two reasons,
+/// the second of which was found by mutating the first away:
+///
+/// 1. The stop exists for a server that mispages -- one that keeps reporting
+///    "more" without delivering it -- and "progress" measured against such a
+///    server is progress against a number it is getting wrong, so advancing a
+///    watermark on that basis skips whatever sat in the gap.
+/// 2. **It is the only thing that terminates the loop.** The other exit is
+///    `start_at >= total`, and `total` is the very number the server is
+///    inflating. Restricting the refusal to full syncs -- which looks like the
+///    careful, narrower fix, since no sweep follows an incremental -- makes an
+///    incremental against such a server run forever. Verified: the test below
+///    does not terminate in 180 s with `&& cursor.is_none()` added here.
+///
+/// A source genuinely this large is narrowed with `projects` or `jql_filter`,
+/// which is what the message says.
 const MAX_PAGES: u32 = 5_000;
 
 pub(crate) struct SyncRun<'a> {
@@ -132,8 +158,19 @@ impl SyncRun<'_> {
             }
             start_at += returned;
             pages += 1;
-            if start_at >= total || pages >= MAX_PAGES {
+            if start_at >= total {
                 break;
+            }
+            if pages >= MAX_PAGES {
+                // Not a `break`: see the note on MAX_PAGES. Leaving the loop
+                // here and returning `Ok` would hand the engine a partial walk
+                // wearing a completed one's clothes.
+                return Err(SourceError::Protocol(format!(
+                    "the Jira search did not reach its own reported total of {total} issues \
+                     within {MAX_PAGES} pages of {}; refusing to report a partial walk as a \
+                     completed sync. Narrow this source with `projects` or `jql_filter`.",
+                    self.cfg.page_size
+                )));
             }
         }
 
@@ -255,6 +292,9 @@ mod tests {
         /// Extra `total` the fake claims beyond what it will ever return -- a
         /// server whose index shrank under the run.
         phantom_total: u32,
+        /// A server that never stops promising more: every page carries one
+        /// fresh issue and a `total` the walk can never reach.
+        endless: bool,
         unauthorized: bool,
         calls: Mutex<Vec<String>>,
     }
@@ -267,6 +307,7 @@ mod tests {
                 worklogs: HashMap::new(),
                 offset_secs: 2 * 3600,
                 phantom_total: 0,
+                endless: false,
                 unauthorized: false,
                 calls: Mutex::new(Vec::new()),
             }
@@ -353,6 +394,15 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(format!("search@{start_at}"));
+            if self.endless {
+                return Ok(serde_json::from_value(serde_json::json!({
+                    "startAt": start_at, "maxResults": max_results, "total": u32::MAX,
+                    "issues": [issue(
+                        &format!("PAY-{start_at}"), "2026-08-22T11:48:00.000+0000", 0, 0
+                    )]
+                }))
+                .unwrap());
+            }
             let since = since_of(jql, self.offset_secs);
             let matching: Vec<serde_json::Value> = self
                 .issues
@@ -850,6 +900,82 @@ mod tests {
         assert_eq!(
             again, cursor,
             "a run that emitted nothing must return the bytes it was handed, zone change included"
+        );
+    }
+
+    /// A walk that hits the page cap **fails**; it never comes back as a
+    /// completed sync.
+    ///
+    /// This is the one that matters most, and it is the one mockd structurally
+    /// cannot see: the fixture is seven issues, so the cap is a real-server-only
+    /// failure mode. `descriptor_template().full_sync_exhaustive` is `true`,
+    /// which is the engine's licence to tombstone every row a `cursor: None`
+    /// run did not return. An `Ok` here is therefore not "we synced a bit less"
+    /// -- it is authorisation to delete everything past the cap. And because
+    /// the query is `ORDER BY updated ASC`, what falls off the end is the
+    /// newest work, so the rows offered up for deletion are exactly the ones
+    /// someone is looking at today.
+    ///
+    /// The assertion is the *outcome*, not the emission: items do reach the
+    /// sink before the cap, and that is fine. What must not happen is the run
+    /// telling the engine it saw the whole corpus.
+    #[tokio::test]
+    async fn a_walk_that_hits_the_page_cap_fails_instead_of_reporting_a_completed_sync() {
+        let api = FakeApi {
+            endless: true,
+            ..FakeApi::default()
+        };
+        let mut sink = VecSink(Vec::new());
+        let got = run(&api, &cfg(serde_json::json!({})), None, &mut sink)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&got, SourceError::Protocol(m) if m.contains("partial walk")),
+            "{got:?}"
+        );
+        // The cap fired where it is meant to, rather than the run ending for
+        // some other reason that happens to look the same.
+        assert_eq!(api.count("search@"), MAX_PAGES as usize);
+        assert!(
+            !sink.0.is_empty(),
+            "the items before the cap are still delivered; it is the verdict that changes"
+        );
+    }
+
+    /// An incremental run gets the same refusal.
+    ///
+    /// Tempting to let it through: no sweep follows an incremental, the items
+    /// were delivered, and the watermark advanced honestly under
+    /// `ORDER BY updated ASC`, so the next run would resume where this one
+    /// stopped. That narrower fix is worse than it looks, for a reason the
+    /// mutation check turned up rather than the argument: with
+    /// `&& cursor.is_none()` on the cap, **this test does not terminate**. The
+    /// loop's only other exit is `start_at >= total`, and `total` is the number
+    /// the server is inflating -- so an incremental against a mispaging server
+    /// has no stop at all. (Measured: no completion in 180 s, against 1.7 s for
+    /// the whole lib suite.)
+    ///
+    /// The refusal is therefore unconditional, and this pins it rather than
+    /// leaving it to a comment.
+    #[tokio::test]
+    async fn an_incremental_run_that_hits_the_page_cap_fails_too() {
+        let settled = FakeApi {
+            issues: five_issues(),
+            ..FakeApi::default()
+        };
+        let (_, cursor) = keys_of(&settled, &cfg(serde_json::json!({})), None).await;
+
+        let api = FakeApi {
+            endless: true,
+            ..FakeApi::default()
+        };
+        let mut sink = VecSink(Vec::new());
+        let got = run(&api, &cfg(serde_json::json!({})), Some(cursor), &mut sink)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&got, SourceError::Protocol(m) if m.contains("partial walk")),
+            "{got:?}"
         );
     }
 
