@@ -418,7 +418,12 @@ pub trait SecretStore: Send + Sync {
 pub struct KeyringStore { service: String }     // the real one
 pub struct MemoryStore { .. }                   // every test, and CI
 pub struct Secret { pub kind: knobas_source::AuthMethod, pub value: String } // Debug redacts
-#[derive(Debug, thiserror::Error)] pub enum SecretError { Backend(String), Locked, NotFound }
+#[derive(Debug, thiserror::Error)] pub enum SecretError { Backend(String), Unavailable, NotFound }
+// `Locked` was renamed `Unavailable` in PR #19 and its meaning narrowed: it covers exactly the
+// six OSStatus values `apple-native-keyring-store` maps to `NoStorageAccess`, and NOT
+// errSecInteractionNotAllowed / errSecAuthFailed / errSecUserCanceled — a locked keychain or a
+// denied prompt on macOS arrives as `Backend`. An "Unlock your keychain" affordance built on
+// `Unavailable` alone is dead code there. See the crate docs before building on either variant.
 ```
 `just check` must never touch a real keychain: the store is injected into `AppState`, and `KeyringStore` is exercised only by a `#[ignore]`d macOS-local test.
 
