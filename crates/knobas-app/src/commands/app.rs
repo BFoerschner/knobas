@@ -98,6 +98,22 @@ impl Lifecycle {
         *self.db.lock().unwrap_or_else(PoisonError::into_inner) = state;
     }
 
+    /// Claim a retry: move `Failed` back to `Starting`, and say whether this
+    /// call is the one that now owns a bring-up.
+    ///
+    /// The check and the write are one critical section on purpose. Two quick
+    /// clicks on *Retry* would otherwise both read `Failed` and both spawn,
+    /// which is two `initdb`s racing for one data directory.
+    pub fn begin_retry(&self) -> bool {
+        let mut db = self.db.lock().unwrap_or_else(PoisonError::into_inner);
+        if matches!(*db, DbState::Failed { .. }) {
+            *db = DbState::Starting { detail: None };
+            true
+        } else {
+            false
+        }
+    }
+
     /// Hand over the shared state, once the pool is live and migrated.
     pub fn install(&self, state: AppState) {
         *self.app.lock().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(state));
@@ -215,6 +231,30 @@ pub fn frontend_ready<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(),
     let state = app.state::<Lifecycle>().get();
     app.emit(crate::events::DB_STATE, state)
         .map_err(IpcError::internal)?;
+    Ok(())
+}
+
+/// Start the database again after a failure.
+///
+/// The *Retry* button on the boot screen. A retry that only re-polled would
+/// redraw the same failure for ever -- the database has to be asked to start
+/// again, and only this side can do that.
+///
+/// Idempotent by construction: [`Lifecycle::begin_retry`] hands the bring-up
+/// to exactly one caller, so a second click while the first attempt is still
+/// running succeeds and starts nothing. That is the right answer to "start the
+/// database" when it is already starting.
+///
+/// # Errors
+///
+/// Never, today. It returns a `Result` because every command does and because
+/// a future bring-up that can refuse (a profile whose data directory is gone)
+/// has somewhere to say so.
+#[tauri::command]
+pub fn retry_database<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), IpcError> {
+    if app.state::<Lifecycle>().begin_retry() {
+        crate::spawn_bring_up(app);
+    }
     Ok(())
 }
 
@@ -338,6 +378,33 @@ mod tests {
         let error = life.pool().expect_err("there is no pool yet");
         assert_eq!(error.code, crate::IpcErrorCode::NotReady);
         assert!(error.message.contains("starting"), "{}", error.message);
+    }
+
+    /// One retry, however many callers ask for one.
+    #[test]
+    fn a_retry_is_claimed_once_and_only_out_of_a_failure() {
+        let life = Lifecycle::new();
+
+        // Nothing to retry while it is still coming up: a second `initdb` on
+        // the same data directory is the failure this prevents.
+        assert!(!life.begin_retry(), "a starting database is not retried");
+
+        life.set(DbState::Failed {
+            message: "port 5432 in use".to_owned(),
+        });
+        assert!(life.begin_retry(), "a failure can be retried");
+        assert_eq!(
+            life.get(),
+            DbState::Starting { detail: None },
+            "the retry moves the state, so the boot screen stops saying `failed`"
+        );
+        assert!(
+            !life.begin_retry(),
+            "the second click must not start a second bring-up"
+        );
+
+        life.set(DbState::Ready);
+        assert!(!life.begin_retry(), "a live database is not restarted");
     }
 
     /// ...and a bring-up that *failed* says so, rather than repeating "still

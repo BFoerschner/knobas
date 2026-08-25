@@ -29,6 +29,7 @@ pub mod demo;
 mod error;
 mod profile;
 
+pub use commands::app::{DbState, Lifecycle};
 pub use error::{IpcError, IpcErrorCode};
 pub use profile::{APP_IDENTIFIER, DEMO_FLAG, Profile};
 
@@ -58,7 +59,7 @@ pub mod events {
 use std::sync::{Mutex, PoisonError};
 
 use sqlx::PgPool;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 /// Points knobas at an already-running PostgreSQL instead of starting its own.
 ///
@@ -66,12 +67,6 @@ use tauri::Manager;
 /// for any environment where downloading and running an embedded server is not
 /// wanted. An empty value counts as unset.
 pub const DB_URL_ENV: &str = "KNOBAS_DB_URL";
-
-/// Label of the one window `tauri.conf.json` declares.
-///
-/// It is created hidden (`"visible": false`) and shown once the database is
-/// up -- see [`run`] -- so this name is load-bearing in two files at once.
-const MAIN_WINDOW: &str = "main";
 
 /// Everything a command needs, managed by Tauri and shared by every window.
 pub struct AppState {
@@ -137,49 +132,39 @@ pub fn run() {
 
     tauri::Builder::default()
         .setup(|app| {
-            // `setup` is synchronous and the database is not; `block_on` is
-            // deliberate, since every command would have to wait for the pool
-            // anyway. No `emit` from here (M0 has no events): a listener
-            // registered by the frontend cannot exist yet.
-            //
-            // It also means the whole bring-up happens before the app is
-            // usable, and a first run -- which downloads and `initdb`s
-            // PostgreSQL -- can take tens of seconds. `tauri.conf.json`
-            // therefore declares the window `"visible": false` and it is shown
-            // here, once there is something behind it: a window created up
-            // front would sit on screen as an empty white frame that does not
-            // repaint, which reads as a hung application rather than as a slow
-            // start. Nothing is lost by waiting -- the frontend has no loading
-            // state to render either, since it cannot be told when the
-            // database is ready until M0 grows events (M1 stream D). Until
-            // then the panic hook below is what makes a *failure* legible: the
-            // process dies without ever showing a window.
+            // Both managed synchronously, before anything can call in, and
+            // both for the same reason: they are what a command asks when the
+            // database is *not* up yet. `Lifecycle` is the shared state's
+            // only door (see `commands::app::Lifecycle`), so managing it here
+            // rather than after bring-up is what makes `not_ready` reachable
+            // instead of Tauri's bare "state not managed".
             let handle = app.handle().clone();
-
-            // Managed first, and synchronously: `app_status` (stream D) has to
-            // answer "which knobas is this, and is the database up yet?" from
-            // the very first frame, and when bring-up becomes asynchronous the
-            // profile must already be in state -- a command that waits for the
-            // database to know whether it is the demo is a command that cannot
-            // report a database that is still starting.
             let profile = Profile::from_args(std::env::args(), &handle.path().app_data_dir()?);
             tracing::info!(demo = profile.demo, dir = %profile.dir.display(), "profile");
-            handle.manage(profile.clone());
+            handle.manage(profile);
+            handle.manage(Lifecycle::new());
 
-            tauri::async_runtime::block_on(async move { start_database(&handle, &profile).await })?;
-
-            // By label, and a hard failure if it is missing: a config whose
-            // window was renamed would otherwise start knobas with no window
-            // at all and no hint as to why.
-            app.get_webview_window(MAIN_WINDOW)
-                .ok_or_else(|| format!("no {MAIN_WINDOW:?} window in tauri.conf.json"))?
-                .show()?;
+            // And the database comes up on its own task. M0 blocked here,
+            // which froze the event loop for the length of a first run -- a
+            // PostgreSQL download plus an `initdb`, tens of seconds -- so the
+            // window had to be created hidden to avoid showing a white frame
+            // that never repaints. It now appears immediately and renders the
+            // boot screen, which is the M0 carry-over this discharges: the app
+            // says what it is doing instead of not existing yet.
+            //
+            // Nothing is emitted from here (gotcha 9): the webview is not
+            // listening yet. `spawn_bring_up` emits as it goes and
+            // `frontend_ready` replays the current state to whoever missed it.
+            spawn_bring_up(handle);
             Ok(())
         })
         // Append-only, orchestrator-owned, grouped by owning module so a
         // stream adding a command touches one line in one group.
         .invoke_handler(tauri::generate_handler![
             commands::app::ping,
+            commands::app::app_status,
+            commands::app::frontend_ready,
+            commands::app::retry_database,
             commands::entity::recent_activity,
             commands::search::search,
             commands::sources::demo_load,
@@ -204,31 +189,82 @@ pub fn run() {
         });
 }
 
-/// Start (or connect to) the database, migrate it, and hand it to Tauri.
+/// Bring the database up on its own task, narrating it on `db:state`.
 ///
-/// Which database that is belongs to the [`Profile`] (ruling P13): the demo
-/// runs its own server out of its own directory, and declines `KNOBAS_DB_URL`
-/// rather than loading a fixture into a corpus somebody manages.
-async fn start_database(
-    handle: &tauri::AppHandle,
-    profile: &Profile,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let config = profile.db_config(std::env::var(DB_URL_ENV).ok());
+/// Every transition is written into the managed [`Lifecycle`] *and* emitted.
+/// Both, deliberately: the event is what makes the boot screen move the
+/// instant something happens, and the stored state is what `app_status` and
+/// `frontend_ready` answer with for a webview that was not listening yet, or
+/// that reloaded. A frontend polling `app_status` therefore converges on the
+/// truth even if every single event is lost.
+///
+/// Called once from `setup`, and again by `commands::app::retry_database`
+/// after a failure -- which is why it takes a handle rather than closing over
+/// `setup`'s.
+pub(crate) fn spawn_bring_up<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
+    tauri::async_runtime::spawn(async move {
+        let profile = handle.state::<Profile>().inner().clone();
+        let config = profile.db_config(std::env::var(DB_URL_ENV).ok());
 
-    if config.existing_url.is_some() {
-        tracing::info!("{DB_URL_ENV} is set: using an externally managed postgres");
-    } else {
-        tracing::info!(root_dir = %config.root_dir.display(), "starting the embedded postgres");
-    }
+        // A true sentence about what is about to take time, and `None` when
+        // nothing unusual is: the boot screen shows this verbatim, so a
+        // reassuring guess would be a lie in the one place the app is asking
+        // for patience.
+        let detail = if config.existing_url.is_some() {
+            tracing::info!("{DB_URL_ENV} is set: using an externally managed postgres");
+            Some(format!("connecting to the server {DB_URL_ENV} names"))
+        } else if config.root_dir.exists() {
+            tracing::info!(root_dir = %config.root_dir.display(), "starting the embedded postgres");
+            None
+        } else {
+            tracing::info!(root_dir = %config.root_dir.display(), "first run: provisioning postgres");
+            Some("first run: downloading and initialising PostgreSQL".to_owned())
+        };
+        set_db_state(&handle, DbState::Starting { detail });
 
-    let db = knobas_db::EmbeddedDb::start(config).await?;
-    knobas_db::migrate::run(db.pool()).await?;
+        let outcome = async {
+            let db = knobas_db::EmbeddedDb::start(config).await?;
+            set_db_state(&handle, DbState::Migrating);
+            knobas_db::migrate::run(db.pool()).await?;
+            Ok::<_, Box<dyn std::error::Error>>(db)
+        }
+        .await;
 
-    handle.manage(AppState {
-        pool: db.pool().clone(),
-        db: Mutex::new(Some(db)),
+        match outcome {
+            Ok(db) => {
+                handle.state::<Lifecycle>().install(AppState {
+                    pool: db.pool().clone(),
+                    db: Mutex::new(Some(db)),
+                });
+                // Installed *before* the state moves to `ready`: a frontend
+                // that reacted to `ready` by fetching would otherwise race the
+                // pool it was told about.
+                set_db_state(&handle, DbState::Ready);
+            }
+            Err(error) => {
+                tracing::error!(%error, "the database did not start");
+                set_db_state(
+                    &handle,
+                    DbState::Failed {
+                        message: error.to_string(),
+                    },
+                );
+            }
+        }
     });
-    Ok(())
+}
+
+/// Record a transition and tell the frontend about it.
+///
+/// An emit that nobody is listening to is not a failure -- during `setup`
+/// there is no webview at all, and gotcha 9 is exactly that. It is logged and
+/// dropped; the stored state is the durable half.
+fn set_db_state<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, state: DbState) {
+    tracing::info!(?state, "database lifecycle");
+    handle.state::<Lifecycle>().set(state.clone());
+    if let Err(error) = handle.emit(events::DB_STATE, state) {
+        tracing::debug!(%error, "nobody is listening to db:state yet");
+    }
 }
 
 /// Stop the embedded server, once.
@@ -257,8 +293,15 @@ async fn start_database(
 /// connection is busy. Bounding it -- a timeout, or cancelling the run --
 /// belongs with the sync scheduler in M1 stream F.
 fn shutdown_database(app: &tauri::AppHandle) {
-    let Some(state) = app.try_state::<AppState>() else {
-        // Startup failed before the state was managed; nothing was started.
+    let Some(lifecycle) = app.try_state::<Lifecycle>() else {
+        // `setup` never ran; nothing was started.
+        return;
+    };
+    let Some(state) = lifecycle.app_state() else {
+        // Bring-up is still running or failed; there is no server to stop.
+        // A quit during a first-run download therefore leaves the download
+        // half-finished, which the next start resumes -- the same as any other
+        // interrupted first run.
         return;
     };
     // The guard is dropped before `block_on`: nothing may hold a lock across
@@ -313,27 +356,42 @@ fn install_panic_hook() {
 
 #[cfg(test)]
 mod tests {
-    /// The window `tauri.conf.json` declares is created hidden, and `run`
-    /// shows it once the database is up.
+    /// The window `tauri.conf.json` declares is visible from the start, and
+    /// `run` no longer shows it by hand.
+    ///
+    /// M0 asserted the opposite, and was right to: bring-up blocked the event
+    /// loop, so a visible window meant an empty white frame that did not
+    /// repaint for the length of a first run. Bring-up is asynchronous now and
+    /// the frontend renders a boot screen, so hiding the window would hide the
+    /// very thing that says what is taking so long. A test still asserting the
+    /// old behaviour would be worse than none.
     ///
     /// The two halves live in different files and neither compiles against the
-    /// other, so the config is asserted here. A `"visible": true` puts an
-    /// empty white frame on screen for the length of a first run -- which is a
-    /// PostgreSQL download plus an `initdb` -- and a renamed label makes `run`
-    /// fail to find the window it is supposed to show.
+    /// other, which is why the config is read back here.
     #[test]
-    fn the_main_window_is_declared_hidden_under_the_label_run_shows() {
+    fn the_main_window_is_declared_visible_and_run_does_not_show_it() {
         let config: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.conf.json")).expect("tauri.conf.json");
         let windows = config["app"]["windows"]
             .as_array()
             .expect("app.windows is an array");
 
-        assert_eq!(windows.len(), 1, "run() shows exactly one window");
-        assert_eq!(windows[0]["label"], super::MAIN_WINDOW);
+        assert_eq!(windows.len(), 1, "knobas has exactly one window");
+        assert_eq!(windows[0]["label"], "main");
         assert_eq!(
-            windows[0]["visible"], false,
-            "the window must not appear before the database is up"
+            windows[0]["visible"], true,
+            "the window must appear before the database does -- that is what \
+             the boot screen is for"
+        );
+
+        // The other half: a `show()` left behind would be harmless today and
+        // wrong the moment the window is ever deliberately hidden. Spelled in
+        // pieces so this assertion does not match itself.
+        let source = include_str!("lib.rs");
+        let getter = concat!("get_webview", "_window");
+        assert!(
+            !source.contains(getter),
+            "run() still reaches for the window; showing it is the config's job now"
         );
     }
 

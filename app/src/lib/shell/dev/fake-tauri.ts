@@ -134,8 +134,39 @@ export function installIfRequested(): void {
  *
  * Grows one handler per task, as each screen learns to call something new.
  */
-export function demoHandlers(_params = new URLSearchParams()): Record<string, Handler> {
+export function demoHandlers(params = new URLSearchParams()): Record<string, Handler> {
   return {
     ping: () => "pong",
+    app_status: () => ({ db: fakeDbState(params), ...DEMO_STATUS }),
+    frontend_ready: () => null,
+    retry_database: () => null,
   };
+}
+
+/** Everything in `AppStatus` that is not the lifecycle state. */
+const DEMO_STATUS = {
+  first_run: false,
+  demo: true,
+  source_count: 1,
+  app_version: "0.1.0-fixture",
+};
+
+/**
+ * `?fake-db=starting|migrating|failed` holds the boot screen on one state.
+ *
+ * Without it the fake answers `ready` immediately, which is right for QA of
+ * every other screen and useless for QA of this one — the loading screen would
+ * be gone before the shutter opened.
+ */
+function fakeDbState(params: URLSearchParams): unknown {
+  switch (params.get("fake-db")) {
+    case "starting":
+      return { state: "starting", detail: "first run: downloading and initialising PostgreSQL" };
+    case "migrating":
+      return { state: "migrating" };
+    case "failed":
+      return { state: "failed", message: "port 50861 is in use by another process" };
+    default:
+      return { state: "ready" };
+  }
 }

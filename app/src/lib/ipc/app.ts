@@ -55,3 +55,14 @@ export function appStatus(): Promise<AppStatus> {
 export function frontendReady(): Promise<void> {
   return invoke<void>("frontend_ready");
 }
+
+/**
+ * Start the database again after a failure — the boot screen's *Retry*.
+ *
+ * Idempotent on the backend: a second call while a bring-up is already running
+ * starts nothing, which is the right answer to "start the database" when it is
+ * already starting.
+ */
+export function retryDatabase(): Promise<void> {
+  return invoke<void>("retry_database");
+}
