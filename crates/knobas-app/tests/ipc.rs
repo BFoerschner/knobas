@@ -600,7 +600,9 @@ fn app_status_answers_before_the_database_does() {
     assert_eq!(status["source_count"], serde_json::json!(0));
     assert_eq!(status["first_run"], serde_json::json!(false));
     assert!(
-        status["app_version"].as_str().is_some_and(|v| !v.is_empty()),
+        status["app_version"]
+            .as_str()
+            .is_some_and(|v| !v.is_empty()),
         "the failure screen offers this line to copy: {status}"
     );
 }

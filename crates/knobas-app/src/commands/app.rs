@@ -417,6 +417,10 @@ mod tests {
         });
         let error = life.pool().expect_err("there is no pool");
         assert_eq!(error.code, crate::IpcErrorCode::NotReady);
-        assert!(error.message.contains("port 5432 in use"), "{}", error.message);
+        assert!(
+            error.message.contains("port 5432 in use"),
+            "{}",
+            error.message
+        );
     }
 }
