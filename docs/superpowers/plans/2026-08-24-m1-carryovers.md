@@ -18,6 +18,9 @@ Items struck through were discharged by the M1 contract PR (checkpoint 0); every
 **Stream F — §10.6(c)'s cost is worse than starvation (added 2026-08-25, from PR #21's review):**
 - A `Source::sync` that cannot terminate does not merely spin: because `run_once` holds its advisory lock **and** a pool connection across the whole of `Source::sync`, such a run pins one of the pool's five connections and that source's lock until the process dies. Found while proving a Jira paging bug had no reachable exit. It raises the stakes on the dedicated-connection fix rather than changing its shape — and argues that any adapter loop without a provable exit is a availability bug, not a performance one.
 
+**Stream A / mock (from PR #24's review) — the registry cannot hand out a faulted adapter:**
+- `knobas_source_mock::build` ignores `instance.config` and hardcodes `MockSource::new()`, so no test can drive a compiled-in adapter whose `test_connection` fails. F's credential-health wiring is now measured on the real path with an injected refusing registry, so what remains is narrower: whether a *real* adapter's 401 arrives as `SourceError::Unauthorized` — the adapter's contract, covered by stream A's certification. One line in a crate F does not own; do it when the mock is next touched.
+
 **Stream F (sync engine) — added 2026-08-25:**
 - **Bound the failed-`KNOBAS_DB_URL` wait.** Stream D observed a real boot: a `KNOBAS_DB_URL` pointing at a dead port leaves the window on "Starting the local database" for a full **30 s** before failing. That is `knobas-db`'s pool-acquire timeout, not the shell's — the boot screen reports it honestly, but bounding it belongs to F.
 
