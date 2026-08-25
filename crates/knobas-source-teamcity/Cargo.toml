@@ -10,6 +10,7 @@ license.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
 knobas-core = { path = "../knobas-core" }
+knobas-http = { path = "../knobas-http" }
 knobas-source = { path = "../knobas-source" }
 serde.workspace = true
 serde_json.workspace = true

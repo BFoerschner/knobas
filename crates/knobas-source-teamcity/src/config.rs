@@ -11,6 +11,8 @@ const MAX_BUILDS_PER_CONFIG: u32 = 10_000;
 
 /// Interfaces §4.1's TeamCity default: 5 requests per second.
 const DEFAULT_RATE_LIMIT: u32 = 5;
+/// Interfaces §4.1's TeamCity default burst: 10.
+const DEFAULT_BURST: u32 = 10;
 /// Interfaces §4.1's TeamCity page size.
 pub(crate) const DEFAULT_BUILDS_PER_CONFIG: u32 = 100;
 
@@ -62,6 +64,17 @@ impl TeamCityConfig {
             .map_err(|e| SourceError::Protocol(format!("teamcity config: {e}")))?;
         cfg.validate()?;
         Ok(cfg)
+    }
+
+    /// The burst allowance for [`Self::rate_limit_per_sec`].
+    ///
+    /// Twice the sustained rate, which is interfaces §4.1's pairing (5 / 10)
+    /// at the default and keeps the same shape when a user raises the rate.
+    pub(crate) fn burst(&self) -> u32 {
+        // Saturating rather than wrapping: nothing above refuses a `u32::MAX`
+        // rate, and a wrapped burst of 0 would silently become "one request"
+        // inside the limiter.
+        self.rate_limit_per_sec.saturating_mul(2).max(DEFAULT_BURST)
     }
 
     fn validate(&self) -> Result<(), SourceError> {
@@ -202,6 +215,24 @@ mod tests {
         }
         TeamCityConfig::from_json(&serde_json::Value::Object(probe))
             .expect("every field the generated form can fill must parse");
+    }
+
+    /// Interfaces §4.1 pairs TeamCity's 5 req/s with a burst of 10, and a
+    /// raised rate keeps the same shape rather than staying pinned at 10.
+    #[test]
+    fn the_burst_is_twice_the_rate_and_never_below_the_default() {
+        assert_eq!(TeamCityConfig::default().burst(), 10);
+        let raised = TeamCityConfig::from_json(&serde_json::json!({ "rate_limit_per_sec": 20 }))
+            .expect("config");
+        assert_eq!(raised.burst(), 40);
+        let low =
+            TeamCityConfig::from_json(&serde_json::json!({ "rate_limit_per_sec": 1 })).expect("c");
+        assert_eq!(low.burst(), 10, "the documented burst is a floor");
+        let huge = TeamCityConfig {
+            rate_limit_per_sec: u32::MAX,
+            ..TeamCityConfig::default()
+        };
+        assert_eq!(huge.burst(), u32::MAX, "saturating, never wrapping to zero");
     }
 
     /// The schema's declared defaults are the ones the struct actually uses:

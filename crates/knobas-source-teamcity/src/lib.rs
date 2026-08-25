@@ -20,9 +20,11 @@
 //! one. Every other M1 adapter is exhaustive; this one is the reason the flag
 //! exists.
 
+mod client;
 mod config;
 mod cursor;
 mod descriptor;
+mod http;
 mod map;
 mod rest;
 
