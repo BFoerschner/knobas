@@ -2,13 +2,27 @@
   import { onMount } from "svelte";
 
   import Booting from "./lib/shell/Booting.svelte";
+  import Room from "./lib/shell/Room.svelte";
   import Shell from "./lib/shell/Shell.svelte";
   import Toast from "./lib/shell/Toast.svelte";
+  import { builtinContexts } from "./lib/shell/contexts";
   import { installKeys } from "./lib/shell/keys";
   import { lifecycle } from "./lib/shell/lifecycle.svelte";
   import { router } from "./lib/shell/router.svelte";
   import { push } from "./lib/shell/toasts.svelte";
   import { ipcErrorMessage } from "./lib/ipc";
+
+  /**
+   * The rooms the switcher offers.
+   *
+   * One per configured source, plus *All work* — and there are no configured
+   * sources to list until task 18, because `listSources` is stream F's and is
+   * not merged yet. An empty list is not a placeholder here: it is the truth
+   * for a knobas that has synced nothing, and *All work* still reads the whole
+   * mirror.
+   */
+  const sources: { id: string; label: string }[] = [];
+  const contexts = builtinContexts(sources);
 
   onMount(() => {
     void (async () => {
@@ -59,7 +73,7 @@
 </script>
 
 {#if lifecycle.ready}
-  <Shell {router} {lifecycle} onsearch={openLauncher}>
+  <Shell {router} {lifecycle} {contexts} onsearch={openLauncher}>
     {#snippet main()}
       {#if router.route.view === "unknown"}
         <!--
@@ -81,10 +95,7 @@
           <p>The first-run wizard arrives in phase 3 of this stream.</p>
         </div>
       {:else}
-        <!-- Task 9 fills the room with its tiles. -->
-        <div class="empty">
-          <p>Nothing synced yet.</p>
-        </div>
+        <Room {router} {contexts} />
       {/if}
     {/snippet}
   </Shell>

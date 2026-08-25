@@ -12,28 +12,26 @@
 -->
 <script lang="ts">
   import ContextTabs from "./ContextTabs.svelte";
-  import { builtinContexts } from "./contexts";
+  import { builtinContexts, type RoomContext } from "./contexts";
   import type { Router } from "./router.svelte";
 
   let {
     router,
     onsearch,
-    sources = [],
+    contexts = builtinContexts([]),
   }: {
     router: Router;
     onsearch: () => void;
     /**
-     * The configured sources, one room each.
+     * The rooms the switcher offers.
      *
-     * Empty until task 18 can list them — stream F owns `listSources`, and
-     * declaring its shape here would be inventing another stream's interface.
-     * An empty list is not a placeholder: it is the truth for a knobas that
-     * has synced nothing.
+     * Defaults to *All work* alone, which is what M1 has until task 18 can
+     * list the configured sources — `listSources` is stream F's and declaring
+     * its shape here would be inventing another stream's interface.
      */
-    sources?: { id: string; label: string }[];
+    contexts?: RoomContext[];
   } = $props();
 
-  const contexts = $derived(builtinContexts(sources));
   const onSources = $derived(router.route.view === "sources");
 </script>
 

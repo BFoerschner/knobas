@@ -1,0 +1,115 @@
+<!--
+  One room tile, which owns its own read.
+
+  The mockup swept every tile out of one `render()` over one blob of state
+  (roadmap §5). That does not carry over: a tile is the thing that knows which
+  kinds it draws, so it is the thing that asks for them. Six tiles are six
+  round trips against a local PostgreSQL, and the alternative — one query the
+  room slices up — puts the tile layout back into the room and makes adding a
+  tile a change in two places.
+-->
+<script lang="ts">
+  import { ipcErrorMessage } from "../ipc";
+  import { listEntities, type EntityPage, type EntityRow } from "../ipc/entity";
+  import EntityLine from "./EntityLine.svelte";
+  import type { TileSpec } from "./kinds";
+
+  let {
+    spec,
+    sources,
+    onopen,
+  }: {
+    spec: TileSpec;
+    /** The room's source filter; `[]` is every source. */
+    sources: string[];
+    onopen: (row: EntityRow) => void;
+  } = $props();
+
+  /**
+   * How many rows a tile holds.
+   *
+   * The tile scrolls (`.tile-b { overflow: auto }`), and `total` in the header
+   * says how many there are in all, so this is a window rather than a cap on
+   * the truth.
+   */
+  const PAGE = 50;
+
+  let page = $state<EntityPage | null>(null);
+  let error = $state<string | null>(null);
+
+  /**
+   * The generation of the newest request.
+   *
+   * A slow tile must not overwrite a newer context's answer: switching rooms
+   * twice quickly leaves two reads in flight, and without this the one that
+   * started first can land last. Plain, not a rune — writing it is not a
+   * render.
+   */
+  let token = 0;
+
+  $effect(() => {
+    const mine = ++token;
+    const filter = {
+      sources,
+      kinds: spec.kinds,
+      updated_within_days: null,
+      order: "updated_desc" as const,
+      include_deleted: false,
+    };
+    // Cleared before the request, not after it: a tile showing the previous
+    // room's rows while the new ones load is showing rows that are not in this
+    // room at all.
+    page = null;
+    error = null;
+    void listEntities(filter, PAGE, 0)
+      .then((answer) => {
+        if (mine !== token) return;
+        page = answer;
+      })
+      .catch((rejection) => {
+        if (mine !== token) return;
+        // Shown in the tile, not swallowed: a tile that silently renders empty
+        // on a failed read is indistinguishable from a tile with nothing in it.
+        error = ipcErrorMessage(rejection);
+      });
+  });
+
+  /**
+   * What an empty tile says.
+   *
+   * The mockup's wording where it still applies, rewritten where it promised
+   * an action M1 does not have — `signal-miller.html:2380,2416,2428,2437,2446`
+   * offer *New ticket*, *Git…*, *Trigger build…*, all M2 write-backs. An empty
+   * tile in M1 says what is missing and stops there.
+   */
+  const EMPTY: Record<string, string> = {
+    tickets: "No ticket in this room yet.",
+    code: "No pull request, commit or repository belongs to this room.",
+    builds: "No pipeline runs in this room.",
+    docs: "No page in this room yet.",
+    notes: "No note in this room yet.",
+  };
+  const empty = $derived(EMPTY[spec.id] ?? `Nothing of this kind in this room yet.`);
+</script>
+
+<section class="tile">
+  <div class="tile-h">
+    <span class="lab">{spec.label}</span>
+    <span class="cnt">{page ? page.total : ""}</span>
+    <span class="acts"></span>
+  </div>
+  <div class="tile-b">
+    {#if error}
+      <!-- Text: an `IpcError.message` can carry whatever a source said. -->
+      <div class="empty"><p class="fail">{error}</p></div>
+    {:else if !page}
+      <div class="empty"><p class="muted">Reading…</p></div>
+    {:else if page.rows.length === 0}
+      <div class="empty"><p>{empty}</p></div>
+    {:else}
+      {#each page.rows as row (row.entity_id)}
+        <EntityLine {row} {onopen} />
+      {/each}
+    {/if}
+  </div>
+</section>
