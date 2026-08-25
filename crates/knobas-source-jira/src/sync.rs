@@ -812,6 +812,56 @@ mod tests {
         assert_eq!(sink.0.len(), 5);
     }
 
+    /// `comment` and `worklog` are not in Jira's `*navigable` set, so a
+    /// `/search` that does not name them returns no container -- which this
+    /// adapter reads as "truncated" and completes with a request per issue.
+    /// Asking for them up front is the difference between one request per page
+    /// and one per issue, and nothing else in the suite would notice their
+    /// removal: the completion path would quietly pick up the slack.
+    #[test]
+    fn the_field_list_asks_for_the_two_containers_that_would_otherwise_cost_a_request_each() {
+        let config = cfg(serde_json::json!({}));
+        let api = FakeApi::default();
+        let fields = SyncRun {
+            api: &api,
+            cfg: &config,
+            source_id: "jira",
+            base_url: "https://jira.example",
+        }
+        .fields();
+        let names: Vec<&str> = fields.split(',').collect();
+        assert!(names.contains(&"comment"), "{fields}");
+        assert!(names.contains(&"worklog"), "{fields}");
+        // The fields the mapping itself reads (interfaces §4.1 normalization).
+        for required in ["summary", "description", "updated", "assignee"] {
+            assert!(
+                names.contains(&required),
+                "{required} missing from {fields}"
+            );
+        }
+    }
+
+    /// The configured Epic Link custom field rides along in `fields=`, which is
+    /// the whole of what the option does -- it preserves epic membership in
+    /// `payload` for a classic DC project (gap 3). Dropped, the option is a
+    /// form input that silently does nothing.
+    #[test]
+    fn the_epic_link_field_is_appended_to_the_field_list() {
+        let config = cfg(serde_json::json!({ "epic_link_field": "customfield_10008" }));
+        let api = FakeApi::default();
+        let fields = SyncRun {
+            api: &api,
+            cfg: &config,
+            source_id: "jira",
+            base_url: "https://jira.example",
+        }
+        .fields();
+        assert!(
+            fields.split(',').any(|n| n == "customfield_10008"),
+            "{fields}"
+        );
+    }
+
     /// Battery clause 6: a sink error aborts the run rather than being
     /// swallowed, and it keeps its own variant.
     #[tokio::test]

@@ -126,3 +126,72 @@ impl JiraApi for crate::http::JiraHttp {
             .await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::http::{JiraHttp, credential};
+    use knobas_source::AuthMethod;
+
+    /// Every call in this trait, once, against `knobas-mockd`.
+    ///
+    /// `tests/mockd.rs` drives the adapter and therefore only reaches the
+    /// endpoints a *sync* happens to need -- and with `fields=comment,worklog`
+    /// honoured, the fixture's containers arrive complete, so
+    /// [`JiraApi::comments`] and [`JiraApi::worklogs`] are never called over the
+    /// wire there at all. Their paths and their parameter sets would then be
+    /// pinned by nothing but the fake, which answers whatever it is asked. This
+    /// test calls all five directly, so an invented path or an undeclared query
+    /// parameter on any of them is a recorded violation here.
+    #[tokio::test]
+    async fn every_call_is_one_the_wadl_declares() {
+        let jira = knobas_mockd::spawn_mock_jira().await;
+        let http = JiraHttp::new(
+            &jira.base_url(),
+            &crate::JiraConfig::default(),
+            credential(Some(AuthMethod::Pat), None, Some(knobas_mockd::JIRA_TOKEN))
+                .expect("a PAT is a credential"),
+        )
+        .expect("mockd's base URL is a URL");
+
+        let server = http.server_info().await.expect("serverInfo answers");
+        assert_eq!(server.version.as_deref(), Some("9.17.0"));
+        // The whole reason `serverInfo` is called at all: mockd is on +02:00,
+        // and the JQL literal has to be rendered in that zone.
+        assert_eq!(server.offset_secs(), 2 * 3600);
+
+        let me = http.myself().await.expect("myself answers");
+        assert_eq!(me.name.as_deref(), Some("mara.lindqvist"));
+
+        let page = http
+            .search(
+                "ORDER BY updated ASC",
+                0,
+                2,
+                "summary,updated,comment,worklog",
+            )
+            .await
+            .expect("search answers");
+        assert_eq!(page.total, 7);
+        assert_eq!(page.issues.len(), 2);
+
+        let comments = http
+            .comments("PAY-231", 0, 1)
+            .await
+            .expect("the comment endpoint answers");
+        assert_eq!(comments.total, 2);
+        assert_eq!(
+            comments.comments.len(),
+            1,
+            "startAt/maxResults are honoured"
+        );
+
+        let worklogs = http
+            .worklogs("PAY-231")
+            .await
+            .expect("the worklog endpoint answers");
+        assert_eq!(worklogs.worklogs.len(), 1);
+
+        jira.assert_no_violations();
+    }
+}
