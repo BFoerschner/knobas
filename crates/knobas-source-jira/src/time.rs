@@ -88,6 +88,21 @@ pub(crate) fn format_jql_time(t: DateTime<Utc>, offset_secs: i32) -> String {
 /// back unrecognised, dragging the watermark backwards on every poll.
 ///
 /// Truncation is toward the past, so the result is never later than `t`.
+///
+/// # Do not "simplify" this into a UTC truncation
+///
+/// A mutation check found that replacing this with a plain truncate-to-minute
+/// in UTC changes no observable behaviour, and a reviewer confirmed it over
+/// 280,980 cases. That is a true result with a precondition attached: it holds
+/// **only because every real UTC offset is a whole number of minutes**, so
+/// truncating in UTC and truncating in the server's zone name the same instant.
+///
+/// Nothing in the type system enforces that. `offset_secs` is an `i32`, and at
+/// an offset of `+00:00:30` the two genuinely diverge. Today that value is
+/// unreachable -- [`parse_offset_secs`] is the only source of it and rejects
+/// every sub-minute spelling -- but "unreachable today" is a fact about the
+/// parser, not about this function. Rendering and reading back costs nothing
+/// and stays correct if either ever changes, so it stays.
 pub(crate) fn jql_floor(t: DateTime<Utc>, offset_secs: i32) -> DateTime<Utc> {
     let zone = zone_of(offset_secs);
     NaiveDateTime::parse_from_str(&format_jql_time(t, offset_secs), JQL_FMT)

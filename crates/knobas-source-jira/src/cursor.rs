@@ -83,10 +83,28 @@ impl JiraCursor {
     /// back than the window [`Self::advanced`] recorded `seen` for, so that run
     /// re-delivers what falls in between. That is deliberate -- widening is how
     /// no item falls in the daylight-saving seam, and `advanced` cannot know an
-    /// offset that has not been observed yet. It is safe only because the run
-    /// takes its new watermark as `max(previous, newest delivered)`: without
-    /// that, a re-delivered older item would drag the watermark backwards, the
-    /// same oscillation the minute-flooring above exists to prevent.
+    /// offset that has not been observed yet.
+    ///
+    /// # What the caller owes, in full
+    ///
+    /// Re-delivery here is harmless only if the run satisfies **both** of the
+    /// following. Either one alone leaves an idle source oscillating, and the
+    /// two fail in different places, so neither substitutes for the other:
+    ///
+    /// 1. **The new watermark is `max(previous, newest emitted)`.** Otherwise a
+    ///    re-delivered *older* item drags the watermark backwards -- the same
+    ///    oscillation the minute-flooring in [`Self::advanced`] exists to
+    ///    prevent, arriving by a different door.
+    /// 2. **`advanced` is handed every pair in the window, skipped ones
+    ///    included** -- see its own contract. A run that passes only what it
+    ///    emitted drops the pairs it recognised out of `seen`, and they come
+    ///    back unrecognised next run. The watermark holds perfectly while this
+    ///    happens; it is `seen` that oscillates, and the source emits an item
+    ///    on every poll forever.
+    ///
+    /// Condition 2 hides from the obvious test: full-sync-then-idle is stable
+    /// under it, because a full sync skips nothing. It takes **one new issue
+    /// and then an idle poll** to show.
     pub(crate) fn since(&self, current_offset_secs: i32) -> Option<DateTime<Utc>> {
         let watermark = self.updated_to?;
         let minutes = if current_offset_secs == self.tz_offset_secs {
@@ -108,11 +126,28 @@ impl JiraCursor {
         self.seen.iter().any(|s| s.u == updated && s.k == key)
     }
 
-    /// The cursor for a run that delivered something.
+    /// The cursor for a run that emitted something.
+    ///
+    /// # `seen_in_window` is every pair the run *saw*, not every pair it sent
+    ///
+    /// The run must pass every `(key, updated)` it observed inside the overlap
+    /// window -- **the ones it skipped as already-delivered just as much as the
+    /// ones it pushed to the sink**. `seen` is a record of what the *window*
+    /// contained, not of what crossed the SPI, and the two differ on exactly
+    /// the items that make an idle poll idle.
+    ///
+    /// Pass only the emitted pairs and the cursor forgets, every run, whatever
+    /// it recognised that run. Concretely, with the `max()` watermark from
+    /// [`Self::since`] correctly applied: run 3 emits PAY-3 and skips PAY-2, so
+    /// PAY-2 leaves `seen`; run 4 no longer recognises PAY-2 and emits it,
+    /// which pushes PAY-3 out; run 5 emits PAY-3 again. The watermark never
+    /// moves and the source still emits an item on every poll, forever.
+    ///
+    /// This is why the parameter is not called `delivered`.
     pub(crate) fn advanced(
         watermark: DateTime<Utc>,
         tz_offset_secs: i32,
-        delivered: &[(String, DateTime<Utc>)],
+        seen_in_window: &[(String, DateTime<Utc>)],
     ) -> Self {
         // The band the next query will really return, not the band the
         // arithmetic suggests. `since` subtracts whole minutes, but the literal
@@ -132,7 +167,7 @@ impl JiraCursor {
             watermark - chrono::Duration::minutes(OVERLAP_MINUTES),
             tz_offset_secs,
         );
-        let mut seen: Vec<Seen> = delivered
+        let mut seen: Vec<Seen> = seen_in_window
             .iter()
             .filter(|(_, u)| *u >= floor)
             .map(|(k, u)| Seen {
@@ -388,6 +423,72 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// What a run holding `cursor` would emit, given what its query returned.
+    ///
+    /// The sync loop is task 5's; this is only the three lines of it that
+    /// [`JiraCursor::already_delivered`] already decides, which is enough to
+    /// show what [`JiraCursor::advanced`]'s input contract buys.
+    fn would_emit<'a>(
+        cursor: &JiraCursor,
+        returned: &'a [(String, DateTime<Utc>)],
+    ) -> Vec<&'a str> {
+        returned
+            .iter()
+            .filter(|(key, updated)| !cursor.already_delivered(key, Some(*updated)))
+            .map(|(key, _)| key.as_str())
+            .collect()
+    }
+
+    /// **`advanced` must be given the pairs the run *skipped*, not just the
+    /// ones it emitted.** `seen` records what the window contained; a run that
+    /// passes only what it pushed to the sink drops everything it recognised,
+    /// and those items come back unrecognised on the very next poll.
+    ///
+    /// The `max()` watermark does not save it -- the watermark here never moves
+    /// at all. It is `seen` that oscillates, so the failure is invisible to
+    /// anything watching the cursor's timestamp.
+    ///
+    /// Note what it takes to see this: a full sync skips nothing, so
+    /// full-sync-then-idle is stable and a battery that certifies only that
+    /// sequence passes. It needs **one new issue and then an idle poll**.
+    #[test]
+    fn seen_must_record_the_skipped_pairs_or_an_idle_source_never_settles() {
+        let older = t("2026-08-22T11:47:00.000+0000");
+        let newer = t("2026-08-22T11:48:00.000+0000");
+        // What the next query returns: both are inside the overlap window.
+        let window = [("PAY-2".to_owned(), older), ("PAY-3".to_owned(), newer)];
+
+        // Run 3 emitted PAY-3 and skipped PAY-2, having recognised it from run
+        // 2. Contract honoured: `advanced` is handed both.
+        let honoured = JiraCursor::advanced(newer, 0, &window);
+        assert!(
+            would_emit(&honoured, &window).is_empty(),
+            "an idle poll must emit nothing"
+        );
+        // And it stays settled: the same window yields the same cursor, so the
+        // engine reads "same cursor, no items" and writes no activity line.
+        assert_eq!(
+            JiraCursor::advanced(newer, 0, &window).encode(),
+            honoured.encode()
+        );
+
+        // The same run passing only what it *emitted* -- the reading the old
+        // parameter name invited.
+        let run3 = JiraCursor::advanced(newer, 0, &window[1..]);
+        assert_eq!(
+            would_emit(&run3, &window),
+            vec!["PAY-2"],
+            "the skipped pair fell out of seen and comes back unrecognised"
+        );
+
+        // It does not converge. Run 4 emits PAY-2; its watermark is still
+        // max(newer, older) == newer, so nothing looks wrong -- but its seen
+        // now holds only PAY-2, so run 5 emits PAY-3, and so on forever.
+        let run4 = JiraCursor::advanced(newer, 0, &[("PAY-2".to_owned(), older)]);
+        assert_eq!(run4.updated_to, Some(newer), "the watermark never moved");
+        assert_eq!(would_emit(&run4, &window), vec!["PAY-3"]);
     }
 
     /// A cursor is stored in a text column and read on every run; an unbounded
