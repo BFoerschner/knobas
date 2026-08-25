@@ -307,20 +307,18 @@ fn set_db_state<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, state: DbState)
 /// either: what happens is that the next start finds it alive and adopts it
 /// (see `knobas_db::EmbeddedDb::start`), reusing it as a warm start.
 ///
-/// Adoption is a **one-way door for that server's lifetime**, and an accepted
-/// M0 limitation: an adopted handle owns nothing, so no clean quit ever stops
-/// it -- not this one, not any later run's, since every later run adopts it in
-/// turn. The `info` line below is logged all the same, because the handle
-/// cannot say whether it owns a server; read it as "shutting the database
-/// down", not as proof a postmaster died. From then until the machine reboots
-/// or the user stops it by hand there is one PostgreSQL running per profile.
-/// Owning that properly -- a supervisor, or a handle that knows it adopted --
-/// is M1 stream F's.
+/// **Adoption is no longer a one-way door.** M0's adopted handle owned nothing,
+/// so no clean quit ever stopped that server and every later run adopted it in
+/// turn. An adopter now takes the ownership lock when nobody else holds it, so
+/// the next clean quit stops the server for good -- while a server a *live*
+/// sibling owns is still left alone. `EmbeddedDb::stop` reports which case it
+/// was.
 ///
-/// `db.stop()` closes the pool first, which waits for in-flight queries. A quit
-/// during a long sync therefore blocks the exit for as long as that sync's
-/// connection is busy. Bounding it -- a timeout, or cancelling the run --
-/// belongs with the sync scheduler in M1 stream F.
+/// `db.stop()` closes the pool first, and that close is **bounded**: a quit
+/// during a long query no longer waits it out. The sync runs are stopped before
+/// this is reached at all -- `sources::shutdown` cancels them, which is what
+/// keeps Cmd-Q during a thirty-second remote call from being a thirty-second
+/// hang.
 fn shutdown_database(app: &tauri::AppHandle) {
     let Some(lifecycle) = app.try_state::<Lifecycle>() else {
         // `setup` never ran; nothing was started.

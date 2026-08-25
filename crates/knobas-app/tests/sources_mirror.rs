@@ -14,75 +14,14 @@
 const MIRROR: &str = include_str!("../../../app/src/lib/ipc/sources.ts");
 const ENTITY_MIRROR: &str = include_str!("../../../app/src/lib/ipc/entity.ts");
 
-/// The body of `export interface <name> { ... }`, brace-matched.
+/// The keys `value` serializes to must be exactly `expected`, and exactly what
+/// the mirror's `interface <name>` declares -- both directions.
 ///
-/// **Scoped, not a whole-file `contains`.** A search over the file passes as
-/// soon as *any* interface declares a field of that name, so renaming
-/// `ConnectionReport.elapsed_ms` stayed green while `SyncProgress.elapsed_ms`
-/// existed -- observed, on the first draft of this file. The name has to be
-/// declared by the interface that claims to mirror the struct.
-fn interface_body<'m>(mirror: &'m str, name: &str) -> &'m str {
-    let header = format!("export interface {name} {{");
-    let start = mirror
-        .find(&header)
-        .unwrap_or_else(|| panic!("the mirror declares no `interface {name}`"))
-        + header.len();
-    let rest = &mirror[start..];
-    let mut depth = 1_usize;
-    for (at, ch) in rest.char_indices() {
-        match ch {
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return &rest[..at];
-                }
-            }
-            _ => {}
-        }
-    }
-    panic!("`interface {name}` is never closed");
-}
-
-/// The keys `value` serializes to, sorted -- and each one declared by the
-/// mirror's interface of the same name.
-fn keys_of(name: &str, value: &serde_json::Value) -> Vec<String> {
-    keys_in(MIRROR, name, value)
-}
-
-fn keys_in(mirror: &str, name: &str, value: &serde_json::Value) -> Vec<String> {
-    let object = value
-        .as_object()
-        .unwrap_or_else(|| panic!("{name} is not a JSON object: {value}"));
-    let body = interface_body(mirror, name);
-    let mut keys: Vec<String> = object.keys().cloned().collect();
-    keys.sort();
-    for key in &keys {
-        assert!(
-            body.contains(&format!("{key}:")),
-            "{name}.{key} is missing from `interface {name}` in the mirror"
-        );
-    }
-    // ...and nothing the mirror declares is absent from the Rust side either:
-    // a TypeScript-only field is a form input the backend silently discards.
-    for line in body.lines() {
-        let line = line.trim();
-        if line.starts_with("//") || line.starts_with('*') || line.starts_with("/*") {
-            continue;
-        }
-        let Some((field, _)) = line.split_once(':') else {
-            continue;
-        };
-        let field = field.trim().trim_end_matches('?');
-        if field.is_empty() || !field.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-            continue;
-        }
-        assert!(
-            keys.iter().any(|k| k == field),
-            "the mirror's {name}.{field} has no counterpart in the Rust struct"
-        );
-    }
-    keys
+/// `knobas_sync::mirror` and not a copy: the same check is needed by three
+/// types in that crate, and the version this file used to carry was the fourth
+/// hand-written one. Three of the four were wrong in the same way.
+fn assert_shape(name: &str, value: &serde_json::Value, expected: &[&str]) {
+    knobas_sync::mirror::assert_shape(MIRROR, name, value, expected);
 }
 
 fn health() -> knobas_sync::config::CredentialHealth {
@@ -114,10 +53,10 @@ fn the_source_summary_shape_matches_its_typescript_mirror() {
         }
         .entity_kinds,
     };
-    let wire = serde_json::to_value(&summary).unwrap();
-    assert_eq!(
-        keys_of("SourceSummary", &wire),
-        [
+    assert_shape(
+        "SourceSummary",
+        &serde_json::to_value(&summary).unwrap(),
+        &[
             "adapter_kind",
             "base_url",
             "config",
@@ -131,7 +70,6 @@ fn the_source_summary_shape_matches_its_typescript_mirror() {
             "next_run_at",
             "sync_interval_secs",
         ],
-        "SourceSummary grew or lost a field; the mirror has to follow"
     );
 }
 
@@ -145,21 +83,20 @@ fn the_connection_report_shape_matches_its_typescript_mirror() {
         error: Some("the credential was refused".to_owned()),
         code: Some(knobas_app::IpcErrorCode::Unauthorized),
         elapsed_ms: 42,
-        detail: Some("Server 9.4.0".to_owned()),
     };
     let wire = serde_json::to_value(&report).unwrap();
-    assert_eq!(
-        keys_of("ConnectionReport", &wire),
-        [
+    assert_shape(
+        "ConnectionReport",
+        &wire,
+        &[
             "account",
             "code",
-            "detail",
             "elapsed_ms",
             "error",
             "ok",
             "secret_expires_at",
             "server_version",
-        ]
+        ],
     );
     // The one field the UI branches on, in the spelling the mirror's union
     // declares -- `unauthorized` is what turns *Test* into *Re-enter*.
@@ -181,20 +118,22 @@ fn the_db_stats_shape_matches_its_typescript_mirror() {
         newest_synced_at: Some(chrono::Utc::now()),
     };
     let wire = serde_json::to_value(&stats).unwrap();
-    assert_eq!(
-        keys_of("DbStats", &wire),
-        [
+    assert_shape(
+        "DbStats",
+        &wire,
+        &[
             "db_bytes",
             "entity_count",
             "item_count",
             "newest_synced_at",
             "oldest_synced_at",
             "per_source",
-        ]
+        ],
     );
-    assert_eq!(
-        keys_of("SourceCount", &wire["per_source"][0]),
-        ["items", "source_id", "synced_at"]
+    assert_shape(
+        "SourceCount",
+        &wire["per_source"][0],
+        &["items", "source_id", "synced_at"],
     );
 }
 
@@ -214,9 +153,10 @@ fn the_sync_run_row_shape_matches_its_typescript_mirror() {
         cursor_after: Some("c".to_owned()),
     })
     .unwrap();
-    assert_eq!(
-        keys_of("SyncRunRow", &row),
-        [
+    assert_shape(
+        "SyncRunRow",
+        &row,
+        &[
             "cursor_after",
             "deleted",
             "error",
@@ -228,16 +168,17 @@ fn the_sync_run_row_shape_matches_its_typescript_mirror() {
             "swept",
             "trigger",
             "upserted",
-        ]
+        ],
     );
 }
 
 #[test]
 fn the_descriptor_shape_matches_its_typescript_mirror() {
     let wire = serde_json::to_value(knobas_source_mock::descriptor_template()).unwrap();
-    assert_eq!(
-        keys_of("SourceDescriptor", &wire),
-        [
+    assert_shape(
+        "SourceDescriptor",
+        &wire,
+        &[
             "adapter_kind",
             "adapter_version",
             "auth_methods",
@@ -248,13 +189,15 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
             "id",
             "name",
             "write_ops",
-        ]
+        ],
     );
     // `KindInfo` rides inside it, and `entity.ts` is where the mirror declares
     // it -- so the keys are looked for there rather than in `sources.ts`.
-    assert_eq!(
-        keys_in(ENTITY_MIRROR, "KindInfo", &wire["entity_kinds"][0]),
-        ["id", "label", "monogram", "plural"]
+    knobas_sync::mirror::assert_shape(
+        ENTITY_MIRROR,
+        "KindInfo",
+        &wire["entity_kinds"][0],
+        &["id", "label", "monogram", "plural"],
     );
 }
 
@@ -333,14 +276,24 @@ fn the_patch_and_draft_payloads_the_mirror_describes_decode() {
         "source_id": null,
         "adapter_kind": "mock",
         "base_url": "",
-        "auth_kind": null,
+        "auth_kind": "Pat",
         "config": {},
         "secret": null
     }))
     .expect("the mirror's SourceDraft decodes");
     assert!(draft.source_id.is_none());
+    assert_eq!(
+        draft.auth_kind,
+        knobas_source::AuthMethod::Pat,
+        "the frozen shape's `AuthMethod`, not an Option -- a saved source is \
+         tested against its stored auth, not the draft's"
+    );
     assert!(
-        draft.auth_kind.is_none(),
-        "null is a source that needs no credential, not a default method"
+        serde_json::from_value::<knobas_app::sources::SourceDraft>(serde_json::json!({
+            "source_id": null, "adapter_kind": "mock", "base_url": "",
+            "auth_kind": null, "config": {}, "secret": null
+        }))
+        .is_err(),
+        "a null auth_kind is not the frozen shape and must not decode"
     );
 }

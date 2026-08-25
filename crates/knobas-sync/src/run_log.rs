@@ -27,10 +27,10 @@ closed_vocabulary! {
     /// How a run ended.
     ///
     /// Stored in `knobas.sync_run.outcome`, whose `sync_run_outcome_chk`
-    /// allows exactly these spellings. Stream F's backoff branches on it, so a
-    /// variant the constraint does not know about is not a display bug: the
-    /// `UPDATE` that closes the run is refused, `runner`'s failure path logs
-    /// and swallows that, and the row never closes.
+    /// allows exactly these spellings. The scheduler's backoff branches on it,
+    /// so a variant the constraint does not know about is not a display bug:
+    /// the `UPDATE` that closes the run is refused, `settle` logs and swallows
+    /// that (it must not mask the run's own failure), and the row never closes.
     pub enum SyncOutcome {
         Ok => "ok",
         Unauthorized => "unauthorized",
@@ -40,12 +40,6 @@ closed_vocabulary! {
 }
 
 impl SyncOutcome {
-    /// Classify a failed run.
-    ///
-    /// The same three-way split the scheduler's backoff reads: `Unreachable`
-    /// and `Error` are retried with an increasing delay, `Unauthorized` never
-    /// is -- it needs a human (interfaces §8 P7). Defined here, once, so the
-    /// log and the backoff cannot disagree about what a failure was.
     /// Whether this outcome advances the backoff ladder.
     ///
     /// `Unauthorized` does not: P7 gives it **no automatic retry**, because
@@ -57,6 +51,13 @@ impl SyncOutcome {
         matches!(self, SyncOutcome::Unreachable | SyncOutcome::Error)
     }
 
+    /// Classify a failed run.
+    ///
+    /// The same three-way split [`backs_off`](Self::backs_off) reads:
+    /// `Unreachable` and `Error` are retried with an increasing delay,
+    /// `Unauthorized` never is -- it needs a human (interfaces §8 P7). Defined
+    /// here, once, so the log and the backoff cannot disagree about what a
+    /// failure was.
     #[must_use]
     pub fn of(error: &SyncError) -> Self {
         match error {
@@ -78,9 +79,9 @@ impl SyncOutcome {
 /// handful of these per run -- a transition each -- and per-item progress goes
 /// on a [`Channel`](crate::progress::ProgressSink) and nowhere else.
 ///
-/// Seeded here rather than by stream F because the contract PR emits the first
-/// `sync:state` and an event needs a payload type; F extends it (and fills the
-/// two scheduler fields) rather than defining a second one.
+/// Lives here rather than in [`scheduler`](crate::scheduler) because the log is
+/// what it is read out of: `status_for` builds one from `knobas.sync_run` plus
+/// `knobas.source_config`, and the scheduler re-exports it.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SourceSyncStatus {
     pub source_id: String,
@@ -94,12 +95,14 @@ pub struct SourceSyncStatus {
     pub started_at: Option<chrono::DateTime<chrono::Utc>>,
     pub last_finished_at: Option<chrono::DateTime<chrono::Utc>>,
     pub last_outcome: Option<SyncOutcome>,
-    /// Derived from the interval and the previous run's `finished_at`
-    /// (ruling P7). **Always `None` until stream F's scheduler exists** --
-    /// there is no schedule to derive it from yet.
+    /// When the scheduler will run this source next: last finish + interval,
+    /// clamped up by [`backoff_until`](Self::backoff_until). **Derived, never
+    /// stored** (ruling P7). `None` while a run is in flight, and for a source
+    /// that is disabled or needs a human -- a countdown to a run that will
+    /// never start is a lie the sources view would render.
     pub next_run_at: Option<chrono::DateTime<chrono::Utc>>,
-    /// `knobas.source_config.backoff_until`. **Always `None` until stream F**,
-    /// which is what writes and honours it.
+    /// `knobas.source_config.backoff_until` -- how long a failing source is
+    /// held off for. Never set by a 401 (P7).
     pub backoff_until: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -184,29 +187,6 @@ pub struct RunResult {
     pub counts: RunCounts,
     /// The failure's message, or `None` for a run that succeeded.
     pub error: Option<String>,
-}
-
-impl RunResult {
-    /// The verdict a successful run produces.
-    #[must_use]
-    pub fn ok(report: &SyncReport) -> Self {
-        Self {
-            outcome: SyncOutcome::Ok,
-            counts: RunCounts::of(report),
-            error: None,
-        }
-    }
-
-    /// The verdict a failed run produces: the failure's class and its message,
-    /// and no counts -- the run rolled back, so nothing it wrote survived.
-    #[must_use]
-    pub fn failed(error: &SyncError) -> Self {
-        Self {
-            outcome: SyncOutcome::of(error),
-            counts: RunCounts::default(),
-            error: Some(error.to_string()),
-        }
-    }
 }
 
 /// Open a run and return its id.
@@ -570,7 +550,7 @@ mod tests {
         }
     }
 
-    /// The classification stream F's backoff reads. `Unauthorized` is the one
+    /// The classification the backoff reads. `Unauthorized` is the one
     /// that must never be retried, so it is the one that must never be
     /// swallowed into `Error`.
     #[test]
@@ -690,7 +670,6 @@ mod tests {
     /// `backoff_until` and will add fields.
     #[test]
     fn the_sync_status_shape_matches_its_typescript_mirror() {
-        let mirror = include_str!("../../../app/src/lib/ipc/sources.ts");
         let status = SourceSyncStatus {
             source_id: "mock".to_owned(),
             running: false,
@@ -702,13 +681,11 @@ mod tests {
             backoff_until: Some(chrono::Utc::now()),
         };
 
-        let wire = serde_json::to_value(&status).expect("a status serializes");
-        let object = wire.as_object().expect("a status is a JSON object");
-        let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
-        keys.sort_unstable();
-        assert_eq!(
-            keys,
-            [
+        crate::mirror::assert_shape(
+            include_str!("../../../app/src/lib/ipc/sources.ts"),
+            "SourceSyncStatus",
+            &serde_json::to_value(&status).expect("a status serializes"),
+            &[
                 "backoff_until",
                 "last_finished_at",
                 "last_outcome",
@@ -718,16 +695,50 @@ mod tests {
                 "source_id",
                 "started_at",
             ],
-            "SourceSyncStatus grew or lost a field; app/src/lib/ipc/sources.ts \
-             has to grow or lose it too"
         );
+    }
 
-        for key in &keys {
-            assert!(
-                mirror.contains(&format!("{key}:")),
-                "SourceSyncStatus.{key} is missing from app/src/lib/ipc/sources.ts"
-            );
-        }
+    /// **Every count, to its own column.** The M0 `runner` tests asserted these
+    /// exact values; deleting that path took the assertions with it, and
+    /// swapping `deleted` for `swept` -- or handing back a cursor the run never
+    /// returned -- then survived both crates' suites, because everything
+    /// downstream only checked `upserted > 10` and `cursor_after.is_some()`.
+    ///
+    /// Values are all different on purpose: `1, 2, 3` would let two of the
+    /// three swaps through.
+    #[test]
+    fn the_counts_a_report_carries_land_in_their_own_fields() {
+        let counts = RunCounts::of(&SyncReport {
+            source_id: "mock".to_owned(),
+            upserted: 21,
+            deleted: 4,
+            swept: 7,
+            cursor: r#"{"v":1,"n":9}"#.to_owned(),
+        });
+        assert_eq!(counts.upserted, 21);
+        assert_eq!(counts.deleted, 4);
+        assert_eq!(counts.swept, 7);
+        assert_eq!(
+            counts.cursor_after.as_deref(),
+            Some(r#"{"v":1,"n":9}"#),
+            "the log records the position the run actually returned"
+        );
+        assert_eq!(counts.touched(), 32, "and `touched` is their sum");
+    }
+
+    /// A `u64` the log's `i64` columns cannot hold clamps rather than wrapping
+    /// into a negative count.
+    #[test]
+    fn an_impossible_count_clamps_instead_of_going_negative() {
+        let counts = RunCounts::of(&SyncReport {
+            source_id: "mock".to_owned(),
+            upserted: u64::MAX,
+            deleted: 0,
+            swept: 0,
+            cursor: String::new(),
+        });
+        assert_eq!(counts.upserted, i64::MAX);
+        assert!(counts.touched() >= 0, "a count never reads as negative");
     }
 
     /// A run that opened and never closed is what `finished_at is null` means,

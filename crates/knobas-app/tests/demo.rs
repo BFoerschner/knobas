@@ -120,10 +120,12 @@ async fn demo_load_registers_once_and_syncs_the_same_rows_every_time() {
 /// M0 asserted this against `"jira"` as an id **no adapter** answered to. Jira
 /// is a compiled-in adapter now, so the interesting refusal moved: what makes
 /// an id unusable is having no `knobas.source_config` row, whatever adapters
-/// exist. The half about leaving no `sync_run` behind is the scheduler's
+/// exist. Driven through `set_secret`, which is the real path a user reaches
+/// (*Re-enter password* on a row that has since been deleted); the half about
+/// leaving no `sync_run` behind is the scheduler's
 /// `scheduler_loop::triggering_a_source_that_does_not_exist_is_refused_without_a_log_row`.
 #[tokio::test]
-async fn an_unconfigured_source_cannot_be_built() {
+async fn an_unconfigured_source_cannot_be_reached() {
     use std::sync::Arc;
 
     let pool = knobas_db::test_util::test_pool().await;
@@ -133,12 +135,17 @@ async fn an_unconfigured_source_cannot_be_built() {
     let registry = knobas_app::sources::Registry::builtin();
 
     let missing = format!("nope-{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
-    // `Box<dyn Source>` is not `Debug`, so the success arm is matched.
-    let error =
-        match knobas_app::sources::crud::adapter_for(&pool, &secrets, &registry, &missing).await {
-            Err(error) => error,
-            Ok(_) => panic!("there is no such source, so nothing should have been built"),
-        };
+    let error = knobas_app::sources::crud::set_secret(
+        &pool,
+        &secrets,
+        &registry,
+        &missing,
+        knobas_app::sources::SecretInput {
+            value: "pat".to_owned(),
+        },
+    )
+    .await
+    .expect_err("there is no such source");
     assert!(
         matches!(&error, knobas_app::sources::SourcesError::NotFound(id) if *id == missing),
         "unexpected error: {error}"
@@ -146,6 +153,10 @@ async fn an_unconfigured_source_cannot_be_built() {
     assert_eq!(
         knobas_app::sources::to_ipc(&error, Some(&missing)).code,
         knobas_app::IpcErrorCode::NotFound
+    );
+    assert!(
+        secrets.get(&missing).unwrap().is_none(),
+        "a source that does not exist must not get a keychain item"
     );
 }
 

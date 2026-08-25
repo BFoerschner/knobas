@@ -228,8 +228,12 @@ export interface SourceDraft {
   source_id: string | null;
   adapter_kind: string;
   base_url: string;
-  /** null for a source that needs no credential at all. */
-  auth_kind: AuthMethod | null;
+  /**
+   * Only meaningful for an **unsaved** draft. A draft naming a saved source is
+   * tested against that source's *stored* configuration — otherwise *Test
+   * connection* could pass against auth the scheduled run never attempts.
+   */
+  auth_kind: AuthMethod;
   config: unknown;
   secret: SecretInput | null;
 }
@@ -245,7 +249,6 @@ export interface ConnectionReport {
   /** The class to branch on: `unauthorized` turns *Test* into *Re-enter*. */
   code: IpcErrorCode | null;
   elapsed_ms: number;
-  detail: string | null;
 }
 
 /** `knobas_sync::stats::SourceCount`. */

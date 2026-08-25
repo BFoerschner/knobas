@@ -58,18 +58,21 @@ impl Registry {
     }
 
     /// One descriptor **template** per compiled-in kind.
+    ///
+    /// Also reachable as [`AdapterRegistry::descriptors`]; kept as an inherent
+    /// method because `list_adapters` is the one caller that has no
+    /// `SourcesState` to reach a trait object through -- it answers before
+    /// bring-up, which is what lets the Add-source form be drawn on a cold
+    /// start.
     #[must_use]
     pub fn templates(&self) -> Vec<SourceDescriptor> {
         ADAPTERS.iter().map(|a| (a.template)()).collect()
     }
+}
 
-    /// The template for one kind, or `None` if no adapter answers to it.
-    #[must_use]
-    pub fn template_for(&self, kind: &str) -> Option<SourceDescriptor> {
-        ADAPTERS
-            .iter()
-            .find(|a| a.kind == kind)
-            .map(|a| (a.template)())
+impl knobas_sync::scheduler::AdapterRegistry for Registry {
+    fn descriptors(&self) -> Vec<SourceDescriptor> {
+        self.templates()
     }
 
     /// Build an instance, routing on [`SourceInstance::kind`].
@@ -77,11 +80,7 @@ impl Registry {
     /// The kind and not the id: two Jiras are `jira` and `jira-eu`, two
     /// instances of one adapter, and the id is the entity namespace rather than
     /// the thing to look up (P10).
-    ///
-    /// # Errors
-    /// [`SourceError::Protocol`] if no adapter answers to the instance's kind,
-    /// or if the adapter rejected the configuration.
-    pub fn build_instance(&self, instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
+    fn build(&self, instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
         let adapter = ADAPTERS
             .iter()
             .find(|a| a.kind == instance.kind)
@@ -92,15 +91,5 @@ impl Registry {
                 ))
             })?;
         (adapter.build)(instance)
-    }
-}
-
-impl knobas_sync::scheduler::AdapterRegistry for Registry {
-    fn descriptors(&self) -> Vec<SourceDescriptor> {
-        self.templates()
-    }
-
-    fn build(&self, instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
-        self.build_instance(instance)
     }
 }

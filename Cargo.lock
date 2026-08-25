@@ -2792,6 +2792,7 @@ dependencies = [
  "knobas-secrets",
  "knobas-source",
  "knobas-source-mock",
+ "knobas-sync",
  "serde",
  "serde_json",
  "sqlx",

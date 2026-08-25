@@ -30,6 +30,8 @@ struct Slow {
     inside: Arc<AtomicUsize>,
     peak: Arc<AtomicUsize>,
     dwell: Duration,
+    /// A function, not a value: `SourceError` is not `Clone` (frozen SPI).
+    fault: Option<fn() -> SourceError>,
 }
 
 #[async_trait::async_trait]
@@ -65,6 +67,9 @@ impl Source for Slow {
         self.peak.fetch_max(now, Ordering::SeqCst);
         tokio::time::sleep(self.dwell).await;
         self.inside.fetch_sub(1, Ordering::SeqCst);
+        if let Some(fault) = self.fault {
+            return Err(fault());
+        }
         sink.item(knobas_source::SyncItem {
             entity: knobas_core::entity::EntityRef::new(&self.id, "S-1"),
             kind: "ticket".into(),
@@ -88,6 +93,7 @@ struct SlowRegistry {
     inside: Arc<AtomicUsize>,
     peak: Arc<AtomicUsize>,
     dwell: Duration,
+    fault: Option<fn() -> SourceError>,
 }
 
 impl AdapterRegistry for SlowRegistry {
@@ -100,6 +106,7 @@ impl AdapterRegistry for SlowRegistry {
             inside: Arc::clone(&self.inside),
             peak: Arc::clone(&self.peak),
             dwell: self.dwell,
+            fault: self.fault,
         }))
     }
 }
@@ -195,6 +202,7 @@ async fn deps(pool: PgPool, dwell: Duration) -> (SchedulerDeps, Arc<AtomicUsize>
                 inside: Arc::new(AtomicUsize::new(0)),
                 peak: Arc::clone(&peak),
                 dwell,
+                fault: None,
             }),
             secrets: Arc::new(MemoryStore::new()),
             events: Arc::new(Silent),
@@ -540,6 +548,7 @@ async fn a_trigger_says_running_before_it_returns() {
             inside: Arc::new(AtomicUsize::new(0)),
             peak: Arc::new(AtomicUsize::new(0)),
             dwell: Duration::from_secs(5),
+            fault: None,
         }),
         secrets: Arc::new(MemoryStore::new()),
         events: Arc::clone(&events) as Arc<dyn SyncEvents>,
@@ -566,4 +575,153 @@ async fn a_trigger_says_running_before_it_returns() {
 
     scheduler.shutdown().await;
     retire(&pool, &ids).await;
+}
+
+/// **Every phase the mirror declares is actually emitted by a real run**, and
+/// no message claims the run took no time at all.
+///
+/// The declaration half -- that the five spellings agree across the bridge --
+/// is `progress::the_phase_names_match_their_typescript_mirror`. This is the
+/// stronger half, and it was missing: `Started` was declared on both sides and
+/// sent by nobody, `Writing` was sent from the scheduler *after* the run had
+/// finished (and on the failure path, where nothing was written), and the
+/// terminal message carried a hardcoded `elapsed_ms: 0`. A phase the UI can
+/// never observe invites a frontend to wait for a state that never arrives.
+///
+/// Driven through `Scheduler::trigger`, because the terminal message is the
+/// ticker's: a test that drove only `execute_run` could not see
+/// `Finished`/`Failed` at all, which is how the zero survived. The expected set
+/// is read out of the TypeScript union rather than listed here -- a list this
+/// test owns is a list this test can quietly shrink.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn every_declared_phase_is_actually_emitted() {
+    let _serial = serially().await;
+    let declared = knobas_sync::mirror::declared_union(
+        include_str!("../../../app/src/lib/ipc/sources.ts"),
+        "SyncPhase",
+    );
+
+    // A healthy run and a failing one: `Finished` and `Failed` are mutually
+    // exclusive, so neither alone covers the union.
+    let (healthy, healthy_ids) = phases_of(None).await;
+    let (failed, failed_ids) =
+        phases_of(Some(|| SourceError::Unreachable("simulated".into()))).await;
+
+    let mut seen: Vec<String> = healthy.iter().chain(failed.iter()).cloned().collect();
+    seen.sort();
+    seen.dedup();
+    let mut want = declared.clone();
+    want.sort();
+    assert_eq!(
+        seen, want,
+        "the mirror declares {declared:?}; real runs emit {seen:?}. A phase \
+         nothing sends is a state the UI can wait for for ever."
+    );
+
+    assert!(
+        healthy.contains(&"finished".to_owned()) && !healthy.contains(&"failed".to_owned()),
+        "a healthy run ends Finished: {healthy:?}"
+    );
+    assert!(
+        failed.contains(&"failed".to_owned()) && !failed.contains(&"finished".to_owned()),
+        "a failed run ends Failed: {failed:?}"
+    );
+    assert!(
+        !failed.contains(&"writing".to_owned()),
+        "nothing was written, so nothing may say it was: {failed:?}"
+    );
+    assert_eq!(
+        healthy.first().map(String::as_str),
+        Some("started"),
+        "the first thing a watcher hears is that the run started: {healthy:?}"
+    );
+
+    let (pool, _) = pools().await;
+    retire(&pool, &healthy_ids).await;
+    retire(&pool, &failed_ids).await;
+}
+
+/// One run through the whole ticker, as wire spellings, plus the source ids to
+/// retire afterwards.
+async fn phases_of(fault: Option<fn() -> SourceError>) -> (Vec<String>, Vec<String>) {
+    #[derive(Default)]
+    struct Recorder(std::sync::Mutex<Vec<knobas_sync::progress::SyncProgress>>);
+    impl knobas_sync::progress::ProgressSink for Recorder {
+        fn report(&self, progress: knobas_sync::progress::SyncProgress) {
+            self.0.lock().unwrap().push(progress);
+        }
+    }
+
+    let (pool, sched_pool) = pools().await;
+    let ids = seed(&pool, 1).await;
+    let id = ids[0].clone();
+    let connector = knobas_db::test_util::test_connector().await;
+    let scheduler = Scheduler::start(SchedulerDeps {
+        pool: sched_pool,
+        connections: Arc::new(TestConnections(connector)),
+        registry: Arc::new(SlowRegistry {
+            inside: Arc::new(AtomicUsize::new(0)),
+            peak: Arc::new(AtomicUsize::new(0)),
+            // Long enough that `elapsed_ms` cannot round to zero on a fast
+            // machine, short enough not to slow the suite.
+            dwell: Duration::from_millis(30),
+            fault,
+        }),
+        secrets: Arc::new(MemoryStore::new()),
+        events: Arc::new(Silent),
+    })
+    .await
+    .unwrap();
+
+    let sink = Arc::new(Recorder::default());
+    let run_id = scheduler
+        .trigger(
+            &id,
+            SyncTrigger::Manual,
+            Some(Arc::clone(&sink) as Arc<dyn knobas_sync::progress::ProgressSink>),
+        )
+        .await
+        .unwrap();
+
+    // Wait for the terminal message rather than for the log row: it is the last
+    // thing the run does, so anything earlier can read a half-finished list.
+    for _ in 0..200 {
+        let done = sink.0.lock().unwrap().iter().any(|p| {
+            matches!(
+                p.phase,
+                knobas_sync::progress::SyncPhase::Finished
+                    | knobas_sync::progress::SyncPhase::Failed
+            )
+        });
+        if done {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    scheduler.shutdown().await;
+
+    let seen = sink.0.lock().unwrap().clone();
+    assert!(!seen.is_empty(), "a channel that was attached saw nothing");
+    assert!(
+        seen.iter().all(|p| p.run_id == run_id && p.source_id == id),
+        "every message names its run: {seen:?}"
+    );
+    let terminal = seen.last().expect("a terminal message");
+    assert!(
+        terminal.elapsed_ms > 0,
+        "the terminal message reports the run as instantaneous -- the \
+         hardcoded zero this test exists to catch: {terminal:?}"
+    );
+
+    let phases = seen
+        .iter()
+        .map(|p| {
+            serde_json::to_value(p.phase)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+    (phases, ids)
 }

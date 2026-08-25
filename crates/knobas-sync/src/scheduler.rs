@@ -287,8 +287,23 @@ pub async fn execute_run(
     source_id: &str,
     run_id: i64,
     progress: Option<Arc<dyn ProgressSink>>,
+    started: std::time::Instant,
 ) -> RunResult {
-    let started = std::time::Instant::now();
+    // `started` comes from the caller so that every message about this run --
+    // including the terminal one the ticker sends after `settle` -- measures
+    // the same thing: how long the user has been waiting.
+    if let Some(sink) = progress.as_ref() {
+        report(
+            sink,
+            run_id,
+            source_id,
+            SyncPhase::Started,
+            0,
+            started,
+            None,
+        );
+    }
+
     match attempt(deps, source_id, run_id, progress.as_ref(), started).await {
         Ok(report) => RunResult {
             outcome: SyncOutcome::Ok,
@@ -304,6 +319,31 @@ pub async fn execute_run(
             }
         }
     }
+}
+
+/// Send one progress message.
+///
+/// Every phase this crate emits goes through here, which is what makes
+/// "emitted at the moment it is reached" checkable rather than a claim:
+/// `elapsed_ms` is always measured from the run's start, never passed in as a
+/// placeholder.
+fn report(
+    sink: &Arc<dyn ProgressSink>,
+    run_id: i64,
+    source_id: &str,
+    phase: SyncPhase,
+    items: u64,
+    started: std::time::Instant,
+    message: Option<String>,
+) {
+    sink.report(SyncProgress {
+        run_id,
+        source_id: source_id.to_owned(),
+        phase,
+        items,
+        elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        message,
+    });
 }
 
 async fn attempt(
@@ -325,20 +365,12 @@ async fn attempt(
     let mut conn = deps.connections.open().await.map_err(RunFailure::Db)?;
 
     // The decorator only exists when somebody attached a channel: a scheduled
-    // run allocates nothing and reports nothing per item (P3).
+    // run allocates nothing and reports nothing per item (P3). `Fetching` and
+    // `Writing` are emitted from inside it, where they are true.
     let report = match progress {
         Some(sink) => {
             let observed = Observed::new(source.as_ref(), run_id, started, Arc::clone(sink));
-            let result = run_from_stored_cursor(&mut conn, &deps.pool, &observed).await;
-            sink.report(SyncProgress {
-                run_id,
-                source_id: source_id.to_owned(),
-                phase: SyncPhase::Writing,
-                items: 0,
-                elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
-                message: None,
-            });
-            result
+            run_from_stored_cursor(&mut conn, &deps.pool, &observed).await
         }
         None => run_from_stored_cursor(&mut conn, &deps.pool, source.as_ref()).await,
     };
@@ -545,6 +577,12 @@ struct Inner {
     /// a tick.
     wake: Notify,
     cancel: CancellationToken,
+    /// Handles to join (or abort) at shutdown.
+    ///
+    /// Pruned on every push: a run adds one and never removes it, so a process
+    /// left open for a week at a five-minute interval would accumulate
+    /// thousands of finished handles for the sake of a shutdown that only
+    /// cares about the live ones.
     tasks: Mutex<Vec<tokio::task::JoinHandle<()>>>,
 }
 
@@ -701,7 +739,9 @@ impl Inner {
         let inner = Arc::clone(self);
         let id = source_id.to_owned();
         let handle = tokio::spawn(async move { inner.run_task(id, run_id, progress).await });
-        self.tasks.lock().await.push(handle);
+        let mut tasks = self.tasks.lock().await;
+        tasks.retain(|task| !task.is_finished());
+        tasks.push(handle);
         Ok(run_id)
     }
 
@@ -716,6 +756,10 @@ impl Inner {
         // The permit is what caps concurrency. Acquired *after* the log row
         // exists, so a queued run is visible as "running" in the UI rather
         // than as nothing at all.
+        // Started when the task did, not when it got a permit: a run queued
+        // behind the concurrency cap has been waiting, and the bar should say
+        // so.
+        let started = std::time::Instant::now();
         let permit = tokio::select! {
             biased;
             () = self.cancel.cancelled() => None,
@@ -728,7 +772,9 @@ impl Inner {
                 tokio::select! {
                     biased;
                     () = self.cancel.cancelled() => cancelled_result(),
-                    result = execute_run(&self.deps, &source_id, run_id, progress.clone()) => result,
+                    result = execute_run(
+                        &self.deps, &source_id, run_id, progress.clone(), started,
+                    ) => result,
                 }
             }
         };
@@ -737,18 +783,22 @@ impl Inner {
 
         settle(&self.deps, &source_id, run_id, &result).await;
         if let Some(sink) = progress {
-            sink.report(SyncProgress {
+            // `started`, not `0`: the terminal message is the one a progress
+            // bar shows as the run's duration, and a hardcoded zero made it
+            // report every run as instantaneous.
+            report(
+                &sink,
                 run_id,
-                source_id: source_id.clone(),
-                phase: if result.outcome == SyncOutcome::Ok {
+                &source_id,
+                if result.outcome == SyncOutcome::Ok {
                     SyncPhase::Finished
                 } else {
                     SyncPhase::Failed
                 },
-                items: u64::try_from(result.counts.upserted).unwrap_or(0),
-                elapsed_ms: 0,
-                message: result.error.clone(),
-            });
+                u64::try_from(result.counts.upserted).unwrap_or(0),
+                started,
+                result.error.clone(),
+            );
         }
         self.inflight.lock().await.remove(&source_id);
         self.wake.notify_one();

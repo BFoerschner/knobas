@@ -132,10 +132,20 @@ impl Source for Observed<'_> {
             sink: std::sync::Arc::clone(&self.sink),
         };
         let result = self.inner.sync(cursor, &mut counting).await;
-        // One final message either way, so the bar reaches the count the run
+        // One final `Fetching` either way, so the bar reaches the count the run
         // actually pushed instead of stopping at the last throttled sample --
         // and so a run that pushed nothing still says so.
         counting.emit();
+
+        // **`Writing` here, and only on success, because here is where it
+        // becomes true.** The adapter has returned, so nothing is left to
+        // fetch; what the engine does next is flush the tail of the batch,
+        // sweep, and commit. An earlier version sent this from the scheduler
+        // *after* the whole run had finished, including on the failure path --
+        // a phase that named work already over, or work that never happened.
+        if result.is_ok() {
+            counting.phase(SyncPhase::Writing);
+        }
         result
     }
 
@@ -158,10 +168,15 @@ struct Counting<'s> {
 impl Counting<'_> {
     fn emit(&mut self) {
         self.reported_at = std::time::Instant::now();
+        self.phase(SyncPhase::Fetching);
+    }
+
+    /// Report `phase` with the count so far.
+    fn phase(&self, phase: SyncPhase) {
         self.sink.report(SyncProgress {
             run_id: self.run_id,
             source_id: self.source_id.clone(),
-            phase: SyncPhase::Fetching,
+            phase,
             items: self.seen,
             elapsed_ms: u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX),
             message: None,
@@ -191,6 +206,13 @@ mod tests {
     /// The phases are one list in two languages; the mirror is
     /// `app/src/lib/ipc/sources.ts`. A rename on one side is a progress bar
     /// that silently never advances.
+    ///
+    /// This is the **spelling** half only. That a phase is *ever emitted* is a
+    /// different claim and a stronger one -- a variant declared on both sides
+    /// and sent by nobody invites a frontend to wait for a state that never
+    /// arrives -- and it is asserted by
+    /// `knobas-sync/tests/scheduler_run.rs::every_declared_phase_is_actually_emitted`,
+    /// which drives real runs and collects what comes out.
     #[test]
     fn the_phase_names_match_their_typescript_mirror() {
         let mirror = include_str!("../../../app/src/lib/ipc/sources.ts");
@@ -207,5 +229,18 @@ mod tests {
                 "{wire} is missing from app/src/lib/ipc/sources.ts"
             );
         }
+    }
+
+    /// The union the emission test reads is the one the mirror declares.
+    #[test]
+    fn the_declared_union_is_read_out_of_the_mirror() {
+        assert_eq!(
+            crate::mirror::declared_union(
+                include_str!("../../../app/src/lib/ipc/sources.ts"),
+                "SyncPhase"
+            ),
+            ["started", "fetching", "writing", "finished", "failed"],
+            "the union moved or changed shape; the emission test reads it"
+        );
     }
 }

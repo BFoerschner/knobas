@@ -88,18 +88,28 @@ mod tests {
                 "{wire} is missing from app/src/lib/ipc/sources.ts"
             );
         }
-        for field in [
-            "source_id:",
-            "state:",
-            "checked_at:",
-            "detail:",
-            "secret_expires_at:",
-        ] {
-            assert!(
-                mirror.contains(field),
-                "CredentialHealth.{field} is missing from the TS mirror"
-            );
-        }
+        // The struct half, scoped to its own interface. A whole-file
+        // `contains` passes as soon as *any* interface declares a field of the
+        // name -- `detail:` is also `SyncRunRow`'s neighbour in that file.
+        crate::mirror::assert_shape(
+            mirror,
+            "CredentialHealth",
+            &serde_json::to_value(CredentialHealth {
+                source_id: "mock".to_owned(),
+                state: AuthState::Unauthorized,
+                checked_at: Some(chrono::Utc::now()),
+                detail: Some("401".to_owned()),
+                secret_expires_at: Some(chrono::Utc::now()),
+            })
+            .expect("a health serializes"),
+            &[
+                "checked_at",
+                "detail",
+                "secret_expires_at",
+                "source_id",
+                "state",
+            ],
+        );
     }
 
     #[test]

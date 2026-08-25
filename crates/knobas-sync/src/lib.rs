@@ -81,6 +81,8 @@ macro_rules! closed_vocabulary {
 
 pub mod config;
 pub mod health;
+#[cfg(any(test, feature = "test-util"))]
+pub mod mirror;
 pub mod progress;
 pub mod run_log;
 pub mod scheduler;
@@ -263,13 +265,21 @@ pub async fn run_once(
 /// wasted full re-fetch.)
 ///
 /// **The lock and the transaction live on `conn`, not on a pool.** That is
-/// interfaces §10.6(c), and it is a signature rather than a convention on
-/// purpose: a run holds its transaction open for as long as the remote system
-/// takes to answer, so a run on a *pooled* connection is a run competing with
-/// every query the UI makes for the connection the network has parked. Worse
-/// than slow -- an adapter loop with no reachable exit pins that connection and
-/// that source's lock until the process dies. A caller cannot reach this
-/// function with a pool, which is what makes the property structural.
+/// interfaces §10.6(c): a run holds its transaction open for as long as the
+/// remote system takes to answer, so a run on a *pooled* connection is a run
+/// competing with every query the UI makes for the connection the network has
+/// parked. Worse than slow -- an adapter loop with no reachable exit pins that
+/// connection and that source's lock until the process dies.
+///
+/// The signature does **not** enforce this on its own, and an earlier version
+/// of this paragraph claimed it did: `sqlx::pool::PoolConnection` derefs to
+/// `PgConnection`, so a determined caller can still hand one over. What makes
+/// the property hold is where the scheduler gets its connections --
+/// [`RunConnections::open`](crate::scheduler::RunConnections::open), whose one
+/// implementation is `knobas_db::Connector::connect`, which belongs to no pool.
+/// The signature is what makes that the obvious thing to pass;
+/// `tests/dedicated.rs` is what checks it, by measuring the pool from outside
+/// while a run is parked.
 ///
 /// `pool` is used for exactly one thing: the activity line, written **after**
 /// the commit, when nothing is held. It is a single insert on a connection
@@ -848,7 +858,6 @@ mod tests {
     /// and `swept` was exactly such an addition.
     #[test]
     fn the_report_shape_matches_its_typescript_mirror() {
-        let mirror = include_str!("../../../app/src/lib/ipc/sources.ts");
         let report = SyncReport {
             source_id: "mock".to_owned(),
             upserted: 12,
@@ -856,24 +865,12 @@ mod tests {
             swept: 2,
             cursor: r#"{"v":1}"#.to_owned(),
         };
-
-        let wire = serde_json::to_value(&report).expect("a report serializes");
-        let object = wire.as_object().expect("a report is a JSON object");
-        let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
-        keys.sort_unstable();
-        assert_eq!(
-            keys,
-            ["cursor", "deleted", "source_id", "swept", "upserted"],
-            "SyncReport grew or lost a field; app/src/lib/ipc/sources.ts has \
-             to grow or lose it too"
+        crate::mirror::assert_shape(
+            include_str!("../../../app/src/lib/ipc/sources.ts"),
+            "SyncReport",
+            &serde_json::to_value(&report).expect("a report serializes"),
+            &["cursor", "deleted", "source_id", "swept", "upserted"],
         );
-
-        for key in &keys {
-            assert!(
-                mirror.contains(&format!("{key}:")),
-                "SyncReport.{key} is missing from app/src/lib/ipc/sources.ts"
-            );
-        }
     }
 
     fn unit_item(source_id: &str, n: usize) -> SyncItem {

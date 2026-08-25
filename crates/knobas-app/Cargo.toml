@@ -63,8 +63,13 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
+# The CRUD tests inject an adapter that refuses to connect.
+async-trait.workspace = true
 # The scheduler tests inject an in-memory credential store.
 knobas-secrets = { path = "../knobas-secrets" }
+# `knobas_sync::mirror`: the one TypeScript-mirror assertion, shared rather
+# than copied -- this crate's DTOs need the same check `knobas-sync`'s do.
+knobas-sync = { path = "../knobas-sync", features = ["test-util"] }
 # Self-dev-dependency so this crate's own integration tests see
 # `AppState::over_pool` (same convention as `knobas-db`'s `test_util`).
 knobas-app = { path = ".", features = ["test-util"] }

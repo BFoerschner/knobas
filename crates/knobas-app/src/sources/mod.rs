@@ -70,7 +70,17 @@ pub struct SourcesState {
     pub pool: PgPool,
     pub scheduler: Scheduler,
     pub secrets: Arc<dyn SecretStore>,
-    pub registry: Arc<Registry>,
+    /// **The trait, not the concrete `Registry`.**
+    ///
+    /// `Registry` is a unit struct over a `const` table, so a `crud` written
+    /// against it can only ever build adapters that work -- which left the
+    /// *failed*-credential path in `set_secret` untestable, and a mutation
+    /// that cleared the backoff after a rejected password survived the whole
+    /// suite. That is P7's exact prohibition sitting on the path a user
+    /// reaches by retyping a password that is still wrong. The trait already
+    /// existed and `Registry` already implemented it; taking it here is what
+    /// lets a test inject an adapter that refuses.
+    pub registry: Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
 }
 
 /// The sources state, or the one honest refusal for a call that beat bring-up.
@@ -149,11 +159,17 @@ pub struct SourceDraft {
     pub source_id: Option<String>,
     pub adapter_kind: String,
     pub base_url: String,
-    /// `None` for a source that needs no credential at all -- the mock, and
-    /// any read-only internal service. Not a placeholder method with an empty
-    /// secret: an adapter must be able to tell "no auth" from "auth
-    /// configured, secret missing" (P6).
-    pub auth_kind: Option<knobas_source::AuthMethod>,
+    /// The frozen shape's `AuthMethod`, not an `Option`.
+    ///
+    /// An earlier draft widened it so a no-credential source could be tested.
+    /// That was a mistake with teeth: for a **saved** source the draft's fields
+    /// then described a configuration the scheduled run would not use, so *Test
+    /// connection* could pass against auth the run never attempts. The fix is
+    /// the other way round -- a saved source is tested against its **stored**
+    /// configuration (see [`crud::test`]), and this field applies only to a
+    /// draft that has not been saved yet. Every source the Add-source form can
+    /// create has an auth method by construction ([`NewSource::auth_kind`]).
+    pub auth_kind: knobas_source::AuthMethod,
     pub config: serde_json::Value,
     pub secret: Option<SecretInput>,
 }
@@ -185,12 +201,19 @@ pub struct ConnectionReport {
     pub server_version: Option<String>,
     pub secret_expires_at: Option<chrono::DateTime<chrono::Utc>>,
     /// One line for the form, or `None` when it connected.
+    ///
+    /// Interfaces §2.2 spells this `Option<SourceError>`. A `String` plus
+    /// [`code`](Self::code) instead, and it is the **one** declared deviation
+    /// in this shape: serializing `SourceError` puts an untagged Rust enum on
+    /// the bridge for the frontend to pattern-match, and P1 says branch on a
+    /// code. `ConnectionInfo::detail` is deliberately *not* carried -- it
+    /// would be a second undeclared field, and `account` plus
+    /// `server_version` already say what it would.
     pub error: Option<String>,
     /// The class the UI branches on -- `unauthorized` is what turns *Test*
     /// into *Re-enter*, and a message is not something to branch on.
     pub code: Option<crate::IpcErrorCode>,
     pub elapsed_ms: u32,
-    pub detail: Option<String>,
 }
 
 /// Why a sources operation did not happen.
@@ -214,6 +237,9 @@ pub enum SourcesError {
     Trigger(#[from] knobas_sync::scheduler::TriggerError),
     #[error("database: {0}")]
     Db(#[from] sqlx::Error),
+    /// The sync engine could not get its own connections at bring-up.
+    #[error("the sync engine's database: {0}")]
+    Bringup(#[from] knobas_db::DbError),
 }
 
 /// Map a stream-F failure onto the frontend's branchable shape (P1).
@@ -243,7 +269,9 @@ pub fn to_ipc(error: &SourcesError, source_id: Option<&str>) -> crate::IpcError 
         SourcesError::Sync(knobas_sync::SyncError::NotConfigured { .. }) => Code::NotFound,
         SourcesError::Sync(_) => Code::Internal,
         SourcesError::Trigger(Te::ShuttingDown) => Code::NotReady,
-        SourcesError::Trigger(Te::Db(_)) | SourcesError::Db(_) => Code::Internal,
+        SourcesError::Trigger(Te::Db(_)) | SourcesError::Db(_) | SourcesError::Bringup(_) => {
+            Code::Internal
+        }
     };
     let mapped = crate::IpcError::new(code, error);
     match source_id {
@@ -260,27 +288,24 @@ pub fn to_ipc(error: &SourcesError, source_id: Option<&str>) -> crate::IpcError 
 /// and `sync_status()` on mount is the authoritative read either way.
 ///
 /// # Errors
-/// [`SourcesError::Db`] if the scheduler's pool or its startup reconciliation
-/// fails -- both mean the database is not usable, which the caller reports as a
-/// failed bring-up.
+/// [`SourcesError::Bringup`] if the scheduler cannot open its pool, and
+/// [`SourcesError::Db`] if its startup reconciliation fails. Both mean the
+/// database is not usable, which the caller reports as a failed bring-up.
 pub async fn start<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     db: &knobas_db::EmbeddedDb,
 ) -> Result<(), SourcesError> {
     // Its own pool for the scheduler's bookkeeping; the runs themselves take a
     // connection each from the connector, outside every pool (§10.6(c)).
-    let sync_pool = db
-        .pool_for(knobas_sync::scheduler::SYNC_POOL_SIZE)
-        .await
-        .map_err(|error| SourcesError::Invalid(error.to_string()))?;
+    let sync_pool = db.pool_for(knobas_sync::scheduler::SYNC_POOL_SIZE).await?;
     let profile = app.state::<crate::Profile>().inner().clone();
     let secrets = secret_store(&profile);
-    let registry = Arc::new(Registry::builtin());
+    let registry: Arc<dyn knobas_sync::scheduler::AdapterRegistry> = Arc::new(Registry::builtin());
 
     let scheduler = Scheduler::start(SchedulerDeps {
         pool: sync_pool,
         connections: Arc::new(DbConnections(db.connector())),
-        registry: Arc::clone(&registry) as Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+        registry: Arc::clone(&registry),
         secrets: Arc::clone(&secrets),
         events: Arc::new(TauriEvents::new(app.clone())),
     })

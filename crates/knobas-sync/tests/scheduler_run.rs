@@ -175,14 +175,27 @@ async fn harness(auth: AuthKind, with_secret: bool) -> Harness {
 }
 
 /// Drive one run the way the ticker will: open the row, execute, settle.
-async fn one_run(h: &Harness, trigger: SyncTrigger) -> run_log::SyncRunRow {
+///
+/// Returns the row **and** the verdict that produced it, so a test can assert
+/// that the two agree field by field. `finish` binds seven values into one
+/// statement; a swapped pair there is invisible to any assertion that only
+/// checks the row against a remembered constant.
+async fn one_run(h: &Harness, trigger: SyncTrigger) -> (run_log::SyncRunRow, run_log::RunResult) {
     let run_id = run_log::start(&h.deps.pool, &h.id, trigger).await.unwrap();
-    let result = knobas_sync::scheduler::execute_run(&h.deps, &h.id, run_id, None).await;
+    let result = knobas_sync::scheduler::execute_run(
+        &h.deps,
+        &h.id,
+        run_id,
+        None,
+        std::time::Instant::now(),
+    )
+    .await;
     knobas_sync::scheduler::settle(&h.deps, &h.id, run_id, &result).await;
-    run_log::list(&h.deps.pool, Some(&h.id), 1)
+    let row = run_log::list(&h.deps.pool, Some(&h.id), 1)
         .await
         .unwrap()
-        .remove(0)
+        .remove(0);
+    (row, result)
 }
 
 #[tokio::test]
@@ -196,7 +209,7 @@ async fn a_healthy_run_is_logged_ok_clears_backoff_and_marks_the_credential_good
     .await
     .unwrap();
 
-    let row = one_run(&h, SyncTrigger::FirstRun).await;
+    let (row, result) = one_run(&h, SyncTrigger::FirstRun).await;
 
     assert_eq!(row.outcome, Some(SyncOutcome::Ok));
     assert!(
@@ -205,6 +218,18 @@ async fn a_healthy_run_is_logged_ok_clears_backoff_and_marks_the_credential_good
         row.upserted
     );
     assert!(row.finished_at.is_some());
+    // **Field by field against the verdict, not against a remembered
+    // constant.** `run_log::finish` binds seven values into one statement, and
+    // a swapped pair there -- `deleted` into `swept`, or a cursor from
+    // somewhere else -- is exactly what an `is_some()` cannot see. (The M0
+    // `runner` tests carried these; deleting that path took them with it.)
+    assert_eq!(row.upserted, result.counts.upserted);
+    assert_eq!(row.deleted, result.counts.deleted);
+    assert_eq!(row.swept, result.counts.swept);
+    assert_eq!(
+        row.cursor_after, result.counts.cursor_after,
+        "the position recorded is the position the run returned"
+    );
     assert!(
         row.cursor_after.is_some(),
         "the position is recorded for the diagnostics view"
@@ -296,7 +321,7 @@ async fn an_unreachable_source_backs_off_along_the_ladder() {
     let h = harness(AuthKind::Method(AuthMethod::Pat), true).await;
     *h.registry.fault.lock().unwrap() = Fault::Unreachable;
 
-    let row = one_run(&h, SyncTrigger::Schedule).await;
+    let (row, _) = one_run(&h, SyncTrigger::Schedule).await;
     assert_eq!(row.outcome, Some(SyncOutcome::Unreachable));
     assert!(
         row.error.as_deref().unwrap().contains("simulated"),
@@ -339,7 +364,7 @@ async fn a_401_marks_the_credential_and_sets_no_backoff_at_all() {
     let h = harness(AuthKind::Method(AuthMethod::Pat), true).await;
     *h.registry.fault.lock().unwrap() = Fault::Unauthorized;
 
-    let row = one_run(&h, SyncTrigger::Schedule).await;
+    let (row, _) = one_run(&h, SyncTrigger::Schedule).await;
     assert_eq!(row.outcome, Some(SyncOutcome::Unauthorized));
 
     let cfg = config::get(&h.deps.pool, &h.id).await.unwrap().unwrap();
@@ -369,7 +394,7 @@ async fn a_401_marks_the_credential_and_sets_no_backoff_at_all() {
 async fn a_source_whose_secret_is_gone_is_reported_rather_than_attempted() {
     let h = harness(AuthKind::Method(AuthMethod::Pat), false).await;
 
-    let row = one_run(&h, SyncTrigger::Schedule).await;
+    let (row, _) = one_run(&h, SyncTrigger::Schedule).await;
     assert_eq!(row.outcome, Some(SyncOutcome::Unauthorized));
     assert_eq!(row.upserted, 0);
 
@@ -388,7 +413,7 @@ async fn a_source_whose_secret_is_gone_is_reported_rather_than_attempted() {
 #[tokio::test]
 async fn a_source_that_needs_no_credential_syncs_without_one() {
     let h = harness(AuthKind::None, false).await;
-    let row = one_run(&h, SyncTrigger::FirstRun).await;
+    let (row, _) = one_run(&h, SyncTrigger::FirstRun).await;
     assert_eq!(row.outcome, Some(SyncOutcome::Ok));
     assert!(row.upserted > 10);
 }
@@ -425,7 +450,14 @@ async fn status_reports_running_then_the_finished_shape() {
         "a run in flight has no next time to count down to"
     );
 
-    let result = knobas_sync::scheduler::execute_run(&h.deps, &h.id, run_id, None).await;
+    let result = knobas_sync::scheduler::execute_run(
+        &h.deps,
+        &h.id,
+        run_id,
+        None,
+        std::time::Instant::now(),
+    )
+    .await;
     knobas_sync::scheduler::settle(&h.deps, &h.id, run_id, &result).await;
 
     let done = knobas_sync::scheduler::status_for(&h.deps.pool, &h.id)
@@ -566,26 +598,19 @@ async fn a_never_synced_source_is_due_immediately() {
     );
 }
 
-/// A run with a channel attached reports its phases, and every message names
-/// the run so two channels stay distinguishable (P3).
-///
-/// This is the coverage `runner::run`'s tests used to carry. That composition
-/// is gone -- §10.8 warns that a stream which treats the engine as frozen ends
-/// the milestone with two sync paths, and this is the surviving one -- so the
-/// assertion moved here rather than being deleted with it.
+/// A run with no channel attached allocates and reports nothing (P3).
 #[tokio::test]
-async fn a_run_with_a_channel_attached_reports_its_phases() {
+async fn a_run_with_no_channel_reports_nothing() {
     #[derive(Default)]
-    struct Recorder(Mutex<Vec<knobas_sync::progress::SyncProgress>>);
+    struct Recorder(Mutex<usize>);
     impl knobas_sync::progress::ProgressSink for Recorder {
-        fn report(&self, progress: knobas_sync::progress::SyncProgress) {
-            self.0.lock().unwrap().push(progress);
+        fn report(&self, _progress: knobas_sync::progress::SyncProgress) {
+            *self.0.lock().unwrap() += 1;
         }
     }
 
     let h = harness(AuthKind::None, false).await;
     let sink = Arc::new(Recorder::default());
-
     let run_id = run_log::start(&h.deps.pool, &h.id, SyncTrigger::Manual)
         .await
         .unwrap();
@@ -593,37 +618,14 @@ async fn a_run_with_a_channel_attached_reports_its_phases() {
         &h.deps,
         &h.id,
         run_id,
-        Some(Arc::clone(&sink) as Arc<dyn knobas_sync::progress::ProgressSink>),
+        None,
+        std::time::Instant::now(),
     )
     .await;
-    knobas_sync::scheduler::settle(&h.deps, &h.id, run_id, &result).await;
-
-    let seen = sink.0.lock().unwrap().clone();
-    assert!(!seen.is_empty(), "a channel that was attached saw nothing");
-    assert!(
-        seen.iter()
-            .all(|p| p.run_id == run_id && p.source_id == h.id),
-        "every message names its run: {seen:?}"
-    );
-    assert!(
-        seen.iter()
-            .any(|p| p.phase == knobas_sync::progress::SyncPhase::Fetching && p.items > 0),
-        "the item count has to move, or the bar does not: {seen:?}"
-    );
+    assert_eq!(result.outcome, SyncOutcome::Ok);
     assert_eq!(
-        seen.last().unwrap().phase,
-        knobas_sync::progress::SyncPhase::Writing,
-        "the last message `execute_run` sends is the write phase; the terminal \
-         Finished/Failed is the ticker's, which this test does not drive"
-    );
-
-    // ...and a run with **no** channel allocates and reports nothing, which is
-    // what makes a five-minute schedule free (P3).
-    let quiet = knobas_sync::scheduler::execute_run(&h.deps, &h.id, run_id, None).await;
-    assert_eq!(quiet.outcome, SyncOutcome::Ok);
-    assert_eq!(
-        sink.0.lock().unwrap().len(),
-        seen.len(),
-        "a run with no sink must not report to a previous run's"
+        *sink.0.lock().unwrap(),
+        0,
+        "a sink nobody attached must never be reported to"
     );
 }

@@ -71,7 +71,7 @@ pub async fn list_sources<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
 ) -> Result<Vec<SourceSummary>, IpcError> {
     let state = crate::sources::state(&app)?;
-    crud::list(&state.pool, &state.registry)
+    crud::list(&state.pool, state.registry.as_ref())
         .await
         .map_err(|error| to_ipc(&error, None))
 }
@@ -83,7 +83,7 @@ pub async fn add_source<R: tauri::Runtime>(
 ) -> Result<SourceSummary, IpcError> {
     let state = crate::sources::state(&app)?;
     let id = input.id.clone();
-    let summary = crud::add(&state.pool, &state.secrets, &state.registry, input)
+    let summary = crud::add(&state.pool, &state.secrets, state.registry.as_ref(), input)
         .await
         .map_err(|error| to_ipc(&error, Some(&id)))?;
     // A brand-new source is due now; do not make the user wait out a tick.
@@ -98,7 +98,7 @@ pub async fn update_source<R: tauri::Runtime>(
     patch: SourcePatch,
 ) -> Result<SourceSummary, IpcError> {
     let state = crate::sources::state(&app)?;
-    let summary = crud::update(&state.pool, &state.registry, &id, patch)
+    let summary = crud::update(&state.pool, state.registry.as_ref(), &id, patch)
         .await
         .map_err(|error| to_ipc(&error, Some(&id)))?;
     // Re-enabling a source, or shortening its interval, may have made it due.
@@ -129,9 +129,15 @@ pub async fn set_source_secret<R: tauri::Runtime>(
     secret: SecretInput,
 ) -> Result<knobas_sync::config::CredentialHealth, IpcError> {
     let state = crate::sources::state(&app)?;
-    let health = crud::set_secret(&state.pool, &state.secrets, &state.registry, &id, secret)
-        .await
-        .map_err(|error| to_ipc(&error, Some(&id)))?;
+    let health = crud::set_secret(
+        &state.pool,
+        &state.secrets,
+        state.registry.as_ref(),
+        &id,
+        secret,
+    )
+    .await
+    .map_err(|error| to_ipc(&error, Some(&id)))?;
     emit(&app, crate::events::SOURCE_HEALTH, &health);
     // A credential that now works releases the backoff, so the source may be
     // due this instant rather than at the next tick.
@@ -147,7 +153,7 @@ pub async fn test_source<R: tauri::Runtime>(
 ) -> Result<ConnectionReport, IpcError> {
     let state = crate::sources::state(&app)?;
     let id = draft.source_id.clone();
-    crud::test(&state.pool, &state.secrets, &state.registry, draft)
+    crud::test(&state.pool, &state.secrets, state.registry.as_ref(), draft)
         .await
         .map_err(|error| to_ipc(&error, id.as_deref()))
 }

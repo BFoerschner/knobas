@@ -7,14 +7,14 @@
 use std::sync::Arc;
 
 use knobas_secrets::SecretStore;
+use knobas_source::SourceDescriptor;
 use knobas_source::instance::SourceInstance;
-use knobas_source::{Source, SourceDescriptor};
 use knobas_sync::config::{self, AuthKind, CredentialHealth, InsertConfig, PatchConfig};
+use knobas_sync::scheduler::AdapterRegistry;
 use sqlx::PgPool;
 
 use super::{
-    ConnectionReport, NewSource, Registry, SecretInput, SourceDraft, SourcePatch, SourceSummary,
-    SourcesError,
+    ConnectionReport, NewSource, SecretInput, SourceDraft, SourcePatch, SourceSummary, SourcesError,
 };
 
 /// Reject an id that cannot be an entity namespace *before* anything is
@@ -30,9 +30,20 @@ fn check_id(id: &str) -> Result<(), SourcesError> {
         .map_err(|error| SourcesError::Invalid(error.to_string()))
 }
 
-fn template_for(registry: &Registry, kind: &str) -> Result<SourceDescriptor, SourcesError> {
+/// The descriptor template for one adapter kind.
+///
+/// Read off [`AdapterRegistry::descriptors`] rather than off the concrete
+/// `Registry`, so that everything in this module works against the trait --
+/// which is what makes a *failing* adapter injectable. See the module note on
+/// `&dyn AdapterRegistry`.
+fn template_for(
+    registry: &dyn AdapterRegistry,
+    kind: &str,
+) -> Result<SourceDescriptor, SourcesError> {
     registry
-        .template_for(kind)
+        .descriptors()
+        .into_iter()
+        .find(|template| template.adapter_kind == kind)
         .ok_or_else(|| SourcesError::UnknownAdapter(kind.to_owned()))
 }
 
@@ -75,7 +86,7 @@ fn instance_from(
 pub async fn add(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
-    registry: &Registry,
+    registry: &dyn AdapterRegistry,
     input: NewSource,
 ) -> Result<SourceSummary, SourcesError> {
     check_id(&input.id)?;
@@ -171,17 +182,25 @@ fn classify_insert(error: sqlx::Error, id: &str) -> SourcesError {
 ///
 /// # Errors
 /// [`SourcesError::Db`] if any read fails.
-pub async fn list(pool: &PgPool, registry: &Registry) -> Result<Vec<SourceSummary>, SourcesError> {
+pub async fn list(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+) -> Result<Vec<SourceSummary>, SourcesError> {
     let rows = config::list(pool).await?;
     let counts = item_counts(pool).await?;
     let statuses = knobas_sync::scheduler::status_all(pool).await?;
+    // Once, not once per row: `descriptors()` builds every template.
+    let templates = registry.descriptors();
 
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
         // A row whose adapter is no longer compiled in still appears -- the
         // user has to be able to see it in order to delete it. It simply
         // declares no kinds.
-        let template = registry.template_for(&row.adapter_kind);
+        let template = templates
+            .iter()
+            .find(|t| t.adapter_kind == row.adapter_kind)
+            .cloned();
         let id = row.id.clone();
         out.push(SourceSummary {
             item_count: counts.get(&id).copied().unwrap_or(0),
@@ -223,7 +242,7 @@ async fn item_counts(pool: &PgPool) -> Result<std::collections::HashMap<String, 
 /// [`SourcesError::NotFound`] if there is no such source.
 pub async fn update(
     pool: &PgPool,
-    registry: &Registry,
+    registry: &dyn AdapterRegistry,
     id: &str,
     patch: SourcePatch,
 ) -> Result<SourceSummary, SourcesError> {
@@ -285,7 +304,7 @@ pub async fn delete(
 pub async fn set_secret(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
-    registry: &Registry,
+    registry: &dyn AdapterRegistry,
     id: &str,
     secret: SecretInput,
 ) -> Result<CredentialHealth, SourcesError> {
@@ -307,7 +326,7 @@ pub async fn set_secret(
     )
     .await?;
 
-    let source = registry.build_instance(instance_from(
+    let source = registry.build(instance_from(
         id,
         &cfg.adapter_kind,
         &cfg.display_name,
@@ -383,18 +402,48 @@ fn auth_state_of(error: &knobas_source::SourceError) -> knobas_sync::config::Aut
 pub async fn test(
     pool: &PgPool,
     secrets: &Arc<dyn SecretStore>,
-    registry: &Registry,
+    registry: &dyn AdapterRegistry,
     draft: SourceDraft,
 ) -> Result<ConnectionReport, SourcesError> {
-    template_for(registry, &draft.adapter_kind)?;
+    // **A saved source is tested against what it is saved as.** The draft's
+    // `base_url`, `auth_kind`, `config` and `adapter_kind` describe the form on
+    // screen; for a source that already exists, the scheduled run will use the
+    // stored row. Testing the form instead would let *Test connection* pass
+    // against a configuration no run ever attempts -- a green tick over a
+    // source that 401s every five minutes.
+    let saved = match &draft.source_id {
+        Some(id) => Some(
+            config::get(pool, id)
+                .await?
+                .ok_or_else(|| SourcesError::NotFound(id.clone()))?,
+        ),
+        None => None,
+    };
+    let (kind, base_url, auth, config) = match &saved {
+        Some(row) => (
+            row.adapter_kind.clone(),
+            row.base_url.clone(),
+            row.auth_kind.method(),
+            row.config.clone(),
+        ),
+        None => (
+            draft.adapter_kind.clone(),
+            draft.base_url.clone(),
+            Some(draft.auth_kind),
+            draft.config.clone(),
+        ),
+    };
+    let template = template_for(registry, &kind)?;
 
     let secret = match (&draft.secret, &draft.source_id) {
+        // A typed secret is the point of *Test* before *Save*: it is held in
+        // memory for this call and written nowhere.
         (Some(typed), _) => Some(typed.value.clone()),
         // No typed secret and a saved source: the stored one. Absent is an
         // error rather than an anonymous attempt -- "you never entered one" is
         // the `missing_secret` offer, not a 401.
-        (None, Some(saved)) if draft.auth_kind.is_some() => Some(
-            knobas_secrets::spawn::get(secrets, saved)
+        (None, Some(id)) if auth.is_some() => Some(
+            knobas_secrets::spawn::get(secrets, id)
                 .await?
                 .ok_or(knobas_secrets::SecretError::NotFound)?
                 .value,
@@ -405,21 +454,23 @@ pub async fn test(
     // The instance id only matters to an adapter that emits items; nothing here
     // does. A draft for a saved source uses its real id all the same, so an
     // adapter that validates it sees what it will see in production.
-    let id = draft.source_id.as_deref().unwrap_or(&draft.adapter_kind);
-    let source = registry.build_instance(instance_from(
+    let id = draft.source_id.as_deref().unwrap_or(&template.adapter_kind);
+    let display_name = saved
+        .as_ref()
+        .map_or(kind.as_str(), |row| &row.display_name);
+    let source = registry.build(instance_from(
         id,
-        &draft.adapter_kind,
-        &draft.adapter_kind,
-        &draft.base_url,
-        draft.auth_kind,
+        &kind,
+        display_name,
+        &base_url,
+        auth,
         secret,
-        draft.config,
+        config,
     ))?;
 
     let started = std::time::Instant::now();
     let outcome = source.test_connection().await;
     let elapsed_ms = u32::try_from(started.elapsed().as_millis()).unwrap_or(u32::MAX);
-    let _ = pool;
 
     Ok(match outcome {
         Ok(info) => ConnectionReport {
@@ -430,7 +481,6 @@ pub async fn test(
             error: None,
             code: None,
             elapsed_ms,
-            detail: info.detail,
         },
         Err(error) => ConnectionReport {
             ok: false,
@@ -440,7 +490,6 @@ pub async fn test(
             error: Some(error.to_string()),
             code: Some(crate::IpcError::from_source_error(&error, draft.source_id.as_deref()).code),
             elapsed_ms,
-            detail: None,
         },
     })
 }
@@ -480,43 +529,6 @@ async fn summarize(
         config: row.config,
         health: row.health,
     })
-}
-
-/// Build a live adapter for an already-configured source.
-///
-/// The one path `test_source` and the scheduler share for a *saved* source, so
-/// a credential that works in one works in the other.
-///
-/// # Errors
-/// [`SourcesError::NotFound`], [`SourcesError::Secret`],
-/// [`SourcesError::Source`].
-pub async fn adapter_for(
-    pool: &PgPool,
-    secrets: &Arc<dyn SecretStore>,
-    registry: &Registry,
-    id: &str,
-) -> Result<Box<dyn Source>, SourcesError> {
-    let cfg = config::get(pool, id)
-        .await?
-        .ok_or_else(|| SourcesError::NotFound(id.to_owned()))?;
-    let secret = match cfg.auth_kind.method() {
-        None => None,
-        Some(_) => Some(
-            knobas_secrets::spawn::get(secrets, id)
-                .await?
-                .ok_or(knobas_secrets::SecretError::NotFound)?
-                .value,
-        ),
-    };
-    Ok(registry.build_instance(instance_from(
-        id,
-        &cfg.adapter_kind,
-        &cfg.display_name,
-        &cfg.base_url,
-        cfg.auth_kind.method(),
-        secret,
-        cfg.config,
-    ))?)
 }
 
 #[cfg(test)]

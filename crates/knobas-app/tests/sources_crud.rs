@@ -5,14 +5,68 @@ use std::sync::Arc;
 
 use knobas_app::sources::{self, NewSource, Registry, SecretInput, SourceDraft, SourcePatch};
 use knobas_secrets::{MemoryStore, SecretStore};
-use knobas_source::AuthMethod;
+use knobas_source::instance::SourceInstance;
+use knobas_source::{AuthMethod, Source, SourceDescriptor, SourceError};
 use knobas_sync::config::AuthState;
+use knobas_sync::scheduler::AdapterRegistry;
 use sqlx::PgPool;
+
+/// A registry whose adapters refuse to connect.
+///
+/// The compiled-in ones cannot: the mock always connects, and driving Jira at a
+/// dead port would wait out `knobas_http`'s retry budget and make an app test
+/// depend on another stream's timing. Without this the whole *failed*
+/// credential path in `set_secret` is unreachable — and a mutation that clears
+/// the backoff after a rejected password survived the entire suite because of
+/// it. `crud` takes `&dyn AdapterRegistry` so this can exist.
+/// A function rather than a value: `SourceError` is not `Clone` (frozen SPI),
+/// and each `build` needs its own.
+struct RefusingRegistry(fn() -> SourceError);
+
+impl AdapterRegistry for RefusingRegistry {
+    fn descriptors(&self) -> Vec<SourceDescriptor> {
+        Registry::builtin().descriptors()
+    }
+    fn build(&self, instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
+        Ok(Box::new(Refusing {
+            id: instance.id,
+            error: self.0,
+        }))
+    }
+}
+
+struct Refusing {
+    id: String,
+    error: fn() -> SourceError,
+}
+
+#[async_trait::async_trait]
+impl Source for Refusing {
+    fn descriptor(&self) -> SourceDescriptor {
+        SourceDescriptor {
+            id: self.id.clone(),
+            ..knobas_source_mock::descriptor_template()
+        }
+    }
+    async fn test_connection(&self) -> Result<knobas_source::ConnectionInfo, SourceError> {
+        Err((self.error)())
+    }
+    async fn sync(
+        &self,
+        _cursor: Option<knobas_source::Cursor>,
+        _sink: &mut (dyn knobas_source::Sink + Send),
+    ) -> Result<knobas_source::Cursor, SourceError> {
+        Err((self.error)())
+    }
+    async fn write(&self, _op: knobas_source::WriteOp) -> Result<(), SourceError> {
+        Err(SourceError::Protocol("read-only".into()))
+    }
+}
 
 struct Fixture {
     pool: PgPool,
     secrets: Arc<dyn SecretStore>,
-    registry: Arc<Registry>,
+    registry: Registry,
     id: String,
 }
 
@@ -22,7 +76,7 @@ async fn fixture() -> Fixture {
     Fixture {
         pool,
         secrets: Arc::new(MemoryStore::new()),
-        registry: Arc::new(Registry::builtin()),
+        registry: Registry::builtin(),
         // `crud-<hex>` -- lowercase, dashes, under 32 characters, which is what
         // `validate_instance_id` allows.
         id: format!("crud-{}", &uuid::Uuid::new_v4().simple().to_string()[..12]),
@@ -255,7 +309,7 @@ async fn testing_a_draft_writes_nothing_at_all() {
             source_id: None,
             adapter_kind: "mock".into(),
             base_url: "https://jira.example.invalid".into(),
-            auth_kind: Some(AuthMethod::Pat),
+            auth_kind: AuthMethod::Pat,
             config: serde_json::json!({}),
             secret: Some(SecretInput {
                 value: "typed-but-not-saved".into(),
@@ -302,7 +356,7 @@ async fn a_draft_for_a_saved_source_re_tests_the_stored_secret() {
             source_id: Some(f.id.clone()),
             adapter_kind: "mock".into(),
             base_url: "https://jira.example.invalid".into(),
-            auth_kind: Some(AuthMethod::Pat),
+            auth_kind: AuthMethod::Pat,
             config: serde_json::json!({}),
             secret: None,
         },
@@ -323,7 +377,7 @@ async fn a_draft_for_a_saved_source_re_tests_the_stored_secret() {
             source_id: Some(f.id.clone()),
             adapter_kind: "mock".into(),
             base_url: "https://jira.example.invalid".into(),
-            auth_kind: Some(AuthMethod::Pat),
+            auth_kind: AuthMethod::Pat,
             config: serde_json::json!({}),
             secret: None,
         },
@@ -530,5 +584,160 @@ fn nothing_in_the_ipc_surface_reads_a_secret_back() {
     assert!(
         !keys.iter().any(|k| k.contains("secret")),
         "SourceSummary grew a secret-shaped field: {keys:?}"
+    );
+}
+
+/// **P7, on the path a user actually reaches.** Retyping a password that is
+/// still wrong must not release the backoff.
+///
+/// Clearing it would put the source straight back in front of a system that
+/// just refused it, on a timer — which for a Jira DC is how an account earns a
+/// CAPTCHA lockout. The credential is still stored (the user asked for that,
+/// and a stored-but-rejected secret is what `unauthorized` means), the health
+/// says so, and the schedule stays held off.
+#[tokio::test]
+async fn a_credential_that_is_still_wrong_does_not_release_the_backoff() {
+    let f = fixture().await;
+    sources::crud::add(&f.pool, &f.secrets, &f.registry, a_new_source(&f.id))
+        .await
+        .unwrap();
+
+    let held_until = chrono::Utc::now() + chrono::Duration::hours(1);
+    knobas_sync::config::set_backoff(&f.pool, &f.id, held_until)
+        .await
+        .unwrap();
+
+    let refusing = RefusingRegistry(|| SourceError::Unauthorized);
+    let health = sources::crud::set_secret(
+        &f.pool,
+        &f.secrets,
+        &refusing,
+        &f.id,
+        SecretInput {
+            value: "still-wrong".into(),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(health.state, AuthState::Unauthorized);
+    let cfg = knobas_sync::config::get(&f.pool, &f.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        cfg.backoff_until.map(|t| t.timestamp()),
+        Some(held_until.timestamp()),
+        "a rejected credential must leave the backoff exactly where it was"
+    );
+    assert!(
+        knobas_sync::config::due(&f.pool)
+            .await
+            .unwrap()
+            .iter()
+            .all(|d| d.id != f.id),
+        "and the source must not be schedulable again"
+    );
+    assert_eq!(
+        f.secrets.get(&f.id).unwrap().unwrap().value,
+        "still-wrong",
+        "the user asked for it to be stored; `unauthorized` means stored and rejected"
+    );
+}
+
+/// The same path with a source that could not be *reached*: the credential is
+/// not accused, and the backoff still stands.
+#[tokio::test]
+async fn an_unreachable_source_does_not_blame_the_credential_or_release_the_backoff() {
+    let f = fixture().await;
+    sources::crud::add(&f.pool, &f.secrets, &f.registry, a_new_source(&f.id))
+        .await
+        .unwrap();
+    let held_until = chrono::Utc::now() + chrono::Duration::hours(1);
+    knobas_sync::config::set_backoff(&f.pool, &f.id, held_until)
+        .await
+        .unwrap();
+
+    let refusing = RefusingRegistry(|| SourceError::Unreachable("dns".to_owned()));
+    let health = sources::crud::set_secret(
+        &f.pool,
+        &f.secrets,
+        &refusing,
+        &f.id,
+        SecretInput {
+            value: "probably-fine".into(),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        health.state,
+        AuthState::Unreachable,
+        "a network failure says nothing about the PAT"
+    );
+    assert!(
+        knobas_sync::config::get(&f.pool, &f.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .backoff_until
+            .is_some()
+    );
+}
+
+/// *Test connection* on a **saved** source uses the source's stored
+/// configuration, not the draft's.
+///
+/// The draft describes the form on screen. Building from it would let a green
+/// tick stand over a configuration no scheduled run ever attempts — the
+/// divergence the widened `auth_kind` opened. Shown by giving the draft an
+/// adapter kind that does not exist: if the draft decided, this would be
+/// `UnknownAdapter`; because the stored row decides, it succeeds.
+#[tokio::test]
+async fn testing_a_saved_source_uses_its_stored_configuration() {
+    let f = fixture().await;
+    sources::crud::add(&f.pool, &f.secrets, &f.registry, a_new_source(&f.id))
+        .await
+        .unwrap();
+
+    let report = sources::crud::test(
+        &f.pool,
+        &f.secrets,
+        &f.registry,
+        SourceDraft {
+            source_id: Some(f.id.clone()),
+            adapter_kind: "nosuch".into(),
+            base_url: "https://somewhere-else.invalid".into(),
+            auth_kind: AuthMethod::OAuth,
+            config: serde_json::json!({ "flavor": "cloud" }),
+            secret: None,
+        },
+    )
+    .await
+    .expect("the stored row decides, and it names a kind that exists");
+    assert!(report.ok);
+
+    // ...and a draft for a source that is not saved at all is refused rather
+    // than tested against nothing.
+    let gone = format!("gone-{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
+    let err = sources::crud::test(
+        &f.pool,
+        &f.secrets,
+        &f.registry,
+        SourceDraft {
+            source_id: Some(gone.clone()),
+            adapter_kind: "mock".into(),
+            base_url: String::new(),
+            auth_kind: AuthMethod::Pat,
+            config: serde_json::json!({}),
+            secret: Some(SecretInput { value: "x".into() }),
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(&err, sources::SourcesError::NotFound(id) if *id == gone),
+        "{err:?}"
     );
 }

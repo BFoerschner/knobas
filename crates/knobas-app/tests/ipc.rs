@@ -331,7 +331,7 @@ fn every_sources_command_is_registered_and_reachable() {
     // as well as the handler list.
     let draft = serde_json::json!({
         "source_id": null, "adapter_kind": "mock", "base_url": "",
-        "auth_kind": null, "config": {}, "secret": null
+        "auth_kind": "Pat", "config": {}, "secret": null
     });
     let new_source = serde_json::json!({
         "id": "mock2", "adapter_kind": "mock", "display_name": "M", "base_url": "",
