@@ -34,6 +34,7 @@ pub mod keys;
 
 mod client;
 mod cursor;
+mod map;
 mod model;
 mod source;
 
