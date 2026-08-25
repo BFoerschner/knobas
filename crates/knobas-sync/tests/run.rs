@@ -66,7 +66,7 @@ async fn mock_sync_lands_in_postgres_and_is_searchable() {
     assert_eq!(found, 1, "the mock's PAY-231 must be findable after a sync");
 
     // sync wrote an activity line
-    let acts = knobas_core::activity::recent(pool, 50).await.unwrap();
+    let acts = knobas_core::activity::recent(pool, 50, None).await.unwrap();
     assert!(
         acts.iter()
             .any(|a| a.actor == "sync:mock" && a.verb == "synced")

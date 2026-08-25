@@ -8,6 +8,7 @@
 
   import StatusBar from "./StatusBar.svelte";
   import TopStrip from "./TopStrip.svelte";
+  import { builtinContexts, type RoomContext } from "./contexts";
   import type { Router } from "./router.svelte";
   import type { Lifecycle } from "./lifecycle.svelte";
 
@@ -15,17 +16,20 @@
     router,
     lifecycle,
     onsearch,
+    contexts = builtinContexts([]),
     main,
   }: {
     router: Router;
     lifecycle: Lifecycle;
     onsearch: () => void;
+    /** The rooms the switcher offers. Defaults to *All work* alone. */
+    contexts?: RoomContext[];
     main: Snippet;
   } = $props();
 </script>
 
 <div class="app">
-  <TopStrip {router} {onsearch} />
+  <TopStrip {router} {contexts} {onsearch} />
   <main class="main">{@render main()}</main>
   <StatusBar {lifecycle} />
 </div>
