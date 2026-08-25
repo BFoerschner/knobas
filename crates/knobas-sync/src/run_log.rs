@@ -137,7 +137,8 @@ impl SourceSyncStatus {
 pub struct RunCounts {
     pub upserted: i64,
     pub deleted: i64,
-    /// Rows the full-sync sweep tombstoned. Stream F's; zero until then.
+    /// Rows the full-sync sweep tombstoned -- `SyncReport::swept`. Zero for an
+    /// incremental run and for an adapter whose full sync is not exhaustive.
     pub swept: i64,
     pub cursor_after: Option<String>,
 }
@@ -149,7 +150,7 @@ impl RunCounts {
         Self {
             upserted: i64::try_from(report.upserted).unwrap_or(i64::MAX),
             deleted: i64::try_from(report.deleted).unwrap_or(i64::MAX),
-            swept: 0,
+            swept: i64::try_from(report.swept).unwrap_or(i64::MAX),
             cursor_after: Some(report.cursor.clone()),
         }
     }

@@ -32,6 +32,16 @@ async fn mock_sync_lands_in_postgres_and_is_searchable() {
     // idempotent: second full run upserts the same rows, no dupes
     let again = knobas_sync::run_once(pool, &src, None).await.unwrap();
     assert_eq!(report.upserted, again.upserted);
+    // The mock emits a fixed fixture, so a second full sync sees everything
+    // again: nothing is stale and nothing is swept. (The mock declares
+    // `full_sync_exhaustive`, so this is the sweep deciding there is nothing
+    // to do -- not the gate skipping it.)
+    assert_eq!(report.swept, 0);
+    assert_eq!(again.swept, 0);
+    assert!(
+        src.descriptor().full_sync_exhaustive,
+        "the assertion above is only meaningful for an exhaustive full sync"
+    );
     let (cnt,): (i64,) = sqlx::query_as("select count(*) from sync.item where source_id = 'mock'")
         .fetch_one(pool)
         .await
