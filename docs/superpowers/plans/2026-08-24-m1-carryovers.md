@@ -20,6 +20,11 @@ same sweep. That extension is correct and stands.
 
 ---
 
+**Stream E — two benchmark-only defects, review these before `m1/search-ipc` merges:**
+- `q` as a materialised CTE made the planner blind to the tsquery (40,000 per-row `entity_pkey` probes at 100k).
+- The statement was a **cached prepared statement**, so the fix decayed on the **sixth keystroke of every session** — sqlx promotes after five executions and re-plans generically. Any test that runs a query once cannot see this. Verify the fix survives ≥6 executions in one session, not just the first.
+- The plan's benchmark fixture had **false case labels**: `tombstone` ("rare") matched 60,000 of 100,000 rows while `payout` ("common") matched 40,000. Fixture replaced; don't restore the old one.
+
 # M0 → M1 carry-overs
 
 Extracted from the M0 execution ledger at milestone exit (2026-08-24). Every M1 plan writer reads this alongside the roadmap.

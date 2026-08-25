@@ -37,6 +37,13 @@ to disk that isn't also on the remote.**
 | B Gitea adapter | **in progress** (`m1/gitea`), pure layers + repo sync |
 | C TeamCity adapter | **in progress** (`m1/teamcity`), all 7 tasks |
 
+**M1's headline exit criterion is met**: the `⌘K < 100 ms` gate passes at **64 ms worst-case p90**
+over a 100k corpus (`m1/search-ipc`, unmerged). Getting there exposed two plan defects invisible to
+every functional test — `q` was a materialised CTE, so the planner was blind to the tsquery and did
+40,000 per-row `entity_pkey` probes; and the statement was a **cached prepared statement**, so the
+first fix silently decayed on the sixth keystroke of every session. The second is the one to review
+hardest: a plan that is correct five times and wrong thereafter passes any test that runs once.
+
 **Four branches carry unmerged work**, each with a resumption report in
 `.superpowers/sdd/<plan>/` (git-ignored, local only — read them before resuming a stream):
 `m1/gitea`, `m1/teamcity`, `m1/search-ipc`, `m1/testenv-compose`.
