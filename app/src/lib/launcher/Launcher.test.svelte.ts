@@ -292,6 +292,47 @@ test("an empty box shows the smart lists and the recent items", async () => {
   expect(target.querySelector(".c.chg")?.textContent).toContain("3");
 });
 
+/**
+ * The board's third section (spec §4: the empty box shows source health beside
+ * the lists). Not selectable — a reading, not a destination — so nothing else
+ * in this file would notice if it stopped being drawn.
+ */
+test("the board shows one line per source, and says which one needs attention", async () => {
+  const sources: CredentialHealth[] = [
+    {
+      source_id: "jira",
+      state: "ok",
+      checked_at: "2026-08-25T11:00:00Z",
+      detail: null,
+      secret_expires_at: null,
+    },
+    {
+      source_id: "gitea",
+      state: "unauthorized",
+      checked_at: "2026-08-25T11:00:00Z",
+      detail: "401 from Gitea",
+      secret_expires_at: null,
+    },
+  ];
+  open({
+    ports: {
+      search: async () => response(),
+      launcherHome: async () => ({ ...HOME, sources }),
+    },
+  });
+  await settle();
+
+  const lines = [...target.querySelectorAll(".src")].map((el) => el.textContent?.replace(/\s+/g, " ").trim());
+  // `GI`, not `GT`: the monogram is the first two letters of the id, because
+  // §3a forbids a table of adapter names. Written `GT` at first, from the
+  // mockup's hand-curated map — the second time this fixture-vs-derivation gap
+  // has been caught by a test rather than by reading the code.
+  expect(lines).toEqual(["JI jira checked 1 h ago", "GI gitea 401 from Gitea"]);
+  // Only the broken one is marked, and `ok` is not "needs attention".
+  expect(target.querySelectorAll(".src.fail")).toHaveLength(1);
+  expect(target.querySelector(".src.fail")?.textContent).toContain("gitea");
+});
+
 test("Enter on a row navigates to its address and closes the overlay", async () => {
   const onnavigate = vi.fn();
   const onclose = vi.fn();
