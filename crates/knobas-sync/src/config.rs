@@ -501,10 +501,18 @@ pub async fn clear_backoff(pool: &PgPool, id: &str) -> Result<(), sqlx::Error> {
 /// * `enabled = false` and the two states that need a human are excluded
 ///   outright -- no request, no backoff churn (interfaces §3, "Missing").
 ///
-/// `finished_at is not null` in the lateral is what keeps a run *in flight*
-/// from resetting the schedule: `max()` over an open run would be NULL, the
-/// source would read as never-synced, and the scheduler would start a second
-/// run of something already running and call it a first sync.
+/// A run *in flight* must not reset the schedule -- a source with an open run
+/// on top of a finished one is not never-synced, or the scheduler would start
+/// a second run of something already running and call it a first sync. What
+/// actually guarantees that is `max()` ignoring NULLs, so the explicit
+/// `finished_at is not null` is **redundant for correctness**: deleting it
+/// changes no result, and a mutation test confirms it changes none.
+///
+/// It is kept for the index rather than the semantics -- it is the predicate
+/// of `sync_run_running_idx`'s complement, and it says in the query what the
+/// lateral is for. The behaviour itself is pinned by
+/// `a_run_still_in_flight_does_not_reset_the_schedule`, which asserts the
+/// outcome and not this clause.
 const DUE: &str = r#"
 select c.id,
        f.last_finished_at is null as first_run
