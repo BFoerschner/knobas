@@ -431,7 +431,9 @@ async fn sync_now_answers_before_the_run_and_reports_it_on_the_event() {
     knobas_db::migrate::run(&pool).await.unwrap();
     // Registers `mock` in `source_config`, which is what `prepare_sync`
     // requires. The sync it performs is incidental.
-    knobas_app::demo::demo_load_inner(&pool).await.unwrap();
+    knobas_app::sources::demo::demo_load_inner(&pool)
+        .await
+        .unwrap();
 
     let seen: std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>> = Default::default();
     let recorder = std::sync::Arc::clone(&seen);

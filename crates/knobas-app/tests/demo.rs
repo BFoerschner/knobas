@@ -6,7 +6,7 @@
 //! that source takes [`MOCK`] for its whole duration; a test that touches only
 //! an id no adapter answers to (`jira`) needs no lock.
 
-use knobas_app::demo;
+use knobas_app::sources::demo;
 
 /// Held by every test that syncs the `mock` source.
 ///

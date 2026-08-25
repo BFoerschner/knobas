@@ -25,9 +25,9 @@
 //! blocked in a release build while working perfectly in dev.
 
 pub mod commands;
-pub mod demo;
 mod error;
 mod profile;
+pub mod sources;
 
 pub use commands::app::{DbState, Lifecycle};
 pub use error::{IpcError, IpcErrorCode};
@@ -190,6 +190,11 @@ pub fn run() {
                 event,
                 tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
             ) {
+                // **Before** the database: the scheduler's runs hold
+                // connections inside transactions, and closing the pool under
+                // them is the stall the M0 carry-over describes. Both calls are
+                // idempotent, so whichever event arrives first does the work.
+                sources::shutdown(app);
                 shutdown_database(app);
             }
         });
@@ -232,6 +237,11 @@ pub(crate) fn spawn_bring_up<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
             let db = knobas_db::EmbeddedDb::start(config).await?;
             set_db_state(&handle, DbState::Migrating);
             knobas_db::migrate::run(db.pool()).await?;
+            // Before `Ready`, and before `AppState` is installed: the sync
+            // engine is part of "the database is up" as far as the frontend is
+            // concerned, and a window that reacted to `ready` by calling
+            // `sync_status` must not race the scheduler into existence.
+            sources::start(&handle, &db).await?;
             Ok::<_, Box<dyn std::error::Error>>(db)
         }
         .await;

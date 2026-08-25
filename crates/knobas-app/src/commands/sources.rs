@@ -15,7 +15,7 @@ use crate::{IpcError, Lifecycle};
 
 /// Register the demo source if absent, then sync it in full.
 ///
-/// Safe to call repeatedly: see [`crate::demo::demo_load_inner`], which owns
+/// Safe to call repeatedly: see [`crate::sources::demo::demo_load_inner`], which owns
 /// the behaviour and the test for it.
 ///
 /// Refused outside the demo profile (ruling P13): the Tidewater fixture is
@@ -37,7 +37,7 @@ pub async fn demo_load(
         )));
     }
     let pool = lifecycle.pool()?;
-    Ok(crate::demo::demo_load_inner(&pool).await?)
+    Ok(crate::sources::demo::demo_load_inner(&pool).await?)
 }
 
 /// The channel `sync_now_with_progress` reports on.
@@ -153,7 +153,8 @@ async fn spawn_sync<R: tauri::Runtime>(
     sink: Option<Box<dyn knobas_sync::ProgressSink>>,
 ) -> Result<i64, IpcError> {
     let prepared =
-        crate::demo::prepare_sync(pool, &source_id, knobas_sync::SyncTrigger::Manual).await?;
+        crate::sources::demo::prepare_sync(pool, &source_id, knobas_sync::SyncTrigger::Manual)
+            .await?;
     let run_id = prepared.run_id;
     emit_sync_state(
         app,

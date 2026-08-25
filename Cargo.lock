@@ -2621,12 +2621,15 @@ dependencies = [
 name = "knobas-app"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "chrono",
  "knobas-app",
  "knobas-core",
  "knobas-db",
  "knobas-search",
+ "knobas-secrets",
  "knobas-source",
+ "knobas-source-jira",
  "knobas-source-mock",
  "knobas-sync",
  "serde",
