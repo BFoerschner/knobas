@@ -132,6 +132,43 @@ mod tests {
         assert!(descriptor_template().full_sync_exhaustive);
     }
 
+    /// The claim above is one the contract battery *cannot* check -- it would
+    /// have to know the remote corpus. What makes it true is a single property
+    /// of the query renderer: a `cursor: None` run puts **no time bound** in
+    /// its JQL, so the result set is every issue the credential can see.
+    ///
+    /// Pinned here, beside the claim, rather than in `jql`'s own tests: it is
+    /// the descriptor that becomes a lie if the renderer ever gains a bound,
+    /// and the engine acts on the descriptor -- it sweeps every row whose
+    /// `synced_at` predates a full run, so a windowed full sync would tombstone
+    /// live issues. The paging half (that the run walks `total`, not just the
+    /// first page) is task 5's and is checked there.
+    #[test]
+    fn the_full_sync_claim_rests_on_a_query_with_no_time_bound() {
+        assert!(descriptor_template().full_sync_exhaustive);
+        for config in [
+            serde_json::json!({}),
+            serde_json::json!({ "projects": ["PAY", "OPS"] }),
+            serde_json::json!({ "jql_filter": "labels = sepa" }),
+        ] {
+            let cfg = crate::JiraConfig::from_json(&config).unwrap();
+            let jql = crate::jql::build_jql(&cfg, None, 7_200).to_lowercase();
+            for bound in [
+                "updated >=",
+                "updated>=",
+                "created >=",
+                "updated <",
+                "created <",
+            ] {
+                assert!(
+                    !jql.contains(bound),
+                    "a full sync claiming to be exhaustive must not bound time, \
+                     but {config} renders {jql:?}"
+                );
+            }
+        }
+    }
+
     /// The Add-source form is generated from `config_schema` (spec §3a), so the
     /// schema and the struct the adapter parses must describe the same keys.
     /// Drift here is a form field that is silently discarded, or a config key

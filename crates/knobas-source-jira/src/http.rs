@@ -44,10 +44,31 @@ pub(crate) fn credential(
     username: Option<&str>,
     secret: Option<&str>,
 ) -> Result<Auth, SourceError> {
-    // Before the method is looked at: a source whose secret was never stored
-    // reads the same way whichever method it would have used, and that state
-    // has its own remedy in the UI.
+    // The configuration is judged **before** the secret, and the order is the
+    // whole point. These are two different states with two different remedies
+    // (§3, §10.2): `missing_secret` sends the user to *Re-enter*, a
+    // misconfigured source sends them to the source's settings. A source that
+    // could not authenticate even with a secret in hand has the second problem,
+    // and reporting `Unauthorized` for it -- which is what checking the secret
+    // first does -- sends the user to retype a token that was never the issue.
+    let scheme = scheme(auth, username)?;
     let secret = secret.ok_or(SourceError::Unauthorized)?;
+    Ok(match scheme {
+        Scheme::Bearer => Auth::Bearer(secret.to_owned()),
+        Scheme::Basic(username) => Auth::Basic {
+            username: username.to_owned(),
+            password: secret.to_owned(),
+        },
+    })
+}
+
+/// How this source authenticates, decided from configuration alone.
+enum Scheme<'a> {
+    Bearer,
+    Basic(&'a str),
+}
+
+fn scheme(auth: Option<AuthMethod>, username: Option<&str>) -> Result<Scheme<'_>, SourceError> {
     let Some(auth) = auth else {
         // `SourceInstance::auth` is optional because some sources need no
         // credential (P6). Jira DC is not one of them, and neither method the
@@ -60,19 +81,13 @@ pub(crate) fn credential(
     };
     match auth {
         // Jira DC >= 8.14: personal access tokens are Bearer tokens.
-        AuthMethod::Pat => Ok(Auth::Bearer(secret.to_owned())),
-        AuthMethod::UserPassword => {
-            let username = username.ok_or_else(|| {
-                SourceError::Protocol(
-                    "user + password authentication needs a username in the source configuration"
-                        .to_owned(),
-                )
-            })?;
-            Ok(Auth::Basic {
-                username: username.to_owned(),
-                password: secret.to_owned(),
-            })
-        }
+        AuthMethod::Pat => Ok(Scheme::Bearer),
+        AuthMethod::UserPassword => username.map(Scheme::Basic).ok_or_else(|| {
+            SourceError::Protocol(
+                "user + password authentication needs a username in the source configuration"
+                    .to_owned(),
+            )
+        }),
         // Declared in neither `descriptor_template().auth_methods` nor
         // reachable from the Add-source form; refused rather than guessed at.
         other => Err(SourceError::Protocol(format!(
@@ -278,6 +293,33 @@ mod tests {
                      if m.contains("personal access token") && m.contains("password")),
             "{e:?}"
         );
+    }
+
+    /// A source that is *both* misconfigured and missing its secret must
+    /// report the configuration problem. `Unauthorized` would put *Re-enter*
+    /// in front of the user (§3 `missing_secret`), and retyping a token cannot
+    /// fix a source with no auth method chosen -- they would be sent round that
+    /// loop forever. The two states have different remedies, so the more
+    /// fundamental one wins.
+    #[test]
+    fn a_configuration_problem_outranks_a_missing_secret() {
+        for (auth, username) in [
+            (None, None),
+            (Some(AuthMethod::OAuth), Some("mara")),
+            (Some(AuthMethod::UserPassword), None),
+        ] {
+            let e = credential(auth, username, None).unwrap_err();
+            assert!(
+                matches!(&e, SourceError::Protocol(_)),
+                "{auth:?}/{username:?} with no secret should name the configuration: {e:?}"
+            );
+        }
+        // But a *well*-configured source with no secret is exactly
+        // `missing_secret`, and still reads as unauthorized.
+        assert!(matches!(
+            credential(Some(AuthMethod::UserPassword), Some("mara"), None),
+            Err(SourceError::Unauthorized)
+        ));
     }
 
     #[test]

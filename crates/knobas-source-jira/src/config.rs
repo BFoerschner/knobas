@@ -108,7 +108,7 @@ impl JiraConfig {
             if filter.trim().is_empty() {
                 return bad("jql_filter is blank".to_owned());
             }
-            if filter.to_ascii_lowercase().contains("order by") {
+            if mentions_order_by(filter) {
                 return bad(
                     "jql_filter must not carry an ORDER BY: the adapter appends \
                      ORDER BY updated ASC, which is what makes startAt paging safe"
@@ -142,6 +142,41 @@ impl JiraConfig {
         }
         Ok(())
     }
+}
+
+/// Whether `filter` carries an `ORDER BY` **clause**.
+///
+/// Not a substring scan: `summary ~ "order by phone"` is a legitimate filter,
+/// and refusing it would make a perfectly good search unconfigurable with a
+/// message about ordering that the user cannot act on. Quoted literals are
+/// stripped first -- text inside them is data, not syntax -- and the match is
+/// then token-bounded, so `reorder by` is not an ordering either.
+fn mentions_order_by(filter: &str) -> bool {
+    let mut outside = String::with_capacity(filter.len());
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    for ch in filter.chars() {
+        match quote {
+            Some(open) => {
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == open {
+                    quote = None;
+                }
+            }
+            // JQL quotes strings with either " or '.
+            None if ch == '"' || ch == '\'' => quote = Some(ch),
+            None => outside.push(ch),
+        }
+    }
+    let lowered = outside.to_ascii_lowercase();
+    let tokens: Vec<&str> = lowered
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .filter(|token| !token.is_empty())
+        .collect();
+    tokens.windows(2).any(|pair| pair == ["order", "by"])
 }
 
 /// Jira project keys are uppercase, start with a letter, and may carry digits
@@ -214,8 +249,33 @@ mod tests {
     /// user cannot explain.
     #[test]
     fn a_filter_with_its_own_ordering_is_refused() {
-        let msg = err(json!({ "jql_filter": "project = PAY order by created DESC" }));
-        assert!(msg.contains("ORDER BY"), "{msg}");
+        for bad in [
+            "project = PAY order by created DESC",
+            "project = PAY ORDER BY created",
+            "project = PAY OrDeR    By created",
+            // The clause after a quoted literal is still a clause.
+            "summary ~ \"order by phone\" order by created",
+        ] {
+            let msg = err(json!({ "jql_filter": bad }));
+            assert!(msg.contains("ORDER BY"), "{bad:?}: {msg}");
+        }
+    }
+
+    /// The refusal is about the ORDER BY *clause*, not the letters. A filter
+    /// searching for the words is a legitimate filter, and rejecting it would
+    /// be unfixable from the user's side -- the message would talk about
+    /// ordering they never asked for.
+    #[test]
+    fn a_filter_merely_mentioning_the_words_is_accepted() {
+        for good in [
+            "summary ~ \"order by phone\"",
+            "description ~ 'the order by which we ship'",
+            "labels = reorder AND status != Done",
+            "summary ~ \"order\" AND labels = by",
+        ] {
+            JiraConfig::from_json(&json!({ "jql_filter": good }))
+                .unwrap_or_else(|e| panic!("{good:?} should be accepted: {e}"));
+        }
     }
 
     #[test]
