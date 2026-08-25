@@ -212,7 +212,7 @@ pub(crate) fn spawn_bring_up<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
         // for patience.
         let detail = if config.existing_url.is_some() {
             tracing::info!("{DB_URL_ENV} is set: using an externally managed postgres");
-            Some(format!("connecting to the server {DB_URL_ENV} names"))
+            Some(format!("connecting to the server {DB_URL_ENV} points at"))
         } else if config.root_dir.exists() {
             tracing::info!(root_dir = %config.root_dir.display(), "starting the embedded postgres");
             None
