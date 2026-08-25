@@ -6,6 +6,13 @@ export interface SyncReport {
   source_id: string;
   upserted: number;
   deleted: number;
+  /**
+   * Rows a **full** sync tombstoned because the run did not see them
+   * (hard-delete reconciliation). Always 0 for an incremental run, for an
+   * adapter whose full sync is a bounded window, and for a full sync that
+   * emitted nothing.
+   */
+  swept: number;
   /** Opaque to the frontend; hand it back to resume an incremental sync. */
   cursor: string;
 }

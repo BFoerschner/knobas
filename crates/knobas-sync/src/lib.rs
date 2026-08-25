@@ -720,6 +720,41 @@ mod tests {
         }
     }
 
+    /// `SyncReport` crosses the bridge -- `demo_load` returns one -- so its
+    /// shape is contract. The **exact key set**, for the reason the M0
+    /// carry-over spells out: a test that only walks a hardcoded list of
+    /// fields cannot see a Rust field added with no TypeScript counterpart,
+    /// and `swept` was exactly such an addition.
+    #[test]
+    fn the_report_shape_matches_its_typescript_mirror() {
+        let mirror = include_str!("../../../app/src/lib/ipc/sources.ts");
+        let report = SyncReport {
+            source_id: "mock".to_owned(),
+            upserted: 12,
+            deleted: 1,
+            swept: 2,
+            cursor: r#"{"v":1}"#.to_owned(),
+        };
+
+        let wire = serde_json::to_value(&report).expect("a report serializes");
+        let object = wire.as_object().expect("a report is a JSON object");
+        let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["cursor", "deleted", "source_id", "swept", "upserted"],
+            "SyncReport grew or lost a field; app/src/lib/ipc/sources.ts has \
+             to grow or lose it too"
+        );
+
+        for key in &keys {
+            assert!(
+                mirror.contains(&format!("{key}:")),
+                "SyncReport.{key} is missing from app/src/lib/ipc/sources.ts"
+            );
+        }
+    }
+
     fn unit_item(source_id: &str, n: usize) -> SyncItem {
         SyncItem {
             entity: EntityRef::new(source_id, &format!("U-{n}")),

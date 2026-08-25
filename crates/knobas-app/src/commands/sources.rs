@@ -239,6 +239,7 @@ mod tests {
             source_id: "mock".to_owned(),
             upserted: 1,
             deleted: 0,
+            swept: 0,
             cursor: "c".to_owned(),
         };
         assert_eq!(super::outcome_of(&Ok(report)), SyncOutcome::Ok);
