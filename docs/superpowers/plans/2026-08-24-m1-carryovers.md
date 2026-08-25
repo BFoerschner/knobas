@@ -20,6 +20,9 @@ Items struck through were discharged by the M1 contract PR (checkpoint 0); every
 - ~~Structured snippet highlighting (sentinel selectors → segments); M0 ships plain text over title+body.~~ **Done (contract PR, task 4).** `knobas_search::snippet` owns the sentinel selectors (`headline_options()`) and the split (`segments()`); `SearchHit.snippet` is `Vec<Segment>`. Every `Segment.text` is raw source text: render as text, never as markup (gotcha 7).
 - `capabilities/default.json` grants only `core:default` — the first plugin (notifications, shortcuts) must extend it. CSP note: desktop dev builds get NO CSP; verify CSP changes against production builds only.
 
+**Orchestrator-owned (`knobas-http` is read-only for M1 — requests route through the orchestrator):**
+- **A body→message hook.** Stream A found that `HttpClient::send` consumes the response body before an adapter can lift the API's own error envelope out of it (Jira's `errorMessages`), so the adapter reconstructs the message afterwards in `humanize`. All three adapters will hit this — Gitea and TeamCity both return structured error bodies. The clean fix is a hook that lets the caller map a failing response body into the `SourceError` message. Requested by A on PR #15; do it before streams B and C write their HTTP seams, so all three share one path instead of three private workarounds.
+
 **Stream T / CI:**
 - `actions/*@v4` Node-20 deprecation annotations (breakage when the shim is removed).
 - Linux dep set is minimal-by-experiment; tray/dialogs/`tauri build`-in-CI will need additions.
