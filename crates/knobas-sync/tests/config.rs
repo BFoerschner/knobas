@@ -355,14 +355,19 @@ async fn a_source_that_just_finished_a_run_waits_out_its_interval() {
         "the *newest* finished run decides, not the oldest"
     );
 
-    sqlx::query("update knobas.sync_run set finished_at = now() - interval '1 hour' where source_id = $1")
-        .bind(&id)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "update knobas.sync_run set finished_at = now() - interval '1 hour' where source_id = $1",
+    )
+    .bind(&id)
+    .execute(&pool)
+    .await
+    .unwrap();
     let due = config::due(&pool).await.unwrap();
     let mine = due.iter().find(|d| d.id == id).expect("due again");
-    assert!(!mine.first_run, "a source with a finished run is not a first run");
+    assert!(
+        !mine.first_run,
+        "a source with a finished run is not a first run"
+    );
 }
 
 /// A run still in flight has no `finished_at`, so it must not make a source
@@ -509,11 +514,12 @@ async fn deleting_a_source_keeps_its_run_history() {
 
     assert!(config::delete(&pool, &id, true).await.unwrap());
 
-    let (runs,): (i64,) = sqlx::query_as("select count(*) from knobas.sync_run where source_id = $1")
-        .bind(&id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let (runs,): (i64,) =
+        sqlx::query_as("select count(*) from knobas.sync_run where source_id = $1")
+            .bind(&id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(runs, 1, "deleting a source must not rewrite its history");
 }
 
@@ -537,7 +543,12 @@ async fn list_and_get_agree_on_what_a_row_is() {
     assert_eq!(mine.health.detail.as_deref(), Some("dns"));
     assert_eq!(mine.auth_kind, got.auth_kind);
     assert_eq!(mine.display_name, got.display_name);
-    assert!(config::get(&pool, "no-such-source").await.unwrap().is_none());
+    assert!(
+        config::get(&pool, "no-such-source")
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 /// Every `AuthKind` must survive the round trip through `auth_kind`, and the

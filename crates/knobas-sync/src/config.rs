@@ -583,7 +583,10 @@ mod tests {
         for state in AuthState::ALL {
             assert_eq!(auth_state_from_db(state.as_str()), *state);
         }
-        assert_eq!(auth_state_from_db("written_by_a_newer_knobas"), AuthState::Unknown);
+        assert_eq!(
+            auth_state_from_db("written_by_a_newer_knobas"),
+            AuthState::Unknown
+        );
         assert_eq!(auth_state_from_db(""), AuthState::Unknown);
     }
 

@@ -46,6 +46,17 @@ impl SyncOutcome {
     /// and `Error` are retried with an increasing delay, `Unauthorized` never
     /// is -- it needs a human (interfaces §8 P7). Defined here, once, so the
     /// log and the backoff cannot disagree about what a failure was.
+    /// Whether this outcome advances the backoff ladder.
+    ///
+    /// `Unauthorized` does not: P7 gives it **no automatic retry**, because
+    /// only a human can fix a rejected credential, and a source that retries
+    /// one on a timer is a source that gets an account locked out. `Ok` does
+    /// not either, obviously -- it clears the ladder instead.
+    #[must_use]
+    pub fn backs_off(self) -> bool {
+        matches!(self, SyncOutcome::Unreachable | SyncOutcome::Error)
+    }
+
     #[must_use]
     pub fn of(error: &SyncError) -> Self {
         match error {
@@ -198,6 +209,232 @@ pub async fn finish(
     .execute(pool)
     .await?;
     Ok(())
+}
+
+/// How many runs per source the log keeps.
+///
+/// Older ones are pruned after a finished run: the log is a diagnostic, not an
+/// archive, and a five-minute schedule would otherwise reach 288 rows per
+/// source per day for ever.
+pub const KEEP_RUNS: i64 = 200;
+
+/// One row of the sync log, as the diagnostics view reads it.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SyncRunRow {
+    pub id: i64,
+    pub source_id: String,
+    pub trigger: SyncTrigger,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    /// `None` while the run is in flight -- which is what "running" means.
+    pub finished_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub outcome: Option<SyncOutcome>,
+    pub upserted: i64,
+    pub deleted: i64,
+    pub swept: i64,
+    pub error: Option<String>,
+    pub cursor_after: Option<String>,
+}
+
+/// Parse a stored `trigger`.
+///
+/// Anything unrecognised reads as [`SyncTrigger::Schedule`]: a row written by
+/// a newer knobas must not break the diagnostics list. Driven by `ALL`, so a
+/// variant is readable the moment it is writable.
+fn trigger_from_db(raw: &str) -> SyncTrigger {
+    SyncTrigger::ALL
+        .iter()
+        .copied()
+        .find(|t| t.as_str() == raw)
+        .unwrap_or(SyncTrigger::Schedule)
+}
+
+/// Parse a stored `outcome`. As [`trigger_from_db`], defaulting to
+/// [`SyncOutcome::Error`] -- an outcome this version cannot name is not a
+/// success, and must not clear a backoff ladder.
+fn outcome_from_db(raw: &str) -> SyncOutcome {
+    SyncOutcome::ALL
+        .iter()
+        .copied()
+        .find(|o| o.as_str() == raw)
+        .unwrap_or(SyncOutcome::Error)
+}
+
+#[derive(sqlx::FromRow)]
+struct RawRun {
+    id: i64,
+    source_id: String,
+    trigger: String,
+    started_at: chrono::DateTime<chrono::Utc>,
+    finished_at: Option<chrono::DateTime<chrono::Utc>>,
+    outcome: Option<String>,
+    upserted: i64,
+    deleted: i64,
+    swept: i64,
+    error: Option<String>,
+    cursor_after: Option<String>,
+}
+
+impl From<RawRun> for SyncRunRow {
+    fn from(r: RawRun) -> Self {
+        SyncRunRow {
+            id: r.id,
+            source_id: r.source_id,
+            trigger: trigger_from_db(&r.trigger),
+            started_at: r.started_at,
+            finished_at: r.finished_at,
+            outcome: r.outcome.as_deref().map(outcome_from_db),
+            upserted: r.upserted,
+            deleted: r.deleted,
+            swept: r.swept,
+            error: r.error,
+            cursor_after: r.cursor_after,
+        }
+    }
+}
+
+/// Every column the readers below select, named. Never `select *` -- the
+/// project rule, and here it also keeps the column list in one place instead of
+/// in three statements that drift.
+const RUN_COLUMNS: &str = "id, source_id, trigger, started_at, finished_at, outcome,
+                           upserted, deleted, swept, error, cursor_after";
+
+/// The `limit` newest runs, newest first -- every source, or one.
+///
+/// One statement for both cases: `$1 is null` makes the filter optional without
+/// building SQL. Ordered by `(started_at desc, id desc)`, which is
+/// `sync_run_source_idx`'s order for the filtered read; `id` breaks ties so two
+/// runs started in the same microsecond still have a stable order.
+///
+/// # Errors
+/// [`sqlx::Error`] if the query fails.
+pub async fn list(
+    pool: &sqlx::PgPool,
+    source_id: Option<&str>,
+    limit: i64,
+) -> Result<Vec<SyncRunRow>, sqlx::Error> {
+    let sql = format!(
+        "select {RUN_COLUMNS} from knobas.sync_run
+          where ($1::text is null or source_id = $1)
+          order by started_at desc, id desc
+          limit $2"
+    );
+    let rows: Vec<RawRun> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .bind(source_id)
+        .bind(limit)
+        .fetch_all(pool)
+        .await?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
+/// The newest **finished** run for a source -- what
+/// [`SourceSyncStatus::last_outcome`] reads.
+///
+/// `finished_at is not null` is load-bearing here, unlike in the schedule's
+/// lateral: this is a `limit 1` over an ordering, not a `max()`, so an open run
+/// really would shadow the finished one underneath it and the status strip
+/// would go blank for the duration of every sync.
+///
+/// # Errors
+/// [`sqlx::Error`] if the query fails.
+pub async fn last_finished(
+    pool: &sqlx::PgPool,
+    source_id: &str,
+) -> Result<Option<SyncRunRow>, sqlx::Error> {
+    let sql = format!(
+        "select {RUN_COLUMNS} from knobas.sync_run
+          where source_id = $1 and finished_at is not null
+          order by started_at desc, id desc limit 1"
+    );
+    let row: Option<RawRun> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .bind(source_id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.map(Into::into))
+}
+
+/// How many **finished** runs there have been since the last successful one --
+/// the rung of P7's backoff ladder, derived rather than stored.
+///
+/// A counter column would be a second truth that a crashed process, a manual
+/// sync or a pruned log immediately falsifies. A run still in flight is
+/// excluded: a slow source is not a failing one, and counting it would double
+/// the backoff of a source that is merely taking its time.
+///
+/// # Errors
+/// [`sqlx::Error`] if the query fails.
+pub async fn failures_since_last_ok(
+    pool: &sqlx::PgPool,
+    source_id: &str,
+) -> Result<i64, sqlx::Error> {
+    let (n,): (i64,) = sqlx::query_as(
+        "select count(*)
+           from knobas.sync_run
+          where source_id = $1
+            and finished_at is not null
+            and id > coalesce((select max(id) from knobas.sync_run
+                                where source_id = $1 and outcome = 'ok'), 0)",
+    )
+    .bind(source_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(n)
+}
+
+/// Keep the newest `keep` runs for one source; return how many went.
+///
+/// A `not in` over a bounded subquery rather than an id-arithmetic trick: the
+/// keep set is at most a few hundred ids, `sync_run_source_idx` serves the
+/// ordering, and "keep these, delete the rest" is what the sentence says.
+///
+/// # Errors
+/// [`sqlx::Error`] if the delete fails.
+pub async fn prune(pool: &sqlx::PgPool, source_id: &str, keep: i64) -> Result<u64, sqlx::Error> {
+    let done = sqlx::query(
+        "delete from knobas.sync_run
+          where source_id = $1
+            and id not in (
+                  select id from knobas.sync_run
+                   where source_id = $1
+                   order by started_at desc, id desc
+                   limit $2)",
+    )
+    .bind(source_id)
+    .bind(keep)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected())
+}
+
+/// Close every run left open by a process that is no longer running.
+///
+/// Called once at scheduler start, before the first tick. Nothing in a killed
+/// process can close its own row, so an open row outlives it and makes
+/// `sync_status` report a source as running for ever, and the diagnostics view
+/// carry a run that never ended. Uses `sync_run_running_idx`.
+///
+/// **Whole-database, deliberately**: knobas runs one scheduler per profile, and
+/// at the moment this is called no run of this process exists yet, so every
+/// open row is by definition abandoned. That is also why it must run *before*
+/// the first tick -- afterwards it would close live runs.
+///
+/// `coalesce(error, …)` rather than an overwrite: a run that recorded why it
+/// was struggling before the process died keeps that, which is the more useful
+/// half of the diagnosis.
+///
+/// # Errors
+/// [`sqlx::Error`] if the update fails.
+pub async fn reconcile_abandoned(pool: &sqlx::PgPool) -> Result<u64, sqlx::Error> {
+    let done = sqlx::query(
+        "update knobas.sync_run
+            set finished_at = now(),
+                outcome = $1,
+                error = coalesce(error, 'interrupted: knobas exited while this run was in flight')
+          where finished_at is null",
+    )
+    .bind(SyncOutcome::Error.as_str())
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected())
 }
 
 #[cfg(test)]
