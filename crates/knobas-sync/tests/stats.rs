@@ -8,40 +8,54 @@ async fn pool() -> PgPool {
     pool
 }
 
+/// Insert `n` mirror rows under a fresh source id, and return the id.
+async fn seed(pool: &PgPool, n: usize) -> String {
+    let id = format!("stats-{}", uuid::Uuid::new_v4().simple());
+    for i in 0..n {
+        let entity = format!("{id}:S-{i}");
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ticket', 's')")
+            .bind(&entity)
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "insert into sync.item (entity_id, source_id, kind, title, payload)
+             values ($1, $2, 'ticket', 's', '{}'::jsonb)",
+        )
+        .bind(&entity)
+        .bind(&id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    id
+}
+
 #[tokio::test]
 async fn db_stats_reports_a_size_counts_and_a_per_source_breakdown() {
     let pool = pool().await;
-    let id = format!("stats-{}", uuid::Uuid::new_v4().simple());
-    let entity = format!("{id}:S-1");
-    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ticket', 's')")
-        .bind(&entity)
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::query(
-        "insert into sync.item (entity_id, source_id, kind, title, payload)
-         values ($1, $2, 'ticket', 's', '{}'::jsonb)",
-    )
-    .bind(&entity)
-    .bind(&id)
-    .execute(&pool)
-    .await
-    .unwrap();
+    // Two sources with **different** counts, which is what makes the breakdown
+    // a breakdown. An ungrouped `count(*)` would give both the same number.
+    let one = seed(&pool, 1).await;
+    let three = seed(&pool, 3).await;
 
     let stats = knobas_sync::stats::db_stats(&pool).await.unwrap();
     assert!(stats.db_bytes > 0);
-    assert!(stats.entity_count >= 1);
-    assert!(stats.item_count >= 1);
+    assert!(stats.entity_count >= 4);
+    assert!(stats.item_count >= 4);
     assert!(stats.oldest_synced_at.is_some() && stats.newest_synced_at.is_some());
     assert!(stats.oldest_synced_at <= stats.newest_synced_at);
 
-    let mine = stats
-        .per_source
-        .iter()
-        .find(|s| s.source_id == id)
-        .expect("the source appears");
-    assert_eq!(mine.items, 1, "one row, and this source's own");
-    assert!(mine.synced_at.is_some());
+    let row_for = |id: &str| {
+        stats
+            .per_source
+            .iter()
+            .find(|s| s.source_id == id)
+            .unwrap_or_else(|| panic!("{id} is missing from the breakdown"))
+    };
+    assert_eq!(row_for(&one).items, 1, "each row counts its own source");
+    assert_eq!(row_for(&three).items, 3);
+    assert!(row_for(&one).synced_at.is_some());
     assert!(
         stats
             .per_source
@@ -50,13 +64,12 @@ async fn db_stats_reports_a_size_counts_and_a_per_source_breakdown() {
         "id order, so the diagnostics list does not reshuffle between polls"
     );
 
-    // The breakdown is a breakdown: its rows sum to the total, rather than each
-    // carrying an ungrouped `count(*)`.
-    let summed: i64 = stats.per_source.iter().map(|s| s.items).sum();
-    assert_eq!(
-        summed, stats.item_count,
-        "the per-source counts must add up to the total"
-    );
+    // Deliberately **not** "the rows sum to `item_count`". The database is
+    // shared across this binary, the totals and the breakdown are two
+    // statements, and another test inserting between them makes that assertion
+    // fail for a reason that has nothing to do with the code -- which is how it
+    // failed in CI on the first run of this file. Two sources with different
+    // counts pin the grouping without depending on anything global.
 }
 
 /// The re-index button. `reindex index concurrently` cannot run inside a
