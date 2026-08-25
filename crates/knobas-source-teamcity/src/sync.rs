@@ -611,6 +611,9 @@ mod tests {
 
         // ...and a foreign build that *finishes* still moves it along, so the
         // incremental query does not accumulate builds it always discards.
+        // The **newest** finished build is the foreign one, deliberately: if
+        // an in-scope build were newest, a watermark that ignored foreign
+        // builds would land on the same number and this could not fail.
         let rest = FakeRest::new(
             vec![
                 build_type("Payout_Build", "Payout"),
@@ -619,15 +622,15 @@ mod tests {
             vec![
                 build(100, "Ledger_Deploy_Staging", "Ledger", "finished"),
                 build(200, "Payout_Build", "Payout", "finished"),
-                build(300, "Ledger_Deploy_Staging", "Ledger", "finished"),
-                build(400, "Payout_Build", "Payout", "finished"),
+                build(300, "Payout_Build", "Payout", "finished"),
+                build(400, "Ledger_Deploy_Staging", "Ledger", "finished"),
             ],
         );
         let (items, second) = run(&rest, &cfg, Some(first)).await;
-        assert_eq!(keys(&items), ["buildType:Payout_Build", "build:400"]);
+        assert_eq!(keys(&items), ["buildType:Payout_Build", "build:300"]);
         assert_eq!(
             second, r#"{"v":1,"since_build_id":400}"#,
-            "300 is foreign and finished: the run saw it and will never want it again"
+            "400 is foreign and finished: the run saw it and will never want it again, so              leaving the watermark at 300 would re-fetch it on every poll for good"
         );
     }
 
@@ -662,26 +665,43 @@ mod tests {
         assert_eq!(items.iter().filter(|i| i.kind == "build_config").count(), 1);
     }
 
-    /// Interfaces §4.1 and battery clause 6: a sink failure abandons the run.
+    /// A sink that rejects one kind of item and not the other.
+    ///
+    /// Configurations are pushed before builds, so a sink that fails on
+    /// *everything* only ever exercises the first `?` in the run -- and the
+    /// build loop's `?` could be deleted with the suite still green. This one
+    /// can be pointed at either loop.
+    struct RejectsKind(&'static str);
+
+    #[async_trait::async_trait]
+    impl knobas_source::Sink for RejectsKind {
+        async fn item(&mut self, item: SyncItem) -> Result<(), SourceError> {
+            if item.kind == self.0 {
+                return Err(SourceError::Sink(format!("no room for a {}", self.0)));
+            }
+            Ok(())
+        }
+    }
+
+    /// Interfaces §4.1 and battery clause 6: a sink failure abandons the run
+    /// -- from **either** loop, which is two `?`s and therefore two tests in
+    /// one.
     #[tokio::test]
     async fn a_sink_failure_aborts_the_run() {
-        struct Failing;
-        #[async_trait::async_trait]
-        impl knobas_source::Sink for Failing {
-            async fn item(&mut self, _: SyncItem) -> Result<(), SourceError> {
-                Err(SourceError::Sink("sink is down".into()))
-            }
+        for kind in ["build_config", "build"] {
+            let outcome = execute(
+                "teamcity",
+                &TeamCityConfig::default(),
+                &tidewater(),
+                None,
+                &mut RejectsKind(kind),
+            )
+            .await;
+            assert!(
+                matches!(outcome, Err(SourceError::Sink(_))),
+                "a rejected {kind} must abandon the run as SourceError::Sink, got {outcome:?}"
+            );
         }
-        let err = execute(
-            "teamcity",
-            &TeamCityConfig::default(),
-            &tidewater(),
-            None,
-            &mut Failing,
-        )
-        .await
-        .expect_err("propagated");
-        assert!(matches!(err, SourceError::Sink(_)), "{err:?}");
     }
 
     /// The page cap **fails**; it must never return `Ok` with a short answer.

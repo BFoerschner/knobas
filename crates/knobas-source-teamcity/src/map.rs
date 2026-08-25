@@ -336,6 +336,26 @@ mod tests {
         );
     }
 
+    /// The key is the build **id**, and the title carries the build
+    /// **number**: they are different identifiers, and this record makes them
+    /// different values so a mapping that confused them cannot pass.
+    ///
+    /// Numbers are per-configuration and a configuration's counter can be
+    /// reset, so two builds on one server can share a number. Keying on it
+    /// would make two builds one row.
+    #[test]
+    fn the_key_is_the_id_and_the_title_is_the_number() {
+        let raw = serde_json::json!({
+            "id": 5001, "number": "42", "buildTypeId": "Payout_Build",
+            "state": "finished", "status": "SUCCESS",
+            "finishDate": "20260822T101018+0000"
+        });
+        let b: Build = serde_json::from_value(raw.clone()).expect("build");
+        let it = build_item("teamcity", &raw, &b);
+        assert_eq!(it.entity.key, "build:5001", "the server-wide id");
+        assert_eq!(it.title, "Payout_Build #42", "the human-facing number");
+    }
+
     /// The two key spaces must not collide: a build id and a configuration id
     /// both go into one `EntityRef` key space, and only the prefix separates
     /// them.
