@@ -6,10 +6,20 @@
 |---|---|---|---|
 | `jira-dc-rest.wadl` | **Jira Data Center REST v2** (the adapter's primary dialect: `/rest/api/2/search` + classic `startAt` pagination, issue/comment/worklog/transitions — all verified present) | WADL (official; "Jira 9.17.0", the latest Atlassian publishes) | vendored |
 | — | **Confluence Data Center REST v1** (`/rest/api/content`, CQL search) | **Atlassian publishes no machine-readable DC spec at all** (no OpenAPI, no reachable WADL) | contract = official HTML REST docs + validation against the real `atlassian/confluence` container |
-| `teamcity.json` | TeamCity REST | Swagger 2.0, served only by a running server | extract from the pinned `jetbrains/teamcity-server` container (see `fetch.sh`) |
+| `teamcity.json` | TeamCity REST | Swagger 2.0, served only by a running server | **BLOCKED, not vendored** — see below. TeamCity keeps golden-fixture validation only |
 | `jira-cloud-v3.json` | Jira **Cloud** v3 (421 paths, `/search/jql`) | OpenAPI 3.0.1 | vendored — cloud flavor, later |
 | `confluence-cloud-v1.json` | Confluence **Cloud** v1 (CQL lives only here) | OpenAPI 3.0.1 | vendored — cloud flavor, later |
 | `confluence-cloud-v2.json` | Confluence **Cloud** v2 content CRUD | OpenAPI 3.0.3 | vendored — cloud flavor, later |
+
+**TeamCity blocker (2026-08-25).** `teamcity.json` could not be vendored on the development machine, and no spec was invented in its place:
+
+1. JetBrains publishes **no static swagger document**. Re-verified 2026-08-25 against four plausible public URLs (`jetbrains.com/help/teamcity/rest/{teamcity-rest-openapi,swagger}.json`, the `teamcity-rest-client` repo, `plugins.jetbrains.com`) — all 404 or 403. `/app/rest/swagger.json` on a running server is the only source.
+2. That server is behind a one-time **first-start wizard** (database choice, licence agreement, administrator account) whose form endpoints are not REST API and change between versions. It is a human action, so `fetch.sh --teamcity` stops there and says so rather than guessing.
+3. The host had **13 GiB free on a 98 %-full volume**; the image plus its data directory needs roughly 10 GB.
+
+Consequence, per the plan's own fallback: TeamCity is validated against **golden fixtures only** — which is exactly what ruling P11(b) already blesses, and strictly less loss than a hand-written spec that lies. `crates/knobas-mockd/tests/teamcity_contract.rs` carries the swagger half already written and **self-arming**: it detects `teamcity.json`, and the moment the file is vendored the schema assertions start running with no code change. A companion test fails if this row ever stops recording the blocker, so the skip cannot be quietly forgotten.
+
+To discharge it: `cd testenv/specs && ./fetch.sh --teamcity` on a machine with the disk headroom and a human at the browser, then `shasum -a 256 *.json *.wadl > SHA256SUMS`, review, and flip this row to `vendored — <version>, <date>`.
 
 Rules:
 - `SHA256SUMS` pins the exact documents. mockd mocks the **DC shapes** (Jira v2, Confluence v1) and validates its responses — and, via request-validation middleware, the adapters' requests — against the strongest available contract per API.
