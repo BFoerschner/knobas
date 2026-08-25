@@ -62,3 +62,67 @@ pub(crate) trait JiraApi: Send + Sync {
     /// resource, so there is no paging to do.
     async fn worklogs(&self, key: &str) -> Result<WorklogPage, SourceError>;
 }
+
+/// The real endpoints. Every path and every parameter here is declared in
+/// `testenv/specs/jira-dc-rest.wadl`; `knobas-mockd` records anything else as a
+/// violation, which is what turns "the adapter invented an endpoint" into a red
+/// test in this crate's own suite rather than a surprise against a real Jira.
+///
+/// The issue key is interpolated into the path. Keys come from Jira's own
+/// responses (`PAY-231`) and are `[A-Z0-9_]+-\d+`, so no escaping is required;
+/// a key that is not one would 404 and be reported as
+/// [`SourceError::Protocol`].
+#[async_trait::async_trait]
+impl JiraApi for crate::http::JiraHttp {
+    async fn server_info(&self) -> Result<ServerInfo, SourceError> {
+        self.get_json("rest/api/2/serverInfo", &[]).await
+    }
+
+    async fn myself(&self) -> Result<Myself, SourceError> {
+        self.get_json("rest/api/2/myself", &[]).await
+    }
+
+    async fn search(
+        &self,
+        jql: &str,
+        start_at: u32,
+        max_results: u32,
+        fields: &str,
+    ) -> Result<SearchPage, SourceError> {
+        // Data Center's classic search. NOT Cloud's /rest/api/3/search/jql --
+        // roadmap §4 gotcha 4. `validateQuery` and `expand` are left at their
+        // defaults: renderedFields would give us HTML (gotcha 7).
+        self.get_json(
+            "rest/api/2/search",
+            &[
+                ("jql", jql.to_owned()),
+                ("startAt", start_at.to_string()),
+                ("maxResults", max_results.to_string()),
+                ("fields", fields.to_owned()),
+            ],
+        )
+        .await
+    }
+
+    async fn comments(
+        &self,
+        key: &str,
+        start_at: u32,
+        max_results: u32,
+    ) -> Result<CommentPage, SourceError> {
+        self.get_json(
+            &format!("rest/api/2/issue/{key}/comment"),
+            &[
+                ("startAt", start_at.to_string()),
+                ("maxResults", max_results.to_string()),
+            ],
+        )
+        .await
+    }
+
+    async fn worklogs(&self, key: &str) -> Result<WorklogPage, SourceError> {
+        // No parameters: the WADL declares none on this resource.
+        self.get_json(&format!("rest/api/2/issue/{key}/worklog"), &[])
+            .await
+    }
+}
