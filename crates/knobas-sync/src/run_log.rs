@@ -156,6 +156,56 @@ impl RunCounts {
     }
 }
 
+impl RunCounts {
+    /// How much this run changed. Zero means the source had nothing new, which
+    /// is what keeps a five-minute schedule from writing 288 activity lines a
+    /// day per source.
+    #[must_use]
+    pub fn touched(&self) -> i64 {
+        self.upserted
+            .saturating_add(self.deleted)
+            .saturating_add(self.swept)
+    }
+}
+
+/// The whole verdict on one finished run: how it ended, what it wrote, and why
+/// it did not.
+///
+/// One value rather than three parallel arguments to [`finish`], because the
+/// scheduler passes the same verdict to the log, to the credential health and
+/// to the backoff, and three call sites reading three loose arguments is how
+/// they come to disagree about what happened.
+#[derive(Debug, Clone)]
+pub struct RunResult {
+    pub outcome: SyncOutcome,
+    pub counts: RunCounts,
+    /// The failure's message, or `None` for a run that succeeded.
+    pub error: Option<String>,
+}
+
+impl RunResult {
+    /// The verdict a successful run produces.
+    #[must_use]
+    pub fn ok(report: &SyncReport) -> Self {
+        Self {
+            outcome: SyncOutcome::Ok,
+            counts: RunCounts::of(report),
+            error: None,
+        }
+    }
+
+    /// The verdict a failed run produces: the failure's class and its message,
+    /// and no counts -- the run rolled back, so nothing it wrote survived.
+    #[must_use]
+    pub fn failed(error: &SyncError) -> Self {
+        Self {
+            outcome: SyncOutcome::of(error),
+            counts: RunCounts::default(),
+            error: Some(error.to_string()),
+        }
+    }
+}
+
 /// Open a run and return its id.
 ///
 /// Written before the adapter is touched, so a run that hangs or crashes is
@@ -190,9 +240,7 @@ pub async fn start(
 pub async fn finish(
     pool: &sqlx::PgPool,
     run_id: i64,
-    outcome: SyncOutcome,
-    counts: &RunCounts,
-    error: Option<&str>,
+    result: &RunResult,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "update knobas.sync_run
@@ -201,12 +249,12 @@ pub async fn finish(
           where id = $1",
     )
     .bind(run_id)
-    .bind(outcome.as_str())
-    .bind(counts.upserted)
-    .bind(counts.deleted)
-    .bind(counts.swept)
-    .bind(error)
-    .bind(counts.cursor_after.as_deref())
+    .bind(result.outcome.as_str())
+    .bind(result.counts.upserted)
+    .bind(result.counts.deleted)
+    .bind(result.counts.swept)
+    .bind(result.error.as_deref())
+    .bind(result.counts.cursor_after.as_deref())
     .execute(pool)
     .await?;
     Ok(())
@@ -252,7 +300,7 @@ fn trigger_from_db(raw: &str) -> SyncTrigger {
 /// Parse a stored `outcome`. As [`trigger_from_db`], defaulting to
 /// [`SyncOutcome::Error`] -- an outcome this version cannot name is not a
 /// success, and must not clear a backoff ladder.
-fn outcome_from_db(raw: &str) -> SyncOutcome {
+pub(crate) fn outcome_from_db(raw: &str) -> SyncOutcome {
     SyncOutcome::ALL
         .iter()
         .copied()
@@ -704,14 +752,16 @@ mod tests {
         finish(
             &pool,
             run_id,
-            SyncOutcome::Unauthorized,
-            &RunCounts {
-                upserted: 3,
-                deleted: 1,
-                swept: 2,
-                cursor_after: Some("c-9".to_owned()),
+            &RunResult {
+                outcome: SyncOutcome::Unauthorized,
+                counts: RunCounts {
+                    upserted: 3,
+                    deleted: 1,
+                    swept: 2,
+                    cursor_after: Some("c-9".to_owned()),
+                },
+                error: Some("401".to_owned()),
             },
-            Some("401"),
         )
         .await
         .unwrap();

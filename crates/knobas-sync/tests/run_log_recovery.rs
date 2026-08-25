@@ -81,9 +81,11 @@ async fn a_run_abandoned_by_a_quit_is_closed_at_the_next_start() {
     run_log::finish(
         &pool,
         ok_run,
-        SyncOutcome::Ok,
-        &run_log::RunCounts::default(),
-        None,
+        &run_log::RunResult {
+            outcome: SyncOutcome::Ok,
+            counts: run_log::RunCounts::default(),
+            error: None,
+        },
     )
     .await
     .unwrap();

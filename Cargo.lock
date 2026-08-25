@@ -2785,6 +2785,7 @@ dependencies = [
  "chrono",
  "knobas-core",
  "knobas-db",
+ "knobas-secrets",
  "knobas-source",
  "knobas-source-mock",
  "serde",
@@ -2792,6 +2793,7 @@ dependencies = [
  "sqlx",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-util",
  "tracing",
  "uuid",
 ]

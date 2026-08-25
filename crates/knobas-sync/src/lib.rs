@@ -84,10 +84,11 @@ pub mod health;
 pub mod progress;
 pub mod run_log;
 pub mod runner;
+pub mod scheduler;
 
 pub use health::{AuthState, CredentialHealth};
 pub use progress::{ProgressSink, SyncPhase, SyncProgress};
-pub use run_log::{RunCounts, SourceSyncStatus, SyncOutcome, SyncTrigger};
+pub use run_log::{RunCounts, RunResult, SourceSyncStatus, SyncOutcome, SyncTrigger};
 pub use runner::run;
 
 use std::collections::{BTreeMap, HashMap, HashSet};

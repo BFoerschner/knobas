@@ -32,15 +32,31 @@ fn ok_counts(upserted: i64) -> RunCounts {
 }
 
 async fn finish_ok(pool: &PgPool, run_id: i64, upserted: i64) {
-    run_log::finish(pool, run_id, SyncOutcome::Ok, &ok_counts(upserted), None)
-        .await
-        .unwrap();
+    run_log::finish(
+        pool,
+        run_id,
+        &run_log::RunResult {
+            outcome: SyncOutcome::Ok,
+            counts: ok_counts(upserted),
+            error: None,
+        },
+    )
+    .await
+    .unwrap();
 }
 
 async fn finish_failed(pool: &PgPool, run_id: i64, outcome: SyncOutcome, error: &str) {
-    run_log::finish(pool, run_id, outcome, &RunCounts::default(), Some(error))
-        .await
-        .unwrap();
+    run_log::finish(
+        pool,
+        run_id,
+        &run_log::RunResult {
+            outcome,
+            counts: RunCounts::default(),
+            error: Some(error.to_owned()),
+        },
+    )
+    .await
+    .unwrap();
 }
 
 #[tokio::test]
@@ -64,14 +80,16 @@ async fn a_run_is_open_while_it_runs_and_closed_with_its_counts() {
     run_log::finish(
         &pool,
         run_id,
-        SyncOutcome::Ok,
-        &RunCounts {
-            upserted: 42,
-            deleted: 1,
-            swept: 3,
-            cursor_after: Some("c-9".to_owned()),
+        &run_log::RunResult {
+            outcome: SyncOutcome::Ok,
+            counts: RunCounts {
+                upserted: 42,
+                deleted: 1,
+                swept: 3,
+                cursor_after: Some("c-9".to_owned()),
+            },
+            error: None,
         },
-        None,
     )
     .await
     .unwrap();

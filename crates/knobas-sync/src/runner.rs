@@ -21,7 +21,7 @@ use knobas_source::{Cursor, Source};
 use sqlx::PgPool;
 
 use crate::progress::{ProgressSink, SyncPhase, SyncProgress};
-use crate::run_log::{self, RunCounts, SyncOutcome};
+use crate::run_log::{self, RunResult};
 use crate::{SyncError, SyncReport};
 
 /// Execute one run whose log row is already open, and close it.
@@ -66,7 +66,7 @@ pub async fn run(
 
     match crate::run_once(pool, source, cursor).await {
         Ok(done) => {
-            run_log::finish(pool, run_id, SyncOutcome::Ok, &RunCounts::of(&done), None).await?;
+            run_log::finish(pool, run_id, &RunResult::ok(&done)).await?;
             report(
                 progress,
                 run_id,
@@ -79,10 +79,8 @@ pub async fn run(
             Ok(done)
         }
         Err(error) => {
-            let outcome = SyncOutcome::of(&error);
             let message = error.to_string();
-            if let Err(log_error) =
-                run_log::finish(pool, run_id, outcome, &RunCounts::default(), Some(&message)).await
+            if let Err(log_error) = run_log::finish(pool, run_id, &RunResult::failed(&error)).await
             {
                 tracing::warn!(run_id, %log_error, "the run failed, and so did logging it");
             }
