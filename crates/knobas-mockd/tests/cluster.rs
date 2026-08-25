@@ -25,12 +25,14 @@ async fn one_state_backs_both_servers_and_the_admin_api_drives_it() {
     assert_eq!(h["apis"], serde_json::json!(["jira", "teamcity"]));
     assert_eq!(h["fixture_today"], "2026-08-22T14:32:00Z");
 
-    // Touch through HTTP, observe through the typed state -- same object.
+    // Touch through the *TeamCity* server's admin port and observe through the
+    // typed state the Jira server was built over. Going in one door and out the
+    // other is what proves there is one object and not two.
     let before = c.state().issue("PAY-240").unwrap().updated;
     let r = http
         .post(format!(
             "{}/__mock/jira/issue/PAY-240/touch",
-            c.jira.base_url()
+            c.teamcity.base_url()
         ))
         .send()
         .await
