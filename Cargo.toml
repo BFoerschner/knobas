@@ -50,3 +50,9 @@ sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio",
 # response header).
 reqwest = { version = "0.13.4", default-features = false, features = ["charset", "gzip", "http2", "json", "query", "rustls", "system-proxy"] }
 governor = "0.10.4"
+
+# Test binaries link the sqlx + postgresql_embedded stack; on Linux their
+# debuginfo dominates the artifact size and exhausted a 14 GB CI runner at 30
+# test binaries (PR #19). Backtraces keep line numbers via debug=1 in dev.
+[profile.test]
+debug = 0
