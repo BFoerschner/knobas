@@ -22,6 +22,7 @@
 
 mod config;
 mod descriptor;
+mod map;
 mod rest;
 
 pub use config::{TeamCityConfig, config_schema};
