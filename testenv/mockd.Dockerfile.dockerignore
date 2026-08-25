@@ -1,0 +1,14 @@
+# BuildKit prefers `<dockerfile>.dockerignore` over the context's
+# `.dockerignore`, which keeps this file inside testenv/ where stream T owns it
+# (the repo root is nobody's in M1). The context is the repo root, so without
+# this the build would ship every stream's target/ directory -- gigabytes.
+target/
+**/target/
+app/node_modules/
+app/dist/
+.git/
+.worktrees/
+mockups/
+docs/
+.superpowers/
+testenv/.env

@@ -1,0 +1,191 @@
+# `testenv` — the knobas test environment
+
+A small fake company on a laptop: the Tidewater Freight fixture served by real
+software where we can self-host it, and by our own faithful mock where we
+cannot.
+
+```sh
+cd testenv
+docker compose up -d --build   # gitea, uptime-kuma, mockd
+./seed                         # the Tidewater content, idempotent
+```
+
+Two layers, and the difference is the point:
+
+| Layer | What | Why |
+|---|---|---|
+| **Real products** | Gitea, Uptime Kuma v2 | Cheap to self-host, so the adapters are certified against the actual software rather than against our idea of it. |
+| **mockd** | Jira Data Center v2, TeamCity REST | Jira and TeamCity are not cheap to self-host (see the profiles below). `crates/knobas-mockd` serves the *same* Tidewater fixture, so both layers tell one story (design §14a). |
+
+## Ports
+
+Fixed by the M1 interfaces doc §5. Everything binds `127.0.0.1` only — this
+environment ships developer-grade credentials and must never be reachable
+off-host. `./check-ports.sh` asserts the compose file against this table and CI
+runs it, so the table and the file cannot drift.
+
+| Port | Service | Profile |
+|---|---|---|
+| 3000 | Gitea | default |
+| 3001 | Uptime Kuma v2 | default |
+| 8200 | mockd — health + `/__mock/*` admin API | default |
+| 8210 | mockd — Jira Data Center REST v2 | default |
+| 8211 | **reserved** — Confluence DC mock (M3) | *bound by nothing* |
+| 8212 | mockd — TeamCity REST | default |
+| 8213 | **reserved** — Flowrun stub (M4) | *bound by nothing* |
+| 8111 | real TeamCity server | `--profile real-teamcity` |
+| 8080 | real Jira Software | `--profile real-atlassian` |
+| 8090 | real Confluence | `--profile real-atlassian` |
+
+8211 and 8213 are reserved on purpose and bound by nothing — in the compose
+file *and* in the `mockd` binary. They were not forgotten.
+
+## Credentials
+
+All developer-grade, all in the clear on purpose — there is nothing here worth
+protecting, and a seed that prompts is a seed nobody runs.
+
+| Where | User | Password |
+|---|---|---|
+| Gitea admin | `knobas` | `knobas-dev` |
+| Gitea people (`mara.lindqvist`, …) | fixture username | `tidewater-dev` |
+| Uptime Kuma admin | `knobas` | `knobas-dev` |
+| mockd | any non-empty `Bearer`/`Basic` token | — |
+
+`./seed` writes two files, both git-ignored:
+
+- **`kuma-api-key`** — the Uptime Kuma API key, for `/metrics`.
+- **`seed-state.json`** — the fixture→reality id mapping (see *What the seed
+  cannot reproduce* below).
+
+## Environment variables for adapter test suites
+
+`./seed` prints these at the end, ready to paste or `eval`:
+
+```sh
+export KNOBAS_GITEA_URL=http://127.0.0.1:3000
+export KNOBAS_GITEA_TOKEN=<the seed's admin token, also in seed-state.json>
+export KNOBAS_GITEA_OWNER=tidewater
+export KNOBAS_GITEA_REPO=payout-service
+```
+
+`eval "$(./seed --env)"` re-prints them without re-seeding.
+
+## What the seed **cannot** reproduce — read this before writing assertions
+
+`fixtures/tidewater/work.json` records commit shas like `c90d11` and pull
+request numbers like `142`. **Gitea and git assign their own.** The seed cannot
+make a real git commit hash come out as a chosen six-character prefix, and it
+cannot retroactively renumber a pull request.
+
+Consequences for a live test suite:
+
+- **Assert by form and by title, never by literal id.** `gitea:tidewater/payout-service@<sha40>`
+  is the key *form* the §4.2 contract fixes; the sha inside it is whatever git
+  produced. A test that hardcodes `c90d11` is testing the fixture, not the
+  adapter.
+- **PR numbers are best-effort.** `SEED_EXACT_PR_NUMBERS=1` (the default) burns
+  the preceding issue indices so PR #142 really is #142 — Gitea allocates issue
+  and pull indices from one per-repo counter, so this is possible, and it is
+  worth the ~140 extra calls because every mockup and link test was written
+  against those numbers. Set `SEED_EXACT_PR_NUMBERS=0` for a fast seed; the PRs
+  then land at 1, 2, … and the mapping goes to `seed-state.json`.
+- **`seed-state.json` is the bridge.** It maps every fixture short sha to the
+  real 40-character sha, and every fixture PR number to the real index. Read it
+  rather than guessing.
+
+Nothing in the §4.2 key forms depends on the fixture's abbreviations.
+
+## Opt-in profiles
+
+Off by default because they are expensive. Approximate costs are in `.env`.
+
+```sh
+docker compose --profile real-teamcity  up -d teamcity     # ~2.5 GB pull, ~10 GB on disk
+docker compose --profile real-atlassian up -d jira         # ~700 MB, wants ~4 GB RAM
+docker compose --profile real-atlassian up -d confluence   # ~800 MB
+```
+
+- **TeamCity** first start is a browser wizard — database choice, licence
+  agreement, administrator account — that no script can drive. It is also the
+  only way to obtain `/app/rest/swagger.json`; see `specs/README.md`'s blocker
+  and `specs/fetch.sh --teamcity`.
+- **Jira / Confluence** need a developer or timebomb licence entered by hand.
+  The Jira tag is `9.17` to match the vendored WADL (Jira 9.17.0), so the real
+  container and mockd speak the same version.
+
+Real Confluence is here in M1 although Confluence is M3's target, because
+Atlassian publishes **no machine-readable Confluence DC spec at all** — the
+running container is the only contract there will ever be.
+
+## Image pinning
+
+No `:latest` anywhere in the compose file. `.env` holds one
+`NAME=repo@sha256:…` line per image and is **committed**: it contains public
+image digests and no secrets. The compose file interpolates them with a failing
+default, so a missing pin stops `docker compose config`, not `docker compose up`
+three minutes later.
+
+```sh
+./pin-images.sh   # re-resolve the tags in the script to digests, rewrite .env
+git diff .env     # review it: a digest change is an environment change
+```
+
+`pin-images.sh` resolves digests with `docker buildx imagetools inspect`, which
+reads the registry manifest and **downloads nothing**. Pinning by `docker pull`
+instead would cost ~13 GB, most of it the TeamCity image that the whole point of
+`profiles:` is to keep off the disk. The two agree: for a multi-arch tag both
+report the digest of the manifest index.
+
+The two build stages of `mockd.Dockerfile` are pinned the same way — an
+unpinned `rust:1-slim` would make the mockd container unreproducible.
+`rust-toolchain.toml` still decides the compiler.
+
+## Network access
+
+The environment runs offline once the images are pulled, with **one
+exception**: `kuma-seed` runs `npm i socket.io-client@4` into a scratch prefix
+at seed time, because Uptime Kuma v2 has no REST API for configuration and the
+client has to come from somewhere.
+
+## Monitors
+
+`monitors.json` is a **baseline of this stream's own**, not fixture content:
+`fixtures/tidewater/work.json` contains no monitors, because assets and
+monitors are M4 (interfaces §1). The four entries point at containers on the
+compose network, so they are genuinely up rather than four permanent outages.
+**M4 carry-over:** fold this file into the asset fixture when assets land.
+
+Verify through the channel the adapter will actually use — `/metrics`, not the
+UI:
+
+```sh
+curl -fsS -u ":$(cat kuma-api-key)" http://127.0.0.1:3001/metrics | grep monitor_status
+```
+
+Uptime Kuma v2 prunes raw heartbeats to ~24 h, **absence of a metric means
+*unknown* rather than down**, and a response time of `-1` is a sentinel. The
+seed asserts presence, never a particular value, and never waits for heartbeat
+history.
+
+## Scripts
+
+| Script | Does |
+|---|---|
+| `./seed` | Everything below, in order. Idempotent — re-running is a no-op that exits 0. |
+| `./seed-gitea.sh` | Org, users, repos, branches, commits, PRs, comments, reviews. |
+| `./seed-kuma.sh` | Kuma admin account, monitors, API key. |
+| `./pin-images.sh` | Re-resolve image tags to digests into `.env`. |
+| `./check-ports.sh` | Assert the compose file against the §5 port table. Starts nothing. |
+| `./reset` | `down -v` every profile, and delete the seed's outputs. |
+
+## mockd's documented deviations
+
+mockd is deliberately **stricter** than the real products in several places, so
+that an adapter which passes here passes there — never the reverse. The list is
+maintained in one place and must not be copied:
+
+> **`crates/knobas-mockd/src/lib.rs`**, the *Documented deviations* section of
+> the module docs.
+
+Read it before concluding that mockd is wrong.

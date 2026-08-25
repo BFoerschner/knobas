@@ -1,0 +1,184 @@
+# The knobas test environment: a small fake company that a developer can bring
+# up on a laptop.
+#
+# Two kinds of service live here, and the difference is the point:
+#
+#   * REAL products we can self-host -- Gitea and Uptime Kuma v2. The adapters
+#     for these are certified against the actual software, not against a mock.
+#   * mockd, our own faithful mock of the products we cannot self-host cheaply
+#     (Jira Data Center, TeamCity). It serves the same Tidewater Freight
+#     fixture, so both layers tell one story (design §14a).
+#
+# The opt-in profiles bring up the real Jira, Confluence and TeamCity servers
+# for whole-product fidelity checks. They are off by default because they are
+# expensive: see the cost note in .env, and the profile comments below.
+#
+# Everything binds 127.0.0.1 only. This environment has developer-grade
+# credentials in it (knobas/knobas-dev) and must never be reachable off-host.
+#
+# Ports are fixed by the M1 interfaces doc §5; testenv/check-ports.sh asserts
+# this file against that map and CI runs it.
+
+name: knobas-testenv
+
+services:
+  # ---------------------------------------------------------------- real ----
+  gitea:
+    image: ${GITEA_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
+    container_name: knobas-gitea
+    environment:
+      # INSTALL_LOCK skips the first-run web installer, which is otherwise a
+      # human step and would make `./seed` unrunnable on a fresh volume.
+      GITEA__security__INSTALL_LOCK: "true"
+      GITEA__server__ROOT_URL: http://127.0.0.1:3000/
+      GITEA__server__SSH_DOMAIN: 127.0.0.1
+      # M1 clones nothing and pushes over HTTP only, so no SSH port is
+      # published and the SSH server is off rather than listening unused.
+      GITEA__server__DISABLE_SSH: "true"
+      GITEA__service__DISABLE_REGISTRATION: "true"
+      # The seed creates its users through the admin API; self-service sign-up
+      # would only be another way in.
+      GITEA__service__REQUIRE_SIGNIN_VIEW: "false"
+      GITEA__log__LEVEL: warn
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - gitea-data:/data
+    healthcheck:
+      # /api/healthz is Gitea's own readiness endpoint and reports the database
+      # too, so a healthy gitea here means the seed's very first POST will work.
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/api/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped
+
+  uptime-kuma:
+    image: ${KUMA_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
+    container_name: knobas-uptime-kuma
+    ports:
+      - "127.0.0.1:3001:3001"
+    volumes:
+      - kuma-data:/app/data
+    healthcheck:
+      # Kuma v2 has no health endpoint; `/` serving the SPA is the readiness
+      # signal, and it is what the seed's socket.io client needs anyway.
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:3001/"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------- mock ----
+  mockd:
+    build:
+      # The repo root: build.rs needs testenv/specs/, knobas-source-mock needs
+      # fixtures/. See the header of mockd.Dockerfile.
+      context: ..
+      dockerfile: testenv/mockd.Dockerfile
+      args:
+        RUST_IMAGE: ${RUST_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
+        RUNTIME_IMAGE: ${RUNTIME_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
+    container_name: knobas-mockd
+    environment:
+      # Scheme and host ONLY -- mockd appends each API's own port, so this
+      # yields http://127.0.0.1:8210 for Jira and http://127.0.0.1:8212 for
+      # TeamCity. Writing the port here would produce `...:8210:8210`.
+      #
+      # 127.0.0.1 rather than the container name because the consumer of these
+      # `self`/`webUrl` links is an adapter running on the HOST.
+      MOCKD_PUBLIC_BASE_URL: http://127.0.0.1
+    ports:
+      - "127.0.0.1:8200:8200"   # health + /__mock/* admin API
+      - "127.0.0.1:8210:8210"   # Jira Data Center REST v2
+      - "127.0.0.1:8212:8212"   # TeamCity REST
+      # 8211 (Confluence DC mock, M3) and 8213 (Flowrun stub, M4) are RESERVED
+      # by interfaces §5. They are bound by nothing, here or in the binary, and
+      # check-ports.sh fails if that ever changes by accident.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8200/__mock/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------- seed ----
+  kuma-seed:
+    # A one-shot, not a service: `profiles` keeps it out of `up`, and
+    # seed-kuma.sh runs it with `compose run --rm`. Kuma v2 has no REST API for
+    # configuration (roadmap §4 gotcha 6) -- setup, login, monitor creation and
+    # API-key creation are all socket.io -- which is why this is node and not
+    # curl.
+    image: ${NODE_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
+    profiles: ["seed"]
+    depends_on:
+      uptime-kuma:
+        condition: service_healthy
+    environment:
+      KUMA_URL: http://uptime-kuma:3001
+      KUMA_USER: knobas
+      KUMA_PASS: knobas-dev
+    volumes:
+      # READ-ONLY on purpose. The API key comes back on the container's stdout
+      # and seed-kuma.sh writes it host-side, so nothing in this repo is ever
+      # written by a container (which on Linux would leave root-owned files).
+      - ./:/seed:ro
+    # The only step in the whole environment that needs network access at seed
+    # time; noted in README.md. --prefix keeps it out of the read-only mount.
+    command: >
+      sh -c "npm --prefix /tmp/k i --no-save --silent socket.io-client@4 &&
+             NODE_PATH=/tmp/k/node_modules node /seed/kuma-seed.mjs"
+
+  # ------------------------------------------------------ opt-in: real -----
+  teamcity:
+    # ~2.5 GB to pull, ~10 GB on disk with its data directory, and its first
+    # start is a browser wizard (database, licence, admin account) that no
+    # script can drive. Off by default for all three reasons; this is also the
+    # container `testenv/specs/fetch.sh --teamcity` needs to extract
+    # /app/rest/swagger.json (see specs/README.md's blocker).
+    #   docker compose --profile real-teamcity up -d teamcity
+    image: ${TEAMCITY_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
+    profiles: ["real-teamcity"]
+    container_name: knobas-teamcity
+    ports:
+      - "127.0.0.1:8111:8111"
+    volumes:
+      - tc-data:/data/teamcity_server/datadir
+      - tc-logs:/opt/teamcity/logs
+
+  jira:
+    # Wants ~4 GB of RAM and a developer/timebomb licence entered by hand.
+    #   docker compose --profile real-atlassian up -d jira
+    # The tag is 9.17 to match the vendored WADL (Jira 9.17.0) so the real
+    # container and mockd speak the same version.
+    image: ${JIRA_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
+    profiles: ["real-atlassian"]
+    container_name: knobas-jira
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - jira-data:/var/atlassian/application-data/jira
+
+  confluence:
+    # M3's target. Present now because Atlassian publishes no machine-readable
+    # Confluence DC spec at all (specs/README.md), so the real container is the
+    # only contract there will ever be.
+    #   docker compose --profile real-atlassian up -d confluence
+    image: ${CONFLUENCE_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
+    profiles: ["real-atlassian"]
+    container_name: knobas-confluence
+    ports:
+      - "127.0.0.1:8090:8090"
+    volumes:
+      - confluence-data:/var/atlassian/application-data/confluence
+
+volumes:
+  gitea-data:
+  kuma-data:
+  tc-data:
+  tc-logs:
+  jira-data:
+  confluence-data:

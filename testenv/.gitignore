@@ -1,0 +1,4 @@
+# Seed outputs, not source. Both name credentials that only exist in one
+# person's local containers, and `./reset` deletes them.
+kuma-api-key
+seed-state.json
