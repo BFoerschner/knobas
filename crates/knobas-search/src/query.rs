@@ -98,6 +98,44 @@ pub struct EffectiveFilters {
     pub authors: Vec<String>,
 }
 
+impl EffectiveFilters {
+    /// Whether anything is actually being filtered on.
+    ///
+    /// The engine's reason for asking: a query with neither text nor a filter
+    /// is a *browse of the whole corpus*, which the builder will happily
+    /// generate and which counts every row in the mirror. That answer belongs
+    /// to the launcher board, not to a SQL statement.
+    ///
+    /// [`Self::authors`] is deliberately not consulted, and cannot be: it is
+    /// `mine` already resolved, so it is empty exactly when knobas does not
+    /// know who the user is -- and reading that as "no filter" would turn
+    /// `@me` on an unconfigured install into an unfiltered scan.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.sources.is_empty()
+            && self.kinds.is_empty()
+            && self.updated_within_days.is_none()
+            && !self.mine
+    }
+
+    /// What the launcher draws its chips from.
+    ///
+    /// The *merged* filters, not the typed ones: a chip the user clicked is
+    /// part of what the query ran with, and echoing only the typed half would
+    /// have the UI redraw a narrower query than the one it got results for.
+    /// [`Self::authors`] stays behind -- it is `mine` resolved to usernames,
+    /// and `SearchFilters` has no home for it (open question **E-Q1**).
+    #[must_use]
+    pub fn echo(&self) -> SearchFilters {
+        SearchFilters {
+            sources: self.sources.clone(),
+            kinds: self.kinds.clone(),
+            updated_within_days: self.updated_within_days,
+            mine: self.mine,
+        }
+    }
+}
+
 /// Parse one raw launcher string against what this installation is configured
 /// with.
 #[must_use]
