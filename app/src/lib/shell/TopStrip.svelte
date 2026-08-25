@@ -1,8 +1,8 @@
 <!--
   The top strip — **M1 members only.**
 
-  The context switcher and its tabs (one built-in room until task 9 fills
-  them), the launcher field, the sync monograms (task 18; the group is empty
+  The context switcher and its tabs (one built-in room until task 18 can list
+  the configured sources), the launcher field, the sync monograms (task 18; the group is empty
   until there are sources to put in it), and the gear.
 
   The timer, inbox, Assets and Today/Day buttons of spec §2 are M2/M3/M4 and
@@ -11,28 +11,34 @@
   reader nothing except that the app is unfinished.
 -->
 <script lang="ts">
+  import ContextTabs from "./ContextTabs.svelte";
+  import { builtinContexts } from "./contexts";
   import type { Router } from "./router.svelte";
 
-  let { router, onsearch }: { router: Router; onsearch: () => void } = $props();
+  let {
+    router,
+    onsearch,
+    sources = [],
+  }: {
+    router: Router;
+    onsearch: () => void;
+    /**
+     * The configured sources, one room each.
+     *
+     * Empty until task 18 can list them — stream F owns `listSources`, and
+     * declaring its shape here would be inventing another stream's interface.
+     * An empty list is not a placeholder: it is the truth for a knobas that
+     * has synced nothing.
+     */
+    sources?: { id: string; label: string }[];
+  } = $props();
 
-  const inRoom = $derived(router.route.view === "room");
+  const contexts = $derived(builtinContexts(sources));
   const onSources = $derived(router.route.view === "sources");
 </script>
 
 <header class="topbar">
-  <div class="ctx-switch">
-    <span class="ctx-name">
-      <span class="nm">All work</span>
-    </span>
-  </div>
-
-  <div class="tabs">
-    <button
-      class="tab {inRoom ? 'on' : ''}"
-      aria-current={inRoom ? "page" : undefined}
-      onclick={() => router.go("#/ctx/all")}>All work</button
-    >
-  </div>
+  <ContextTabs {router} {contexts} />
 
   <button class="searchfield" onclick={onsearch} title="Search everything and act in place (⌘K)">
     <svg viewBox="0 0 16 16" aria-hidden="true">

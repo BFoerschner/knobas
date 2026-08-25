@@ -392,3 +392,31 @@ kbd{font:400 10px var(--mono);color:var(--faint);border:1px solid var(--hair);bo
   .flap .leaf{display:none}
   .detail,.dlg,.pop,.toast{animation:none}
 }
+
+/* ======================================================================
+   M1 stream D additions -- appended, never edited into the port above, so a
+   diff against `mockups/round-3/signal-miller.html` stays readable.
+   ====================================================================== */
+
+/* The context switcher's popover. `.pop` is `position:fixed` with no
+   coordinates of its own, and the anchor is the top strip's left edge, which
+   never moves -- so this is two constants rather than measured geometry. A
+   class and not a `style="..."`: `style-src 'self'` drops inline style
+   attributes in a bundle and honours them under `just dev`. */
+.pop.ctx-pop{top:40px;left:10px}
+
+/* The tile grid, sized to how many tiles there actually are.
+
+   The port's `.tiles` is the mockup's fixed six-tile board (three equal rows
+   plus a taller one). A room whose corpus has three kinds in it draws three
+   tiles, and the fixed template would leave a row and a half of hairline
+   nothing under them. One modifier per row count, because the alternative is
+   a computed `grid-template-rows` -- which is exactly the inline style the CSP
+   forbids. */
+.tiles.rows-1{grid-template-rows:minmax(0,1fr)}
+.tiles.rows-2{grid-template-rows:repeat(2,minmax(0,1fr))}
+.tiles.rows-3{grid-template-rows:repeat(3,minmax(0,1fr))}
+.tiles.rows-4{grid-template-rows:repeat(4,minmax(0,1fr))}
+
+/* A room with a single tile is a list, not a two-column board. */
+.tiles.one{grid-template-columns:1fr}
