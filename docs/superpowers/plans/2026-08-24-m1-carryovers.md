@@ -21,6 +21,9 @@ Items struck through were discharged by the M1 contract PR (checkpoint 0); every
 **Stream F (sync engine) — added 2026-08-25:**
 - **Bound the failed-`KNOBAS_DB_URL` wait.** Stream D observed a real boot: a `KNOBAS_DB_URL` pointing at a dead port leaves the window on "Starting the local database" for a full **30 s** before failing. That is `knobas-db`'s pool-acquire timeout, not the shell's — the boot screen reports it honestly, but bounding it belongs to F.
 
+**Stream D — snippet safety, sharpened (from PR #23, 2026-08-25):**
+- `ts_headline` **elides** source markup: Postgres treats `<script>…</script>` as a single tag token it does not emit, so an excerpt is not byte-for-byte the source. **This is not why the bridge is safe.** Untagged hostile text — `onclick=…` and friends — passes through untouched, so the frontend may never use `{@html}` on a segment. Related fixture trap: `to_tsvector('english', '<b>word</b>')` indexes nothing at all, so a test fixture containing markup can silently match nothing.
+
 **Stream D (frontend shell):**
 - **Async DB bring-up with a loading state** — the exit wave hid the frozen window (`visible: false` + show-when-ready), but first-run download/initdb still blocks the event loop; a real loading screen replaces that.
 - ~~Structured snippet highlighting (sentinel selectors → segments); M0 ships plain text over title+body.~~ **Done (contract PR, task 4).** `knobas_search::snippet` owns the sentinel selectors (`headline_options()`) and the split (`segments()`); `SearchHit.snippet` is `Vec<Segment>`. Every `Segment.text` is raw source text: render as text, never as markup (gotcha 7).
