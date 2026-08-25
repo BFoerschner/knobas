@@ -2508,6 +2508,7 @@ dependencies = [
  "keyring-core",
  "knobas-source",
  "linux-keyutils-keyring-store",
+ "security-framework",
  "serde",
  "serde_json",
  "thiserror 2.0.20",

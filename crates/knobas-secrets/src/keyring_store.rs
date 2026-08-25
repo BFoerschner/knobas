@@ -191,16 +191,67 @@ mod tests {
             map_error(KeyringError::PlatformFailure(Box::new(Boxed("boom")))),
             SecretError::Backend(_)
         ));
-        // A locked keychain on macOS is `errSecInteractionNotAllowed`, which
-        // `apple-native-keyring-store` maps to `PlatformFailure` -- so it
-        // reaches us as `Backend`, not `Unavailable`. Asserted so that the
-        // documented gap is a tested fact rather than a claim in a comment.
-        assert!(matches!(
-            map_error(KeyringError::PlatformFailure(Box::new(Boxed(
-                "errSecInteractionNotAllowed"
-            )))),
-            SecretError::Backend(_)
-        ));
+    }
+
+    /// **The macOS gap, driven rather than described.**
+    ///
+    /// Every code below is pushed through `apple-native-keyring-store`'s own
+    /// `decode_error`, so this asserts what the platform layer *does*, not what
+    /// a comment says it does. The previous version of this test built a
+    /// `PlatformFailure(Boxed("errSecInteractionNotAllowed"))` and checked it
+    /// came back as `Backend` -- but that string is an inert `Display` payload
+    /// that `map_error` never inspects, so the assertion was a duplicate of the
+    /// `"boom"` case above and would have stayed green if `apple-native` had
+    /// started mapping -25308 to `NoStorageAccess`. That is the exact shape of
+    /// a test that fails green.
+    ///
+    /// If this goes red, the store changed its mapping and
+    /// [`SecretError::Unavailable`]'s documentation is now wrong -- fix the doc,
+    /// do not relax the test.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_macos_codes_land_where_the_docs_say_they_do() {
+        use apple_native_keyring_store::keychain::decode_error;
+        use security_framework::base::Error as PlatformError;
+
+        let classify = |code| map_error(decode_error(PlatformError::from_code(code)));
+
+        // The six the legacy-keychain store maps to `NoStorageAccess`.
+        for (code, name) in [
+            (-61, "write permissions"),
+            (-25244, "errSecInvalidOwnerEdit"),
+            (-25291, "errSecNotAvailable"),
+            (-25292, "errSecReadOnly"),
+            (-25294, "errSecNoSuchKeychain"),
+            (-25295, "errSecInvalidKeychain"),
+        ] {
+            assert!(
+                matches!(classify(code), SecretError::Unavailable),
+                "{name} ({code}) should reach Unavailable"
+            );
+        }
+
+        assert!(
+            matches!(classify(-25300), SecretError::NotFound),
+            "errSecItemNotFound is absence, not failure"
+        );
+
+        // …and the three a human would call "locked", which do **not**. This is
+        // the gap `SecretError::Unavailable`'s docs warn about, and the reason
+        // an *Unlock your keychain* affordance cannot hang off that variant
+        // alone.
+        for (code, name) in [
+            (-25308, "errSecInteractionNotAllowed"),
+            (-25293, "errSecAuthFailed"),
+            (-128, "errSecUserCanceled"),
+        ] {
+            assert!(
+                matches!(classify(code), SecretError::Backend(_)),
+                "{name} ({code}) reaches Backend today; if this fails, \
+                 apple-native-keyring-store changed its mapping and \
+                 SecretError::Unavailable's documentation must be updated"
+            );
+        }
     }
 
     /// The cause is forwarded through `Display`, never `Debug`: `Debug` on a

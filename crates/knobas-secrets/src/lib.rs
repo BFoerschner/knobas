@@ -75,6 +75,14 @@ impl std::fmt::Debug for Secret {
 pub enum SecretError {
     /// The platform store failed, or handed back something this version cannot
     /// read. Carries no secret material.
+    ///
+    /// **Also the bucket a locked macOS keychain lands in.** A caller deciding
+    /// what to render must not read this as "an internal error, nothing the
+    /// user can do": `errSecInteractionNotAllowed`, `errSecAuthFailed` and
+    /// `errSecUserCanceled` all arrive here rather than in
+    /// [`Unavailable`](SecretError::Unavailable) -- see that variant's docs for
+    /// why, and for what an *Unlock your keychain* affordance has to key off
+    /// instead. Pinned by `the_macos_codes_land_where_the_docs_say_they_do`.
     #[error("keychain: {0}")]
     Backend(String),
     /// The store is there but refused access to it.
