@@ -14,6 +14,8 @@
   import Monogram from "../shell/Monogram.svelte";
   import { kindMonogram, kindSingular } from "../shell/kinds";
   import { ago } from "../shell/time";
+  import HistoryPanel from "./HistoryPanel.svelte";
+  import LinksPanel from "./LinksPanel.svelte";
   import PayloadView from "./PayloadView.svelte";
   import { projectPayload } from "./payload";
 
@@ -126,10 +128,19 @@
       </div>
     {:else}
       {#if detail.deleted_at}
-        <!-- Task 12 replaces this with the full withdrawn banner. -->
+        <!--
+          The source withdrew this item and knobas kept it: `sync.item` still
+          holds the mirror row, `knobas.entity.deleted_at` carries the
+          tombstone (interfaces §1's sweep), and links and notes may point at
+          it (§5a). Saying so is the difference between a stale row and a
+          deliberate one.
+        -->
         <div class="prompt">
           <span class="pulse"></span>
-          <span>Withdrawn upstream — last seen {ago(detail.deleted_at)}.</span>
+          <span>
+            Withdrawn upstream — last seen {ago(detail.deleted_at)}. Kept because links and
+            notes may point at it.
+          </span>
         </div>
       {/if}
 
@@ -180,6 +191,9 @@
         </div>
         <PayloadView {fields} />
       </div>
+
+      <LinksPanel entityId={detail.row.entity_id} links={detail.links} />
+      <HistoryPanel activity={detail.activity} />
     {/if}
   </div>
 </aside>

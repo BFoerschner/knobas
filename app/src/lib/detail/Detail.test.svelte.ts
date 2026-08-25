@@ -63,7 +63,15 @@ function render(props: { entityId?: string; kind?: string | null } = {}) {
   return {
     target,
     onclose,
-    text: () => target.textContent ?? "",
+    /**
+     * The panel's text with runs of whitespace collapsed.
+     *
+     * `textContent` reproduces the newlines and indentation of the *template*,
+     * so a sentence that happens to wrap across two source lines contains a
+     * newline and eight spaces in the middle. That is a fact about how the
+     * markup is formatted, not about what the reader sees.
+     */
+    text: () => (target.textContent ?? "").replace(/\s+/g, " "),
     done: () => {
       unmount(app);
       target.remove();
@@ -282,4 +290,143 @@ test("a superseded read is discarded", async () => {
 
   unmount(app);
   target.remove();
+});
+
+/**
+ * §5a: an entity the source withdrew is still readable, and says so.
+ *
+ * The banner is the whole point — without it a withdrawn ticket is
+ * indistinguishable from a live one, and the reason knobas kept it (links and
+ * notes may point at it) is the reason the reader is looking at it.
+ */
+test("a withdrawn entity opens with a banner that says why it is still here", async () => {
+  answer = () =>
+    Promise.resolve(
+      detail({
+        row: {
+          entity_id: "mock:PAY-198",
+          kind: "ticket",
+          source_id: "mock",
+          title: "Legacy payout reconciliation (withdrawn)",
+          updated_at: null,
+          synced_at: "2026-08-22T14:30:00Z",
+        },
+        deleted_at: "2026-08-22T12:00:00Z",
+        web_url: null,
+      }),
+    );
+
+  const screen = render({ entityId: "mock:PAY-198" });
+  await vi.waitFor(() => expect(screen.text()).toContain("Withdrawn upstream"));
+  flushSync();
+
+  expect(screen.target.querySelector(".prompt")).not.toBeNull();
+  expect(screen.text()).toContain("links and notes may point at it");
+  // ...and it is still a readable item, not just a banner.
+  expect(screen.text()).toContain("Legacy payout reconciliation (withdrawn)");
+
+  screen.done();
+});
+
+/** A live entity carries no banner at all. */
+test("a live entity has no withdrawn banner", async () => {
+  const screen = render();
+  await vi.waitFor(() => expect(screen.text()).toContain("Retry failed SEPA payouts"));
+  flushSync();
+
+  expect(screen.target.querySelector(".prompt")).toBeNull();
+  expect(screen.text()).not.toContain("Withdrawn upstream");
+
+  screen.done();
+});
+
+/**
+ * The links panel ships empty and says so honestly.
+ *
+ * M1 never writes `knobas.link`, so this is the only state it can be in — and
+ * an empty panel with no explanation reads as a bug rather than as a milestone
+ * boundary.
+ */
+test("the links panel is present, empty, and explains itself", async () => {
+  const screen = render();
+  await vi.waitFor(() => expect(screen.text()).toContain("Linked items"));
+  flushSync();
+
+  expect(screen.text()).toContain("Nothing linked yet");
+  const empty = [...screen.target.querySelectorAll(".empty")].find((node) =>
+    node.textContent?.includes("Nothing linked yet"),
+  );
+  expect(empty?.getAttribute("title")).toMatch(/M2/);
+
+  screen.done();
+});
+
+/** A link, when there is one, shows the *other* end whichever way it was drawn. */
+test("a link renders the far end, in either direction", async () => {
+  answer = () =>
+    Promise.resolve(
+      detail({
+        links: [
+          {
+            id: "11111111-1111-1111-1111-111111111111",
+            from_id: "mock:PAY-231",
+            to_id: "mock:payout-service#142",
+            relation: "implements",
+            origin: "manual",
+            created_by: "mara",
+            created_at: "2026-08-22T12:00:00Z",
+          },
+          {
+            id: "22222222-2222-2222-2222-222222222222",
+            from_id: "mock:ENG-SEPA",
+            to_id: "mock:PAY-231",
+            relation: "documents",
+            origin: "suggested",
+            created_by: "mara",
+            created_at: "2026-08-21T12:00:00Z",
+          },
+        ],
+      }),
+    );
+
+  const screen = render();
+  await vi.waitFor(() => expect(screen.text()).toContain("implements"));
+  flushSync();
+
+  expect(screen.text()).toContain("mock:payout-service#142");
+  expect(screen.text()).toContain("mock:ENG-SEPA");
+  expect(screen.text()).not.toContain("Nothing linked yet");
+  // Neither row is the entity being viewed.
+  const cells = [...screen.target.querySelectorAll(".row.g4 .t")].map((n) => n.textContent?.trim());
+  expect(cells).not.toContain("mock:PAY-231");
+
+  screen.done();
+});
+
+/** The entity's own history rides along with the read. */
+test("history arrives with the entity rather than in a second call", async () => {
+  answer = () =>
+    Promise.resolve(
+      detail({
+        activity: [
+          {
+            id: 1,
+            at: "2026-08-22T14:30:00Z",
+            actor: "sync:mock",
+            verb: "synced",
+            entity_id: "mock:PAY-231",
+            detail: { upserted: 9 },
+          },
+        ],
+      }),
+    );
+
+  const screen = render();
+  await vi.waitFor(() => expect(screen.text()).toContain("History"));
+  flushSync();
+
+  expect(calls).toEqual(["mock:PAY-231"]);
+  expect(screen.text()).toContain("synced by mock");
+
+  screen.done();
 });
