@@ -36,6 +36,9 @@ The **contract PR** (interfaces §6.2 checkpoint 0, orchestrator-owned) must be 
 
 ---
 
+> **CORRECTION (2026-08-25, found in review of PR #24 — the task 6/7 brief's progress contract is defective as written).**
+> Two of its `SyncPhase` instructions describe events the engine cannot honestly emit: `Writing` is specified at a point where the run has already finished (so it is *faked*, on the failure path too), and the terminal message carries `elapsed_ms: 0`. A third, `Started`, is declared on both sides of the contract with a guard test asserting the two agree — while **no production code emits it**. A phase the UI can never observe is worse than an absent one: it invites a frontend to wait for a state that never arrives. Emit only phases the run actually reaches, at the moment it reaches them, and let the guard test assert *emission*, not merely declaration.
+
 ## Global Constraints
 
 Inherited from `2026-08-24-plan-01-foundation.md` and still binding:
