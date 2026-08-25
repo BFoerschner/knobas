@@ -85,34 +85,39 @@ export function createLifecycle(options: { pollMs?: number } = {}): Lifecycle {
       // reason the command exists (gotcha 9). Reversed, the replay lands
       // before anything is listening and the boot screen sits on "starting"
       // until its next poll.
-      // `listen` is itself an `invoke` (`plugin:event|listen`), so it can
-      // reject — the bridge not up yet, the event plugin refused. That must
-      // degrade to "no live updates", never to "no updates at all": the poll
-      // below is the channel that is allowed to be slow but not the one that
-      // is allowed to be missing.
-      let off: (() => void) | undefined;
+      // Arming the live channel is best-effort **in its entirety**, and the
+      // `try` deliberately spans both calls rather than each one separately.
+      // `listen` is an `invoke` (`plugin:event|listen`) and `frontendReady` is
+      // another; either can reject — the bridge not up yet, the event plugin
+      // refused, the webview gone. Any of that must degrade to "no live
+      // updates", never to "no updates at all", because the poll below is the
+      // channel that is allowed to be slow but not the one that is allowed to
+      // be missing. Guarding one call and not the other left the same bug in
+      // place under a different name, so the scope of this block is the point:
+      // a third call added here is covered without anyone remembering to.
       try {
-        off = await listen<DbState>(EVENTS.dbState, (event) => {
+        const off = await listen<DbState>(EVENTS.dbState, (event) => {
           state.db = event.payload;
           // `ready` also means the counts are now answerable, and they arrive
           // on `app_status`, not on the event.
           if (event.payload.state === "ready") void poll();
         });
+        if (stopped) {
+          // Unmounted inside the await. `listen` resolves its teardown
+          // asynchronously, so without this the subscription outlives the
+          // thing that made it — one leak per mount, for the life of the
+          // process.
+          off();
+          return;
+        }
+        unlisten = off;
+        await frontendReady();
       } catch {
-        off = undefined;
+        // Degraded to polling. Nothing to report: the poll is about to say
+        // what the database is actually doing.
       }
-      if (stopped) {
-        // Unmounted inside the await. `listen` resolves its teardown
-        // asynchronously, so without this the subscription outlives the thing
-        // that made it — one leak per mount, for the life of the process.
-        off?.();
-        return;
-      }
-      unlisten = off;
 
-      // Swallowed on purpose: if the replay cannot be armed there is nothing
-      // to do about it here, and the poll below already covers the case.
-      await frontendReady().catch(() => undefined);
+      if (stopped) return;
       await poll();
     },
 

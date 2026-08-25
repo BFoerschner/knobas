@@ -185,8 +185,55 @@ test("a listen that rejects degrades to polling rather than stalling", async () 
   await life.start();
 
   await vi.waitFor(() => expect(life.ready).toBe(true));
-  expect(frontendReady).toHaveBeenCalledOnce();
+  // `frontendReady` is deliberately *not* asserted here: its only job is to
+  // make the backend replay `db:state` to a listener, and there is no listener
+  // to replay to. Whether it ran is not the behaviour that matters; that the
+  // poll did is.
+  expect(life.error).toBeNull();
 
   // ...and stopping is still safe with no subscription to remove.
   expect(() => life.stop()).not.toThrow();
+});
+
+/**
+ * The same class of failure as the `listen` case, one call along.
+ *
+ * `frontendReady` is the other `invoke` in `start()` before the poll. Guarding
+ * only `listen` pinned the instance and left the class open: a rejection here
+ * escaped `start()`, the poll never ran, and the window sat on "starting" for
+ * ever — the exact symptom the `listen` guard was added to prevent.
+ */
+test("a frontendReady that rejects degrades to polling rather than stalling", async () => {
+  vi.mocked(frontendReady).mockRejectedValueOnce(new Error("no webview to emit to"));
+  vi.mocked(appStatus).mockResolvedValue(status({ state: "ready" }));
+
+  const life = createLifecycle({ pollMs: 1 });
+  await life.start();
+
+  await vi.waitFor(() => expect(life.ready).toBe(true));
+  expect(life.error).toBeNull();
+
+  // The listener was registered before the failure, so it is still torn down.
+  life.stop();
+  expect(unlisten).toHaveBeenCalledOnce();
+});
+
+/**
+ * Whatever `start()` does before the poll, it must not throw. A caller does
+ * `void lifecycle.start()` from `onMount`, so an escaping rejection is silent
+ * — no error screen, no retry, just a window that never leaves "starting".
+ */
+test("start() never rejects, whichever arming call fails", async () => {
+  vi.mocked(appStatus).mockResolvedValue(status({ state: "ready" }));
+
+  for (const breakOne of [
+    () => vi.mocked(listen).mockRejectedValueOnce(new Error("plugin not ready")),
+    () => vi.mocked(frontendReady).mockRejectedValueOnce(new Error("no webview")),
+  ]) {
+    breakOne();
+    const life = createLifecycle({ pollMs: 1 });
+    await expect(life.start()).resolves.toBeUndefined();
+    await vi.waitFor(() => expect(life.ready).toBe(true));
+    life.stop();
+  }
 });

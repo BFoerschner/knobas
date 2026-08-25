@@ -71,6 +71,54 @@ function markupOf(text: string): string {
     .replace(/<!--[\s\S]*?-->/g, "");
 }
 
+/**
+ * A file's code with its comments removed, string literals left intact.
+ *
+ * Load-bearing for any rule that asks whether the *code* does something: this
+ * codebase documents its own house rules next to the code that obeys them, so
+ * a scan over raw text can be satisfied by the sentence describing the rule
+ * rather than by the rule being followed. That is a lint that fails open, and
+ * it is exactly how the guard below went green against an unguarded import.
+ */
+function codeOf(text: string): string {
+  let out = "";
+  let index = 0;
+  while (index < text.length) {
+    const c = text[index]!;
+    const next = text[index + 1];
+    if (c === '"' || c === "'" || c === "`") {
+      out += c;
+      index += 1;
+      while (index < text.length) {
+        const s = text[index]!;
+        out += s;
+        index += 1;
+        if (s === "\\") {
+          out += text[index] ?? "";
+          index += 1;
+        } else if (s === c) {
+          break;
+        }
+      }
+    } else if (c === "/" && next === "/") {
+      while (index < text.length && text[index] !== "\n") index += 1;
+    } else if (c === "/" && next === "*") {
+      index += 2;
+      while (index < text.length && !(text[index] === "*" && text[index + 1] === "/")) index += 1;
+      index += 2;
+      out += " ";
+    } else if (c === "<" && text.startsWith("<!--", index)) {
+      const close = text.indexOf("-->", index);
+      index = close === -1 ? text.length : close + 3;
+      out += " ";
+    } else {
+      out += c;
+      index += 1;
+    }
+  }
+  return out;
+}
+
 /** The offending paths, relative to `app/src/`, so a failure is readable. */
 function offenders(predicate: (text: string, file: string) => boolean): string[] {
   return sources()
@@ -142,9 +190,26 @@ test("no runtime network references (default-src 'self')", () => {
  */
 test("the dev harness is only reachable behind import.meta.env.DEV", () => {
   const importers = offenders(
-    (text, file) => !file.includes("/lib/shell/dev/") && text.includes("shell/dev/"),
+    (text, file) => !file.includes("/lib/shell/dev/") && codeOf(text).includes("shell/dev/"),
   );
+  expect(importers.length, "nothing imports the dev harness, so this proves nothing").toBe(1);
+
   for (const file of importers) {
-    expect(readFileSync(join(ROOT, file), "utf8")).toMatch(/import\.meta\.env\.DEV/);
+    const code = codeOf(readFileSync(join(ROOT, file), "utf8"));
+
+    // The guard itself, in code and not in prose. A `text.includes(..)` over
+    // the raw file is satisfied by the comment *explaining* the guard, so
+    // rewriting the condition to `if (true)` — the fixture installed
+    // unconditionally in a production bundle — left the old version green.
+    expect(code, `${file} imports the dev harness without an import.meta.env.DEV guard`).toMatch(
+      /if\s*\(\s*import\.meta\.env\.DEV\s*\)/,
+    );
+
+    // ...and it must be a dynamic import. A static `import … from "./dev/…"`
+    // is a hard dependency of the module graph: Rollup cannot drop it however
+    // the branch around its *use* is written.
+    expect(code, `${file} imports the dev harness statically`).not.toMatch(
+      /^\s*import\s[^\n]*["'][^"'\n]*shell\/dev\//m,
+    );
   }
 });
