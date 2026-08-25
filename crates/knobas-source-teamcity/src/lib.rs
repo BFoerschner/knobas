@@ -27,9 +27,12 @@ mod descriptor;
 mod http;
 mod map;
 mod rest;
+mod source;
+mod sync;
 
 pub use config::{TeamCityConfig, config_schema};
 pub use descriptor::descriptor_template;
+pub use source::{TeamCitySource, build};
 
 /// This adapter's kind, the default instance id offered by the Add-source
 /// form, and therefore the default
