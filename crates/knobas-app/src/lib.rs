@@ -165,6 +165,7 @@ pub fn run() {
             commands::app::app_status,
             commands::app::frontend_ready,
             commands::app::retry_database,
+            commands::entity::get_entity,
             commands::entity::list_entities,
             commands::entity::recent_activity,
             commands::search::search,

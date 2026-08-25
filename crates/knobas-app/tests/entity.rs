@@ -5,7 +5,9 @@
 //! to survive another test running beside it: relative counts and set
 //! membership, never absolute row totals.
 
-use knobas_app::commands::entity::{EntityFilter, EntityOrder, list_entities_inner};
+use knobas_app::commands::entity::{
+    EntityFilter, EntityOrder, get_entity_inner, list_entities_inner, recent_activity_inner,
+};
 use knobas_source_mock::MockSource;
 use sqlx::PgPool;
 
@@ -35,6 +37,20 @@ async fn seeded() -> PgPool {
     }
     drop(done);
     pool
+}
+
+/// A token no other test in this binary writes.
+///
+/// `knobas.activity` is shared with every other test here, so a run's own
+/// lines have to be findable by something only it wrote -- a fixed verb would
+/// make the counts below depend on which tests ran first.
+fn unique() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_nanos());
+    format!("{nanos}-{}", NEXT.fetch_add(1, Ordering::Relaxed))
 }
 
 /// Everything, newest first, nothing excluded.
@@ -234,5 +250,140 @@ async fn the_source_filter_selects_a_room() {
             .unwrap()
             .total,
         0
+    );
+}
+
+// -- get_entity -------------------------------------------------------------
+
+#[tokio::test]
+async fn returns_the_row_its_source_and_the_raw_payload() {
+    let pool = seeded().await;
+    let d = get_entity_inner(&pool, "mock:PAY-231").await.unwrap();
+
+    assert_eq!(d.row.entity_id, "mock:PAY-231");
+    assert_eq!(d.row.kind, "ticket");
+    assert_eq!(d.source.id, "mock");
+    assert_eq!(
+        d.source.display_name, "Tidewater (mock)",
+        "the configured display name, not the id"
+    );
+    assert_eq!(d.source.adapter_kind, "mock");
+    assert!(d.body_text.contains("SEPA"));
+    assert_eq!(
+        d.payload["key"], "PAY-231",
+        "payload is the source record verbatim (§3a)"
+    );
+    assert!(d.links.is_empty(), "links are M2");
+    assert!(d.deleted_at.is_none());
+    assert!(
+        d.kind_info.is_none(),
+        "resolving kind_info needs the adapter registry -- task 21"
+    );
+}
+
+/// P5's *Open in browser*: the URL is the adapter's, persisted by `0002`.
+#[tokio::test]
+async fn the_web_url_the_adapter_reported_survives_the_mirror() {
+    let pool = seeded().await;
+    let d = get_entity_inner(&pool, "mock:PAY-231").await.unwrap();
+    assert_eq!(
+        d.web_url.as_deref(),
+        Some("https://tidewater.example/browse/PAY-231")
+    );
+
+    // ...and an item the adapter gave no page for has none, rather than a
+    // fabricated one. The button is absent exactly there.
+    let withdrawn = get_entity_inner(&pool, "mock:PAY-198").await.unwrap();
+    assert_eq!(withdrawn.web_url, None);
+}
+
+#[tokio::test]
+async fn an_unknown_id_is_not_found_not_internal() {
+    let pool = seeded().await;
+    let err = get_entity_inner(&pool, "mock:NOPE-1").await.unwrap_err();
+    assert_eq!(err.code, knobas_app::IpcErrorCode::NotFound, "{err}");
+}
+
+/// A bad deep link reports itself as a bad address, not as a 500.
+#[tokio::test]
+async fn a_malformed_id_is_invalid() {
+    let pool = seeded().await;
+    for bad in ["no-colon-here", "", ":PAY-1", "mock:"] {
+        let err = get_entity_inner(&pool, bad).await.unwrap_err();
+        assert_eq!(
+            err.code,
+            knobas_app::IpcErrorCode::Invalid,
+            "{bad:?} produced {err}"
+        );
+    }
+}
+
+/// §5a: links and notes point at entities that vanished upstream, so the
+/// detail view has to be able to show what the user linked to.
+#[tokio::test]
+async fn a_tombstoned_entity_is_still_readable_and_says_so() {
+    let pool = seeded().await;
+    let d = get_entity_inner(&pool, "mock:PAY-198").await.unwrap();
+    assert!(
+        d.deleted_at.is_some(),
+        "the banner has nothing to say without this"
+    );
+    assert_eq!(d.row.title, "Legacy payout reconciliation (withdrawn)");
+}
+
+#[tokio::test]
+async fn activity_can_be_scoped_to_one_entity() {
+    let pool = seeded().await;
+    // The activity table is shared with every other test in this binary, so
+    // this run's lines are found by a verb nobody else writes.
+    let verb = format!("opened-{}", unique());
+    let mine = knobas_core::entity::EntityRef::parse("mock:PAY-231").unwrap();
+    let other = knobas_core::entity::EntityRef::parse("mock:PAY-228").unwrap();
+    for entity in [&mine, &other] {
+        knobas_core::activity::record(&pool, "user", &verb, Some(entity), serde_json::json!({}))
+            .await
+            .unwrap();
+    }
+
+    let scoped = recent_activity_inner(&pool, 200, Some(&mine))
+        .await
+        .unwrap();
+    assert_eq!(
+        scoped.iter().filter(|r| r.verb == verb).count(),
+        1,
+        "the filter dropped the other entity's line"
+    );
+    assert!(
+        scoped
+            .iter()
+            .all(|r| r.entity_id.as_deref() == Some("mock:PAY-231")),
+        "a scoped read returns only that entity's lines"
+    );
+
+    let global = recent_activity_inner(&pool, 500, None).await.unwrap();
+    assert_eq!(
+        global.iter().filter(|r| r.verb == verb).count(),
+        2,
+        "the unscoped read still sees both"
+    );
+}
+
+/// `get_entity` hands the detail view the entity's own history without a
+/// second round trip.
+#[tokio::test]
+async fn the_detail_carries_the_entitys_own_activity() {
+    let pool = seeded().await;
+    let verb = format!("noted-{}", unique());
+    let entity = knobas_core::entity::EntityRef::parse("mock:PAY-231").unwrap();
+    knobas_core::activity::record(&pool, "user", &verb, Some(&entity), serde_json::json!({}))
+        .await
+        .unwrap();
+
+    let d = get_entity_inner(&pool, "mock:PAY-231").await.unwrap();
+    assert!(d.activity.iter().any(|r| r.verb == verb));
+    assert!(
+        d.activity
+            .iter()
+            .all(|r| r.entity_id.as_deref() == Some("mock:PAY-231"))
     );
 }

@@ -27,6 +27,9 @@
 //! by name.
 
 use chrono::{DateTime, Utc};
+use knobas_core::activity::ActivityRow;
+use knobas_core::entity::EntityRef;
+use knobas_core::link::LinkRow;
 use sqlx::{PgPool, Row};
 use tauri::State;
 
@@ -242,20 +245,179 @@ pub async fn list_entities(
     list_entities_inner(&pool, &filter, limit, offset).await
 }
 
-/// The `limit` most recent activity-log lines, newest first.
+// -- the detail view --------------------------------------------------------
+
+/// Which source an entity came from, as the detail view names it.
+///
+/// Every field falls back to the source id, because `run_once` syncs sources
+/// that have no `knobas.source_config` row (tests, ad-hoc imports, interfaces
+/// §1). An entity whose source was deleted still has to render.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SourceRef {
+    pub id: String,
+    pub display_name: String,
+    /// The *adapter* kind (`jira`, `mock`), not the instance id.
+    pub adapter_kind: String,
+}
+
+/// Everything the slide-over draws for one entity (interfaces §2.5).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EntityDetail {
+    pub row: EntityRow,
+    pub source: SourceRef,
+    /// The adapter's own label and monogram for this kind.
+    ///
+    /// **`None` throughout M1 phase 1.** Resolving it means asking the adapter
+    /// registry (`crates/knobas-app/src/sources/**`, stream F) what an
+    /// installed adapter declares, and that does not exist yet; task 21 fills
+    /// it in. The field ships now because it is in the contract and because
+    /// the frontend's fallback -- the title-cased kind -- is what §3a asks for
+    /// when nothing declares one anyway.
+    pub kind_info: Option<knobas_source::KindInfo>,
+    /// Untrusted source text. Rendered as text, never as markup (gotcha 7).
+    pub body_text: String,
+    pub author: Option<String>,
+    /// The source record **verbatim** (§3a): what the generic detail view
+    /// projects. It is untrusted text all the way down.
+    pub payload: serde_json::Value,
+    /// Where the item lives in its own system, or `None` when the adapter
+    /// reported no page -- in which case *Open in browser* is absent (P5).
+    pub web_url: Option<String>,
+    /// Set when the source withdrew the entity. The mirror row survives, so
+    /// links and notes still resolve (§5a).
+    pub deleted_at: Option<DateTime<Utc>>,
+    /// Always empty in M1: nothing writes `knobas.link` until M2.
+    pub links: Vec<LinkRow>,
+    /// This entity's own history, newest first (spec §12.1).
+    pub activity: Vec<ActivityRow>,
+}
+
+/// How many history lines the detail view is given up front.
+///
+/// Enough to fill the panel without a second round trip; the full history is a
+/// later milestone's view, not a scroll in a slide-over.
+const DETAIL_ACTIVITY: i64 = 20;
+
+/// One entity, deleted or not.
+///
+/// The join is `sync.live_item`'s minus its tombstone filter, deliberately:
+/// §5a says a withdrawn entity must still open, and `e.deleted_at` is what the
+/// banner reads. `source_config` is a **left** join because `run_once` syncs
+/// unconfigured sources.
+const DETAIL: &str = r#"
+select i.entity_id, i.source_id, i.kind, i.title, i.body_text, i.author,
+       i.item_updated_at, i.synced_at, i.payload, i.web_url,
+       e.deleted_at,
+       c.display_name, c.kind as adapter_kind
+  from sync.item i
+  join knobas.entity e on e.id = i.entity_id
+  left join knobas.source_config c on c.id = i.source_id
+ where i.entity_id = $1
+"#;
+
+/// Everything the slide-over needs for `entity_id`, in three round trips.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) if `entity_id` is not an entity
+/// id -- which is how a mistyped deep link reports itself rather than as a
+/// 500; [`NotFound`](crate::IpcErrorCode::NotFound) if nothing carries it;
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+pub async fn get_entity_inner(pool: &PgPool, entity_id: &str) -> Result<EntityDetail, IpcError> {
+    // First, and before any query: `#/ticket/not-an-id` is a bad address, not
+    // a missing entity, and the two want different words on screen.
+    let entity = EntityRef::parse(entity_id).map_err(IpcError::invalid)?;
+
+    let row = sqlx::query(DETAIL)
+        .bind(entity.to_string())
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| IpcError::not_found(format!("{entity} is not in the local index")))?;
+
+    let source_id: String = row.get("source_id");
+    let display_name: Option<String> = row.get("display_name");
+    let adapter_kind: Option<String> = row.get("adapter_kind");
+
+    Ok(EntityDetail {
+        row: EntityRow {
+            entity_id: row.get("entity_id"),
+            kind: row.get("kind"),
+            source_id: source_id.clone(),
+            title: row.get("title"),
+            updated_at: row.get("item_updated_at"),
+            synced_at: row.get("synced_at"),
+        },
+        source: SourceRef {
+            display_name: display_name.unwrap_or_else(|| source_id.clone()),
+            adapter_kind: adapter_kind.unwrap_or_else(|| source_id.clone()),
+            id: source_id,
+        },
+        // Task 21, once there is a registry to ask. See the field's docs.
+        kind_info: None,
+        body_text: row.get("body_text"),
+        author: row.get("author"),
+        payload: row.get("payload"),
+        web_url: row.get("web_url"),
+        deleted_at: row.get("deleted_at"),
+        links: knobas_core::link::links_of(pool, &entity).await?,
+        activity: knobas_core::activity::recent(pool, DETAIL_ACTIVITY, Some(&entity)).await?,
+    })
+}
+
+/// One entity, for the detail slide-over.
 ///
 /// # Errors
 ///
 /// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the
-/// database is still coming up, [`Internal`](crate::IpcErrorCode::Internal)
-/// for a query failure.
+/// database is still coming up, and whatever [`get_entity_inner`] refuses
+/// with.
+#[tauri::command]
+pub async fn get_entity(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+) -> Result<EntityDetail, IpcError> {
+    let pool = lifecycle.pool()?;
+    get_entity_inner(&pool, &entity_id).await
+}
+
+/// The `limit` most recent activity lines, globally or for one entity.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) if `entity` is not an entity id,
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+pub async fn recent_activity_inner(
+    pool: &PgPool,
+    limit: u32,
+    entity: Option<&EntityRef>,
+) -> Result<Vec<ActivityRow>, IpcError> {
+    Ok(knobas_core::activity::recent(pool, i64::from(limit), entity).await?)
+}
+
+/// The `limit` most recent activity-log lines, newest first.
+///
+/// `entityId` scopes the read to one entity's history; omitting it is the
+/// global stream the status bar reads.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the
+/// database is still coming up, [`Invalid`](crate::IpcErrorCode::Invalid) for
+/// a malformed `entityId`, [`Internal`](crate::IpcErrorCode::Internal) for a
+/// query failure.
 #[tauri::command]
 pub async fn recent_activity(
     lifecycle: State<'_, Lifecycle>,
     limit: u32,
-) -> Result<Vec<knobas_core::activity::ActivityRow>, IpcError> {
+    entity_id: Option<String>,
+) -> Result<Vec<ActivityRow>, IpcError> {
     let pool = lifecycle.pool()?;
-    Ok(knobas_core::activity::recent(&pool, i64::from(limit)).await?)
+    let entity = entity_id
+        .as_deref()
+        .map(EntityRef::parse)
+        .transpose()
+        .map_err(IpcError::invalid)?;
+    recent_activity_inner(&pool, limit, entity.as_ref()).await
 }
 
 #[cfg(test)]

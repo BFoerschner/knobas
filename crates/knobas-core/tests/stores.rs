@@ -156,7 +156,7 @@ async fn activity_records_and_lists() {
     .unwrap();
 
     let entity_id = t.to_string();
-    let rows = activity::recent(&pool, 10).await.unwrap();
+    let rows = activity::recent(&pool, 10, None).await.unwrap();
     assert!(
         rows.iter()
             .any(|r| r.verb == "commented" && r.entity_id.as_deref() == Some(entity_id.as_str()))
@@ -183,7 +183,7 @@ async fn activity_defaults_and_orders_newest_first() {
     .await
     .unwrap();
 
-    let mine: Vec<_> = activity::recent(&pool, 200)
+    let mine: Vec<_> = activity::recent(&pool, 200, None)
         .await
         .unwrap()
         .into_iter()
@@ -203,5 +203,63 @@ async fn activity_defaults_and_orders_newest_first() {
     assert_eq!(mine[1].detail, serde_json::json!({}));
 
     // the limit actually caps the result -- the table holds our two rows at least
-    assert_eq!(activity::recent(&pool, 1).await.unwrap().len(), 1);
+    assert_eq!(activity::recent(&pool, 1, None).await.unwrap().len(), 1);
+}
+
+/// The detail view's history panel reads one entity's lines and no one else's.
+///
+/// Both directions are asserted: the other entity's line is absent from the
+/// scoped read *and* present in the unscoped one. A `where` that matched
+/// nothing would satisfy only the first.
+#[tokio::test]
+async fn activity_can_be_scoped_to_one_entity() {
+    let (pool, ticket, note) = seeded_pool().await;
+    let verb = format!("verb-{}", Uuid::new_v4());
+
+    for entity in [&ticket, &note] {
+        activity::record(&pool, "user", &verb, Some(entity), serde_json::json!({}))
+            .await
+            .unwrap();
+    }
+
+    let scoped = activity::recent(&pool, 200, Some(&ticket)).await.unwrap();
+    assert_eq!(
+        scoped
+            .iter()
+            .filter(|row| row.verb == verb)
+            .map(|row| row.entity_id.clone())
+            .collect::<Vec<_>>(),
+        vec![Some(ticket.to_string())]
+    );
+    assert!(
+        scoped
+            .iter()
+            .all(|row| row.entity_id.as_deref() == Some(ticket.to_string().as_str())),
+        "a scoped read returns nothing but that entity's lines"
+    );
+
+    let global = activity::recent(&pool, 500, None).await.unwrap();
+    assert_eq!(
+        global.iter().filter(|row| row.verb == verb).count(),
+        2,
+        "the unscoped read still sees both"
+    );
+}
+
+/// The `limit` applies to the scoped read too -- it is the same `$1`.
+#[tokio::test]
+async fn a_scoped_read_is_still_capped_and_newest_first() {
+    let (pool, ticket, _note) = seeded_pool().await;
+    let verb = format!("verb-{}", Uuid::new_v4());
+
+    for _ in 0..3 {
+        activity::record(&pool, "user", &verb, Some(&ticket), serde_json::json!({}))
+            .await
+            .unwrap();
+    }
+
+    let capped = activity::recent(&pool, 2, Some(&ticket)).await.unwrap();
+    assert_eq!(capped.len(), 2);
+    // Three rows written in three transactions, so a flipped order shows up.
+    assert!(capped[0].id > capped[1].id);
 }

@@ -90,7 +90,96 @@ export interface ActivityRow {
   detail: unknown;
 }
 
-/** The `limit` most recent activity lines, newest first. */
-export function recentActivity(limit: number): Promise<ActivityRow[]> {
-  return invoke<ActivityRow[]>("recent_activity", { limit });
+/**
+ * The `limit` most recent activity lines, newest first.
+ *
+ * `entityId` scopes the read to one entity's history (the detail view's
+ * History panel); omitting it is the global stream the status bar reads. A
+ * malformed id rejects with `invalid`, not `internal`.
+ */
+export function recentActivity(limit: number, entityId?: string): Promise<ActivityRow[]> {
+  return invoke<ActivityRow[]>("recent_activity", { limit, entityId });
+}
+
+/** Which source an entity came from — `SourceRef`. */
+export interface SourceRef {
+  id: string;
+  /**
+   * The configured display name, falling back to the id. `run_once` syncs
+   * sources that were never configured, so there is not always a name.
+   */
+  display_name: string;
+  /** The *adapter* kind (`jira`, `mock`), not the instance id. */
+  adapter_kind: string;
+}
+
+/** An adapter's display metadata for one kind — `knobas_source::KindInfo`. */
+export interface KindInfo {
+  id: string;
+  label: string;
+  plural: string;
+  /** Two characters, e.g. `"PR"`. */
+  monogram: string;
+}
+
+/** One link — `knobas_core::link::LinkRow`. Always empty in M1. */
+export interface LinkRow {
+  id: string;
+  from_id: string;
+  to_id: string;
+  relation: string;
+  origin: "manual" | "suggested" | "imported" | "source" | "implied";
+  created_by: string;
+  /** RFC 3339. */
+  created_at: string;
+}
+
+/** Everything the detail slide-over draws — `EntityDetail` (interfaces §2.5). */
+export interface EntityDetail {
+  row: EntityRow;
+  source: SourceRef;
+  /**
+   * The adapter's label and monogram for this kind, or `null`.
+   *
+   * `null` throughout M1 phase 1 — resolving it needs the adapter registry
+   * (task 21). The header falls back to the title-cased kind, which is what
+   * §3a asks for when no adapter declares one anyway.
+   */
+  kind_info: KindInfo | null;
+  /** Untrusted source text — render as text, never as markup (gotcha 7). */
+  body_text: string;
+  author: string | null;
+  /**
+   * The source record verbatim (§3a).
+   *
+   * `unknown`, per §2.6's `serde_json::Value` mapping — and untrusted source
+   * text all the way down: project it as text, never as markup (interfaces
+   * §2.5, gotcha 7).
+   */
+  payload: unknown;
+  /**
+   * Where the item lives in its own system, or `null` when the adapter
+   * reported no page — in which case *Open in browser* is absent (P5).
+   */
+  web_url: string | null;
+  /**
+   * RFC 3339 when the source withdrew the entity, else `null`. The mirror row
+   * survives so links and notes still resolve (§5a).
+   */
+  deleted_at: string | null;
+  /** Always `[]` in M1: nothing writes `knobas.link` until M2. */
+  links: LinkRow[];
+  /** This entity's own history, newest first (spec §12.1). */
+  activity: ActivityRow[];
+}
+
+/**
+ * One entity, deleted or not.
+ *
+ * Rejects with `invalid` for something that is not an entity id and
+ * `not_found` for one nothing carries — a deep link into a corpus that has not
+ * synced yet is a normal event, not a bug.
+ */
+export function getEntity(entityId: string): Promise<EntityDetail> {
+  return invoke<EntityDetail>("get_entity", { entityId });
 }
