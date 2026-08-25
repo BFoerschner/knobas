@@ -479,3 +479,71 @@ async fn an_injected_fault_reaches_teamcity_too() {
     assert_eq!(r.headers()["retry-after"], "7");
     s.assert_no_violations();
 }
+
+#[tokio::test]
+async fn only_a_running_build_carries_running_information() {
+    // The negative half matters as much as the positive one: an adapter that
+    // reads `running-info` to drive a progress bar would show a finished build
+    // as perpetually in flight if mockd emitted the object unconditionally.
+    let s = spawn_mock_teamcity().await;
+    let (_, done) = tc(&s.base_url(), "/app/rest/builds/id:412?fields=$long").await;
+    assert!(done.get("running-info").is_none(), "412 is finished");
+    assert!(done.get("running").is_none());
+    assert!(done.get("percentageComplete").is_none());
+
+    let (_, live) = tc(&s.base_url(), "/app/rest/builds/id:1188?fields=$long").await;
+    assert_eq!(live["running"], true);
+    assert_eq!(live["percentageComplete"], 60);
+    assert!(live["running-info"]["elapsedSeconds"].as_i64().unwrap() > 0);
+
+    // ... and they go away again when it finishes.
+    s.state()
+        .finish_build(1188, knobas_mockd::TcStatus::Success);
+    let (_, after) = tc(&s.base_url(), "/app/rest/builds/id:1188?fields=$long").await;
+    assert!(after.get("running-info").is_none());
+    assert!(after.get("running").is_none());
+    assert!(after.get("percentageComplete").is_none());
+    s.assert_no_violations();
+}
+
+#[tokio::test]
+async fn a_queued_build_has_a_queued_date_and_no_start_date() {
+    let s = spawn_mock_teamcity().await;
+    let id = s.state().queue_build("Payout_Build", "main");
+    let (_, b) = tc(
+        &s.base_url(),
+        &format!("/app/rest/builds/id:{id}?fields=$long"),
+    )
+    .await;
+    assert_eq!(b["state"], "queued");
+    assert!(b["queuedDate"].is_string());
+    assert!(
+        b.get("startDate").is_none(),
+        "a build that has not started has no startDate"
+    );
+    assert!(b.get("finishDate").is_none());
+    s.assert_no_violations();
+}
+
+#[tokio::test]
+async fn the_mutators_advance_the_clock_and_stamp_the_build() {
+    // One minute per mutation, the same rule as Jira's touch_issue: the clock
+    // is what `server.currentTime` reports, and a mutator that did not move it
+    // would make two consecutive finishes indistinguishable.
+    let s = spawn_mock_teamcity().await;
+    let before = s.state().now();
+    s.state()
+        .finish_build(1188, knobas_mockd::TcStatus::Success);
+    let after = s.state().now();
+    assert_eq!((after - before).num_seconds(), 60);
+    assert_eq!(
+        s.state().build(1188).unwrap().finish_date,
+        Some(after),
+        "finish_date is the ticked clock"
+    );
+
+    let id = s.state().queue_build("Payout_Build", "main");
+    let queued_at = s.state().now();
+    assert_eq!((queued_at - after).num_seconds(), 60);
+    assert_eq!(s.state().build(id).unwrap().start_date, queued_at);
+}
