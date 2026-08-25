@@ -36,6 +36,10 @@ pin() {  # pin <VAR> <repo:tag>
   printf '# %s\n%s=%s@%s\n' "$2" "$1" "${2%%:*}" "$digest"
 }
 
+# The heredoc-style block below writes .env. Its comment lines contain literal
+# backticks and $-free prose that must reach the file verbatim, so single
+# quotes are correct and SC2016's suggestion would break them.
+# shellcheck disable=SC2016
 {
   echo '# Image digest pins for testenv/docker-compose.yml. Public digests only --'
   echo '# no secrets live here. Regenerate with ./pin-images.sh, review the diff.'

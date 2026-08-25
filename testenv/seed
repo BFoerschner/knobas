@@ -1,0 +1,63 @@
+#!/bin/sh
+# Populate the running test environment with the Tidewater Freight content.
+# Idempotent: safe to re-run. Requires docker, curl, jq.
+#
+#   ./seed          seed Gitea and Uptime Kuma, then print the adapter env vars
+#   ./seed --env    print the env vars for an already-seeded environment
+#
+# SEED_EXACT_PR_NUMBERS=0 skips the ~140 placeholder issues per repo that make
+# the fixture's pull request numbers come out exactly; see README.md.
+set -eu
+cd "$(dirname "$0")"
+
+STATE=seed-state.json
+KEY_FILE=kuma-api-key
+
+# The variables an adapter test suite needs. Printed at the end of a seed and
+# by `--env`, so a consumer never has to know where the seed put things.
+print_env() {
+  [ -r "$STATE" ] || { echo "seed: $STATE not found -- run ./seed first" >&2; exit 1; }
+  echo "export KNOBAS_GITEA_URL=$(jq -r '.gitea.url' "$STATE")"
+  echo "export KNOBAS_GITEA_TOKEN=$(jq -r '.gitea.token' "$STATE")"
+  echo "export KNOBAS_GITEA_OWNER=$(jq -r '.gitea.org' "$STATE")"
+  echo "export KNOBAS_GITEA_REPO=payout-service"
+  [ -r "$KEY_FILE" ] && echo "export KNOBAS_KUMA_URL=http://127.0.0.1:3001"
+  [ -r "$KEY_FILE" ] && echo "export KNOBAS_KUMA_API_KEY=$(cat "$KEY_FILE")"
+  echo "export KNOBAS_MOCKD_JIRA_URL=http://127.0.0.1:8210"
+  echo "export KNOBAS_MOCKD_TEAMCITY_URL=http://127.0.0.1:8212"
+  echo "export KNOBAS_MOCKD_ADMIN_URL=http://127.0.0.1:8200"
+}
+
+if [ "${1:-}" = "--env" ]; then print_env; exit 0; fi
+[ $# -eq 0 ] || { echo "seed: unknown argument '$1'; usage: ./seed [--env]" >&2; exit 2; }
+
+for tool in docker curl jq; do
+  command -v "$tool" >/dev/null || { echo "seed: $tool is required" >&2; exit 1; }
+done
+
+FIXTURE=../fixtures/tidewater/work.json
+[ -r "$FIXTURE" ] || { echo "seed: $FIXTURE not found" >&2; exit 1; }
+export FIXTURE
+
+wait_for() {  # wait_for <name> <url>
+  printf 'seed: waiting for %s ' "$1"
+  i=0
+  until curl -fsS -o /dev/null "$2"; do
+    i=$((i + 1))
+    [ "$i" -lt 60 ] || { echo " timeout after 120s -- is 'docker compose up -d' running?"; exit 1; }
+    printf '.'; sleep 2
+  done
+  echo ' ok'
+}
+
+wait_for gitea       http://127.0.0.1:3000/api/healthz
+wait_for uptime-kuma http://127.0.0.1:3001/
+wait_for mockd       http://127.0.0.1:8200/__mock/health
+
+./seed-gitea.sh
+./seed-kuma.sh
+
+echo "seed: done"
+echo
+echo "# Environment for an adapter test suite -- eval \"\$(./seed --env)\""
+print_env
