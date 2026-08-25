@@ -1,3 +1,25 @@
+# ⚠ BLOCKING before stream B's adapter merges
+
+**Gitea's per-repo budgets vs. `full_sync_exhaustive` — ruled 2026-08-25, must be applied.**
+Stream B's `commits_per_repo` / `prs_per_repo` budgets bound what a cursor-less run emits.
+Stream F's sweep is **merged on `main`** (`crates/knobas-sync/src/lib.rs:509`) and fires on
+`full_sync && exhaustive && upserted > 0`, so an adapter that declares `full_sync_exhaustive: true`
+while capping per repo authorises the engine to tombstone **every commit past the cap on every
+full sync**. Same class as the Jira `MAX_PAGES` defect, reaching a different mechanism.
+
+**Ruling: if Gitea applies any per-repo budget, it declares `full_sync_exhaustive: false`** —
+that flag means exactly "a cursor-less run emits the complete corpus", and a budgeted run does not.
+TeamCity is already the `false` case for the same reason. The alternative (make cap-exit an error,
+as Jira does) is acceptable only if the budgets are removed entirely. Decide before task 7 merges;
+a reviewer should treat a `true` alongside any cap as a blocking finding.
+
+**Ratified in the same breath:** stream B extended ruling B4 rather than applying it literally —
+a 403/404 on one repository skips it on an *incremental* run, but is **fatal during a cursor-less
+run**, because the literal reading would let one refused repository lose its whole corpus to the
+same sweep. That extension is correct and stands.
+
+---
+
 # M0 → M1 carry-overs
 
 Extracted from the M0 execution ledger at milestone exit (2026-08-24). Every M1 plan writer reads this alongside the roadmap.

@@ -58,6 +58,13 @@ Merged branches are kept on the remote deliberately. They look "unmerged" to
 - Each worktree carries a ~6–25 GB `target/`. Reclaim on merge; sweep for orphaned Postgres
   before a wave (`ps aux | grep postgres`).
 
+## ⚠ One blocking item before stream B merges
+
+Gitea's per-repo budgets plus `full_sync_exhaustive: true` would meet the sweep now merged on
+`main` and tombstone every commit past the cap on each full sync. **Ruled: budgets ⇒ declare
+`full_sync_exhaustive: false`.** Written up at the top of the carry-overs doc; a reviewer should
+treat `true` alongside any cap as a blocking finding.
+
 ## Needs you, not an agent
 
 - **Vendor the TeamCity swagger**: `cd testenv/specs && ./fetch.sh --teamcity`. Needs ~10 GB
