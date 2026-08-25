@@ -16,4 +16,8 @@ serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+# The HTTP-level mock the exit criteria are certified against (interfaces §5).
+# A dev-dependency only: nothing in the shipped adapter knows mockd exists.
+knobas-mockd = { path = "../knobas-mockd" }
+serde_json.workspace = true
 tokio.workspace = true

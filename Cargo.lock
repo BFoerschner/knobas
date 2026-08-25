@@ -2537,6 +2537,7 @@ dependencies = [
  "chrono",
  "knobas-core",
  "knobas-http",
+ "knobas-mockd",
  "knobas-source",
  "serde",
  "serde_json",
