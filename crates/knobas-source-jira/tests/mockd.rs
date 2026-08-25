@@ -35,7 +35,13 @@ fn instance(base_url: &str, secret: &str, config: serde_json::Value) -> SourceIn
 }
 
 fn source(base_url: &str, config: serde_json::Value) -> Box<dyn Source> {
-    match knobas_source_jira::build(instance(base_url, knobas_mockd::JIRA_TOKEN, config)) {
+    source_named("jira", base_url, config)
+}
+
+fn source_named(id: &str, base_url: &str, config: serde_json::Value) -> Box<dyn Source> {
+    let mut i = instance(base_url, knobas_mockd::JIRA_TOKEN, config);
+    i.id = id.to_owned();
+    match knobas_source_jira::build(i) {
         Ok(s) => s,
         // `Box<dyn Source>` is not `Debug`, so `expect` is unavailable.
         Err(e) => panic!("the adapter must build against mockd: {e:?}"),
@@ -322,6 +328,35 @@ async fn test_connection_reports_the_account_and_the_server() {
     assert_eq!(info.detail.as_deref(), Some("Server 9.17.0"), "{info:?}");
     // PAT expiry needs /rest/pat/latest/tokens, which is outside M1's endpoints.
     assert!(info.secret_expires_at.is_none());
+    jira.assert_no_violations();
+}
+
+/// P10: the `EntityRef` namespace is the **instance** id, not the adapter kind.
+///
+/// Every other test here uses an instance called `jira`, which is also
+/// `ADAPTER_KIND` -- so the two are indistinguishable and a `sync` wired to the
+/// constant would pass all of them. Two Jiras are `jira` and `jira-eu`, and
+/// their items must not collide in the mirror.
+#[tokio::test]
+async fn a_second_instance_of_the_same_jira_carries_its_own_namespace() {
+    let jira = spawn_mock_jira().await;
+    let eu = source_named("jira-eu", &jira.base_url(), serde_json::json!({}));
+    assert_eq!(eu.descriptor().id, "jira-eu");
+    let mut sink = VecSink(Vec::new());
+    eu.sync(None, &mut sink).await.expect("sync succeeds");
+    assert!(!sink.0.is_empty());
+    for item in &sink.0 {
+        assert_eq!(
+            item.entity.namespace, "jira-eu",
+            "{} is namespaced to the adapter kind, not to the instance",
+            item.entity
+        );
+    }
+    assert!(
+        sink.0
+            .iter()
+            .any(|i| i.entity.to_string() == "jira-eu:PAY-231")
+    );
     jira.assert_no_violations();
 }
 

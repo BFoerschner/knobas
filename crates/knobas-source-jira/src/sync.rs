@@ -242,13 +242,35 @@ mod tests {
         })
     }
 
-    #[derive(Default)]
     struct FakeApi {
         issues: Vec<serde_json::Value>,
         comments: HashMap<String, Vec<serde_json::Value>>,
         worklogs: HashMap<String, Vec<serde_json::Value>>,
+        /// The zone `serverInfo` reports and JQL literals are resolved in.
+        /// Defaults to `+02:00` like `knobas-mockd`, and deliberately not to
+        /// UTC: a fake on UTC cannot tell a watermark rendered in the server's
+        /// zone from one rendered in UTC, which is the trap this adapter's
+        /// whole `serverInfo` call exists to avoid.
+        offset_secs: i32,
+        /// Extra `total` the fake claims beyond what it will ever return -- a
+        /// server whose index shrank under the run.
+        phantom_total: u32,
         unauthorized: bool,
         calls: Mutex<Vec<String>>,
+    }
+
+    impl Default for FakeApi {
+        fn default() -> Self {
+            Self {
+                issues: Vec::new(),
+                comments: HashMap::new(),
+                worklogs: HashMap::new(),
+                offset_secs: 2 * 3600,
+                phantom_total: 0,
+                unauthorized: false,
+                calls: Mutex::new(Vec::new()),
+            }
+        }
     }
 
     impl FakeApi {
@@ -280,21 +302,35 @@ mod tests {
 
     /// The fake honours the one JQL clause the run depends on. Without it the
     /// incremental tests would prove nothing.
-    fn since_of(jql: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    ///
+    /// The literal is resolved **in the server's zone**, never in UTC -- that
+    /// is what a real Jira does, what mockd does, and the only reason the
+    /// adapter reads `serverInfo.serverTime` at all.
+    fn since_of(jql: &str, offset_secs: i32) -> Option<chrono::DateTime<chrono::Utc>> {
+        use chrono::TimeZone;
         let rest = jql.split("updated >= \"").nth(1)?;
         let literal = rest.split('"').next()?;
-        chrono::NaiveDateTime::parse_from_str(literal, "%Y-%m-%d %H:%M")
-            .ok()
-            .map(|n| n.and_utc())
+        let naive = chrono::NaiveDateTime::parse_from_str(literal, "%Y-%m-%d %H:%M").ok()?;
+        let zone = chrono::FixedOffset::east_opt(offset_secs)?;
+        zone.from_local_datetime(&naive)
+            .single()
+            .map(|t| t.with_timezone(&chrono::Utc))
     }
 
     #[async_trait::async_trait]
     impl JiraApi for FakeApi {
         async fn server_info(&self) -> Result<ServerInfo, SourceError> {
             self.calls.lock().unwrap().push("serverInfo".to_owned());
+            let (sign, mins) = if self.offset_secs < 0 {
+                ('-', -self.offset_secs / 60)
+            } else {
+                ('+', self.offset_secs / 60)
+            };
             Ok(serde_json::from_value(serde_json::json!({
                 "version": "9.17.0", "deploymentType": "Server",
-                "serverTime": "2026-08-22T11:48:00.000+0000"
+                "serverTime": format!(
+                    "2026-08-22T11:48:00.000{sign}{:02}{:02}", mins / 60, mins % 60
+                )
             }))
             .unwrap())
         }
@@ -317,7 +353,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(format!("search@{start_at}"));
-            let since = since_of(jql);
+            let since = since_of(jql, self.offset_secs);
             let matching: Vec<serde_json::Value> = self
                 .issues
                 .iter()
@@ -341,7 +377,7 @@ mod tests {
                 .collect();
             Ok(serde_json::from_value(serde_json::json!({
                 "startAt": start_at, "maxResults": max_results,
-                "total": matching.len(), "issues": window
+                "total": matching.len() as u32 + self.phantom_total, "issues": window
             }))
             .unwrap())
         }
@@ -719,6 +755,171 @@ mod tests {
         assert_eq!(
             c4, c3,
             "an idle poll must hand back the cursor it was given"
+        );
+    }
+
+    /// The trap the `serverInfo` call exists for, at the layer that sends the
+    /// query.
+    ///
+    /// JQL date literals carry no zone and are read in the **server's**. A
+    /// watermark rendered in UTC and sent to a `+02:00` server therefore names
+    /// an instant two hours earlier, and the query returns two extra hours of
+    /// issues on every incremental run. That is invisible in the emitted items
+    /// as long as everything in the extra band is still in `seen` -- so the
+    /// issue here sits *outside* the two-minute overlap the cursor remembers
+    /// and inside the two-hour band the mistake would open. Under the correct
+    /// rendering the idle run does not see it at all; under a UTC rendering it
+    /// comes back unrecognised and is emitted.
+    ///
+    /// `time.rs` pins the renderer itself. This pins that the run hands it the
+    /// zone the server reported rather than a zero.
+    #[tokio::test]
+    async fn the_watermark_literal_is_read_in_the_servers_zone() {
+        let mut issues = five_issues();
+        // 11:46Z is the floor an idle run really queries from; 09:46Z is the
+        // floor a UTC-rendered literal would open on a +02:00 server.
+        issues.push(issue("PAY-500", "2026-08-22T10:30:00.000+0000", 0, 0));
+        let api = FakeApi {
+            issues,
+            ..FakeApi::default()
+        };
+        let config = cfg(serde_json::json!({}));
+        let (full, cursor) = keys_of(&api, &config, None).await;
+        assert_eq!(full.len(), 6);
+        // Outside the overlap window, so the cursor does not remember it -- the
+        // only thing keeping it out of the next run is the query's lower bound.
+        let seen: Vec<String> = crate::cursor::JiraCursor::parse(&cursor)
+            .unwrap()
+            .seen
+            .into_iter()
+            .map(|s| s.k)
+            .collect();
+        assert!(!seen.contains(&"PAY-500".to_owned()), "{seen:?}");
+
+        let (idle, again) = keys_of(&api, &config, Some(cursor.clone())).await;
+        assert!(
+            idle.is_empty(),
+            "the query floor reached back further than the server's zone puts it: {idle:?}"
+        );
+        assert_eq!(again, cursor);
+    }
+
+    /// `total` is a live number: an issue can leave the result set while the
+    /// run is paging it, and a server can simply be wrong. The loop stops on
+    /// the page that arrives empty rather than on the arithmetic, because
+    /// `startAt` does not advance over rows that were not returned -- so a run
+    /// trusting `total` alone re-asks for the same offset forever.
+    #[tokio::test]
+    async fn a_page_that_arrives_empty_while_total_still_claims_more_ends_the_run() {
+        let api = FakeApi {
+            issues: five_issues(),
+            phantom_total: 40,
+            ..FakeApi::default()
+        };
+        let (keys, _) = keys_of(&api, &cfg(serde_json::json!({})), None).await;
+        assert_eq!(keys.len(), 5);
+        // One page with the five issues, one that comes back empty and ends it.
+        assert_eq!(api.searches(), vec!["search@0", "search@5"]);
+    }
+
+    /// Battery clause 2 says an idle run returns the cursor it was handed
+    /// **byte-identically**, and the run keeps that promise by handing back the
+    /// input string rather than re-encoding the struct. Re-encoding looks
+    /// equivalent and is not: the envelope carries the zone its watermark was
+    /// taken in, so the first idle poll after the server crossed a daylight
+    /// saving boundary would come back with a different `tz_offset_secs` and a
+    /// window widened to 65 minutes -- a changed cursor for a run in which
+    /// nothing happened, which is exactly the activity line the clause exists
+    /// to suppress.
+    #[tokio::test]
+    async fn an_idle_run_after_the_server_changed_zone_returns_the_same_bytes() {
+        let mut api = FakeApi {
+            issues: five_issues(),
+            offset_secs: 2 * 3600,
+            ..FakeApi::default()
+        };
+        let config = cfg(serde_json::json!({}));
+        let (full, cursor) = keys_of(&api, &config, None).await;
+        assert_eq!(full.len(), 5);
+
+        // Winter time: the server is now an hour west of where the cursor was
+        // written, so the next run widens its overlap. Nothing changed upstream.
+        api.offset_secs = 3600;
+        let (idle, again) = keys_of(&api, &config, Some(cursor.clone())).await;
+        assert!(idle.is_empty(), "{idle:?}");
+        assert_eq!(
+            again, cursor,
+            "a run that emitted nothing must return the bytes it was handed, zone change included"
+        );
+    }
+
+    /// The widening is for the run *after* a zone change and no other. A run
+    /// whose zone did not move reaches back exactly the two-minute overlap.
+    ///
+    /// `seen` is filtered to that same two minutes, so anything the window
+    /// reaches beyond it comes back unrecognised and is emitted -- on every
+    /// poll, forever. A permanently widened window is therefore not a harmless
+    /// over-fetch: it is battery clause 2 failing in steady state, for any
+    /// source with an edit between three and sixty-five minutes old.
+    #[tokio::test]
+    async fn an_idle_poll_does_not_reach_back_further_than_the_overlap() {
+        let mut issues = five_issues();
+        // Inside the daylight-saving widening, outside the overlap -- so the
+        // cursor does not remember it and only an over-wide floor returns it.
+        issues.push(issue("PAY-502", "2026-08-22T11:00:00.000+0000", 0, 0));
+        let api = FakeApi {
+            issues,
+            ..FakeApi::default()
+        };
+        let config = cfg(serde_json::json!({}));
+        let (full, cursor) = keys_of(&api, &config, None).await;
+        assert_eq!(full.len(), 6);
+        let (idle, again) = keys_of(&api, &config, Some(cursor.clone())).await;
+        assert!(
+            idle.is_empty(),
+            "an idle poll reached past the two-minute overlap: {idle:?}"
+        );
+        assert_eq!(again, cursor);
+    }
+
+    /// The one run after the server's UTC offset changed reaches back an hour
+    /// further than the overlap, and it is the **current** offset that decides
+    /// that -- comparing the cursor's zone against itself would make the
+    /// widening unreachable.
+    ///
+    /// `cursor.rs` pins that [`JiraCursor::since`] widens; this pins that the
+    /// run gives it something to compare against. The issue in the seam is
+    /// outside the two-minute overlap and therefore not in `seen`, so the only
+    /// thing that can bring it back is the wider floor -- and the watermark
+    /// must not follow it backwards.
+    #[tokio::test]
+    async fn the_run_after_a_zone_change_widens_its_window_once() {
+        let mut issues = five_issues();
+        // 48 minutes before the watermark: inside the 65-minute widening,
+        // outside the 2-minute overlap.
+        issues.push(issue("PAY-501", "2026-08-22T11:00:00.000+0000", 0, 0));
+        let mut api = FakeApi {
+            issues,
+            offset_secs: 2 * 3600,
+            ..FakeApi::default()
+        };
+        let config = cfg(serde_json::json!({}));
+        let (_, cursor) = keys_of(&api, &config, None).await;
+
+        // Same corpus, unchanged; only the server's zone moved.
+        api.offset_secs = 3600;
+        let (widened, advanced) = keys_of(&api, &config, Some(cursor)).await;
+        assert_eq!(
+            widened,
+            vec!["PAY-501".to_owned()],
+            "the run after a zone change must re-read the daylight-saving seam"
+        );
+        assert_eq!(
+            crate::cursor::JiraCursor::parse(&advanced)
+                .unwrap()
+                .updated_to,
+            crate::time::parse_jira_time("2026-08-22T11:48:00.000+0000"),
+            "re-reading the seam must not drag the watermark back into it"
         );
     }
 
