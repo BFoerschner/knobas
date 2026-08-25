@@ -37,6 +37,7 @@ mod cursor;
 mod map;
 mod model;
 mod source;
+mod sync;
 
 pub use config::{GiteaConfig, config_schema};
 pub use source::{GiteaSource, build};

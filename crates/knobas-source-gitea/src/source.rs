@@ -89,9 +89,7 @@ impl Source for GiteaSource {
         cursor: Option<Cursor>,
         sink: &mut (dyn Sink + Send),
     ) -> Result<Cursor, SourceError> {
-        // Task 5 replaces this with `sync::run`.
-        let _ = sink;
-        Ok(cursor.unwrap_or_default())
+        crate::sync::run(self, cursor, sink).await
     }
 
     async fn write(&self, op: WriteOp) -> Result<(), SourceError> {
