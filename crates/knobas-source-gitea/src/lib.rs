@@ -32,7 +32,12 @@
 pub mod config;
 pub mod keys;
 
+mod client;
+mod model;
+mod source;
+
 pub use config::{GiteaConfig, config_schema};
+pub use source::{GiteaSource, build};
 
 use knobas_source::{AuthMethod, KindInfo, SourceDescriptor};
 
