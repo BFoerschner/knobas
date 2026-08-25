@@ -14,7 +14,6 @@ thiserror.workspace = true
 # `rt` for `spawn_blocking`: every async caller of this crate must go through
 # it, because a locked keychain blocks on a user prompt.
 tokio = { workspace = true, features = ["rt"] }
-tracing = "0.1"
 
 # `keyring-core` rather than the all-in-one `keyring` crate, and per platform.
 #

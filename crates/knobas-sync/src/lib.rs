@@ -269,10 +269,18 @@ pub async fn run_from_stored_cursor(
 
 /// Where a run gets the position it resumes from.
 ///
-/// Both entry points delegate to one `run_inner`, so [`run_once`] is
-/// byte-for-byte the run it was in M0 -- `demo_load` passes an explicit `None`
-/// and must keep getting exactly that -- while the scheduler's entry point gets
-/// the read under the lock.
+/// Both entry points delegate to one `run_inner`, so [`run_once`] keeps its M0
+/// **signature and cursor semantics** exactly -- `demo_load` passes an explicit
+/// `None` and still gets a full sync from that `None` -- while the scheduler's
+/// entry point gets the read under the lock.
+///
+/// It is *not* byte-for-byte the M0 run, and the difference has a caller:
+/// `run_inner` now sweeps after an exhaustive full sync, and the mock declares
+/// `full_sync_exhaustive: true`, so *Load demo data* tombstones `mock:`
+/// entities that the fixture stopped emitting. That is the intended behaviour
+/// -- a demo corpus should not accumulate items the fixture no longer has --
+/// but it is new in M1, and a reader comparing this against M0 needs to know
+/// the sweep is the thing that changed.
 enum CursorSource {
     /// The caller decided: [`run_once`]'s argument, unchanged from M0.
     Explicit(Option<Cursor>),

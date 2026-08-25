@@ -43,6 +43,36 @@ async fn a_run_abandoned_by_a_quit_is_closed_at_the_next_start() {
         "idempotent: a second startup closes nothing"
     );
 
+    // A run that recorded *why* it was struggling before the process died
+    // keeps that message: `coalesce(error, …)` rather than an overwrite, and
+    // the more useful half of the diagnosis is the adapter's own words. This
+    // mutant survived the first round of this PR -- nothing had an error set
+    // on it when the recovery ran.
+    let diagnosed = run_log::start(&pool, &id, SyncTrigger::Schedule)
+        .await
+        .unwrap();
+    sqlx::query("update knobas.sync_run set error = $2 where id = $1")
+        .bind(diagnosed)
+        .bind("429 from Jira, giving up")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(run_log::reconcile_abandoned(&pool).await.unwrap(), 1);
+    let recovered = run_log::list(&pool, Some(&id), 100)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|r| r.id == diagnosed)
+        .expect("the run is still there");
+    assert_eq!(
+        recovered.error.as_deref(),
+        Some("429 from Jira, giving up"),
+        "the recovery must not overwrite what the run already knew"
+    );
+    assert!(recovered.finished_at.is_some(), "but it is still closed");
+    assert_eq!(recovered.outcome, Some(SyncOutcome::Error));
+
     // A run that finished normally keeps the outcome it finished with -- the
     // recovery must not overwrite history.
     let ok_run = run_log::start(&pool, &id, SyncTrigger::Manual)

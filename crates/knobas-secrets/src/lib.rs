@@ -77,9 +77,25 @@ pub enum SecretError {
     /// read. Carries no secret material.
     #[error("keychain: {0}")]
     Backend(String),
-    /// The keychain exists but is locked and the user did not unlock it.
-    #[error("the keychain is locked")]
-    Locked,
+    /// The store is there but refused access to it.
+    ///
+    /// **Not "the keychain is locked", however much it sounds like it.** This
+    /// is exactly `keyring_core::Error::NoStorageAccess`, and on macOS the
+    /// legacy-keychain store raises that for only six `OSStatus` values:
+    /// `-61` (write permissions), `errSecInvalidOwnerEdit`,
+    /// `errSecNotAvailable`, `errSecReadOnly`, `errSecNoSuchKeychain` and
+    /// `errSecInvalidKeychain`.
+    ///
+    /// The three cases a *human* would call "locked" are **not** among them --
+    /// `errSecInteractionNotAllowed` (-25308, locked with no UI available),
+    /// `errSecAuthFailed` (-25293) and `errSecUserCanceled` (-128, the user
+    /// clicked *Deny*) all fall through to
+    /// [`Backend`](SecretError::Backend). So an *Unlock your keychain*
+    /// affordance hung off this variant alone would be dead code on the
+    /// platform it was written for; a caller that wants one has to treat
+    /// `Backend` as possibly-lockable too, or downcast the platform error.
+    #[error("the credential store refused access")]
+    Unavailable,
     /// Asked for an item that is not there, from an operation that needed one.
     /// [`SecretStore::get`] reports absence as `Ok(None)` instead.
     #[error("no stored credential")]

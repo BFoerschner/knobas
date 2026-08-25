@@ -117,10 +117,11 @@ fn platform_store() -> Result<Arc<CredentialStore>, SecretError> {
 fn map_error(error: KeyringError) -> SecretError {
     match error {
         KeyringError::NoEntry => SecretError::NotFound,
-        // The platform has the item but would not hand it over: on macOS this
-        // is the locked-keychain / denied-prompt case, which is a thing the
-        // user can fix and must be told about as such.
-        KeyringError::NoStorageAccess(_) => SecretError::Locked,
+        // The store refused access. See `SecretError::Unavailable` for what
+        // this does and does not cover -- notably it is *not* the
+        // locked-keychain / denied-prompt case on macOS, which arrives as
+        // `PlatformFailure` and therefore as `Backend`.
+        KeyringError::NoStorageAccess(_) => SecretError::Unavailable,
         other => SecretError::Backend(other.to_string()),
     }
 }
@@ -148,5 +149,78 @@ impl SecretStore for KeyringStore {
             Ok(()) | Err(KeyringError::NoEntry) => Ok(()),
             Err(other) => Err(map_error(other)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A stand-in for whatever the platform layer boxes up. Its `Display`
+    /// carries a marker so the assertions below can tell "the cause was
+    /// forwarded" from "a generic message was invented".
+    #[derive(Debug)]
+    struct Boxed(&'static str);
+
+    impl std::fmt::Display for Boxed {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.0)
+        }
+    }
+
+    impl std::error::Error for Boxed {}
+
+    /// The classification the whole crate's error surface rests on, and until
+    /// now the only part of it with no test.
+    ///
+    /// `NoStorageAccess` is deliberately **not** "locked": see
+    /// [`SecretError::Unavailable`]. Pinning it here is what stops a future
+    /// edit from quietly folding it into `Backend` and taking a caller's only
+    /// signal with it.
+    #[test]
+    fn a_platform_failure_is_classified_by_what_the_store_said() {
+        assert!(matches!(
+            map_error(KeyringError::NoEntry),
+            SecretError::NotFound
+        ));
+        assert!(matches!(
+            map_error(KeyringError::NoStorageAccess(Box::new(Boxed("refused")))),
+            SecretError::Unavailable
+        ));
+        assert!(matches!(
+            map_error(KeyringError::PlatformFailure(Box::new(Boxed("boom")))),
+            SecretError::Backend(_)
+        ));
+        // A locked keychain on macOS is `errSecInteractionNotAllowed`, which
+        // `apple-native-keyring-store` maps to `PlatformFailure` -- so it
+        // reaches us as `Backend`, not `Unavailable`. Asserted so that the
+        // documented gap is a tested fact rather than a claim in a comment.
+        assert!(matches!(
+            map_error(KeyringError::PlatformFailure(Box::new(Boxed(
+                "errSecInteractionNotAllowed"
+            )))),
+            SecretError::Backend(_)
+        ));
+    }
+
+    /// The cause is forwarded through `Display`, never `Debug`: `Debug` on a
+    /// platform error can print the buffer it was decoding.
+    #[test]
+    fn the_backend_message_forwards_the_cause_without_debug_formatting() {
+        let SecretError::Backend(message) =
+            map_error(KeyringError::PlatformFailure(Box::new(Boxed("plain-text"))))
+        else {
+            panic!("a platform failure is a Backend error");
+        };
+        // keyring-core's own `Display` prefixes the class ("Platform failure:
+        // …"); what matters is that the cause reaches us through it.
+        assert!(
+            message.contains("plain-text"),
+            "the cause was dropped: {message}"
+        );
+        assert!(
+            !message.contains("Boxed"),
+            "the cause was Debug-formatted, which can print payload bytes: {message}"
+        );
     }
 }

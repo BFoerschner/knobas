@@ -557,6 +557,47 @@ mod tests {
         );
     }
 
+    /// The stored-value readers, both directions and both defaults.
+    ///
+    /// The defaults are the point. `outcome_from_db` falling back to
+    /// [`SyncOutcome::Ok`] instead of [`SyncOutcome::Error`] would make a row
+    /// this version cannot name read as a *success* -- which clears the
+    /// backoff ladder, so a source failing with an outcome written by a newer
+    /// knobas would be retried at full rate for ever. That mutant survived the
+    /// first round of this PR because nothing asserted the fallback; it is the
+    /// same shape `config::auth_state_from_db` already had a test for.
+    #[test]
+    fn a_stored_value_round_trips_and_an_unrecognised_one_degrades_safely() {
+        for outcome in SyncOutcome::ALL {
+            assert_eq!(outcome_from_db(outcome.as_str()), *outcome);
+        }
+        for trigger in SyncTrigger::ALL {
+            assert_eq!(trigger_from_db(trigger.as_str()), *trigger);
+        }
+
+        // An outcome this version cannot name is **not** a success.
+        for unknown in ["cancelled", "written_by_a_newer_knobas", ""] {
+            assert_eq!(
+                outcome_from_db(unknown),
+                SyncOutcome::Error,
+                "{unknown:?} must not read as a success: it would clear the \
+                 backoff ladder"
+            );
+            assert!(
+                outcome_from_db(unknown).backs_off()
+                    || outcome_from_db(unknown) == SyncOutcome::Unauthorized,
+                "an unnameable outcome must still be a failure"
+            );
+        }
+
+        // A trigger this version cannot name is cosmetic -- it only labels a
+        // row in the diagnostics list -- so it degrades to the commonest one
+        // rather than refusing to list the run at all.
+        for unknown in ["webhook", "written_by_a_newer_knobas", ""] {
+            assert_eq!(trigger_from_db(unknown), SyncTrigger::Schedule);
+        }
+    }
+
     /// **The enum half of the `SourceSyncStatus` mirror pin** (M0 carry-over,
     /// stream F). The twin of `health::the_states_match_their_typescript_mirror`
     /// and, like it, driven by `::ALL` -- so a variant added to either

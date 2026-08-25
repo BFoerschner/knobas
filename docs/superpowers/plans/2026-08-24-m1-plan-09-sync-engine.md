@@ -4554,6 +4554,21 @@ git commit -m "knobas-sync: scheduler ticker, concurrency cap, bounded shutdown"
 
 ### Task 8: `knobas-db::embedded` — own the postmaster, bound the close, hand out a second pool
 
+> **Orchestrator ruling, 2026-08-25 (review of stream F PR #19), binding on this task.**
+> §10.6(c) — a run's HTTP retries happening inside an advisory-locked transaction — was **deferred out of
+> tasks 1–5 and lands here**. §10.6(c) names two acceptable shapes, and the one this task must implement is
+> the second: **the run keeps its own dedicated connection, with the advisory lock held on that connection.**
+> That needs no write-path redesign, keeps the run's single-transaction atomicity, and keeps
+> `sync.item.synced_at` as the transaction timestamp — which the Task 4 sweep depends on, since
+> `synced_at < now()` is only "this run did not touch it" while every row of a run shares one transaction
+> timestamp.
+>
+> **A second pool alone does not discharge the carry-over.** Handing the scheduler more connections removes
+> the *starvation* symptom (a network-bound run no longer pins one of the UI's five) while leaving the
+> actual finding — the lock and the transaction spanning the network work — exactly where it was. If this
+> task ships `pool_for` without moving the lock onto a dedicated connection, §10.6(c) is still open and must
+> be re-raised, not marked done.
+
 **Files:**
 - Modify: `crates/knobas-db/src/embedded.rs`, `crates/knobas-db/tests/embedded.rs`
 - Modify: `crates/knobas-db/Cargo.toml` (no new dependency; `tokio` already has `sync`, add `time` for the timeout)

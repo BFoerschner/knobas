@@ -829,6 +829,14 @@ From this commit on, each of the following requires an orchestrator decision **a
 - `crates/knobas-http/**`,
 - `crates/knobas-app/src/{error,profile}.rs`.
 
+**Ratified exceptions to the frozen list** (recorded here because this section requires it):
+
+- `crates/knobas-app/src/error.rs`, stream F PR #19 (2026-08-25): `knobas_sync::SyncError` gained
+  `NotConfigured { id }`, which made the `From<SyncError> for IpcError` match non-exhaustive and stopped
+  the workspace building. One arm added, mapping it to `IpcErrorCode::NotFound` — the source id is a real
+  id, there is simply no such source. Forced, minimal, and the right code; ratified by the orchestrator on
+  the review of that PR. No other change to the file.
+
 **`crates/knobas-sync/**` is NOT frozen — and stream F is expected to restructure it.**
 
 Spelled out because the list above is short and the omission would otherwise be read as an oversight. `knobas_sync::run` and `run_once` are a *starting point*, not a contract: F owns the scheduler, the cursor lifecycle, backoff, the sweep, and — explicitly — **`run_once`'s transaction boundary**, which §10.6(c) says has to move so a run's HTTP work stops happening inside an advisory-locked transaction.

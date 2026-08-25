@@ -319,10 +319,19 @@ async fn the_sweep_only_touches_its_own_source() {
     assert_eq!(live_count(&pool, &theirs).await, 1);
 }
 
-/// A sweep that runs must be inside the run's own transaction, or a failure
-/// after it would leave tombstones over data that was rolled back. Proven by
-/// the tombstone and the upserts landing together: `swept` is reported on the
-/// same committed report as `upserted`.
+/// Sources do resurrect things -- an issue is un-deleted, a repo restored --
+/// and a tombstone the sweep wrote must come off again when the item comes
+/// back, or a stale one hides a live entity for ever.
+///
+/// This asserts **resurrection and nothing else**. An earlier version of this
+/// comment claimed it also proved the sweep runs inside the run's own
+/// transaction; it does not, and that property is not reachable from a test at
+/// this level: the sweep executes only after `Source::sync` has returned `Ok`,
+/// and the only statements after it are the cursor update and the commit,
+/// neither of which a test can force to fail without reaching inside the
+/// engine. The property is held by construction instead -- `SWEEP` executes on
+/// `&mut *tx`, the same transaction as the upserts -- and that is what the
+/// reader should check, rather than trusting this test to have checked it.
 #[tokio::test]
 async fn a_resurrected_item_loses_its_tombstone_again() {
     let pool = pool().await;
