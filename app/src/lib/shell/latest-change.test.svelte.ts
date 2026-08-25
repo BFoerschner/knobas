@@ -84,6 +84,35 @@ test("the middle of a burst never reaches the screen", () => {
   store.stop();
 });
 
+/**
+ * A burst that keeps arriving keeps being held.
+ *
+ * The window has to re-arm when it releases, or the invariant is only "at most
+ * one update per second *for the first second*": a release that wrote the
+ * value directly would leave the window closed, and the very next line — a
+ * millisecond later — would be drawn at once. Two visible updates 1 ms apart
+ * is exactly what the coalescing exists to prevent.
+ */
+test("the window re-arms, so a burst that continues is still held", () => {
+  vi.useFakeTimers();
+  const store = createLatestChange({ windowMs: 1000 });
+
+  store.push(row(1, "a"));
+  store.push(row(2, "b"));
+  vi.advanceTimersByTime(1000);
+  expect(store.current?.id).toBe(2);
+
+  // One millisecond into the *next* window.
+  vi.advanceTimersByTime(1);
+  store.push(row(3, "c"));
+  expect(store.current?.id, "a third line was drawn 1 ms after the second").toBe(2);
+
+  vi.advanceTimersByTime(1000);
+  expect(store.current?.id).toBe(3);
+
+  store.stop();
+});
+
 /** Nothing has happened yet is a state, and it is `null`. */
 test("an untouched store has no line", () => {
   const store = createLatestChange();
@@ -105,9 +134,16 @@ test("stop cancels the pending release", () => {
 
   store.push(row(1, "a"));
   store.push(row(2, "b"));
-  store.stop();
-  vi.advanceTimersByTime(5000);
+  expect(vi.getTimerCount(), "a window is open").toBe(1);
 
+  store.stop();
+
+  // Checked *before* advancing, and that order is the whole assertion. After
+  // 5000 ms the timer has fired and removed itself either way, so the same
+  // check afterwards holds against a `stop` that cancels nothing — which is
+  // what it did, until a mutation run said so.
+  expect(vi.getTimerCount(), "stop left a timer running").toBe(0);
+
+  vi.advanceTimersByTime(5000);
   expect(store.current?.id, "the deferred line landed after stop").toBe(1);
-  expect(vi.getTimerCount()).toBe(0);
 });

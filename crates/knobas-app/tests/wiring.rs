@@ -1,6 +1,14 @@
-//! What the window is permitted to do -- `capabilities/default.json`.
+//! What `run()` wires up: the command handler list, and the one plugin.
 //!
-//! Tauri reads this file at build time and denies anything it does not name,
+//! Both live in files nothing else references, and both fail **at run time**
+//! with no compile-time signal: a command missing from `generate_handler!` is
+//! simply not there when the frontend calls it, and a permission missing from
+//! `capabilities/default.json` denies a plugin command that exists.
+//!
+//! ## What the window is permitted to do -- `capabilities/default.json`
+//!
+//!
+//! Tauri reads that file at build time and denies anything it does not name,
 //! at **run time**, with no compile-time signal at all: an app whose capability
 //! file lost a permission builds, lints and tests green, and *Open in browser*
 //! silently stops working in the packaged build. There is nothing else in the
@@ -178,4 +186,108 @@ fn strip_comments(source: &str) -> String {
         }
     }
     out
+}
+
+// ---------------------------------------------------------------------------
+// The handler list.
+// ---------------------------------------------------------------------------
+
+/// Every `#[tauri::command]` in `src/commands/**` is in `run()`'s handler list.
+///
+/// # Why this is a scan, and what the compiler already covers
+///
+/// The two directions are not symmetric:
+///
+/// * **Registered but not a command** is a *compile* error. `generate_handler!`
+///   expands each identifier into a path it has to resolve to a command, so a
+///   name that is not one fails to build. Nothing is needed for that direction.
+/// * **A command that is not registered** is nothing at all. It builds, it
+///   lints, `tests/ipc.rs` still dispatches it -- because that file builds its
+///   own `generate_handler!` list, which is a *copy* -- and the frontend's
+///   `invoke` fails at run time with "command not found". A mutation run said
+///   so: deleting `commands::entity::list_entities` from `run()` left the whole
+///   suite green.
+///
+/// So this reads the source, with comments stripped so a doc comment naming a
+/// command cannot stand in for registering it. It proves the name is in the
+/// list; it does not prove the list is the one `Builder::invoke_handler` is
+/// given, which is one line away in the same function.
+#[test]
+fn every_command_is_in_the_handler_list() {
+    let registered = handler_list();
+    assert!(
+        registered.len() >= 8,
+        "the handler list was not parsed -- it holds {} names",
+        registered.len()
+    );
+
+    let mut missing = Vec::new();
+    for (module, command) in declared_commands() {
+        let path = format!("commands::{module}::{command}");
+        if !registered.contains(&path) {
+            missing.push(path);
+        }
+    }
+    missing.sort();
+    assert_eq!(
+        missing,
+        Vec::<String>::new(),
+        "these commands exist and are never registered, so the frontend's \
+         `invoke` fails at run time with \"command not found\" and nothing else \
+         in the tree notices. Registered: {registered:?}"
+    );
+}
+
+/// The identifiers inside `run()`'s `tauri::generate_handler![..]`.
+fn handler_list() -> Vec<String> {
+    let code = strip_comments(include_str!("../src/lib.rs"));
+    let start = code
+        .find("generate_handler![")
+        .expect("run() builds a handler list");
+    let rest = &code[start + "generate_handler![".len()..];
+    let end = rest.find(']').expect("the handler list is closed");
+    rest[..end]
+        .split(',')
+        .map(|entry| entry.trim().to_owned())
+        .filter(|entry| !entry.is_empty())
+        .collect()
+}
+
+/// Every `#[tauri::command]` in `src/commands/**`, as `(module, function)`.
+fn declared_commands() -> Vec<(String, String)> {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/commands");
+    let mut found = Vec::new();
+
+    for entry in std::fs::read_dir(&dir).expect("src/commands is readable") {
+        let path = entry.expect("a directory entry").path();
+        if path.extension().is_none_or(|extension| extension != "rs") {
+            continue;
+        }
+        let module = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .expect("a module name")
+            .to_owned();
+        if module == "mod" {
+            continue;
+        }
+        let code = strip_comments(&std::fs::read_to_string(&path).expect("a command module"));
+        let mut rest = code.as_str();
+        while let Some(at) = rest.find("#[tauri::command]") {
+            rest = &rest[at + "#[tauri::command]".len()..];
+            let name = rest
+                .split("fn ")
+                .nth(1)
+                .and_then(|after| after.split(['(', '<', ' ']).next())
+                .expect("a command declares a function after its attribute")
+                .to_owned();
+            found.push((module.clone(), name));
+        }
+    }
+
+    assert!(
+        found.len() >= 8,
+        "no commands were found at all, so this test proves nothing"
+    );
+    found
 }

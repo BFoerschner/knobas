@@ -108,11 +108,21 @@ async fn an_empty_filter_list_means_unfiltered_not_empty() {
 }
 
 /// The page is a window on the filtered set, and `total` describes the set.
+///
+/// Scoped to the `mock` source, and that is not tidiness: the database is
+/// shared by every test in this binary, so an unfiltered read is a moving
+/// target — a row another test inserts between the two calls below shifts the
+/// window and makes page two repeat a row from page one. The mock corpus is
+/// written once, by [`seeded`], under a mutex.
 #[tokio::test]
 async fn offset_walks_the_same_ordering_and_total_does_not_move() {
     let pool = seeded().await;
-    let first = list_entities_inner(&pool, &all(), 3, 0).await.unwrap();
-    let second = list_entities_inner(&pool, &all(), 3, 3).await.unwrap();
+    let mine = EntityFilter {
+        sources: vec!["mock".to_owned()],
+        ..all()
+    };
+    let first = list_entities_inner(&pool, &mine, 3, 0).await.unwrap();
+    let second = list_entities_inner(&pool, &mine, 3, 3).await.unwrap();
 
     assert_eq!(
         first.total, second.total,
@@ -126,9 +136,7 @@ async fn offset_walks_the_same_ordering_and_total_does_not_move() {
     assert_eq!(overlap, 0, "offset skipped nothing");
 
     // Past the end: no rows, and the total still describes the set.
-    let beyond = list_entities_inner(&pool, &all(), 3, 100_000)
-        .await
-        .unwrap();
+    let beyond = list_entities_inner(&pool, &mine, 3, 100_000).await.unwrap();
     assert!(beyond.rows.is_empty());
     assert_eq!(beyond.total, 0, "an empty page reports 0, not a guess");
 }
@@ -194,35 +202,73 @@ async fn title_order_is_a_second_statement_not_string_interpolation() {
 }
 
 /// `updated_within_days` is a window on the source's own timestamp.
+///
+/// Two rows of this test's own, one dated now and one dated a month ago, in a
+/// source id nothing else uses. Deliberately **not** the fixture: its items
+/// are dated 2026-08-22, so "a one-day window excludes the corpus" is a fact
+/// about what today's date happens to be, and a test that starts failing on a
+/// particular Saturday is worse than no test.
 #[tokio::test]
 async fn the_recency_window_is_bound_as_a_parameter() {
     let pool = seeded().await;
-    // The fixture's newest item is dated 2026-08-22; the tests run long after
-    // it, so a one-day window necessarily excludes the corpus and a very wide
-    // one necessarily includes it. Both directions, so a predicate that is
-    // simply ignored fails.
-    let narrow = EntityFilter {
-        updated_within_days: Some(1),
-        ..all()
-    };
-    let wide = EntityFilter {
-        updated_within_days: Some(100_000),
-        ..all()
-    };
-    assert_eq!(
-        list_entities_inner(&pool, &narrow, 500, 0)
+    let source = format!("clock-{}", unique());
+    let fresh = format!("{source}:FRESH");
+    let stale = format!("{source}:STALE");
+
+    for (id, age_days) in [(&fresh, 0_i32), (&stale, 30)] {
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ticket', 'x')")
+            .bind(id)
+            .execute(&pool)
             .await
-            .unwrap()
-            .total,
-        0
-    );
+            .unwrap();
+        sqlx::query(
+            "insert into sync.item
+                 (entity_id, source_id, kind, title, body_text, item_updated_at, payload)
+             values ($1, $2, 'ticket', 'x', '', now() - make_interval(days => $3), '{}'::jsonb)",
+        )
+        .bind(id)
+        .bind(&source)
+        .bind(age_days)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let within = |days: Option<u32>| EntityFilter {
+        sources: vec![source.clone()],
+        updated_within_days: days,
+        ..all()
+    };
+
+    let ids = |page: knobas_app::commands::entity::EntityPage| {
+        page.rows
+            .into_iter()
+            .map(|row| row.entity_id)
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+
+    // Both directions, so a predicate that is simply ignored fails: the narrow
+    // window drops the stale row, the absent window keeps it.
+    let narrow = ids(list_entities_inner(&pool, &within(Some(1)), 500, 0)
+        .await
+        .unwrap());
     assert!(
-        list_entities_inner(&pool, &wide, 500, 0)
-            .await
-            .unwrap()
-            .total
-            > 0
+        narrow.contains(&fresh),
+        "the fresh row is inside a one-day window"
     );
+    assert!(!narrow.contains(&stale), "the stale row is not");
+
+    let unfiltered = ids(list_entities_inner(&pool, &within(None), 500, 0)
+        .await
+        .unwrap());
+    assert!(unfiltered.contains(&fresh));
+    assert!(unfiltered.contains(&stale));
+
+    // ...and a window wide enough to reach past it takes it back.
+    let wide = ids(list_entities_inner(&pool, &within(Some(365)), 500, 0)
+        .await
+        .unwrap());
+    assert!(wide.contains(&stale));
 }
 
 /// One source's room shows one source's work.
@@ -386,4 +432,45 @@ async fn the_detail_carries_the_entitys_own_activity() {
             .iter()
             .all(|r| r.entity_id.as_deref() == Some("mock:PAY-231"))
     );
+}
+
+/// A source with no configuration row still names itself.
+///
+/// `run_once` syncs sources that were never configured (interfaces §1: tests,
+/// ad-hoc imports), and deleting a source leaves its mirror rows behind. The
+/// join to `knobas.source_config` is therefore a **left** join, and the
+/// fallback is the source id — an inner join would make those entities
+/// unopenable, and a `display_name` of the empty string would make them
+/// nameless.
+///
+/// Seeded by hand rather than through an adapter, because that is exactly the
+/// state being tested: rows in the mirror with nothing in `source_config`.
+#[tokio::test]
+async fn an_entity_whose_source_was_never_configured_is_still_readable() {
+    let pool = seeded().await;
+    let source = format!("ghost-{}", unique());
+    let entity = format!("{source}:GH-1");
+
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ticket', 'A ghost')")
+        .bind(&entity)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+         values ($1, $2, 'ticket', 'A ghost', '', '{}'::jsonb)",
+    )
+    .bind(&entity)
+    .bind(&source)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let d = get_entity_inner(&pool, &entity).await.unwrap();
+    assert_eq!(d.source.id, source);
+    assert_eq!(
+        d.source.display_name, source,
+        "an unconfigured source falls back to its id, not to an empty name"
+    );
+    assert_eq!(d.source.adapter_kind, source);
 }

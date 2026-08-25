@@ -204,6 +204,39 @@ test("a slow rejection from the previous room does not blank the new one", async
   screen.done();
 });
 
+/**
+ * The key is everything after the *first* colon.
+ *
+ * `knobas_core::entity` splits on the first `:` only, so a Confluence page id
+ * (`confluence:ENG:SEPA design`) and a Gitea PR (`gitea:acme/svc#142`) both
+ * carry more punctuation in the key. A `split(":")[1]` truncates the first and
+ * looks perfectly correct on every ticket key in the fixture.
+ */
+test("a key containing a colon is shown whole", async () => {
+  answer = () =>
+    Promise.resolve({
+      rows: [
+        {
+          entity_id: "confluence:ENG:SEPA design",
+          kind: "ticket",
+          source_id: "confluence",
+          title: "SEPA design",
+          updated_at: "2026-08-22T11:48:00Z",
+          synced_at: "2026-08-22T14:30:00Z",
+        },
+      ],
+      total: 1,
+    });
+
+  const screen = render();
+  await vi.waitFor(() => expect(screen.rows()).toHaveLength(1));
+  flushSync();
+
+  expect(screen.target.querySelector(".row .k")?.textContent).toBe("ENG:SEPA design");
+
+  screen.done();
+});
+
 /** Clicking a row hands the row back; the room decides where that goes. */
 test("a row reports which entity was opened", async () => {
   answer = () => Promise.resolve({ rows: [row("PAY-1")], total: 1 });
