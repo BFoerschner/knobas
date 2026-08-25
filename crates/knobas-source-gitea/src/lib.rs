@@ -33,6 +33,7 @@ pub mod config;
 pub mod keys;
 
 mod client;
+mod cursor;
 mod model;
 mod source;
 

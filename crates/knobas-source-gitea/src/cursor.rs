@@ -1,0 +1,249 @@
+//! The incremental position: one watermark set per repository, in a versioned
+//! envelope (interfaces §4.1 -- "an unrecognised version means full sync").
+
+use std::collections::BTreeMap;
+
+use chrono::{DateTime, Utc};
+
+/// Bump when the meaning of a field changes; an older knobas then reads the
+/// cursor as unrecognised and syncs in full, which is the safe direction.
+pub(crate) const CURSOR_VERSION: u32 = 1;
+
+/// Where the next run resumes, per repository.
+///
+/// # Why per-branch head shas rather than one digest
+///
+/// Interfaces §4.2 sketches this envelope with a `branches_hash`. This adapter
+/// stores the heads themselves instead -- `{"main": "<sha>", …}` -- because the
+/// cursor is adapter-defined (§4.1, ruling B2) and the heads buy two things a
+/// digest cannot:
+///
+/// * **Commits are fetched only for branches that moved.** Gitea's branch
+///   listing has no incremental filter, so every run sees every head anyway; a
+///   digest only says "something in this repository changed", which would mean
+///   re-walking every branch's commits on every push. Twenty repositories with
+///   eight branches each is 200 requests a run instead of about 40.
+/// * **A deleted branch can be tombstoned mid-cycle.** A name that was in the
+///   cursor and is not in the listing is gone, and `SyncItem { deleted: true }`
+///   says so now rather than at the next full sync -- links point at branches
+///   (spec §5a), and a dead link is worse than a missing one.
+///
+/// The cost is roughly 55 bytes per branch in `source_config.cursor`, bounded
+/// by the `owners`/`repos` allowlist.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct GiteaCursor {
+    pub v: u32,
+    /// When the repository set in this cursor was last observed. Diagnostic in
+    /// M1; reserved for skipping the listing on close-together runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repos_listed_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub repos: BTreeMap<String, RepoCursor>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct RepoCursor {
+    /// The `updated_at` the repository entity was last emitted with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo_updated_at: Option<DateTime<Utc>>,
+    /// The newest pull-request `updated_at` delivered so far.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pulls_updated_to: Option<DateTime<Utc>>,
+    /// The pull requests sitting exactly on that instant, already delivered.
+    ///
+    /// Gitea's timestamps have one-second resolution, so a strict `>` boundary
+    /// would drop a pull request updated in the same second as the newest one;
+    /// remembering the handful of numbers at the boundary closes that hole
+    /// without re-delivering them on every idle run.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pulls_at_watermark: Vec<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commits_since: Option<DateTime<Utc>>,
+    /// The object ids on that instant, already delivered -- the same boundary
+    /// argument, and also what makes Gitea's inclusive `since=` filter safe to
+    /// use as-is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub commits_at_watermark: Vec<String>,
+    /// Branch name -> head object id, as of the last run that walked this
+    /// repository.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub branches: BTreeMap<String, String>,
+}
+
+impl GiteaCursor {
+    /// A position that knows nothing: everything is fetched in full.
+    pub(crate) fn empty() -> Self {
+        Self {
+            v: CURSOR_VERSION,
+            repos_listed_at: None,
+            repos: BTreeMap::new(),
+        }
+    }
+
+    /// The envelope a run that emitted something writes.
+    pub(crate) fn fresh() -> Self {
+        Self {
+            repos_listed_at: Some(Utc::now()),
+            ..Self::empty()
+        }
+    }
+
+    /// Read the cursor the engine handed us. Anything unreadable or from
+    /// another version means a full sync.
+    pub(crate) fn parse(raw: Option<&str>) -> Self {
+        let Some(raw) = raw else {
+            return Self::empty();
+        };
+        match serde_json::from_str::<Self>(raw) {
+            Ok(cursor) if cursor.v == CURSOR_VERSION => cursor,
+            Ok(cursor) => {
+                tracing::warn!(
+                    version = cursor.v,
+                    "gitea: unrecognised cursor version, syncing in full"
+                );
+                Self::empty()
+            }
+            Err(error) => {
+                tracing::warn!(%error, "gitea: unreadable cursor, syncing in full");
+                Self::empty()
+            }
+        }
+    }
+
+    /// This repository's position, or a blank one if it has never been synced.
+    pub(crate) fn repo(&self, full_name: &str) -> RepoCursor {
+        self.repos.get(full_name).cloned().unwrap_or_default()
+    }
+
+    pub(crate) fn to_json(&self) -> String {
+        // Every field is plain data and every map is ordered, so this cannot
+        // fail and cannot vary between two calls.
+        serde_json::to_string(self).expect("a GiteaCursor serialises")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample() -> GiteaCursor {
+        let mut cursor = GiteaCursor::empty();
+        cursor.repos.insert(
+            "tidewater/payout-service".to_owned(),
+            RepoCursor {
+                repo_updated_at: Some(at("2026-08-22T11:42:00Z")),
+                pulls_updated_to: Some(at("2026-08-22T13:50:00Z")),
+                pulls_at_watermark: vec![144],
+                commits_since: Some(at("2026-08-22T11:42:00Z")),
+                commits_at_watermark: vec!["c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192".to_owned()],
+                branches: BTreeMap::from([(
+                    "main".to_owned(),
+                    "1111111111111111111111111111111111111111".to_owned(),
+                )]),
+            },
+        );
+        cursor
+    }
+
+    fn at(s: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc)
+    }
+
+    #[test]
+    fn a_cursor_round_trips() {
+        let cursor = sample();
+        assert_eq!(GiteaCursor::parse(Some(&cursor.to_json())), cursor);
+    }
+
+    /// The engine compares cursors as strings, so serialising the same position
+    /// twice has to produce the same bytes -- which is why every map here is a
+    /// `BTreeMap`.
+    #[test]
+    fn serialisation_is_stable() {
+        assert_eq!(sample().to_json(), sample().to_json());
+        let json = sample().to_json();
+        assert!(json.starts_with(r#"{"v":1"#), "{json}");
+    }
+
+    /// Every watermark field has to survive the trip: a field dropped in
+    /// serialisation reads back as "never seen", and the next run re-emits
+    /// everything it covers. The sample carries a *distinct* value in each one
+    /// so a field read into the wrong slot fails too.
+    #[test]
+    fn every_watermark_survives_the_round_trip() {
+        let back = GiteaCursor::parse(Some(&sample().to_json()));
+        let repo = back.repo("tidewater/payout-service");
+        assert_eq!(repo.repo_updated_at, Some(at("2026-08-22T11:42:00Z")));
+        assert_eq!(repo.pulls_updated_to, Some(at("2026-08-22T13:50:00Z")));
+        assert_eq!(repo.pulls_at_watermark, vec![144]);
+        assert_eq!(repo.commits_since, Some(at("2026-08-22T11:42:00Z")));
+        assert_eq!(
+            repo.commits_at_watermark,
+            vec!["c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192".to_owned()]
+        );
+        assert_eq!(
+            repo.branches.get("main").map(String::as_str),
+            Some("1111111111111111111111111111111111111111")
+        );
+    }
+
+    /// Empty collections are omitted: the cursor is a text column that grows
+    /// with the repository count, and a first sync of thirty repositories
+    /// should not carry thirty empty arrays.
+    #[test]
+    fn empty_fields_are_omitted() {
+        let mut cursor = GiteaCursor::empty();
+        cursor
+            .repos
+            .insert("tidewater/ops-runbooks".to_owned(), RepoCursor::default());
+        let json = cursor.to_json();
+        assert!(!json.contains("pulls_at_watermark"), "{json}");
+        assert!(!json.contains("branches"), "{json}");
+        assert!(!json.contains("repos_listed_at"), "{json}");
+    }
+
+    /// A cursor written by a later shape, or by something else entirely, means
+    /// "sync in full" -- never a half-understood position.
+    #[test]
+    fn an_unusable_cursor_means_full_sync() {
+        for raw in [
+            r#"{"v":2,"repos":{}}"#,
+            "not json",
+            "",
+            "[]",
+            r#"{"repos":{}}"#,
+        ] {
+            assert_eq!(
+                GiteaCursor::parse(Some(raw)),
+                GiteaCursor::empty(),
+                "{raw:?}"
+            );
+        }
+        assert_eq!(GiteaCursor::parse(None), GiteaCursor::empty());
+        // And the version this knobas writes is still understood, so the guard
+        // above is a version check rather than a blanket refusal.
+        assert_ne!(
+            GiteaCursor::parse(Some(&sample().to_json())),
+            GiteaCursor::empty()
+        );
+    }
+
+    /// A repository with no entry yet is fetched in full -- which is how a
+    /// repository added upstream is picked up (interfaces §4.2).
+    #[test]
+    fn an_unknown_repository_starts_from_nothing() {
+        assert_eq!(sample().repo("tidewater/ledger-api"), RepoCursor::default());
+        assert!(
+            sample()
+                .repo("tidewater/payout-service")
+                .pulls_updated_to
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn a_fresh_cursor_records_when_the_repository_set_was_seen() {
+        assert!(GiteaCursor::fresh().repos_listed_at.is_some());
+        assert_eq!(GiteaCursor::fresh().v, CURSOR_VERSION);
+    }
+}
