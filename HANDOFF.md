@@ -1,65 +1,81 @@
-# knobas — session handoff (2026-08-24)
+# knobas — handoff, paused 2026-08-25
 
-Context for picking up work on **knobas**, a Rust + Tauri desktop app being designed via clickable HTML mockups before any app code is written. Repo: `/Users/dev/Projects/knobas`, branch `main`, everything committed.
+A personal work cockpit (Rust + Tauri 2 + Svelte 5) that syncs Jira / Gitea / TeamCity
+into one local Postgres and gives you one search box over all of it.
 
-## 1. What knobas is
+**Paused deliberately mid-M1. Everything is committed and pushed. Nothing is half-written
+to disk that isn't also on the remote.**
 
-A personal work cockpit that unifies Jira (tickets), Confluence (pages), Gitea (git), TeamCity (pipelines), **Uptime Kuma (monitoring — it stays the system of record; knobas only syncs from it)**, a low-code scenario runtime (fictional name "Flowrun": instances per dev/stage/prod running versioned scenarios), and the user's own infrastructure assets. It keeps a local copy of everything in **one Postgres database** (with FTS) so search is instant and cross-source, writes back through each system's API, and adds what no source has: **links, contexts, notes, time tracking, an inbox, standup generation, and an asset tree**.
+---
 
-The user: Björn (git author "Björn Förschner"), a developer juggling these systems daily; pain points are bad source-system search (JQL/Confluence) and credential juggling.
+## Read these first, in this order
 
-## 2. Hard decisions (do not re-litigate)
+1. `docs/superpowers/specs/2026-08-23-knobas-design.md` — what knobas is. §16 lists every
+   decision and who made it; entries tagged **Rec 08-24** were decided by Claude under
+   delegation and are yours to override.
+2. `docs/superpowers/plans/2026-08-24-knobas-roadmap.md` — milestones, and §3 the working
+   model (PR loop, review economics, concurrency limits). Read §3 before dispatching agents.
+3. `docs/superpowers/plans/2026-08-24-m1-interfaces.md` — **the contract**. §8 rulings P1–P13,
+   §9 amendments, §10 *as-built* (this is the truth; §2 carries superseded shapes, marked).
+4. `docs/superpowers/plans/2026-08-24-m1-carryovers.md` — obligations owed to specific streams,
+   including two that must be done **early in M2** and one that needs **you**, not an agent.
+5. `docs/architecture.d2` / `.svg` — how it couples together (graphite = merged, amber = in
+   flight at time of drawing, dashed = planned).
 
-1. **Process**: no Rust/app code until the UI is chosen from mockup rounds. Clickable self-contained HTML mockups with shared fictional data, built by parallel agents, user picks, repeat.
-2. **Paradigm**: Context hub (rooms per work context) + the Launcher box (prefix search `>` `#` `@` `/`, filter chips, Tab action chains) merged into one shell.
-3. **Design**: D1 "Signal" (dark graphite, hairlines, mono readings, amber only for attention, split-flap cells). D3 "Patchbay" liked, may return later. **The amber ticker strip is removed** (user dislikes it).
-4. **Assets**: Miller columns (Finder-style, chosen from 5 depth-explorer prototypes) over an **infinitely nestable** asset tree (site › hypervisor › VM › engine › container › runtime › app › step › connector; DB › database › schema › table). Types are open; create anywhere; any asset can expose routes (URL → target); routes visible from both ends ("exposes" / "reachable via", including through ancestors).
-5. **Links are THE core feature**: manual (*Link to…* everywhere) + suggested (with reasons, dismissals remembered), **stored locally only — never written into the source systems**.
-6. **Postgres is the one store**: synced copies (`sync` schema) + everything knobas owns (`knobas` schema: links, contexts, notes, assets, time, smart lists, source configs minus secrets). **Export/import = dump/restore of that DB's contents** (one archive; merge-by-id with preview when restoring into a populated DB; plain files at most a secondary view).
-7. **Time tracking**: manual timer + passive suggestions based on what's open in the app; **no git-branch awareness ever** (only git has branches; much work isn't code). Timer context = any entity (incl. assets) or an ad-hoc label. Worklog draft assembled from interval activity as checkboxes → Jira worklog. Day review with unattributed blocks; week timesheet.
-8. **First-class features**: attention inbox, ticket→branch→PR one-action flow, smart lists (cross-source queries JQL can't do), auto-link suggestions, standup digest + protocol (publishable to Confluence).
-9. **Monitoring belongs to Uptime Kuma** (no official REST API — adapter speaks its socket.io protocol; `/metrics` for cheap polling; write-back only create/pause; "ack" is knobas-local).
+## Where the project stands
 
-## 3. Repo layout
+**M0 complete** (12 PRs). **M1: 24 PRs merged, ~59 of 82 stream tasks.**
 
-```
-mockups/shared/          briefs: dataset.md (fictional company "Tidewater Freight", Mara Lindqvist,
-                         PAY-231 SEPA-retry storyline; "today" = Fri 2026-08-22 14:32, fictional calendar),
-                         assets.md, screens.md (8 surfaces), agent-brief.md, round-2-brief.md,
-                         round-3-brief.md, paradigms/P1-P5, designs/D1-D5, ways/W1-W3
-mockups/round-1/         25 mockups (5 paradigms × 5 designs) + index.html (5×5 matrix)
-mockups/round-2/         base-signal.html (shell: context hub + launcher, corrected time figures)
-                         + W1-inventory / W2-topology / W3-environment-matrix + index.html
-mockups/playground/      brief.md, topology-explorer.html (nested boxes — REJECTED),
-                         E1-miller-columns (CHOSEN), E2-semantic-zoom, E3-expanding-graph, E4-drill-in-stack
-mockups/round-3/         signal-miller.html — THE current reference mockup (4277 lines):
-                         shell + Miller-column assets integrated everywhere, no ticker
-mockups/build-index.mjs  regenerates a round's index.html (matrix or flat list) from file header comments
-docs/superpowers/specs/2026-08-23-knobas-design.md   THE design document (feature walkthrough)
-HANDOFF.md               this file
-```
+| Stream | State |
+|---|---|
+| Contract | ✅ merged — migration 0002, SPI changes, `IpcError`, `knobas-search`/`knobas-http` seeds, demo profile |
+| A Jira adapter | ✅ **complete and certified end to end** |
+| F sync engine | ✅ **complete** — scheduler, dedicated-connection advisory lock, credential health, backoff, registry, sources IPC |
+| T testenv | mockd Jira + TeamCity merged; compose/seeds **in progress** (`m1/testenv-compose`) |
+| E search | grammar, SQL builder, grouped results, smart lists, board merged; IPC + launcher UI + 100k benchmark **in progress** (`m1/search-ipc`) |
+| D frontend | phase 0 + rooms/details/entity read path merged; tasks 15–23 **not started** |
+| B Gitea adapter | **in progress** (`m1/gitea`), pure layers + repo sync |
+| C TeamCity adapter | **in progress** (`m1/teamcity`), all 7 tasks |
 
-Every mockup: single self-contained HTML, vanilla JS/CSS, Google Fonts only, opens from `file://`, `⌘K` search / `⌘T` timer / `Esc` unwind, optimistic mutations, no `alert()`, shared dataset verbatim. Header comment (paradigm/design/way + 3 thesis lines) feeds the index generator.
+**Four branches carry unmerged work**, each with a resumption report in
+`.superpowers/sdd/<plan>/` (git-ignored, local only — read them before resuming a stream):
+`m1/gitea`, `m1/teamcity`, `m1/search-ipc`, `m1/testenv-compose`.
 
-## 4. The design document
+Merged branches are kept on the remote deliberately. They look "unmerged" to
+`git merge-base --is-ancestor` because every PR was **squash**-merged; don't let that mislead you.
 
-`docs/superpowers/specs/2026-08-23-knobas-design.md` — feature walkthrough with status tags (**Decided / In mockup / Proposed / Open**): shell, sources/sync, search, work items, **§5a links (core)**, notes, contexts, inbox, time, standup, actions, **§12 assets (model / Miller UI / Uptime Kuma monitoring / Flowrun)**, backlog, non-functional (incl. export/import), architecture direction (Tauri 2 + Rust workspace: knobas-core / knobas-db (sqlx, Postgres FTS) / knobas-source-* behind one `Source` trait / knobas-assets / knobas-git / knobas-app; OS keychain for secrets).
+## Resuming
 
-**Open questions awaiting the user** (§16): 1 Postgres installed vs. bundled (now the first real architecture decision); 2 keep split-flaps everywhere or tone down; 3 smart-list query language vs. builder; 4 Confluence editing depth; 5 which asset actions write back in v1; 6 keep environment-matrix / blast-radius as secondary views; 7 write-queue conflict strategy; 9 frontend framework (mockups are vanilla; Svelte/Solid/React all port); 10 backlog promotions; 11 context membership hop depth; 12 export defaults (notes included? `sync` schema included?). (8, monitoring, is answered.)
+- `just deps && just check` — the gate. First run downloads PostgreSQL 18.6 once to `~/.theseus`.
+- `just dev` (real profile) / `just demo` (separate profile, Tidewater fixture, own data dir,
+  port and keychain service). Demo data cannot reach the real profile.
+- Per stream: read its report, `git worktree add .worktrees/<name> <branch>`, dispatch an
+  `implementer` with the remaining task briefs. Reviews go to `pr-reviewer-std`; `pr-reviewer`
+  (xhigh) is for frozen contracts, migrations, concurrency, secrets.
+- **Concurrency is bounded by the machine, not by task independence** — see roadmap §3. Two
+  heavy Rust implementers is the safe default; a five-agent wave once drove load to 79.7 on
+  12 cores and the watchdog killed three of them.
+- Each worktree carries a ~6–25 GB `target/`. Reclaim on merge; sweep for orphaned Postgres
+  before a wave (`ps aux | grep postgres`).
 
-## 5. Where things stand / immediate next steps
+## Needs you, not an agent
 
-- User was last reviewing `round-3/signal-miller.html` and the design doc; both delivered. No outstanding build tasks. Round-3 known gaps (from its builder, acceptable so far): created objects are session-only; asset detail is a fixed pane (not the slide-over) so the column path stays visible; search doesn't match ancestor names in asset paths.
-- **2026-08-24 session (Claude, autonomous per user's "add or modify features as you see fit"):** design doc revised — every §16 open question answered with a recommendation tagged **Rec 08-24** (embedded Postgres via `postgresql_embedded`, Svelte 5 + Vite, flaps only on live values, save-search smart lists, section-level Confluence edits, ask-with-diff conflicts, 1-hop membership, export defaults …), mockup-implemented-but-unstated rules written down (addressing, health rollup, alert routing), three mockup flaws fixed in spec (uniform link table, env as stored/inherited property, path-matching search), new §2a activity stream / §14a demo-seed + mock source / diagnostics. A prototype-vs-doc gap analysis and a 2026-08 tech-research report (Kuma v2 stable + heartbeat pruning, sqlx 0.9 `SqlSafeStr`, Jira `/search` 410, etc.) fed all of it — findings preserved in the roadmap.
-- New planning artifacts: `docs/superpowers/plans/2026-08-24-knobas-roadmap.md` (MVP = end of M1 read cockpit; milestones M0–M4; parallel-agent working model; stack pins + gotchas; risks) and `docs/superpowers/plans/2026-08-24-plan-01-foundation.md` (M0 in full writing-plans format: workspace, embedded PG, migrations, Source SPI + contract battery, Tidewater fixtures, mock source, sync run, Tauri+Svelte shell).
-- **Björn approved everything on 2026-08-24 and M0 was executed the same day**: 11/11 tasks merged via the PR loop (repo github.com/BFoerschner/knobas, PRs #1-#11, squash-merged, CI green). The app boots, provisions embedded PG 18.6, loads the Tidewater demo (21 items), answers FTS over IPC, survives Cmd-Q/orphan/second-instance scenarios. Frozen at M0 exit: the `Source` SPI (+ 16-clause contract battery), migration baseline `0001_init.sql`, and the M0 IPC surface. A 15-finding milestone-exit sweep was fixed in PR #12 (embedded-PG cross-process races, reaper hardening, sync polish). M1 obligations are committed in `docs/superpowers/plans/2026-08-24-m1-carryovers.md`; all M0 rulings were reported to Björn in-session.
-- **Next**: M1 per the roadmap — write the M1 plans (`superpowers:writing-plans`, one per stream or one with parallel task groups: Jira DC adapter, Gitea, TeamCity, frontend shell port, search, sync engine, testenv stream T), then fan out. Björn authorized parallel agents ("as many as necessary"); the PR loop + pre-filter process is proven over 11 PRs.
-- Time-figure note: `dataset.md` was corrected (Fri 5h 12m; tracked 34h 37m; logged 29h 25m; unlogged 5h 12m; #1187→PAY-231 is confirmed, #412→PAY-228 is the 4th suggestion). Round-1 mockups and some round-2 ways still show the old numbers — harmless, don't fix retroactively.
+- **Vendor the TeamCity swagger**: `cd testenv/specs && ./fetch.sh --teamcity`. Needs ~10 GB
+  free and a human at a browser (the first-start wizard is form endpoints, deliberately not
+  scripted). Until then TeamCity is validated against golden fixtures only. The schema test is
+  written and **self-arming** — it starts asserting the moment the file appears.
+- **Your Jira/Confluence instance versions**, to re-pin the vendored WADL and container tags.
+- **GPG**: the key wasn't cached at the end of the session, so the last few `main` commits are
+  unsigned (`%G?` = `N`). Agent branches are unsigned by design; PR merges are GitHub-signed.
 
-## 6. Process facts and gotchas
+## The thing most worth carrying forward
 
-- **Mockup fan-out**: parallel `general-purpose` agents on **Opus** (user explicitly chose Opus for agents after session limits killed a Fable wave; session model is now Opus 5 too), one file per agent, in per-stream git worktrees under `.worktrees/` (ignored) for rounds — orchestrator commits/merges (agents never run git; 5 agents sharing a worktree would collide on index.lock). Playground files were written straight into the checkout. Harness cap: 20 concurrent subagents. **User watches usage limits — never launch more agents than agreed, ask before scaling.**
-- Each agent: invoke `frontend-design:frontend-design` skill first, read the briefs, build one file, QA in headless Chrome ("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", `--headless=new`; agents should use their own `--user-data-dir`/port — parallel agents have collided), report raw data. Superpowers plugin is installed (brainstorming was used; architectural path; next artifact per its flow = implementation plan via `writing-plans`).
-- **Git commits are GPG-signed**; the pinentry prompt sometimes expires — if signing fails, tell the user to run the commit themselves (`! git commit …`) or wait for their go-ahead; they said "you can commit now" once cached. Commit style: short imperative subject, no Claude attribution used in this repo so far.
-- Memory files exist at `/Users/dev/.claude/projects/-Users-dev-Projects-knobas/memory/` (process, no-branch-time-tracking, links-local-exportable) — keep them current on new decisions.
-- User communicates tersely, redirects fast, plays devil's advocate (asked "why not Grafana?" — answer: Grafana/Backstage fit slices but not the local-index + write-back + desktop core; monitoring delegated to Uptime Kuma instead). Present options with a recommendation; don't over-ask.
+Nine process rules live in `.claude/agents/{implementer,pr-reviewer,pr-reviewer-std}.md`, and
+every one was earned by an agent discovering its own instrument had lied to it. They are the
+reason the review loop found what it found; read them before writing new agent definitions.
+
+The recurring defect all session was **a check that measures a representation of the thing
+instead of the thing** — a lint satisfied by a comment mentioning it, a path substring standing
+in for a resolved path, a mutation that never compiled, a restore that left a phantom mutant, a
+benchmark timing an unvacuumed index, a fixture of zeros that cannot witness a swap. All of them
+fail *green*. Four defects in Claude's own plans were caught the same way and corrected at source.
