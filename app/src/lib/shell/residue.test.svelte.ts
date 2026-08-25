@@ -342,6 +342,16 @@ test("the tracker sees what is left behind, and stops seeing it when it is clean
       timers: ["setInterval", "setTimeout"],
     });
 
+    // A null listener is a no-op in the DOM, and recording one would make the
+    // tracker cry leak over a component that installed nothing. Over-reporting
+    // is the cheaper failure but not a harmless one: a net that raises false
+    // alarms is a net people start ignoring.
+    // Cast because the DOM *spec* accepts a null callback (and treats it as a
+    // no-op) while TypeScript's lib types do not. The tracker still has to
+    // survive it, because a null is what an optional handler evaluates to.
+    window.addEventListener("pointerdown", null as unknown as EventListener);
+    expect(track.residue().listeners).toEqual(["pointerdown (capture) on window"]);
+
     // The capture flag is part of the identity: a bubble-phase remove does not
     // balance a capture-phase add, and reporting that it did would hide the
     // exact shape of this stream's first finding.
@@ -362,12 +372,55 @@ test("the tracker sees what is left behind, and stops seeing it when it is clean
 });
 
 /**
+ * A removal with a **different function reference** balances nothing.
+ *
+ * This is the hole the first version of the tracker had, and it is the one
+ * that matters most: the DOM matches a removal on identity, so an inline
+ * arrow in both the add and the remove — the ordinary form of the mistake —
+ * leaves the listener attached while a *counting* tracker reports clean. That
+ * is finding 1's exact bug walking straight through the net built to catch it.
+ *
+ * The assertion is tied to the ground truth rather than to the bookkeeping:
+ * after the mismatched removal the listener is **still called**, and the
+ * tracker has to agree with that, not with the count of calls made.
+ */
+test("a removal with a different function reference does not balance the add", async () => {
+  const track = trackResidue();
+  try {
+    let fired = 0;
+    const real = () => {
+      fired += 1;
+    };
+    window.addEventListener("pointerdown", real, true);
+
+    // The classic mistake, spelled the way a component spells it.
+    window.removeEventListener("pointerdown", () => {}, true);
+    await track.settle();
+
+    window.dispatchEvent(new Event("pointerdown"));
+    expect(fired, "the listener is still attached — that is the leak").toBe(1);
+    expect(track.residue().listeners).toEqual(["pointerdown (capture) on window"]);
+
+    // ...and the tracker stops seeing it only when it is genuinely gone.
+    window.removeEventListener("pointerdown", real, true);
+    window.dispatchEvent(new Event("pointerdown"));
+    expect(fired).toBe(1);
+    expect(track.residue().listeners).toEqual([]);
+  } finally {
+    track.stop();
+  }
+});
+
+/**
  * A `removeEventListener` for something never added cannot pay for a real leak.
  *
- * The DOM treats such a call as a no-op, and so must the count: letting it go
- * negative would mean the *next* genuine add on that type balanced to zero and
- * a real leak was reported as clean. That is the instrument lying in the one
- * direction that matters, and nothing else here exercises it.
+ * The DOM treats such a call as a no-op, and so must the tracker: paying for
+ * it would mean the *next* genuine add on that type balanced out and a real
+ * leak was reported as clean. Since listeners are held by identity this now
+ * holds by construction — deleting from a `Set` that does not contain the
+ * value changes nothing — but the property is worth a test of its own rather
+ * than an argument about the data structure, because the data structure is
+ * what a future edit changes.
  */
 test("an unmatched remove does not pay for a later leak", async () => {
   const track = trackResidue();

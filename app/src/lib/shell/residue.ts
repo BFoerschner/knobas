@@ -54,7 +54,7 @@
 
 /** What is still attached after a component is gone. Empty is the only pass. */
 export interface Residue {
-  /** e.g. `"pointerdown (capture) on window"`, once per unbalanced add. */
+  /** e.g. `"pointerdown (capture) on window"`, once per listener still attached. */
   listeners: string[];
   /** e.g. `"setInterval"`, once per timer still armed. */
   timers: string[];
@@ -89,8 +89,23 @@ export function trackResidue(): ResidueTracker {
   const realSetInterval = globalThis.setInterval;
   const realClearInterval = globalThis.clearInterval;
 
-  /** Unbalanced `addEventListener`s, keyed by what a reader needs to see. */
-  const listeners = new Map<string, number>();
+  /**
+   * Live listeners, by what a reader needs to see, holding the **references**.
+   *
+   * A count would be wrong, and wrong in the direction that matters: the DOM
+   * matches a removal on *identity*, so `removeEventListener(type, () => {},
+   * capture)` removes nothing at all — while a counter would happily balance
+   * it to zero and report clean. An inline arrow in both the add and the
+   * remove is the ordinary form of that mistake, and it is exactly the leak
+   * this file exists to catch. Proven, not assumed: the calibration test
+   * dispatches the event afterwards and the listener still fires.
+   *
+   * A `Set` also gives DOM semantics for free at both ends — adding the same
+   * listener twice for one type and phase is a no-op there and here, and
+   * removing one that was never added changes nothing, so the count clamp this
+   * used to need is gone.
+   */
+  const listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
   /** Timers armed and not yet fired or cleared. */
   const timers = new Map<unknown, string>();
 
@@ -111,7 +126,12 @@ export function trackResidue(): ResidueTracker {
       options?: boolean | AddEventListenerOptions,
     ) => {
       const key = `${type}${captures(options) ? " (capture)" : ""} on ${name}`;
-      listeners.set(key, (listeners.get(key) ?? 0) + 1);
+      // A null listener is a no-op in the DOM, so it is one here too.
+      if (listener !== null && listener !== undefined) {
+        const live = listeners.get(key) ?? new Set();
+        live.add(listener);
+        listeners.set(key, live);
+      }
       add(type, listener, options);
     }) as EventTarget["addEventListener"];
 
@@ -121,10 +141,12 @@ export function trackResidue(): ResidueTracker {
       options?: boolean | EventListenerOptions,
     ) => {
       const key = `${type}${captures(options) ? " (capture)" : ""} on ${name}`;
-      const live = listeners.get(key) ?? 0;
-      // Never below zero: a `removeEventListener` for something that was never
-      // added would otherwise cancel out a real leak elsewhere.
-      if (live > 0) listeners.set(key, live - 1);
+      // By identity, because that is what the DOM does. Deleting something the
+      // set does not hold changes nothing, which is the same no-op the browser
+      // performs.
+      if (listener !== null && listener !== undefined) {
+        listeners.get(key)?.delete(listener);
+      }
       remove(type, listener, options);
     }) as EventTarget["removeEventListener"];
   }
@@ -178,8 +200,8 @@ export function trackResidue(): ResidueTracker {
 
     residue() {
       const stuck: string[] = [];
-      for (const [key, count] of listeners) {
-        for (let n = 0; n < count; n += 1) stuck.push(key);
+      for (const [key, live] of listeners) {
+        for (let n = 0; n < live.size; n += 1) stuck.push(key);
       }
       return { listeners: stuck.sort(), timers: [...timers.values()].sort() };
     },
