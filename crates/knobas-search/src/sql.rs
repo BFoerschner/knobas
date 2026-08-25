@@ -1,0 +1,802 @@
+//! The one module in knobas that assembles a SQL statement at runtime.
+//!
+//! Roadmap §4 gotcha 2, verbatim: *"sqlx 0.9: dynamic SQL needs
+//! `AssertSqlSafe`; keep it in one reviewed query-builder module. Never bind
+//! `tsquery` -- bind text into `websearch_to_tsquery('english', $1)`, compute
+//! the tsquery once as a FROM item. Never map `tsvector` to `String`."* This is
+//! that module, and `tests/sql_containment.rs` fails the build if anything else
+//! in the crate so much as names the type.
+//!
+//! # Why the confinement holds
+//!
+//! Three things, in order of how much they are worth:
+//!
+//! 1. **Types.** [`SearchSql`]'s fields are private and [`search_sql`] is its
+//!    only constructor, so no caller anywhere can hand [`query_as_with`] a
+//!    string it made up. The escape hatch is not merely discouraged, it is
+//!    unreachable.
+//! 2. **The `Corpus` invariant.** Every fragment spliced into the statement is
+//!    a `&'static str` from [`crate::corpus`]; every value -- every word the
+//!    user typed, every source id, every kind, every limit -- travels as a
+//!    bind, and the *only* way to add one is [`Builder::param`], which returns
+//!    the placeholder that reads it. A placeholder therefore cannot drift from
+//!    its argument. The one piece of runtime-formatted text is the corpus
+//!    index, a loop counter over the caller's own slice.
+//! 3. **A test**, for the day someone in a hurry adds a fourth thing.
+//!
+//! # The shape of the statement, and why
+//!
+//! ```sql
+//! with q as (...),                 -- the tsquery, computed once
+//!      m as materialized (...),    -- one narrow row per *match*
+//!      totals as (...),            -- per-kind counts, over every match
+//!      top as (...),               -- rank within kind
+//!      picked as (...),            -- the page
+//!      detail as (...)             -- titles and excerpts, page only
+//! select ... from totals left join detail ...
+//! ```
+//!
+//! Four properties are load-bearing:
+//!
+//! * **`m` is deliberately narrow** -- entity id, kind, rank, updated-at and
+//!   nothing else. It holds one row per match, which for a common word is
+//!   thousands; carrying titles and bodies through it is what turns a 20 ms
+//!   search into a 200 ms one.
+//! * **Exactly one match scan.** `m` is `materialized` because both `totals`
+//!   and `top` read it, and the alternative is scanning the index twice.
+//! * **`totals` LEFT JOIN `detail`**, so every matching kind comes back even
+//!   when the global `limit` left it no row: `ResultGroup.total` is then a true
+//!   count and not a page size. A kind with `total > 0` and no hit is a
+//!   legitimate row, and the columns of such a row are **null** -- the caller's
+//!   `FromRow` must read them as `Option`.
+//! * **`ts_headline` runs after the limit.** It re-parses the document text per
+//!   row, and running it over the match set instead of over the page is the
+//!   single most expensive mistake available here.
+//!
+//! This replaces the contract seed's two statements, whose per-kind total was a
+//! `count(*) over (partition by kind)` -- a second window partition, and
+//! therefore a second full sort of every matching row, on the launcher's hot
+//! path (M0 carry-over). `totals` is one grouped aggregate over the same
+//! materialized scan.
+
+use std::fmt::Write as _;
+
+use sqlx::postgres::{PgArguments, PgRow};
+use sqlx::query::QueryAs;
+use sqlx::{FromRow, Postgres};
+
+use crate::corpus::Corpus;
+use crate::query::EffectiveFilters;
+
+/// One value bound into a generated statement.
+///
+/// Deliberately closed and deliberately small: every variant here is something
+/// the builder actually binds, so a variant nobody constructs is a variant
+/// nobody has to review.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Bind {
+    /// The raw search text, and the `ts_headline` options.
+    Text(String),
+    /// A `text[]` for an `= any(...)` predicate.
+    Texts(Vec<String>),
+    /// `make_interval(days => ...)`, which takes an `int4`.
+    I32(i32),
+    /// Row counts: `row_number()` yields `bigint`, and so does `limit`.
+    I64(i64),
+}
+
+/// A generated statement and the arguments that go with it.
+///
+/// The fields are private and [`search_sql`] is the only constructor. That is
+/// not tidiness: it is what makes "runtime SQL is confined to this module" a
+/// property of the type system rather than of a convention.
+#[derive(Debug, Clone)]
+pub struct SearchSql {
+    sql: String,
+    binds: Vec<Bind>,
+}
+
+impl SearchSql {
+    /// The generated statement, for tests and for tracing.
+    #[must_use]
+    pub fn sql(&self) -> &str {
+        &self.sql
+    }
+
+    /// How many arguments the statement expects.
+    #[must_use]
+    pub fn bind_count(&self) -> usize {
+        self.binds.len()
+    }
+}
+
+/// Assemble the launcher's query.
+///
+/// * `corpora` -- the relations to search. M1 passes `&[&LIVE_ITEM]`; more than
+///   one becomes a `union all` inside the match CTE.
+/// * `text` -- the search terms, or `None` for **browse mode**: no ranking, no
+///   excerpts, ordered by recency. A browse with no filters at all is refused
+///   upstream rather than counting the whole corpus.
+/// * `prefix_last` -- whether the last word is still being typed and should
+///   match as a prefix.
+/// * `per_group` -- how many rows one kind may contribute, so a flood of
+///   tickets cannot push every build off the page.
+/// * `limit` -- the total number of rows returned.
+#[must_use]
+pub fn search_sql(
+    corpora: &[&Corpus],
+    text: Option<&str>,
+    prefix_last: bool,
+    filters: &EffectiveFilters,
+    per_group: u32,
+    limit: u32,
+) -> SearchSql {
+    let mut builder = Builder::default();
+
+    // Binds are allocated in the order their placeholders first appear in the
+    // statement below. That is not cosmetic: it is what keeps `$1..$n` dense
+    // and in order, which `placeholders_are_numbered_in_bind_order` pins.
+    let tsquery = text.map(|raw| builder.param(Bind::Text(raw.to_owned())));
+    let sources =
+        (!filters.sources.is_empty()).then(|| builder.param(Bind::Texts(filters.sources.clone())));
+    let kinds =
+        (!filters.kinds.is_empty()).then(|| builder.param(Bind::Texts(filters.kinds.clone())));
+    let days = filters
+        .updated_within_days
+        .map(|days| builder.param(Bind::I32(i32::try_from(days).unwrap_or(i32::MAX))));
+    // `mine` with an empty author list is not "no filter": it is knobas not
+    // knowing who the user is. Binding the empty array matches nothing, which
+    // is the honest answer; dropping the predicate would return everything.
+    let authors = (filters.mine || !filters.authors.is_empty())
+        .then(|| builder.param(Bind::Texts(filters.authors.clone())));
+    let per_group = builder.param(Bind::I64(i64::from(per_group)));
+    let limit = builder.param(Bind::I64(i64::from(limit)));
+    let headline_opts = text.map(|_| builder.param(Bind::Text(crate::snippet::headline_options())));
+
+    let mut sql = String::from("with\n");
+
+    if let Some(tsquery) = &tsquery {
+        // Computed ONCE, as a FROM item, and never bound as a tsquery
+        // (roadmap §4 gotcha 2): the match, the rank and the headline all read
+        // this one value.
+        sql.push_str("q as (\n  select ");
+        if prefix_last {
+            // What makes the box answer while the word is still being typed.
+            // `websearch_to_tsquery` output is already a well-formed, quoted
+            // tsquery, so appending ':*' to its *text* and casting back turns
+            // only the last lexeme into a prefix. The guard is for the empty
+            // case -- a query of nothing but stopwords yields the empty
+            // tsquery, and ':*' on its own is a syntax error.
+            sql.push_str(concat!(
+                "case when t.tsq::text = '' then null::tsquery\n",
+                "              else (t.tsq::text || ':*')::tsquery end as tsq\n"
+            ));
+        } else {
+            sql.push_str("t.tsq as tsq\n");
+        }
+        let _ = writeln!(
+            sql,
+            "    from (select websearch_to_tsquery('english', {tsquery}) as tsq) t\n),"
+        );
+    }
+
+    // One narrow row per match. MATERIALIZED because `totals` and `top` both
+    // read it and the scan must happen once.
+    sql.push_str("m as materialized (\n");
+    for (index, corpus) in corpora.iter().enumerate() {
+        if index > 0 {
+            sql.push_str("  union all\n");
+        }
+        let rank = if text.is_some() {
+            format!("ts_rank_cd({}, q.tsq)", corpus.fts)
+        } else {
+            "0::real".to_owned()
+        };
+        let _ = writeln!(
+            sql,
+            "  select {} as entity_id, {} as kind, {rank} as rank,\n         {} as item_updated_at, {index} as corpus",
+            corpus.entity_id, corpus.kind, corpus.updated_at
+        );
+        let _ = write!(sql, "    from {}", corpus.relation);
+        if text.is_some() {
+            sql.push_str(" cross join q");
+        }
+        sql.push('\n');
+
+        let mut predicates: Vec<String> = Vec::new();
+        if text.is_some() {
+            predicates.push(format!("{} @@ q.tsq", corpus.fts));
+        }
+        if let Some(scope) = corpus.scope {
+            predicates.push(scope.to_owned());
+        }
+        if let Some(sources) = &sources {
+            predicates.push(format!("{} = any({sources})", corpus.source_id));
+        }
+        if let Some(kinds) = &kinds {
+            predicates.push(format!("{} = any({kinds})", corpus.kind));
+        }
+        if let Some(days) = &days {
+            predicates.push(format!(
+                "{} >= now() - make_interval(days => {days})",
+                corpus.updated_at
+            ));
+        }
+        if let Some(authors) = &authors {
+            predicates.push(match corpus.author {
+                Some(author) => format!("{author} = any({authors})"),
+                // A corpus with no author column holds nothing of anybody's.
+                None => "false".to_owned(),
+            });
+        }
+        if !predicates.is_empty() {
+            let _ = writeln!(sql, "   where {}", predicates.join("\n     and "));
+        }
+    }
+    sql.push_str("),\n");
+
+    // The true per-kind count, over every match rather than over the page.
+    sql.push_str("totals as (select kind, count(*) as kind_total from m group by kind),\n");
+
+    // One ordering, spelled three times with different qualifiers: within the
+    // kind (window), across the page, and across the joined result. They must
+    // agree, or the row a group header counts is not the row it shows.
+    let ranked = text.is_some();
+    let ordering = order_by("", ranked, false);
+
+    let _ = writeln!(
+        sql,
+        "top as (\n  select m.*, row_number() over (partition by m.kind order by {}) as rn\n    from m\n),",
+        order_by("m.", ranked, false)
+    );
+    // One kind cannot flood the box (rn), and the whole answer is bounded
+    // (limit) before anything expensive touches it.
+    let _ = writeln!(
+        sql,
+        "picked as (\n  select * from top where rn <= {per_group}\n   order by {ordering}\n   limit {limit}\n),"
+    );
+
+    // Titles and excerpts, on the rows that survived and no others.
+    sql.push_str("detail as (\n");
+    for (index, corpus) in corpora.iter().enumerate() {
+        if index > 0 {
+            sql.push_str("  union all\n");
+        }
+        let snippet = match &headline_opts {
+            Some(opts) => format!(
+                "ts_headline('english', {}, q.tsq, {opts})",
+                corpus.headline_text
+            ),
+            None => "null::text".to_owned(),
+        };
+        let _ = writeln!(
+            sql,
+            "  select p.kind as kind, p.entity_id as entity_id, p.rank as rank,\n         p.item_updated_at as item_updated_at,\n         {} as source_id, {} as title, {} as synced_at,\n         {snippet} as snippet",
+            corpus.source_id, corpus.title, corpus.synced_at
+        );
+        let _ = write!(sql, "    from picked p\n    join {}", corpus.relation);
+        let _ = write!(sql, " on {} = p.entity_id", corpus.entity_id);
+        if let Some(scope) = corpus.scope {
+            let _ = write!(sql, " and {scope}");
+        }
+        sql.push('\n');
+        if text.is_some() {
+            sql.push_str("    cross join q\n");
+        }
+        // The discriminator, so two corpora that happen to share an entity id
+        // cannot cross-join into each other's detail rows.
+        let _ = writeln!(sql, "   where p.corpus = {index}");
+    }
+    sql.push_str(")\n");
+
+    // A kind the limit cut has no detail row, so every `d.` column here is
+    // null for it -- `nulls last` keeps those group headers at the end of
+    // their kind rather than at the front of it.
+    let _ = write!(
+        sql,
+        "select t.kind as group_kind, t.kind_total as kind_total,\n       d.entity_id as entity_id, d.source_id as source_id, d.title as title,\n       d.item_updated_at as updated_at, d.synced_at as synced_at,\n       d.rank as rank, d.snippet as snippet\n  from totals t\n  left join detail d on d.kind = t.kind\n order by t.kind, {}",
+        order_by("d.", ranked, true)
+    );
+
+    SearchSql {
+        sql,
+        binds: builder.binds,
+    }
+}
+
+/// Bind a generated statement and hand back a runnable query.
+///
+/// The one place in knobas where a runtime-built SQL string is executed. Sound
+/// because of the invariants in this module's docs: `built.sql` came out of
+/// [`search_sql`], which can only concatenate `&'static str` fragments and
+/// placeholders produced by [`Builder::param`].
+pub fn query_as_with<O>(built: SearchSql) -> QueryAs<'static, Postgres, O, PgArguments>
+where
+    O: for<'r> FromRow<'r, PgRow> + Send + Unpin,
+{
+    let SearchSql { sql, binds } = built;
+    let mut query = sqlx::query_as::<Postgres, O>(sqlx::AssertSqlSafe(sql));
+    for bind in binds {
+        query = match bind {
+            Bind::Text(value) => query.bind(value),
+            Bind::Texts(value) => query.bind(value),
+            Bind::I32(value) => query.bind(value),
+            Bind::I64(value) => query.bind(value),
+        };
+    }
+    query
+}
+
+/// The result ordering, qualified with `prefix` (`""`, `"m."` or `"d."`).
+///
+/// `entity_id` is the last key on purpose: rank ties and identical timestamps
+/// are common in a mirror written by one transaction, and without a total order
+/// the page a user pages through is not stable between two identical queries.
+fn order_by(prefix: &str, ranked: bool, nullable: bool) -> String {
+    let nulls = if nullable { " nulls last" } else { "" };
+    let mut keys = Vec::new();
+    if ranked {
+        keys.push(format!("{prefix}rank desc{nulls}"));
+    }
+    keys.push(format!("{prefix}item_updated_at desc nulls last"));
+    keys.push(format!("{prefix}entity_id"));
+    keys.join(", ")
+}
+
+/// Accumulates the arguments a generated statement reads.
+#[derive(Default)]
+struct Builder {
+    binds: Vec<Bind>,
+}
+
+impl Builder {
+    /// Push a value and get back the placeholder that reads it.
+    ///
+    /// The only way to add a bind, which is what makes it impossible for a
+    /// placeholder to drift from its argument.
+    fn param(&mut self, bind: Bind) -> String {
+        self.binds.push(bind);
+        format!("${}", self.binds.len())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::corpus::LIVE_ITEM;
+
+    /// Every single-quoted literal the builder is allowed to emit.
+    ///
+    /// The point of the list is that it is *closed*: a generated statement that
+    /// contains a quoted string not named here is either a new static fragment
+    /// nobody reviewed, or -- the case that matters -- user text that reached
+    /// the SQL instead of the bind list.
+    const ALLOWED_LITERALS: &[&str] = &["english", ":*", "", " — "];
+
+    fn filters(
+        sources: &[&str],
+        kinds: &[&str],
+        days: Option<u32>,
+        authors: &[&str],
+    ) -> EffectiveFilters {
+        EffectiveFilters {
+            sources: sources.iter().map(|s| (*s).to_owned()).collect(),
+            kinds: kinds.iter().map(|s| (*s).to_owned()).collect(),
+            updated_within_days: days,
+            mine: !authors.is_empty(),
+            authors: authors.iter().map(|s| (*s).to_owned()).collect(),
+        }
+    }
+
+    /// Every `'...'` run in a statement, in order.
+    fn literals(sql: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut rest = sql;
+        while let Some(start) = rest.find('\'') {
+            rest = &rest[start + 1..];
+            let end = rest.find('\'').expect("an unterminated literal");
+            out.push(rest[..end].to_owned());
+            rest = &rest[end + 1..];
+        }
+        out
+    }
+
+    /// Every `$n`, in order of first appearance.
+    fn placeholders(sql: &str) -> Vec<usize> {
+        let mut seen: Vec<usize> = Vec::new();
+        let bytes = sql.as_bytes();
+        for (index, byte) in bytes.iter().enumerate() {
+            if *byte != b'$' {
+                continue;
+            }
+            let digits: String = sql[index + 1..]
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            if digits.is_empty() {
+                continue;
+            }
+            let n: usize = digits.parse().expect("a number");
+            if !seen.contains(&n) {
+                seen.push(n);
+            }
+        }
+        seen
+    }
+
+    #[test]
+    fn user_text_never_enters_the_sql_string() {
+        let evil = "'; drop schema knobas cascade; --";
+        let built = search_sql(
+            &[&LIVE_ITEM],
+            Some(evil),
+            false,
+            &filters(&[evil], &[evil], None, &[evil]),
+            10,
+            50,
+        );
+        assert!(!built.sql.contains("drop schema"), "{}", built.sql);
+        assert!(!built.sql.contains(evil), "{}", built.sql);
+        // Stronger than "does not contain that string": the set of literals in
+        // the statement is closed, so *no* user text can be hiding in it.
+        for literal in literals(&built.sql) {
+            assert!(
+                ALLOWED_LITERALS.contains(&literal.as_str()),
+                "unexpected literal {literal:?} in\n{}",
+                built.sql
+            );
+        }
+        // Everything the user typed arrived as a bind instead.
+        assert!(
+            built
+                .binds
+                .iter()
+                .any(|bind| matches!(bind, Bind::Text(text) if text == evil))
+        );
+        assert!(
+            built
+                .binds
+                .iter()
+                .any(|bind| matches!(bind, Bind::Texts(values) if values == &[evil.to_owned()]))
+        );
+    }
+
+    #[test]
+    fn placeholders_are_numbered_in_bind_order() {
+        let built = search_sql(
+            &[&LIVE_ITEM],
+            Some("sepa"),
+            true,
+            &filters(&["jira"], &["ticket"], Some(7), &["mara"]),
+            10,
+            50,
+        );
+        assert_eq!(built.binds.len(), 8, "{}", built.sql);
+        assert_eq!(
+            placeholders(&built.sql),
+            (1..=built.binds.len()).collect::<Vec<_>>(),
+            "{}",
+            built.sql
+        );
+        // And the arguments are the ones the placeholders promise.
+        assert_eq!(built.binds[0], Bind::Text("sepa".to_owned()));
+        assert_eq!(built.binds[1], Bind::Texts(vec!["jira".to_owned()]));
+        assert_eq!(built.binds[2], Bind::Texts(vec!["ticket".to_owned()]));
+        assert_eq!(built.binds[3], Bind::I32(7));
+        assert_eq!(built.binds[4], Bind::Texts(vec!["mara".to_owned()]));
+        assert_eq!(built.binds[5], Bind::I64(10));
+        assert_eq!(built.binds[6], Bind::I64(50));
+    }
+
+    /// A statement with no filters must number its placeholders densely too --
+    /// the bind list shrinks with the predicates, and a gap would be a query
+    /// that reads an argument nobody sent.
+    #[test]
+    fn a_bare_query_still_numbers_densely() {
+        let built = search_sql(
+            &[&LIVE_ITEM],
+            Some("sepa"),
+            false,
+            &EffectiveFilters::default(),
+            10,
+            50,
+        );
+        assert_eq!(built.binds.len(), 4);
+        assert_eq!(placeholders(&built.sql), [1, 2, 3, 4], "{}", built.sql);
+    }
+
+    #[test]
+    fn the_tsquery_is_computed_once_and_the_trailing_word_may_be_a_prefix() {
+        let typing = search_sql(
+            &[&LIVE_ITEM],
+            Some("sep"),
+            true,
+            &EffectiveFilters::default(),
+            10,
+            50,
+        );
+        assert_eq!(
+            typing.sql.matches("websearch_to_tsquery").count(),
+            1,
+            "the tsquery is computed once, as a FROM item: {}",
+            typing.sql
+        );
+        assert_eq!(
+            typing.sql.matches("cross join q").count(),
+            2,
+            "and it is read as a FROM item by the match and by the headline: {}",
+            typing.sql
+        );
+        assert!(typing.sql.contains("':*'"), "{}", typing.sql);
+        // The empty-tsquery guard: `':*'` appended to nothing is a syntax
+        // error, not an empty match.
+        assert!(typing.sql.contains("null::tsquery"), "{}", typing.sql);
+
+        let done = search_sql(
+            &[&LIVE_ITEM],
+            Some("sepa"),
+            false,
+            &EffectiveFilters::default(),
+            10,
+            50,
+        );
+        assert!(!done.sql.contains("':*'"), "{}", done.sql);
+        assert_eq!(done.sql.matches("websearch_to_tsquery").count(), 1);
+    }
+
+    #[test]
+    fn an_absent_filter_emits_no_predicate() {
+        let bare = search_sql(
+            &[&LIVE_ITEM],
+            Some("x"),
+            false,
+            &EffectiveFilters::default(),
+            10,
+            50,
+        );
+        for absent in [
+            "source_id = any",
+            "kind = any",
+            "make_interval",
+            "author = any",
+        ] {
+            assert!(
+                !bare.sql.contains(absent),
+                "{absent} leaked into an unfiltered query:\n{}",
+                bare.sql
+            );
+        }
+    }
+
+    #[test]
+    fn a_present_filter_emits_exactly_its_predicate() {
+        let built = search_sql(
+            &[&LIVE_ITEM],
+            Some("x"),
+            false,
+            &filters(&["jira"], &["ticket"], Some(7), &["mara"]),
+            10,
+            50,
+        );
+        for present in [
+            "i.source_id = any($2)",
+            "i.kind = any($3)",
+            "i.item_updated_at >= now() - make_interval(days => $4)",
+            "i.author = any($5)",
+        ] {
+            assert!(
+                built.sql.contains(present),
+                "{present} missing from\n{}",
+                built.sql
+            );
+        }
+    }
+
+    /// `mine` with nobody behind it must still filter.
+    ///
+    /// The user asked for their own work; knobas does not know who they are.
+    /// Returning everything would be a filter that silently did nothing.
+    #[test]
+    fn mine_without_an_identity_binds_an_empty_array_rather_than_dropping_the_filter() {
+        let built = search_sql(
+            &[&LIVE_ITEM],
+            Some("x"),
+            false,
+            &EffectiveFilters {
+                mine: true,
+                ..EffectiveFilters::default()
+            },
+            10,
+            50,
+        );
+        assert!(built.sql.contains("i.author = any("), "{}", built.sql);
+        assert!(built.binds.contains(&Bind::Texts(Vec::new())));
+    }
+
+    #[test]
+    fn a_text_free_query_browses_by_recency_instead_of_ranking() {
+        let browse = search_sql(
+            &[&LIVE_ITEM],
+            None,
+            false,
+            &filters(&["jira"], &[], None, &[]),
+            10,
+            50,
+        );
+        assert!(!browse.sql.contains("ts_rank_cd"), "{}", browse.sql);
+        assert!(!browse.sql.contains("ts_headline"), "{}", browse.sql);
+        assert!(
+            !browse.sql.contains("websearch_to_tsquery"),
+            "{}",
+            browse.sql
+        );
+        assert!(!browse.sql.contains("cross join q"), "{}", browse.sql);
+        assert!(browse.sql.contains("order by"), "{}", browse.sql);
+        assert!(browse.sql.contains("0::real as rank"), "{}", browse.sql);
+        assert!(
+            browse.sql.contains("null::text as snippet"),
+            "{}",
+            browse.sql
+        );
+        // The filter still applies, and it is still a bind.
+        assert!(
+            browse.sql.contains("i.source_id = any($1)"),
+            "{}",
+            browse.sql
+        );
+    }
+
+    /// The per-group total must be a grouped aggregate over the match set, not
+    /// a window partition riding on every matching row (M0 carry-over: the
+    /// seeded query's `count(*) over (partition by kind)` forced a second full
+    /// sort of every match on the launcher's hot path).
+    #[test]
+    fn the_per_kind_total_costs_one_grouped_aggregate_not_a_second_sort() {
+        let built = search_sql(
+            &[&LIVE_ITEM],
+            Some("sepa"),
+            false,
+            &EffectiveFilters::default(),
+            10,
+            50,
+        );
+        assert!(
+            built
+                .sql
+                .contains("select kind, count(*) as kind_total from m group by kind"),
+            "{}",
+            built.sql
+        );
+        assert!(
+            !built.sql.contains("count(*) over"),
+            "the per-kind total is back on a window partition:\n{}",
+            built.sql
+        );
+        // One window function only: `row_number`, which is the per-kind cap.
+        assert_eq!(built.sql.matches(" over (").count(), 1, "{}", built.sql);
+        // And the match set is scanned once, for both readers of it.
+        assert!(built.sql.contains("m as materialized ("), "{}", built.sql);
+    }
+
+    /// A kind whose rows the global limit cut must still come back, so the
+    /// group header can show a real count.
+    #[test]
+    fn totals_outer_join_the_page_so_a_cut_kind_keeps_its_count() {
+        let built = search_sql(
+            &[&LIVE_ITEM],
+            Some("sepa"),
+            false,
+            &EffectiveFilters::default(),
+            10,
+            50,
+        );
+        assert!(
+            built
+                .sql
+                .contains("from totals t\n  left join detail d on d.kind = t.kind"),
+            "{}",
+            built.sql
+        );
+    }
+
+    /// `ts_headline` re-parses the document per row, so it must see the page
+    /// and not the match set.
+    #[test]
+    fn the_headline_runs_after_the_limit() {
+        let built = search_sql(
+            &[&LIVE_ITEM],
+            Some("sepa"),
+            false,
+            &EffectiveFilters::default(),
+            10,
+            50,
+        );
+        let limit = built.sql.find("limit $").expect("a limit");
+        let headline = built.sql.find("ts_headline").expect("a headline");
+        assert!(limit < headline, "{}", built.sql);
+        // And it reads the page, not the corpus.
+        assert!(built.sql.contains("from picked p"), "{}", built.sql);
+    }
+
+    /// The mirror is read through the view migration 0002 added, and `fts` is
+    /// matched against rather than selected (interfaces §1).
+    #[test]
+    fn the_corpus_is_the_live_view_and_fts_is_never_selected() {
+        let built = search_sql(
+            &[&LIVE_ITEM],
+            Some("sepa"),
+            false,
+            &EffectiveFilters::default(),
+            10,
+            50,
+        );
+        assert!(built.sql.contains("sync.live_item i"), "{}", built.sql);
+        assert!(!built.sql.contains("sync.item "), "{}", built.sql);
+        // `select *` over a CTE this module defined is fine -- its columns are
+        // the ones `m` named. What must never happen is `select *` over the
+        // mirror itself, whose `fts` is a tsvector that panics when read into a
+        // struct (interfaces §1).
+        assert!(!built.sql.contains("select * from sync"), "{}", built.sql);
+        assert!(!built.sql.contains("select i.*"), "{}", built.sql);
+        // `fts` appears exactly twice, and both occurrences are accounted
+        // for: ranked and matched against. Neither is a projection, which is
+        // what would panic.
+        assert_eq!(built.sql.matches("i.fts").count(), 2, "{}", built.sql);
+        assert_eq!(
+            built.sql.matches("ts_rank_cd(i.fts, q.tsq)").count(),
+            1,
+            "{}",
+            built.sql
+        );
+        assert_eq!(
+            built.sql.matches("i.fts @@ q.tsq").count(),
+            1,
+            "{}",
+            built.sql
+        );
+    }
+
+    /// The M4 seam: a second corpus unions in without a second query.
+    #[test]
+    fn a_second_corpus_unions_into_the_same_statement() {
+        const OTHER: Corpus = Corpus {
+            relation: "sync.other o",
+            entity_id: "o.entity_id",
+            kind: "o.kind",
+            source_id: "o.source_id",
+            title: "o.title",
+            fts: "o.fts",
+            headline_text: "o.title",
+            // No author column: an author filter must exclude this corpus
+            // rather than be quietly dropped for it.
+            author: None,
+            updated_at: "o.updated_at",
+            synced_at: "o.synced_at",
+            scope: Some("o.archived is false"),
+        };
+        let built = search_sql(
+            &[&LIVE_ITEM, &OTHER],
+            Some("sepa"),
+            false,
+            &filters(&["jira"], &[], None, &["mara"]),
+            10,
+            50,
+        );
+        assert_eq!(built.sql.matches("union all").count(), 2, "{}", built.sql);
+        // One bind per filter, shared by both branches -- not one per branch.
+        assert_eq!(built.binds.len(), 6, "{}", built.sql);
+        assert_eq!(built.sql.matches("= any($2)").count(), 2, "{}", built.sql);
+        // The scope travels with the corpus, into the match *and* the detail.
+        assert_eq!(
+            built.sql.matches("o.archived is false").count(),
+            2,
+            "{}",
+            built.sql
+        );
+        // An author filter over a corpus with no author column excludes it.
+        assert!(built.sql.contains("and false"), "{}", built.sql);
+        // And the two branches cannot read each other's rows.
+        assert!(built.sql.contains("where p.corpus = 0"), "{}", built.sql);
+        assert!(built.sql.contains("where p.corpus = 1"), "{}", built.sql);
+    }
+}

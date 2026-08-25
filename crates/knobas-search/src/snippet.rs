@@ -92,6 +92,40 @@ mod tests {
         );
     }
 
+    /// The excerpt stays **raw source text**: nothing is escaped, nothing is
+    /// stripped, and no sentinel ever survives into a segment.
+    ///
+    /// Both halves matter (roadmap §4 gotcha 7). A segment that carried markup
+    /// would be a string every caller has to escape again -- and a splitter
+    /// that helpfully escaped it here would be escaping it a second time in the
+    /// renderer. The highlight is the `hit` flag; the text is what the source
+    /// holds.
+    #[test]
+    fn segments_carry_raw_text_and_never_a_sentinel() {
+        for adversarial in [
+            format!("{HIT_STOP}orphan"),
+            format!("un{HIT_START}closed"),
+            format!("{HIT_START}{HIT_STOP}"),
+            format!("<script>{HIT_START}x{HIT_STOP}"),
+            format!("{HIT_START}{HIT_START}a{HIT_STOP}{HIT_STOP}"),
+        ] {
+            let out = segments(&adversarial);
+            assert!(
+                out.iter().all(|s| !s.text.contains([HIT_START, HIT_STOP])),
+                "{adversarial:?} -> {out:?}"
+            );
+            assert!(
+                out.iter().all(|s| !s.text.is_empty()),
+                "an empty segment is a row the UI draws nothing into: {out:?}"
+            );
+        }
+        let script = segments(&format!("<script>{HIT_START}x{HIT_STOP}"));
+        assert_eq!(script[0].text, "<script>");
+        assert!(!script[0].hit);
+        assert_eq!(script[1].text, "x");
+        assert!(script[1].hit);
+    }
+
     /// Source text is arbitrary and could in principle contain a sentinel
     /// byte. It must not desynchronise the walk into a panic or a lost tail.
     #[test]

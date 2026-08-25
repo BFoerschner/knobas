@@ -11,7 +11,7 @@
 //! Seeded (this crate's contract PR): the frozen types, the FTS query over
 //! `sync.live_item`, sentinel-based snippet segments, grouping by kind.
 //! **Stream E's:** the query parser ([`query`], [`vocab`]), the dynamic query
-//! builder that applies [`SearchFilters`] (`sql` -- the one reviewed module
+//! builder that applies [`SearchFilters`] ([`sql`] -- the one reviewed module
 //! allowed to wrap a runtime-built statement, roadmap §4 gotcha 2), the
 //! built-in smart lists, and the empty-query board. Until the builder is wired
 //! into [`search`] a filtered query is refused rather than silently answered
@@ -25,8 +25,10 @@
 //! The corpus is `sync.live_item` and nothing else: notes are M2 and asset
 //! ancestor paths are M4 (interfaces §2.4).
 
+pub mod corpus;
 pub mod query;
 pub mod snippet;
+pub mod sql;
 pub mod types;
 pub mod vocab;
 
