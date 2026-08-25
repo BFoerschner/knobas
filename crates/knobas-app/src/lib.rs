@@ -395,6 +395,42 @@ mod tests {
         );
     }
 
+    /// The window cannot be made narrower than the shell is designed for.
+    ///
+    /// Found by running `just dev` and looking at the result: the window came
+    /// up at 1028 px, `.app { min-width: 1100px }` overflowed it, and
+    /// `html, body { overflow: hidden }` meant the clipped right-hand end of
+    /// the top strip -- the sources gear -- was simply unreachable. No
+    /// scrollbar, no error, no way to get to it.
+    ///
+    /// Two files that cannot see each other, so the invariant is asserted
+    /// here: whatever floor the stylesheet sets, the window may not go below
+    /// it. Raising one without the other silently amputates the top strip
+    /// again, and only at window widths a developer has to think to try.
+    #[test]
+    fn the_window_may_not_be_narrower_than_the_stylesheet_floor() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("tauri.conf.json");
+        let min_width = config["app"]["windows"][0]["minWidth"]
+            .as_u64()
+            .expect("app.windows[0].minWidth");
+
+        let css = include_str!("../../../app/src/app.css");
+        let floor: u64 = css
+            .split_once(".app{")
+            .and_then(|(_, rest)| rest.split_once("min-width:"))
+            .and_then(|(_, rest)| rest.split_once("px"))
+            .and_then(|(value, _)| value.trim().parse().ok())
+            .expect("`.app` declares a `min-width` in px");
+
+        assert!(
+            min_width >= floor,
+            "the window may shrink to {min_width}px but the shell needs {floor}px: \
+             everything past the floor is clipped, and `overflow: hidden` means \
+             there is no scrollbar to reach it with"
+        );
+    }
+
     /// The event names are one list in two languages. A rename on one side is
     /// a listener that silently never fires -- the failure mode this test
     /// exists to make loud.
