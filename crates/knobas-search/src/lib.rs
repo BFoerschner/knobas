@@ -35,6 +35,7 @@
 
 pub mod corpus;
 pub mod group;
+pub mod lists;
 pub mod query;
 pub mod snippet;
 pub mod sql;
@@ -46,6 +47,7 @@ use std::time::Instant;
 use sqlx::PgPool;
 
 pub use group::RawHit;
+pub use lists::{BuiltinList, SmartListSummary};
 pub use query::{EffectiveFilters, Parsed, merge, parse};
 pub use types::{
     EntityRow, ParsedQuery, Prefix, ResultGroup, SearchFilters, SearchHit, SearchQuery,
@@ -148,7 +150,7 @@ impl Searcher {
 
         if let Some(list) = parsed.list_id.clone() {
             return self
-                .list_response(&list, query.limit, interpreted, started)
+                .list_response(&list, query.limit, &vocab, interpreted, started)
                 .await;
         }
 
@@ -185,18 +187,69 @@ impl Searcher {
         })
     }
 
+    /// Every built-in smart list, with its count and its change badge.
+    ///
+    /// Two round trips: the vocabulary (for the identity behind `@me`, which
+    /// every search loads anyway) and one statement carrying the counts, the
+    /// freshness stamps and the seen-stamps together.
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Db`] if the summary cannot be read.
+    pub async fn smart_lists(&self) -> Result<Vec<SmartListSummary>, SearchError> {
+        let vocab = Vocabulary::load(&self.pool, self.kinds.clone()).await?;
+        lists::summaries(&self.pool, &vocab.identity).await
+    }
+
     /// The rows of one built-in smart list, shaped exactly like a search.
     ///
-    /// Task 6 fills this in; until then a `list:` is understood and answered
-    /// with nothing, which is the same honest empty the M1-less corpora get.
+    /// Same grouping, same DTO, `rank = 0` and no snippet -- which is why the
+    /// launcher renders a list with the code it renders results with, and why
+    /// typing `list:mine` in the box needs no second path.
+    ///
+    /// Opening a list is also what **clears its badge**: the seen-stamp is
+    /// written here, so a list the user has looked at stops claiming to be new.
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::UnknownList`] if nobody ships a list by that id,
+    /// [`SearchError::Db`] if the statement fails.
+    pub async fn smart_list_items(
+        &self,
+        id: &str,
+        limit: u32,
+    ) -> Result<SearchResponse, SearchError> {
+        let started = Instant::now();
+        let vocab = Vocabulary::load(&self.pool, self.kinds.clone()).await?;
+        let interpreted = ParsedQuery {
+            text: String::new(),
+            prefix: Some(Prefix::List),
+            filters: SearchFilters::default(),
+            unknown_tokens: Vec::new(),
+        };
+        self.list_response(id, limit, &vocab, interpreted, started)
+            .await
+    }
+
     async fn list_response(
         &self,
-        _list: &str,
-        _limit: u32,
+        id: &str,
+        limit: u32,
+        vocab: &Vocabulary,
         interpreted: ParsedQuery,
         started: Instant,
     ) -> Result<SearchResponse, SearchError> {
-        Ok(empty(interpreted, started))
+        let list = lists::find(id).ok_or_else(|| SearchError::UnknownList(id.to_owned()))?;
+        let rows =
+            lists::rows(&self.pool, list, &vocab.identity, limit.clamp(1, MAX_LIMIT)).await?;
+        let groups = group::group(rows, &vocab.kinds);
+        lists::mark_seen(&self.pool, list.id).await?;
+        Ok(SearchResponse {
+            interpreted,
+            total: groups.iter().map(|g| g.total).sum(),
+            groups,
+            took_ms: took_ms(started),
+        })
     }
 }
 
