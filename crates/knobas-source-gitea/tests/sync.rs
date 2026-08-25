@@ -226,6 +226,30 @@ async fn a_revoked_token_fails_the_run_rather_than_syncing_a_subset() {
     assert!(sink.0.is_empty());
 }
 
+/// The preflight's actual job, on a fixture that can show it: an instance that
+/// serves its public repositories to anyone. Without `GET /user` first, a run
+/// with a dead token succeeds and quietly replaces the mirror with the public
+/// subset -- and because this source declares its full sync exhaustive, the
+/// engine then tombstones everything the token used to be able to see.
+#[tokio::test]
+async fn a_dead_token_against_a_publicly_readable_instance_still_fails() {
+    let fake = Fake::start_public(&State::tidewater()).await;
+    let revoked =
+        knobas_source_gitea::build(instance(fake.base_url(), "revoked", serde_json::json!({})))
+            .unwrap();
+    let mut sink = VecSink(Vec::new());
+    let error = revoked.sync(None, &mut sink).await.unwrap_err();
+    assert!(matches!(error, SourceError::Unauthorized), "{error:?}");
+    assert!(sink.0.is_empty(), "{:?}", sink.0);
+
+    // The fixture really would have served a sync: the same instance with a
+    // good token mirrors the repository, so the refusal above is the preflight
+    // and not an unreachable server.
+    let good = source(fake.base_url(), serde_json::json!({}));
+    let (items, _) = full(&*good).await;
+    assert!(!items.is_empty());
+}
+
 /// Ruling B4, the incremental half: one repository refusing us costs that
 /// repository this run, not the run. Its watermarks are kept, so the next run
 /// does not refetch it from scratch.

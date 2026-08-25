@@ -32,6 +32,13 @@ const FORBIDDEN_PRIORITY: u8 = 3;
 const EMPTY_PAGE_PRIORITY: u8 = 8;
 const BAD_TOKEN_PRIORITY: u8 = 9;
 
+/// Whether this instance guards its repository reads or serves them to anyone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reads {
+    TokenOnly,
+    Anonymous,
+}
+
 /// What the fake serves. Mutate it and call [`Fake::remount`] to make the
 /// remote system change between two sync runs.
 #[derive(Debug, Clone)]
@@ -239,6 +246,21 @@ impl Fake {
         fake
     }
 
+    /// An instance that serves its **public** repositories to anyone and only
+    /// guards `/user`, which is what a Gitea with public repos actually does.
+    ///
+    /// This is the fixture the identity preflight can be witnessed on: against
+    /// a server that 401s everything, dropping the preflight changes nothing,
+    /// because the next request fails the same way. Here a run with a dead
+    /// token would quietly mirror whatever is public instead.
+    pub async fn start_public(state: &State) -> Self {
+        let fake = Self {
+            server: MockServer::start().await,
+        };
+        fake.mount_as(state, 1_000, Reads::Anonymous).await;
+        fake
+    }
+
     pub fn base_url(&self) -> String {
         self.server.uri()
     }
@@ -272,9 +294,19 @@ impl Fake {
     }
 
     async fn mount(&self, state: &State, page_size: usize) {
+        self.mount_as(state, page_size, Reads::TokenOnly).await;
+    }
+
+    async fn mount_as(&self, state: &State, page_size: usize, reads: Reads) {
         let ok = |body: Value| ResponseTemplate::new(200).set_body_json(body);
         let token = format!("token {TOKEN}");
-        let authed = |m: wiremock::MockBuilder| m.and(header("Authorization", token.as_str()));
+        // `/user` is guarded whatever the instance does with its repositories:
+        // that is the whole difference between the two fixtures.
+        let identity = |m: wiremock::MockBuilder| m.and(header("Authorization", token.as_str()));
+        let authed = |m: wiremock::MockBuilder| match reads {
+            Reads::TokenOnly => m.and(header("Authorization", token.as_str())),
+            Reads::Anonymous => m,
+        };
 
         // A repository the token may not read. Mounted first so it wins over
         // the records below, which is what lets one `State` describe both.
@@ -291,11 +323,11 @@ impl Fake {
             .await;
         }
 
-        authed(Mock::given(method("GET")).and(path("/api/v1/version")))
+        identity(Mock::given(method("GET")).and(path("/api/v1/version")))
             .respond_with(ok(json!({ "version": "1.24.3" })))
             .mount(&self.server)
             .await;
-        authed(Mock::given(method("GET")).and(path("/api/v1/user")))
+        identity(Mock::given(method("GET")).and(path("/api/v1/user")))
             .respond_with(ok(
                 json!({ "login": "mara", "id": 7, "full_name": "Mara Lindqvist" }),
             ))
@@ -376,13 +408,18 @@ impl Fake {
         }
 
         // Anything past the last page answers empty, the way Gitea does --
-        // never a 401, which would read as a credential fault.
-        Mock::given(method("GET"))
-            .and(header("Authorization", token.as_str()))
-            .respond_with(ok(json!([])))
-            .with_priority(EMPTY_PAGE_PRIORITY)
-            .mount(&self.server)
-            .await;
+        // never a 401, which would read as a credential fault. `/user` and
+        // `/version` are excluded: they are not lists, and a `[]` there would
+        // let a run past the identity preflight with no account at all.
+        authed(
+            Mock::given(method("GET")).and(|request: &wiremock::Request| {
+                !matches!(request.url.path(), "/api/v1/user" | "/api/v1/version")
+            }),
+        )
+        .respond_with(ok(json!([])))
+        .with_priority(EMPTY_PAGE_PRIORITY)
+        .mount(&self.server)
+        .await;
         // Lowest priority: no token, or the wrong one. This is what Gitea
         // answers an invalid token with, and what the battery's Unauthorized
         // case relies on.
