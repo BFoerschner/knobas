@@ -13,7 +13,7 @@
  * applies to code no test happens to mount.
  */
 import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 
 import { expect, test } from "vitest";
 
@@ -182,6 +182,52 @@ test("no runtime network references (default-src 'self')", () => {
   ).toEqual([]);
 });
 
+/** The dev harness, as a path rather than as a spelling. */
+const DEV_DIR = join(ROOT, "lib/shell/dev");
+
+/**
+ * Every module specifier a file imports, tagged static or dynamic.
+ *
+ * Three forms, because all three reach the module graph: `… from "x"` (which
+ * also covers `export * from`), a bare side-effect `import "x"`, and the
+ * dynamic `import("x")`.
+ */
+function specifiers(code: string): { specifier: string; dynamic: boolean }[] {
+  const found: { specifier: string; dynamic: boolean }[] = [];
+  for (const match of code.matchAll(/\bfrom\s*["'`]([^"'`]+)["'`]/g)) {
+    found.push({ specifier: match[1]!, dynamic: false });
+  }
+  for (const match of code.matchAll(/\bimport\s+["'`]([^"'`]+)["'`]/g)) {
+    found.push({ specifier: match[1]!, dynamic: false });
+  }
+  for (const match of code.matchAll(/\bimport\s*\(\s*["'`]([^"'`]+)["'`]\s*\)/g)) {
+    found.push({ specifier: match[1]!, dynamic: true });
+  }
+  return found;
+}
+
+/**
+ * The imports of `file` that land inside the dev harness.
+ *
+ * **Resolved, not string-matched.** A substring test against the specifier
+ * text is spelling-dependent, and the spellings are not equivalent to a
+ * reader: every module that would import the harness lives in
+ * `lib/shell/`, where the natural form — and the one auto-import produces —
+ * is `./dev/fake-tauri`, which contains no `shell/dev/` at all. That is a
+ * working, unguarded, static import the old check could not see. Resolving
+ * against the importing file's own directory removes the question of how the
+ * path happens to be written, which matters more as tasks 7-23 add roughly
+ * twenty files into exactly that directory.
+ */
+function devImports(code: string, file: string): { specifier: string; dynamic: boolean }[] {
+  return specifiers(code).filter(({ specifier }) => {
+    // Only relative specifiers can reach it; a bare one is a package.
+    if (!specifier.startsWith(".")) return false;
+    const target = resolve(dirname(file), specifier);
+    return target === DEV_DIR || target.startsWith(DEV_DIR + sep);
+  });
+}
+
 /**
  * `shell/dev/**` answers `invoke` from a fixture. In a production bundle that
  * would be a frontend quietly serving itself fake data, so its only reachable
@@ -189,27 +235,39 @@ test("no runtime network references (default-src 'self')", () => {
  * `false` and drops the branch — and the module with it.
  */
 test("the dev harness is only reachable behind import.meta.env.DEV", () => {
-  const importers = offenders(
-    (text, file) => !file.includes("/lib/shell/dev/") && codeOf(text).includes("shell/dev/"),
-  );
-  expect(importers.length, "nothing imports the dev harness, so this proves nothing").toBe(1);
+  const importers = sources()
+    .filter((file) => !file.startsWith(DEV_DIR + sep))
+    .map((file) => ({ file, code: codeOf(readFileSync(file, "utf8")) }))
+    .map((entry) => ({ ...entry, imports: devImports(entry.code, entry.file) }))
+    .filter((entry) => entry.imports.length > 0);
 
-  for (const file of importers) {
-    const code = codeOf(readFileSync(join(ROOT, file), "utf8"));
+  expect(
+    importers.length,
+    "nothing imports the dev harness at all, so this test proves nothing",
+  ).toBeGreaterThan(0);
 
-    // The guard itself, in code and not in prose. A `text.includes(..)` over
-    // the raw file is satisfied by the comment *explaining* the guard, so
-    // rewriting the condition to `if (true)` — the fixture installed
-    // unconditionally in a production bundle — left the old version green.
-    expect(code, `${file} imports the dev harness without an import.meta.env.DEV guard`).toMatch(
+  // The violations first, so a failure names the actual sin rather than the
+  // bookkeeping mismatch that follows from it.
+  for (const { file, code, imports } of importers) {
+    const where = file.slice(ROOT.length);
+
+    // A static import is a hard edge in the module graph: Rollup cannot drop
+    // it however the branch around its *use* is written.
+    expect(
+      imports.filter((entry) => !entry.dynamic).map((entry) => entry.specifier),
+      `${where} imports the dev harness statically`,
+    ).toEqual([]);
+
+    expect(code, `${where} imports the dev harness without an import.meta.env.DEV guard`).toMatch(
       /if\s*\(\s*import\.meta\.env\.DEV\s*\)/,
     );
-
-    // ...and it must be a dynamic import. A static `import … from "./dev/…"`
-    // is a hard dependency of the module graph: Rollup cannot drop it however
-    // the branch around its *use* is written.
-    expect(code, `${file} imports the dev harness statically`).not.toMatch(
-      /^\s*import\s[^\n]*["'][^"'\n]*shell\/dev\//m,
-    );
   }
+
+  // ...and the set itself, because every door into the fake bridge is a
+  // decision someone should have to make on purpose. Growing this list is
+  // allowed; doing it without noticing is not.
+  expect(
+    importers.map((entry) => entry.file.slice(ROOT.length)).sort(),
+    "a module started importing the dev harness — add it here only if a second entry point to the fixture is genuinely wanted",
+  ).toEqual(["App.svelte"]);
 });
