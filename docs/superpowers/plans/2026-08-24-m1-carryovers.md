@@ -23,6 +23,9 @@ Items struck through were discharged by the M1 contract PR (checkpoint 0); every
 **Orchestrator-owned (`knobas-http` is read-only for M1 — requests route through the orchestrator):**
 - **A body→message hook.** Stream A found that `HttpClient::send` consumes the response body before an adapter can lift the API's own error envelope out of it (Jira's `errorMessages`), so the adapter reconstructs the message afterwards in `humanize`. All three adapters will hit this — Gitea and TeamCity both return structured error bodies. The clean fix is a hook that lets the caller map a failing response body into the `SourceError` message. Requested by A on PR #15; do it before streams B and C write their HTTP seams, so all three share one path instead of three private workarounds.
 
+**Needs Björn (a human step, not an agent one):**
+- **Vendor the TeamCity swagger** — `cd testenv/specs && ./fetch.sh --teamcity`. It needs ~10 GB of disk headroom and a human at the browser: TeamCity's first-start wizard (database choice, licence, admin account) is served by form endpoints that are not REST API and change between versions, so it deliberately is not scripted. Until then TeamCity is validated against golden fixtures only, which ruling P11(b) already blesses. The schema half of the test is written and **self-arming** — it starts asserting the moment the file appears, no code change — and a companion test fails if the README ever stops recording the blocker. Worth doing before stream C's adapter is called done: goldens plus a hand-written route table share an origin with the adapter author's reading of the same docs, and the swagger is what would catch the unknown unknowns.
+
 **Stream T / CI:**
 - `actions/*@v4` Node-20 deprecation annotations (breakage when the shim is removed).
 - Linux dep set is minimal-by-experiment; tray/dialogs/`tauri build`-in-CI will need additions.
