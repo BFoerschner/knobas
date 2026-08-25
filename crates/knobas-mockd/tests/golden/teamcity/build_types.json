@@ -1,0 +1,30 @@
+{
+  "buildType": [
+    {
+      "href": "/app/rest/buildTypes/id:Ledger_Deploy_Staging",
+      "id": "Ledger_Deploy_Staging",
+      "name": "Deploy Staging",
+      "projectId": "Ledger",
+      "projectName": "Ledger",
+      "webUrl": "http://mockd.test/viewType.html?buildTypeId=Ledger_Deploy_Staging"
+    },
+    {
+      "href": "/app/rest/buildTypes/id:Payout_Build",
+      "id": "Payout_Build",
+      "name": "Build",
+      "projectId": "Payout",
+      "projectName": "Payout",
+      "webUrl": "http://mockd.test/viewType.html?buildTypeId=Payout_Build"
+    },
+    {
+      "href": "/app/rest/buildTypes/id:Payout_IntegrationTests",
+      "id": "Payout_IntegrationTests",
+      "name": "IntegrationTests",
+      "projectId": "Payout",
+      "projectName": "Payout",
+      "webUrl": "http://mockd.test/viewType.html?buildTypeId=Payout_IntegrationTests"
+    }
+  ],
+  "count": 3,
+  "href": "/app/rest/buildTypes"
+}

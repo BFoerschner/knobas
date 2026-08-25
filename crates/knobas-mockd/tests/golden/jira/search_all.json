@@ -1,0 +1,662 @@
+{
+  "expand": "schema,names",
+  "issues": [
+    {
+      "expand": "",
+      "fields": {
+        "assignee": {
+          "active": true,
+          "avatarUrls": {
+            "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=mara.lindqvist",
+            "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=mara.lindqvist",
+            "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=mara.lindqvist",
+            "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=mara.lindqvist"
+          },
+          "displayName": "Mara Lindqvist",
+          "emailAddress": "mara.lindqvist@tidewater.example",
+          "key": "JIRAUSER10100",
+          "name": "mara.lindqvist",
+          "self": "http://mockd.test/rest/api/2/user?username=mara.lindqvist",
+          "timeZone": "Europe/Berlin"
+        },
+        "comment": {
+          "comments": [
+            {
+              "author": {
+                "active": true,
+                "avatarUrls": {
+                  "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=priya.nair",
+                  "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=priya.nair",
+                  "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=priya.nair",
+                  "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=priya.nair"
+                },
+                "displayName": "Priya Nair",
+                "emailAddress": "priya.nair@tidewater.example",
+                "key": "JIRAUSER10102",
+                "name": "priya.nair",
+                "self": "http://mockd.test/rest/api/2/user?username=priya.nair",
+                "timeZone": "Europe/Berlin"
+              },
+              "body": "Please make sure the backoff policy matches the design page — finance wants max 5 attempts.",
+              "created": "2026-08-21T16:20:00.000+0200",
+              "id": "20000",
+              "self": "http://mockd.test/rest/api/2/issue/10001/comment/20000",
+              "updateAuthor": {
+                "active": true,
+                "avatarUrls": {
+                  "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=priya.nair",
+                  "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=priya.nair",
+                  "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=priya.nair",
+                  "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=priya.nair"
+                },
+                "displayName": "Priya Nair",
+                "emailAddress": "priya.nair@tidewater.example",
+                "key": "JIRAUSER10102",
+                "name": "priya.nair",
+                "self": "http://mockd.test/rest/api/2/user?username=priya.nair",
+                "timeZone": "Europe/Berlin"
+              },
+              "updated": "2026-08-21T16:20:00.000+0200"
+            },
+            {
+              "author": {
+                "active": true,
+                "avatarUrls": {
+                  "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=mara.lindqvist",
+                  "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=mara.lindqvist",
+                  "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=mara.lindqvist",
+                  "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=mara.lindqvist"
+                },
+                "displayName": "Mara Lindqvist",
+                "emailAddress": "mara.lindqvist@tidewater.example",
+                "key": "JIRAUSER10100",
+                "name": "mara.lindqvist",
+                "self": "http://mockd.test/rest/api/2/user?username=mara.lindqvist",
+                "timeZone": "Europe/Berlin"
+              },
+              "body": "Backoff + jitter implemented in a41f2c, integration test still red (#1187), investigating.",
+              "created": "2026-08-22T12:15:00.000+0200",
+              "id": "20001",
+              "self": "http://mockd.test/rest/api/2/issue/10001/comment/20001",
+              "updateAuthor": {
+                "active": true,
+                "avatarUrls": {
+                  "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=mara.lindqvist",
+                  "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=mara.lindqvist",
+                  "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=mara.lindqvist",
+                  "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=mara.lindqvist"
+                },
+                "displayName": "Mara Lindqvist",
+                "emailAddress": "mara.lindqvist@tidewater.example",
+                "key": "JIRAUSER10100",
+                "name": "mara.lindqvist",
+                "self": "http://mockd.test/rest/api/2/user?username=mara.lindqvist",
+                "timeZone": "Europe/Berlin"
+              },
+              "updated": "2026-08-22T12:15:00.000+0200"
+            }
+          ],
+          "maxResults": 2,
+          "startAt": 0,
+          "total": 2
+        },
+        "created": "2026-08-08T13:48:00.000+0200",
+        "description": "When the SEPA batch at the PSP returns a transient error (HTTP 503 or PSP code `TEMP_UNAVAILABLE`), retry the payout with exponential backoff (base 30 s, factor 2, max 5 attempts, jitter). Permanent failures go to the manual review queue.",
+        "issuetype": {
+          "name": "Story",
+          "subtask": false
+        },
+        "priority": {
+          "name": "High"
+        },
+        "project": {
+          "key": "PAY",
+          "name": "PAY"
+        },
+        "reporter": {
+          "active": true,
+          "avatarUrls": {
+            "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=mara.lindqvist",
+            "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=mara.lindqvist",
+            "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=mara.lindqvist",
+            "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=mara.lindqvist"
+          },
+          "displayName": "Mara Lindqvist",
+          "emailAddress": "mara.lindqvist@tidewater.example",
+          "key": "JIRAUSER10100",
+          "name": "mara.lindqvist",
+          "self": "http://mockd.test/rest/api/2/user?username=mara.lindqvist",
+          "timeZone": "Europe/Berlin"
+        },
+        "status": {
+          "id": "3",
+          "name": "In Progress",
+          "statusCategory": {
+            "key": "indeterminate",
+            "name": "In Progress"
+          }
+        },
+        "summary": "Retry failed SEPA payouts",
+        "updated": "2026-08-22T13:48:00.000+0200",
+        "worklog": {
+          "maxResults": 1,
+          "startAt": 0,
+          "total": 1,
+          "worklogs": [
+            {
+              "author": {
+                "active": true,
+                "avatarUrls": {
+                  "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=mara.lindqvist",
+                  "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=mara.lindqvist",
+                  "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=mara.lindqvist",
+                  "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=mara.lindqvist"
+                },
+                "displayName": "Mara Lindqvist",
+                "emailAddress": "mara.lindqvist@tidewater.example",
+                "key": "JIRAUSER10100",
+                "name": "mara.lindqvist",
+                "self": "http://mockd.test/rest/api/2/user?username=mara.lindqvist",
+                "timeZone": "Europe/Berlin"
+              },
+              "comment": "Retry loop implementation",
+              "created": "2026-08-21T11:00:00.000+0200",
+              "id": "30000",
+              "issueId": "10001",
+              "self": "http://mockd.test/rest/api/2/issue/10001/worklog/30000",
+              "started": "2026-08-21T11:00:00.000+0200",
+              "timeSpent": "4h 30m",
+              "timeSpentSeconds": 16200,
+              "updateAuthor": {
+                "active": true,
+                "avatarUrls": {
+                  "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=mara.lindqvist",
+                  "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=mara.lindqvist",
+                  "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=mara.lindqvist",
+                  "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=mara.lindqvist"
+                },
+                "displayName": "Mara Lindqvist",
+                "emailAddress": "mara.lindqvist@tidewater.example",
+                "key": "JIRAUSER10100",
+                "name": "mara.lindqvist",
+                "self": "http://mockd.test/rest/api/2/user?username=mara.lindqvist",
+                "timeZone": "Europe/Berlin"
+              },
+              "updated": "2026-08-21T11:00:00.000+0200"
+            }
+          ]
+        }
+      },
+      "id": "10001",
+      "key": "PAY-231",
+      "self": "http://mockd.test/rest/api/2/issue/10001"
+    },
+    {
+      "expand": "",
+      "fields": {
+        "assignee": {
+          "active": true,
+          "avatarUrls": {
+            "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=mara.lindqvist",
+            "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=mara.lindqvist",
+            "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=mara.lindqvist",
+            "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=mara.lindqvist"
+          },
+          "displayName": "Mara Lindqvist",
+          "emailAddress": "mara.lindqvist@tidewater.example",
+          "key": "JIRAUSER10100",
+          "name": "mara.lindqvist",
+          "self": "http://mockd.test/rest/api/2/user?username=mara.lindqvist",
+          "timeZone": "Europe/Berlin"
+        },
+        "comment": {
+          "comments": [],
+          "maxResults": 0,
+          "startAt": 0,
+          "total": 0
+        },
+        "created": "2026-08-08T10:12:00.000+0200",
+        "description": "Finance reports the payout dashboard takes 8–12 s to load for August. Target < 2 s.",
+        "issuetype": {
+          "name": "Task",
+          "subtask": false
+        },
+        "priority": {
+          "name": "Medium"
+        },
+        "project": {
+          "key": "PAY",
+          "name": "PAY"
+        },
+        "reporter": {
+          "active": true,
+          "avatarUrls": {
+            "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=priya.nair",
+            "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=priya.nair",
+            "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=priya.nair",
+            "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=priya.nair"
+          },
+          "displayName": "Priya Nair",
+          "emailAddress": "priya.nair@tidewater.example",
+          "key": "JIRAUSER10102",
+          "name": "priya.nair",
+          "self": "http://mockd.test/rest/api/2/user?username=priya.nair",
+          "timeZone": "Europe/Berlin"
+        },
+        "status": {
+          "id": "10000",
+          "name": "To Do",
+          "statusCategory": {
+            "key": "new",
+            "name": "To Do"
+          }
+        },
+        "summary": "Payout dashboard latency",
+        "updated": "2026-08-22T10:12:00.000+0200",
+        "worklog": {
+          "maxResults": 0,
+          "startAt": 0,
+          "total": 0,
+          "worklogs": []
+        }
+      },
+      "id": "10003",
+      "key": "PAY-240",
+      "self": "http://mockd.test/rest/api/2/issue/10003"
+    },
+    {
+      "expand": "",
+      "fields": {
+        "assignee": {
+          "active": true,
+          "avatarUrls": {
+            "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=mara.lindqvist",
+            "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=mara.lindqvist",
+            "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=mara.lindqvist",
+            "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=mara.lindqvist"
+          },
+          "displayName": "Mara Lindqvist",
+          "emailAddress": "mara.lindqvist@tidewater.example",
+          "key": "JIRAUSER10100",
+          "name": "mara.lindqvist",
+          "self": "http://mockd.test/rest/api/2/user?username=mara.lindqvist",
+          "timeZone": "Europe/Berlin"
+        },
+        "comment": {
+          "comments": [],
+          "maxResults": 0,
+          "startAt": 0,
+          "total": 0
+        },
+        "created": "2026-08-07T18:05:00.000+0200",
+        "description": null,
+        "issuetype": {
+          "name": "Bug",
+          "subtask": false
+        },
+        "priority": {
+          "name": "High"
+        },
+        "project": {
+          "key": "PAY",
+          "name": "PAY"
+        },
+        "reporter": {
+          "active": true,
+          "avatarUrls": {
+            "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=mara.lindqvist",
+            "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=mara.lindqvist",
+            "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=mara.lindqvist",
+            "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=mara.lindqvist"
+          },
+          "displayName": "Mara Lindqvist",
+          "emailAddress": "mara.lindqvist@tidewater.example",
+          "key": "JIRAUSER10100",
+          "name": "mara.lindqvist",
+          "self": "http://mockd.test/rest/api/2/user?username=mara.lindqvist",
+          "timeZone": "Europe/Berlin"
+        },
+        "status": {
+          "id": "10002",
+          "name": "In Review",
+          "statusCategory": {
+            "key": "indeterminate",
+            "name": "In Progress"
+          }
+        },
+        "summary": "Ledger drift on partial refunds",
+        "updated": "2026-08-21T18:05:00.000+0200",
+        "worklog": {
+          "maxResults": 1,
+          "startAt": 0,
+          "total": 1,
+          "worklogs": [
+            {
+              "author": {
+                "active": true,
+                "avatarUrls": {
+                  "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=mara.lindqvist",
+                  "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=mara.lindqvist",
+                  "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=mara.lindqvist",
+                  "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=mara.lindqvist"
+                },
+                "displayName": "Mara Lindqvist",
+                "emailAddress": "mara.lindqvist@tidewater.example",
+                "key": "JIRAUSER10100",
+                "name": "mara.lindqvist",
+                "self": "http://mockd.test/rest/api/2/user?username=mara.lindqvist",
+                "timeZone": "Europe/Berlin"
+              },
+              "comment": "Review PR #139 fixes, re-test partial refund drift",
+              "created": "2026-08-21T11:00:00.000+0200",
+              "id": "30001",
+              "issueId": "10002",
+              "self": "http://mockd.test/rest/api/2/issue/10002/worklog/30001",
+              "started": "2026-08-21T11:00:00.000+0200",
+              "timeSpent": "2h 40m",
+              "timeSpentSeconds": 9600,
+              "updateAuthor": {
+                "active": true,
+                "avatarUrls": {
+                  "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=mara.lindqvist",
+                  "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=mara.lindqvist",
+                  "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=mara.lindqvist",
+                  "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=mara.lindqvist"
+                },
+                "displayName": "Mara Lindqvist",
+                "emailAddress": "mara.lindqvist@tidewater.example",
+                "key": "JIRAUSER10100",
+                "name": "mara.lindqvist",
+                "self": "http://mockd.test/rest/api/2/user?username=mara.lindqvist",
+                "timeZone": "Europe/Berlin"
+              },
+              "updated": "2026-08-21T11:00:00.000+0200"
+            }
+          ]
+        }
+      },
+      "id": "10002",
+      "key": "PAY-228",
+      "self": "http://mockd.test/rest/api/2/issue/10002"
+    },
+    {
+      "expand": "",
+      "fields": {
+        "assignee": {
+          "active": true,
+          "avatarUrls": {
+            "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=jonas.becker",
+            "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=jonas.becker",
+            "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=jonas.becker",
+            "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=jonas.becker"
+          },
+          "displayName": "Jonas Becker",
+          "emailAddress": "jonas.becker@tidewater.example",
+          "key": "JIRAUSER10101",
+          "name": "jonas.becker",
+          "self": "http://mockd.test/rest/api/2/user?username=jonas.becker",
+          "timeZone": "Europe/Berlin"
+        },
+        "comment": {
+          "comments": [],
+          "maxResults": 0,
+          "startAt": 0,
+          "total": 0
+        },
+        "created": "2026-08-06T02:00:00.000+0200",
+        "description": null,
+        "issuetype": {
+          "name": "Story",
+          "subtask": false
+        },
+        "priority": {
+          "name": "Low"
+        },
+        "project": {
+          "key": "PAY",
+          "name": "PAY"
+        },
+        "reporter": {
+          "active": true,
+          "avatarUrls": {
+            "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=jonas.becker",
+            "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=jonas.becker",
+            "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=jonas.becker",
+            "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=jonas.becker"
+          },
+          "displayName": "Jonas Becker",
+          "emailAddress": "jonas.becker@tidewater.example",
+          "key": "JIRAUSER10101",
+          "name": "jonas.becker",
+          "self": "http://mockd.test/rest/api/2/user?username=jonas.becker",
+          "timeZone": "Europe/Berlin"
+        },
+        "status": {
+          "id": "10000",
+          "name": "To Do",
+          "statusCategory": {
+            "key": "new",
+            "name": "To Do"
+          }
+        },
+        "summary": "Payout CSV export for finance",
+        "updated": "2026-08-20T02:00:00.000+0200",
+        "worklog": {
+          "maxResults": 0,
+          "startAt": 0,
+          "total": 0,
+          "worklogs": []
+        }
+      },
+      "id": "10005",
+      "key": "PAY-236",
+      "self": "http://mockd.test/rest/api/2/issue/10005"
+    },
+    {
+      "expand": "",
+      "fields": {
+        "assignee": {
+          "active": true,
+          "avatarUrls": {
+            "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=tomasz.wojcik",
+            "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=tomasz.wojcik",
+            "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=tomasz.wojcik",
+            "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=tomasz.wojcik"
+          },
+          "displayName": "Tomasz Wójcik",
+          "emailAddress": "tomasz.wojcik@tidewater.example",
+          "key": "JIRAUSER10103",
+          "name": "tomasz.wojcik",
+          "self": "http://mockd.test/rest/api/2/user?username=tomasz.wojcik",
+          "timeZone": "Europe/Berlin"
+        },
+        "comment": {
+          "comments": [],
+          "maxResults": 0,
+          "startAt": 0,
+          "total": 0
+        },
+        "created": "2026-08-05T02:00:00.000+0200",
+        "description": null,
+        "issuetype": {
+          "name": "Task",
+          "subtask": false
+        },
+        "priority": {
+          "name": "Medium"
+        },
+        "project": {
+          "key": "OPS",
+          "name": "OPS"
+        },
+        "reporter": {
+          "active": true,
+          "avatarUrls": {
+            "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=tomasz.wojcik",
+            "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=tomasz.wojcik",
+            "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=tomasz.wojcik",
+            "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=tomasz.wojcik"
+          },
+          "displayName": "Tomasz Wójcik",
+          "emailAddress": "tomasz.wojcik@tidewater.example",
+          "key": "JIRAUSER10103",
+          "name": "tomasz.wojcik",
+          "self": "http://mockd.test/rest/api/2/user?username=tomasz.wojcik",
+          "timeZone": "Europe/Berlin"
+        },
+        "status": {
+          "id": "10000",
+          "name": "To Do",
+          "statusCategory": {
+            "key": "new",
+            "name": "To Do"
+          }
+        },
+        "summary": "On-call runbook outdated",
+        "updated": "2026-08-19T02:00:00.000+0200",
+        "worklog": {
+          "maxResults": 0,
+          "startAt": 0,
+          "total": 0,
+          "worklogs": []
+        }
+      },
+      "id": "10006",
+      "key": "OPS-77",
+      "self": "http://mockd.test/rest/api/2/issue/10006"
+    },
+    {
+      "expand": "",
+      "fields": {
+        "assignee": {
+          "active": true,
+          "avatarUrls": {
+            "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=mara.lindqvist",
+            "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=mara.lindqvist",
+            "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=mara.lindqvist",
+            "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=mara.lindqvist"
+          },
+          "displayName": "Mara Lindqvist",
+          "emailAddress": "mara.lindqvist@tidewater.example",
+          "key": "JIRAUSER10100",
+          "name": "mara.lindqvist",
+          "self": "http://mockd.test/rest/api/2/user?username=mara.lindqvist",
+          "timeZone": "Europe/Berlin"
+        },
+        "comment": {
+          "comments": [],
+          "maxResults": 0,
+          "startAt": 0,
+          "total": 0
+        },
+        "created": "2026-08-04T02:00:00.000+0200",
+        "description": null,
+        "issuetype": {
+          "name": "Task",
+          "subtask": false
+        },
+        "priority": {
+          "name": "Medium"
+        },
+        "project": {
+          "key": "PAY",
+          "name": "PAY"
+        },
+        "reporter": {
+          "active": true,
+          "avatarUrls": {
+            "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=mara.lindqvist",
+            "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=mara.lindqvist",
+            "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=mara.lindqvist",
+            "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=mara.lindqvist"
+          },
+          "displayName": "Mara Lindqvist",
+          "emailAddress": "mara.lindqvist@tidewater.example",
+          "key": "JIRAUSER10100",
+          "name": "mara.lindqvist",
+          "self": "http://mockd.test/rest/api/2/user?username=mara.lindqvist",
+          "timeZone": "Europe/Berlin"
+        },
+        "status": {
+          "id": "10001",
+          "name": "Done",
+          "statusCategory": {
+            "key": "done",
+            "name": "Done"
+          }
+        },
+        "summary": "Rotate PSP credentials",
+        "updated": "2026-08-18T02:00:00.000+0200",
+        "worklog": {
+          "maxResults": 0,
+          "startAt": 0,
+          "total": 0,
+          "worklogs": []
+        }
+      },
+      "id": "10004",
+      "key": "PAY-219",
+      "self": "http://mockd.test/rest/api/2/issue/10004"
+    },
+    {
+      "expand": "",
+      "fields": {
+        "assignee": null,
+        "comment": {
+          "comments": [],
+          "maxResults": 0,
+          "startAt": 0,
+          "total": 0
+        },
+        "created": "2026-07-09T16:32:00.000+0200",
+        "description": null,
+        "issuetype": {
+          "name": "Epic",
+          "subtask": false
+        },
+        "priority": null,
+        "project": {
+          "key": "PAY",
+          "name": "PAY"
+        },
+        "reporter": {
+          "active": true,
+          "avatarUrls": {
+            "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=priya.nair",
+            "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=priya.nair",
+            "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=priya.nair",
+            "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=priya.nair"
+          },
+          "displayName": "Priya Nair",
+          "emailAddress": "priya.nair@tidewater.example",
+          "key": "JIRAUSER10102",
+          "name": "priya.nair",
+          "self": "http://mockd.test/rest/api/2/user?username=priya.nair",
+          "timeZone": "Europe/Berlin"
+        },
+        "status": {
+          "id": "3",
+          "name": "In Progress",
+          "statusCategory": {
+            "key": "indeterminate",
+            "name": "In Progress"
+          }
+        },
+        "summary": "Payout reliability",
+        "updated": "2026-07-23T16:32:00.000+0200",
+        "worklog": {
+          "maxResults": 0,
+          "startAt": 0,
+          "total": 0,
+          "worklogs": []
+        }
+      },
+      "id": "10000",
+      "key": "PAY-200",
+      "self": "http://mockd.test/rest/api/2/issue/10000"
+    }
+  ],
+  "maxResults": 100,
+  "startAt": 0,
+  "total": 7
+}

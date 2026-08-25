@@ -18,7 +18,7 @@ use crate::allowlist;
 use crate::state::{MockFault, MockState};
 
 /// One request that the vendored contract does not define, as mockd saw it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Violation {
     pub kind: ViolationKind,
     /// Upper-case HTTP verb.
@@ -34,7 +34,8 @@ pub struct Violation {
 }
 
 /// Why a request violated the contract.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ViolationKind {
     /// The path is not in the contract at all (a Cloud-dialect path, say).
     UnknownPath,
@@ -300,7 +301,12 @@ pub(crate) async fn unimplemented(State(state): State<Arc<MockState>>, req: Requ
 
 /// Records one violation against `req`, so every handler spells the fields the
 /// same way.
-fn record_violation(state: &MockState, req: &Request, kind: ViolationKind, detail: String) {
+pub(crate) fn record_violation(
+    state: &MockState,
+    req: &Request,
+    kind: ViolationKind,
+    detail: String,
+) {
     state.violations().record(Violation {
         kind,
         method: req.method().as_str().to_ascii_uppercase(),
