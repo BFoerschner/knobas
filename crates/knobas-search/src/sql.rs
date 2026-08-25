@@ -143,7 +143,7 @@ pub fn search_sql(
         (!filters.kinds.is_empty()).then(|| builder.param(Bind::Texts(filters.kinds.clone())));
     let days = filters
         .updated_within_days
-        .map(|days| builder.param(Bind::I32(i32::try_from(days).unwrap_or(i32::MAX))));
+        .map(|days| builder.param(Bind::I32(clamp_days(days))));
     // `mine` with an empty author list is not "no filter": it is knobas not
     // knowing who the user is. Binding the empty array matches nothing, which
     // is the honest answer; dropping the predicate would return everything.
@@ -325,6 +325,32 @@ where
         };
     }
     query
+}
+
+/// The largest `updated:` window the statement may ask Postgres for.
+///
+/// `now() - make_interval(days => $n)` has to land inside `timestamptz`, which
+/// bottoms out at 4713 BC -- about 2.4 million days back. Past that the server
+/// raises `timestamp out of range`, and the launcher turns a typo into an
+/// `IpcErrorCode::Internal` on its hot path.
+///
+/// Roughly 2,700 years, which is longer than any corpus and comfortably inside
+/// the range. The exact number does not matter; that it is a **clamp** and not
+/// a saturation does. Saturating at `i32::MAX` is the worst possible choice --
+/// that value is itself guaranteed to throw.
+const MAX_UPDATED_WITHIN_DAYS: i32 = 1_000_000;
+
+/// A day count Postgres can subtract from `now()`.
+///
+/// Clamped here rather than in the parser, and deliberately so: `SearchFilters`
+/// arrives from the frontend, so a **chip** carrying `updated_within_days:
+/// 4_294_967_295` never passes through `query::duration_days` at all. The
+/// engine's limit belongs at the engine's edge, which is the only place every
+/// caller goes through.
+fn clamp_days(days: u32) -> i32 {
+    i32::try_from(days)
+        .unwrap_or(MAX_UPDATED_WITHIN_DAYS)
+        .min(MAX_UPDATED_WITHIN_DAYS)
 }
 
 /// The result ordering, qualified with `prefix` (`""`, `"m."` or `"d."`).
@@ -590,6 +616,38 @@ mod tests {
                 built.sql
             );
         }
+    }
+
+    /// An `updated:` window Postgres cannot subtract must be clamped, never
+    /// saturated.
+    ///
+    /// `updated:99999999d` is one paste away and parses to exactly that. The
+    /// old code bound `i32::MAX`, which is *guaranteed* to raise `timestamp out
+    /// of range` -- so the saturation turned a harmless over-wide filter into
+    /// an error on the launcher's hot path.
+    #[test]
+    fn an_over_wide_updated_window_is_clamped_rather_than_saturated() {
+        assert_eq!(clamp_days(7), 7);
+        assert_eq!(
+            clamp_days(MAX_UPDATED_WITHIN_DAYS.cast_unsigned()),
+            MAX_UPDATED_WITHIN_DAYS
+        );
+        for days in [99_999_999_u32, u32::MAX, i32::MAX.cast_unsigned()] {
+            assert_eq!(clamp_days(days), MAX_UPDATED_WITHIN_DAYS, "{days}");
+        }
+        let built = search_sql(
+            &[&LIVE_ITEM],
+            Some("x"),
+            false,
+            &EffectiveFilters {
+                updated_within_days: Some(u32::MAX),
+                ..EffectiveFilters::default()
+            },
+            10,
+            50,
+        );
+        assert!(built.binds.contains(&Bind::I32(MAX_UPDATED_WITHIN_DAYS)));
+        assert!(!built.binds.contains(&Bind::I32(i32::MAX)));
     }
 
     /// `mine` with nobody behind it must still filter.

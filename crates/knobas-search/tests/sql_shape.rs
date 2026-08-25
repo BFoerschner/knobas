@@ -37,6 +37,15 @@ async fn pool() -> sqlx::PgPool {
     pool
 }
 
+/// A timestamp `n` days back.
+///
+/// Seeds pass this rather than a day count, so that a test which needs several
+/// rows to share one `item_updated_at` -- and they must share it *exactly*, or
+/// the tie it is pinning is not a tie -- can compute it once.
+fn days_ago(days: i64) -> DateTime<Utc> {
+    Utc::now() - Duration::days(days)
+}
+
 fn token(tag: &str) -> String {
     format!("zs{tag}{}", uuid::Uuid::new_v4().simple())
 }
@@ -50,7 +59,7 @@ async fn seed(
     title: &str,
     body: &str,
     author: Option<&str>,
-    updated_days_ago: i64,
+    updated_at: DateTime<Utc>,
 ) {
     sqlx::query("insert into knobas.entity (id, kind, title) values ($1,$2,$3)")
         .bind(id)
@@ -74,7 +83,7 @@ async fn seed(
     .bind(title)
     .bind(body)
     .bind(author)
-    .bind(Utc::now() - Duration::days(updated_days_ago))
+    .bind(updated_at)
     .execute(pool)
     .await
     .unwrap();
@@ -104,7 +113,7 @@ async fn a_generated_query_runs_and_carries_every_column_the_launcher_draws() {
         &format!("Retry failed {tag} payouts"),
         "Payouts that bounce should be retried with backoff.",
         Some("mara"),
-        1,
+        days_ago(1),
     )
     .await;
     seed(
@@ -115,7 +124,7 @@ async fn a_generated_query_runs_and_carries_every_column_the_launcher_draws() {
         &format!("Add {tag} retry backoff"),
         "Implements the retry.",
         Some("jonas"),
-        2,
+        days_ago(2),
     )
     .await;
 
@@ -186,7 +195,7 @@ async fn the_best_match_comes_first_and_recency_only_breaks_ties() {
         &format!("The {tag} rollout"),
         "Unrelated prose about batch windows and ledgers.",
         None,
-        30,
+        days_ago(30),
     )
     .await;
     seed(
@@ -197,7 +206,7 @@ async fn the_best_match_comes_first_and_recency_only_breaks_ties() {
         "Quarterly planning",
         &format!("Somewhere in here we mention {tag} once."),
         None,
-        0,
+        days_ago(0),
     )
     .await;
 
@@ -229,6 +238,126 @@ async fn the_best_match_comes_first_and_recency_only_breaks_ties() {
     assert!(ranks[0] > ranks[1], "{ranks:?}");
 }
 
+/// The last ordering key: when rank *and* timestamp tie, `entity_id` decides.
+///
+/// I first declined to pin this, on the theory that Postgres is free to return
+/// either order without the key and a test would be asserting an accident. That
+/// was wrong, and the review proved it: with the key deleted the server returns
+/// the rows in insertion order, deterministically, so the mutation is perfectly
+/// catchable. Four rows share one title (hence one `ts_rank_cd`) and one
+/// literal `item_updated_at`, and are inserted in reverse alphabetical order --
+/// so only the `entity_id` key can produce the expected result.
+///
+/// It matters beyond tidiness: a mirror is written by one transaction, so ties
+/// are the common case, and without a total order two identical queries can
+/// return two different pages.
+#[tokio::test]
+async fn rows_tied_on_rank_and_timestamp_are_ordered_by_entity_id() {
+    let pool = pool().await;
+    let tag = token("t");
+    // One timestamp, computed once: "both a day old" is not a tie.
+    let stamp = days_ago(3);
+    for suffix in ["d", "c", "b", "a"] {
+        seed(
+            &pool,
+            &format!("sq-jira:{tag}-{suffix}"),
+            "ticket",
+            "sq-jira",
+            &format!("{tag} identical title"),
+            "identical body",
+            None,
+            stamp,
+        )
+        .await;
+    }
+
+    let rows = run(
+        &pool,
+        search_sql(
+            &[&LIVE_ITEM],
+            Some(&tag),
+            false,
+            &EffectiveFilters::default(),
+            10,
+            50,
+        ),
+    )
+    .await;
+    let found = hits(&rows);
+
+    // The tie is real, or this test pins nothing.
+    let ranks: Vec<f32> = found.iter().map(|r| r.rank.unwrap()).collect();
+    assert!(
+        ranks.windows(2).all(|pair| pair[0] == pair[1]),
+        "the rows must tie on rank: {ranks:?}"
+    );
+    let stamps: Vec<DateTime<Utc>> = found.iter().map(|r| r.updated_at.unwrap()).collect();
+    assert!(
+        stamps.windows(2).all(|pair| pair[0] == pair[1]),
+        "the rows must tie on timestamp: {stamps:?}"
+    );
+
+    let ids: Vec<String> = found.iter().map(|r| r.entity_id.clone().unwrap()).collect();
+    assert_eq!(
+        ids,
+        [
+            format!("sq-jira:{tag}-a"),
+            format!("sq-jira:{tag}-b"),
+            format!("sq-jira:{tag}-c"),
+            format!("sq-jira:{tag}-d"),
+        ],
+        "insertion order was d, c, b, a -- only the entity_id key reverses it"
+    );
+}
+
+/// An `updated:` window wider than Postgres can subtract must still answer.
+///
+/// `now() - make_interval(days => $n)` has to land inside `timestamptz`, which
+/// bottoms out around 2.4 million days back. `updated:99999999d` parses to a
+/// perfectly ordinary `u32`, and binding it -- or worse, saturating to
+/// `i32::MAX` as the first cut did -- makes the server raise `timestamp out of
+/// range`, which the launcher shows as an internal error for what is really
+/// just a very wide filter.
+#[tokio::test]
+async fn an_absurd_updated_window_answers_instead_of_erroring() {
+    let pool = pool().await;
+    let tag = token("w");
+    seed(
+        &pool,
+        &format!("sq-jira:{tag}"),
+        "ticket",
+        "sq-jira",
+        &format!("{tag} still findable"),
+        "body",
+        None,
+        days_ago(1),
+    )
+    .await;
+
+    for days in [7_u32, 99_999_999, u32::MAX] {
+        let rows = run(
+            &pool,
+            search_sql(
+                &[&LIVE_ITEM],
+                Some(&tag),
+                false,
+                &EffectiveFilters {
+                    updated_within_days: Some(days),
+                    ..EffectiveFilters::default()
+                },
+                10,
+                50,
+            ),
+        )
+        .await;
+        assert_eq!(
+            hits(&rows).len(),
+            1,
+            "updated_within_days = {days}: {rows:?}"
+        );
+    }
+}
+
 /// The carry-over this query was rewritten for: the per-kind count is the
 /// number of **matches**, not the number of rows that fit on the page.
 ///
@@ -249,7 +378,7 @@ async fn the_limit_cuts_the_page_and_never_the_totals() {
             &format!("{tag} ticket {n}"),
             "body",
             Some("mara"),
-            i64::from(n),
+            days_ago(i64::from(n)),
         )
         .await;
     }
@@ -264,7 +393,7 @@ async fn the_limit_cuts_the_page_and_never_the_totals() {
             Some("mara"),
             // Older than every ticket, so a global limit of 1 keeps a ticket
             // and leaves the `pr` group with no hit at all.
-            10 + i64::from(n),
+            days_ago(10 + i64::from(n)),
         )
         .await;
     }
@@ -343,7 +472,7 @@ async fn every_filter_narrows_the_match_and_none_of_them_is_a_literal() {
         &format!("{tag} recent mine"),
         "body",
         Some("mara"),
-        1,
+        days_ago(1),
     )
     .await;
     seed(
@@ -354,7 +483,7 @@ async fn every_filter_narrows_the_match_and_none_of_them_is_a_literal() {
         &format!("{tag} old theirs"),
         "body",
         Some("jonas"),
-        90,
+        days_ago(90),
     )
     .await;
 
@@ -442,7 +571,7 @@ async fn a_half_typed_word_matches_as_a_prefix_and_a_finished_one_does_not() {
         &format!("{tag}extra payouts"),
         "body",
         None,
-        1,
+        days_ago(1),
     )
     .await;
 
@@ -513,7 +642,7 @@ async fn browse_mode_orders_by_recency_and_ranks_nothing() {
             &format!("browse {n}"),
             "body",
             None,
-            i64::from(n),
+            days_ago(i64::from(n)),
         )
         .await;
     }
@@ -564,7 +693,7 @@ async fn a_tombstoned_item_is_not_a_result() {
         &format!("Withdrawn {tag} work"),
         "gone upstream",
         None,
-        1,
+        days_ago(1),
     )
     .await;
 

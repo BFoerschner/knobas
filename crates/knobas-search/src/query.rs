@@ -327,22 +327,30 @@ fn apply_key_value(
             parsed.claim_prefix(Prefix::Source);
             resolve_sources(parsed, vocab, value, token);
         }
-        // `kind:` is unambiguous, so it is taken at face value: a kind nothing
-        // emits simply matches nothing, which is a truthful empty result.
-        "kind" => {
+        // Two spellings, one filter, and only one of them is ambiguous.
+        //
+        // `kind:` is taken at face value: a kind nothing emits simply matches
+        // nothing, which is a truthful empty result rather than a guess.
+        //
+        // `type:` is ambiguous -- §4 gives it to the *estate* chips
+        // (`type:hypervisor`), which are M4 -- so it is a kind filter only
+        // when the catalog says the value names a kind. But the catalog can
+        // only say that when it knows anything at all: an **empty** catalog is
+        // not evidence that `build` is not a kind, it is knobas not yet having
+        // been told what kinds exist (**E-Q2**; `KindCatalog::default()` is
+        // what the product ships with until stream F's registry is wired). A
+        // disambiguator with no information must not act as a rejecter, so
+        // `type:` falls back to `kind:` while the catalog is empty -- which is
+        // also what makes §4's own `type:build` work today.
+        //
+        // The consequence, recorded rather than hidden: while the catalog is
+        // empty, `type:hypervisor` is a kind filter matching nothing instead
+        // of a reported token. It starts being reported the moment any adapter
+        // declares its kinds, which is well before an asset exists to filter.
+        "kind" | "type" => {
             if value.is_empty() {
                 parsed.unknown(token);
-            } else {
-                push_unique(&mut parsed.query.filters.kinds, value);
-            }
-        }
-        // `type:` is not unambiguous -- §4 gives it to the *estate* chips
-        // (`type:hypervisor`), which are M4. So it is a kind filter only when
-        // it names a kind an adapter actually declared, and an unknown token
-        // otherwise. Reading `type:hypervisor` as a kind filter would return
-        // an empty list that looks like an answer.
-        "type" => {
-            if vocab.kinds.is_declared(value) {
+            } else if key == "kind" || vocab.kinds.is_empty() || vocab.kinds.is_declared(value) {
                 push_unique(&mut parsed.query.filters.kinds, value);
             } else {
                 parsed.unknown(token);
@@ -437,6 +445,7 @@ fn push_unique(into: &mut Vec<String>, value: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vocab::KindCatalog;
 
     fn fixture() -> Vocabulary {
         Vocabulary::fixture()
@@ -599,6 +608,67 @@ mod tests {
         assert!(p.query.unknown_tokens.is_empty());
         assert!(p.query.filters.sources.is_empty());
         assert_eq!(p.query.text, "jira:PAY-231");
+    }
+
+    /// `type:` is disambiguated by the catalog -- but only once the catalog
+    /// knows something.
+    ///
+    /// Every other `type:` assertion in this file runs against
+    /// `Vocabulary::fixture()`, which declares five kinds. The **shipped**
+    /// catalog is `KindCatalog::default()`, which declares none, and gating on
+    /// an empty catalog would make every `type:X` an unknown token in the
+    /// product -- including §4's own `type:build`. This pins both states, so
+    /// the fixture cannot flatter the behaviour again.
+    #[test]
+    fn type_falls_back_to_kind_while_the_catalog_is_empty() {
+        let populated = Vocabulary::fixture();
+        let empty = Vocabulary {
+            kinds: KindCatalog::default(),
+            ..Vocabulary::fixture()
+        };
+        assert!(empty.kinds.is_empty() && !populated.kinds.is_empty());
+
+        // What the product does today.
+        assert_eq!(parse("type:build", &empty).query.filters.kinds, ["build"]);
+        assert!(parse("type:build", &empty).query.unknown_tokens.is_empty());
+        // ... and the price of it, stated out loud: with nothing declared, an
+        // estate key is a kind filter that matches nothing.
+        assert_eq!(
+            parse("type:hypervisor", &empty).query.filters.kinds,
+            ["hypervisor"]
+        );
+
+        // What it does once an adapter has declared its kinds.
+        assert_eq!(
+            parse("type:build", &populated).query.filters.kinds,
+            ["build"]
+        );
+        assert!(
+            parse("type:hypervisor", &populated)
+                .query
+                .filters
+                .kinds
+                .is_empty()
+        );
+        assert_eq!(
+            parse("type:hypervisor", &populated).query.unknown_tokens,
+            ["type:hypervisor"]
+        );
+
+        for vocab in [&empty, &populated] {
+            // `kind:` is the unambiguous spelling and never consults the
+            // catalog, in either state.
+            assert_eq!(
+                parse("kind:hypervisor", vocab).query.filters.kinds,
+                ["hypervisor"]
+            );
+            // And neither spelling may filter on the empty string.
+            for raw in ["kind:", "type:"] {
+                let parsed = parse(raw, vocab);
+                assert!(parsed.query.filters.kinds.is_empty(), "{raw:?}");
+                assert_eq!(parsed.query.unknown_tokens, [raw], "{raw:?}");
+            }
+        }
     }
 
     /// A named person has no field in `SearchFilters` (**E-Q1**), so the

@@ -309,6 +309,18 @@ impl KindCatalog {
         self.declared.keys().cloned().collect()
     }
 
+    /// Whether the catalog knows of any kind at all.
+    ///
+    /// An empty catalog is **not** the statement "there are no kinds"; it is
+    /// knobas not yet knowing what kinds exist, because nothing wires the
+    /// adapter registry through until stream F's `list_adapters` (open question
+    /// **E-Q2**). Callers that disambiguate on [`Self::is_declared`] have to
+    /// check this first, or they will read "I have not been told" as "no".
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.declared.is_empty()
+    }
+
     /// Whether an adapter declared this kind.
     ///
     /// The grammar needs this to tell `type:build` (a kind filter) from
