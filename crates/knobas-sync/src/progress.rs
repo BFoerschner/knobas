@@ -18,6 +18,8 @@
 //! the sink is an ordinary `Option<&dyn ProgressSink>`, so the engine has one
 //! code path either way.
 
+use knobas_source::{Cursor, Sink, Source, SourceError, SyncItem};
+
 /// One progress message.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SyncProgress {
@@ -50,6 +52,136 @@ pub trait ProgressSink: Send + Sync {
     /// Report one message. Implementations must not block or fail the run: a
     /// webview that stopped listening is not a sync error.
     fn report(&self, progress: SyncProgress);
+}
+
+/// Report at most this often, whatever the item rate.
+const THROTTLE: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// …and at least this often by count, so a burst between two clock ticks does
+/// not go entirely unreported on a fast local source.
+const EVERY_N_ITEMS: u64 = 250;
+
+/// An adapter that reports what it pushes.
+///
+/// **A decorator, not a hook in the engine.** Threading a progress callback
+/// through `run_once` would put a reporting concern inside the engine's
+/// transaction and make it everyone's to maintain. Wrapping the *adapter*
+/// instead reaches exactly the same items, needs no change to `run_once` at
+/// all, and costs nothing when nobody attached a channel -- the scheduler just
+/// does not build one.
+///
+/// Borrows the real adapter rather than owning it: the registry hands out a
+/// `Box<dyn Source>`, and moving it in would force every caller into the same
+/// shape whether it wants progress or not.
+pub struct Observed<'a> {
+    inner: &'a dyn Source,
+    run_id: i64,
+    started: std::time::Instant,
+    sink: std::sync::Arc<dyn ProgressSink>,
+}
+
+impl<'a> Observed<'a> {
+    /// `started` is the *run's* start, not the decorator's, so `elapsed_ms`
+    /// measures what the user has been waiting rather than when the wrapper
+    /// happened to be built.
+    #[must_use]
+    pub fn new(
+        inner: &'a dyn Source,
+        run_id: i64,
+        started: std::time::Instant,
+        sink: std::sync::Arc<dyn ProgressSink>,
+    ) -> Observed<'a> {
+        Observed {
+            inner,
+            run_id,
+            started,
+            sink,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Source for Observed<'_> {
+    /// Verbatim. The engine builds its namespace and kind guards out of this,
+    /// and reads `full_sync_exhaustive` off it to decide whether to sweep, so
+    /// anything but delegation here changes what the run *does*.
+    fn descriptor(&self) -> knobas_source::SourceDescriptor {
+        self.inner.descriptor()
+    }
+
+    async fn test_connection(&self) -> Result<knobas_source::ConnectionInfo, SourceError> {
+        self.inner.test_connection().await
+    }
+
+    async fn sync(
+        &self,
+        cursor: Option<Cursor>,
+        sink: &mut (dyn Sink + Send),
+    ) -> Result<Cursor, SourceError> {
+        let source_id = self.inner.descriptor().id;
+        let mut counting = Counting {
+            inner: sink,
+            // So the first accepted item reports at once: a wizard that
+            // attached a channel should see the bar move, not wait 250 ms to
+            // learn the run started.
+            reported_at: std::time::Instant::now() - THROTTLE,
+            seen: 0,
+            run_id: self.run_id,
+            source_id,
+            started: self.started,
+            sink: std::sync::Arc::clone(&self.sink),
+        };
+        let result = self.inner.sync(cursor, &mut counting).await;
+        // One final message either way, so the bar reaches the count the run
+        // actually pushed instead of stopping at the last throttled sample --
+        // and so a run that pushed nothing still says so.
+        counting.emit();
+        result
+    }
+
+    async fn write(&self, op: knobas_source::WriteOp) -> Result<(), SourceError> {
+        self.inner.write(op).await
+    }
+}
+
+/// The sink the adapter is really handed.
+struct Counting<'s> {
+    inner: &'s mut (dyn Sink + Send),
+    reported_at: std::time::Instant,
+    seen: u64,
+    run_id: i64,
+    source_id: String,
+    started: std::time::Instant,
+    sink: std::sync::Arc<dyn ProgressSink>,
+}
+
+impl Counting<'_> {
+    fn emit(&mut self) {
+        self.reported_at = std::time::Instant::now();
+        self.sink.report(SyncProgress {
+            run_id: self.run_id,
+            source_id: self.source_id.clone(),
+            phase: SyncPhase::Fetching,
+            items: self.seen,
+            elapsed_ms: u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            message: None,
+        });
+    }
+}
+
+#[async_trait::async_trait]
+impl Sink for Counting<'_> {
+    async fn item(&mut self, item: SyncItem) -> Result<(), SourceError> {
+        // The real sink first, and the count only on success: an item is
+        // "seen" once it has been accepted, so a rejected item never inflates
+        // the number the wizard shows.
+        self.inner.item(item).await?;
+        self.seen += 1;
+        if self.seen.is_multiple_of(EVERY_N_ITEMS) || self.reported_at.elapsed() >= THROTTLE {
+            self.emit();
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
