@@ -18,6 +18,9 @@
 use std::collections::BTreeMap;
 
 use knobas_source::{KindInfo, SourceDescriptor};
+use sqlx::PgPool;
+
+use crate::SearchError;
 
 /// One configured source instance, as the grammar sees it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,7 +83,81 @@ const SOURCE_ALIASES: &[(&str, &str)] = &[
     ("flowrun", "asset"),
 ];
 
+/// The one query a vocabulary is loaded with.
+///
+/// It stays **one** query on purpose: this runs on the hot path of every
+/// keystroke, and a second round trip per search costs more than the search.
+///
+/// `kind` is `0001`'s column name for the *adapter* kind; interfaces §2.2 spells
+/// the DTO field `adapter_kind`. Renaming the column would be a migration, and
+/// `0002` was the only one M1 gets -- so the alias lives here.
+///
+/// The columns are named rather than `select *`ed. That is a rule for every
+/// query in this crate (interfaces §1): the mirror's view carries a `tsvector`,
+/// and reading one into a `FromRow` struct panics at runtime.
+const SOURCE_VOCAB_SQL: &str = r"
+select id,
+       kind                  as adapter_kind,
+       display_name,
+       -- 'Who am I' is not a setting anyone should have to fill in twice: it
+       -- is the username each source was configured with (interfaces §4.2).
+       config ->> 'username' as username
+  from knobas.source_config
+ where enabled
+ order by id
+";
+
+#[derive(sqlx::FromRow)]
+struct SourceConfigRow {
+    id: String,
+    adapter_kind: String,
+    display_name: String,
+    username: Option<String>,
+}
+
 impl Vocabulary {
+    /// Read the configured sources and the identity behind `@me`.
+    ///
+    /// The [`KindCatalog`] is passed in rather than loaded: it comes from the
+    /// compiled-in adapters, not from the database, and the caller is the one
+    /// that has the registry (open question **E-Q2**).
+    ///
+    /// A **disabled** source is not in the vocabulary at all, so `/ji` stops
+    /// resolving to it and the token is reported as unknown. That is the
+    /// truthful answer -- its rows are still in the mirror, but the user turned
+    /// the source off.
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Db`] if the configuration cannot be read.
+    pub async fn load(pool: &PgPool, kinds: KindCatalog) -> Result<Self, SearchError> {
+        let rows = sqlx::query_as::<_, SourceConfigRow>(SOURCE_VOCAB_SQL)
+            .fetch_all(pool)
+            .await?;
+        let sources: Vec<SourceVocab> = rows
+            .into_iter()
+            .map(|row| SourceVocab {
+                id: row.id,
+                adapter_kind: row.adapter_kind,
+                display_name: row.display_name,
+                // A blank username is the JSON field being present and empty,
+                // which is nobody -- and an empty string in `identity` would
+                // make `@me` match every item with no author.
+                username: row.username.filter(|name| !name.trim().is_empty()),
+            })
+            .collect();
+
+        let mut identity: Vec<String> = sources.iter().filter_map(|s| s.username.clone()).collect();
+        identity.sort_unstable();
+        identity.dedup();
+
+        Ok(Self {
+            sources,
+            identity,
+            kinds,
+        })
+    }
+
     /// Which configured source instances a `/token` or `source:token` names.
     ///
     /// Resolution order, most specific first:
