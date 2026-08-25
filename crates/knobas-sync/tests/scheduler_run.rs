@@ -20,6 +20,19 @@ use knobas_sync::scheduler::{
 /// (`knobas-app/src/sources/registry.rs`), which `knobas-sync` must not see.
 struct MockRegistry {
     fault: Mutex<Fault>,
+    /// Whether the built mock emits its one deleted item.
+    ///
+    /// Not decoration: it is the only way this harness can produce a run whose
+    /// `deleted` differs from its `swept`, and without that difference the
+    /// field-by-field comparison in
+    /// `a_healthy_run_is_logged_ok_...` cannot fail -- swapping the two
+    /// bindings in `run_log::finish` left it green, because both were `0`.
+    ///
+    /// `knobas_source_mock::build` cannot express this (it ignores
+    /// `instance.config` and hardcodes `MockSource::new()`), which is why the
+    /// harness builds the mock itself rather than going through the real
+    /// registry.
+    tombstone: Mutex<bool>,
 }
 
 impl AdapterRegistry for MockRegistry {
@@ -28,9 +41,14 @@ impl AdapterRegistry for MockRegistry {
     }
     fn build(&self, instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
         let fault = *self.fault.lock().unwrap();
+        let inner = if *self.tombstone.lock().unwrap() {
+            MockSource::with_tombstone()
+        } else {
+            MockSource::with_fault(fault)
+        };
         Ok(Box::new(Renamed {
             id: instance.id,
-            inner: MockSource::with_fault(fault),
+            inner,
         }))
     }
 }
@@ -158,6 +176,7 @@ async fn harness(auth: AuthKind, with_secret: bool) -> Harness {
     let events = Arc::new(Recorder::default());
     let registry = Arc::new(MockRegistry {
         fault: Mutex::new(Fault::None),
+        tombstone: Mutex::new(false),
     });
 
     Harness {
@@ -201,6 +220,13 @@ async fn one_run(h: &Harness, trigger: SyncTrigger) -> (run_log::SyncRunRow, run
 #[tokio::test]
 async fn a_healthy_run_is_logged_ok_clears_backoff_and_marks_the_credential_good() {
     let h = harness(AuthKind::Method(AuthMethod::Pat), true).await;
+    // The tombstoning mock, so this run's three counts are **three different
+    // numbers** (21 upserted, 1 deleted, 0 swept). With the plain mock they
+    // were 21/0/0, and the field-by-field comparison below could not fail:
+    // swapping `deleted` and `swept` in `run_log::finish` gave 12 passed, 0
+    // failed. The unit test on `RunCounts::of` says "values are all different
+    // on purpose"; the same reasoning was missing one level up.
+    *h.registry.tombstone.lock().unwrap() = true;
     config::set_backoff(
         &h.deps.pool,
         &h.id,
@@ -229,6 +255,18 @@ async fn a_healthy_run_is_logged_ok_clears_backoff_and_marks_the_credential_good
     assert_eq!(
         row.cursor_after, result.counts.cursor_after,
         "the position recorded is the position the run returned"
+    );
+    // ...and the three really are distinct, so each of the three possible
+    // swaps has a value that separates it. An assertion that can only fail on
+    // a fixture nobody checked is the shape this test was in.
+    assert_eq!(row.deleted, 1, "the tombstoning mock withdrew one item");
+    assert_eq!(row.swept, 0, "nothing to sweep on a source's first run");
+    assert!(
+        row.upserted != row.deleted && row.deleted != row.swept && row.upserted != row.swept,
+        "the counts must differ, or a swapped pair is invisible: {} / {} / {}",
+        row.upserted,
+        row.deleted,
+        row.swept
     );
     assert!(
         row.cursor_after.is_some(),

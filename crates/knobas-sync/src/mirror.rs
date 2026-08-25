@@ -160,6 +160,19 @@ mod tests {
     /// A net that cannot be shown to catch anything is not evidence there was
     /// nothing to catch -- and this net's first version caught nothing, because
     /// it searched the whole file.
+    ///
+    /// # What each part of this fixture is for
+    ///
+    /// Every feature here exists so that some assertion below *can fail*:
+    /// `Other` and `After` for the scoping, the comment for the prose filter,
+    /// `beta?` for the optional marker -- and `nested`'s inline object is
+    /// deliberately spread over **three lines**, because [`declared_fields`]
+    /// iterates by line. Written on one line (`nested: { inner: string };`) its
+    /// field is never a candidate at all, so removing the depth guard left all
+    /// nine of these tests green *including the one that names it*. A correct
+    /// assertion whose fixture cannot produce the case it is about is not a
+    /// test. There are no inline object types on the bridge today, which is
+    /// precisely why the branch needs a witness here rather than a caller.
     const SAMPLE: &str = r#"
 export interface Other {
   run_id: number;
@@ -172,7 +185,9 @@ export interface Thing {
   alpha: string;
   /** beta does something */
   beta?: number | null;
-  nested: { deep: string };
+  nested: {
+    inner: string;
+  };
 }
 
 export interface After {
@@ -192,7 +207,10 @@ export interface After {
     fn the_body_is_brace_matched_and_stops_at_the_interface_it_names() {
         let body = interface_body(SAMPLE, "Thing");
         assert!(body.contains("alpha:"));
-        assert!(body.contains("deep:"), "a nested object is inside the body");
+        assert!(
+            body.contains("inner:"),
+            "a nested object is inside the body"
+        );
         assert!(
             !body.contains("gamma:"),
             "the match ran past the closing brace into the next interface"
@@ -212,7 +230,7 @@ export interface After {
             "a field name mentioned in a comment is not a declaration"
         );
         assert!(
-            !fields.contains(&"deep"),
+            !fields.contains(&"inner"),
             "a field of an inline object type belongs to that object, not to \
              the interface"
         );
