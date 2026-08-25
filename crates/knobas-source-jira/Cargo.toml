@@ -7,6 +7,7 @@ license.workspace = true
 # The Jira Data Center adapter. Read-only in M1: it maps issues, comments and
 # worklogs into SyncItems and never writes back (interfaces doc §4.1).
 [dependencies]
+async-trait.workspace = true
 chrono.workspace = true
 knobas-core = { path = "../knobas-core" }
 knobas-http = { path = "../knobas-http" }
@@ -15,4 +16,8 @@ serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+# The HTTP-level mock the exit criteria are certified against (interfaces §5).
+# A dev-dependency only: nothing in the shipped adapter knows mockd exists.
+knobas-mockd = { path = "../knobas-mockd" }
+serde_json.workspace = true
 tokio.workspace = true
