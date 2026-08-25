@@ -44,9 +44,27 @@ every functional test — `q` was a materialised CTE, so the planner was blind t
 first fix silently decayed on the sixth keystroke of every session. The second is the one to review
 hardest: a plan that is correct five times and wrong thereafter passes any test that runs once.
 
-**Four branches carry unmerged work**, each with a resumption report in
-`.superpowers/sdd/<plan>/` (git-ignored, local only — read them before resuming a stream):
-`m1/gitea`, `m1/teamcity`, `m1/search-ipc`, `m1/testenv-compose`.
+### The four unmerged branches — all pushed, all clean, none has a PR
+
+Each has a resumption report in `.superpowers/sdd/<plan>/` (git-ignored, local only). Read the
+report before resuming its stream; each ends with a sentence its author wanted read first.
+
+| Branch | Head | State | First thing on return |
+|---|---|---|---|
+| `m1/gitea` | `28abeef` | tasks 1–5 code-complete, 87 tests, 25/25 mutants | rebase, `just check`, open PR — **but settle the blocking ruling below first** |
+| `m1/teamcity` | `8a5ef30` | tasks 1–7 complete, 82 tests, 15/15 mutants | `just check` has **never** been run on this branch — do that, then PR |
+| `m1/search-ipc` | `71a3475` | tasks 8–10 complete, gate green, 27/33 mutants | rebase (expect one `generate_handler!` conflict, append-only — keep both lines), run the 6 perf mutants, PR |
+| `m1/testenv-compose` | `e552800` | tasks 12–14 complete; **task 15 (CI) not started** | task 15, then PR |
+
+Their authors' own warnings, worth more than any summary I could write:
+- *teamcity*: the mutation harness first reported "15 survivors" because it merged cargo's stdout
+  and stderr, parsed zero results, and an empty baseline passed its own green check.
+- *search*: the 100 ms gate passes at 64 ms — but only because the benchmark found a **cached
+  prepared statement** that made the fix decay on the sixth keystroke of every session.
+- *testenv*: the Kuma healthcheck used to pass on a Kuma with no socket.io server at all —
+  *"assume any other green light here is a proxy until you have mutated it."*
+- *gitea*: a 403/404 on one repository is fatal during a cursor-less run, not a skip — the literal
+  ruling would have let one refused repo lose its whole corpus to the sweep.
 
 Merged branches are kept on the remote deliberately. They look "unmerged" to
 `git merge-base --is-ancestor` because every PR was **squash**-merged; don't let that mislead you.
@@ -62,7 +80,13 @@ Merged branches are kept on the remote deliberately. They look "unmerged" to
 - **Concurrency is bounded by the machine, not by task independence** — see roadmap §3. Two
   heavy Rust implementers is the safe default; a five-agent wave once drove load to 79.7 on
   12 cores and the watchdog killed three of them.
-- Each worktree carries a ~6–25 GB `target/`. Reclaim on merge; sweep for orphaned Postgres
+- **Build artifacts were reclaimed at pause** (~20 GB) — the first `just check` in each worktree
+  rebuilds from scratch, roughly ten minutes. Source state is untouched. Disk left at 35 GiB free.
+- All Postgres instances were stopped cleanly and no containers are running. The compose volumes
+  are **kept and still seeded**, so `docker compose up -d` in `testenv/` returns a working Tidewater
+  immediately (Gitea, Uptime Kuma and mockd images are already local; TeamCity/Jira/Confluence were
+  deliberately never pulled).
+- Each worktree will re-grow a 6–25 GB `target/`. Reclaim on merge; sweep for orphaned Postgres
   before a wave (`ps aux | grep postgres`).
 
 ## ⚠ One blocking item before stream B merges
