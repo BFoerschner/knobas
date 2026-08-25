@@ -10,27 +10,39 @@
 //!
 //! Seeded (this crate's contract PR): the frozen types, the FTS query over
 //! `sync.live_item`, sentinel-based snippet segments, grouping by kind.
-//! **Stream E's:** the query parser (prefixes, aliases, `key:value`), the
-//! dynamic query builder that applies [`SearchFilters`] -- the one reviewed
-//! module allowed to use `AssertSqlSafe` (roadmap §4 gotcha 2) -- the built-in
-//! smart lists, and the empty-query board. Until then a filtered query is
-//! refused rather than silently answered unfiltered.
+//! **Stream E's:** the query parser ([`query`], [`vocab`]), the dynamic query
+//! builder that applies [`SearchFilters`] ([`sql`] -- the one reviewed module
+//! allowed to wrap a runtime-built statement, roadmap §4 gotcha 2), the
+//! built-in smart lists, and the empty-query board. Until the builder is wired
+//! into [`search`] a filtered query is refused rather than silently answered
+//! unfiltered.
+//!
+//! The gotcha-2 confinement is enforced, not merely intended: `tests/
+//! sql_containment.rs` fails the build if any file in this crate outside
+//! `sql.rs` so much as names the type, which is also why no other module here
+//! spells it out.
 //!
 //! The corpus is `sync.live_item` and nothing else: notes are M2 and asset
 //! ancestor paths are M4 (interfaces §2.4).
 
+pub mod corpus;
+pub mod query;
 pub mod snippet;
+pub mod sql;
 pub mod types;
+pub mod vocab;
 
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
+pub use query::{EffectiveFilters, Parsed, merge, parse};
 pub use types::{
     EntityRow, ParsedQuery, Prefix, ResultGroup, SearchFilters, SearchHit, SearchQuery,
     SearchResponse, Segment,
 };
+pub use vocab::{KindCatalog, SourceVocab, Vocabulary};
 
 /// Why a search could not be answered.
 #[derive(Debug, thiserror::Error)]
@@ -153,6 +165,11 @@ pub async fn search(pool: &PgPool, query: &SearchQuery) -> Result<SearchResponse
             .fetch_one(pool)
             .await?,
     );
+    // Derived metadata, because nothing has wired the adapter registry through
+    // yet (open question **E-Q2**): `KindCatalog::info` falls back to a label,
+    // a plural and a monogram worked out from the kind id, which is what a kind
+    // no compiled-in adapter declares needs anyway (spec §3a).
+    let catalog = KindCatalog::default();
     let mut groups: Vec<ResultGroup> = Vec::new();
     for row in rows {
         let hit = SearchHit {
@@ -171,12 +188,12 @@ pub async fn search(pool: &PgPool, query: &SearchQuery) -> Result<SearchResponse
         match groups.iter_mut().find(|group| group.kind == row.kind) {
             Some(group) => group.hits.push(hit),
             None => {
-                let (label, plural, monogram) = kind_display(&row.kind);
+                let info = catalog.info(&row.kind);
                 groups.push(ResultGroup {
                     kind: row.kind,
-                    label,
-                    plural,
-                    monogram,
+                    label: info.label,
+                    plural: info.plural,
+                    monogram: info.monogram,
                     total: saturating_u32(row.kind_total),
                     hits: vec![hit],
                 });
@@ -194,75 +211,4 @@ pub async fn search(pool: &PgPool, query: &SearchQuery) -> Result<SearchResponse
 
 fn saturating_u32(value: i64) -> u32 {
     u32::try_from(value).unwrap_or(u32::MAX)
-}
-
-/// Display metadata for a kind, derived from the kind string.
-///
-/// **A seed, and the one place stream E must replace.** §3a is explicit that
-/// the launcher renders a source's items from the adapter's
-/// `SourceDescriptor::entity_kinds` -- label, plural, monogram -- so that a new
-/// adapter needs no UI work. Until `list_adapters` is wired through (stream F's
-/// registry, stream E's grouping), this derives something legible rather than
-/// leaving the fields blank: `"pr"` becomes `Pr` / `Prs` / `PR`, which is
-/// wrong-but-visible, exactly the kind of wrong a reviewer catches.
-fn kind_display(kind: &str) -> (String, String, String) {
-    let mut chars = kind.chars();
-    let label = match chars.next() {
-        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-        None => String::new(),
-    };
-    let plural = format!("{label}s");
-    // Uppercase *then* take two, not the other way round: Unicode uppercasing
-    // is not length-preserving (`"ß"` uppercases to `"SS"`), so taking two
-    // characters first can yield three and break the fixed-width invariant the
-    // chip is drawn to -- the one the test below asserts.
-    let mut monogram: String = kind.to_uppercase().chars().take(2).collect();
-    while monogram.chars().count() < 2 {
-        monogram.push('·');
-    }
-    (label, plural, monogram)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The monogram is drawn into a fixed-width chip, so "two characters" is
-    /// an invariant and not a rough size.
-    ///
-    /// The trap is Unicode: uppercasing is not length-preserving, so taking
-    /// two characters and *then* uppercasing can yield three -- `"ßx"` becomes
-    /// `"SSX"`. Uppercasing first is what makes the invariant hold for every
-    /// kind an adapter can name, and only a non-ASCII kind shows the
-    /// difference.
-    #[test]
-    fn a_monogram_is_always_two_characters() {
-        for kind in [
-            "ticket",
-            "pr",
-            "b",
-            "",
-            "ßx",
-            "straße",
-            "über",
-            "日本語",
-            "É",
-        ] {
-            let (_, _, monogram) = kind_display(kind);
-            assert_eq!(
-                monogram.chars().count(),
-                2,
-                "kind {kind:?} produced {monogram:?}"
-            );
-        }
-    }
-
-    /// A short kind is padded rather than left ragged, and the padding is the
-    /// same character every time.
-    #[test]
-    fn a_short_kind_is_padded() {
-        assert_eq!(kind_display("pr").2, "PR");
-        assert_eq!(kind_display("b").2, "B·");
-        assert_eq!(kind_display("").2, "··");
-    }
 }
