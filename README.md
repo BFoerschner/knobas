@@ -80,17 +80,38 @@ against — then reports how many items were upserted. The button is idempotent;
 pressing it twice rewrites the same rows. Afterwards, searching for `sepa retry`
 finds `mock:PAY-231` in the `ticket` group.
 
+## Sync
+
+Each source has an interval measured from the **end** of its previous run
+(default five minutes), and the scheduler picks up whatever is due. *Sync now*
+returns as soon as the run is recorded — the UI never waits on a source.
+
+Every run holds a database connection of its own, outside the pools the rest of
+the app uses, and at most three run at a time; a slow source therefore cannot
+take a connection the window needs, however long the remote system takes to
+answer. A failure backs the source off 1 → 2 → 5 → 15 → 60 minutes. A 401 does
+not back off at all: only re-entering the credential can fix one, and retrying a
+rejected credential on a timer is how an account gets locked out.
+
+`KNOBAS_SECRET_STORE=memory` keeps credentials out of the OS keychain for a
+throwaway run — they then live for the length of the process.
+
 ## Shutting down
 
-Quitting the app (Cmd-Q, or closing the last window) stops the embedded server.
+Quitting the app (Cmd-Q, or closing the last window) stops the sync scheduler,
+cancelling whatever is in flight, and then stops the embedded server. Both are
+bounded: a quit during a thirty-second remote call does not wait it out.
+
 A signal does not: Ctrl-C under `just dev`, a `kill`, or a crash leaves the
 postmaster running.
 
 That orphan needs no cleanup — **just start knobas again**. The next start
 finds the server already serving its data directory and *adopts* it rather than
-fighting it for the lock, which also makes it a warm start. The catch is that an
-adopted server is not owned, so from then on no clean quit stops it; owning it
-properly is M1 stream F.
+fighting it for the lock, which also makes it a warm start. Since M1 it also
+takes *ownership* of it: the adopting process holds the same lock the starting
+one would, so the next clean quit stops the server for good. (A server a
+**live** sibling instance owns is never stopped by an adopter — two windows on
+one profile share it, and the one that started it is the one that stops it.)
 
 To stop one by hand, the server's own `pg_ctl` is the one that works — it is not
 on `PATH`, and it needs the data directory:
@@ -113,9 +134,10 @@ A reboot does the same thing.
 | `crates/knobas-db` | The database: embedded PostgreSQL lifecycle (start / adopt / stop) and the embedded migrations. |
 | `crates/knobas-source` | The adapter SPI — the `Source` trait, the contract battery, and the plain serde data every adapter exchanges. No database dependency, on purpose. |
 | `crates/knobas-source-mock` | The reference adapter: serves the Tidewater Freight fixture, talks to nothing. |
+| `crates/knobas-secrets` | *(new in M1)* The OS-keychain credential store behind a trait, with an in-memory store for tests and CI. Nothing secret ever reaches Postgres, and nothing reads a secret back over the bridge. |
 | `crates/knobas-search` | *(new in M1)* The launcher's read side: the FTS query over `sync.live_item`, in the `SearchQuery` → `SearchResponse` shape, with snippets as segments. |
 | `crates/knobas-http` | *(new in M1)* The HTTP transport the three real adapters share: one reqwest stack, retry classes, rate limiting, and the status → `SourceError` mapping. |
-| `crates/knobas-sync` | The sync engine — one run in one transaction: pull from a `Source`, upsert into `knobas.entity` and `sync.item`, advance the cursor — plus the run log, progress and credential-health types. |
+| `crates/knobas-sync` | The sync engine **and scheduler**: one run in one transaction (pull from a `Source`, upsert into `knobas.entity` and `sync.item`, advance the cursor), the full-sync sweep, cursors, backoff, credential health, the per-run log, and the ticker that decides when. |
 | `crates/knobas-app` | The Tauri shell: window, app state, database lifecycle, profiles, and the IPC commands. |
 | `app/` | The frontend — Svelte 5 runes on plain Vite, TypeScript strict. `app/src/lib/ipc/` mirrors the command surface, one file per Rust command module. |
 

@@ -157,11 +157,18 @@ async fn progress_is_throttled_rather_than_one_message_per_item() {
     );
     assert!(!reports.is_empty(), "but some progress must be reported");
     assert!(
-        reports
-            .iter()
-            .all(|r| r.run_id == 9 && r.phase == SyncPhase::Fetching),
-        "every message names its run and the phase it is in"
+        reports.iter().all(|r| r.run_id == 9),
+        "every message names its run"
     );
+    // Every message but the last is `Fetching`; the last is `Writing`, sent
+    // once the adapter has returned and the only work left is the engine's
+    // flush, sweep and commit. It is the one place that phase is true.
+    let (last, fetching) = reports.split_last().expect("some progress");
+    assert!(
+        fetching.iter().all(|r| r.phase == SyncPhase::Fetching),
+        "the fetch phase is what a decorated adapter reports while it fetches"
+    );
+    assert_eq!(last.phase, SyncPhase::Writing);
     // Monotonic: a progress bar that goes backwards is a bug report.
     assert!(reports.windows(2).all(|w| w[0].items <= w[1].items));
     assert_eq!(reports.last().unwrap().source_id, "flood");
@@ -187,9 +194,12 @@ async fn a_run_that_pushed_nothing_still_reports_once() {
     observed.sync(None, &mut counting).await.unwrap();
 
     let reports = recorder.seen();
-    assert_eq!(reports.len(), 1, "exactly the final message");
-    assert_eq!(reports[0].items, 0);
-    assert_eq!(reports[0].run_id, 3);
+    assert_eq!(
+        reports.iter().map(|r| r.phase).collect::<Vec<_>>(),
+        [SyncPhase::Fetching, SyncPhase::Writing],
+        "the final count, then the handover to the engine's writes"
+    );
+    assert!(reports.iter().all(|r| r.items == 0 && r.run_id == 3));
 }
 
 /// An item the sink refused is not an item the run pushed. Counting it would

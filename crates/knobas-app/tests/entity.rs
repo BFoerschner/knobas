@@ -26,7 +26,9 @@ async fn seeded() -> PgPool {
     let mut done = SEEDED.lock().await;
     if !*done {
         knobas_db::migrate::run(&pool).await.unwrap();
-        knobas_app::demo::demo_load_inner(&pool).await.unwrap();
+        knobas_app::sources::demo::demo_load_inner(&pool)
+            .await
+            .unwrap();
         // The tombstone channel, from the reference adapter rather than from a
         // test-local source: `with_tombstone` reports `PAY-198` as deleted, so
         // `knobas.entity.deleted_at` is set while its mirror row stays.

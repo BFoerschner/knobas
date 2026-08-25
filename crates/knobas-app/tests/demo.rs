@@ -6,7 +6,7 @@
 //! that source takes [`MOCK`] for its whole duration; a test that touches only
 //! an id no adapter answers to (`jira`) needs no lock.
 
-use knobas_app::demo;
+use knobas_app::sources::demo;
 
 /// Held by every test that syncs the `mock` source.
 ///
@@ -34,18 +34,9 @@ async fn demo_load_registers_once_and_syncs_the_same_rows_every_time() {
         .await
         .unwrap();
 
-    // Before anything registers it, the mock is an adapter knobas *has* but has
-    // not been told to use. Syncing it anyway would run a full fetch whose
-    // cursor the engine has no row to store, so every later sync would refetch
-    // the world -- silently. This assertion has to come first: the demo loads
-    // below are what create the row.
-    let unconfigured = demo::sync_now_inner(pool, "mock", None)
-        .await
-        .expect_err("an unregistered source must be refused");
-    assert!(
-        matches!(&unconfigured, demo::DemoError::NotConfigured(id) if id == "mock"),
-        "unexpected error: {unconfigured}"
-    );
+    // (An unregistered source being refused outright is
+    // `knobas_sync`'s `cursor::a_source_with_no_configuration_row_is_refused_...`;
+    // it moved there with the M0 `sync_now_inner` this file used to drive.)
 
     let first = demo::demo_load_inner(pool).await.unwrap();
     assert_eq!(first.source_id, "mock");
@@ -97,104 +88,75 @@ async fn demo_load_registers_once_and_syncs_the_same_rows_every_time() {
         "a re-run duplicated rows instead of upserting them"
     );
 
-    // The stored cursor is exactly what `sync_now` picks up: an incremental
-    // run from it has nothing left to do -- and P3 means the command hands
-    // back the run's id, so what it did is read from the log.
-    let run_id = demo::sync_now_inner(pool, "mock", None).await.unwrap();
-    let (outcome, upserted, cursor_after, finished_at): (
-        Option<String>,
-        i64,
-        Option<String>,
-        Option<chrono::DateTime<chrono::Utc>>,
-    ) = sqlx::query_as(
-        "select outcome, upserted, cursor_after, finished_at from knobas.sync_run where id = $1",
-    )
-    .bind(run_id)
-    .fetch_one(pool)
-    .await
-    .unwrap();
-    assert_eq!(outcome.as_deref(), Some("ok"));
-    assert_eq!(
-        upserted, 0,
-        "an incremental run over a frozen fixture writes nothing"
-    );
-    assert_eq!(cursor_after.as_deref(), Some(first.cursor.as_str()));
-    assert!(
-        finished_at.is_some(),
-        "a finished run must not look like a running one"
-    );
-}
-
-/// An unknown adapter is refused *as* an unknown adapter, and leaves no log
-/// line behind.
-///
-/// Both halves of one refusal, because they fail together and for one reason:
-/// `prepare_sync` resolves the adapter before it opens the `sync_run` row. The
-/// class matters because "no such adapter" is not "not configured yet" --
-/// `"jira"` is not something loading the demo data would fix -- and the
-/// absence of a row matters because the diagnostics view must not show a
-/// phantom run for a source the caller got wrong.
-#[tokio::test]
-async fn a_refused_sync_is_classified_and_writes_no_run() {
-    let pool = knobas_db::test_util::test_pool().await;
-    let pool = &pool;
-    knobas_db::migrate::run(pool).await.unwrap();
-
-    let runs = || async {
-        sqlx::query_scalar::<_, i64>(
-            "select count(*) from knobas.sync_run where source_id = 'jira'",
-        )
-        .fetch_one(pool)
+    // The stored cursor is exactly what the scheduler picks up: an incremental
+    // run from it has nothing left to do. Driven through the engine's own entry
+    // point, on a connection of its own -- the shape §10.6(c) requires and the
+    // shape the scheduler uses.
+    let mut conn = knobas_db::test_util::test_connector()
         .await
-        .unwrap()
-    };
-
-    let before = runs().await;
-    let error = demo::sync_now_inner(pool, "jira", None)
-        .await
-        .expect_err("M0 has no jira adapter");
-    assert!(
-        matches!(&error, demo::DemoError::UnknownSource(id) if id == "jira"),
-        "unexpected error: {error}"
-    );
-    assert_eq!(before, runs().await, "a refusal is not a run");
-}
-
-/// Ruling P3: per-item progress goes on the sink and nowhere else, and the run
-/// id is on every message so a UI listening to two runs can tell them apart.
-#[tokio::test]
-async fn a_run_reports_its_phases_to_the_progress_sink() {
-    use knobas_sync::{ProgressSink, SyncPhase, SyncProgress};
-
-    #[derive(Default)]
-    struct Recorder(std::sync::Mutex<Vec<SyncProgress>>);
-    impl ProgressSink for Recorder {
-        fn report(&self, progress: SyncProgress) {
-            self.0.lock().expect("recorder").push(progress);
-        }
-    }
-
-    let _guard = MOCK.lock().await;
-    let pool = knobas_db::test_util::test_pool().await;
-    let pool = &pool;
-    knobas_db::migrate::run(pool).await.unwrap();
-    demo::demo_load_inner(pool).await.unwrap();
-
-    let recorder = Recorder::default();
-    let run_id = demo::sync_now_inner(pool, "mock", Some(&recorder))
+        .connect()
         .await
         .unwrap();
-
-    let seen = recorder.0.lock().expect("recorder").clone();
-    let phases: Vec<SyncPhase> = seen.iter().map(|p| p.phase).collect();
+    let incremental = knobas_sync::run_from_stored_cursor(
+        &mut conn,
+        pool,
+        &knobas_source_mock::MockSource::new(),
+    )
+    .await
+    .unwrap();
     assert_eq!(
-        phases,
-        [SyncPhase::Started, SyncPhase::Finished],
-        "{seen:?}"
+        incremental.upserted, 0,
+        "an incremental run over a frozen fixture writes nothing"
+    );
+    assert_eq!(
+        incremental.cursor, first.cursor,
+        "and it leaves the position where the full sync put it"
+    );
+}
+
+/// An id no *configured source* answers to is refused as `NotFound`, and
+/// nothing is written.
+///
+/// M0 asserted this against `"jira"` as an id **no adapter** answered to. Jira
+/// is a compiled-in adapter now, so the interesting refusal moved: what makes
+/// an id unusable is having no `knobas.source_config` row, whatever adapters
+/// exist. Driven through `set_secret`, which is the real path a user reaches
+/// (*Re-enter password* on a row that has since been deleted); the half about
+/// leaving no `sync_run` behind is the scheduler's
+/// `scheduler_loop::triggering_a_source_that_does_not_exist_is_refused_without_a_log_row`.
+#[tokio::test]
+async fn an_unconfigured_source_cannot_be_reached() {
+    use std::sync::Arc;
+
+    let pool = knobas_db::test_util::test_pool().await;
+    knobas_db::migrate::run(&pool).await.unwrap();
+    let secrets: Arc<dyn knobas_secrets::SecretStore> =
+        Arc::new(knobas_secrets::MemoryStore::new());
+    let registry = knobas_app::sources::Registry::builtin();
+
+    let missing = format!("nope-{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
+    let error = knobas_app::sources::crud::set_secret(
+        &pool,
+        &secrets,
+        &registry,
+        &missing,
+        knobas_app::sources::SecretInput {
+            value: "pat".to_owned(),
+        },
+    )
+    .await
+    .expect_err("there is no such source");
+    assert!(
+        matches!(&error, knobas_app::sources::SourcesError::NotFound(id) if *id == missing),
+        "unexpected error: {error}"
+    );
+    assert_eq!(
+        knobas_app::sources::to_ipc(&error, Some(&missing)).code,
+        knobas_app::IpcErrorCode::NotFound
     );
     assert!(
-        seen.iter()
-            .all(|p| p.run_id == run_id && p.source_id == "mock")
+        secrets.get(&missing).unwrap().is_none(),
+        "a source that does not exist must not get a keychain item"
     );
 }
 

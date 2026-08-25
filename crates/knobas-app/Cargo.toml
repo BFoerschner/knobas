@@ -21,15 +21,23 @@ test-util = []
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+# `RunConnections` is an async trait, and this crate implements it over
+# `knobas_db::Connector`.
+async-trait.workspace = true
 # `EntityRow`'s two timestamps: `DateTime<Utc>` on the wire is RFC 3339.
 chrono.workspace = true
 knobas-core = { path = "../knobas-core" }
 knobas-db = { path = "../knobas-db" }
 # The launcher's read side: the search command is a shim over this crate.
 knobas-search = { path = "../knobas-search" }
+# The credential store, behind its trait. The concrete `KeyringStore` is picked
+# in `sources::start`; every test gets `MemoryStore` (interfaces §3).
+knobas-secrets = { path = "../knobas-secrets" }
 # The SPI, for the `Source` trait the M0 registry hands to the sync engine.
 knobas-source = { path = "../knobas-source" }
-# M0's only adapter, and the source demo mode loads.
+# One line per compiled-in adapter -- the registry in `sources/registry.rs` is
+# the only place in knobas that names them, and this is its manifest half.
+knobas-source-jira = { path = "../knobas-source-jira" }
 knobas-source-mock = { path = "../knobas-source-mock" }
 knobas-sync = { path = "../knobas-sync" }
 # `IpcError` is what every command rejects with, so it has to serialize.
@@ -55,6 +63,13 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
+# The CRUD tests inject an adapter that refuses to connect.
+async-trait.workspace = true
+# The scheduler tests inject an in-memory credential store.
+knobas-secrets = { path = "../knobas-secrets" }
+# `knobas_sync::mirror`: the one TypeScript-mirror assertion, shared rather
+# than copied -- this crate's DTOs need the same check `knobas-sync`'s do.
+knobas-sync = { path = "../knobas-sync", features = ["test-util"] }
 # Self-dev-dependency so this crate's own integration tests see
 # `AppState::over_pool` (same convention as `knobas-db`'s `test_util`).
 knobas-app = { path = ".", features = ["test-util"] }
@@ -67,3 +82,6 @@ knobas-db = { path = "../knobas-db", features = ["test-util"] }
 # is how the mock runtime reaches the commands.
 tauri = { version = "2", features = ["test"] }
 tokio.workspace = true
+# Per-test source ids: the database is shared across a test binary, and a
+# hardcoded id would make two tests each other's fixture.
+uuid.workspace = true

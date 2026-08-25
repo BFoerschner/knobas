@@ -1,22 +1,35 @@
 //! Sources, secrets, sync and diagnostics -- stream F (interfaces §2.2, §2.3).
+//! Mirrored in `app/src/lib/ipc/sources.ts`.
 //!
-//! Its `State<'_, Lifecycle>` is not an accident and is not stream D being
-//! tidy: carry-over §10.6(a). `AppState` exists only once PostgreSQL is up,
-//! and a `#[tauri::command]` resolves every argument *before* its body runs,
-//! so a command declaring `State<'_, AppState>` is rejected by Tauri itself
-//! during bring-up with the bare string `"state not managed"` -- no code for
-//! the frontend to branch on. `Lifecycle` is managed at build time and is
-//! always there; `lifecycle.pool()?` is the single place `not_ready` comes
-//! from.
+//! Every body is three lines because every decision lives in `crate::sources`,
+//! which has its own tests -- a `#[tauri::command]` cannot be called from one.
+//!
+//! # Two states, both fetched rather than declared
+//!
+//! Carry-over §10.6(a): a `#[tauri::command]` resolves *every* argument before
+//! its body runs, and neither `AppState` nor `SourcesState` exists until
+//! PostgreSQL is up. A command declaring either is rejected by Tauri itself
+//! during bring-up with the bare string `"state not managed"` -- no code, and
+//! `IpcErrorCode::NotReady` unreachable despite existing for exactly this. So:
+//! `State<'_, Lifecycle>` (managed at build time) for the pool, and
+//! `crate::sources::state(&app)` for the scheduler and the registry. Both
+//! rules are pinned by tests at the bottom of this file and in `commands/mod.rs`.
+//!
+//! **No command reads a secret back.** There is no function here that could,
+//! and `sources_crud::nothing_in_the_ipc_surface_reads_a_secret_back` scans
+//! this file to keep it that way.
 
-use tauri::{Emitter, State};
+use tauri::State;
 
+use crate::sources::{
+    ConnectionReport, NewSource, SecretInput, SourceDraft, SourcePatch, SourceSummary, crud, to_ipc,
+};
 use crate::{IpcError, Lifecycle};
 
 /// Register the demo source if absent, then sync it in full.
 ///
-/// Safe to call repeatedly: see [`crate::demo::demo_load_inner`], which owns
-/// the behaviour and the test for it.
+/// Safe to call repeatedly: see [`crate::sources::demo::demo_load_inner`],
+/// which owns the behaviour and the test for it.
 ///
 /// Refused outside the demo profile (ruling P13): the Tidewater fixture is
 /// twenty-one items of fiction, and a corpus that mixes it with real work is
@@ -37,230 +50,368 @@ pub async fn demo_load(
         )));
     }
     let pool = lifecycle.pool()?;
-    Ok(crate::demo::demo_load_inner(&pool).await?)
+    Ok(crate::sources::demo::demo_load_inner(&pool).await?)
 }
 
-/// The channel `sync_now_with_progress` reports on.
-///
-/// A local wrapper because the orphan rule forbids implementing
-/// `knobas_sync::ProgressSink` for `tauri::ipc::Channel` directly -- neither is
-/// this crate's type.
-struct ChannelProgress(tauri::ipc::Channel<knobas_sync::SyncProgress>);
+// -- §2.2: sources, secrets, credential health --------------------------------
 
-impl knobas_sync::ProgressSink for ChannelProgress {
-    fn report(&self, progress: knobas_sync::SyncProgress) {
-        // A webview that stopped listening is not a sync failure: the run is
-        // the point, the progress bar is not.
-        if let Err(error) = self.0.send(progress) {
-            tracing::debug!(%error, "dropping a progress message: nobody is listening");
-        }
-    }
+/// One descriptor template per compiled-in adapter kind (`id == adapter_kind`).
+///
+/// Touches neither the database nor the keychain: the Add-source form is
+/// generated from `config_schema` + `auth_methods`, and the launcher reads kind
+/// metadata, without instantiating anything. It therefore answers before
+/// bring-up, which is the point -- the form must be drawable on a cold start.
+#[tauri::command]
+pub fn list_adapters() -> Vec<knobas_source::SourceDescriptor> {
+    crate::sources::Registry::builtin().templates()
 }
 
-/// Start a sync of one configured source and return its `sync_run.id`.
+#[tauri::command]
+pub async fn list_sources<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<SourceSummary>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    crud::list(&state.pool, state.registry.as_ref())
+        .await
+        .map_err(|error| to_ipc(&error, None))
+}
+
+#[tauri::command]
+pub async fn add_source<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    input: NewSource,
+) -> Result<SourceSummary, IpcError> {
+    let state = crate::sources::state(&app)?;
+    let id = input.id.clone();
+    let summary = crud::add(&state.pool, &state.secrets, state.registry.as_ref(), input)
+        .await
+        .map_err(|error| to_ipc(&error, Some(&id)))?;
+    // A brand-new source is due now; do not make the user wait out a tick.
+    state.scheduler.wake();
+    Ok(summary)
+}
+
+#[tauri::command]
+pub async fn update_source<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    id: String,
+    patch: SourcePatch,
+) -> Result<SourceSummary, IpcError> {
+    let state = crate::sources::state(&app)?;
+    let summary = crud::update(&state.pool, state.registry.as_ref(), &id, patch)
+        .await
+        .map_err(|error| to_ipc(&error, Some(&id)))?;
+    // Re-enabling a source, or shortening its interval, may have made it due.
+    state.scheduler.wake();
+    Ok(summary)
+}
+
+#[tauri::command]
+pub async fn delete_source<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    id: String,
+    purge_items: bool,
+) -> Result<(), IpcError> {
+    let state = crate::sources::state(&app)?;
+    crud::delete(&state.pool, &state.secrets, &id, purge_items)
+        .await
+        .map_err(|error| to_ipc(&error, Some(&id)))
+}
+
+/// Store a credential for a saved source and test it (interfaces §3,
+/// "Re-enter").
 ///
-/// **Returns before the run finishes** (ruling P3): the log row is written,
-/// the run is spawned onto its own task, and the id comes back immediately. A
-/// UI must never wait on a source. What the run did is read back from
-/// `knobas.sync_run`; while it is in flight, `sync:state` says so -- one event
-/// when the run starts and one when it ends, which is what makes
-/// `EVENTS.syncState` worth listening to.
+/// Write-only: there is no command that reads one back.
+#[tauri::command]
+pub async fn set_source_secret<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    id: String,
+    secret: SecretInput,
+) -> Result<knobas_sync::config::CredentialHealth, IpcError> {
+    let state = crate::sources::state(&app)?;
+    let health = crud::set_secret(
+        &state.pool,
+        &state.secrets,
+        state.registry.as_ref(),
+        &id,
+        secret,
+    )
+    .await
+    .map_err(|error| to_ipc(&error, Some(&id)))?;
+    emit(&app, crate::events::SOURCE_HEALTH, &health);
+    // A credential that now works releases the backoff, so the source may be
+    // due this instant rather than at the next tick.
+    state.scheduler.wake();
+    Ok(health)
+}
+
+/// *Test connection*, for a draft or for a saved source. **Writes nothing.**
+#[tauri::command]
+pub async fn test_source<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    draft: SourceDraft,
+) -> Result<ConnectionReport, IpcError> {
+    let state = crate::sources::state(&app)?;
+    let id = draft.source_id.clone();
+    crud::test(&state.pool, &state.secrets, state.registry.as_ref(), draft)
+        .await
+        .map_err(|error| to_ipc(&error, id.as_deref()))
+}
+
+#[tauri::command]
+pub async fn credential_health<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<knobas_sync::config::CredentialHealth>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    crud::health(&state.pool)
+        .await
+        .map_err(|error| to_ipc(&error, None))
+}
+
+// -- §2.3: sync, status, the run log, diagnostics -----------------------------
+
+/// Start a sync of one source and return its `sync_run.id` **immediately**
+/// (P3).
 ///
-/// The two refusals happen *before* the return, so a typo is still an error
-/// the caller sees rather than a run id for a run that never started: an id no
-/// adapter answers to, and an id with no `knobas.source_config` row.
+/// It does not wait for the run: a network-bound sync behind a command is
+/// exactly the UI blocking on a source that §14 forbids. The coarse
+/// `sync:state` event fires when the run starts and again when it ends; what
+/// the run *did* is read from `list_sync_runs`.
 ///
-/// **Stream F replaces the bare `spawn`.** What is here is one spawn per
-/// call and nothing else: no concurrency cap, no queue, no backoff. That is
-/// adequate for M0's single in-memory adapter and a human pressing a button;
-/// it is *not* adequate for real sources, because a run holds one of the
-/// pool's five connections for its whole network-bound duration (M0
-/// carry-over). F's scheduler owns the cap, the queue, the backoff and the
-/// cursor-inside-the-lock fix. The **shape** is what this freezes: id out
-/// immediately, log row written first, coarse state on the event, per-item
-/// progress on the channel only.
+/// A source that is already syncing is not started twice -- the id of the run
+/// in flight comes back, so a double-clicked *Sync now* is harmless.
 ///
 /// # Why there are two of these
 ///
 /// P3 asked for one command with an omittable `Option<Channel<SyncProgress>>`.
-/// Tauri 2.11 cannot express that: `Channel` implements `Serialize` and its own
+/// Tauri 2 cannot express that: `Channel` implements `Serialize` and its own
 /// `CommandArg` but no `Deserialize`, and the only route from
-/// `Option<Channel<_>>` to `CommandArg` is the blanket impl over
-/// `Deserialize`, so the wrapped form does not compile. P3's documented
-/// fallback is therefore in force -- this command for callers that want no
-/// per-item progress, [`sync_now_with_progress`] for the ones that do. The
-/// evidence is pinned in `crates/knobas-app/tests/ipc.rs`.
+/// `Option<Channel<_>>` to `CommandArg` is the blanket impl over `Deserialize`,
+/// so the wrapped form does not compile. P3's documented fallback is therefore
+/// in force, and the evidence is pinned in `crates/knobas-app/tests/ipc.rs`.
 ///
 /// # Errors
-///
-/// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) for an unknown
-/// adapter, [`NotReady`](crate::IpcErrorCode::NotReady) for an unconfigured
-/// source. A failure of the run *itself* arrives on `sync:state` and in the
-/// run log, not here -- by then this command has already returned.
+/// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) for a source that
+/// does not exist, [`NotReady`](crate::IpcErrorCode::NotReady) while the engine
+/// is starting or stopping. A failure of the run *itself* arrives on
+/// `sync:state` and in the run log -- by then this command has returned.
 #[tauri::command]
 pub async fn sync_now<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
-    lifecycle: State<'_, Lifecycle>,
     source_id: String,
 ) -> Result<i64, IpcError> {
-    let pool = lifecycle.pool()?;
-    spawn_sync(&app, &pool, source_id, None).await
+    let state = crate::sources::state(&app)?;
+    state
+        .scheduler
+        .trigger(&source_id, knobas_sync::SyncTrigger::Manual, None)
+        .await
+        .map_err(|error| to_ipc(&error.into(), Some(&source_id)))
 }
 
 /// [`sync_now`], reporting per-item progress on `progress`.
 ///
-/// Same return value and same semantics -- it too returns as soon as the run
-/// is recorded. The channel is the only difference, and it is **required**;
-/// see [`sync_now`] for why the two are separate commands. Ruling P3 and
-/// roadmap §4: per-item progress goes on the channel and nowhere else, so a
-/// caller that only wants to know a run started should call [`sync_now`] and
-/// listen to `sync:state` instead of opening a channel it will not read.
+/// Same return value and same semantics -- it too returns as soon as the run is
+/// recorded. The channel is **required**; a caller that only needs to know a
+/// run started should call [`sync_now`] and listen to `sync:state`, because
+/// per-item progress goes on the channel and nowhere else (roadmap §4).
 ///
 /// # Errors
-///
 /// As [`sync_now`].
 #[tauri::command]
 pub async fn sync_now_with_progress<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
-    lifecycle: State<'_, Lifecycle>,
     source_id: String,
     progress: tauri::ipc::Channel<knobas_sync::SyncProgress>,
 ) -> Result<i64, IpcError> {
-    let pool = lifecycle.pool()?;
-    spawn_sync(
-        &app,
-        &pool,
-        source_id,
-        Some(Box::new(ChannelProgress(progress))),
-    )
-    .await
+    let state = crate::sources::state(&app)?;
+    let sink = std::sync::Arc::new(crate::sources::progress::ChannelSink::new(progress))
+        as std::sync::Arc<dyn knobas_sync::ProgressSink>;
+    state
+        .scheduler
+        .trigger(&source_id, knobas_sync::SyncTrigger::Manual, Some(sink))
+        .await
+        .map_err(|error| to_ipc(&error.into(), Some(&source_id)))
 }
 
-/// Record a run, start it on its own task, and hand back its id.
+/// Start a sync for every enabled source that does not need a human. Returns
+/// one run id per source it started, in id order.
+#[tauri::command]
+pub async fn sync_all<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<Vec<i64>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    state
+        .scheduler
+        .trigger_all()
+        .await
+        .map_err(|error| to_ipc(&error.into(), None))
+}
+
+/// What every source is doing, and when it goes next.
 ///
-/// Generic over the runtime because a bare `tauri::AppHandle` means
-/// `AppHandle<Wry>`, which `tests/ipc.rs`'s `MockRuntime` is not -- a
-/// non-generic command taking a handle simply cannot be registered on a mock
-/// app, and the IPC tests would have to stop covering these two.
+/// The authoritative read: `sync:state` events are a hint that something moved
+/// (and may be missed while the webview is still mounting -- roadmap §4 gotcha
+/// 9), this is the truth. Call it on mount.
+#[tauri::command]
+pub async fn sync_status<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<knobas_sync::SourceSyncStatus>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    knobas_sync::scheduler::status_all(&state.pool)
+        .await
+        .map_err(|error| to_ipc(&crate::sources::SourcesError::Db(error), None))
+}
+
+/// The per-source sync log the diagnostics view reads (§3): errors, durations
+/// (`finished_at - started_at`), item counts. `source_id: None` spans every
+/// source.
+#[tauri::command]
+pub async fn list_sync_runs<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    source_id: Option<String>,
+    limit: u32,
+) -> Result<Vec<knobas_sync::run_log::SyncRunRow>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    knobas_sync::run_log::list(&state.pool, source_id.as_deref(), i64::from(limit.min(500)))
+        .await
+        .map_err(|error| {
+            to_ipc(
+                &crate::sources::SourcesError::Db(error),
+                source_id.as_deref(),
+            )
+        })
+}
+
+#[tauri::command]
+pub async fn db_stats<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<knobas_sync::stats::DbStats, IpcError> {
+    let state = crate::sources::state(&app)?;
+    knobas_sync::stats::db_stats(&state.pool)
+        .await
+        .map_err(|error| to_ipc(&crate::sources::SourcesError::Db(error), None))
+}
+
+/// Rebuild the FTS index (§3, the diagnostics view's *Re-index* button).
+#[tauri::command]
+pub async fn reindex_fts<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), IpcError> {
+    let state = crate::sources::state(&app)?;
+    knobas_sync::stats::reindex_fts(&state.pool)
+        .await
+        .map_err(|error| to_ipc(&crate::sources::SourcesError::Db(error), None))
+}
+
+/// Emit one event, best effort.
 ///
-/// The order is the contract: refuse what cannot run, open the log row, say
-/// `running` on the event, *then* spawn. A caller holding the id can read the
-/// run's fate out of `knobas.sync_run` whatever happens to the task.
-async fn spawn_sync<R: tauri::Runtime>(
+/// A webview that is not listening is not a failure of the operation that just
+/// succeeded -- the credential is stored either way, and `credential_health()`
+/// is the authoritative read.
+fn emit<R: tauri::Runtime, T: serde::Serialize + Clone>(
     app: &tauri::AppHandle<R>,
-    pool: &sqlx::PgPool,
-    source_id: String,
-    sink: Option<Box<dyn knobas_sync::ProgressSink>>,
-) -> Result<i64, IpcError> {
-    let prepared =
-        crate::demo::prepare_sync(pool, &source_id, knobas_sync::SyncTrigger::Manual).await?;
-    let run_id = prepared.run_id;
-    emit_sync_state(
-        app,
-        &knobas_sync::SourceSyncStatus::started(&source_id, run_id),
-    );
-
-    // Owned clones: the task outlives this call by design. `PgPool` and
-    // `AppHandle` are both handle types, so this is a refcount each.
-    let pool = pool.clone();
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let result = knobas_sync::run(
-            &pool,
-            prepared.source.as_ref(),
-            prepared.cursor,
-            run_id,
-            sink.as_deref(),
-        )
-        .await;
-        match &result {
-            Ok(report) => {
-                tracing::info!(run_id, source_id = %source_id, upserted = report.upserted, "sync finished");
-            }
-            // Nowhere to return it to -- the command answered long ago. The
-            // run log has it (`knobas_sync::run` wrote it there before
-            // returning), the event carries its class, and this line is what
-            // makes it visible in a terminal.
-            Err(error) => {
-                tracing::warn!(run_id, source_id = %source_id, %error, "sync failed");
-            }
-        }
-        let outcome = outcome_of(&result);
-        emit_sync_state(
-            &app,
-            &knobas_sync::SourceSyncStatus::finished(&source_id, run_id, outcome),
-        );
-    });
-
-    Ok(run_id)
-}
-
-/// How the run ended, in the log's vocabulary.
-///
-/// Separated from the task body so it can be asserted without a database and a
-/// spawn: it is the only *decision* the spawned task makes, and getting it
-/// wrong means stream F's backoff reads the wrong class -- retrying a 401 for
-/// ever, or never retrying something transient.
-fn outcome_of(
-    result: &Result<knobas_sync::SyncReport, knobas_sync::SyncError>,
-) -> knobas_sync::SyncOutcome {
-    match result {
-        Ok(_) => knobas_sync::SyncOutcome::Ok,
-        Err(error) => knobas_sync::SyncOutcome::of(error),
-    }
-}
-
-/// Emit one coarse `sync:state`.
-///
-/// Failure is logged and dropped: a webview that is not listening (or not
-/// there yet) is not a sync failure, and the run log is the durable record
-/// either way.
-fn emit_sync_state<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-    status: &knobas_sync::SourceSyncStatus,
+    name: &str,
+    payload: T,
 ) {
-    if let Err(error) = app.emit(crate::events::SYNC_STATE, status) {
-        tracing::debug!(%error, "nobody is listening to sync:state");
+    use tauri::Emitter;
+    if let Err(error) = app.emit(name, payload) {
+        tracing::debug!(event = name, %error, "nothing was listening for this event");
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use knobas_source::SourceError;
-    use knobas_sync::{SyncError, SyncOutcome};
-
-    /// The classification that reaches `sync:state` -- and through it stream
-    /// F's backoff, which never retries `unauthorized` and does retry
-    /// `unreachable`. A failed run that reported `ok` would look to the
-    /// scheduler like a source that is fine.
+    /// No command in this file takes `State<'_, SourcesState>`.
+    ///
+    /// The same rule `commands/mod.rs` enforces for `AppState`, for the same
+    /// reason and with the same failure mode: `SourcesState` is managed only
+    /// once the sync engine has started, and a command declaring it **builds
+    /// and lints clean** while failing at run time during bring-up with
+    /// Tauri's bare `"state not managed"` -- no code for the frontend to branch
+    /// on. `crate::sources::state(&app)` is the shape; it returns
+    /// `IpcErrorCode::NotReady`.
+    ///
+    /// A source scan and not a type-level check because there is no type-level
+    /// check to be had -- see the note in `commands/mod.rs`.
     #[test]
-    fn the_terminal_outcome_is_the_class_of_the_failure() {
-        let report = knobas_sync::SyncReport {
-            source_id: "mock".to_owned(),
-            upserted: 1,
-            deleted: 0,
-            swept: 0,
-            cursor: "c".to_owned(),
-        };
-        assert_eq!(super::outcome_of(&Ok(report)), SyncOutcome::Ok);
-
-        for (error, expected) in [
-            (SourceError::Unauthorized, SyncOutcome::Unauthorized),
-            (
-                SourceError::Unreachable("dns".to_owned()),
-                SyncOutcome::Unreachable,
-            ),
-            (
-                SourceError::Protocol("bad json".to_owned()),
-                SyncOutcome::Error,
-            ),
-        ] {
-            let described = format!("{error:?}");
-            assert_eq!(
-                super::outcome_of(&Err(SyncError::Source(error))),
-                expected,
-                "{described}"
+    fn no_command_takes_the_sources_state_directly() {
+        let source = include_str!("sources.rs");
+        // The doc comments above name the very thing they forbid, so the scan
+        // runs over code only -- and the forbidden name is **assembled** rather
+        // than written, because this test's own failure message quotes it and
+        // a literal here would make the scan match itself. (It did, first run.)
+        let forbidden = concat!("Sources", "State");
+        let code = strip_line_comments(source);
+        let mut rest = code.as_str();
+        let mut seen = 0_usize;
+        while let Some(at) = rest.find("State<'") {
+            rest = &rest[at + "State<'".len()..];
+            let end = rest.find('>').unwrap_or(rest.len());
+            seen += 1;
+            assert!(
+                !rest[..end].contains(forbidden),
+                "a command here declares that state as a `tauri::State` argument. \
+                 It builds and lints clean and fails at *run time* during \
+                 bring-up with Tauri's bare \"state not managed\" -- carry-over \
+                 §10.6(a). Use `crate::sources::state(&app)?`, which answers \
+                 `not_ready`."
             );
         }
+        assert!(
+            seen >= 1,
+            "no `State<'_, _>` argument was found at all, so the scan proves nothing"
+        );
+    }
+
+    /// The detector has to be able to catch something, or a green run is not
+    /// evidence there was nothing to catch.
+    ///
+    /// It is run against a line of the shape it forbids, and against the shape
+    /// that is allowed, so both a false negative and a false positive fail
+    /// here rather than in the next stream's PR.
+    #[test]
+    fn the_scan_catches_the_signature_it_forbids() {
+        let forbidden = concat!("Sources", "State");
+        let bad = format!("pub async fn x(state: State<'_, {forbidden}>) {{}}");
+        let good = "pub async fn x(app: tauri::AppHandle<R>) {}";
+        let commented = format!("// State<'_, {forbidden}> is what this forbids\n{good}");
+
+        assert!(declares_forbidden_state(&bad, forbidden));
+        assert!(!declares_forbidden_state(good, forbidden));
+        assert!(
+            !declares_forbidden_state(&commented, forbidden),
+            "prose about the rule is not a violation of it"
+        );
+        assert!(
+            !declares_forbidden_state(
+                "pub async fn x(lifecycle: State<'_, Lifecycle>) {}",
+                forbidden
+            ),
+            "the allowed state must not trip it"
+        );
+    }
+
+    /// The scan itself, factored out so the test above can drive it over text
+    /// that is not this file.
+    fn declares_forbidden_state(code: &str, forbidden: &str) -> bool {
+        let code = strip_line_comments(code);
+        let mut rest = code.as_str();
+        while let Some(at) = rest.find("State<'") {
+            rest = &rest[at + "State<'".len()..];
+            let end = rest.find('>').unwrap_or(rest.len());
+            if rest[..end].contains(forbidden) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Doc comments only -- the forbidden spelling appears in prose above, and
+    /// nowhere in a string literal in this file.
+    fn strip_line_comments(source: &str) -> String {
+        source
+            .lines()
+            .filter(|line| {
+                let trimmed = line.trim_start();
+                !trimmed.starts_with("//")
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }

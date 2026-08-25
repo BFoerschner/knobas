@@ -7,24 +7,46 @@ version.workspace = true
 # rather than opening one, so it needs `sqlx` but not `knobas-db` -- the
 # database crate is a test dependency only, which keeps the engine usable from
 # anything holding a pool.
+[features]
+# Exposes `knobas_sync::mirror` -- the TypeScript-mirror assertion -- to other
+# crates' tests. One implementation, because `knobas-app` needs the same check
+# over its own DTOs and a second copy is a second thing to get wrong (it was,
+# three times). Gated on the feature alone rather than `cfg(test)`, which is set
+# for neither this crate's own `tests/` directory nor a downstream crate.
+test-util = []
+
 [dependencies]
 async-trait.workspace = true
 # `CredentialHealth` carries three timestamps across the bridge; the run log's
 # own timestamps stay in the database and are never read back here.
 chrono.workspace = true
 knobas-core = { path = "../knobas-core" }
+# The scheduler builds an adapter from a stored configuration plus its
+# credential, so it holds the store behind its trait. The trait, never a
+# concrete store: `just check` must never reach a real keychain.
+knobas-secrets = { path = "../knobas-secrets" }
 knobas-source = { path = "../knobas-source" }
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
+# The scheduler's runs live on tasks and are cancelled at shutdown; `sync` for
+# the semaphore and the mutexes, `time` for the ticker and its bounded waits,
+# `rt` for `spawn`, `macros` for `select!`.
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+# `CancellationToken` -- the one shape that cancels a run at its next await
+# point instead of aborting it mid-transaction.
+tokio-util = { version = "0.7", default-features = false }
 # The one diagnostic channel the engine has: a committed run whose activity
 # line failed is reported here rather than as a failed sync.
 tracing = "0.1"
 
 [dev-dependencies]
+# Self-dev-dependency so this crate's own tests see `mirror` (same convention as
+# `knobas-db`'s `test_util`).
+knobas-sync = { path = ".", features = ["test-util"] }
 # A real PostgreSQL, and the reference adapter to sync out of it.
 knobas-db = { path = "../knobas-db", features = ["test-util"] }
 knobas-source-mock = { path = "../knobas-source-mock" }
-tokio.workspace = true
+tokio = { workspace = true }
 uuid.workspace = true

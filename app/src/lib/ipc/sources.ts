@@ -1,5 +1,47 @@
-/** Sources, sync and diagnostics — `crates/knobas-app/src/commands/sources.rs`. */
+/**
+ * Sources, secrets, credential health, sync and diagnostics — one function per
+ * `#[tauri::command]` in `crates/knobas-app/src/commands/sources.rs`.
+ *
+ * Hand-written, as in M0: `tauri-specta` is still an RC. Argument names are
+ * camelCase because Tauri renames command *arguments*; **struct fields keep
+ * their Rust snake_case spelling**, which is why the interfaces below are
+ * snake_case and the functions are not.
+ *
+ * There is deliberately no function here that reads a secret back. There is no
+ * command behind one either — `sources_crud::nothing_in_the_ipc_surface_reads_a_secret_back`
+ * scans the Rust side to keep it that way.
+ */
 import { Channel, invoke } from "@tauri-apps/api/core";
+// Declared once, by the modules that own them. `KindInfo` is `entity.ts`'s and
+// `IpcErrorCode` is the barrel's; re-declaring either here would put a second
+// copy of a frozen shape in the tree, and the barrel's `export *` would refuse
+// to re-export both. Type-only, so nothing is imported at run time and the
+// cycle through `./index` is erased.
+import type { KindInfo } from "./entity";
+import type { IpcErrorCode } from "./index";
+
+/** `knobas_source::AuthMethod` — PascalCase, unchanged since M0. */
+export type AuthMethod = "UserPassword" | "Pat" | "ApiToken" | "OAuth";
+
+/**
+ * `knobas_source::SourceDescriptor` — what the Add-source form is generated
+ * from. A *template* has `id === adapter_kind`; a configured instance's
+ * descriptor carries the instance id instead.
+ */
+export interface SourceDescriptor {
+  id: string;
+  adapter_kind: string;
+  name: string;
+  capabilities: string[];
+  adapter_version: string;
+  auth_methods: AuthMethod[];
+  write_ops: string[];
+  entity_kinds: KindInfo[];
+  /** Whether a full sync of this adapter returns everything it has. */
+  full_sync_exhaustive: boolean;
+  /** JSON Schema. The form is generated from it — never hand-built per adapter. */
+  config_schema: unknown;
+}
 
 /** What one sync run did — `knobas_sync::SyncReport`. */
 export interface SyncReport {
@@ -68,9 +110,26 @@ export type SyncOutcome = "ok" | "unauthorized" | "unreachable" | "error";
  */
 export type SyncTrigger = "schedule" | "manual" | "first_run";
 
+/** One row of the sync log — `knobas_sync::run_log::SyncRunRow`. */
+export interface SyncRunRow {
+  id: number;
+  source_id: string;
+  trigger: SyncTrigger;
+  started_at: string;
+  /** null while the run is still going. */
+  finished_at: string | null;
+  outcome: SyncOutcome | null;
+  upserted: number;
+  deleted: number;
+  /** Rows the full-sync sweep tombstoned. */
+  swept: number;
+  error: string | null;
+  cursor_after: string | null;
+}
+
 /**
  * The coarse state one source's syncing is in — `knobas_sync::SourceSyncStatus`,
- * the payload of `EVENTS.syncState`.
+ * the payload of `EVENTS.syncState` and the return of `syncStatus()`.
  *
  * Coarse by rule: a transition each, at most a handful per run. Per-item
  * progress is {@link SyncProgress} on a channel and nowhere else.
@@ -78,15 +137,24 @@ export type SyncTrigger = "schedule" | "manual" | "first_run";
 export interface SourceSyncStatus {
   source_id: string;
   running: boolean;
+  /**
+   * The run this status is about: the one in flight, or — once `running` is
+   * false — the last one to finish, which is the run `last_outcome` describes.
+   * null only for a source that has never run.
+   */
   run_id: number | null;
-  /** RFC 3339, on the `running: true` transition. */
+  /** RFC 3339, while `running`. */
   started_at: string | null;
-  /** RFC 3339, on the terminal transition. */
+  /** RFC 3339, of the last run that finished. */
   last_finished_at: string | null;
   last_outcome: SyncOutcome | null;
-  /** Always null until stream F's scheduler exists. */
+  /**
+   * When the scheduler will run it next: last finish + interval, clamped up by
+   * `backoff_until`. Derived, never stored (P7). null while a run is in flight,
+   * and for a source that is disabled or needs a human.
+   */
   next_run_at: string | null;
-  /** Always null until stream F writes and honours backoff. */
+  /** Held off until this, after a failure. Never set by a 401 (P7). */
   backoff_until: string | null;
 }
 
@@ -104,16 +172,160 @@ export interface SyncProgress {
   message: string | null;
 }
 
+/** One row of the sources view — `knobas_app::sources::SourceSummary`. */
+export interface SourceSummary {
+  id: string;
+  adapter_kind: string;
+  display_name: string;
+  base_url: string;
+  enabled: boolean;
+  sync_interval_secs: number;
+  config: unknown;
+  health: CredentialHealth;
+  last_run: SyncRunRow | null;
+  /** null when the source is disabled, running, or needs a human. */
+  next_run_at: string | null;
+  item_count: number;
+  /** From the adapter's descriptor, so the view needs no per-adapter table. */
+  kinds: KindInfo[];
+}
+
+/** Write-only. The backend has no way to send one back. */
+export interface SecretInput {
+  value: string;
+}
+
+/** What the Add-source form submits — `knobas_app::sources::NewSource`. */
+export interface NewSource {
+  id: string;
+  adapter_kind: string;
+  display_name: string;
+  base_url: string;
+  auth_kind: AuthMethod;
+  config: unknown;
+  secret: SecretInput;
+  sync_interval_secs: number;
+  enabled: boolean;
+}
+
+/**
+ * What *Edit source* may change.
+ *
+ * No `id`, no `adapter_kind`: the instance id is the entity namespace, baked
+ * into every entity id, link and activity row, and therefore immutable (P10).
+ */
+export interface SourcePatch {
+  display_name?: string | null;
+  base_url?: string | null;
+  config?: unknown;
+  sync_interval_secs?: number | null;
+  enabled?: boolean | null;
+}
+
+/** An unsaved (or saved) source to test — `knobas_app::sources::SourceDraft`. */
+export interface SourceDraft {
+  /** Set, with `secret: null`, to re-test the stored credential. */
+  source_id: string | null;
+  adapter_kind: string;
+  base_url: string;
+  /**
+   * Only meaningful for an **unsaved** draft. A draft naming a saved source is
+   * tested against that source's *stored* configuration — otherwise *Test
+   * connection* could pass against auth the scheduled run never attempts.
+   */
+  auth_kind: AuthMethod;
+  config: unknown;
+  secret: SecretInput | null;
+}
+
+/** What *Test connection* found — `knobas_app::sources::ConnectionReport`. */
+export interface ConnectionReport {
+  ok: boolean;
+  account: string | null;
+  server_version: string | null;
+  secret_expires_at: string | null;
+  /** One line for the form, or null when it connected. */
+  error: string | null;
+  /** The class to branch on: `unauthorized` turns *Test* into *Re-enter*. */
+  code: IpcErrorCode | null;
+  elapsed_ms: number;
+}
+
+/** `knobas_sync::stats::SourceCount`. */
+export interface SourceCount {
+  source_id: string;
+  items: number;
+  synced_at: string | null;
+}
+
+/** `knobas_sync::stats::DbStats` — the diagnostics view's numbers. */
+export interface DbStats {
+  db_bytes: number;
+  entity_count: number;
+  item_count: number;
+  per_source: SourceCount[];
+  oldest_synced_at: string | null;
+  newest_synced_at: string | null;
+}
+
+// -- §2.2: sources, secrets, credential health --------------------------------
+
+/**
+ * One descriptor template per compiled-in adapter kind (`id === adapter_kind`).
+ *
+ * Answers before the database is up — nothing is instantiated and no keychain
+ * is touched — so the Add-source form is drawable on a cold start.
+ */
+export function listAdapters(): Promise<SourceDescriptor[]> {
+  return invoke<SourceDescriptor[]>("list_adapters");
+}
+
+export function listSources(): Promise<SourceSummary[]> {
+  return invoke<SourceSummary[]>("list_sources");
+}
+
+export function addSource(input: NewSource): Promise<SourceSummary> {
+  return invoke<SourceSummary>("add_source", { input });
+}
+
+export function updateSource(id: string, patch: SourcePatch): Promise<SourceSummary> {
+  return invoke<SourceSummary>("update_source", { id, patch });
+}
+
+export function deleteSource(id: string, purgeItems: boolean): Promise<void> {
+  return invoke<void>("delete_source", { id, purgeItems });
+}
+
+/**
+ * Store a credential for a saved source and test it. Write-only: nothing reads
+ * one back.
+ */
+export function setSourceSecret(id: string, secret: SecretInput): Promise<CredentialHealth> {
+  return invoke<CredentialHealth>("set_source_secret", { id, secret });
+}
+
+/** *Test connection*. Writes nothing — not to Postgres, not to the keychain. */
+export function testSource(draft: SourceDraft): Promise<ConnectionReport> {
+  return invoke<ConnectionReport>("test_source", { draft });
+}
+
+export function credentialHealth(): Promise<CredentialHealth[]> {
+  return invoke<CredentialHealth[]>("credential_health");
+}
+
+// -- §2.3: sync, status, the run log, diagnostics ------------------------------
+
 /**
  * Start a sync of one configured source; resolves with its `sync_run.id` as
  * soon as the run is recorded, **not** when it finishes — watch
- * `EVENTS.syncState` for that.
+ * `EVENTS.syncState` for that. Triggering a source that is already syncing
+ * returns the run already in flight.
  *
  * Use {@link syncNowWithProgress} when you are drawing per-item progress.
  * There are two functions rather than one optional argument because
- * `Option<Channel<_>>` is not a valid Tauri 2.11 command argument (`Channel`
- * has no `Deserialize` impl); the Rust side splits for the same reason, and
- * the evidence is in `crates/knobas-app/tests/ipc.rs`.
+ * `Option<Channel<_>>` is not a valid Tauri command argument (`Channel` has no
+ * `Deserialize` impl); the Rust side splits for the same reason, and the
+ * evidence is in `crates/knobas-app/tests/ipc.rs`.
  */
 export function syncNow(sourceId: string): Promise<number> {
   return invoke<number>("sync_now", { sourceId });
@@ -132,4 +344,40 @@ export function syncNowWithProgress(
   progress: Channel<SyncProgress>,
 ): Promise<number> {
   return invoke<number>("sync_now_with_progress", { sourceId, progress });
+}
+
+/**
+ * Start a sync for every enabled source that does not need a human, in id
+ * order. Returns one run id per source it started.
+ */
+export function syncAll(): Promise<number[]> {
+  return invoke<number[]>("sync_all");
+}
+
+/**
+ * What every source is doing, and when it goes next.
+ *
+ * The authoritative read: `EVENTS.syncState` is a hint that something moved and
+ * may be missed while the webview is still mounting. Call this on mount.
+ */
+export function syncStatus(): Promise<SourceSyncStatus[]> {
+  return invoke<SourceSyncStatus[]>("sync_status");
+}
+
+/**
+ * The per-source sync log the diagnostics view reads: errors, durations
+ * (`finished_at - started_at`), item counts. `sourceId: null` spans every
+ * source. `limit` is clamped to 500.
+ */
+export function listSyncRuns(sourceId: string | null, limit: number): Promise<SyncRunRow[]> {
+  return invoke<SyncRunRow[]>("list_sync_runs", { sourceId, limit });
+}
+
+export function dbStats(): Promise<DbStats> {
+  return invoke<DbStats>("db_stats");
+}
+
+/** Rebuild the FTS index. Concurrent — searches keep working meanwhile. */
+export function reindexFts(): Promise<void> {
+  return invoke<void>("reindex_fts");
 }
