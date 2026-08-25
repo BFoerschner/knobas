@@ -32,18 +32,23 @@
 //!
 //! Why (2) and (3) are separate: a `#[tauri::command]` resolves its arguments
 //! in declaration order, and both real commands take `app: AppHandle<R>` and
-//! then `State<'_, AppState>` before they reach `source_id` or `progress`. The
-//! handle always resolves; the state does not, because a mock app manages no
-//! `AppState` -- so every call to them stops there, before `progress` is
-//! looked at. (2) therefore uses commands of the same two *trailing* argument
-//! shapes with nothing in front of them, which is the only way to watch the
-//! decoding itself happen.
+//! then `State<'_, Lifecycle>` before they reach `source_id` or `progress`.
+//! The handle always resolves; the state does not, because a mock app built
+//! here manages nothing by default -- so every call to them stops there,
+//! before `progress` is looked at. (2) therefore uses commands of the same two
+//! *trailing* argument shapes with nothing in front of them, which is the only
+//! way to watch the decoding itself happen.
 //!
 //! A fourth section rides along, for a different contract: ruling P13's demo
 //! guard. Argument resolution runs to completion *before* any command body, so
-//! reaching the guard means managing both the `Profile` and an `AppState` --
-//! the latter over a pool pointing at a closed port, so that "the guard
-//! refused" and "the database was touched" cannot be confused for one another.
+//! reaching the guard means managing both the `Profile` and a `Lifecycle` with
+//! an `AppState` in it -- the latter over a pool pointing at a closed port, so
+//! that "the guard refused" and "the database was touched" cannot be confused
+//! for one another.
+//!
+//! A fifth section covers what the asynchronous bring-up made reachable
+//! (carry-over §10.6(a)): a command that arrives *before* the database is up
+//! now answers `not_ready` with a code, and `app_status` answers at all.
 
 use std::marker::PhantomData;
 
@@ -196,6 +201,9 @@ fn invoke_managing(
 ) -> Result<tauri::ipc::InvokeResponseBody, String> {
     let app = tauri::test::mock_builder()
         .invoke_handler(tauri::generate_handler![
+            knobas_app::commands::app::app_status,
+            knobas_app::commands::app::frontend_ready,
+            knobas_app::commands::entity::recent_activity,
             knobas_app::commands::sources::demo_load,
             knobas_app::commands::sources::sync_now,
             knobas_app::commands::sources::sync_now_with_progress,
@@ -280,17 +288,22 @@ fn the_two_argument_shapes_decode_as_the_split_needs() {
 
 /// What a rejection from *inside* a command looks like.
 ///
-/// A mock app manages no `AppState`, so a call that Tauri accepted and
-/// dispatched gets exactly this far. It is therefore the marker for "this
-/// command is registered and was reached", as distinct from "no such command"
-/// or "the ACL refused it".
+/// A mock app built by [`invoke`] manages no `Lifecycle`, so a call that Tauri
+/// accepted and dispatched gets exactly this far. It is therefore the marker
+/// for "this command is registered and was reached", as distinct from "no such
+/// command" or "the ACL refused it".
+///
+/// Note what it is *not*: with a `Lifecycle` managed (which is how the app
+/// really runs) this string never appears, and an early call gets
+/// `IpcErrorCode::NotReady` instead -- see
+/// [`a_command_that_beats_the_database_is_told_to_try_again`].
 const REACHED_THE_BODY: &str = "state not managed";
 
 /// Both halves of the split are registered under the names the TypeScript
 /// mirror invokes, and both dispatch.
 ///
 /// Not a decoding test -- each takes `app: AppHandle<R>` and then
-/// `State<'_, AppState>`, and the unmanaged state stops the call before any
+/// `State<'_, Lifecycle>`, and the unmanaged state stops the call before any
 /// caller-supplied argument is read -- but the one that catches the mistake a
 /// two-command surface invites: adding the command and forgetting the handler
 /// list, which is a frontend that fails at runtime with "command not found"
@@ -330,11 +343,19 @@ fn unreachable_pool() -> sqlx::PgPool {
     })
 }
 
+/// A lifecycle holding a live-looking pool, the way bring-up leaves one.
+fn ready_over(pool: sqlx::PgPool) -> knobas_app::Lifecycle {
+    let lifecycle = knobas_app::Lifecycle::new();
+    lifecycle.install(knobas_app::AppState::over_pool(pool));
+    lifecycle.set(knobas_app::DbState::Ready);
+    lifecycle
+}
+
 /// Invoke `demo_load` with `profile` and a database nothing is listening on.
 fn invoke_demo_load(profile: knobas_app::Profile) -> Result<(), String> {
     invoke_managing("demo_load", serde_json::json!({}), move |app| {
         app.manage(profile);
-        app.manage(knobas_app::AppState::over_pool(unreachable_pool()));
+        app.manage(ready_over(unreachable_pool()));
     })
     .map(|_| ())
 }
@@ -420,7 +441,7 @@ async fn sync_now_answers_before_the_run_and_reports_it_on_the_event() {
         "sync_now",
         serde_json::json!({ "sourceId": "mock" }),
         move |app| {
-            app.manage(knobas_app::AppState::over_pool(pool_for_state));
+            app.manage(ready_over(pool_for_state));
             app.listen("sync:state", move |event| {
                 if let Ok(value) = serde_json::from_str::<serde_json::Value>(event.payload()) {
                     recorder.lock().unwrap().push(value);
@@ -477,5 +498,142 @@ async fn sync_now_answers_before_the_run_and_reports_it_on_the_event() {
         outcome.as_deref(),
         Some("ok"),
         "the spawned run must close its own log row"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 5. The window can now call before the database is up (carry-over §10.6(a)).
+// ---------------------------------------------------------------------------
+
+/// A command that needs the pool, called during bring-up, answers `not_ready`.
+///
+/// This is the carry-over the asynchronous bring-up turned from latent into
+/// live, and the reason every such command takes `State<'_, Lifecycle>` rather
+/// than `State<'_, AppState>`. With the old shape the call never reaches a
+/// command body at all: Tauri refuses it while resolving arguments and the
+/// frontend gets the bare string `"state not managed"`, which carries no code,
+/// which means the shell cannot tell "still starting" from "broken".
+///
+/// A `Lifecycle` is managed here and no `AppState` is installed -- exactly the
+/// window between `setup` and a live pool.
+#[test]
+fn a_command_that_beats_the_database_is_told_to_try_again() {
+    let rejection = invoke_managing(
+        "recent_activity",
+        serde_json::json!({ "limit": 5 }),
+        |app| {
+            app.manage(knobas_app::Lifecycle::new());
+        },
+    )
+    .expect_err("there is no pool yet");
+
+    assert!(
+        rejection.contains("not_ready"),
+        "the refusal must carry IpcErrorCode::NotReady, or the shell cannot \
+         tell a starting database from a broken one: {rejection}"
+    );
+    assert!(
+        !rejection.contains(REACHED_THE_BODY),
+        "Tauri refused this while resolving arguments, so the command's own \
+         answer was never reached: {rejection}"
+    );
+}
+
+/// ...and once the pool is there the same call gets past the guard.
+///
+/// Without this the test above would pass just as well against a
+/// `recent_activity` that answers `not_ready` to everybody. The pool points at
+/// nothing, so the assertion is that the failure is no longer the lifecycle's.
+#[test]
+fn the_same_command_gets_through_once_the_database_is_up() {
+    let rejection = invoke_managing(
+        "recent_activity",
+        serde_json::json!({ "limit": 5 }),
+        |app| {
+            app.manage(ready_over(unreachable_pool()));
+        },
+    )
+    .expect_err("the pool points at no server");
+
+    assert!(
+        !rejection.contains("not_ready"),
+        "a live lifecycle must not refuse as if it were still starting: {rejection}"
+    );
+    assert!(
+        rejection.contains("internal"),
+        "a connection failure is internal: {rejection}"
+    );
+}
+
+/// `app_status` answers while the database is still coming up -- which is the
+/// entire point of it (interfaces §2.1) and impossible for any command taking
+/// `State<'_, AppState>`.
+#[test]
+fn app_status_answers_before_the_database_does() {
+    let lifecycle = knobas_app::Lifecycle::new();
+    lifecycle.set(knobas_app::DbState::Starting {
+        detail: Some("first run: downloading and initialising PostgreSQL".to_owned()),
+    });
+
+    let status = invoke_managing("app_status", serde_json::json!({}), move |app| {
+        app.manage(lifecycle);
+        app.manage(knobas_app::Profile::from_args(
+            vec![knobas_app::DEMO_FLAG.to_owned()],
+            std::path::Path::new("/tmp/knobas-test"),
+        ));
+    })
+    .expect("app_status must answer with no database at all")
+    .deserialize::<serde_json::Value>()
+    .expect("an AppStatus came back");
+
+    assert_eq!(
+        status["db"],
+        serde_json::json!({
+            "state": "starting",
+            "detail": "first run: downloading and initialising PostgreSQL",
+        }),
+        "the boot screen renders this verbatim"
+    );
+    assert_eq!(status["demo"], serde_json::json!(true));
+    // Not "0 sources": nothing has been counted, and claiming a count nobody
+    // took is how a first-run wizard fires at somebody's real corpus.
+    assert_eq!(status["source_count"], serde_json::json!(0));
+    assert_eq!(status["first_run"], serde_json::json!(false));
+    assert!(
+        status["app_version"]
+            .as_str()
+            .is_some_and(|v| !v.is_empty()),
+        "the failure screen offers this line to copy: {status}"
+    );
+}
+
+/// `frontend_ready` replays the current state onto `db:state`.
+///
+/// Gotcha 9: the backend cannot emit before the webview listens, so a
+/// `db:state` fired during startup is lost unless something replays it. If
+/// this command stopped emitting, a window that attached late would sit on
+/// "starting" until its next poll -- which looks like a slow database and is
+/// actually a lost event.
+#[test]
+fn frontend_ready_replays_the_current_state() {
+    let seen: std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>> = Default::default();
+    let recorder = std::sync::Arc::clone(&seen);
+
+    invoke_managing("frontend_ready", serde_json::json!({}), move |app| {
+        let lifecycle = knobas_app::Lifecycle::new();
+        lifecycle.set(knobas_app::DbState::Migrating);
+        app.manage(lifecycle);
+        app.listen("db:state", move |event| {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(event.payload()) {
+                recorder.lock().unwrap().push(value);
+            }
+        });
+    })
+    .expect("frontend_ready must answer");
+
+    assert_eq!(
+        seen.lock().unwrap().as_slice(),
+        [serde_json::json!({ "state": "migrating" })],
+        "exactly one replay of the state the lifecycle actually holds"
     );
 }

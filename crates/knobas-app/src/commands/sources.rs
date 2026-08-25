@@ -1,8 +1,17 @@
 //! Sources, secrets, sync and diagnostics -- stream F (interfaces §2.2, §2.3).
+//!
+//! Its `State<'_, Lifecycle>` is not an accident and is not stream D being
+//! tidy: carry-over §10.6(a). `AppState` exists only once PostgreSQL is up,
+//! and a `#[tauri::command]` resolves every argument *before* its body runs,
+//! so a command declaring `State<'_, AppState>` is rejected by Tauri itself
+//! during bring-up with the bare string `"state not managed"` -- no code for
+//! the frontend to branch on. `Lifecycle` is managed at build time and is
+//! always there; `lifecycle.pool()?` is the single place `not_ready` comes
+//! from.
 
 use tauri::{Emitter, State};
 
-use crate::{AppState, IpcError};
+use crate::{IpcError, Lifecycle};
 
 /// Register the demo source if absent, then sync it in full.
 ///
@@ -15,16 +24,20 @@ use crate::{AppState, IpcError};
 /// the wrong profile writes nothing at all.
 #[tauri::command]
 pub async fn demo_load(
-    state: State<'_, AppState>,
+    lifecycle: State<'_, Lifecycle>,
     profile: State<'_, crate::Profile>,
 ) -> Result<knobas_sync::SyncReport, IpcError> {
+    // Before the pool is even asked for: the wrong profile must write nothing
+    // at all, and "refused" must not be confusable with "the database was
+    // busy". `tests/ipc.rs` pins that ordering against an unreachable pool.
     if !profile.allows_demo_data() {
         return Err(IpcError::invalid(format!(
             "demo data belongs to the demo profile -- start knobas with {} (or `just demo`)",
             crate::DEMO_FLAG
         )));
     }
-    Ok(crate::demo::demo_load_inner(&state.pool).await?)
+    let pool = lifecycle.pool()?;
+    Ok(crate::demo::demo_load_inner(&pool).await?)
 }
 
 /// The channel `sync_now_with_progress` reports on.
@@ -87,10 +100,11 @@ impl knobas_sync::ProgressSink for ChannelProgress {
 #[tauri::command]
 pub async fn sync_now<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
-    state: State<'_, AppState>,
+    lifecycle: State<'_, Lifecycle>,
     source_id: String,
 ) -> Result<i64, IpcError> {
-    spawn_sync(&app, &state.pool, source_id, None).await
+    let pool = lifecycle.pool()?;
+    spawn_sync(&app, &pool, source_id, None).await
 }
 
 /// [`sync_now`], reporting per-item progress on `progress`.
@@ -108,13 +122,14 @@ pub async fn sync_now<R: tauri::Runtime>(
 #[tauri::command]
 pub async fn sync_now_with_progress<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
-    state: State<'_, AppState>,
+    lifecycle: State<'_, Lifecycle>,
     source_id: String,
     progress: tauri::ipc::Channel<knobas_sync::SyncProgress>,
 ) -> Result<i64, IpcError> {
+    let pool = lifecycle.pool()?;
     spawn_sync(
         &app,
-        &state.pool,
+        &pool,
         source_id,
         Some(Box::new(ChannelProgress(progress))),
     )
