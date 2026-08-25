@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use postgresql_embedded::{PostgreSQL, Settings, VersionReq};
-use sqlx::postgres::PgPoolOptions;
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{Connection, PgConnection, PgPool};
 
 /// The exact PostgreSQL version knobas runs against. Pinned rather than
@@ -47,6 +47,26 @@ const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long to wait for a TCP handshake when deciding whether a recorded
 /// `postmaster.pid` still has a live server behind it.
 const LIVENESS_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// Upper bound on the *first* connection to a server, before a pool exists.
+///
+/// M0 let `PgPoolOptions::connect` decide, and its acquire timeout is 30 s: a
+/// `KNOBAS_DB_URL` pointing at a dead port therefore left the boot screen on
+/// "Starting the local database" for a full half-minute before saying anything
+/// (M1 carry-over, observed by stream D). A refused handshake is instant and a
+/// live server answers in milliseconds, so five seconds is generous for the
+/// question actually being asked -- and it bounds only the probe, not the
+/// pool's own acquire timeout, which still has to cover a busy database.
+const FIRST_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long [`EmbeddedDb::stop`] waits for in-flight queries before stopping
+/// the server regardless.
+///
+/// `PgPool::close` waits for every borrowed connection to come back, and one
+/// parked on a remote system is how Cmd-Q during a sync turns into a
+/// thirty-second hang (M0 carry-over). Past this, `pg_ctl stop -m fast`
+/// terminates the backends -- which is what `-m fast` is for.
+const POOL_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Where the database lives and how to reach it.
 #[derive(Clone, Debug)]
@@ -107,20 +127,112 @@ impl DbError {
 /// only closes it.
 pub struct EmbeddedDb {
     pool: PgPool,
-    /// Connection URL of the running server, for callers that need a pool of
-    /// their own rather than the shared one.
+    /// How to reach the running server, for callers that need connections of
+    /// their own rather than the shared pool's.
     ///
-    /// Only [`test_util`](crate::test_util) ever asks for it, so the field
-    /// exists only when that feature does. Keeping it unconditionally would
-    /// mean an application build carries a string holding the superuser
-    /// password that nothing in that build can read -- and, because the field
-    /// is private and its one reader is feature-gated, a `dead_code` warning
-    /// that only appears when the crate is compiled the way a consumer
-    /// compiles it.
-    #[cfg(feature = "test-util")]
-    url: String,
+    /// No longer test-only: [`pool_for`](Self::pool_for) and
+    /// [`connector`](Self::connector) are application paths -- the sync
+    /// scheduler runs on its own pool, and each of its runs holds a connection
+    /// that belongs to no pool at all (interfaces §10.6(c)). It carries the
+    /// superuser password, so it stays **private** and redacts in `Debug`;
+    /// callers ask for a pool or a connection, never for the string.
+    connector: Connector,
     /// `None` when connected to a server we do not manage.
     postgresql: Option<PostgreSQL>,
+    /// The settings `pg_ctl` needs to stop a server this process *adopted*.
+    ///
+    /// `None` for a server started here (`postgresql` knows how to stop that
+    /// one) and for an externally managed `existing_url`, which is never ours
+    /// to stop.
+    stop_settings: Option<Settings>,
+    /// Held for this handle's life when this process is responsible for
+    /// stopping the server. `None` when a live sibling owns it, and when
+    /// `existing_url` points at a server knobas does not manage at all.
+    owner_lock: Option<File>,
+}
+
+/// How to open a connection to a knobas database.
+///
+/// A wrapper rather than a bare [`PgConnectOptions`] for one reason: that type
+/// derives `Debug` and holds the superuser password, so a single
+/// `tracing::debug!(?options)` anywhere downstream would put it in a log file.
+/// Spec §14 says no secret is ever logged, and the way to make that true is a
+/// type that cannot print one.
+#[derive(Clone)]
+pub struct Connector {
+    options: PgConnectOptions,
+}
+
+impl std::fmt::Debug for Connector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Connector")
+            .field("host", &self.options.get_host())
+            .field("port", &self.options.get_port())
+            .field("database", &self.options.get_database())
+            .field("password", &"<redacted>")
+            .finish()
+    }
+}
+
+impl Connector {
+    /// # Errors
+    /// [`sqlx::Error`] if the URL cannot be parsed.
+    fn parse(url: &str) -> Result<Connector, sqlx::Error> {
+        Ok(Connector {
+            options: url.parse()?,
+        })
+    }
+
+    /// One connection, belonging to no pool.
+    ///
+    /// This is what interfaces §10.6(c) requires of a sync run: the advisory
+    /// lock and the transaction are held for as long as the remote system
+    /// takes to answer, and holding them on a *pooled* connection means the
+    /// rest of the app is competing for a connection the network has parked.
+    /// A connection opened here is competing with nothing -- it costs one TCP
+    /// handshake and one authentication per run, which against a paginated
+    /// sync is not measurable.
+    ///
+    /// # Errors
+    /// [`sqlx::Error`] if the connection fails.
+    pub async fn connect(&self) -> Result<PgConnection, sqlx::Error> {
+        PgConnection::connect_with(&self.options).await
+    }
+
+    /// A pool of `max_connections` on the same server.
+    ///
+    /// # Errors
+    /// [`sqlx::Error`] if the first connection fails.
+    pub async fn pool(&self, max_connections: u32) -> Result<PgPool, sqlx::Error> {
+        let pool = PgPoolOptions::new()
+            .max_connections(max_connections)
+            .connect_lazy_with(self.options.clone());
+        probe(&pool).await?;
+        Ok(pool)
+    }
+}
+
+/// Take one connection out of `pool`, under [`FIRST_CONNECT_TIMEOUT`].
+///
+/// `PgPoolOptions::connect` does this itself and bounds it by the pool's
+/// acquire timeout, which is 30 s and has to stay that way for a *busy*
+/// database. Bounding the first connection separately is what keeps a dead
+/// `KNOBAS_DB_URL` from holding the boot screen for half a minute.
+async fn probe(pool: &PgPool) -> Result<(), sqlx::Error> {
+    match tokio::time::timeout(FIRST_CONNECT_TIMEOUT, pool.acquire()).await {
+        Ok(Ok(conn)) => {
+            drop(conn);
+            Ok(())
+        }
+        Ok(Err(error)) => Err(error),
+        Err(_elapsed) => Err(sqlx::Error::Io(io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!(
+                "no answer from the database within {}s",
+                FIRST_CONNECT_TIMEOUT.as_secs()
+            ),
+        ))),
+    }
 }
 
 impl EmbeddedDb {
@@ -156,11 +268,14 @@ impl EmbeddedDb {
     pub async fn start(cfg: DbConfig) -> Result<EmbeddedDb, DbError> {
         if let Some(url) = cfg.existing_url.as_deref() {
             tracing::info!("connecting to externally managed postgres");
+            let connector = Connector::parse(url)?;
             return Ok(EmbeddedDb {
-                pool: connect(url).await?,
-                #[cfg(feature = "test-util")]
-                url: url.to_string(),
+                pool: connector.pool(MAX_CONNECTIONS).await?,
+                connector,
                 postgresql: None,
+                stop_settings: None,
+                // Never ours to stop, whatever any lock file says.
+                owner_lock: None,
             });
         }
 
@@ -204,31 +319,154 @@ impl EmbeddedDb {
         &self.pool
     }
 
-    /// The URL this handle is connected to.
+    /// How to reach this server, for a caller that needs connections of its
+    /// own.
     ///
-    /// Crate-internal on purpose: it carries the superuser password, and the
-    /// only reason to need it is opening a second pool -- a `PgPool` may not be
-    /// shared across tokio runtimes, so anything outliving the runtime that
-    /// built [`pool`](Self::pool) needs its own. `test_util` is the one caller,
-    /// which is why this compiles only under that feature -- along with the
-    /// field it reads.
-    #[cfg(feature = "test-util")]
+    /// A [`Connector`] and not the URL: the string carries the superuser
+    /// password, and a type that redacts in `Debug` is what keeps it out of a
+    /// log line. Cheap to clone and independent of this handle's lifetime,
+    /// which is what the scheduler needs -- it opens a connection per run for
+    /// as long as the process lives.
     #[must_use]
-    pub(crate) fn url(&self) -> &str {
-        &self.url
+    pub fn connector(&self) -> Connector {
+        self.connector.clone()
     }
 
-    /// Close the pool and shut the server down.
+    /// A second pool on the same server, for a caller that must not share the
+    /// application's connections.
+    ///
+    /// The sync scheduler is the reason this exists: its bookkeeping -- the
+    /// run log, credential health, the status read -- happens while runs are
+    /// parked on the network, and a scheduler that cannot record what it is
+    /// doing is worse than a slow one. It is **not** what discharges the
+    /// §10.6(c) carry-over on its own; the runs themselves hold connections
+    /// from [`connector`](Self::connector), outside every pool.
+    ///
+    /// # Errors
+    /// [`DbError::Sqlx`] if the connection fails.
+    pub async fn pool_for(&self, max_connections: u32) -> Result<PgPool, DbError> {
+        Ok(self.connector.pool(max_connections).await?)
+    }
+
+    /// Whether this process is responsible for stopping the server.
+    ///
+    /// False for an externally managed server (`existing_url`), and for a
+    /// server a live sibling instance owns.
+    #[must_use]
+    pub fn owns_server(&self) -> bool {
+        self.owner_lock.is_some()
+    }
+
+    /// Drop this handle the way a signal does: no `pg_ctl stop`, no pool
+    /// close, the ownership lock released by closing its file. The server
+    /// keeps running, owned by nobody -- which is exactly the state a
+    /// `kill -9` leaves behind.
+    ///
+    /// Test-only, and the only way to reach the orphan case in-process: a
+    /// `kill -9` is not something a `#[tokio::test]` can do to itself, and the
+    /// property under test -- that the *next* launch adopts an orphan **and
+    /// takes responsibility for it** -- is the one M0 could not deliver.
+    ///
+    /// The two halves are deliberately different. The lock file is **dropped**,
+    /// because the kernel is what releases an OS lock when a process dies and
+    /// an orphan with a live lock holder would be indistinguishable from a
+    /// live sibling's server. The pool and the `PostgreSQL` handle are
+    /// **forgotten**, because dropping either one is what would stop the
+    /// server (`PostgreSQL::drop` runs `pg_ctl stop -m fast` whenever
+    /// `postmaster.pid` exists). Leaking them costs a handful of sockets for
+    /// the rest of a short-lived test binary.
+    #[cfg(feature = "test-util")]
+    pub fn abandon(self) {
+        // `PostgreSQL::drop` runs `pg_ctl stop -m fast` whenever
+        // `postmaster.pid` exists, which is exactly what this must not do. The
+        // owner lock is closed first, because a signal-killed process releases
+        // its locks and this is standing in for one.
+        let EmbeddedDb {
+            pool,
+            connector,
+            postgresql,
+            stop_settings,
+            owner_lock,
+        } = self;
+        drop(owner_lock);
+        drop(connector);
+        drop(stop_settings);
+        std::mem::forget(pool);
+        std::mem::forget(postgresql);
+    }
+
+    /// Close the pool and shut the server down, if this process owns it.
+    ///
+    /// The close is **bounded** by [`POOL_CLOSE_TIMEOUT`]: `PgPool::close`
+    /// waits for in-flight queries, and waiting for one parked on a remote
+    /// system is how Cmd-Q during a sync turns into a thirty-second hang (M0
+    /// carry-over). Past the timeout the pool is abandoned and `pg_ctl stop -m
+    /// fast` terminates the backends anyway.
+    ///
+    /// An **adopted** server is stopped too, provided this process holds the
+    /// ownership lock. That is the M1 fix for the carry-over: M0 never stopped
+    /// one, so a signal-killed run left a postmaster per profile running until
+    /// the machine rebooted.
     ///
     /// # Errors
     ///
     /// Returns [`DbError::Embedded`] if `pg_ctl stop` fails.
     pub async fn stop(self) -> Result<(), DbError> {
-        self.pool.close().await;
-        if let Some(postgresql) = &self.postgresql {
-            postgresql.stop().await?;
+        if tokio::time::timeout(POOL_CLOSE_TIMEOUT, self.pool.close())
+            .await
+            .is_err()
+        {
+            tracing::warn!(
+                "connections were still busy after {}s: stopping the server anyway",
+                POOL_CLOSE_TIMEOUT.as_secs()
+            );
+        }
+        if self.owner_lock.is_none() {
+            tracing::info!("not this process's server to stop");
+            return Ok(());
+        }
+        match &self.postgresql {
+            // Started here: the handle knows how to stop it.
+            Some(postgresql) => postgresql.stop().await?,
+            // Adopted, and ownerless when we found it. Rebuild a handle over
+            // the settings this instance is actually connected to and stop it
+            // through the same `pg_ctl` path; the ownership lock is what makes
+            // that safe.
+            None => {
+                if let Some(settings) = self.stop_settings.clone() {
+                    PostgreSQL::new(settings).stop().await?;
+                }
+            }
         }
         Ok(())
+    }
+}
+
+/// Name of the file whose OS lock marks "this process stops the server".
+///
+/// A *different* lock from [`BRING_UP_LOCK`], and held for a different length
+/// of time: bring-up is held for one `initdb`+start and released; ownership is
+/// held for the process's whole life. The kernel releases it however the
+/// process dies, which is the property the whole design rests on -- a server
+/// orphaned by a `kill -9` has no lock holder, so the next launch can adopt it
+/// *and take responsibility for it*.
+const OWNER_LOCK: &str = ".owner.lock";
+
+/// Claim responsibility for the server serving `root_dir`, if nobody else has.
+///
+/// Non-blocking on purpose: a live sibling holding this lock is the answer,
+/// not a delay. `None` means "somebody else owns it" -- which is exactly when
+/// stopping the server would take a running instance's database down with it.
+fn claim_ownership(root_dir: &Path) -> Result<Option<File>, DbError> {
+    let path = root_dir.join(OWNER_LOCK);
+    let file = File::create(&path).map_err(|source| DbError::io(&path, source))?;
+    match file.try_lock() {
+        Ok(()) => Ok(Some(file)),
+        Err(TryLockError::WouldBlock) => {
+            tracing::info!("another knobas instance owns this server; it will stop it");
+            Ok(None)
+        }
+        Err(TryLockError::Error(source)) => Err(DbError::io(&path, source)),
     }
 }
 
@@ -319,7 +557,7 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
             Lock::Absent => return Err(error.into()),
             Lock::Live { port, pid } => {
                 std::mem::forget(postgresql);
-                return adopt(adoption, port, pid).await;
+                return adopt(root_dir, adoption, port, pid).await;
             }
             Lock::LiveProcess { pid } => {
                 std::mem::forget(postgresql);
@@ -327,7 +565,7 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
                     data_dir,
                     reason: format!(
                         "postmaster.pid records process {pid}, which is still running, but \
-                         nothing answers on the port it recorded"
+                         nothing answers on the port it recorded (the start failed with: {error})"
                     ),
                 });
             }
@@ -339,15 +577,22 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
     }
 
     let url = postgresql.settings().url(DATABASE_NAME);
-    let pool = connect(&url).await?;
+    let connector = Connector::parse(&url)?;
+    let pool = connector.pool(MAX_CONNECTIONS).await?;
+
+    // We started it, so we stop it -- but the claim still goes through the
+    // lock, so `owns_server` has exactly one meaning and a sibling that later
+    // adopts this server can see that somebody is already responsible for it.
+    let owner_lock = claim_ownership(root_dir)?;
 
     tracing::info!(port = postgresql.settings().port, "embedded postgres ready");
 
     Ok(Started::Ready(Box::new(EmbeddedDb {
         pool,
-        #[cfg(feature = "test-util")]
-        url,
+        connector,
         postgresql: Some(postgresql),
+        stop_settings: None,
+        owner_lock,
     })))
 }
 
@@ -362,18 +607,28 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
 /// distinguishes the two. Adopting it does neither: the orphan becomes this
 /// run's warm start, skipping `initdb` and the start entirely.
 ///
-/// The adopted server is deliberately **not** owned -- `postgresql` stays
-/// `None`, so [`EmbeddedDb::stop`] closes the pool and leaves the server up.
-/// Two consequences worth knowing:
+/// **Ownership is decided here, and M1 changed the answer.** M0 adopted
+/// without owning: `postgresql` stayed `None` and `stop` left the server up,
+/// so a server orphaned by a signal-kill was never stopped by anybody -- "from
+/// then until the machine reboots there is one PostgreSQL running per
+/// profile". Now the adopter tries [`claim_ownership`]:
 ///
-/// * A server adopted this way keeps running after knobas quits, and is
-///   adopted again next launch. It is only ever stopped by the run that
-///   actually started it.
-/// * If the server belongs to a second live instance, both instances now share
-///   it -- which PostgreSQL is entirely happy with -- but the instance that
-///   started it will stop it on quit, and the adopter's pool dies with it.
-///   Single-user desktop, M0: acceptable. Real multi-instance arbitration is
-///   M1's.
+/// * **Nobody holds the lock** -- the orphan case. This process takes
+///   responsibility and stops the server on a clean quit, which closes M0's
+///   one-way door.
+/// * **A live sibling holds it** -- two knobas windows on one profile. The
+///   adopter borrows only; the instance that started the server is the one
+///   that stops it, and taking it down under a live sibling is precisely what
+///   the lock prevents.
+///
+/// # The last uncovered corner
+///
+/// A **live recycled PID** whose recorded port is answered by something that
+/// is not PostgreSQL still yields [`DbError::AlreadyRunning`]: the pid check
+/// says the lock may still be owned, and nothing else identifies what
+/// answered. Accepted as documented rather than covered by more machinery --
+/// the recovery is to delete `data/postmaster.pid` by hand. Every other shape
+/// of stale lock is handled above.
 ///
 /// # Errors
 ///
@@ -394,7 +649,12 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
 /// recovery honest: while the recorded process is still alive, the lock may
 /// still be owned, and a non-PostgreSQL answer on its port is not enough to
 /// condemn it.
-async fn adopt(mut settings: Settings, port: u16, pid: Option<u32>) -> Result<Started, DbError> {
+async fn adopt(
+    root_dir: &Path,
+    mut settings: Settings,
+    port: u16,
+    pid: Option<u32>,
+) -> Result<Started, DbError> {
     let data_dir = settings.data_dir.clone();
     // The recorded port, not the 0 that `build_settings` asks a fresh start to
     // pick: this server chose its port long ago.
@@ -439,7 +699,7 @@ async fn adopt(mut settings: Settings, port: u16, pid: Option<u32>) -> Result<St
         .fetch_one(&mut admin)
         .await
         .map_err(|source| unreachable(format!("cannot query it: {source}")))?;
-    if !same_dir(Path::new(&serving.0), &data_dir) {
+    if provably_different(Path::new(&serving.0), &data_dir) {
         // A mismatch clears the lock **whatever the recorded pid is doing** --
         // deliberately, and not an oversight of the rule the wire-level arm
         // above applies ("a live recorded process means the lock may still be
@@ -481,55 +741,70 @@ async fn adopt(mut settings: Settings, port: u16, pid: Option<u32>) -> Result<St
             port,
             "the adopted server has no {DATABASE_NAME} database: creating it"
         );
-        sqlx::query(sqlx::AssertSqlSafe(format!(
+        if let Err(source) = sqlx::query(sqlx::AssertSqlSafe(format!(
             r#"create database "{DATABASE_NAME}""#
         )))
         .execute(&mut admin)
         .await
-        .map_err(|source| {
-            unreachable(format!(
-                "cannot create the {DATABASE_NAME} database: {source}"
-            ))
-        })?;
+        {
+            // 42P04 = duplicate_database. `create database` has no `if not
+            // exists`, so the lookup above is a check-then-act two adopters
+            // can interleave: the loser gets this, and the outcome it wanted
+            // -- a database that exists -- is exactly what happened.
+            let raced = source
+                .as_database_error()
+                .and_then(sqlx::error::DatabaseError::code)
+                .is_some_and(|code| code == "42P04");
+            if !raced {
+                return Err(unreachable(format!(
+                    "cannot create the {DATABASE_NAME} database: {source}"
+                )));
+            }
+            tracing::info!("another adopter created the {DATABASE_NAME} database first");
+        }
     }
     let _ = admin.close().await;
 
-    let pool = connect(&url).await.map_err(|source| {
+    let connector = Connector::parse(&url)?;
+    let pool = connector.pool(MAX_CONNECTIONS).await.map_err(|source| {
         unreachable(format!(
             "cannot connect to {DATABASE_NAME} on port {port}: {source}"
         ))
     })?;
 
+    let owner_lock = claim_ownership(root_dir)?;
     tracing::warn!(
         port,
+        owned = owner_lock.is_some(),
         "adopting the postgres already serving this data directory"
     );
     Ok(Started::Ready(Box::new(EmbeddedDb {
         pool,
-        #[cfg(feature = "test-util")]
-        url,
+        connector,
         postgresql: None,
+        // `settings.port` was set to the recorded port above, and
+        // `adopt_recorded_password` gave it the password `initdb` burned in,
+        // so this is a handle over the server we are actually connected to.
+        stop_settings: Some(settings),
+        owner_lock,
     })))
 }
 
-/// Whether two paths name the same directory.
+/// Whether two paths are **provably different** directories.
 ///
 /// Canonicalised first: macOS hands out `/var/folders/...` paths that
-/// PostgreSQL reports back as `/private/var/folders/...`, and a raw string
-/// comparison would call an adopted server a stranger every time. Falls back to
-/// the literal comparison when a path cannot be resolved.
-fn same_dir(left: &Path, right: &Path) -> bool {
+/// PostgreSQL reports back as `/private/var/folders/...`, so a raw string
+/// comparison would call an adopted server a stranger every time.
+///
+/// Deliberately **not** the negation of "same directory". Its caller uses it to
+/// decide whether to clear a lock file -- a destructive act -- and a path that
+/// cannot be resolved is not evidence of anything. Both sides must canonicalise
+/// for a mismatch to count; anything else keeps the lock.
+fn provably_different(left: &Path, right: &Path) -> bool {
     match (left.canonicalize(), right.canonicalize()) {
-        (Ok(left), Ok(right)) => left == right,
-        _ => left == right,
+        (Ok(left), Ok(right)) => left != right,
+        _ => false,
     }
-}
-
-pub(crate) async fn connect(url: &str) -> Result<PgPool, sqlx::Error> {
-    PgPoolOptions::new()
-        .max_connections(MAX_CONNECTIONS)
-        .connect(url)
-        .await
 }
 
 /// `Settings::new()` with its litter cleaned up.
@@ -1177,6 +1452,27 @@ mod tests {
         settings
     }
 
+    /// The destructive branch in `adopt` clears a lock file, and an
+    /// unresolvable path is not evidence of anything. `provably_different` is
+    /// deliberately not the negation of "same directory" for exactly that.
+    #[test]
+    fn a_path_that_cannot_be_resolved_is_never_proof_of_a_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("gone");
+        assert!(
+            !provably_different(&missing, dir.path()),
+            "an unresolvable path proves nothing"
+        );
+        assert!(
+            !provably_different(dir.path(), dir.path()),
+            "one directory is not different from itself"
+        );
+        assert!(provably_different(
+            dir.path(),
+            std::env::temp_dir().as_path()
+        ));
+    }
+
     /// The recycled-port lockout: a dead postmaster's port now belongs to some
     /// unrelated program. That is not another knobas instance, and reporting it
     /// as one leaves the user with an app that refuses to launch until they
@@ -1186,7 +1482,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let port = squatter();
 
-        match adopt(adoption_settings(dir.path()), port, Some(dead_pid())).await {
+        match adopt(
+            dir.path(),
+            adoption_settings(dir.path()),
+            port,
+            Some(dead_pid()),
+        )
+        .await
+        {
             Ok(Started::StaleLock { port: p, .. }) => assert_eq!(p, port),
             Ok(Started::Ready(_)) => panic!("nothing on that port could have been adopted"),
             Err(error) => panic!("a stranger on the port is a stale lock, not {error:?}"),
@@ -1204,6 +1507,7 @@ mod tests {
         // `Started` carries an `EmbeddedDb`, which is not `Debug`, so the
         // success arm is matched rather than unwrapped.
         match adopt(
+            dir.path(),
             adoption_settings(dir.path()),
             port,
             Some(std::process::id()),

@@ -89,6 +89,21 @@ const PG_CTL: &str = if cfg!(windows) {
 /// Panics if the database cannot be started, or if the pool cannot connect --
 /// there is no useful way for a test to continue without one.
 pub async fn test_pool() -> PgPool {
+    test_connector()
+        .await
+        .pool(TEST_POOL_SIZE)
+        .await
+        .expect("connect a test pool to the shared embedded postgres")
+}
+
+/// How to reach this test binary's shared database, for a test that needs
+/// connections rather than a pool -- the scheduler's runs hold one each
+/// (interfaces §10.6(c)).
+///
+/// # Panics
+///
+/// Panics if the database cannot be started.
+pub async fn test_connector() -> crate::embedded::Connector {
     static DB: tokio::sync::OnceCell<EmbeddedDb> = tokio::sync::OnceCell::const_new();
 
     let db = DB
@@ -104,11 +119,12 @@ pub async fn test_pool() -> PgPool {
             .expect("start embedded postgres for tests")
         })
         .await;
-
-    crate::embedded::connect(db.url())
-        .await
-        .expect("connect a test pool to the shared embedded postgres")
+    db.connector()
 }
+
+/// Connections a test pool gets. The same five the application pool has, so a
+/// test that exhausts one is exhausting what the app would.
+const TEST_POOL_SIZE: u32 = 5;
 
 /// The ownership lock path for a scratch directory: a sibling, never a child.
 fn lock_path(root_dir: &Path) -> PathBuf {

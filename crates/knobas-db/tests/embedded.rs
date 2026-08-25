@@ -588,3 +588,274 @@ fn test_pool_survives_an_earlier_runtimes_death() {
         drop(rt);
     }
 }
+
+/// The port `postmaster.pid` records for a data directory.
+fn port_of(root_dir: &std::path::Path) -> u16 {
+    running_port(root_dir)
+}
+
+fn port_answers(port: u16) -> bool {
+    std::net::TcpStream::connect_timeout(
+        &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+        std::time::Duration::from_millis(500),
+    )
+    .is_ok()
+}
+
+/// The M0 carry-over: an adopted server was owned by nobody, so it outlived
+/// every later run too. A launch that finds an orphan must be able to take
+/// responsibility for it, or `just dev` leaves a postmaster per crash behind
+/// for ever.
+#[tokio::test]
+async fn a_launch_that_adopts_an_orphaned_server_takes_ownership_and_can_stop_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = DbConfig {
+        root_dir: dir.path().to_path_buf(),
+        existing_url: None,
+    };
+
+    let first = EmbeddedDb::start(cfg.clone()).await.unwrap();
+    assert!(first.owns_server(), "the process that started it owns it");
+    let port = port_of(dir.path());
+
+    // Exactly what a `kill -9` leaves behind: the handle is gone, its locks are
+    // released, the server is still up.
+    first.abandon();
+    assert!(port_answers(port), "the orphan is still serving");
+
+    let second = EmbeddedDb::start(cfg).await.unwrap();
+    assert!(
+        second.owns_server(),
+        "adopting an ownerless server takes ownership of it"
+    );
+    let one: (i32,) = sqlx::query_as("select 1")
+        .fetch_one(second.pool())
+        .await
+        .unwrap();
+    assert_eq!(one.0, 1);
+
+    second.stop().await.unwrap();
+    assert!(!port_answers(port), "and a clean quit actually stops it");
+}
+
+/// The other half of the same rule: a server a *live* instance owns must never
+/// be stopped by an adopter. Two knobas windows on one profile share the
+/// database; the one that started it is the one that stops it.
+#[tokio::test]
+async fn an_adopter_does_not_take_ownership_from_a_live_owner() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = DbConfig {
+        root_dir: dir.path().to_path_buf(),
+        existing_url: None,
+    };
+
+    let owner = EmbeddedDb::start(cfg.clone()).await.unwrap();
+    let port = port_of(dir.path());
+    let guest = EmbeddedDb::start(cfg).await.unwrap();
+
+    assert!(owner.owns_server());
+    assert!(
+        !guest.owns_server(),
+        "the owner is still alive; the guest only borrows"
+    );
+
+    guest.stop().await.unwrap();
+    assert!(
+        port_answers(port),
+        "a guest's quit must not take the owner's database down"
+    );
+
+    owner.stop().await.unwrap();
+    assert!(!port_answers(port));
+}
+
+/// A server knobas does not manage at all is never owned, whatever the locks
+/// in `root_dir` say.
+#[tokio::test]
+async fn an_externally_managed_server_is_never_owned() {
+    let dir = tempfile::tempdir().unwrap();
+    let owned = EmbeddedDb::start(DbConfig {
+        root_dir: dir.path().to_path_buf(),
+        existing_url: None,
+    })
+    .await
+    .unwrap();
+
+    let borrowed = EmbeddedDb::start(DbConfig {
+        root_dir: dir.path().join("never-touched"),
+        existing_url: Some(running_url(dir.path())),
+    })
+    .await
+    .unwrap();
+    assert!(
+        !borrowed.owns_server(),
+        "KNOBAS_DB_URL points at somebody else's server"
+    );
+    borrowed.stop().await.unwrap();
+
+    owned.stop().await.unwrap();
+}
+
+/// Carry-over: "quitting mid-sync stalls on `pool.close()` until the run's
+/// transaction drains". The scheduler cancels its runs first (stream F, Task
+/// 7), but the database handle must not be able to hang the exit on its own
+/// either -- a stray query from anywhere else would do it.
+#[tokio::test]
+async fn stopping_does_not_wait_out_a_long_running_query() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = EmbeddedDb::start(DbConfig {
+        root_dir: dir.path().to_path_buf(),
+        existing_url: None,
+    })
+    .await
+    .unwrap();
+
+    let pool = db.pool().clone();
+    // Far longer than the close timeout, and holding a pooled connection.
+    let hog = tokio::spawn(async move {
+        let _ = sqlx::query("select pg_sleep(30)").execute(&pool).await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    let started = std::time::Instant::now();
+    db.stop().await.unwrap();
+    let took = started.elapsed();
+    assert!(
+        took < std::time::Duration::from_secs(15),
+        "stop took {took:?}; it must be bounded"
+    );
+
+    hog.abort();
+}
+
+/// The scheduler needs connections of its own: a network-bound run pins one for
+/// the length of a remote call, and the UI's five must stay free (carry-over).
+#[tokio::test]
+async fn a_second_pool_can_be_opened_on_the_same_server() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = EmbeddedDb::start(DbConfig {
+        root_dir: dir.path().to_path_buf(),
+        existing_url: None,
+    })
+    .await
+    .unwrap();
+
+    let second = db.pool_for(4).await.unwrap();
+    knobas_db::migrate::run(db.pool()).await.unwrap();
+
+    sqlx::query(
+        "insert into knobas.entity (id, kind, title) values ('note:pool-test', 'note', 'x')",
+    )
+    .execute(&second)
+    .await
+    .unwrap();
+    let (n,): (i64,) =
+        sqlx::query_as("select count(*) from knobas.entity where id = 'note:pool-test'")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(n, 1, "both pools see one database");
+
+    // ...and it really is a *second* pool: closing it must leave the
+    // application's untouched. A `pool_for` that handed back a clone of
+    // `db.pool()` would satisfy everything above and fail here, which is the
+    // whole point of the carry-over.
+    second.close().await;
+    assert!(second.is_closed());
+    assert!(
+        !db.pool().is_closed(),
+        "the application pool is not the scheduler's"
+    );
+    let (still,): (i64,) = sqlx::query_as("select count(*) from knobas.entity")
+        .fetch_one(db.pool())
+        .await
+        .expect("the application pool still answers after the scheduler's closed");
+    assert!(still >= 1);
+
+    db.stop().await.unwrap();
+}
+
+/// A connection that belongs to no pool at all -- what §10.6(c) makes the sync
+/// run hold its advisory lock on.
+#[tokio::test]
+async fn a_connector_hands_out_connections_outside_every_pool() {
+    use sqlx::Connection;
+
+    let dir = tempfile::tempdir().unwrap();
+    let db = EmbeddedDb::start(DbConfig {
+        root_dir: dir.path().to_path_buf(),
+        existing_url: None,
+    })
+    .await
+    .unwrap();
+    let connector = db.connector();
+
+    // The pool is exhausted for the whole of this test...
+    let pool = db.pool_for(1).await.unwrap();
+    let held = pool.acquire().await.unwrap();
+
+    // ...and the connector still answers, because it draws on nothing.
+    let mut conn = connector.connect().await.unwrap();
+    let (one,): (i32,) = sqlx::query_as("select 1")
+        .fetch_one(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(one, 1);
+    conn.close().await.unwrap();
+
+    drop(held);
+    pool.close().await;
+    db.stop().await.unwrap();
+}
+
+/// A `Connector` carries the superuser password, so `{:?}` must not.
+#[tokio::test]
+async fn a_connector_does_not_print_its_password() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = EmbeddedDb::start(DbConfig {
+        root_dir: dir.path().to_path_buf(),
+        existing_url: None,
+    })
+    .await
+    .unwrap();
+
+    let password = std::fs::read_to_string(dir.path().join(".pgpass")).unwrap();
+    let password = password.trim_end();
+    assert!(!password.is_empty(), "initdb recorded a password");
+
+    let printed = format!("{:?}", db.connector());
+    assert!(
+        !printed.contains(password),
+        "the connector printed its password: {printed}"
+    );
+    assert!(printed.contains("<redacted>"), "{printed}");
+
+    db.stop().await.unwrap();
+}
+
+/// Carry-over: a `KNOBAS_DB_URL` pointing at a dead port left the boot screen
+/// on "Starting the local database" for a full 30 s -- `PgPoolOptions::connect`
+/// retrying a refused handshake until the pool's acquire timeout expired.
+#[tokio::test]
+async fn an_existing_url_that_answers_nothing_fails_fast_rather_than_after_thirty_seconds() {
+    // A port nothing listens on: bind it, read it back, drop the listener.
+    let port = {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.local_addr().unwrap().port()
+    };
+    let dir = tempfile::tempdir().unwrap();
+
+    let started = std::time::Instant::now();
+    let outcome = EmbeddedDb::start(DbConfig {
+        root_dir: dir.path().to_path_buf(),
+        existing_url: Some(format!("postgresql://postgres:x@127.0.0.1:{port}/knobas")),
+    })
+    .await;
+    let took = started.elapsed();
+
+    assert!(outcome.is_err(), "nothing is listening on {port}");
+    assert!(
+        took < std::time::Duration::from_secs(15),
+        "the failure took {took:?}; sqlx' 30 s pool-acquire wait is the bug this bounds"
+    );
+}
