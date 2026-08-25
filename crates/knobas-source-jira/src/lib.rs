@@ -25,6 +25,7 @@
 //! crate sends is declared there. `knobas-mockd` answers anything else with a
 //! recorded violation, so an invented endpoint fails this crate's own suite.
 
+mod api;
 mod config;
 mod cursor;
 mod descriptor;
@@ -32,6 +33,7 @@ mod http;
 mod jql;
 mod map;
 mod model;
+mod sync;
 mod time;
 
 pub use config::{Flavor, JiraConfig};
