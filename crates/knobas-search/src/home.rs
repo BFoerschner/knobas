@@ -82,8 +82,48 @@ const EXPLAIN_RECENT_SQL: &str = recent_sql!("explain (analyze false, costs fals
 /// buys nothing), and a kind the catalog does not declare -- an adapter since
 /// removed, a source the user disabled, a mirror older than the build -- still
 /// has items the user can open, so leaving it out would be a board missing
-/// rows. One index-only scan of `item_kind_updated_idx`.
-const RECENT_KINDS_SQL: &str = "select distinct kind from sync.item";
+/// rows.
+///
+/// # Why this is not `select distinct kind`
+///
+/// Because PostgreSQL has no loose index scan, and `select distinct kind from
+/// sync.item` therefore plans as `HashAggregate → Seq Scan on item` -- a full
+/// scan of the mirror, on the board's path, growing with the corpus. This is
+/// the classic recursive emulation: start at the first key, then repeatedly ask
+/// the index for the next one strictly greater. `item_kind_updated_idx` leads
+/// with `kind`, so every step is an `Index Only Scan` and the whole read is
+/// O(distinct kinds), flat in corpus size.
+///
+/// Measured at 3 200 rows, `analyze`d: 47 buffers / 0.31 ms for the `distinct`
+/// against 16 buffers / 0.07 ms for this -- and only the first of those two
+/// numbers grows. The cost was never the point; the *claim* was. This module's
+/// whole stated rationale is that the board is index-backed, and a comment
+/// asserting that above a sequential scan is worth less than no comment.
+///
+/// `sync.item` rather than `sync.live_item`: the view's join to
+/// `knobas.entity` is what would cost the index-only scan its "only", and a
+/// kind whose every row is tombstoned merely buys one lateral probe that
+/// returns nothing.
+macro_rules! recent_kinds_sql {
+    ($prefix:literal) => {
+        concat!(
+            $prefix,
+            "with recursive k as (\n",
+            "    (select kind from sync.item order by kind limit 1)\n",
+            "  union all\n",
+            "    select (select i.kind from sync.item i\n",
+            "              where i.kind > k.kind order by i.kind limit 1)\n",
+            "      from k where k.kind is not null\n",
+            ")\n",
+            "select kind from k where kind is not null\n"
+        )
+    };
+}
+
+const RECENT_KINDS_SQL: &str = recent_kinds_sql!("");
+
+#[cfg(any(test, feature = "test-util"))]
+const EXPLAIN_RECENT_KINDS_SQL: &str = recent_kinds_sql!("explain (analyze false, costs false)\n");
 
 /// What an empty box answers with (interfaces §2.4).
 ///
@@ -136,20 +176,35 @@ pub async fn recent(pool: &sqlx::PgPool, limit: u32) -> Result<Vec<EntityRow>, S
         .collect())
 }
 
-/// The plan `recent` runs under, for the test that keeps it index-backed.
+/// The plans `recent` runs under, for the test that keeps it index-backed.
+///
+/// **Both** statements, and that is the whole point of the helper's shape.
+/// [`recent`] runs [`RECENT_KINDS_SQL`] and then [`RECENT_SQL`]; a probe that
+/// explained only the second would report "no sequential scan" while the board
+/// sequentially scanned the mirror in the statement it did not look at. That is
+/// exactly what this helper did in review round 1, and a mutation reverting the
+/// kinds read to `select distinct` left every home test green -- a detector
+/// that was sound but scoped to half of what it claimed to cover.
 ///
 /// # Errors
 ///
-/// [`SearchError::Db`] if the plan cannot be read.
+/// [`SearchError::Db`] if either plan cannot be read.
 #[cfg(any(test, feature = "test-util"))]
 pub async fn explain_recent(pool: &sqlx::PgPool, limit: u32) -> Result<String, SearchError> {
+    let kinds_plan: Vec<String> = sqlx::query_scalar(EXPLAIN_RECENT_KINDS_SQL)
+        .fetch_all(pool)
+        .await?;
     let kinds = kinds(pool).await?;
-    let lines: Vec<String> = sqlx::query_scalar(EXPLAIN_RECENT_SQL)
+    let rows_plan: Vec<String> = sqlx::query_scalar(EXPLAIN_RECENT_SQL)
         .bind(&kinds)
         .bind(i64::from(limit))
         .fetch_all(pool)
         .await?;
-    Ok(lines.join("\n"))
+    Ok(format!(
+        "-- kinds --\n{}\n-- rows --\n{}",
+        kinds_plan.join("\n"),
+        rows_plan.join("\n")
+    ))
 }
 
 async fn kinds(pool: &sqlx::PgPool) -> Result<Vec<String>, SearchError> {
@@ -162,15 +217,44 @@ async fn kinds(pool: &sqlx::PgPool) -> Result<Vec<String>, SearchError> {
 mod tests {
     use super::*;
 
-    /// The plan variant has to be the *same* statement, or the assertion in
+    /// Each plan variant has to be the *same* statement, or the assertion in
     /// `tests/home.rs` is about a query nobody runs.
+    ///
+    /// Both of them, because [`recent`] runs both -- see `explain_recent`.
     #[test]
-    fn the_explained_statement_is_the_one_that_runs() {
-        assert_eq!(
-            EXPLAIN_RECENT_SQL
-                .strip_prefix("explain (analyze false, costs false)\n")
-                .expect("the plan variant is the statement with a prefix"),
-            RECENT_SQL
+    fn the_explained_statements_are_the_ones_that_run() {
+        const PREFIX: &str = "explain (analyze false, costs false)\n";
+        for (explained, run) in [
+            (EXPLAIN_RECENT_SQL, RECENT_SQL),
+            (EXPLAIN_RECENT_KINDS_SQL, RECENT_KINDS_SQL),
+        ] {
+            assert_eq!(
+                explained
+                    .strip_prefix(PREFIX)
+                    .expect("the plan variant is the statement with a prefix"),
+                run
+            );
+        }
+    }
+
+    /// The kinds read walks the index rather than the table.
+    ///
+    /// Pinned in the source as well as in the plan (`tests/home.rs`) because
+    /// the two catch different mistakes: the plan assertion catches the
+    /// planner changing its mind, this catches someone "simplifying" the
+    /// recursion back to the `select distinct` that PostgreSQL cannot serve
+    /// from an index at all.
+    #[test]
+    fn the_kinds_read_is_a_loose_index_scan_and_not_a_distinct() {
+        assert!(
+            RECENT_KINDS_SQL.contains("with recursive"),
+            "{RECENT_KINDS_SQL}"
+        );
+        assert!(!RECENT_KINDS_SQL.contains("distinct"), "{RECENT_KINDS_SQL}");
+        // The step that makes it a *scan* rather than a loop over a table.
+        assert!(
+            RECENT_KINDS_SQL.contains("i.kind > k.kind"),
+            "{RECENT_KINDS_SQL}"
         );
     }
 

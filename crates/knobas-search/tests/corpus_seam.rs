@@ -14,7 +14,8 @@
 //! through `sql::search_sql`, `sql::query_as_with`, `group::group` and
 //! `snippet::segments` untouched.
 //!
-//! Every test shares one database, so each seeds a token unique to itself.
+//! Every test in this binary shares one database -- fresh per run, shared
+//! across the tests in it -- so each seeds a token unique to itself.
 //!
 //! [`Corpus`]: knobas_search::corpus::Corpus
 

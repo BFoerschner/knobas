@@ -4,9 +4,17 @@
 //! vocabulary, grammar, statement, grouping -- through the public
 //! [`Searcher`], which is what the IPC command calls.
 //!
-//! Every test shares one database (`knobas_db::test_util`), which can outlive a
-//! run, so each seeds a token unique to itself and searches for *that*. Nothing
+//! Every test in this binary shares one database (`knobas_db::test_util`), so
+//! each seeds a token unique to itself and searches for *that*. Nothing
 //! truncates, and no test can be made to pass by a row another one left behind.
+//!
+//! The database does **not** outlive the run, and getting that wrong once cost
+//! this stream a misdiagnosed test failure: `test_util::run_nonce` is
+//! `{pid}-{nanos}`, so a scratch directory an earlier run left behind can never
+//! match this process's stamp, and `take_over` stops its server and deletes it.
+//! What a test can see is exactly what the other tests *in this run of this
+//! binary* have seeded -- and libtest does not order those, so no test may
+//! assume which of them have already run.
 
 use std::collections::HashSet;
 

@@ -1,16 +1,36 @@
 //! The built-in smart lists, against a real PostgreSQL.
 //!
-//! # Why these tests serialize
+//! # Why these tests serialize, and what that does and does not buy
 //!
 //! A smart list is a **global aggregate**: "changed today" counts every row in
 //! the mirror, and the change badge is one shared `knobas.setting` row. Two
 //! tests seeding concurrently into the one shared database would each see the
-//! other's rows, so there is no per-test token that can isolate a count.
+//! other's rows mid-flight, so there is no per-test token that can isolate a
+//! count.
 //!
 //! Every test therefore takes [`SERIAL`] and measures a **delta**: read the
-//! summary, seed n rows, read it again, assert it moved by exactly n. That is
-//! sound against rows this run left behind *and* against rows an earlier run
-//! left behind, which no absolute count is.
+//! summary, seed n rows, read it again, assert it moved by exactly n. A delta
+//! is sound whatever the other tests in this run have already seeded, which no
+//! absolute count is.
+//!
+//! **The mutex serialises; it does not order.** libtest picks the order, so a
+//! test may run before or after any other test in this binary and must be
+//! correct either way. That distinction is not pedantry: it is the actual cause
+//! of the one failure this file had. `changed_today_starts_at_midnight_...`
+//! originally looked for its row on a page of 200, and the row it looks for is
+//! by construction the *oldest* thing in the list -- so it passed when it ran
+//! before `a_list_page_is_bounded_...` (which seeds 250 rows) and failed when it
+//! ran after. It was misdiagnosed as state surviving between runs; the database
+//! is fresh per run (`test_util::run_nonce` is `{pid}-{nanos}`, so an earlier
+//! run's directory can never match this process's stamp and is deleted), and
+//! the real variable was the ordering inside a single run.
+//!
+//! The two rules that follow, and that every test here obeys:
+//!
+//! * assert **deltas**, never absolute counts;
+//! * never assert that a specific row is *on a page*, because what else is on
+//!   that page depends on which tests have already run. Assert through `total`,
+//!   or assert an ordering property over whatever came back.
 
 use std::collections::HashSet;
 use std::sync::LazyLock;
@@ -176,9 +196,9 @@ async fn every_builtin_runs_and_decodes() {
         );
     }
 
-    // The four scan-based lists each found the rows just seeded; `cross-key`
-    // needs a second source and gets its own test.
-    for id in ["changed-today", "mine", "mine-stale", "just-synced"] {
+    // Every list found the rows just seeded, so "the statement parses" is not
+    // being mistaken for "the statement is right".
+    for id in lists::BUILTINS.iter().map(|l| l.id) {
         assert!(
             !s.smart_list_items(id, 20).await.unwrap().groups.is_empty(),
             "{id} came back empty with rows seeded into it"
@@ -329,86 +349,6 @@ async fn the_change_badge_clears_when_the_list_is_opened() {
         "opening `just-synced` forgot that `changed-today` had been opened"
     );
     assert!(!is_changed(&s, "just-synced").await);
-}
-
-/// A ticket key mentioned in another system's text: the join spec §4 sells as
-/// "a query JQL cannot express", done without links (which are M2).
-#[tokio::test]
-async fn the_cross_source_list_finds_what_no_single_source_could() {
-    let _guard = SERIAL.lock().await;
-    let pool = pool().await;
-    let s = searcher(&pool);
-    let t = token("cross");
-    let key = format!("{t}-PAY-231");
-    let ticket = format!("jira:{key}");
-
-    seed(
-        &pool,
-        &ticket,
-        "ticket",
-        "jira",
-        "Retry failed SEPA payouts",
-        None,
-        Utc::now(),
-        Utc::now(),
-    )
-    .await;
-    // A ticket nobody else mentions, so the list is a filter and not a listing
-    // of every recent ticket.
-    let lonely = format!("jira:{t}-PAY-999");
-    seed(
-        &pool,
-        &lonely,
-        "ticket",
-        "jira",
-        "Nobody links to this one",
-        None,
-        Utc::now(),
-        Utc::now(),
-    )
-    .await;
-
-    let found = |r: &knobas_search::SearchResponse, id: &str| {
-        r.groups
-            .iter()
-            .flat_map(|g| &g.hits)
-            .any(|h| h.row.entity_id == id)
-    };
-
-    // Before the mention exists, neither ticket qualifies.
-    let before = s.smart_list_items("cross-key", 20).await.unwrap();
-    assert!(!found(&before, &ticket), "nothing mentions it yet");
-
-    // A PR in *another* source that names the ticket by key.
-    seed(
-        &pool,
-        &format!("gitea:{t}-pr"),
-        "pr",
-        "gitea",
-        &format!("{key} sepa retry"),
-        None,
-        Utc::now(),
-        Utc::now(),
-    )
-    .await;
-
-    let r = s.smart_list_items("cross-key", 20).await.unwrap();
-    assert!(
-        found(&r, &ticket),
-        "the mentioned ticket is the whole point"
-    );
-    assert!(
-        !found(&r, &lonely),
-        "a ticket nothing mentions must not be in a cross-reference list"
-    );
-    // The PR itself is not in the list: it is the evidence, not the answer.
-    assert!(
-        r.groups.iter().all(|g| g.kind == "ticket"),
-        "{:?}",
-        r.groups
-    );
-    // And the same source mentioning its own key is not a cross-reference.
-    assert!(count_of(&s, "cross-key").await >= 1);
 }
 
 /// A list is bounded by its limit, and the group totals still tell the truth

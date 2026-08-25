@@ -13,8 +13,49 @@
 //! spec §3a forbids in the same breath (*"Search does not know adapter names --
 //! it knows `sync.item`"*).
 //!
-//! So M1 ships **the registry plus five lists that are true over the generic
+//! So M1 ships **the registry plus four lists that are true over the generic
 //! corpus**, and the catalogue lands in M2 when its inputs exist.
+//!
+//! # The list that was measured out, and what it costs to bring back
+//!
+//! A fifth list shipped in review round 1 and does not ship now:
+//! `cross-key`, *"tickets another system mentions by key"* -- spec §4's *"a
+//! query JQL cannot express"*, attempted without `knobas.link` (which is M2).
+//! Its predicate was a correlated `exists` probing the FTS index once per
+//! ticket in a 14-day window. Measured on an `analyze`d corpus, warm cache:
+//!
+//! | mirror rows | tickets in window | the scan | the probe | total |
+//! |---|---|---|---|---|
+//! | 3,200 | 800 | 0.78 ms | **183 ms** | 184 ms |
+//! | 12,800 | 3,200 | 3.1 ms | **2,892 ms** | 2,896 ms |
+//!
+//! Two facts, and the second is the one that settles it. It was already over a
+//! 100 ms budget at **1/30th** of M1's target corpus -- and the *per-probe*
+//! cost grew with the corpus too (0.23 ms → 0.90 ms), because a GIN lookup on
+//! a ticket key returns more candidate rows to filter as the mirror fills. The
+//! cost is therefore quadratic in corpus size, so capping the candidate set
+//! does not rescue it: at 100k rows even ten probes would blow the budget.
+//!
+//! It also read like the cheap one. The comment justifying it said the
+//! candidate set was *"tens of rows"*; it was 800 rows at 3,200, and the term
+//! this module's author had flagged as the thing to watch -- the full scan --
+//! turned out to be the cheapest term in the statement by three orders of
+//! magnitude. An unmeasured performance claim in a comment is worth exactly
+//! what it cost to write.
+//!
+//! **M2 gets it back for free.** With `knobas.link` populated, "referenced
+//! across sources" stops being a text probe and becomes an index probe:
+//!
+//! ```sql
+//! count(*) filter (where i.kind = 'ticket'
+//!                    and exists (select 1 from knobas.link l
+//!                                 where l.from_id = i.entity_id
+//!                                   and l.deleted_at is null))
+//! ```
+//!
+//! `link_from_idx` makes that O(1) per ticket, so it collapses into the single
+//! scan below like every other list -- which is why the rule that every list is
+//! a `count(*) filter` over one pass is now stated as a rule.
 //!
 //! # Why they are constants and not a little query language
 //!
@@ -34,12 +75,9 @@
 //! `@me` is the second query, and it is [`crate::vocab::Vocabulary::load`]'s --
 //! the same one every search already makes.
 //!
-//! `cross-key` is the exception and gets its own CTE rather than a `filter`
-//! clause. Its predicate is a correlated `exists`, and inside a `filter` that
-//! would be evaluated per row of the whole scan unless `AND` short-circuits --
-//! which PostgreSQL does not promise. As its own branch the candidate set is a
-//! real `where`: "tickets touched in the last fortnight", tens of rows, each
-//! probing one GIN index.
+//! There is no exception to that single pass, and the section above is why:
+//! the one list that could not be written as a `count(*) filter` over it was
+//! also the one that could not be afforded.
 //!
 //! # The change badge
 //!
@@ -147,7 +185,6 @@ macro_rules! rows_over {
 macro_rules! builtins {
     (
         $( scan: $id:literal, $label:literal, $column:literal, $blurb:literal, $pred:literal; )*
-        bounded: $bid:literal, $blabel:literal, $bcolumn:literal, $bblurb:literal, $bpred:literal;
     ) => {
         /// Every built-in list, in the order the launcher rail draws them.
         pub const BUILTINS: &[BuiltinList] = &[
@@ -155,10 +192,6 @@ macro_rules! builtins {
                 id: $id, label: $label, blurb: $blurb, column: $column,
                 rows_sql: rows_over!($pred),
             }, )*
-            BuiltinList {
-                id: $bid, label: $blabel, blurb: $bblurb, column: $bcolumn,
-                rows_sql: rows_over!($bpred),
-            },
         ];
 
         /// Counts, freshness and the seen-stamps, in one round trip.
@@ -166,6 +199,10 @@ macro_rules! builtins {
         /// `$1` is the identity usernames. `scanned` is the row count the one
         /// pass covered; it also anchors the generated comma-separated list of
         /// aggregates, which is why it is first.
+        ///
+        /// Every list is a `count(*) filter` over the **same single scan**, and
+        /// that is now a rule rather than a convenience -- see the module docs
+        /// on what the one list that could not be written this way cost.
         const SUMMARY_SQL: &str = concat!(
             "with scan as (\n  select count(*) as scanned",
             $(
@@ -173,9 +210,6 @@ macro_rules! builtins {
                 ",\n    max(i.synced_at) filter (where ", $pred, ") as ", $column, "_at",
             )*
             "\n    from sync.live_item i\n),\n",
-            "bounded as (\n",
-            "  select count(*) as n, max(i.synced_at) as at\n",
-            "    from sync.live_item i\n   where ", $bpred, "\n),\n",
             "seen as (\n",
             "  select coalesce(\n",
             "           (select value from knobas.setting where key = 'search.smart_list_seen'),\n",
@@ -186,10 +220,7 @@ macro_rules! builtins {
                 ",\n       scan.", $column, ", scan.", $column, "_at",
                 ",\n       seen.v ->> '", $id, "' as ", $column, "_seen",
             )*
-            ",\n       bounded.n as ", $bcolumn,
-            ",\n       bounded.at as ", $bcolumn, "_at",
-            ",\n       seen.v ->> '", $bid, "' as ", $bcolumn, "_seen\n",
-            "  from scan, bounded, seen\n"
+            "\n  from scan, seen\n"
         );
     };
 }
@@ -216,18 +247,6 @@ builtins! {
     scan: "just-synced", "Just synced", "just_synced",
         "What the last hour of syncing brought in.",
         "i.synced_at >= now() - interval '1 hour'";
-    // Bounded by construction: the candidate set is "tickets touched in the
-    // last two weeks", which is tens of rows, and each probe is one GIN lookup
-    // on the key. Its own branch rather than a `filter` clause -- see the
-    // module docs.
-    bounded: "cross-key", "Referenced across sources", "cross_key",
-        "Tickets another system mentions by key -- a join no single source can answer.",
-        "i.kind = 'ticket'
-     and i.item_updated_at >= now() - interval '14 days'
-     and exists (select 1 from sync.live_item o
-                  where o.source_id <> i.source_id
-                    and o.fts @@ websearch_to_tsquery('english',
-                                   split_part(i.entity_id, ':', 2)))";
 }
 
 /// Record that a list was just opened, so its badge clears.

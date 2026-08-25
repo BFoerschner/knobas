@@ -4,8 +4,11 @@
 //! the identity behind `@me` is the union of every enabled source's configured
 //! username, so "no identity" is a property of the **whole database**. Any test
 //! sharing a database with one that configures an account cannot observe it.
-//! `knobas_db::test_util` gives one database per test *binary*, so this file is
-//! the isolation.
+//! `knobas_db::test_util` gives one database per test binary, fresh per run
+//! (`run_nonce` is `{pid}-{nanos}`, so an earlier run's scratch directory can
+//! never match this process's stamp and is deleted) -- so this file is the
+//! isolation, and it is also why the hardcoded entity id below needs no
+//! `on conflict`: it is the only test in the only run that will ever insert it.
 //!
 //! The other half -- an install that does have an account -- is
 //! `a_configured_identity_leaves_the_blurb_alone` in `tests/lists.rs`. Both
@@ -18,12 +21,21 @@ use knobas_search::{Searcher, lists};
 async fn a_list_with_no_identity_configured_says_so_instead_of_reading_empty() {
     let pool = knobas_db::test_util::test_pool().await;
     knobas_db::migrate::run(&pool).await.unwrap();
-    // Belt and braces: a database this binary inherited from an earlier run
-    // could carry a source row, and the whole test is about there being none.
-    sqlx::query("update knobas.source_config set enabled = false")
-        .execute(&pool)
-        .await
-        .unwrap();
+    // The precondition, asserted rather than forced. Disabling every source
+    // "just in case" would have been theatre -- the database is fresh, so there
+    // is nothing to disable -- and worse, it would hide the day someone adds a
+    // second test to this binary and configures an account in it. Then the
+    // failure would be a silently meaningless assertion instead of this line.
+    let configured: i64 =
+        sqlx::query_scalar("select count(*) from knobas.source_config where enabled")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        configured, 0,
+        "this binary must hold no configured source; `@me` would resolve and the \
+         test would be asserting nothing"
+    );
     // A row that *would* be in `mine` if knobas knew any account -- so an
     // empty list here is the missing identity and not a missing corpus.
     sqlx::query("insert into knobas.entity (id, kind, title) values ('jira:NOID-1','ticket','x')")

@@ -5,8 +5,11 @@
 //! this module, because the statement is assembled per query: a filter
 //! combination nobody executed is a filter combination nobody knows parses.
 //!
-//! Every test shares one database (`knobas_db::test_util`), which can outlive a
-//! run, so each seeds a token unique to itself and nothing truncates.
+//! Every test in this binary shares one database (`knobas_db::test_util`), so
+//! each seeds a token unique to itself and nothing truncates. It does **not**
+//! outlive the run -- `test_util::run_nonce` is `{pid}-{nanos}`, so an earlier
+//! run's scratch directory can never match this process's stamp and is
+//! deleted.
 
 use chrono::{DateTime, Duration, Utc};
 use knobas_search::corpus::LIVE_ITEM;
