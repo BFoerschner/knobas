@@ -19,6 +19,7 @@
  * consulted only after the adapter has had its say.
  */
 import type { KindInfo } from "../ipc/entity";
+import { humanise } from "./humanise";
 
 /** One room tile: a heading and the kinds it draws. */
 export interface TileSpec {
@@ -106,12 +107,6 @@ export function kindMonogram(kind: string, info?: KindInfo | null): string {
   const known = VOCABULARY[kind]?.monogram;
   if (known) return known;
   return kind.slice(0, 2).toUpperCase() || "?";
-}
-
-/** `build_config` → `Build config`. */
-function humanise(kind: string): string {
-  const words = kind.replace(/[_-]+/g, " ").trim();
-  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 /**

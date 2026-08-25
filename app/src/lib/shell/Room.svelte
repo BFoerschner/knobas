@@ -9,6 +9,7 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../ipc";
+  import Detail from "../detail/Detail.svelte";
   import { listEntities, type EntityRow } from "../ipc/entity";
   import RoomBar from "./RoomBar.svelte";
   import Tile from "./Tile.svelte";
@@ -30,6 +31,8 @@
   const SCAN = 200;
 
   const context = $derived(contextById(router.ctx, contexts));
+  /** The entity the address has open over this room, if any. */
+  const detail = $derived(router.route.view === "room" ? router.route.detail : null);
 
   let kinds = $state<string[] | null>(null);
   let total = $state<number | null>(null);
@@ -99,5 +102,22 @@
         <Tile {spec} sources={context.filter.sources} onopen={open} />
       {/each}
     </div>
+  {/if}
+
+  <!--
+    The slide-over is drawn *inside* the room, over its right-hand half
+    (`.detail` is absolutely positioned against `.main`). Keyed on the entity
+    id so opening a second item from behind the panel rebuilds it rather than
+    leaving the previous one's focus capture in place.
+  -->
+  {#if detail}
+    {#key detail.entityId}
+      <Detail
+        entityId={detail.entityId}
+        kind={detail.kind}
+        contextLabel={context.label}
+        onclose={() => router.back()}
+      />
+    {/key}
   {/if}
 </div>

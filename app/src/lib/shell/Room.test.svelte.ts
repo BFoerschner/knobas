@@ -8,18 +8,26 @@
 import { flushSync, mount, unmount } from "svelte";
 import { beforeEach, expect, test, vi } from "vitest";
 
-import type { EntityFilter, EntityPage, EntityRow } from "../ipc/entity";
+import type { EntityDetail, EntityFilter, EntityPage, EntityRow } from "../ipc/entity";
 
 /** A plain function, not a `vi.fn` — see the note in `Tile.test.svelte.ts`. */
 const calls: { filter: EntityFilter; limit: number; offset: number }[] = [];
 let answer: (filter: EntityFilter) => Promise<EntityPage> = () =>
   Promise.resolve({ rows: [], total: 0 });
 
+/**
+ * `getEntity` too, because opening a row mounts the slide-over — which reads.
+ * A mock that stopped at `listEntities` would make the navigation test fail
+ * inside Svelte's effect runner, several frames after the assertion it is
+ * about.
+ */
 vi.mock("../ipc/entity", () => ({
   listEntities: (filter: EntityFilter, limit: number, offset: number) => {
     calls.push({ filter, limit, offset });
     return answer(filter);
   },
+  getEntity: (entityId: string): Promise<EntityDetail> =>
+    Promise.reject({ code: "not_found", message: `${entityId} is not in the local index`, source_id: null }),
 }));
 
 const { default: Room } = await import("./Room.svelte");
