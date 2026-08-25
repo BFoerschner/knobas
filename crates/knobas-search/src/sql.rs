@@ -159,7 +159,7 @@ pub fn search_sql(
         // Computed ONCE, as a FROM item, and never bound as a tsquery
         // (roadmap §4 gotcha 2): the match, the rank and the headline all read
         // this one value.
-        sql.push_str("q as (\n  select ");
+        sql.push_str("q as not materialized (\n  select ");
         if prefix_last {
             // What makes the box answer while the word is still being typed.
             // `websearch_to_tsquery` output is already a well-formed, quoted
@@ -315,7 +315,29 @@ where
     O: for<'r> FromRow<'r, PgRow> + Send + Unpin,
 {
     let SearchSql { sql, binds } = built;
-    let mut query = sqlx::query_as::<Postgres, O>(sqlx::AssertSqlSafe(sql));
+    let mut query = sqlx::query_as::<Postgres, O>(sqlx::AssertSqlSafe(sql))
+        // **Not a cached prepared statement, and this is a measured decision.**
+        //
+        // PostgreSQL plans a *named* prepared statement with the actual
+        // parameter values for its first five executions and then considers a
+        // **generic** plan, which by definition cannot know the tsquery. It
+        // therefore falls back to a default selectivity guess for `fts @@ $1`,
+        // decides the match set is tiny, and joins `knobas.entity` with a
+        // nested loop -- one `entity_pkey` probe per matching row.
+        //
+        // Measured on a 100k-row corpus, twenty consecutive searches for one
+        // word: 125, 123, 124, 123, 128, **185**, 187, 185, 196, 191, 230, 284,
+        // 257, 347, 502, 621, ... The step at the sixth execution is the switch.
+        // The plan behind the slow one does 40,000 index probes and touches
+        // 167,554 buffers where the custom plan's hash join touches 8,386.
+        //
+        // `persistent(false)` uses the unnamed statement, which PostgreSQL
+        // plans at Bind time with the values in hand -- so every execution is a
+        // custom plan. The cost is re-planning: 1.5 ms of a 100 ms budget,
+        // against a 5x regression that only appears after the sixth keystroke
+        // of a session and would therefore never be seen in a test that ran a
+        // query five times.
+        .persistent(false);
     for bind in binds {
         query = match bind {
             Bind::Text(value) => query.bind(value),
@@ -325,6 +347,44 @@ where
         };
     }
     query
+}
+
+/// The plan the launcher's own statement runs under.
+///
+/// Behind `test-util` and living **here** because this is the module
+/// `AssertSqlSafe` is confined to (`tests/sql_containment.rs` fails the build
+/// if it is named anywhere else). Prepending `explain` to a statement built by
+/// [`search_sql`] is exactly as sound as running it: the text still came out of
+/// the builder and every value still travels as a bind.
+///
+/// `analyze` and `buffers` on, `costs` off -- the estimate is not the question,
+/// what the executor actually did is.
+///
+/// # Errors
+///
+/// [`sqlx::Error`] if the statement cannot be planned.
+#[cfg(any(test, feature = "test-util"))]
+pub async fn explain(pool: &sqlx::PgPool, built: SearchSql) -> Result<String, sqlx::Error> {
+    let SearchSql { sql, binds } = built;
+    let mut query = sqlx::query_as::<Postgres, (String,)>(sqlx::AssertSqlSafe(format!(
+        "explain (analyze, buffers, costs off)
+{sql}"
+    )));
+    for bind in binds {
+        query = match bind {
+            Bind::Text(value) => query.bind(value),
+            Bind::Texts(value) => query.bind(value),
+            Bind::I32(value) => query.bind(value),
+            Bind::I64(value) => query.bind(value),
+        };
+    }
+    Ok(query
+        .fetch_all(pool)
+        .await?
+        .into_iter()
+        .map(|(line,)| line)
+        .collect::<Vec<_>>()
+        .join("\n"))
 }
 
 /// The largest `updated:` window the statement may ask Postgres for.
