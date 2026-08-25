@@ -93,6 +93,15 @@ Open in editor/terminal · paste-URL → entity chip · quick capture hotkey · 
 
 **Git rules (supersedes the earlier "agents never run git"):** agents run git **only inside their own worktree/branch** and `gh` only against their own PR; nobody but the orchestrator touches `main` or merges; the repo-root checkout belongs to the orchestrator.
 
+**Concurrency is bounded by the machine, not by task independence (rule, 2026-08-25 — learned the hard way).** Five implementers were dispatched at once because their streams were genuinely disjoint; within minutes all five were dead. Load average hit **79.7 on a 12-core / 16 GB machine**, three agents were killed by a 600 s no-progress watchdog, and one reported the cause plainly: "other agents' builds plus a zombie of my own were racing". Disjoint files do not mean disjoint *resources* — every Rust implementer runs `cargo build`/`cargo test --workspace` (measured: 56 s at 471 % CPU, i.e. ~4.7 cores) and most also start one embedded Postgres **per test binary**.
+
+The limits, until measurement says otherwise:
+- **At most 2 concurrent implementers** doing Rust work on this machine (~9.4 cores of build alone). A third is affordable only when it does no Rust compile — a docs, fixture, or pure-frontend batch.
+- **Reviewers count too.** They build and mutate in their own worktrees; treat one reviewer as roughly one implementer. Two implementers + one active reviewer is the practical ceiling.
+- **Commit per task, always.** What survived the wipe was what had been committed (4, 3, 2, 1 commits across four streams); one stream had committed nothing and lost its whole batch to the working tree. This is why the implementer rule says commit before going idle.
+- **Sweep before dispatching a wave**: `ps aux | grep -E 'postgres|cargo|rustc'` and stop orphans. A crashed agent can leave an embedded Postgres cluster running, and the next wave inherits the contention.
+- Wall-clock parallelism is still the goal — it just comes from *pipelining* (implementer on stream X while a reviewer works stream Y) rather than from starting everything at once.
+
 **Review economics (rule, Björn 08-24 — after 13 PRs of measured data).** M0 cost ~15 min of xhigh review per PR plus fix rounds; M1's ~80 planned tasks would cost roughly 20 hours of review wall-clock at one-PR-per-task. Four rules, in order of leverage:
 
 1. **A PR is a coherent deliverable, not a task.** Group a stream's tasks into PRs of roughly 3-6 tasks at natural review boundaries — the boundary is "could a reviewer meaningfully reject this half while approving the other half?", not "did the plan number them separately". The measured evidence: PRs #1/#4/#10/#11 were each under 200 lines, each cost a full review cycle, and each yielded only doc nits or test-quality findings; the real bugs came from the substantial PRs. Split anyway when a task changes a frozen surface, adds a migration, or is risky enough to want its own bisect point.
