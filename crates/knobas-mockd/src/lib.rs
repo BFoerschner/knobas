@@ -64,19 +64,19 @@
 //!    to remove. The status code, the body and the violation are all correct;
 //!    only the header is noise.
 //! 10. **TeamCity's `/app/rest/users/current` reports the same e-mail address
-//!    Jira's `myself` does** (`mara.lindqvist@tidewater.example`). One fake
-//!    company has one seat, and a cross-source test over [`spawn_all`] sees a
-//!    single coherent person rather than two spellings of Mara.
+//!     Jira's `myself` does** (`mara.lindqvist@tidewater.example`). One fake
+//!     company has one seat, and a cross-source test over [`spawn_all`] sees a
+//!     single coherent person rather than two spellings of Mara.
 //! 11. **A TeamCity object's absent keys are omitted, never `null`.** The
-//!    serialisers build every key an object can have so that `fields=` has a
-//!    stable set of known names to validate against; the projection then drops
-//!    the nulls, which is TeamCity's own wire shape. The consequence is that
-//!    `fields=` accepts a name that is legal for the *type* even when this
-//!    particular instance does not carry it — asking a finished build for
-//!    `running-info` is a 200 without the key, not a 400.
+//!     serialisers build every key an object can have so that `fields=` has a
+//!     stable set of known names to validate against; the projection then drops
+//!     the nulls, which is TeamCity's own wire shape. The consequence is that
+//!     `fields=` accepts a name that is legal for the *type* even when this
+//!     particular instance does not carry it — asking a finished build for
+//!     `running-info` is a 200 without the key, not a 400.
 //! 12. **Builds come back ascending by id**, where real TeamCity returns the
-//!    newest first. Ascending is what makes `sinceBuild` paging obvious to read
-//!    in a test, and no knobas adapter depends on the order.
+//!     newest first. Ascending is what makes `sinceBuild` paging obvious to read
+//!     in a test, and no knobas adapter depends on the order.
 //!
 //! ## The shared credentials
 //!
