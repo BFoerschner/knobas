@@ -42,7 +42,7 @@ pub(crate) struct JiraCursor {
     pub updated_to: Option<DateTime<Utc>>,
     /// The server's UTC offset when that watermark was taken.
     pub tz_offset_secs: i32,
-    /// What was delivered inside the overlap window, sorted by key.
+    /// What was delivered inside the overlap window, newest first.
     pub seen: Vec<Seen>,
 }
 
@@ -114,15 +114,18 @@ impl JiraCursor {
                 u: *u,
             })
             .collect();
-        // Newest first, so the cap drops the entries least likely to come back.
-        // The key breaks ties, so a set delivered in two different orders caps
-        // to the same members.
+        // Newest first, so the cap drops the entries least likely to come back,
+        // with the key breaking ties. A key appears at most once, so this is a
+        // *total* order on the pairs -- which is the whole of what makes the
+        // same delivered set encode to the same bytes however the pages
+        // happened to arrive. The engine compares cursors as strings, so that
+        // property is what lets an idle poll be recognised as one.
+        //
+        // A second pass sorting by key alone used to follow this one, claiming
+        // to be what stabilised the bytes. It was not: it was redundant, and a
+        // mutation check found no test that could tell whether it was there.
         seen.sort_by(|a, b| b.u.cmp(&a.u).then_with(|| a.k.cmp(&b.k)));
         seen.truncate(SEEN_CAP);
-        // Then by key, so the same delivered set always encodes to the same
-        // bytes -- which is what makes "same cursor" a byte comparison for the
-        // engine.
-        seen.sort_by(|a, b| a.k.cmp(&b.k));
         Self {
             v: CURSOR_VERSION,
             updated_to: Some(watermark),
@@ -221,16 +224,54 @@ mod tests {
         assert_eq!(keys, vec!["PAY-231", "PAY-240"]);
     }
 
-    /// Sorted, so two runs that delivered the same set encode the same bytes.
+    /// Two runs that delivered the same set must encode the same bytes, in
+    /// whatever order the pages happened to arrive -- the engine compares
+    /// cursors as strings, so an order that tracked arrival order would make
+    /// every idle poll look like progress.
+    ///
+    /// The timestamps here are deliberately **distinct and counter to key
+    /// order**: an earlier version of this test gave all three entries the
+    /// same timestamp, which the sort's tie-break already resolved by key, so
+    /// it could not tell newest-first ordering from no ordering at all.
     #[test]
-    fn the_seen_set_is_ordered_deterministically() {
+    fn the_seen_set_is_ordered_newest_first_however_it_arrived() {
         let watermark = t("2026-08-22T11:48:00.000+0000");
-        let delivered = |order: [&str; 3]| {
+        // PAY-0 is the oldest and PAY-2 the newest, so newest-first is the
+        // reverse of key order and the two cannot be confused.
+        let pairs = |order: [i64; 3]| {
+            order.map(|i| {
+                (
+                    format!("PAY-{i}"),
+                    watermark - chrono::Duration::seconds(2 - i),
+                )
+            })
+        };
+        let encode = |order: [i64; 3]| JiraCursor::advanced(watermark, 0, &pairs(order)).encode();
+        assert_eq!(encode([2, 0, 1]), encode([0, 1, 2]));
+        assert_eq!(encode([1, 2, 0]), encode([0, 1, 2]));
+
+        let c = JiraCursor::advanced(watermark, 0, &pairs([2, 0, 1]));
+        let keys: Vec<&str> = c.seen.iter().map(|s| s.k.as_str()).collect();
+        assert_eq!(keys, vec!["PAY-2", "PAY-1", "PAY-0"]);
+    }
+
+    /// A bulk edit stamps many issues with the same `updated`, so the ordering
+    /// cannot rest on the timestamp alone: without the key tie-break, `sort_by`
+    /// is stable and equal-timestamp entries would keep the order the pages
+    /// arrived in -- different bytes for the same delivered set.
+    #[test]
+    fn entries_sharing_a_timestamp_are_still_ordered_deterministically() {
+        let watermark = t("2026-08-22T11:48:00.000+0000");
+        let encode = |order: [&str; 3]| {
             JiraCursor::advanced(watermark, 0, &order.map(|k| (k.to_owned(), watermark))).encode()
         };
         assert_eq!(
-            delivered(["PAY-240", "PAY-219", "PAY-231"]),
-            delivered(["PAY-219", "PAY-231", "PAY-240"])
+            encode(["PAY-240", "PAY-219", "PAY-231"]),
+            encode(["PAY-219", "PAY-231", "PAY-240"])
+        );
+        assert_eq!(
+            encode(["PAY-231", "PAY-240", "PAY-219"]),
+            encode(["PAY-219", "PAY-231", "PAY-240"])
         );
     }
 
