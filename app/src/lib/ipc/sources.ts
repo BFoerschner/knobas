@@ -6,6 +6,13 @@ export interface SyncReport {
   source_id: string;
   upserted: number;
   deleted: number;
+  /**
+   * Rows a **full** sync tombstoned because the run did not see them
+   * (hard-delete reconciliation). Always 0 for an incremental run, for an
+   * adapter whose full sync is a bounded window, and for a full sync that
+   * emitted nothing.
+   */
+  swept: number;
   /** Opaque to the frontend; hand it back to resume an incremental sync. */
   cursor: string;
 }
@@ -50,6 +57,16 @@ export interface CredentialHealth {
 
 /** How a run ended — `knobas_sync::SyncOutcome`. */
 export type SyncOutcome = "ok" | "unauthorized" | "unreachable" | "error";
+
+/**
+ * Why a run happened — `knobas_sync::SyncTrigger`, the `trigger` of a
+ * `knobas.sync_run` row.
+ *
+ * The diagnostics list labels a run with it: a scheduled poll, the user's
+ * *Sync now*, or the initial sync the first-run wizard drew a progress bar
+ * for.
+ */
+export type SyncTrigger = "schedule" | "manual" | "first_run";
 
 /**
  * The coarse state one source's syncing is in — `knobas_sync::SourceSyncStatus`,

@@ -79,6 +79,7 @@ macro_rules! closed_vocabulary {
     };
 }
 
+pub mod config;
 pub mod health;
 pub mod progress;
 pub mod run_log;
@@ -118,6 +119,11 @@ pub struct SyncReport {
     pub upserted: u64,
     /// How many of them ended the run tombstoned.
     pub deleted: u64,
+    /// Rows a **full** sync tombstoned because this run did not see them
+    /// (hard-delete reconciliation). Always 0 for an incremental run, for an
+    /// adapter whose full sync is not exhaustive, and for a full sync that
+    /// emitted nothing -- see [`SWEEP`].
+    pub swept: u64,
     /// Where the source says the next run should resume.
     pub cursor: Cursor,
 }
@@ -135,6 +141,12 @@ pub enum SyncError {
     /// before the transaction opens: nothing was read or written.
     #[error("source id {id:?} is unusable: {reason}")]
     BadSourceId { id: String, reason: &'static str },
+    /// The source has no `knobas.source_config` row, so there is nowhere to
+    /// resume from and nowhere to store the new position. Only
+    /// [`run_from_stored_cursor`] raises it; [`run_once`] with an explicit
+    /// cursor still syncs an unconfigured source (a test, an ad-hoc import).
+    #[error("source {id:?} is not configured")]
+    NotConfigured { id: String },
     /// The adapter failed, or propagated a sink failure back to us.
     #[error("source: {0}")]
     Source(#[from] SourceError),
@@ -229,15 +241,68 @@ pub async fn run_once(
     source: &dyn Source,
     cursor: Option<Cursor>,
 ) -> Result<SyncReport, SyncError> {
+    run_inner(pool, source, CursorSource::Explicit(cursor)).await
+}
+
+/// Run `source` from the position `knobas.source_config` recorded for it.
+///
+/// This is what the scheduler calls, and the difference from [`run_once`] is
+/// the whole point: the cursor is read **inside the transaction that holds the
+/// source's advisory lock**, so two triggers arriving together -- a scheduler
+/// tick and a *Sync now* -- serialise, and the second resumes from the position
+/// the first stored instead of repeating its fetch. (M0 read it before the
+/// lock; the carry-over records the cost: on a 40,000-issue Jira, a wasted
+/// full re-fetch.)
+///
+/// # Errors
+///
+/// As [`run_once`], plus [`SyncError::NotConfigured`] when the source has no
+/// configuration row: it has nowhere to store a position, so every later run
+/// would sync everything again, for ever, with nothing to show that anything
+/// was wrong.
+pub async fn run_from_stored_cursor(
+    pool: &PgPool,
+    source: &dyn Source,
+) -> Result<SyncReport, SyncError> {
+    run_inner(pool, source, CursorSource::Stored).await
+}
+
+/// Where a run gets the position it resumes from.
+///
+/// Both entry points delegate to one `run_inner`, so [`run_once`] keeps its M0
+/// **signature and cursor semantics** exactly -- `demo_load` passes an explicit
+/// `None` and still gets a full sync from that `None` -- while the scheduler's
+/// entry point gets the read under the lock.
+///
+/// It is *not* byte-for-byte the M0 run, and the difference has a caller:
+/// `run_inner` now sweeps after an exhaustive full sync, and the mock declares
+/// `full_sync_exhaustive: true`, so *Load demo data* tombstones `mock:`
+/// entities that the fixture stopped emitting. That is the intended behaviour
+/// -- a demo corpus should not accumulate items the fixture no longer has --
+/// but it is new in M1, and a reader comparing this against M0 needs to know
+/// the sweep is the thing that changed.
+enum CursorSource {
+    /// The caller decided: [`run_once`]'s argument, unchanged from M0.
+    Explicit(Option<Cursor>),
+    /// Read from `knobas.source_config` **inside the run's own lock**.
+    Stored,
+}
+
+async fn run_inner(
+    pool: &PgPool,
+    source: &dyn Source,
+    from: CursorSource,
+) -> Result<SyncReport, SyncError> {
     let descriptor = source.descriptor();
     check_source_id(&descriptor.id)?;
     let source_id = descriptor.id;
+    // Read before `entity_kinds` is consumed below.
+    let exhaustive = descriptor.full_sync_exhaustive;
     let kinds: HashSet<String> = descriptor
         .entity_kinds
         .into_iter()
         .map(|kind| kind.id)
         .collect();
-    let previous = cursor.clone();
 
     let mut tx = pool.begin().await?;
     // Held until this transaction ends, however it ends. Two runs of one source
@@ -248,6 +313,26 @@ pub async fn run_once(
         .execute(&mut *tx)
         .await?;
 
+    // Inside the lock, deliberately: see `run_from_stored_cursor`.
+    let cursor = match from {
+        CursorSource::Explicit(cursor) => cursor,
+        CursorSource::Stored => {
+            let row: Option<(Option<Cursor>,)> =
+                sqlx::query_as("select cursor from knobas.source_config where id = $1")
+                    .bind(&source_id)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+            match row {
+                Some((cursor,)) => cursor,
+                // The transaction is dropped here, which releases the advisory
+                // lock: nothing was read from the source and nothing written.
+                None => return Err(SyncError::NotConfigured { id: source_id }),
+            }
+        }
+    };
+    let previous = cursor.clone();
+    let full_sync = cursor.is_none();
+
     let (cursor, upserted, deleted) = {
         let mut sink = PgSink::new(&mut tx, source_id.clone(), kinds);
         let cursor = source.sync(cursor, &mut sink).await?;
@@ -255,6 +340,26 @@ pub async fn run_once(
         // run: flush it before the cursor claims to cover it.
         sink.flush().await?;
         (cursor, sink.upserted, sink.deleted)
+    };
+
+    // Reconcile what a full sync did not see. Inside the same transaction as
+    // the writes, so a failure rolls the tombstones back with them.
+    //
+    // Three conditions, and dropping any one of them alone is a bug:
+    //  * `full_sync` -- an incremental run has not seen the whole source;
+    //  * `exhaustive` -- a *bounded* full sync (TeamCity: newest N builds per
+    //    configuration) does not return everything, so absence is not deletion;
+    //  * `upserted > 0` -- a full sync that emitted nothing is
+    //    indistinguishable from an adapter that silently failed, and sweeping
+    //    there would tombstone the whole source.
+    let swept = if full_sync && exhaustive && upserted > 0 {
+        sqlx::query(SWEEP)
+            .bind(&source_id)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected()
+    } else {
+        0
     };
 
     sqlx::query("update knobas.source_config set cursor = $1 where id = $2")
@@ -268,10 +373,13 @@ pub async fn run_once(
         source_id,
         upserted,
         deleted,
+        swept,
         cursor,
     };
-    let changed_nothing =
-        report.upserted == 0 && report.deleted == 0 && previous.as_deref() == Some(&report.cursor);
+    let changed_nothing = report.upserted == 0
+        && report.deleted == 0
+        && report.swept == 0
+        && previous.as_deref() == Some(&report.cursor);
     if !changed_nothing
         && let Err(error) = activity::record(
             pool,
@@ -299,6 +407,36 @@ pub async fn run_once(
     }
     Ok(report)
 }
+
+/// Hard-delete reconciliation for a full sync (interfaces §1, point 4), run
+/// only for an adapter that declared `full_sync_exhaustive` -- see `run_inner`.
+///
+/// No `last_seen_at` column is needed, and adding one would be a second truth:
+/// `ITEM_UPSERT` stamps `synced_at = now()`, and `now()` is the **transaction**
+/// timestamp -- one value for every row this run wrote. So inside this very
+/// transaction, `synced_at < now()` is precisely "this run did not touch it".
+/// (The M0 carry-over already records that property, as an accepted consequence
+/// of long runs stamping every item with the run's start.)
+///
+/// Driven from `sync.item` rather than from `knobas.entity`: the mirror is
+/// indexed by `(source_id, …)`, so this touches one source's rows instead of
+/// scanning every entity knobas holds.
+///
+/// `deleted_at is null` keeps the **first** deletion's timestamp, exactly as
+/// `ENTITY_UPSERT` does -- a tombstone restamped by every later run would
+/// report a month-old deletion as fresh for ever -- and is also what makes
+/// `swept` count *new* tombstones rather than every already-dead row. The
+/// mirror row is left alone on purpose: the UI still renders the last-known
+/// title of something that vanished upstream.
+const SWEEP: &str = r#"
+update knobas.entity e
+   set deleted_at = now()
+  from sync.item i
+ where i.entity_id = e.id
+   and i.source_id = $1
+   and i.synced_at < now()
+   and e.deleted_at is null
+"#;
 
 /// The [`Sink`] the engine hands to an adapter: buffers items and writes them
 /// into the caller's transaction in batches.
@@ -586,6 +724,41 @@ mod tests {
             assert!(
                 check_source_id(reserved).is_err(),
                 "{reserved:?} should be refused"
+            );
+        }
+    }
+
+    /// `SyncReport` crosses the bridge -- `demo_load` returns one -- so its
+    /// shape is contract. The **exact key set**, for the reason the M0
+    /// carry-over spells out: a test that only walks a hardcoded list of
+    /// fields cannot see a Rust field added with no TypeScript counterpart,
+    /// and `swept` was exactly such an addition.
+    #[test]
+    fn the_report_shape_matches_its_typescript_mirror() {
+        let mirror = include_str!("../../../app/src/lib/ipc/sources.ts");
+        let report = SyncReport {
+            source_id: "mock".to_owned(),
+            upserted: 12,
+            deleted: 1,
+            swept: 2,
+            cursor: r#"{"v":1}"#.to_owned(),
+        };
+
+        let wire = serde_json::to_value(&report).expect("a report serializes");
+        let object = wire.as_object().expect("a report is a JSON object");
+        let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["cursor", "deleted", "source_id", "swept", "upserted"],
+            "SyncReport grew or lost a field; app/src/lib/ipc/sources.ts has \
+             to grow or lose it too"
+        );
+
+        for key in &keys {
+            assert!(
+                mirror.contains(&format!("{key}:")),
+                "SyncReport.{key} is missing from app/src/lib/ipc/sources.ts"
             );
         }
     }

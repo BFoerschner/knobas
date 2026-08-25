@@ -142,6 +142,14 @@ impl IpcError {
             knobas_sync::SyncError::BadSourceId { id, .. } => {
                 Self::invalid(error).with_source(source_id.unwrap_or(id))
             }
+            // Asked to sync something that has no configuration row: the id
+            // is a real source id as far as the engine is concerned, there is
+            // simply no such source. `NotFound` is what the sources view needs
+            // to distinguish "gone" from "broken" -- and its own `id` is the
+            // source when the caller named none, as with `BadSourceId`.
+            knobas_sync::SyncError::NotConfigured { id } => {
+                Self::not_found(error).with_source(source_id.unwrap_or(id))
+            }
             knobas_sync::SyncError::Db(_) => Self::internal(error),
         };
         if mapped.source_id.is_none() {
