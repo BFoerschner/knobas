@@ -221,16 +221,14 @@ async fn the_loaded_fixture_is_searchable_the_way_the_readme_promises() {
         "the README promises 21 items from the Tidewater fixture"
     );
 
-    let response = knobas_search::search(
-        pool,
-        &knobas_search::SearchQuery {
+    let response = knobas_search::Searcher::new(pool.clone())
+        .search(knobas_search::SearchQuery {
             raw: "sepa retry".to_owned(),
             limit: 20,
             filters: knobas_search::SearchFilters::default(),
-        },
-    )
-    .await
-    .unwrap();
+        })
+        .await
+        .unwrap();
 
     let ticket = response
         .groups

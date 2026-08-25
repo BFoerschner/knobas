@@ -30,10 +30,12 @@ pub async fn search(
     query: knobas_search::SearchQuery,
 ) -> Result<knobas_search::SearchResponse, IpcError> {
     let pool = lifecycle.pool()?;
-    knobas_search::search(&pool, &query)
+    knobas_search::Searcher::new(pool)
+        .search(query)
         .await
         .map_err(|error| match error {
-            knobas_search::SearchError::Unsupported(_) => IpcError::invalid(error),
+            knobas_search::SearchError::Invalid(_) => IpcError::invalid(error),
+            knobas_search::SearchError::UnknownList(_) => IpcError::not_found(error),
             knobas_search::SearchError::Db(_) => IpcError::internal(error),
         })
 }

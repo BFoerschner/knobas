@@ -1,12 +1,14 @@
 //! The vocabulary the launcher grammar parses against, read from a real
 //! PostgreSQL.
 //!
-//! Every test shares one database (`knobas_db::test_util`), which can outlive a
-//! run, so each seeds source ids unique to *itself* and nothing truncates. That
-//! matters more here than elsewhere: `Vocabulary::load` reads **every** enabled
-//! source, so a row another test left behind is a row this one sees -- which is
-//! also why the prefixes are per-test (`vta-`, `vtd-`, `vtb-`) rather than one
-//! shared `vt-`.
+//! Every test in this binary shares one database (`knobas_db::test_util`), so
+//! each seeds source ids unique to *itself* and nothing truncates. That matters
+//! more here than elsewhere: `Vocabulary::load` reads **every** enabled source,
+//! so a row another test in this run left behind is a row this one sees --
+//! which is also why the prefixes are per-test (`vta-`, `vtd-`, `vtb-`) rather
+//! than one shared `vt-`. The database itself is fresh per run:
+//! `test_util::run_nonce` is `{pid}-{nanos}`, so an earlier run's scratch
+//! directory can never match this process's stamp and is deleted.
 
 use knobas_search::{KindCatalog, Vocabulary};
 

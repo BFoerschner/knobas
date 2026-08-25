@@ -4,8 +4,25 @@
 //! default is `<b>…</b>`, which is unusable here: the excerpt is raw source
 //! text that every renderer has to escape, so the tags would arrive on screen
 //! as literal `<b>`. Instead the selectors are two control characters that
-//! cannot appear in prose, and Rust splits on them -- so no markup ever
-//! crosses the bridge and the UI still knows what matched (carry-over D).
+//! cannot appear in prose, and Rust splits on them, so the highlight crosses
+//! the bridge as [`Segment::hit`] rather than as markup (carry-over D).
+//!
+//! Read that precisely, because the looser version of it is dangerous. What
+//! this module guarantees is that **nothing the highlighter added** is in the
+//! text: no `<b>`, no sentinel. It does *not* guarantee the text is free of
+//! markup -- [`Segment::text`] is whatever a person typed into a ticket, and
+//! `onclick=`, a bare `<`, or an unbalanced quote travel through untouched.
+//! (`ts_headline` happens to elide well-formed tags, because the default parser
+//! does not emit tag tokens, but that is a fidelity accident and not a
+//! sanitiser: an excerpt is not byte-for-byte the source, and nothing here
+//! escapes anything.)
+//!
+//! So the safety property is the pair, and both halves are needed: the
+//! highlight is a flag, and the renderer prints `segment.text` **as text**
+//! (`{seg.text}`, never `{@html}`) -- roadmap §4 gotcha 7.
+//!
+//! [`Segment::hit`]: crate::types::Segment::hit
+//! [`Segment::text`]: crate::types::Segment::text
 
 use crate::types::Segment;
 
