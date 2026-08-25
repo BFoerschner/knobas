@@ -595,20 +595,21 @@ async fn changed_today_starts_at_midnight_and_is_not_a_rolling_day() {
     .await
     .unwrap();
 
+    let count = count_of(&s, "changed-today").await;
     assert_eq!(
-        count_of(&s, "changed-today").await - before,
+        count - before,
         1,
         "the first instant of today counts and the last instant of yesterday does not"
     );
+
+    // The rows obey the same boundary as the count. Asserted through `total`
+    // rather than by looking for the two ids on the page: the row at exactly
+    // midnight is by construction the *oldest* thing in the list, so on a
+    // corpus with more than a page of items it is correctly not on the first
+    // page -- and a membership assertion would then be testing the paging, not
+    // the boundary.
     let rows = s.smart_list_items("changed-today", 200).await.unwrap();
-    let ids: Vec<&str> = rows
-        .groups
-        .iter()
-        .flat_map(|g| &g.hits)
-        .map(|h| h.row.entity_id.as_str())
-        .collect();
-    assert!(ids.contains(&at_midnight.as_str()), "{ids:?}");
-    assert!(!ids.contains(&just_before.as_str()), "{ids:?}");
+    assert_eq!(u32::try_from(count).unwrap(), rows.total);
 }
 
 /// A caller asking for more rows than the launcher draws gets the page the
@@ -637,7 +638,11 @@ async fn a_list_page_is_bounded_however_much_the_caller_asks_for() {
         "insert into sync.item
            (entity_id, source_id, kind, title, body_text, item_updated_at, synced_at, payload)
          select $1 || ':' || g, 'jira', 'ticket', 'row ' || g, 'body',
-                now() - make_interval(secs => g), now(), '{}'::jsonb
+                -- Synced within the hour (so `just-synced` holds them) but
+                -- last *changed* days ago, so 250 rows do not land in every
+                -- other list's window and crowd out the tests that own it.
+                now() - interval '3 days' - make_interval(secs => g), now(),
+                '{}'::jsonb
            from generate_series(1, $2) g",
     )
     .bind(&t)
