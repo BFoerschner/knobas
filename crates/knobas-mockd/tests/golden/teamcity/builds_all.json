@@ -6,6 +6,7 @@
         "href": "/app/rest/buildTypes/id:Ledger_Deploy_Staging",
         "id": "Ledger_Deploy_Staging",
         "name": "Deploy Staging",
+        "paused": false,
         "projectId": "Ledger",
         "projectName": "Ledger",
         "webUrl": "http://mockd.test/viewType.html?buildTypeId=Ledger_Deploy_Staging"
@@ -20,6 +21,10 @@
       "state": "finished",
       "status": "SUCCESS",
       "statusText": "Success",
+      "triggered": {
+        "date": "20260821T162000+0000",
+        "type": "vcs"
+      },
       "webUrl": "http://mockd.test/viewLog.html?buildId=412&buildTypeId=Ledger_Deploy_Staging"
     },
     {
@@ -28,6 +33,7 @@
         "href": "/app/rest/buildTypes/id:Payout_IntegrationTests",
         "id": "Payout_IntegrationTests",
         "name": "IntegrationTests",
+        "paused": false,
         "projectId": "Payout",
         "projectName": "Payout",
         "webUrl": "http://mockd.test/viewType.html?buildTypeId=Payout_IntegrationTests"
@@ -42,6 +48,10 @@
       "state": "finished",
       "status": "FAILURE",
       "statusText": "test sepa::retry::gives_up_after_max_attempts ... FAILED",
+      "triggered": {
+        "date": "20260822T101000+0000",
+        "type": "vcs"
+      },
       "webUrl": "http://mockd.test/viewLog.html?buildId=1187&buildTypeId=Payout_IntegrationTests"
     },
     {
@@ -50,6 +60,7 @@
         "href": "/app/rest/buildTypes/id:Payout_Build",
         "id": "Payout_Build",
         "name": "Build",
+        "paused": false,
         "projectId": "Payout",
         "projectName": "Payout",
         "webUrl": "http://mockd.test/viewType.html?buildTypeId=Payout_Build"
@@ -70,6 +81,10 @@
       "state": "running",
       "status": "SUCCESS",
       "statusText": "Running",
+      "triggered": {
+        "date": "20260822T114500+0000",
+        "type": "vcs"
+      },
       "webUrl": "http://mockd.test/viewLog.html?buildId=1188&buildTypeId=Payout_Build"
     }
   ],

@@ -547,3 +547,118 @@ async fn the_mutators_advance_the_clock_and_stamp_the_build() {
     assert_eq!((queued_at - after).num_seconds(), 60);
     assert_eq!(s.state().build(id).unwrap().start_date, queued_at);
 }
+
+// -- the authorship fields the M1 adapter cannot ask for yet -----------------
+//
+// `knobas-source-teamcity`'s `rest` module docs record the gap these two tests
+// close: `triggered(user(username))` is the only place TeamCity names the
+// person who started a build, and mockd's serialiser did not carry the name,
+// so asking for it was a 400 + `UnknownField` violation rather than a field.
+// The adapter therefore hard-codes `SyncItem::author = None` for every build.
+//
+// These tests assert the *names are servable*, which is the half stream T owns.
+// They deliberately do **not** assert an author: `fixtures/tidewater/work.json`
+// records no triggerer for any of its three builds, and inventing one here
+// would put a fabricated person into `SyncItem::author`.
+
+#[tokio::test]
+async fn a_build_serves_the_triggered_subtree_the_adapter_will_widen_to() {
+    let s = spawn_mock_teamcity().await;
+    let (st, v) = tc(
+        &s.base_url(),
+        "/app/rest/builds?locator=state:any,count:100\
+         &fields=count,build(id,queuedDate,triggered(type,date,user(username,name)))",
+    )
+    .await;
+    assert_eq!(st, 200, "{v}");
+
+    let builds = v["build"].as_array().expect("a build array");
+    assert_eq!(builds.len(), 3, "the fixture's three builds: {v}");
+    for b in builds {
+        let t = &b["triggered"];
+        assert_eq!(
+            t["type"], "vcs",
+            "the fixture records no person pressing Run, and a VCS trigger is \
+             what a branch build is: {b}"
+        );
+        assert_eq!(
+            t["date"], b["queuedDate"],
+            "the trigger fires when the build is queued: {b}"
+        );
+        assert!(
+            t.get("user").is_none(),
+            "a VCS trigger has no user, and the fixture names none: {b}"
+        );
+    }
+    // The whole point: asking for these names is no longer a violation.
+    s.assert_no_violations();
+}
+
+#[tokio::test]
+async fn a_build_type_serves_description_and_paused() {
+    let s = spawn_mock_teamcity().await;
+    let (st, v) = tc(
+        &s.base_url(),
+        "/app/rest/buildTypes?fields=count,buildType(id,description,paused)",
+    )
+    .await;
+    assert_eq!(st, 200, "{v}");
+
+    let types = v["buildType"].as_array().expect("a buildType array");
+    assert!(!types.is_empty(), "{v}");
+    for t in types {
+        assert_eq!(
+            t["paused"], false,
+            "no fixture configuration is paused, and `false` is a fact rather \
+             than an omission: {t}"
+        );
+        assert!(
+            t.get("description").is_none(),
+            "the fixture gives no configuration a description: {t}"
+        );
+    }
+    s.assert_no_violations();
+}
+
+#[tokio::test]
+async fn the_new_names_are_still_a_closed_set() {
+    // The additions must widen the known set by exactly these names -- a
+    // serialiser that started answering anything would make every test above
+    // vacuous.
+    let s = spawn_mock_teamcity().await;
+    for bad in [
+        "count,build(id,triggeredBy)",
+        "count,build(id,triggered(who))",
+    ] {
+        let (st, v) = tc(
+            &s.base_url(),
+            &format!("/app/rest/builds?locator=state:any,count:100&fields={bad}"),
+        )
+        .await;
+        assert_eq!(st, 400, "fields={bad} must be refused: {v}");
+    }
+    assert_eq!(
+        s.violations()
+            .iter()
+            .filter(|v| v.kind == ViolationKind::UnknownField)
+            .count(),
+        2,
+        "each refusal is also a recorded violation"
+    );
+
+    // The limit of that closed set, asserted rather than left as a surprise:
+    // `user` is `null` on every fixture build, and a null carries no key set,
+    // so a typo *inside* an absent object cannot be caught. Stream C widening
+    // to `triggered(user(username))` is safe; a widening to a misspelled
+    // sub-name would pass here and return nothing.
+    let (st, _) = tc(
+        &s.base_url(),
+        "/app/rest/builds?locator=state:any,count:100\
+         &fields=count,build(id,triggered(user(nosuchfield)))",
+    )
+    .await;
+    assert_eq!(
+        st, 200,
+        "a sub-name of an absent object is accepted -- see tc_fields::check_names"
+    );
+}

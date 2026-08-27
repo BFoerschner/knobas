@@ -48,7 +48,32 @@ jobs:
     # default, holding the queue and hiding the failure.
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      # The three `actions/*` pins below were bumped off `@v4` together, and
+      # `@v4` is the only thing they had in common: the deprecation annotation
+      # this discharges named exactly these three and no others --
+      #
+      #   "Node.js 20 is deprecated. The following actions target Node.js 20
+      #    but are being forced to run on Node.js 24: actions/cache@v4,
+      #    actions/checkout@v4, actions/setup-node@v4."
+      #
+      # -- and the other three actions in this file were already clear:
+      # dtolnay/rust-toolchain and taiki-e/install-action are `composite`
+      # (no Node runtime at all) and Swatinem/rust-cache@v2 is already node24.
+      # That was read out of each action.yml's `runs.using`, which is the
+      # thing the annotation is actually about; a version number is only a
+      # proxy for it.
+      #
+      # Each is pinned to its latest stable major rather than to the lowest
+      # one that clears node20, so this is one bump rather than two. Every
+      # input used below was checked to still exist in the target major, and
+      # the majors' breaking changes were read: setup-node v5 added automatic
+      # package-manager caching and v6 narrowed it to npm, which cannot reach
+      # us -- there is no root package.json and no `packageManager` field, and
+      # the step below sets `cache: npm` explicitly anyway.
+      #
+      # The real proof is not any of that reasoning: it is this workflow's own
+      # run coming back green with no Node-20 annotation on it.
+      - uses: actions/checkout@v7
       # A stock ubuntu-latest runner has ~14 GB free, and this workspace's test
       # binaries plus an embedded PostgreSQL data directory exceed it. These
       # toolchains are not used by any job step.
@@ -94,7 +119,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -135,7 +160,7 @@ jobs:
       # keeps hitting, so `actions/cache` restores the old version and, because
       # an exact-key hit skips the save, never stores the new one. A wasted
       # download now beats a permanent one.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.theseus
           key: postgres-${{ hashFiles('crates/knobas-db/src/embedded.rs') }}-linux

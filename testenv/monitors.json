@@ -1,0 +1,26 @@
+[
+  {
+    "name": "payout-service (git)",
+    "type": "http",
+    "url": "http://gitea:3000/api/healthz",
+    "interval": 60
+  },
+  {
+    "name": "ledger-api (git)",
+    "type": "http",
+    "url": "http://gitea:3000/api/healthz",
+    "interval": 60
+  },
+  {
+    "name": "Jira (mockd)",
+    "type": "http",
+    "url": "http://mockd:8200/__mock/health",
+    "interval": 60
+  },
+  {
+    "name": "TeamCity (mockd)",
+    "type": "http",
+    "url": "http://mockd:8200/__mock/health",
+    "interval": 60
+  }
+]

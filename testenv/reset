@@ -1,0 +1,19 @@
+#!/bin/sh
+# Destroy the test environment, including its data. The next `docker compose
+# up -d` starts from an empty Gitea and an unconfigured Kuma, so `./seed` has
+# to be re-run afterwards.
+#
+# `--profile '*'` so the opt-in services' containers and volumes go too -- a
+# `down -v` without it leaves tc-data behind, which is the ~10 GB one.
+set -eu
+cd "$(dirname "$0")"
+
+docker compose --profile '*' down -v --remove-orphans
+
+# Not volumes, so `down -v` does not touch them: these are the seed's outputs,
+# and leaving them would point at credentials that no longer exist.
+rm -f kuma-api-key seed-state.json
+
+echo "reset: containers, networks and volumes destroyed (gitea-data, kuma-data,"
+echo "reset: tc-data, tc-logs, jira-data, confluence-data), and the seed outputs"
+echo "reset: kuma-api-key and seed-state.json removed. Re-run ./seed after up."

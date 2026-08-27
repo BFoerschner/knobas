@@ -77,6 +77,19 @@
 //! 12. **Builds come back ascending by id**, where real TeamCity returns the
 //!     newest first. Ascending is what makes `sinceBuild` paging obvious to read
 //!     in a test, and no knobas adapter depends on the order.
+//! 13. **Every build is `triggered.type: "vcs"` with no `triggered.user`.** The
+//!     names are served — `triggered(type,date,user(username,name))` is a 200,
+//!     not the 400 it used to be, which is what lets
+//!     `knobas-source-teamcity` widen its `BUILD_FIELDS` without recording a
+//!     violation. What they are *not* is authorship:
+//!     `fixtures/tidewater/work.json` records no triggerer for any of its three
+//!     builds, so `SyncItem::author` stays `None` for every build even after
+//!     that widening. Putting an invented person here would be worse than the
+//!     gap — it would be indexed and searched as if the fixture had said it.
+//!     Closing it for real needs a triggerer in the fixture, which is
+//!     `knobas-source-mock`'s to add, not this crate's. Note also that because
+//!     `user` is `null`, a *sub*-name of it cannot be validated (deviation 11's
+//!     consequence, one level down): `triggered(user(nosuchfield))` is a 200.
 //!
 //! ## The shared credentials
 //!
