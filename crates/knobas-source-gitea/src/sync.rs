@@ -158,17 +158,53 @@ fn cap_reached(what: &str, cap: u32) -> SourceError {
 /// dead" never reaches this crate. Task 5's brief classified 403/404 as a skip
 /// and 401 as fatal; with the status gone, that classification is recovered by
 /// **measuring** instead of guessing -- re-run the identity probe the run
-/// already opened with:
+/// already opened with.
 ///
-/// * it still answers ⇒ the credential is alive, so the refusal really was
-///   about that one repository (ruling B4: skip with a warning);
-/// * it does not ⇒ the credential died mid-run, which is the run's verdict and
-///   the thing the sources view offers *Re-enter* on.
+/// **The probe has three outcomes, not two**, and each gets its own:
+///
+/// 1. **It answers** ⇒ the credential is alive, so the refusal really was about
+///    that one repository (ruling B4: skip with a warning). `Ok(())`.
+/// 2. **It answers `Unauthorized`** ⇒ the credential died mid-run. That is the
+///    run's verdict, passed through unchanged so it stays the fault class the
+///    sources view offers *Re-enter* on (interfaces §3).
+/// 3. **It fails any other way** -- a 500 (not in `status_is_transient`, so not
+///    retried), a timeout, a DNS blip. The credential is then *unknown*, which
+///    is neither of the above. This **ends the run**: believing the refusal
+///    would be guessing in the direction that loses data silently, which is the
+///    thing this function exists to stop. But it ends it honestly --
+///    * the probe's own fault class is kept, so a timeout is still
+///      `Unreachable` and never gets relabelled `Unauthorized`, and nothing
+///      puts *Re-enter* on screen over a credential nobody has disproved;
+///    * the message names **the repository that was actually refused**, not
+///      `/user`, because that is the event the user has to act on.
 ///
 /// The cost is one extra request per refused repository, on a path that was
-/// already losing a repository, and none at all on a healthy run.
-async fn credential_still_good(source: &crate::GiteaSource) -> Result<(), SourceError> {
-    source.client.current_user().await.map(|_| ())
+/// already losing a repository, and none at all on a healthy run. It is not
+/// cached across refusals within a run on purpose: a cached "alive" is a
+/// refusal believed without checking, which is exactly what this replaced.
+async fn credential_still_good(
+    source: &crate::GiteaSource,
+    repository: &str,
+    refusal: &SourceError,
+) -> Result<(), SourceError> {
+    match source.client.current_user().await {
+        Ok(_) => Ok(()),
+        // The credential is gone: the run's verdict, unchanged.
+        Err(SourceError::Unauthorized) => Err(SourceError::Unauthorized),
+        // Unknown. Keep the probe's fault class, name the real event.
+        Err(probe) => {
+            let why = format!(
+                "gitea: {repository} refused this run ({refusal}), and the identity probe that \
+                 would say whether the credential is still good could not be completed: {probe}"
+            );
+            Err(match probe {
+                SourceError::Unreachable(_) => SourceError::Unreachable(why),
+                // `current_user` cannot produce a `Sink` failure -- it never
+                // touches one -- so everything left is a protocol fault.
+                _ => SourceError::Protocol(why),
+            })
+        }
+    }
 }
 
 pub(crate) async fn run(
@@ -236,7 +272,7 @@ pub(crate) async fn run(
                 // a 401 arrives here indistinguishable from a 403, and a token
                 // revoked after the first repository was walked would otherwise
                 // be reported as a healthy sync.
-                credential_still_good(source).await?;
+                credential_still_good(source, &selected.full_name, &error).await?;
                 tracing::warn!(
                     repository = %selected.full_name,
                     %error,
@@ -311,7 +347,7 @@ async fn select_repos(
                     // The same measurement the walk loop makes: 401 and 403 are
                     // one error here, so a dead credential would otherwise read
                     // as "the user configured a repository they cannot see".
-                    credential_still_good(source).await?;
+                    credential_still_good(source, entry, &error).await?;
                     tracing::warn!(
                         repository = %entry,
                         %error,

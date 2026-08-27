@@ -517,6 +517,77 @@ async fn a_credential_revoked_after_the_first_repository_raises() {
     }
 }
 
+/// The credential probe's **third** outcome: `/user` neither answers nor
+/// refuses, it breaks. The credential is then *unknown*, and the run must not
+/// round that off to either of the other two.
+///
+/// Three properties, and each one fails differently in production:
+///
+/// * it **ends the run** -- believing the refusal would be guessing in the
+///   direction that silently loses a repository;
+/// * it does **not** say `Unauthorized` -- that would put *Re-enter* on screen
+///   over a credential nobody has disproved, and send the user to rotate a
+///   token that was never the problem;
+/// * the message names **the repository that was actually refused**, not
+///   `/user`, because that is the event to act on.
+#[tokio::test]
+async fn a_probe_that_breaks_ends_the_run_without_blaming_the_credential() {
+    let mut state = State::tidewater().with_elsewhere();
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+    let (_, cursor) = full(&*source).await;
+
+    // `elsewhere/unrelated` sorts first and walks; the refusal lands on the
+    // second repository, so this is the partial-walk shape and not the
+    // `walked == 0` guard.
+    state
+        .forbidden
+        .insert("tidewater/payout-service".to_owned());
+
+    // Control: the identical refusal with a working `/user` is a skip.
+    fake.remount(&state).await;
+    let mut sink = VecSink(Vec::new());
+    assert!(
+        source.sync(Some(cursor.clone()), &mut sink).await.is_ok(),
+        "a working probe must still skip"
+    );
+
+    // The one condition changed: `/user` answers the preflight, then 500s.
+    fake.remount_identity_broken_after_preflight(&state).await;
+    let mut sink = VecSink(Vec::new());
+    let error = source
+        .sync(Some(cursor.clone()), &mut sink)
+        .await
+        .map(|c| format!("Ok({c})"))
+        .unwrap_err();
+
+    assert!(
+        !matches!(error, SourceError::Unauthorized),
+        "an unknown credential is not a revoked one: {error:?}"
+    );
+    let SourceError::Protocol(ref message) = error else {
+        panic!("a broken probe is a protocol fault, not {error:?}");
+    };
+    assert!(
+        message.contains("tidewater/payout-service"),
+        "the message must name the repository that was refused: {message}"
+    );
+
+    // And a *revoked* token on the very same shape still says Unauthorized, so
+    // the assertion above is about the 500 and not about any probe failure.
+    fake.remount_revoked_after_preflight(&state).await;
+    let mut sink = VecSink(Vec::new());
+    let revoked = source
+        .sync(Some(cursor), &mut sink)
+        .await
+        .map(|c| format!("Ok({c})"))
+        .unwrap_err();
+    assert!(
+        matches!(revoked, SourceError::Unauthorized),
+        "a revoked token is still the credential verdict: {revoked:?}"
+    );
+}
+
 /// More than one page of branches: the walk must not stop at `PAGE_SIZE`.
 #[tokio::test]
 async fn branch_listings_are_paged() {

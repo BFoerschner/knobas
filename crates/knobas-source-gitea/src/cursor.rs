@@ -250,6 +250,56 @@ mod tests {
         );
     }
 
+    /// `entry_like` exists so a **refused `repos[]` entry keeps its position**
+    /// (`sync::run`), and the allowlist is matched case-insensitively
+    /// (`sync::push_selected`), so `Tidewater/Payout-Service` is a supported
+    /// spelling of a repository Gitea calls `tidewater/payout-service`.
+    ///
+    /// Both halves of that doc are pinned here, because each fails differently
+    /// and silently:
+    ///
+    /// * **matches case-insensitively** -- an exact-match lookup finds nothing
+    ///   for a mixed-case entry, so the carry-forward writes nothing and the
+    ///   repository loses its watermarks anyway. The fix for that would be
+    ///   green in every end-to-end test, because every fixture's allowlist is
+    ///   already exact-case.
+    /// * **returns the *stored* spelling** -- re-inserting under the queried
+    ///   spelling leaves one repository holding two cursor entries, and the
+    ///   walk looks up neither of them by the name it has.
+    ///
+    /// A unit test and not a fixture: the wiremock fake matches request paths
+    /// case-sensitively, so a mixed-case end-to-end run would be exercising the
+    /// fake's routing rather than this lookup.
+    #[test]
+    fn a_refused_allowlist_entry_is_found_whatever_case_the_user_typed() {
+        let cursor = sample();
+        let stored = "tidewater/payout-service";
+
+        for typed in [
+            "tidewater/payout-service",
+            "Tidewater/Payout-Service",
+            "TIDEWATER/PAYOUT-SERVICE",
+        ] {
+            let (key, position) = cursor
+                .entry_like(typed)
+                .unwrap_or_else(|| panic!("{typed:?} must find the stored entry"));
+            assert_eq!(
+                key, stored,
+                "{typed:?} must come back under the spelling the cursor stores, \
+                 or the carry-forward writes a second entry for one repository"
+            );
+            // And it is the real position, not a blank one: this is the state
+            // the whole carry-forward exists to preserve.
+            assert_eq!(position, &cursor.repo(stored));
+            assert!(position.repo_updated_at.is_some());
+        }
+
+        // Case-insensitivity is not case-blindness: a different repository is
+        // still a different repository.
+        assert!(cursor.entry_like("tidewater/payout-services").is_none());
+        assert!(cursor.entry_like("elsewhere/unrelated").is_none());
+    }
+
     /// A repository with no entry yet is fetched in full -- which is how a
     /// repository added upstream is picked up (interfaces §4.2).
     #[test]

@@ -28,6 +28,13 @@
 //! per emitted pull request that has comments. Twenty repositories on the
 //! default five-minute schedule is roughly forty requests a run at 10 req/s.
 //! The `owners`/`repos` allowlist is the lever when that is too much.
+//!
+//! **Plus one identity request per repository this run *skips*.** A refusal is
+//! believed only while the credential is provably still good, because
+//! `knobas-http` collapses 401 and 403 into one error
+//! (`sync::credential_still_good`). A healthy run pays nothing for this; a
+//! source whose token is scoped away from one of its repositories pays one
+//! extra request on every incremental run, for as long as that stays true.
 
 pub mod config;
 pub mod keys;
