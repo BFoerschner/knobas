@@ -4,6 +4,7 @@
     "href": "/app/rest/buildTypes/id:Payout_IntegrationTests",
     "id": "Payout_IntegrationTests",
     "name": "IntegrationTests",
+    "paused": false,
     "projectId": "Payout",
     "projectName": "Payout",
     "webUrl": "http://mockd.test/viewType.html?buildTypeId=Payout_IntegrationTests"
@@ -18,5 +19,9 @@
   "state": "finished",
   "status": "FAILURE",
   "statusText": "test sepa::retry::gives_up_after_max_attempts ... FAILED",
+  "triggered": {
+    "date": "20260822T101000+0000",
+    "type": "vcs"
+  },
   "webUrl": "http://mockd.test/viewLog.html?buildId=1187&buildTypeId=Payout_IntegrationTests"
 }

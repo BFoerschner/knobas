@@ -112,8 +112,14 @@ pub fn project(full: &Value, sel: &[FieldSel]) -> Result<Value, String> {
                 };
                 if v.is_null() {
                     // Known name, absent on this instance: TeamCity omits it.
-                    // The children are still checked, so a typo inside an
-                    // absent object is not excused by its absence.
+                    //
+                    // The children are *offered* for checking but a null
+                    // carries no key set, so `check_names` can only accept
+                    // them: a typo inside an absent object IS excused by its
+                    // absence. (An earlier comment here claimed the opposite.
+                    // It was wrong -- see `check_names`' own doc, and
+                    // `teamcity.rs::the_new_names_are_still_a_closed_set`,
+                    // which pins the real behaviour so the gap stays visible.)
                     check_names(v, &s.children)?;
                     continue;
                 }

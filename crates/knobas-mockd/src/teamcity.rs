@@ -275,6 +275,12 @@ fn build_type_json(bt: &TcBuildType, base: &str) -> Value {
         "projectId": bt.project_id,
         "href": format!("/app/rest/buildTypes/id:{}", bt.id),
         "webUrl": format!("{base}/viewType.html?buildTypeId={}", bt.id),
+        // The fixture gives no configuration prose, so `description` is the
+        // null that means "known name, absent here". `paused` is a genuine
+        // `false`: nothing in the fixture is paused, and a configuration that
+        // is merely quiet is not a paused one.
+        "description": Value::Null,
+        "paused": false,
     })
 }
 
@@ -308,6 +314,22 @@ fn build_json(b: &TcBuild, base: &str, s: &MockState, types: &[TcBuildType]) -> 
             .find(|t| t.id == b.build_type_id)
             .map(|t| build_type_json(t, base)),
         "running-info": running_info,
+        // `triggered` is the only place TeamCity names the person who started
+        // a build, and `knobas-source-teamcity` already parses it -- but until
+        // this key existed, asking for it was a 400 + `UnknownField`, so the
+        // adapter hard-codes `SyncItem::author = None` for every build.
+        //
+        // `user` is null, deliberately: `fixtures/tidewater/work.json` records
+        // no triggerer for any of its builds, and a fabricated person here
+        // would flow straight into `SyncItem::author` and be indexed as
+        // authorship. `type: "vcs"` is the honest reading of a fixture where
+        // nothing says a human pressed Run -- and a VCS trigger is exactly the
+        // case real TeamCity serves with no `user` at all.
+        "triggered": {
+            "type": "vcs",
+            "date": tc_date(b.start_date),
+            "user": Value::Null,
+        },
     })
 }
 

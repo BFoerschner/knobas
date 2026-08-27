@@ -4,6 +4,7 @@
       "href": "/app/rest/buildTypes/id:Ledger_Deploy_Staging",
       "id": "Ledger_Deploy_Staging",
       "name": "Deploy Staging",
+      "paused": false,
       "projectId": "Ledger",
       "projectName": "Ledger",
       "webUrl": "http://mockd.test/viewType.html?buildTypeId=Ledger_Deploy_Staging"
@@ -12,6 +13,7 @@
       "href": "/app/rest/buildTypes/id:Payout_Build",
       "id": "Payout_Build",
       "name": "Build",
+      "paused": false,
       "projectId": "Payout",
       "projectName": "Payout",
       "webUrl": "http://mockd.test/viewType.html?buildTypeId=Payout_Build"
@@ -20,6 +22,7 @@
       "href": "/app/rest/buildTypes/id:Payout_IntegrationTests",
       "id": "Payout_IntegrationTests",
       "name": "IntegrationTests",
+      "paused": false,
       "projectId": "Payout",
       "projectName": "Payout",
       "webUrl": "http://mockd.test/viewType.html?buildTypeId=Payout_IntegrationTests"
