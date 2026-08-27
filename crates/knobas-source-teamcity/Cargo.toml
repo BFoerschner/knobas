@@ -1,0 +1,30 @@
+[package]
+name = "knobas-source-teamcity"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+# The read-only TeamCity adapter (M1 stream C). Four REST endpoints, JSON only,
+# every response trimmed with an explicit `fields=`.
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+knobas-core = { path = "../knobas-core" }
+knobas-http = { path = "../knobas-http" }
+knobas-source = { path = "../knobas-source" }
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+# The HTTP-level mock the exit criteria are certified against (interfaces §5).
+# A dev-dependency only: nothing in the shipped adapter knows mockd exists.
+knobas-mockd = { path = "../knobas-mockd" }
+# The Tidewater dataset both mock layers share -- every expectation in
+# `tests/mockd.rs` is computed from it rather than hard-coded (spec §14a).
+knobas-source-mock = { path = "../knobas-source-mock" }
+# Only to send the one deliberately malformed request that proves mockd's
+# violation log is live. The adapter itself reaches the network through
+# `knobas-http` and nothing else.
+reqwest.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
