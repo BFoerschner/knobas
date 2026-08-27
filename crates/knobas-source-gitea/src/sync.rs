@@ -207,6 +207,27 @@ async fn credential_still_good(
     }
 }
 
+/// Copy the stored position of every repository this run refused into the
+/// cursor it is about to write.
+///
+/// **A function and not four inline lines** because two of its properties are
+/// invisible to any end-to-end fixture: the allowlist is matched
+/// case-insensitively, but the wiremock fake routes paths case-sensitively, so
+/// a mixed-case entry never reaches the refusal path there at all. The seam is
+/// what lets `a_refused_entry_is_carried_under_the_spelling_the_cursor_stores`
+/// drive the case that a real user with `repos: ["Tidewater/Payout-Service"]`
+/// hits on their first refusal.
+fn carry_skipped_forward(previous: &GiteaCursor, skipped: &[String], next: &mut GiteaCursor) {
+    for name in skipped {
+        if let Some((stored, position)) = previous.entry_like(name) {
+            // The *stored* key: inserting under the queried spelling would give
+            // one repository two entries, and the walk looks up neither by the
+            // name Gitea gives it.
+            next.repos.insert(stored.clone(), position.clone());
+        }
+    }
+}
+
 pub(crate) async fn run(
     source: &crate::GiteaSource,
     cursor: Option<Cursor>,
@@ -249,11 +270,7 @@ pub(crate) async fn run(
     // transient refusal costs that repository its `repo_updated_at` and every
     // per-branch head sha -- after which the next run re-emits it whole and,
     // having no branch memory, can tombstone nothing deleted in between.
-    for name in &skipped {
-        if let Some((stored, position)) = previous.entry_like(name) {
-            next.repos.insert(stored.clone(), position.clone());
-        }
-    }
+    carry_skipped_forward(&previous, &skipped, &mut next);
 
     for selected in &walk {
         let before = previous.repo(&selected.full_name);
@@ -561,6 +578,53 @@ mod tests {
                 "must abort the run"
             );
         }
+    }
+
+    /// A refused `repos[]` entry keeps its position **under the spelling the
+    /// cursor stores**, whatever case the user typed it in.
+    ///
+    /// `cursor::…::a_refused_allowlist_entry_is_found_whatever_case_the_user_typed`
+    /// pins what `entry_like` *returns*; this pins that the caller writes back
+    /// the key it returned rather than the one it was asked with. Those fail
+    /// differently -- the first loses the position outright, the second gives
+    /// one repository two cursor entries and the walk finds neither -- and with
+    /// an exact-case allowlist, which is every end-to-end fixture, the two
+    /// spellings are the same string and neither failure is observable.
+    #[test]
+    fn a_refused_entry_is_carried_under_the_spelling_the_cursor_stores() {
+        let stored = "tidewater/payout-service";
+        let mut previous = GiteaCursor::empty();
+        previous.repos.insert(
+            stored.to_owned(),
+            RepoCursor {
+                repo_updated_at: Some(
+                    "2026-08-20T09:00:00Z"
+                        .parse::<chrono::DateTime<chrono::Utc>>()
+                        .unwrap(),
+                ),
+                branches: BTreeMap::from([("main".to_owned(), "9".repeat(40))]),
+                ..RepoCursor::default()
+            },
+        );
+
+        let mut next = GiteaCursor::fresh();
+        carry_skipped_forward(
+            &previous,
+            &[
+                "Tidewater/Payout-Service".to_owned(),
+                // Never seen before: nothing to carry, and no blank entry
+                // invented for it either.
+                "elsewhere/unrelated".to_owned(),
+            ],
+            &mut next,
+        );
+
+        assert_eq!(
+            next.repos.keys().collect::<Vec<_>>(),
+            vec![stored],
+            "exactly one entry, under the stored spelling"
+        );
+        assert_eq!(next.repo(stored), previous.repo(stored));
     }
 
     /// The cap message has to name the limit that was hit and the lever that
