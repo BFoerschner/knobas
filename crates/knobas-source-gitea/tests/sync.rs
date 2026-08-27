@@ -138,7 +138,9 @@ async fn a_moved_branch_head_is_re_emitted_and_an_untouched_one_is_not() {
 }
 
 /// A branch deleted after a merge is a dead link target until something says
-/// so. The engine's full-sync sweep would only catch it on the next full run.
+/// so -- and since this source declares `full_sync_exhaustive: false`, the
+/// engine's sweep never runs for it, so the adapter's own tombstone is the only
+/// thing that will ever retire the row.
 #[tokio::test]
 async fn a_vanished_branch_is_tombstoned() {
     let mut state = State::tidewater();
@@ -229,8 +231,8 @@ async fn a_revoked_token_fails_the_run_rather_than_syncing_a_subset() {
 /// The preflight's actual job, on a fixture that can show it: an instance that
 /// serves its public repositories to anyone. Without `GET /user` first, a run
 /// with a dead token succeeds and quietly replaces the mirror with the public
-/// subset -- and because this source declares its full sync exhaustive, the
-/// engine then tombstones everything the token used to be able to see.
+/// subset -- a revoked token silently shrinking the corpus to whatever the
+/// instance serves anonymously, reported as a healthy sync.
 #[tokio::test]
 async fn a_dead_token_against_a_publicly_readable_instance_still_fails() {
     let fake = Fake::start_public(&State::tidewater()).await;
@@ -307,10 +309,11 @@ async fn every_repository_refusing_us_raises() {
     assert!(sink.0.is_empty());
 }
 
-/// A cursor-less run may not report success over a hole. The descriptor claims
-/// `full_sync_exhaustive`, so the engine reads a successful full sync as
-/// permission to tombstone every row it did not re-emit -- which for a skipped
-/// repository is that repository's whole corpus.
+/// A cursor-less run may not report success over a hole. Ruling B4's
+/// skip-with-warning is an *incremental* run's option, where the repository's
+/// watermarks survive and the next run picks it back up; a cursor-less run has
+/// no such state, so the skip would be the only record the repository was ever
+/// in scope.
 #[tokio::test]
 async fn a_forbidden_repository_is_fatal_during_a_full_sync() {
     let mut state = State::tidewater().with_elsewhere();
@@ -354,8 +357,8 @@ async fn branch_listings_are_paged() {
 }
 
 /// A run that hits a page cap must **fail**, not return `Ok` over a truncated
-/// corpus: this source declares its full sync exhaustive, so an `Ok` short of
-/// the corpus authorises the engine to tombstone everything past the cap.
+/// corpus: an `Ok` short of the listing reports a complete mirror of something
+/// this run never finished walking.
 #[tokio::test]
 async fn a_branch_listing_that_would_exceed_the_cap_fails_the_run() {
     let mut state = State::tidewater();
@@ -378,8 +381,11 @@ async fn a_branch_listing_that_would_exceed_the_cap_fails_the_run() {
 
     let mut sink = VecSink(Vec::new());
     let error = source.sync(None, &mut sink).await.unwrap_err();
+    // Names the *branch* cap, so this cannot pass on the repository listing's
+    // message instead.
     assert!(
-        matches!(error, SourceError::Protocol(ref m) if m.contains("tombstone")),
+        matches!(error, SourceError::Protocol(ref m)
+            if m.contains("1000 branches in one repository") && m.contains("never finished walking")),
         "{error:?}"
     );
 }

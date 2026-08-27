@@ -105,14 +105,21 @@ pub fn descriptor_template() -> SourceDescriptor {
         auth_methods: vec![AuthMethod::Pat],
         write_ops: Vec::new(),
         entity_kinds: entity_kinds(),
-        // Interfaces §4.2: Gitea's full sync emits the complete corpus, so the
-        // engine's hard-delete sweep may run after it. That is a claim about
-        // this crate's read path, and it is what forces two rules on `sync`:
-        // a page cap that is reached ends the run with an error rather than
-        // with `Ok` (an `Ok` short of the corpus authorises the sweep to
-        // tombstone everything past the cap), and a repository skipped during
-        // a cursor-less run is likewise fatal (see `sync::run`).
-        full_sync_exhaustive: true,
+        // **`false`, per the 2026-08-25 ruling**, superseding interfaces
+        // §4.2's `true`: `commits_per_repo` / `prs_per_repo` bound what one
+        // run mirrors per repository, including a cursor-less one, and the
+        // flag means precisely "a cursor-less run emits the complete corpus".
+        // Declaring `true` would license the engine's hard-delete sweep to
+        // tombstone every commit past the cap on every full sync.
+        // Pinned by `a_budgeted_full_sync_is_not_exhaustive`.
+        //
+        // `sync` still refuses to return `Ok` over a hole -- a reached page cap
+        // and a repository skipped during a cursor-less run are both fatal (see
+        // `sync::run`). That is no longer the sweep's precondition; it is the
+        // weaker promise this adapter can still keep: what a run *did* walk, it
+        // walked completely, so an incomplete mirror is reported and not
+        // silently served.
+        full_sync_exhaustive: false,
         config_schema: config::config_schema(),
     }
 }
@@ -150,9 +157,47 @@ mod tests {
                 k.id
             );
         }
-        // The sweep's precondition (interfaces §4.2: Gitea `true`).
-        assert!(d.full_sync_exhaustive);
+        // The sweep's precondition -- see `a_budgeted_full_sync_is_not_exhaustive`.
+        assert!(!d.full_sync_exhaustive);
         assert_eq!(d.config_schema["type"], "object");
+    }
+
+    /// **The 2026-08-25 ruling** (carry-overs, *"BLOCKING before stream B's
+    /// adapter merges"*), which supersedes interfaces §4.2's `true` for Gitea.
+    ///
+    /// `full_sync_exhaustive` means exactly "a cursor-less run emits the
+    /// complete corpus", and this adapter's configuration bounds what one run
+    /// mirrors per repository. The engine sweeps on
+    /// `full_sync && exhaustive && upserted > 0`
+    /// (`knobas_sync::run_inner` → `sweep`), so `true` alongside a budget is a
+    /// standing instruction to tombstone every commit past the cap on **every**
+    /// full sync -- the same defect class as Jira's `MAX_PAGES`, reaching a
+    /// different mechanism.
+    ///
+    /// This pins the coupling and not just the constant: it names the budgets
+    /// the ruling is about, so renaming one fails here rather than passing
+    /// vacuously, and if every budget is ever removed this test is what has to
+    /// be revisited before `true` can come back.
+    #[test]
+    fn a_budgeted_full_sync_is_not_exhaustive() {
+        let schema = config::config_schema();
+        let budgets: Vec<&str> = schema["properties"]
+            .as_object()
+            .expect("config_schema has an object of properties")
+            .keys()
+            .filter(|key| key.ends_with("_per_repo"))
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            budgets,
+            vec!["commits_per_repo", "prs_per_repo"],
+            "the per-repository budgets the ruling is about"
+        );
+        assert!(
+            !descriptor_template().full_sync_exhaustive,
+            "{budgets:?} bound what a cursor-less run emits, so the run is not \
+             exhaustive and the engine must not sweep after it"
+        );
     }
 
     /// The whole descriptor crosses the IPC bridge as plain data (spec §3a).

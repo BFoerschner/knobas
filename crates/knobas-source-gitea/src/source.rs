@@ -137,7 +137,9 @@ mod tests {
         // Everything else is still the template's.
         assert_eq!(d.entity_kinds.len(), 4);
         assert!(d.write_ops.is_empty());
-        assert!(d.full_sync_exhaustive);
+        // Including the 2026-08-25 budget ruling -- an instance cannot quietly
+        // re-grant the sweep the template refuses it.
+        assert!(!d.full_sync_exhaustive);
     }
 
     /// An id that cannot be an `EntityRef` namespace fails when the source is

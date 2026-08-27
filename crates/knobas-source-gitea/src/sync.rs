@@ -17,22 +17,47 @@
 //!
 //! # Why a truncated run fails instead of succeeding
 //!
-//! The descriptor claims `full_sync_exhaustive: true` (interfaces §4.2), and
-//! the engine reads that as permission to tombstone every row of this source a
-//! cursor-less run did not re-emit. Two things follow, and both are the same
-//! rule:
+//! The descriptor declares `full_sync_exhaustive: false` (the 2026-08-25
+//! ruling: per-repository budgets and an exhaustive full sync cannot both be
+//! true), so the engine's hard-delete sweep never fires for this source. That
+//! removes the *catastrophic* reading of a truncated run -- it can no longer
+//! tombstone a corpus -- but not the rule, which is the weaker promise this
+//! adapter can still keep: **what one run set out to walk, it walked
+//! completely.** A budget the user configured is a known bound; a page cap or a
+//! refusal hit mid-walk is a hole the user never asked for, and a mirror that
+//! is silently missing 400 repositories is worse than a run that says so.
+//!
+//! Two things follow, and both are the same rule:
 //!
 //! * **A page cap that is reached ends the run with an error.** Returning `Ok`
-//!   after walking 1,000 of 1,400 repositories would authorise the sweep to
-//!   tombstone the other 400.
+//!   after walking 1,000 of 1,400 repositories would report a complete mirror
+//!   of a corpus that was never walked.
 //! * **A repository skipped during a cursor-less run is fatal too.** Ruling B4
 //!   grants skip-with-warning for a 403 or 404 on one repository, and that is
-//!   what an *incremental* run does -- no sweep follows it, and the
-//!   repository's watermarks are kept so the next run picks up where this one
-//!   left off. During a full sync the same skip would hand the engine an
-//!   incomplete corpus and a green light, so it raises instead. A repository
-//!   genuinely deleted upstream never takes this path: it simply stops
-//!   appearing in the listing, and the sweep tombstoning it is then correct.
+//!   what an *incremental* run does -- the repository's watermarks are kept, so
+//!   the next run picks up where this one left off. A cursor-less run has no
+//!   such state to fall back on: the skip would be the only record that the
+//!   repository was ever in scope. A repository genuinely deleted upstream
+//!   never takes this path -- it simply stops appearing in the listing.
+//!
+//! Both guards also mean the flag could go back to `true` on the day the
+//! budgets go away without re-auditing this file; see
+//! `crate::tests::a_budgeted_full_sync_is_not_exhaustive`.
+//!
+//! # What `false` costs: repository hard-deletes
+//!
+//! Because the sweep is gated on the flag, **nothing** retires a `repo` row for
+//! a repository that stops appearing in the listing -- not the engine, and not
+//! this adapter. Its branches are tombstoned by the walk below (that is the
+//! adapter's own mechanism and it does not depend on the flag), but the
+//! repository row itself stays live, and its cursor entry is dropped the next
+//! time the run emits anything. This is the generic hard-delete limitation
+//! recorded against `run_once`, made unconditional here by the ruling. Closing
+//! it means emitting a `repo` tombstone for a name in the previous cursor that
+//! a *complete* listing did not return -- deliberately not done in tasks 1-5,
+//! because "complete" has to exclude a run that skipped a repository or was
+//! narrowed by an edited `owners[]`/`repos[]`, and that is a walk this crate
+//! does not yet make.
 
 use std::collections::BTreeMap;
 
@@ -78,8 +103,8 @@ impl From<SourceError> for RepoError {
 /// The failure a reached page cap ends the run with.
 fn cap_reached(what: &str, cap: u32) -> SourceError {
     SourceError::Protocol(format!(
-        "gitea: more than {} {what} to walk in one run; this source declares its full sync \
-         exhaustive, so stopping at the cap would let the engine tombstone everything past it. \
+        "gitea: more than {} {what} to walk in one run; stopping at the cap would report a \
+         complete mirror of a corpus this run never finished walking. \
          Narrow the source with owners[] or repos[].",
         cap * PAGE_SIZE
     ))
@@ -408,8 +433,8 @@ mod tests {
         };
         assert!(message.contains("1000"), "{message}");
         assert!(message.contains("owners[]"), "{message}");
-        // Not swept away silently: the message says why stopping is not an
-        // option.
-        assert!(message.contains("tombstone"), "{message}");
+        // And says why stopping is not an option: an `Ok` here would claim a
+        // corpus the run never finished walking.
+        assert!(message.contains("never finished walking"), "{message}");
     }
 }
