@@ -272,6 +272,22 @@ impl Fake {
         self.mount(state, 1_000).await;
     }
 
+    /// The same instance, but the token stops working **after the first
+    /// `/user`** -- a credential revoked mid-run.
+    ///
+    /// `/user` answers once (the run's identity preflight, which must succeed
+    /// or the run never gets far enough to be interesting) and then falls
+    /// through to the fake's 401. Everything else is mounted as usual, so which
+    /// repositories still answer is `State::forbidden`'s business: a
+    /// repository listed as forbidden stands in for the repositories a
+    /// revoked token can no longer read, and the adapter cannot tell that 403
+    /// from the 401 it would really get -- which is the whole point.
+    pub async fn remount_revoked_after_preflight(&self, state: &State) {
+        self.server.reset().await;
+        self.mount_with_identity(state, 1_000, Reads::TokenOnly, Some(1))
+            .await;
+    }
+
     /// How many requests the fake has answered so far, which is how a test
     /// asserts that an idle run costs what the module docs claim.
     pub async fn requests(&self) -> usize {
@@ -298,6 +314,20 @@ impl Fake {
     }
 
     async fn mount_as(&self, state: &State, page_size: usize, reads: Reads) {
+        self.mount_with_identity(state, page_size, reads, None)
+            .await;
+    }
+
+    /// `identity_answers`: how many times `/user` serves an account before it
+    /// falls through to the 401 catch-all. `None` means "always", which is
+    /// every fixture except the mid-run revocation one.
+    async fn mount_with_identity(
+        &self,
+        state: &State,
+        page_size: usize,
+        reads: Reads,
+        identity_answers: Option<u64>,
+    ) {
         let ok = |body: Value| ResponseTemplate::new(200).set_body_json(body);
         let token = format!("token {TOKEN}");
         // `/user` is guarded whatever the instance does with its repositories:
@@ -327,12 +357,13 @@ impl Fake {
             .respond_with(ok(json!({ "version": "1.24.3" })))
             .mount(&self.server)
             .await;
-        identity(Mock::given(method("GET")).and(path("/api/v1/user")))
-            .respond_with(ok(
-                json!({ "login": "mara", "id": 7, "full_name": "Mara Lindqvist" }),
-            ))
-            .mount(&self.server)
-            .await;
+        let user = identity(Mock::given(method("GET")).and(path("/api/v1/user"))).respond_with(ok(
+            json!({ "login": "mara", "id": 7, "full_name": "Mara Lindqvist" }),
+        ));
+        match identity_answers {
+            Some(times) => user.up_to_n_times(times).mount(&self.server).await,
+            None => user.mount(&self.server).await,
+        }
         for (index, chunk) in pages(&state.repos, page_size) {
             authed(
                 Mock::given(method("GET"))

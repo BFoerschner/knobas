@@ -333,6 +333,190 @@ async fn a_forbidden_repository_is_fatal_during_a_full_sync() {
     assert_eq!(ids(&items, "repo").len(), 2, "{items:?}");
 }
 
+/// A cursor the adapter cannot read is documented as meaning "sync in full"
+/// (`GiteaCursor::parse`), so the run that follows one holds no position -- and
+/// the ratified fatal-skip rule has to fire for it exactly as it does for
+/// `cursor: None`. Deriving that from `cursor.is_none()` instead let an
+/// unreadable cursor return `Ok` over a hole.
+///
+/// The three cases run side by side on one fixture: two ways of holding nothing
+/// (both must raise) and one of holding a real position (must skip, per ruling
+/// B4). Without the third the test would pass on an adapter that simply raises
+/// on every refusal.
+#[tokio::test]
+async fn a_run_holding_no_position_is_a_full_sync_whatever_cursor_it_was_handed() {
+    let mut state = State::tidewater().with_elsewhere();
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+    let (_, usable) = full(&*source).await;
+
+    state.forbidden.insert("elsewhere/unrelated".to_owned());
+    fake.remount(&state).await;
+
+    for (label, cursor) in [
+        ("no cursor at all", None),
+        (
+            "an unrecognised version",
+            Some(r#"{"v":9,"repos":{}}"#.into()),
+        ),
+        ("an unreadable cursor", Some("not json".to_owned())),
+        (
+            "a cursor naming no repository",
+            Some(r#"{"v":1,"repos":{}}"#.into()),
+        ),
+    ] {
+        let mut sink = VecSink(Vec::new());
+        let error = source
+            .sync(cursor, &mut sink)
+            .await
+            .map(|c| format!("Ok({c})"))
+            .unwrap_err();
+        assert!(
+            matches!(error, SourceError::Unauthorized),
+            "{label}: {error:?}"
+        );
+    }
+
+    // And the position the run actually wrote is still an incremental run, so
+    // ruling B4's skip-with-warning is intact rather than traded away.
+    let (items, _) = again(&*source, &usable).await;
+    assert!(items.is_empty(), "{items:?}");
+}
+
+/// A branch deleted while no usable position was held is **never** tombstoned:
+/// the tombstone loop diffs against the previous cursor, and a full sync has
+/// none. Recorded in `sync`'s module docs as what `full_sync_exhaustive: false`
+/// costs, and pinned here so the doc and the behaviour cannot drift apart --
+/// close the gap and this test fails, which is the point.
+#[tokio::test]
+async fn a_run_holding_no_position_cannot_tombstone_a_deleted_branch() {
+    let mut state = State::tidewater();
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+    let (_, cursor) = full(&*source).await;
+
+    state
+        .branches
+        .get_mut("tidewater/payout-service")
+        .unwrap()
+        .retain(|b| b["name"] != "feature/PAY-231-sepa-retry");
+    fake.remount(&state).await;
+
+    // Holding the position from the first run, the deletion is seen.
+    let (incremental, _) = again(&*source, &cursor).await;
+    assert_eq!(
+        incremental.iter().filter(|i| i.deleted).count(),
+        1,
+        "the fixture really does delete a branch: {incremental:?}"
+    );
+
+    // Holding nothing, the very same deletion is invisible.
+    let (cursor_less, _) = full(&*source).await;
+    assert_eq!(
+        cursor_less.iter().filter(|i| i.deleted).count(),
+        0,
+        "known limitation: a full sync has nothing to diff against"
+    );
+}
+
+/// Ruling B4's skip must cost a repository *this run*, never its stored
+/// position -- and the `repos[]` allowlist path skips during selection, where
+/// the walk loop's careful `next.repos.insert(name, before)` never runs.
+///
+/// The same fixture is driven down both paths, because the listing path already
+/// had a test and the allowlist path is the one that dropped state.
+#[tokio::test]
+async fn a_refused_repository_keeps_its_position_on_either_selection_path() {
+    for config in [
+        serde_json::json!({}),
+        serde_json::json!({ "repos": ["tidewater/payout-service", "elsewhere/unrelated"] }),
+    ] {
+        let mut state = State::tidewater().with_elsewhere();
+        let fake = Fake::start(&state).await;
+        let source = source(fake.base_url(), config.clone());
+        let (_, cursor) = full(&*source).await;
+
+        let before: serde_json::Value = serde_json::from_str(&cursor).unwrap();
+        assert!(
+            before["repos"]["elsewhere/unrelated"]["branches"]["main"].is_string(),
+            "{config}: the fixture must have a position to lose: {before}"
+        );
+
+        // Something else changes too, so the run emits and therefore writes a
+        // *new* cursor rather than handing back the one it was given -- which
+        // is the only shape in which the position can be dropped.
+        state.forbidden.insert("elsewhere/unrelated".to_owned());
+        state.branches.get_mut("tidewater/payout-service").unwrap()[1] = branch(
+            "feature/PAY-231-sepa-retry",
+            "2222222222222222222222222222222222222222",
+            "PAY-231: bound the jitter",
+            "2026-08-22T14:05:00Z",
+        );
+        fake.remount(&state).await;
+
+        let (items, next) = again(&*source, &cursor).await;
+        assert!(!items.is_empty(), "{config}: the run must have emitted");
+        let after: serde_json::Value = serde_json::from_str(&next).unwrap();
+        assert_eq!(
+            after["repos"]["elsewhere/unrelated"], before["repos"]["elsewhere/unrelated"],
+            "{config}: a refused repository lost its position"
+        );
+    }
+}
+
+/// The compound case the two guards left open: the token dies **after** the
+/// first repository was walked. `walked == 0` cannot see it, and 401 arrives
+/// indistinguishable from 403, so the run used to return `Ok` with an advanced
+/// cursor over a credential that no longer exists -- and the sources view never
+/// offered *Re-enter*.
+///
+/// Both selection paths, because they refuse in different places, and each with
+/// its control: the identical fixture with the credential still alive must
+/// still *skip*, or this would be a test of "any refusal raises" and would have
+/// traded ruling B4 away rather than implemented it.
+#[tokio::test]
+async fn a_credential_revoked_after_the_first_repository_raises() {
+    for config in [
+        serde_json::json!({}),
+        serde_json::json!({ "repos": ["tidewater/payout-service", "elsewhere/unrelated"] }),
+    ] {
+        let mut state = State::tidewater().with_elsewhere();
+        let fake = Fake::start(&state).await;
+        let source = source(fake.base_url(), config.clone());
+        let (_, cursor) = full(&*source).await;
+
+        // `elsewhere/unrelated` sorts first and walks fine; the refusal lands on
+        // the *second* repository, so `walked == 1` and the run's other guard
+        // cannot fire.
+        state
+            .forbidden
+            .insert("tidewater/payout-service".to_owned());
+
+        // Control: credential alive. Ruling B4 -- skip, warn, return Ok.
+        fake.remount(&state).await;
+        let mut sink = VecSink(Vec::new());
+        let outcome = source.sync(Some(cursor.clone()), &mut sink).await;
+        assert!(
+            outcome.is_ok(),
+            "{config}: a live token must still skip, not raise: {outcome:?}"
+        );
+
+        // The one condition changed: the token stops working after the run's
+        // identity preflight.
+        fake.remount_revoked_after_preflight(&state).await;
+        let mut sink = VecSink(Vec::new());
+        let error = source
+            .sync(Some(cursor.clone()), &mut sink)
+            .await
+            .map(|c| format!("Ok({c})"))
+            .unwrap_err();
+        assert!(
+            matches!(error, SourceError::Unauthorized),
+            "{config}: a revoked credential must be the run's verdict: {error:?}"
+        );
+    }
+}
+
 /// More than one page of branches: the walk must not stop at `PAGE_SIZE`.
 #[tokio::test]
 async fn branch_listings_are_paged() {
@@ -409,10 +593,67 @@ async fn a_repository_listing_that_would_exceed_the_cap_fails_the_run() {
 
     let mut sink = VecSink(Vec::new());
     let error = source.sync(None, &mut sink).await.unwrap_err();
+    // Names the *repository* cap. `owners[]` alone would not: both messages
+    // come from the same `cap_reached` and both name that lever, so asserting
+    // it would pass on the branch cap's message too.
     assert!(
-        matches!(error, SourceError::Protocol(ref m) if m.contains("owners[]")),
+        matches!(error, SourceError::Protocol(ref m)
+            if m.contains("1000 repositories") && m.contains("owners[]")),
         "{error:?}"
     );
+}
+
+/// The cap fires at **exactly** `20 * PAGE`, not past it: page 20 comes back
+/// full and a full page is not proof there is no page 21. The conservatism is
+/// deliberate; what this pins is that the message says the same thing the code
+/// does, at the one value where "more than 1000" would have been a lie.
+#[tokio::test]
+async fn a_cap_fires_at_exactly_the_boundary_it_names() {
+    let mut state = State::tidewater();
+    let exactly: Vec<serde_json::Value> = (0..20 * PAGE)
+        .map(|i| {
+            branch(
+                &format!("wip/{i:05}"),
+                &format!("{i:040}"),
+                "work",
+                "2026-08-22T09:00:00Z",
+            )
+        })
+        .collect();
+    assert_eq!(exactly.len(), 1000, "the boundary this test is about");
+    state
+        .branches
+        .insert("tidewater/payout-service".to_owned(), exactly);
+    let fake = Fake::start_paged(&state).await;
+    let at_boundary = source(fake.base_url(), serde_json::json!({}));
+
+    let mut sink = VecSink(Vec::new());
+    let error = at_boundary.sync(None, &mut sink).await.unwrap_err();
+    assert!(
+        matches!(error, SourceError::Protocol(ref m) if m.contains("at least 1000 branches")),
+        "exactly 1000 must fail, and say so accurately: {error:?}"
+    );
+
+    // One under the boundary walks cleanly, so the assertion above is about the
+    // boundary and not about a fixture that could never have succeeded.
+    let mut under = State::tidewater();
+    under.branches.insert(
+        "tidewater/payout-service".to_owned(),
+        (0..20 * PAGE - 1)
+            .map(|i| {
+                branch(
+                    &format!("wip/{i:05}"),
+                    &format!("{i:040}"),
+                    "work",
+                    "2026-08-22T09:00:00Z",
+                )
+            })
+            .collect(),
+    );
+    let fake = Fake::start_paged(&under).await;
+    let under_boundary = source(fake.base_url(), serde_json::json!({}));
+    let (items, _) = full(&*under_boundary).await;
+    assert_eq!(ids(&items, "branch").len(), 20 * PAGE - 1);
 }
 
 /// A sink that rejects an item aborts the run -- the remaining items are not

@@ -88,24 +88,31 @@ impl GiteaCursor {
         }
     }
 
-    /// Read the cursor the engine handed us. Anything unreadable or from
-    /// another version means a full sync.
-    pub(crate) fn parse(raw: Option<&str>) -> Self {
-        let Some(raw) = raw else {
-            return Self::empty();
-        };
+    /// Read the cursor the engine handed us, or `None` if there is no usable
+    /// position in it -- absent, unreadable, or written by another version.
+    ///
+    /// **`None` and not `empty()`.** An unusable cursor and a valid one that
+    /// happens to know nothing are the same *value*, and `run` has to tell them
+    /// apart: a run holding no recovered position is a full sync in the only
+    /// sense that matters to ruling B4's extension (a skipped repository has no
+    /// stored state to fall back on), even though the engine handed it a
+    /// non-`None` cursor. Returning the distinction in the type is what stops
+    /// that from being re-derived by comparing against `empty()`, which is a
+    /// value coincidence rather than a fact about the parse.
+    pub(crate) fn parse(raw: Option<&str>) -> Option<Self> {
+        let raw = raw?;
         match serde_json::from_str::<Self>(raw) {
-            Ok(cursor) if cursor.v == CURSOR_VERSION => cursor,
+            Ok(cursor) if cursor.v == CURSOR_VERSION => Some(cursor),
             Ok(cursor) => {
                 tracing::warn!(
                     version = cursor.v,
                     "gitea: unrecognised cursor version, syncing in full"
                 );
-                Self::empty()
+                None
             }
             Err(error) => {
                 tracing::warn!(%error, "gitea: unreadable cursor, syncing in full");
-                Self::empty()
+                None
             }
         }
     }
@@ -113,6 +120,21 @@ impl GiteaCursor {
     /// This repository's position, or a blank one if it has never been synced.
     pub(crate) fn repo(&self, full_name: &str) -> RepoCursor {
         self.repos.get(full_name).cloned().unwrap_or_default()
+    }
+
+    /// The stored entry for `name`, matched the way the `repos[]` allowlist
+    /// matches (case-insensitively), returned **under the key it is stored
+    /// with**.
+    ///
+    /// The keys in this map are Gitea's own `full_name`; the names a skipped
+    /// allowlist entry is known by are what the user typed. Carrying a skipped
+    /// entry forward has to find it despite that difference and must not write
+    /// it back under a second spelling, or one repository would occupy two
+    /// entries and neither would be the one the walk looks up.
+    pub(crate) fn entry_like(&self, name: &str) -> Option<(&String, &RepoCursor)> {
+        self.repos
+            .iter()
+            .find(|(stored, _)| stored.eq_ignore_ascii_case(name))
     }
 
     pub(crate) fn to_json(&self) -> String {
@@ -152,7 +174,7 @@ mod tests {
     #[test]
     fn a_cursor_round_trips() {
         let cursor = sample();
-        assert_eq!(GiteaCursor::parse(Some(&cursor.to_json())), cursor);
+        assert_eq!(GiteaCursor::parse(Some(&cursor.to_json())), Some(cursor));
     }
 
     /// The engine compares cursors as strings, so serialising the same position
@@ -171,7 +193,7 @@ mod tests {
     /// so a field read into the wrong slot fails too.
     #[test]
     fn every_watermark_survives_the_round_trip() {
-        let back = GiteaCursor::parse(Some(&sample().to_json()));
+        let back = GiteaCursor::parse(Some(&sample().to_json())).expect("the sample is usable");
         let repo = back.repo("tidewater/payout-service");
         assert_eq!(repo.repo_updated_at, Some(at("2026-08-22T11:42:00Z")));
         assert_eq!(repo.pulls_updated_to, Some(at("2026-08-22T13:50:00Z")));
@@ -204,6 +226,10 @@ mod tests {
 
     /// A cursor written by a later shape, or by something else entirely, means
     /// "sync in full" -- never a half-understood position.
+    ///
+    /// `None`, not `empty()`: `sync::run` reads the absence to decide whether
+    /// this run has any state to fall back on, and a value that merely *equals*
+    /// `empty()` would not tell it that. See `parse`'s docs.
     #[test]
     fn an_unusable_cursor_means_full_sync() {
         for raw in [
@@ -213,18 +239,14 @@ mod tests {
             "[]",
             r#"{"repos":{}}"#,
         ] {
-            assert_eq!(
-                GiteaCursor::parse(Some(raw)),
-                GiteaCursor::empty(),
-                "{raw:?}"
-            );
+            assert_eq!(GiteaCursor::parse(Some(raw)), None, "{raw:?}");
         }
-        assert_eq!(GiteaCursor::parse(None), GiteaCursor::empty());
+        assert_eq!(GiteaCursor::parse(None), None);
         // And the version this knobas writes is still understood, so the guard
         // above is a version check rather than a blanket refusal.
-        assert_ne!(
+        assert_eq!(
             GiteaCursor::parse(Some(&sample().to_json())),
-            GiteaCursor::empty()
+            Some(sample())
         );
     }
 

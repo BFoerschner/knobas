@@ -123,9 +123,15 @@ pub(crate) fn status_of(error: &SourceError) -> Option<u16> {
 /// itself works, which is what makes that reading available at all.
 ///
 /// 403 arrives as a bare [`SourceError::Unauthorized`] because `knobas-http`
-/// maps 401 and 403 alike, so both are read here as repository-scoped. A
-/// credential revoked *mid-run* therefore looks like every remaining
-/// repository refusing us -- which raises, since none of them can be walked.
+/// maps 401 and 403 alike, so both are read here as repository-scoped.
+///
+/// **This predicate alone cannot tell a refused repository from a dead
+/// credential, and it does not try to.** `sync::credential_still_good` is what
+/// separates them, by re-running the identity probe before any refusal is
+/// allowed to become a skip; a `true` from here means "not a sink or transport
+/// failure", not "the token is fine". The `walked == 0` guard in `sync::run` is
+/// a different rule again -- it catches a live token whose *scope* covers
+/// nothing -- and covers neither case on its own.
 pub(crate) fn is_repo_scoped(error: &SourceError) -> bool {
     match error {
         SourceError::Unauthorized => true,

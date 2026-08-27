@@ -32,32 +32,53 @@
 //! * **A page cap that is reached ends the run with an error.** Returning `Ok`
 //!   after walking 1,000 of 1,400 repositories would report a complete mirror
 //!   of a corpus that was never walked.
-//! * **A repository skipped during a cursor-less run is fatal too.** Ruling B4
+//! * **A repository skipped during a full sync is fatal too.** Ruling B4
 //!   grants skip-with-warning for a 403 or 404 on one repository, and that is
 //!   what an *incremental* run does -- the repository's watermarks are kept, so
-//!   the next run picks up where this one left off. A cursor-less run has no
-//!   such state to fall back on: the skip would be the only record that the
-//!   repository was ever in scope. A repository genuinely deleted upstream
+//!   the next run picks up where this one left off. A run holding no position
+//!   has no such state to fall back on: the skip would be the only record that
+//!   the repository was ever in scope. A repository genuinely deleted upstream
 //!   never takes this path -- it simply stops appearing in the listing.
+//!
+//!   **"Full sync" here is about the position, not the argument.** `cursor:
+//!   None` is one way to arrive with nothing; an unreadable cursor, a cursor
+//!   from another version, and a cursor naming no repository are the others,
+//!   and `GiteaCursor::parse` documents the first two as meaning exactly "sync
+//!   in full". `run` therefore derives the flag from what it recovered rather
+//!   than from `cursor.is_none()`, or the ratified rule would not fire on three
+//!   of its four cases.
 //!
 //! Both guards also mean the flag could go back to `true` on the day the
 //! budgets go away without re-auditing this file; see
 //! `crate::tests::a_budgeted_full_sync_is_not_exhaustive`.
 //!
-//! # What `false` costs: repository hard-deletes
+//! # What `false` costs: hard-deletes, of repositories **and of branches**
 //!
-//! Because the sweep is gated on the flag, **nothing** retires a `repo` row for
-//! a repository that stops appearing in the listing -- not the engine, and not
-//! this adapter. Its branches are tombstoned by the walk below (that is the
-//! adapter's own mechanism and it does not depend on the flag), but the
-//! repository row itself stays live, and its cursor entry is dropped the next
-//! time the run emits anything. This is the generic hard-delete limitation
-//! recorded against `run_once`, made unconditional here by the ruling. Closing
-//! it means emitting a `repo` tombstone for a name in the previous cursor that
-//! a *complete* listing did not return -- deliberately not done in tasks 1-5,
-//! because "complete" has to exclude a run that skipped a repository or was
-//! narrowed by an edited `owners[]`/`repos[]`, and that is a walk this crate
-//! does not yet make.
+//! Because the sweep is gated on the flag, **nothing** retires a row this
+//! source stops returning -- not the engine, and not this adapter. Two distinct
+//! holes, and the second is the one that is easy to state wrongly:
+//!
+//! * **A repository** that stops appearing in the listing keeps its live `repo`
+//!   row for ever. Its cursor entry is dropped the next time the run emits
+//!   anything.
+//! * **A branch** is tombstoned only when the run can *see* that it is gone,
+//!   and the only thing that remembers a branch is the previous cursor
+//!   (`before.branches`, in `branches` below). A run holding no position
+//!   therefore emits **zero** branch tombstones -- it has nothing to compare
+//!   against. So a branch deleted upstream while no usable cursor was held
+//!   (a re-added source, a cleared or unreadable cursor, a cursor-version bump)
+//!   stays live for ever, and `branch` is precisely the kind links hang off
+//!   (spec §5a). Before the ruling the engine's sweep covered exactly this
+//!   case; now nothing does. Pinned, so the limitation cannot silently change
+//!   without this text changing with it, by
+//!   `tests/sync.rs::a_run_holding_no_position_cannot_tombstone_a_deleted_branch`.
+//!
+//! Closing either means emitting tombstones for names in the previous cursor
+//! that a *complete* walk did not return -- which needs "complete" to exclude a
+//! run that skipped a repository or was narrowed by an edited
+//! `owners[]`/`repos[]`, and, for branches, needs a position to diff against
+//! that a full sync by definition does not have. Deliberately not done in
+//! tasks 1-5; carried to the orchestrator rather than hidden here.
 
 use std::collections::BTreeMap;
 
@@ -78,6 +99,18 @@ pub(crate) struct Selected {
     full_name: String,
     raw: Value,
     repo: model::Repo,
+}
+
+/// What `select_repos` decided: what to walk, and what was refused while
+/// deciding.
+struct Selection {
+    walk: Vec<Selected>,
+    /// Allowlist entries refused during selection. They never enter `walk`, so
+    /// the walk loop cannot carry their stored positions forward and this is
+    /// the only record that they were ever in scope.
+    skipped: Vec<String>,
+    /// The first refusal met, kept so a run that walked nothing can report it.
+    first_skip: Option<SourceError>,
 }
 
 /// Whether a failure ends the run or just this repository.
@@ -101,13 +134,41 @@ impl From<SourceError> for RepoError {
 }
 
 /// The failure a reached page cap ends the run with.
+///
+/// **"at least", not "more than."** The cap fires when page `cap` came back
+/// full, and a full last page is not proof there is another one -- so a corpus
+/// of exactly `cap * PAGE_SIZE` fails too. Saying "more than" would be wrong at
+/// the one value where a user is most likely to check the arithmetic;
+/// `a_cap_fires_at_exactly_the_boundary_it_names` pins that boundary.
 fn cap_reached(what: &str, cap: u32) -> SourceError {
     SourceError::Protocol(format!(
-        "gitea: more than {} {what} to walk in one run; stopping at the cap would report a \
+        "gitea: at least {} {what} to walk in one run; stopping at the cap would report a \
          complete mirror of a corpus this run never finished walking. \
          Narrow the source with owners[] or repos[].",
         cap * PAGE_SIZE
     ))
+}
+
+/// Whether a repository-scoped refusal is believable, or the credential itself
+/// has gone.
+///
+/// `knobas-http` maps **401 and 403 alike** onto a bare
+/// [`SourceError::Unauthorized`] (`crates/knobas-http/src/classify.rs`), so the
+/// status that separates "this repository is not ours" from "this token is
+/// dead" never reaches this crate. Task 5's brief classified 403/404 as a skip
+/// and 401 as fatal; with the status gone, that classification is recovered by
+/// **measuring** instead of guessing -- re-run the identity probe the run
+/// already opened with:
+///
+/// * it still answers ⇒ the credential is alive, so the refusal really was
+///   about that one repository (ruling B4: skip with a warning);
+/// * it does not ⇒ the credential died mid-run, which is the run's verdict and
+///   the thing the sources view offers *Re-enter* on.
+///
+/// The cost is one extra request per refused repository, on a path that was
+/// already losing a repository, and none at all on a healthy run.
+async fn credential_still_good(source: &crate::GiteaSource) -> Result<(), SourceError> {
+    source.client.current_user().await.map(|_| ())
 }
 
 pub(crate) async fn run(
@@ -123,15 +184,42 @@ pub(crate) async fn run(
     // about the credential.
     source.client.current_user().await?;
 
-    let full_sync = cursor.is_none();
-    let previous = GiteaCursor::parse(cursor.as_deref());
+    // **A full sync is a run holding no position, not a run handed no cursor.**
+    // `cursor.is_none()` is only one of the ways to arrive with nothing: an
+    // unreadable cursor and one from another version are documented on
+    // `GiteaCursor::parse` as meaning "sync in full", and a cursor that parses
+    // but names no repository knows nothing about any of them either. All three
+    // are the case ruling B4's extension was ratified for -- there is no stored
+    // state for a skipped repository to fall back on, so the skip would be the
+    // only record it was ever in scope.
+    let recovered = GiteaCursor::parse(cursor.as_deref());
+    let full_sync = recovered
+        .as_ref()
+        .is_none_or(|position| position.repos.is_empty());
+    let previous = recovered.unwrap_or_else(GiteaCursor::empty);
     let mut next = GiteaCursor::fresh();
     let mut emitted = 0u64;
     let mut walked = 0usize;
 
-    let (selection, mut first_skip) = select_repos(source, full_sync).await?;
+    let Selection {
+        walk,
+        skipped,
+        mut first_skip,
+    } = select_repos(source, full_sync).await?;
 
-    for selected in &selection {
+    // Carry a refused allowlist entry's stored position forward before the walk
+    // writes anything, exactly as the walk loop's own skip arm does. Without
+    // this the entry is simply absent from the cursor this run returns, and one
+    // transient refusal costs that repository its `repo_updated_at` and every
+    // per-branch head sha -- after which the next run re-emits it whole and,
+    // having no branch memory, can tombstone nothing deleted in between.
+    for name in &skipped {
+        if let Some((stored, position)) = previous.entry_like(name) {
+            next.repos.insert(stored.clone(), position.clone());
+        }
+    }
+
+    for selected in &walk {
         let before = previous.repo(&selected.full_name);
         let mut after = before.clone();
         match sync_repo(source, selected, &before, &mut after, sink, &mut emitted).await {
@@ -144,6 +232,11 @@ pub(crate) async fn run(
             // module docs.
             Err(RepoError::Skip(error)) if full_sync => return Err(error),
             Err(RepoError::Skip(error)) => {
+                // Believe the refusal only while the credential is still good:
+                // a 401 arrives here indistinguishable from a 403, and a token
+                // revoked after the first repository was walked would otherwise
+                // be reported as a healthy sync.
+                credential_still_good(source).await?;
                 tracing::warn!(
                     repository = %selected.full_name,
                     %error,
@@ -180,12 +273,13 @@ pub(crate) async fn run(
     Ok(next.to_json())
 }
 
-/// Which repositories this run walks, and the first refusal met while deciding.
+/// Which repositories this run walks, and what was refused while deciding.
 async fn select_repos(
     source: &crate::GiteaSource,
     full_sync: bool,
-) -> Result<(Vec<Selected>, Option<SourceError>), SourceError> {
+) -> Result<Selection, SourceError> {
     let mut out = Vec::new();
+    let mut skipped = Vec::new();
     let mut skip = None;
     let config = &source.config;
 
@@ -214,11 +308,16 @@ async fn select_repos(
             match source.client.get_repo(owner, name).await {
                 Ok(raw) => push_selected(&mut out, raw, config),
                 Err(error) if is_repo_scoped(&error) && !full_sync => {
+                    // The same measurement the walk loop makes: 401 and 403 are
+                    // one error here, so a dead credential would otherwise read
+                    // as "the user configured a repository they cannot see".
+                    credential_still_good(source).await?;
                     tracing::warn!(
                         repository = %entry,
                         %error,
                         "gitea: configured repository is unavailable"
                     );
+                    skipped.push(entry.clone());
                     if skip.is_none() {
                         skip = Some(error);
                     }
@@ -230,7 +329,11 @@ async fn select_repos(
 
     // Deterministic: the commit budget is spent in this order.
     out.sort_by(|a, b| a.full_name.cmp(&b.full_name));
-    Ok((out, skip))
+    Ok(Selection {
+        walk: out,
+        skipped,
+        first_skip: skip,
+    })
 }
 
 fn push_selected(out: &mut Vec<Selected>, raw: Value, config: &crate::config::GiteaConfig) {
