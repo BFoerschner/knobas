@@ -1,0 +1,98 @@
+# The docker test environment's own gate.
+#
+# `just check` compiles and tests Rust; it cannot see a shell script with a
+# quoting bug or a compose file whose port map has drifted away from the
+# interfaces doc §5 table that six streams read. This workflow covers exactly
+# that gap, and nothing else.
+#
+# It starts no containers and pulls no images -- roadmap §3: CI runs only the
+# docker-free layers. `docker compose config` resolves ${...} from testenv/.env
+# and validates the schema locally; it never contacts a registry. That matters
+# beyond speed: the TeamCity, Jira and Confluence images this file references
+# are ~13 GB and are deliberately never pulled anywhere, CI included.
+name: testenv
+
+on:
+  pull_request:
+    paths: ['testenv/**', '.github/workflows/testenv.yml']
+  push:
+    branches: [main]
+    paths: ['testenv/**', '.github/workflows/testenv.yml']
+
+# Same rule as check.yml, and for the same reason: a push to a PR branch makes
+# the previous push's run irrelevant, so those share a group and supersede each
+# other -- while every commit on `main` is a distinct answer to "is main green"
+# and gets a group of its own (keyed on run_id) so nothing can displace it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    # Seconds of work. This bounds the run that is stuck rather than slow --
+    # a `docker compose` that decided to talk to a registry, say.
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      # The scripts are discovered by their shebang, not by a glob.
+      #
+      # The plan's `shellcheck testenv/seed testenv/seed-*.sh ...` list was a
+      # pattern standing in for the set it meant to cover, and it already
+      # missed two of the seven scripts in this directory (`check-ports.sh`
+      # and `specs/fetch.sh`). A glob cannot fail loudly when a new script does
+      # not match it -- it just quietly checks less than you think.
+      #
+      # `git ls-files` rather than `find`: only tracked files, so a seeded
+      # volume or a stray local script can never enter or skew the set.
+      #
+      # The empty guard is the point of the step, not decoration: a discovery
+      # that silently matched nothing would make `shellcheck` exit 0 having
+      # examined no files at all, and this job would report green while
+      # checking literally nothing.
+      - name: shellcheck every script in testenv/
+        run: |
+          set -euo pipefail
+          scripts=()
+          while IFS= read -r f; do
+            [ -f "$f" ] || continue
+            if head -n 1 -- "$f" | grep -qE '^#!.*\b(ba)?sh\b'; then
+              scripts+=("$f")
+            fi
+          done < <(git ls-files -z -- 'testenv/**' | tr '\0' '\n')
+
+          if [ ${#scripts[@]} -eq 0 ]; then
+            echo "::error::shebang discovery matched no scripts under testenv/ -- shellcheck would have run on nothing and passed. Fix the discovery, do not delete this guard."
+            exit 1
+          fi
+
+          echo "shellchecking ${#scripts[@]} scripts:"
+          printf '  %s\n' "${scripts[@]}"
+          shellcheck "${scripts[@]}"
+
+      # Schema validation of the compose file, for the default profile and for
+      # each opt-in one. A profile is only resolved when it is selected, so a
+      # broken `real-teamcity` service is invisible to a bare `config -q` --
+      # and that profile is precisely the one nobody runs locally, because
+      # running it means pulling ~10 GB.
+      - name: validate the compose file, default and opt-in profiles
+        working-directory: testenv
+        run: |
+          docker compose config -q
+          docker compose --profile seed \
+                         --profile real-teamcity \
+                         --profile real-atlassian config -q
+
+      # The port map itself. `config -q` is happy with any port at all, so it
+      # cannot see 8210 becoming 8299, a service published on 0.0.0.0 instead
+      # of 127.0.0.1, or the reserved 8211/8213 being bound. check-ports.sh
+      # reads the *resolved* model and asserts the §5 table; it was built with
+      # five mutants, each of which it kills.
+      #
+      # `jq` and `docker compose` are both preinstalled on ubuntu-latest.
+      - name: assert the published ports against interfaces §5
+        run: ./testenv/check-ports.sh
