@@ -298,9 +298,15 @@ async fn a_running_build_is_re_polled_without_moving_the_cursor() {
     let (running, _) = running_build();
     let source = adapter(&server.base_url(), serde_json::json!({}));
     let (_, cursor) = sync(source.as_ref(), None).await;
+    // A *numeric* comparison, via the helper documented for exactly this. The
+    // string form this used to compare is a lexicographic ordering of two JSON
+    // documents standing in for an ordering of two build ids: it agrees only
+    // while the ids have equal digit counts, and a watermark of 11880 against
+    // a running build of 1188 would compare '0' against '}' and pass while
+    // being numerically far above the build it claims to sit below.
     assert!(
-        cursor < format!(r#"{{"v":1,"since_build_id":{running}}}"#),
-        "the watermark must sit below the running build: {cursor}"
+        since_build_id(&cursor) < running,
+        "the watermark must sit below the running build {running}: {cursor}"
     );
 
     let (items, next) = sync(source.as_ref(), Some(cursor.clone())).await;
