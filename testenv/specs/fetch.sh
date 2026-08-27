@@ -5,19 +5,61 @@
 # reviewing the diff — mockd's contract tests pin against these files.
 set -eu
 
-# ---- TeamCity: spec only served by a running server ----
-# JetBrains publishes no static swagger document anywhere (re-verified
-# 2026-08-25: the four plausible public URLs answer 404/403). The only source is
-# a running server's own `/app/rest/swagger.json`, which is behind
-# authentication, which is behind a one-time first-start wizard. That wizard is
-# a *human* action -- database choice, licence agreement, administrator account
-# -- served by form endpoints that are not part of the REST API and that change
-# between versions. So this is NOT part of the default run: `./fetch.sh` stays a
-# pure curl of the public documents, with no Docker and no interaction.
+# ---- TeamCity ----
+#
+# #############################################################################
+# ## STOP. RUNNING THIS OVERWRITES A HAND-AUGMENTED FILE AND LOSES WORK.      ##
+# #############################################################################
+#
+# `teamcity.json` is NOT a pure download. It was taken from JetBrains' guest
+# server instance (TeamCity 2026.1) and then **hand-augmented by Björn** with
+# information from the official HTML documentation. Those additions exist
+# nowhere else -- not upstream, not on any server, not in any other file. The
+# `curl -o teamcity.json` below would silently destroy them.
+#
+# So: NEVER run this straight onto the vendored copy. Fetch to a scratch path
+# and diff:
+#
+#     ./fetch.sh --teamcity --to /tmp/teamcity-fresh.json
+#     diff <(jq -S . teamcity.json) <(jq -S . /tmp/teamcity-fresh.json)
+#
+# and then merge upstream's changes INTO the vendored file by hand, keeping the
+# augmentations. `git diff` is not a safety net here: if you overwrite and
+# commit, the additions are gone from the working tree, and recovering them
+# means knowing they ever existed. That is what this comment is for.
+# See testenv/specs/README.md, "mixed authority".
+#
+# ---- Where the document actually comes from ----
+# JetBrains publishes no static swagger document at a public documentation URL
+# (re-verified 2026-08-25: four plausible URLs answer 404/403). But the earlier
+# conclusion drawn from that -- "the only source is a server you run yourself"
+# -- was too pessimistic, and cost two days of blocked gate. The document is
+# served by ANY running TeamCity, including **JetBrains' own public guest
+# instance**, which needs no Docker pull, no 10 GB of disk and no first-start
+# wizard. That is how the vendored copy was obtained (2026-08-27).
+#
+# The self-hosted route below is kept as the fallback for when a specific
+# version is needed that the guest instance does not run. It is behind a
+# one-time first-start wizard -- database choice, licence agreement,
+# administrator account -- served by form endpoints that are not REST API and
+# that change between versions. It is a *human* action, so this is NOT part of
+# the default run: `./fetch.sh` stays a pure curl of the public documents, with
+# no Docker and no interaction.
 #
 # Run it deliberately, with a human at the browser:
-#     ./fetch.sh --teamcity
+#     ./fetch.sh --teamcity --to <scratch path>
 fetch_teamcity() {
+  # Default kept OUT of the vendored path on purpose: an accidental
+  # `./fetch.sh --teamcity` writes a scratch file, not teamcity.json.
+  out=${1:-./teamcity-fresh.json}
+  case "$out" in
+    ./teamcity.json|teamcity.json)
+      echo "==> refusing to write teamcity.json directly: it is hand-augmented." >&2
+      echo "==> fetch to a scratch path and diff. See the comment above." >&2
+      return 2
+      ;;
+  esac
+  echo "==> fetching to $out (NOT teamcity.json -- diff before merging)"
   # Budget: a multi-GB image pull and a few minutes of JVM startup. Needs
   # roughly 10 GB of free disk for the image plus its data directory.
   docker pull jetbrains/teamcity-server:latest
@@ -43,22 +85,37 @@ WIZARD
     -H 'Accept: application/json' \
     http://127.0.0.1:8111/app/rest/users/username:mockd-spec/tokens/spec | jq -r .value)
   curl -fsSL -H "Authorization: Bearer $TOKEN" -H 'Accept: application/json' \
-    http://127.0.0.1:8111/app/rest/swagger.json -o teamcity.json
+    http://127.0.0.1:8111/app/rest/swagger.json -o "$out"
   docker rm -f tc-spec
 
-  # Verify before pinning. A document that does not carry the definitions
-  # mockd is validated against is worse than no document at all.
-  jq -r '.swagger, .info.version, (.paths|keys|length), (.definitions|keys|length)' teamcity.json
-  jq -e '.paths["/app/rest/server"], .paths["/app/rest/builds"], .paths["/app/rest/buildTypes"]' teamcity.json >/dev/null
-  jq -e '.definitions.Builds, .definitions.Build, .definitions.BuildTypes' teamcity.json >/dev/null
-  echo "==> ok. Now: shasum -a 256 *.json *.wadl > SHA256SUMS, review the diff, update README.md."
-  echo "==> if .swagger was absent and .openapi present, the server emits OpenAPI 3:"
-  echo "    record that in README.md -- schemas live under components.schemas, not definitions,"
-  echo "    and crates/knobas-mockd/tests/teamcity_contract.rs must follow."
+  # Verify before pinning. A document that does not carry the schemas mockd is
+  # validated against is worse than no document at all. The 2026.1 guest
+  # instance emits OpenAPI 3.0.0 with LOWERCASE schema names under
+  # components.schemas; older servers emitted Swagger 2.0 with capitalised
+  # names under definitions. Accept either, and say which.
+  jq -r '(.openapi // .swagger), .info.version, (.paths|keys|length)' "$out"
+  jq -e '.paths["/app/rest/server"], .paths["/app/rest/builds"], .paths["/app/rest/buildTypes"]' "$out" >/dev/null
+  if jq -e 'has("openapi")' "$out" >/dev/null; then
+    echo "==> OpenAPI 3: $(jq -r '.components.schemas|keys|length' "$out") schemas under components.schemas"
+    jq -e '.components.schemas.builds, .components.schemas.build, .components.schemas.buildTypes' "$out" >/dev/null
+  else
+    echo "==> Swagger 2.0: $(jq -r '.definitions|keys|length' "$out") definitions"
+    jq -e '.definitions.Builds, .definitions.Build, .definitions.BuildTypes' "$out" >/dev/null
+    echo "==> NOTE: the vendored copy is OpenAPI 3. A Swagger 2.0 re-fetch is a DOWNGRADE;"
+    echo "    crates/knobas-mockd/tests/teamcity_contract.rs reads components.schemas."
+  fi
+  echo "==> ok, and NOT yet vendored. Next:"
+  echo "    diff <(jq -S . teamcity.json) <(jq -S . $out)   # keep Björn's hand-added parts"
+  echo "    then merge by hand, shasum -a 256 *.json *.wadl > SHA256SUMS, update README.md."
 }
 
 if [ "${1:-}" = "--teamcity" ]; then
-  fetch_teamcity
+  # `--to <path>` so the destination is always explicit at the call site.
+  if [ "${2:-}" = "--to" ]; then
+    fetch_teamcity "${3:?--to needs a path}"
+  else
+    fetch_teamcity
+  fi
   exit $?
 fi
 
