@@ -111,6 +111,16 @@
 //! largest fixture because it looks saner is precisely the trap. The largest
 //! fresh reading in the table is the **worst** one, at 86.5×.
 //!
+//! **Task 10 completed this model, and the missing factor is the scan count.**
+//! [`crate::testing`] measured the penalty directly out of `pgstatginindex`
+//! rather than from a timing: it is paid **once per index scan**, at roughly
+//! `pending_pages x 0.3-0.5 us` each, over four probe counts and four pending
+//! list sizes. That is why the table above -- a correlated `exists`, one scan
+//! per ticket in the window -- shows 21x to 182x, while `Searcher::search`,
+//! which makes **one** scan, measures 1.0-1.1x on the same dirty index. The
+//! increment governs the size of the penalty; the statement's shape governs how
+//! many times it is paid. Neither reading was wrong.
+//!
 //! An earlier draft said the artifact "has vanished by 100,000 (ratio 1.0)".
 //! That was one cell of one curve promoted to a property of size, and it did
 //! not reproduce. Its cause is worth naming because it is the same rule applied

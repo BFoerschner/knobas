@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
+  import { Launcher } from "./lib/launcher";
   import Booting from "./lib/shell/Booting.svelte";
   import Room from "./lib/shell/Room.svelte";
   import Shell from "./lib/shell/Shell.svelte";
@@ -23,6 +24,15 @@
    */
   const sources: { id: string; label: string }[] = [];
   const contexts = builtinContexts(sources);
+
+  /**
+   * Whether the ⌘K overlay is up.
+   *
+   * `bind:`-ed because the launcher registers the hotkey itself, so the flag
+   * moves from either side. Stream D's task 22 owns this file's shell; the
+   * mount here is the two lines that integration is.
+   */
+  let launcherOpen = $state(false);
 
   onMount(() => {
     void (async () => {
@@ -55,12 +65,14 @@
   });
 
   /**
-   * A visible, honest stub. Task 22 wires this to stream E's launcher; until
-   * then ⌘K says so rather than being a dead key, which is the one thing a
-   * documented shortcut must never be.
+   * The top strip's search field, and `installKeys`' own ⌘K binding.
+   *
+   * The launcher binds ⌘K too — that is what makes mounting it the whole
+   * integration — and the two converge: this sets the flag, the component
+   * toggles it, and both land on "open" from a closed box.
    */
   function openLauncher() {
-    push({ text: "Search lands with the launcher (stream E)." });
+    launcherOpen = true;
   }
 
   async function onRetry() {
@@ -99,6 +111,11 @@
       {/if}
     {/snippet}
   </Shell>
+  <Launcher
+    bind:open={launcherOpen}
+    onnavigate={(hash) => router.go(hash)}
+    onclose={() => {}}
+  />
 {:else}
   <Booting
     db={lifecycle.db}

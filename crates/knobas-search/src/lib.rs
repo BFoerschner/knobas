@@ -40,6 +40,9 @@ pub mod lists;
 pub mod query;
 pub mod snippet;
 pub mod sql;
+/// The deterministic corpus the perf gate and the bench share.
+#[cfg(any(test, feature = "test-util"))]
+pub mod testing;
 pub mod types;
 pub mod vocab;
 

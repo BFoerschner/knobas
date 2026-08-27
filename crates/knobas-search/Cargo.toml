@@ -23,6 +23,14 @@ sqlx.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+# The exit criterion's measurement (interfaces §6.3: "a bench, not a claim").
+#
+# `default-features = false` on purpose (open question **E-Q4**): the defaults
+# pull in plotters and the HTML report, which every `cargo clippy --all-targets`
+# in the gate would then compile. `cargo_bench_support` is the one default that
+# has to come back -- without it criterion refuses to run under `cargo bench`,
+# which is the only way it is ever run here.
+criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }
 knobas-db = { path = "../knobas-db", features = ["test-util"] }
 # The launcher labels a group from what the adapter declared (spec §3a), so the
 # tests assert against a real adapter's `KindInfo` rather than against a
@@ -37,3 +45,10 @@ knobas-search = { path = ".", features = ["test-util"] }
 serde_json.workspace = true
 tokio.workspace = true
 uuid.workspace = true
+
+# `harness = false` because criterion provides its own `main`. Not run by
+# `just check`: seeding 100k rows costs tens of seconds and a shared runner's
+# timings would flake. `cargo bench -p knobas-search`.
+[[bench]]
+name = "search"
+harness = false

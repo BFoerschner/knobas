@@ -127,6 +127,33 @@ const ShellFixture = (await import("./Shell.fixture.svelte")).default;
 const StatusBar = (await import("./StatusBar.svelte")).default;
 const Tile = (await import("./Tile.svelte")).default;
 const Detail = (await import("../detail/Detail.svelte")).default;
+const Launcher = (await import("../launcher/Launcher.svelte")).default;
+const QueryBox = (await import("../launcher/QueryBox.svelte")).default;
+
+/**
+ * The launcher's IPC, injected.
+ *
+ * Its two commands are stream E's and are not in the `../ipc/entity` mock
+ * above; the component takes a `ports` prop for exactly this. Both answer
+ * through `deferred`, so `land()` decides when — a mock resolving on a timer
+ * would be indistinguishable from the leak this file looks for.
+ */
+const LAUNCHER_PORTS = {
+  search: () =>
+    deferred({
+      interpreted: {
+        text: "sepa",
+        prefix: null,
+        filters: { sources: [], kinds: [], updated_within_days: null, mine: false },
+        unknown_tokens: [],
+      },
+      groups: [],
+      total: 0,
+      took_ms: 1,
+    }),
+  launcherHome: () =>
+    deferred({ smart_lists: [], recent: [], sources: [], pending_writes: 0 }),
+};
 
 const CONTEXTS = builtinContexts([{ id: "jira", label: "Tidewater Jira" }]);
 
@@ -233,6 +260,48 @@ const CASES: Case[] = [
     name: "Modal",
     source: "lib/shell/Modal.svelte",
     open: (target) => ({ app: mount(ModalFixture, { target, props: { onclose: () => {} } }) }),
+  },
+  {
+    name: "Launcher",
+    source: "lib/launcher/Launcher.svelte",
+    open: (target) => ({
+      app: mount(Launcher, {
+        target,
+        props: {
+          open: true,
+          onnavigate: () => {},
+          onclose: () => {},
+          ports: LAUNCHER_PORTS,
+        },
+      }),
+    }),
+    // A keystroke is what arms the debounce timer, and an unfired debounce is
+    // the timer this component can most plausibly leave behind. A pass that
+    // never typed would prove nothing about `dispose()`.
+    exercise: (target) => {
+      const input = target.querySelector("input");
+      if (!input) return;
+      input.value = "sep";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    },
+  },
+  {
+    name: "QueryBox",
+    source: "lib/launcher/QueryBox.svelte",
+    open: (target) => ({
+      app: mount(QueryBox, {
+        target,
+        props: {
+          value: "",
+          placeholder: "Search",
+          pending: false,
+          footnote: "local index",
+          oninput: () => {},
+          onkeydown: () => {},
+          onclose: () => {},
+        },
+      }),
+    }),
   },
   {
     name: "Shell",

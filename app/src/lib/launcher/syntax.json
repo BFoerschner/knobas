@@ -1,0 +1,130 @@
+[
+  {
+    "token": ">",
+    "insert": ">",
+    "summary": "actions — where the app can take you",
+    "probe": ">",
+    "prefix": "action",
+    "expect": "recognised"
+  },
+  {
+    "token": "#",
+    "insert": "#",
+    "summary": "tickets only — #PAY-231, #sepa",
+    "probe": "#PAY-231",
+    "prefix": "ticket",
+    "expect": "recognised"
+  },
+  {
+    "token": "@me",
+    "insert": "@me ",
+    "summary": "items your configured accounts wrote",
+    "probe": "@me",
+    "prefix": "person",
+    "expect": "recognised"
+  },
+  {
+    "token": "/",
+    "insert": "/",
+    "summary": "one source — /ji, /gt, /tc, or its name",
+    "probe": "/ji",
+    "prefix": "source",
+    "expect": "recognised"
+  },
+  {
+    "token": "t",
+    "insert": "t ",
+    "summary": "time — worklogs and the day review (M3)",
+    "probe": "t today",
+    "prefix": "time",
+    "expect": "recognised"
+  },
+  {
+    "token": "note:",
+    "insert": "note:",
+    "summary": "local notes (M2 — no notes exist yet)",
+    "probe": "note:standup",
+    "prefix": "note",
+    "expect": "recognised"
+  },
+  {
+    "token": "list:",
+    "insert": "list:",
+    "summary": "open a smart list — list:mine",
+    "probe": "list:mine",
+    "prefix": "list",
+    "expect": "recognised"
+  },
+  {
+    "token": "asset:",
+    "insert": "asset:",
+    "summary": "the estate (M4 — no assets exist yet)",
+    "probe": "asset:pve",
+    "prefix": "asset",
+    "expect": "recognised"
+  },
+  {
+    "token": "?",
+    "insert": "?",
+    "summary": "this card",
+    "probe": "?",
+    "prefix": "help",
+    "expect": "recognised"
+  },
+  {
+    "token": "kind:",
+    "insert": "kind:",
+    "summary": "one kind of item — kind:pr, kind:build",
+    "probe": "kind:pr",
+    "prefix": null,
+    "expect": "recognised"
+  },
+  {
+    "token": "type:",
+    "insert": "type:",
+    "summary": "the same as kind: — type:build",
+    "probe": "type:build",
+    "prefix": null,
+    "expect": "recognised"
+  },
+  {
+    "token": "source:",
+    "insert": "source:",
+    "summary": "a source spelled out — source:jira (also src:, in:)",
+    "probe": "source:jira",
+    "prefix": "source",
+    "expect": "recognised"
+  },
+  {
+    "token": "updated:",
+    "insert": "updated:",
+    "summary": "changed recently — updated:today, updated:7d, updated:2w",
+    "probe": "updated:7d",
+    "prefix": null,
+    "expect": "recognised"
+  },
+  {
+    "token": "is:mine",
+    "insert": "is:mine ",
+    "summary": "the same as @me",
+    "probe": "is:mine",
+    "prefix": null,
+    "expect": "recognised"
+  },
+  {
+    "token": "author:",
+    "insert": "author:",
+    "summary": "greyed out — only @me filters today (also owner:, by:)",
+    "probe": "author:jonas",
+    "prefix": "person",
+    "expect": "reported"
+  },
+  {
+    "token": "env:",
+    "insert": "env:",
+    "summary": "greyed out — the estate arrives in M4 (also health:)",
+    "probe": "env:prod",
+    "prefix": null,
+    "expect": "reported"
+  }
+]
