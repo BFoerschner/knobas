@@ -6,20 +6,35 @@
 |---|---|---|---|
 | `jira-dc-rest.wadl` | **Jira Data Center REST v2** (the adapter's primary dialect: `/rest/api/2/search` + classic `startAt` pagination, issue/comment/worklog/transitions — all verified present) | WADL (official; "Jira 9.17.0", the latest Atlassian publishes) | vendored |
 | — | **Confluence Data Center REST v1** (`/rest/api/content`, CQL search) | **Atlassian publishes no machine-readable DC spec at all** (no OpenAPI, no reachable WADL) | contract = official HTML REST docs + validation against the real `atlassian/confluence` container |
-| `teamcity.json` | TeamCity REST | Swagger 2.0, served only by a running server | **BLOCKED, not vendored** — see below. TeamCity keeps golden-fixture validation only |
+| `teamcity.json` | TeamCity REST (`/app/rest/server`, `/app/rest/builds`, `/app/rest/buildTypes`) | **OpenAPI 3.0.0** — 268 paths, 238 `components.schemas` with **lowercase** names (`server`, `user`, `build`) | vendored — 2026.1, 2026-08-27. **Mixed authority, see below** |
 | `jira-cloud-v3.json` | Jira **Cloud** v3 (421 paths, `/search/jql`) | OpenAPI 3.0.1 | vendored — cloud flavor, later |
 | `confluence-cloud-v1.json` | Confluence **Cloud** v1 (CQL lives only here) | OpenAPI 3.0.1 | vendored — cloud flavor, later |
 | `confluence-cloud-v2.json` | Confluence **Cloud** v2 content CRUD | OpenAPI 3.0.3 | vendored — cloud flavor, later |
 
-**TeamCity blocker (2026-08-25).** `teamcity.json` could not be vendored on the development machine, and no spec was invented in its place:
+## TeamCity: vendored 2026-08-27, with **mixed authority**
 
-1. JetBrains publishes **no static swagger document**. Re-verified 2026-08-25 against four plausible public URLs (`jetbrains.com/help/teamcity/rest/{teamcity-rest-openapi,swagger}.json`, the `teamcity-rest-client` repo, `plugins.jetbrains.com`) — all 404 or 403. `/app/rest/swagger.json` on a running server is the only source.
-2. That server is behind a one-time **first-start wizard** (database choice, licence agreement, administrator account) whose form endpoints are not REST API and change between versions. It is a human action, so `fetch.sh --teamcity` stops there and says so rather than guessing.
-3. The host had **13 GiB free on a 98 %-full volume**; the image plus its data directory needs roughly 10 GB.
+**Provenance, as supplied by Björn:** downloaded from JetBrains' guest server instance (TeamCity 2026.1), then hand-augmented by Björn with information from the official HTML documentation.
 
-Consequence, per the plan's own fallback: TeamCity is validated against **golden fixtures only** — which is exactly what ruling P11(b) already blesses, and strictly less loss than a hand-written spec that lies. `crates/knobas-mockd/tests/teamcity_contract.rs` carries the swagger half already written and **self-arming**: it detects `teamcity.json`, and the moment the file is vendored the schema assertions start running with no code change. A companion test fails if this row ever stops recording the blocker, so the skip cannot be quietly forgotten.
+Both halves of that sentence matter, and they do **not** carry the same weight:
 
-To discharge it: `cd testenv/specs && ./fetch.sh --teamcity` on a machine with the disk headroom and a human at the browser, then `shasum -a 256 *.json *.wadl > SHA256SUMS`, review, and flip this row to `vendored — <version>, <date>`.
+| Part of the document | Origin | Trust |
+|---|---|---|
+| The bulk of the paths and schemas | emitted by a real TeamCity 2026.1 server | **authoritative** — this is what the server says about itself |
+| Descriptions, examples and constraints added on top | one human reading the official HTML docs and transcribing | **a human's error bar** — prose read, understood, and re-encoded by hand |
+
+**Why this is written down rather than just appreciated.** When the fidelity gate fails against some clause in this document, the debugging prior depends on which half the clause came from. A server-derived constraint that mockd violates is almost certainly a mockd bug. A hand-added constraint that mockd violates may equally well be a mis-transcription — the HTML docs are prose, prose is ambiguous, and encoding ambiguous prose as a hard JSON Schema constraint is exactly where a well-meaning transcription goes wrong. **Do not bend a fixture to satisfy a hand-added constraint without first checking the constraint**, because a mockd fixture edited to match a wrong constraint is now doubly wrong: it no longer matches the real TeamCity, and the gate is green about it.
+
+That this document is **OpenAPI 3.0.0** and not the Swagger 2.0 originally anticipated is recorded per `fetch.sh`'s own postscript: schemas live under `components.schemas`, not `definitions`, and their names are **lowercase** (`server`, `user`, `buildTypes`, `builds`, `build`). `crates/knobas-mockd/tests/teamcity_contract.rs` follows that. It also pins that the document uses none of the OpenAPI-3.0-only constructs (`nullable`, boolean `exclusiveMinimum`) where OAS 3.0 and modern JSON Schema disagree, so a future re-fetch that introduces one fails with a message naming the dialect rather than an unexplained type error.
+
+The gate validates with **format assertion deliberately off**. Over the 143 schemas reachable from the five validated endpoints, the formats present are `int32` (101), `int64` (11) and `date-time` (1). The two numeric ones are OpenAPI hints JSON Schema ignores either way, so the flag changes nothing for 112 of the 113. The single `date-time` — `DeploymentStateEntry.changeDate` — is one TeamCity's own document contradicts: its other `date-time` fields carry examples like `20250905T001122+0200`, which is ISO-8601 basic, not RFC 3339. Asserting the label would fail a mock for faithfully copying the server. *(TeamCity does also overload `format` with its own locator grammars — `BuildLocator`, `"String value"` — 37 of them, but all outside the reachable closure, so that is a property of the document rather than a reason this gate needs the exemption. An earlier version of this paragraph gave it as the reason; that was wrong.)*
+
+**What a green gate does and does not mean.** These schemas carry no `required` arrays and no `additionalProperties: false` anywhere, so schema conformance proves *nothing mockd serves has the wrong type* — not that mockd serves everything it should. Field presence is pinned by the golden snapshots, not by the schemas. Both halves are load-bearing.
+
+**Re-fetching would destroy the hand-added half.** See the warning in `fetch.sh` — `--teamcity` writes `teamcity.json` in place. A re-fetch must be taken to a scratch path and *diffed* against the vendored copy, never written over it.
+
+### Historical: the blocker this replaces (2026-08-25 → discharged 2026-08-27)
+
+For two days TeamCity had golden-fixture validation only, because `teamcity.json` could not be obtained on the development machine: JetBrains publishes no static swagger document at a public URL (four candidates re-verified, all 404/403), the only other source was a running server behind a one-time human first-start wizard, and the host had 13 GiB free on a 98 %-full volume against an image needing roughly 10 GB. Ruling P11(b) blessed golden-only validation as the fallback, and `teamcity_contract.rs` was written **self-arming** so the schema half would start asserting the moment a document appeared, with no code change. It did, and it does. The route that actually worked — JetBrains' **guest instance**, which needs no local server at all — is now recorded in `fetch.sh`; the old "no source anywhere but your own server" framing was too pessimistic.
 
 Rules:
 - `SHA256SUMS` pins the exact documents. mockd mocks the **DC shapes** (Jira v2, Confluence v1) and validates its responses — and, via request-validation middleware, the adapters' requests — against the strongest available contract per API.
