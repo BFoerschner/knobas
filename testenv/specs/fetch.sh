@@ -52,14 +52,33 @@ fetch_teamcity() {
   # Default kept OUT of the vendored path on purpose: an accidental
   # `./fetch.sh --teamcity` writes a scratch file, not teamcity.json.
   out=${1:-./teamcity-fresh.json}
-  case "$out" in
-    ./teamcity.json|teamcity.json)
-      echo "==> refusing to write teamcity.json directly: it is hand-augmented." >&2
-      echo "==> fetch to a scratch path and diff. See the comment above." >&2
-      return 2
-      ;;
-  esac
-  echo "==> fetching to $out (NOT teamcity.json -- diff before merging)"
+
+  # RESOLVE both sides before comparing. Matching the *spelling* would be the
+  # very bug this guard exists to prevent, one level up: `teamcity.json` and
+  # `./teamcity.json` are two of the ways to name this file, and
+  # `testenv/specs/teamcity.json` from the repo root -- the unremarkable
+  # invocation -- is another, as are `../specs/teamcity.json` and any absolute
+  # path. Comparing the resolved directory plus basename catches every spelling
+  # of the same file: `..` segments, symlinks (`pwd -P`) and absolute paths.
+  vendored_dir=$(cd "$(dirname "$0")" && pwd -P) || return 1
+  out_dir=$(cd "$(dirname "$out")" 2>/dev/null && pwd -P) || out_dir=
+
+  # Unresolvable target directory => REFUSE, not proceed. A guard that cannot
+  # tell where the write would land must not wave it through; `curl -o` would
+  # fail on such a path anyway, so the only thing fail-open buys here is a worse
+  # error message and a guard whose behaviour depends on what happens to exist.
+  if [ -z "$out_dir" ]; then
+    echo "==> refusing: cannot resolve the directory for '$out' (does it exist?)." >&2
+    echo "==> name an existing scratch directory so this guard can check the target." >&2
+    return 2
+  fi
+  if [ "$out_dir/$(basename "$out")" = "$vendored_dir/teamcity.json" ]; then
+    echo "==> refusing to write $vendored_dir/teamcity.json: it is hand-augmented." >&2
+    echo "==> you named it '$out'; that resolves to the vendored copy." >&2
+    echo "==> fetch to a scratch path and diff. See the comment above." >&2
+    return 2
+  fi
+  echo "==> fetching to $out (NOT the vendored teamcity.json -- diff before merging)"
   # Budget: a multi-GB image pull and a few minutes of JVM startup. Needs
   # roughly 10 GB of free disk for the image plus its data directory.
   docker pull jetbrains/teamcity-server:latest
