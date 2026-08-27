@@ -214,10 +214,43 @@ mod tests {
     /// launcher. The expected list is taken from `serde_json` rather than
     /// written out, so it is the **wire** that is compared against the mirror,
     /// not a third copy of the field names that could drift from both.
+    ///
+    /// # The search has to be scoped, and for one round it was not
+    ///
+    /// This asserted `mirror.contains("sources:")` against the **whole file** —
+    /// 150 lines and six interfaces. `sources:` was therefore satisfied by
+    /// `SearchFilters.sources` a hundred lines away, `id:` by `entity_id:`, and
+    /// `label:` by `ResultGroup.label`. Review round 1 proved the consequence
+    /// twice: deleting `sources: CredentialHealth[];` from `LauncherHome` left
+    /// this test green, and renaming the field to `source_health` on the
+    /// TypeScript side alone — consumers and fixtures included, which is what a
+    /// real rename looks like — passed this test, `svelte-check` with 0 errors
+    /// and all 222 frontend tests, while `Board.svelte` read `undefined` at run
+    /// time. That is verbatim the failure the paragraph above claims to
+    /// prevent.
+    ///
+    /// So the search is scoped to the declaration and matched against a
+    /// *declaration line* rather than against any occurrence of the text.
+    /// [`declares`] is what makes a doc comment inside the block unable to
+    /// stand in for the field it documents, and the negative control below is
+    /// what makes the slice unable to quietly stop slicing.
     #[test]
     fn the_launcher_home_shape_matches_its_typescript_mirror() {
         let mirror = include_str!("../../../../app/src/lib/ipc/search.ts");
-        let home = LauncherHome {
+        let home = interface_body(mirror, "LauncherHome");
+        let summary = interface_body(mirror, "SmartListSummary");
+
+        // The negative control. `SearchFilters.kinds` is declared in this file
+        // and is not a `LauncherHome` field, so a slice that still reaches it
+        // is not a slice -- which is exactly the state this test was in, and a
+        // rearrangement that did not fix it would look identical from here.
+        assert!(
+            !declares(home, "kinds"),
+            "the LauncherHome slice still reaches SearchFilters.kinds, so it \
+             is searching more than the declaration:\n{home}"
+        );
+
+        let value = LauncherHome {
             smart_lists: vec![knobas_search::SmartListSummary {
                 id: "mine".to_owned(),
                 label: "My items".to_owned(),
@@ -230,7 +263,7 @@ mod tests {
             pending_writes: 0,
         };
 
-        let wire = serde_json::to_value(&home).expect("LauncherHome serializes");
+        let wire = serde_json::to_value(&value).expect("LauncherHome serializes");
         let mut keys: Vec<&str> = wire
             .as_object()
             .expect("an object")
@@ -241,8 +274,10 @@ mod tests {
         assert_eq!(keys, ["pending_writes", "recent", "smart_lists", "sources"]);
         for key in &keys {
             assert!(
-                mirror.contains(&format!("{key}:")),
-                "LauncherHome.{key} is missing from app/src/lib/ipc/search.ts"
+                declares(home, key),
+                "`interface LauncherHome` in app/src/lib/ipc/search.ts does \
+                 not declare `{key}`, which the Rust type puts on the wire:\
+                 \n{home}"
             );
         }
 
@@ -260,10 +295,40 @@ mod tests {
         );
         for key in &list_keys {
             assert!(
-                mirror.contains(&format!("{key}:")),
-                "SmartListSummary.{key} is missing from app/src/lib/ipc/search.ts"
+                declares(summary, key),
+                "`interface SmartListSummary` in app/src/lib/ipc/search.ts \
+                 does not declare `{key}`, which the Rust type puts on the \
+                 wire:\n{summary}"
             );
         }
+    }
+
+    /// The body of `export interface <name> { … }` in the mirror.
+    ///
+    /// Panics rather than returning an empty slice when the interface is not
+    /// there: a rename on the TypeScript side that this could not find would
+    /// otherwise turn every assertion above into a vacuous one.
+    fn interface_body<'a>(mirror: &'a str, name: &str) -> &'a str {
+        let header = format!("export interface {name} {{");
+        let start = mirror
+            .find(&header)
+            .unwrap_or_else(|| panic!("`{header}` is not in app/src/lib/ipc/search.ts"))
+            + header.len();
+        let rest = &mirror[start..];
+        let end = rest
+            .find("\n}")
+            .unwrap_or_else(|| panic!("`interface {name}` is never closed"));
+        &rest[..end]
+    }
+
+    /// Whether `body` **declares** `key` — a line whose first token is `key:`.
+    ///
+    /// Not `contains`. A doc comment inside the block would satisfy a
+    /// substring search for the field it documents, so the field could be
+    /// deleted and its comment left behind and nothing here would notice.
+    fn declares(body: &str, key: &str) -> bool {
+        body.lines()
+            .any(|line| line.trim_start().starts_with(&format!("{key}:")))
     }
 
     /// `LauncherHome.recent` and a room's rows are **one** TypeScript type over
