@@ -36,10 +36,19 @@
 //! # Fixture, stated
 //!
 //! Deterministic, no RNG. Five kinds, three sources, three authors, a
-//! two-word title and a **25-word body** per row from a 20-word vocabulary.
-//! Text richness is the variable that decides the headline (this stream
-//! measured 57 ms and 174 ms for one statement on two fixtures differing only
-//! in richness), so it is stated here rather than left to be inferred.
+//! two-word title and a **20-word body** per row drawn from a **512-word**
+//! filler space, with the domain markers placed on top at declared
+//! frequencies. Text richness is the variable that decides the headline (this
+//! stream measured 57 ms and 174 ms for one statement on two fixtures
+//! differing only in richness), so it is stated here rather than left to be
+//! inferred -- and [`knobas_search::testing`] is where the frequencies live,
+//! measured by `match_count` rather than asserted from this comment.
+//!
+//! This paragraph described a **25-word body from a 20-word vocabulary** until
+//! the rebase that opened the PR. That was the *rejected* generator -- the one
+//! on which `tombstone` ("rare word") matched 60,000 rows of 100,000. The
+//! fixture had been replaced and its description had not, in the one file
+//! whose stated purpose is to say what the fixture is.
 
 use std::time::Instant;
 
@@ -447,6 +456,25 @@ async fn the_match_set_is_not_joined_row_by_row() {
 /// The assertion is a *ratio between halves of one run*, not an absolute
 /// time -- what matters is that the tenth search is not slower than the first,
 /// whatever the machine.
+///
+/// # This test is the reading, not the pin -- and it failed green once
+///
+/// Mutating `.persistent(false)` away before the PR, on a machine carrying
+/// another heavy build, produced 550, 493, 563, 499, 492, **725**, 691, 677,
+/// 684, ... : the step at the sixth execution, exactly as documented. **And
+/// this test passed.** Every timing had quadrupled against the original
+/// reading, so the fixed costs dominated and the ratio came out at 1.32x
+/// against the 2x threshold below. The threshold is not wrong; a wall-clock
+/// ratio is simply a *representation* of which plan ran, and the two diverge
+/// with load in the direction that fails green.
+///
+/// The deterministic pin is
+/// `tests/sql_shape.rs::the_launchers_statement_is_never_a_named_prepared_statement`,
+/// which reads `pg_prepared_statements` -- the thing itself, with no clock and
+/// no corpus in the path. This test keeps its threshold at 2x, where it is a
+/// coarse backstop for a gross regression and the source of the numbers the
+/// record quotes. Tightening it to 1.2x would only calibrate it to one loaded
+/// machine, which is the same mistake in the other direction.
 #[tokio::test]
 #[ignore = "seeds 100k rows and compares wall-clock halves; run it deliberately"]
 async fn the_plan_does_not_decay_after_the_fifth_execution() {
@@ -475,11 +503,14 @@ async fn the_plan_does_not_decay_after_the_fifth_execution() {
     );
 }
 
-/// The sum of every `Buffers: shared hit=N` in an `explain (buffers)` output.
+/// The largest `Buffers: shared hit=N` in an `explain (buffers)` output.
 ///
-/// The top node's count already includes its children, so this over-counts --
-/// deliberately, and it does not matter: the assertion is an order-of-magnitude
-/// one, and over-counting can only make it stricter.
+/// A plan node's count already includes its children's, so the largest is the
+/// whole statement's -- taking the maximum rather than the sum is what avoids
+/// counting the same buffers once per level of the tree. `0` when the plan
+/// carries no buffer line at all, which the caller asserts against separately:
+/// a zero here would otherwise satisfy `buffers < matches` on a run that
+/// measured nothing.
 fn total_buffers(plan: &str) -> i64 {
     plan.lines()
         .filter_map(|line| line.split("shared hit=").nth(1))

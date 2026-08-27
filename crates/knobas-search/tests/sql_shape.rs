@@ -756,3 +756,91 @@ async fn hostile_text_is_a_search_term_and_nothing_else() {
         .unwrap();
     assert!(entities >= 0);
 }
+
+/// The launcher's statement is never a **named** prepared statement.
+///
+/// PostgreSQL custom-plans a named prepared statement for its first five
+/// executions and may then switch to a **generic** plan. A generic plan cannot
+/// know the tsquery, so it falls back to a default selectivity guess, decides
+/// the match set is tiny, and joins `knobas.entity` with a nested loop -- one
+/// index probe per matching row. That is a five-fold regression which appears
+/// on the *sixth* keystroke of a session, so a test that runs a query three
+/// times cannot see it. `sql::query_as_with` asks for the unnamed statement
+/// precisely to stop it.
+///
+/// **This is the deterministic half of that pin, and it exists because the
+/// other half failed green.** `tests/perf.rs`'s
+/// `the_plan_does_not_decay_after_the_fifth_execution` measures the
+/// consequence in wall clock, and it is the reading the record quotes -- but a
+/// wall-clock *ratio* is a representation of the plan, not the plan, and the
+/// two diverge under load. With the fix removed, this machine reproduced the
+/// step at the sixth execution exactly -- 550, 493, 563, 499, 492, **725**,
+/// 691, 677, ... -- and the timing test still **passed**: its fixed costs were
+/// four times the original reading, which compressed the ratio to 1.32x
+/// against a threshold of 2x. The mutation survived a test named for it.
+///
+/// So this asserts on the thing rather than on a consequence of it. Postgres
+/// lists every named prepared statement of the current session in
+/// `pg_prepared_statements`; the unnamed statement is never there. No corpus
+/// and no clock are involved, so nothing about the machine can change the
+/// answer.
+#[tokio::test]
+async fn the_launchers_statement_is_never_a_named_prepared_statement() {
+    let pool = pool().await;
+    let mut conn = pool.acquire().await.unwrap();
+
+    let query = || {
+        search_sql(
+            &[&LIVE_ITEM],
+            Some("ledger"),
+            false,
+            &EffectiveFilters::default(),
+            10,
+            40,
+        )
+    };
+
+    let start = named_statements(&mut conn).await;
+
+    // Positive control. A detector that cannot be shown to catch anything is
+    // not evidence there was nothing to catch: sqlx prepares and caches an
+    // ordinary query by default, so this one *must* move the counter. If it
+    // does not, the assertion below would pass on a session where nothing is
+    // ever named and would be pinning nothing at all.
+    sqlx::query("select 1").fetch_one(&mut *conn).await.unwrap();
+    let control = named_statements(&mut conn).await;
+    assert!(
+        control > start,
+        "an ordinary sqlx query left no row in pg_prepared_statements \
+         ({start} -> {control}), so this test cannot tell a named statement \
+         from an unnamed one and the assertion below means nothing"
+    );
+
+    query_as_with::<ResultRow>(query())
+        .fetch_all(&mut *conn)
+        .await
+        .unwrap();
+
+    let after = named_statements(&mut conn).await;
+    assert_eq!(
+        after, control,
+        "the launcher's statement was left in pg_prepared_statements \
+         ({control} -> {after}), so PostgreSQL is caching a plan for it and \
+         will consider a generic one from the sixth execution of every \
+         session. See `sql::query_as_with`, which asks for the unnamed \
+         statement to stop exactly this."
+    );
+}
+
+/// How many named prepared statements this session holds.
+///
+/// Non-persistent itself, or it would count the statement doing the counting:
+/// Postgres inserts the entry at Parse, before the query it is inside ever
+/// returns a row.
+async fn named_statements(conn: &mut sqlx::PgConnection) -> i64 {
+    sqlx::query_scalar("select count(*) from pg_prepared_statements")
+        .persistent(false)
+        .fetch_one(&mut *conn)
+        .await
+        .unwrap()
+}
