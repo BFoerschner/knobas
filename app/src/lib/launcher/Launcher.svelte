@@ -47,7 +47,12 @@
     now,
   }: {
     open?: boolean;
-    /** The health the top strip already polls, for the chips and the rows. */
+    /**
+     * Credential health from a shell that already polls it.
+     *
+     * **Optional, and in M1 nothing passes it** — see `health` below, which is
+     * what the chips and the rows actually read.
+     */
     sources?: CredentialHealth[];
     /** Extras appended to `>` — things only the shell knows it can offer. */
     actions?: LauncherAction[];
@@ -67,6 +72,30 @@
   // a request counter, so swapping its ports mid-life would drop both. Nothing
   // changes this prop -- production omits it and tests pass fakes at mount.
   const session = new Session(ports ?? { search: defaultSearch, launcherHome: defaultHome });
+
+  /**
+   * The credential health the chips and the result rows are drawn from.
+   *
+   * **The `sources` prop alone was not enough, and review round 1 caught it.**
+   * The prop is there for a shell that already polls this — but nothing in M1
+   * does: `credentialHealth()` has no caller in `app/src` and nothing
+   * subscribes to `EVENTS.sourceHealth`. So on the one production mount
+   * (`App.svelte`) it was `[]` unconditionally, `Row.svelte` always drew the
+   * sync age and `Chips.svelte` never drew the failure dot. The behaviour was
+   * implemented and unreachable, and `Launcher.test.svelte.ts` was green about
+   * it because it passed the prop explicitly — a test taking a path production
+   * does not take.
+   *
+   * `LauncherHome.sources` is the same fact, fetched on every opening and
+   * already what `Board.svelte`'s strip reads. Falling back to it makes the
+   * launcher correct whatever the shell remembers to pass, and it collapses a
+   * divergence: the board's strip and the result rows were being fed from two
+   * independent copies of one thing.
+   *
+   * A wired shell still wins, because a live subscription is fresher than a
+   * per-opening fetch. Wiring one is M2.
+   */
+  const health = $derived(sources.length > 0 ? sources : (session.home?.sources ?? []));
 
   let box = $state<ReturnType<typeof QueryBox> | null>(null);
 
@@ -233,7 +262,7 @@
       />
 
       {#if interpreted}
-        <Chips {interpreted} {sources} />
+        <Chips {interpreted} sources={health} />
       {/if}
 
       <div class="rlist" role="listbox" tabindex="-1" aria-label="Results">
@@ -284,7 +313,7 @@
             response={session.response}
             rows={session.rows}
             selected={session.selected}
-            {sources}
+            sources={health}
             {now}
             onopen={activate}
             onhover={(index) => (session.selected = index)}

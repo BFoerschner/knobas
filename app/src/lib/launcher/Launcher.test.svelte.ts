@@ -280,6 +280,58 @@ test("a source that is refusing the credential replaces the age on its rows", as
   expect(ages).toEqual(["synced 4 min ago", "gitea · sign in again", "synced 4 min ago"]);
 });
 
+/**
+ * The same behaviour on the path production actually takes.
+ *
+ * The test above passes `sources` at mount. `App.svelte` does not — nothing in
+ * `app/src` polls credential health in M1 — so for one review round the
+ * component could replace the age with the credential complaint and never did
+ * it in the shipped app: the test was green about a path production does not
+ * take, which is the whole finding.
+ *
+ * This mounts the way `App.svelte` mounts, with **no `sources` prop at all**,
+ * and asserts the complaint appears anyway — from `LauncherHome.sources`,
+ * which the launcher already fetches on every opening.
+ */
+test("with no sources prop, the rows take their health from the board", async () => {
+  open({
+    ports: {
+      search: async () => response(),
+      launcherHome: async (): Promise<LauncherHome> => ({
+        ...HOME,
+        sources: [
+          {
+            source_id: "gitea",
+            state: "unauthorized",
+            checked_at: null,
+            detail: "401",
+            secret_expires_at: null,
+          },
+          // Still the `unknown` control: 0002's default must not read as a
+          // fault, or a fresh install reports every source broken.
+          {
+            source_id: "jira",
+            state: "unknown",
+            checked_at: null,
+            detail: null,
+            secret_expires_at: null,
+          },
+        ],
+      }),
+    },
+  });
+  await settle();
+  target.querySelector("input")!.value = "sepa";
+  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+
+  // Three rows from three different sources, only the middle one failing, so
+  // a fixture that could not witness a mix-up is not what is being read here.
+  const ages = [...target.querySelectorAll(".sy")].map((el) => el.textContent?.trim());
+  expect(ages).toEqual(["synced 4 min ago", "gitea · sign in again", "synced 4 min ago"]);
+});
+
 test("an empty box shows the smart lists and the recent items", async () => {
   open();
   await settle();

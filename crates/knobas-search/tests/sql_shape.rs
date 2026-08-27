@@ -834,9 +834,16 @@ async fn the_launchers_statement_is_never_a_named_prepared_statement() {
 
 /// How many named prepared statements this session holds.
 ///
-/// Non-persistent itself, or it would count the statement doing the counting:
-/// Postgres inserts the entry at Parse, before the query it is inside ever
-/// returns a row.
+/// Non-persistent itself so that the numbers in the failure messages mean what
+/// they say: Postgres inserts a named statement's entry at Parse, so a
+/// persistent counter would count itself.
+///
+/// **Hygiene, not the pin** — corrected in review round 1, which checked. The
+/// assertion above is a *delta* (`after == control`), so a self-counted row
+/// cancels on both sides: with this line removed the test still passes on
+/// healthy code and still kills the `.persistent(false)` mutant. An earlier
+/// version of this comment read as though the line were load-bearing, which
+/// would have made the next reader afraid to touch it for the wrong reason.
 async fn named_statements(conn: &mut sqlx::PgConnection) -> i64 {
     sqlx::query_scalar("select count(*) from pg_prepared_statements")
         .persistent(false)
