@@ -3,6 +3,14 @@
 A personal work cockpit (Rust + Tauri 2 + Svelte 5) that syncs Jira / Gitea / TeamCity
 into one local Postgres and gives you one search box over all of it.
 
+> **Update 2026-08-27 — the four unmerged branches are landed.** PRs #25 (teamcity, `baeaf00`),
+> #26 (gitea, `5a78d98`), #27 (search-ipc, `ccd6a21`), #28 (testenv-compose, `5b2f175`), each
+> through its adversarial review loop, all CI-green; worktrees and branches removed. New
+> carry-overs from the landing reviews: `docs/superpowers/plans/2026-08-24-m1-carryovers.md`,
+> section "M1 landing round"; contract amendments: interfaces doc §9, same date. Still open in
+> M1: stream D tasks 15–23 and Gitea tasks 6–8 — both feed M2 planning. The "four unmerged
+> branches" section below is historical.
+
 **Paused deliberately mid-M1. Everything is committed and pushed. Nothing is half-written
 to disk that isn't also on the remote.**
 

@@ -659,6 +659,25 @@ Stream T note for the Gitea live suite: the seed **cannot** reproduce fixture PR
 
 **Test-harness note for streams D/E/F:** `#[tauri::command]` resolves arguments in declaration order and every real command takes `State<'_, AppState>` first, so a `mock_context` invoke fails on missing state before argument decoding; `mock_context`'s ACL also only exempts *local* origins (`tauri://localhost` on macOS, not `http://tauri.localhost`). An IPC test that ignores either fact passes vacuously. **Ruling:** contract T8 adds a documented test-support `AppState` constructor behind the existing `test-util` feature convention so each stream does not re-invent the workaround.
 
+### Amendments from the M1 landing round (2026-08-27, binding)
+
+- **§4.2 Gitea `full_sync_exhaustive` is `false`** (ruled 2026-08-25, applied in PR #26; the §3a
+  amendment above described the flag before the ruling). Budgets ⇒ not exhaustive, so the sweep
+  never fires for Gitea; the two resulting holes and the preferred per-kind route are in the
+  carry-overs doc ("M1 landing round").
+- **§4.2 TeamCity in-flight semantics as built (PR #25):** the in-flight poll opens every run
+  (before the finished query), widens past a full page, and hard-fails at `MAX_BUILDS_PER_QUERY`;
+  the two result sets dedup through one ordered map with the finished observation winning. The
+  table's `state:running,state:queued` spelling remains superseded by
+  `state:(queued:true,running:true)` (amended above); the table itself is left as history.
+- **§5 the as-built mockd locator subset includes `start:`** — the §5 listing omitting it is
+  stale (stream C, verified against as-built mockd).
+- **§5 mockd TeamCity serialisers gain `triggered` (build) and `description`/`paused`
+  (buildType)** (PR #28). Fixtures carry no triggerer, so `triggered.user` is `null` and `type`
+  is `"vcs"`: authorship stays off until `knobas-source-mock` gains a triggerer and the adapter's
+  `BUILD_FIELDS` widens (M2; see carry-overs — the widening must also update
+  `the_selectors_ask_for_nothing_outside_the_mock_contract` and its message).
+
 ---
 
 ## 10. As built — the contract PR (2026-08-24)

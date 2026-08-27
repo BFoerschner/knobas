@@ -86,3 +86,87 @@ Items struck through were discharged by the M1 contract PR (checkpoint 0); every
 - thiserror `"database: {0}"` + `#[source]` duplicates cause in chains — accepted for bare IPC display.
 - `SyncItem`/battery: consider a generic deletion-channel clause if a pattern emerges (mock has `with_tombstone()`).
 - Cleanup candidates from the exit sweep: `PgSink::check` duplicates battery clause 1; counters derivable from the `seen` map; hand-paired `test_pool()`+`migrate::run` at ~10 sites; unused schema surface (`knobas.context`, `knobas.note` tables, `source_config.sync_interval_secs/enabled`) until their milestones land; no owning store module for `source_config`.
+
+# M1 landing round → M2 carry-overs (2026-08-27)
+
+The four paused branches landed as PRs #25 (teamcity, `baeaf00`), #26 (gitea, `5a78d98`), #27
+(search-ipc, `ccd6a21`), #28 (testenv-compose, `5b2f175`), each through its adversarial review
+loop, all CI-green. Items below were surfaced by those loops and are M2's to schedule; the full
+arguments live in the PR review threads.
+
+## Frozen-contract items (xhigh review tier when picked up)
+
+- **Per-kind `full_sync_exhaustive`** — the preferred route (#26 reviewer, rounds 2–3): Gitea's
+  `repo`/`branch` walks *are* exhaustive; only `commit`/`pr` are budgeted. One change closes both
+  open tombstone holes — repo-row retirement (nothing ever retires a `repo` row for a repository
+  that vanishes from the listing) and the branch hard-delete window (recorded, not closed, in
+  `knobas-source-gitea/src/sync.rs` "What `false` costs"; deferral verified sound: `Sink` is
+  write-only, so the adapter cannot diff without a position). Alternative route: a reconcile call
+  on the `Sink` SPI.
+- **Structured status on `SourceError`** — now two concrete callers in `knobas-source-gitea`
+  (skip/fatal classification, and the `credential_still_good` probe that exists only because
+  `knobas-http` collapses 401/403 in `classify.rs:29`). Would let a bare 401 be Fatal per the
+  original brief instead of behaviourally.
+- **TeamCity watermark ceiling** — the PR #25 reorder *traded* loss classes, it did not subset
+  them (reviewer's correction): the old order lost in-flight-at-start builds that finished mid-run
+  (likely); the new order newly exposes a build queued after the opening poll and overtaken by a
+  later-queued-but-earlier-finished one (rare; ~40 s full-sync window). The ceiling fix (highest
+  build id at run start; the watermark may never pass it) closes a real hole — do not file it as
+  polish. Blocked on a portable newest-build query: mockd `count:1` returns the *oldest*, real
+  TeamCity the newest (mockd deviation 12).
+
+## TeamCity authorship (two steps, in this order)
+
+1. A triggerer in `knobas-source-mock` fixtures — `work.json` records none, and inventing one in
+   mockd would flow into `SyncItem::author` as if the fixture had said it (refused in #28,
+   recorded as mockd deviation 13). mockd now serves `triggered`/`description`/`paused`.
+2. Widen `BUILD_FIELDS` in `knobas-source-teamcity/src/rest.rs`. Budget "test **and** message to
+   update", not "comment": `the_selectors_ask_for_nothing_outside_the_mock_contract`
+   (`rest.rs:510-515`) asserts `!contains("triggered")` and its failure message becomes false the
+   moment the field widens (#28 reviewer, finding 1).
+
+## App / frontend
+
+- **Live `EVENTS.sourceHealth` subscription**: launcher per-row credential health currently rides
+  the `session.home` fallback (#27; `Launcher.svelte` `$derived`). The `sources.length > 0`
+  conflation of "unsupplied" and "supplied empty" is deliberate and correct today — wrong the day
+  a shell polls a *subset* of sources; revisit with the subscription.
+- **`ACTIONABLE` spelled twice** (`app/src/lib/launcher/format.ts:53`, `Chips.svelte:77`),
+  hand-maintained against `AuthState`; drift direction is safe (under-reports). Two-line
+  follow-up; deferral signed off in #27 round 2.
+- **`knobas-app` registry rows**: verify TeamCity's row landed (stream C left it to F) and add
+  Gitea's only when the app can honestly offer it — the descriptor advertises four kinds while
+  sync emits two until tasks 6–8. `every_adapter_crate_linked_into_the_app_has_a_row` walks only
+  *linked* crates and cannot catch the omission.
+
+## Search — open orchestrator decisions (restated from stream E)
+
+- E-Q1 `author:` / `@` tokens (fallback shipped: refused and reported in `unknown_tokens`; the
+  help card *asserts* the refusal, so granting E-Q1 without updating it fails loudly).
+- E-Q2: the seam is pluggable today — `list_adapters()` → `KindCatalog::from_descriptors` →
+  `Searcher::with_kinds`.
+- Lever 5 (candidate cap → "500+" totals); `kind:`-mid-typing greyed chip; `browse, no text`
+  (`/tc`) grows linearly and crosses the 100 ms budget around 250 k items.
+
+## Gitea remaining scope
+
+Tasks 6–8: `tests/live_gitea.rs` (everything the wiremock fake encodes is re-asserted there; on
+disagreement **the fake is wrong**) and `just gitea-live` — unblocked now that testenv compose is
+merged.
+
+## Small, from #28's review
+
+- `.github/workflows/testenv.yml:53-54` — comment claims bare `shellcheck` exits 0; measured
+  exit 3 on 0.11.0. Guard right, rationale wrong.
+- `crates/knobas-mockd/tests/teamcity.rs:584-586` — `triggered.date == queuedDate` cannot fail
+  the way its message reads (all three derive from `b.start_date`); catches M3 only.
+
+## Environment / process
+
+- **`RUSTUP_TOOLCHAIN=1.97.1` is exported in the orchestration environment** and silently
+  overrides the repo's 1.94 pin for *raw cargo* invocations. The justfile strips it in its
+  recipes (verified via rebuild fingerprints), so `just check` is safe; mutation harnesses and
+  ad-hoc cargo must `env -u RUSTUP_TOOLCHAIN` (search's `mutate-rs.py:113` already does). Find
+  and remove the export at source.
+- GPG key uncached this round too: this docs commit is unsigned like the pause-round ones; PR
+  merges stay GitHub-signed.
