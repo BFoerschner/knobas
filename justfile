@@ -10,7 +10,75 @@
 # with `devUrl` set takes the empty default asset set and never looks at
 # `app/dist`. Nothing here may create that directory either: a missing one is
 # exactly how `tauri build` refuses to bundle an app with no frontend in it.
-check: fmt front clippy clippy-libs test
+check: fmt front clippy clippy-libs inventory test
+
+# The test inventory: every test this workspace defines, by name, committed.
+#
+# `just check` going green is not evidence that the tests you wrote still
+# exist. A test that is *deleted* takes its own failure with it, so the suite
+# reports success on what is left and the count moves in whatever direction the
+# rest of the commit pushed it. This has happened here: a mis-scoped splice
+# removed four tests in one commit while three were added in the same commit,
+# so the file-level count *rose*; the loss was found only because a mutation
+# that used to die stopped dying, and two of the four survived a name-by-name
+# audit because an audit can only look for names someone already suspects.
+#
+# Diffing the names is the check that does not depend on suspicion. A deleted
+# test cannot hide behind an added one, because both are lines.
+#
+# This does not forbid deleting a test -- retiring one is often right. It makes
+# the deletion *visible*: `just inventory-update` turns it into a `-` line in
+# the PR diff, where a reviewer sees it and asks why, instead of it being
+# invisible against a green suite.
+#
+# Scope: unit and integration tests, keyed by package, target and test name, so
+# two crates that both have `tests/mockd.rs` stay distinct and a test that moves
+# between crates reads as one removal plus one addition. Doctests are not listed
+# -- cargo builds no binary for them, so there is nothing to enumerate; they are
+# still run by `test`.
+inventory:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just _inventory-write /tmp/knobas-inventory-actual.txt
+    if ! diff -u test-inventory.txt /tmp/knobas-inventory-actual.txt; then
+        echo >&2
+        echo "error: the test inventory does not match test-inventory.txt." >&2
+        echo "  '-' lines are tests that no longer exist. If that is deliberate," >&2
+        echo "  run 'just inventory-update' and commit it, so the removal shows up" >&2
+        echo "  in the diff a reviewer reads." >&2
+        exit 1
+    fi
+
+# Regenerate `test-inventory.txt`. Run this whenever you add or remove a test,
+# and commit the result alongside the change that caused it.
+inventory-update:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just _inventory-write test-inventory.txt
+    echo "test-inventory.txt: $(wc -l < test-inventory.txt | tr -d ' ') tests"
+
+# Enumerate the workspace's tests into the file named by $1.
+#
+# `--no-run` builds the test binaries and `--message-format=json` names them;
+# asking each binary to `--list` itself is what makes the result the *harness's*
+# answer rather than a guess parsed out of the source. `--list` enumerates, it
+# does not execute, so nothing here starts a database.
+#
+# The package name comes from `package_id`, which cargo spells two ways
+# depending on version (`<path>#<version>` and `<path>#<name>@<version>`); both
+# are handled. LC_ALL=C keeps the sort byte-wise, so the file does not churn
+# when a machine's locale differs.
+_inventory-write FILE:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    env -u RUSTUP_TOOLCHAIN cargo test --workspace --no-run --message-format=json 2>/dev/null \
+      | jq -r 'select(.executable != null and .profile.test == true)
+               | (.package_id | if test("#.*@") then (split("#")[1] | split("@")[0])
+                                else (split("#")[0] | split("/") | last) end) as $pkg
+               | "\($pkg)\t\(.target.kind[0])/\(.target.name)\t\(.executable)"' \
+      | while IFS=$'\t' read -r pkg target exe; do
+            "$exe" --list 2>/dev/null | sed -n 's/: test$//p' | sed "s|^|${pkg}\t${target}\t|"
+        done | LC_ALL=C sort > "{{FILE}}"
 
 fmt:
     env -u RUSTUP_TOOLCHAIN cargo fmt --all --check
