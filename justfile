@@ -78,12 +78,3 @@ dev: deps
 # `profile demo=true` is the acceptance test for that.
 demo: deps
     cd crates/knobas-app && PATH="$PWD/../../app/node_modules/.bin:$PATH" tauri dev -- -- --demo
-
-# Implement ready-for-agent issues unattended: one fresh claude session per
-# issue -- a new session per issue IS the context clearing -- serial,
-# squash-merged on green CI, stopping only when an issue needs Björn (the
-# session relabels it ready-for-human with the question as a comment).
-# `just autopilot 52 53` runs exactly those; no arguments takes the whole
-# queue ascending; `just autopilot --dry-run` shows the pick without running.
-autopilot *issues:
-    scripts/autopilot.sh {{issues}}

@@ -15,31 +15,16 @@ Implementation now runs ticket-driven:
   the per-role tier map: the **deep pass** (frozen contracts, migrations, concurrency/locking,
   secrets, the write-queue/conflict engine — reviewed against the ADR/contract, tests run by the
   reviewer in a throwaway worktree) and the **standard pass** (everything else).
-- **Termination is objective, not vibes:** merge when findings are resolved AND `just check` is
-  green; hard cap 3 review rounds, then Björn adjudicates.
-- **Merging & signing:** squash-merge (`gh pr merge --squash --delete-branch`) so `main` stays
-  linear and GitHub-signed; one commit per issue, short imperative subject.
+- **Termination is objective, not vibes:** the agent's work ends when findings are resolved AND
+  `just check` is green; hard cap 3 review rounds, then Björn adjudicates.
+- **Merging is Björn's gate (amended 2026-08-28 — Björn: he reviews every PR before it merges).**
+  An agent never merges a PR. When findings are resolved and CI is green, it leaves the PR open,
+  notes on the PR that it is ready for review, and stops. Björn reviews and merges — squash-merge
+  (`gh pr merge --squash --delete-branch`) so `main` stays linear and GitHub-signed; one commit
+  per issue, short imperative subject.
 - **Git rules:** an agent runs git only inside its own worktree/branch and `gh` only against its
-  own PR; only the orchestrating session touches `main` or merges; the repo-root checkout belongs
+  own PR; nobody but Björn merges or touches `main`; the repo-root checkout belongs
   to the orchestrating session.
-
-**Autopilot (added 2026-08-28 — Björn: stop only when something needs him).** `just autopilot
-[issue …]` drives the ticket loop unattended: it picks the next runnable `ready-for-agent` issue
-(open, every blocked-by closed, not an umbrella with open sub-issues), runs **one fresh `claude -p`
-session** for it — a new session per issue is the context clearing — and that session carries the
-issue through the flow above to squash-merge. Serial on purpose: the 2-worker machine cap below,
-and migrations as the #1 collision source. The one designed stop: a session that hits a genuine
-decision comments the question on its issue and swaps `ready-for-agent` → `ready-for-human`; the
-driver prints the comment and exits. Answer on the issue, relabel it `ready-for-agent`, rerun. A
-session that ends without closing or escalating stops the driver for inspection (exit 3, log path
-printed) — it never retries on its own, with one exception judged from the output rather than the
-exit code: a **usage-limit refusal** is neither a failure nor a decision (the children bill the
-same subscription windows as interactive sessions), so the driver waits and relaunches the same
-issue every 15 minutes until the window resets, telling the new session to continue from its
-predecessor's branch. Logs land under `$TMPDIR/knobas-autopilot-logs/`. Do not export
-`ANTHROPIC_API_KEY` in the shell that runs autopilot — it outranks the subscription login in
-Claude Code's credential precedence and would silently flip the whole run to pay-per-token API
-billing.
 
 **Concurrency is bounded by the machine, not by task independence (rule, 2026-08-25 — learned the hard way).** Five implementers were dispatched at once because their streams were genuinely disjoint; within minutes all five were dead. Load average hit **79.7 on a 12-core / 16 GB machine**, three agents were killed by a 600 s no-progress watchdog, and one reported the cause plainly: "other agents' builds plus a zombie of my own were racing". Disjoint files do not mean disjoint *resources* — every Rust implementer runs `cargo build`/`cargo test --workspace` (measured: 56 s at 471 % CPU, i.e. ~4.7 cores) and most also start one embedded Postgres **per test binary**.
 
@@ -65,7 +50,7 @@ The limits, until measurement says otherwise:
 
 Shifting left: implementers now **mutation-check their own load-bearing tests and paste the proof**. Vacuous tests were the most common finding across M0 — six-plus times, always caught downstream by an expensive reviewer. Catching them in the cheap seat removes that whole class from the review loop.
 
-**Worktree exclusivity (rule, Björn 08-24 — after an orchestrator merge collided with a live agent):** a worktree has exactly **one** owner at a time and that owner is whoever is live in it. One worktree per agent, created by the orchestrator, named in the dispatch, released when the agent reports and its work is **committed**. While an agent is live: nobody else edits files there, and the orchestrator runs **no** git command there — not a merge, not a rebase, not a `checkout`. The orchestrator's own git work (merging stream branches, resolving lockfiles, syncing `main`) happens in the repo-root checkout or a dedicated scratch worktree, never in a borrowed one. Sequential tasks stacking on one branch may reuse a worktree, but only strictly one-at-a-time with an explicit handover; when in doubt, give the next agent a fresh worktree branched from the previous task's committed head. Human gate: Björn reviews at milestone exits and whenever a frozen contract (Source trait / migrations baseline / IPC) needs changing; day-to-day PRs merge on reviewer approval (he can watch them live on GitHub).
+**Worktree exclusivity (rule, Björn 08-24 — after an orchestrator merge collided with a live agent):** a worktree has exactly **one** owner at a time and that owner is whoever is live in it. One worktree per agent, created by the orchestrator, named in the dispatch, released when the agent reports and its work is **committed**. While an agent is live: nobody else edits files there, and the orchestrator runs **no** git command there — not a merge, not a rebase, not a `checkout`. The orchestrator's own git work (merging stream branches, resolving lockfiles, syncing `main`) happens in the repo-root checkout or a dedicated scratch worktree, never in a borrowed one. Sequential tasks stacking on one branch may reuse a worktree, but only strictly one-at-a-time with an explicit handover; when in doubt, give the next agent a fresh worktree branched from the previous task's committed head. Human gate: Björn reviews every PR before it merges (amended 2026-08-28; agent review approval readies a PR, it does not merge it), plus milestone exits and whenever a frozen contract (Source trait / migrations baseline / IPC) needs changing.
 
 **Branching model (decided 2026-08-24): trunk-based with short-lived task branches.** What actually keeps parallel features from breaking each other is not the branches — it's three structural rules; the branches just carry the work:
 
