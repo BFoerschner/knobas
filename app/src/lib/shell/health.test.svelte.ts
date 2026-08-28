@@ -331,6 +331,21 @@ test("a state this build does not know is not shouted about", () => {
   expect(isActionable("expired_in_a_future_release" as AuthState)).toBe(false);
 });
 
+/**
+ * No reading at all is the third way a state can be nothing to shout about,
+ * and it is answered *here*.
+ *
+ * A chip can name a source the health store has never returned a row for —
+ * `/gitea` typed before the first scheduler run, or against a source id that
+ * is only in the query. Until #72 the signature forbade `undefined` while
+ * `Chips.svelte` checked for it itself, so the rule this doc comment says
+ * lives in one place lived in two. Folding it in is why the parameter is
+ * `AuthState | undefined` and why the lookup stays `=== true`.
+ */
+test("a source with no reading at all is not actionable", () => {
+  expect(isActionable(undefined)).toBe(false);
+});
+
 const NOW = new Date("2026-08-22T00:00:00Z");
 
 test("a PAT expiring in 12 days reads amber; in 41 days it reads plain", () => {
