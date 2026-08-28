@@ -136,7 +136,8 @@ pub async fn create(
     .bind(origin.as_str())
     .bind(created_by)
     .fetch_one(pool)
-    .await?;
+    .await
+    .map_err(CoreError::from_link_write)?;
     Ok(id)
 }
 

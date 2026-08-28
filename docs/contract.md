@@ -856,6 +856,23 @@ From this commit on, each of the following requires an orchestrator decision **a
   id, there is simply no such source. Forced, minimal, and the right code; ratified by the orchestrator on
   the review of that PR. No other change to the file.
 
+- `crates/knobas-app/src/error.rs`, issue #50 (2026-08-28): `knobas_core::CoreError` gained
+  `EndpointMissing` -- the second of that ticket's three items -- which made the
+  `From<CoreError> for IpcError` match non-exhaustive and stopped the workspace building. One arm
+  added, folded into the existing `LinkNotFound` arm and mapping to `IpcErrorCode::NotFound`: a link
+  endpoint with no mirror row is the same "no such thing" as a link id nothing carries, and as
+  `internal` it read as "knobas is broken" for something the user merely mistyped. Forced, minimal,
+  and exactly what #50 asked for -- **ratification pending on that PR's review**. No other change to
+  the file.
+
+  Recorded alongside it for the orchestrator to rule on, as adjacent to bullet 3 rather than clearly
+  inside it: `EntityFilter` and `EntityOrder` in `commands/entity.rs` gained a `Serialize` derive.
+  The wire schema, the `commands/` + `ipc/` layout and both barrels are untouched -- the derive adds
+  no field and changes no spelling, and `tests/entity_mirror.rs` is what proves the serialized shape
+  still equals what `entity.ts` declares. It exists so an *input* DTO can be pinned through a round
+  trip; a decode-only check is blind to a Rust field the mirror never declares, because serde decodes
+  a missing `Option` as `None`.
+
 **`crates/knobas-sync/**` is NOT frozen — and stream F is expected to restructure it.**
 
 Spelled out because the list above is short and the omission would otherwise be read as an oversight. `knobas_sync::run` and `run_once` are a *starting point*, not a contract: F owns the scheduler, the cursor lifecycle, backoff, the sweep, and — explicitly — **`run_once`'s transaction boundary**, which §10.6(c) says has to move so a run's HTTP work stops happening inside an advisory-locked transaction.

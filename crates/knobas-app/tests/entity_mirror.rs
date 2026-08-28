@@ -33,14 +33,28 @@ use knobas_app::commands::entity::{
 };
 use knobas_core::activity::ActivityRow;
 use knobas_core::link::{LinkRow, Origin};
-use knobas_sync::mirror::{assert_shape as assert_against, declared_union, interface_body};
+use knobas_sync::mirror::{declared_inline_union, declared_union, interface_body};
 
 const MIRROR: &str = include_str!("../../../app/src/lib/ipc/entity.ts");
 
 /// The keys `value` serializes to must be exactly `expected`, and exactly what
 /// `interface <name>` in `entity.ts` declares -- both directions.
 fn assert_shape(name: &str, value: &serde_json::Value, expected: &[&str]) {
-    assert_against(MIRROR, name, value, expected);
+    knobas_sync::mirror::assert_shape(MIRROR, name, value, expected);
+}
+
+/// The spellings a Rust enum serializes to must be exactly the members the
+/// mirror's union declares -- order-insensitively, since neither side's
+/// ordering means anything.
+///
+/// Both unions on this mirror need this, and the second copy of it was the
+/// beginning of the drift `knobas_sync::mirror` exists to stop.
+fn assert_same_members(rust: &[&str], declared: Vec<String>, whats_at_stake: &str) {
+    let mut rust: Vec<&str> = rust.to_vec();
+    rust.sort_unstable();
+    let mut declared = declared;
+    declared.sort();
+    assert_eq!(rust, declared, "{whats_at_stake}");
 }
 
 /// A fixed instant, so a fixture reads the same on every run.
@@ -56,6 +70,23 @@ fn row(updated_at: Option<DateTime<Utc>>) -> EntityRow {
         title: "Payments retry storm".to_owned(),
         updated_at,
         synced_at: at(),
+    }
+}
+
+fn source_ref() -> SourceRef {
+    SourceRef {
+        id: "mock".to_owned(),
+        display_name: "Tidewater Mock".to_owned(),
+        adapter_kind: "mock".to_owned(),
+    }
+}
+
+fn kind_info() -> knobas_source::KindInfo {
+    knobas_source::KindInfo {
+        id: "ticket".to_owned(),
+        label: "Ticket".to_owned(),
+        plural: "Tickets".to_owned(),
+        monogram: "TI".to_owned(),
     }
 }
 
@@ -81,6 +112,10 @@ fn link_row() -> LinkRow {
         created_at: at(),
     }
 }
+
+const ACTIVITY_ROW_FIELDS: &[&str] = &["actor", "at", "detail", "entity_id", "id", "verb"];
+const SOURCE_REF_FIELDS: &[&str] = &["adapter_kind", "display_name", "id"];
+const KIND_INFO_FIELDS: &[&str] = &["id", "label", "monogram", "plural"];
 
 const ENTITY_ROW_FIELDS: &[&str] = &[
     "entity_id",
@@ -168,21 +203,20 @@ fn the_entity_filter_shape_matches_its_typescript_mirror() {
 /// side only is a room the other side can never draw.
 #[test]
 fn the_entity_orders_match_their_typescript_mirror() {
-    let declared = declared_union(MIRROR, "EntityOrder");
-    let mut spellings: Vec<String> = [EntityOrder::UpdatedDesc, EntityOrder::TitleAsc]
+    let spellings: Vec<serde_json::Value> = [EntityOrder::UpdatedDesc, EntityOrder::TitleAsc]
         .into_iter()
-        .map(|order| {
-            serde_json::to_value(order)
-                .unwrap()
-                .as_str()
-                .expect("an order serializes as a string")
-                .to_owned()
-        })
+        .map(|order| serde_json::to_value(order).unwrap())
         .collect();
-    spellings.sort();
-    let mut declared = declared;
-    declared.sort();
-    assert_eq!(spellings, declared);
+    let spellings: Vec<&str> = spellings
+        .iter()
+        .map(|order| order.as_str().expect("an order serializes as a string"))
+        .collect();
+    assert_same_members(
+        &spellings,
+        declared_union(MIRROR, "EntityOrder"),
+        "an ordering declared on one side only is a room the other side can \
+         never draw",
+    );
 }
 
 /// The status bar's stream and the detail view's history panel read this.
@@ -192,11 +226,7 @@ fn the_entity_orders_match_their_typescript_mirror() {
 #[test]
 fn the_activity_row_shape_matches_its_typescript_mirror() {
     let wire = serde_json::to_value(activity_row()).unwrap();
-    assert_shape(
-        "ActivityRow",
-        &wire,
-        &["actor", "at", "detail", "entity_id", "id", "verb"],
-    );
+    assert_shape("ActivityRow", &wire, ACTIVITY_ROW_FIELDS);
     assert_eq!(wire["entity_id"], serde_json::Value::Null);
     // `detail` is `unknown` in the mirror because the Rust type is any JSON
     // value. It is not a string-keyed map, and nothing coerces it on the way
@@ -215,15 +245,10 @@ fn the_activity_row_shape_matches_its_typescript_mirror() {
 
 #[test]
 fn the_source_ref_shape_matches_its_typescript_mirror() {
-    let source = SourceRef {
-        id: "mock".to_owned(),
-        display_name: "Tidewater Mock".to_owned(),
-        adapter_kind: "mock".to_owned(),
-    };
     assert_shape(
         "SourceRef",
-        &serde_json::to_value(source).unwrap(),
-        &["adapter_kind", "display_name", "id"],
+        &serde_json::to_value(source_ref()).unwrap(),
+        SOURCE_REF_FIELDS,
     );
 }
 
@@ -233,16 +258,10 @@ fn the_source_ref_shape_matches_its_typescript_mirror() {
 /// detail view reads.
 #[test]
 fn the_kind_info_shape_matches_its_typescript_mirror() {
-    let info = knobas_source::KindInfo {
-        id: "ticket".to_owned(),
-        label: "Ticket".to_owned(),
-        plural: "Tickets".to_owned(),
-        monogram: "TI".to_owned(),
-    };
     assert_shape(
         "KindInfo",
-        &serde_json::to_value(info).unwrap(),
-        &["id", "label", "monogram", "plural"],
+        &serde_json::to_value(kind_info()).unwrap(),
+        KIND_INFO_FIELDS,
     );
 }
 
@@ -270,24 +289,17 @@ fn the_link_row_shape_matches_its_typescript_mirror() {
 
     // The origin union is declared inline on the field rather than as its own
     // exported type, so it is read off the field's line.
-    let declared = inline_union(interface_body(MIRROR, "LinkRow"), "origin");
-    let mut spellings: Vec<String> = [
-        Origin::Manual,
-        Origin::Suggested,
-        Origin::Imported,
-        Origin::Source,
-        Origin::Implied,
-    ]
-    .into_iter()
-    .map(|origin| origin.as_str().to_owned())
-    .collect();
-    spellings.sort();
-    let mut declared = declared;
-    declared.sort();
-    assert_eq!(
-        spellings, declared,
+    assert_same_members(
+        &[
+            Origin::Manual.as_str(),
+            Origin::Suggested.as_str(),
+            Origin::Imported.as_str(),
+            Origin::Source.as_str(),
+            Origin::Implied.as_str(),
+        ],
+        declared_inline_union(interface_body(MIRROR, "LinkRow"), "origin"),
         "an origin declared on one side only is a link the other side cannot \
-         classify"
+         classify",
     );
     // ... and the enum serializes as the column value the union names.
     assert_eq!(wire["origin"], serde_json::json!(Origin::Manual.as_str()));
@@ -302,17 +314,8 @@ fn the_link_row_shape_matches_its_typescript_mirror() {
 fn the_entity_detail_shape_matches_its_typescript_mirror() {
     let detail = EntityDetail {
         row: row(Some(at())),
-        source: SourceRef {
-            id: "mock".to_owned(),
-            display_name: "Tidewater Mock".to_owned(),
-            adapter_kind: "mock".to_owned(),
-        },
-        kind_info: Some(knobas_source::KindInfo {
-            id: "ticket".to_owned(),
-            label: "Ticket".to_owned(),
-            plural: "Tickets".to_owned(),
-            monogram: "TI".to_owned(),
-        }),
+        source: source_ref(),
+        kind_info: Some(kind_info()),
         body_text: "Retries pile up behind the gateway.".to_owned(),
         author: None,
         payload: serde_json::json!({ "key": "PAY-231" }),
@@ -341,22 +344,10 @@ fn the_entity_detail_shape_matches_its_typescript_mirror() {
     );
 
     assert_shape("EntityRow", &wire["row"], ENTITY_ROW_FIELDS);
-    assert_shape(
-        "SourceRef",
-        &wire["source"],
-        &["adapter_kind", "display_name", "id"],
-    );
-    assert_shape(
-        "KindInfo",
-        &wire["kind_info"],
-        &["id", "label", "monogram", "plural"],
-    );
+    assert_shape("SourceRef", &wire["source"], SOURCE_REF_FIELDS);
+    assert_shape("KindInfo", &wire["kind_info"], KIND_INFO_FIELDS);
     assert_shape("LinkRow", &wire["links"][0], LINK_ROW_FIELDS);
-    assert_shape(
-        "ActivityRow",
-        &wire["activity"][0],
-        &["actor", "at", "detail", "entity_id", "id", "verb"],
-    );
+    assert_shape("ActivityRow", &wire["activity"][0], ACTIVITY_ROW_FIELDS);
 
     // The three fields the header and the footer branch on are `null`, not
     // absent: *Open in browser* is drawn from `web_url`, the withdrawn banner
@@ -364,25 +355,4 @@ fn the_entity_detail_shape_matches_its_typescript_mirror() {
     for field in ["author", "web_url", "deleted_at"] {
         assert_eq!(wire[field], serde_json::Value::Null, "{field} lost its key");
     }
-}
-
-/// The string-union members declared inline on one field of an interface body.
-///
-/// `origin: "manual" | "suggested" | ...` is a union with no exported name, so
-/// [`declared_union`] cannot reach it.
-///
-/// # Panics
-/// If the body declares no such field.
-fn inline_union(body: &str, field: &str) -> Vec<String> {
-    let needle = format!("{field}:");
-    let line = body
-        .lines()
-        .find(|line| line.trim_start().starts_with(&needle))
-        .unwrap_or_else(|| panic!("the interface body declares no `{field}`"));
-    // Quoted members are the odd-indexed pieces of a split on the quote.
-    line.split('"')
-        .skip(1)
-        .step_by(2)
-        .map(ToOwned::to_owned)
-        .collect()
 }

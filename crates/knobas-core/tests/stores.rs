@@ -344,3 +344,39 @@ async fn the_activity_write_returns_the_row_it_wrote() {
         coerced.id
     );
 }
+
+/// A foreign-key violation somewhere other than a link write is **not** an
+/// endpoint.
+///
+/// `EndpointMissing` says "one of the link's endpoints has no entity" and
+/// crosses the bridge as `not_found`, which is right for a user naming an
+/// entity that has not synced yet -- and wrong for anything else. `0001`
+/// carries foreign keys on `knobas.context.anchor_id` and
+/// `sync.item.entity_id` as well, and violating one of those is knobas' own
+/// bug: `internal`, not "no such thing".
+///
+/// This is the test that keeps the claim honest as this crate grows writes.
+/// Classifying every 23503 crate-wide would pass every other test in this file
+/// and mislabel the first one of those writes that lands.
+#[tokio::test]
+async fn a_foreign_key_violation_outside_a_link_write_is_not_an_endpoint() {
+    let (pool, _t, _n) = seeded_pool().await;
+    let absent = EntityRef::new("jira", &format!("GONE-{}", Uuid::new_v4()));
+
+    let violated = sqlx::query(
+        "insert into knobas.context (id, kind, title, anchor_id) values ($1,'adhoc','ctx',$2)",
+    )
+    .bind(format!("ctx:{}", Uuid::new_v4()))
+    .bind(absent.to_string())
+    .execute(&pool)
+    .await
+    .expect_err("the anchor has no entity row, so the foreign key rejects it");
+
+    // The same conversion every `?` in this crate performs.
+    let classified = CoreError::from(violated);
+    assert!(
+        matches!(classified, CoreError::Db(_)),
+        "a foreign key that is not a link endpoint must stay a database fault, \
+         got {classified:?}"
+    );
+}

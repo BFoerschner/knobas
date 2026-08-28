@@ -151,6 +151,60 @@ pub fn declared_union(mirror: &str, name: &str) -> Vec<String> {
         .collect()
 }
 
+/// The members of a string union declared **inline on one field** of an
+/// interface body: `origin: "manual" | "suggested";`.
+///
+/// [`declared_union`] reads a named `export type`; this reads the anonymous
+/// one, which is how `LinkRow.origin` is spelled in `entity.ts`. It lives here
+/// rather than in the test file that wanted it for this module's founding
+/// reason: a second copy of a mirror detector is a second detector that
+/// drifts.
+///
+/// Reads to the declaration's terminating `;` rather than to the end of the
+/// line, so a union reflowed across several lines is still one union -- and
+/// drops `//` prose first, so a member named in a comment is not a member.
+///
+/// # Panics
+/// If the body declares no such field, or the declaration is never terminated.
+#[must_use]
+pub fn declared_inline_union(body: &str, field: &str) -> Vec<String> {
+    let needle = format!("{field}:");
+    let mut lines = body
+        .lines()
+        .skip_while(|line| !line.trim_start().starts_with(&needle));
+    let first = lines
+        .next()
+        .unwrap_or_else(|| panic!("the interface body declares no `{field}`"));
+    let mut piece = first
+        .trim_start()
+        .strip_prefix(&needle)
+        .expect("the line the search stopped on starts with the field")
+        .to_owned();
+
+    let mut declaration = String::new();
+    loop {
+        let code = piece.split("//").next().unwrap_or("");
+        if let Some(end) = code.find(';') {
+            declaration.push_str(&code[..end]);
+            break;
+        }
+        declaration.push_str(code);
+        declaration.push(' ');
+        piece = lines
+            .next()
+            .unwrap_or_else(|| panic!("`{field}` is never terminated"))
+            .to_owned();
+    }
+
+    // Quoted members are the odd-indexed pieces of a split on the quote.
+    declaration
+        .split('"')
+        .skip(1)
+        .step_by(2)
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,6 +246,14 @@ export interface Thing {
 
 export interface After {
   gamma: boolean;
+}
+
+export interface Unions {
+  origin: "manual" | "implied";
+  spread:
+    | "wide" // and not "ghost"
+    | "narrow";
+  plain: string;
 }
 "#;
 
@@ -291,6 +353,40 @@ export interface After {
             declared_union("export type Two =\n  | \"x\"\n  | \"y\";\n", "Two"),
             ["x", "y"]
         );
+    }
+
+    /// The inline union, over the two shapes `entity.ts` can hand it.
+    ///
+    /// `spread` is the witness for both branches the one-line version got
+    /// wrong: it is reflowed across three lines, so a reader that stopped at
+    /// the newline would return an empty list and pass every caller that
+    /// compares one empty list to another -- and it carries a trailing comment
+    /// naming a member that does not exist, which a reader that did not strip
+    /// prose would report as real.
+    #[test]
+    fn an_inline_union_is_read_across_lines_and_past_prose() {
+        let body = interface_body(SAMPLE, "Unions");
+        assert_eq!(declared_inline_union(body, "origin"), ["manual", "implied"]);
+        assert_eq!(declared_inline_union(body, "spread"), ["wide", "narrow"]);
+        assert!(
+            !declared_inline_union(body, "spread").contains(&"ghost".to_owned()),
+            "a member named in a comment is not a member"
+        );
+        // A field that is not a union at all has no members, which is a
+        // different answer from "the field is not there" below.
+        assert!(declared_inline_union(body, "plain").is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "declares no `absent`")]
+    fn an_inline_union_on_a_field_that_is_not_there_is_a_failure() {
+        let _ = declared_inline_union(interface_body(SAMPLE, "Unions"), "absent");
+    }
+
+    #[test]
+    #[should_panic(expected = "`origin` is never terminated")]
+    fn an_unterminated_inline_union_is_a_failure_not_a_silent_truncation() {
+        let _ = declared_inline_union("  origin: \"manual\"\n", "origin");
     }
 
     #[test]
