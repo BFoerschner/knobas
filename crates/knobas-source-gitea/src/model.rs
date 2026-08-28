@@ -27,24 +27,10 @@ pub(crate) struct Repo {
     #[serde(default)]
     pub html_url: Option<String>,
     #[serde(default)]
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "wired in task 7: incremental commits per moved branch"
-        )
-    )]
     pub default_branch: Option<String>,
     /// A repository with no commits at all. Gitea answers `/commits` on one of
     /// these with 409, which Task 7's walk uses this field to avoid asking for.
     #[serde(default)]
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "wired in task 7: incremental commits per moved branch"
-        )
-    )]
     pub empty: bool,
 }
 
@@ -85,13 +71,6 @@ pub(crate) struct PayloadUser {
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "wired in task 6: pull requests and their discussion"
-    )
-)]
 pub(crate) struct PullRequest {
     pub number: u64,
     #[serde(default)]

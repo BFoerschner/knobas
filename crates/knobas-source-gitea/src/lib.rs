@@ -34,7 +34,34 @@
 //! `knobas-http` collapses 401 and 403 into one error
 //! (`sync::credential_still_good`). A healthy run pays nothing for this; a
 //! source whose token is scoped away from one of its repositories pays one
-//! extra request on every incremental run, for as long as that stays true.
+//! extra request on every incremental run, for as long as that stays true. A
+//! *discussion* refused with a bare `Unauthorized` is measured the same way and
+//! costs the same; a 404 there is unambiguous and costs nothing
+//! (`sync::fetch_comments`).
+//!
+//! # Testing
+//!
+//! `cargo test -p knobas-source-gitea` needs no Docker: it runs against a
+//! wiremock stand-in, contract battery included. **The stand-in is a
+//! convenience, not the contract** -- this adapter's contract source is the
+//! real pinned container (interfaces §4.2), and `tests/live_gitea.rs`
+//! re-asserts every shape the fake encodes against it. If the two disagree, the
+//! fake is what is wrong.
+//!
+//! Those tests are `#[ignore]`d so `just check` and CI stay docker-free
+//! (roadmap §3). To run them:
+//!
+//! ```text
+//! just gitea-live
+//! ```
+//!
+//! or by hand, against an environment that is already up and seeded:
+//!
+//! ```text
+//! cd testenv && docker compose up -d --wait gitea && ./seed-gitea.sh
+//! eval "$(cd testenv && ./seed --env)"
+//! cargo test -p knobas-source-gitea --test live_gitea -- --ignored --nocapture
+//! ```
 
 pub mod config;
 pub mod keys;

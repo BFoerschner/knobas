@@ -48,8 +48,12 @@ const ADAPTERS: &[Adapter] = &[
         template: knobas_source_teamcity::descriptor_template,
         build: knobas_source_teamcity::build,
     },
+    Adapter {
+        kind: "gitea",
+        template: knobas_source_gitea::descriptor_template,
+        build: knobas_source_gitea::build,
+    },
 ];
-// Stream B adds:  Adapter { kind: "gitea", template: knobas_source_gitea::descriptor_template, build: knobas_source_gitea::build }
 
 /// Turns stored configurations into live adapters.
 #[derive(Debug, Default)]

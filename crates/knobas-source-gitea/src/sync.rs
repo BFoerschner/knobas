@@ -1,9 +1,9 @@
 //! One sync run.
 //!
 //! Order is fixed and deterministic -- repository, its branches, its pull
-//! requests (Task 6), its commits (Task 7), repositories sorted by full name --
-//! so a test can assert on what came out and a budget spends itself the same
-//! way twice.
+//! requests, its commits, repositories sorted by full name, branches by
+//! `walk_order` -- so a test can assert on what came out and a budget spends
+//! itself the same way twice.
 //!
 //! # Why every kind has a change gate
 //!
@@ -108,8 +108,9 @@
 //! reach the sweep at all, because a skip during a cursor-less run is fatal
 //! (above).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
+use chrono::{DateTime, Utc};
 use knobas_source::{Cursor, Sink, SourceError, SyncItem};
 use serde_json::Value;
 
@@ -121,6 +122,25 @@ use crate::model;
 /// At 50 per page: 1,000 repositories, and 1,000 branches per repository.
 const MAX_LIST_PAGES: u32 = 20;
 const MAX_BRANCH_PAGES: u32 = 20;
+// The two budgeted walks' page caps. Both sit at 1,000 records, which is
+// exactly the largest `prs_per_repo`/`commits_per_repo` the config schema
+// allows (`config::config_schema`, `"maximum": 1000`). Sitting them *there* is
+// what keeps them runaway guards rather than a second, hidden budget: any
+// lower and a user who raised their budget to the top of the range the form
+// offers would be truncated by a number no form ever showed them.
+//
+// Unlike `MAX_LIST_PAGES`/`MAX_BRANCH_PAGES`, reaching one of these ends the
+// walk *silently* rather than with `cap_reached`. That is the
+// exhaustive/budgeted split (ADR-0003): `repo` and `branch` promise a complete
+// corpus, so stopping short of one has to fail the run rather than report a
+// mirror it never finished; `pr` and `commit` promise only the newest
+// `*_per_repo` of theirs and are never swept, so stopping is the normal case
+// and cannot be read downstream as a deletion.
+/// Pull requests per repository, per run.
+const MAX_PR_PAGES: u32 = 20;
+/// Commits per *branch* per run. `commits_per_repo` is the whole-repository
+/// budget the walk actually spends, and is what bites first.
+const MAX_COMMIT_PAGES: u32 = 20;
 
 /// One repository this run will walk.
 pub(crate) struct Selected {
@@ -489,9 +509,26 @@ async fn sync_repo(
     }
     after.repo_updated_at = updated_at;
 
-    // 2. Branches, and the ones that vanished. Task 7 walks commits for
+    // 2. Branches, and the ones that vanished. Step 4 walks commits for
     //    exactly the branches this reports as moved.
-    let _moved = branches(source, at, before, after, sink, emitted).await?;
+    let moved = branches(source, at, before, after, sink, emitted).await?;
+
+    // 3. Pull requests, newest-updated first, down to the watermark.
+    pulls(source, at, before, after, sink, emitted).await?;
+
+    // 4. Commits, only where a head moved. On a first sync every branch counts
+    //    as moved, so this is the full walk the budget bounds.
+    commits(
+        source,
+        at,
+        &selected.repo,
+        before,
+        after,
+        &moved,
+        sink,
+        emitted,
+    )
+    .await?;
     Ok(())
 }
 
@@ -562,6 +599,349 @@ async fn branches(
 
     after.branches = heads;
     Ok(moved)
+}
+
+/// Pull requests changed since the watermark, newest-updated first.
+///
+/// The walk relies on `sort=recentupdate` ordering the answer newest first, so
+/// the first record strictly below the watermark ends it. That assumption is
+/// checked against the real server in `tests/live_gitea.rs` rather than
+/// trusted -- if a Gitea release ever changed it, this walk would silently
+/// truncate every sync and no fixture would notice, because the fake is
+/// written to the same assumption.
+///
+/// # Why a budget here is not the truncation the module docs forbid
+///
+/// `prs_per_repo` is a bound the **user configured** on the corpus knobas
+/// mirrors; a reached page cap or a refusal is a hole nobody asked for. That is
+/// the whole distinction, and it is why `pr` declares
+/// `full_sync_exhaustive: false` (ADR-0003): a budgeted kind is never swept, so
+/// stopping at the budget can never be read downstream as "the rest was
+/// deleted".
+async fn pulls(
+    source: &crate::GiteaSource,
+    at: RepoRef<'_>,
+    before: &RepoCursor,
+    after: &mut RepoCursor,
+    sink: &mut (dyn Sink + Send),
+    emitted: &mut u64,
+) -> Result<(), RepoError> {
+    // Carried first, so every early return below leaves the position it came
+    // in with rather than a blank one.
+    after.pulls_updated_to = before.pulls_updated_to;
+    after.pulls_at_watermark = before.pulls_at_watermark.clone();
+    if source.config.prs_per_repo == 0 {
+        return Ok(());
+    }
+
+    let watermark = before.pulls_updated_to;
+    let mut budget = source.config.prs_per_repo;
+    // Every pull request this run looked at -- delivered, or recognised as
+    // already delivered. The new watermark is computed from this, so a pull
+    // request skipped as already-delivered still holds the boundary open.
+    let mut examined: Vec<(u64, Option<DateTime<Utc>>)> = Vec::new();
+
+    'paging: for page in 1..=MAX_PR_PAGES {
+        let batch = source.client.pulls(at.owner, at.name, page).await?;
+        let last = batch.len() < PAGE_SIZE as usize;
+        for raw in batch {
+            let pr: model::PullRequest = match serde_json::from_value(raw.clone()) {
+                Ok(pr) => pr,
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        repository = %at.full_name,
+                        "gitea: skipping an unreadable pull request"
+                    );
+                    continue;
+                }
+            };
+            let updated = map::real_time(pr.updated_at).or_else(|| map::real_time(pr.created_at));
+            if let (Some(mark), Some(when)) = (watermark, updated) {
+                if when < mark {
+                    break 'paging;
+                }
+                if when == mark && before.pulls_at_watermark.contains(&pr.number) {
+                    examined.push((pr.number, updated));
+                    continue;
+                }
+            }
+            let comments = fetch_comments(source, at, &pr).await?;
+            examined.push((pr.number, updated));
+            push(
+                sink,
+                map::pr_item(&source.id, &raw, at, &pr, &comments),
+                emitted,
+            )
+            .await?;
+            budget -= 1;
+            if budget == 0 {
+                break 'paging;
+            }
+        }
+        if last {
+            break;
+        }
+    }
+
+    (after.pulls_updated_to, after.pulls_at_watermark) =
+        close_watermark(&examined, watermark, &before.pulls_at_watermark);
+    Ok(())
+}
+
+/// Where a budgeted walk's watermark now stands, and which keys sit exactly on
+/// it.
+///
+/// Gitea's timestamps have one-second resolution, so a strict `>` boundary
+/// would drop a record updated in the same second as the newest one. Both
+/// budgeted walks close their position the same way, and it is subtle enough in
+/// the same two places that it is written once here rather than twice.
+///
+/// `examined` is every record this run **looked at** -- delivered, or
+/// recognised as already delivered -- because a record skipped as
+/// already-delivered still holds the boundary open.
+///
+/// `carried` is the previous run's keys on the incoming mark, and it is the
+/// half worth reading twice. When the position does not move, whatever the
+/// previous run recorded at that instant is still delivered **even where this
+/// run's budget stopped before re-observing it**; dropping those keys would
+/// re-deliver them on the next poll, and battery clause 2 would fail on the
+/// *second* idle run rather than the first, which is the hard version of this
+/// bug to find. When the position does move, the carried keys are strictly
+/// below the new mark and each walk's own `<` test already stops at them, so
+/// carrying them would only grow the cursor.
+fn close_watermark<K: Ord + Clone>(
+    examined: &[(K, Option<DateTime<Utc>>)],
+    incoming: Option<DateTime<Utc>>,
+    carried: &[K],
+) -> (Option<DateTime<Utc>>, Vec<K>) {
+    let mark = examined
+        .iter()
+        .filter_map(|(_, when)| *when)
+        .max()
+        .or(incoming);
+    let Some(at) = mark else {
+        return (None, Vec::new());
+    };
+    let mut keys: Vec<K> = examined
+        .iter()
+        .filter(|(_, when)| *when == Some(at))
+        .map(|(key, _)| key.clone())
+        .collect();
+    if mark == incoming {
+        keys.extend(carried.iter().cloned());
+    }
+    keys.sort();
+    keys.dedup();
+    (mark, keys)
+}
+
+/// The discussion, when there is any and the source wants it indexed.
+///
+/// Gitea keeps a pull request's discussion on the **issue** of the same index,
+/// which is the fifth read endpoint ruling B1 granted. `pr.comments == 0` is
+/// what makes an idle-ish run cheap: no discussion, no request.
+///
+/// # What a refusal here costs, and what it is allowed to hide
+///
+/// A refusal costs searchable text, not the run -- the pull request itself was
+/// readable a moment ago on the same credential. But `knobas-http` collapses
+/// 401 and 403 into a bare [`SourceError::Unauthorized`], so "this token has no
+/// issue scope" and "this token was just revoked" arrive identically, and
+/// swallowing both would let a run whose credential died report success.
+///
+/// So the two are separated the way the rest of this module separates them, by
+/// **measuring**:
+///
+/// * **404** -- unambiguous, and the common case: Gitea answers it for a
+///   repository with its issue unit disabled. Never a credential fault, so it
+///   is indexed without discussion and costs nothing extra.
+/// * **`Unauthorized`** -- ambiguous, so the identity probe decides. Alive means
+///   the token really lacks issue scope (index without discussion, and the
+///   warning names the setting that turns this off); dead is the run's verdict.
+///
+/// The probe is one extra request per *refused* discussion fetch. A healthy run
+/// pays nothing; a token scoped away from issues pays it per pull request that
+/// has comments, which is what `include_pr_comments: false` exists to switch
+/// off.
+///
+/// # Why this is not ruling B4's "fatal on a cursor-less run"
+///
+/// A repository refused during a full sync **is** fatal (the walk loop's
+/// `Err(Skip) if full_sync` arm), because that run would otherwise report a
+/// complete corpus it never read. A refused *discussion* is deliberately not
+/// that, on either kind of run: B4's subject is a repository, and here the pull
+/// request itself is still emitted, no entity is missing from the mirror, and
+/// `pr` is a budgeted kind the sweep never touches -- so nothing downstream can
+/// read the shorter `body_text` as a deletion. What is lost is search text on
+/// one item, and it is restored the next time that pull request is updated, or
+/// by the next full sync.
+async fn fetch_comments(
+    source: &crate::GiteaSource,
+    at: RepoRef<'_>,
+    pr: &model::PullRequest,
+) -> Result<Vec<model::Comment>, RepoError> {
+    if !source.config.include_pr_comments || pr.comments == 0 {
+        return Ok(Vec::new());
+    }
+    let error = match source
+        .client
+        .issue_comments(at.owner, at.name, pr.number)
+        .await
+    {
+        Ok(raw) => {
+            // A single unreadable comment is dropped rather than failing the
+            // pull request: the rest of the discussion is still worth indexing.
+            return Ok(raw
+                .into_iter()
+                .filter_map(|c| serde_json::from_value(c).ok())
+                .collect());
+        }
+        Err(error) => error,
+    };
+    if !is_repo_scoped(&error) {
+        return Err(RepoError::from(error));
+    }
+    if matches!(error, SourceError::Unauthorized) {
+        // Ambiguous: 401 and 403 arrive identically. Believe it only while the
+        // credential is provably still good.
+        credential_still_good(source, at.full_name, &error)
+            .await
+            .map_err(RepoError::Fatal)?;
+    }
+    tracing::warn!(
+        repository = %at.full_name,
+        number = pr.number,
+        %error,
+        "gitea: indexing this pull request without its discussion; \
+         set include_pr_comments to false to stop asking"
+    );
+    Ok(Vec::new())
+}
+
+/// New commits on the branches whose heads moved this run.
+///
+/// Gitea's `since=` is inclusive and server-side, so the boundary commits come
+/// back on every run; `commits_at_watermark` is what keeps them from being
+/// re-delivered. Commits are immutable, so a delivered object id is delivered
+/// for good.
+///
+/// **A branch that did not move is not walked at all**, which is what the
+/// per-branch head object ids in the cursor are for (`cursor::RepoCursor`): an
+/// idle repository costs its two listings and no commit request. The cost of
+/// that trade is stated plainly -- a commit reachable only from a branch whose
+/// *head* did not change is never noticed, and nothing here goes looking for
+/// one.
+///
+/// **Known limitation:** a branch that appears with history older than
+/// `commits_since` -- a long-lived branch pushed for the first time -- has that
+/// older history filtered out by `since=`. It arrives with the next full sync
+/// (`cursor: None`). Fetching it eagerly would mean walking every new branch to
+/// its root, which is exactly the cost `commits_per_repo` exists to bound.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the whole per-repository walk state, threaded explicitly: a struct \
+              here would be a bag of unrelated borrows with a different lifetime each"
+)]
+async fn commits(
+    source: &crate::GiteaSource,
+    at: RepoRef<'_>,
+    repo: &model::Repo,
+    before: &RepoCursor,
+    after: &mut RepoCursor,
+    moved: &[String],
+    sink: &mut (dyn Sink + Send),
+    emitted: &mut u64,
+) -> Result<(), RepoError> {
+    after.commits_since = before.commits_since;
+    after.commits_at_watermark = before.commits_at_watermark.clone();
+    // `repo.empty` is the one that saves a request rather than a mistake:
+    // Gitea answers `/commits` on a repository with no commits at all with a
+    // 409, which `client::commits` already reads as "none".
+    if source.config.commits_per_repo == 0 || repo.empty || moved.is_empty() {
+        return Ok(());
+    }
+
+    let since = before.commits_since;
+    let mut budget = source.config.commits_per_repo;
+    let mut examined: Vec<(String, Option<DateTime<Utc>>)> = Vec::new();
+    // One object id can be reachable from several branches; it is one entity
+    // and must cost one slot of the budget.
+    let mut seen: HashSet<String> = HashSet::new();
+
+    'branches: for branch in walk_order(repo.default_branch.as_deref(), moved) {
+        for page in 1..=MAX_COMMIT_PAGES {
+            let batch = source
+                .client
+                .commits(at.owner, at.name, &branch, since, page)
+                .await?;
+            let last = batch.len() < PAGE_SIZE as usize;
+            let mut fresh = 0usize;
+            for raw in batch {
+                let commit: model::Commit = match serde_json::from_value(raw.clone()) {
+                    Ok(commit) => commit,
+                    Err(error) => {
+                        tracing::warn!(
+                            %error,
+                            repository = %at.full_name,
+                            "gitea: skipping an unreadable commit"
+                        );
+                        continue;
+                    }
+                };
+                let happened = map::real_time(commit.happened_at());
+                if let (Some(mark), Some(when)) = (since, happened) {
+                    // Not a `break`: `since=` is a server-side filter this walk
+                    // does not control, and a server that ignored it would put
+                    // the whole history in front of the new commits.
+                    if when < mark {
+                        continue;
+                    }
+                    if when == mark && before.commits_at_watermark.contains(&commit.sha) {
+                        examined.push((commit.sha.clone(), happened));
+                        continue;
+                    }
+                }
+                if !seen.insert(commit.sha.clone()) {
+                    continue;
+                }
+                examined.push((commit.sha.clone(), happened));
+                push(
+                    sink,
+                    map::commit_item(&source.id, &raw, at, &commit),
+                    emitted,
+                )
+                .await?;
+                fresh += 1;
+                budget -= 1;
+                if budget == 0 {
+                    break 'branches;
+                }
+            }
+            // A page with nothing new on it is the end of this branch's new
+            // history -- and if the server ignored `since=` altogether, it is
+            // the point where paging stops being worth anything.
+            if last || fresh == 0 {
+                break;
+            }
+        }
+    }
+
+    (after.commits_since, after.commits_at_watermark) =
+        close_watermark(&examined, since, &before.commits_at_watermark);
+    Ok(())
+}
+
+/// Default branch first, then by name: on a first sync the budget should go to
+/// `main` before it goes to `wip/spike`, and the order has to be the same twice
+/// or two runs of one repository would mirror two different subsets of it.
+fn walk_order(default_branch: Option<&str>, moved: &[String]) -> Vec<String> {
+    let mut order = moved.to_vec();
+    order.sort_by(|a, b| {
+        let rank = |name: &String| usize::from(Some(name.as_str()) != default_branch);
+        rank(a).cmp(&rank(b)).then_with(|| a.cmp(b))
+    });
+    order
 }
 
 /// Hand one item to the engine.
@@ -653,6 +1033,118 @@ mod tests {
             "exactly one entry, under the stored spelling"
         );
         assert_eq!(next.repo(stored), previous.repo(stored));
+    }
+
+    /// The budget is spent in a fixed order, and the default branch is where a
+    /// first sync should spend it: `main` before `wip/spike`.
+    ///
+    /// Determinism is the half that is easy to lose and hard to see -- two runs
+    /// of one repository that ordered its branches differently would mirror two
+    /// different hundred-commit subsets of it and each would look correct.
+    #[test]
+    fn the_default_branch_gets_the_budget_first() {
+        let moved = vec![
+            "wip/spike".to_owned(),
+            "main".to_owned(),
+            "feature/PAY-231".to_owned(),
+        ];
+        assert_eq!(
+            walk_order(Some("main"), &moved),
+            vec!["main", "feature/PAY-231", "wip/spike"]
+        );
+        // No default branch reported: still a stable order, just alphabetical.
+        assert_eq!(
+            walk_order(None, &moved),
+            vec!["feature/PAY-231", "main", "wip/spike"]
+        );
+        // A default branch that did not move does not get walked just for
+        // being the default.
+        assert_eq!(
+            walk_order(Some("main"), &["wip/spike".to_owned()]),
+            vec!["wip/spike"]
+        );
+        assert!(walk_order(Some("main"), &[]).is_empty());
+    }
+
+    fn at(t: &str) -> Option<DateTime<Utc>> {
+        Some(t.parse().expect("a timestamp"))
+    }
+
+    /// The boundary second, closed. Each case is a run the budget ended
+    /// somewhere different.
+    #[test]
+    fn the_watermark_keeps_every_key_on_the_instant_it_stands_on() {
+        // Nothing known and nothing seen: no position to write.
+        assert_eq!(
+            close_watermark::<u64>(&[], None, &[]),
+            (None, Vec::new()),
+            "a walk that saw nothing invents no position"
+        );
+
+        // A first sync: the mark is the newest examined, and only the keys on
+        // it are the boundary.
+        assert_eq!(
+            close_watermark(
+                &[
+                    (144, at("2026-08-22T13:50:00Z")),
+                    (143, at("2026-08-22T13:50:00Z")),
+                    (142, at("2026-08-22T10:20:00Z")),
+                ],
+                None,
+                &[],
+            ),
+            (at("2026-08-22T13:50:00Z"), vec![143, 144])
+        );
+
+        // The position moved. The keys the previous run held are strictly
+        // below the new mark, so carrying them would only grow the cursor --
+        // each walk's own `<` test is what stops at them now.
+        assert_eq!(
+            close_watermark(
+                &[(146, at("2026-08-22T14:00:00Z"))],
+                at("2026-08-22T13:50:00Z"),
+                &[142, 144],
+            ),
+            (at("2026-08-22T14:00:00Z"), vec![146])
+        );
+
+        // The position did **not** move and this run's budget stopped after
+        // one new record on the same instant. The two the previous run
+        // delivered are still delivered; dropping them re-delivers them on the
+        // next poll, which is the bug this carry exists to stop.
+        assert_eq!(
+            close_watermark(
+                &[(146, at("2026-08-22T13:50:00Z"))],
+                at("2026-08-22T13:50:00Z"),
+                &[142, 144],
+            ),
+            (at("2026-08-22T13:50:00Z"), vec![142, 144, 146])
+        );
+
+        // An idle run examines the boundary again; re-observing a carried key
+        // must not record it twice.
+        assert_eq!(
+            close_watermark(
+                &[(144, at("2026-08-22T13:50:00Z"))],
+                at("2026-08-22T13:50:00Z"),
+                &[142, 144],
+            ),
+            (at("2026-08-22T13:50:00Z"), vec![142, 144])
+        );
+
+        // A run that examined nothing at all keeps the position it was handed,
+        // boundary and all.
+        assert_eq!(
+            close_watermark(
+                &[],
+                at("2026-08-22T13:50:00Z"),
+                &["c90d11".to_owned(), "a41f2c".to_owned()],
+            ),
+            (
+                at("2026-08-22T13:50:00Z"),
+                vec!["a41f2c".to_owned(), "c90d11".to_owned()]
+            )
+        );
     }
 
     /// The cap message has to name the limit that was hit and the lever that

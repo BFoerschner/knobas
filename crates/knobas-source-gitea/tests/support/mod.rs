@@ -66,6 +66,11 @@ pub struct State {
     pub pulls: BTreeMap<String, Vec<Value>>,
     /// `owner/repo#index` -> comment records.
     pub comments: BTreeMap<String, Vec<Value>>,
+    /// `owner/repo#index` -> the HTTP status that discussion is refused with.
+    /// A 404 is what Gitea answers for a repository with its issue unit
+    /// disabled; a 403 is a token without issue scope, and arrives at the
+    /// adapter indistinguishable from the 401 of a revoked one.
+    pub discussion_status: BTreeMap<String, u16>,
     /// `owner/repo@branch` -> commit records, newest first.
     pub commits: BTreeMap<String, Vec<Value>>,
     /// `owner/repo` entries every request under is answered 403 for -- a
@@ -203,6 +208,7 @@ impl State {
                 ),
             ]),
             forbidden: BTreeSet::new(),
+            discussion_status: BTreeMap::new(),
         }
     }
 
@@ -449,6 +455,23 @@ impl Fake {
                 .mount(&self.server)
                 .await;
             }
+        }
+        // Mounted before the discussions themselves so a refusal wins over
+        // the records it stands in for -- the same trick `forbidden` uses.
+        for (key, status) in &state.discussion_status {
+            let (full_name, index) = key
+                .split_once('#')
+                .expect("discussion key is owner/repo#index");
+            authed(Mock::given(method("GET")).and(path(format!(
+                "/api/v1/repos/{full_name}/issues/{index}/comments"
+            ))))
+            .respond_with(
+                ResponseTemplate::new(*status)
+                    .set_body_json(json!({ "message": "no permission to read issues" })),
+            )
+            .with_priority(FORBIDDEN_PRIORITY)
+            .mount(&self.server)
+            .await;
         }
         for (key, comments) in &state.comments {
             let (full_name, index) = key
