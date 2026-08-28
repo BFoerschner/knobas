@@ -565,10 +565,15 @@ async fn a_link_made_from_its_two_ends_alone_is_related_manual_and_visible_from_
         .await
         .unwrap();
 
+    // The literal, not just the constant: a test asserting only
+    // `== DEFAULT_RELATION` would hold for whatever that constant was changed
+    // to, and "related" is the word the spec, the curated relation list and
+    // the panel's group header all use.
     assert_eq!(
-        written.link.relation, DEFAULT_RELATION,
+        written.link.relation, "related",
         "an unnamed relation is `related`, not empty"
     );
+    assert_eq!(DEFAULT_RELATION, "related");
     assert_eq!(
         written.link.origin,
         knobas_core::link::Origin::Manual,

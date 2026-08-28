@@ -203,7 +203,9 @@ fn invoke_managing(
         .invoke_handler(tauri::generate_handler![
             knobas_app::commands::app::app_status,
             knobas_app::commands::app::frontend_ready,
+            knobas_app::commands::entity::create_link,
             knobas_app::commands::entity::recent_activity,
+            knobas_app::commands::entity::unlink,
             knobas_app::commands::sources::demo_load,
             knobas_app::commands::sources::list_adapters,
             knobas_app::commands::sources::list_sources,
@@ -741,4 +743,164 @@ fn frontend_ready_replays_the_current_state() {
         [serde_json::json!({ "state": "migrating" })],
         "exactly one replay of the state the lifecycle actually holds"
     );
+}
+
+// ---------------------------------------------------------------------------
+// 7. The two link commands, through the real IPC pipeline (#52).
+// ---------------------------------------------------------------------------
+
+/// Both link commands are registered under the name the TypeScript mirror
+/// invokes, and both argument shapes decode.
+///
+/// The mistake this catches is the one an append-only handler list invites:
+/// adding a command and forgetting the list, which is a frontend failing at run
+/// time with "command not found" against a Rust side that compiles perfectly.
+/// The argument names are the camelCase spellings Tauri renames to, which is
+/// what `app/src/lib/ipc/entity.ts` sends -- so a misspelled key fails here as
+/// an argument-resolution error rather than as `not_ready`.
+///
+/// `not_ready` is the marker for "dispatched, arguments resolved, body ran":
+/// only a `Lifecycle` is managed, so `lifecycle.pool()` is the first thing that
+/// can refuse.
+#[test]
+fn both_link_commands_are_registered_and_their_arguments_decode() {
+    for (cmd, args) in [
+        // `createLink` with everything, and with only the two ends -- the
+        // "costs no extra decisions" call. An omitted `Option` argument
+        // decodes as `None`, and the second case is what proves it: a
+        // `relation` declared as `String` would be refused by name here.
+        (
+            "create_link",
+            serde_json::json!({
+                "fromId": "mock:PAY-231", "toId": "mock:PAY-228",
+                "relation": "documents", "note": "why"
+            }),
+        ),
+        (
+            "create_link",
+            serde_json::json!({ "fromId": "mock:PAY-231", "toId": "mock:PAY-228" }),
+        ),
+        (
+            "unlink",
+            serde_json::json!({ "linkId": "00000000-0000-0000-0000-000000000000" }),
+        ),
+    ] {
+        let rejection = invoke_managing(cmd, args.clone(), |app| {
+            app.manage(knobas_app::Lifecycle::new());
+        })
+        .expect_err("there is no pool yet");
+
+        assert!(
+            rejection.contains("not_ready"),
+            "{cmd} was not dispatched, or {args} does not decode: {rejection}"
+        );
+        assert!(
+            !rejection.contains(TAURI_STATE_REFUSAL),
+            "{cmd} declares managed state as an argument -- carry-over §10.6(a): \
+             {rejection}"
+        );
+    }
+
+    // The control: without it the loop above would pass just as happily
+    // against a harness that answered `not_ready` to anything at all. A
+    // required argument left out is refused *by name*, before any body runs.
+    let omitted = invoke_managing(
+        "create_link",
+        serde_json::json!({ "fromId": "mock:PAY-231" }),
+        |app| {
+            app.manage(knobas_app::Lifecycle::new());
+        },
+    )
+    .expect_err("`toId` is not optional");
+    assert!(
+        omitted.contains("toId") || omitted.contains("to_id"),
+        "a missing endpoint must be refused by name: {omitted}"
+    );
+    assert!(
+        !omitted.contains("not_ready"),
+        "the body ran despite an incomplete argument list: {omitted}"
+    );
+}
+
+/// `create_link` puts its activity line on `activity:new`, and the payload is
+/// the row that was written.
+///
+/// The event is what makes the status bar's "latest change" tick when the user
+/// links something (story 19), and it is the half of the acceptance criterion
+/// no store test can see: the command emits it *itself*, from the row the write
+/// handed back, rather than re-reading the log the way the scheduler does.
+///
+/// Driven through the whole pipeline -- a mock app, a real migrated pool, a
+/// listener -- so what is asserted is what a window would receive.
+#[tokio::test(flavor = "multi_thread")]
+async fn creating_a_link_announces_its_activity_line_on_the_event() {
+    let pool = knobas_db::test_util::test_pool().await;
+    knobas_db::migrate::run(&pool).await.unwrap();
+
+    // Two entities of this test's own: the database is shared by every test in
+    // this binary, and a link is refused if either end has no entity row.
+    let run = uuid::Uuid::new_v4();
+    let from = format!("links-{run}:TICKET-1");
+    let to = format!("links-{run}:PAGE-1");
+    for id in [&from, &to] {
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ticket', 'x')")
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    let seen: std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>> = Default::default();
+    let recorder = std::sync::Arc::clone(&seen);
+    let pool_for_state = pool.clone();
+    let (from_arg, to_arg) = (from.clone(), to.clone());
+
+    let created = invoke_managing(
+        "create_link",
+        serde_json::json!({ "fromId": from_arg, "toId": to_arg, "relation": "documents" }),
+        move |app| {
+            app.manage(ready_over(pool_for_state));
+            app.listen("activity:new", move |event| {
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(event.payload()) {
+                    recorder.lock().unwrap().push(value);
+                }
+            });
+        },
+    )
+    .expect("create_link must answer")
+    .deserialize::<serde_json::Value>()
+    .expect("a LinkRow came back");
+
+    assert_eq!(created["from_id"], serde_json::json!(from));
+    assert_eq!(created["to_id"], serde_json::json!(to));
+    assert_eq!(created["origin"], serde_json::json!("manual"));
+
+    // Emitted before the command returns, so it is already there -- no polling,
+    // and therefore no way for this to pass by waiting long enough.
+    let lines = seen.lock().unwrap().clone();
+    assert_eq!(lines.len(), 1, "one line per mutation: {lines:?}");
+    let line = &lines[0];
+    assert_eq!(line["verb"], serde_json::json!("linked"));
+    assert_eq!(line["actor"], serde_json::json!("user"));
+    assert_eq!(
+        line["entity_id"],
+        serde_json::json!(from),
+        "the line is named on the end the link was drawn from"
+    );
+    assert_eq!(line["detail"]["to_id"], serde_json::json!(to));
+    assert_eq!(line["detail"]["relation"], serde_json::json!("documents"));
+    assert_eq!(line["detail"]["link_id"], created["id"]);
+
+    // The announced row is the row in the log, not one the command invented:
+    // `id` and `at` are the database's to choose.
+    let stored: (String, serde_json::Value) = sqlx::query_as(
+        "select verb, detail from knobas.activity where id = $1 and entity_id = $2",
+    )
+    .bind(line["id"].as_i64().expect("the line carries its id"))
+    .bind(&from)
+    .fetch_one(&pool)
+    .await
+    .expect("the announced line is in the log");
+    assert_eq!(stored.0, "linked");
+    assert_eq!(stored.1, line["detail"]);
 }
