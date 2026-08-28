@@ -7,7 +7,7 @@
  * `Results.svelte` and `Board.svelte` both draw rows and they have to draw them
  * identically — that is the whole point of the board reusing the result row.
  */
-import type { CredentialHealth } from "../ipc/sources";
+import type { AuthState, CredentialHealth } from "../ipc/sources";
 import { ago } from "../shell/time";
 
 /**
@@ -49,8 +49,37 @@ export function sourceMonogram(sourceId: string): string {
  * that reading every row in a fresh install would show a health complaint in
  * place of its sync age, which is both wrong and the loudest possible way to
  * be wrong.
+ *
+ * **A total record over `AuthState`, not a `Set<string>`.** The set was spelled
+ * out three times — here, in `Board.svelte` and inline in `Chips.svelte` — and
+ * hand-maintained against a Rust enum, so a state added on the Rust side fell
+ * through to "not actionable" in every copy at once. That direction is safe and
+ * therefore silent, which is the worse half. A `Record<AuthState, boolean>` has
+ * to name every state: adding one to `AuthState` makes this literal incomplete
+ * and fails `svelte-check`, which is the gate `just front` runs.
  */
-const ACTIONABLE = new Set(["unauthorized", "unreachable", "missing_secret"]);
+const ACTIONABLE: Record<AuthState, boolean> = {
+  ok: false,
+  unauthorized: true,
+  unreachable: true,
+  missing_secret: true,
+  // Never tested, not broken — see above.
+  unknown: false,
+};
+
+/**
+ * Whether a source's credential health is something the user has to act on.
+ *
+ * The one spelling of the rule: the row badge (`provenance`), the board's
+ * source strip and the filter chip's dot all ask this, so they cannot disagree.
+ *
+ * `=== true` rather than a bare lookup because the state arrives over the IPC
+ * bridge: a value outside `AuthState` is a state this build does not know, and
+ * "do not shout about it" is the same safe answer `unknown` gets.
+ */
+export function isActionable(state: AuthState): boolean {
+  return ACTIONABLE[state] === true;
+}
 
 /** What to say about a source whose credential needs attention. */
 const COMPLAINT: Record<string, string> = {
@@ -75,7 +104,7 @@ export function provenance(
   now?: Date,
 ): { text: string; failing: boolean } {
   const health = sources.find((source) => source.source_id === sourceId);
-  if (health && ACTIONABLE.has(health.state)) {
+  if (health && isActionable(health.state)) {
     return { text: `${sourceId} · ${COMPLAINT[health.state] ?? health.state}`, failing: true };
   }
   return { text: syncAge(syncedAt, now), failing: false };

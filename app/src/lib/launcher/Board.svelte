@@ -15,7 +15,7 @@
   import type { LauncherHome } from "../ipc";
   import Monogram from "../shell/Monogram.svelte";
   import { ago } from "../shell/time";
-  import { sourceMonogram } from "./format";
+  import { isActionable, sourceMonogram } from "./format";
   import Row from "./Row.svelte";
   import type { LauncherRow } from "./rows";
 
@@ -38,20 +38,16 @@
   /** Recent rows start after the lists in the flat selectable list. */
   const recentFrom = $derived(home.smart_lists.length);
 
-  /**
-   * The states that mean a human has to act, in the same reading `format.ts`
-   * uses for a row: `unknown` is 0002's default and is *never tested*, not
-   * *broken*.
-   */
-  const ACTIONABLE = new Set(["unauthorized", "unreachable", "missing_secret"]);
-
   /** One line per source: what it is, and whether knobas can still read it. */
   const strip = $derived(
     home.sources.map((source) => ({
       id: source.source_id,
       monogram: sourceMonogram(source.source_id),
-      failing: ACTIONABLE.has(source.state),
-      note: ACTIONABLE.has(source.state)
+      // `format.ts` owns the reading of a health state, so this strip and a
+      // result row's badge cannot come to different conclusions about the
+      // same source.
+      failing: isActionable(source.state),
+      note: isActionable(source.state)
         ? (source.detail ?? source.state)
         : source.checked_at
           ? `checked ${ago(source.checked_at, now)}`

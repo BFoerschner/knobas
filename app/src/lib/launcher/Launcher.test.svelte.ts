@@ -501,6 +501,66 @@ test("an unknown token is greyed out with a reason rather than silently ignored"
   ]);
 });
 
+/**
+ * The third reader of the actionable-health rule, and the one nothing else in
+ * this file covers.
+ *
+ * A `/gitea` chip's dot and the row badge beside it are the same claim about
+ * the same source, so they are drawn from one rule (`format.ts::isActionable`)
+ * rather than from three copies of the state list — which is what #37 asked for
+ * and what this asserts is actually wired up. `ok` is the control: without it a
+ * chip renderer that marked every source failing would pass.
+ */
+test("a source chip is marked when that source is refusing the credential", async () => {
+  open({
+    ports: {
+      launcherHome: async (): Promise<LauncherHome> => ({
+        ...HOME,
+        sources: [
+          {
+            source_id: "gitea",
+            state: "unauthorized",
+            checked_at: null,
+            detail: "401",
+            secret_expires_at: null,
+          },
+          {
+            source_id: "jira",
+            state: "ok",
+            checked_at: null,
+            detail: null,
+            secret_expires_at: null,
+          },
+        ],
+      }),
+      search: async () =>
+        response({
+          interpreted: {
+            text: "sepa",
+            prefix: null,
+            filters: {
+              sources: ["gitea", "jira"],
+              kinds: [],
+              updated_within_days: null,
+              mine: false,
+            },
+            unknown_tokens: [],
+          },
+        }),
+    },
+  });
+  await settle();
+  target.querySelector("input")!.value = "/gitea /jira sepa";
+  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+
+  const chips = [...target.querySelectorAll(".fchip.on")].map((el) => el.textContent?.trim());
+  expect(chips).toEqual(["gitea", "jira"]);
+  const failing = [...target.querySelectorAll(".fchip.on.fail")].map((el) => el.textContent?.trim());
+  expect(failing).toEqual(["gitea"]);
+});
+
 test("`?` lists the syntax, and clicking a row inserts it", async () => {
   open({
     ports: {
