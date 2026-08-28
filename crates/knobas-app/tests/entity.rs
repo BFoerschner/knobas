@@ -66,10 +66,38 @@ fn all() -> EntityFilter {
     }
 }
 
+/// Scoped to the `mock` source, for the same reason
+/// [`offset_walks_the_same_ordering_and_total_does_not_move`] is: the recency
+/// test writes fresher `ticket` rows under its own `clock-*` source, and an
+/// unscoped limit-2 window would show those whenever they commit first
+/// (issue #30). The intruder below is that neighbour, seeded deterministically
+/// instead of raced for, so the scoping is proven rather than assumed.
 #[tokio::test]
 async fn lists_the_newest_first_and_reports_the_unpaged_total() {
     let pool = seeded().await;
+
+    // A ticket fresher than the whole corpus (dated 2026-08-22), in a source
+    // nothing else uses. Without the source scope it wins the window.
+    let source = format!("elsewhere-{}", unique());
+    let intruder = format!("{source}:NEW-1");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ticket', 'x')")
+        .bind(&intruder)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item
+             (entity_id, source_id, kind, title, body_text, item_updated_at, payload)
+         values ($1, $2, 'ticket', 'x', '', now(), '{}'::jsonb)",
+    )
+    .bind(&intruder)
+    .bind(&source)
+    .execute(&pool)
+    .await
+    .unwrap();
+
     let filter = EntityFilter {
+        sources: vec!["mock".to_owned()],
         kinds: vec!["ticket".to_owned()],
         ..all()
     };
