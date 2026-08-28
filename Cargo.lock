@@ -2793,8 +2793,10 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",
+ "tempfile",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-util",
  "tracing",
  "tracing-subscriber",
  "uuid",
@@ -2820,6 +2822,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "knobas-db",
+ "percent-encoding",
  "postgresql_archive",
  "postgresql_embedded",
  "serde_json",
@@ -2828,6 +2831,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+ "url",
  "uuid",
 ]
 

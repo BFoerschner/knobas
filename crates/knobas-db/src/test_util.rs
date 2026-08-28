@@ -50,7 +50,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use sqlx::PgPool;
+use sqlx::{Connection, PgPool};
 
 use crate::{DbConfig, EmbeddedDb};
 
@@ -120,6 +120,62 @@ pub async fn test_connector() -> crate::embedded::Connector {
         })
         .await;
     db.connector()
+}
+
+/// A database of its own on this binary's shared server, migrated and empty.
+///
+/// The shared database cannot be used by a test that *replaces* its contents:
+/// every other test in the binary is in it, and nothing here truncates. A
+/// restore is exactly such a test -- so it gets its own database instead, which
+/// costs one `create database` rather than a second postmaster.
+///
+/// The name carries `label` plus a per-call nonce, so two calls (and two runs
+/// against a server that outlived one) never collide. Nothing drops it: the
+/// whole scratch directory goes when the run's lock is released, and a
+/// `drop database` in a test that failed would run only when it did not need
+/// to.
+///
+/// # Panics
+///
+/// Panics if the database cannot be created, connected to, or migrated --
+/// there is no useful way for a test to continue without one.
+pub async fn scratch_database(label: &str) -> crate::embedded::Connector {
+    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+    let slug: String = label
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    let name = format!(
+        "knobas_scratch_{slug}_{}_{}",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    );
+
+    let server = test_connector().await;
+    let mut admin = server
+        .with_database(crate::embedded::MAINTENANCE_DATABASE)
+        .connect()
+        .await
+        .expect("connect to the maintenance database");
+    // Built here from an alphanumeric slug, a pid and a counter, so there is
+    // no caller-supplied text in it -- `create database` takes no parameter.
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!("create database {name}")))
+        .execute(&mut admin)
+        .await
+        .expect("create a scratch database");
+    let _ = admin.close().await;
+
+    let scratch = server.with_database(&name);
+    let pool = scratch
+        .pool(2)
+        .await
+        .expect("connect to the scratch database");
+    crate::migrate::run(&pool)
+        .await
+        .expect("migrate the scratch database");
+    pool.close().await;
+    scratch
 }
 
 /// Connections a test pool gets. The same five the application pool has, so a
@@ -377,7 +433,8 @@ fn stop_server(root: &Path) {
     if !root.join("data").join("postmaster.pid").exists() {
         return;
     }
-    let Some(pg_ctl) = find_pg_ctl(&crate::embedded::installation_dir()) else {
+    let Some(pg_ctl) = crate::embedded::find_tool(&crate::embedded::installation_dir(), PG_CTL)
+    else {
         return;
     };
     let _ = std::process::Command::new(pg_ctl)
@@ -386,20 +443,6 @@ fn stop_server(root: &Path) {
         .arg(root.join("data"))
         .args(["-m", "immediate", "-w"])
         .output();
-}
-
-/// `pg_ctl` sits at either `<install>/bin/pg_ctl` or, once the archive has
-/// been unpacked into a version subdirectory, `<install>/<version>/bin/pg_ctl`.
-fn find_pg_ctl(installation_dir: &Path) -> Option<PathBuf> {
-    let direct = installation_dir.join("bin").join(PG_CTL);
-    if direct.is_file() {
-        return Some(direct);
-    }
-    std::fs::read_dir(installation_dir)
-        .ok()?
-        .flatten()
-        .map(|entry| entry.path().join("bin").join(PG_CTL))
-        .find(|path| path.is_file())
 }
 
 #[cfg(test)]

@@ -24,6 +24,7 @@
 //! reaches the backend with a `fetch`, and without it every command call is
 //! blocked in a release build while working perfectly in dev.
 
+pub mod backup;
 pub mod commands;
 mod error;
 mod profile;
@@ -169,6 +170,10 @@ pub fn run() {
             commands::app::app_status,
             commands::app::frontend_ready,
             commands::app::retry_database,
+            commands::backup::backup_status,
+            commands::backup::backup_now,
+            commands::backup::set_backup_schedule,
+            commands::backup::restore_backup,
             commands::entity::get_entity,
             commands::entity::list_entities,
             commands::entity::recent_activity,
@@ -211,6 +216,9 @@ pub fn run() {
                 // them is the stall the M0 carry-over describes. Both calls are
                 // idempotent, so whichever event arrives first does the work.
                 sources::shutdown(app);
+                // Before the pool closes under it, for the reason the sync
+                // scheduler is stopped first: its tick reads `knobas.setting`.
+                backup::shutdown(app);
                 shutdown_database(app);
             }
         });
@@ -258,6 +266,9 @@ pub(crate) fn spawn_bring_up<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
             // concerned, and a window that reacted to `ready` by calling
             // `sync_status` must not race the scheduler into existence.
             sources::start(&handle, &db).await?;
+            // Beside the sync scheduler, not inside it: a backup is not a
+            // source (see `backup`'s module docs).
+            backup::start(&handle, &db);
             Ok::<_, Box<dyn std::error::Error>>(db)
         }
         .await;

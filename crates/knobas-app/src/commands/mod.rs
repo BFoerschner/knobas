@@ -13,6 +13,7 @@
 //! own tests.
 
 pub mod app;
+pub mod backup;
 pub mod entity;
 pub mod search;
 pub mod sources;

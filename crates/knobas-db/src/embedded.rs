@@ -31,7 +31,7 @@ pub const DATABASE_NAME: &str = "knobas";
 /// itself and to create [`DATABASE_NAME`] when it is missing. Connecting to
 /// [`DATABASE_NAME`] cannot do either job -- on a server that has not got it
 /// yet, the connection is what fails.
-const MAINTENANCE_DATABASE: &str = "postgres";
+pub(crate) const MAINTENANCE_DATABASE: &str = "postgres";
 
 /// Loopback host. Never a Unix socket -- see the module docs.
 const HOST: &str = "127.0.0.1";
@@ -161,6 +161,14 @@ pub struct EmbeddedDb {
 #[derive(Clone)]
 pub struct Connector {
     options: PgConnectOptions,
+    /// The password, kept beside the options because [`PgConnectOptions`] has
+    /// no getter for one and [`backup`](crate::backup) has to hand it to a
+    /// *child process* -- `pg_dump` speaks libpq, not sqlx.
+    ///
+    /// It goes to that child in `PGPASSWORD`, never in an argument: `argv` is
+    /// world-readable in `ps` and the environment of another user's process is
+    /// not.
+    password: Option<String>,
 }
 
 impl std::fmt::Debug for Connector {
@@ -180,7 +188,46 @@ impl Connector {
     fn parse(url: &str) -> Result<Connector, sqlx::Error> {
         Ok(Connector {
             options: url.parse()?,
+            password: password_of(url),
         })
+    }
+
+    /// The same server, a different database.
+    ///
+    /// What `create database` needs (the statement cannot run inside the
+    /// database it creates, so it is issued from the maintenance database) and
+    /// what a restore into a *fresh* database needs.
+    #[must_use]
+    pub fn with_database(&self, database: &str) -> Connector {
+        Connector {
+            options: self.options.clone().database(database),
+            password: self.password.clone(),
+        }
+    }
+
+    /// The database this connector opens, when the URL named one.
+    #[must_use]
+    pub fn database(&self) -> Option<&str> {
+        self.options.get_database()
+    }
+
+    /// The libpq environment a child process needs to reach this server.
+    ///
+    /// `pg_dump` and `pg_restore` take their connection from the environment
+    /// rather than from `argv` on purpose -- see [`Connector::password`].
+    pub(crate) fn libpq_env(&self) -> Vec<(&'static str, String)> {
+        let mut env = vec![
+            ("PGHOST", self.options.get_host().to_owned()),
+            ("PGPORT", self.options.get_port().to_string()),
+            ("PGUSER", self.options.get_username().to_owned()),
+        ];
+        if let Some(database) = self.options.get_database() {
+            env.push(("PGDATABASE", database.to_owned()));
+        }
+        if let Some(password) = &self.password {
+            env.push(("PGPASSWORD", password.clone()));
+        }
+        env
     }
 
     /// One connection, belonging to no pool.
@@ -210,6 +257,29 @@ impl Connector {
         probe(&pool).await?;
         Ok(pool)
     }
+}
+
+/// The password a connection URL carries, percent-decoded.
+///
+/// sqlx keeps it inside [`PgConnectOptions`] with no getter, and a child
+/// process needs it, so it is read off the URL the same way sqlx reads it:
+/// `url` for the structure, `percent-encoding` for the escapes. Both crates
+/// are already in the tree -- `sqlx-core` depends on them -- so this costs
+/// nothing to compile.
+///
+/// `None` for a URL with no password (a `trust`-authenticated server, or a
+/// `KNOBAS_DB_URL` relying on the caller's own `.pgpass`); libpq then falls
+/// back to its usual sources, which is the right behaviour rather than a
+/// failure.
+fn password_of(url: &str) -> Option<String> {
+    let parsed = url::Url::parse(url).ok()?;
+    let raw = parsed.password()?;
+    Some(
+        percent_encoding::percent_decode_str(raw)
+            .decode_utf8()
+            .ok()?
+            .into_owned(),
+    )
 }
 
 /// Take one connection out of `pool`, under [`FIRST_CONNECT_TIMEOUT`].
@@ -837,19 +907,49 @@ fn fresh_settings() -> Settings {
 /// nothing here may pre-create it.
 ///
 /// `build_settings` does not call this -- it leaves `installation_dir` at the
-/// very default this returns. The readers are all test-side: `test_util`'s
-/// reaper, which needs the `pg_ctl` under it, and this module's own unit tests
-/// asserting where the default points. Hence the cfg: outside `test-util` the
-/// function has no caller at all.
-///
-/// The cfg needs no `test` arm for those unit tests. This crate dev-depends on
-/// itself with `test-util` on, so building any of its own test targets unifies
-/// the feature onto the library -- `cfg(test)` here always implies
-/// `feature = "test-util"`. That unification is the same one `just check`'s
-/// `clippy-libs` pass exists to see past.
-#[cfg(feature = "test-util")]
+/// very default this returns. It used to be `#[cfg(feature = "test-util")]`,
+/// because `test_util`'s reaper (which needs the `pg_ctl` under it) was the
+/// only reader. [`backup`](crate::backup) made it a **shipping** path: the
+/// `pg_dump` and `pg_restore` a backup runs are the ones that came out of the
+/// same archive as the server, and this is where they are.
 pub(crate) fn installation_dir() -> PathBuf {
     fresh_settings().installation_dir
+}
+
+/// One of the PostgreSQL binaries under `installation_dir`, if it is there.
+///
+/// Two shapes, because the archive is unpacked lazily: before the first
+/// extraction the directory does not exist at all, and afterwards the binaries
+/// sit under a *version* subdirectory (`<install>/18.6.0/bin/pg_dump`). The
+/// crate's own default has no version segment (`<install>/bin/pg_dump`), so
+/// both are tried.
+///
+/// **The pinned version first, and any other only as a fallback.** The
+/// installation directory is shared with every other `postgresql_embedded`
+/// application on the machine, so it can hold several versions -- and
+/// `pg_dump` refuses to dump a server newer than itself. Taking whichever
+/// subdirectory `read_dir` happened to yield first would make a backup fail
+/// (or, worse, succeed against the wrong server) for a reason nothing in
+/// knobas would explain.
+pub(crate) fn find_tool(installation_dir: &Path, name: &str) -> Option<PathBuf> {
+    // `PG_VERSION_REQ` is a semver *requirement* (`=18.6.0`); the directory is
+    // named after the version alone.
+    let pinned = installation_dir
+        .join(PG_VERSION_REQ.trim_start_matches(['=', '^', '~', ' ']))
+        .join("bin")
+        .join(name);
+    if pinned.is_file() {
+        return Some(pinned);
+    }
+    let direct = installation_dir.join("bin").join(name);
+    if direct.is_file() {
+        return Some(direct);
+    }
+    std::fs::read_dir(installation_dir)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path().join("bin").join(name))
+        .find(|path| path.is_file())
 }
 
 fn build_settings(root_dir: &Path) -> Result<Settings, DbError> {
@@ -1183,6 +1283,51 @@ mod tests {
         let path = dir.join(name);
         std::fs::write(&path, contents).unwrap();
         path
+    }
+
+    /// The installation directory is shared with every other
+    /// `postgresql_embedded` application on the machine, so it can hold more
+    /// than one PostgreSQL. `pg_dump` refuses to dump a server newer than
+    /// itself, so picking whichever version `read_dir` yielded first would
+    /// make a backup fail against the very server knobas runs -- and the two
+    /// directories are indistinguishable to anything but the pin.
+    #[test]
+    fn a_tool_comes_from_the_pinned_version_when_several_are_installed() {
+        let install = tempfile::tempdir().unwrap();
+        let pinned = PG_VERSION_REQ.trim_start_matches('=');
+
+        for version in ["17.4.0", pinned, "19.0.0"] {
+            let bin = install.path().join(version).join("bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            write(&bin, "pg_dump", version);
+        }
+
+        let found = find_tool(install.path(), "pg_dump").expect("a pg_dump");
+        assert_eq!(
+            std::fs::read_to_string(&found).unwrap(),
+            pinned,
+            "{} is not the pinned version's tool",
+            found.display()
+        );
+    }
+
+    /// ...and a version-less layout (the crate's own default) still resolves.
+    #[test]
+    fn a_tool_is_still_found_without_a_version_directory() {
+        let install = tempfile::tempdir().unwrap();
+        let bin = install.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        write(&bin, "pg_dump", "flat");
+
+        assert_eq!(
+            find_tool(install.path(), "pg_dump"),
+            Some(bin.join("pg_dump"))
+        );
+        assert_eq!(
+            find_tool(install.path(), "pg_restore"),
+            None,
+            "a tool that is not there is absent, not a path that does not exist"
+        );
     }
 
     #[test]
