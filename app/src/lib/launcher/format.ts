@@ -7,7 +7,8 @@
  * `Results.svelte` and `Board.svelte` both draw rows and they have to draw them
  * identically — that is the whole point of the board reusing the result row.
  */
-import type { AuthState, CredentialHealth } from "../ipc/sources";
+import type { CredentialHealth } from "../ipc/sources";
+import { isActionable } from "../shell/health.svelte";
 import { ago } from "../shell/time";
 
 /**
@@ -40,48 +41,14 @@ export function sourceMonogram(sourceId: string): string {
 }
 
 /**
- * The states that mean *a human has to do something*.
+ * What to say about a source whose credential needs attention.
  *
- * **`unknown` is deliberately not one of them**, and this is a correction to
- * the plan's "replaced by the source's health when it is not `ok`". `unknown`
- * is migration 0002's default: it means nothing has tested the credential yet,
- * which is the state every source is in until stream F's scheduler runs. On
- * that reading every row in a fresh install would show a health complaint in
- * place of its sync age, which is both wrong and the loudest possible way to
- * be wrong.
- *
- * **A total record over `AuthState`, not a `Set<string>`.** The set was spelled
- * out three times — here, in `Board.svelte` and inline in `Chips.svelte` — and
- * hand-maintained against a Rust enum, so a state added on the Rust side fell
- * through to "not actionable" in every copy at once. That direction is safe and
- * therefore silent, which is the worse half. A `Record<AuthState, boolean>` has
- * to name every state: adding one to `AuthState` makes this literal incomplete
- * and fails `svelte-check`, which is the gate `just front` runs.
+ * Which states those are is `shell/health.svelte`'s {@link isActionable} — one
+ * spelling, total over `AuthState`, because the row's complaint here, the
+ * board's source strip and the chip's failure dot in `Chips.svelte` have to
+ * agree about what a red reading means, and a second inline copy is a second
+ * chance for them to drift the day a state is added (#37).
  */
-const ACTIONABLE: Record<AuthState, boolean> = {
-  ok: false,
-  unauthorized: true,
-  unreachable: true,
-  missing_secret: true,
-  // Never tested, not broken — see above.
-  unknown: false,
-};
-
-/**
- * Whether a source's credential health is something the user has to act on.
- *
- * The one spelling of the rule: the row badge (`provenance`), the board's
- * source strip and the filter chip's dot all ask this, so they cannot disagree.
- *
- * `=== true` rather than a bare lookup because the state arrives over the IPC
- * bridge: a value outside `AuthState` is a state this build does not know, and
- * "do not shout about it" is the same safe answer `unknown` gets.
- */
-export function isActionable(state: AuthState): boolean {
-  return ACTIONABLE[state] === true;
-}
-
-/** What to say about a source whose credential needs attention. */
 const COMPLAINT: Record<string, string> = {
   unauthorized: "sign in again",
   unreachable: "unreachable",

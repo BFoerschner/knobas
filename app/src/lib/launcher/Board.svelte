@@ -13,9 +13,10 @@
 -->
 <script lang="ts">
   import type { LauncherHome } from "../ipc";
+  import { isActionable } from "../shell/health.svelte";
   import Monogram from "../shell/Monogram.svelte";
   import { ago } from "../shell/time";
-  import { isActionable, sourceMonogram } from "./format";
+  import { sourceMonogram } from "./format";
   import Row from "./Row.svelte";
   import type { LauncherRow } from "./rows";
 
@@ -43,9 +44,9 @@
     home.sources.map((source) => ({
       id: source.source_id,
       monogram: sourceMonogram(source.source_id),
-      // `format.ts` owns the reading of a health state, so this strip and a
-      // result row's badge cannot come to different conclusions about the
-      // same source.
+      // `shell/health.svelte` owns the reading of a health state, so this
+      // strip and a result row's badge cannot come to different conclusions
+      // about the same source.
       failing: isActionable(source.state),
       note: isActionable(source.state)
         ? (source.detail ?? source.state)
