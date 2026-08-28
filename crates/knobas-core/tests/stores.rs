@@ -263,3 +263,120 @@ async fn a_scoped_read_is_still_capped_and_newest_first() {
     // Three rows written in three transactions, so a flipped order shows up.
     assert!(capped[0].id > capped[1].id);
 }
+
+/// An endpoint with no `knobas.entity` row is its own error, not a database
+/// fault.
+///
+/// The distinction is what the IPC boundary needs: linking to an entity that
+/// has not synced yet is a normal event the UI reports as `not_found`, while
+/// `CoreError::Db` crosses as `internal` -- "knobas is broken" for something
+/// the user merely mistyped.
+#[tokio::test]
+async fn a_link_endpoint_with_no_entity_row_is_its_own_error() {
+    let (pool, ticket, _note) = seeded_pool().await;
+    let absent = EntityRef::new("jira", &format!("GONE-{}", Uuid::new_v4()));
+
+    // Both ends, because `from_id` and `to_id` carry a foreign key each and
+    // they are separate constraints: a classifier keyed on one of them by name
+    // would leave the other end reporting `internal`.
+    for (from, to) in [(&ticket, &absent), (&absent, &ticket)] {
+        let created =
+            link::create(&pool, from, to, "documents", link::Origin::Manual, "mara").await;
+        assert!(
+            matches!(created, Err(CoreError::EndpointMissing)),
+            "{created:?}"
+        );
+    }
+}
+
+/// The write hands back the row it wrote, so a caller can announce the line
+/// without reading it again.
+///
+/// Asserted against an independent read rather than against the arguments: the
+/// point of returning the row is that it is the *stored* one -- the id and the
+/// timestamp the database chose, and the `detail` after the null coercion.
+#[tokio::test]
+async fn the_activity_write_returns_the_row_it_wrote() {
+    let (pool, ticket, _note) = seeded_pool().await;
+    let actor = format!("sync:{}", Uuid::new_v4());
+
+    let written = activity::record(
+        &pool,
+        &actor,
+        "linked",
+        Some(&ticket),
+        serde_json::json!({"n": 1}),
+    )
+    .await
+    .unwrap();
+
+    let stored = activity::recent(&pool, 200, Some(&ticket))
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|row| row.actor == actor)
+        .expect("the written line is in the log");
+
+    assert_eq!(written.id, stored.id);
+    assert_eq!(written.at, stored.at);
+    assert_eq!(written.actor, stored.actor);
+    assert_eq!(written.verb, stored.verb);
+    assert_eq!(written.entity_id, stored.entity_id);
+    assert_eq!(written.detail, stored.detail);
+    assert_eq!(
+        written.entity_id.as_deref(),
+        Some(ticket.to_string().as_str())
+    );
+
+    // The null-detail coercion is visible in the returned row too. A write that
+    // echoed its argument back would hand the caller a jsonb null that the log
+    // itself does not carry -- and `ActivityRow.detail` is `unknown` in the
+    // TypeScript mirror precisely because nothing downstream re-checks it.
+    let coerced = activity::record(&pool, &actor, "synced", None, serde_json::Value::Null)
+        .await
+        .unwrap();
+    assert_eq!(coerced.detail, serde_json::json!({}));
+    assert_eq!(coerced.entity_id, None);
+    assert!(
+        coerced.id > written.id,
+        "the identity column advances: {} then {}",
+        written.id,
+        coerced.id
+    );
+}
+
+/// A foreign-key violation somewhere other than a link write is **not** an
+/// endpoint.
+///
+/// `EndpointMissing` says "one of the link's endpoints has no entity" and
+/// crosses the bridge as `not_found`, which is right for a user naming an
+/// entity that has not synced yet -- and wrong for anything else. `0001`
+/// carries foreign keys on `knobas.context.anchor_id` and
+/// `sync.item.entity_id` as well, and violating one of those is knobas' own
+/// bug: `internal`, not "no such thing".
+///
+/// This is the test that keeps the claim honest as this crate grows writes.
+/// Classifying every 23503 crate-wide would pass every other test in this file
+/// and mislabel the first one of those writes that lands.
+#[tokio::test]
+async fn a_foreign_key_violation_outside_a_link_write_is_not_an_endpoint() {
+    let (pool, _t, _n) = seeded_pool().await;
+    let absent = EntityRef::new("jira", &format!("GONE-{}", Uuid::new_v4()));
+
+    let violated = sqlx::query(
+        "insert into knobas.context (id, kind, title, anchor_id) values ($1,'adhoc','ctx',$2)",
+    )
+    .bind(format!("ctx:{}", Uuid::new_v4()))
+    .bind(absent.to_string())
+    .execute(&pool)
+    .await
+    .expect_err("the anchor has no entity row, so the foreign key rejects it");
+
+    // The same conversion every `?` in this crate performs.
+    let classified = CoreError::from(violated);
+    assert!(
+        matches!(classified, CoreError::Db(_)),
+        "a foreign key that is not a link endpoint must stay a database fault, \
+         got {classified:?}"
+    );
+}
