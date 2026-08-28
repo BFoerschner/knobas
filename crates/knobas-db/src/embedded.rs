@@ -924,11 +924,23 @@ pub(crate) fn installation_dir() -> PathBuf {
 /// crate's own default has no version segment (`<install>/bin/pg_dump`), so
 /// both are tried.
 ///
-/// A search rather than a built path, so that the version knobas installed is
-/// the version the tool comes from: `pg_dump` refuses to dump a server newer
-/// than itself, and a hardcoded path would be a silently wrong one after a
-/// version bump.
+/// **The pinned version first, and any other only as a fallback.** The
+/// installation directory is shared with every other `postgresql_embedded`
+/// application on the machine, so it can hold several versions -- and
+/// `pg_dump` refuses to dump a server newer than itself. Taking whichever
+/// subdirectory `read_dir` happened to yield first would make a backup fail
+/// (or, worse, succeed against the wrong server) for a reason nothing in
+/// knobas would explain.
 pub(crate) fn find_tool(installation_dir: &Path, name: &str) -> Option<PathBuf> {
+    // `PG_VERSION_REQ` is a semver *requirement* (`=18.6.0`); the directory is
+    // named after the version alone.
+    let pinned = installation_dir
+        .join(PG_VERSION_REQ.trim_start_matches(['=', '^', '~', ' ']))
+        .join("bin")
+        .join(name);
+    if pinned.is_file() {
+        return Some(pinned);
+    }
     let direct = installation_dir.join("bin").join(name);
     if direct.is_file() {
         return Some(direct);
@@ -1271,6 +1283,51 @@ mod tests {
         let path = dir.join(name);
         std::fs::write(&path, contents).unwrap();
         path
+    }
+
+    /// The installation directory is shared with every other
+    /// `postgresql_embedded` application on the machine, so it can hold more
+    /// than one PostgreSQL. `pg_dump` refuses to dump a server newer than
+    /// itself, so picking whichever version `read_dir` yielded first would
+    /// make a backup fail against the very server knobas runs -- and the two
+    /// directories are indistinguishable to anything but the pin.
+    #[test]
+    fn a_tool_comes_from_the_pinned_version_when_several_are_installed() {
+        let install = tempfile::tempdir().unwrap();
+        let pinned = PG_VERSION_REQ.trim_start_matches('=');
+
+        for version in ["17.4.0", pinned, "19.0.0"] {
+            let bin = install.path().join(version).join("bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            write(&bin, "pg_dump", version);
+        }
+
+        let found = find_tool(install.path(), "pg_dump").expect("a pg_dump");
+        assert_eq!(
+            std::fs::read_to_string(&found).unwrap(),
+            pinned,
+            "{} is not the pinned version's tool",
+            found.display()
+        );
+    }
+
+    /// ...and a version-less layout (the crate's own default) still resolves.
+    #[test]
+    fn a_tool_is_still_found_without_a_version_directory() {
+        let install = tempfile::tempdir().unwrap();
+        let bin = install.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        write(&bin, "pg_dump", "flat");
+
+        assert_eq!(
+            find_tool(install.path(), "pg_dump"),
+            Some(bin.join("pg_dump"))
+        );
+        assert_eq!(
+            find_tool(install.path(), "pg_restore"),
+            None,
+            "a tool that is not there is absent, not a path that does not exist"
+        );
     }
 
     #[test]
