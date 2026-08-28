@@ -15,9 +15,9 @@
 //!   6) and **the route table is the allowlist**. Both answer a mistake with a
 //!   real error *and* a recorded [`Violation`](knobas_mockd::Violation), which
 //!   is why every test here ends with `assert_no_violations()`.
-//! * **Builds come back ascending by id** (mockd deviation 12), where real
-//!   TeamCity answers newest-first. Nothing below asserts an order, and
-//!   `sync`'s own unit tests run the same fixture through both orderings.
+//! * **Builds come back newest-first**, as they do on a real server. Nothing
+//!   below asserts an order anyway, and `sync`'s own unit tests run the same
+//!   fixture through both orderings so the run cannot come to depend on one.
 //!
 //! Expectations are **computed from `knobas_source_mock::fixture()`**, not
 //! hard-coded: mockd transcribes `build.num` to `build.id` and `build.cfg` to

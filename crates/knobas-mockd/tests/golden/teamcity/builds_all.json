@@ -1,60 +1,6 @@
 {
   "build": [
     {
-      "branchName": "main",
-      "buildType": {
-        "href": "/app/rest/buildTypes/id:Ledger_Deploy_Staging",
-        "id": "Ledger_Deploy_Staging",
-        "name": "Deploy Staging",
-        "paused": false,
-        "projectId": "Ledger",
-        "projectName": "Ledger",
-        "webUrl": "http://mockd.test/viewType.html?buildTypeId=Ledger_Deploy_Staging"
-      },
-      "buildTypeId": "Ledger_Deploy_Staging",
-      "finishDate": "20260821T162100+0000",
-      "href": "/app/rest/builds/id:412",
-      "id": 412,
-      "number": "412",
-      "queuedDate": "20260821T162000+0000",
-      "startDate": "20260821T162000+0000",
-      "state": "finished",
-      "status": "SUCCESS",
-      "statusText": "Success",
-      "triggered": {
-        "date": "20260821T162000+0000",
-        "type": "vcs"
-      },
-      "webUrl": "http://mockd.test/viewLog.html?buildId=412&buildTypeId=Ledger_Deploy_Staging"
-    },
-    {
-      "branchName": "feature/PAY-231-sepa-retry",
-      "buildType": {
-        "href": "/app/rest/buildTypes/id:Payout_IntegrationTests",
-        "id": "Payout_IntegrationTests",
-        "name": "IntegrationTests",
-        "paused": false,
-        "projectId": "Payout",
-        "projectName": "Payout",
-        "webUrl": "http://mockd.test/viewType.html?buildTypeId=Payout_IntegrationTests"
-      },
-      "buildTypeId": "Payout_IntegrationTests",
-      "finishDate": "20260822T101412+0000",
-      "href": "/app/rest/builds/id:1187",
-      "id": 1187,
-      "number": "1187",
-      "queuedDate": "20260822T101000+0000",
-      "startDate": "20260822T101000+0000",
-      "state": "finished",
-      "status": "FAILURE",
-      "statusText": "test sepa::retry::gives_up_after_max_attempts ... FAILED",
-      "triggered": {
-        "date": "20260822T101000+0000",
-        "type": "vcs"
-      },
-      "webUrl": "http://mockd.test/viewLog.html?buildId=1187&buildTypeId=Payout_IntegrationTests"
-    },
-    {
       "branchName": "feature/PAY-231-sepa-retry",
       "buildType": {
         "href": "/app/rest/buildTypes/id:Payout_Build",
@@ -86,6 +32,60 @@
         "type": "vcs"
       },
       "webUrl": "http://mockd.test/viewLog.html?buildId=1188&buildTypeId=Payout_Build"
+    },
+    {
+      "branchName": "feature/PAY-231-sepa-retry",
+      "buildType": {
+        "href": "/app/rest/buildTypes/id:Payout_IntegrationTests",
+        "id": "Payout_IntegrationTests",
+        "name": "IntegrationTests",
+        "paused": false,
+        "projectId": "Payout",
+        "projectName": "Payout",
+        "webUrl": "http://mockd.test/viewType.html?buildTypeId=Payout_IntegrationTests"
+      },
+      "buildTypeId": "Payout_IntegrationTests",
+      "finishDate": "20260822T101412+0000",
+      "href": "/app/rest/builds/id:1187",
+      "id": 1187,
+      "number": "1187",
+      "queuedDate": "20260822T101000+0000",
+      "startDate": "20260822T101000+0000",
+      "state": "finished",
+      "status": "FAILURE",
+      "statusText": "test sepa::retry::gives_up_after_max_attempts ... FAILED",
+      "triggered": {
+        "date": "20260822T101000+0000",
+        "type": "vcs"
+      },
+      "webUrl": "http://mockd.test/viewLog.html?buildId=1187&buildTypeId=Payout_IntegrationTests"
+    },
+    {
+      "branchName": "main",
+      "buildType": {
+        "href": "/app/rest/buildTypes/id:Ledger_Deploy_Staging",
+        "id": "Ledger_Deploy_Staging",
+        "name": "Deploy Staging",
+        "paused": false,
+        "projectId": "Ledger",
+        "projectName": "Ledger",
+        "webUrl": "http://mockd.test/viewType.html?buildTypeId=Ledger_Deploy_Staging"
+      },
+      "buildTypeId": "Ledger_Deploy_Staging",
+      "finishDate": "20260821T162100+0000",
+      "href": "/app/rest/builds/id:412",
+      "id": 412,
+      "number": "412",
+      "queuedDate": "20260821T162000+0000",
+      "startDate": "20260821T162000+0000",
+      "state": "finished",
+      "status": "SUCCESS",
+      "statusText": "Success",
+      "triggered": {
+        "date": "20260821T162000+0000",
+        "type": "vcs"
+      },
+      "webUrl": "http://mockd.test/viewLog.html?buildId=412&buildTypeId=Ledger_Deploy_Staging"
     }
   ],
   "count": 3,

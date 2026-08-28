@@ -157,10 +157,11 @@ async fn the_build_ids_and_numbers_are_the_fixture_nums() {
     assert_eq!(
         got,
         [
-            (412, "412", "Ledger_Deploy_Staging"),
-            (1187, "1187", "Payout_IntegrationTests"),
             (1188, "1188", "Payout_Build"),
-        ]
+            (1187, "1187", "Payout_IntegrationTests"),
+            (412, "412", "Ledger_Deploy_Staging"),
+        ],
+        "newest first"
     );
     s.assert_no_violations();
 }
@@ -175,7 +176,7 @@ async fn the_default_locator_hides_the_running_build() {
     .await;
     assert_eq!(
         ids(&v),
-        vec![412, 1187],
+        vec![1187, 412],
         "1188 is running and must be filtered by default"
     );
     s.assert_no_violations();
@@ -189,7 +190,7 @@ async fn default_filter_false_shows_everything() {
         "/app/rest/builds?locator=defaultFilter:false,count:100&fields=count,build(id)",
     )
     .await;
-    assert_eq!(ids(&v), vec![412, 1187, 1188]);
+    assert_eq!(ids(&v), vec![1188, 1187, 412]);
     s.assert_no_violations();
 }
 
@@ -276,14 +277,18 @@ async fn count_and_start_page_the_result() {
         "/app/rest/builds?locator=state:any,count:2&fields=count,build(id)",
     )
     .await;
-    assert_eq!(ids(&v), vec![412, 1187]);
+    assert_eq!(
+        ids(&v),
+        vec![1188, 1187],
+        "a page is taken off the newest end"
+    );
     assert_eq!(v["count"], 2, "count is the size of this page");
     let (_, v) = tc(
         &s.base_url(),
         "/app/rest/builds?locator=state:any,start:2,count:100&fields=count,build(id)",
     )
     .await;
-    assert_eq!(ids(&v), vec![1188]);
+    assert_eq!(ids(&v), vec![412], "...and `start:` skips from that end");
     s.assert_no_violations();
 }
 
@@ -294,7 +299,7 @@ async fn since_build_advances_only_past_finished_builds() {
         format!("/app/rest/builds?locator=sinceBuild:(id:{n}),count:100&fields=count,build(id)")
     };
     let (_, v) = tc(&s.base_url(), &q(0)).await;
-    assert_eq!(ids(&v), vec![412, 1187]);
+    assert_eq!(ids(&v), vec![1187, 412]);
     let (_, v) = tc(&s.base_url(), &q(412)).await;
     assert_eq!(ids(&v), vec![1187]);
     let (_, v) = tc(&s.base_url(), &q(1187)).await;
@@ -661,4 +666,46 @@ async fn the_new_names_are_still_a_closed_set() {
         st, 200,
         "a sub-name of an absent object is accepted -- see tc_fields::check_names"
     );
+}
+
+/// Deviation 12, closed: `/app/rest/builds` answers **newest first**, so
+/// `count:1` is the newest build rather than the oldest.
+///
+/// This is the one thing the vendored swagger cannot catch — it validates the
+/// shape of a response, never the order of a collection — so a mock that
+/// answered ascending taught every adapter written against it that `count:1`
+/// means "the oldest build", which is the opposite of what the same request
+/// does in production.
+///
+/// The expectation is computed from the fixture rather than written out, and
+/// the fixture's three ids are distinct, so an implementation that ignored the
+/// order entirely could not satisfy both halves.
+#[tokio::test]
+async fn builds_come_back_newest_first_so_count_1_is_the_newest_build() {
+    let mut newest_first: Vec<u64> = knobas_source_mock::fixture()
+        .builds
+        .iter()
+        .map(|b| u64::from(b.num))
+        .collect();
+    newest_first.sort_unstable_by(|a, b| b.cmp(a));
+
+    let s = spawn_mock_teamcity().await;
+    let (_, all) = tc(
+        &s.base_url(),
+        "/app/rest/builds?locator=defaultFilter:false,count:100&fields=count,build(id)",
+    )
+    .await;
+    assert_eq!(ids(&all), newest_first, "newest first, as real TeamCity");
+
+    let (_, one) = tc(
+        &s.base_url(),
+        "/app/rest/builds?locator=defaultFilter:false,count:1&fields=count,build(id)",
+    )
+    .await;
+    assert_eq!(
+        ids(&one),
+        newest_first[..1].to_vec(),
+        "count:1 is the newest build, not the oldest"
+    );
+    s.assert_no_violations();
 }

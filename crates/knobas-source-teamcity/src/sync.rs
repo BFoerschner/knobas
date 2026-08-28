@@ -134,8 +134,8 @@ pub(crate) async fn execute(
     //
     //    The map also fixes the emission order, which the queries do not:
     //    `BTreeMap<i64, _>` iterates ascending by build id, so the run emits
-    //    oldest-first whether the server answered newest-first (real TeamCity)
-    //    or ascending (`knobas-mockd`, its deviation 12). Keying on the *id*
+    //    oldest-first whether the server answered newest-first (both real
+    //    TeamCity and `knobas-mockd` do) or ascending. Keying on the *id*
     //    rather than on the entity key is what makes that numeric: the key's
     //    string order puts `build:1188` before `build:412`.
     let mut observed: BTreeMap<i64, &Rec<Build>> = BTreeMap::new();
@@ -377,9 +377,10 @@ mod tests {
     struct FakeRest {
         build_types: Vec<serde_json::Value>,
         builds: Vec<serde_json::Value>,
-        /// Newest first, as real TeamCity answers. `knobas-mockd` answers
-        /// ascending (its deviation 12), which is why the run may not depend
-        /// on either -- `tests/mockd.rs` is the other half of this pair.
+        /// Newest first, as both real TeamCity and `knobas-mockd` answer.
+        /// The ascending variant is kept because the run may not depend on
+        /// either order: it is the only thing left that can witness a
+        /// dependency on one, now that both servers agree.
         newest_first: bool,
         calls: Mutex<Vec<String>>,
     }
@@ -1053,8 +1054,9 @@ mod tests {
         );
     }
 
-    /// The run must not depend on the server's ordering: real TeamCity answers
-    /// newest-first, `knobas-mockd` answers ascending (its deviation 12).
+    /// The run must not depend on the server's ordering. Both real TeamCity
+    /// and `knobas-mockd` answer newest-first, so the ascending run here is
+    /// the only thing that can catch a dependency on the direction.
     ///
     /// This pins **determinism**, not direction: both runs pass through the
     /// same ordering, so they move together under any change to it. Direction

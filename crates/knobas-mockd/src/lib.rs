@@ -74,10 +74,7 @@
 //!     `fields=` accepts a name that is legal for the *type* even when this
 //!     particular instance does not carry it — asking a finished build for
 //!     `running-info` is a 200 without the key, not a 400.
-//! 12. **Builds come back ascending by id**, where real TeamCity returns the
-//!     newest first. Ascending is what makes `sinceBuild` paging obvious to read
-//!     in a test, and no knobas adapter depends on the order.
-//! 13. **Every build is `triggered.type: "vcs"` with no `triggered.user`.** The
+//! 12. **Every build is `triggered.type: "vcs"` with no `triggered.user`.** The
 //!     names are served — `triggered(type,date,user(username,name))` is a 200,
 //!     not the 400 it used to be, which is what lets
 //!     `knobas-source-teamcity` widen its `BUILD_FIELDS` without recording a

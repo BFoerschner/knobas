@@ -607,9 +607,19 @@ impl Locator {
         })
     }
 
+    /// Filters, orders **newest first**, then pages.
+    ///
+    /// The order is part of the contract, not a presentation detail:
+    /// `/app/rest/builds` answers newest-first on a real server, so `count:1`
+    /// is "the newest build" and a full page drops the *oldest* matches. An
+    /// adapter reads both of those as meaning, and the vendored swagger cannot
+    /// see either -- it validates the shape of a response, never the order of
+    /// a collection. `start:`/`count:` page over this order, so they page the
+    /// same way here as they do in production.
     fn apply(&self, all: Vec<TcBuild>) -> Vec<TcBuild> {
         let states = self.states();
-        all.into_iter()
+        let mut hits: Vec<TcBuild> = all
+            .into_iter()
             .filter(|b| states.contains(&b.state))
             .filter(|b| {
                 self.build_type
@@ -617,9 +627,12 @@ impl Locator {
                     .is_none_or(|t| &b.build_type_id == t)
             })
             .filter(|b| self.since_build.is_none_or(|n| b.id > n))
-            .skip(self.start)
-            .take(self.count)
-            .collect()
+            .collect();
+        // Sorted rather than reversed: `crate::state::MockState::builds`
+        // happens to hand these over ascending, and a `reverse()` would depend
+        // on that silently.
+        hits.sort_by_key(|b| std::cmp::Reverse(b.id));
+        hits.into_iter().skip(self.start).take(self.count).collect()
     }
 }
 
