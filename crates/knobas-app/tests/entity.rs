@@ -656,7 +656,7 @@ async fn a_link_made_from_its_two_ends_alone_is_related_manual_and_visible_from_
     assert_eq!(written.link.from_id, from);
     assert_eq!(written.link.to_id, to);
 
-    // Both ends, through the entity-detail read. `links_of` is undirected, so
+    // Both ends, through the entity-detail read. `entries_of` is undirected, so
     // the end the link was *not* drawn from is the half that would be missing
     // if the read were keyed on `from_id`.
     for end in [&from, &to] {
@@ -733,7 +733,7 @@ async fn a_note_travels_from_the_write_to_the_entity_detail_read() {
 /// second row.
 ///
 /// **In this direction.** The uniqueness rule is directed -- `link_active_idx`
-/// is on `(from_id, to_id, relation)` -- while `links_of` reads undirected, so
+/// is on `(from_id, to_id, relation)` -- while `entries_of` reads undirected, so
 /// `B -> A` after `A -> B` still succeeds and both panels then show two rows
 /// for one relationship. That is **#70**: pre-existing store behaviour that
 /// #52 wired up, ruled 2026-08-28 to be its own sub-issue rather than this
