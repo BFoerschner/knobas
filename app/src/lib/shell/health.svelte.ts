@@ -74,6 +74,18 @@ const ACTIONABLE: Record<AuthState, boolean> = {
  * is not the first made redundant — `AuthState` is a mirror of a Rust enum
  * across the IPC bridge, so a newer backend can hand over a variant that
  * satisfies no branch of the union the compiler checked.
+ *
+ * The widening costs something, and it is worth naming here rather than
+ * discovering later: every *other* caller — `launcher/format.ts`,
+ * `launcher/Board.svelte`, `shell/TopStrip.svelte`, `sources/SourceRow.svelte`
+ * and {@link Health.failing} — passes a `CredentialHealth.state`, which is
+ * required, so for them the parameter is now looser than the value. Were that
+ * field ever to become optional, those five would quietly read `false` instead
+ * of failing `svelte-check` — the same silent-safe direction the table above
+ * is a `Record` and not a `Set` to avoid. The trade is taken deliberately: one
+ * caller genuinely holds `undefined` (a chip naming a source the store has no
+ * row for), and a rule that cannot answer for its own missing case is a rule
+ * every caller has to finish.
  */
 export function isActionable(state: AuthState | undefined): boolean {
   return state !== undefined && ACTIONABLE[state] === true;

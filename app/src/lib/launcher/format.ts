@@ -55,6 +55,12 @@ export function provenance(
   now?: Date,
 ): { text: string; failing: boolean } {
   const health = sources.find((source) => source.source_id === sourceId);
+  // `health &&` is not the call-site guard #72 folded into the rule. That one
+  // was a second place deciding what "no reading yet" means; this one is a
+  // `find()` result checked before `health.state` is read — twice, once here
+  // and once in the branch body. `isActionable` answering `undefined` does not
+  // remove it, it only respells it as `health?.state` and costs the narrowing
+  // that `COMPLAINT[health.state]` below depends on.
   if (health && isActionable(health.state)) {
     return { text: `${sourceId} · ${COMPLAINT[health.state] ?? health.state}`, failing: true };
   }
