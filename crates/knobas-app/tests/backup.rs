@@ -201,7 +201,7 @@ async fn a_restored_backup_still_links_the_entities_a_later_sync_rebuilt() {
     let targets: Vec<&str> = detail
         .links
         .iter()
-        .map(|link| link.to_id.as_str())
+        .map(|entry| entry.link.to_id.as_str())
         .collect();
     assert!(
         targets.contains(&seeded.pr.as_str()),
@@ -209,7 +209,7 @@ async fn a_restored_backup_still_links_the_entities_a_later_sync_rebuilt() {
         detail.links
     );
     assert_eq!(
-        detail.links[0].relation, "implements",
+        detail.links[0].link.relation, "implements",
         "the relation is part of the link record (§5a)"
     );
     assert!(

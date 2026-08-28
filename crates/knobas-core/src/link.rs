@@ -88,14 +88,33 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for Origin {
 /// [`LinkRow`] is a `FromRow`, so a column this list forgets is not a compile
 /// error anywhere -- it is a decode failure at run time, in whichever of the
 /// three statements below was written without it. Naming them once is what
-/// stops `create`'s `returning`, `links_of`'s `select` and `unlink`'s
+/// stops `create`'s `returning`, `entries_of`'s `select` and `unlink`'s
 /// `returning` from drifting apart.
 ///
 /// A macro rather than a `const` because the statements are `concat!`ed at
-/// compile time, and `concat!` takes literals.
+/// compile time, and `concat!` takes literals -- which is also why the table
+/// alias is a parameter: [`entries_of`] joins a second table and every column
+/// there has to be qualified.
 macro_rules! link_columns {
-    () => {
-        "id, from_id, to_id, relation, origin, note, created_by, created_at"
+    ($prefix:literal) => {
+        concat!(
+            $prefix,
+            "id, ",
+            $prefix,
+            "from_id, ",
+            $prefix,
+            "to_id, ",
+            $prefix,
+            "relation, ",
+            $prefix,
+            "origin, ",
+            $prefix,
+            "note, ",
+            $prefix,
+            "created_by, ",
+            $prefix,
+            "created_at"
+        )
     };
 }
 
@@ -122,7 +141,7 @@ pub struct LinkRow {
 
 /// Link `from` to `to`, returning the row that was written.
 ///
-/// Links are directed as stated but read undirected by [`links_of`].
+/// Links are directed as stated but read undirected by [`entries_of`].
 ///
 /// The whole row and not just the id, for the reason
 /// [`crate::activity::record`] hands its row back: `id` and `created_at` are
@@ -134,7 +153,7 @@ pub struct LinkRow {
 /// # Errors
 ///
 /// The uniqueness this rests on is **directed** -- `link_active_idx` is on
-/// `(from_id, to_id, relation)` while [`links_of`] reads undirected, so the
+/// `(from_id, to_id, relation)` while [`entries_of`] reads undirected, so the
 /// same pair linked the other way round is not a duplicate here and shows as a
 /// second row on both ends. Known, filed as **#70**; do not read the error
 /// below as "this pair is linked".
@@ -156,7 +175,7 @@ pub async fn create(
         "insert into knobas.link (from_id, to_id, relation, origin, note, created_by)
          values ($1, $2, $3, $4, $5, $6)
          returning ",
-        link_columns!()
+        link_columns!("")
     ))
     .bind(from.to_string())
     .bind(to.to_string())
@@ -173,19 +192,69 @@ pub async fn create(
     Ok(row)
 }
 
+/// The end of a link that the reader is **not** looking at.
+///
+/// A link row carries two ids and nothing else, and an id is not something a
+/// person recognises: the panel has to say *what* was linked (spec §5a, #40's
+/// story 9). Resolved here rather than by a second read per row, because a
+/// detail view drawing ten links would otherwise make ten round trips.
+#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+pub struct LinkEnd {
+    pub entity_id: String,
+    pub kind: String,
+    /// The entity's own title. Untrusted source text: render it as text.
+    pub title: String,
+    /// Set when the source withdrew this entity.
+    ///
+    /// Not a filter -- a *fact* the reader is shown. A link may point at
+    /// something that vanished upstream, and hiding it would be a link that
+    /// dangles silently (#40's story 10).
+    pub deleted_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// One link, as a detail view draws it: the record, and its other end.
+#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+pub struct LinkEntry {
+    #[sqlx(flatten)]
+    pub link: LinkRow,
+    /// The end that is not the entity this was read for.
+    ///
+    /// Which end that is depends on who is reading, which is why this cannot
+    /// be resolved once and cached on the row: `A -> B` hydrates `B` on A's
+    /// detail and `A` on B's.
+    #[sqlx(flatten)]
+    pub other: LinkEnd,
+}
+
 /// Every active link `entity` takes part in, in either direction, newest
-/// first.
+/// first, with the other end of each resolved.
+///
+/// ## Why the join is on `knobas.entity` and not on `sync.live_item`
+///
+/// `sync.live_item` has the tombstone filter built in, and every *other*
+/// reader in the app is supposed to go through it. This one deliberately does
+/// not: §5a says a link may point at an entity the source withdrew, and such a
+/// link must stay visible and openable rather than vanishing from the panel.
+/// `knobas.entity` is the durable identity -- it survives the sweep, it
+/// carries `kind`, `title` and the tombstone itself -- so joining it is what
+/// makes "marked withdrawn" possible instead of "silently gone".
+///
+/// It is also the table that has a row for entities the mirror never had:
+/// notes and contexts are knobas' own (M2), and they are linkable.
 ///
 /// # Errors
 ///
 /// [`CoreError::Db`] if the query fails.
-pub async fn links_of(pool: &PgPool, entity: &EntityRef) -> Result<Vec<LinkRow>, CoreError> {
-    let rows = sqlx::query_as::<_, LinkRow>(concat!(
+pub async fn entries_of(pool: &PgPool, entity: &EntityRef) -> Result<Vec<LinkEntry>, CoreError> {
+    let rows = sqlx::query_as::<_, LinkEntry>(concat!(
         "select ",
-        link_columns!(),
-        " from knobas.link
-          where deleted_at is null and (from_id = $1 or to_id = $1)
-          order by created_at desc, id desc"
+        link_columns!("l."),
+        ", e.id as entity_id, e.kind, e.title, e.deleted_at
+           from knobas.link l
+           join knobas.entity e
+             on e.id = case when l.from_id = $1 then l.to_id else l.from_id end
+          where l.deleted_at is null and (l.from_id = $1 or l.to_id = $1)
+          order by l.created_at desc, l.id desc"
     ))
     .bind(entity.to_string())
     .fetch_all(pool)
@@ -214,7 +283,7 @@ pub async fn unlink(pool: &PgPool, id: Uuid) -> Result<Option<LinkRow>, CoreErro
         "update knobas.link set deleted_at = now()
          where id = $1 and deleted_at is null
          returning ",
-        link_columns!()
+        link_columns!("")
     ))
     .bind(id)
     .fetch_optional(pool)

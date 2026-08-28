@@ -8,16 +8,24 @@
 import { flushSync, mount, unmount } from "svelte";
 import { beforeEach, expect, test, vi } from "vitest";
 
-import type { EntityDetail } from "../ipc/entity";
+import type { EntityDetail, LinkEntry } from "../ipc/entity";
 
 /** A plain function, not a `vi.fn` — see the note in `shell/Tile.test.svelte.ts`. */
 const calls: string[] = [];
 let answer: (entityId: string) => Promise<EntityDetail> = () => Promise.resolve(detail());
 
+/** Link ids handed to `unlink`, and whether the command refuses. */
+const unlinked: string[] = [];
+let unlinkFails = false;
+
 vi.mock("../ipc/entity", () => ({
   getEntity: (entityId: string) => {
     calls.push(entityId);
     return answer(entityId);
+  },
+  unlink: async (linkId: string) => {
+    unlinked.push(linkId);
+    if (unlinkFails) throw { code: "not_found", message: "no such link", source_id: null };
   },
 }));
 
@@ -62,6 +70,7 @@ function render(props: { entityId?: string; kind?: string | null } = {}) {
   const target = document.createElement("div");
   document.body.append(target);
   const onclose = vi.fn();
+  const onnavigate = vi.fn();
   const app = mount(Detail, {
     target,
     props: {
@@ -69,12 +78,14 @@ function render(props: { entityId?: string; kind?: string | null } = {}) {
       kind: props.kind ?? "ticket",
       contextLabel: "All work",
       onclose,
+      onnavigate,
     },
   });
   flushSync();
   return {
     target,
     onclose,
+    onnavigate,
     /**
      * The panel's text with runs of whitespace collapsed.
      *
@@ -94,7 +105,9 @@ function render(props: { entityId?: string; kind?: string | null } = {}) {
 beforeEach(() => {
   calls.length = 0;
   opened.length = 0;
+  unlinked.length = 0;
   openerFails = false;
+  unlinkFails = false;
   answer = () => Promise.resolve(detail());
 });
 
@@ -301,6 +314,7 @@ test("a superseded read is discarded", async () => {
     kind: "ticket" as string | null,
     contextLabel: "All work",
     onclose: vi.fn(),
+    onnavigate: vi.fn(),
   });
   const app = mount(Detail, { target, props });
   flushSync();
@@ -369,53 +383,83 @@ test("a live entity has no withdrawn banner", async () => {
   screen.done();
 });
 
+/** A hydrated link entry, as `get_entity` now hands them over. */
+function link(over: {
+  id: string;
+  from?: string;
+  to?: string;
+  relation?: string;
+  note?: string | null;
+  otherKind?: string;
+  otherTitle?: string;
+  otherDeleted?: string | null;
+}): LinkEntry {
+  const from = over.from ?? "mock:PAY-231";
+  const to = over.to ?? "mock:payout-service#142";
+  return {
+    link: {
+      id: over.id,
+      from_id: from,
+      to_id: to,
+      relation: over.relation ?? "implements",
+      origin: "manual",
+      note: over.note ?? null,
+      created_by: "mara",
+      created_at: "2026-08-22T12:00:00Z",
+    },
+    other: {
+      entity_id: from === "mock:PAY-231" ? to : from,
+      kind: over.otherKind ?? "pr",
+      title: over.otherTitle ?? "Retry SEPA payouts behind the gateway",
+      deleted_at: over.otherDeleted ?? null,
+    },
+  };
+}
+
 /**
- * The links panel ships empty and says so honestly.
- *
- * M1 never writes `knobas.link`, so this is the only state it can be in — and
- * an empty panel with no explanation reads as a bug rather than as a milestone
- * boundary.
+ * The empty panel invites linking rather than explaining that linking is
+ * impossible — which is what it said through M1, and is no longer true.
  */
-test("the links panel is present, empty, and explains itself", async () => {
+test("the links panel is present, empty, and invites linking", async () => {
   const screen = render();
   await vi.waitFor(() => expect(screen.text()).toContain("Linked items"));
   flushSync();
 
   expect(screen.text()).toContain("Nothing linked yet");
-  const empty = [...screen.target.querySelectorAll(".empty")].find((node) =>
-    node.textContent?.includes("Nothing linked yet"),
-  );
-  expect(empty?.getAttribute("title")).toMatch(/M2/);
+  expect(screen.text()).toContain("Link this to");
+  // The M1 caveat lived in a `title` attribute, where `textContent` cannot see
+  // it, so the markup is what is asserted.
+  expect(screen.target.innerHTML).not.toContain("M2");
 
   screen.done();
 });
 
-/** A link, when there is one, shows the *other* end whichever way it was drawn. */
-test("a link renders the far end, in either direction", async () => {
+/**
+ * A link shows the *other* end whichever way it was drawn, by title and kind.
+ *
+ * The far end's id is deliberately **not** what the row says: the whole point
+ * of the hydrated read is that the reader recognises what they linked.
+ */
+test("a link renders the far end by title, in either direction", async () => {
   answer = () =>
     Promise.resolve(
       detail({
         links: [
-          {
+          link({
             id: "11111111-1111-1111-1111-111111111111",
-            from_id: "mock:PAY-231",
-            to_id: "mock:payout-service#142",
+            to: "mock:payout-service#142",
             relation: "implements",
-            origin: "manual",
-            note: null,
-            created_by: "mara",
-            created_at: "2026-08-22T12:00:00Z",
-          },
-          {
+            otherTitle: "Retry SEPA payouts behind the gateway",
+          }),
+          link({
             id: "22222222-2222-2222-2222-222222222222",
-            from_id: "mock:ENG-SEPA",
-            to_id: "mock:PAY-231",
+            from: "mock:ENG-SEPA",
+            to: "mock:PAY-231",
             relation: "documents",
-            origin: "suggested",
             note: "the retry storm postmortem",
-            created_by: "mara",
-            created_at: "2026-08-21T12:00:00Z",
-          },
+            otherKind: "page",
+            otherTitle: "SEPA retry runbook",
+          }),
         ],
       }),
     );
@@ -424,13 +468,115 @@ test("a link renders the far end, in either direction", async () => {
   await vi.waitFor(() => expect(screen.text()).toContain("implements"));
   flushSync();
 
-  expect(screen.text()).toContain("mock:payout-service#142");
-  expect(screen.text()).toContain("mock:ENG-SEPA");
+  expect(screen.text()).toContain("Retry SEPA payouts behind the gateway");
+  expect(screen.text()).toContain("SEPA retry runbook");
+  expect(screen.text()).toContain("the retry storm postmortem");
+  // The second link was drawn *at* this entity, so it reads inverted.
+  expect(screen.text()).toContain("documented by");
   expect(screen.text()).not.toContain("Nothing linked yet");
-  // Neither row is the entity being viewed.
-  const cells = [...screen.target.querySelectorAll(".row.g4 .t")].map((n) => n.textContent?.trim());
-  expect(cells).not.toContain("mock:PAY-231");
+  // Neither row names the entity being viewed.
+  const cells = [...screen.target.querySelectorAll(".lopen")].map((n) => n.textContent?.trim());
+  expect(cells.join(" ")).not.toContain("mock:PAY-231");
 
+  screen.done();
+});
+
+/** Story 8: a row is navigation, and the shell is the only navigator. */
+test("clicking a linked row asks the shell for the other end's address", async () => {
+  answer = () =>
+    Promise.resolve(
+      detail({
+        links: [
+          link({
+            id: "11111111-1111-1111-1111-111111111111",
+            to: "mock:payout-service#142",
+            otherKind: "pr",
+            otherTitle: "Retry SEPA payouts",
+          }),
+        ],
+      }),
+    );
+
+  const screen = render();
+  await vi.waitFor(() => expect(screen.text()).toContain("Retry SEPA payouts"));
+  flushSync();
+
+  const row = [...screen.target.querySelectorAll<HTMLButtonElement>(".lopen")][0]!;
+  row.click();
+  flushSync();
+
+  expect(screen.onnavigate).toHaveBeenCalledWith("#/pr/mock:payout-service%23142");
+
+  screen.done();
+});
+
+/**
+ * Story 11: one action, and the panel is right afterwards **without the
+ * reader reopening the detail**.
+ *
+ * The re-read is what is asserted, not a locally spliced array: the links
+ * array is the backend's answer, and a panel that edited its own copy would
+ * disagree with the next read.
+ */
+test("unlinking removes the row without reopening the detail", async () => {
+  const kept = link({ id: "22222222-2222-2222-2222-222222222222", otherTitle: "Kept link" });
+  const doomed = link({
+    id: "11111111-1111-1111-1111-111111111111",
+    to: "mock:payout-service#142",
+    otherTitle: "Doomed link",
+  });
+  let links = [doomed, kept];
+  answer = () => Promise.resolve(detail({ links }));
+
+  const screen = render();
+  await vi.waitFor(() => expect(screen.text()).toContain("Doomed link"));
+  flushSync();
+
+  // The backend is what forgets the link; the panel re-reads.
+  links = [kept];
+  const unlinkButton = [...screen.target.querySelectorAll<HTMLButtonElement>("button")].find(
+    (button) => button.textContent?.includes("Unlink"),
+  )!;
+  unlinkButton.click();
+
+  await vi.waitFor(() => expect(screen.text()).not.toContain("Doomed link"));
+  flushSync();
+
+  expect(unlinked).toEqual(["11111111-1111-1111-1111-111111111111"]);
+  expect(screen.text()).toContain("Kept link");
+  expect(calls).toEqual(["mock:PAY-231", "mock:PAY-231"]);
+  expect(screen.onclose).not.toHaveBeenCalled();
+
+  screen.done();
+});
+
+/** A refused unlink says so and leaves the row where it was. */
+test("an unlink that fails is reported and changes nothing", async () => {
+  unlinkFails = true;
+  answer = () =>
+    Promise.resolve(
+      detail({
+        links: [link({ id: "11111111-1111-1111-1111-111111111111", otherTitle: "Still here" })],
+      }),
+    );
+
+  const screen = render();
+  await vi.waitFor(() => expect(screen.text()).toContain("Still here"));
+  flushSync();
+
+  [...screen.target.querySelectorAll<HTMLButtonElement>("button")]
+    .find((button) => button.textContent?.includes("Unlink"))!
+    .click();
+
+  await vi.waitFor(() =>
+    expect(toasts.items.map((toast) => toast.text).join(" ")).toMatch(/no such link/),
+  );
+  flushSync();
+
+  expect(screen.text()).toContain("Still here");
+  expect(calls, "a refused unlink does not re-read").toEqual(["mock:PAY-231"]);
+
+  toasts.items = [];
   screen.done();
 });
 

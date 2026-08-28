@@ -159,6 +159,41 @@ export interface LinkRow {
   created_at: string;
 }
 
+/**
+ * The end of a link the reader is **not** on — `knobas_core::link::LinkEnd`.
+ *
+ * An id is not something a person recognises, so the panel draws these instead
+ * of `to_id`: the kind, the title, and whether the entity was withdrawn
+ * upstream.
+ */
+export interface LinkEnd {
+  /** `"<namespace>:<key>"` — the address a row navigates to. */
+  entity_id: string;
+  kind: string;
+  /** Raw source text. Render as text, never as markup (gotcha 7). */
+  title: string;
+  /**
+   * RFC 3339 when the source withdrew this entity, else `null`.
+   *
+   * Not a reason to hide the row — the opposite. §5a keeps the entity so a
+   * link never dangles, and the panel marks it instead.
+   */
+  deleted_at: string | null;
+}
+
+/**
+ * One link as the panel draws it — `knobas_core::link::LinkEntry`.
+ *
+ * Which end `other` holds depends on whose detail was read: `A → B` hydrates
+ * `B` on A's panel and `A` on B's. Direction and the inverse-label wording are
+ * the frontend's (`detail/relations.ts`), computed from `link.from_id` against
+ * the entity being viewed.
+ */
+export interface LinkEntry {
+  link: LinkRow;
+  other: LinkEnd;
+}
+
 /** Everything the detail slide-over draws — `EntityDetail` (interfaces §2.5). */
 export interface EntityDetail {
   row: EntityRow;
@@ -194,9 +229,10 @@ export interface EntityDetail {
   deleted_at: string | null;
   /**
    * The entity's confirmed links, newest first — undirected, so a link drawn
-   * from either end appears on both. `createLink`/`unlink` are what move it.
+   * from either end appears on both, each with the other end already resolved.
+   * `createLink`/`unlink` are what move it.
    */
-  links: LinkRow[];
+  links: LinkEntry[];
   /** This entity's own history, newest first (spec §12.1). */
   activity: ActivityRow[];
 }

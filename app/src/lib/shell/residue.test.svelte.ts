@@ -319,6 +319,7 @@ const CASES: Case[] = [
           kind: "ticket",
           contextLabel: "All work",
           onclose: () => {},
+          onnavigate: () => {},
         },
       }),
     }),

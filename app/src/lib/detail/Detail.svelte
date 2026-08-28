@@ -10,7 +10,7 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage, isIpcError } from "../ipc";
-  import { getEntity, type EntityDetail } from "../ipc/entity";
+  import { getEntity, unlink, type EntityDetail, type LinkEntry } from "../ipc/entity";
   import Monogram from "../shell/Monogram.svelte";
   import { kindRegistry } from "../shell/kind-registry.svelte";
   import { kindMonogram, kindSingular } from "../shell/kinds";
@@ -27,6 +27,7 @@
     kind,
     contextLabel,
     onclose,
+    onnavigate,
   }: {
     entityId: string;
     /** From the address. `null` for the `#/entity/<id>` alias. */
@@ -34,6 +35,13 @@
     /** The room this was opened over, for the crumb. */
     contextLabel: string;
     onclose: () => void;
+    /**
+     * Go to an address — a linked entity's own detail (spec §2).
+     *
+     * A callback rather than the router itself: the shell owns navigation, and
+     * a slide-over that wrote `location.hash` would be a second navigator.
+     */
+    onnavigate: (hash: string) => void;
   } = $props();
 
   let detail = $state<EntityDetail | null>(null);
@@ -59,6 +67,45 @@
         };
       });
   });
+
+  /**
+   * Re-read this entity without blanking the panel.
+   *
+   * What a *write* needs: after an unlink the links array is stale, and the
+   * reader is looking at the row that has to disappear. The mount effect above
+   * cannot do it — it clears `detail` first, so the whole slide-over would
+   * flash "Reading…" for one round trip after every small action.
+   *
+   * `token` is read and not bumped: this is the same read generation as the
+   * effect that opened the panel, so an answer that lands after the address
+   * moved on is dropped exactly as a slow first read would be.
+   */
+  async function refresh() {
+    const mine = token;
+    try {
+      const answer = await getEntity(entityId);
+      if (mine !== token) return;
+      detail = answer;
+    } catch (rejection) {
+      push({ text: `Could not re-read this item: ${ipcErrorMessage(rejection)}`, tone: "err" });
+    }
+  }
+
+  /**
+   * Withdraw a link, and show the result.
+   *
+   * No confirmation: re-linking the same pair is one action, so the removal is
+   * cheap to reverse (§5a's partial unique index is what makes that true).
+   */
+  async function removeLink(entry: LinkEntry) {
+    try {
+      await unlink(entry.link.id);
+    } catch (rejection) {
+      push({ text: `Could not unlink: ${ipcErrorMessage(rejection)}`, tone: "err" });
+      return;
+    }
+    await refresh();
+  }
 
   /**
    * Focus moves into the panel on open and back to the opener on close.
@@ -240,7 +287,12 @@
         <PayloadView {fields} />
       </div>
 
-      <LinksPanel entityId={detail.row.entity_id} links={detail.links} />
+      <LinksPanel
+        entityId={detail.row.entity_id}
+        links={detail.links}
+        onopen={onnavigate}
+        onunlink={(entry) => void removeLink(entry)}
+      />
       <HistoryPanel activity={detail.activity} />
     {/if}
   </div>

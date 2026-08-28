@@ -123,6 +123,7 @@
         kind={detail.kind}
         contextLabel={context.label}
         onclose={() => router.back()}
+        onnavigate={(hash) => router.go(hash)}
       />
     {/key}
   {/if}
