@@ -140,7 +140,7 @@ export class Session {
       const response = await this.#ports.search({
         raw: this.raw,
         limit: SEARCH_LIMIT,
-        filters: { sources: [], kinds: [], updated_within_days: null, mine: false },
+        filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
       });
       // The whole point of the counter. A stale answer is dropped *silently*:
       // a newer one is already on screen and there is nothing to report.

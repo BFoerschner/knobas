@@ -558,7 +558,10 @@ async fn every_filter_narrows_the_match_and_none_of_them_is_a_literal() {
     })
     .await;
     both.sort();
-    assert_eq!(both, [format!("sq-gitea:{tag}-2"), format!("sq-jira:{tag}-1")]);
+    assert_eq!(
+        both,
+        [format!("sq-gitea:{tag}-2"), format!("sq-jira:{tag}-1")]
+    );
     // A name nobody wrote under matches nothing rather than everything.
     assert!(
         only(EffectiveFilters {

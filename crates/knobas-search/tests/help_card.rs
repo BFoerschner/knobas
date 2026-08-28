@@ -51,8 +51,14 @@ fn wire(prefix: Prefix) -> String {
 /// `recognised` means the parser honoured the token: nothing greyed out, and
 /// the advertised prefix claimed. `reported` means the parser deliberately
 /// refused it and said so -- which is the promise the card makes by drawing
-/// that row greyed with a reason, and is exactly the state `author:` is in
-/// while open question **E-Q1** is unanswered.
+/// that row greyed with a reason, and is the state `env:` and `health:` are in
+/// until the estate arrives.
+///
+/// `author:` was in that second state until ruling **E-Q1** was granted, and
+/// this is the assertion that caught it: the parser started honouring the
+/// token while the card still said it did nothing. Catching that is the whole
+/// point of the walk, so the failure is worth recording rather than only
+/// fixing.
 #[test]
 fn every_row_of_the_help_card_does_what_it_says() {
     let vocab = Vocabulary::fixture();

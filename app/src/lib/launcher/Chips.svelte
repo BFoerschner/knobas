@@ -45,9 +45,6 @@
   function reason(token: string): string {
     const key = token.split(":")[0]?.toLowerCase() ?? "";
     if (token.startsWith("/")) return `no source matches ${token}`;
-    if (token.startsWith("@") || ["author", "owner", "by"].includes(key)) {
-      return "only @me filters by person today";
-    }
     if (key === "env" || key === "health") return "the estate arrives with assets";
     if (key === "type" || key === "kind") return "no such kind, or no value yet";
     if (key === "updated") return "not a duration — try today, 7d, 2w";
@@ -93,6 +90,12 @@
     }
     if (interpreted.filters.mine) {
       out.push({ key: "mine", text: "@me", title: "your configured accounts", fail: false });
+    }
+    // Named people, and only named people. `mine` is the chip above; the
+    // usernames it stands for never cross the bridge, so there is nothing here
+    // the user did not type.
+    for (const author of interpreted.filters.authors) {
+      out.push({ key: `author:${author}`, text: author, title: "author", fail: false });
     }
     return out;
   });

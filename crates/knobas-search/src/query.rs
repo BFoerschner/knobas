@@ -332,7 +332,7 @@ fn apply_token(token: &str, vocab: &Vocabulary, parsed: &mut Parsed, terms: &mut
     }
     if let Some(person) = token.strip_prefix('@') {
         parsed.claim_prefix(Prefix::Person);
-        apply_person(parsed, person, token);
+        apply_person(parsed, person);
         return;
     }
     if let Some(rest) = token.strip_prefix('#') {
@@ -421,7 +421,7 @@ fn apply_key_value(
         }
         "author" | "owner" | "by" => {
             parsed.claim_prefix(Prefix::Person);
-            apply_person(parsed, value, token);
+            apply_person(parsed, value);
         }
         // The estate's own keys. They have no home before M4, and demoting
         // them to search words would quietly widen the result set.
@@ -437,8 +437,10 @@ fn apply_key_value(
 /// username as its source spells it, the predicate is an equality, and folding
 /// the case here would only make the filter miss on any source that
 /// distinguishes it.
-fn apply_person(parsed: &mut Parsed, person: &str, token: &str) {
-    let _ = token;
+///
+/// The one person this cannot serve is somebody actually called `me`, and that
+/// is the right trade: `@me` is the filter §4 puts on a chip.
+fn apply_person(parsed: &mut Parsed, person: &str) {
     if person.eq_ignore_ascii_case("me") {
         parsed.query.filters.mine = true;
     } else if !person.is_empty() {
@@ -872,7 +874,10 @@ mod tests {
         let eff = merge(&parse("@me", &v), &SearchFilters::default());
         assert!(eff.mine);
         assert!(eff.authors().is_empty());
-        assert!(!eff.is_empty(), "`mine` is a filter even with nobody behind it");
+        assert!(
+            !eff.is_empty(),
+            "`mine` is a filter even with nobody behind it"
+        );
     }
 
     #[test]

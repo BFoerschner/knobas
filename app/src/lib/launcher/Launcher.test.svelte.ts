@@ -43,7 +43,7 @@ function response(over: Partial<SearchResponse> = {}): SearchResponse {
     interpreted: {
       text: "sepa",
       prefix: null,
-      filters: { sources: [], kinds: [], updated_within_days: null, mine: false },
+      filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
       unknown_tokens: [],
     },
     groups: [
@@ -481,7 +481,7 @@ test("an unknown token is greyed out with a reason rather than silently ignored"
           interpreted: {
             text: "",
             prefix: null,
-            filters: { sources: [], kinds: [], updated_within_days: null, mine: false },
+            filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
             unknown_tokens: ["env:prod", "/cf"],
           },
           groups: [],
@@ -543,6 +543,7 @@ test("a source chip is marked when that source is refusing the credential", asyn
               kinds: [],
               updated_within_days: null,
               mine: false,
+              authors: [],
             },
             unknown_tokens: [],
           },
@@ -561,6 +562,48 @@ test("a source chip is marked when that source is refusing the credential", asyn
   expect(failing).toEqual(["gitea"]);
 });
 
+/**
+ * The chip that ruling **E-Q1** made possible, and the two halves it keeps
+ * apart.
+ *
+ * `@me` and a named person are two dimensions of one predicate, and the
+ * launcher has to draw both — but only the name. The usernames `@me` resolved
+ * to stay in the backend: a chip row that listed them would be claiming a
+ * filter the user never typed, and the `@me` chip beside it already says the
+ * same thing.
+ */
+test("a named person is a chip, and nothing about them is greyed out", async () => {
+  open({
+    ports: {
+      launcherHome: async () => HOME,
+      search: async () =>
+        response({
+          interpreted: {
+            text: "sepa",
+            prefix: "person",
+            filters: {
+              sources: [],
+              kinds: [],
+              updated_within_days: null,
+              mine: true,
+              authors: ["jonas"],
+            },
+            unknown_tokens: [],
+          },
+        }),
+    },
+  });
+  await settle();
+  target.querySelector("input")!.value = "@me @jonas sepa";
+  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+
+  const chips = [...target.querySelectorAll(".fchip.on")].map((el) => el.textContent?.trim());
+  expect(chips).toEqual(["people", "@me", "jonas"]);
+  expect([...target.querySelectorAll(".fchip.off")]).toEqual([]);
+});
+
 test("`?` lists the syntax, and clicking a row inserts it", async () => {
   open({
     ports: {
@@ -570,7 +613,7 @@ test("`?` lists the syntax, and clicking a row inserts it", async () => {
           interpreted: {
             text: "",
             prefix: "help",
-            filters: { sources: [], kinds: [], updated_within_days: null, mine: false },
+            filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
             unknown_tokens: [],
           },
           groups: [],
