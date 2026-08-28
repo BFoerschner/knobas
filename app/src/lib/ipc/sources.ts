@@ -353,6 +353,25 @@ export function syncNowWithProgress(
 }
 
 /**
+ * **Backfill** one source: re-read it from the top and rewrite every mirrored
+ * item, ignoring the position it has stored. Same shape as {@link syncNow} —
+ * the run id resolves immediately and the run is watched on
+ * `EVENTS.syncState` — and the same in-flight rule, so pressing it twice does
+ * not start two full re-reads.
+ *
+ * What it is for: a *payload widening*. A scheduled sync re-fetches what
+ * changed upstream, and widening an adapter's field list changes nothing
+ * upstream, so an item nobody has touched keeps the narrower record for ever.
+ * This is the only thing that reaches it.
+ *
+ * It is the longest run a source ever does, and it deliberately tombstones
+ * nothing — the reasoning is on `knobas_sync::run_backfill`.
+ */
+export function backfillSource(sourceId: string): Promise<number> {
+  return invoke<number>("backfill_source", { sourceId });
+}
+
+/**
  * Start a sync for every enabled source that does not need a human, in id
  * order. Returns one run id per source it started.
  */

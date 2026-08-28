@@ -40,7 +40,7 @@ use tokio_util::sync::CancellationToken;
 use crate::config::{self, AuthState, CredentialHealth};
 use crate::progress::{Observed, ProgressSink, SyncPhase, SyncProgress};
 use crate::run_log::{self, RunResult, SyncOutcome, SyncTrigger};
-use crate::{SyncError, run_from_stored_cursor};
+use crate::{SyncError, run_backfill, run_from_stored_cursor};
 
 pub use crate::run_log::SourceSyncStatus;
 
@@ -280,12 +280,34 @@ async fn build_source(
     deps.registry.build(instance).map_err(RunFailure::Source)
 }
 
+/// What a run does with the position the source has stored.
+///
+/// Not a spelling of `SyncTrigger`, and deliberately a second axis: the
+/// trigger says *why* a run happened (schedule, *Sync now*, first run) and is
+/// written to `knobas.sync_run` for the diagnostics list, while this says what
+/// the run does and is never stored. A backfill is triggered manually and logs
+/// as `Manual`; adding a trigger spelling for it would need a migration to
+/// widen `sync_run_trigger_chk`, and would still be answering a different
+/// question.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RunMode {
+    /// Resume from the stored position: every scheduled run, *Sync now*, and
+    /// a source's first sync (which is cursor-less because nothing is stored
+    /// yet, not because the run asked for that).
+    #[default]
+    Incremental,
+    /// Ignore the stored position and re-read the source from the top, without
+    /// sweeping -- [`crate::run_backfill`], which is where the reasoning is.
+    Backfill,
+}
+
 /// Run one source, and say what happened. Writes nothing to the log itself --
 /// [`settle`] does that -- so a test can assert on the verdict directly.
 pub async fn execute_run(
     deps: &SchedulerDeps,
     source_id: &str,
     run_id: i64,
+    mode: RunMode,
     progress: Option<Arc<dyn ProgressSink>>,
     started: std::time::Instant,
 ) -> RunResult {
@@ -304,7 +326,7 @@ pub async fn execute_run(
         );
     }
 
-    match attempt(deps, source_id, run_id, progress.as_ref(), started).await {
+    match attempt(deps, source_id, run_id, mode, progress.as_ref(), started).await {
         Ok(report) => RunResult {
             outcome: SyncOutcome::Ok,
             counts: run_log::RunCounts::of(&report),
@@ -350,6 +372,7 @@ async fn attempt(
     deps: &SchedulerDeps,
     source_id: &str,
     run_id: i64,
+    mode: RunMode,
     progress: Option<&Arc<dyn ProgressSink>>,
     started: std::time::Instant,
 ) -> Result<crate::SyncReport, RunFailure> {
@@ -367,12 +390,19 @@ async fn attempt(
     // The decorator only exists when somebody attached a channel: a scheduled
     // run allocates nothing and reports nothing per item (P3). `Fetching` and
     // `Writing` are emitted from inside it, where they are true.
-    let report = match progress {
-        Some(sink) => {
+    let report = match (progress, mode) {
+        (Some(sink), RunMode::Incremental) => {
             let observed = Observed::new(source.as_ref(), run_id, started, Arc::clone(sink));
             run_from_stored_cursor(&mut conn, &deps.pool, &observed).await
         }
-        None => run_from_stored_cursor(&mut conn, &deps.pool, source.as_ref()).await,
+        (Some(sink), RunMode::Backfill) => {
+            let observed = Observed::new(source.as_ref(), run_id, started, Arc::clone(sink));
+            run_backfill(&mut conn, &deps.pool, &observed).await
+        }
+        (None, RunMode::Incremental) => {
+            run_from_stored_cursor(&mut conn, &deps.pool, source.as_ref()).await
+        }
+        (None, RunMode::Backfill) => run_backfill(&mut conn, &deps.pool, source.as_ref()).await,
     };
 
     // Explicit, and not left to `Drop`: `PgConnection::drop` closes the socket
@@ -633,7 +663,36 @@ impl Scheduler {
         trigger: SyncTrigger,
         progress: Option<Arc<dyn ProgressSink>>,
     ) -> Result<i64, TriggerError> {
-        self.inner.trigger(source_id, trigger, progress).await
+        self.inner
+            .trigger(source_id, trigger, RunMode::Incremental, progress)
+            .await
+    }
+
+    /// **Backfill** one source: the same run in every respect but one -- the
+    /// stored position is not used, so the source is re-read from the top and
+    /// every mirrored item is rewritten with whatever the adapter's *current*
+    /// query returns. [`crate::run_backfill`] carries the reasoning, including
+    /// why it does not sweep.
+    ///
+    /// It goes through the scheduler rather than around it because everything
+    /// the scheduler does for a run matters more here, not less: it is the
+    /// longest run a source ever does. The concurrency permit, the in-flight
+    /// dedupe (a double-click must not start two full re-reads), the
+    /// `sync_run` row the diagnostics view shows, the backoff and credential
+    /// health `settle` applies, and above all the run's **own** connection
+    /// (§10.6(c)) -- a full re-read on a pooled connection is exactly the
+    /// stall that requirement exists to prevent.
+    ///
+    /// Logged as [`SyncTrigger::Manual`]: only a person starts one, and the
+    /// trigger vocabulary is a database check constraint, so a spelling of its
+    /// own would need a migration.
+    ///
+    /// # Errors
+    /// [`TriggerError`].
+    pub async fn backfill(&self, source_id: &str) -> Result<i64, TriggerError> {
+        self.inner
+            .trigger(source_id, SyncTrigger::Manual, RunMode::Backfill, None)
+            .await
     }
 
     /// Trigger every enabled source that does not need a human, id order.
@@ -655,7 +714,7 @@ impl Scheduler {
             }
             ids.push(
                 self.inner
-                    .trigger(&cfg.id, SyncTrigger::Manual, None)
+                    .trigger(&cfg.id, SyncTrigger::Manual, RunMode::Incremental, None)
                     .await?,
             );
         }
@@ -709,6 +768,7 @@ impl Inner {
         self: &Arc<Self>,
         source_id: &str,
         trigger: SyncTrigger,
+        mode: RunMode,
         progress: Option<Arc<dyn ProgressSink>>,
     ) -> Result<i64, TriggerError> {
         if self.cancel.is_cancelled() {
@@ -738,7 +798,7 @@ impl Inner {
 
         let inner = Arc::clone(self);
         let id = source_id.to_owned();
-        let handle = tokio::spawn(async move { inner.run_task(id, run_id, progress).await });
+        let handle = tokio::spawn(async move { inner.run_task(id, run_id, mode, progress).await });
         let mut tasks = self.tasks.lock().await;
         tasks.retain(|task| !task.is_finished());
         tasks.push(handle);
@@ -751,6 +811,7 @@ impl Inner {
         self: Arc<Self>,
         source_id: String,
         run_id: i64,
+        mode: RunMode,
         progress: Option<Arc<dyn ProgressSink>>,
     ) {
         // The permit is what caps concurrency. Acquired *after* the log row
@@ -773,7 +834,7 @@ impl Inner {
                     biased;
                     () = self.cancel.cancelled() => cancelled_result(),
                     result = execute_run(
-                        &self.deps, &source_id, run_id, progress.clone(), started,
+                        &self.deps, &source_id, run_id, mode, progress.clone(), started,
                     ) => result,
                 }
             }
@@ -835,7 +896,10 @@ async fn tick_loop(inner: Arc<Inner>) {
                     };
                     // `UnknownSource` here means the source was deleted between
                     // the query and the claim: nothing to report.
-                    if let Err(error) = inner.trigger(&source.id, trigger, None).await {
+                    if let Err(error) = inner
+                        .trigger(&source.id, trigger, RunMode::Incremental, None)
+                        .await
+                    {
                         match error {
                             TriggerError::ShuttingDown => return,
                             other => {

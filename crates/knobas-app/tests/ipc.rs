@@ -217,6 +217,7 @@ fn invoke_managing(
             knobas_app::commands::sources::credential_health,
             knobas_app::commands::sources::sync_now,
             knobas_app::commands::sources::sync_now_with_progress,
+            knobas_app::commands::sources::backfill_source,
             knobas_app::commands::sources::sync_all,
             knobas_app::commands::sources::sync_status,
             knobas_app::commands::sources::list_sync_runs,
@@ -323,7 +324,7 @@ const SOURCES_NOT_READY: &str = "not_ready";
 /// The mistake this catches is the one an append-only handler list invites:
 /// adding a command and forgetting the list, which is a frontend failing at run
 /// time with "command not found" and a Rust side that compiles perfectly.
-/// Sixteen commands is well past the point where that is noticed by hand.
+/// Seventeen commands is well past the point where that is noticed by hand.
 #[test]
 fn every_sources_command_is_registered_and_reachable() {
     // A complete argument list per command, in the camelCase spelling Tauri
@@ -362,6 +363,7 @@ fn every_sources_command_is_registered_and_reachable() {
             "sync_now_with_progress",
             serde_json::json!({ "sourceId": "mock", "progress": "__CHANNEL__:1" }),
         ),
+        ("backfill_source", serde_json::json!({ "sourceId": "mock" })),
         ("sync_all", serde_json::json!({})),
         ("sync_status", serde_json::json!({})),
         (

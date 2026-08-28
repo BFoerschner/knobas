@@ -195,6 +195,7 @@ pub fn run() {
             commands::sources::credential_health,
             commands::sources::sync_now,
             commands::sources::sync_now_with_progress,
+            commands::sources::backfill_source,
             commands::sources::sync_all,
             commands::sources::sync_status,
             commands::sources::list_sync_runs,

@@ -233,6 +233,38 @@ pub async fn sync_now_with_progress<R: tauri::Runtime>(
         .map_err(|error| to_ipc(&error.into(), Some(&source_id)))
 }
 
+/// **Backfill** one source: re-read it from the top and rewrite every mirrored
+/// item, ignoring the position it has stored.
+///
+/// Same shape as [`sync_now`] -- the run id comes back immediately (P3) and the
+/// run itself is watched on `sync:state` -- and the same in-flight rule, so
+/// pressing it twice does not start two full re-reads.
+///
+/// This is what makes a *payload widening* reach items nobody has touched. A
+/// scheduled run re-fetches what changed upstream, and widening an adapter's
+/// field list changes nothing upstream, so without this an issue last edited
+/// last year keeps whatever the narrower query stored -- for ever
+/// (`knobas_sync::run_backfill`, and issue #32, where Jira's `fields=` gained
+/// `parent` and epic membership had to reach every already-mirrored issue).
+///
+/// It is the longest run a source ever does, and it deliberately does **not**
+/// tombstone anything: the reasoning is on `knobas_sync::run_backfill`.
+///
+/// # Errors
+/// As [`sync_now`].
+#[tauri::command]
+pub async fn backfill_source<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    source_id: String,
+) -> Result<i64, IpcError> {
+    let state = crate::sources::state(&app)?;
+    state
+        .scheduler
+        .backfill(&source_id)
+        .await
+        .map_err(|error| to_ipc(&error.into(), Some(&source_id)))
+}
+
 /// Start a sync for every enabled source that does not need a human. Returns
 /// one run id per source it started, in id order.
 #[tauri::command]
