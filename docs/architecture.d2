@@ -33,18 +33,21 @@
 #                     as a diff touching most of the file. Normalise that hash
 #                     (`s/d2-[0-9]*/H/g`) before reading a render diff, or the
 #                     real change is invisible in the noise.
-#   architecture.png  does NOT reproduce. Chrome's text rasterisation moved
-#                     between the version that made the committed file and
-#                     Chrome 151: re-rendering the *identical* SVG changes
-#                     0.62% of channel bytes (76% of them by +/-1) and the file
-#                     size by ~10%. So a PNG regenerated for a small edit
-#                     carries that unrelated churn with it.
+#   architecture.png  reproduces exactly on a FIXED Chrome (two renders of one
+#                     SVG are byte-identical) but NOT across Chrome versions --
+#                     it is a rasteriser artefact, not a vector one. Text
+#                     antialiasing moved between the Chrome that made the
+#                     2026-08-24 file and Chrome 151.0.7922.175: re-rendering
+#                     the *identical* SVG changed 0.62% of channel bytes (76%
+#                     of them by exactly +/-1) and the file size by ~10%.
+#                     Expect that churn on any Chrome upgrade, and do not read
+#                     it as a diagram change -- the SVG is the artefact to
+#                     diff when you want to know what actually moved.
 #
-# ADR-0003 (2026-08-28) edited the SPI bullet below and regenerated the SVG.
-# The PNG was deliberately left at its older Chrome rendering rather than
-# commit ~600 KB of antialiasing churn alongside a two-line text change. It is
-# therefore one bullet out of date. Regenerate it with the command above when
-# something is changing the PNG anyway.
+# ADR-0003 (2026-08-28) edited the SPI bullet below and regenerated both. The
+# PNG diff of that commit decomposes into the edit itself -- 15,526 bytes in a
+# 27x240 px band at rows 1835-1861, measured against a same-Chrome control --
+# and ~600 KB of the antialiasing churn described above.
 
 # Palette: graphite + hairlines, amber reserved for the one thing that is
 # moving (the in-flight branch). The page paints its own soft ground rather
