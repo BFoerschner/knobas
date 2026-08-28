@@ -1399,6 +1399,113 @@ mod tests {
         );
     }
 
+    /// The loss class the opening in-flight poll **traded** rather than
+    /// closed, and the ceiling closes.
+    ///
+    /// Build 1100 is queued after the poll, so the poll cannot have seen it,
+    /// and it is still running when the finished query goes out, so that query
+    /// cannot see it either. It is in neither set: nothing emits it and
+    /// nothing clamps below it. Build 1200 was queued later still and finished
+    /// inside the same run, which is what pushes `max_finished` to 1200 -- and
+    /// a watermark at 1200 puts 1100 permanently out of `sinceBuild`'s reach,
+    /// with a full sync being a window rather than the corpus, so not even a
+    /// cursor reset recovers it.
+    ///
+    /// The ceiling is the highest build id in existence when the run started,
+    /// 1000 here. Everything queued afterwards has an id above it, so a
+    /// watermark that may not pass it cannot skip any of them. The cost is
+    /// re-fetching 1200 next run, and upserts are idempotent.
+    ///
+    /// 1200 is what makes this fixture able to fail: without a build that both
+    /// appeared and finished inside the run, `max_finished` would never rise
+    /// above the ceiling and a run with no ceiling at all would land on the
+    /// same number.
+    #[tokio::test]
+    async fn a_build_queued_after_the_opening_poll_is_not_skipped() {
+        let rest = MidRun::new(
+            vec![build_type("Payout_Build", "Payout")],
+            vec![build(1000, "Payout_Build", "Payout", "finished")],
+            vec![
+                build(1000, "Payout_Build", "Payout", "finished"),
+                build(1100, "Payout_Build", "Payout", "running"),
+                build(1200, "Payout_Build", "Payout", "finished"),
+            ],
+        );
+        let mut sink = VecSink(Vec::new());
+        let cursor = execute(
+            "teamcity",
+            &TeamCityConfig::default(),
+            &rest,
+            Some(r#"{"v":1,"since_build_id":900}"#.to_owned()),
+            &mut sink,
+        )
+        .await
+        .expect("run");
+        assert_eq!(
+            cursor, r#"{"v":1,"since_build_id":1000}"#,
+            "1000 was the newest build in existence when the run opened; 1100 was queued after \
+             the poll and is still running, so the watermark may not pass 1000 or `sinceBuild` \
+             will never offer 1100 again"
+        );
+    }
+
+    /// The ceiling counts builds that are **in flight** at run start, not only
+    /// finished ones -- which is what `defaultFilter:false` on the ceiling
+    /// query buys, and the whole reason it is there.
+    ///
+    /// Build 1100 belongs to a foreign configuration and is running when the
+    /// run opens, so it does not clamp: a scoped source must not be held below
+    /// a build it will never emit ([`cursor::advance`]'s asymmetry). It
+    /// finishes during the run and turns up in the global finished query, and
+    /// a foreign *finished* build is exactly the case the watermark must
+    /// advance past, or the incremental query re-offers it on every poll for
+    /// good.
+    ///
+    /// TeamCity's default filter hides unfinished builds, so a ceiling taken
+    /// without `defaultFilter:false` would name 1000 here and pin the
+    /// watermark there -- reinstating, through the ceiling, the very clamp the
+    /// asymmetry removes.
+    #[tokio::test]
+    async fn the_ceiling_counts_the_builds_in_flight_at_run_start() {
+        let types = vec![
+            build_type("Payout_Build", "Payout"),
+            build_type("Ledger_Deploy_Staging", "Ledger"),
+        ];
+        let rest = MidRun::new(
+            types,
+            vec![
+                build(1000, "Payout_Build", "Payout", "finished"),
+                build(1100, "Ledger_Deploy_Staging", "Ledger", "running"),
+            ],
+            vec![
+                build(1000, "Payout_Build", "Payout", "finished"),
+                build(1100, "Ledger_Deploy_Staging", "Ledger", "finished"),
+            ],
+        );
+        let cfg = TeamCityConfig::from_json(&serde_json::json!({ "project_ids": ["Payout"] }))
+            .expect("config");
+        let mut sink = VecSink(Vec::new());
+        let cursor = execute(
+            "teamcity",
+            &cfg,
+            &rest,
+            Some(r#"{"v":1,"since_build_id":900}"#.to_owned()),
+            &mut sink,
+        )
+        .await
+        .expect("run");
+        assert_eq!(
+            keys(&sink.0),
+            ["buildType:Payout_Build", "build:1000"],
+            "1100 is foreign and is not emitted"
+        );
+        assert_eq!(
+            cursor, r#"{"v":1,"since_build_id":1100}"#,
+            "1100 existed when the run opened, so the ceiling is 1100 and the foreign build it \
+             saw finish is free to move the watermark"
+        );
+    }
+
     /// The emission order is the run's own, asserted against the property
     /// rather than against another run.
     ///
