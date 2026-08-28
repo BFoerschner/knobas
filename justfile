@@ -40,11 +40,33 @@ check: fmt front clippy clippy-libs inventory test
 # one platform and not another, and the file is written on macOS and checked on
 # `ubuntu-latest`, so it cannot be pinned by a list that has to match on both.
 # Each line there costs the gate one test and is argued for in place.
+#
+# The scratch file is per-invocation, from `mktemp`. It used to be a fixed
+# `/tmp` path, which two `just check` runs on one machine -- the parallel
+# worktrees this repo is worked in -- wrote at the same time, so the `diff`
+# read a half-written or foreign file and the gate failed on lines belonging to
+# nobody's tree. A gate that can fail for reasons unconnected to its own diff
+# is one everybody learns to re-run, which is how a real `-` line gets waved
+# through; that is the failure this recipe exists to prevent, so its scratch
+# file cannot be shared.
+#
+# `inventory-update` keeps writing `test-inventory.txt` directly, because that
+# path is inside the worktree and no two worktrees share it. It is not atomic,
+# though: the redirect in `_inventory-write` truncates the file the moment the
+# pipeline starts, and the first stage of that pipeline is a cargo build. So a
+# `just check` running *in the same worktree* can still diff against a
+# half-written committed file, and an interrupted `inventory-update` leaves an
+# empty one behind (`git checkout test-inventory.txt` restores it). That window
+# is narrow -- cargo's target-dir lock serialises most of it -- and no other
+# worktree can reach it, so it is not the race fixed here; closing it is a
+# separate change.
 inventory:
     #!/usr/bin/env bash
     set -euo pipefail
-    just _inventory-write /tmp/knobas-inventory-actual.txt
-    if ! diff -u test-inventory.txt /tmp/knobas-inventory-actual.txt; then
+    actual=$(mktemp "${TMPDIR:-/tmp}/knobas-inventory-actual.XXXXXX")
+    trap 'rm -f "$actual"' EXIT
+    just _inventory-write "$actual"
+    if ! diff -u test-inventory.txt "$actual"; then
         echo >&2
         echo "error: the test inventory does not match test-inventory.txt." >&2
         echo "  '-' lines are tests that no longer exist. If that is deliberate," >&2
