@@ -126,6 +126,7 @@ vi.mock("../ipc/sources", () => ({
       secret_expires_at: null,
     }),
   credentialHealth: () => deferred([]),
+  syncStatus: () => deferred([]),
   listSyncRuns: () => deferred([]),
   dbStats: () =>
     deferred({
@@ -167,6 +168,7 @@ const Detail = (await import("../detail/Detail.svelte")).default;
 const Launcher = (await import("../launcher/Launcher.svelte")).default;
 const QueryBox = (await import("../launcher/QueryBox.svelte")).default;
 const AddSource = (await import("../sources/AddSource.svelte")).default;
+const Diagnostics = (await import("../sources/Diagnostics.svelte")).default;
 const ReenterSecret = (await import("../sources/ReenterSecret.svelte")).default;
 const SourcesView = (await import("../sources/SourcesView.svelte")).default;
 const { createHealth } = await import("./health.svelte");
@@ -359,6 +361,11 @@ const CASES: Case[] = [
     open: (target) => ({
       app: mount(AddSource, { target, props: { onclose: () => {}, onsaved: () => {} } }),
     }),
+  },
+  {
+    name: "Diagnostics",
+    source: "lib/sources/Diagnostics.svelte",
+    open: (target) => ({ app: mount(Diagnostics, { target, props: {} }) }),
   },
   {
     name: "ReenterSecret",

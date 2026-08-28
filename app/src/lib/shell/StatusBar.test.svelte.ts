@@ -14,6 +14,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import type { ActivityRow } from "../ipc/entity";
+import type { DbStats, SourceSyncStatus } from "../ipc/sources";
 
 const activityCalls: number[] = [];
 let activity: ActivityRow[] = [];
@@ -23,6 +24,25 @@ vi.mock("../ipc/entity", () => ({
     activityCalls.push(limit);
     return Promise.resolve(activity);
   },
+}));
+
+const statsCalls: number[] = [];
+let stats: DbStats | null = {
+  db_bytes: 222_298_112,
+  entity_count: 128,
+  item_count: 213,
+  per_source: [],
+  oldest_synced_at: null,
+  newest_synced_at: "2026-08-25T11:56:00Z",
+};
+let statuses: SourceSyncStatus[] = [];
+
+vi.mock("../ipc/sources", () => ({
+  dbStats: () => {
+    statsCalls.push(1);
+    return stats ? Promise.resolve(stats) : Promise.reject({ code: "not_ready", message: "starting", source_id: null });
+  },
+  syncStatus: () => Promise.resolve(statuses),
 }));
 
 /** The `listen` subscriptions, and whether each was torn down. */
@@ -41,6 +61,11 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 const { default: StatusBar } = await import("./StatusBar.svelte");
 
+/** The subscription for one event, by name — the bar holds two. */
+function subscription(event: string) {
+  return listeners.find((entry) => entry.event === event);
+}
+
 function lifecycle(ready: boolean) {
   return {
     ready,
@@ -53,10 +78,12 @@ function lifecycle(ready: boolean) {
   };
 }
 
-function render(ready: boolean) {
+const NOW = new Date("2026-08-25T12:00:00Z");
+
+function render(ready: boolean, now: Date = NOW) {
   const target = document.createElement("div");
   document.body.append(target);
-  const app = mount(StatusBar, { target, props: { lifecycle: lifecycle(ready) } });
+  const app = mount(StatusBar, { target, props: { lifecycle: lifecycle(ready), now } });
   flushSync();
   return {
     target,
@@ -70,9 +97,19 @@ function render(ready: boolean) {
 
 beforeEach(() => {
   activityCalls.length = 0;
+  statsCalls.length = 0;
   listeners.length = 0;
   resolveListen = [];
   activity = [];
+  statuses = [];
+  stats = {
+    db_bytes: 222_298_112,
+    entity_count: 128,
+    item_count: 213,
+    per_source: [],
+    oldest_synced_at: null,
+    newest_synced_at: "2026-08-25T11:56:00Z",
+  };
 });
 
 test("asks nothing while the database is still coming up", () => {
@@ -89,7 +126,9 @@ test("seeds from the log and then listens for changes", async () => {
 
   const screen = render(true);
   expect(activityCalls).toEqual([1]);
-  expect(listeners.map((l) => l.event)).toEqual(["activity:new"]);
+  // Both subscriptions, by name: the bar listens for the activity line and for
+  // the sync transitions that move its numbers.
+  expect(listeners.map((l) => l.event).sort()).toEqual(["activity:new", "sync:state"]);
 
   await vi.waitFor(() => expect(screen.text()).toContain("synced"));
   flushSync();
@@ -103,9 +142,9 @@ test("seeds from the log and then listens for changes", async () => {
 test("an activity:new event moves the line", async () => {
   const screen = render(true);
   resolveListen.forEach((resolve) => resolve());
-  await vi.waitFor(() => expect(listeners[0]).toBeDefined());
+  await vi.waitFor(() => expect(subscription("activity:new")).toBeDefined());
 
-  listeners[0]?.deliver({
+  subscription("activity:new")?.deliver({
     id: 9,
     at: "2026-08-22T14:31:00Z",
     actor: "user",
@@ -131,22 +170,24 @@ test("an activity:new event moves the line", async () => {
  */
 test("a subscription that resolves after unmount is cancelled anyway", async () => {
   const screen = render(true);
-  expect(listeners).toHaveLength(1);
+  expect(listeners.length, "the bar installed no subscriptions at all").toBeGreaterThan(0);
 
   screen.done();
   resolveListen.forEach((resolve) => resolve());
-  await vi.waitFor(() => expect(listeners[0]?.off).toBe(true));
+  // *Every* one of them, not just the first: a bar that cancelled one of its
+  // two would fail an assertion about `listeners[0]` only half the time.
+  await vi.waitFor(() => expect(listeners.filter((entry) => !entry.off)).toEqual([]));
 });
 
-/** ...and one that resolved first is cancelled on teardown. */
+/** ...and ones that resolved first are cancelled on teardown. */
 test("a live subscription is cancelled on teardown", async () => {
   const screen = render(true);
   resolveListen.forEach((resolve) => resolve());
-  await vi.waitFor(() => expect(listeners[0]).toBeDefined());
+  await vi.waitFor(() => expect(listeners.length).toBeGreaterThan(0));
   await Promise.resolve();
 
   screen.done();
-  await vi.waitFor(() => expect(listeners[0]?.off).toBe(true));
+  await vi.waitFor(() => expect(listeners.filter((entry) => !entry.off)).toEqual([]));
 });
 
 /**
@@ -155,15 +196,119 @@ test("a live subscription is cancelled on teardown", async () => {
  * A `0` there would be a claim — "this knobas holds nothing" — that nobody
  * checked, and the reader has no way to tell it apart from a real zero.
  */
-test("readings M1 cannot answer are dashes, and pending writes is a real zero", () => {
+test("readings it has not got yet are dashes, and pending writes is a real zero", () => {
   const screen = render(true);
 
+  // Before `db_stats` answers. A `0` here would be a claim — "this knobas
+  // holds nothing" — that nobody checked.
   expect(screen.text()).toContain("postgres knobas · —");
   expect(screen.text()).toContain("— entities · — items");
-  expect(screen.text()).toContain("next in —");
   expect(screen.text()).toContain("pending writes 0");
   // No identity model until M2, so no user slot at all.
   expect(screen.text()).not.toContain("mara");
+
+  screen.done();
+});
+
+test("the database size and counts come from db_stats once it answers", async () => {
+  const screen = render(true);
+  await vi.waitFor(() => expect(statsCalls.length).toBe(1));
+  flushSync();
+
+  expect(screen.text()).toContain("postgres knobas · 212 MB");
+  expect(screen.text()).toContain("128 entities · 213 items");
+
+  screen.done();
+});
+
+test("db_stats failing leaves dashes rather than zeroes", async () => {
+  stats = null;
+  const screen = render(true);
+  await vi.waitFor(() => expect(statsCalls.length).toBe(1));
+  flushSync();
+
+  expect(screen.text()).toContain("postgres knobas · —");
+  expect(screen.text()).toContain("— entities · — items");
+
+  screen.done();
+});
+
+test("the cadence and the countdown come from the soonest scheduled source", async () => {
+  statuses = [
+    {
+      source_id: "gitea",
+      running: false,
+      run_id: 2,
+      started_at: null,
+      last_finished_at: "2026-08-25T11:50:00Z",
+      last_outcome: "ok",
+      next_run_at: "2026-08-25T12:09:00Z",
+      backoff_until: null,
+    },
+    {
+      source_id: "jira",
+      running: false,
+      run_id: 1,
+      started_at: null,
+      last_finished_at: "2026-08-25T11:56:00Z",
+      last_outcome: "ok",
+      // Sooner, so this is the one the bar counts down to: a status bar
+      // showing the *latest* next run would sit at 9 minutes while a sync ran
+      // four minutes earlier.
+      next_run_at: "2026-08-25T12:04:20Z",
+      backoff_until: null,
+    },
+  ];
+  const screen = render(true);
+  await vi.waitFor(() => expect(screen.text()).toContain("4:20"));
+
+  screen.done();
+});
+
+test("a source that is not scheduled contributes no countdown", async () => {
+  statuses = [
+    {
+      source_id: "jira",
+      running: true,
+      run_id: 1,
+      started_at: "2026-08-25T11:59:00Z",
+      last_finished_at: null,
+      last_outcome: null,
+      // Null while a run is in flight (contract §2.3).
+      next_run_at: null,
+      backoff_until: null,
+    },
+  ];
+  const screen = render(true);
+  await vi.waitFor(() => expect(statsCalls.length).toBe(1));
+  flushSync();
+  expect(screen.text()).toContain("next in —");
+
+  screen.done();
+});
+
+test("a finished run re-reads the database numbers", async () => {
+  const screen = render(true);
+  await vi.waitFor(() => expect(statsCalls.length).toBe(1));
+
+  const sync = listeners.find((entry) => entry.event === "sync:state");
+  expect(sync, "the status bar does not listen for sync:state").toBeTruthy();
+  stats = { ...stats!, item_count: 400 };
+  (sync!.deliver as unknown as (payload: SourceSyncStatus) => void)({
+    source_id: "jira",
+    running: false,
+    run_id: 1,
+    started_at: null,
+    last_finished_at: "2026-08-25T11:59:00Z",
+    last_outcome: "ok",
+    next_run_at: "2026-08-25T12:14:00Z",
+    backoff_until: null,
+  });
+  flushSync();
+
+  await vi.waitFor(() => expect(screen.text()).toContain("400 items"));
+  // ...and the countdown moved with it, from the event's own payload.
+  expect(screen.text()).toContain("14:00");
 
   screen.done();
 });

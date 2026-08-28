@@ -32,6 +32,7 @@
   import { health as sharedHealth, type Health } from "../shell/health.svelte";
   import { push } from "../shell/toasts.svelte";
   import AddSource from "./AddSource.svelte";
+  import Diagnostics from "./Diagnostics.svelte";
   import ReenterSecret from "./ReenterSecret.svelte";
   import SourceRow from "./SourceRow.svelte";
 
@@ -61,6 +62,8 @@
   let deleting = $state<SourceSummary | null>(null);
   /** Whether the Add-source dialog is up. */
   let adding = $state(false);
+  /** Bumped on every finished run, so the diagnostics re-read themselves. */
+  let transitions = $state(0);
   let purge = $state(false);
 
   async function load() {
@@ -85,7 +88,12 @@
     let off: (() => void) | undefined;
 
     void listen<SourceSyncStatus>(EVENTS.syncState, (event) => {
-      if (!dead) statuses = { ...statuses, [event.payload.source_id]: event.payload };
+      if (dead) return;
+      statuses = { ...statuses, [event.payload.source_id]: event.payload };
+      // A run that has *finished* is a new row in the sync log and new numbers
+      // in the `.dbbar`. Counting transitions rather than re-fetching here
+      // keeps the decision to re-read where the reading lives.
+      if (!event.payload.running) transitions += 1;
     })
       .then((unlisten) => {
         // `listen` is itself an `invoke`, so it resolves a tick or more later —
@@ -216,6 +224,16 @@
           />
         {/if}
       {/each}
+
+      {#if sources.length > 0}
+        <!--
+          Below the list, not beside it: the diagnostics answer a question a
+          reader asks *after* looking at a row and finding it odd.
+          `reloadKey` moves on every sync transition, so a run that just
+          finished appears in the log without the reader refreshing.
+        -->
+        <Diagnostics {now} reloadKey={transitions} />
+      {/if}
 
       {#if sources.length === 0}
         <div class="empty">
