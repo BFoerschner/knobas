@@ -115,6 +115,11 @@ Gitea's per-repo budgets plus `full_sync_exhaustive: true` would meet the sweep 
 `full_sync_exhaustive: false`.** Written up at the top of the carry-overs doc; a reviewer should
 treat `true` alongside any cap as a blocking finding.
 
+> **Superseded in part by ADR-0003 (issue #31).** The flag is declared per *kind* now, so the
+> rule reads "a budgeted **kind** is never exhaustive" — `commit` and `pr` stay `false`, while
+> `repo` and `branch`, which nothing bounds, are `true`. `true` alongside a cap *on that kind* is
+> still a blocking finding.
+
 ## Needs you, not an agent
 
 - **Vendor the TeamCity swagger**: `cd testenv/specs && ./fetch.sh --teamcity`. Needs ~10 GB

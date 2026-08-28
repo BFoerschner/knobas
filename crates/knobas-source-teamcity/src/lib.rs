@@ -13,12 +13,13 @@
 //!
 //! # What this adapter does *not* claim
 //!
-//! [`SourceDescriptor::full_sync_exhaustive`](knobas_source::SourceDescriptor::full_sync_exhaustive)
-//! is `false`. A full sync fetches the newest `builds_per_config` finished
-//! builds per configuration, which is a window over the build history rather
-//! than the whole of it, so the engine's tombstone sweep must not run after
-//! one. Every other M1 adapter is exhaustive; this one is the reason the flag
-//! exists.
+//! [`KindInfo::full_sync_exhaustive`](knobas_source::KindInfo::full_sync_exhaustive)
+//! is `false` on **both** kinds this adapter emits. A full sync fetches the
+//! newest `builds_per_config` finished builds per configuration, which is a
+//! window over the build history rather than the whole of it, so the engine's
+//! tombstone sweep must not run after one. This adapter is the reason the flag
+//! exists; ADR-0003 moved it onto the kind, for adapters that need to answer
+//! both ways at once, and left TeamCity's answer where it was.
 
 mod client;
 mod config;
