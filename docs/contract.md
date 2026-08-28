@@ -291,6 +291,7 @@ One command carrying a query object, not a family of prefix commands, and **the 
 ```rust
 pub struct SearchQuery { pub raw: String, pub limit: u32, pub filters: SearchFilters }
 pub struct SearchFilters { pub sources: Vec<String>, pub kinds: Vec<String>,
+                           pub authors: Vec<String>,
                            pub updated_within_days: Option<u32>, pub mine: bool }
 pub struct ParsedQuery { pub text: String, pub prefix: Option<Prefix>,
                          pub filters: SearchFilters, pub unknown_tokens: Vec<String> }
@@ -679,6 +680,16 @@ Stream T note for the Gitea live suite: the seed **cannot** reproduce fixture PR
   `the_selectors_ask_for_nothing_outside_the_mock_contract` and its message).
 
 ### Amendments from the M2 hardening lane (2026-08-28, binding)
+
+- **§2.4 `SearchFilters` gains `authors: Vec<String>`** — no new grant: **E-Q1 was already
+  granted by name** in the per-stream rulings above. The struct listing simply predated the
+  `author:`/`@` tokens actually shipping, and is corrected here so §2.4 and the code agree.
+  Applied in issue #39. The IPC TS mirror gains the field in the same change; the wire-shape
+  test in `types.rs` is what forces the two halves to stay in step.
+  - `authors` is the *typed or chipped* people. What `mine` resolves to is kept separate inside
+    `EffectiveFilters` (`named_authors` vs `identity_authors`) and only unioned when the SQL is
+    bound — so `is_empty()` still counts a named person, and the response `echo()` never lists a
+    username the user did not type.
 
 - **§3a/§4 `full_sync_exhaustive` moves from `SourceDescriptor` to `KindInfo`** — ADR-0003,
   ratified 2026-08-27, applied in issue #31. Exhaustiveness is a property of each *kind*, not of
