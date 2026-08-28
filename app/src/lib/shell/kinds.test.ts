@@ -55,7 +55,13 @@ test("duplicate kinds collapse", () => {
 });
 
 test("labels and monograms come from the adapter when it declares them", () => {
-  const info = { id: "incident", label: "Incident", plural: "Incidents", monogram: "IN" };
+  const info = {
+    id: "incident",
+    label: "Incident",
+    plural: "Incidents",
+    monogram: "IN",
+    full_sync_exhaustive: true,
+  };
   expect(kindMonogram("incident", info)).toBe("IN");
   expect(kindMonogram("incident", null)).toBe("IN"); // fallback: first two letters, upper
   expect(kindLabel("build_config", null)).toBe("Build configs");
@@ -69,7 +75,13 @@ test("labels and monograms come from the adapter when it declares them", () => {
  * whoever emitted the row is the one who gets to name it (§3a).
  */
 test("a declared kind_info overrides the built-in vocabulary", () => {
-  const info = { id: "ticket", label: "Issue", plural: "Issues", monogram: "IS" };
+  const info = {
+    id: "ticket",
+    label: "Issue",
+    plural: "Issues",
+    monogram: "IS",
+    full_sync_exhaustive: true,
+  };
   expect(kindLabel("ticket", info)).toBe("Issues");
   expect(kindSingular("ticket", info)).toBe("Issue");
   expect(kindMonogram("ticket", info)).toBe("IS");
