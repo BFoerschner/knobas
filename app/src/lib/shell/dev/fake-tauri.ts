@@ -14,14 +14,29 @@
  * collided before:
  *
  * ```sh
- * cd app && npm run build && npx vite preview --port $PORT --strictPort &
+ * cd app && npx vite --port $PORT --strictPort &
  * "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
- *   --headless=new --disable-gpu --window-size=1440,900 \
+ *   --headless --disable-gpu --window-size=1440,900 \
  *   --user-data-dir=/tmp/knobas-qa-$USER-$PORT \
  *   --screenshot=/tmp/knobas-qa-$PORT.png \
  *   "http://localhost:$PORT/?fake-ipc#/ctx/all"
- * # attach the PNG to the PR; kill the preview server afterwards.
+ * # attach the PNG to the PR; kill the dev server afterwards.
  * ```
+ *
+ * **The dev server, not `vite preview`** — and this is a correction, because
+ * the convention as originally written could not work. `vite preview` serves
+ * the *production* build, where `import.meta.env.DEV` is `false`, this module
+ * is dropped from the bundle and `?fake-ipc` therefore does nothing at all.
+ * The symptom is a window stuck on "Starting the local database" for ever,
+ * which reads like a bug in the boot screen rather than a QA command pointed
+ * at the wrong server. (`grep -c fake-ipc app/dist/assets/*.js` is `0`, which
+ * is exactly the property the guard above promises.)
+ *
+ * A `--screenshot` is taken at the load event, and the shell is not finished
+ * booting then: it awaits a dynamic import and then polls `app_status`. For a
+ * screen that has to be *settled* — anything reading `db_stats` or
+ * `list_sync_runs` — drive Chrome over the DevTools Protocol and wait for the
+ * `.boot` element to go, rather than trusting `--virtual-time-budget`.
  *
  * `?fake-db=starting|migrating|failed` holds the boot screen on one state so
  * it can be photographed; without it the fake answers `ready` immediately.

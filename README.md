@@ -202,15 +202,21 @@ Any screen can be driven in a browser with a fixture behind `invoke`. **Pick
 your own port and user-data directory** — parallel agents have collided on this:
 
 ```bash
-cd app && npm run build && npx vite preview --port "$PORT" &
+cd app && npx vite --port "$PORT" --strictPort &
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
   --headless --disable-gpu --window-size=1440,900 \
   --user-data-dir="/tmp/knobas-qa-$PORT" \
   --screenshot=/tmp/shot.png "http://localhost:$PORT/?fake-ipc#/ctx/all"
 ```
 
-`?fake-ipc` opts in; without it even a dev build talks to the real backend, and
-the fixture is behind `import.meta.env.DEV` so it never reaches a bundle.
+`?fake-ipc` opts in; without it even a dev build talks to the real backend.
+**The dev server, not `vite preview`**: the fixture is behind
+`import.meta.env.DEV`, so a production build drops it and `?fake-ipc` does
+nothing — the window then sits on "Starting the local database" for ever.
+`?fake-db=starting|migrating|failed` holds the boot screen on one state.
+
+This checks layout and interaction, not the bridge. The end-to-end check is
+`just dev` or `just demo`.
 
 ### The mockup
 
