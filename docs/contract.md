@@ -291,7 +291,8 @@ One command carrying a query object, not a family of prefix commands, and **the 
 ```rust
 pub struct SearchQuery { pub raw: String, pub limit: u32, pub filters: SearchFilters }
 pub struct SearchFilters { pub sources: Vec<String>, pub kinds: Vec<String>,
-                           pub updated_within_days: Option<u32>, pub mine: bool }
+                           pub updated_within_days: Option<u32>, pub mine: bool,
+                           pub authors: Vec<String> }
 pub struct ParsedQuery { pub text: String, pub prefix: Option<Prefix>,
                          pub filters: SearchFilters, pub unknown_tokens: Vec<String> }
 #[serde(rename_all = "snake_case")]
@@ -680,6 +681,16 @@ Stream T note for the Gitea live suite: the seed **cannot** reproduce fixture PR
 
 ### Amendments from the M2 hardening lane (2026-08-28, binding)
 
+- **§2.4 `SearchFilters` gains `authors: Vec<String>`** — no new grant: **E-Q1 was already
+  granted by name** in the per-stream rulings above. The struct listing simply predated the
+  `author:`/`@` tokens actually shipping, and is corrected here so §2.4 and the code agree.
+  Applied in issue #39. The IPC TS mirror gains the field in the same change; the wire-shape
+  test in `types.rs` is what forces the two halves to stay in step.
+  - `authors` is the *typed or chipped* people. What `mine` resolves to is kept separate inside
+    `EffectiveFilters` (`named_authors` vs `identity_authors`) and only unioned when the SQL is
+    bound — so `is_empty()` still counts a named person, and the response `echo()` never lists a
+    username the user did not type.
+
 - **§3a/§4 `full_sync_exhaustive` moves from `SourceDescriptor` to `KindInfo`** — ADR-0003,
   ratified 2026-08-27, applied in issue #31. Exhaustiveness is a property of each *kind*, not of
   a source: Gitea walks repositories and branches to the end while `commits_per_repo` /
@@ -938,6 +949,17 @@ From this commit on, each of the following requires an orchestrator decision **a
 - `crates/knobas-app/src/{error,profile}.rs`.
 
 **Ratified exceptions to the frozen list** (recorded here because this section requires it):
+
+- **IPC schema**, issue #39 (2026-08-28): `SearchFilters` gained `authors: Vec<String>`, with the
+  matching field on the `app/src/lib/ipc` TS mirror. **Not a new grant** — the per-stream rulings
+  above already record "**E-Q1** `SearchFilters.authors` granted"; what was missing was the §2.4
+  listing and this entry. The field is additive and `#[serde(default)]`, so an older frontend
+  keeps deserialising. Ratified by the orchestrator on the review of PR #79 (2026-08-28); the
+  field sits last in the struct, after `mine`, matching `knobas-search/src/types.rs`.
+  - `authors` is the people the query **named** (`@jonas`, `author:jonas`, or an author chip).
+    What `mine` resolves to stays separate inside `EffectiveFilters` (`named_authors` vs
+    `identity_authors`) and is unioned only when the SQL is bound — so `is_empty()` still counts a
+    named person, and the response `echo()` never lists a username the user did not type.
 
 - `crates/knobas-app/src/error.rs`, stream F PR #19 (2026-08-25): `knobas_sync::SyncError` gained
   `NotConfigured { id }`, which made the `From<SyncError> for IpcError` match non-exhaustive and stopped
