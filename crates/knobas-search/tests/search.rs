@@ -462,7 +462,7 @@ async fn a_named_person_filters_with_or_without_search_text() {
     ] {
         let r = s.search(q(&raw)).await.unwrap();
         assert_eq!(ids(&r), [format!("jira:{t}-1")], "{raw:?}");
-        assert_eq!(r.interpreted.filters.authors, [hers.clone()], "{raw:?}");
+        assert_eq!(r.interpreted.filters.authors, [hers.as_str()], "{raw:?}");
         assert!(r.interpreted.unknown_tokens.is_empty(), "{raw:?}");
         assert_eq!(r.interpreted.prefix, Some(Prefix::Person), "{raw:?}");
         // A named person is not `mine`: reading it as the identity filter
