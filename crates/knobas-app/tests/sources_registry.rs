@@ -74,10 +74,45 @@ fn every_template_names_its_own_kind_and_declares_a_config_schema() {
     );
 }
 
+/// The adapter crates `knobas-app`'s own manifest links into the binary.
+///
+/// Read from `Cargo.toml` rather than listed here, because a listed one is a
+/// list somebody has to remember to extend -- and the test below is named for
+/// a property only the manifest can witness. Scoped to `[dependencies]`: a
+/// dev-dependency is not linked into the app, and `knobas-source` is the SPI
+/// rather than an adapter, which the trailing `-` excludes.
+fn linked_adapter_crates() -> Vec<&'static str> {
+    const MANIFEST: &str = include_str!("../Cargo.toml");
+    MANIFEST
+        .lines()
+        .skip_while(|line| line.trim() != "[dependencies]")
+        .skip(1)
+        .take_while(|line| !line.trim_start().starts_with('['))
+        .filter_map(|line| line.split_once('=').map(|(name, _)| name.trim()))
+        .filter(|name| name.starts_with("knobas-source-"))
+        .collect()
+}
+
 /// Every adapter compiled into the binary is reachable through the table. A
 /// crate that is a dependency but has no row is a source the Add-source form
 /// never offers -- which is the failure mode of an append-only table that
 /// somebody forgot to append to.
+///
+/// **Two oracles, because the named one cannot see the case that actually
+/// happened.** The loop is the strong check for the three crates it names: it
+/// calls each crate's own `descriptor_template`, so the kind it demands is the
+/// adapter's spelling rather than a string repeated here. But it can only look
+/// for names somebody wrote into it, and TeamCity went missing for a whole
+/// milestone underneath a green run of this test -- the crate was not a
+/// dependency, so the premise was false and the check was true and empty at
+/// once. Adding the dependency fixes that instance and leaves the mechanism:
+/// the *next* adapter can be linked with no row and no line here, and pass.
+///
+/// So the count is asserted against the manifest, which is the one document
+/// that cannot be out of date about what is linked. Equal counts mean one row
+/// per crate rather than merely the right total, because
+/// `every_template_names_its_own_kind_and_declares_a_config_schema` already
+/// rejects two rows claiming one kind.
 #[test]
 fn every_adapter_crate_linked_into_the_app_has_a_row() {
     let kinds: Vec<String> = Registry::builtin()
@@ -95,6 +130,15 @@ fn every_adapter_crate_linked_into_the_app_has_a_row() {
             "{expected:?} is linked into knobas-app but has no registry row: {kinds:?}"
         );
     }
+
+    let linked = linked_adapter_crates();
+    let (crates, rows) = (linked.len(), kinds.len());
+    assert_eq!(
+        crates, rows,
+        "knobas-app links {crates} adapter crates {linked:?} but the table has \
+         {rows} rows {kinds:?}; a crate that is a dependency with no row is a \
+         source the Add-source form never offers"
+    );
 }
 
 /// M1 is read-only toward every source (interfaces §4.1). The battery already

@@ -54,9 +54,11 @@ jobs:
       # the reason this comment used to give. It claimed a discovery matching
       # nothing "would make `shellcheck` exit 0 having examined no files at
       # all". Measured: bare `shellcheck` prints "No files specified." and
-      # exits **3** -- on 0.9.0 (what the `ubuntu-24.04` image this job runs on
-      # ships), on 0.10.0 and on 0.11.0 alike. The job fails either way and was
-      # never at risk of reporting green over nothing.
+      # exits **3** -- on 0.9.0, 0.10.0 and 0.11.0 alike. 0.9.0 is the version
+      # that decides this job *today*: it runs on `ubuntu-latest`, which
+      # currently resolves to `ubuntu-24.04`, whose image manifest ships
+      # shellcheck 0.9.0-1. The job fails either way and was never at risk of
+      # reporting green over nothing.
       #
       # What the guard actually buys is what that failure *says*. Without it
       # the step has already printed "shellchecking 0 scripts:" and then dies
