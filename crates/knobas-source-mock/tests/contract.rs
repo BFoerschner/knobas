@@ -34,6 +34,55 @@ async fn fixture_matches_the_brief() {
     );
 }
 
+/// Who pressed Run, transcribed rather than invented.
+///
+/// `mockups/shared/dataset.md` says it once, in Mara's worklog draft:
+/// "triggered build #1188 (11:45)". Nothing in the dataset names a person for
+/// #1187 or #412, so those two record none and stay VCS-triggered downstream.
+/// The mixture is the point: a fixture that gave every build the same
+/// triggerer could not tell an adapter that reads authorship apart from one
+/// that hard-codes it.
+#[tokio::test]
+async fn the_dataset_records_who_triggered_build_1188() {
+    let f = knobas_source_mock::fixture();
+    let by: Vec<(u32, Option<&str>)> = f
+        .builds
+        .iter()
+        .map(|b| (b.num, b.triggered_by.as_deref()))
+        .collect();
+    assert_eq!(by, [(1188, Some("mara")), (1187, None), (412, None)]);
+    assert!(
+        f.person("mara").is_some(),
+        "a triggerer is a Person::id, and a dangling one would index as nobody"
+    );
+}
+
+/// ...and the item carries it, so a search for the person who started a build
+/// finds the build. `author` is a `Person::id` here, the same as every other
+/// kind the mock emits.
+#[tokio::test]
+async fn a_build_item_names_its_triggerer_as_the_author() {
+    let mut sink = VecSink(Vec::new());
+    MockSource::default()
+        .sync(None, &mut sink)
+        .await
+        .expect("full sync");
+    let author = |key: &str| {
+        sink.0
+            .iter()
+            .find(|i| i.entity.key == key)
+            .unwrap_or_else(|| panic!("{key} emitted"))
+            .author
+            .clone()
+    };
+    assert_eq!(author("Payout_Build#1188").as_deref(), Some("mara"));
+    assert_eq!(
+        author("Payout_IntegrationTests#1187"),
+        None,
+        "the dataset names nobody for #1187, and inventing one would be indexed as if it had"
+    );
+}
+
 /// Every group of the dataset is present, at its full size -- a fixture that
 /// silently lost half its tickets would still satisfy the spot checks above.
 #[tokio::test]

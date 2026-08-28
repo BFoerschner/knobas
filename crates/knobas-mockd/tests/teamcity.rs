@@ -561,13 +561,20 @@ async fn the_mutators_advance_the_clock_and_stamp_the_build() {
 // so asking for it was a 400 + `UnknownField` violation rather than a field.
 // The adapter therefore hard-codes `SyncItem::author = None` for every build.
 //
-// These tests assert the *names are servable*, which is the half stream T owns.
-// They deliberately do **not** assert an author: `fixtures/tidewater/work.json`
-// records no triggerer for any of its three builds, and inventing one here
-// would put a fabricated person into `SyncItem::author`.
+// `triggered` is served from the fixture and from nowhere else. A person
+// invented here would flow through the adapter into `SyncItem::author` and be
+// indexed and searched as if `fixtures/tidewater/work.json` had said it, which
+// is why #28 refused to add one and the fixture gained `triggered_by` first.
 
+/// The fixture's triggerer, as TeamCity spells it: the person's `username` and
+/// `name` under `triggered.user`, and `type: "user"` rather than `"vcs"`.
+///
+/// The fixture names a person for one build and nobody for the other two, and
+/// both halves are asserted -- a serialiser that hard-coded either answer
+/// would fail one of them.
 #[tokio::test]
-async fn a_build_serves_the_triggered_subtree_the_adapter_will_widen_to() {
+async fn a_build_names_the_person_the_fixture_says_triggered_it() {
+    let f = knobas_source_mock::fixture();
     let s = spawn_mock_teamcity().await;
     let (st, v) = tc(
         &s.base_url(),
@@ -578,24 +585,49 @@ async fn a_build_serves_the_triggered_subtree_the_adapter_will_widen_to() {
     assert_eq!(st, 200, "{v}");
 
     let builds = v["build"].as_array().expect("a build array");
-    assert_eq!(builds.len(), 3, "the fixture's three builds: {v}");
+    assert_eq!(builds.len(), f.builds.len(), "the fixture's builds: {v}");
+    let mut named = 0;
     for b in builds {
+        let num = b["id"].as_u64().expect("an id") as u32;
+        let fixture_build = f
+            .builds
+            .iter()
+            .find(|x| x.num == num)
+            .unwrap_or_else(|| panic!("mockd served a build the fixture has not: {num}"));
         let t = &b["triggered"];
-        assert_eq!(
-            t["type"], "vcs",
-            "the fixture records no person pressing Run, and a VCS trigger is \
-             what a branch build is: {b}"
-        );
         assert_eq!(
             t["date"], b["queuedDate"],
             "the trigger fires when the build is queued: {b}"
         );
-        assert!(
-            t.get("user").is_none(),
-            "a VCS trigger has no user, and the fixture names none: {b}"
-        );
+        match fixture_build.triggered_by.as_deref() {
+            Some(id) => {
+                named += 1;
+                let p = f
+                    .person(id)
+                    .expect("the triggerer is a person in the fixture");
+                assert_eq!(t["type"], "user", "a person pressed Run: {b}");
+                assert_eq!(t["user"]["username"], p.username, "{b}");
+                assert_eq!(t["user"]["name"], p.name, "{b}");
+            }
+            None => {
+                assert_eq!(
+                    t["type"], "vcs",
+                    "the fixture records no person for this build, and a VCS trigger is what a \
+                     branch build is: {b}"
+                );
+                assert!(
+                    t.get("user").is_none(),
+                    "a VCS trigger has no user, and inventing one would be indexed as \
+                     authorship: {b}"
+                );
+            }
+        }
     }
-    // The whole point: asking for these names is no longer a violation.
+    assert!(
+        named > 0 && named < builds.len(),
+        "the fixture must name a triggerer for some builds and not others, or neither branch \
+         above can fail"
+    );
     s.assert_no_violations();
 }
 
@@ -651,20 +683,40 @@ async fn the_new_names_are_still_a_closed_set() {
         "each refusal is also a recorded violation"
     );
 
-    // The limit of that closed set, asserted rather than left as a surprise:
-    // `user` is `null` on every fixture build, and a null carries no key set,
-    // so a typo *inside* an absent object cannot be caught. Stream C widening
-    // to `triggered(user(username))` is safe; a widening to a misspelled
-    // sub-name would pass here and return nothing.
-    let (st, _) = tc(
+    // Sub-names of `triggered.user` are checked too, now that the fixture
+    // names a person: a null carries no key set, so before `triggered_by` this
+    // could only be accepted.
+    let (st, v) = tc(
         &s.base_url(),
         "/app/rest/builds?locator=state:any,count:100\
          &fields=count,build(id,triggered(user(nosuchfield)))",
     )
     .await;
     assert_eq!(
+        st, 400,
+        "a build with a real triggerer has a key set to validate against: {v}"
+    );
+
+    // ...and the limit that remains, asserted rather than left as a surprise:
+    // scope the answer to builds the fixture names nobody for and the check
+    // has nothing to work from again (deviation 11, one level down).
+    let quiet = knobas_source_mock::fixture()
+        .builds
+        .iter()
+        .find(|b| b.triggered_by.is_none())
+        .map(|b| b.cfg.clone())
+        .expect("the fixture has a build with no triggerer");
+    let (st, _) = tc(
+        &s.base_url(),
+        &format!(
+            "/app/rest/builds?locator=buildType:(id:{quiet}),state:any,count:100\
+             &fields=count,build(id,triggered(user(nosuchfield)))"
+        ),
+    )
+    .await;
+    assert_eq!(
         st, 200,
-        "a sub-name of an absent object is accepted -- see tc_fields::check_names"
+        "a sub-name of an absent object is still accepted -- see tc_fields::check_names"
     );
 }
 

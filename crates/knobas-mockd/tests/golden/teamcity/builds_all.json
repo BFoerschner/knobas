@@ -29,7 +29,11 @@
       "statusText": "Running",
       "triggered": {
         "date": "20260822T114500+0000",
-        "type": "vcs"
+        "type": "user",
+        "user": {
+          "name": "Mara Lindqvist",
+          "username": "mara.lindqvist"
+        }
       },
       "webUrl": "http://mockd.test/viewLog.html?buildId=1188&buildTypeId=Payout_Build"
     },

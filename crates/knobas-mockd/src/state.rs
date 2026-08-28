@@ -321,6 +321,9 @@ impl MockState {
             status_text: "Queued".to_owned(),
             percentage_complete: None,
             current_stage_text: None,
+            // A build the test harness queued is nobody's: the mutator is
+            // given a configuration and a branch, which is a VCS trigger.
+            triggered_by: None,
         });
         id
     }

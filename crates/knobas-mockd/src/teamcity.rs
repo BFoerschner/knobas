@@ -285,6 +285,10 @@ fn build_type_json(bt: &TcBuildType, base: &str) -> Value {
 }
 
 fn build_json(b: &TcBuild, base: &str, s: &MockState, types: &[TcBuildType]) -> Value {
+    let triggerer = b
+        .triggered_by
+        .as_deref()
+        .and_then(|id| knobas_source_mock::fixture().person(id));
     let queued = b.state == TcState::Queued;
     let running = b.state == TcState::Running;
     let running_info = running.then(|| {
@@ -315,20 +319,18 @@ fn build_json(b: &TcBuild, base: &str, s: &MockState, types: &[TcBuildType]) -> 
             .map(|t| build_type_json(t, base)),
         "running-info": running_info,
         // `triggered` is the only place TeamCity names the person who started
-        // a build, and `knobas-source-teamcity` already parses it -- but until
-        // this key existed, asking for it was a 400 + `UnknownField`, so the
-        // adapter hard-codes `SyncItem::author = None` for every build.
+        // a build, and it is what `knobas-source-teamcity` reads for
+        // `SyncItem::author`.
         //
-        // `user` is null, deliberately: `fixtures/tidewater/work.json` records
-        // no triggerer for any of its builds, and a fabricated person here
-        // would flow straight into `SyncItem::author` and be indexed as
-        // authorship. `type: "vcs"` is the honest reading of a fixture where
-        // nothing says a human pressed Run -- and a VCS trigger is exactly the
-        // case real TeamCity serves with no `user` at all.
+        // Who that is comes from the fixture and nowhere else: a person
+        // invented here would flow straight into `author` and be indexed and
+        // searched as if the dataset had said it. Where the fixture names
+        // nobody the trigger is `vcs` with no `user` at all, which is exactly
+        // what a real server serves for a branch build.
         "triggered": {
-            "type": "vcs",
+            "type": if triggerer.is_some() { "user" } else { "vcs" },
             "date": tc_date(b.start_date),
-            "user": Value::Null,
+            "user": triggerer.map(|p| json!({ "username": p.username, "name": p.name })),
         },
     })
 }

@@ -220,6 +220,11 @@ pub struct Build {
     pub branch: String,
     pub when: DateTime<Utc>,
     pub ticket: Option<String>,
+    /// [`Person::id`] of whoever started it, where the dataset says. `None` is
+    /// a build nothing in the dataset attributes to a person -- a VCS trigger
+    /// -- and not a person the transcription lost.
+    #[serde(default)]
+    pub triggered_by: Option<String>,
     /// Progress of a running build, e.g. ``"step 3/5 `cargo test`"``.
     pub step: Option<String>,
     pub duration: Option<String>,
@@ -526,7 +531,7 @@ fn items(source_id: &str) -> Vec<SyncItem> {
                     .into_iter()
                     .chain(b.log.clone()),
             ),
-            None,
+            b.triggered_by.clone(),
             Some(b.when),
             b,
             Some(format!(
