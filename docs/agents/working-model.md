@@ -23,6 +23,17 @@ Implementation now runs ticket-driven:
   own PR; only the orchestrating session touches `main` or merges; the repo-root checkout belongs
   to the orchestrating session.
 
+**Autopilot (added 2026-08-28 — Björn: stop only when something needs him).** `just autopilot
+[issue …]` drives the ticket loop unattended: it picks the next runnable `ready-for-agent` issue
+(open, every blocked-by closed, not an umbrella with open sub-issues), runs **one fresh `claude -p`
+session** for it — a new session per issue is the context clearing — and that session carries the
+issue through the flow above to squash-merge. Serial on purpose: the 2-worker machine cap below,
+and migrations as the #1 collision source. The one designed stop: a session that hits a genuine
+decision comments the question on its issue and swaps `ready-for-agent` → `ready-for-human`; the
+driver prints the comment and exits. Answer on the issue, relabel it `ready-for-agent`, rerun. A
+session that ends without closing or escalating stops the driver for inspection (exit 3, log path
+printed) — it never retries on its own. Logs land under `$TMPDIR/knobas-autopilot-logs/`.
+
 **Concurrency is bounded by the machine, not by task independence (rule, 2026-08-25 — learned the hard way).** Five implementers were dispatched at once because their streams were genuinely disjoint; within minutes all five were dead. Load average hit **79.7 on a 12-core / 16 GB machine**, three agents were killed by a 600 s no-progress watchdog, and one reported the cause plainly: "other agents' builds plus a zombie of my own were racing". Disjoint files do not mean disjoint *resources* — every Rust implementer runs `cargo build`/`cargo test --workspace` (measured: 56 s at 471 % CPU, i.e. ~4.7 cores) and most also start one embedded Postgres **per test binary**.
 
 The limits, until measurement says otherwise:
