@@ -594,9 +594,29 @@ async fn a_build_names_the_person_the_fixture_says_triggered_it() {
             .find(|x| x.num == num)
             .unwrap_or_else(|| panic!("mockd served a build the fixture has not: {num}"));
         let t = &b["triggered"];
+        // **Against the fixture, not against the sibling field.** The message
+        // here used to read "the trigger fires when the build is queued" over
+        // `t["date"] == b["queuedDate"]`, and it could not fail that way:
+        // `queuedDate`, `startDate` and `triggered.date` are all
+        // `tc_date(b.start_date)` in `teamcity.rs::build_json`, so the two
+        // sides of that comparison were one expression written twice. A
+        // serialiser that moved *both* off the build's own time -- to the
+        // finish, to the mock's clock -- still satisfied it.
+        //
+        // `f.builds[..].when` is the independent oracle: it is where
+        // `TcBuild::start_date` comes from, one layer below the response, so
+        // this pins each field to the dataset rather than to the other field.
+        // The `queuedDate` half is kept, now anchored the same way, because
+        // the adapter reads the two together.
+        let when = knobas_mockd::tc_state::tc_date(fixture_build.when);
         assert_eq!(
-            t["date"], b["queuedDate"],
-            "the trigger fires when the build is queued: {b}"
+            t["date"], when,
+            "the trigger's date is the build's own time, as the fixture records it: {b}"
+        );
+        assert_eq!(
+            b["queuedDate"], when,
+            "and the queue time is that same instant, which is what makes \
+             `triggered.date == queuedDate` true rather than a coincidence: {b}"
         );
         match fixture_build.triggered_by.as_deref() {
             Some(id) => {
