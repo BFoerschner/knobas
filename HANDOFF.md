@@ -93,9 +93,9 @@ Merged branches are kept on the remote deliberately. They look "unmerged" to
 - `just deps && just check` — the gate. First run downloads PostgreSQL 18.6 once to `~/.theseus`.
 - `just dev` (real profile) / `just demo` (separate profile, Tidewater fixture, own data dir,
   port and keychain service). Demo data cannot reach the real profile.
-- Per stream: read its report, `git worktree add .worktrees/<name> <branch>`, dispatch an
-  `implementer` with the remaining task briefs. Reviews go to `pr-reviewer-std`; `pr-reviewer`
-  (xhigh) is for frozen contracts, migrations, concurrency, secrets.
+- Per stream: read its report, `git worktree add .worktrees/<name> <branch>`, implement from
+  the GitHub Issue brief (mattpocock tdd). Reviews use the mattpocock code-review skill; the
+  deep pass is for frozen contracts, migrations, concurrency, secrets.
 - **Concurrency is bounded by the machine, not by task independence** — see roadmap §3. Two
   heavy Rust implementers is the safe default; a five-agent wave once drove load to 79.7 on
   12 cores and the watchdog killed three of them.
@@ -127,9 +127,10 @@ treat `true` alongside any cap as a blocking finding.
 
 ## The thing most worth carrying forward
 
-Nine process rules live in `.claude/agents/{implementer,pr-reviewer,pr-reviewer-std}.md`, and
-every one was earned by an agent discovering its own instrument had lied to it. They are the
-reason the review loop found what it found; read them before writing new agent definitions.
+Nine process rules lived in the agent definitions retired 2026-08-28 (git history:
+`git show 06ed97f:.claude/agents/pr-reviewer.md` and siblings), and every one was earned by an
+agent discovering its own instrument had lied to it. They are the reason the review loop found
+what it found; read them before briefing any agent that reviews.
 
 The recurring defect all session was **a check that measures a representation of the thing
 instead of the thing** — a lint satisfied by a comment mentioning it, a path substring standing
