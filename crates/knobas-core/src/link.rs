@@ -11,42 +11,31 @@
 //! therefore carry several links as long as their relations differ, and a
 //! withdrawn link may be recreated.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::CoreError;
 use crate::entity::EntityRef;
 
-/// Where a link came from.
-///
-/// Stored as lowercase text in `knobas.link.origin`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Origin {
-    /// Drawn by the user.
-    Manual,
-    /// Proposed by knobas and confirmed by the user.
-    Suggested,
-    /// Restored from an export.
-    Imported,
-    /// Mirrored from a relation the source system already states.
-    Source,
-    /// Drawn by knobas as a consequence of another action, e.g. linking an
-    /// asset to a ticket adding the asset to that ticket's context.
-    Implied,
-}
-
-impl Origin {
-    /// The value stored in the `origin` column.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Origin::Manual => "manual",
-            Origin::Suggested => "suggested",
-            Origin::Imported => "imported",
-            Origin::Source => "source",
-            Origin::Implied => "implied",
-        }
+crate::closed_vocabulary! {
+    /// Where a link came from.
+    ///
+    /// Stored as lowercase text in `knobas.link.origin`, whose
+    /// `link_origin_chk` (migration 0003) allows exactly these spellings --
+    /// and `ALL` is what the test that pins the two together walks.
+    pub enum Origin {
+        /// Drawn by the user.
+        Manual => "manual",
+        /// Proposed by knobas and confirmed by the user.
+        Suggested => "suggested",
+        /// Restored from an export.
+        Imported => "imported",
+        /// Mirrored from a relation the source system already states.
+        Source => "source",
+        /// Drawn by knobas as a consequence of another action, e.g. linking an
+        /// asset to a ticket adding the asset to that ticket's context.
+        Implied => "implied",
     }
 }
 
@@ -65,14 +54,13 @@ impl std::str::FromStr for Origin {
     type Err = UnknownOrigin;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "manual" => Ok(Origin::Manual),
-            "suggested" => Ok(Origin::Suggested),
-            "imported" => Ok(Origin::Imported),
-            "source" => Ok(Origin::Source),
-            "implied" => Ok(Origin::Implied),
-            other => Err(UnknownOrigin(other.to_owned())),
-        }
+        // Read off `ALL` rather than a second hand-written match: the point of
+        // declaring the enum as a closed vocabulary is that there is one list.
+        Origin::ALL
+            .iter()
+            .copied()
+            .find(|origin| origin.as_str() == s)
+            .ok_or_else(|| UnknownOrigin(s.to_owned()))
     }
 }
 
@@ -207,6 +195,42 @@ mod tests {
             assert_eq!(origin.as_str().parse(), Ok(origin));
         }
         assert!("confirmed".parse::<Origin>().is_err());
+    }
+
+    /// The enum and migration 0003's CHECK constraint are one list written in
+    /// two places, and neither may grow without the other: a variant the
+    /// constraint does not allow is an `INSERT` that fails at runtime, and a
+    /// spelling the enum does not know is a row [`Origin`]'s decoder refuses,
+    /// so the link cannot be read back at all.
+    ///
+    /// Driven by `ALL`, which is generated from the same variant list as the
+    /// enum, so a new origin necessarily reaches this assertion. The other
+    /// half of the pin -- the constraint as the live catalog reports it --
+    /// is in `crates/knobas-db/tests/schema.rs`.
+    ///
+    /// It reads `0003` because `0003` is where the constraint is, and applied
+    /// migrations are never edited: widening the vocabulary means a `0004`
+    /// that drops and re-adds it, and rewriting this test to read *that* file
+    /// is part of doing so, not an accident of it.
+    #[test]
+    fn the_origins_are_exactly_what_the_migration_allows() {
+        let migration = include_str!("../../knobas-db/migrations/0003_link_origin.sql");
+        let line = migration
+            .lines()
+            .find(|line| line.contains("check (origin in ("))
+            .expect("link_origin_chk is missing from 0003");
+
+        for origin in Origin::ALL {
+            assert!(
+                line.contains(&format!("'{}'", origin.as_str())),
+                "{origin:?} is a variant the constraint does not allow: {line}"
+            );
+        }
+        assert_eq!(
+            line.matches('\'').count() / 2,
+            Origin::ALL.len(),
+            "the constraint and the enum list different numbers of origins: {line}"
+        );
     }
 
     #[test]

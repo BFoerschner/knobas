@@ -6,7 +6,7 @@
 
 use chrono::{DateTime, Utc};
 
-closed_vocabulary! {
+knobas_core::closed_vocabulary! {
     /// What the last attempt to use a source's credential established.
     ///
     /// The wire spellings are the same five literals
