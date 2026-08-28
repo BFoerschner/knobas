@@ -132,13 +132,28 @@ export interface KindInfo {
   full_sync_exhaustive: boolean;
 }
 
-/** One link — `knobas_core::link::LinkRow`. Always empty in M1. */
+/** One link — `knobas_core::link::LinkRow`. */
 export interface LinkRow {
   id: string;
   from_id: string;
   to_id: string;
+  /**
+   * What kind of link this is — `"related"` unless one was named.
+   *
+   * Always **lower case**: the backend folds it on write, so `Blocks` and
+   * `blocks` are one relation and one panel group rather than two. Key the
+   * curated list and the inverse-label lookup on this spelling; capitalize
+   * for display from the whole string.
+   */
   relation: string;
   origin: "manual" | "suggested" | "imported" | "source" | "implied";
+  /**
+   * Why the link exists, in the user's own words, or `null`.
+   *
+   * `null` and not `""`: “no reason recorded” and “a reason recorded as
+   * nothing” are different facts, and only one of them is worth a line.
+   */
+  note: string | null;
   created_by: string;
   /** RFC 3339. */
   created_at: string;
@@ -177,7 +192,10 @@ export interface EntityDetail {
    * survives so links and notes still resolve (§5a).
    */
   deleted_at: string | null;
-  /** Always `[]` in M1: nothing writes `knobas.link` until M2. */
+  /**
+   * The entity's confirmed links, newest first — undirected, so a link drawn
+   * from either end appears on both. `createLink`/`unlink` are what move it.
+   */
   links: LinkRow[];
   /** This entity's own history, newest first (spec §12.1). */
   activity: ActivityRow[];
@@ -192,4 +210,47 @@ export interface EntityDetail {
  */
 export function getEntity(entityId: string): Promise<EntityDetail> {
   return invoke<EntityDetail>("get_entity", { entityId });
+}
+
+/**
+ * Draw a link between two entities — `knobas_app::commands::entity::create_link`.
+ *
+ * `relation` defaults to `"related"` and is folded to lower case; `note` is
+ * optional and kept as typed — it is prose, not a group key. Both are
+ * normalized backend-side, so a field the user left alone may be sent as `""`.
+ * The origin is always `"manual"` and is deliberately not suppliable: the
+ * other origins belong to the suggestion engine and to import.
+ *
+ * There is no matching read: an entity's links arrive with `getEntity`, and
+ * they are undirected, so a link drawn from either end is on both.
+ *
+ * Rejects with `invalid` for an id that is not an entity id or for an entity
+ * linked to itself, `not_found` when an endpoint is not in the local mirror —
+ * it has not synced yet — and `conflict` when that pair is already linked
+ * under that relation ("already linked"). Emits `EVENTS.activityNew`.
+ *
+ * The `conflict` is **directed**: the same pair linked the other way round is
+ * not refused, and shows as a second row on both ends. Known — see #70.
+ */
+export function createLink(
+  fromId: string,
+  toId: string,
+  relation?: string,
+  note?: string,
+): Promise<LinkRow> {
+  return invoke<LinkRow>("create_link", { fromId, toId, relation, note });
+}
+
+/**
+ * Withdraw a link — `knobas_app::commands::entity::unlink`.
+ *
+ * The row is kept, tombstoned, so the removal is remembered and the same pair
+ * can be linked again afterwards. Idempotent: withdrawing an already-withdrawn
+ * link resolves, writes no second activity line and emits nothing.
+ *
+ * Rejects with `invalid` for something that is not a link id and `not_found`
+ * for one nothing carries. Emits `EVENTS.activityNew`.
+ */
+export function unlink(linkId: string): Promise<void> {
+  return invoke<void>("unlink", { linkId });
 }

@@ -1,16 +1,16 @@
 <!--
   What this item is linked to — spec §5a's core object.
 
-  **Always empty in M1.** `knobas.link` exists (migration `0001`) and
-  `knobas_core::link` can write it, but nothing in M1 does: drawing a link is
-  the M2 identity release, and `EntityDetail.links` is `[]` for every entity
-  in this milestone (interfaces §2.5).
+  **No longer always empty.** It was, through M1 — `knobas.link` existed and
+  nothing wrote it. Links v1's tracer bullet (#52) gave the app
+  `createLink`/`unlink`, so `EntityDetail.links` now carries whatever the user
+  has drawn (interfaces §2.5).
 
-  It ships now because this panel is where every later milestone hangs — the
-  suggestion tray, *Link to…*, the unlink tombstone — and writing it against
-  the real `LinkRow` shape costs ten lines today and saves a redesign later.
-  What it must not do is *pretend*: the empty state says nothing is linked and
-  the reason it cannot be, and nothing on it is clickable.
+  This panel is where every later milestone hangs — the suggestion tray,
+  *Link to…*, the unlink tombstone — which is why it shipped against the real
+  `LinkRow` shape in M1. What is still M1-shaped and **not** this file's to fix
+  yet: the empty state's caveat text, the inverse labels, the note, click-through
+  and the unlink control are all #53's, which rewrites the panel.
 -->
 <script lang="ts">
   import type { LinkRow } from "../ipc/entity";

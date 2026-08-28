@@ -102,6 +102,10 @@ fn activity_row() -> ActivityRow {
     }
 }
 
+/// A link with **no** note, because `note` is the nullable field on this row
+/// and the file's second rule is that nullable fields are exercised as `None`:
+/// a `skip_serializing_if` added to it would drop the key and hand the panel
+/// `undefined` where the mirror promised `string | null`.
 fn link_row() -> LinkRow {
     LinkRow {
         id: uuid::Uuid::nil(),
@@ -109,6 +113,7 @@ fn link_row() -> LinkRow {
         to_id: "note:retry-storm".to_owned(),
         relation: "documents".to_owned(),
         origin: Origin::Manual,
+        note: None,
         created_by: "mara".to_owned(),
         created_at: at(),
     }
@@ -271,6 +276,7 @@ const LINK_ROW_FIELDS: &[&str] = &[
     "created_by",
     "from_id",
     "id",
+    "note",
     "origin",
     "relation",
     "to_id",
@@ -299,6 +305,24 @@ fn the_link_row_shape_matches_its_typescript_mirror() {
     );
     // ... and the enum serializes as the column value the union names.
     assert_eq!(wire["origin"], serde_json::json!(Origin::Manual.as_str()));
+
+    // `note` is the field Links v1 wires through (#40): a column since `0001`
+    // that reached nothing. Both of its states are checked, because they are
+    // different failures -- a dropped key is `undefined` where the mirror
+    // promised `string | null`, and a note that does not survive serialization
+    // is a reason the user typed and the panel never shows.
+    assert_eq!(
+        wire["note"],
+        serde_json::Value::Null,
+        "a link with no note keeps the key and nulls it"
+    );
+    let annotated = serde_json::to_value(LinkRow {
+        note: Some("why this link exists".to_owned()),
+        ..link_row()
+    })
+    .unwrap();
+    assert_shape("LinkRow", &annotated, LINK_ROW_FIELDS);
+    assert_eq!(annotated["note"], serde_json::json!("why this link exists"));
 }
 
 /// Everything the slide-over draws, and every nested shape inside it.

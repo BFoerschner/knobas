@@ -67,6 +67,10 @@ tracing = "0.1"
 # port the server came up on, whether it reused an existing data directory --
 # is dropped on the floor, and `tauri dev` is exactly when those are wanted.
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# `unlink` takes its link id as a string off the wire and parses it, so a
+# mistyped one is `invalid` rather than an argument Tauri refuses to decode at
+# all -- the same treatment `get_entity` gives a malformed entity id.
+uuid.workspace = true
 
 [dev-dependencies]
 # The CRUD tests inject an adapter that refuses to connect.
