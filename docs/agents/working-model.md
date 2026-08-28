@@ -17,14 +17,17 @@ Implementation now runs ticket-driven:
   reviewer in a throwaway worktree) and the **standard pass** (everything else).
 - **Termination is objective, not vibes:** the agent's work ends when findings are resolved AND
   `just check` is green; hard cap 3 review rounds, then Björn adjudicates.
-- **Merging is Björn's gate (amended 2026-08-28 — Björn: he reviews every PR before it merges).**
-  An agent never merges a PR. When findings are resolved and CI is green, it leaves the PR open,
-  notes on the PR that it is ready for review, and stops. Björn reviews and merges — squash-merge
-  (`gh pr merge --squash --delete-branch`) so `main` stays linear and GitHub-signed; one commit
-  per issue, short imperative subject.
+- **Merging is delegated to a merge-manager agent (amended 2026-08-28 — Björn, overriding the
+  review-gate rule set earlier the same day).** The *implementer* still never merges: it stops when
+  the PR is open. A separate **merge-manager** agent then runs the review pass, drives the fixes,
+  and squash-merges (`gh pr merge --squash --delete-branch`) so `main` stays linear; one commit per
+  issue, short imperative subject. A merge-manager merges only the one PR it was dispatched for.
+  **Merges stay serial** — one PR at a time, orchestrator-sequenced; every other open PR rebases
+  onto the new `main` before its own merge. Björn keeps the gate for milestone exits and for any
+  change to a frozen contract (`Source` trait / migrations baseline / IPC).
 - **Git rules:** an agent runs git only inside its own worktree/branch and `gh` only against its
-  own PR; nobody but Björn merges or touches `main`; the repo-root checkout belongs
-  to the orchestrating session.
+  own PR; a PR is merged only by its own merge-manager and nobody edits `main` directly; the
+  repo-root checkout belongs to the orchestrating session.
 
 **Concurrency is bounded by the machine, not by task independence (rule, 2026-08-25 — learned the hard way).** Five implementers were dispatched at once because their streams were genuinely disjoint; within minutes all five were dead. Load average hit **79.7 on a 12-core / 16 GB machine**, three agents were killed by a 600 s no-progress watchdog, and one reported the cause plainly: "other agents' builds plus a zombie of my own were racing". Disjoint files do not mean disjoint *resources* — every Rust implementer runs `cargo build`/`cargo test --workspace` (measured: 56 s at 471 % CPU, i.e. ~4.7 cores) and most also start one embedded Postgres **per test binary**.
 
@@ -50,13 +53,13 @@ The limits, until measurement says otherwise:
 
 Shifting left: implementers now **mutation-check their own load-bearing tests and paste the proof**. Vacuous tests were the most common finding across M0 — six-plus times, always caught downstream by an expensive reviewer. Catching them in the cheap seat removes that whole class from the review loop.
 
-**Worktree exclusivity (rule, Björn 08-24 — after an orchestrator merge collided with a live agent):** a worktree has exactly **one** owner at a time and that owner is whoever is live in it. One worktree per agent, created by the orchestrator, named in the dispatch, released when the agent reports and its work is **committed**. While an agent is live: nobody else edits files there, and the orchestrator runs **no** git command there — not a merge, not a rebase, not a `checkout`. The orchestrator's own git work (merging stream branches, resolving lockfiles, syncing `main`) happens in the repo-root checkout or a dedicated scratch worktree, never in a borrowed one. Sequential tasks stacking on one branch may reuse a worktree, but only strictly one-at-a-time with an explicit handover; when in doubt, give the next agent a fresh worktree branched from the previous task's committed head. Human gate: Björn reviews every PR before it merges (amended 2026-08-28; agent review approval readies a PR, it does not merge it), plus milestone exits and whenever a frozen contract (Source trait / migrations baseline / IPC) needs changing.
+**Worktree exclusivity (rule, Björn 08-24 — after an orchestrator merge collided with a live agent):** a worktree has exactly **one** owner at a time and that owner is whoever is live in it. One worktree per agent, created by the orchestrator, named in the dispatch, released when the agent reports and its work is **committed**. While an agent is live: nobody else edits files there, and the orchestrator runs **no** git command there — not a merge, not a rebase, not a `checkout`. The orchestrator's own git work (merging stream branches, resolving lockfiles, syncing `main`) happens in the repo-root checkout or a dedicated scratch worktree, never in a borrowed one. Sequential tasks stacking on one branch may reuse a worktree, but only strictly one-at-a-time with an explicit handover; when in doubt, give the next agent a fresh worktree branched from the previous task's committed head. Human gate (amended 2026-08-28 — a merge-manager agent now merges its own PR; see the Process section): milestone exits, and whenever a frozen contract (Source trait / migrations baseline / IPC) needs changing.
 
 **Branching model (decided 2026-08-24): trunk-based with short-lived task branches.** What actually keeps parallel features from breaking each other is not the branches — it's three structural rules; the branches just carry the work:
 
 1. **Streams own disjoint code.** The milestone streams are cut along crate/module boundaries (one crate per adapter, one component region per frontend surface), so concurrent PRs rarely touch the same files. Cross-cutting surfaces — the `Source` trait, the migrations directory, the IPC schema — are frozen and **single-writer (orchestrator)**; migrations are the #1 real-world collision source and are therefore requested from the orchestrator, never added inside a stream.
 2. **Branches stay short-lived: one task = one branch = one PR to `main`**, named `m<milestone>/<stream>-<slug>` (e.g. `m1/jira-adapter-incremental-sync`), merged within its review loop — typically hours-to-a-day of divergence, so merge-back is trivial by construction. Long-lived per-feature branches are the *cause* of unmergeable code, not the cure; we use them only when a feature genuinely can't land in working slices, as `feat/<name>` integration branches fed by the same task-PR loop and merged to `main` after one final full review. Pre-1.0 there is no release to protect, so a half-built feature ships to `main` simply not wired into navigation rather than living on a stale branch.
-3. **`main` must always pass `just check`, and merges are serial.** The implementer rebases onto `origin/main` before opening the PR and again whenever `main` moved during review (re-running `just check` after every rebase); the orchestrator merges one PR at a time and, when a merge conflicts with a still-open PR, has that PR's implementer rebase next (or has a fresh agent rebase faithfully to both sides' intent if the original is gone). GitHub Actions runs `just check` on every PR as the machine-enforced backstop (plan 01 task 11), independent of anyone's worktree.
+3. **`main` must always pass `just check`, and merges are serial.** The implementer rebases onto `origin/main` before opening the PR and again whenever `main` moved during review (re-running `just check` after every rebase); merges happen one PR at a time and, when a merge conflicts with a still-open PR, that PR's implementer rebases next (or has a fresh agent rebase faithfully to both sides' intent if the original is gone). GitHub Actions runs `just check` on every PR as the machine-enforced backstop (plan 01 task 11), independent of anyone's worktree.
 
 Other standing rules (HANDOFF §6) stay in force: worktrees under `.worktrees/` (gitignored), harness cap 20 but **never launch more than agreed — ask before scaling** (suggested default: 4–6 concurrent; M0 is sequential anyway — one implementer + one reviewer alive at a time), agents report raw data. Cost note: deep reviews are the expensive step by design; re-reviews stay affordable because the continued review context only examines the delta.
 
