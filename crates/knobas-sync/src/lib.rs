@@ -78,9 +78,14 @@ pub struct SyncReport {
     /// How many of them ended the run tombstoned.
     pub deleted: u64,
     /// Rows a **full** sync tombstoned because this run did not see them
-    /// (hard-delete reconciliation). Always 0 for an incremental run, for an
-    /// adapter whose full sync is not exhaustive, and for a full sync that
-    /// emitted nothing -- see [`SWEEP`].
+    /// (hard-delete reconciliation). Counts only rows of a kind that declared
+    /// `full_sync_exhaustive` *and* emitted something this run, so it is 0 for
+    /// an incremental run, for a source with no exhaustive kind, and for a
+    /// kind that emitted nothing -- see [`SWEEP`].
+    ///
+    /// A run over a source with both kinds of kind reports one number for the
+    /// exhaustive half; the budgeted half is never in it. What that leaves
+    /// unreachable is on [`run_once`], under *Limitations*.
     pub swept: u64,
     /// Where the source says the next run should resume.
     pub cursor: Cursor,
@@ -176,11 +181,22 @@ fn check_source_id(id: &str) -> Result<(), SyncError> {
 ///
 /// # Limitations
 ///
-/// A full sync does not reconcile: an item the source deleted *and stopped
-/// mentioning* (a hard delete, rather than one reported with `deleted`) keeps
-/// its row, because the engine sees only what the adapter pushes and has no way
-/// to tell "gone" from "unchanged". Sweeping rows a full sync did not touch is
-/// an M1 sync-engine feature.
+/// **Hard deletes in a non-exhaustive kind are inexpressible.** A full sync
+/// reconciles only the kinds that declared `full_sync_exhaustive` (ADR-0003):
+/// for those, an item the source stopped mentioning is tombstoned by the
+/// sweep. For every other kind -- Gitea's budgeted `commit` and `pr`,
+/// TeamCity's windowed `build` and `build_config` -- "stopped being returned"
+/// and "deleted upstream" are the same observation, so the row stays live and
+/// the mirror keeps what it last saw.
+///
+/// This is a documented residual, not an oversight. The engine sees only what
+/// the adapter pushes; the only ways to close it are a reconcile call on the
+/// `Sink` SPI (rejected in ADR-0003 -- `Sink` staying write-only is the
+/// verified reason the tombstone deferral was sound) or an adapter that stops
+/// budgeting the kind, which is a decision about that adapter's read path.
+/// Until then a stale row of a budgeted kind is the accepted cost, and it is
+/// the cheap side of the trade: sweeping such a kind would tombstone
+/// everything past the cap on every full sync.
 ///
 /// # Errors
 ///
@@ -280,9 +296,10 @@ enum Host<'h> {
 /// entry point gets the read under the lock.
 ///
 /// It is *not* byte-for-byte the M0 run, and the difference has a caller:
-/// `run_inner` now sweeps after an exhaustive full sync, and the mock declares
-/// `full_sync_exhaustive: true`, so *Load demo data* tombstones `mock:`
-/// entities that the fixture stopped emitting. That is the intended behaviour
+/// `run_inner` now sweeps after a full sync, over the kinds that declared
+/// `full_sync_exhaustive`, and every one of the mock's kinds declares it -- so
+/// *Load demo data* tombstones `mock:` entities that the fixture stopped
+/// emitting. That is the intended behaviour
 /// -- a demo corpus should not accumulate items the fixture no longer has --
 /// but it is new in M1, and a reader comparing this against M0 needs to know
 /// the sweep is the thing that changed.
@@ -302,12 +319,15 @@ async fn run_inner(
     let descriptor = source.descriptor();
     check_source_id(&descriptor.id)?;
     let source_id = descriptor.id;
-    // Read before `entity_kinds` is consumed below.
-    let exhaustive = !descriptor.entity_kinds.is_empty()
-        && descriptor
-            .entity_kinds
-            .iter()
-            .all(|kind| kind.full_sync_exhaustive);
+    // Two sets out of one list: everything the sink will accept, and the
+    // subset the sweep may act on. Both are read here, before `entity_kinds`
+    // is consumed.
+    let exhaustive: HashSet<String> = descriptor
+        .entity_kinds
+        .iter()
+        .filter(|kind| kind.full_sync_exhaustive)
+        .map(|kind| kind.id.clone())
+        .collect();
     let kinds: HashSet<String> = descriptor
         .entity_kinds
         .into_iter()
@@ -412,7 +432,7 @@ async fn run_locked(
     source: &dyn Source,
     source_id: &str,
     kinds: HashSet<String>,
-    exhaustive: bool,
+    exhaustive: HashSet<String>,
     from: CursorSource,
 ) -> Result<Locked, SyncError> {
     // Held until this transaction ends, however it ends. Two runs of one source
@@ -447,13 +467,13 @@ async fn run_locked(
     let previous = cursor.clone();
     let full_sync = cursor.is_none();
 
-    let (cursor, upserted, deleted) = {
+    let (cursor, upserted, deleted, emitted) = {
         let mut sink = PgSink::new(tx, source_id.to_owned(), kinds);
         let cursor = source.sync(cursor, &mut sink).await?;
         // The adapter is done, so whatever is still buffered belongs to this
         // run: flush it before the cursor claims to cover it.
         sink.flush().await?;
-        (cursor, sink.upserted, sink.deleted)
+        (cursor, sink.upserted, sink.deleted, sink.emitted)
     };
 
     // Reconcile what a full sync did not see. Inside the same transaction as
@@ -462,13 +482,23 @@ async fn run_locked(
     // Three conditions, and dropping any one of them alone is a bug:
     //  * `full_sync` -- an incremental run has not seen the whole source;
     //  * `exhaustive` -- a *bounded* full sync (TeamCity: newest N builds per
-    //    configuration) does not return everything, so absence is not deletion;
-    //  * `upserted > 0` -- a full sync that emitted nothing is
-    //    indistinguishable from an adapter that silently failed, and sweeping
-    //    there would tombstone the whole source.
-    let swept = if full_sync && exhaustive && upserted > 0 {
+    //    configuration) does not return everything, so absence is not deletion.
+    //    Read **per kind** (ADR-0003): one adapter routinely walks some kinds
+    //    in full and budgets others, and a source-wide answer is wrong for it
+    //    in both directions;
+    //  * the kind emitted something -- a full sync that emitted nothing *of a
+    //    kind* is indistinguishable from an adapter that silently failed, and
+    //    sweeping there would tombstone that whole kind. Per kind for the same
+    //    reason the gate is: a repository listing that came back empty while
+    //    the branch walk succeeded would otherwise pass a source-wide test.
+    //
+    // The two sets are intersected rather than checked in sequence, so a kind
+    // only reaches the sweep on both counts at once.
+    let sweep_kinds: Vec<String> = emitted.intersection(&exhaustive).cloned().collect();
+    let swept = if full_sync && !sweep_kinds.is_empty() {
         sqlx::query(SWEEP)
             .bind(source_id)
+            .bind(&sweep_kinds)
             .execute(&mut **tx)
             .await?
             .rows_affected()
@@ -492,7 +522,13 @@ async fn run_locked(
 }
 
 /// Hard-delete reconciliation for a full sync (interfaces §1, point 4), run
-/// only for an adapter that declared `full_sync_exhaustive` -- see `run_inner`.
+/// only over the kinds that declared `full_sync_exhaustive` **and** emitted
+/// something this run -- see `run_locked`.
+///
+/// `$2` is that kind list, and it is why this is `i.kind = any($2)` rather
+/// than a bare source filter: a source's budgeted kinds share the table with
+/// its exhaustive ones, and a sweep that took the whole source would tombstone
+/// every commit past `commits_per_repo` on every full sync (ADR-0003).
 ///
 /// No `last_seen_at` column is needed, and adding one would be a second truth:
 /// `ITEM_UPSERT` stamps `synced_at = now()`, and `now()` is the **transaction**
@@ -517,6 +553,7 @@ update knobas.entity e
   from sync.item i
  where i.entity_id = e.id
    and i.source_id = $1
+   and i.kind = any($2)
    and i.synced_at < now()
    and e.deleted_at is null
 "#;
@@ -541,6 +578,13 @@ struct PgSink<'t, 'c> {
     /// a source that has 500. One entry per distinct entity, so a very large
     /// source pays for this in memory; batching alone cannot dedupe a run.
     seen: HashMap<String, bool>,
+    /// Every kind this run actually wrote a row of. The sweep's emptiness
+    /// guard reads it: a kind absent from here emitted nothing, so this run
+    /// proves nothing about what that kind still holds. A set rather than a
+    /// count because that is the whole question -- "did anything of this kind
+    /// arrive" -- and it is bounded by the descriptor's kind list, unlike
+    /// `seen`.
+    emitted: HashSet<String>,
     upserted: u64,
     deleted: u64,
 }
@@ -557,6 +601,7 @@ impl<'t, 'c> PgSink<'t, 'c> {
             kinds,
             buf: Vec::new(),
             seen: HashMap::new(),
+            emitted: HashSet::new(),
             upserted: 0,
             deleted: 0,
         }
@@ -667,6 +712,7 @@ impl<'t, 'c> PgSink<'t, 'c> {
         for (id, tombstoned) in ids.iter().zip(&deleted) {
             self.count(id, *tombstoned);
         }
+        self.emitted.extend(kinds);
         Ok(())
     }
 
