@@ -12,27 +12,64 @@
 -->
 <script lang="ts">
   import ContextTabs from "./ContextTabs.svelte";
+  import Monogram from "./Monogram.svelte";
   import { builtinContexts, type RoomContext } from "./contexts";
+  import { health as sharedHealth, isActionable, type Health } from "./health.svelte";
   import type { Router } from "./router.svelte";
 
   let {
     router,
     onsearch,
     contexts = builtinContexts([]),
+    health = sharedHealth,
   }: {
     router: Router;
     onsearch: () => void;
-    /**
-     * The rooms the switcher offers.
-     *
-     * Defaults to *All work* alone, which is what M1 has until task 18 can
-     * list the configured sources — `listSources` is stream F's and declaring
-     * its shape here would be inventing another stream's interface.
-     */
+    /** The rooms the switcher offers. Defaults to *All work* alone. */
     contexts?: RoomContext[];
+    /**
+     * The live `source:health` store the cluster draws.
+     *
+     * A prop with the shell's singleton as its default, so the strip is
+     * correct whatever a caller passes and a test can hand it a store with no
+     * Tauri bridge behind it.
+     */
+    health?: Health;
   } = $props();
 
   const onSources = $derived(router.route.view === "sources");
+
+  /** How each state reads in the cluster's tooltip. */
+  const STATE_WORD: Record<string, string> = {
+    ok: "ok",
+    unauthorized: "credential rejected",
+    unreachable: "server unreachable",
+    missing_secret: "no credential stored",
+    unknown: "not checked yet",
+  };
+
+  /**
+   * `401`, and only for `unauthorized`.
+   *
+   * Spec §2 highlights the one state a person must resolve themselves: the
+   * scheduler backs off and retries an `unreachable` source on its own (P7)
+   * and will never retry a rejected credential. Labelling both would make the
+   * loud reading mean "something is off somewhere", which is not a call to
+   * action.
+   */
+  const unauthorized = $derived(health.all.filter((source) => source.state === "unauthorized"));
+
+  /**
+   * The whole list, in the tooltip.
+   *
+   * 44 px of strip cannot hold five source names and their states, and the
+   * mockup put them here for the same reason (`signal-miller.html:2299`).
+   */
+  const tooltip = $derived(
+    health.all
+      .map((source) => `${source.source_id}: ${STATE_WORD[source.state] ?? source.state}`)
+      .join("\n"),
+  );
 </script>
 
 <header class="topbar">
@@ -49,8 +86,27 @@
 
   <span class="spacer"></span>
 
-  <!-- Task 18 fills this with one monogram per configured source. -->
-  <span class="sync"></span>
+  {#if health.all.length > 0}
+    <button
+      class="sync"
+      title={tooltip}
+      aria-label="Source credential health"
+      onclick={() => router.go("#/sources")}
+    >
+      {#each health.all as source (source.source_id)}
+        <Monogram
+          text={source.source_id.slice(0, 2).toUpperCase()}
+          tone={isActionable(source.state) ? "err" : "ok"}
+          label="{source.source_id}: {STATE_WORD[source.state] ?? source.state}"
+        />
+      {/each}
+      {#if unauthorized.length > 0}
+        <span class="err-txt">
+          <span class="lbl">credential rejected</span> 401
+        </span>
+      {/if}
+    </button>
+  {/if}
 
   <button
     class="tb-btn {onSources ? 'on' : ''}"
