@@ -77,3 +77,74 @@ test("disables the flap animation under reduced motion", () => {
 test("keeps the document from scrolling behind the app frame", () => {
   expect(css).toMatch(/html,\s*body\s*\{[^}]*overflow:\s*hidden/);
 });
+
+/**
+ * Spec §14's own bar, computed rather than asserted about.
+ *
+ * The mockup shipped `--faint` at 2.86:1 and it was used for small secondary
+ * text throughout, so this is the one accessibility requirement the port could
+ * not simply inherit. The decision — lift the token, override the three rules
+ * that put it on a hover surface — is written into `app.css` beside the
+ * palette; this is what stops it being quietly undone by an editor pulling the
+ * colour back towards the mockup.
+ */
+
+/** One channel of sRGB, linearised. WCAG 2.x relative luminance. */
+function channel(value: number): number {
+  const c = value / 255;
+  return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+}
+
+function luminance(hex: string): number {
+  const digits = hex.replace("#", "");
+  const [r, g, b] = [0, 2, 4].map((at) => channel(Number.parseInt(digits.slice(at, at + 2), 16)));
+  return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+}
+
+function contrast(a: string, b: string): number {
+  const [high, low] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (high! + 0.05) / (low! + 0.05);
+}
+
+/** A token's value, read out of `:root` rather than restated here. */
+function token(name: string): string {
+  const match = new RegExp(`--${name}\\s*:\\s*(#[0-9A-Fa-f]{6})`).exec(css);
+  expect(match, `--${name} is not declared as a hex colour in app.css`).toBeTruthy();
+  return match![1]!;
+}
+
+test("the contrast maths agrees with the WCAG reference pairs", () => {
+  // Black on white is 21:1 and a colour on itself is 1:1. Without these the
+  // function could be wrong in a way that made every assertion below pass.
+  expect(contrast("#000000", "#FFFFFF")).toBeCloseTo(21, 5);
+  expect(contrast("#15171A", "#15171A")).toBeCloseTo(1, 5);
+  // A known failure, so the threshold assertions are known to be reachable.
+  expect(contrast("#5A6169", "#15171A")).toBeLessThan(4.5);
+});
+
+test("every text token clears 4.5:1 on the surfaces it is read on", () => {
+  const surfaces = { bg: token("bg"), panel: token("panel") };
+  const failures: string[] = [];
+
+  for (const name of ["text", "muted", "faint", "amber", "fail", "ok", "link"]) {
+    for (const [surface, colour] of Object.entries(surfaces)) {
+      const ratio = contrast(token(name), colour);
+      if (ratio < 4.5) failures.push(`--${name} on --${surface}: ${ratio.toFixed(2)}`);
+    }
+  }
+
+  expect(failures, "spec §14 sets 4.5:1 for text").toEqual([]);
+});
+
+test("the three rules that put faint text on a hover surface are lifted", () => {
+  // `--raised` is the one background `--faint` does not clear, and it is a
+  // hover or selected state rather than a resting surface. Deleting these
+  // overrides would put small text at 4.09:1 under a pointer, which is exactly
+  // the kind of regression a palette assertion alone cannot see.
+  expect(contrast(token("faint"), token("raised"))).toBeLessThan(4.5);
+  expect(contrast(token("muted"), token("raised"))).toBeGreaterThanOrEqual(4.5);
+
+  for (const selector of [".pop .it:hover small", ".mod:hover .sub", ".card.sel .k .pr"]) {
+    expect(css, `${selector} is no longer lifted off --faint`).toContain(selector);
+  }
+});

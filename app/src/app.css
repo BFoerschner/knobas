@@ -48,7 +48,10 @@
 
 :root{
   --bg:#15171A;--panel:#1D2024;--raised:#24282D;--hair:#2E3339;--hair2:#3A4047;
-  --text:#E7E9EC;--muted:#8B929A;--faint:#5A6169;
+  --text:#E7E9EC;--muted:#8B929A;
+  /* --faint is LIFTED from the mockup's #5A6169, deliberately. See the
+     contrast note at the foot of this file. */
+  --faint:#808790;
   --amber:#FFB020;--fail:#FF6A5C;--ok:#7FD1A1;--link:#9CC3FF;
   --c-epic:#2C3D55;--c-ticket:#365179;--c-adhoc:#3A5248;--c-none:#2A2E33;--c-asset:#4A4130;
   --disp:'Barlow Condensed','Arial Narrow',Impact,sans-serif;
@@ -426,3 +429,40 @@ kbd{font:400 10px var(--mono);color:var(--faint);border:1px solid var(--hair);bo
    spacing -- the mockup put the same rule in an inline style, which the CSP
    forbids. */
 .d-h .d-acts{margin-left:auto;display:flex;gap:4px;align-items:center}
+
+/* ======================================================================
+   Contrast -- the §14 decision, recorded rather than left to be rediscovered.
+
+   Spec §14 sets 4.5:1 for text. Measured against `--bg` (#15171A), the
+   round-3 mockup's palette gave:
+
+     --text  #E7E9EC  14.76   pass
+     --muted #8B929A   5.71   pass
+     --faint #5A6169   2.86   FAIL
+     --amber #FFB020   9.82   pass
+     --fail  #FF6A5C   6.39   pass
+     --ok    #7FD1A1   9.87   pass
+     --link  #9CC3FF   9.97   pass
+
+   `--faint` carries small secondary readings all over this stylesheet -- the
+   sync log's counts, a source's capability chips, the `.steps` breadcrumb, the
+   status bar itself -- so restricting it to non-text decoration was not
+   available: it would have meant rewriting twenty rules to `--muted` and
+   losing the two-level hierarchy entirely.
+
+   **The decision: `--faint` is #808790.** 4.95 against `--bg` and 4.51
+   against `--panel`, both clear. It reads slightly lighter than the mockup
+   and that difference is intentional and visible.
+
+   `--raised` (#24282D) is the one background it does not clear (4.09), and it
+   is a *hover or selected* state rather than a resting surface. Three rules
+   put `--faint` text on it; each is lifted to `--muted` (4.71 there) below,
+   which is the smaller change and keeps the resting hierarchy intact.
+
+   `app-css.test.ts` computes all of this. A token edited back down fails the
+   suite rather than shipping.
+   ====================================================================== */
+.pop .it:hover small,
+.pop .it.on small,
+.mod:hover .sub,
+.card.sel .k .pr{color:var(--muted)}
