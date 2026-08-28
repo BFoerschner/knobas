@@ -49,6 +49,11 @@ serde_json.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 tauri = { version = "2", features = [] }
+# The nightly backup task: `sleep` for its tick and `select!` for its
+# cancellation. Everything else in this crate runs on Tauri's runtime without
+# naming it; a loop that has to be stoppable cannot.
+tokio.workspace = true
+tokio-util = { version = "0.7", default-features = false }
 # *Open in browser* (interfaces §8 P5). The first Tauri plugin in the app, and
 # the one that discharges the M0 carry-over about `capabilities/default.json`
 # holding only `core:default`. Pinned exactly, and to the same version as

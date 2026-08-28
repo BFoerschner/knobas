@@ -66,6 +66,16 @@ impl Profile {
         self.dir.join("db")
     }
 
+    /// Where scheduled backup archives are written (§14).
+    ///
+    /// Inside the profile, like the database, so a demo run cannot write into
+    /// the real profile's backups (P13) -- and so that deleting a profile
+    /// takes its archives with it rather than orphaning them.
+    #[must_use]
+    pub fn backup_dir(&self) -> PathBuf {
+        self.dir.join("backups")
+    }
+
     /// The OS keychain service this profile's secrets live under (§3).
     ///
     /// `dev.knobas.desktop` in a release build, `.dev` in a debug one (so
@@ -145,6 +155,11 @@ mod tests {
         assert!(demo.demo);
         assert_eq!(demo.dir, data_dir().join("demo"));
         assert_ne!(demo.db_root(), real.db_root());
+        assert_ne!(
+            demo.backup_dir(),
+            real.backup_dir(),
+            "a demo run must not write into the real profile's archives"
+        );
         assert_ne!(demo.keychain_service(), real.keychain_service());
         assert!(
             demo.keychain_service().ends_with(".demo"),

@@ -17,6 +17,7 @@
  * This file is orchestrator-owned and append-only.
  */
 export * from "./app";
+export * from "./backup";
 export * from "./entity";
 export * from "./search";
 export * from "./sources";
