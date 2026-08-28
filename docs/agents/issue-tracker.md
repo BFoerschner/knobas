@@ -7,11 +7,33 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 - **Create an issue**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line bodies.
 - **Read an issue**: `gh issue view <number> --comments`, filtering comments by `jq` and also fetching labels.
 - **List issues**: `gh issue list --state open --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'` with appropriate `--label` and `--state` filters.
-- **Comment on an issue**: `gh issue comment <number> --body "..."`
+- **Comment on an issue**: `gh issue view <number>` **first, always** — then
+  `gh issue comment <number> --body "..."`. A comment is a write to a shared surface, and the tooling
+  gates no read before it the way it gates `Read` before `Edit` on a file. Asserting what an issue does
+  or does not say without having read its current body is how duplicate acceptance criteria and stale
+  advice get posted. The same applies before `gh issue edit`, `gh issue close`, and any reply to a
+  review that claims what a ticket asked for.
 - **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
 - **Close**: `gh issue close <number> --comment "..."`
 
 Infer the repo from `git remote -v`; `gh` does this automatically when run inside a clone.
+
+### A finding about a ticket you have not read is a hypothesis
+
+Review agents are briefed on one ticket and routinely reason about its neighbours — "this belongs in
+the follow-up's criteria", "the parent already covers this". That reasoning is worth having and is not
+evidence: the agent is describing a document that was never in its context.
+
+Two rules, both cheap:
+
+- **Dispatching**: name every ticket the agent may need to opine on, and give it their contents. An
+  agent asked to review #50 will still form opinions about #52; the only question is whether they are
+  grounded.
+- **Acting**: a finding that quotes the artifact it is about is evidence. One that does not is a
+  hypothesis — `gh issue view` it before acting, and especially before writing anything back.
+
+Recorded 2026-08-28 after a review of #50 recommended adding an acceptance criterion to #52 that #52
+already had, and the recommendation was posted there before anyone read #52.
 
 ## Pull requests as a triage surface
 
