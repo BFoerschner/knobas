@@ -612,7 +612,14 @@ async fn branch_listings_are_paged() {
         .branches
         .insert("tidewater/payout-service".to_owned(), many);
     let fake = Fake::start_paged(&state).await;
-    let source = source(fake.base_url(), serde_json::json!({}));
+    // `commits_per_repo: 0` scopes this to the branch *listing*. Every branch
+    // here is a fixture stub with no commit list mounted behind it, so the
+    // commit pass would otherwise spend one request per branch answering
+    // nothing -- a property of the fake, not of the walk.
+    let source = source(
+        fake.base_url(),
+        serde_json::json!({ "commits_per_repo": 0 }),
+    );
     let (items, _) = full(&*source).await;
     assert_eq!(ids(&items, "branch").len(), PAGE + 2);
 }
@@ -728,7 +735,13 @@ async fn a_cap_fires_at_exactly_the_boundary_it_names() {
             .collect(),
     );
     let fake = Fake::start_paged(&under).await;
-    let under_boundary = source(fake.base_url(), serde_json::json!({}));
+    // Same scoping as `branch_listings_are_paged`: this is about the branch
+    // listing's boundary, and 999 commit-less branches are 999 requests the
+    // fake would answer `[]` to.
+    let under_boundary = source(
+        fake.base_url(),
+        serde_json::json!({ "commits_per_repo": 0 }),
+    );
     let (items, _) = full(&*under_boundary).await;
     assert_eq!(ids(&items, "branch").len(), 20 * PAGE - 1);
 }
@@ -948,4 +961,147 @@ async fn a_discussion_refused_by_a_dead_credential_fails_the_run() {
     let mut sink = VecSink(Vec::new());
     let error = source.sync(None, &mut sink).await.unwrap_err();
     assert!(matches!(error, SourceError::Unauthorized), "{error:?}");
+}
+
+// --------------------------------------------------------------- commits ----
+
+#[tokio::test]
+async fn a_full_sync_emits_commits_under_their_object_ids() {
+    let fake = Fake::start(&State::tidewater()).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+    let (items, _) = full(&*source).await;
+
+    assert_eq!(
+        ids(&items, "commit"),
+        vec![
+            "gitea:tidewater/payout-service@1111111111111111111111111111111111111111",
+            "gitea:tidewater/payout-service@a41f2c8b7d6e5f403192837465a0b1c2d3e4f506",
+            "gitea:tidewater/payout-service@c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192",
+        ]
+    );
+    let jitter = items
+        .iter()
+        .find(|i| {
+            i.entity
+                .key
+                .ends_with("c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192")
+        })
+        .expect("the fixture has c90d11");
+    assert_eq!(
+        jitter.title,
+        "PAY-231: jitter in backoff, cap at 5 attempts"
+    );
+}
+
+/// The point of keeping branch heads in the cursor: a repository whose branches
+/// all stand still costs one listing request and no commit walk at all.
+#[tokio::test]
+async fn commits_are_not_re_walked_while_the_branch_head_stands_still() {
+    let mut state = State::tidewater();
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+    let (_, cursor) = full(&*source).await;
+
+    // The commit list gains an entry, but no branch head moved -- an upstream
+    // state the adapter deliberately does not go looking for.
+    state
+        .commits
+        .get_mut("tidewater/payout-service@main")
+        .unwrap()
+        .insert(
+            0,
+            support::commit(
+                "3333333333333333333333333333333333333333",
+                "unreferenced",
+                "2026-08-22T16:00:00Z",
+            ),
+        );
+    fake.remount(&state).await;
+
+    let (items, again_cursor) = again(&*source, &cursor).await;
+    assert!(
+        items.is_empty(),
+        "walked a branch that did not move: {items:?}"
+    );
+    assert_eq!(again_cursor, cursor);
+    // …and the proof it is the *head* that gates the walk, not luck: no commit
+    // listing was requested at all on this run.
+    let asked = fake.paths().await;
+    assert!(!asked.iter().any(|p| p.ends_with("/commits")), "{asked:?}");
+}
+
+#[tokio::test]
+async fn a_new_commit_on_a_moved_branch_is_emitted_once() {
+    let mut state = State::tidewater();
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+    let (_, cursor) = full(&*source).await;
+
+    let head = "4444444444444444444444444444444444444444";
+    state.branches.get_mut("tidewater/payout-service").unwrap()[1] = branch(
+        "feature/PAY-231-sepa-retry",
+        head,
+        "PAY-231: bound the jitter",
+        "2026-08-22T16:20:00Z",
+    );
+    state
+        .commits
+        .get_mut("tidewater/payout-service@feature/PAY-231-sepa-retry")
+        .unwrap()
+        .insert(
+            0,
+            support::commit(head, "PAY-231: bound the jitter", "2026-08-22T16:20:00Z"),
+        );
+    fake.remount(&state).await;
+
+    let (items, _) = again(&*source, &cursor).await;
+    assert_eq!(
+        ids(&items, "commit"),
+        vec![format!("gitea:tidewater/payout-service@{head}")]
+    );
+    // The branch moved too, so both are in the run -- and nothing else is.
+    assert_eq!(items.len(), 2, "{items:?}");
+}
+
+#[tokio::test]
+async fn the_commit_budget_bounds_the_mirror() {
+    let fake = Fake::start(&State::tidewater()).await;
+
+    let one = source(
+        fake.base_url(),
+        serde_json::json!({ "commits_per_repo": 1 }),
+    );
+    let (items, _) = full(&*one).await;
+    assert_eq!(ids(&items, "commit").len(), 1, "{items:?}");
+
+    let quiet = Fake::start(&State::tidewater()).await;
+    let none = source(
+        quiet.base_url(),
+        serde_json::json!({ "commits_per_repo": 0 }),
+    );
+    let (items, _) = full(&*none).await;
+    assert!(ids(&items, "commit").is_empty(), "{items:?}");
+    let asked = quiet.paths().await;
+    assert!(!asked.iter().any(|p| p.ends_with("/commits")), "{asked:?}");
+}
+
+/// A commit reachable from two branches is one entity, and must cost one slot
+/// of the budget, not two.
+#[tokio::test]
+async fn a_commit_on_two_branches_is_emitted_once() {
+    let mut state = State::tidewater();
+    let shared = state
+        .commits
+        .get("tidewater/payout-service@main")
+        .unwrap()
+        .clone();
+    state
+        .commits
+        .get_mut("tidewater/payout-service@feature/PAY-231-sepa-retry")
+        .unwrap()
+        .extend(shared);
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+    let (items, _) = full(&*source).await;
+    assert_eq!(ids(&items, "commit").len(), 3, "{items:?}");
 }

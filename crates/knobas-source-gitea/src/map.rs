@@ -176,13 +176,6 @@ pub(crate) fn pr_item(
     }
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "wired in task 7: incremental commits per moved branch"
-    )
-)]
 pub(crate) fn commit_item(
     source_id: &str,
     raw: &Value,

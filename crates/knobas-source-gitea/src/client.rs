@@ -276,13 +276,6 @@ impl GiteaClient {
     /// `GET /repos/{o}/{r}/commits`. `stat`, `verification` and `files` all
     /// default to **true** in Gitea; turning them off is the difference between
     /// a listing and a diff dump.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "wired in task 7: incremental commits per moved branch"
-        )
-    )]
     pub(crate) async fn commits(
         &self,
         owner: &str,

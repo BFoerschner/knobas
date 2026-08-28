@@ -108,7 +108,7 @@
 //! reach the sweep at all, because a skip during a cursor-less run is fatal
 //! (above).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use chrono::{DateTime, Utc};
 use knobas_source::{Cursor, Sink, SourceError, SyncItem};
@@ -126,6 +126,9 @@ const MAX_BRANCH_PAGES: u32 = 20;
 /// the config schema allows -- the cap is a runaway guard, not a bound the
 /// user is meant to feel.
 const MAX_PR_PAGES: u32 = 20;
+/// 500 commits per *branch* per run. Ten times the default `commits_per_repo`,
+/// which is the whole-repository budget the walk actually spends.
+const MAX_COMMIT_PAGES: u32 = 10;
 
 /// One repository this run will walk.
 pub(crate) struct Selected {
@@ -494,12 +497,26 @@ async fn sync_repo(
     }
     after.repo_updated_at = updated_at;
 
-    // 2. Branches, and the ones that vanished. Task 7 walks commits for
+    // 2. Branches, and the ones that vanished. Step 4 walks commits for
     //    exactly the branches this reports as moved.
-    let _moved = branches(source, at, before, after, sink, emitted).await?;
+    let moved = branches(source, at, before, after, sink, emitted).await?;
 
     // 3. Pull requests, newest-updated first, down to the watermark.
     pulls(source, at, before, after, sink, emitted).await?;
+
+    // 4. Commits, only where a head moved. On a first sync every branch counts
+    //    as moved, so this is the full walk the budget bounds.
+    commits(
+        source,
+        at,
+        &selected.repo,
+        before,
+        after,
+        &moved,
+        sink,
+        emitted,
+    )
+    .await?;
     Ok(())
 }
 
@@ -756,6 +773,153 @@ async fn fetch_comments(
     Ok(Vec::new())
 }
 
+/// New commits on the branches whose heads moved this run.
+///
+/// Gitea's `since=` is inclusive and server-side, so the boundary commits come
+/// back on every run; `commits_at_watermark` is what keeps them from being
+/// re-delivered. Commits are immutable, so a delivered object id is delivered
+/// for good.
+///
+/// **A branch that did not move is not walked at all**, which is what the
+/// per-branch head object ids in the cursor are for (`cursor::RepoCursor`): an
+/// idle repository costs its two listings and no commit request. The cost of
+/// that trade is stated plainly -- a commit reachable only from a branch whose
+/// *head* did not change is never noticed, and nothing here goes looking for
+/// one.
+///
+/// **Known limitation:** a branch that appears with history older than
+/// `commits_since` -- a long-lived branch pushed for the first time -- has that
+/// older history filtered out by `since=`. It arrives with the next full sync
+/// (`cursor: None`). Fetching it eagerly would mean walking every new branch to
+/// its root, which is exactly the cost `commits_per_repo` exists to bound.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the whole per-repository walk state, threaded explicitly: a struct \
+              here would be a bag of unrelated borrows with a different lifetime each"
+)]
+async fn commits(
+    source: &crate::GiteaSource,
+    at: RepoRef<'_>,
+    repo: &model::Repo,
+    before: &RepoCursor,
+    after: &mut RepoCursor,
+    moved: &[String],
+    sink: &mut (dyn Sink + Send),
+    emitted: &mut u64,
+) -> Result<(), RepoError> {
+    after.commits_since = before.commits_since;
+    after.commits_at_watermark = before.commits_at_watermark.clone();
+    // `repo.empty` is the one that saves a request rather than a mistake:
+    // Gitea answers `/commits` on a repository with no commits at all with a
+    // 409, which `client::commits` already reads as "none".
+    if source.config.commits_per_repo == 0 || repo.empty || moved.is_empty() {
+        return Ok(());
+    }
+
+    let since = before.commits_since;
+    let mut budget = source.config.commits_per_repo;
+    let mut examined: Vec<(String, Option<DateTime<Utc>>)> = Vec::new();
+    // One object id can be reachable from several branches; it is one entity
+    // and must cost one slot of the budget.
+    let mut seen: HashSet<String> = HashSet::new();
+
+    'branches: for branch in walk_order(repo.default_branch.as_deref(), moved) {
+        for page in 1..=MAX_COMMIT_PAGES {
+            let batch = source
+                .client
+                .commits(at.owner, at.name, &branch, since, page)
+                .await?;
+            let last = batch.len() < PAGE_SIZE as usize;
+            let mut fresh = 0usize;
+            for raw in batch {
+                let commit: model::Commit = match serde_json::from_value(raw.clone()) {
+                    Ok(commit) => commit,
+                    Err(error) => {
+                        tracing::warn!(
+                            %error,
+                            repository = %at.full_name,
+                            "gitea: skipping an unreadable commit"
+                        );
+                        continue;
+                    }
+                };
+                let happened = map::real_time(commit.happened_at());
+                if let (Some(mark), Some(when)) = (since, happened) {
+                    // Not a `break`: `since=` is a server-side filter this walk
+                    // does not control, and a server that ignored it would put
+                    // the whole history in front of the new commits.
+                    if when < mark {
+                        continue;
+                    }
+                    if when == mark && before.commits_at_watermark.contains(&commit.sha) {
+                        examined.push((commit.sha.clone(), happened));
+                        continue;
+                    }
+                }
+                if !seen.insert(commit.sha.clone()) {
+                    continue;
+                }
+                examined.push((commit.sha.clone(), happened));
+                push(
+                    sink,
+                    map::commit_item(&source.id, &raw, at, &commit),
+                    emitted,
+                )
+                .await?;
+                fresh += 1;
+                budget -= 1;
+                if budget == 0 {
+                    break 'branches;
+                }
+            }
+            // A page with nothing new on it is the end of this branch's new
+            // history -- and if the server ignored `since=` altogether, it is
+            // the point where paging stops being worth anything.
+            if last || fresh == 0 {
+                break;
+            }
+        }
+    }
+
+    after.commits_since = examined
+        .iter()
+        .filter_map(|(_, when)| *when)
+        .max()
+        .or(since);
+    after.commits_at_watermark = match after.commits_since {
+        Some(mark) => {
+            let mut shas: Vec<String> = examined
+                .iter()
+                .filter(|(_, when)| *when == Some(mark))
+                .map(|(sha, _)| sha.clone())
+                .collect();
+            if after.commits_since == since {
+                // The position did not move, so the boundary this run was
+                // handed still holds -- even where the budget stopped short of
+                // re-observing it.
+                shas.extend(before.commits_at_watermark.iter().cloned());
+            }
+            shas.sort();
+            shas.dedup();
+            shas
+        }
+        None => Vec::new(),
+    };
+    Ok(())
+}
+
+/// Default branch first, then by name: on a first sync the budget should go to
+/// `main` before it goes to `wip/spike`, and the order has to be the same twice
+/// or two runs of one repository would mirror two different subsets of it.
+fn walk_order(default_branch: Option<&str>, moved: &[String]) -> Vec<String> {
+    let mut order = moved.to_vec();
+    order.sort_by(|a, b| {
+        let rank = |name: &String| usize::from(Some(name.as_str()) != default_branch);
+        rank(a).cmp(&rank(b)).then_with(|| a.cmp(b))
+    });
+    order
+}
+
 /// Hand one item to the engine.
 ///
 /// The `?` is the contract: a sink that rejected an item wants the sync
@@ -845,6 +1009,37 @@ mod tests {
             "exactly one entry, under the stored spelling"
         );
         assert_eq!(next.repo(stored), previous.repo(stored));
+    }
+
+    /// The budget is spent in a fixed order, and the default branch is where a
+    /// first sync should spend it: `main` before `wip/spike`.
+    ///
+    /// Determinism is the half that is easy to lose and hard to see -- two runs
+    /// of one repository that ordered its branches differently would mirror two
+    /// different hundred-commit subsets of it and each would look correct.
+    #[test]
+    fn the_default_branch_gets_the_budget_first() {
+        let moved = vec![
+            "wip/spike".to_owned(),
+            "main".to_owned(),
+            "feature/PAY-231".to_owned(),
+        ];
+        assert_eq!(
+            walk_order(Some("main"), &moved),
+            vec!["main", "feature/PAY-231", "wip/spike"]
+        );
+        // No default branch reported: still a stable order, just alphabetical.
+        assert_eq!(
+            walk_order(None, &moved),
+            vec!["feature/PAY-231", "main", "wip/spike"]
+        );
+        // A default branch that did not move does not get walked just for
+        // being the default.
+        assert_eq!(
+            walk_order(Some("main"), &["wip/spike".to_owned()]),
+            vec!["wip/spike"]
+        );
+        assert!(walk_order(Some("main"), &[]).is_empty());
     }
 
     /// The cap message has to name the limit that was hit and the lever that
