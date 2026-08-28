@@ -1,4 +1,5 @@
-//! Entity and room reads -- stream D (interfaces §2.5).
+//! Entity and room reads, and the two link writes -- stream D
+//! (interfaces §2.5).
 //!
 //! Its `State<'_, Lifecycle>` is not an accident and is not stream D being
 //! tidy: carry-over §10.6(a). `AppState` exists only once PostgreSQL is up,
@@ -29,9 +30,10 @@
 use chrono::{DateTime, Utc};
 use knobas_core::activity::ActivityRow;
 use knobas_core::entity::EntityRef;
-use knobas_core::link::LinkRow;
+use knobas_core::link::{LinkRow, Origin};
 use sqlx::{PgPool, Row};
-use tauri::State;
+use tauri::{Emitter, State};
+use uuid::Uuid;
 
 use crate::{IpcError, Lifecycle};
 
@@ -306,7 +308,11 @@ pub struct EntityDetail {
     /// Set when the source withdrew the entity. The mirror row survives, so
     /// links and notes still resolve (§5a).
     pub deleted_at: Option<DateTime<Utc>>,
-    /// Always empty in M1: nothing writes `knobas.link` until M2.
+    /// Every link this entity takes part in, newest first.
+    ///
+    /// Read undirected by [`knobas_core::link::links_of`], so a link drawn from
+    /// either end is on both ends' detail. [`create_link`] and [`unlink`] are
+    /// what move it.
     pub links: Vec<LinkRow>,
     /// This entity's own history, newest first (spec §12.1).
     pub activity: Vec<ActivityRow>,
@@ -438,6 +444,214 @@ pub async fn recent_activity(
         .transpose()
         .map_err(IpcError::invalid)?;
     recent_activity_inner(&pool, limit, entity.as_ref()).await
+}
+
+
+// -- the link writes --------------------------------------------------------
+//
+// Two commands, and only two. The *read* stays on `get_entity`: `links_of` is
+// undirected, so an entity's backlinks are the same query as its links and need
+// no endpoint of their own, and the target picker reuses `search`.
+
+/// The relation a link takes when the caller names none.
+///
+/// A quick link costs no extra decisions, which is only true if "no relation"
+/// is a relation rather than an empty string: the panel groups by this value
+/// and an empty group header is a row nobody can read.
+pub const DEFAULT_RELATION: &str = "related";
+
+/// Who a link made through this surface belongs to, in `created_by` and in the
+/// activity line's `actor`.
+///
+/// knobas has no identity system: there is one person using it, and the only
+/// other actor the log knows is `sync:<source_id>`. Naming it once here keeps
+/// the two spellings from drifting.
+const ACTOR: &str = "user";
+
+/// What a link mutation left behind: the row, and the activity line announcing
+/// it.
+///
+/// Not a wire type -- the commands return the link and emit the line. It exists
+/// so the behaviour is reachable from a test without a Tauri app: the emit is
+/// the only part of these commands that a `#[tauri::command]` shell adds, and
+/// everything worth asserting is in here.
+#[derive(Debug, Clone)]
+pub struct LinkMutation {
+    pub link: LinkRow,
+    pub activity: ActivityRow,
+}
+
+/// Text the user did not type is no text.
+///
+/// A dialog hands back `""` for a field left alone, and `Some("")` is not the
+/// same fact as `None` anywhere downstream: an empty relation is an unreadable
+/// group header, and an empty note is a line the panel would draw with nothing
+/// in it.
+fn present(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|text| !text.is_empty())
+}
+
+/// What an activity line says about a link: the other end, the relation, and
+/// which link it was.
+///
+/// The line is named on the link's `from` end, so `to_id` is the end the reader
+/// does not already know. One helper, because `linked` and `unlinked` describe
+/// the same link and a reader of the log has to be able to pair them.
+fn link_detail(link: &LinkRow) -> serde_json::Value {
+    serde_json::json!({
+        "link_id": link.id,
+        "to_id": link.to_id,
+        "relation": link.relation,
+    })
+}
+
+/// Draw a link between two entities.
+///
+/// `relation` defaults to [`DEFAULT_RELATION`]; `note` is optional; the origin
+/// is always [`Origin::Manual`] -- it is deliberately not client-suppliable in
+/// v1, because the other origins belong to the suggestion engine and to import.
+///
+/// The behaviour lives here rather than in the command so it is reachable from
+/// a test: a `#[tauri::command]` cannot be called directly.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) if either id is not an entity id;
+/// [`NotFound`](crate::IpcErrorCode::NotFound) if either endpoint has no local
+/// entity -- linking to something that has not synced yet is an ordinary event,
+/// not a fault; [`Conflict`](crate::IpcErrorCode::Conflict) if that pair is
+/// already actively linked under that relation;
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+pub async fn create_link_inner(
+    pool: &PgPool,
+    from_id: &str,
+    to_id: &str,
+    relation: Option<&str>,
+    note: Option<&str>,
+) -> Result<LinkMutation, IpcError> {
+    // Before any query, as `get_entity_inner` does: a malformed id is a bad
+    // address, and the two want different words on screen.
+    let from = EntityRef::parse(from_id).map_err(IpcError::invalid)?;
+    let to = EntityRef::parse(to_id).map_err(IpcError::invalid)?;
+
+    let link = knobas_core::link::create(
+        pool,
+        &from,
+        &to,
+        present(relation).unwrap_or(DEFAULT_RELATION),
+        Origin::Manual,
+        present(note),
+        ACTOR,
+    )
+    .await?;
+
+    let activity = record_link_activity(pool, "linked", &link).await?;
+    Ok(LinkMutation { link, activity })
+}
+
+/// Withdraw a link.
+///
+/// `Ok(None)` when the link was already withdrawn: the store is idempotent, and
+/// nothing was mutated, so nothing is written to the log and nothing is
+/// announced.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) if `link_id` is not a UUID;
+/// [`NotFound`](crate::IpcErrorCode::NotFound) if no link carries it;
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+pub async fn unlink_inner(pool: &PgPool, link_id: &str) -> Result<Option<LinkMutation>, IpcError> {
+    let id: Uuid = link_id
+        .parse()
+        .map_err(|_| IpcError::invalid(format!("{link_id} is not a link id")))?;
+
+    let Some(link) = knobas_core::link::unlink(pool, id).await? else {
+        return Ok(None);
+    };
+    let activity = record_link_activity(pool, "unlinked", &link).await?;
+    Ok(Some(LinkMutation { link, activity }))
+}
+
+/// One line, on the end the link was drawn from.
+///
+/// The to-end's own history panel therefore does not list it -- a known and
+/// accepted v1 limitation; that entity's links panel still shows the link. If
+/// the inbox (#45) ever needs the other side, the fix is a read-side change and
+/// not a second row.
+async fn record_link_activity(
+    pool: &PgPool,
+    verb: &str,
+    link: &LinkRow,
+) -> Result<ActivityRow, IpcError> {
+    let from = EntityRef::parse(&link.from_id).map_err(IpcError::internal)?;
+    Ok(knobas_core::activity::record(pool, ACTOR, verb, Some(&from), link_detail(link)).await?)
+}
+
+/// Put an activity line on `activity:new`.
+///
+/// Best-effort, like every other emit in this app: a failure means no window is
+/// listening, which is not a reason to fail a write that already landed. The
+/// command emits it itself rather than re-reading the log the way the scheduler
+/// does -- the write hands its row back precisely so it does not have to guess
+/// which of the table's rows is its own.
+fn announce<R: tauri::Runtime>(app: &tauri::AppHandle<R>, row: ActivityRow) {
+    if let Err(error) = app.emit(crate::events::ACTIVITY_NEW, row) {
+        tracing::debug!(
+            event = crate::events::ACTIVITY_NEW,
+            %error,
+            "nothing was listening for this event"
+        );
+    }
+}
+
+/// Draw a link between two entities, and announce it.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the database
+/// is still coming up, and whatever [`create_link_inner`] refuses with.
+#[tauri::command]
+pub async fn create_link<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    from_id: String,
+    to_id: String,
+    relation: Option<String>,
+    note: Option<String>,
+) -> Result<LinkRow, IpcError> {
+    let pool = lifecycle.pool()?;
+    let written = create_link_inner(
+        &pool,
+        &from_id,
+        &to_id,
+        relation.as_deref(),
+        note.as_deref(),
+    )
+    .await?;
+    announce(&app, written.activity);
+    Ok(written.link)
+}
+
+/// Withdraw a link, and announce it.
+///
+/// Idempotent: withdrawing an already-withdrawn link succeeds, writes no second
+/// line and announces nothing.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the database
+/// is still coming up, and whatever [`unlink_inner`] refuses with.
+#[tauri::command]
+pub async fn unlink<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    link_id: String,
+) -> Result<(), IpcError> {
+    let pool = lifecycle.pool()?;
+    if let Some(written) = unlink_inner(&pool, &link_id).await? {
+        announce(&app, written.activity);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -6,7 +6,8 @@
 //! membership, never absolute row totals.
 
 use knobas_app::commands::entity::{
-    EntityFilter, EntityOrder, get_entity_inner, list_entities_inner, recent_activity_inner,
+    DEFAULT_RELATION, EntityFilter, EntityOrder, create_link_inner, get_entity_inner,
+    list_entities_inner, recent_activity_inner, unlink_inner,
 };
 use knobas_source_mock::MockSource;
 use sqlx::PgPool;
@@ -349,7 +350,10 @@ async fn returns_the_row_its_source_and_the_raw_payload() {
         d.payload["key"], "PAY-231",
         "payload is the source record verbatim (§3a)"
     );
-    assert!(d.links.is_empty(), "links are M2");
+    // (`links` used to be asserted empty here -- "links are M2". It is not
+    // empty any more, and it is not this test's subject either: the link tests
+    // at the bottom of this file are what that assertion became, and one of
+    // them links `mock:PAY-231`.)
     assert!(d.deleted_at.is_none());
     assert!(
         d.kind_info.is_none(),
@@ -503,4 +507,439 @@ async fn an_entity_whose_source_was_never_configured_is_still_readable() {
         "an unconfigured source falls back to its id, not to an empty name"
     );
     assert_eq!(d.source.adapter_kind, source);
+}
+
+// -- the link commands ------------------------------------------------------
+//
+// The seam is the command layer, driven over the migrated test pool: a link is
+// *made* through `create_link_inner` and *observed* through `get_entity_inner`
+// and `recent_activity_inner` -- three different commands, so nothing here can
+// pass by agreeing with itself. Nothing asserts SQL, store internals, or a
+// count of the whole table: the corpus is shared by every test in this binary.
+
+/// Two run-unique entities that are in the mirror, which is what a link needs
+/// at both ends to be *read back*: `get_entity_inner` joins `sync.item`, so an
+/// entity carrying only a `knobas.entity` row can be linked and never opened.
+async fn linkable_pair(pool: &PgPool) -> (String, String) {
+    let source = format!("links-{}", unique());
+    let from = format!("{source}:TICKET-1");
+    let to = format!("{source}:PAGE-1");
+    for (id, kind) in [(&from, "ticket"), (&to, "page")] {
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1, $2, 'x')")
+            .bind(id)
+            .bind(kind)
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+             values ($1, $2, $3, 'x', '', '{}'::jsonb)",
+        )
+        .bind(id)
+        .bind(&source)
+        .bind(kind)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    (from, to)
+}
+
+/// The links `entity`'s detail view would draw.
+async fn links_on(pool: &PgPool, entity: &str) -> Vec<knobas_core::link::LinkRow> {
+    get_entity_inner(pool, entity).await.unwrap().links
+}
+
+/// A link made with nothing but its two ends: `related`, `manual`, and on both
+/// ends' detail.
+///
+/// The quick link that "costs no extra decisions" -- and the read is the
+/// *other* command, in both directions, because a link that only its own
+/// writer can see is not a link.
+#[tokio::test]
+async fn a_link_made_from_its_two_ends_alone_is_related_manual_and_visible_from_both() {
+    let pool = seeded().await;
+    let (from, to) = linkable_pair(&pool).await;
+
+    let written = create_link_inner(&pool, &from, &to, None, None)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        written.link.relation, DEFAULT_RELATION,
+        "an unnamed relation is `related`, not empty"
+    );
+    assert_eq!(
+        written.link.origin,
+        knobas_core::link::Origin::Manual,
+        "origin is not client-suppliable in v1: a link made here is hand-made"
+    );
+    assert_eq!(written.link.note, None);
+    assert_eq!(written.link.from_id, from);
+    assert_eq!(written.link.to_id, to);
+
+    // Both ends, through the entity-detail read. `links_of` is undirected, so
+    // the end the link was *not* drawn from is the half that would be missing
+    // if the read were keyed on `from_id`.
+    for end in [&from, &to] {
+        let row = links_on(&pool, end)
+            .await
+            .into_iter()
+            .find(|row| row.id == written.link.id)
+            .unwrap_or_else(|| panic!("the link is missing from {end}'s detail"));
+        assert_eq!(row.from_id, from);
+        assert_eq!(row.to_id, to);
+        assert_eq!(row.relation, DEFAULT_RELATION);
+    }
+}
+
+/// The relation the caller names is the relation the link carries, and the
+/// same pair may carry several.
+#[tokio::test]
+async fn a_named_relation_is_kept_and_the_same_pair_may_carry_several() {
+    let pool = seeded().await;
+    let (from, to) = linkable_pair(&pool).await;
+
+    let documents = create_link_inner(&pool, &from, &to, Some("documents"), None)
+        .await
+        .unwrap();
+    let blocks = create_link_inner(&pool, &from, &to, Some("blocks"), None)
+        .await
+        .unwrap();
+    assert_eq!(documents.link.relation, "documents");
+    assert_eq!(blocks.link.relation, "blocks");
+
+    let relations: std::collections::BTreeSet<String> = links_on(&pool, &from)
+        .await
+        .into_iter()
+        .map(|row| row.relation)
+        .collect();
+    assert!(
+        relations.contains("documents") && relations.contains("blocks"),
+        "the pair carries both relations: {relations:?}"
+    );
+}
+
+/// The note is carried from the write all the way to the detail read -- the
+/// column `0001` declared and nothing filled in until now.
+#[tokio::test]
+async fn a_note_travels_from_the_write_to_the_entity_detail_read() {
+    let pool = seeded().await;
+    let (from, to) = linkable_pair(&pool).await;
+
+    let written = create_link_inner(&pool, &from, &to, None, Some("  why this exists  "))
+        .await
+        .unwrap();
+    assert_eq!(
+        written.link.note.as_deref(),
+        Some("why this exists"),
+        "the note is trimmed, so a stray space is not a different note"
+    );
+
+    let read = links_on(&pool, &to)
+        .await
+        .into_iter()
+        .find(|row| row.id == written.link.id)
+        .expect("the link is on the far end's detail");
+    assert_eq!(read.note.as_deref(), Some("why this exists"));
+
+    // A note that is only whitespace is no note. `null` and `""` are different
+    // facts in the mirror, and only one of them is worth a line in the panel.
+    let blank = create_link_inner(&pool, &from, &to, Some("blocks"), Some("   "))
+        .await
+        .unwrap();
+    assert_eq!(blank.link.note, None);
+}
+
+/// Linking the same pair under the same relation twice is `conflict`, not a
+/// second row: the panel never shows duplicates.
+#[tokio::test]
+async fn a_duplicate_pair_and_relation_is_a_conflict() {
+    let pool = seeded().await;
+    let (from, to) = linkable_pair(&pool).await;
+
+    create_link_inner(&pool, &from, &to, Some("documents"), None)
+        .await
+        .unwrap();
+    let again = create_link_inner(&pool, &from, &to, Some("documents"), None)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        again.code,
+        knobas_app::IpcErrorCode::Conflict,
+        "already linked is `conflict`, so the dialog can say so: {again}"
+    );
+
+    // Exactly one row survived the attempt.
+    assert_eq!(
+        links_on(&pool, &from)
+            .await
+            .iter()
+            .filter(|row| row.relation == "documents")
+            .count(),
+        1
+    );
+}
+
+/// An endpoint with no mirror row is `not_found` -- the user named an entity
+/// that has not synced, which is an ordinary event and not knobas being
+/// broken. Both ends, because they are two separate foreign keys.
+#[tokio::test]
+async fn a_link_endpoint_that_is_not_in_the_mirror_is_not_found_at_the_command_seam() {
+    let pool = seeded().await;
+    let (from, _to) = linkable_pair(&pool).await;
+    let absent = format!("nowhere-{}:GONE-1", unique());
+
+    for (a, b) in [(&from, &absent), (&absent, &from)] {
+        let refused = create_link_inner(&pool, a, b, None, None).await.unwrap_err();
+        assert_eq!(
+            refused.code,
+            knobas_app::IpcErrorCode::NotFound,
+            "{a} -> {b} produced {refused}"
+        );
+    }
+
+    // ... and an id that is not an entity id at all is a bad address, not a
+    // missing entity: the two want different words on screen.
+    for bad in ["no-colon-here", "", "mock:"] {
+        let refused = create_link_inner(&pool, &from, bad, None, None)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            refused.code,
+            knobas_app::IpcErrorCode::Invalid,
+            "{bad:?} produced {refused}"
+        );
+    }
+}
+
+/// Unlinking an id nothing carries is `not_found`.
+#[tokio::test]
+async fn unlinking_an_unknown_id_is_not_found_and_a_malformed_one_is_invalid() {
+    let pool = seeded().await;
+
+    let unknown = unlink_inner(&pool, &uuid::Uuid::new_v4().to_string())
+        .await
+        .unwrap_err();
+    assert_eq!(
+        unknown.code,
+        knobas_app::IpcErrorCode::NotFound,
+        "{unknown}"
+    );
+
+    let malformed = unlink_inner(&pool, "not-a-uuid").await.unwrap_err();
+    assert_eq!(
+        malformed.code,
+        knobas_app::IpcErrorCode::Invalid,
+        "{malformed}"
+    );
+}
+
+/// Unlinking keeps the row, and the same pair and relation can be linked
+/// again afterwards.
+///
+/// The tombstone is what makes an unlink rememberable (story 12) and the
+/// partial unique index is what makes re-linking possible (story 13); the two
+/// are asserted together because either one alone would pass a weaker
+/// implementation -- a hard delete satisfies re-linking, and a plain unique
+/// index satisfies the tombstone.
+#[tokio::test]
+async fn unlinking_keeps_the_row_and_the_pair_can_be_linked_again() {
+    let pool = seeded().await;
+    let (from, to) = linkable_pair(&pool).await;
+
+    let first = create_link_inner(&pool, &from, &to, Some("documents"), None)
+        .await
+        .unwrap();
+    let withdrawn = unlink_inner(&pool, &first.link.id.to_string())
+        .await
+        .unwrap()
+        .expect("the first unlink withdrew the link");
+    assert_eq!(withdrawn.link.id, first.link.id);
+
+    for end in [&from, &to] {
+        assert!(
+            !links_on(&pool, end)
+                .await
+                .iter()
+                .any(|row| row.id == first.link.id),
+            "the withdrawn link is still on {end}'s detail"
+        );
+    }
+
+    // The row stays -- an unlink is a tombstone, not a delete.
+    let (kept,): (i64,) = sqlx::query_as("select count(*) from knobas.link where id = $1")
+        .bind(first.link.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(kept, 1, "unlink deleted the row instead of tombstoning it");
+
+    // ... and the pair is linkable again under the very relation that was
+    // withdrawn, which is what the *partial* unique index buys.
+    let second = create_link_inner(&pool, &from, &to, Some("documents"), None)
+        .await
+        .unwrap();
+    assert_ne!(second.link.id, first.link.id);
+    assert!(
+        links_on(&pool, &from)
+            .await
+            .iter()
+            .any(|row| row.id == second.link.id)
+    );
+
+    // Withdrawing something already withdrawn is not an error and is not a
+    // mutation: nothing comes back, so nothing is announced.
+    assert!(
+        unlink_inner(&pool, &first.link.id.to_string())
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+/// Every mutation leaves exactly one activity line, on the end the link was
+/// drawn from, naming the other end, the relation and the link.
+///
+/// Read back through `recent_activity_inner` *and* through the entity detail's
+/// own history, because those are the two surfaces that draw it (§12.1, §2a) --
+/// and counted with `== 1`, scoped by a verb nobody else in this binary writes,
+/// so a second row would fail rather than pass unnoticed.
+#[tokio::test]
+async fn each_link_mutation_writes_one_activity_line_on_the_from_end() {
+    let pool = seeded().await;
+    let (from, to) = linkable_pair(&pool).await;
+    let from_ref = knobas_core::entity::EntityRef::parse(&from).unwrap();
+    let to_ref = knobas_core::entity::EntityRef::parse(&to).unwrap();
+
+    let created = create_link_inner(&pool, &from, &to, Some("documents"), None)
+        .await
+        .unwrap();
+
+    assert_eq!(created.activity.verb, "linked");
+    assert_eq!(created.activity.actor, "user");
+    assert_eq!(
+        created.activity.entity_id.as_deref(),
+        Some(from.as_str()),
+        "the line is named on the end the link was drawn from"
+    );
+    assert_eq!(
+        created.activity.detail,
+        serde_json::json!({
+            "link_id": created.link.id,
+            "to_id": to,
+            "relation": "documents",
+        }),
+        "the other end, the relation and the link id are what make the line \
+         actionable"
+    );
+
+    // The row the command hands back is the row in the log, not a copy of its
+    // own arguments: found by id through a different command.
+    let logged = recent_activity_inner(&pool, 200, Some(&from_ref))
+        .await
+        .unwrap();
+    let mine: Vec<_> = logged
+        .iter()
+        .filter(|row| row.id == created.activity.id)
+        .collect();
+    assert_eq!(mine.len(), 1, "one line per mutation");
+    assert_eq!(mine[0].detail, created.activity.detail);
+    assert_eq!(mine[0].at, created.activity.at);
+
+    // ... and it rides along with the detail read the panel is drawn from.
+    assert!(
+        get_entity_inner(&pool, &from)
+            .await
+            .unwrap()
+            .activity
+            .iter()
+            .any(|row| row.id == created.activity.id)
+    );
+
+    // The known v1 limitation, asserted rather than assumed: the to-end's
+    // history does not carry the line. Its links panel still shows the link.
+    assert!(
+        !recent_activity_inner(&pool, 200, Some(&to_ref))
+            .await
+            .unwrap()
+            .iter()
+            .any(|row| row.id == created.activity.id),
+        "one row per mutation, on the from-end -- a second row on the to-end \
+         would be the decision this ticket did not take"
+    );
+
+    // The other verb, on the same shape.
+    let withdrawn = unlink_inner(&pool, &created.link.id.to_string())
+        .await
+        .unwrap()
+        .expect("the link was withdrawn");
+    assert_eq!(withdrawn.activity.verb, "unlinked");
+    assert_eq!(withdrawn.activity.entity_id.as_deref(), Some(from.as_str()));
+    assert_eq!(
+        withdrawn.activity.detail,
+        serde_json::json!({
+            "link_id": created.link.id,
+            "to_id": to,
+            "relation": "documents",
+        })
+    );
+    assert_ne!(
+        withdrawn.activity.id, created.activity.id,
+        "the unlink wrote its own line rather than reporting the link's"
+    );
+    assert_eq!(
+        recent_activity_inner(&pool, 200, Some(&from_ref))
+            .await
+            .unwrap()
+            .iter()
+            .filter(|row| row.verb == "unlinked" && row.id == withdrawn.activity.id)
+            .count(),
+        1
+    );
+}
+
+/// The demo criterion: in the demo corpus, a link made over the seam is in the
+/// array the links panel draws from.
+///
+/// `EntityDetail.links` is exactly what `LinksPanel.svelte` is handed, and the
+/// panel switches on `groups.length === 0` -- so a non-empty array there is
+/// "Nothing linked yet" being replaced by the row. (The panel's own rendering
+/// of that array is pinned in `app/src/lib/detail/Detail.test.svelte.ts`.)
+///
+/// Two fixture entities the demo profile really loads, rather than rows this
+/// test invented: the point of the criterion is that it holds for the corpus
+/// the user sees after clicking *Load demo data*.
+#[tokio::test]
+async fn a_link_over_the_seam_fills_the_demo_profiles_empty_links_panel() {
+    let pool = seeded().await;
+
+    let before = get_entity_inner(&pool, "mock:PAY-231").await.unwrap().links;
+    let written = create_link_inner(
+        &pool,
+        "mock:PAY-231",
+        "mock:PAY-228",
+        Some("documents"),
+        Some("the retry storm postmortem"),
+    )
+    .await
+    .unwrap();
+
+    let after = get_entity_inner(&pool, "mock:PAY-231").await.unwrap().links;
+    assert_eq!(
+        after.len(),
+        before.len() + 1,
+        "the panel gained exactly one row"
+    );
+    let drawn = after
+        .iter()
+        .find(|row| row.id == written.link.id)
+        .expect("the new link is in the array the panel draws");
+    assert_eq!(drawn.to_id, "mock:PAY-228");
+    assert_eq!(drawn.relation, "documents");
+    assert_eq!(drawn.note.as_deref(), Some("the retry storm postmortem"));
+    assert!(
+        !after.is_empty(),
+        "a non-empty links array is what replaces the empty state"
+    );
 }
