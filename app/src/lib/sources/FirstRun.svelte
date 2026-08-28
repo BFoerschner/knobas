@@ -2,9 +2,16 @@
   The first-run wizard — spec §14a: *"initialize the database → add the first
   source (the §3 flow) → initial sync with progress → land in the launcher."*
 
-  Four panels over the mockup's `.steps` breadcrumb. The Add-source flow is
-  embedded **inline** rather than in a modal: a dialog over an otherwise empty
-  window is a dialog with nothing behind it.
+  Four panels over the mockup's `.steps` breadcrumb.
+
+  **Known deviation from task 20 step 3.** The brief asks for the Add-source
+  flow "embedded inline rather than in a modal; a modal over an otherwise empty
+  window is a dialog with nothing behind it". It is reused here exactly as the
+  sources view mounts it — `AddSource` *is* a `Modal` and has no inline mode —
+  so step 2 does open a dialog over the wizard. Recorded rather than papered
+  over: the reasons the brief gives are about how it looks, and giving
+  `AddSource` a second presentation is a change to a component the sources view
+  also owns. Not attempted inside this PR's review round.
 
   ## Why completion comes off the channel
 
@@ -28,6 +35,7 @@
 
   import { ipcErrorMessage } from "../ipc";
   import { completeFirstRun } from "../ipc/app";
+  import { health as sharedHealth, type Health } from "../shell/health.svelte";
   import {
     demoLoad,
     syncNowWithProgress,
@@ -40,12 +48,19 @@
   let {
     demo = false,
     source: initialSource = null,
+    health = sharedHealth,
     onfinish,
   }: {
     /** The `--demo` profile (P13), which is offered the Tidewater fixture. */
     demo?: boolean;
     /** A source configured already — the wizard resumed, or a test's fixture. */
     source?: SourceSummary | null;
+    /**
+     * The live `source:health` store, so the shell behind the wizard knows
+     * about the source it configures. A prop with the shell's singleton as its
+     * default, the way `SourcesView` takes it.
+     */
+    health?: Health;
     /** Hand the shell back. The wizard has recorded completion by then. */
     onfinish: () => void;
   } = $props();
@@ -267,6 +282,13 @@
       adding = false;
       source = added;
       stepIndex = 2;
+      // `add_source` emits no `source:health`, and the shell's seed already
+      // ran against a database that had no sources in it. Without this the
+      // wizard finishes onto a shell that has never heard of the source it
+      // just configured: no monogram in the strip, no room tab, and — on the
+      // *Skip* path, where no sync follows to change `auth_state` — nothing
+      // that would ever tell it.
+      health.patch(added.health);
     }}
   />
 {/if}

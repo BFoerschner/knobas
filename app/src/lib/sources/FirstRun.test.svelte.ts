@@ -49,6 +49,9 @@ vi.mock("../ipc/sources", () => ({
     return Promise.resolve({ source_id: "mock", upserted: 21, deleted: 0, swept: 0, cursor: "" });
   },
   listAdapters: () => Promise.resolve([]),
+  // The wizard hands its new source to the health store, and the store's
+  // module reaches for this to build its default port.
+  credentialHealth: () => Promise.resolve([]),
   addSource: () => Promise.reject(new Error("the dialog under test does not save here")),
   testSource: () => Promise.reject(new Error("unused")),
 }));

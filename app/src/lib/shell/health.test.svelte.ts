@@ -52,7 +52,8 @@ test("seeds from credentialHealth and orders by source id", async () => {
     listen: events.listen,
   });
   const stop = health.start();
-  await vi.waitFor(() => expect(health.all.length).toBe(2));
+  await health.reseed();
+  expect(health.all.length).toBe(2);
   expect(health.all.map((h) => h.source_id)).toEqual(["gitea", "teamcity"]);
   expect(health.get("gitea")?.state).toBe("unauthorized");
   expect(health.get("nobody")).toBeNull();
@@ -67,7 +68,8 @@ test("a source:health event patches one source and leaves the others alone", asy
   });
   const stop = health.start();
   await vi.waitFor(() => expect(events.handlers.length).toBe(1));
-  await vi.waitFor(() => expect(health.all.length).toBe(2));
+  await health.reseed();
+  expect(health.all.length).toBe(2);
 
   events.emit(row("gitea", "unauthorized", { detail: "401 from /api/v1/user" }));
   flushSync();
@@ -142,10 +144,11 @@ test("a seed that resolves after stop is discarded", async () => {
     listen: events.listen,
   });
   const stop = health.start();
+  const seeding = health.reseed();
   stop();
   await vi.waitFor(() => expect(resolveSeed).not.toBeNull());
   resolveSeed!([row("jira", "ok")]);
-  await Promise.resolve();
+  await seeding;
   flushSync();
   expect(health.all).toEqual([]);
 });
@@ -158,6 +161,7 @@ test("a failed seed leaves the store empty rather than throwing into the shell",
   });
   const stop = health.start();
   await vi.waitFor(() => expect(events.handlers.length).toBe(1));
+  await health.reseed();
   expect(health.all).toEqual([]);
   // ...and the subscription still works, so the store recovers the moment the
   // scheduler reports anything.
@@ -165,6 +169,96 @@ test("a failed seed leaves the store empty rather than throwing into the shell",
   flushSync();
   expect(health.all.length).toBe(1);
   stop();
+});
+
+/**
+ * **The seed is not fired by `start()`**, and this is the fix for the review
+ * finding that `credential_health` was called at shell mount — a moment when
+ * `crate::sources::state()` is guaranteed to answer `not_ready`, because the
+ * embedded Postgres is still coming up. The rejection was swallowed, and since
+ * the scheduler emits `source:health` *on a change only*, a steady install
+ * where every source is `ok` never produced a second chance: the top strip's
+ * monograms, the per-source room tabs and the launcher's row complaints all
+ * stayed empty for the session.
+ *
+ * README's own rule is the one that was broken: *"No data call before
+ * `db.state === 'ready'` … the shell gates on the lifecycle rather than
+ * catching and ignoring."* So the store subscribes on `start()` — an event
+ * missed is an event lost, and the listener costs nothing before the database
+ * is up — and the shell calls {@link Health.reseed} when the lifecycle says
+ * ready.
+ */
+test("start subscribes but does not fetch — the seed is the shell's, gated on the database", async () => {
+  const events = fakeListen();
+  let fetches = 0;
+  const health = createHealth({
+    credentialHealth: () => {
+      fetches += 1;
+      return Promise.resolve([row("gitea", "ok")]);
+    },
+    listen: events.listen,
+  });
+
+  const stop = health.start();
+  await vi.waitFor(() => expect(events.handlers.length).toBe(1));
+  expect(fetches, "start() must not call a command the database cannot answer yet").toBe(0);
+  expect(health.all).toEqual([]);
+
+  // …and the event still lands, so nothing is missed in the meantime.
+  events.emit(row("jira", "unauthorized"));
+  flushSync();
+  expect(health.all.map((h) => h.source_id)).toEqual(["jira"]);
+
+  await health.reseed();
+  expect(fetches).toBe(1);
+  expect(health.all.map((h) => h.source_id)).toEqual(["gitea"]);
+  stop();
+});
+
+/**
+ * A source that has been deleted has to leave the store, and `patch` cannot
+ * express that — it only ever adds.
+ *
+ * The consequence found in review: `SourcesView` re-listed after a delete and
+ * patched each surviving row, so the deleted id kept its top-strip monogram
+ * and its `#/ctx/src:<id>` room tab for the rest of the session. That is the
+ * tab strip disagreeing with the sources view about which sources exist, which
+ * is the one thing this module was written to prevent.
+ *
+ * `replace` takes a whole authoritative reading — `list_sources` after a
+ * mutation, or `credential_health` — and is therefore the only operation that
+ * can *forget*.
+ */
+test("replace forgets a source the authoritative list no longer carries", async () => {
+  const events = fakeListen();
+  const health = createHealth({
+    credentialHealth: () => Promise.resolve([row("gitea", "ok"), row("jira", "unauthorized")]),
+    listen: events.listen,
+  });
+  const stop = health.start();
+  await health.reseed();
+  expect(health.all.map((h) => h.source_id)).toEqual(["gitea", "jira"]);
+
+  health.replace([row("gitea", "ok")]);
+  flushSync();
+  expect(health.all.map((h) => h.source_id)).toEqual(["gitea"]);
+  expect(health.get("jira"), "a deleted source must not survive in the store").toBeNull();
+  stop();
+});
+
+/** Calling `start` twice must not leave a subscription nothing can unwind. */
+test("start is idempotent — a second call does not strand a listener", async () => {
+  const events = fakeListen();
+  const health = createHealth({
+    credentialHealth: () => Promise.resolve([]),
+    listen: events.listen,
+  });
+  const stop = health.start();
+  const stopAgain = health.start();
+  await vi.waitFor(() => expect(events.handlers.length).toBe(1));
+  stop();
+  stopAgain();
+  await vi.waitFor(() => expect(events.unlistened).toBe(1));
 });
 
 test("failing lists only the states a human can act on", async () => {
@@ -181,7 +275,8 @@ test("failing lists only the states a human can act on", async () => {
     listen: events.listen,
   });
   const stop = health.start();
-  await vi.waitFor(() => expect(health.all.length).toBe(5));
+  await health.reseed();
+  expect(health.all.length).toBe(5);
   // `unknown` is migration 0002's default — nothing has tested the credential
   // yet — so it is not a complaint. Counting it would put a red dot on every
   // source of a fresh install.
@@ -197,7 +292,8 @@ test("unauthorized is what the top strip's 401 reading keys on, not any failure"
     listen: events.listen,
   });
   const stop = health.start();
-  await vi.waitFor(() => expect(health.all.length).toBe(1));
+  await health.reseed();
+  expect(health.all.length).toBe(1);
   expect(health.failing.length).toBe(1);
   expect(health.unauthorized).toBe(false);
   stop();

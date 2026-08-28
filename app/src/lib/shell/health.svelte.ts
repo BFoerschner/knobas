@@ -88,9 +88,31 @@ export interface Health {
   get(sourceId: string): CredentialHealth | null;
   /** Apply one reading. Exposed so a mutation elsewhere can seed it directly. */
   patch(next: CredentialHealth): void;
-  /** Re-read from the backend. Awaited by callers that just changed a source. */
+  /**
+   * Take a whole authoritative reading, forgetting anything not in it.
+   *
+   * The only operation that can *remove* a source. {@link patch} only ever
+   * adds, so a view that re-lists after a delete and patches each surviving
+   * row leaves the deleted one drawing its monogram and its room tab for the
+   * rest of the session.
+   */
+  replace(rows: CredentialHealth[]): void;
+  /**
+   * Read the whole set from `credential_health`.
+   *
+   * The shell's to call, and **only once the database is ready** — the command
+   * answers `not_ready` until the embedded Postgres is up. Also awaited by a
+   * caller that has just changed the set of sources.
+   */
   reseed(): Promise<void>;
-  /** Seed and subscribe. Returns the teardown; calling it twice is harmless. */
+  /**
+   * Subscribe to `source:health`. Returns the teardown; calling it twice is
+   * harmless.
+   *
+   * **Subscribing only.** The seed is {@link reseed}, and it is the shell's
+   * because only the shell knows when the database can answer — see the note
+   * on `reseed`.
+   */
   start(): () => void;
 }
 
@@ -128,28 +150,39 @@ export function createHealth(ports?: HealthPorts): Health {
       return state.by[sourceId] ?? null;
     },
     patch: apply,
+    replace(rows: CredentialHealth[]) {
+      const by: Record<string, CredentialHealth> = {};
+      for (const row of rows) by[row.source_id] = row;
+      state.by = by;
+    },
     async reseed() {
       try {
         const rows = await io.credentialHealth();
         if (!live) return;
-        const by: Record<string, CredentialHealth> = {};
-        for (const row of rows) by[row.source_id] = row;
-        state.by = by;
+        this.replace(rows);
       } catch {
-        // `credential_health` rejects with `not_ready` while Postgres is coming
-        // up, and with `internal` if the keychain is locked. Neither is a
-        // reason to take the window down: the subscription below still
-        // delivers, so the store fills in the moment the scheduler says
-        // anything.
+        // The keychain being locked answers `internal`, and that is not a
+        // reason to take the window down — the subscription still delivers.
+        //
+        // It is no longer where a `not_ready` goes to die: the shell calls
+        // this only once the lifecycle says the database is up, so a rejection
+        // here is a real fault rather than the ordinary boot race it used to
+        // be mistaken for.
       }
     },
     start() {
+      if (live) {
+        // Already subscribed. Handing back a teardown that unwinds the *first*
+        // subscription would strand it if the second caller stops first, so
+        // this one is a no-op and the first `stop()` remains the real one.
+        return () => {};
+      }
       live = true;
       let off: (() => void) | undefined;
 
-      // The listener is asked for before the seed, so a change that lands
-      // between the two is either delivered by the event or already in the
-      // seed — the other order has a window in which it is neither.
+      // Subscribed at shell start, long before the seed the shell fires when
+      // the database is ready: an event that lands in between is delivered
+      // rather than lost, and the seed that follows is the newer reading.
       void io
         .listen(EVENTS.sourceHealth, (event) => {
           if (live) apply(event.payload);
@@ -161,8 +194,6 @@ export function createHealth(ports?: HealthPorts): Health {
         .catch(() => {
           // A failed subscription is not a failed window; the seed still shows.
         });
-
-      void this.reseed();
 
       return () => {
         live = false;

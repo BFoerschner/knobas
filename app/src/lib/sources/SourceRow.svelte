@@ -16,7 +16,7 @@
   import Monogram from "../shell/Monogram.svelte";
   import { expiryNote, isActionable } from "../shell/health.svelte";
   import { ago } from "../shell/time";
-  import type { CredentialHealth, SourceSummary, SourceSyncStatus } from "../ipc/sources";
+  import type { AuthState, CredentialHealth, SourceSummary, SourceSyncStatus } from "../ipc/sources";
 
   let {
     source,
@@ -64,8 +64,14 @@
   /** `jira` → `JI`. The adapter kind is the only identifier every source has. */
   const monogram = $derived(source.adapter_kind.slice(0, 2).toUpperCase() || "??");
 
-  /** What the credential column says about the state itself. */
-  const CREDENTIAL_WORD: Record<string, string> = {
+  /**
+   * What the credential column says about the state itself.
+   *
+   * Total over `AuthState`, like `isActionable`'s table and the top strip's:
+   * a state added on the Rust side must fail `svelte-check` here rather than
+   * fall through to rendering its raw enum spelling at the reader.
+   */
+  const CREDENTIAL_WORD: Record<AuthState, string> = {
     ok: "credential ok",
     unauthorized: "credential rejected",
     unreachable: "server unreachable",
@@ -107,7 +113,7 @@
   </span>
 
   <span>
-    <span class="st">{CREDENTIAL_WORD[credential.state] ?? credential.state}</span>
+    <span class="st">{CREDENTIAL_WORD[credential.state]}</span>
     {#if expiry}
       <span class="sub {expiry.tone}">{expiry.text}</span>
     {/if}

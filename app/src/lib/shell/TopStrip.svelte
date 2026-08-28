@@ -11,6 +11,7 @@
   reader nothing except that the app is unfinished.
 -->
 <script lang="ts">
+  import type { AuthState } from "../ipc/sources";
   import ContextTabs from "./ContextTabs.svelte";
   import Monogram from "./Monogram.svelte";
   import { builtinContexts, type RoomContext } from "./contexts";
@@ -39,8 +40,14 @@
 
   const onSources = $derived(router.route.view === "sources");
 
-  /** How each state reads in the cluster's tooltip. */
-  const STATE_WORD: Record<string, string> = {
+  /**
+   * How each state reads in the cluster's tooltip.
+   *
+   * Total over `AuthState` for the same reason `isActionable`'s table is: a
+   * variant added on the Rust side has to fail `svelte-check` here rather than
+   * fall through to a fallback nobody notices.
+   */
+  const STATE_WORD: Record<AuthState, string> = {
     ok: "ok",
     unauthorized: "credential rejected",
     unreachable: "server unreachable",
@@ -67,7 +74,7 @@
    */
   const tooltip = $derived(
     health.all
-      .map((source) => `${source.source_id}: ${STATE_WORD[source.state] ?? source.state}`)
+      .map((source) => `${source.source_id}: ${STATE_WORD[source.state]}`)
       .join("\n"),
   );
 </script>
@@ -97,7 +104,7 @@
         <Monogram
           text={source.source_id.slice(0, 2).toUpperCase()}
           tone={isActionable(source.state) ? "err" : "ok"}
-          label="{source.source_id}: {STATE_WORD[source.state] ?? source.state}"
+          label="{source.source_id}: {STATE_WORD[source.state]}"
         />
       {/each}
       {#if unauthorized.length > 0}

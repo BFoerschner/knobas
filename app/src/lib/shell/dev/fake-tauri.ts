@@ -44,6 +44,7 @@
  * **This checks layout and interaction, not the bridge.** The real end-to-end
  * check is `just dev` (Tauri + embedded PostgreSQL) or `just demo`.
  */
+import { JIRA_SCHEMA } from "../../sources/fixtures";
 
 /** One fake command. Arguments arrive camelCased, exactly as Tauri sends them. */
 export type Handler = (args: Record<string, unknown>) => unknown;
@@ -590,22 +591,11 @@ const FIXTURE_ADAPTERS = [
     write_ops: [],
     entity_kinds: KIND_INFO,
     // The generated-form case: a select with a default, two lists, two texts.
-    config_schema: {
-      type: "object",
-      properties: {
-        flavor: {
-          type: "string",
-          enum: ["datacenter", "cloud"],
-          default: "datacenter",
-          title: "Deployment flavor",
-          description: "Data Center speaks REST v2; Cloud is not supported yet.",
-        },
-        projects: { type: "array", items: { type: "string" }, title: "Projects" },
-        jql_filter: { type: "string", title: "JQL filter" },
-        username: { type: "string", title: "Username", description: "Basic auth only." },
-      },
-      required: ["flavor"],
-    },
+    // The *same* transcription the form tests render, not a second copy of it.
+    // A fixture that drifted from the corpus under test would leave browser QA
+    // agreeing with nothing — and this is the import that makes `fixtures.ts`'s
+    // "not test-only" true rather than aspirational.
+    config_schema: JIRA_SCHEMA,
   },
 ];
 

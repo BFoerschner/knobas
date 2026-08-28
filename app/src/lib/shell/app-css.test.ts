@@ -144,7 +144,14 @@ test("the three rules that put faint text on a hover surface are lifted", () => 
   expect(contrast(token("faint"), token("raised"))).toBeLessThan(4.5);
   expect(contrast(token("muted"), token("raised"))).toBeGreaterThanOrEqual(4.5);
 
-  for (const selector of [".pop .it:hover small", ".mod:hover .sub", ".card.sel .k .pr"]) {
+  // All four, not three: `.pop .it.on small` is the selected-row case and was
+  // unpinned, so deleting it would have lifted nothing and failed nothing.
+  for (const selector of [
+    ".pop .it:hover small",
+    ".pop .it.on small",
+    ".mod:hover .sub",
+    ".card.sel .k .pr",
+  ]) {
     expect(css, `${selector} is no longer lifted off --faint`).toContain(selector);
   }
 });

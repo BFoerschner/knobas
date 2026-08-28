@@ -455,7 +455,7 @@ kbd{font:400 10px var(--mono);color:var(--faint);border:1px solid var(--hair);bo
    and that difference is intentional and visible.
 
    `--raised` (#24282D) is the one background it does not clear (4.09), and it
-   is a *hover or selected* state rather than a resting surface. Three rules
+   is a *hover or selected* state rather than a resting surface. Four rules
    put `--faint` text on it; each is lifted to `--muted` (4.71 there) below,
    which is the smaller change and keeps the resting hierarchy intact.
 

@@ -143,6 +143,26 @@ vi.mock("../ipc/sources", () => ({
   reindexFts: () => deferred(undefined),
 }));
 
+/**
+ * The boot channel, so `App.svelte` can be mounted like any other case.
+ *
+ * `app_status` answers ready at once: the interesting residue is the three
+ * subscriptions the shell installs around it, not the boot screen.
+ */
+vi.mock("../ipc/app", () => ({
+  appStatus: () =>
+    deferred({
+      db: { state: "ready", detail: null },
+      app_version: "0.0.0-test",
+      demo: false,
+      first_run: false,
+    }),
+  frontendReady: () => deferred(undefined),
+  retryDatabase: () => deferred(undefined),
+  completeFirstRun: () => deferred(undefined),
+  ping: () => deferred("pong"),
+}));
+
 vi.mock("@tauri-apps/api/event", () => ({
   listen: (event: string, handler: (payload: { payload: unknown }) => void) => {
     // Modelled as a real `window` listener so that failing to unsubscribe is
@@ -157,6 +177,7 @@ const { trackResidue } = await import("./residue");
 const { createRouter } = await import("./router.svelte");
 const { builtinContexts } = await import("./contexts");
 
+const App = (await import("../../App.svelte")).default;
 const ContextTabs = (await import("./ContextTabs.svelte")).default;
 const Flap = (await import("./Flap.svelte")).default;
 const ModalFixture = (await import("./Modal.fixture.svelte")).default;
@@ -236,6 +257,19 @@ interface Case {
 }
 
 const CASES: Case[] = [
+  {
+    /**
+     * The root, and the reason this scan reaches outside `lib/`.
+     *
+     * `App.svelte` installs the three longest-lived subscriptions in the
+     * window — the router's `hashchange`, the global key bindings and the
+     * `source:health` listener — and it was the one component the walk below
+     * could not see, because it is the only one that does not live in `lib/`.
+     */
+    name: "App",
+    source: "App.svelte",
+    open: (target) => ({ app: mount(App, { target, props: {} }) }),
+  },
   {
     name: "ContextTabs",
     source: "lib/shell/ContextTabs.svelte",
@@ -618,7 +652,11 @@ test("every component with an effect is in the table", () => {
       }
     }
   };
-  walk(join(root, "lib"));
+  // The whole of `src/`, not just `lib/`: `App.svelte` sits at the root and it
+  // holds the longest-lived subscriptions in the window (`router`, the keys,
+  // and `source:health`). Scanning only `lib/` meant the one component whose
+  // teardown matters most was the one component this guard could not see.
+  walk(root);
 
   expect(withEffects.length, "no components were scanned at all").toBeGreaterThan(0);
   const covered = new Set(CASES.map((entry) => entry.source));

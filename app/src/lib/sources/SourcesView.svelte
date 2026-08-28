@@ -71,10 +71,12 @@
       const rows = await listSources();
       sources = rows;
       error = null;
-      // The rows carry health as of `list_sources`. Seeding the store from
-      // them keeps the launcher's chips and this view reading one fact even
-      // before the scheduler has emitted anything.
-      for (const row of rows) health.patch(row.health);
+      // The rows carry health as of `list_sources`, and they are the whole set
+      // — so this *replaces* rather than patches. Patching kept the launcher's
+      // chips and this view reading one fact, but it could only ever add: a
+      // source deleted below stayed in the store, drawing its top-strip
+      // monogram and its room tab until the window was restarted.
+      health.replace(rows.map((row) => row.health));
     } catch (cause) {
       // Not a silent empty list: "No sources yet" is a claim about the
       // database, and the view does not have one to make — it knows only that

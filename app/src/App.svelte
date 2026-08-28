@@ -43,14 +43,28 @@
   let launcherOpen = $state(false);
 
   onMount(() => {
+    /**
+     * Unmounted before the bridge was ready.
+     *
+     * Everything below the dynamic import runs on a later tick, and the window
+     * can be gone by then — in a test that mounts and unmounts, and in a real
+     * session that closes during bring-up. Without this the teardown runs
+     * *first* and the subscriptions are installed *after* it, which is a leak
+     * per mount rather than a subscription per window: `lifecycle.start()`
+     * opens with `stopped = false`, so a `stop()` that has already happened is
+     * simply undone.
+     */
+    let disposed = false;
+    let stopHealth: (() => void) | undefined;
+
     void (async () => {
       // Dev only, and behind `import.meta.env.DEV` so Rollup folds the branch
       // away and the fixture never reaches a bundle. `?fake-ipc` opts in;
       // without it even a dev build talks to the real backend.
       //
-      // Awaited *before* the lifecycle starts, and that ordering is
+      // Awaited *before* anything subscribes, and that ordering is
       // load-bearing under `?fake-ipc`: a dynamic import resolves on a later
-      // tick, so a lifecycle started first would call `listen` against a
+      // tick, so a `listen` issued first would run against a
       // `window.__TAURI_INTERNALS__` the fixture has not defined yet. A real
       // Tauri window injects its internals before any script runs, which is
       // why this only ever breaks in browser QA — the worst place for a
@@ -59,26 +73,54 @@
         const dev = await import("./lib/shell/dev/fake-tauri");
         dev.installIfRequested();
       }
+      if (disposed) return;
+
+      // Subscribed for the whole session, not per component: the top strip,
+      // the sources view and the launcher all draw this, and three independent
+      // fetches is three chances for them to disagree (#27). The *seed* is the
+      // effect below — `credential_health` cannot answer until the database is
+      // up. Behind the same await as the lifecycle, for the same reason: it is
+      // a `listen`, and a `listen` before the fixture is a listen into nothing.
+      stopHealth = health.start();
+      // Once, at shell start: `list_adapters` is static per build and answers
+      // before the database is up, so there is nothing to poll and nothing to
+      // tear down.
+      void kindRegistry.load();
+
       await lifecycle.start();
     })();
 
     const stopRouter = router.start();
     const stopKeys = installKeys(router, { openLauncher });
-    // Seeded and kept current for the whole session, not per component: the
-    // top strip, the sources view and the launcher all draw this, and three
-    // independent fetches is three chances for them to disagree (#27).
-    const stopHealth = health.start();
-    // Once, at shell start: `list_adapters` is static per build and answers
-    // before the database is up, so there is nothing to poll and nothing to
-    // tear down.
-    void kindRegistry.load();
 
     return () => {
-      stopHealth();
+      disposed = true;
+      stopHealth?.();
       stopKeys();
       stopRouter();
       lifecycle.stop();
     };
+  });
+
+  /**
+   * Seed credential health the moment the database can answer, and never
+   * before.
+   *
+   * `credential_health` goes through `crate::sources::state()`, which rejects
+   * with `not_ready` for the whole of bring-up. Seeding at mount therefore
+   * threw its one reading away, and because the scheduler emits `source:health`
+   * *on a change only*, a steady install where every source is `ok` got no
+   * second chance: the strip's monograms, the per-source room tabs and the
+   * launcher's row complaints stayed empty for the session. README's rule is
+   * the one that was broken — "no data call before `db.state === 'ready'`; the
+   * shell gates on the lifecycle rather than catching and ignoring".
+   *
+   * An effect rather than a one-shot because `retry()` can take the window
+   * from `failed` back to `ready`, and that is a database the store has still
+   * never read.
+   */
+  $effect(() => {
+    if (lifecycle.ready) void health.reseed();
   });
 
   /**
@@ -101,6 +143,14 @@
    */
   function onFirstRunDone() {
     completedFirstRun = true;
+    // The wizard has changed the set of sources — it added one, or `demo_load`
+    // registered `mock` — and neither `add_source` nor `demo_load` emits
+    // `source:health`. The seed below ran against a database that had no
+    // sources in it at all, so without this the shell lands on a room whose
+    // strip, tabs and launcher complaints have never heard of what was just
+    // configured. `Skip for now` is the path where nothing else would ever
+    // tell it.
+    void health.reseed();
     router.go("#/ctx/all");
     launcherOpen = true;
   }
