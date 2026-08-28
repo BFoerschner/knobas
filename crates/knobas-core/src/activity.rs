@@ -22,10 +22,17 @@ pub struct ActivityRow {
     pub detail: serde_json::Value,
 }
 
-/// Append one line to the log.
+/// Append one line to the log, and hand back the line that was written.
 ///
 /// `detail` is stored as jsonb; a [`serde_json::Value::Null`] is stored as the
 /// column's `{}` default so the log never carries a jsonb null.
+///
+/// The row comes back from the `returning` clause of the insert itself rather
+/// than from a second statement: `id` and `at` are the database's to choose,
+/// and a caller that has to announce the line -- `activity:new` carries an
+/// [`ActivityRow`] -- would otherwise have to read back what it just wrote, in
+/// a table where "the newest row" is not reliably its own. Callers that only
+/// wanted the write drop the value.
 ///
 /// # Errors
 ///
@@ -36,22 +43,23 @@ pub async fn record(
     verb: &str,
     entity: Option<&EntityRef>,
     detail: serde_json::Value,
-) -> Result<(), CoreError> {
+) -> Result<ActivityRow, CoreError> {
     let detail = match detail {
         serde_json::Value::Null => serde_json::Value::Object(serde_json::Map::new()),
         other => other,
     };
-    sqlx::query(
+    let row = sqlx::query_as::<_, ActivityRow>(
         r#"insert into knobas.activity (actor, verb, entity_id, detail)
-           values ($1, $2, $3, $4)"#,
+           values ($1, $2, $3, $4)
+           returning id, at, actor, verb, entity_id, detail"#,
     )
     .bind(actor)
     .bind(verb)
     .bind(entity.map(EntityRef::to_string))
     .bind(detail)
-    .execute(pool)
+    .fetch_one(pool)
     .await?;
-    Ok(())
+    Ok(row)
 }
 
 /// Every line, newest first.

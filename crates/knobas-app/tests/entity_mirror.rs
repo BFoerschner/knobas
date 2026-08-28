@@ -1,0 +1,388 @@
+//! Every interface `app/src/lib/ipc/entity.ts` declares, against the Rust it
+//! claims to mirror.
+//!
+//! This file existed as a hole. `sources.ts` has had a shape test per DTO since
+//! stream F landed, and `entity.ts` -- the larger mirror, and the one the room,
+//! the detail slide-over and the status bar all read through -- had exactly one
+//! pinned interface, `KindInfo`, and that only incidentally, because it rides
+//! inside a `SourceDescriptor` in `sources_mirror.rs`. Seven interfaces were
+//! hand-written prose that nothing compared to anything.
+//!
+//! # The rules the checks here follow
+//!
+//! **The exact key set, not a `contains` walk.** A test that looks for the
+//! fields somebody thought to list cannot see a Rust field that has no
+//! TypeScript counterpart, which is the direction this bridge breaks first.
+//! [`knobas_sync::mirror::assert_shape`] compares three witnesses -- the
+//! serialized key set, the literal list spelled out here, and the interface
+//! body -- and fails on any disagreement in either direction.
+//!
+//! **Nullable fields are exercised as `None`.** `Option<T>` serializes to a
+//! `null` *key*, and the mirror declares `T | null` on that promise. A
+//! `skip_serializing_if` added to one of them would drop the key entirely and
+//! hand the frontend `undefined` where it declared `null`; the fixtures below
+//! leave every nullable field empty somewhere so that change cannot pass.
+//!
+//! **Unions are read out of the mirror, never listed here.** A hand-copied list
+//! of members is the remembered-list trap one level down: it would pass while
+//! both the union and the copy of it drifted from the Rust enum.
+
+use chrono::{DateTime, TimeZone, Utc};
+use knobas_app::commands::entity::{
+    EntityDetail, EntityFilter, EntityOrder, EntityPage, EntityRow, SourceRef,
+};
+use knobas_core::activity::ActivityRow;
+use knobas_core::link::{LinkRow, Origin};
+use knobas_sync::mirror::{assert_shape as assert_against, declared_union, interface_body};
+
+const MIRROR: &str = include_str!("../../../app/src/lib/ipc/entity.ts");
+
+/// The keys `value` serializes to must be exactly `expected`, and exactly what
+/// `interface <name>` in `entity.ts` declares -- both directions.
+fn assert_shape(name: &str, value: &serde_json::Value, expected: &[&str]) {
+    assert_against(MIRROR, name, value, expected);
+}
+
+/// A fixed instant, so a fixture reads the same on every run.
+fn at() -> DateTime<Utc> {
+    Utc.with_ymd_and_hms(2026, 8, 28, 9, 30, 0).unwrap()
+}
+
+fn row(updated_at: Option<DateTime<Utc>>) -> EntityRow {
+    EntityRow {
+        entity_id: "mock:PAY-231".to_owned(),
+        kind: "ticket".to_owned(),
+        source_id: "mock".to_owned(),
+        title: "Payments retry storm".to_owned(),
+        updated_at,
+        synced_at: at(),
+    }
+}
+
+fn activity_row() -> ActivityRow {
+    ActivityRow {
+        id: 7,
+        at: at(),
+        actor: "user".to_owned(),
+        verb: "linked".to_owned(),
+        entity_id: None,
+        detail: serde_json::json!({ "n": 1 }),
+    }
+}
+
+fn link_row() -> LinkRow {
+    LinkRow {
+        id: uuid::Uuid::nil(),
+        from_id: "mock:PAY-231".to_owned(),
+        to_id: "note:retry-storm".to_owned(),
+        relation: "documents".to_owned(),
+        origin: Origin::Manual,
+        created_by: "mara".to_owned(),
+        created_at: at(),
+    }
+}
+
+const ENTITY_ROW_FIELDS: &[&str] = &[
+    "entity_id",
+    "kind",
+    "source_id",
+    "synced_at",
+    "title",
+    "updated_at",
+];
+
+/// A row that the source never dated, so `updated_at` is checked as the `null`
+/// the mirror declares -- the room sorts on that hole (interfaces §4.1).
+#[test]
+fn the_entity_row_shape_matches_its_typescript_mirror() {
+    let wire = serde_json::to_value(row(None)).unwrap();
+    assert_shape("EntityRow", &wire, ENTITY_ROW_FIELDS);
+    assert_eq!(
+        wire["updated_at"],
+        serde_json::Value::Null,
+        "an undated row keeps the key and nulls it; dropping the key hands the \
+         frontend `undefined` where the mirror promised `T | null`"
+    );
+}
+
+#[test]
+fn the_entity_page_shape_matches_its_typescript_mirror() {
+    let page = EntityPage {
+        rows: vec![row(Some(at()))],
+        total: 42,
+    };
+    let wire = serde_json::to_value(page).unwrap();
+    assert_shape("EntityPage", &wire, &["rows", "total"]);
+    assert_shape("EntityRow", &wire["rows"][0], ENTITY_ROW_FIELDS);
+}
+
+/// The filter is an *input* DTO, so it is pinned through a round trip: the
+/// object the mirror describes is decoded and then re-encoded, and the
+/// re-encoding is what the shape assertion sees.
+///
+/// A serialize-only check cannot see an input DTO at all, and a decode-only
+/// check cannot see a Rust field the mirror never declares -- serde would just
+/// report a missing field for a payload nobody in production writes by hand.
+/// The round trip is both halves at once: what comes back out is what the
+/// backend actually understood, and a renamed field on either side stops it
+/// matching.
+#[test]
+fn the_entity_filter_shape_matches_its_typescript_mirror() {
+    let payload = serde_json::json!({
+        "sources": ["mock"],
+        "kinds": ["ticket", "pr"],
+        "updated_within_days": null,
+        "order": "title_asc",
+        "include_deleted": true,
+    });
+    let decoded: EntityFilter =
+        serde_json::from_value(payload.clone()).expect("the mirror's EntityFilter decodes");
+    let wire = serde_json::to_value(&decoded).unwrap();
+
+    assert_shape(
+        "EntityFilter",
+        &wire,
+        &[
+            "include_deleted",
+            "kinds",
+            "order",
+            "sources",
+            "updated_within_days",
+        ],
+    );
+    assert_eq!(
+        wire, payload,
+        "every value the frontend sent survived the decode unchanged"
+    );
+
+    // The window is the one nullable field, and `null` there means *no window*
+    // rather than zero days -- a decode that defaulted it to `Some(0)` would
+    // silently empty every room.
+    assert_eq!(decoded.updated_within_days, None);
+    assert_eq!(decoded.order, EntityOrder::TitleAsc);
+}
+
+/// Both orderings, in the spelling the mirror's union declares.
+///
+/// Read out of `entity.ts` rather than listed here: an ordering added on one
+/// side only is a room the other side can never draw.
+#[test]
+fn the_entity_orders_match_their_typescript_mirror() {
+    let declared = declared_union(MIRROR, "EntityOrder");
+    let mut spellings: Vec<String> = [EntityOrder::UpdatedDesc, EntityOrder::TitleAsc]
+        .into_iter()
+        .map(|order| {
+            serde_json::to_value(order)
+                .unwrap()
+                .as_str()
+                .expect("an order serializes as a string")
+                .to_owned()
+        })
+        .collect();
+    spellings.sort();
+    let mut declared = declared;
+    declared.sort();
+    assert_eq!(spellings, declared);
+}
+
+/// The status bar's stream and the detail view's history panel read this.
+///
+/// `entity_id` is checked as `None`, which is what a `sync:` line carries: a
+/// run is about a source, not about any one entity it touched.
+#[test]
+fn the_activity_row_shape_matches_its_typescript_mirror() {
+    let wire = serde_json::to_value(activity_row()).unwrap();
+    assert_shape(
+        "ActivityRow",
+        &wire,
+        &["actor", "at", "detail", "entity_id", "id", "verb"],
+    );
+    assert_eq!(wire["entity_id"], serde_json::Value::Null);
+    // `detail` is `unknown` in the mirror because the Rust type is any JSON
+    // value. It is not a string-keyed map, and nothing coerces it on the way
+    // out -- only `activity::record` turns a JSON null into `{}` on the way in.
+    assert!(wire["detail"].is_object());
+    assert!(
+        serde_json::to_value(ActivityRow {
+            detail: serde_json::json!("a bare string"),
+            ..activity_row()
+        })
+        .unwrap()["detail"]
+            .is_string(),
+        "a row whose detail is not an object is still well-typed"
+    );
+}
+
+#[test]
+fn the_source_ref_shape_matches_its_typescript_mirror() {
+    let source = SourceRef {
+        id: "mock".to_owned(),
+        display_name: "Tidewater Mock".to_owned(),
+        adapter_kind: "mock".to_owned(),
+    };
+    assert_shape(
+        "SourceRef",
+        &serde_json::to_value(source).unwrap(),
+        &["adapter_kind", "display_name", "id"],
+    );
+}
+
+/// `KindInfo` is declared in `entity.ts` even though its Rust home is
+/// `knobas-source`, so this is where it is pinned. `sources_mirror.rs` checks
+/// the copy that rides inside a `SourceDescriptor`; this checks the one the
+/// detail view reads.
+#[test]
+fn the_kind_info_shape_matches_its_typescript_mirror() {
+    let info = knobas_source::KindInfo {
+        id: "ticket".to_owned(),
+        label: "Ticket".to_owned(),
+        plural: "Tickets".to_owned(),
+        monogram: "TI".to_owned(),
+    };
+    assert_shape(
+        "KindInfo",
+        &serde_json::to_value(info).unwrap(),
+        &["id", "label", "monogram", "plural"],
+    );
+}
+
+const LINK_ROW_FIELDS: &[&str] = &[
+    "created_at",
+    "created_by",
+    "from_id",
+    "id",
+    "origin",
+    "relation",
+    "to_id",
+];
+
+/// The link row, and every origin its `origin` field can hold.
+///
+/// Empty in M1 and about to stop being empty (#40), which is exactly when an
+/// unpinned shape costs something: the panel that draws these is being written
+/// against this declaration right now.
+#[test]
+fn the_link_row_shape_matches_its_typescript_mirror() {
+    let wire = serde_json::to_value(link_row()).unwrap();
+    assert_shape("LinkRow", &wire, LINK_ROW_FIELDS);
+    // A uuid crosses as a string, not as an object or an array of bytes.
+    assert!(wire["id"].is_string(), "{}", wire["id"]);
+
+    // The origin union is declared inline on the field rather than as its own
+    // exported type, so it is read off the field's line.
+    let declared = inline_union(interface_body(MIRROR, "LinkRow"), "origin");
+    let mut spellings: Vec<String> = [
+        Origin::Manual,
+        Origin::Suggested,
+        Origin::Imported,
+        Origin::Source,
+        Origin::Implied,
+    ]
+    .into_iter()
+    .map(|origin| origin.as_str().to_owned())
+    .collect();
+    spellings.sort();
+    let mut declared = declared;
+    declared.sort();
+    assert_eq!(
+        spellings, declared,
+        "an origin declared on one side only is a link the other side cannot \
+         classify"
+    );
+    // ... and the enum serializes as the column value the union names.
+    assert_eq!(wire["origin"], serde_json::json!(Origin::Manual.as_str()));
+}
+
+/// Everything the slide-over draws, and every nested shape inside it.
+///
+/// The nested assertions are the point: `EntityDetail` is the one DTO on this
+/// bridge that carries four other declared shapes, and a top-level key-set
+/// check would pass with every one of them wrong.
+#[test]
+fn the_entity_detail_shape_matches_its_typescript_mirror() {
+    let detail = EntityDetail {
+        row: row(Some(at())),
+        source: SourceRef {
+            id: "mock".to_owned(),
+            display_name: "Tidewater Mock".to_owned(),
+            adapter_kind: "mock".to_owned(),
+        },
+        kind_info: Some(knobas_source::KindInfo {
+            id: "ticket".to_owned(),
+            label: "Ticket".to_owned(),
+            plural: "Tickets".to_owned(),
+            monogram: "TI".to_owned(),
+        }),
+        body_text: "Retries pile up behind the gateway.".to_owned(),
+        author: None,
+        payload: serde_json::json!({ "key": "PAY-231" }),
+        web_url: None,
+        deleted_at: None,
+        links: vec![link_row()],
+        activity: vec![activity_row()],
+    };
+
+    let wire = serde_json::to_value(detail).unwrap();
+    assert_shape(
+        "EntityDetail",
+        &wire,
+        &[
+            "activity",
+            "author",
+            "body_text",
+            "deleted_at",
+            "kind_info",
+            "links",
+            "payload",
+            "row",
+            "source",
+            "web_url",
+        ],
+    );
+
+    assert_shape("EntityRow", &wire["row"], ENTITY_ROW_FIELDS);
+    assert_shape(
+        "SourceRef",
+        &wire["source"],
+        &["adapter_kind", "display_name", "id"],
+    );
+    assert_shape(
+        "KindInfo",
+        &wire["kind_info"],
+        &["id", "label", "monogram", "plural"],
+    );
+    assert_shape("LinkRow", &wire["links"][0], LINK_ROW_FIELDS);
+    assert_shape(
+        "ActivityRow",
+        &wire["activity"][0],
+        &["actor", "at", "detail", "entity_id", "id", "verb"],
+    );
+
+    // The three fields the header and the footer branch on are `null`, not
+    // absent: *Open in browser* is drawn from `web_url`, the withdrawn banner
+    // from `deleted_at`, and both read the key.
+    for field in ["author", "web_url", "deleted_at"] {
+        assert_eq!(wire[field], serde_json::Value::Null, "{field} lost its key");
+    }
+}
+
+/// The string-union members declared inline on one field of an interface body.
+///
+/// `origin: "manual" | "suggested" | ...` is a union with no exported name, so
+/// [`declared_union`] cannot reach it.
+///
+/// # Panics
+/// If the body declares no such field.
+fn inline_union(body: &str, field: &str) -> Vec<String> {
+    let needle = format!("{field}:");
+    let line = body
+        .lines()
+        .find(|line| line.trim_start().starts_with(&needle))
+        .unwrap_or_else(|| panic!("the interface body declares no `{field}`"));
+    // Quoted members are the odd-indexed pieces of a split on the quote.
+    line.split('"')
+        .skip(1)
+        .step_by(2)
+        .map(ToOwned::to_owned)
+        .collect()
+}

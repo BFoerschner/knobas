@@ -62,7 +62,13 @@ pub struct EntityRow {
 /// Both lists are *unfiltered when empty*, which is why they are bound as
 /// `NULL` rather than as an empty array: `= any('{}')` matches nothing, and a
 /// room whose filter said "no sources in particular" would come back empty.
-#[derive(Debug, Clone, serde::Deserialize)]
+///
+/// `Serialize` alongside `Deserialize` although nothing sends a filter the
+/// other way: it is what lets `tests/entity_mirror.rs` pin an *input* DTO
+/// through a round trip, and so see a field this struct has that
+/// `app/src/lib/ipc/entity.ts` never declares. A decode-only check is blind to
+/// that direction.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct EntityFilter {
     /// Source ids to include; empty means every source.
     pub sources: Vec<String>,
@@ -79,7 +85,7 @@ pub struct EntityFilter {
 }
 
 /// The two orderings a room offers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EntityOrder {
     /// Newest first, by the source's own timestamp. Undated items last.

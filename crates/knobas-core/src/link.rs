@@ -114,8 +114,9 @@ pub struct LinkRow {
 /// # Errors
 ///
 /// [`CoreError::Duplicate`] if an active link with the same
-/// `(from, to, relation)` already exists; [`CoreError::Db`] for anything else,
-/// including either endpoint not existing in `knobas.entity`.
+/// `(from, to, relation)` already exists; [`CoreError::EndpointMissing`] if
+/// either endpoint has no `knobas.entity` row; [`CoreError::Db`] for anything
+/// else.
 pub async fn create(
     pool: &PgPool,
     from: &EntityRef,

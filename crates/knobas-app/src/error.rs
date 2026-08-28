@@ -116,7 +116,11 @@ impl From<knobas_core::CoreError> for IpcError {
     fn from(error: knobas_core::CoreError) -> Self {
         match error {
             knobas_core::CoreError::Duplicate => Self::conflict(error),
-            knobas_core::CoreError::LinkNotFound(_) => Self::not_found(error),
+            knobas_core::CoreError::LinkNotFound(_)
+            // An endpoint with no mirror row is the same "no such thing" as a
+            // link id nothing carries: the entity has not synced yet, which is
+            // a normal event and not knobas being broken.
+            | knobas_core::CoreError::EndpointMissing => Self::not_found(error),
             knobas_core::CoreError::Db(_) => Self::internal(error),
         }
     }
@@ -288,5 +292,34 @@ mod tests {
         assert_eq!(duplicate.code, IpcErrorCode::Conflict);
         let db = IpcError::from(sqlx::Error::PoolClosed);
         assert_eq!(db.code, IpcErrorCode::Internal);
+    }
+
+    /// Linking to an entity that is not in the mirror is `not_found`, not
+    /// `internal`.
+    ///
+    /// The whole reason the store lifts a foreign-key violation out of
+    /// [`knobas_core::CoreError::Db`]: `internal` tells the user knobas is
+    /// broken and offers nothing to do about it, while the actual event --
+    /// naming an entity that has not synced yet -- is the same ordinary
+    /// "no such thing" `get_entity` already reports for a deep link into a
+    /// corpus that has not arrived.
+    #[test]
+    fn a_link_endpoint_that_is_not_in_the_mirror_is_not_found() {
+        let missing = IpcError::from(knobas_core::CoreError::EndpointMissing);
+        assert_eq!(missing.code, IpcErrorCode::NotFound);
+        // It is the store's message that crosses, not a placeholder: this is
+        // the only text the user gets.
+        assert_eq!(
+            missing.message,
+            knobas_core::CoreError::EndpointMissing.to_string()
+        );
+        assert!(!missing.message.is_empty());
+        // ... and it is not the code a duplicate gets. The two arrive from the
+        // same classifier and the UI acts on them differently -- one is
+        // "nothing there", the other "already there".
+        assert_ne!(
+            missing.code,
+            IpcError::from(knobas_core::CoreError::Duplicate).code
+        );
     }
 }
