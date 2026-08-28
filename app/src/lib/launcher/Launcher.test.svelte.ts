@@ -526,13 +526,123 @@ test("Esc clears the query first and only then closes", async () => {
   window.removeEventListener("keydown", shell);
 });
 
-test("Tab is reserved and steals no focus", async () => {
-  open();
+test("Tab steals no focus, and offers nothing while no detail is open", async () => {
+  // `onlink` is supplied and `openEntity` is not, which is exactly how the
+  // shell mounts this with no detail open: the handler is always there, the
+  // open entity is what comes and goes.
+  const onlink = vi.fn();
+  open({ onlink });
   await settle();
+  target.querySelector("input")!.value = "sepa";
+  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+
   const input = target.querySelector("input");
   const event = press("Tab");
-  expect(event.defaultPrevented, "Tab is M2's action chain, not a focus move").toBe(true);
+  expect(event.defaultPrevented, "Tab is the action chain, not a focus move").toBe(true);
   expect(document.activeElement).toBe(input);
+  // #55: the chain's one action needs a second end. With nothing open there is
+  // nothing to link to, so there is no chain at all.
+  expect(target.querySelector('[aria-label="Actions on the selected result"]')).toBeNull();
+  press("Enter");
+  expect(onlink, "Enter opens the row; there was no action to run").not.toHaveBeenCalled();
+});
+
+/** The open entity, as the shell names it to the launcher. */
+const OPEN = { entityId: "jira:PAY-999", label: "PAY-999" };
+
+/**
+ * #55. The chain exists only while a detail is open, it names what is open,
+ * and pressing it hands the *result* back — the launcher never writes.
+ */
+test("Tab offers Link to the open entity, and Enter hands the result to the shell", async () => {
+  const onlink = vi.fn();
+  open({ openEntity: OPEN, onlink });
+  await settle();
+  // Search, so the selected row is a result rather than the board.
+  target.querySelector("input")!.value = "sepa";
+  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+
+  press("Tab");
+  const chain = target.querySelector('[aria-label="Actions on the selected result"]');
+  expect(chain?.textContent).toContain("Link to PAY-999");
+
+  press("Enter");
+  // The first result of the fixture's first group.
+  expect(onlink).toHaveBeenCalledWith("jira:PAY-231", "Retry failed SEPA payouts");
+  // The chain closes behind the action rather than staying over a done thing.
+  expect(target.querySelector('[aria-label="Actions on the selected result"]')).toBeNull();
+});
+
+/** The chain acts on the row that was selected when it opened, not on a later one. */
+test("moving the selection abandons an open chain", async () => {
+  const onlink = vi.fn();
+  open({ openEntity: OPEN, onlink });
+  await settle();
+  target.querySelector("input")!.value = "sepa";
+  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+
+  press("Tab");
+  expect(target.querySelector('[aria-label="Actions on the selected result"]')).not.toBeNull();
+
+  // With a chain open the arrows walk *it*, so the selection is moved from a
+  // closed one: Escape first.
+  press("Escape");
+  expect(target.querySelector('[aria-label="Actions on the selected result"]')).toBeNull();
+  press("ArrowDown");
+  press("Tab");
+  press("Enter");
+
+  expect(onlink).toHaveBeenCalledWith("gitea:acme/svc#142", "Backoff");
+});
+
+/** An entity cannot be linked to itself, so its own row offers nothing. */
+test("the open entity's own row has no chain", async () => {
+  const onlink = vi.fn();
+  open({ openEntity: { entityId: "jira:PAY-231", label: "PAY-231" }, onlink });
+  await settle();
+  target.querySelector("input")!.value = "sepa";
+  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+
+  press("Tab");
+  expect(target.querySelector('[aria-label="Actions on the selected result"]')).toBeNull();
+  expect(onlink).not.toHaveBeenCalled();
+});
+
+/**
+ * Escape unwinds the chain first — one rung per press, and the shell's ladder
+ * still never sees the key.
+ */
+test("Escape closes the chain before it clears the query", async () => {
+  // Only `Escape` matters here: the shell binds it (and ⌘K), and `Tab` is
+  // preventDefault-ed rather than stopped, because nothing above listens for it.
+  const reachedTheShell: string[] = [];
+  const shell = (event: KeyboardEvent) => reachedTheShell.push(event.key);
+  window.addEventListener("keydown", shell);
+  open({ openEntity: OPEN, onlink: () => {} });
+  await settle();
+  target.querySelector("input")!.value = "sepa";
+  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+
+  press("Tab");
+  press("Escape");
+  expect(target.querySelector('[aria-label="Actions on the selected result"]')).toBeNull();
+  expect(target.querySelector("input")!.value, "the query survives the first rung").toBe("sepa");
+
+  press("Escape");
+  expect(target.querySelector("input")!.value).toBe("");
+  expect(reachedTheShell, "one keystroke must not unwind two ladders").not.toContain("Escape");
+
+  window.removeEventListener("keydown", shell);
 });
 
 test("⌘K opens the overlay from anywhere, and opening twice is not closing", async () => {

@@ -61,11 +61,11 @@ async fn link_lifecycle_with_tombstone() {
     .await;
     assert!(matches!(dup, Err(CoreError::Duplicate)), "{dup:?}");
     // visible from both ends
-    assert_eq!(link::links_of(&pool, &t).await.unwrap().len(), 1);
-    assert_eq!(link::links_of(&pool, &n).await.unwrap().len(), 1);
+    assert_eq!(link::entries_of(&pool, &t).await.unwrap().len(), 1);
+    assert_eq!(link::entries_of(&pool, &n).await.unwrap().len(), 1);
 
     link::unlink(&pool, id).await.unwrap();
-    assert!(link::links_of(&pool, &t).await.unwrap().is_empty());
+    assert!(link::entries_of(&pool, &t).await.unwrap().is_empty());
     // tombstone remains in the table
     let (cnt,): (i64,) = sqlx::query_as("select count(*) from knobas.link where id = $1")
         .bind(id)
@@ -104,15 +104,22 @@ async fn link_row_carries_its_origin_and_direction() {
     .unwrap()
     .id;
 
-    let rows = link::links_of(&pool, &n).await.unwrap();
+    let rows = link::entries_of(&pool, &n).await.unwrap();
     assert_eq!(rows.len(), 1);
-    let row = &rows[0];
+    let row = &rows[0].link;
     assert_eq!(row.id, id);
     assert_eq!(row.from_id, t.to_string());
     assert_eq!(row.to_id, n.to_string());
     assert_eq!(row.relation, "documents");
     assert_eq!(row.origin, link::Origin::Suggested);
     assert_eq!(row.created_by, "sync:jira");
+
+    // Read from `n`, the resolved end is `t` -- the end the reader is *not*
+    // on. A hydration keyed on `to_id` would hand `n`'s own panel a row
+    // describing `n`.
+    let other = &rows[0].other;
+    assert_eq!(other.entity_id, t.to_string());
+    assert_eq!(other.deleted_at, None);
 }
 
 #[tokio::test]
@@ -138,27 +145,27 @@ async fn several_relations_coexist_and_come_back_newest_first() {
         .id;
     let after = chrono::Utc::now();
 
-    let rows = link::links_of(&pool, &t).await.unwrap();
+    let rows = link::entries_of(&pool, &t).await.unwrap();
     // Newest first -- asserted on ids, and asserted *first*, because these two
     // relation names happen to sort into the same order and so would hide a
     // flipped `order by` behind a passing name comparison.
-    let ids: Vec<Uuid> = rows.iter().map(|row| row.id).collect();
+    let ids: Vec<Uuid> = rows.iter().map(|row| row.link.id).collect();
     assert_eq!(ids, [blocks, documents]);
     // The pair carries both relations: `link_active_idx` is three-column.
-    let relations: Vec<&str> = rows.iter().map(|row| row.relation.as_str()).collect();
+    let relations: Vec<&str> = rows.iter().map(|row| row.link.relation.as_str()).collect();
     assert_eq!(relations, ["blocks", "documents"]);
 
     // `created_at` is the stored insertion time, not the reading query's clock:
-    // `links_of` runs strictly after `after`.
+    // `entries_of` runs strictly after `after`.
     for row in &rows {
         assert!(
-            row.created_at >= before && row.created_at <= after,
+            row.link.created_at >= before && row.link.created_at <= after,
             "created_at {} outside [{before}, {after}]",
-            row.created_at
+            row.link.created_at
         );
     }
     // ... and the two inserts, being separate transactions, are distinct.
-    assert!(rows[0].created_at > rows[1].created_at);
+    assert!(rows[0].link.created_at > rows[1].link.created_at);
 }
 
 #[tokio::test]
@@ -456,7 +463,7 @@ async fn a_foreign_key_violation_outside_a_link_write_is_not_an_endpoint() {
 /// id would make the caller read back a row it just wrote, in a table where
 /// "the newest row" is not reliably its own.
 ///
-/// Asserted against an independent [`link::links_of`] read rather than against
+/// Asserted against an independent [`link::entries_of`] read rather than against
 /// the arguments, so an implementation that echoed its own inputs back fails.
 #[tokio::test]
 async fn the_link_write_returns_the_stored_row_including_its_note() {
@@ -474,12 +481,13 @@ async fn the_link_write_returns_the_stored_row_including_its_note() {
     .await
     .unwrap();
 
-    let stored = link::links_of(&pool, &t)
+    let stored = link::entries_of(&pool, &t)
         .await
         .unwrap()
         .into_iter()
-        .find(|row| row.id == written.id)
-        .expect("the written link is in the store");
+        .find(|entry| entry.link.id == written.id)
+        .expect("the written link is in the store")
+        .link;
 
     assert_eq!(written.from_id, stored.from_id);
     assert_eq!(written.to_id, stored.to_id);
@@ -505,12 +513,13 @@ async fn the_link_write_returns_the_stored_row_including_its_note() {
         .unwrap();
     assert_eq!(bare.note, None);
     assert_eq!(
-        link::links_of(&pool, &n)
+        link::entries_of(&pool, &n)
             .await
             .unwrap()
             .into_iter()
-            .find(|row| row.id == bare.id)
+            .find(|entry| entry.link.id == bare.id)
             .expect("the second link is in the store")
+            .link
             .note,
         None
     );

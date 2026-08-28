@@ -10,7 +10,7 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage, isIpcError } from "../ipc";
-  import { getEntity, type EntityDetail } from "../ipc/entity";
+  import { getEntity, unlink, type EntityDetail, type LinkEntry } from "../ipc/entity";
   import Monogram from "../shell/Monogram.svelte";
   import { kindRegistry } from "../shell/kind-registry.svelte";
   import { kindMonogram, kindSingular } from "../shell/kinds";
@@ -18,6 +18,8 @@
   import { ago } from "../shell/time";
   import { push } from "../shell/toasts.svelte";
   import HistoryPanel from "./HistoryPanel.svelte";
+  import LinkDialog from "./LinkDialog.svelte";
+  import { linkChanges } from "./links.svelte";
   import LinksPanel from "./LinksPanel.svelte";
   import PayloadView from "./PayloadView.svelte";
   import { projectPayload } from "./payload";
@@ -27,6 +29,7 @@
     kind,
     contextLabel,
     onclose,
+    onnavigate,
   }: {
     entityId: string;
     /** From the address. `null` for the `#/entity/<id>` alias. */
@@ -34,6 +37,13 @@
     /** The room this was opened over, for the crumb. */
     contextLabel: string;
     onclose: () => void;
+    /**
+     * Go to an address — a linked entity's own detail (spec §2).
+     *
+     * A callback rather than the router itself: the shell owns navigation, and
+     * a slide-over that wrote `location.hash` would be a second navigator.
+     */
+    onnavigate: (hash: string) => void;
   } = $props();
 
   let detail = $state<EntityDetail | null>(null);
@@ -59,6 +69,72 @@
         };
       });
   });
+
+  /**
+   * Re-read this entity without blanking the panel.
+   *
+   * What a *write* needs: after an unlink the links array is stale, and the
+   * reader is looking at the row that has to disappear. The mount effect above
+   * cannot do it — it clears `detail` first, so the whole slide-over would
+   * flash "Reading…" for one round trip after every small action.
+   *
+   * `token` is read and not bumped: this is the same read generation as the
+   * effect that opened the panel, so an answer that lands after the address
+   * moved on is dropped exactly as a slow first read would be.
+   */
+  async function refresh() {
+    const mine = token;
+    try {
+      const answer = await getEntity(entityId);
+      if (mine !== token) return;
+      detail = answer;
+    } catch (rejection) {
+      push({ text: `Could not re-read this item: ${ipcErrorMessage(rejection)}`, tone: "err" });
+    }
+  }
+
+  /**
+   * Re-read when something outside this panel drew a link.
+   *
+   * The launcher's `Tab` chain can link the entity this slide-over has open,
+   * and the write happens in the shell. Without this the panel would keep
+   * saying what it said before the link — a state the app has already left.
+   *
+   * `seen` is a plain `let`, so writing it cannot re-trigger the effect; the
+   * first run only records where the counter stood when the panel opened.
+   */
+  let seenLinkChanges = linkChanges.count;
+  $effect(() => {
+    const now = linkChanges.count;
+    if (now === seenLinkChanges) return;
+    seenLinkChanges = now;
+    void refresh();
+  });
+
+  /**
+   * Whether *Link to…* is up.
+   *
+   * The dialog is `Modal`-based, so it takes rung 1 of the Esc ladder: one
+   * press closes it and hands focus back to the button that opened it, and the
+   * slide-over underneath stays open.
+   */
+  let linking = $state(false);
+
+  /**
+   * Withdraw a link, and show the result.
+   *
+   * No confirmation: re-linking the same pair is one action, so the removal is
+   * cheap to reverse (§5a's partial unique index is what makes that true).
+   */
+  async function removeLink(entry: LinkEntry) {
+    try {
+      await unlink(entry.link.id);
+    } catch (rejection) {
+      push({ text: `Could not unlink: ${ipcErrorMessage(rejection)}`, tone: "err" });
+      return;
+    }
+    await refresh();
+  }
 
   /**
    * Focus moves into the panel on open and back to the opener on close.
@@ -127,6 +203,14 @@
         state for an item withdrawn upstream and for any source that has no
         per-item URL. A disabled button would claim there is somewhere to go.
       -->
+      <button class="btn sm" onclick={() => (linking = true)}>
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M6.5 9.5 9.5 6.5" />
+          <path d="M7 4.5 8.5 3a2.5 2.5 0 0 1 3.5 3.5L10.5 8" />
+          <path d="M9 11.5 7.5 13A2.5 2.5 0 0 1 4 9.5L5.5 8" />
+        </svg>
+        Link to…
+      </button>
       {#if webUrl}
         <button class="btn sm" onclick={() => void open(webUrl)}>
           <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -240,8 +324,31 @@
         <PayloadView {fields} />
       </div>
 
-      <LinksPanel entityId={detail.row.entity_id} links={detail.links} />
+      <LinksPanel
+        entityId={detail.row.entity_id}
+        links={detail.links}
+        onopen={onnavigate}
+        onunlink={(entry) => void removeLink(entry)}
+        onlink={() => (linking = true)}
+      />
       <HistoryPanel activity={detail.activity} />
+
+      <!--
+        Mounted only while it is open, and keyed on nothing: a closed dialog
+        that keeps its half-typed search around is a dialog that reopens with
+        somebody else's question in it.
+      -->
+      {#if linking}
+        <LinkDialog
+          fromId={detail.row.entity_id}
+          fromTitle={detail.row.title}
+          onclose={() => (linking = false)}
+          oncreated={() => {
+            linking = false;
+            void refresh();
+          }}
+        />
+      {/if}
     {/if}
   </div>
 </aside>

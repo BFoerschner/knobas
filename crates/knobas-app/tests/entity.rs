@@ -561,9 +561,66 @@ async fn linkable_pair(pool: &PgPool) -> (String, String) {
     (from, to)
 }
 
-/// The links `entity`'s detail view would draw.
-async fn links_on(pool: &PgPool, entity: &str) -> Vec<knobas_core::link::LinkRow> {
+/// The link entries `entity`'s detail view would draw -- each one the link
+/// record plus the end the viewer is *not* on.
+async fn links_on(pool: &PgPool, entity: &str) -> Vec<knobas_core::link::LinkEntry> {
     get_entity_inner(pool, entity).await.unwrap().links
+}
+
+/// The other end arrives hydrated, and a target the source withdrew still
+/// resolves.
+///
+/// Story 9 and story 10 of #40 in one read, because they are one query: the
+/// panel draws a kind and a title rather than a raw id, and it can only do
+/// that if the read reaches **past** `sync.live_item` -- the documented
+/// exception, since a link may point at an entity that was tombstoned upstream
+/// and must not silently dangle.
+///
+/// Both directions, because the hydrated end is chosen relative to the entity
+/// being read: a join keyed on `to_id` alone would pass the first half of this
+/// test and hand the withdrawn ticket's own panel a row describing itself.
+#[tokio::test]
+async fn a_links_other_end_arrives_hydrated_and_a_withdrawn_target_still_resolves() {
+    let pool = seeded().await;
+    let (from, _unused) = linkable_pair(&pool).await;
+    // The fixture's withdrawn ticket: `knobas.entity.deleted_at` is set and its
+    // mirror row is kept (`a_tombstoned_entity_is_still_readable_and_says_so`).
+    let withdrawn = "mock:PAY-198";
+
+    let written = create_link_inner(&pool, &from, withdrawn, Some("documents"), None)
+        .await
+        .unwrap();
+
+    let entry = links_on(&pool, &from)
+        .await
+        .into_iter()
+        .find(|entry| entry.link.id == written.link.id)
+        .expect("the link is on the viewed entity's detail");
+    assert_eq!(entry.other.entity_id, withdrawn);
+    assert_eq!(
+        entry.other.kind, "ticket",
+        "the panel draws the other end's kind, not a raw id"
+    );
+    assert_eq!(
+        entry.other.title, "Legacy payout reconciliation (withdrawn)",
+        "the other end's own title, so the reader recognises what they linked"
+    );
+    assert!(
+        entry.other.deleted_at.is_some(),
+        "a withdrawn target still resolves, and carries what marks it withdrawn"
+    );
+
+    // ... and read from the withdrawn end, the hydrated end is the live one.
+    let back = links_on(&pool, withdrawn)
+        .await
+        .into_iter()
+        .find(|entry| entry.link.id == written.link.id)
+        .expect("the link is on the far end's detail too");
+    assert_eq!(back.other.entity_id, from);
+    assert!(
+        back.other.deleted_at.is_none(),
+        "the live end is not marked withdrawn"
+    );
 }
 
 /// A link made with nothing but its two ends: `related`, `manual`, and on both
@@ -599,18 +656,18 @@ async fn a_link_made_from_its_two_ends_alone_is_related_manual_and_visible_from_
     assert_eq!(written.link.from_id, from);
     assert_eq!(written.link.to_id, to);
 
-    // Both ends, through the entity-detail read. `links_of` is undirected, so
+    // Both ends, through the entity-detail read. `entries_of` is undirected, so
     // the end the link was *not* drawn from is the half that would be missing
     // if the read were keyed on `from_id`.
     for end in [&from, &to] {
-        let row = links_on(&pool, end)
+        let entry = links_on(&pool, end)
             .await
             .into_iter()
-            .find(|row| row.id == written.link.id)
+            .find(|entry| entry.link.id == written.link.id)
             .unwrap_or_else(|| panic!("the link is missing from {end}'s detail"));
-        assert_eq!(row.from_id, from);
-        assert_eq!(row.to_id, to);
-        assert_eq!(row.relation, DEFAULT_RELATION);
+        assert_eq!(entry.link.from_id, from);
+        assert_eq!(entry.link.to_id, to);
+        assert_eq!(entry.link.relation, DEFAULT_RELATION);
     }
 }
 
@@ -633,7 +690,7 @@ async fn a_named_relation_is_kept_and_the_same_pair_may_carry_several() {
     let relations: std::collections::BTreeSet<String> = links_on(&pool, &from)
         .await
         .into_iter()
-        .map(|row| row.relation)
+        .map(|entry| entry.link.relation)
         .collect();
     assert!(
         relations.contains("documents") && relations.contains("blocks"),
@@ -660,9 +717,9 @@ async fn a_note_travels_from_the_write_to_the_entity_detail_read() {
     let read = links_on(&pool, &to)
         .await
         .into_iter()
-        .find(|row| row.id == written.link.id)
+        .find(|entry| entry.link.id == written.link.id)
         .expect("the link is on the far end's detail");
-    assert_eq!(read.note.as_deref(), Some("why this exists"));
+    assert_eq!(read.link.note.as_deref(), Some("why this exists"));
 
     // A note that is only whitespace is no note. `null` and `""` are different
     // facts in the mirror, and only one of them is worth a line in the panel.
@@ -676,7 +733,7 @@ async fn a_note_travels_from_the_write_to_the_entity_detail_read() {
 /// second row.
 ///
 /// **In this direction.** The uniqueness rule is directed -- `link_active_idx`
-/// is on `(from_id, to_id, relation)` -- while `links_of` reads undirected, so
+/// is on `(from_id, to_id, relation)` -- while `entries_of` reads undirected, so
 /// `B -> A` after `A -> B` still succeeds and both panels then show two rows
 /// for one relationship. That is **#70**: pre-existing store behaviour that
 /// #52 wired up, ruled 2026-08-28 to be its own sub-issue rather than this
@@ -704,7 +761,7 @@ async fn a_duplicate_pair_and_relation_is_a_conflict() {
         links_on(&pool, &from)
             .await
             .iter()
-            .filter(|row| row.relation == "documents")
+            .filter(|entry| entry.link.relation == "documents")
             .count(),
         1
     );
@@ -793,7 +850,7 @@ async fn unlinking_keeps_the_row_and_the_pair_can_be_linked_again() {
             !links_on(&pool, end)
                 .await
                 .iter()
-                .any(|row| row.id == first.link.id),
+                .any(|entry| entry.link.id == first.link.id),
             "the withdrawn link is still on {end}'s detail"
         );
     }
@@ -816,7 +873,7 @@ async fn unlinking_keeps_the_row_and_the_pair_can_be_linked_again() {
         links_on(&pool, &from)
             .await
             .iter()
-            .any(|row| row.id == second.link.id)
+            .any(|entry| entry.link.id == second.link.id)
     );
 
     // Withdrawing something already withdrawn is not an error and is not a
@@ -947,10 +1004,10 @@ async fn a_link_over_the_seam_fills_the_demo_profiles_empty_links_panel() {
 
     // The empty state is half the criterion, so it is asserted rather than
     // assumed: the demo fixture ships no links, and this is the only test in
-    // this binary that writes one into the shared `mock:` corpus -- every
-    // other link test uses `linkable_pair`'s run-unique ids. A second test
-    // linking a `mock:` entity would fail here, deliberately and not by
-    // ordering: the criterion is "Nothing linked yet" being *replaced*.
+    // this binary that links `mock:PAY-231` -- every other link test uses
+    // `linkable_pair`'s run-unique ids for at least one end. A second test
+    // linking this entity would fail here, deliberately and not by ordering:
+    // the criterion is "Nothing linked yet" being *replaced*.
     let before = get_entity_inner(&pool, "mock:PAY-231").await.unwrap().links;
     assert!(
         before.is_empty(),
@@ -974,11 +1031,22 @@ async fn a_link_over_the_seam_fills_the_demo_profiles_empty_links_panel() {
     );
     let drawn = after
         .iter()
-        .find(|row| row.id == written.link.id)
+        .find(|entry| entry.link.id == written.link.id)
         .expect("the new link is in the array the panel draws");
-    assert_eq!(drawn.to_id, "mock:PAY-228");
-    assert_eq!(drawn.relation, "documents");
-    assert_eq!(drawn.note.as_deref(), Some("the retry storm postmortem"));
+    assert_eq!(drawn.link.to_id, "mock:PAY-228");
+    assert_eq!(drawn.link.relation, "documents");
+    assert_eq!(
+        drawn.link.note.as_deref(),
+        Some("the retry storm postmortem")
+    );
+    // Hydrated, which is what the panel draws instead of the id: `PAY-228` is
+    // a real fixture ticket and the panel names it.
+    assert_eq!(drawn.other.entity_id, "mock:PAY-228");
+    assert_eq!(drawn.other.kind, "ticket");
+    assert!(
+        !drawn.other.title.is_empty(),
+        "the row would show a raw id with nothing to recognise it by"
+    );
 }
 
 /// An entity cannot be linked to itself.
@@ -1011,7 +1079,7 @@ async fn an_entity_cannot_be_linked_to_itself() {
         !links_on(&pool, &from)
             .await
             .iter()
-            .any(|row| row.from_id == row.to_id),
+            .any(|entry| entry.link.from_id == entry.link.to_id),
         "a self-link reached the table"
     );
 
@@ -1059,12 +1127,12 @@ async fn a_relations_case_does_not_split_its_group() {
 
     // The folded value is what both ends read back.
     for end in [&from, &to] {
-        let row = links_on(&pool, end)
+        let entry = links_on(&pool, end)
             .await
             .into_iter()
-            .find(|row| row.id == written.link.id)
+            .find(|entry| entry.link.id == written.link.id)
             .unwrap_or_else(|| panic!("the link is missing from {end}'s detail"));
-        assert_eq!(row.relation, "blocks");
+        assert_eq!(entry.link.relation, "blocks");
     }
 
     // ... and the same relation in another case is the *same* relation, so the
@@ -1086,7 +1154,7 @@ async fn a_relations_case_does_not_split_its_group() {
     let relations: std::collections::BTreeSet<String> = links_on(&pool, &from)
         .await
         .into_iter()
-        .map(|row| row.relation)
+        .map(|entry| entry.link.relation)
         .collect();
     assert!(
         relations.contains("blocks") && relations.contains("documents"),

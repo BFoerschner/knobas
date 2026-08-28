@@ -32,7 +32,7 @@ use knobas_app::commands::entity::{
     EntityDetail, EntityFilter, EntityOrder, EntityPage, EntityRow, SourceRef,
 };
 use knobas_core::activity::ActivityRow;
-use knobas_core::link::{LinkRow, Origin};
+use knobas_core::link::{LinkEnd, LinkEntry, LinkRow, Origin};
 use knobas_sync::mirror::{declared_inline_union, declared_union, interface_body};
 
 const MIRROR: &str = include_str!("../../../app/src/lib/ipc/entity.ts");
@@ -271,6 +271,27 @@ fn the_kind_info_shape_matches_its_typescript_mirror() {
     );
 }
 
+/// The other end, hydrated. `deleted_at` is `None` here and `Some` in the
+/// entity-detail fixture below, because it is the nullable field on this shape
+/// and both states have to keep the key: the panel's withdrawn marker reads it.
+fn link_end() -> LinkEnd {
+    LinkEnd {
+        entity_id: "note:retry-storm".to_owned(),
+        kind: "note".to_owned(),
+        title: "Retry storm postmortem".to_owned(),
+        deleted_at: None,
+    }
+}
+
+fn link_entry() -> LinkEntry {
+    LinkEntry {
+        link: link_row(),
+        other: link_end(),
+    }
+}
+
+const LINK_END_FIELDS: &[&str] = &["deleted_at", "entity_id", "kind", "title"];
+
 const LINK_ROW_FIELDS: &[&str] = &[
     "created_at",
     "created_by",
@@ -325,6 +346,43 @@ fn the_link_row_shape_matches_its_typescript_mirror() {
     assert_eq!(annotated["note"], serde_json::json!("why this link exists"));
 }
 
+/// The hydrated entry the links panel draws: the record, and the end the
+/// reader is not on.
+///
+/// Nested rather than flattened, and the shape assertions below say so from
+/// both sides: `link` and `other` are the only two keys, and each of them is
+/// its own pinned shape. A `#[serde(flatten)]` here would collide `id` with
+/// `entity_id`'s neighbours and hand the panel one bag of fields where it
+/// declared two objects.
+#[test]
+fn the_link_entry_shape_matches_its_typescript_mirror() {
+    let wire = serde_json::to_value(link_entry()).unwrap();
+    assert_shape("LinkEntry", &wire, &["link", "other"]);
+    assert_shape("LinkRow", &wire["link"], LINK_ROW_FIELDS);
+    assert_shape("LinkEnd", &wire["other"], LINK_END_FIELDS);
+    assert_eq!(
+        wire["other"]["deleted_at"],
+        serde_json::Value::Null,
+        "a live end keeps the key and nulls it -- the panel's withdrawn marker \
+         branches on it"
+    );
+
+    let withdrawn = serde_json::to_value(LinkEntry {
+        other: LinkEnd {
+            deleted_at: Some(at()),
+            ..link_end()
+        },
+        ..link_entry()
+    })
+    .unwrap();
+    assert_shape("LinkEnd", &withdrawn["other"], LINK_END_FIELDS);
+    assert!(
+        withdrawn["other"]["deleted_at"].is_string(),
+        "a withdrawn end crosses as an RFC 3339 string: {}",
+        withdrawn["other"]["deleted_at"]
+    );
+}
+
 /// Everything the slide-over draws, and every nested shape inside it.
 ///
 /// The nested assertions are the point: `EntityDetail` is the one DTO on this
@@ -341,7 +399,7 @@ fn the_entity_detail_shape_matches_its_typescript_mirror() {
         payload: serde_json::json!({ "key": "PAY-231" }),
         web_url: None,
         deleted_at: None,
-        links: vec![link_row()],
+        links: vec![link_entry()],
         activity: vec![activity_row()],
     };
 
@@ -366,7 +424,9 @@ fn the_entity_detail_shape_matches_its_typescript_mirror() {
     assert_shape("EntityRow", &wire["row"], ENTITY_ROW_FIELDS);
     assert_shape("SourceRef", &wire["source"], SOURCE_REF_FIELDS);
     assert_shape("KindInfo", &wire["kind_info"], KIND_INFO_FIELDS);
-    assert_shape("LinkRow", &wire["links"][0], LINK_ROW_FIELDS);
+    assert_shape("LinkEntry", &wire["links"][0], &["link", "other"]);
+    assert_shape("LinkRow", &wire["links"][0]["link"], LINK_ROW_FIELDS);
+    assert_shape("LinkEnd", &wire["links"][0]["other"], LINK_END_FIELDS);
     assert_shape("ActivityRow", &wire["activity"][0], ACTIVITY_ROW_FIELDS);
 
     // The three fields the header and the footer branch on are `null`, not

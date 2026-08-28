@@ -30,7 +30,7 @@
 use chrono::{DateTime, Utc};
 use knobas_core::activity::ActivityRow;
 use knobas_core::entity::EntityRef;
-use knobas_core::link::{LinkRow, Origin};
+use knobas_core::link::{LinkEntry, LinkRow, Origin};
 use sqlx::{PgPool, Row};
 use tauri::{Emitter, State};
 use uuid::Uuid;
@@ -307,12 +307,15 @@ pub struct EntityDetail {
     /// Set when the source withdrew the entity. The mirror row survives, so
     /// links and notes still resolve (§5a).
     pub deleted_at: Option<DateTime<Utc>>,
-    /// Every link this entity takes part in, newest first.
+    /// Every link this entity takes part in, newest first, each with the end
+    /// the reader is *not* on already resolved.
     ///
-    /// Read undirected by [`knobas_core::link::links_of`], so a link drawn from
-    /// either end is on both ends' detail. [`create_link`] and [`unlink`] are
-    /// what move it.
-    pub links: Vec<LinkRow>,
+    /// Read undirected by [`knobas_core::link::entries_of`], so a link drawn
+    /// from either end is on both ends' detail, and hydrated there, so the
+    /// panel draws a kind and a title rather than a raw id -- including for a
+    /// target the source withdrew. [`create_link`] and [`unlink`] are what
+    /// move it.
+    pub links: Vec<LinkEntry>,
     /// This entity's own history, newest first (spec §12.1).
     pub activity: Vec<ActivityRow>,
 }
@@ -386,7 +389,7 @@ pub async fn get_entity_inner(pool: &PgPool, entity_id: &str) -> Result<EntityDe
         payload: row.get("payload"),
         web_url: row.get("web_url"),
         deleted_at: row.get("deleted_at"),
-        links: knobas_core::link::links_of(pool, &entity).await?,
+        links: knobas_core::link::entries_of(pool, &entity).await?,
         activity: knobas_core::activity::recent(pool, DETAIL_ACTIVITY, Some(&entity)).await?,
     })
 }
@@ -478,9 +481,9 @@ pub async fn recent_activity(
 
 // -- the link writes --------------------------------------------------------
 //
-// Two commands, and only two. The *read* stays on `get_entity`: `links_of` is
-// undirected, so an entity's backlinks are the same query as its links and need
-// no endpoint of their own, and the target picker reuses `search`.
+// Two commands, and only two. The *read* stays on `get_entity`: `entries_of`
+// is undirected, so an entity's backlinks are the same query as its links and
+// need no endpoint of their own, and the target picker reuses `search`.
 
 /// The relation a link takes when the caller names none.
 ///
