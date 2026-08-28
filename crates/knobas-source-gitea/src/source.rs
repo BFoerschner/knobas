@@ -139,7 +139,18 @@ mod tests {
         assert!(d.write_ops.is_empty());
         // Including the 2026-08-25 budget ruling -- an instance cannot quietly
         // re-grant the sweep the template refuses it.
-        assert!(!d.entity_kinds.iter().any(|k| k.full_sync_exhaustive));
+        assert_eq!(
+            d.entity_kinds
+                .iter()
+                .map(|k| (k.id.as_str(), k.full_sync_exhaustive))
+                .collect::<Vec<_>>(),
+            vec![
+                (crate::KIND_REPO, true),
+                (crate::KIND_BRANCH, true),
+                (crate::KIND_PR, false),
+                (crate::KIND_COMMIT, false),
+            ]
+        );
     }
 
     /// An id that cannot be an `EntityRef` namespace fails when the source is

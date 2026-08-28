@@ -66,6 +66,13 @@ pub const KIND_COMMIT: &str = "commit";
 /// The kinds this adapter emits, with the display metadata the launcher renders
 /// groups, chips and monograms from (spec §3a -- nothing downstream carries a
 /// per-adapter table). Monograms are fixed by interfaces §4.2.
+///
+/// Each kind also declares whether a cursor-less run emits **its** complete
+/// corpus, which is the engine's licence to tombstone what that kind stopped
+/// returning (ADR-0003). This adapter splits two ways and is the reason the
+/// declaration is per kind at all -- see
+/// `tests::exactly_the_unbudgeted_kinds_are_exhaustive`, and `sync`'s module
+/// docs for what makes the `true` half honest.
 #[must_use]
 pub fn entity_kinds() -> Vec<KindInfo> {
     vec![
@@ -74,20 +81,32 @@ pub fn entity_kinds() -> Vec<KindInfo> {
             label: "Repository".into(),
             plural: "Repositories".into(),
             monogram: "RE".into(),
-            full_sync_exhaustive: false,
+            // The listing is walked to the end or the run fails, and no
+            // configuration bounds it, so a cursor-less run emits every
+            // repository in scope. This is what retires the row of a
+            // repository that was deleted upstream.
+            full_sync_exhaustive: true,
         },
         KindInfo {
             id: KIND_BRANCH.into(),
             label: "Branch".into(),
             plural: "Branches".into(),
             monogram: "BR".into(),
-            full_sync_exhaustive: false,
+            // Same: every branch of every walked repository, unbounded. The
+            // adapter's own tombstones need a previous cursor to diff against
+            // and a full sync has none, so for the cursor-less case the
+            // engine's sweep is the only thing that ever retires a deleted
+            // branch -- and `branch` is precisely the kind links hang off
+            // (spec §5a).
+            full_sync_exhaustive: true,
         },
         KindInfo {
             id: KIND_PR.into(),
             label: "Pull request".into(),
             plural: "Pull requests".into(),
             monogram: "PR".into(),
+            // `prs_per_repo` bounds what one run mirrors, cursor-less runs
+            // included. A budgeted kind is non-exhaustive by definition.
             full_sync_exhaustive: false,
         },
         KindInfo {
@@ -95,6 +114,7 @@ pub fn entity_kinds() -> Vec<KindInfo> {
             label: "Commit".into(),
             plural: "Commits".into(),
             monogram: "CM".into(),
+            // `commits_per_repo`, likewise.
             full_sync_exhaustive: false,
         },
     ]
@@ -159,24 +179,28 @@ mod tests {
         assert_eq!(d.config_schema["type"], "object");
     }
 
-    /// **The 2026-08-25 ruling** (carry-overs, *"BLOCKING before stream B's
-    /// adapter merges"*), which supersedes interfaces §4.2's `true` for Gitea.
+    /// **This adapter is why ADR-0003 exists**, and it carries both answers.
     ///
     /// `full_sync_exhaustive` means exactly "a cursor-less run emits the
-    /// complete corpus", and this adapter's configuration bounds what one run
-    /// mirrors per repository. The engine sweeps on
-    /// `full_sync && exhaustive && upserted > 0`
-    /// (`knobas_sync::run_inner` → `sweep`), so `true` alongside a budget is a
-    /// standing instruction to tombstone every commit past the cap on **every**
-    /// full sync -- the same defect class as Jira's `MAX_PAGES`, reaching a
-    /// different mechanism.
+    /// complete corpus of this kind". The repository listing and each walked
+    /// repository's branch listing are walked to the end -- a reached page cap
+    /// is fatal, and a repository skipped during a cursor-less run is fatal
+    /// too (`sync`'s module docs), so a run that returns `Ok` without a cursor
+    /// really did emit every repo and every branch. The other two kinds are
+    /// bounded by `commits_per_repo` / `prs_per_repo`, and a budgeted kind is
+    /// non-exhaustive by definition: `true` there would be a standing
+    /// instruction to tombstone every commit past the cap on **every** full
+    /// sync -- the same defect class as Jira's `MAX_PAGES`, reaching a
+    /// different mechanism. That is the 2026-08-25 ruling, kept; what ADR-0003
+    /// changed is that it no longer has to cost `repo` and `branch` too.
     ///
-    /// This pins the coupling and not just the constant: it names the budgets
-    /// the ruling is about, so renaming one fails here rather than passing
-    /// vacuously, and if every budget is ever removed this test is what has to
-    /// be revisited before `true` can come back.
+    /// This pins the *coupling* and not just four constants: the budgeted kinds
+    /// are derived from the config schema, so renaming a budget fails here
+    /// rather than passing vacuously, and a budget added for repositories or
+    /// branches makes the two halves disagree instead of quietly licensing a
+    /// sweep over a bounded walk.
     #[test]
-    fn a_budgeted_full_sync_is_not_exhaustive() {
+    fn exactly_the_unbudgeted_kinds_are_exhaustive() {
         let schema = config::config_schema();
         let budgets: Vec<&str> = schema["properties"]
             .as_object()
@@ -190,14 +214,34 @@ mod tests {
             vec!["commits_per_repo", "prs_per_repo"],
             "the per-repository budgets the ruling is about"
         );
-        assert!(
-            !descriptor_template()
-                .entity_kinds
-                .iter()
-                .any(|k| k.full_sync_exhaustive),
-            "{budgets:?} bound what a cursor-less run emits, so the run is not \
-             exhaustive and the engine must not sweep after it"
+        // `commits_per_repo` bounds `commit`, `prs_per_repo` bounds `pr`.
+        let budgeted: Vec<&str> = budgets
+            .iter()
+            .map(|budget| budget.trim_end_matches("s_per_repo"))
+            .collect();
+        assert_eq!(budgeted, vec![KIND_COMMIT, KIND_PR]);
+
+        let claims: Vec<(String, bool)> = descriptor_template()
+            .entity_kinds
+            .into_iter()
+            .map(|kind| (kind.id, kind.full_sync_exhaustive))
+            .collect();
+        assert_eq!(
+            claims,
+            vec![
+                (KIND_REPO.to_owned(), true),
+                (KIND_BRANCH.to_owned(), true),
+                (KIND_PR.to_owned(), false),
+                (KIND_COMMIT.to_owned(), false),
+            ]
         );
+        for (kind, exhaustive) in &claims {
+            assert_eq!(
+                *exhaustive,
+                !budgeted.contains(&kind.as_str()),
+                "{kind:?} is exhaustive if and only if no {budgets:?} bounds it"
+            );
+        }
     }
 
     /// The whole descriptor crosses the IPC bridge as plain data (spec §3a).
