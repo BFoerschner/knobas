@@ -25,6 +25,18 @@ pub struct SearchFilters {
     pub kinds: Vec<String>,
     pub updated_within_days: Option<u32>,
     pub mine: bool,
+    /// The people the query **named** -- `@jonas`, `author:jonas`, or an
+    /// author chip (ruling **E-Q1**).
+    ///
+    /// A username as the source spells it, matched exactly, because that is
+    /// what `sync.item.author` holds and what `mine` already matches against.
+    ///
+    /// [`Self::mine`] is a *separate* dimension and its resolved identity
+    /// never appears here: the echo is what the launcher redraws its chips
+    /// from, and putting usernames the user never typed into that row would
+    /// have the chips claim a filter nobody wrote.
+    #[serde(default)]
+    pub authors: Vec<String>,
 }
 
 impl SearchFilters {
@@ -35,6 +47,7 @@ impl SearchFilters {
             && self.kinds.is_empty()
             && self.updated_within_days.is_none()
             && !self.mine
+            && self.authors.is_empty()
     }
 }
 

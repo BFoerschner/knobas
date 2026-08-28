@@ -147,8 +147,12 @@ pub fn search_sql(
     // `mine` with an empty author list is not "no filter": it is knobas not
     // knowing who the user is. Binding the empty array matches nothing, which
     // is the honest answer; dropping the predicate would return everything.
-    let authors = (filters.mine || !filters.authors.is_empty())
-        .then(|| builder.param(Bind::Texts(filters.authors.clone())));
+    //
+    // Which is why the *decision* reads `mine` and the named people rather
+    // than the resolved list: the list is empty in exactly the state the
+    // predicate has to survive.
+    let authors = (filters.mine || !filters.named_authors.is_empty())
+        .then(|| builder.param(Bind::Texts(filters.authors())));
     let per_group = builder.param(Bind::I64(i64::from(per_group)));
     let limit = builder.param(Bind::I64(i64::from(limit)));
     let headline_opts = text.map(|_| builder.param(Bind::Text(crate::snippet::headline_options())));
@@ -470,7 +474,8 @@ mod tests {
             kinds: kinds.iter().map(|s| (*s).to_owned()).collect(),
             updated_within_days: days,
             mine: !authors.is_empty(),
-            authors: authors.iter().map(|s| (*s).to_owned()).collect(),
+            identity_authors: authors.iter().map(|s| (*s).to_owned()).collect(),
+            named_authors: Vec::new(),
         }
     }
 

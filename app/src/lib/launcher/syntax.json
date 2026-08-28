@@ -24,6 +24,14 @@
     "expect": "recognised"
   },
   {
+    "token": "@name",
+    "insert": "@",
+    "summary": "one person’s items — @jonas, the same as author:jonas",
+    "probe": "@jonas",
+    "prefix": "person",
+    "expect": "recognised"
+  },
+  {
     "token": "/",
     "insert": "/",
     "summary": "one source — /ji, /gt, /tc, or its name",
@@ -114,10 +122,10 @@
   {
     "token": "author:",
     "insert": "author:",
-    "summary": "greyed out — only @me filters today (also owner:, by:)",
+    "summary": "one person’s items — author:jonas (also owner:, by:)",
     "probe": "author:jonas",
     "prefix": "person",
-    "expect": "reported"
+    "expect": "recognised"
   },
   {
     "token": "env:",
