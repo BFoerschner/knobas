@@ -741,6 +741,14 @@ async fn phases_of(fault: Option<fn() -> SourceError>) -> (Vec<String>, Vec<Stri
 /// `backfill` alone would still pass if `Manual` had been renamed. The rows
 /// have to differ, and the manual one has to still say `manual`.
 ///
+/// **Two sources, one each, deliberately.** The same source twice would need
+/// the first run to be over before the second is triggered, and "over" has two
+/// meanings here that do not coincide: `settle` writes `finished_at` and only
+/// then does `run_task` release the source from the in-flight map, so a poll on
+/// the log row can win that race and the second trigger is handed the first
+/// run's id. (Observed -- the first draft of this test failed exactly there,
+/// `left: 5, right: 5`.) Two sources have nothing to serialise.
+///
 /// This goes through [`Scheduler::backfill`] rather than `execute_run`, which
 /// is the only way the spelling is under test at all -- `execute_run`'s callers
 /// hand it a trigger, so a test there asserts its own argument back.
@@ -748,46 +756,50 @@ async fn phases_of(fault: Option<fn() -> SourceError>) -> (Vec<String>, Vec<Stri
 async fn a_backfill_is_logged_under_its_own_trigger() {
     let _serial = serially().await;
     let (pool, sched_pool) = pools().await;
-    let ids = seed(&pool, 1).await;
-    let id = ids[0].clone();
+    let ids = seed(&pool, 2).await;
+    let (synced, backfilled) = (ids[0].clone(), ids[1].clone());
     let (deps, _) = deps(sched_pool, Duration::from_millis(10)).await;
 
     let scheduler = Scheduler::start(deps).await.unwrap();
-    let manual = scheduler
-        .trigger(&id, SyncTrigger::Manual, None)
+    let manual_run = scheduler
+        .trigger(&synced, SyncTrigger::Manual, None)
         .await
         .unwrap();
-    // Not concurrently: the in-flight dedupe would hand the second caller the
-    // first run's id, and there would be one row rather than two.
-    await_finish(&pool, manual).await;
-    let backfilled = scheduler.backfill(&id).await.unwrap();
-    await_finish(&pool, backfilled).await;
+    let backfill_run = scheduler.backfill(&backfilled).await.unwrap();
+    await_finish(&pool, manual_run).await;
+    await_finish(&pool, backfill_run).await;
     scheduler.shutdown().await;
 
-    let runs = run_log::list(&pool, Some(&id), 10).await.unwrap();
-    let trigger_of = |run_id: i64| {
-        runs.iter()
+    let logged = |runs: Vec<run_log::SyncRunRow>, run_id: i64| {
+        runs.into_iter()
             .find(|r| r.id == run_id)
-            .unwrap_or_else(|| panic!("no log row for run {run_id}: {runs:?}"))
+            .unwrap_or_else(|| panic!("no log row for run {run_id}"))
             .trigger
     };
-    assert_ne!(manual, backfilled, "two runs, or there is nothing to tell apart");
-    assert_eq!(
-        trigger_of(backfilled),
-        SyncTrigger::Backfill,
-        "a backfill must be readable as one in the log, not as a *Sync now*: {runs:?}"
+    let manual_rows = run_log::list(&pool, Some(&synced), 10).await.unwrap();
+    let backfill_rows = run_log::list(&pool, Some(&backfilled), 10).await.unwrap();
+
+    assert_ne!(
+        manual_run, backfill_run,
+        "two runs, or there is nothing to tell apart"
     );
     assert_eq!(
-        trigger_of(manual),
+        logged(backfill_rows, backfill_run),
+        SyncTrigger::Backfill,
+        "a backfill must be readable as one in the log, not as a *Sync now*"
+    );
+    assert_eq!(
+        logged(manual_rows, manual_run),
         SyncTrigger::Manual,
-        "*Sync now* keeps its own spelling: {runs:?}"
+        "*Sync now* keeps its own spelling"
     );
     retire(&pool, &ids).await;
 }
 
-/// Wait for one run's log row to be finished, so the next trigger is not
-/// deduped into it. Polls rather than sleeps a fixed span: the row is written
-/// by the spawned task, and a fixed sleep is either a flake or slow.
+/// Wait for one run's log row to be finished. Polls rather than sleeping a
+/// fixed span: the row is written by the spawned task, and a fixed sleep is
+/// either a flake or slow. Note what this does *not* promise -- see the two
+/// meanings of "over" on the test above.
 async fn await_finish(pool: &PgPool, run_id: i64) {
     for _ in 0..200 {
         let finished = run_log::list(pool, None, 50)

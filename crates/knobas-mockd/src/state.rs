@@ -579,20 +579,19 @@ fn resolve_references(issues: &mut [JiraIssue], fx: &knobas_source_mock::Fixture
     // blocker the outward one, both under the same id.
     let mut next_link_id = 40_000;
     let mut links: Vec<Vec<JiraLink>> = vec![Vec::new(); fx.tickets.len()];
-    for (idx, t) in fx.tickets.iter().enumerate() {
+    for (blocked_idx, t) in fx.tickets.iter().enumerate() {
         for blocker_key in &t.blocked_by {
             let id = next_link_id;
             next_link_id += 1;
+            // `reference` already panics if the key names no ticket, and says
+            // so; this only needs the *position*, to hang the other end on.
+            let blocker = reference(blocker_key);
             let blocker_idx = fx
                 .tickets
                 .iter()
                 .position(|o| &o.key == blocker_key)
-                .unwrap_or_else(|| {
-                    panic!("fixture ticket {blocker_key:?} blocks nothing that exists")
-                });
-            let blocked = reference(&t.key);
-            let blocker = reference(blocker_key);
-            links[idx].push(JiraLink {
+                .expect("`reference` accepted the key, so a ticket has it");
+            links[blocked_idx].push(JiraLink {
                 id,
                 inward: true,
                 other: blocker,
@@ -600,7 +599,7 @@ fn resolve_references(issues: &mut [JiraIssue], fx: &knobas_source_mock::Fixture
             links[blocker_idx].push(JiraLink {
                 id,
                 inward: false,
-                other: blocked,
+                other: reference(&t.key),
             });
         }
     }

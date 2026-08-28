@@ -303,6 +303,27 @@ pub enum RunMode {
     Backfill,
 }
 
+impl From<SyncTrigger> for RunMode {
+    /// The mode a run started for this reason is in.
+    ///
+    /// Many-to-one, and **derived rather than passed**: `backfill` in the log
+    /// is read as "this run could not have reconciled", which is only true of
+    /// `RunMode::Backfill`, so the two must never be able to disagree. They
+    /// once travelled as two parameters with a `debug_assert` pairing them,
+    /// which is a guard compiled out of the shipped binary -- exactly where a
+    /// mislabelled `swept` would mislead. Deriving makes the pairing
+    /// structural instead. `execute_run` still takes the mode, because it is
+    /// below the log and the trigger does not reach it.
+    fn from(trigger: SyncTrigger) -> Self {
+        match trigger {
+            SyncTrigger::Backfill => Self::Backfill,
+            SyncTrigger::Schedule | SyncTrigger::Manual | SyncTrigger::FirstRun => {
+                Self::Incremental
+            }
+        }
+    }
+}
+
 /// Run one source, and say what happened. Writes nothing to the log itself --
 /// [`settle`] does that -- so a test can assert on the verdict directly.
 pub async fn execute_run(
@@ -392,19 +413,20 @@ async fn attempt(
     // The decorator only exists when somebody attached a channel: a scheduled
     // run allocates nothing and reports nothing per item (P3). `Fetching` and
     // `Writing` are emitted from inside it, where they are true.
-    let report = match (progress, mode) {
-        (Some(sink), RunMode::Incremental) => {
-            let observed = Observed::new(source.as_ref(), run_id, started, Arc::clone(sink));
-            run_from_stored_cursor(&mut conn, &deps.pool, &observed).await
-        }
-        (Some(sink), RunMode::Backfill) => {
-            let observed = Observed::new(source.as_ref(), run_id, started, Arc::clone(sink));
-            run_backfill(&mut conn, &deps.pool, &observed).await
-        }
-        (None, RunMode::Incremental) => {
-            run_from_stored_cursor(&mut conn, &deps.pool, source.as_ref()).await
-        }
-        (None, RunMode::Backfill) => run_backfill(&mut conn, &deps.pool, source.as_ref()).await,
+    // Two independent choices, composed rather than enumerated: whether the
+    // run is watched, and which entry point it goes through. Crossing them in
+    // one `match` gave four arms, two of which built the same decorator, and
+    // made `(Some(sink), Backfill)` look like a case somebody had to reach for
+    // it to be live code.
+    let observed =
+        progress.map(|sink| Observed::new(source.as_ref(), run_id, started, Arc::clone(sink)));
+    let watched: &dyn Source = match &observed {
+        Some(o) => o,
+        None => source.as_ref(),
+    };
+    let report = match mode {
+        RunMode::Incremental => run_from_stored_cursor(&mut conn, &deps.pool, watched).await,
+        RunMode::Backfill => run_backfill(&mut conn, &deps.pool, watched).await,
     };
 
     // Explicit, and not left to `Drop`: `PgConnection::drop` closes the socket
@@ -665,9 +687,7 @@ impl Scheduler {
         trigger: SyncTrigger,
         progress: Option<Arc<dyn ProgressSink>>,
     ) -> Result<i64, TriggerError> {
-        self.inner
-            .trigger(source_id, trigger, RunMode::Incremental, progress)
-            .await
+        self.inner.trigger(source_id, trigger, progress).await
     }
 
     /// **Backfill** one source: the same run in every respect but one -- the
@@ -686,7 +706,9 @@ impl Scheduler {
     /// stall that requirement exists to prevent.
     ///
     /// Logged under [`SyncTrigger::Backfill`], its own spelling in
-    /// `sync_run_trigger_chk` since migration 0004. Not `Manual`, though only
+    /// `sync_run_trigger_chk` since migration 0004 -- and that spelling is
+    /// what *puts* the run in [`RunMode::Backfill`], so no caller can produce
+    /// one without the other. Not `Manual`, though only
     /// a person starts one: a backfill is the single run mode that is
     /// **forbidden to reconcile**, so it is the run whose `swept` count is
     /// always `0` by construction, and the one question anybody asks of a
@@ -698,7 +720,7 @@ impl Scheduler {
     /// [`TriggerError`].
     pub async fn backfill(&self, source_id: &str) -> Result<i64, TriggerError> {
         self.inner
-            .trigger(source_id, SyncTrigger::Backfill, RunMode::Backfill, None)
+            .trigger(source_id, SyncTrigger::Backfill, None)
             .await
     }
 
@@ -721,7 +743,7 @@ impl Scheduler {
             }
             ids.push(
                 self.inner
-                    .trigger(&cfg.id, SyncTrigger::Manual, RunMode::Incremental, None)
+                    .trigger(&cfg.id, SyncTrigger::Manual, None)
                     .await?,
             );
         }
@@ -775,20 +797,12 @@ impl Inner {
         self: &Arc<Self>,
         source_id: &str,
         trigger: SyncTrigger,
-        mode: RunMode,
         progress: Option<Arc<dyn ProgressSink>>,
     ) -> Result<i64, TriggerError> {
-        // The two axes are independent, but one pairing is a lie rather than a
-        // combination: `backfill` in the log is read as "this run could not
-        // have reconciled", and that is only true of a run in
-        // `RunMode::Backfill`. `trigger` is public, so nothing in the type
-        // system stops a caller spelling one without the other -- hence here.
-        debug_assert_eq!(
-            trigger == SyncTrigger::Backfill,
-            mode == RunMode::Backfill,
-            "the `backfill` trigger and `RunMode::Backfill` mean the same run \
-             and must be spelled together"
-        );
+        // Derived, never passed alongside: see `impl From<SyncTrigger> for
+        // RunMode`. This is what makes "the log says `backfill`" and "the run
+        // was forbidden to sweep" the same statement.
+        let mode = RunMode::from(trigger);
         if self.cancel.is_cancelled() {
             return Err(TriggerError::ShuttingDown);
         }
@@ -914,10 +928,7 @@ async fn tick_loop(inner: Arc<Inner>) {
                     };
                     // `UnknownSource` here means the source was deleted between
                     // the query and the claim: nothing to report.
-                    if let Err(error) = inner
-                        .trigger(&source.id, trigger, RunMode::Incremental, None)
-                        .await
-                    {
+                    if let Err(error) = inner.trigger(&source.id, trigger, None).await {
                         match error {
                             TriggerError::ShuttingDown => return,
                             other => {

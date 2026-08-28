@@ -419,6 +419,18 @@ impl CursorSource {
     fn may_sweep(&self) -> bool {
         !matches!(self, CursorSource::Backfill)
     }
+
+    /// Whether the position stored for the source is read for the
+    /// [`SyncError::NotConfigured`] refusal and then thrown away, rather than
+    /// resumed from.
+    ///
+    /// A method beside [`Self::may_sweep`] rather than a `matches!` inlined in
+    /// `run_locked`, because the two are the whole of what a backfill *is* and
+    /// a reader should find them together. They are still two, not one flag:
+    /// each has its own reason and neither implies the other.
+    fn discards_the_stored_position(&self) -> bool {
+        matches!(self, CursorSource::Backfill)
+    }
 }
 
 async fn run_inner(
@@ -559,7 +571,7 @@ async fn run_locked(
     // run resumes from and whether it may reconcile are two questions, and a
     // backfill answers them differently (see `CursorSource::may_sweep`).
     let may_sweep = from.may_sweep();
-    let discards_the_stored_position = matches!(from, CursorSource::Backfill);
+    let discards_the_stored_position = from.discards_the_stored_position();
     // `cursor` is what the adapter is handed; `previous` is where the source
     // stood before this run. The same value for every run but a backfill,
     // which is the point of separating them: a backfill *has* a position and
