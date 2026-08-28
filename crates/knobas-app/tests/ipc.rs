@@ -903,3 +903,109 @@ async fn creating_a_link_announces_its_activity_line_on_the_event() {
     assert_eq!(stored.0, "linked");
     assert_eq!(stored.1, line["detail"]);
 }
+
+/// `unlink` announces its own line, and an already-withdrawn link announces
+/// nothing.
+///
+/// The sibling above covers `linked` only, which left the other half of the
+/// acceptance criterion -- "each mutation ... emits the activity event" --
+/// resting on nobody: `unlink`'s `announce` could be deleted outright and the
+/// whole `knobas-app` suite still passed. The second half is the one the
+/// `Option` the store hands back exists for: an unlink that withdrew nothing is
+/// not a mutation, so it writes no line and emits none.
+#[tokio::test(flavor = "multi_thread")]
+async fn unlinking_announces_its_line_and_an_already_withdrawn_link_announces_nothing() {
+    let pool = knobas_db::test_util::test_pool().await;
+    knobas_db::migrate::run(&pool).await.unwrap();
+
+    // Two entities of this test's own: the database is shared by every test in
+    // this binary, and a link is refused if either end has no entity row.
+    let run = uuid::Uuid::new_v4();
+    let from = format!("unlinks-{run}:TICKET-1");
+    let to = format!("unlinks-{run}:PAGE-1");
+    for id in [&from, &to] {
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ticket', 'x')")
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    let created = {
+        let pool_for_state = pool.clone();
+        invoke_managing(
+            "create_link",
+            serde_json::json!({ "fromId": &from, "toId": &to, "relation": "blocks" }),
+            move |app| {
+                app.manage(ready_over(pool_for_state));
+            },
+        )
+        .expect("create_link must answer")
+        .deserialize::<serde_json::Value>()
+        .expect("a LinkRow came back")
+    };
+    let link_id = created["id"].as_str().expect("the link carries its id");
+
+    /// Invoke `unlink` over the bridge and collect every `activity:new` a
+    /// window would have received.
+    fn unlink_watching(pool: &sqlx::PgPool, link_id: &str) -> Vec<serde_json::Value> {
+        let seen: std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>> = Default::default();
+        let recorder = std::sync::Arc::clone(&seen);
+        let pool_for_state = pool.clone();
+        invoke_managing(
+            "unlink",
+            serde_json::json!({ "linkId": link_id }),
+            move |app| {
+                app.manage(ready_over(pool_for_state));
+                app.listen("activity:new", move |event| {
+                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(event.payload()) {
+                        recorder.lock().unwrap().push(value);
+                    }
+                });
+            },
+        )
+        .expect("unlink must answer");
+        // Emitted before the command returns, so it is already there -- no
+        // polling, and therefore no way for this to pass by waiting.
+        seen.lock().unwrap().clone()
+    }
+
+    let announced = unlink_watching(&pool, link_id);
+    assert_eq!(announced.len(), 1, "one line per mutation: {announced:?}");
+    let line = &announced[0];
+    assert_eq!(line["verb"], serde_json::json!("unlinked"));
+    assert_eq!(line["actor"], serde_json::json!("user"));
+    assert_eq!(
+        line["entity_id"],
+        serde_json::json!(from),
+        "the line is named on the end the link was drawn from"
+    );
+    assert_eq!(line["detail"]["to_id"], serde_json::json!(to));
+    assert_eq!(line["detail"]["relation"], serde_json::json!("blocks"));
+    assert_eq!(line["detail"]["link_id"], created["id"]);
+
+    // The announced row is the row in the log, not one the command invented.
+    let stored: (String, serde_json::Value) =
+        sqlx::query_as("select verb, detail from knobas.activity where id = $1 and entity_id = $2")
+            .bind(line["id"].as_i64().expect("the line carries its id"))
+            .bind(&from)
+            .fetch_one(&pool)
+            .await
+            .expect("the announced line is in the log");
+    assert_eq!(stored.0, "unlinked");
+    assert_eq!(stored.1, line["detail"]);
+
+    // Withdrawing it again mutates nothing, so it announces nothing.
+    assert!(
+        unlink_watching(&pool, link_id).is_empty(),
+        "an already-withdrawn link is not a mutation and must announce nothing"
+    );
+    let (lines_written,): (i64,) = sqlx::query_as(
+        "select count(*) from knobas.activity where entity_id = $1 and verb = 'unlinked'",
+    )
+    .bind(&from)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(lines_written, 1, "the second unlink wrote a second line");
+}

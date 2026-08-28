@@ -474,7 +474,7 @@ const ACTOR: &str = "user";
 /// so the behaviour is reachable from a test without a Tauri app: the emit is
 /// the only part of these commands that a `#[tauri::command]` shell adds, and
 /// everything worth asserting is in here.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct LinkMutation {
     pub link: LinkRow,
     pub activity: ActivityRow,

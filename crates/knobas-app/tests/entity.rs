@@ -921,7 +921,17 @@ async fn each_link_mutation_writes_one_activity_line_on_the_from_end() {
 async fn a_link_over_the_seam_fills_the_demo_profiles_empty_links_panel() {
     let pool = seeded().await;
 
+    // The empty state is half the criterion, so it is asserted rather than
+    // assumed: the demo fixture ships no links, and this is the only test in
+    // this binary that writes one into the shared `mock:` corpus -- every
+    // other link test uses `linkable_pair`'s run-unique ids. A second test
+    // linking a `mock:` entity would fail here, deliberately and not by
+    // ordering: the criterion is "Nothing linked yet" being *replaced*.
     let before = get_entity_inner(&pool, "mock:PAY-231").await.unwrap().links;
+    assert!(
+        before.is_empty(),
+        "the demo profile's panel says \"Nothing linked yet\" before the write: {before:?}"
+    );
     let written = create_link_inner(
         &pool,
         "mock:PAY-231",
@@ -945,8 +955,4 @@ async fn a_link_over_the_seam_fills_the_demo_profiles_empty_links_panel() {
     assert_eq!(drawn.to_id, "mock:PAY-228");
     assert_eq!(drawn.relation, "documents");
     assert_eq!(drawn.note.as_deref(), Some("the retry storm postmortem"));
-    assert!(
-        !after.is_empty(),
-        "a non-empty links array is what replaces the empty state"
-    );
 }
