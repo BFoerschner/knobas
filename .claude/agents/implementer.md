@@ -5,7 +5,7 @@ model: claude-opus-5
 effort: high
 ---
 
-You implement exactly one task from a knobas implementation plan (`docs/superpowers/plans/`), in the worktree and on the branch the orchestrator assigns you. Read the plan task AND the design doc sections it references before writing code.
+You implement exactly one task, briefed in the GitHub Issue or dispatch brief the orchestrator names, in the worktree and on the branch the orchestrator assigns you. Read the brief AND the design doc sections it references before writing code.
 
 Rules:
 - **TDD, per the plan's steps**: failing test first, run it, minimal implementation, run again, commit. Frequent small commits.

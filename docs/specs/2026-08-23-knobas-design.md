@@ -12,14 +12,14 @@ Per your go-ahead ("add or modify features as you see fit"), this revision was m
 4. **New: §2a Activity stream** (first-class — it already feeds standup, day review, and inbox history), **§14a first-run + demo seed mode + mock source** (the Tidewater dataset becomes the dev/test fixture — this is what lets parallel agents build UI without live sources), **diagnostics view** (§3).
 5. §13 backlog re-tiered; §15 architecture extended (sync engine, mock source crate, IPC contract-first).
 
-Companion documents: `docs/superpowers/plans/2026-08-24-knobas-roadmap.md` (MVP, milestones, parallel workstreams) and `docs/superpowers/plans/2026-08-24-plan-01-foundation.md` (first implementation plan).
+Companion documents: `docs/roadmap.md` (MVP, milestones, parallel workstreams); task-level tracking is GitHub Issues (the executed superpowers-era plan files are in git history).
 
 Legend for the status tags:
 - **Decided** — you said yes; it will be built as described.
 - **In mockup** — exists in a clickable mockup; the behaviour is a proposal until you confirm it.
 - **Proposed** — suggested, not yet in a mockup.
 - **Open** — needs your answer; the question is stated. *(As of 08-24 nothing carries this tag — every open question got a recommendation, tagged as below.)*
-- **Rec 08-24** — recommended by Claude on 2026-08-24 under your "as you see fit" delegation; treated as decided for planning, but yours to override on review.
+- **Rec 08-24** — recommended by Claude on 2026-08-24 under your "as you see fit" delegation; treated as decided for planning, but yours to override on review. **Ratified 2026-08-27 (Björn) — all twelve §16 entries, with two amendments recorded in §16.**
 
 Mockups referenced: round 1 `mockups/round-1/` (25 paradigm × design cells), round 2 `mockups/round-2/` (Signal shell + three asset ways), round 3 `mockups/round-3/signal-miller.html` (the integrated view), playground `mockups/playground/` (E1–E4 depth explorers).
 
@@ -325,7 +325,7 @@ Rust workspace: `knobas-core` (entities, links, contexts, notes, time, activity)
 
 ---
 
-## 16. Open questions — all answered with recommendations 2026-08-24 (Claude); override any of them
+## 16. Open questions — all answered with recommendations 2026-08-24 (Claude); **ratified 2026-08-27 (Björn), all twelve, with two amendments** (the notification tier in 10, and this tier mapping: **v1 = end of M4** on the roadmap; v1.5/v2 follow it)
 
 1. **Postgres: embedded** via `postgresql_embedded`, download-on-first-run, PG 18.6 pinned, TCP on 127.0.0.1; "use existing Postgres URL" as a setting. Not a user-installed prerequisite; not a Tauri sidecar (macOS notarization of external binaries is a known open Tauri bug — the crate's extract-to-home approach sidesteps it). → §3.
 2. **Split-flaps: only on values that change while you watch** (timer, sync countdown, build/monitor transitions, inbox/alert counts); everything else plain mono. → §2.
@@ -336,7 +336,7 @@ Rust workspace: `knobas-core` (entities, links, contexts, notes, time, activity)
 7. **Queued-write conflicts: re-read before flush; if the target changed, hold and ask with both versions side by side.** No silent last-write-wins in v1. The queue is a visible list. → §3.
 8. ~~Monitoring~~ **Answered 2026-08-23: Uptime Kuma is the monitoring system.** 08-24 note: adapter plan updated for Kuma **v2** (`/metrics` primary, own timeseries, `kuma-client` for config). → §12.3.
 9. **Frontend: Svelte 5 + Vite** (no SvelteKit); port region-by-region, keep the mockup CSS global. → §14.
-10. **Backlog promotions:** conflict UI → v1 (follows from 7); desktop notifications, open-in-editor/terminal, paste-URL→chip, quick capture → v1.5; rest stays v2. → §13.
+10. **Backlog promotions:** conflict UI → v1 (follows from 7); desktop notifications → **M3** (amended 2026-08-27 — they pair with the daily flow, and M2's inbox is in-app only); open-in-editor/terminal, paste-URL→chip, quick capture → v1.5; rest stays v2. → §13.
 11. **Context membership: explicit adds + direct links + one hop, fixed rule, not configurable in v1.** Asset membership counts through ancestors. → §5a.
 12. **Export defaults: backup = all of `knobas` incl. notes, no `sync`; share = links/assets/contexts/smart lists, no notes; every part toggleable.** → §14.
 

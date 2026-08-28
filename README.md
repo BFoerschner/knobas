@@ -143,14 +143,14 @@ A reboot does the same thing.
 
 ## Where the documents live
 
-- **Design doc** — `docs/superpowers/specs/2026-08-23-knobas-design.md`: the
+- **Design doc** — `docs/specs/2026-08-23-knobas-design.md`: the
   feature-by-feature walkthrough, and the thing to change before changing
   behaviour.
-- **Roadmap** — `docs/superpowers/plans/2026-08-24-knobas-roadmap.md`:
+- **Roadmap** — `docs/roadmap.md`:
   milestones M0–M4, which streams may run in parallel, and the working model for
   parallel agents (§3).
-- **Implementation plans** — `docs/superpowers/plans/`, one file per milestone
-  (`2026-08-24-plan-01-foundation.md` is M0).
+- **Task tracking** — GitHub Issues (milestone `M2` onward); the executed M0/M1
+  plan files live in git history (`git show 736ac1f:docs/superpowers/plans/<file>`).
 
 From the end of M0 the **`Source` trait, the migration baseline, and the IPC
 schema are frozen**: changing any of them takes an orchestrator decision plus a

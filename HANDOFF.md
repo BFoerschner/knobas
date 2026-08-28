@@ -6,10 +6,20 @@ into one local Postgres and gives you one search box over all of it.
 > **Update 2026-08-27 — the four unmerged branches are landed.** PRs #25 (teamcity, `baeaf00`),
 > #26 (gitea, `5a78d98`), #27 (search-ipc, `ccd6a21`), #28 (testenv-compose, `5b2f175`), each
 > through its adversarial review loop, all CI-green; worktrees and branches removed. New
-> carry-overs from the landing reviews: `docs/superpowers/plans/2026-08-24-m1-carryovers.md`,
-> section "M1 landing round"; contract amendments: interfaces doc §9, same date. Still open in
+> carry-overs from the landing reviews: ported to GitHub Issues (milestone M2, 2026-08-28);
+> contract amendments: `docs/contract.md` §9, same date. Still open in
 > M1: stream D tasks 15–23 and Gitea tasks 6–8 — both feed M2 planning. The "four unmerged
 > branches" section below is historical.
+
+> **Update 2026-08-28 — process switch and doc re-home.** The superpowers flow is retired;
+> planning now runs mattpocock-skills (grilling → spec → tickets). §16's twelve delegated
+> decisions were ratified 2026-08-27 with two amendments; ADRs live in `docs/adr/`,
+> vocabulary in `CONTEXT.md`. Docs moved: design spec → `docs/specs/2026-08-23-knobas-design.md`,
+> interfaces contract → `docs/contract.md`, roadmap → `docs/roadmap.md` (its §3 working model →
+> `docs/agents/working-model.md`). The executed plan files and the carry-over ledger were
+> retired to git history (`git show 736ac1f:docs/superpowers/plans/<file>`); the ledger and the
+> ratified M2 scope are GitHub Issues, milestone **M2**. Path references below are updated;
+> the flow they describe is otherwise historical.
 
 **Paused deliberately mid-M1. Everything is committed and pushed. Nothing is half-written
 to disk that isn't also on the remote.**
@@ -18,15 +28,16 @@ to disk that isn't also on the remote.**
 
 ## Read these first, in this order
 
-1. `docs/superpowers/specs/2026-08-23-knobas-design.md` — what knobas is. §16 lists every
+1. `docs/specs/2026-08-23-knobas-design.md` — what knobas is. §16 lists every
    decision and who made it; entries tagged **Rec 08-24** were decided by Claude under
    delegation and are yours to override.
-2. `docs/superpowers/plans/2026-08-24-knobas-roadmap.md` — milestones, and §3 the working
-   model (PR loop, review economics, concurrency limits). Read §3 before dispatching agents.
-3. `docs/superpowers/plans/2026-08-24-m1-interfaces.md` — **the contract**. §8 rulings P1–P13,
+2. `docs/roadmap.md` — milestones; its former §3 working model now lives at
+   `docs/agents/working-model.md` (PR loop, review economics, concurrency limits). Read it
+   before dispatching agents.
+3. `docs/contract.md` — **the contract**. §8 rulings P1–P13,
    §9 amendments, §10 *as-built* (this is the truth; §2 carries superseded shapes, marked).
-4. `docs/superpowers/plans/2026-08-24-m1-carryovers.md` — obligations owed to specific streams,
-   including two that must be done **early in M2** and one that needs **you**, not an agent.
+4. GitHub Issues, milestone **M2** — the carry-over ledger, ported 2026-08-28 (the original
+   `m1-carryovers.md` is in git history); early-M2 obligations are sequenced there.
 5. `docs/architecture.d2` / `.svg` — how it couples together (graphite = merged, amber = in
    flight at time of drawing, dashed = planned).
 

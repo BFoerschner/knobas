@@ -1,6 +1,7 @@
 //! Generates the Jira DC request allowlist and the response-schema table from
 //! the vendored WADL. See `src/allowlist.rs` for how the tables are consumed
-//! and `docs/superpowers/plans/2026-08-24-m1-plan-03-testenv.md` Task 2 for the
+//! and the retired testenv plan Task 2 (in git history:
+//! `git show 736ac1f:docs/superpowers/plans/2026-08-24-m1-plan-03-testenv.md`) for the
 //! four properties of the document this parser relies on:
 //!
 //! 1. `<resources base=".../rest/">` — every resource path is relative to
