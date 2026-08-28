@@ -515,6 +515,34 @@ test("Delete asks first, and the confirm dialog names the source and the purge c
   expect(calls.listSources).toBeGreaterThan(1);
 });
 
+/**
+ * The delete has to reach the *store*, not just the row set.
+ *
+ * The store is what the top strip's monograms and the shell's per-source room
+ * tabs are drawn from, so a source that is gone from `list_sources` but still
+ * in the store is a tab strip disagreeing with this view about which sources
+ * exist. It was: `load()` patched each surviving row, and `patch` can only add.
+ *
+ * The `mock` control is the half that makes this an assertion about *forgetting
+ * one* rather than about clearing everything.
+ */
+test("a deleted source leaves the shared health store, not just the list", async () => {
+  sources = [source(), source({ id: "mock", display_name: "Tidewater mock" })];
+  const store = health();
+  render({ health: store });
+  await settle();
+  expect(store.all.map((row) => row.source_id)).toEqual(["jira", "mock"]);
+
+  sources = sources.filter((row) => row.id !== "jira");
+  button("Delete", rowFor("jira")!)!.click();
+  flushSync();
+  button("Delete source", target.querySelector<HTMLElement>('[role="dialog"]')!)!.click();
+  await settle();
+
+  expect(store.get("jira"), "the strip would keep drawing a source that is gone").toBeNull();
+  expect(store.all.map((row) => row.source_id)).toEqual(["mock"]);
+});
+
 test("cancelling the confirm deletes nothing", async () => {
   sources = [source()];
   render();
