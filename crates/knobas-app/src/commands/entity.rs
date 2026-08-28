@@ -63,12 +63,21 @@ pub struct EntityRow {
 /// `NULL` rather than as an empty array: `= any('{}')` matches nothing, and a
 /// room whose filter said "no sources in particular" would come back empty.
 ///
-/// `Serialize` alongside `Deserialize` although nothing sends a filter the
-/// other way: it is what lets `tests/entity_mirror.rs` pin an *input* DTO
-/// through a round trip, and so see a field this struct has that
+/// `Serialize` behind `test-util`, although nothing sends a filter the other
+/// way: it is what lets `tests/entity_mirror.rs` pin an *input* DTO through a
+/// round trip, and so see a field this struct has that
 /// `app/src/lib/ipc/entity.ts` never declares. A decode-only check is blind to
-/// that direction.
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+/// that direction -- serde reads a missing `Option` as `None`, so a Rust-only
+/// optional field decodes clean and the mirror never has to declare it.
+///
+/// Gated rather than unconditional, for the reason the feature exists at all
+/// (see `Cargo.toml`): a filter is something the frontend *sends*, and a
+/// production build that can also write one invites a caller to round-trip a
+/// command argument through nothing. `cargo test` turns the feature on through
+/// this crate's self-dev-dependency; `tauri build` and the `clippy --lib` half
+/// of the gate compile without it.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[cfg_attr(feature = "test-util", derive(serde::Serialize))]
 pub struct EntityFilter {
     /// Source ids to include; empty means every source.
     pub sources: Vec<String>,
@@ -85,7 +94,12 @@ pub struct EntityFilter {
 }
 
 /// The two orderings a room offers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+///
+/// `Serialize` behind `test-util` for the same reason [`EntityFilter`] carries
+/// it: it rides inside the filter's round trip, and pins this union against the
+/// mirror's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[cfg_attr(feature = "test-util", derive(serde::Serialize))]
 #[serde(rename_all = "snake_case")]
 pub enum EntityOrder {
     /// Newest first, by the source's own timestamp. Undated items last.

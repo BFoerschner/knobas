@@ -865,13 +865,12 @@ From this commit on, each of the following requires an orchestrator decision **a
   and exactly what #50 asked for -- **ratification pending on that PR's review**. No other change to
   the file.
 
-  Recorded alongside it for the orchestrator to rule on, as adjacent to bullet 3 rather than clearly
-  inside it: `EntityFilter` and `EntityOrder` in `commands/entity.rs` gained a `Serialize` derive.
-  The wire schema, the `commands/` + `ipc/` layout and both barrels are untouched -- the derive adds
-  no field and changes no spelling, and `tests/entity_mirror.rs` is what proves the serialized shape
-  still equals what `entity.ts` declares. It exists so an *input* DTO can be pinned through a round
-  trip; a decode-only check is blind to a Rust field the mirror never declares, because serde decodes
-  a missing `Option` as `None`.
+  Raised in review and resolved without needing a ruling: `EntityFilter` and `EntityOrder` in
+  `commands/entity.rs` gained a `Serialize` derive so an *input* DTO could be pinned through a round
+  trip. It is now `#[cfg_attr(feature = "test-util", ...)]`, so it is absent from `tauri build` and
+  from the `clippy --lib` half of the gate -- the same treatment, and the same reasoning, as
+  `AppState::over_pool`. Nothing about the wire schema, the `commands/` + `ipc/` layout or either
+  barrel changes.
 
 **`crates/knobas-sync/**` is NOT frozen — and stream F is expected to restructure it.**
 
