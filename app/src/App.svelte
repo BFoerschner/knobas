@@ -12,6 +12,7 @@
   import { lifecycle } from "./lib/shell/lifecycle.svelte";
   import { router } from "./lib/shell/router.svelte";
   import { push } from "./lib/shell/toasts.svelte";
+  import FirstRun from "./lib/sources/FirstRun.svelte";
   import SourcesView from "./lib/sources/SourcesView.svelte";
   import { ipcErrorMessage } from "./lib/ipc";
 
@@ -86,6 +87,44 @@
     launcherOpen = true;
   }
 
+  /**
+   * §14a's landing: *"land in the launcher"*.
+   *
+   * The room first, then the overlay — a launcher over a blank pane is the
+   * same empty window it was before, and the sentence's point is that the
+   * reader can immediately search what they just synced.
+   */
+  function onFirstRunDone() {
+    completedFirstRun = true;
+    router.go("#/ctx/all");
+    launcherOpen = true;
+  }
+
+  /**
+   * Whether *this session* has finished the wizard.
+   *
+   * `AppStatus.first_run` is the durable answer, written by
+   * `complete_first_run` and read on the next launch. It is **not** re-read
+   * here: `lifecycle` stops polling once the database is ready, so within one
+   * session `status.first_run` keeps whatever it said at boot. This flag is
+   * that session's answer, and without it every route change after the wizard
+   * would put the reader straight back into it.
+   */
+  let completedFirstRun = $state(false);
+
+  /**
+   * The §14a wizard takes over the whole window when there is nothing to show.
+   *
+   * Not a route the reader has to find: a first run has no rooms, no sources
+   * and no corpus, so a shell drawn around an empty room with a wizard
+   * somewhere behind `#/first-run` is a window that says nothing about what to
+   * do next. `#/first-run` still addresses it, so a person can walk back
+   * through it on purpose.
+   */
+  const firstRun = $derived(
+    !completedFirstRun && (lifecycle.status?.first_run ?? false),
+  );
+
   async function onRetry() {
     try {
       await lifecycle.retry();
@@ -95,7 +134,9 @@
   }
 </script>
 
-{#if lifecycle.ready}
+{#if lifecycle.ready && firstRun}
+  <FirstRun demo={lifecycle.status?.demo ?? false} onfinish={onFirstRunDone} />
+{:else if lifecycle.ready}
   <Shell {router} {lifecycle} {contexts} onsearch={openLauncher}>
     {#snippet main()}
       {#if router.route.view === "unknown"}
@@ -111,9 +152,7 @@
       {:else if router.route.view === "sources"}
         <SourcesView />
       {:else if router.route.view === "first-run"}
-        <div class="empty">
-          <p>The first-run wizard arrives in phase 3 of this stream.</p>
-        </div>
+        <FirstRun demo={lifecycle.status?.demo ?? false} onfinish={onFirstRunDone} />
       {:else}
         <Room {router} {contexts} />
       {/if}

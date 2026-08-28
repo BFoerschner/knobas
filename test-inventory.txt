@@ -12,7 +12,9 @@ knobas-app	lib/knobas_app	commands::app::tests::a_call_before_the_database_is_up
 knobas-app	lib/knobas_app	commands::app::tests::a_failed_bring_up_says_why_in_the_refusal
 knobas-app	lib/knobas_app	commands::app::tests::a_retry_is_claimed_once_and_only_out_of_a_failure
 knobas-app	lib/knobas_app	commands::app::tests::app_status_serialises_the_keys_the_mirror_declares
+knobas-app	lib/knobas_app	commands::app::tests::completing_the_first_run_upserts_the_key_app_status_reads
 knobas-app	lib/knobas_app	commands::app::tests::db_state_serialises_as_the_contract_declares
+knobas-app	lib/knobas_app	commands::app::tests::every_command_in_this_module_has_a_typescript_mirror
 knobas-app	lib/knobas_app	commands::app::tests::every_db_state_has_its_typescript_counterpart
 knobas-app	lib/knobas_app	commands::app::tests::lifecycle_starts_starting_and_remembers_the_last_set
 knobas-app	lib/knobas_app	commands::backup::tests::the_mirror_invokes_the_commands_by_their_registered_names

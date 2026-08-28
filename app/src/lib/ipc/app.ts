@@ -66,3 +66,20 @@ export function frontendReady(): Promise<void> {
 export function retryDatabase(): Promise<void> {
   return invoke<void>("retry_database");
 }
+
+/**
+ * Record that the §14a first-run wizard finished.
+ *
+ * `AppStatus.first_run` is `source_count === 0 && !completed` — two facts,
+ * because they are different ones. Without this, a person who finished the
+ * wizard and later removed their only source would be shown it again.
+ *
+ * The flag lives in `knobas.setting`, not in the webview's storage: §14 makes
+ * the database what an export carries, and a flag outside it would not survive
+ * the round trip.
+ *
+ * Idempotent — finishing twice is the same as finishing once.
+ */
+export function completeFirstRun(): Promise<void> {
+  return invoke<void>("complete_first_run");
+}

@@ -258,9 +258,78 @@ pub fn retry_database<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(),
     Ok(())
 }
 
+/// The SQL `complete_first_run` runs. Named so the test can assert on the
+/// shape rather than on a copy of it.
+const COMPLETE_FIRST_RUN_SQL: &str = "insert into knobas.setting (key, value) \
+     values ('first_run.completed', 'true'::jsonb) \
+     on conflict (key) do update set value = excluded.value, updated_at = now()";
+
+/// Record that the §14a wizard finished.
+///
+/// `app_status.first_run` is `source_count == 0 && !completed` -- two facts,
+/// because they are different ones. Without this row, a person who finished
+/// the wizard and later removed their only source would be shown the wizard
+/// again, which is the app forgetting something it was told.
+///
+/// It lives in `knobas.setting` rather than in the webview's `localStorage`
+/// because §14 makes the database the thing an export carries: a flag outside
+/// it would not survive the export/import round trip the milestone is built
+/// around.
+///
+/// Idempotent by `on conflict`: finishing the wizard twice -- a double click,
+/// a second window -- is the same as finishing it once.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while PostgreSQL
+/// is still coming up, and
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write
+/// fails.
+#[tauri::command]
+pub async fn complete_first_run<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<(), IpcError> {
+    // Through `Lifecycle`, not `State<'_, AppState>`: a command declaring the
+    // latter is rejected by Tauri itself during bring-up with a bare "state
+    // not managed" that the frontend cannot branch on. See [`Lifecycle`].
+    let pool = app.state::<Lifecycle>().pool()?;
+    sqlx::query(COMPLETE_FIRST_RUN_SQL)
+        .execute(&pool)
+        .await
+        .map_err(IpcError::internal)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The write has to be an upsert, and it has to touch exactly the key
+    /// `counts()` reads.
+    ///
+    /// Both halves are load-bearing and neither is visible from the type: a
+    /// plain `insert` makes finishing the wizard twice a primary-key violation
+    /// (a double click is enough), and a key that does not match the one
+    /// `app_status` looks for leaves the wizard reappearing for ever with the
+    /// row sitting in the table.
+    #[test]
+    fn completing_the_first_run_upserts_the_key_app_status_reads() {
+        assert!(
+            COMPLETE_FIRST_RUN_SQL.contains("on conflict (key) do update"),
+            "a plain insert makes a second Finish a primary-key violation: {COMPLETE_FIRST_RUN_SQL}"
+        );
+        // The literal `counts()` queries, quoted from the same file, so a
+        // rename on one side fails here rather than at run time.
+        assert!(
+            COMPLETE_FIRST_RUN_SQL.contains("'first_run.completed'"),
+            "the wizard would write a key nothing reads: {COMPLETE_FIRST_RUN_SQL}"
+        );
+        let reader = include_str!("app.rs");
+        assert!(
+            reader.contains("where key = 'first_run.completed'"),
+            "app_status no longer reads the key this command writes"
+        );
+    }
 
     /// The frontend narrows on `state` and reads `message` only inside the
     /// `failed` arm. A different tag, or a payload that moved, is a union that
@@ -349,6 +418,57 @@ mod tests {
                 "AppStatus.{key} is missing from app/src/lib/ipc/app.ts"
             );
         }
+    }
+
+    /// Every command in this module is callable from the frontend.
+    ///
+    /// The mirror is hand-written (contract §2.6), so a command added on the
+    /// Rust side alone compiles, lints and tests green while being unreachable
+    /// from the window -- and a command *renamed* on the Rust side alone leaves
+    /// the mirror invoking a name that no longer exists, which fails only when
+    /// a person clicks the button.
+    ///
+    /// Matched on the `invoke("<name>")` string, because that is the thing
+    /// that actually has to agree: a TS function may be called anything.
+    #[test]
+    fn every_command_in_this_module_has_a_typescript_mirror() {
+        let code = include_str!("app.rs");
+        let mirror = include_str!("../../../../app/src/lib/ipc/app.ts");
+
+        // Read out of this file rather than listed, so a command added below
+        // is covered without anyone remembering to add it here.
+        let mut commands: Vec<&str> = Vec::new();
+        for (index, line) in code.lines().enumerate() {
+            if line.trim() != "#[tauri::command]" {
+                continue;
+            }
+            let signature = code
+                .lines()
+                .nth(index + 1)
+                .expect("a #[tauri::command] is followed by its signature");
+            let name = signature
+                .split("fn ")
+                .nth(1)
+                .and_then(|rest| rest.split(['<', '(']).next())
+                .expect("the signature names a function");
+            commands.push(name);
+        }
+        assert!(
+            commands.len() >= 5,
+            "no commands were found, so this test proves nothing: {commands:?}"
+        );
+
+        let missing: Vec<&str> = commands
+            .iter()
+            .copied()
+            .filter(|name| !mirror.contains(&format!("(\"{name}\"")))
+            .collect();
+        assert_eq!(
+            missing,
+            Vec::<&str>::new(),
+            "these commands have no `invoke(\"..\")` in app/src/lib/ipc/app.ts, so the frontend \
+             cannot call them. Found: {commands:?}"
+        );
     }
 
     #[test]

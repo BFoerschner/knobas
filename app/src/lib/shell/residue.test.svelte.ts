@@ -169,6 +169,7 @@ const Launcher = (await import("../launcher/Launcher.svelte")).default;
 const QueryBox = (await import("../launcher/QueryBox.svelte")).default;
 const AddSource = (await import("../sources/AddSource.svelte")).default;
 const Diagnostics = (await import("../sources/Diagnostics.svelte")).default;
+const FirstRun = (await import("../sources/FirstRun.svelte")).default;
 const ReenterSecret = (await import("../sources/ReenterSecret.svelte")).default;
 const SourcesView = (await import("../sources/SourcesView.svelte")).default;
 const { createHealth } = await import("./health.svelte");
@@ -366,6 +367,11 @@ const CASES: Case[] = [
     name: "Diagnostics",
     source: "lib/sources/Diagnostics.svelte",
     open: (target) => ({ app: mount(Diagnostics, { target, props: {} }) }),
+  },
+  {
+    name: "FirstRun",
+    source: "lib/sources/FirstRun.svelte",
+    open: (target) => ({ app: mount(FirstRun, { target, props: { onfinish: () => {} } }) }),
   },
   {
     name: "ReenterSecret",
