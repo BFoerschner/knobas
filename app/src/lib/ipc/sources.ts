@@ -104,10 +104,17 @@ export type SyncOutcome = "ok" | "unauthorized" | "unreachable" | "error";
  * `knobas.sync_run` row.
  *
  * The diagnostics list labels a run with it: a scheduled poll, the user's
- * *Sync now*, or the initial sync the first-run wizard drew a progress bar
- * for.
+ * *Sync now*, the initial sync the first-run wizard drew a progress bar for,
+ * or a backfill.
+ *
+ * `backfill` is the one that carries information the others do not. It is a
+ * deliberate cursor-less run that widens the payload of items an incremental
+ * would never re-fetch, and it is forbidden to reconcile -- so unlike every
+ * other cursor-less run it *cannot* have tombstoned anything. When a
+ * suspicious `swept` count needs explaining, this spelling is what rules a
+ * run out.
  */
-export type SyncTrigger = "schedule" | "manual" | "first_run";
+export type SyncTrigger = "schedule" | "manual" | "first_run" | "backfill";
 
 /** One row of the sync log — `knobas_sync::run_log::SyncRunRow`. */
 export interface SyncRunRow {
