@@ -36,12 +36,29 @@ async fn seeded_pool() -> (sqlx::PgPool, EntityRef, EntityRef) {
 async fn link_lifecycle_with_tombstone() {
     let (pool, t, n) = seeded_pool().await;
 
-    let id = link::create(&pool, &t, &n, "documents", link::Origin::Manual, None, "mara")
-        .await
-        .unwrap()
-        .id;
+    let id = link::create(
+        &pool,
+        &t,
+        &n,
+        "documents",
+        link::Origin::Manual,
+        None,
+        "mara",
+    )
+    .await
+    .unwrap()
+    .id;
     // duplicate active link is rejected
-    let dup = link::create(&pool, &t, &n, "documents", link::Origin::Manual, None, "mara").await;
+    let dup = link::create(
+        &pool,
+        &t,
+        &n,
+        "documents",
+        link::Origin::Manual,
+        None,
+        "mara",
+    )
+    .await;
     assert!(matches!(dup, Err(CoreError::Duplicate)), "{dup:?}");
     // visible from both ends
     assert_eq!(link::links_of(&pool, &t).await.unwrap().len(), 1);
@@ -57,9 +74,17 @@ async fn link_lifecycle_with_tombstone() {
         .unwrap();
     assert_eq!(cnt, 1);
     // and re-linking after unlink is allowed again
-    link::create(&pool, &t, &n, "documents", link::Origin::Manual, None, "mara")
-        .await
-        .unwrap();
+    link::create(
+        &pool,
+        &t,
+        &n,
+        "documents",
+        link::Origin::Manual,
+        None,
+        "mara",
+    )
+    .await
+    .unwrap();
 }
 
 #[tokio::test]
@@ -95,10 +120,18 @@ async fn several_relations_coexist_and_come_back_newest_first() {
     let (pool, t, n) = seeded_pool().await;
 
     let before = chrono::Utc::now();
-    let documents = link::create(&pool, &t, &n, "documents", link::Origin::Manual, None, "mara")
-        .await
-        .unwrap()
-        .id;
+    let documents = link::create(
+        &pool,
+        &t,
+        &n,
+        "documents",
+        link::Origin::Manual,
+        None,
+        "mara",
+    )
+    .await
+    .unwrap()
+    .id;
     let blocks = link::create(&pool, &t, &n, "blocks", link::Origin::Manual, None, "mara")
         .await
         .unwrap()
@@ -132,10 +165,18 @@ async fn several_relations_coexist_and_come_back_newest_first() {
 async fn unlink_is_idempotent_but_unknown_ids_are_reported() {
     let (pool, t, n) = seeded_pool().await;
 
-    let id = link::create(&pool, &t, &n, "documents", link::Origin::Manual, None, "mara")
-        .await
-        .unwrap()
-        .id;
+    let id = link::create(
+        &pool,
+        &t,
+        &n,
+        "documents",
+        link::Origin::Manual,
+        None,
+        "mara",
+    )
+    .await
+    .unwrap()
+    .id;
     let withdrawn = link::unlink(&pool, id).await.unwrap();
     assert_eq!(
         withdrawn.map(|row| row.id),
@@ -297,8 +338,16 @@ async fn a_link_endpoint_with_no_entity_row_is_its_own_error() {
     // they are separate constraints: a classifier keyed on one of them by name
     // would leave the other end reporting `internal`.
     for (from, to) in [(&ticket, &absent), (&absent, &ticket)] {
-        let created =
-            link::create(&pool, from, to, "documents", link::Origin::Manual, None, "mara").await;
+        let created = link::create(
+            &pool,
+            from,
+            to,
+            "documents",
+            link::Origin::Manual,
+            None,
+            "mara",
+        )
+        .await;
         assert!(
             matches!(created, Err(CoreError::EndpointMissing)),
             "{created:?}"

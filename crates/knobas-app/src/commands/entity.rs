@@ -446,7 +446,6 @@ pub async fn recent_activity(
     recent_activity_inner(&pool, limit, entity.as_ref()).await
 }
 
-
 // -- the link writes --------------------------------------------------------
 //
 // Two commands, and only two. The *read* stays on `get_entity`: `links_of` is

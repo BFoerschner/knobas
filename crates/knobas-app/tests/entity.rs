@@ -696,7 +696,9 @@ async fn a_link_endpoint_that_is_not_in_the_mirror_is_not_found_at_the_command_s
     let absent = format!("nowhere-{}:GONE-1", unique());
 
     for (a, b) in [(&from, &absent), (&absent, &from)] {
-        let refused = create_link_inner(&pool, a, b, None, None).await.unwrap_err();
+        let refused = create_link_inner(&pool, a, b, None, None)
+            .await
+            .unwrap_err();
         assert_eq!(
             refused.code,
             knobas_app::IpcErrorCode::NotFound,

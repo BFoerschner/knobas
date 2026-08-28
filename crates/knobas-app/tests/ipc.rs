@@ -893,14 +893,13 @@ async fn creating_a_link_announces_its_activity_line_on_the_event() {
 
     // The announced row is the row in the log, not one the command invented:
     // `id` and `at` are the database's to choose.
-    let stored: (String, serde_json::Value) = sqlx::query_as(
-        "select verb, detail from knobas.activity where id = $1 and entity_id = $2",
-    )
-    .bind(line["id"].as_i64().expect("the line carries its id"))
-    .bind(&from)
-    .fetch_one(&pool)
-    .await
-    .expect("the announced line is in the log");
+    let stored: (String, serde_json::Value) =
+        sqlx::query_as("select verb, detail from knobas.activity where id = $1 and entity_id = $2")
+            .bind(line["id"].as_i64().expect("the line carries its id"))
+            .bind(&from)
+            .fetch_one(&pool)
+            .await
+            .expect("the announced line is in the log");
     assert_eq!(stored.0, "linked");
     assert_eq!(stored.1, line["detail"]);
 }
