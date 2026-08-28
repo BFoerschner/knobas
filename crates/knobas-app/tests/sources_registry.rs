@@ -124,6 +124,7 @@ fn every_adapter_crate_linked_into_the_app_has_a_row() {
         knobas_source_mock::descriptor_template().adapter_kind,
         knobas_source_jira::descriptor_template().adapter_kind,
         knobas_source_teamcity::descriptor_template().adapter_kind,
+        knobas_source_gitea::descriptor_template().adapter_kind,
     ] {
         assert!(
             kinds.contains(&expected),
@@ -220,7 +221,9 @@ fn the_registry_routes_on_the_kind_and_not_on_the_instance_id() {
 
     // ...and an instance id that happens to *be* a kind name is not what routes.
     assert!(
-        registry.build(instance("jira", "gitea-not-yet")).is_err(),
+        registry
+            .build(instance("jira", "not-a-compiled-in-kind"))
+            .is_err(),
         "an unknown kind must be refused however the instance is named"
     );
 }

@@ -180,3 +180,31 @@ dev: deps
 # `profile demo=true` is the acceptance test for that.
 demo: deps
     cd crates/knobas-app && PATH="$PWD/../../app/node_modules/.bin:$PATH" tauri dev -- -- --demo
+
+# The Gitea adapter against the REAL pinned container in `testenv/`.
+#
+# That container is this adapter's contract source (interfaces §4.2). The
+# wiremock stand-in the rest of its suite runs against exists only so
+# `just check` and CI stay docker-free (roadmap §3) -- it encodes one person's
+# reading of Gitea's API, and `tests/live_gitea.rs` re-asserts every shape it
+# encodes against the server that decides them. **If the two disagree, the fake
+# is what is wrong.**
+#
+# Not part of `check`, which is why every test in that file is `#[ignore]`d;
+# this recipe is what un-ignores them.
+#
+# Gitea and its seed only: `testenv/seed` also waits for uptime-kuma and mockd,
+# which this suite never touches. Both steps are idempotent, so re-running this
+# against an already-seeded environment just runs the tests. Serial, because the
+# suite opens a pull request through Gitea's own API and the runs share one
+# server.
+gitea-live:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd testenv
+    docker compose up -d --wait gitea
+    ./seed-gitea.sh
+    eval "$(./seed --env)"
+    cd ..
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-gitea --test live_gitea \
+      -- --ignored --nocapture --test-threads=1

@@ -1,9 +1,9 @@
 //! One sync run.
 //!
 //! Order is fixed and deterministic -- repository, its branches, its pull
-//! requests (Task 6), its commits (Task 7), repositories sorted by full name --
-//! so a test can assert on what came out and a budget spends itself the same
-//! way twice.
+//! requests, its commits, repositories sorted by full name, branches by
+//! `walk_order` -- so a test can assert on what came out and a budget spends
+//! itself the same way twice.
 //!
 //! # Why every kind has a change gate
 //!
