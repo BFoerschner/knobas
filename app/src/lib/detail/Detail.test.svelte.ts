@@ -268,7 +268,15 @@ test("an undeclared kind is browsable — §3a's promise", async () => {
 test("a declared kind_info names the header", async () => {
   answer = () =>
     Promise.resolve(
-      detail({ kind_info: { id: "ticket", label: "Issue", plural: "Issues", monogram: "IS" } }),
+      detail({
+        kind_info: {
+          id: "ticket",
+          label: "Issue",
+          plural: "Issues",
+          monogram: "IS",
+          full_sync_exhaustive: true,
+        },
+      }),
     );
 
   const screen = render();

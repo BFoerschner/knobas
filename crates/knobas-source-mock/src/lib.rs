@@ -595,35 +595,40 @@ impl Source for MockSource {
                     label: "Ticket".to_owned(),
                     plural: "Tickets".to_owned(),
                     monogram: "TK".to_owned(),
+                    full_sync_exhaustive: true,
                 },
                 KindInfo {
                     id: "pr".to_owned(),
                     label: "Pull request".to_owned(),
                     plural: "Pull requests".to_owned(),
                     monogram: "PR".to_owned(),
+                    full_sync_exhaustive: true,
                 },
                 KindInfo {
                     id: "build".to_owned(),
                     label: "Build".to_owned(),
                     plural: "Builds".to_owned(),
                     monogram: "BU".to_owned(),
+                    full_sync_exhaustive: true,
                 },
                 KindInfo {
                     id: "page".to_owned(),
                     label: "Page".to_owned(),
                     plural: "Pages".to_owned(),
                     monogram: "PG".to_owned(),
+                    full_sync_exhaustive: true,
                 },
                 KindInfo {
                     id: "commit".to_owned(),
                     label: "Commit".to_owned(),
                     plural: "Commits".to_owned(),
                     monogram: "CM".to_owned(),
+                    full_sync_exhaustive: true,
                 },
             ],
-            // The fixture is the entire world this source has: a full sync
-            // emits all of it, so the engine's sweep is safe here.
-            full_sync_exhaustive: true,
+            // Every kind above declares `full_sync_exhaustive: true`: the
+            // fixture is the entire world this source has, so a full sync
+            // emits all of it and the engine's sweep is safe for each kind.
             // Nothing to configure, so the Add-source form for the mock is empty.
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
         }

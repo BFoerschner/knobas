@@ -678,6 +678,40 @@ Stream T note for the Gitea live suite: the seed **cannot** reproduce fixture PR
   `BUILD_FIELDS` widens (M2; see carry-overs — the widening must also update
   `the_selectors_ask_for_nothing_outside_the_mock_contract` and its message).
 
+### Amendments from the M2 hardening lane (2026-08-28, binding)
+
+- **§3a/§4 `full_sync_exhaustive` moves from `SourceDescriptor` to `KindInfo`** — ADR-0003,
+  ratified 2026-08-27, applied in issue #31. Exhaustiveness is a property of each *kind*, not of
+  a source: Gitea walks repositories and branches to the end while `commits_per_repo` /
+  `prs_per_repo` bound the other two, and one per-source boolean was wrong in both directions
+  for it. The sweep (`knobas_sync::SWEEP`) gains `i.kind = any($2)` and fires only for kinds that
+  declared the flag **and** emitted a row this run — the "a full sync that emitted nothing is a
+  silently failed adapter" guard is per kind for the same reason the gate is.
+  - As-built declarations: Gitea `repo`/`branch` `true`, `commit`/`pr` `false`; TeamCity both
+    kinds `false` (unchanged answer, new spelling); Jira `ticket` `true`; mock every kind `true`.
+  - This supersedes the M1 landing-round amendment "§4.2 Gitea `full_sync_exhaustive` is `false`"
+    for `repo` and `branch` only; the 2026-08-25 budget ruling stands for `commit` and `pr`.
+  - Closes both recorded tombstone holes in `knobas-source-gitea/src/sync.rs` — repo-row
+    retirement and the branch hard-delete window — **for cursor-less runs**. That qualifier
+    applies to both halves, not only to the branch one it was first written on: `swept` is gated
+    on `full_sync = cursor.is_none()`, and every scheduled run resumes from a stored position
+    (`knobas_sync::run_from_stored_cursor`). In a running installation a cursor-less run is a
+    source's first sync and *Load demo data*; there is no user-facing re-sync or clear-cursor
+    path. So a deleted Gitea repository is retired the next time that source syncs in full,
+    which absent a cleared cursor may be never.
+  - **Residual, documented not fixed — two cases, not one.** (a) Hard deletes in a
+    non-exhaustive kind stay inexpressible. (b) So do hard deletes in an *exhaustive* kind that
+    emitted nothing: the emptiness guard spares it, so a kind whose corpus goes to zero upstream
+    keeps every row live indefinitely. (b) is the deliberate side of a trade the engine cannot
+    win — an empty listing and a credential that lost its scope are the same empty 200, and
+    tombstoning a whole kind on a token change is the expensive error. Both are recorded under
+    *Limitations* on `knobas_sync::run_once`, together with the incremental-run bound above. The
+    alternative to (a) — a reconcile call on the `Sink` SPI — is rejected in the ADR: `Sink`
+    staying write-only is the verified reason the earlier tombstone deferral was sound.
+  - TS mirrors moved with it: `KindInfo` in `app/src/lib/ipc/entity.ts` gains the field,
+    `SourceDescriptor` in `sources.ts` loses it. Still **no battery clause** — the battery cannot
+    see the remote corpus, so each adapter's own integration tests hold its claim honest.
+
 ---
 
 ## 10. As built — the contract PR (2026-08-24)

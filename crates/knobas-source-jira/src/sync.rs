@@ -61,14 +61,14 @@ project,created,updated,comment,worklog";
 /// A stop so a server that keeps reporting "more" cannot spin a run forever.
 /// At the default page size this is half a million issues.
 ///
-/// Reaching it is a **failure**, never a quiet end to the walk. The descriptor
-/// claims `full_sync_exhaustive: true`, which is the engine's licence to
-/// tombstone every row a `cursor: None` run did not return -- so a truncated
-/// walk reported as `Ok` authorises deleting whatever fell off the end. The
-/// query is `ORDER BY updated ASC`, so what falls off the end is the *most
-/// recently updated* work: the tickets someone is looking at today. And it is
-/// not a first-sync-only hazard, because any later `cursor: None` run
-/// re-enters the same path against a populated mirror.
+/// Reaching it is a **failure**, never a quiet end to the walk. The one kind
+/// this adapter emits claims `full_sync_exhaustive: true`, which is the
+/// engine's licence to tombstone every row a `cursor: None` run did not
+/// return -- so a truncated walk reported as `Ok` authorises deleting whatever
+/// fell off the end. The query is `ORDER BY updated ASC`, so what falls off
+/// the end is the *most recently updated* work: the tickets someone is looking
+/// at today. And it is not a first-sync-only hazard, because any later
+/// `cursor: None` run re-enters the same path against a populated mirror.
 ///
 /// An incremental run gets the same refusal, and unconditionally. Two reasons,
 /// the second of which was found by mutating the first away:
@@ -547,10 +547,11 @@ mod tests {
         assert_eq!(keys(&sink), keys(&one_page));
     }
 
-    /// `descriptor_template().full_sync_exhaustive` is `true`, and the engine
-    /// tombstones every row a full sync did not return. A run that stopped
-    /// after the first page would therefore not merely sync less -- it would
-    /// delete the rest of the corpus from the mirror. So the claim's paging
+    /// The `ticket` kind claims `full_sync_exhaustive: true`, and the engine
+    /// tombstones every row of such a kind that a full sync did not return. A
+    /// run that stopped after the first page would therefore not merely sync
+    /// less -- it would delete the rest of the corpus from the mirror. So the
+    /// claim's paging
     /// half is pinned separately from the "which requests went out" assertion
     /// above: *every* key arrives, whatever the page size.
     #[tokio::test]
@@ -908,10 +909,11 @@ mod tests {
     ///
     /// This is the one that matters most, and it is the one mockd structurally
     /// cannot see: the fixture is seven issues, so the cap is a real-server-only
-    /// failure mode. `descriptor_template().full_sync_exhaustive` is `true`,
-    /// which is the engine's licence to tombstone every row a `cursor: None`
-    /// run did not return. An `Ok` here is therefore not "we synced a bit less"
-    /// -- it is authorisation to delete everything past the cap. And because
+    /// failure mode. The `ticket` kind claims `full_sync_exhaustive: true`,
+    /// which is the engine's licence to tombstone every row of that kind a
+    /// `cursor: None` run did not return. An `Ok` here is therefore not "we
+    /// synced a bit less" -- it is authorisation to delete everything past the
+    /// cap. And because
     /// the query is `ORDER BY updated ASC`, what falls off the end is the
     /// newest work, so the rows offered up for deletion are exactly the ones
     /// someone is looking at today.

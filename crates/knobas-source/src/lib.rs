@@ -65,26 +65,10 @@ pub struct SourceDescriptor {
     /// a new source's items (launcher groups, chips, monograms) from this
     /// alone, never from hardcoded kind lists (spec §3a extensibility).
     /// [`SyncItem::kind`] must name one of these.
+    ///
+    /// Each entry also carries [`KindInfo::full_sync_exhaustive`], which is
+    /// the sweep's precondition and is declared **per kind** (ADR-0003).
     pub entity_kinds: Vec<KindInfo>,
-    /// Whether a `cursor: None` sync emits this source's **complete** current
-    /// corpus.
-    ///
-    /// This is the precondition of the full-sync sweep (interfaces §4.1): after
-    /// an exhaustive full sync, every row of this source whose `synced_at`
-    /// predates the run is an item the source stopped returning, and the engine
-    /// tombstones it -- which is the only way a hard delete upstream ever
-    /// reaches knobas.
-    ///
-    /// `false` says the full sync is a *window*, not the world: TeamCity emits
-    /// the newest N builds per configuration, so a sweep after it would
-    /// tombstone the entire build history on every run. For such a source
-    /// vanished items are never swept, and the mirror keeps what it last saw.
-    ///
-    /// M1: mock `true`, Jira `true`, Gitea `true`, TeamCity `false`. It is a
-    /// claim the adapter makes about its own read path -- the battery cannot
-    /// check it without knowing the remote corpus, so the adapter's own
-    /// integration tests are what hold it honest.
-    pub full_sync_exhaustive: bool,
     /// JSON Schema for this adapter's configuration; the Add-source form is
     /// generated from it (spec §3a). Never holds secrets -- those live in the
     /// OS keychain, keyed by the chosen [`AuthMethod`]. M0: the mock declares
@@ -116,7 +100,8 @@ pub struct ConnectionInfo {
     pub detail: Option<String>,
 }
 
-/// Display metadata for one entity kind an adapter emits.
+/// Display metadata for one entity kind an adapter emits, and whether a full
+/// sync of that kind is exhaustive.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct KindInfo {
     /// Matches [`SyncItem::kind`], e.g. `"ticket"`.
@@ -127,6 +112,39 @@ pub struct KindInfo {
     pub plural: String,
     /// Two-character monogram for the item chip, e.g. `"JI"`.
     pub monogram: String,
+    /// Whether a `cursor: None` sync emits the **complete** current corpus
+    /// *of this kind*.
+    ///
+    /// This is the precondition of the full-sync sweep (interfaces §4.1):
+    /// after an exhaustive full sync, every row of this source **and this
+    /// kind** whose `synced_at` predates the run is an item the source stopped
+    /// returning, and the engine tombstones it -- which is the only way a hard
+    /// delete upstream ever reaches knobas.
+    ///
+    /// `false` says the full sync of this kind is a *window*, not the world:
+    /// TeamCity emits the newest N builds per configuration, so a sweep after
+    /// it would tombstone the entire build history on every run. Vanished
+    /// items of such a kind are never swept, and the mirror keeps what it last
+    /// saw.
+    ///
+    /// **Per kind, not per source** (ADR-0003, ratified 2026-08-27). One
+    /// adapter routinely walks some kinds exhaustively and budgets others:
+    /// Gitea enumerates every repository and every branch, but bounds commits
+    /// and pull requests with `commits_per_repo` / `prs_per_repo`. A single
+    /// per-source flag forced one answer for all four -- `true` licensed the
+    /// sweep to tombstone every commit past the cap on every full sync, and
+    /// `false` left repo-row retirement and branch hard deletes inexpressible.
+    ///
+    /// A **budgeted kind is non-exhaustive by definition**; declaring
+    /// otherwise is the defect class of Jira's `MAX_PAGES` and the 2026-08-25
+    /// Gitea budget ruling.
+    ///
+    /// M2: mock all `true`, Jira `ticket` `true`, Gitea `repo`/`branch`
+    /// `true` and `commit`/`pr` `false`, TeamCity both `false`. It is a claim
+    /// the adapter makes about its own read path -- the battery cannot check
+    /// it without knowing the remote corpus, so the adapter's own integration
+    /// tests are what hold it honest.
+    pub full_sync_exhaustive: bool,
 }
 
 /// What an adapter can do beyond plain syncing (spec §3).
@@ -325,8 +343,8 @@ mod tests {
                 label: "Ticket".into(),
                 plural: "Tickets".into(),
                 monogram: "JI".into(),
+                full_sync_exhaustive: true,
             }],
-            full_sync_exhaustive: true,
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
         }
     }
@@ -346,7 +364,15 @@ mod tests {
         assert_eq!(v["entity_kinds"][0]["monogram"], "JI");
         assert_eq!(v["write_ops"], serde_json::json!(["comment"]));
         assert_eq!(v["adapter_kind"], "jira");
-        assert_eq!(v["full_sync_exhaustive"], true);
+        // The sweep's precondition rides on the *kind*, not on the source
+        // (ADR-0003): one descriptor can carry an exhaustive kind beside a
+        // budgeted one, and a flag at the top could not say that.
+        assert_eq!(v["entity_kinds"][0]["full_sync_exhaustive"], true);
+        assert!(
+            v.get("full_sync_exhaustive").is_none(),
+            "the per-source flag is gone; a descriptor that still carried one \
+             would leave two answers to the same question"
+        );
         assert_eq!(v["config_schema"]["type"], "object");
     }
 
@@ -365,9 +391,12 @@ mod tests {
         assert_eq!(back.auth_methods, d.auth_methods);
         assert_eq!(back.entity_kinds[0].plural, "Tickets");
         assert_eq!(back.write_ops, d.write_ops);
-        // The sweep's precondition travels with the descriptor: a flag that
-        // did not survive the hop would default to "sweep it" downstream.
-        assert_eq!(back.full_sync_exhaustive, d.full_sync_exhaustive);
+        // The sweep's precondition travels with the kind: a flag that did not
+        // survive the hop would default to "sweep it" downstream.
+        assert_eq!(
+            back.entity_kinds[0].full_sync_exhaustive,
+            d.entity_kinds[0].full_sync_exhaustive
+        );
         assert_eq!(back.config_schema, d.config_schema);
 
         let item = SyncItem {

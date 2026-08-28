@@ -39,8 +39,8 @@ impl Source for Recorder {
                 label: "Ticket".into(),
                 plural: "Tickets".into(),
                 monogram: "RE".into(),
+                full_sync_exhaustive: true,
             }],
-            full_sync_exhaustive: true,
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
         }
     }

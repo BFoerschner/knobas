@@ -138,9 +138,10 @@ async fn a_moved_branch_head_is_re_emitted_and_an_untouched_one_is_not() {
 }
 
 /// A branch deleted after a merge is a dead link target until something says
-/// so -- and since this source declares `full_sync_exhaustive: false`, the
-/// engine's sweep never runs for it, so the adapter's own tombstone is the only
-/// thing that will ever retire the row.
+/// so. On an **incremental** run the adapter's own tombstone is the only thing
+/// that will ever retire the row: the engine's sweep fires after a cursor-less
+/// run and no other (`branch` declares `full_sync_exhaustive: true`, which is
+/// what covers the cursor-less case).
 #[tokio::test]
 async fn a_vanished_branch_is_tombstoned() {
     let mut state = State::tidewater();
@@ -383,11 +384,16 @@ async fn a_run_holding_no_position_is_a_full_sync_whatever_cursor_it_was_handed(
     assert!(items.is_empty(), "{items:?}");
 }
 
-/// A branch deleted while no usable position was held is **never** tombstoned:
-/// the tombstone loop diffs against the previous cursor, and a full sync has
-/// none. Recorded in `sync`'s module docs as what `full_sync_exhaustive: false`
-/// costs, and pinned here so the doc and the behaviour cannot drift apart --
-/// close the gap and this test fails, which is the point.
+/// A branch deleted while no usable position was held is never tombstoned **by
+/// this adapter**: the tombstone loop diffs against the previous cursor, and a
+/// full sync has none.
+///
+/// That is a division of labour, not a hole, since ADR-0003: a cursor-less run
+/// emits every branch of every walked repository and `branch` declares
+/// `full_sync_exhaustive: true`, so the engine's sweep retires what this run
+/// did not re-emit. Pinned here so the two halves cannot silently swap -- an
+/// adapter that started emitting full-sync branch tombstones would be diffing
+/// against a position it does not hold, and this test is what says so.
 #[tokio::test]
 async fn a_run_holding_no_position_cannot_tombstone_a_deleted_branch() {
     let mut state = State::tidewater();

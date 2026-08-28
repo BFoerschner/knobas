@@ -8,11 +8,14 @@
 //! `synced_at < now()` inside that same transaction means exactly "this run did
 //! not see it".
 //!
-//! **Gated on `SourceDescriptor.full_sync_exhaustive`.** The inference "this
-//! full sync did not return it, therefore it is gone" only holds for an adapter
-//! whose full sync really does return everything. TeamCity's does not -- it
-//! fetches the newest N builds per configuration -- so it declares `false` and
-//! is never swept; Jira, Gitea and the mock declare `true`.
+//! **Gated on `KindInfo::full_sync_exhaustive`, per kind** (ADR-0003). The
+//! inference "this full sync did not return it, therefore it is gone" only
+//! holds where the full sync really does return everything -- and that is a
+//! property of each *kind*, not of a source. TeamCity's builds are the newest
+//! N per configuration, so both its kinds declare `false` and are never swept.
+//! Gitea enumerates every repository and every branch but budgets commits and
+//! pull requests, so it declares two of each. Jira's one kind and every one of
+//! the mock's declare `true`.
 
 use std::sync::{Arc, Mutex};
 
@@ -23,14 +26,16 @@ use knobas_source::{
 };
 use sqlx::PgPool;
 
-/// An adapter emitting whichever keys it is currently told to, and declaring
-/// whether its full sync is exhaustive.
+/// An adapter emitting whichever `(kind, key)` pairs it is currently told to,
+/// over a fixed set of declared kinds.
 struct Shrinking {
     id: String,
-    keys: Arc<Mutex<Vec<&'static str>>>,
-    /// The gate the sweep obeys: `true` means "a full sync of me returns
-    /// everything I have", which is what makes absence proof of deletion.
-    exhaustive: bool,
+    keys: Arc<Mutex<Vec<(&'static str, &'static str)>>>,
+    /// The kinds this source declares, each with the gate the sweep obeys:
+    /// `true` means "a full sync returns every item of this kind I have",
+    /// which is what makes absence proof of deletion -- **for that kind
+    /// alone**.
+    kinds: Vec<(&'static str, bool)>,
 }
 
 #[async_trait]
@@ -44,13 +49,17 @@ impl Source for Shrinking {
             adapter_version: "0.1.0".into(),
             auth_methods: Vec::new(),
             write_ops: Vec::new(),
-            entity_kinds: vec![KindInfo {
-                id: "ticket".into(),
-                label: "Ticket".into(),
-                plural: "Tickets".into(),
-                monogram: "SH".into(),
-            }],
-            full_sync_exhaustive: self.exhaustive,
+            entity_kinds: self
+                .kinds
+                .iter()
+                .map(|(id, exhaustive)| KindInfo {
+                    id: (*id).to_owned(),
+                    label: (*id).to_owned(),
+                    plural: (*id).to_owned(),
+                    monogram: "SH".into(),
+                    full_sync_exhaustive: *exhaustive,
+                })
+                .collect(),
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
         }
     }
@@ -65,10 +74,10 @@ impl Source for Shrinking {
         sink: &mut (dyn Sink + Send),
     ) -> Result<Cursor, SourceError> {
         let keys = self.keys.lock().unwrap().clone();
-        for key in &keys {
+        for (kind, key) in &keys {
             sink.item(SyncItem {
                 entity: knobas_core::entity::EntityRef::new(&self.id, key),
-                kind: "ticket".into(),
+                kind: (*kind).to_owned(),
                 title: format!("{key} title"),
                 body_text: String::new(),
                 author: None,
@@ -121,33 +130,43 @@ fn unique() -> String {
     format!("swp-{}", uuid::Uuid::new_v4().simple())
 }
 
-/// An adapter whose full sync returns everything it has -- the Jira/Gitea/mock
-/// shape, where absence really does mean deletion.
-fn source(id: &str, keys: &[&'static str]) -> (Shrinking, Arc<Mutex<Vec<&'static str>>>) {
-    let keys = Arc::new(Mutex::new(keys.to_vec()));
+/// What the shared handle to a source's current corpus is spelled as.
+type Corpus = Arc<Mutex<Vec<(&'static str, &'static str)>>>;
+
+/// Keys of the single `"ticket"` kind, for the tests that are not about the
+/// per-kind gate.
+fn tickets(keys: &[&'static str]) -> Vec<(&'static str, &'static str)> {
+    keys.iter().map(|key| ("ticket", *key)).collect()
+}
+
+/// A source declaring `kinds` and currently emitting `keys`.
+fn source_of(
+    id: &str,
+    kinds: &[(&'static str, bool)],
+    keys: &[(&'static str, &'static str)],
+) -> (Shrinking, Corpus) {
+    let corpus: Corpus = Arc::new(Mutex::new(keys.to_vec()));
     (
         Shrinking {
             id: id.to_owned(),
-            keys: Arc::clone(&keys),
-            exhaustive: true,
+            keys: Arc::clone(&corpus),
+            kinds: kinds.to_vec(),
         },
-        keys,
+        corpus,
     )
+}
+
+/// An adapter whose full sync returns everything it has -- the Jira/mock shape,
+/// where absence really does mean deletion.
+fn source(id: &str, keys: &[&'static str]) -> (Shrinking, Corpus) {
+    source_of(id, &[("ticket", true)], &tickets(keys))
 }
 
 /// An adapter whose full sync is **bounded** -- the TeamCity shape: "the newest
 /// N builds per configuration", so an item this run did not return may simply
 /// have fallen off the window.
-fn bounded_source(id: &str, keys: &[&'static str]) -> (Shrinking, Arc<Mutex<Vec<&'static str>>>) {
-    let keys = Arc::new(Mutex::new(keys.to_vec()));
-    (
-        Shrinking {
-            id: id.to_owned(),
-            keys: Arc::clone(&keys),
-            exhaustive: false,
-        },
-        keys,
-    )
+fn bounded_source(id: &str, keys: &[&'static str]) -> (Shrinking, Corpus) {
+    source_of(id, &[("ticket", false)], &tickets(keys))
 }
 
 /// A second of daylight, so `synced_at` is unmistakably older than the next
@@ -167,7 +186,7 @@ async fn a_full_sync_tombstones_what_the_source_stopped_returning_and_keeps_its_
     assert_eq!(first.swept, 0, "nothing is stale on the first full sync");
 
     // Upstream hard-deletes A-2: it simply stops appearing.
-    *keys.lock().unwrap() = vec!["A-1", "A-3"];
+    *keys.lock().unwrap() = tickets(&["A-1", "A-3"]);
     a_moment_passes().await;
 
     let second = knobas_sync::run_once(&pool, &src, None).await.unwrap();
@@ -207,7 +226,7 @@ async fn a_source_whose_full_sync_is_bounded_is_never_swept() {
     assert_eq!(first.upserted, 3);
 
     // The window slid: T-1 is simply older than the newest two builds.
-    *keys.lock().unwrap() = vec!["T-2", "T-3"];
+    *keys.lock().unwrap() = tickets(&["T-2", "T-3"]);
     a_moment_passes().await;
     let second = knobas_sync::run_once(&pool, &src, None).await.unwrap();
 
@@ -230,7 +249,7 @@ async fn an_incremental_run_never_sweeps() {
     let (src, keys) = source(&id, &["B-1", "B-2"]);
     let first = knobas_sync::run_once(&pool, &src, None).await.unwrap();
 
-    *keys.lock().unwrap() = vec!["B-1"];
+    *keys.lock().unwrap() = tickets(&["B-1"]);
     a_moment_passes().await;
     let inc = knobas_sync::run_once(&pool, &src, Some(first.cursor))
         .await
@@ -257,7 +276,7 @@ async fn a_full_sync_that_emitted_nothing_sweeps_nothing() {
     let (src, keys) = source(&id, &["C-1", "C-2"]);
     knobas_sync::run_once(&pool, &src, None).await.unwrap();
 
-    *keys.lock().unwrap() = vec![];
+    *keys.lock().unwrap() = tickets(&[]);
     a_moment_passes().await;
     let empty = knobas_sync::run_once(&pool, &src, None).await.unwrap();
 
@@ -277,7 +296,7 @@ async fn the_sweep_does_not_restamp_an_existing_tombstone() {
     let (src, keys) = source(&id, &["D-1", "D-2"]);
     knobas_sync::run_once(&pool, &src, None).await.unwrap();
 
-    *keys.lock().unwrap() = vec!["D-1"];
+    *keys.lock().unwrap() = tickets(&["D-1"]);
     a_moment_passes().await;
     let swept = knobas_sync::run_once(&pool, &src, None).await.unwrap();
     assert_eq!(swept.swept, 1);
@@ -307,7 +326,7 @@ async fn the_sweep_only_touches_its_own_source() {
     knobas_sync::run_once(&pool, &a, None).await.unwrap();
     knobas_sync::run_once(&pool, &b, None).await.unwrap();
 
-    *keys.lock().unwrap() = vec!["E-1"];
+    *keys.lock().unwrap() = tickets(&["E-1"]);
     a_moment_passes().await;
     let swept = knobas_sync::run_once(&pool, &a, None).await.unwrap();
 
@@ -339,7 +358,7 @@ async fn a_resurrected_item_loses_its_tombstone_again() {
     let (src, keys) = source(&id, &["F-1", "F-2"]);
     knobas_sync::run_once(&pool, &src, None).await.unwrap();
 
-    *keys.lock().unwrap() = vec!["F-1"];
+    *keys.lock().unwrap() = tickets(&["F-1"]);
     a_moment_passes().await;
     assert_eq!(
         knobas_sync::run_once(&pool, &src, None)
@@ -351,7 +370,7 @@ async fn a_resurrected_item_loses_its_tombstone_again() {
     assert!(deleted_at(&pool, &format!("{id}:F-2")).await.is_some());
 
     // Sources do resurrect things -- an issue is un-deleted, a repo restored.
-    *keys.lock().unwrap() = vec!["F-1", "F-2"];
+    *keys.lock().unwrap() = tickets(&["F-1", "F-2"]);
     a_moment_passes().await;
     let back = knobas_sync::run_once(&pool, &src, None).await.unwrap();
     assert_eq!(back.swept, 0);
@@ -360,4 +379,124 @@ async fn a_resurrected_item_loses_its_tombstone_again() {
         "a stale tombstone would hide a live entity"
     );
     assert_eq!(live_count(&pool, &id).await, 2);
+}
+
+/// **The per-kind gate (ADR-0003).** Exhaustiveness belongs to a *kind*, not to
+/// a source: Gitea enumerates every repository and every branch, and budgets
+/// commits and pull requests with `commits_per_repo` / `prs_per_repo`. One
+/// per-source flag could only answer "sweep everything" or "sweep nothing", and
+/// both are wrong for such a source -- `true` tombstones every commit past the
+/// cap on every full sync, `false` leaves a vanished repository live for ever.
+///
+/// So the run sweeps the exhaustive kinds and leaves the budgeted ones exactly
+/// where they were, in the same transaction.
+#[tokio::test]
+async fn a_run_sweeps_its_exhaustive_kinds_and_spares_its_budgeted_ones() {
+    let pool = pool().await;
+    let id = unique();
+    let (src, keys) = source_of(
+        &id,
+        &[("repo", true), ("commit", false)],
+        &[
+            ("repo", "G-repo-1"),
+            ("repo", "G-repo-2"),
+            ("commit", "G-sha-1"),
+            ("commit", "G-sha-2"),
+        ],
+    );
+
+    let first = knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    assert_eq!(first.upserted, 4);
+    assert_eq!(first.swept, 0, "nothing is stale on the first full sync");
+
+    // One repository is deleted upstream; one commit merely falls off the
+    // per-repository budget. Both simply stop appearing, and the engine has
+    // only the declaration to tell the two apart.
+    *keys.lock().unwrap() = vec![("repo", "G-repo-1"), ("commit", "G-sha-1")];
+    a_moment_passes().await;
+
+    let second = knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    assert_eq!(second.upserted, 2);
+    assert_eq!(
+        second.swept, 1,
+        "exactly the vanished repo -- not the commit that fell off the budget"
+    );
+    assert!(
+        deleted_at(&pool, &format!("{id}:G-repo-2")).await.is_some(),
+        "a repository that vanished from an exhaustive listing is retired"
+    );
+    assert!(
+        deleted_at(&pool, &format!("{id}:G-sha-2")).await.is_none(),
+        "a commit past a budget was never claimed to be the whole corpus"
+    );
+    assert!(deleted_at(&pool, &format!("{id}:G-repo-1")).await.is_none());
+    assert!(deleted_at(&pool, &format!("{id}:G-sha-1")).await.is_none());
+    assert_eq!(live_count(&pool, &id).await, 3);
+}
+
+/// The `upserted > 0` guard -- "a full sync that emitted nothing is
+/// indistinguishable from an adapter that silently failed" -- has to hold **per
+/// kind** too, for the same reason the gate does.
+///
+/// A Gitea token that loses repository scope returns an empty listing with a
+/// 200 while the branch walk of the repositories already mirrored keeps
+/// working. Judged source-wide, that run emitted plenty and would sweep every
+/// repo row knobas holds. Judged per kind, the `repo` walk emitted nothing and
+/// proves nothing, so nothing of that kind is swept.
+#[tokio::test]
+async fn a_kind_that_emitted_nothing_is_not_swept_even_when_another_kind_did() {
+    let pool = pool().await;
+    let id = unique();
+    let (src, keys) = source_of(
+        &id,
+        &[("repo", true), ("branch", true)],
+        &[
+            ("repo", "H-repo-1"),
+            ("repo", "H-repo-2"),
+            ("branch", "H-main"),
+        ],
+    );
+
+    let first = knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    assert_eq!(first.upserted, 3);
+
+    // The repository listing comes back empty; the branch walk is unaffected.
+    *keys.lock().unwrap() = vec![("branch", "H-main")];
+    a_moment_passes().await;
+    let second = knobas_sync::run_once(&pool, &src, None).await.unwrap();
+
+    assert_eq!(second.upserted, 1);
+    assert_eq!(
+        second.swept, 0,
+        "a kind that emitted nothing has not proved that its corpus is empty"
+    );
+    assert!(deleted_at(&pool, &format!("{id}:H-repo-1")).await.is_none());
+    assert!(deleted_at(&pool, &format!("{id}:H-repo-2")).await.is_none());
+    assert_eq!(live_count(&pool, &id).await, 3);
+
+    // And it does not resolve itself on the next run, or the one after. The
+    // guard is stateless -- it asks only what *this* run emitted -- so a kind
+    // whose corpus has genuinely gone to zero keeps every row live for as long
+    // as it stays empty. That is the documented residual on `run_once`
+    // (*Limitations*, case 2).
+    //
+    // **Read this loop for exactly what it is.** It does not detect anything
+    // the assertions above it miss. Because the guard holds no cross-run state
+    // -- `emitted` is a fresh set per `PgSink`, per run -- every mutation that
+    // would close the gap fires on the *first* empty run, at the `swept == 0`
+    // assertion above; this loop then never executes. It is a doc-pin: it
+    // costs a couple of seconds to say "indefinitely" out loud, and it would
+    // catch a future *design* change that made the guard stateful (say,
+    // "sweep after N consecutive empty runs"), which nothing above would. Do
+    // not count it as independent evidence that the guard works.
+    for round in 3..=4 {
+        a_moment_passes().await;
+        let again = knobas_sync::run_once(&pool, &src, None).await.unwrap();
+        assert_eq!(again.swept, 0, "round {round}");
+        assert!(
+            deleted_at(&pool, &format!("{id}:H-repo-2")).await.is_none(),
+            "round {round}: a repo row of an empty-listing kind is never retired"
+        );
+        assert_eq!(live_count(&pool, &id).await, 3, "round {round}");
+    }
 }

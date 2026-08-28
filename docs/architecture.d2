@@ -19,6 +19,35 @@
 #   printf '<body style="margin:0"><img src="architecture.svg" style="width:6879px">' > /tmp/w.html
 #   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless \
 #     --screenshot=docs/architecture.png --window-size=6879,4803 --hide-scrollbars file:///tmp/w.html
+#
+# The two renders are NOT equally reproducible, and nothing in CI regenerates
+# either -- there is no `d2` reference in the justfile, scripts/ or the
+# workflows, so a drift between this file and the renders is caught by nobody.
+#
+#   architecture.svg  reproduces byte-for-byte from the command above on d2
+#                     v0.8.1-HEAD, and twice in a row from one source. Note
+#                     that d2 derives the CSS class and font-family hash
+#                     (`d2-<digits>`) from the *compiled* diagram -- editing
+#                     these comments leaves it alone, but changing one label
+#                     rewrites it at ~416 sites, so a one-word change shows up
+#                     as a diff touching most of the file. Normalise that hash
+#                     (`s/d2-[0-9]*/H/g`) before reading a render diff, or the
+#                     real change is invisible in the noise.
+#   architecture.png  reproduces exactly on a FIXED Chrome (two renders of one
+#                     SVG are byte-identical) but NOT across Chrome versions --
+#                     it is a rasteriser artefact, not a vector one. Text
+#                     antialiasing moved between the Chrome that made the
+#                     2026-08-24 file and Chrome 151.0.7922.175: re-rendering
+#                     the *identical* SVG changed 0.62% of channel bytes (76%
+#                     of them by exactly +/-1) and the file size by ~10%.
+#                     Expect that churn on any Chrome upgrade, and do not read
+#                     it as a diagram change -- the SVG is the artefact to
+#                     diff when you want to know what actually moved.
+#
+# ADR-0003 (2026-08-28) edited the SPI bullet below and regenerated both. The
+# PNG diff of that commit decomposes into the edit itself -- 15,526 bytes in a
+# 27x240 px band at rows 1835-1861, measured against a same-Chrome control --
+# and ~600 KB of the antialiasing churn described above.
 
 # Palette: graphite + hairlines, amber reserved for the one thing that is
 # moving (the in-flight branch). The page paints its own soft ground rather
@@ -206,7 +235,7 @@ spi: "▲  FROZEN CONTRACT  ▲   knobas-source — THE SOURCE SPI" {
     width: 470
   }
 
-  m1: "in flight — the only additions on m1/contract:\n• test_connection now returns ConnectionInfo\n   (account · server_version · secret_expires_at)\n• SourceInstance { id, kind, base_url, auth, secret, config }\n   config + keychain secret ⇒ Box<dyn Source>; Debug redacts the secret\n• SyncItem.web_url — the only source of Open in browser\n• SourceDescriptor.full_sync_exhaustive — precondition of the\n   full-sync sweep; TeamCity will say false, everyone else true\n• Capability::Search re-read as server-side search, so M1's\n   read-only adapters declare no capabilities at all" {
+  m1: "in flight — the only additions on m1/contract:\n• test_connection now returns ConnectionInfo\n   (account · server_version · secret_expires_at)\n• SourceInstance { id, kind, base_url, auth, secret, config }\n   config + keychain secret ⇒ Box<dyn Source>; Debug redacts the secret\n• SyncItem.web_url — the only source of Open in browser\n• KindInfo.full_sync_exhaustive — precondition of the\n   full-sync sweep; per kind (ADR-0003), never per source\n• Capability::Search re-read as server-side search, so M1's\n   read-only adapters declare no capabilities at all" {
     class: flight
     width: 470
   }

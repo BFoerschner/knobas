@@ -87,6 +87,7 @@ fn kind_info() -> knobas_source::KindInfo {
         label: "Ticket".to_owned(),
         plural: "Tickets".to_owned(),
         monogram: "TI".to_owned(),
+        full_sync_exhaustive: true,
     }
 }
 
@@ -115,7 +116,7 @@ fn link_row() -> LinkRow {
 
 const ACTIVITY_ROW_FIELDS: &[&str] = &["actor", "at", "detail", "entity_id", "id", "verb"];
 const SOURCE_REF_FIELDS: &[&str] = &["adapter_kind", "display_name", "id"];
-const KIND_INFO_FIELDS: &[&str] = &["id", "label", "monogram", "plural"];
+const KIND_INFO_FIELDS: &[&str] = &["full_sync_exhaustive", "id", "label", "monogram", "plural"];
 
 const ENTITY_ROW_FIELDS: &[&str] = &[
     "entity_id",

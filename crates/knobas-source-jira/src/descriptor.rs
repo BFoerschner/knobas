@@ -29,13 +29,16 @@ pub fn descriptor_template() -> SourceDescriptor {
             label: "Ticket".to_owned(),
             plural: "Tickets".to_owned(),
             monogram: "JI".to_owned(),
+            // A `cursor: None` run walks the whole JQL result set -- `project
+            // in (…)` or the configured filter, unbounded in time -- so every
+            // issue the credential can see is emitted, and the engine's sweep
+            // may tombstone whatever did not come back. Contrast TeamCity,
+            // which emits the newest N builds per configuration and is
+            // therefore `false`. Jira emits one kind, so this adapter is
+            // wholly exhaustive (ADR-0003 changed where the claim is written,
+            // not what Jira claims).
+            full_sync_exhaustive: true,
         }],
-        // A `cursor: None` run walks the whole JQL result set -- `project in
-        // (…)` or the configured filter, unbounded in time -- so every issue
-        // the credential can see is emitted, and the engine's sweep may
-        // tombstone whatever did not come back. Contrast TeamCity, which emits
-        // the newest N builds per configuration and is therefore `false`.
-        full_sync_exhaustive: true,
         config_schema: config_schema(),
     }
 }
@@ -129,7 +132,11 @@ mod tests {
     /// a per-adapter claim and not a default.
     #[test]
     fn a_full_sync_is_the_whole_corpus() {
-        assert!(descriptor_template().full_sync_exhaustive);
+        let d = descriptor_template();
+        assert!(
+            d.entity_kinds.iter().all(|k| k.full_sync_exhaustive),
+            "every kind Jira emits is walked in full"
+        );
     }
 
     /// The claim above is one the contract battery *cannot* check -- it would
@@ -145,7 +152,12 @@ mod tests {
     /// first page) is task 5's and is checked there.
     #[test]
     fn the_full_sync_claim_rests_on_a_query_with_no_time_bound() {
-        assert!(descriptor_template().full_sync_exhaustive);
+        assert!(
+            descriptor_template()
+                .entity_kinds
+                .iter()
+                .all(|k| k.full_sync_exhaustive)
+        );
         for config in [
             serde_json::json!({}),
             serde_json::json!({ "projects": ["PAY", "OPS"] }),

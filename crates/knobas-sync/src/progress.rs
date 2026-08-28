@@ -103,8 +103,9 @@ impl<'a> Observed<'a> {
 #[async_trait::async_trait]
 impl Source for Observed<'_> {
     /// Verbatim. The engine builds its namespace and kind guards out of this,
-    /// and reads `full_sync_exhaustive` off it to decide whether to sweep, so
-    /// anything but delegation here changes what the run *does*.
+    /// and reads each kind's `full_sync_exhaustive` off it to decide which
+    /// kinds to sweep, so anything but delegation here changes what the run
+    /// *does*.
     fn descriptor(&self) -> knobas_source::SourceDescriptor {
         self.inner.descriptor()
     }

@@ -355,6 +355,13 @@ fn derive_kind_info(kind: &str) -> KindInfo {
         plural: derive_plural(kind, &label),
         monogram: derive_monogram(kind),
         label,
+        // Display metadata for a kind **no adapter declared**, so there is no
+        // read path to make a claim about. `false` is the only safe fallback:
+        // the sweep's precondition is a claim, and inventing an affirmative
+        // one here would license tombstoning rows nothing vouched for. Nothing
+        // in the sync engine reads this value anyway -- it reads the
+        // descriptor the adapter returned.
+        full_sync_exhaustive: false,
     }
 }
 
@@ -456,6 +463,7 @@ mod tests {
             label: "Ticket".to_owned(),
             plural: "Tickets".to_owned(),
             monogram: "JI".to_owned(),
+            full_sync_exhaustive: true,
         }])]);
         assert_eq!(catalog.info("ticket").monogram, "JI");
         assert_eq!(catalog.declared_kinds(), ["ticket"]);
@@ -535,6 +543,7 @@ mod tests {
             label: derive_label(id),
             plural: derive_plural(id, &derive_label(id)),
             monogram: monogram.to_owned(),
+            full_sync_exhaustive: true,
         }
     }
 
@@ -548,7 +557,6 @@ mod tests {
             auth_methods: Vec::new(),
             write_ops: Vec::new(),
             entity_kinds: kinds.to_vec(),
-            full_sync_exhaustive: true,
             config_schema: serde_json::Value::Object(serde_json::Map::new()),
         }
     }

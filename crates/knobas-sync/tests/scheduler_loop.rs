@@ -50,8 +50,8 @@ impl Source for Slow {
                 label: "T".into(),
                 plural: "T".into(),
                 monogram: "SL".into(),
+                full_sync_exhaustive: true,
             }],
-            full_sync_exhaustive: true,
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
         }
     }

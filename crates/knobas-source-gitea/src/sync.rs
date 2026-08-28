@@ -17,15 +17,18 @@
 //!
 //! # Why a truncated run fails instead of succeeding
 //!
-//! The descriptor declares `full_sync_exhaustive: false` (the 2026-08-25
-//! ruling: per-repository budgets and an exhaustive full sync cannot both be
-//! true), so the engine's hard-delete sweep never fires for this source. That
-//! removes the *catastrophic* reading of a truncated run -- it can no longer
-//! tombstone a corpus -- but not the rule, which is the weaker promise this
-//! adapter can still keep: **what one run set out to walk, it walked
-//! completely.** A budget the user configured is a known bound; a page cap or a
-//! refusal hit mid-walk is a hole the user never asked for, and a mirror that
-//! is silently missing 400 repositories is worse than a run that says so.
+//! The rule is the promise this adapter keeps to everything downstream:
+//! **what one run set out to walk, it walked completely.** A budget the user
+//! configured is a known bound; a page cap or a refusal hit mid-walk is a hole
+//! the user never asked for, and a mirror that is silently missing 400
+//! repositories is worse than a run that says so.
+//!
+//! Since ADR-0003 this is load-bearing rather than merely tidy. `repo` and
+//! `branch` declare `full_sync_exhaustive: true`, so the engine's sweep
+//! tombstones every repo and branch row a cursor-less run did not re-emit --
+//! and the two guards below are exactly what make "did not re-emit" mean
+//! "gone" instead of "we stopped early". A truncated walk that returned `Ok`
+//! would hand the sweep a corpus it never saw.
 //!
 //! Two things follow, and both are the same rule:
 //!
@@ -48,37 +51,62 @@
 //!   than from `cursor.is_none()`, or the ratified rule would not fire on three
 //!   of its four cases.
 //!
-//! Both guards also mean the flag could go back to `true` on the day the
-//! budgets go away without re-auditing this file; see
-//! `crate::tests::a_budgeted_full_sync_is_not_exhaustive`.
+//! Which kind is bounded and which is not is declared in
+//! `crate::entity_kinds`, and pinned against the config schema by
+//! `crate::tests::exactly_the_unbudgeted_kinds_are_exhaustive` -- so a budget
+//! added for repositories or branches fails there rather than quietly
+//! licensing a sweep over a bounded walk.
 //!
-//! # What `false` costs: hard-deletes, of repositories **and of branches**
+//! # Hard deletes: two holes closed, two left open
 //!
-//! Because the sweep is gated on the flag, **nothing** retires a row this
-//! source stops returning -- not the engine, and not this adapter. Two distinct
-//! holes, and the second is the one that is easy to state wrongly:
+//! Before ADR-0003 this adapter declared one per-source `false` and **nothing**
+//! retired a row it stopped returning -- not the engine, and not this adapter.
+//! The per-kind declaration closes the two that mattered:
 //!
-//! * **A repository** that stops appearing in the listing keeps its live `repo`
-//!   row for ever. Its cursor entry is dropped the next time the run emits
-//!   anything.
-//! * **A branch** is tombstoned only when the run can *see* that it is gone,
-//!   and the only thing that remembers a branch is the previous cursor
-//!   (`before.branches`, in `branches` below). A run holding no position
-//!   therefore emits **zero** branch tombstones -- it has nothing to compare
-//!   against. So a branch deleted upstream while no usable cursor was held
-//!   (a re-added source, a cleared or unreadable cursor, a cursor-version bump)
-//!   stays live for ever, and `branch` is precisely the kind links hang off
-//!   (spec §5a). Before the ruling the engine's sweep covered exactly this
-//!   case; now nothing does. Pinned, so the limitation cannot silently change
-//!   without this text changing with it, by
-//!   `tests/sync.rs::a_run_holding_no_position_cannot_tombstone_a_deleted_branch`.
+//! * **A repository** that stops appearing in the listing is now retired by the
+//!   engine's sweep after any cursor-less run **that emitted at least one
+//!   repository**. (Its cursor entry was already dropped the next time the run
+//!   emitted anything; the live `repo` row is what had no way to go.) The
+//!   qualifier is the engine's emptiness guard and it is load-bearing here: a
+//!   listing that came back empty is exactly what a token which quietly lost
+//!   its repo scope returns, so a source whose *last* repository is deleted --
+//!   or whose `owners[]` is narrowed to owners that hold no repositories --
+//!   keeps that row, and the branch rows under it, indefinitely. (`owners: []`
+//!   is the opposite case: an empty list is no filter at all and syncs every
+//!   repository the token can see, per `GiteaConfig::owners`.) See
+//!   `knobas_sync::run_once`, *Limitations*.
+//! * **A branch** is tombstoned *by this adapter* only when the run can see
+//!   that it is gone, and the only thing that remembers a branch is the
+//!   previous cursor (`before.branches`, in `branches` below). A run holding no
+//!   position therefore still emits **zero** branch tombstones -- it has
+//!   nothing to compare against -- but it no longer needs to: a cursor-less run
+//!   emits every branch of every walked repository, and the sweep retires the
+//!   rest. That was the recorded window (a re-added source, a cleared or
+//!   unreadable cursor, a cursor-version bump), and `branch` is precisely the
+//!   kind links hang off (spec §5a). The adapter's own diff still carries the
+//!   *incremental* case, which the sweep never touches.
+//!   `tests/sync.rs::a_run_holding_no_position_cannot_tombstone_a_deleted_branch`
+//!   pins the adapter half, so the division of labour cannot drift silently.
 //!
-//! Closing either means emitting tombstones for names in the previous cursor
-//! that a *complete* walk did not return -- which needs "complete" to exclude a
-//! run that skipped a repository or was narrowed by an edited
-//! `owners[]`/`repos[]`, and, for branches, needs a position to diff against
-//! that a full sync by definition does not have. Deliberately not done in
-//! tasks 1-5; carried to the orchestrator rather than hidden here.
+//! Two holes stay open, and both are ADR-0003's documented residual rather than
+//! anything this file can fix:
+//!
+//! * **`commit` and `pr` are budgeted**, so for them "stopped being returned"
+//!   and "deleted upstream" are the same observation and the sweep must not
+//!   run. A stale row is the cheap side of that trade; sweeping would tombstone
+//!   everything past the cap on every full sync.
+//! * **An incremental run reconciles nothing**, for any kind: the engine sweeps
+//!   only after a cursor-less run, and this adapter's own diff only sees a
+//!   branch that a *walked* repository stopped listing.
+//!
+//! One consequence worth stating plainly, because it looks like a bug and is
+//! not: narrowing `owners[]`/`repos[]` and then running a full sync retires the
+//! repositories that fell out of scope. They are no longer part of this
+//! source's corpus, and `deleted_at` on the entity is the mirror saying so --
+//! the row, its links and its notes all survive. The other reading of an
+//! incomplete walk -- a repository *skipped* rather than deselected -- cannot
+//! reach the sweep at all, because a skip during a cursor-less run is fatal
+//! (above).
 
 use std::collections::BTreeMap;
 

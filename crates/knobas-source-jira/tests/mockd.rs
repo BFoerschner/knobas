@@ -137,8 +137,9 @@ async fn a_full_sync_lands_the_fixture_issues() {
 
 /// Exit criterion: pagination across >= 2 pages, i.e. `maxResults` < `total`.
 ///
-/// The descriptor claims `full_sync_exhaustive: true`, and the engine
-/// tombstones every row a full sync did not return -- so a run that stopped
+/// The `ticket` kind claims `full_sync_exhaustive: true`, and the engine
+/// tombstones every row of such a kind that a full sync did not return -- so a
+/// run that stopped
 /// after page one would delete live issues from the mirror, not merely sync
 /// fewer of them.
 #[tokio::test]

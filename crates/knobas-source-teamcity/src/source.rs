@@ -132,8 +132,9 @@ mod tests {
         // The claim the engine's tombstone sweep rests on travels with the
         // instance descriptor too, not only with the template.
         assert!(
-            !d.full_sync_exhaustive,
-            "a TeamCity instance's full sync is a window; the sweep must not run after it"
+            !d.entity_kinds.iter().any(|k| k.full_sync_exhaustive),
+            "a TeamCity instance's full sync is a window for every kind it emits; \
+             the sweep must not run after it"
         );
     }
 

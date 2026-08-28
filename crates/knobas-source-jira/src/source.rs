@@ -168,7 +168,7 @@ mod tests {
         assert!(d.write_ops.is_empty());
         // The claim the engine's tombstone sweep rests on travels with the
         // instance descriptor too, not only with the template.
-        assert!(d.full_sync_exhaustive);
+        assert!(d.entity_kinds.iter().all(|k| k.full_sync_exhaustive));
     }
 
     #[test]

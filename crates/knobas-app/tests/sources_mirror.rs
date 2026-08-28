@@ -185,7 +185,6 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
             "capabilities",
             "config_schema",
             "entity_kinds",
-            "full_sync_exhaustive",
             "id",
             "name",
             "write_ops",
@@ -197,7 +196,7 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
         ENTITY_MIRROR,
         "KindInfo",
         &wire["entity_kinds"][0],
-        &["id", "label", "monogram", "plural"],
+        &["full_sync_exhaustive", "id", "label", "monogram", "plural"],
     );
 }
 

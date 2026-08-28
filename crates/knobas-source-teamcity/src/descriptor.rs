@@ -30,22 +30,25 @@ pub fn descriptor_template() -> SourceDescriptor {
                 label: "Build".to_owned(),
                 plural: "Builds".to_owned(),
                 monogram: "BU".to_owned(),
+                full_sync_exhaustive: false,
             },
             KindInfo {
                 id: KIND_BUILD_CONFIG.to_owned(),
                 label: "Build configuration".to_owned(),
                 plural: "Build configurations".to_owned(),
                 monogram: "BC".to_owned(),
+                full_sync_exhaustive: false,
             },
         ],
-        // **The reason this field exists.** A TeamCity full sync fetches the
+        // **The reason that field exists.** A TeamCity full sync fetches the
         // newest `builds_per_config` finished builds per configuration -- a
-        // window, not the corpus. The engine's tombstone sweep deletes every
-        // row of an exhaustive source whose `synced_at` predates the run, so
-        // claiming exhaustiveness here would tombstone the entire mirrored
-        // build history on every full sync. Jira, Gitea and the mock are the
-        // `true` cases; this adapter is the `false` one.
-        full_sync_exhaustive: false,
+        // window, not the corpus -- and the build configurations are read from
+        // the same windowed walk. The engine's tombstone sweep deletes every
+        // row of an exhaustive *kind* whose `synced_at` predates the run, so
+        // claiming exhaustiveness on either kind above would tombstone the
+        // entire mirrored build history on every full sync. Both kinds are
+        // therefore `false`; ADR-0003 moved the claim onto the kind and left
+        // TeamCity's answer unchanged.
         config_schema: config_schema(),
     }
 }
@@ -84,11 +87,15 @@ mod tests {
     /// on each full sync.
     #[test]
     fn the_full_sync_is_declared_a_window_not_the_corpus() {
-        assert!(
-            !descriptor_template().full_sync_exhaustive,
-            "a TeamCity full sync fetches the newest builds_per_config builds per configuration, \
-             so the engine must not sweep what it did not re-emit"
-        );
+        for kind in descriptor_template().entity_kinds {
+            assert!(
+                !kind.full_sync_exhaustive,
+                "a TeamCity full sync fetches the newest builds_per_config builds per \
+                 configuration, so the engine must not sweep {:?} -- what it did not re-emit \
+                 has not been deleted",
+                kind.id
+            );
+        }
     }
 
     /// The descriptor crosses IPC to the UI (§3a), so it has to survive as
@@ -97,9 +104,10 @@ mod tests {
     fn the_template_survives_the_ipc_hop() {
         let json = serde_json::to_value(descriptor_template()).expect("plain serde data");
         assert_eq!(json["adapter_kind"], "teamcity");
-        assert_eq!(json["full_sync_exhaustive"], false);
         assert_eq!(json["entity_kinds"][0]["monogram"], "BU");
+        assert_eq!(json["entity_kinds"][0]["full_sync_exhaustive"], false);
         assert_eq!(json["entity_kinds"][1]["monogram"], "BC");
+        assert_eq!(json["entity_kinds"][1]["full_sync_exhaustive"], false);
         assert_eq!(
             json["auth_methods"],
             serde_json::json!(["Pat", "UserPassword"])

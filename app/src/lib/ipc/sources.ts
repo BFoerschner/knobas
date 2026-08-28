@@ -37,8 +37,6 @@ export interface SourceDescriptor {
   auth_methods: AuthMethod[];
   write_ops: string[];
   entity_kinds: KindInfo[];
-  /** Whether a full sync of this adapter returns everything it has. */
-  full_sync_exhaustive: boolean;
   /** JSON Schema. The form is generated from it — never hand-built per adapter. */
   config_schema: unknown;
 }
@@ -50,9 +48,10 @@ export interface SyncReport {
   deleted: number;
   /**
    * Rows a **full** sync tombstoned because the run did not see them
-   * (hard-delete reconciliation). Always 0 for an incremental run, for an
-   * adapter whose full sync is a bounded window, and for a full sync that
-   * emitted nothing.
+   * (hard-delete reconciliation). Counts only kinds that declared
+   * `full_sync_exhaustive` and emitted something, so it is 0 for an
+   * incremental run, for a kind whose full sync is a bounded window, and for a
+   * kind that emitted nothing.
    */
   swept: number;
   /** Opaque to the frontend; hand it back to resume an incremental sync. */
