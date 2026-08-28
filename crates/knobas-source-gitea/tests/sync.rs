@@ -1105,3 +1105,46 @@ async fn a_commit_on_two_branches_is_emitted_once() {
     let (items, _) = full(&*source).await;
     assert_eq!(ids(&items, "commit").len(), 3, "{items:?}");
 }
+
+/// The carry the budget makes necessary, end to end. `pulls_at_watermark` holds
+/// the pull requests already delivered on the boundary second; a run whose
+/// budget stops before it re-observes them has to keep them anyway, or the run
+/// after it delivers them a second time.
+///
+/// The unit case is `sync::tests::the_watermark_keeps_every_key_on_the_instant_it_stands_on`;
+/// this is the walk that has to reach it with a truncated `examined`.
+#[tokio::test]
+async fn a_budget_that_stops_short_keeps_the_boundary_it_was_handed() {
+    let mut state = State::tidewater();
+    // Both fixture pull requests on one second, so the first run leaves two
+    // numbers sitting on the watermark.
+    state.touch_pull("tidewater/payout-service", 142, "2026-08-22T13:50:00Z");
+    let fake = Fake::start(&state).await;
+    let (_, cursor) = full(&*source(fake.base_url(), serde_json::json!({}))).await;
+
+    // A third pull request updated in that same second, and a budget that can
+    // afford exactly it -- so the walk stops without ever looking at 142/144.
+    state
+        .pulls
+        .get_mut("tidewater/payout-service")
+        .unwrap()
+        .insert(
+            0,
+            support::pull(146, "Retry the retry", "", "2026-08-22T13:50:00Z", 0),
+        );
+    fake.remount(&state).await;
+
+    let tight = source(fake.base_url(), serde_json::json!({ "prs_per_repo": 1 }));
+    let (items, moved) = again(&*tight, &cursor).await;
+    assert_eq!(
+        ids(&items, "pr"),
+        vec!["gitea:tidewater/payout-service#146"],
+        "the budget affords one, and it is the one that is new"
+    );
+
+    // The run after it is silent: 142 and 144 are still on the boundary second
+    // and still delivered, though this run's budget never got to them.
+    let (idle, same) = again(&*tight, &moved).await;
+    assert!(idle.is_empty(), "re-delivered {idle:?}");
+    assert_eq!(same, moved);
+}

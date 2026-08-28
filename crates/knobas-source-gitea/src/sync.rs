@@ -122,13 +122,25 @@ use crate::model;
 /// At 50 per page: 1,000 repositories, and 1,000 branches per repository.
 const MAX_LIST_PAGES: u32 = 20;
 const MAX_BRANCH_PAGES: u32 = 20;
-/// 1,000 pull requests per repository, which is five times the largest budget
-/// the config schema allows -- the cap is a runaway guard, not a bound the
-/// user is meant to feel.
+// The two budgeted walks' page caps. Both sit at 1,000 records, which is
+// exactly the largest `prs_per_repo`/`commits_per_repo` the config schema
+// allows (`config::config_schema`, `"maximum": 1000`). Sitting them *there* is
+// what keeps them runaway guards rather than a second, hidden budget: any
+// lower and a user who raised their budget to the top of the range the form
+// offers would be truncated by a number no form ever showed them.
+//
+// Unlike `MAX_LIST_PAGES`/`MAX_BRANCH_PAGES`, reaching one of these ends the
+// walk *silently* rather than with `cap_reached`. That is the
+// exhaustive/budgeted split (ADR-0003): `repo` and `branch` promise a complete
+// corpus, so stopping short of one has to fail the run rather than report a
+// mirror it never finished; `pr` and `commit` promise only the newest
+// `*_per_repo` of theirs and are never swept, so stopping is the normal case
+// and cannot be read downstream as a deletion.
+/// Pull requests per repository, per run.
 const MAX_PR_PAGES: u32 = 20;
-/// 500 commits per *branch* per run. Ten times the default `commits_per_repo`,
-/// which is the whole-repository budget the walk actually spends.
-const MAX_COMMIT_PAGES: u32 = 10;
+/// Commits per *branch* per run. `commits_per_repo` is the whole-repository
+/// budget the walk actually spends, and is what bites first.
+const MAX_COMMIT_PAGES: u32 = 20;
 
 /// One repository this run will walk.
 pub(crate) struct Selected {
@@ -672,34 +684,56 @@ async fn pulls(
         }
     }
 
-    after.pulls_updated_to = examined
+    (after.pulls_updated_to, after.pulls_at_watermark) =
+        close_watermark(&examined, watermark, &before.pulls_at_watermark);
+    Ok(())
+}
+
+/// Where a budgeted walk's watermark now stands, and which keys sit exactly on
+/// it.
+///
+/// Gitea's timestamps have one-second resolution, so a strict `>` boundary
+/// would drop a record updated in the same second as the newest one. Both
+/// budgeted walks close their position the same way, and it is subtle enough in
+/// the same two places that it is written once here rather than twice.
+///
+/// `examined` is every record this run **looked at** -- delivered, or
+/// recognised as already delivered -- because a record skipped as
+/// already-delivered still holds the boundary open.
+///
+/// `carried` is the previous run's keys on the incoming mark, and it is the
+/// half worth reading twice. When the position does not move, whatever the
+/// previous run recorded at that instant is still delivered **even where this
+/// run's budget stopped before re-observing it**; dropping those keys would
+/// re-deliver them on the next poll, and battery clause 2 would fail on the
+/// *second* idle run rather than the first, which is the hard version of this
+/// bug to find. When the position does move, the carried keys are strictly
+/// below the new mark and each walk's own `<` test already stops at them, so
+/// carrying them would only grow the cursor.
+fn close_watermark<K: Ord + Clone>(
+    examined: &[(K, Option<DateTime<Utc>>)],
+    incoming: Option<DateTime<Utc>>,
+    carried: &[K],
+) -> (Option<DateTime<Utc>>, Vec<K>) {
+    let mark = examined
         .iter()
         .filter_map(|(_, when)| *when)
         .max()
-        .or(watermark);
-    after.pulls_at_watermark = match after.pulls_updated_to {
-        Some(mark) => {
-            let mut numbers: Vec<u64> = examined
-                .iter()
-                .filter(|(_, when)| *when == Some(mark))
-                .map(|(number, _)| *number)
-                .collect();
-            if after.pulls_updated_to == watermark {
-                // The position did not move, so whatever the previous run
-                // recorded at this instant is still delivered -- even if this
-                // run's budget stopped before reaching it. Dropping those
-                // numbers would re-deliver them on the next poll, and battery
-                // clause 2 would fail on the second idle run rather than the
-                // first, which is the hard version of this bug to find.
-                numbers.extend(before.pulls_at_watermark.iter().copied());
-            }
-            numbers.sort_unstable();
-            numbers.dedup();
-            numbers
-        }
-        None => Vec::new(),
+        .or(incoming);
+    let Some(at) = mark else {
+        return (None, Vec::new());
     };
-    Ok(())
+    let mut keys: Vec<K> = examined
+        .iter()
+        .filter(|(_, when)| *when == Some(at))
+        .map(|(key, _)| key.clone())
+        .collect();
+    if mark == incoming {
+        keys.extend(carried.iter().cloned());
+    }
+    keys.sort();
+    keys.dedup();
+    (mark, keys)
 }
 
 /// The discussion, when there is any and the source wants it indexed.
@@ -730,6 +764,18 @@ async fn pulls(
 /// pays nothing; a token scoped away from issues pays it per pull request that
 /// has comments, which is what `include_pr_comments: false` exists to switch
 /// off.
+///
+/// # Why this is not ruling B4's "fatal on a cursor-less run"
+///
+/// A repository refused during a full sync **is** fatal (the walk loop's
+/// `Err(Skip) if full_sync` arm), because that run would otherwise report a
+/// complete corpus it never read. A refused *discussion* is deliberately not
+/// that, on either kind of run: B4's subject is a repository, and here the pull
+/// request itself is still emitted, no entity is missing from the mirror, and
+/// `pr` is a budgeted kind the sweep never touches -- so nothing downstream can
+/// read the shorter `body_text` as a deletion. What is lost is search text on
+/// one item, and it is restored the next time that pull request is updated, or
+/// by the next full sync.
 async fn fetch_comments(
     source: &crate::GiteaSource,
     at: RepoRef<'_>,
@@ -881,30 +927,8 @@ async fn commits(
         }
     }
 
-    after.commits_since = examined
-        .iter()
-        .filter_map(|(_, when)| *when)
-        .max()
-        .or(since);
-    after.commits_at_watermark = match after.commits_since {
-        Some(mark) => {
-            let mut shas: Vec<String> = examined
-                .iter()
-                .filter(|(_, when)| *when == Some(mark))
-                .map(|(sha, _)| sha.clone())
-                .collect();
-            if after.commits_since == since {
-                // The position did not move, so the boundary this run was
-                // handed still holds -- even where the budget stopped short of
-                // re-observing it.
-                shas.extend(before.commits_at_watermark.iter().cloned());
-            }
-            shas.sort();
-            shas.dedup();
-            shas
-        }
-        None => Vec::new(),
-    };
+    (after.commits_since, after.commits_at_watermark) =
+        close_watermark(&examined, since, &before.commits_at_watermark);
     Ok(())
 }
 
@@ -1040,6 +1064,87 @@ mod tests {
             vec!["wip/spike"]
         );
         assert!(walk_order(Some("main"), &[]).is_empty());
+    }
+
+    fn at(t: &str) -> Option<DateTime<Utc>> {
+        Some(t.parse().expect("a timestamp"))
+    }
+
+    /// The boundary second, closed. Each case is a run the budget ended
+    /// somewhere different.
+    #[test]
+    fn the_watermark_keeps_every_key_on_the_instant_it_stands_on() {
+        // Nothing known and nothing seen: no position to write.
+        assert_eq!(
+            close_watermark::<u64>(&[], None, &[]),
+            (None, Vec::new()),
+            "a walk that saw nothing invents no position"
+        );
+
+        // A first sync: the mark is the newest examined, and only the keys on
+        // it are the boundary.
+        assert_eq!(
+            close_watermark(
+                &[
+                    (144, at("2026-08-22T13:50:00Z")),
+                    (143, at("2026-08-22T13:50:00Z")),
+                    (142, at("2026-08-22T10:20:00Z")),
+                ],
+                None,
+                &[],
+            ),
+            (at("2026-08-22T13:50:00Z"), vec![143, 144])
+        );
+
+        // The position moved. The keys the previous run held are strictly
+        // below the new mark, so carrying them would only grow the cursor --
+        // each walk's own `<` test is what stops at them now.
+        assert_eq!(
+            close_watermark(
+                &[(146, at("2026-08-22T14:00:00Z"))],
+                at("2026-08-22T13:50:00Z"),
+                &[142, 144],
+            ),
+            (at("2026-08-22T14:00:00Z"), vec![146])
+        );
+
+        // The position did **not** move and this run's budget stopped after
+        // one new record on the same instant. The two the previous run
+        // delivered are still delivered; dropping them re-delivers them on the
+        // next poll, which is the bug this carry exists to stop.
+        assert_eq!(
+            close_watermark(
+                &[(146, at("2026-08-22T13:50:00Z"))],
+                at("2026-08-22T13:50:00Z"),
+                &[142, 144],
+            ),
+            (at("2026-08-22T13:50:00Z"), vec![142, 144, 146])
+        );
+
+        // An idle run examines the boundary again; re-observing a carried key
+        // must not record it twice.
+        assert_eq!(
+            close_watermark(
+                &[(144, at("2026-08-22T13:50:00Z"))],
+                at("2026-08-22T13:50:00Z"),
+                &[142, 144],
+            ),
+            (at("2026-08-22T13:50:00Z"), vec![142, 144])
+        );
+
+        // A run that examined nothing at all keeps the position it was handed,
+        // boundary and all.
+        assert_eq!(
+            close_watermark(
+                &[],
+                at("2026-08-22T13:50:00Z"),
+                &["c90d11".to_owned(), "a41f2c".to_owned()],
+            ),
+            (
+                at("2026-08-22T13:50:00Z"),
+                vec!["a41f2c".to_owned(), "c90d11".to_owned()]
+            )
+        );
     }
 
     /// The cap message has to name the limit that was hit and the lever that

@@ -583,6 +583,7 @@ knobas-source-gitea	lib/knobas_source_gitea	sync::tests::a_reached_cap_names_the
 knobas-source-gitea	lib/knobas_source_gitea	sync::tests::a_refused_entry_is_carried_under_the_spelling_the_cursor_stores
 knobas-source-gitea	lib/knobas_source_gitea	sync::tests::only_a_repository_scoped_failure_becomes_a_skip
 knobas-source-gitea	lib/knobas_source_gitea	sync::tests::the_default_branch_gets_the_budget_first
+knobas-source-gitea	lib/knobas_source_gitea	sync::tests::the_watermark_keeps_every_key_on_the_instant_it_stands_on
 knobas-source-gitea	lib/knobas_source_gitea	tests::exactly_the_unbudgeted_kinds_are_exhaustive
 knobas-source-gitea	lib/knobas_source_gitea	tests::the_template_describes_a_read_only_gitea
 knobas-source-gitea	lib/knobas_source_gitea	tests::the_template_round_trips_as_json
@@ -596,6 +597,7 @@ knobas-source-gitea	test/client	an_unusable_instance_id_is_refused_at_build_time
 knobas-source-gitea	test/client	every_write_is_refused
 knobas-source-gitea	test/client	test_connection_reports_the_account_and_the_server_version
 knobas-source-gitea	test/contract	passes_the_contract_battery
+knobas-source-gitea	test/live_gitea	a_commit_pushed_through_the_api_arrives_once_and_only_once
 knobas-source-gitea	test/live_gitea	a_pull_request_opened_through_the_api_appears_in_the_next_incremental_run
 knobas-source-gitea	test/live_gitea	a_revoked_token_is_unauthorized
 knobas-source-gitea	test/live_gitea	etag_support_probe
@@ -604,6 +606,7 @@ knobas-source-gitea	test/live_gitea	pull_requests_come_back_newest_updated_first
 knobas-source-gitea	test/live_gitea	the_seeded_content_lands_under_the_documented_key_forms
 knobas-source-gitea	test/live_gitea	the_shapes_the_fake_only_assumes_are_certified_here
 knobas-source-gitea	test/sync	a_branch_listing_that_would_exceed_the_cap_fails_the_run
+knobas-source-gitea	test/sync	a_budget_that_stops_short_keeps_the_boundary_it_was_handed
 knobas-source-gitea	test/sync	a_cap_fires_at_exactly_the_boundary_it_names
 knobas-source-gitea	test/sync	a_commit_on_two_branches_is_emitted_once
 knobas-source-gitea	test/sync	a_credential_revoked_after_the_first_repository_raises

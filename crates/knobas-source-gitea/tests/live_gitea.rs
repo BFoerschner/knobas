@@ -200,6 +200,12 @@ async fn the_seeded_content_lands_under_the_documented_key_forms() {
         );
     }
 
+    assert!(
+        !of_kind(&items, "pr").is_empty(),
+        "the seed opens pull requests -- without this the loop above certifies \
+         the key form of an empty list"
+    );
+
     for item in of_kind(&items, "commit") {
         let (repo, oid) = item
             .entity
@@ -400,6 +406,97 @@ async fn a_pull_request_opened_through_the_api_appears_in_the_next_incremental_r
 
     // And the run after it is silent again, byte-identically (battery clause 2
     // on a position this run wrote rather than on a fresh one).
+    let mut idle = VecSink(Vec::new());
+    let same = source
+        .sync(Some(moved.clone()), &mut idle)
+        .await
+        .expect("idle sync");
+    assert!(idle.0.is_empty(), "second run emitted {:?}", idle.0);
+    assert_eq!(same, moved);
+}
+
+/// Exit criterion B for the **commit** walk, which is where the docker-free
+/// fake is least able to speak for the real server: it matches no `since=` at
+/// all, serves every branch's list in one page, and answers `sha=<branch>` with
+/// whatever the fixture mounted under that key. So `since=` being server-side
+/// *and* inclusive, `sha=` really selecting that branch's history, and
+/// `commits_at_watermark` closing the boundary the inclusive filter re-delivers
+/// are three assumptions only this container can settle.
+///
+/// A commit is pushed through Gitea's own API and the next incremental run must
+/// return **exactly** it -- not the branch's inherited history, and not it
+/// twice.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_commit_pushed_through_the_api_arrives_once_and_only_once() {
+    let env = env();
+    let source = env.one_repo();
+    let (_, cursor) = full(&*source).await;
+
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let branch = format!("knobas-commit-{stamp}");
+    let api = format!("{}/api/v1/repos/{}", env.url, env.full_name());
+    let http = reqwest::Client::new();
+    let auth = format!("token {}", env.token);
+
+    let created = http
+        .post(format!("{api}/branches"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "new_branch_name": branch, "old_branch_name": "main" }))
+        .send()
+        .await
+        .expect("create the branch");
+    assert!(
+        created.status().is_success(),
+        "branch: {}",
+        created.text().await.unwrap_or_default()
+    );
+
+    // A unique path, so a re-run cannot collide; fixed content, so this needs
+    // no base64 encoder. `a25vYmFzIGxpdmUgY2hlY2sK` is "knobas live check\n".
+    let wrote = http
+        .post(format!("{api}/contents/knobas-live-{stamp}.txt"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "branch": branch,
+            "content": "a25vYmFzIGxpdmUgY2hlY2sK",
+            "message": format!("knobas live check {stamp}")
+        }))
+        .send()
+        .await
+        .expect("write the file");
+    assert!(
+        wrote.status().is_success(),
+        "contents: {}",
+        wrote.text().await.unwrap_or_default()
+    );
+    let sha = wrote.json::<serde_json::Value>().await.unwrap()["commit"]["sha"]
+        .as_str()
+        .expect("Gitea answers with the commit it made")
+        .to_owned();
+
+    let mut sink = VecSink(Vec::new());
+    let moved = source
+        .sync(Some(cursor.clone()), &mut sink)
+        .await
+        .expect("incremental sync");
+    let commits: Vec<&str> = of_kind(&sink.0, "commit")
+        .iter()
+        .map(|i| i.entity.key.as_str())
+        .collect();
+    let only = format!("{}@{sha}", env.full_name());
+    assert_eq!(
+        commits,
+        vec![only.as_str()],
+        "the new branch inherits main's whole history; `since=` and \
+         commits_at_watermark are what have to leave all of it out"
+    );
+
+    // …and the run after it is silent, which is the inclusive `since=` boundary
+    // being closed rather than merely narrow.
     let mut idle = VecSink(Vec::new());
     let same = source
         .sync(Some(moved.clone()), &mut idle)
