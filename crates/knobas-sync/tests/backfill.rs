@@ -122,7 +122,7 @@ impl Source for Widening {
     }
 
     async fn write(&self, _op: WriteOp) -> Result<(), SourceError> {
-        Err(SourceError::Protocol("read-only".into()))
+        Err(SourceError::protocol("read-only"))
     }
 }
 

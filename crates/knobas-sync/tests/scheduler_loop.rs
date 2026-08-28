@@ -725,3 +725,80 @@ async fn phases_of(fault: Option<fn() -> SourceError>) -> (Vec<String>, Vec<Stri
         .collect();
     (phases, ids)
 }
+
+/// **The backfill has a trigger spelling of its own, and it is not `manual`.**
+///
+/// Ratified by Björn 2026-08-28 alongside the non-sweeping rule, and the two
+/// are one decision: a backfill is the only run that is *forbidden* to
+/// tombstone, so its `swept` count is `0` by construction. The question anybody
+/// asks of a surprising tombstone count in the diagnostics list is which run
+/// produced it, and a backfill logged as `manual` is indistinguishable from
+/// *Sync now* -- so that question has no answer, and a reader would credit a
+/// sweeping manual run's tombstones to a run that cannot sweep. Migration 0004
+/// widened `sync_run_trigger_chk` for exactly this.
+///
+/// Both runs, in one test, because the claim is a *distinction*: asserting
+/// `backfill` alone would still pass if `Manual` had been renamed. The rows
+/// have to differ, and the manual one has to still say `manual`.
+///
+/// This goes through [`Scheduler::backfill`] rather than `execute_run`, which
+/// is the only way the spelling is under test at all -- `execute_run`'s callers
+/// hand it a trigger, so a test there asserts its own argument back.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_backfill_is_logged_under_its_own_trigger() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed(&pool, 1).await;
+    let id = ids[0].clone();
+    let (deps, _) = deps(sched_pool, Duration::from_millis(10)).await;
+
+    let scheduler = Scheduler::start(deps).await.unwrap();
+    let manual = scheduler
+        .trigger(&id, SyncTrigger::Manual, None)
+        .await
+        .unwrap();
+    // Not concurrently: the in-flight dedupe would hand the second caller the
+    // first run's id, and there would be one row rather than two.
+    await_finish(&pool, manual).await;
+    let backfilled = scheduler.backfill(&id).await.unwrap();
+    await_finish(&pool, backfilled).await;
+    scheduler.shutdown().await;
+
+    let runs = run_log::list(&pool, Some(&id), 10).await.unwrap();
+    let trigger_of = |run_id: i64| {
+        runs.iter()
+            .find(|r| r.id == run_id)
+            .unwrap_or_else(|| panic!("no log row for run {run_id}: {runs:?}"))
+            .trigger
+    };
+    assert_ne!(manual, backfilled, "two runs, or there is nothing to tell apart");
+    assert_eq!(
+        trigger_of(backfilled),
+        SyncTrigger::Backfill,
+        "a backfill must be readable as one in the log, not as a *Sync now*: {runs:?}"
+    );
+    assert_eq!(
+        trigger_of(manual),
+        SyncTrigger::Manual,
+        "*Sync now* keeps its own spelling: {runs:?}"
+    );
+    retire(&pool, &ids).await;
+}
+
+/// Wait for one run's log row to be finished, so the next trigger is not
+/// deduped into it. Polls rather than sleeps a fixed span: the row is written
+/// by the spawned task, and a fixed sleep is either a flake or slow.
+async fn await_finish(pool: &PgPool, run_id: i64) {
+    for _ in 0..200 {
+        let finished = run_log::list(pool, None, 50)
+            .await
+            .unwrap()
+            .iter()
+            .any(|r| r.id == run_id && r.finished_at.is_some());
+        if finished {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("run {run_id} never finished");
+}

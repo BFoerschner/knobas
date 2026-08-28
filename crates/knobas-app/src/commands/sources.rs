@@ -248,7 +248,9 @@ pub async fn sync_now_with_progress<R: tauri::Runtime>(
 /// `parent` and epic membership had to reach every already-mirrored issue).
 ///
 /// It is the longest run a source ever does, and it deliberately does **not**
-/// tombstone anything: the reasoning is on `knobas_sync::run_backfill`.
+/// tombstone anything: the reasoning is on `knobas_sync::run_backfill`. It is
+/// logged under the `backfill` trigger for that reason, not `manual` -- see
+/// [`Scheduler::backfill`](knobas_sync::scheduler::Scheduler::backfill).
 ///
 /// # Errors
 /// As [`sync_now`].

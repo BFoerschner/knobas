@@ -708,7 +708,7 @@ async fn a_backfill_hands_the_adapter_no_position_even_though_one_is_stored() {
 
     one_run(&h, SyncTrigger::FirstRun).await;
     one_run(&h, SyncTrigger::Schedule).await;
-    let (row, result) = one_run_in(&h, SyncTrigger::Manual, RunMode::Backfill).await;
+    let (row, result) = one_run_in(&h, SyncTrigger::Backfill, RunMode::Backfill).await;
 
     let seen = h.registry.cursors.lock().unwrap().clone();
     assert_eq!(seen.len(), 3, "{seen:?}");
@@ -723,10 +723,12 @@ async fn a_backfill_hands_the_adapter_no_position_even_though_one_is_stored() {
     );
 
     // Everything else about the run is unchanged, which is the other half of
-    // the claim: it is logged, it succeeds, and it is a `manual` run --
-    // `sync_run_trigger_chk` has no spelling of its own for a backfill and
-    // inventing one would need a migration.
+    // the claim: it is logged, it succeeds, and it round-trips its trigger.
+    // The trigger is passed in here, so this is not what pins the *spelling* a
+    // backfill is logged under -- that is
+    // `a_backfill_is_logged_under_its_own_trigger` in `scheduler_loop.rs`,
+    // which goes through `Scheduler::backfill` and so has no say in it.
     assert_eq!(result.outcome, SyncOutcome::Ok);
-    assert_eq!(row.trigger, SyncTrigger::Manual);
+    assert_eq!(row.trigger, SyncTrigger::Backfill);
     assert!(row.finished_at.is_some());
 }

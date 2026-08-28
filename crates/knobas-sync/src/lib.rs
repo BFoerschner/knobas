@@ -334,6 +334,14 @@ pub async fn run_from_stored_cursor(
 /// Reconciliation therefore stays where it was: a source's first sync, and
 /// [`run_once`] with an explicit `None`.
 ///
+/// That is also why a run started this way is logged under
+/// [`SyncTrigger::Backfill`] rather than `Manual` (`scheduler::Scheduler::backfill`):
+/// the sweep is the one behaviour a backfill *removes*, so "which run produced
+/// this tombstone count" has to be answerable from the log, and it is not if a
+/// backfill and *Sync now* write the same word.
+///
+/// [`SyncTrigger::Backfill`]: crate::run_log::SyncTrigger::Backfill
+///
 /// The position the run comes back with **is** stored, exactly as any other
 /// run's is, so the next scheduled run is incremental again. Clearing the
 /// stored cursor instead -- the obvious spelling of "run without one" -- would

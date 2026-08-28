@@ -283,12 +283,14 @@ async fn build_source(
 /// What a run does with the position the source has stored.
 ///
 /// Not a spelling of `SyncTrigger`, and deliberately a second axis: the
-/// trigger says *why* a run happened (schedule, *Sync now*, first run) and is
-/// written to `knobas.sync_run` for the diagnostics list, while this says what
-/// the run does and is never stored. A backfill is triggered manually and logs
-/// as `Manual`; adding a trigger spelling for it would need a migration to
-/// widen `sync_run_trigger_chk`, and would still be answering a different
-/// question.
+/// trigger says *why* a run happened and is written to `knobas.sync_run` for
+/// the diagnostics list, while this says what the run *does* with the stored
+/// position and is never stored. The two are near enough to one another that
+/// it is worth saying where they part: every trigger but
+/// [`SyncTrigger::Backfill`] implies [`RunMode::Incremental`], but the reverse
+/// does not hold in the other direction for free -- `Backfill` is the mode,
+/// and the trigger only records that a run started in it. `run_once` reaches
+/// the engine with neither.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RunMode {
     /// Resume from the stored position: every scheduled run, *Sync now*, and
@@ -683,15 +685,20 @@ impl Scheduler {
     /// (§10.6(c)) -- a full re-read on a pooled connection is exactly the
     /// stall that requirement exists to prevent.
     ///
-    /// Logged as [`SyncTrigger::Manual`]: only a person starts one, and the
-    /// trigger vocabulary is a database check constraint, so a spelling of its
-    /// own would need a migration.
+    /// Logged under [`SyncTrigger::Backfill`], its own spelling in
+    /// `sync_run_trigger_chk` since migration 0004. Not `Manual`, though only
+    /// a person starts one: a backfill is the single run mode that is
+    /// **forbidden to reconcile**, so it is the run whose `swept` count is
+    /// always `0` by construction, and the one question anybody asks of a
+    /// surprising tombstone count in the diagnostics list is which run
+    /// produced it. Logged as `Manual` a backfill is indistinguishable from
+    /// *Sync now*, and that question has no answer.
     ///
     /// # Errors
     /// [`TriggerError`].
     pub async fn backfill(&self, source_id: &str) -> Result<i64, TriggerError> {
         self.inner
-            .trigger(source_id, SyncTrigger::Manual, RunMode::Backfill, None)
+            .trigger(source_id, SyncTrigger::Backfill, RunMode::Backfill, None)
             .await
     }
 
@@ -771,6 +778,17 @@ impl Inner {
         mode: RunMode,
         progress: Option<Arc<dyn ProgressSink>>,
     ) -> Result<i64, TriggerError> {
+        // The two axes are independent, but one pairing is a lie rather than a
+        // combination: `backfill` in the log is read as "this run could not
+        // have reconciled", and that is only true of a run in
+        // `RunMode::Backfill`. `trigger` is public, so nothing in the type
+        // system stops a caller spelling one without the other -- hence here.
+        debug_assert_eq!(
+            trigger == SyncTrigger::Backfill,
+            mode == RunMode::Backfill,
+            "the `backfill` trigger and `RunMode::Backfill` mean the same run \
+             and must be spelled together"
+        );
         if self.cancel.is_cancelled() {
             return Err(TriggerError::ShuttingDown);
         }

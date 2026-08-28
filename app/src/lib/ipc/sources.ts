@@ -365,7 +365,10 @@ export function syncNowWithProgress(
  * This is the only thing that reaches it.
  *
  * It is the longest run a source ever does, and it deliberately tombstones
- * nothing — the reasoning is on `knobas_sync::run_backfill`.
+ * nothing — the reasoning is on `knobas_sync::run_backfill`. That is also why
+ * it appears in {@link listSyncRuns} under its own trigger, `"backfill"`,
+ * rather than as a `"manual"` run: it is the one run whose `swept` is always
+ * zero, so the log has to say which run it was.
  */
 export function backfillSource(sourceId: string): Promise<number> {
   return invoke<number>("backfill_source", { sourceId });
