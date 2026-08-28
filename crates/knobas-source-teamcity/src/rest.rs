@@ -174,15 +174,26 @@ impl StateFilter {
 }
 
 /// A `/app/rest/builds` locator, restricted to the dimensions the contract
-/// defines: `buildType:`, `state:`, `sinceBuild:`, `count:`. Anything else --
-/// `project:`, `affectedProject:` -- is recorded as a violation by the mock
-/// and must not be sent. Each dimension appears **at most once**; see
-/// [`StateFilter`].
+/// defines: `buildType:`, `state:`, `sinceBuild:`, `defaultFilter:`,
+/// `count:`. Anything else -- `project:`, `affectedProject:` -- is recorded as
+/// a violation by the mock and must not be sent. Each dimension appears **at
+/// most once**; see [`StateFilter`].
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Locator {
     pub build_type_id: Option<String>,
     pub state: Option<StateFilter>,
     pub since_build_id: Option<i64>,
+    /// TeamCity's default filter hides everything that is not a finished,
+    /// non-personal, non-canceled build. `Some(false)` turns it off, which is
+    /// the only way to ask a question about **every** build regardless of
+    /// state; `None` sends the dimension not at all and takes the default.
+    ///
+    /// Distinct from `state`: `state:` names the states wanted and is the
+    /// right dimension when the answer is a set of builds to emit.
+    /// `defaultFilter:false` widens the population a *stateless* question is
+    /// asked over, which is what the run's opening ceiling query needs -- see
+    /// [`sync::ceiling`](crate::sync).
+    pub default_filter: Option<bool>,
     pub count: u32,
 }
 
@@ -200,6 +211,9 @@ impl Locator {
         }
         if let Some(id) = self.since_build_id {
             parts.push(format!("sinceBuild:(id:{id})"));
+        }
+        if let Some(on) = self.default_filter {
+            parts.push(format!("defaultFilter:{on}"));
         }
         parts.push(format!("count:{}", self.count));
         parts.join(",")
@@ -411,16 +425,35 @@ mod tests {
             assert!(!rendered.contains("state:running"), "{rendered}");
             assert!(!rendered.contains("state:queued"), "{rendered}");
         }
+        // The run's opening ceiling query: no `state`, the default filter
+        // explicitly off, one build. `state` would answer a different
+        // question -- see the field's doc.
+        assert_eq!(
+            Locator {
+                default_filter: Some(false),
+                count: 1,
+                ..Locator::default()
+            }
+            .render(),
+            "defaultFilter:false,count:1"
+        );
         // No dimension may repeat: the mock rejects a locator that names one
         // twice, whichever one it is.
         let rendered = Locator {
             build_type_id: Some("Payout_Build".to_owned()),
             state: Some(StateFilter::InFlight),
             since_build_id: Some(9),
+            default_filter: Some(false),
             count: 100,
         }
         .render();
-        for dimension in ["buildType:", "state:", "sinceBuild:", "count:"] {
+        for dimension in [
+            "buildType:",
+            "state:",
+            "sinceBuild:",
+            "defaultFilter:",
+            "count:",
+        ] {
             assert_eq!(
                 rendered.matches(dimension).count(),
                 1,
