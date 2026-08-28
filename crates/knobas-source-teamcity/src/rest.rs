@@ -7,16 +7,17 @@
 //! `SyncItem::payload` keeps the record verbatim and a future selector should
 //! not need a parse change. The **selectors** are narrower: `knobas-mockd`
 //! validates `fields=` against a closed set of names and answers an unknown
-//! one with 400 + an `UnknownField` violation (mockd deviation 6), and its
-//! TeamCity serialiser does not carry `triggered`, `description` or `paused`.
-//! Asking for a name the contract does not define is exactly the mistake
-//! `assert_no_violations()` exists to catch, so M1 asks only for names the
-//! contract defines.
+//! one with 400 + an `UnknownField` violation (mockd deviation 6). Asking for
+//! a name the contract does not define is exactly the mistake
+//! `assert_no_violations()` exists to catch, so a selector asks only for names
+//! the contract defines *and* the mapping reads -- the two together, which is
+//! why `triggered` is spelled `triggered(user(username))` and not
+//! `triggered(type,date,user(username,name))` even though mockd serves all of
+//! those.
 //!
-//! The visible consequence: `SyncItem::author` is `None` for every build this
-//! adapter emits in M1, because `triggered(user(username))` is the only place
-//! TeamCity puts the person who started a build. Widening mockd's TeamCity
-//! serialiser is the fix, and it is stream T's to make.
+//! `description` (on a build configuration) and `paused` are the standing
+//! example of the second half: mockd serves both, the structs parse
+//! `description`, and neither is asked for because nothing reads them.
 
 use chrono::{DateTime, Utc};
 
@@ -40,7 +41,8 @@ pub(crate) const BUILD_FIELDS: &str = concat!(
     "count,build(id,number,buildTypeId,state,status,statusText,branchName,webUrl,",
     "queuedDate,startDate,finishDate,percentageComplete,",
     "buildType(id,name,projectId,projectName,webUrl),",
-    "running-info(percentageComplete,currentStageText))"
+    "running-info(percentageComplete,currentStageText),",
+    "triggered(user(username)))"
 );
 
 /// Every TeamCity list response: `{count, href, nextHref, <element>: [...]}`.
@@ -505,6 +507,7 @@ mod tests {
             "queuedDate",
             "buildType(",
             "running-info(",
+            "triggered(",
         ] {
             assert!(
                 BUILD_FIELDS.contains(needed),
@@ -535,21 +538,48 @@ mod tests {
         }
     }
 
-    /// Deliberately *not* asked for: mockd's TeamCity serialiser has no such
-    /// key, and an unknown name is 400 + a recorded violation (deviation 6).
-    /// The structs still parse them, which is why this needs saying.
+    /// Deliberately *not* asked for.
+    ///
+    /// Two different reasons, and the split matters. `href` is outside the
+    /// mock contract: mockd's serialisers have no such name for these types,
+    /// so asking is 400 + a recorded violation (deviation 6). `description`
+    /// and `paused` mockd *does* serve, and the structs even parse
+    /// `description` -- they are left out because nothing in the mapping reads
+    /// them, and a selector that asks for what it does not read is request
+    /// budget spent for nothing.
+    ///
+    /// `triggered` was on this list until the fixture named a triggerer. It is
+    /// now asked for, and asserted below rather than merely dropped from here.
     #[test]
-    fn the_selectors_ask_for_nothing_outside_the_mock_contract() {
-        for outside in ["triggered", "description", "paused", "href"] {
+    fn the_selectors_ask_for_nothing_they_do_not_read() {
+        for unread in ["description", "paused", "href"] {
             assert!(
-                !BUILD_FIELDS.contains(outside),
-                "BUILD_FIELDS asks for {outside}, which mockd answers 400 + a violation for"
+                !BUILD_FIELDS.contains(unread),
+                "BUILD_FIELDS asks for {unread}, which nothing in the mapping reads"
             );
             assert!(
-                !BUILD_TYPE_FIELDS.contains(outside),
-                "BUILD_TYPE_FIELDS asks for {outside}"
+                !BUILD_TYPE_FIELDS.contains(unread),
+                "BUILD_TYPE_FIELDS asks for {unread}, which nothing in the mapping reads"
             );
         }
+        // `triggered` is the one name here the mapping does read -- it is the
+        // only place TeamCity puts the person who started a build -- and it is
+        // asked for at exactly the depth `map::build_item` reads it. Anything
+        // deeper is payload nobody looks at.
+        assert!(
+            BUILD_FIELDS.contains("triggered(user(username))"),
+            "BUILD_FIELDS must ask for the triggerer, or every build's author is None"
+        );
+        for deeper in ["triggered(type", "user(username,"] {
+            assert!(
+                !BUILD_FIELDS.contains(deeper),
+                "BUILD_FIELDS asks for {deeper}, which the mapping does not read"
+            );
+        }
+        assert!(
+            !BUILD_TYPE_FIELDS.contains("triggered"),
+            "a build configuration has no triggerer"
+        );
         // ...and no preset: mockd honours only `$long`, and asking for the
         // whole subtree defeats the point of a selector.
         for f in [BUILD_FIELDS, BUILD_TYPE_FIELDS, SERVER_FIELDS, USER_FIELDS] {

@@ -263,6 +263,64 @@ async fn a_mirrored_build_carries_what_the_ui_and_the_index_read() {
     server.assert_no_violations();
 }
 
+/// Authorship, at the wire: `triggered(user(username))` is the only place
+/// TeamCity names the person who started a build, so the selector has to ask
+/// for it and the mock has to recognise the name.
+///
+/// The fixture names a person for one build and nobody for the others, and
+/// both are asserted here. A run that reported the same author for every build
+/// -- or `None` for every build, which is what the narrow selector produced --
+/// would fail one of the two.
+#[tokio::test]
+async fn a_build_names_the_person_who_triggered_it() {
+    let server = spawn_mock_teamcity().await;
+    let (items, _) = sync(
+        adapter(&server.base_url(), serde_json::json!({})).as_ref(),
+        None,
+    )
+    .await;
+
+    let f = knobas_source_mock::fixture();
+    let mut named = 0;
+    for b in &f.builds {
+        let it = items
+            .iter()
+            .find(|i| i.entity.key == format!("build:{}", b.num))
+            .unwrap_or_else(|| panic!("build {} missing; got {:?}", b.num, keys(&items)));
+        match b.triggered_by.as_deref() {
+            Some(id) => {
+                named += 1;
+                let p = f
+                    .person(id)
+                    .expect("the triggerer is a person in the fixture");
+                assert_eq!(
+                    it.author.as_deref(),
+                    Some(p.username.as_str()),
+                    "build {} was triggered by {id}",
+                    b.num
+                );
+                assert!(
+                    it.body_text.contains(&p.username),
+                    "...and is searchable by that person: {:?}",
+                    it.body_text
+                );
+            }
+            None => assert_eq!(
+                it.author, None,
+                "the fixture names nobody for build {}, and an invented author would be indexed \
+                 as if it had",
+                b.num
+            ),
+        }
+    }
+    assert!(
+        named > 0 && named < f.builds.len(),
+        "the fixture must name a triggerer for some builds and not others, or neither branch \
+         above can fail"
+    );
+    server.assert_no_violations();
+}
+
 /// Exit criterion: `sinceBuild` advances only when a finished build was
 /// emitted, and an idle poll changes nothing.
 #[tokio::test]

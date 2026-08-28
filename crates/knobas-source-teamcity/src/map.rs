@@ -84,9 +84,9 @@ pub(crate) fn build_item(source_id: &str, raw: &serde_json::Value, b: &Build) ->
                 .and_then(|r| r.current_stage_text.clone()),
             author.as_ref().map(|u| format!("triggered by {u}")),
         ]),
-        // `None` for every build M1 emits: `triggered` is outside the field
-        // set the mock contract defines, so it is never requested. See
-        // `rest`'s module docs.
+        // `triggered.user.username` is the only place TeamCity names the
+        // person who started a build; `None` is a build no person started --
+        // a VCS or schedule trigger -- which is most of them on a busy server.
         author,
         // Finished, else started, else queued: the newest thing that happened
         // to this build.

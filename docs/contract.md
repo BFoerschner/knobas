@@ -712,6 +712,36 @@ Stream T note for the Gitea live suite: the seed **cannot** reproduce fixture PR
     `SourceDescriptor` in `sources.ts` loses it. Still **no battery clause** — the battery cannot
     see the remote corpus, so each adapter's own integration tests hold its claim honest.
 
+### Amendments from the M2 TeamCity package (2026-08-28, binding) — issue #33
+
+- **§5 mockd deviation 12 is retired: `/app/rest/builds` answers newest-first**, as a real
+  server does, so `count:1` is the newest build and a full page drops the *oldest* matches.
+  It answered ascending, which taught every adapter written against it the opposite of both.
+  The vendored swagger cannot catch this — it validates the shape of a response, never the
+  order of a collection — so the order now has a test of its own. Deviation 13 renumbers to 12.
+- **§5 the as-built mockd locator subset also includes `defaultFilter:`** (the M1 amendment
+  above added `start:`; the §5 listing remains stale for both).
+- **§4.2 TeamCity gains a watermark ceiling.** Every run opens with one
+  `locator=defaultFilter:false,count:1` query and records the highest build id in existence;
+  the watermark may not pass it within that run. This closes the loss class PR #25's reorder
+  *traded* rather than subsetted — a build queued after the opening poll, still running when
+  the finished query goes out, is in neither result set, and a later-queued build that
+  finished inside the same run pushes the watermark past it. The two classes are disjoint:
+  the reorder saves builds in flight at run start, the ceiling saves builds queued after it.
+  `defaultFilter:false` is load-bearing — without it the ceiling names the newest *finished*
+  build and would pin a scoped source below every foreign build merely running when the run
+  opened, reinstating through the ceiling the clamp §4.2's asymmetry removes.
+- **§5 `fixtures/tidewater/work.json` builds gain `triggered_by`** (a `Person::id`, `null`
+  where the dataset attributes the build to no person). `mockups/shared/dataset.md` names
+  Mara as the triggerer of #1188 and nobody for #1187 or #412, so this is transcription;
+  mockd inventing one was refused in #28. mockd serves `triggered.user` from it, and
+  `MockSource` carries it to `SyncItem::author`.
+- **§4.2 TeamCity `BUILD_FIELDS` widens to `triggered(user(username))`**, so a build names the
+  person who started it. The budget test is renamed
+  `the_selectors_ask_for_nothing_they_do_not_read`: `href` stays out because mockd has no
+  such name, `description`/`paused` stay out because nothing in the mapping reads them, and
+  `triggered` is now asserted present at exactly the depth the mapping reads.
+
 ---
 
 ## 10. As built — the contract PR (2026-08-24)
