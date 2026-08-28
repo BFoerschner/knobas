@@ -458,3 +458,151 @@ async fn the_run_log_constrains_its_two_vocabularies() {
             .unwrap_or_else(|error| panic!("outcome {outcome:?} refused: {error}"));
     }
 }
+
+/// `origin` is a closed vocabulary, and the database says so.
+///
+/// The same pin `auth_state` and the run log's two columns get, for the same
+/// reason: the column is plain `text`, the list that writes it lives in Rust
+/// (`knobas_core::link::Origin`), and nothing but a constraint keeps the two
+/// the same. It matters here because origin is not decoration -- the panel
+/// tells hand-made links from machine-made ones by it, and
+/// `Origin`'s decoder refuses a spelling it does not know, so a stray value
+/// is a link that cannot be read back at all.
+///
+/// The other half of this pin -- the enum's variants against the migration's
+/// list -- lives in `knobas_core::link`.
+#[tokio::test]
+async fn the_link_origin_vocabulary_is_closed() {
+    let pool = &knobas_db::test_util::test_pool().await;
+    migrate::run(pool).await.unwrap();
+
+    let run = uuid::Uuid::new_v4().simple().to_string();
+    let from = format!("test:origin-{run}-a");
+    let to = format!("test:origin-{run}-b");
+    for id in [&from, &to] {
+        sqlx::query("insert into knobas.entity (id, kind) values ($1,'ticket')")
+            .bind(id)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    // Every spelling `Origin` can produce is storable. One relation each:
+    // `link_active_idx` would otherwise refuse the second link of the pair.
+    for origin in ["manual", "suggested", "imported", "source", "implied"] {
+        sqlx::query(
+            "insert into knobas.link (from_id, to_id, relation, origin, created_by)
+             values ($1, $2, $3, $4, 'user')",
+        )
+        .bind(&from)
+        .bind(&to)
+        .bind(origin)
+        .bind(origin)
+        .execute(pool)
+        .await
+        .unwrap_or_else(|error| panic!("origin {origin:?} refused: {error}"));
+    }
+
+    for bad in ["confirmed", "Manual", ""] {
+        let refused = sqlx::query(
+            "insert into knobas.link (from_id, to_id, relation, origin, created_by)
+             values ($1, $2, 'related', $3, 'user')",
+        )
+        .bind(&from)
+        .bind(&to)
+        .bind(bad)
+        .execute(pool)
+        .await
+        .unwrap_err();
+        assert_eq!(
+            refused
+                .as_database_error()
+                .and_then(|e| e.code())
+                .as_deref(),
+            Some("23514"),
+            "origin {bad:?} should be refused by the check constraint"
+        );
+    }
+
+    // Read from the live catalog rather than from the migration file: what
+    // this database enforces is what an existing installation got, and the
+    // constraint is only real once the re-entrant runner has applied it.
+    let (definition,): (String,) = sqlx::query_as(
+        "select pg_get_constraintdef(oid) from pg_constraint
+          where conname = 'link_origin_chk'
+            and conrelid = 'knobas.link'::regclass",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    for origin in ["manual", "suggested", "imported", "source", "implied"] {
+        assert!(
+            definition.contains(origin),
+            "{origin:?} missing from {definition}"
+        );
+    }
+}
+
+/// 0003 is additive, and adding it to a database that is already full of links
+/// is the case that actually happens: every existing installation has links in
+/// it, a CHECK added by `ALTER TABLE` validates the rows already there, and a
+/// migration that fails to apply fails *startup* -- `migrate::run` is on the
+/// boot path, so a bad one is an app that no longer opens.
+///
+/// The rows are seeded, the constraint dropped and the migration's own SQL
+/// replayed over them, all inside a transaction that rolls back: what is
+/// exercised is the statement this file ships, not a retyped copy of it, and
+/// the shared database keeps its constraint for the tests running alongside.
+#[tokio::test]
+async fn zero_three_applies_over_the_links_a_database_already_holds() {
+    let pool = &knobas_db::test_util::test_pool().await;
+    migrate::run(pool).await.unwrap();
+    // Re-entrant: a second pass over a database that already has 0003 applies
+    // nothing and fails nothing.
+    migrate::run(pool).await.unwrap();
+
+    let (applied,): (i64,) =
+        sqlx::query_as("select count(*) from _sqlx_migrations where version = 3 and success")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(applied, 1, "0003 is recorded as applied exactly once");
+
+    let run = uuid::Uuid::new_v4().simple().to_string();
+    let from = format!("test:pre-{run}-a");
+    let to = format!("test:pre-{run}-b");
+
+    let mut tx = pool.begin().await.unwrap();
+    for id in [&from, &to] {
+        sqlx::query("insert into knobas.entity (id, kind) values ($1,'ticket')")
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+    }
+    for origin in ["manual", "suggested", "imported", "source", "implied"] {
+        sqlx::query(
+            "insert into knobas.link (from_id, to_id, relation, origin, created_by)
+             values ($1, $2, $3, $4, 'user')",
+        )
+        .bind(&from)
+        .bind(&to)
+        .bind(origin)
+        .bind(origin)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    }
+
+    // From here the transaction looks like a database that predates 0003.
+    sqlx::query("alter table knobas.link drop constraint link_origin_chk")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::raw_sql(include_str!("../migrations/0003_link_origin.sql"))
+        .execute(&mut *tx)
+        .await
+        .expect("0003 must apply to a database that already holds links");
+
+    tx.rollback().await.unwrap();
+}

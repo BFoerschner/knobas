@@ -8,7 +8,7 @@
 
 use crate::{SyncError, SyncReport};
 
-closed_vocabulary! {
+knobas_core::closed_vocabulary! {
     /// Why a run happened.
     ///
     /// Stored in `knobas.sync_run.trigger`, whose `sync_run_trigger_chk`
@@ -23,7 +23,7 @@ closed_vocabulary! {
     }
 }
 
-closed_vocabulary! {
+knobas_core::closed_vocabulary! {
     /// How a run ended.
     ///
     /// Stored in `knobas.sync_run.outcome`, whose `sync_run_outcome_chk`

@@ -289,14 +289,9 @@ fn the_link_row_shape_matches_its_typescript_mirror() {
 
     // The origin union is declared inline on the field rather than as its own
     // exported type, so it is read off the field's line.
+    let origins: Vec<&str> = Origin::ALL.iter().map(|origin| origin.as_str()).collect();
     assert_same_members(
-        &[
-            Origin::Manual.as_str(),
-            Origin::Suggested.as_str(),
-            Origin::Imported.as_str(),
-            Origin::Source.as_str(),
-            Origin::Implied.as_str(),
-        ],
+        &origins,
         declared_inline_union(interface_body(MIRROR, "LinkRow"), "origin"),
         "an origin declared on one side only is a link the other side cannot \
          classify",
