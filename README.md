@@ -141,6 +141,92 @@ A reboot does the same thing.
 | `crates/knobas-app` | The Tauri shell: window, app state, database lifecycle, profiles, and the IPC commands. |
 | `app/` | The frontend — Svelte 5 runes on plain Vite, TypeScript strict. `app/src/lib/ipc/` mirrors the command surface, one file per Rust command module. |
 
+## Frontend
+
+Svelte 5 runes on plain Vite (no SvelteKit), TypeScript strict with
+`exactOptionalPropertyTypes` and `noUncheckedIndexedAccess`. `just front` runs
+`svelte-check` and the Vitest suite in seconds and is the loop to iterate on;
+`just check` runs it before any cargo work, so a broken component is reported
+before a workspace compile.
+
+### The component map
+
+| Path | What lives there |
+| --- | --- |
+| `app/src/App.svelte` | The root: the boot gate, the §14a wizard when there is nothing yet, otherwise the shell. Owns the launcher slot and the `Esc` rung ordering. |
+| `app/src/app.css` | The Signal stylesheet: tokens, the app frame, the room, the detail, the sources view, the overlays. |
+| `app/src/lib/shell/` | The frame — top strip, status bar, room and tiles, router, keyboard, lifecycle, and the Signal primitives (`Flap`, `Toast`, `Modal`, `Monogram`). |
+| `app/src/lib/detail/` | The slide-over, and §3a's generic projection of a raw `payload`. |
+| `app/src/lib/sources/` | The sources cockpit: the generated add-source form, credential health, diagnostics, the first-run wizard. |
+| `app/src/lib/launcher/` | The ⌘K overlay. Mounting it is the whole integration: it binds its own hotkey and unwinds its own `Esc`. |
+| `app/src/lib/ipc/` | Hand-written mirrors of the command surface, one file per Rust command module. Each ships in the same PR as the command it mirrors. |
+
+Three module-level runes are shared rather than threaded through props, because
+each is one fact several trees read: `shell/health.svelte.ts` (live credential
+health, seeded from `credential_health` and patched by `source:health`),
+`shell/kind-registry.svelte.ts` (what the installed adapters declare about
+their kinds), and `shell/toasts.svelte.ts`. Each exports a `create…` factory so
+a test can build its own with no Tauri bridge behind it.
+
+### House rules
+
+Enforced by `lib/shell/house-rules.test.ts` and `lib/shell/a11y.test.ts`, which
+scan the sources off disk — so a rule applies to code no test happens to mount.
+Every one of them is a production failure that is **invisible in development**:
+`tauri dev` navigates to the Vite dev server over `http://`, so no CSP header is
+attached at all.
+
+- **No inline styles.** No `style="…"` attribute, no `style:` directive, no
+  `setAttribute("style", …)`. `style-src 'self'` blocks inline style attributes
+  in a bundle and honours them under `just dev`. Dynamic geometry uses a class
+  or a native `<progress>`.
+- **No `{@html}`.** Every title, body, author, payload, snippet and error
+  message came from a source system. `ts_headline` output is not XSS-safe.
+- **No network at runtime.** `default-src 'self'`; fonts are npm-vendored and
+  bundled. Loopback and the RFC 2606 reserved names (`*.example`, `*.invalid`,
+  `*.test`) are the only exemptions, because neither can resolve.
+- **Every `listen()` is cleaned up**, including the "unmounted before the
+  promise resolved" race. `lib/shell/residue.test.svelte.ts` mounts every
+  component with an effect twice and fails if anything is left behind.
+- **No data call before `db.state === "ready"`.** Commands that need `AppState`
+  reject with `not_ready` during bring-up; the shell gates on the lifecycle
+  rather than catching and ignoring.
+- **Secrets are never displayed, logged or round-tripped.** There is no command
+  that reads one back.
+- **Contrast ≥ 4.5:1 and reduced motion respected** (spec §14). The palette is
+  checked by computation in `lib/shell/app-css.test.ts`.
+
+### QA without Tauri
+
+Any screen can be driven in a browser with a fixture behind `invoke`. **Pick
+your own port and user-data directory** — parallel agents have collided on this:
+
+```bash
+cd app && npx vite --port "$PORT" --strictPort &
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --headless --disable-gpu --window-size=1440,900 \
+  --user-data-dir="/tmp/knobas-qa-$PORT" \
+  --screenshot=/tmp/shot.png "http://localhost:$PORT/?fake-ipc#/ctx/all"
+```
+
+`?fake-ipc` opts in; without it even a dev build talks to the real backend.
+**The dev server, not `vite preview`**: the fixture is behind
+`import.meta.env.DEV`, so a production build drops it and `?fake-ipc` does
+nothing — the window then sits on "Starting the local database" for ever.
+`?fake-db=starting|migrating|failed` holds the boot screen on one state.
+
+This checks layout and interaction, not the bridge. The end-to-end check is
+`just dev` or `just demo`.
+
+### The mockup
+
+`mockups/round-3/signal-miller.html` is a **behaviour and layout reference**.
+Its CSS was carried over wholesale as the global stylesheet; its *rendering
+strategy* — string templates and one `innerHTML` swap per frame — deliberately
+was not. Components own their state, data arrives as props or is fetched by the
+component that displays it, and nothing re-renders a region because a sibling
+changed.
+
 ## Where the documents live
 
 - **Design doc** — `docs/specs/2026-08-23-knobas-design.md`: the

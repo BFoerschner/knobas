@@ -104,3 +104,44 @@ test("a one-character kind still has a monogram", () => {
   expect(kindMonogram("x", null)).toBe("X");
   expect(kindMonogram("", null)).toBe("?");
 });
+
+/**
+ * §3a's claim at the tile level: an adapter's own plural reaches the room.
+ *
+ * The resolver is optional, so a caller with no registry falls through to
+ * knobas' own vocabulary and then to the humaniser. What must not happen is
+ * the resolver being *accepted and ignored*, which looks identical from the
+ * outside until a source ships a kind whose humanised plural is wrong.
+ */
+test("an open kind's tile takes the adapter's declared plural", () => {
+  const declared = (kind: string) =>
+    kind === "incident"
+      ? {
+          id: "incident",
+          label: "Outage",
+          plural: "Outages",
+          monogram: "OU",
+          full_sync_exhaustive: true,
+        }
+      : null;
+
+  const [tile] = tilesFor(["incident"], declared);
+  expect(tile?.label).toBe("Outages");
+  // Without the resolver: the humaniser, which is right about the grammar and
+  // wrong about the word.
+  expect(tilesFor(["incident"])[0]?.label).toBe("Incidents");
+});
+
+test("a declared kind that already has a bucket keeps the bucket's heading", () => {
+  const declared = () => ({
+    id: "ticket",
+    label: "Issue",
+    plural: "Issues",
+    monogram: "IS",
+    full_sync_exhaustive: false,
+  });
+  // `Tickets` is the *bucket* — a designed room region that can hold several
+  // kinds — and it is not one adapter's to rename.
+  expect(tilesFor(["ticket"], declared)[0]?.label).toBe("Tickets");
+});
+

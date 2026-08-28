@@ -15,7 +15,7 @@
 <script lang="ts">
   import type { ParsedQuery } from "../ipc";
   import type { CredentialHealth } from "../ipc/sources";
-  import { isActionable } from "./format";
+  import { isActionable } from "../shell/health.svelte";
 
   let { interpreted, sources }: { interpreted: ParsedQuery; sources: CredentialHealth[] } =
     $props();
@@ -72,8 +72,10 @@
         key: `source:${id}`,
         text: id,
         title: state ? `source · credential ${state}` : "source",
-        // The same rule the row badge and the board strip read, spelled in
-        // `format.ts` and nowhere else.
+        // The same rule the row's provenance line and the board's source
+        // strip branch on, spelled in `shell/health.svelte` and nowhere else:
+        // a chip's dot and a row's complaint disagreeing about one source is
+        // indistinguishable from a bug.
         fail: state !== undefined && isActionable(state),
       });
     }

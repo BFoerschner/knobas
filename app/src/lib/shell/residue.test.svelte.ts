@@ -105,6 +105,64 @@ vi.mock("../ipc/entity", () => ({
   recentActivity: () => deferred([LINE]),
 }));
 
+/**
+ * The sources view's IPC.
+ *
+ * Every read answers through `deferred`, so `land()` decides when it lands —
+ * which is what lets the second pass unmount the view *inside* the window
+ * where its `list_sources` is still in flight.
+ */
+vi.mock("../ipc/sources", () => ({
+  listSources: () => deferred([]),
+  syncNow: () => deferred(1),
+  syncAll: () => deferred([1]),
+  deleteSource: () => deferred(undefined),
+  setSourceSecret: () =>
+    deferred({
+      source_id: "mock",
+      state: "ok",
+      checked_at: null,
+      detail: null,
+      secret_expires_at: null,
+    }),
+  credentialHealth: () => deferred([]),
+  syncStatus: () => deferred([]),
+  listSyncRuns: () => deferred([]),
+  dbStats: () =>
+    deferred({
+      db_bytes: 0,
+      entity_count: 0,
+      item_count: 0,
+      per_source: [],
+      oldest_synced_at: null,
+      newest_synced_at: null,
+    }),
+  listAdapters: () => deferred([]),
+  addSource: () => deferred(undefined),
+  testSource: () => deferred({ ok: true, account: null, server_version: null, secret_expires_at: null, error: null, code: null, elapsed_ms: 1 }),
+  reindexFts: () => deferred(undefined),
+}));
+
+/**
+ * The boot channel, so `App.svelte` can be mounted like any other case.
+ *
+ * `app_status` answers ready at once: the interesting residue is the three
+ * subscriptions the shell installs around it, not the boot screen.
+ */
+vi.mock("../ipc/app", () => ({
+  appStatus: () =>
+    deferred({
+      db: { state: "ready", detail: null },
+      app_version: "0.0.0-test",
+      demo: false,
+      first_run: false,
+    }),
+  frontendReady: () => deferred(undefined),
+  retryDatabase: () => deferred(undefined),
+  completeFirstRun: () => deferred(undefined),
+  ping: () => deferred("pong"),
+}));
+
 vi.mock("@tauri-apps/api/event", () => ({
   listen: (event: string, handler: (payload: { payload: unknown }) => void) => {
     // Modelled as a real `window` listener so that failing to unsubscribe is
@@ -119,6 +177,7 @@ const { trackResidue } = await import("./residue");
 const { createRouter } = await import("./router.svelte");
 const { builtinContexts } = await import("./contexts");
 
+const App = (await import("../../App.svelte")).default;
 const ContextTabs = (await import("./ContextTabs.svelte")).default;
 const Flap = (await import("./Flap.svelte")).default;
 const ModalFixture = (await import("./Modal.fixture.svelte")).default;
@@ -129,6 +188,12 @@ const Tile = (await import("./Tile.svelte")).default;
 const Detail = (await import("../detail/Detail.svelte")).default;
 const Launcher = (await import("../launcher/Launcher.svelte")).default;
 const QueryBox = (await import("../launcher/QueryBox.svelte")).default;
+const AddSource = (await import("../sources/AddSource.svelte")).default;
+const Diagnostics = (await import("../sources/Diagnostics.svelte")).default;
+const FirstRun = (await import("../sources/FirstRun.svelte")).default;
+const ReenterSecret = (await import("../sources/ReenterSecret.svelte")).default;
+const SourcesView = (await import("../sources/SourcesView.svelte")).default;
+const { createHealth } = await import("./health.svelte");
 
 /**
  * The launcher's IPC, injected.
@@ -192,6 +257,19 @@ interface Case {
 }
 
 const CASES: Case[] = [
+  {
+    /**
+     * The root, and the reason this scan reaches outside `lib/`.
+     *
+     * `App.svelte` installs the three longest-lived subscriptions in the
+     * window — the router's `hashchange`, the global key bindings and the
+     * `source:health` listener — and it was the one component the walk below
+     * could not see, because it is the only one that does not live in `lib/`.
+     */
+    name: "App",
+    source: "App.svelte",
+    open: (target) => ({ app: mount(App, { target, props: {} }) }),
+  },
   {
     name: "ContextTabs",
     source: "lib/shell/ContextTabs.svelte",
@@ -299,6 +377,47 @@ const CASES: Case[] = [
           oninput: () => {},
           onkeydown: () => {},
           onclose: () => {},
+        },
+      }),
+    }),
+  },
+  {
+    name: "SourcesView",
+    source: "lib/sources/SourcesView.svelte",
+    // Its own store, not the shell's singleton: seeding the module-level one
+    // from a residue test would leak state into whatever runs next.
+    open: (target) => ({
+      app: mount(SourcesView, { target, props: { health: createHealth() } }),
+    }),
+  },
+  {
+    name: "AddSource",
+    source: "lib/sources/AddSource.svelte",
+    open: (target) => ({
+      app: mount(AddSource, { target, props: { onclose: () => {}, onsaved: () => {} } }),
+    }),
+  },
+  {
+    name: "Diagnostics",
+    source: "lib/sources/Diagnostics.svelte",
+    open: (target) => ({ app: mount(Diagnostics, { target, props: {} }) }),
+  },
+  {
+    name: "FirstRun",
+    source: "lib/sources/FirstRun.svelte",
+    open: (target) => ({ app: mount(FirstRun, { target, props: { onfinish: () => {} } }) }),
+  },
+  {
+    name: "ReenterSecret",
+    source: "lib/sources/ReenterSecret.svelte",
+    open: (target) => ({
+      app: mount(ReenterSecret, {
+        target,
+        props: {
+          sourceId: "mock",
+          displayName: "Mock",
+          onhealth: () => {},
+          oncancel: () => {},
         },
       }),
     }),
@@ -533,7 +652,11 @@ test("every component with an effect is in the table", () => {
       }
     }
   };
-  walk(join(root, "lib"));
+  // The whole of `src/`, not just `lib/`: `App.svelte` sits at the root and it
+  // holds the longest-lived subscriptions in the window (`router`, the keys,
+  // and `source:health`). Scanning only `lib/` meant the one component whose
+  // teardown matters most was the one component this guard could not see.
+  walk(root);
 
   expect(withEffects.length, "no components were scanned at all").toBeGreaterThan(0);
   const covered = new Set(CASES.map((entry) => entry.source));

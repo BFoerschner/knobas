@@ -38,7 +38,7 @@ fn health() -> knobas_sync::config::CredentialHealth {
 ///
 /// `assert_shape` above pins `CredentialHealth.state` as a *key*; nothing pinned
 /// what may be in it. The launcher branches on those spellings --
-/// `app/src/lib/launcher/format.ts` builds a total `Record<AuthState, boolean>`
+/// `app/src/lib/shell/health.svelte.ts` builds a total `Record<AuthState, boolean>`
 /// over them to decide which states mean "a human must act" -- so a variant
 /// added on the Rust side with no member here fell through to "not actionable"
 /// silently, which is the drift #27 round 2 recorded and #37 asked to close.

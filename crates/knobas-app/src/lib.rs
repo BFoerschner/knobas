@@ -170,6 +170,7 @@ pub fn run() {
             commands::app::app_status,
             commands::app::frontend_ready,
             commands::app::retry_database,
+            commands::app::complete_first_run,
             commands::backup::backup_status,
             commands::backup::backup_now,
             commands::backup::set_backup_schedule,

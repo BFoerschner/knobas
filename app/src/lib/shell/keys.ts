@@ -22,7 +22,28 @@
 import type { Router } from "./router.svelte";
 
 export interface KeyHandlers {
-  /** `⌘K` / `Ctrl+K`. Stream E's launcher; a stub until task 22 wires it. */
+  /**
+   * `⌘K` / `Ctrl+K`.
+   *
+   * ## The whole contract between the shell and the launcher
+   *
+   * The shell owns **opening and closing** the overlay and the `Esc` rung
+   * ordering; the launcher owns **everything inside it**. That line is drawn
+   * here because the two live in different trees (`lib/shell/**` and
+   * `lib/launcher/**`), and a launcher whose keyboard lived in the shell would
+   * be one behaviour with two owners.
+   *
+   * Consequences worth stating rather than rediscovering:
+   *
+   * * The launcher is **rung 1**, above the detail slide-over. It binds `⌘K`
+   *   itself and unwinds its own `Esc` (a non-empty query is cleared first,
+   *   and only an already-empty box closes the overlay), calling
+   *   `stopPropagation` on both rungs — so while the overlay is up this
+   *   handler never sees the key. That is what keeps one keystroke from
+   *   unwinding two ladders, which is indistinguishable from a bug.
+   * * Both sides bind `⌘K` and they converge: this sets the flag, the
+   *   component toggles it, and both land on "open" from a closed box.
+   */
   openLauncher: () => void;
 }
 

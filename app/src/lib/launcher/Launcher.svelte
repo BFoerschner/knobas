@@ -39,7 +39,7 @@
 
   let {
     open = $bindable(false),
-    sources = [],
+    sources,
     actions = [],
     onnavigate,
     onclose,
@@ -48,12 +48,14 @@
   }: {
     open?: boolean;
     /**
-     * Credential health from a shell that already polls it.
+     * Credential health from a shell that subscribes to `source:health`.
      *
-     * **Optional, and in M1 nothing passes it** — see `health` below, which is
-     * what the chips and the rows actually read.
+     * `undefined` means *unsupplied* and falls back to the board's own copy;
+     * an empty array means *supplied, and nothing to complain about*. The two
+     * are different answers and the launcher must not collapse them — see
+     * `health` below.
      */
-    sources?: CredentialHealth[];
+    sources?: CredentialHealth[] | undefined;
     /** Extras appended to `>` — things only the shell knows it can offer. */
     actions?: LauncherAction[];
     onnavigate: (hash: string) => void;
@@ -76,26 +78,29 @@
   /**
    * The credential health the chips and the result rows are drawn from.
    *
-   * **The `sources` prop alone was not enough, and review round 1 caught it.**
-   * The prop is there for a shell that already polls this — but nothing in M1
-   * does: `credentialHealth()` has no caller in `app/src` and nothing
-   * subscribes to `EVENTS.sourceHealth`. So on the one production mount
-   * (`App.svelte`) it was `[]` unconditionally, `Row.svelte` always drew the
-   * sync age and `Chips.svelte` never drew the failure dot. The behaviour was
-   * implemented and unreachable, and `Launcher.test.svelte.ts` was green about
-   * it because it passed the prop explicitly — a test taking a path production
-   * does not take.
+   * **Two rounds of review live in this one line, so both are recorded.**
    *
-   * `LauncherHome.sources` is the same fact, fetched on every opening and
-   * already what `Board.svelte`'s strip reads. Falling back to it makes the
-   * launcher correct whatever the shell remembers to pass, and it collapses a
-   * divergence: the board's strip and the result rows were being fed from two
-   * independent copies of one thing.
+   * Round 1 (#27): the prop alone was not enough. Nothing in the shell polled
+   * credential health, so on the one production mount (`App.svelte`) it was
+   * `[]` unconditionally — `Row.svelte` always drew the sync age, `Chips.svelte`
+   * never drew the failure dot, and the component test was green about a path
+   * production did not take. The fix was a fallback to `LauncherHome.sources`,
+   * which the launcher already fetches on every opening.
    *
-   * A wired shell still wins, because a live subscription is fresher than a
-   * per-opening fetch. Wiring one is M2.
+   * Round 2 (issue #36): that fallback was written `sources.length > 0`, which
+   * reads a **supplied but empty** list as *unsupplied*. Correct while nothing
+   * supplied the prop; wrong the moment `App.svelte` passes the live
+   * `source:health` store, because a store that has just been told the only
+   * source is fine is supplied and empty — and falling back to a per-opening
+   * board fetch would redraw a 401 the backend has already retracted. Worse for
+   * a shell that polls a *subset*: the fallback would silently swap the subset
+   * for a different list.
+   *
+   * So the distinction is carried by `undefined` versus `[]`, which is what
+   * those two values already mean everywhere else. A supplied list always wins,
+   * because a live subscription is fresher than a per-opening fetch.
    */
-  const health = $derived(sources.length > 0 ? sources : (session.home?.sources ?? []));
+  const health = $derived(sources ?? session.home?.sources ?? []);
 
   let box = $state<ReturnType<typeof QueryBox> | null>(null);
 
@@ -272,6 +277,7 @@
           {#if session.home}
             <Board
               home={session.home}
+              sources={health}
               rows={session.rows}
               selected={session.selected}
               {now}

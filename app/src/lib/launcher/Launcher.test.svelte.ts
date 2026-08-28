@@ -281,6 +281,51 @@ test("a source that is refusing the credential replaces the age on its rows", as
 });
 
 /**
+ * The conflation the fallback introduced, now that a shell does supply the prop.
+ *
+ * `sources.length > 0 ? sources : home` reads an **empty** live list as
+ * "unsupplied" and silently reaches for the board's per-opening copy instead.
+ * That was correct while nothing supplied the prop, and it stops being correct
+ * the moment `App.svelte` passes a live `source:health` store: a store that has
+ * just been told the only source is fine — or that is still seeding — is
+ * *supplied and empty*, and falling back to a stale board fetch is the launcher
+ * drawing a 401 the backend has already retracted.
+ *
+ * `undefined` means unsupplied. `[]` means "I am watching, and there is
+ * nothing to complain about."
+ */
+test("an explicitly empty sources prop is a live reading, not an unsupplied one", async () => {
+  open({
+    sources: [],
+    ports: {
+      search: async () => response(),
+      launcherHome: async (): Promise<LauncherHome> => ({
+        ...HOME,
+        // The board's copy is stale: this 401 has already been resolved, and
+        // the live store the shell supplies knows it.
+        sources: [
+          {
+            source_id: "gitea",
+            state: "unauthorized",
+            checked_at: null,
+            detail: "401",
+            secret_expires_at: null,
+          },
+        ],
+      }),
+    },
+  });
+  await settle();
+  target.querySelector("input")!.value = "sepa";
+  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+
+  const ages = [...target.querySelectorAll(".sy")].map((el) => el.textContent?.trim());
+  expect(ages).toEqual(["synced 4 min ago", "synced 4 min ago", "synced 4 min ago"]);
+});
+
+/**
  * The same behaviour on the path production actually takes.
  *
  * The test above passes `sources` at mount. `App.svelte` does not — nothing in
@@ -342,6 +387,54 @@ test("an empty box shows the smart lists and the recent items", async () => {
   // The change badge, which is the only thing distinguishing a list worth
   // opening from one that has not moved.
   expect(target.querySelector(".c.chg")?.textContent).toContain("3");
+});
+
+/**
+ * The board strip and the chips are **one** reading, not two.
+ *
+ * The strip used to map `home.sources` — the per-opening `launcher_home` fetch
+ * — while the chips above it were drawn from the live `source:health` store.
+ * They shared `isActionable`, which is a shared *rule* over two sets of data,
+ * and a comment in `Board.svelte` claimed on that basis that the two "cannot
+ * come to different conclusions about the same source". They could: this test
+ * hands the board a stale 401 the live store has already retracted, which is
+ * exactly the shape of #27's finding one layer along.
+ */
+test("the board strip reads the live health, not the copy the board arrived with", async () => {
+  open({
+    // Supplied and disagreeing with the board's own copy: the store says gitea
+    // is fine, the per-opening fetch still remembers a 401.
+    sources: [
+      {
+        source_id: "gitea",
+        state: "ok",
+        checked_at: "2026-08-25T12:00:00Z",
+        detail: null,
+        secret_expires_at: null,
+      },
+    ],
+    ports: {
+      search: async () => response(),
+      launcherHome: async () => ({
+        ...HOME,
+        sources: [
+          {
+            source_id: "gitea",
+            state: "unauthorized",
+            checked_at: "2026-08-25T11:00:00Z",
+            detail: "401 from Gitea",
+            secret_expires_at: null,
+          },
+        ],
+      }),
+    },
+  });
+  await settle();
+
+  const strip = [...target.querySelectorAll(".strip .src")];
+  expect(strip.length, "the strip did not render at all").toBe(1);
+  expect(strip[0]!.className).not.toContain("fail");
+  expect(strip[0]!.textContent).not.toContain("401 from Gitea");
 });
 
 /**
@@ -506,7 +599,7 @@ test("an unknown token is greyed out with a reason rather than silently ignored"
  * this file covers.
  *
  * A `/gitea` chip's dot and the row badge beside it are the same claim about
- * the same source, so they are drawn from one rule (`format.ts::isActionable`)
+ * the same source, so they are drawn from one rule (`shell/health.svelte::isActionable`)
  * rather than from three copies of the state list — which is what #37 asked for
  * and what this asserts is actually wired up. `ok` is the control: without it a
  * chip renderer that marked every source failing would pass.

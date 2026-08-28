@@ -9,6 +9,7 @@
   import StatusBar from "./StatusBar.svelte";
   import TopStrip from "./TopStrip.svelte";
   import { builtinContexts, type RoomContext } from "./contexts";
+  import { health as sharedHealth, type Health } from "./health.svelte";
   import type { Router } from "./router.svelte";
   import type { Lifecycle } from "./lifecycle.svelte";
 
@@ -17,6 +18,7 @@
     lifecycle,
     onsearch,
     contexts = builtinContexts([]),
+    health = sharedHealth,
     main,
   }: {
     router: Router;
@@ -24,12 +26,14 @@
     onsearch: () => void;
     /** The rooms the switcher offers. Defaults to *All work* alone. */
     contexts?: RoomContext[];
+    /** The live `source:health` store the sync cluster draws. */
+    health?: Health;
     main: Snippet;
   } = $props();
 </script>
 
 <div class="app">
-  <TopStrip {router} {contexts} {onsearch} />
+  <TopStrip {router} {contexts} {onsearch} {health} />
   <main class="main">{@render main()}</main>
   <StatusBar {lifecycle} />
 </div>

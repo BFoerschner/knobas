@@ -289,12 +289,11 @@ pub struct EntityDetail {
     pub source: SourceRef,
     /// The adapter's own label and monogram for this kind.
     ///
-    /// **`None` throughout M1 phase 1.** Resolving it means asking the adapter
-    /// registry (`crates/knobas-app/src/sources/**`, stream F) what an
-    /// installed adapter declares, and that does not exist yet; task 21 fills
-    /// it in. The field ships now because it is in the contract and because
-    /// the frontend's fallback -- the title-cased kind -- is what §3a asks for
-    /// when nothing declares one anyway.
+    /// Resolved from the adapter registry by the row's `adapter_kind` -- see
+    /// [`kind_info_for`]. `None` for a kind the adapter does not declare, and
+    /// for a source with no configuration row at all (which `run_once`
+    /// produces). Both cases fall through to the frontend's §3a humaniser,
+    /// which is what §3a asks for when nothing declares anything.
     pub kind_info: Option<knobas_source::KindInfo>,
     /// Untrusted source text. Rendered as text, never as markup (gotcha 7).
     pub body_text: String,
@@ -364,10 +363,13 @@ pub async fn get_entity_inner(pool: &PgPool, entity_id: &str) -> Result<EntityDe
     let display_name: Option<String> = row.get("display_name");
     let adapter_kind: Option<String> = row.get("adapter_kind");
 
+    let kind: String = row.get("kind");
+    let kind_info = kind_info_for(adapter_kind.as_deref(), &kind);
+
     Ok(EntityDetail {
         row: EntityRow {
             entity_id: row.get("entity_id"),
-            kind: row.get("kind"),
+            kind,
             source_id: source_id.clone(),
             title: row.get("title"),
             updated_at: row.get("item_updated_at"),
@@ -378,8 +380,7 @@ pub async fn get_entity_inner(pool: &PgPool, entity_id: &str) -> Result<EntityDe
             adapter_kind: adapter_kind.unwrap_or_else(|| source_id.clone()),
             id: source_id,
         },
-        // Task 21, once there is a registry to ask. See the field's docs.
-        kind_info: None,
+        kind_info,
         body_text: row.get("body_text"),
         author: row.get("author"),
         payload: row.get("payload"),
@@ -388,6 +389,35 @@ pub async fn get_entity_inner(pool: &PgPool, entity_id: &str) -> Result<EntityDe
         links: knobas_core::link::links_of(pool, &entity).await?,
         activity: knobas_core::activity::recent(pool, DETAIL_ACTIVITY, Some(&entity)).await?,
     })
+}
+
+/// What the adapter declares about one kind, if anything does.
+///
+/// §3a: *"entity kinds with display metadata drive grouping, chips and
+/// labels"*. Looked up by the **adapter** kind and not the instance id, because
+/// `jira` and `jira-eu` are two instances of one adapter that declare the same
+/// kinds (P10).
+///
+/// `None` in three cases, and all three are the same answer to the frontend:
+/// no configuration row for the source (`run_once` produces exactly that), no
+/// adapter of that kind compiled in, and an adapter that simply does not
+/// declare this kind. §3a's whole point is that an undeclared kind still
+/// renders, so the humaniser on the other side is the designed path rather
+/// than a degradation.
+///
+/// **First declaration wins**, deterministically: `ADAPTERS` is a fixed table
+/// in a fixed order, so two adapters declaring one kind id resolve the same
+/// way on every call rather than by whichever the iterator reached first this
+/// time.
+fn kind_info_for(adapter_kind: Option<&str>, kind: &str) -> Option<knobas_source::KindInfo> {
+    let adapter_kind = adapter_kind?;
+    crate::sources::Registry::builtin()
+        .templates()
+        .into_iter()
+        .find(|template| template.adapter_kind == adapter_kind)?
+        .entity_kinds
+        .into_iter()
+        .find(|info| info.id == kind)
 }
 
 /// One entity, for the detail slide-over.
@@ -693,6 +723,97 @@ pub async fn unlink<R: tauri::Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// §3a, as a resolution rather than as a claim.
+    ///
+    /// The whole promise is *"a new source's items get grouped, chipped and
+    /// labeled without touching core"*, and it holds only if this lookup
+    /// actually reaches the adapter's own declaration. The mock declares
+    /// `ticket`, so a mock ticket must come back with the mock's words --
+    /// which the frontend's humaniser could not produce (it has no `plural`
+    /// and no monogram to invent).
+    #[test]
+    fn a_declared_kind_resolves_to_the_adapters_own_metadata() {
+        let mock = crate::sources::Registry::builtin()
+            .templates()
+            .into_iter()
+            .find(|template| template.adapter_kind == "mock")
+            .expect("the mock adapter is compiled in");
+        let declared = mock
+            .entity_kinds
+            .first()
+            .expect("the mock declares at least one kind")
+            .clone();
+
+        let resolved =
+            kind_info_for(Some("mock"), &declared.id).expect("a kind the mock declares resolves");
+        assert_eq!(resolved.id, declared.id);
+        assert_eq!(resolved.label, declared.label);
+        assert_eq!(resolved.plural, declared.plural);
+        assert_eq!(resolved.monogram, declared.monogram);
+    }
+
+    /// Three ways to have nothing to say, and all three say nothing.
+    ///
+    /// The middle one is the case that matters operationally: `run_once`
+    /// writes mirror rows for a source with **no configuration row**, so
+    /// `adapter_kind` is genuinely `None` there and a lookup that unwrapped it
+    /// would panic on a perfectly ordinary corpus.
+    #[test]
+    fn nothing_declared_resolves_to_none_rather_than_to_a_guess() {
+        assert!(kind_info_for(Some("mock"), "no-such-kind").is_none());
+        assert!(kind_info_for(None, "ticket").is_none());
+        assert!(kind_info_for(Some("not-a-compiled-in-adapter"), "ticket").is_none());
+    }
+
+    /// One kind id declared by two adapters resolves by **adapter**, not by
+    /// kind.
+    ///
+    /// `jira` and `mock` both declare `ticket` today. A lookup that searched
+    /// every template for the kind would hand a Jira ticket the mock's words
+    /// (or the reverse) depending only on table order -- which is exactly the
+    /// per-adapter table §3a exists to avoid, built by accident.
+    #[test]
+    fn two_adapters_declaring_one_kind_do_not_fight() {
+        let templates = crate::sources::Registry::builtin().templates();
+        let declaring: Vec<&knobas_source::SourceDescriptor> = templates
+            .iter()
+            .filter(|template| template.entity_kinds.iter().any(|info| info.id == "ticket"))
+            .collect();
+        assert!(
+            declaring.len() >= 2,
+            "only {} adapter(s) declare `ticket`, so this test proves nothing",
+            declaring.len()
+        );
+
+        for template in declaring {
+            let resolved = kind_info_for(Some(&template.adapter_kind), "ticket")
+                .expect("the adapter declares `ticket`");
+            let expected = template
+                .entity_kinds
+                .iter()
+                .find(|info| info.id == "ticket")
+                .expect("it is in the list this loop filtered on");
+            // Field by field: `KindInfo` has no `PartialEq`, and adding one
+            // would be an edit to the frozen SPI for a test's convenience.
+            assert_eq!(
+                (
+                    resolved.label.as_str(),
+                    resolved.plural.as_str(),
+                    resolved.monogram.as_str(),
+                    resolved.full_sync_exhaustive
+                ),
+                (
+                    expected.label.as_str(),
+                    expected.plural.as_str(),
+                    expected.monogram.as_str(),
+                    expected.full_sync_exhaustive
+                ),
+                "`ticket` from {} resolved to another adapter's declaration",
+                template.adapter_kind
+            );
+        }
+    }
 
     /// The four statements are four, and each names its columns.
     ///
