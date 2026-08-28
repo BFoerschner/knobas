@@ -202,9 +202,11 @@ fn check_source_id(id: &str) -> Result<(), SyncError> {
 /// not even when the same run emitted plenty of another kind. That is the
 /// emptiness guard in `run_locked`, and its consequence is that a kind whose
 /// corpus goes to *zero* upstream keeps every row of it live indefinitely: a
-/// Gitea source whose last repository is deleted, or whose `owners[]` narrows
-/// to nothing, goes on holding that `repo` row and the branch rows under it,
-/// however many full syncs run afterwards.
+/// Gitea source whose last repository is deleted, or whose `owners[]` is
+/// narrowed to owners that hold no repositories, goes on holding that `repo`
+/// row and the branch rows under it, however many full syncs run afterwards.
+/// (`owners: []` is not that case -- an empty list means *every* repository
+/// the token can see, per `GiteaConfig::owners`.)
 ///
 /// This is the deliberate side of a trade the engine cannot win. An empty
 /// listing and a credential that quietly lost its scope are the same 200 with
@@ -218,8 +220,8 @@ fn check_source_id(id: &str) -> Result<(), SyncError> {
 /// scheduled runs go through [`run_from_stored_cursor`], so in a running
 /// installation a cursor-less run is a source's *first* sync and *Load demo
 /// data*, and little else. A repository deleted upstream is therefore retired
-/// the next time that source syncs in full -- which, absent a cleared cursor,
-/// may be never.
+/// the next time that source syncs in full and emits a repository (case 2) --
+/// which, absent a cleared cursor, may be never.
 ///
 /// # Errors
 ///

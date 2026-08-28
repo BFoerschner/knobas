@@ -478,9 +478,17 @@ async fn a_kind_that_emitted_nothing_is_not_swept_even_when_another_kind_did() {
     // guard is stateless -- it asks only what *this* run emitted -- so a kind
     // whose corpus has genuinely gone to zero keeps every row live for as long
     // as it stays empty. That is the documented residual on `run_once`
-    // (*Limitations*, case 2) and it is pinned here so the doc and the
-    // behaviour cannot drift: close the gap and this loop fails, which is the
-    // point.
+    // (*Limitations*, case 2).
+    //
+    // **Read this loop for exactly what it is.** It does not detect anything
+    // the assertions above it miss. Because the guard holds no cross-run state
+    // -- `emitted` is a fresh set per `PgSink`, per run -- every mutation that
+    // would close the gap fires on the *first* empty run, at the `swept == 0`
+    // assertion above; this loop then never executes. It is a doc-pin: it
+    // costs a couple of seconds to say "indefinitely" out loud, and it would
+    // catch a future *design* change that made the guard stateful (say,
+    // "sweep after N consecutive empty runs"), which nothing above would. Do
+    // not count it as independent evidence that the guard works.
     for round in 3..=4 {
         a_moment_passes().await;
         let again = knobas_sync::run_once(&pool, &src, None).await.unwrap();

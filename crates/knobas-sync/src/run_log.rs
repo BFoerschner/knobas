@@ -143,14 +143,19 @@ impl SourceSyncStatus {
 pub struct RunCounts {
     pub upserted: i64,
     pub deleted: i64,
-    /// Rows the full-sync sweep tombstoned -- `SyncReport::swept`. Zero for
-    /// an incremental run, and per kind for any kind that did not declare
-    /// `full_sync_exhaustive` or emitted nothing this run.
+    /// Rows the full-sync sweep tombstoned -- `SyncReport::swept`. Zero for an
+    /// incremental run; rows of a kind that did not declare
+    /// `full_sync_exhaustive`, or that emitted nothing this run, never enter
+    /// it.
     ///
     /// **Not per adapter.** ADR-0003 moved the gate onto the kind, so there is
     /// no answer of the form "this source is not exhaustive" any more: one
     /// Gitea run sweeps its repos and branches while sparing its commits and
-    /// prs, and contributes a non-zero count here.
+    /// prs, and *can* contribute a non-zero count here. Only can -- this
+    /// counts rows actually tombstoned, so it is 0 unless a repository or
+    /// branch really did vanish, and 0 by construction for the incremental
+    /// runs that are almost all of them (`run_once`, *Limitations*, case 3).
+    /// A zero here is the normal reading, not evidence the gate is broken.
     pub swept: i64,
     pub cursor_after: Option<String>,
 }

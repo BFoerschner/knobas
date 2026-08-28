@@ -70,8 +70,11 @@
 //!   qualifier is the engine's emptiness guard and it is load-bearing here: a
 //!   listing that came back empty is exactly what a token which quietly lost
 //!   its repo scope returns, so a source whose *last* repository is deleted --
-//!   or whose `owners[]` narrows to nothing -- keeps that row, and the branch
-//!   rows under it, indefinitely. See `knobas_sync::run_once`, *Limitations*.
+//!   or whose `owners[]` is narrowed to owners that hold no repositories --
+//!   keeps that row, and the branch rows under it, indefinitely. (`owners: []`
+//!   is the opposite case: an empty list is no filter at all and syncs every
+//!   repository the token can see, per `GiteaConfig::owners`.) See
+//!   `knobas_sync::run_once`, *Limitations*.
 //! * **A branch** is tombstoned *by this adapter* only when the run can see
 //!   that it is gone, and the only thing that remembers a branch is the
 //!   previous cursor (`before.branches`, in `branches` below). A run holding no
