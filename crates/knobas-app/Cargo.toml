@@ -39,6 +39,7 @@ knobas-source = { path = "../knobas-source" }
 # the only place in knobas that names them, and this is its manifest half.
 knobas-source-jira = { path = "../knobas-source-jira" }
 knobas-source-mock = { path = "../knobas-source-mock" }
+knobas-source-teamcity = { path = "../knobas-source-teamcity" }
 knobas-sync = { path = "../knobas-sync" }
 # `IpcError` is what every command rejects with, so it has to serialize.
 serde.workspace = true

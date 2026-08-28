@@ -88,6 +88,7 @@ fn every_adapter_crate_linked_into_the_app_has_a_row() {
     for expected in [
         knobas_source_mock::descriptor_template().adapter_kind,
         knobas_source_jira::descriptor_template().adapter_kind,
+        knobas_source_teamcity::descriptor_template().adapter_kind,
     ] {
         assert!(
             kinds.contains(&expected),
