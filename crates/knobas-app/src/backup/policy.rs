@@ -7,7 +7,8 @@
 //! # What "nightly" means here
 //!
 //! *A backup is due when the last one is older than the most recent occurrence
-//! of the scheduled local time.* Not "a timer that fires at 03:00": a desktop
+//! of the scheduled local time.* Ratified 2026-08-28 (issue #38), against the
+//! obvious alternative. Not "a timer that fires at 03:00": a desktop
 //! is asleep at 03:00 more often than it is awake, and a schedule expressed as
 //! a moment simply does not happen on those days. Expressed as a **boundary**,
 //! the same rule backs up on the next wake instead, and asks nothing of the
@@ -32,7 +33,7 @@ use chrono::{DateTime, Datelike, Duration, NaiveDateTime, TimeZone, Timelike, Ut
 /// backups", ratified nightly in #38).
 ///
 /// `Deserialize` because [`set_backup_schedule`](crate::commands::backup) takes
-/// one from the settings dialog; `Serialize` because it is stored as JSON in
+/// one from the settings dialog (issue #69); `Serialize` because it is stored as JSON in
 /// `knobas.setting` and read back by [`backup_status`](crate::commands::backup).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BackupSchedule {
@@ -42,18 +43,19 @@ pub struct BackupSchedule {
     pub hour: u32,
     /// Local minute, 0-59.
     pub minute: u32,
-    /// How many archives to keep. The oldest beyond this are deleted after a
-    /// successful export.
+    /// How many archives to keep (ratified 2026-08-28, default seven). The
+    /// oldest beyond this are deleted after a successful export.
     pub keep: u32,
 }
 
 impl Default for BackupSchedule {
     /// Enabled, 03:00 local, seven kept.
     ///
-    /// Nightly is ratified; the hour is not, and 03:00 is the usual answer for
-    /// a machine that is either asleep (in which case the boundary rule catches
-    /// it on waking) or idle. Seven is a week -- enough to notice a mistake
-    /// and go back past it, at a few megabytes each.
+    /// All three ratified 2026-08-28 on issue #38, along with the boundary
+    /// reading of "nightly" below. 03:00 is the usual answer for a machine
+    /// that is either asleep (in which case the boundary rule catches it on
+    /// waking) or idle. Seven is a week -- enough to notice a mistake and go
+    /// back past it, at a few megabytes each.
     fn default() -> Self {
         Self {
             enabled: true,

@@ -7,6 +7,9 @@
  *
  * A backup is everything in the `knobas` schema, notes included; the synced
  * mirror is left out because it re-syncs (design §16.12, ratified).
+ *
+ * Nothing calls these yet: the §14 settings surface is issue #69, blocked on
+ * knobas having a settings view to hang it off.
  */
 import { invoke } from "@tauri-apps/api/core";
 
@@ -37,7 +40,7 @@ export interface ArchiveFile {
   bytes: number;
 }
 
-/** Everything the backup settings dialog draws — `backup::BackupStatus`. */
+/** Everything the backup settings dialog (#69) draws — `backup::BackupStatus`. */
 export interface BackupStatus {
   schedule: BackupSchedule;
   /** Absolute path of the directory the archives live in. */

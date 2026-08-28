@@ -1,5 +1,7 @@
-//! Backup export and restore -- the §14 settings surface ("export now /
-//! schedule / restore", plain dialogs).
+//! Backup export and restore -- what the §14 settings surface ("export now /
+//! schedule / restore", plain dialogs) will call. The surface itself is issue
+//! **#69**, blocked on knobas having a settings view at all; this lands
+//! headless.
 //!
 //! Shims, like every other module here: the decisions are in
 //! [`crate::backup`], which is testable without a window.

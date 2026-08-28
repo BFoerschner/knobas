@@ -214,17 +214,12 @@ pub async fn dump(connector: &Connector, archive: &Path) -> Result<u64, BackupEr
 /// [`BackupError::ToolMissing`] or [`BackupError::Tool`] if `pg_restore` will
 /// not read the file.
 pub async fn archive_contents(archive: &Path) -> Result<Vec<TocEntry>, BackupError> {
-    let tool = locate(PG_RESTORE)?;
-    let output = tokio::process::Command::new(&tool)
-        .arg("--list")
-        .arg(archive)
-        .output()
-        .await
-        .map_err(|source| BackupError::Spawn {
-            tool: PG_RESTORE.to_owned(),
-            source,
-        })?;
-    check(PG_RESTORE, &output)?;
+    // The one tool call that needs neither a server nor a password: a table of
+    // contents is read off the file. Hence `tool_command` directly rather than
+    // `run_tool`, which exists to attach a connection.
+    let mut command = tool_command(PG_RESTORE)?;
+    command.arg("--list").arg(archive);
+    let output = run(PG_RESTORE, &mut command).await?;
 
     Ok(String::from_utf8_lossy(&output.stdout)
         .lines()
@@ -436,12 +431,24 @@ async fn run_tool(
     tool: &str,
     args: &[&OsStr],
 ) -> Result<Output, BackupError> {
-    let path = locate(tool)?;
-    let mut command = tokio::process::Command::new(&path);
+    let mut command = tool_command(tool)?;
     command.args(args);
+    // The connection, and in particular the password, reaches the child in its
+    // *environment* and never in `argv` -- see `Connector::libpq_env`.
     for (key, value) in connector.libpq_env() {
         command.env(key, value);
     }
+    run(tool, &mut command).await
+}
+
+/// The bundled `tool` as a command with no arguments yet.
+fn tool_command(tool: &str) -> Result<tokio::process::Command, BackupError> {
+    Ok(tokio::process::Command::new(locate(tool)?))
+}
+
+/// Run `command`, turning a non-zero exit into a [`BackupError::Tool`]
+/// carrying its stderr.
+async fn run(tool: &str, command: &mut tokio::process::Command) -> Result<Output, BackupError> {
     let output = command
         .output()
         .await

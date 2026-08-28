@@ -30,10 +30,17 @@
 //! `knobas_sync::scheduler` is per-*source*: everything it does is driven by
 //! rows in `knobas.source_config`, its concurrency limit is about being polite
 //! to remote systems, and its module docs forbid it knowing about anything but
-//! adapters. A backup is none of those things. **The design document does not
-//! say where this belongs** -- §14 says only "scheduled automatic exports as
-//! backups" -- so this is a choice, recorded here and flagged on the PR rather
-//! than made silently.
+//! adapters. A backup is none of those things. The design document does not
+//! say where this belongs -- §14 says only "scheduled automatic exports as
+//! backups" -- so it was raised rather than settled silently, and **ratified
+//! here on 2026-08-28** (issue #38).
+//!
+//! # There is no settings surface yet
+//!
+//! §14 asks for "a small settings surface (export now / schedule / restore)".
+//! knobas has no settings view to hang one off, so it is **issue #69**,
+//! blocked on that view existing. What is here is what #69 will call: the four
+//! commands in [`crate::commands::backup`] and the typed mirror beside them.
 
 pub mod policy;
 
@@ -88,7 +95,7 @@ pub struct ArchiveFile {
     pub bytes: i64,
 }
 
-/// Everything the settings dialog draws.
+/// Everything the settings dialog draws (issue #69).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct BackupStatus {
     pub schedule: BackupSchedule,
@@ -179,22 +186,49 @@ pub fn state<R: tauri::Runtime>(
         .ok_or_else(|| crate::IpcError::not_ready("the database is still starting".to_owned()))
 }
 
-/// The stored schedule, or the default when nothing has been stored.
+/// One `knobas.setting` row, decoded -- or `None` when it is absent *or no
+/// longer decodes*.
 ///
-/// A stored value that no longer parses -- an older knobas, a hand-edited row
-/// -- falls back to the default rather than failing: the answer to "I cannot
-/// read your schedule" is to keep backing up nightly, not to stop.
+/// Those two are deliberately the same answer. A value that has stopped
+/// parsing -- an older knobas, a hand-edited row -- is a thing this feature
+/// cannot read, and the response to "I cannot read your schedule" is to keep
+/// backing up nightly, not to stop.
+async fn read_setting<T: serde::de::DeserializeOwned>(
+    pool: &PgPool,
+    key: &str,
+) -> Result<Option<T>, sqlx::Error> {
+    let stored: Option<serde_json::Value> =
+        sqlx::query_scalar("select value from knobas.setting where key = $1")
+            .bind(key)
+            .fetch_optional(pool)
+            .await?;
+    Ok(stored.and_then(|value| serde_json::from_value(value).ok()))
+}
+
+/// Store one `knobas.setting` row.
+async fn write_setting<T: serde::Serialize>(
+    pool: &PgPool,
+    key: &str,
+    value: &T,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "insert into knobas.setting (key, value) values ($1, $2)
+         on conflict (key) do update set value = excluded.value, updated_at = now()",
+    )
+    .bind(key)
+    .bind(serde_json::to_value(value).unwrap_or(serde_json::Value::Null))
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// The stored schedule, or the default when nothing has been stored.
 ///
 /// # Errors
 /// [`sqlx::Error`] if the read fails.
 pub async fn load_schedule(pool: &PgPool) -> Result<BackupSchedule, sqlx::Error> {
-    let stored: Option<serde_json::Value> =
-        sqlx::query_scalar("select value from knobas.setting where key = $1")
-            .bind(SCHEDULE_KEY)
-            .fetch_optional(pool)
-            .await?;
-    Ok(stored
-        .and_then(|value| serde_json::from_value::<BackupSchedule>(value).ok())
+    Ok(read_setting::<BackupSchedule>(pool, SCHEDULE_KEY)
+        .await?
         .unwrap_or_default()
         .clamped())
 }
@@ -208,14 +242,7 @@ pub async fn save_schedule(
     schedule: BackupSchedule,
 ) -> Result<BackupSchedule, sqlx::Error> {
     let schedule = schedule.clamped();
-    sqlx::query(
-        "insert into knobas.setting (key, value) values ($1, $2)
-         on conflict (key) do update set value = excluded.value, updated_at = now()",
-    )
-    .bind(SCHEDULE_KEY)
-    .bind(serde_json::to_value(schedule).unwrap_or(serde_json::Value::Null))
-    .execute(pool)
-    .await?;
+    write_setting(pool, SCHEDULE_KEY, &schedule).await?;
     Ok(schedule)
 }
 
@@ -224,12 +251,7 @@ pub async fn save_schedule(
 /// # Errors
 /// [`sqlx::Error`] if the read fails.
 pub async fn last_record(pool: &PgPool) -> Result<Option<BackupRecord>, sqlx::Error> {
-    let stored: Option<serde_json::Value> =
-        sqlx::query_scalar("select value from knobas.setting where key = $1")
-            .bind(LAST_KEY)
-            .fetch_optional(pool)
-            .await?;
-    Ok(stored.and_then(|value| serde_json::from_value(value).ok()))
+    read_setting(pool, LAST_KEY).await
 }
 
 /// Take a backup now, whatever the schedule says.
@@ -252,14 +274,7 @@ pub async fn export_now(state: &BackupState) -> Result<BackupRecord, ExportError
         bytes: i64::try_from(bytes).unwrap_or(i64::MAX),
     };
 
-    sqlx::query(
-        "insert into knobas.setting (key, value) values ($1, $2)
-         on conflict (key) do update set value = excluded.value, updated_at = now()",
-    )
-    .bind(LAST_KEY)
-    .bind(serde_json::to_value(&record).unwrap_or(serde_json::Value::Null))
-    .execute(&state.pool)
-    .await?;
+    write_setting(&state.pool, LAST_KEY, &record).await?;
 
     let schedule = load_schedule(&state.pool).await?;
     prune(state, schedule.keep)?;
