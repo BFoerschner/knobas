@@ -340,7 +340,7 @@ pub struct EntityDetail { pub row: EntityRow, pub source: SourceRef,
                           pub payload: serde_json::Value,          // §3a generic detail view
                           pub web_url: Option<String>,             // proposal P5
                           pub deleted_at: Option<DateTime<Utc>>,
-                          pub links: Vec<knobas_core::link::LinkRow>,   // empty in M1 (links = M2)
+                          pub links: Vec<knobas_core::link::LinkEntry>,
                           pub activity: Vec<knobas_core::activity::ActivityRow> }
 pub struct SourceRef { pub id: String, pub display_name: String, pub adapter_kind: String }
 ```
@@ -706,10 +706,14 @@ Stream T note for the Gitea live suite: the seed **cannot** reproduce fixture PR
     retirement and the branch hard-delete window — **for cursor-less runs**. That qualifier
     applies to both halves, not only to the branch one it was first written on: `swept` is gated
     on `full_sync = cursor.is_none()`, and every scheduled run resumes from a stored position
-    (`knobas_sync::run_from_stored_cursor`). In a running installation a cursor-less run is a
-    source's first sync and *Load demo data*; there is no user-facing re-sync or clear-cursor
-    path. So a deleted Gitea repository is retired the next time that source syncs in full,
-    which absent a cleared cursor may be never.
+    (`knobas_sync::run_from_stored_cursor`). In a running installation the runs that
+    sweep are a source's first sync and *Load demo data*. **Since #32 there is also a
+    user-facing cursor-less path -- `backfill_source` / `knobas_sync::run_backfill` -- and it is
+    deliberately not one of them:** a backfill hands the adapter `None` and takes the sweep away,
+    so it re-reads payloads without judging what still exists (ratified non-sweeping by Björn
+    2026-08-28; the reasoning is on `run_backfill`). So a deleted Gitea repository is still
+    retired only the next time that source syncs in full, which absent a cleared cursor may be
+    never -- the backfill does not close that hole and was not meant to.
   - **Residual, documented not fixed — two cases, not one.** (a) Hard deletes in a
     non-exhaustive kind stay inexpressible. (b) So do hard deletes in an *exhaustive* kind that
     emitted nothing: the emptiness guard spares it, so a kind whose corpus goes to zero upstream
@@ -777,6 +781,46 @@ Stream T note for the Gitea live suite: the seed **cannot** reproduce fixture PR
   which monotonic ids make impossible and which catches *drift* (a source repointed at another
   instance, a restore from an older backup, an upgrade changing an undocumented default) rather
   than a server that was always wrong.
+
+### Amendments from the M2 Jira narrow-payload package (2026-08-28, binding) — issue #32
+
+- **§5 mockd deviation 5 is widened, not retired: the Jira `fields=` set gains six names.**
+  `jira::NAVIGABLE` gains `labels`, `parent`, `resolution`, `issuelinks`, `timeoriginalestimate`
+  and `timespent`. The set stays *closed* — `components`, `fixVersions` and `timeestimate` are
+  still a 400 plus an `UnknownField` violation, with a test that says so. The deviation's own text
+  now records what it must not become: a closed set here gates the *adapter*; it is not a budget
+  for what production may fetch. Read as one, it made a mock's coverage decide what production
+  fetched, and the mirror carried no epic membership, no links and no resolution for any issue
+  knobas had ever synced.
+- **§5 new mockd deviation 13: an issue's `fields.parent` is its epic.** The fixture records epic
+  membership (`Ticket::epic`) and no sub-tasks, so `parent` carries the epic — the spelling a
+  next-gen or recent company-managed project serves. A *classic* Data Center project keeps that
+  relationship in a custom field, which `JiraConfig::epic_link_field` still names and which this
+  mock cannot tell an adapter about.
+- **§5 every new field is transcribed from `fixtures/tidewater/work.json`, none invented** (the
+  #28 ruling): `parent` from `epic`, and **absent — not null — where a ticket has no epic**, as
+  real Jira serves it; `issuelinks` from `blocked_by`, served at both ends under one shared link
+  id; `resolution` from the `done` status category; `timeoriginalestimate` from `estimate_h`;
+  `timespent` from the sum of worklog seconds — `null`, not `0`, where nothing is logged, because
+  Jira reports zero for logged time that was *deleted*; `labels` always `[]`. The two
+  `fields=*all` goldens are regenerated.
+- **§4.2 Jira `BASE_FIELDS` widens from twelve names to eighteen**, the six above. The reader is
+  `payload` (§3a keeps the raw record so a later mapping can re-project it without re-syncing), so
+  #33's "ask for nothing no reader looks at" lands differently here: a name left out is not
+  response size saved, it is data the mirror never holds, recoverable only by re-fetching every
+  issue in the source. `epic_link_field` is **not** made redundant — the two spellings belong to
+  different kinds of project — and its schema description now says so.
+- **§4.2 the Jira twin of #33's budget test is new, not renamed**:
+  `the_field_list_asks_for_nothing_the_fixture_cannot_answer` pairs each unasked name with its own
+  reason. There was no negative test to rename — the existing
+  `the_field_list_asks_for_the_two_containers_…` makes positive assertions only — and what was
+  false was the constant's own doc comment.
+- **§4.2/§1 a backfill is logged under its own trigger, `backfill`** (migration 0004, #90), not
+  `manual`. It is the one run forbidden to reconcile, so its `swept` is `0` by construction, and
+  the question anybody asks of a surprising tombstone count is which run produced it.
+  `knobas_sync::scheduler::RunMode` is *derived* from the trigger (`impl From<SyncTrigger> for
+  RunMode`), so the two cannot disagree — a `debug_assert` pairing them was rejected because it is
+  compiled out of `tauri build`, which is exactly where the mislabelling would matter.
 
 ---
 
@@ -949,6 +993,89 @@ From this commit on, each of the following requires an orchestrator decision **a
 - `crates/knobas-app/src/{error,profile}.rs`.
 
 **Ratified exceptions to the frozen list** (recorded here because this section requires it):
+
+- **IPC schema**, issue #53 (2026-08-28): `EntityDetail.links` becomes
+  `Vec<knobas_core::link::LinkEntry>`, where a `LinkEntry` is the link record plus a `LinkEnd` --
+  the end the reader is *not* on (`entity_id`, `kind`, `title`, `deleted_at`). Two new DTOs, both
+  riding inside `EntityDetail` rather than crossing on their own, the same precedent as that
+  entry's `LinkRow.note`. No new command; the read side was already `get_entity`.
+
+  **This supersedes two sentences of the #52 entry above**, both true when written: "`EntityDetail`
+  keeps its shape" (it does not -- `links` changes element type) and its reference to `links_of`,
+  which no longer exists. `entries_of` **replaced** it rather than joining it, so there is one read
+  with one store battery behind it. The old entry is left as history rather than rewritten, the
+  same treatment §9 gives the superseded TeamCity locator table.
+
+  **The wire shape is nested, deliberately:** `{link, other}`, produced by `#[sqlx(flatten)]` on
+  the query side and *not* `#[serde(flatten)]` on the wire. Flattening it into one bag would
+  collide `id` -- the link's and the other end's -- so a later "tidy-up" that flattens it is a bug,
+  not a simplification.
+
+  The hydration reads `knobas.entity`, **not** `sync.live_item`: that is the whole mechanism by
+  which a link to an entity withdrawn upstream still resolves and is marked, instead of dangling.
+  A test pins it from both ends against a genuinely tombstoned fixture row.
+
+- **`crates/knobas-source/src/**`, `crates/knobas-http/**` and two patterns in
+  `crates/knobas-app/src/error.rs`, issue #34 (2026-08-28):** ADR-0004
+  (`docs/adr/0004-structured-source-error-status.md`, accepted 2026-08-27) is the decision this
+  entry records, and it specifies the package: the status on `SourceError`, 401 and 403 made
+  distinct, a body→message hook, and all three adapters migrated in the same change.
+
+  **The SPI.** `SourceError::Unauthorized` becomes `Unauthorized { status: Option<u16> }` and
+  `Protocol(String)` becomes `Protocol { status: Option<u16>, message: String }`;
+  `SourceError::status()` is the one way to ask, and `SourceError::unauthorized()` /
+  `SourceError::protocol(..)` construct the faults an adapter raises without asking anyone --
+  a missing keychain entry, a base URL that is not one -- which carry no status. That absence is
+  load-bearing, not incidental: a sink failure or a DNS blip reading as a 404 would be swallowed
+  as a skipped repository. **The four fault classes are unchanged and so is every mapping
+  downstream of them**: 401 *and* 403 are still `Unauthorized`, which is what puts *Re-enter
+  password* on screen and what a Jira DC CAPTCHA lockout needs, so `IpcErrorCode`, `AuthState`
+  and `SyncOutcome` map exactly as before. Björn ruled on that reading of ADR-0004's "401 and 403
+  become distinct" on 2026-08-28: distinguishable **by status**, not two fault classes. What
+  changes is that an adapter can now tell which refusal it got, which is what ADR-0004 asked for;
+  Gitea's `credential_still_good` probe, whose only reason to exist was that it could not, is
+  deleted. Both status fields are `#[serde(default)]`, so a peer that sends none still decodes.
+  The serde form of the two variants changes (`"Unauthorized"` -> `{"Unauthorized":{"status":401}}`)
+  and that reaches nothing: `SourceError` has no TypeScript mirror and does not cross the bridge --
+  §2.2 spells `ConnectionReport::error` as `Option<SourceError>`, and the shipped code deliberately
+  carries a `String` plus an `IpcErrorCode` instead, saying so in place (`sources/mod.rs`). No IPC
+  command, DTO field or event name changes. `contract.rs` takes the same pattern-shape edit and
+  nothing more -- no battery clause added, removed or reworded.
+
+  **`crates/knobas-http`.** `classify::status_error` gains a third parameter, the caller's
+  `BodyMessage` (`fn(&str) -> Option<String>`), and `HttpConfig` gains
+  `body_message: Option<BodyMessage>`, `None` by default. It is consulted inside
+  `HttpClient::send`, where the response body still exists and where nothing else can reach it,
+  and only for the message-carrying fault -- `Unauthorized` carries no message. What a hook
+  returns is excerpted like the raw body, so it cannot widen `BODY_EXCERPT`. Additive on the
+  config and covered by its `Default`; a full struct literal must name `body_message`, which all
+  three adapters now do. Every other guarantee of the crate is untouched -- one door onto the
+  wire, one fault mapping, the same attempts, budget, `Retry-After` and rate limit, and the
+  re-export list is unchanged but for `BodyMessage`. `tests/transport.rs` gains one end-to-end
+  test -- the only witness that `HttpConfig` -> `HttpClient` -> `send` is wired, since
+  `classify`'s unit tests call `status_error` directly and never build a client -- plus the same
+  pattern-shape edits.
+
+  **`crates/knobas-app/src/error.rs`.** Pattern shapes only, no arm added or removed:
+  `SourceError::Unauthorized` -> `SourceError::Unauthorized { .. }` and
+  `SourceError::Protocol(_)` -> `SourceError::Protocol { .. }` in `from_source_error`, forced by
+  the variants becoming struct variants. The mapping itself does not move. Outside the frozen
+  list and noted for completeness: `sources/crud.rs`'s `auth_state_of`, `sources/mod.rs`'s
+  `to_ipc` and `sources/registry.rs` take the same pattern-shape edit and nothing more.
+
+  Ratified by the orchestrator as ADR-0004 and issue #34, which specify the package and its
+  acceptance criteria. **No migration of its own** -- `0004` is `0004_backfill_trigger.sql`,
+  claimed by #32. No other change inside the frozen paths.
+
+- **IPC schema**, issue #32 (2026-08-28): one new command, `backfill_source` (`sourceId` -> run id),
+  with `backfillSource` in `app/src/lib/ipc/sources.ts`. It re-reads a source from the top,
+  ignoring its stored position, so a *payload widening* reaches items nobody has touched -- the job
+  nothing else can do, since an incremental run re-fetches what changed upstream and widening a
+  `fields=` list changes nothing upstream. It **deliberately does not sweep**: ratified non-sweeping
+  by Björn 2026-08-28, because the way a cursor-less run goes wrong produces no error -- a credential
+  that quietly loses sight of a project answers with a smaller corpus and a 200 -- and a sweeping
+  backfill would read that as "those items are gone". Additive; no existing command's shape changes.
+  No UI affordance calls it yet (#69 owns the settings surface).
 
 - **IPC schema**, issue #39 (2026-08-28): `SearchFilters` gained `authors: Vec<String>`, with the
   matching field on the `app/src/lib/ipc` TS mirror. **Not a new grant** — the per-stream rulings
