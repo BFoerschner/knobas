@@ -36,6 +36,18 @@ The limits, until measurement says otherwise:
 - **Reviewers count too.** They build and mutate in their own worktrees; treat one reviewer as roughly one implementer. Two implementers + one active reviewer is the practical ceiling.
 - **Commit per task, always.** What survived the wipe was what had been committed (4, 3, 2, 1 commits across four streams); one stream had committed nothing and lost its whole batch to the working tree. This is why the standing rule is: commit before going idle.
 - **Reclaim disk on every merge.** Each worktree carries its own `target/` (~6 GB once warm), so a five-stream fan-out is ~30 GB of duplicated build artifacts on top of the main checkout. Delete a stream's `target/` when its PR merges and when it is parked — it costs a rebuild, not any source. Do **not** collapse the worktrees onto one shared `CARGO_TARGET_DIR`: cargo locks that directory during a build, so concurrent agents would serialize and look like the no-progress stalls above.
+- **A merge-manager cleans up after itself (rule, Björn 2026-08-28).** Merging is not done until the
+  stream leaves no residue. In order, and only after the merge is confirmed: squash-merge with
+  `--delete-branch`, verify the remote branch is actually gone (see the known `gh` failure below)
+  and delete it explicitly if not, then `git -C <repo-root> worktree remove .worktrees/<name>` —
+  which takes that worktree's `target/` with it. Report the space reclaimed. Removing the worktree
+  is the one git command a merge-manager may run outside its own worktree, and only post-merge.
+  If `worktree remove` refuses because the tree is dirty, **report it — never force it**: a dirty
+  tree post-merge means something was not committed, and that is a finding, not an obstacle.
+  - **Known cosmetic failure:** `gh pr merge --squash --delete-branch` exits 1 with
+    `fatal: 'main' is already used by worktree` when the repo root has `main` checked out. The
+    GitHub-side merge has *already succeeded*; only the local post-merge checkout failed. Confirm
+    with `gh pr view <n> --json state,mergedAt` before reacting to that exit code.
 - **Verify briefs actually extracted before dispatching.** A shell gotcha silently produced zero-byte files named `task-1 2 3 4-brief.md` for five streams (`IFS=:` before `read` persisted, so `for n in $nums` never split). The agents coped by reading the whole plan and reported nothing missing, so it cost context rather than correctness — but a scoped brief is the point. `ls` the directory and check the file count and sizes.
 - **Sweep before dispatching a wave**: `ps aux | grep -E 'postgres|cargo|rustc'` and stop orphans. A crashed agent can leave an embedded Postgres cluster running, and the next wave inherits the contention.
 - Wall-clock parallelism is still the goal — it just comes from *pipelining* (implementer on stream X while a reviewer works stream Y) rather than from starting everything at once.
@@ -52,6 +64,13 @@ The limits, until measurement says otherwise:
 7. **Hand the reviewer a prepared package.** Every dispatch that makes an agent re-derive the diff and re-read plan + contract + constraints + reports pays a fixed several-minute tax that gets *worse* as PRs get smaller. Use the SDD `review-package` script (diff + stat + commit list in one file) and name the exact context paths in the dispatch.
 
 Shifting left: implementers now **mutation-check their own load-bearing tests and paste the proof**. Vacuous tests were the most common finding across M0 — six-plus times, always caught downstream by an expensive reviewer. Catching them in the cheap seat removes that whole class from the review loop.
+
+**A mutation script never runs a tree-wide destructive checkout (rule, Björn 2026-08-28 — after ~40 minutes of work was destroyed).** An implementer's mutation harness ended with `git checkout -- crates app` to undo its edits; it also silently reverted every uncommitted change in those paths, and the work was gone with no reflog to recover it (`git checkout --` discards, it does not record). Two rules, both cheap:
+
+1. **Commit the baseline before mutating.** The point of a mutation check is that the tree is a known-good state you are deliberately breaking — if that state is not committed, the check has no floor to return to.
+2. **Restore by inverse, not by blast radius.** Revert the specific file you mutated (`git checkout -- <that one path>`, or better, write the original bytes back from a saved copy). Never aim a restore at a whole directory, and never at `.`.
+
+This is the same failure the "commit before going idle" rule addresses, arriving through a different door: the danger is not only crashing with uncommitted work, it is *your own tooling* deleting it.
 
 **Worktree exclusivity (rule, Björn 08-24 — after an orchestrator merge collided with a live agent):** a worktree has exactly **one** owner at a time and that owner is whoever is live in it. One worktree per agent, created by the orchestrator, named in the dispatch, released when the agent reports and its work is **committed**. While an agent is live: nobody else edits files there, and the orchestrator runs **no** git command there — not a merge, not a rebase, not a `checkout`. The orchestrator's own git work (merging stream branches, resolving lockfiles, syncing `main`) happens in the repo-root checkout or a dedicated scratch worktree, never in a borrowed one. Sequential tasks stacking on one branch may reuse a worktree, but only strictly one-at-a-time with an explicit handover; when in doubt, give the next agent a fresh worktree branched from the previous task's committed head. Human gate (amended 2026-08-28 — a merge-manager agent now merges its own PR; see the Process section): milestone exits, and whenever a frozen contract (Source trait / migrations baseline / IPC) needs changing.
 
