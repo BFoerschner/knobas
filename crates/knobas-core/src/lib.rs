@@ -24,7 +24,15 @@ pub use error::CoreError;
 /// It lives here, in the crate every other one depends on, because both sides
 /// of the bridge need it: `link::Origin` here and `knobas_sync`'s `AuthState`,
 /// `SyncTrigger` and `SyncOutcome` are the same kind of list against the same
-/// kind of constraint.
+/// kind of constraint. Being exported makes it callable from crates that have
+/// no `serde` in scope, so the expansion names `::serde` absolutely; a caller
+/// still needs the dependency, but gets a missing-crate error rather than a
+/// baffling one inside a macro it did not write.
+///
+/// The derive set is every trait a fieldless label wants and none that costs
+/// anything: `Hash` is there because `Origin` had it before it was declared
+/// this way, and taking it away would be a change to a public type that
+/// nothing asked for.
 #[macro_export]
 macro_rules! closed_vocabulary {
     (
@@ -34,7 +42,9 @@ macro_rules! closed_vocabulary {
         }
     ) => {
         $(#[$enum_meta])*
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+        #[derive(
+            Debug, Clone, Copy, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize,
+        )]
         #[serde(rename_all = "snake_case")]
         pub enum $name {
             $( $(#[$variant_meta])* $variant, )+

@@ -207,6 +207,11 @@ mod tests {
     /// enum, so a new origin necessarily reaches this assertion. The other
     /// half of the pin -- the constraint as the live catalog reports it --
     /// is in `crates/knobas-db/tests/schema.rs`.
+    ///
+    /// It reads `0003` because `0003` is where the constraint is, and applied
+    /// migrations are never edited: widening the vocabulary means a `0004`
+    /// that drops and re-adds it, and rewriting this test to read *that* file
+    /// is part of doing so, not an accident of it.
     #[test]
     fn the_origins_are_exactly_what_the_migration_allows() {
         let migration = include_str!("../../knobas-db/migrations/0003_link_origin.sql");
