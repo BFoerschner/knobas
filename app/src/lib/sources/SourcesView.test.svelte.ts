@@ -526,6 +526,30 @@ test("Delete asks first, and the confirm dialog names the source and the purge c
  * The `mock` control is the half that makes this an assertion about *forgetting
  * one* rather than about clearing everything.
  */
+/**
+ * The row's monogram is the **source id**, which is P10's whole point.
+ *
+ * `jira` and `tidewater-jira` are two instances of one adapter (§4.2's
+ * multi-instance form), so a monogram taken from the *adapter kind* draws `JI`
+ * over both — while the top strip, which has always taken the id, draws `JI`
+ * and `TI`. Same two sources, told apart in one place and not in the other.
+ * The fixture used to hide this: its id and its adapter kind were the same
+ * word.
+ */
+test("two instances of one adapter get two monograms, not one", async () => {
+  sources = [
+    source(),
+    source({ id: "tidewater-jira", display_name: "Tidewater Jira EU" }),
+  ];
+  render();
+  await settle();
+
+  const monograms = [...target.querySelectorAll(".src:not(.hd) .mg")].map((el) =>
+    el.textContent?.trim(),
+  );
+  expect(monograms).toEqual(["JI", "TI"]);
+});
+
 test("a deleted source leaves the shared health store, not just the list", async () => {
   sources = [source(), source({ id: "mock", display_name: "Tidewater mock" })];
   const store = health();

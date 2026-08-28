@@ -277,6 +277,7 @@
           {#if session.home}
             <Board
               home={session.home}
+              sources={health}
               rows={session.rows}
               selected={session.selected}
               {now}

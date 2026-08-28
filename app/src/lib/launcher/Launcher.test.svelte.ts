@@ -390,6 +390,54 @@ test("an empty box shows the smart lists and the recent items", async () => {
 });
 
 /**
+ * The board strip and the chips are **one** reading, not two.
+ *
+ * The strip used to map `home.sources` — the per-opening `launcher_home` fetch
+ * — while the chips above it were drawn from the live `source:health` store.
+ * They shared `isActionable`, which is a shared *rule* over two sets of data,
+ * and a comment in `Board.svelte` claimed on that basis that the two "cannot
+ * come to different conclusions about the same source". They could: this test
+ * hands the board a stale 401 the live store has already retracted, which is
+ * exactly the shape of #27's finding one layer along.
+ */
+test("the board strip reads the live health, not the copy the board arrived with", async () => {
+  open({
+    // Supplied and disagreeing with the board's own copy: the store says gitea
+    // is fine, the per-opening fetch still remembers a 401.
+    sources: [
+      {
+        source_id: "gitea",
+        state: "ok",
+        checked_at: "2026-08-25T12:00:00Z",
+        detail: null,
+        secret_expires_at: null,
+      },
+    ],
+    ports: {
+      search: async () => response(),
+      launcherHome: async () => ({
+        ...HOME,
+        sources: [
+          {
+            source_id: "gitea",
+            state: "unauthorized",
+            checked_at: "2026-08-25T11:00:00Z",
+            detail: "401 from Gitea",
+            secret_expires_at: null,
+          },
+        ],
+      }),
+    },
+  });
+  await settle();
+
+  const strip = [...target.querySelectorAll(".strip .src")];
+  expect(strip.length, "the strip did not render at all").toBe(1);
+  expect(strip[0]!.className).not.toContain("fail");
+  expect(strip[0]!.textContent).not.toContain("401 from Gitea");
+});
+
+/**
  * The board's third section (spec §4: the empty box shows source health beside
  * the lists). Not selectable — a reading, not a destination — so nothing else
  * in this file would notice if it stopped being drawn.

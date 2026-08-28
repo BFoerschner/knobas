@@ -13,15 +13,17 @@
 -->
 <script lang="ts">
   import type { LauncherHome } from "../ipc";
+  import type { CredentialHealth } from "../ipc/sources";
   import { isActionable } from "../shell/health.svelte";
+  import { sourceMonogram } from "../shell/monogram";
   import Monogram from "../shell/Monogram.svelte";
   import { ago } from "../shell/time";
-  import { sourceMonogram } from "./format";
   import Row from "./Row.svelte";
   import type { LauncherRow } from "./rows";
 
   let {
     home,
+    sources,
     rows,
     selected,
     now,
@@ -29,6 +31,18 @@
     onhover,
   }: {
     home: LauncherHome;
+    /**
+     * The credential health the strip draws — the launcher's, which is the
+     * live `source:health` store when the shell supplies one and the board's
+     * own per-opening copy when it does not.
+     *
+     * Passed in rather than read off `home.sources` here: the chips above this
+     * strip are drawn from the live store, and two copies is two chances for
+     * the strip and a result row's badge to say different things about the
+     * same source — which is the divergence #27's review found and this PR
+     * claimed to have closed.
+     */
+    sources: CredentialHealth[];
     rows: LauncherRow[];
     selected: number;
     now?: Date | undefined;
@@ -41,7 +55,7 @@
 
   /** One line per source: what it is, and whether knobas can still read it. */
   const strip = $derived(
-    home.sources.map((source) => ({
+    sources.map((source) => ({
       id: source.source_id,
       monogram: sourceMonogram(source.source_id),
       // `shell/health.svelte` owns the reading of a health state, so this
@@ -84,8 +98,11 @@
   `>` already offers. Making it another Enter target would put two different
   meanings on one key.
 -->
-<div class="secl"><span class="lab">Sources</span><span class="n">{home.sources.length}</span></div>
-{#if home.sources.length === 0}
+<!-- The count and the gate read the same list the strip does, not the copy the
+     board arrived with — a header saying "2" over one line is the same lie in
+     a smaller place. -->
+<div class="secl"><span class="lab">Sources</span><span class="n">{sources.length}</span></div>
+{#if sources.length === 0}
   <p class="none">No source is configured yet.</p>
 {:else}
   <div class="strip">

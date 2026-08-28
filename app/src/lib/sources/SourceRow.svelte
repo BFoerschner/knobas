@@ -14,6 +14,7 @@
 -->
 <script lang="ts">
   import Monogram from "../shell/Monogram.svelte";
+  import { sourceMonogram } from "../shell/monogram";
   import { expiryNote, isActionable } from "../shell/health.svelte";
   import { ago } from "../shell/time";
   import type { AuthState, CredentialHealth, SourceSummary, SourceSyncStatus } from "../ipc/sources";
@@ -61,8 +62,17 @@
 
   const running = $derived(status?.running ?? false);
 
-  /** `jira` → `JI`. The adapter kind is the only identifier every source has. */
-  const monogram = $derived(source.adapter_kind.slice(0, 2).toUpperCase() || "??");
+  /**
+   * `jira` → `JI`, from the **source id**, which is the same reading the top
+   * strip's cluster and the launcher's board strip take.
+   *
+   * It was the adapter *kind* here, under a comment claiming that was "the only
+   * identifier every source has" — which `source.id`, rendered two lines below
+   * this in the sub-line, disproves. The cost was real: with `jira` and
+   * `tidewater-jira` both configured (P10's multi-instance form), the strip
+   * told them apart and this view drew `JI` twice.
+   */
+  const monogram = $derived(sourceMonogram(source.id));
 
   /**
    * What the credential column says about the state itself.

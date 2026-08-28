@@ -9,6 +9,7 @@
  */
 import type { CredentialHealth } from "../ipc/sources";
 import { isActionable } from "../shell/health.svelte";
+import { sourceMonogram } from "../shell/monogram";
 import { ago } from "../shell/time";
 
 /**
@@ -22,23 +23,6 @@ export function syncAge(iso: string, now?: Date): string {
   return `synced ${ago(iso, now)}`;
 }
 
-/**
- * A source's two-letter monogram — `jira` → `JI`, `teamcity` → `TE`.
- *
- * From the source **id**, which is what knobas has: `CredentialHealth` carries
- * no display name (interfaces §2.2), and a per-adapter table of pretty
- * monograms is exactly what spec §3a forbids ("a new ticket system is
- * browsable on day one").
- *
- * So it is the first two letters and nothing cleverer. The mockup hand-wrote
- * `TC` for TeamCity; this returns `TE`, and the difference is the point — the
- * mockup knew six sources by name and knobas may not know any of them. An
- * earlier draft of this comment claimed `TC`, which is how a doc lies: the
- * test below is what caught it.
- */
-export function sourceMonogram(sourceId: string): string {
-  return sourceId.slice(0, 2).toUpperCase() || "?";
-}
 
 /**
  * What to say about a source whose credential needs attention.
@@ -76,3 +60,9 @@ export function provenance(
   }
   return { text: syncAge(syncedAt, now), failing: false };
 }
+
+/**
+ * Re-exported so `launcher/index.ts` keeps its shape; the rule itself lives in
+ * `shell/monogram.ts`, because the top strip and the sources view draw it too.
+ */
+export { sourceMonogram };

@@ -14,6 +14,7 @@
   import type { AuthState } from "../ipc/sources";
   import ContextTabs from "./ContextTabs.svelte";
   import Monogram from "./Monogram.svelte";
+  import { sourceMonogram } from "./monogram";
   import { builtinContexts, type RoomContext } from "./contexts";
   import { health as sharedHealth, isActionable, type Health } from "./health.svelte";
   import type { Router } from "./router.svelte";
@@ -102,7 +103,7 @@
     >
       {#each health.all as source (source.source_id)}
         <Monogram
-          text={source.source_id.slice(0, 2).toUpperCase()}
+          text={sourceMonogram(source.source_id)}
           tone={isActionable(source.state) ? "err" : "ok"}
           label="{source.source_id}: {STATE_WORD[source.state]}"
         />
