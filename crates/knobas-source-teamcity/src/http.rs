@@ -150,14 +150,22 @@ pub(crate) fn client(
 /// sentence that says which project was not found.
 ///
 /// `None` for anything that is not that shape -- an HTML error page from a
-/// reverse proxy, an empty body -- which keeps the raw excerpt.
+/// reverse proxy, an empty body -- which keeps the raw excerpt. That is why the
+/// opening line is *required* rather than merely skipped: a body that does not
+/// announce itself as TeamCity's error text is not TeamCity's error text, and
+/// lifting its first line out of it would put `<html>` on screen where the
+/// bounded excerpt of the whole page was the more informative answer.
 fn error_message(body: &str) -> Option<String> {
-    let detail = body
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        // The first line is the status, which the message already carries.
-        .find(|line| !line.starts_with("Error has occurred during request processing"))?;
+    let mut lines = body.lines().map(str::trim).filter(|line| !line.is_empty());
+    // The first line is the status, which the message already carries -- and it
+    // is what identifies the body as TeamCity's in the first place.
+    if !lines
+        .next()?
+        .starts_with("Error has occurred during request processing")
+    {
+        return None;
+    }
+    let detail = lines.next()?;
     // `Error: <fully.qualified.Exception>: <sentence>` -- keep the sentence.
     let detail = detail
         .strip_prefix("Error: ")
@@ -319,11 +327,15 @@ mod tests {
             Some("locator is bad".to_owned())
         );
         // And nothing at all is read out of an empty body or a proxy's HTML.
+        // The HTML cases are the reason the opening line is required: without
+        // that, a multi-line error page reads as its own first line -- `<html>`
+        // -- which is strictly less than the raw excerpt it would replace.
         assert_eq!(error_message(""), None);
         assert_eq!(error_message("   \n \n"), None);
+        assert_eq!(error_message("<html><body>502</body></html>"), None);
         assert_eq!(
-            error_message("<html><body>502</body></html>"),
-            Some("<html><body>502</body></html>".to_owned())
+            error_message("<html>\n<head><title>502 Bad Gateway</title></head>\n</html>"),
+            None
         );
     }
 
