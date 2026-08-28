@@ -50,10 +50,23 @@ jobs:
       # `git ls-files` rather than `find`: only tracked files, so a seeded
       # volume or a stray local script can never enter or skew the set.
       #
-      # The empty guard is the point of the step, not decoration: a discovery
-      # that silently matched nothing would make `shellcheck` exit 0 having
-      # examined no files at all, and this job would report green while
-      # checking literally nothing.
+      # The empty guard is the point of the step, not decoration -- but not for
+      # the reason this comment used to give. It claimed a discovery matching
+      # nothing "would make `shellcheck` exit 0 having examined no files at
+      # all". Measured: bare `shellcheck` prints "No files specified." and
+      # exits **3** -- on 0.9.0 (what the `ubuntu-24.04` image this job runs on
+      # ships), on 0.10.0 and on 0.11.0 alike. The job fails either way and was
+      # never at risk of reporting green over nothing.
+      #
+      # What the guard actually buys is what that failure *says*. Without it
+      # the step has already printed "shellchecking 0 scripts:" and then dies
+      # in a usage dump, which reads as a broken workflow rather than as a
+      # discovery that stopped matching -- and on the runner's bash it really
+      # does reach that line, because `"${scripts[@]}"` on an empty array
+      # expands to no arguments at all under `set -u` from bash 4.4 on.
+      # It also keeps the step off the exit code of a tool nothing here pins:
+      # the runner image upgrades shellcheck without asking, and "no arguments
+      # is an error" is a behaviour, not a promise.
       - name: shellcheck every script in testenv/
         run: |
           set -euo pipefail
@@ -66,7 +79,7 @@ jobs:
           done < <(git ls-files -z -- 'testenv/**' | tr '\0' '\n')
 
           if [ ${#scripts[@]} -eq 0 ]; then
-            echo "::error::shebang discovery matched no scripts under testenv/ -- shellcheck would have run on nothing and passed. Fix the discovery, do not delete this guard."
+            echo "::error::shebang discovery matched no scripts under testenv/ -- nothing was linted. Fix the discovery, do not delete this guard."
             exit 1
           fi
 
