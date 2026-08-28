@@ -15,9 +15,13 @@
 //!   6) and **the route table is the allowlist**. Both answer a mistake with a
 //!   real error *and* a recorded [`Violation`](knobas_mockd::Violation), which
 //!   is why every test here ends with `assert_no_violations()`.
-//! * **Builds come back ascending by id** (mockd deviation 12), where real
-//!   TeamCity answers newest-first. Nothing below asserts an order, and
-//!   `sync`'s own unit tests run the same fixture through both orderings.
+//! * **Builds come back newest-first**, as they do on a real server. Nothing
+//!   below asserts an order, but the run is no longer indifferent to one: the
+//!   opening ceiling query reads row 0 of its page as the newest build. It
+//!   checks that page against itself rather than trusting it -- two rows in
+//!   ascending order are refused on the spot -- so a server that answered the
+//!   other way never gets as far as a watermark. `sync`'s own unit tests hold
+//!   both halves of that.
 //!
 //! Expectations are **computed from `knobas_source_mock::fixture()`**, not
 //! hard-coded: mockd transcribes `build.num` to `build.id` and `build.cfg` to
@@ -260,6 +264,122 @@ async fn a_mirrored_build_carries_what_the_ui_and_the_index_read() {
         cfg.updated_at, None,
         "TeamCity dates no configuration, and `now()` is forbidden"
     );
+    server.assert_no_violations();
+}
+
+/// Authorship, at the wire: `triggered(user(username))` is the only place
+/// TeamCity names the person who started a build, so the selector has to ask
+/// for it and the mock has to recognise the name.
+///
+/// The fixture names a person for one build and nobody for the others, and
+/// both are asserted here. A run that reported the same author for every build
+/// -- or `None` for every build, which is what the narrow selector produced --
+/// would fail one of the two.
+#[tokio::test]
+async fn a_build_names_the_person_who_triggered_it() {
+    let server = spawn_mock_teamcity().await;
+    let (items, _) = sync(
+        adapter(&server.base_url(), serde_json::json!({})).as_ref(),
+        None,
+    )
+    .await;
+
+    let f = knobas_source_mock::fixture();
+    let mut named = 0;
+    for b in &f.builds {
+        let it = items
+            .iter()
+            .find(|i| i.entity.key == format!("build:{}", b.num))
+            .unwrap_or_else(|| panic!("build {} missing; got {:?}", b.num, keys(&items)));
+        match b.triggered_by.as_deref() {
+            Some(id) => {
+                named += 1;
+                let p = f
+                    .person(id)
+                    .expect("the triggerer is a person in the fixture");
+                assert_eq!(
+                    it.author.as_deref(),
+                    Some(p.username.as_str()),
+                    "build {} was triggered by {id}",
+                    b.num
+                );
+                assert!(
+                    it.body_text.contains(&p.username),
+                    "...and is searchable by that person: {:?}",
+                    it.body_text
+                );
+            }
+            None => assert_eq!(
+                it.author, None,
+                "the fixture names nobody for build {}, and an invented author would be indexed \
+                 as if it had",
+                b.num
+            ),
+        }
+    }
+    assert!(
+        named > 0 && named < f.builds.len(),
+        "the fixture must name a triggerer for some builds and not others, or neither branch \
+         above can fail"
+    );
+    server.assert_no_violations();
+}
+
+/// A build configuration's prose reaches the search blob -- selector asks,
+/// mockd serves, `map` reads, `body_text` carries it.
+///
+/// The description is set here rather than read from the fixture because no
+/// fixture configuration has one, and with the value `null` everywhere a
+/// selector that asks for `description` and one that does not produce
+/// byte-identical output. Without this the widening that added it to
+/// `BUILD_TYPE_FIELDS` would be pinned by a string comparison in `rest`'s unit
+/// tests and by nothing on the wire: dropping the name again would leave all
+/// seventeen tests in this file green. Same shape as
+/// `a_full_sync_is_a_window_...`, which creates the second build the fixture
+/// does not have for the same reason.
+#[tokio::test]
+async fn a_configuration_description_reaches_the_search_blob() {
+    let server = spawn_mock_teamcity().await;
+    let cfg = quiet_build_type();
+    let prose = "Deploys the ledger to staging after every merge to main";
+    server.state().describe_build_type(&cfg, prose);
+
+    let (items, _) = sync(
+        adapter(&server.base_url(), serde_json::json!({})).as_ref(),
+        None,
+    )
+    .await;
+    let it = items
+        .iter()
+        .find(|i| i.entity.key == format!("buildType:{cfg}"))
+        .unwrap_or_else(|| panic!("{cfg} missing; got {:?}", keys(&items)));
+    assert!(
+        it.body_text.contains(prose),
+        "the configuration's description is what a human searches for when they cannot \
+         remember its id: {:?}",
+        it.body_text
+    );
+    // ...and it is in the payload verbatim, so the selector really asked for
+    // it rather than the blob having been built from something else.
+    assert_eq!(it.payload["description"], prose);
+
+    // The configurations nobody described still carry none, so this cannot
+    // pass by the adapter inventing prose for every configuration.
+    for other in items
+        .iter()
+        .filter(|i| i.kind == "build_config" && i.entity.key != format!("buildType:{cfg}"))
+    {
+        assert!(
+            !other.body_text.contains(prose),
+            "only the described configuration carries it: {:?}",
+            other.body_text
+        );
+        assert!(
+            other.payload.get("description").is_none(),
+            "TeamCity omits an absent description rather than sending null: {:?}",
+            other.payload
+        );
+    }
     server.assert_no_violations();
 }
 

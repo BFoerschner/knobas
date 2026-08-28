@@ -5,18 +5,31 @@
 //!
 //! The structs accept everything a real TeamCity can send, because
 //! `SyncItem::payload` keeps the record verbatim and a future selector should
-//! not need a parse change. The **selectors** are narrower: `knobas-mockd`
-//! validates `fields=` against a closed set of names and answers an unknown
-//! one with 400 + an `UnknownField` violation (mockd deviation 6), and its
-//! TeamCity serialiser does not carry `triggered`, `description` or `paused`.
-//! Asking for a name the contract does not define is exactly the mistake
-//! `assert_no_violations()` exists to catch, so M1 asks only for names the
-//! contract defines.
+//! not need a parse change. The **selectors** are narrower, and the rule is
+//! exact in both directions: a selector asks for **every** name the mapping
+//! reads and for **no** name it does not.
 //!
-//! The visible consequence: `SyncItem::author` is `None` for every build this
-//! adapter emits in M1, because `triggered(user(username))` is the only place
-//! TeamCity puts the person who started a build. Widening mockd's TeamCity
-//! serialiser is the fix, and it is stream T's to make.
+//! The first half is the one with teeth. A name the mapping reads and the
+//! selector omits is a field that is silently always `None` -- not a parse
+//! error, not a violation, just a value that never arrives. That is what kept
+//! `SyncItem::author` empty for every build until `triggered` was added here,
+//! and it is why `the_field_selectors_cover_everything_the_mapping_reads`
+//! exists.
+//!
+//! The second half is usually budget rather than correctness, and the
+//! difference turns on **which type** a name is asked of, not on the name.
+//! `knobas-mockd` validates `fields=` against a closed set per type and
+//! answers an unknown one with 400 + an `UnknownField` violation (mockd
+//! deviation 6). So `href` is served on builds *and* configurations and costs
+//! only response size; `paused` is served on a configuration and is a 400 on a
+//! **build**, where it is not a field at all. There is no list of "names we
+//! leave out" that is true independently of the type it is asked of, and
+//! `the_selectors_ask_for_nothing_no_reader_looks_at` pairs each name with its
+//! selector for exactly that reason.
+//!
+//! Within one type it is budget: `triggered(user(username))` rather than
+//! `triggered(type,date,user(username,name))`, which mockd would serve
+//! happily.
 
 use chrono::{DateTime, Utc};
 
@@ -31,16 +44,18 @@ pub(crate) const USER_FIELDS: &str = "username,name";
 /// What `/app/rest/buildTypes` is asked for. Without an explicit `fields=`,
 /// real TeamCity answers a hyperlink stub (`id`, `href`) and mockd answers 400
 /// -- the parameter is mandatory on the collections.
-pub(crate) const BUILD_TYPE_FIELDS: &str = "count,buildType(id,name,projectId,projectName,webUrl)";
+pub(crate) const BUILD_TYPE_FIELDS: &str =
+    "count,buildType(id,name,projectId,projectName,description,webUrl)";
 
 /// What `/app/rest/builds` is asked for. The nested `buildType(...)` is what
 /// makes client-side project scoping possible: the locator grammar has no
 /// project dimension.
 pub(crate) const BUILD_FIELDS: &str = concat!(
     "count,build(id,number,buildTypeId,state,status,statusText,branchName,webUrl,",
-    "queuedDate,startDate,finishDate,percentageComplete,",
+    "queuedDate,startDate,finishDate,",
     "buildType(id,name,projectId,projectName,webUrl),",
-    "running-info(percentageComplete,currentStageText))"
+    "running-info(percentageComplete,currentStageText),",
+    "triggered(user(username)))"
 );
 
 /// Every TeamCity list response: `{count, href, nextHref, <element>: [...]}`.
@@ -73,8 +88,8 @@ pub(crate) struct BuildType {
     pub name: Option<String>,
     pub project_id: Option<String>,
     pub project_name: Option<String>,
-    /// Not requested in M1 (mockd's serialiser has no such key), but parsed so
-    /// a record that carries it still maps.
+    /// Prose a human wrote about the configuration, and part of what
+    /// `map::build_config_item` puts in the search blob.
     pub description: Option<String>,
     pub web_url: Option<String>,
 }
@@ -100,8 +115,8 @@ pub(crate) struct Build {
     /// says what it is doing right now.
     #[serde(rename = "running-info")]
     pub running_info: Option<RunningInfo>,
-    /// Not requested in M1 (mockd's serialiser has no such key), but parsed so
-    /// a record from a real server still names its author.
+    /// Who or what started the build. The only place TeamCity names the
+    /// person, and so the only source of `SyncItem::author` for a build.
     pub triggered: Option<Triggered>,
 }
 
@@ -174,15 +189,26 @@ impl StateFilter {
 }
 
 /// A `/app/rest/builds` locator, restricted to the dimensions the contract
-/// defines: `buildType:`, `state:`, `sinceBuild:`, `count:`. Anything else --
-/// `project:`, `affectedProject:` -- is recorded as a violation by the mock
-/// and must not be sent. Each dimension appears **at most once**; see
-/// [`StateFilter`].
+/// defines: `buildType:`, `state:`, `sinceBuild:`, `defaultFilter:`,
+/// `count:`. Anything else -- `project:`, `affectedProject:` -- is recorded as
+/// a violation by the mock and must not be sent. Each dimension appears **at
+/// most once**; see [`StateFilter`].
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Locator {
     pub build_type_id: Option<String>,
     pub state: Option<StateFilter>,
     pub since_build_id: Option<i64>,
+    /// TeamCity's default filter hides everything that is not a finished,
+    /// non-personal, non-canceled build. `Some(false)` turns it off, which is
+    /// the only way to ask a question about **every** build regardless of
+    /// state; `None` sends the dimension not at all and takes the default.
+    ///
+    /// Distinct from `state`: `state:` names the states wanted and is the
+    /// right dimension when the answer is a set of builds to emit.
+    /// `defaultFilter:false` widens the population a *stateless* question is
+    /// asked over, which is what the run's opening ceiling query needs -- see
+    /// [`sync::ceiling`](crate::sync).
+    pub default_filter: Option<bool>,
     pub count: u32,
 }
 
@@ -200,6 +226,9 @@ impl Locator {
         }
         if let Some(id) = self.since_build_id {
             parts.push(format!("sinceBuild:(id:{id})"));
+        }
+        if let Some(on) = self.default_filter {
+            parts.push(format!("defaultFilter:{on}"));
         }
         parts.push(format!("count:{}", self.count));
         parts.join(",")
@@ -411,16 +440,36 @@ mod tests {
             assert!(!rendered.contains("state:running"), "{rendered}");
             assert!(!rendered.contains("state:queued"), "{rendered}");
         }
+        // The run's opening ceiling query: no `state`, the default filter
+        // explicitly off, two builds. `state` would answer a different
+        // question -- see the field's doc -- and the second build is the
+        // ordering evidence, not a spare row (`sync::ceiling`).
+        assert_eq!(
+            Locator {
+                default_filter: Some(false),
+                count: 2,
+                ..Locator::default()
+            }
+            .render(),
+            "defaultFilter:false,count:2"
+        );
         // No dimension may repeat: the mock rejects a locator that names one
         // twice, whichever one it is.
         let rendered = Locator {
             build_type_id: Some("Payout_Build".to_owned()),
             state: Some(StateFilter::InFlight),
             since_build_id: Some(9),
+            default_filter: Some(false),
             count: 100,
         }
         .render();
-        for dimension in ["buildType:", "state:", "sinceBuild:", "count:"] {
+        for dimension in [
+            "buildType:",
+            "state:",
+            "sinceBuild:",
+            "defaultFilter:",
+            "count:",
+        ] {
             assert_eq!(
                 rendered.matches(dimension).count(),
                 1,
@@ -472,16 +521,25 @@ mod tests {
             "queuedDate",
             "buildType(",
             "running-info(",
+            "triggered(",
         ] {
             assert!(
                 BUILD_FIELDS.contains(needed),
                 "BUILD_FIELDS misses {needed}"
             );
         }
-        for needed in ["id", "name", "projectId", "projectName", "webUrl"] {
+        for needed in [
+            "id",
+            "name",
+            "projectId",
+            "projectName",
+            "description",
+            "webUrl",
+        ] {
             assert!(
                 BUILD_TYPE_FIELDS.contains(needed),
-                "BUILD_TYPE_FIELDS misses {needed}"
+                "BUILD_TYPE_FIELDS misses {needed}, so `map::build_config_item` reads it as None \
+                 on every configuration"
             );
         }
         assert!(SERVER_FIELDS.contains("version"));
@@ -502,21 +560,97 @@ mod tests {
         }
     }
 
-    /// Deliberately *not* asked for: mockd's TeamCity serialiser has no such
-    /// key, and an unknown name is 400 + a recorded violation (deviation 6).
-    /// The structs still parse them, which is why this needs saying.
+    /// The other direction: a selector must not ask for a name **no** reader
+    /// in `map` looks at.
+    ///
+    /// Paired name-with-selector rather than iterated as a cross-product,
+    /// because the reason a name is left out is a property of the *pair* and
+    /// not of the name. `paused` is a real field on a build configuration and
+    /// is not a field on a build at all, so `BUILD_TYPE_FIELDS` omitting it is
+    /// budget and `BUILD_FIELDS` omitting it is the mock contract -- mockd
+    /// answers `build(paused)` with 400 + an `UnknownField` violation, exactly
+    /// as it answers a name nobody has ever heard of. A cross-product cannot
+    /// say two different things about two cells, so it said the wrong one
+    /// about that one, twice. Each row below carries its own reason and its
+    /// own consequence.
+    ///
+    /// **The fix is never "delete the name from the selector" when a reader is
+    /// what is missing.** `description` used to be on this list, and it was
+    /// the *list* that was wrong: `map::build_config_item` has always put
+    /// `bt.description` in the search blob, so the selector omitting it meant
+    /// a configuration's prose silently never reached the index. It is asked
+    /// for now.
     #[test]
-    fn the_selectors_ask_for_nothing_outside_the_mock_contract() {
-        for outside in ["triggered", "description", "paused", "href"] {
+    fn the_selectors_ask_for_nothing_no_reader_looks_at() {
+        // (selector, its name, the unasked name, what asking would cost)
+        let unread = [
+            (
+                BUILD_FIELDS,
+                "BUILD_FIELDS",
+                "href",
+                "mockd serves `build(href)`, so this is not a violation -- it is response size \
+                 and a payload key nothing in `map` reads",
+            ),
+            (
+                BUILD_TYPE_FIELDS,
+                "BUILD_TYPE_FIELDS",
+                "href",
+                "mockd serves `buildType(href)`, so this is not a violation -- it is response \
+                 size and a payload key nothing in `map` reads",
+            ),
+            (
+                BUILD_TYPE_FIELDS,
+                "BUILD_TYPE_FIELDS",
+                "paused",
+                "mockd serves `buildType(paused)`, so this is not a violation -- it is response \
+                 size and a payload key nothing in `map` reads",
+            ),
+        ];
+        for (selector, name, missing, why) in unread {
             assert!(
-                !BUILD_FIELDS.contains(outside),
-                "BUILD_FIELDS asks for {outside}, which mockd answers 400 + a violation for"
-            );
-            assert!(
-                !BUILD_TYPE_FIELDS.contains(outside),
-                "BUILD_TYPE_FIELDS asks for {outside}"
+                !selector.contains(missing),
+                "{name} asks for {missing}: {why}. If you added a reader for it, add the name \
+                 here too; if you did not, drop it."
             );
         }
+        // ...and the one that is *not* budget: `paused` is not a field on a
+        // build, so `BUILD_FIELDS` asking for it is a 400 and a recorded
+        // violation, and `tests/mockd.rs` would fail on
+        // `assert_no_violations()`. Adding a reader would not make this legal,
+        // which is the opposite of the advice above -- hence its own case.
+        assert!(
+            !BUILD_FIELDS.contains("paused"),
+            "BUILD_FIELDS asks for `paused`, which is not a field on a build: mockd answers 400 \
+             + an UnknownField violation, the same as a misspelling. Adding a reader would not \
+             help; the name does not exist on this type."
+        );
+        // `triggered` is asked for at exactly the depth `map::build_item`
+        // reads it, and no deeper: mockd would serve
+        // `triggered(type,date,user(username,name))` without complaint.
+        assert!(
+            BUILD_FIELDS.contains("triggered(user(username))"),
+            "BUILD_FIELDS must ask for the triggerer, or every build's author is None"
+        );
+        for deeper in ["triggered(type", "user(username,"] {
+            assert!(
+                !BUILD_FIELDS.contains(deeper),
+                "BUILD_FIELDS asks for {deeper}; nothing in `map` reads below \
+                 triggered.user.username"
+            );
+        }
+        assert!(
+            !BUILD_TYPE_FIELDS.contains("triggered"),
+            "a build configuration has no triggerer"
+        );
+        // A name the selector asks for and no struct field parses is the same
+        // waste one step earlier: it cannot reach a reader at all. Top-level
+        // `percentageComplete` was exactly that -- asked for, never parsed
+        // (`running-info(percentageComplete)` is the one the mapping reads).
+        assert!(
+            !BUILD_FIELDS.contains(",percentageComplete"),
+            "BUILD_FIELDS asks for a top-level percentageComplete, which `struct Build` does \
+             not parse; the mapping reads running-info(percentageComplete)"
+        );
         // ...and no preset: mockd honours only `$long`, and asking for the
         // whole subtree defeats the point of a selector.
         for f in [BUILD_FIELDS, BUILD_TYPE_FIELDS, SERVER_FIELDS, USER_FIELDS] {

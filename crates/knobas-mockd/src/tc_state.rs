@@ -26,6 +26,8 @@
 //! | `startDate` | the fixture's `when`. `finishDate` = `when + duration` (`"4 m 12 s"` parsed) or `when + 60 s` when the fixture gives none; absent while running. |
 //! | `statusText` | the first line of `log` where the fixture has one, else `"Success"` / `"Running"`. |
 //! | `running-info` | `percentageComplete` from the fixture's `step` (`step 3/5 …` ⇒ 60), `currentStageText` = the step verbatim. |
+//! | buildType `description` | `None`: the dataset describes no configuration, and mockd does not invent prose any more than it invents a triggerer. `MockState::describe_build_type` is how a test that needs one gets one. |
+//! | `triggered` | the fixture's `triggered_by` resolved through `fixture().person`: `type: "user"` with that person's `username`/`name`, or `type: "vcs"` and no `user` where the fixture names nobody. |
 
 use chrono::{DateTime, Duration, Utc};
 use knobas_source_mock::fixture;
@@ -76,6 +78,13 @@ pub struct TcBuildType {
     pub name: String,
     pub project_id: String,
     pub project_name: String,
+    /// Prose a human wrote about the configuration. `None` for every fixture
+    /// configuration -- the dataset gives none, and mockd does not invent one
+    /// -- so a test that needs one sets it with
+    /// [`describe_build_type`](crate::state::MockState::describe_build_type),
+    /// the same way stream C's window test creates the second build the
+    /// fixture does not have.
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,6 +100,11 @@ pub struct TcBuild {
     pub status_text: String,
     pub percentage_complete: Option<u8>,
     pub current_stage_text: Option<String>,
+    /// [`knobas_source_mock::Person::id`] of whoever started it, straight from
+    /// the fixture. `None` is a build the dataset attributes to no person,
+    /// which TeamCity serves as a VCS trigger with no `triggered.user` --
+    /// never an invented one.
+    pub triggered_by: Option<String>,
 }
 
 /// The build configurations the fixture's builds refer to, ascending by id.
@@ -109,6 +123,7 @@ pub(crate) fn build_types() -> Vec<TcBuildType> {
                 name: rest.replace('_', " "),
                 project_id: project.to_owned(),
                 project_name: project.to_owned(),
+                description: None,
                 id,
             }
         })
@@ -159,6 +174,7 @@ fn transcribe(b: &knobas_source_mock::Build) -> TcBuild {
         status_text,
         percentage_complete: running.then(|| percentage(b.step.as_deref())).flatten(),
         current_stage_text: running.then(|| b.step.clone()).flatten(),
+        triggered_by: b.triggered_by.clone(),
     }
 }
 

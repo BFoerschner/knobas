@@ -1,10 +1,13 @@
 //! One sync run.
 //!
-//! Every run **opens** with one unconditional `state:(queued:true,running:true)`
-//! poll, because a running build mutates in place and never gets a new id for a
-//! watermark to find it by. It opens with it rather than closing with it so
-//! that a build which is running when the run starts and finished when it ends
-//! lands in *both* sets rather than in neither; see [`execute`] step 1.
+//! Every run **opens** by noting the highest build id in existence -- the
+//! ceiling the watermark may not pass, which is what keeps a build queued
+//! *during* the run from being skipped -- and then with one unconditional
+//! `state:(queued:true,running:true)` poll, because a running build mutates in
+//! place and never gets a new id for a watermark to find it by. The poll opens
+//! the run rather than closing it so that a build which is running when the
+//! run starts and finished when it ends lands in *both* sets rather than in
+//! neither; see [`execute`] steps 1 and 2.
 //!
 //! Then a **full sync** (`cursor: None`) lists the build configurations in
 //! scope and, for each, the newest `builds_per_config` finished builds. An
@@ -50,6 +53,13 @@ const PAGE: u32 = 100;
 /// none of the visibility. See [`in_flight`].
 const MAX_BUILDS_PER_QUERY: u32 = 1_000;
 
+/// How many builds the opening ceiling probe asks for.
+///
+/// **Two, and the second one is not spare.** One row answers "what is the
+/// newest build"; the second is the only evidence the run ever gets that the
+/// page is in the order that answer depends on. See [`ceiling`].
+const CEILING_PROBE: u32 = 2;
+
 pub(crate) async fn execute(
     source_id: &str,
     cfg: &TeamCityConfig,
@@ -58,14 +68,25 @@ pub(crate) async fn execute(
     sink: &mut (dyn Sink + Send),
 ) -> Result<Cursor, SourceError> {
     let previous = cursor_in.as_deref().and_then(cursor::parse);
+    let before = previous.map_or(0, |p| p.since_build_id);
     let mut configs: BTreeMap<String, Rec<BuildType>> = BTreeMap::new();
 
-    // 1. Queued and running builds, unconditionally and **first**.
+    // 1. The ceiling: the highest build id in existence right now.
+    //
+    //    Taken before anything else, because it is the one thing that must be
+    //    read at the *start* of the run to mean anything. Steps 2 and 3 below
+    //    can only protect builds they can see, and neither can see a build
+    //    queued after they ran. Ids are assigned at queue time and are
+    //    monotonic, so every such build has an id above this number and one
+    //    clamp covers all of them. See [`cursor::advance`].
+    let ceiling = ceiling(rest, before).await?;
+
+    // 2. Queued and running builds, unconditionally and **first**.
     //
     //    Unconditionally, because a build mutates in place while it runs and
     //    never gets a new id, so no watermark can find it.
     //
-    //    First, because step 2 is not instantaneous. A full sync issues one
+    //    First, because step 3 is not instantaneous. A full sync issues one
     //    request per configuration, and at the default 5 req/s two hundred
     //    configurations put ~40 s between the two queries. A build that is
     //    running when this poll executes and has finished by the time the
@@ -76,22 +97,12 @@ pub(crate) async fn execute(
     //    at the end -- with nothing holding the watermark below it and nothing
     //    emitting it. `sinceBuild` would then never offer it again.
     //
-    //    **What this order does not close.** A build *queued* after this poll
-    //    can still be missed: it is not in this set (it did not exist yet), and
-    //    if it is still running when its configuration is queried it is not in
-    //    the finished set either. It is lost only if some *later*-queued build
-    //    finished early enough to land in the finished set, since that is what
-    //    pushes `max_finished` above it. The complete fix is a ceiling -- the
-    //    highest build id in existence at this instant, which the watermark may
-    //    never pass -- and that needs a portable "newest build" query: `count:1`
-    //    returns the newest against real TeamCity and the *oldest* against
-    //    `knobas-mockd` (its deviation 12), so the contract has no one spelling
-    //    for it. Recorded rather than silently left; the window is one run's own
-    //    finished phase, and it is strictly narrower than the one this ordering
-    //    removes.
+    //    The two loss classes are disjoint, which is why this order is a fix
+    //    and the ceiling is a second one: this order saves builds *in flight
+    //    at run start*, and the ceiling saves builds *queued after* it.
     let in_flight = in_flight(rest).await?;
 
-    // 2. The finished builds this run is responsible for.
+    // 3. The finished builds this run is responsible for.
     let finished = match previous {
         None => {
             // Full sync: the whole scope, newest `builds_per_config` each. The
@@ -123,7 +134,7 @@ pub(crate) async fn execute(
         Some(state) => since(rest, state.since_build_id).await?,
     };
 
-    // 3. Scope, watermarks, items.
+    // 4. Scope, watermarks, items.
     //
     //    Keyed by build id, because the two queries above can legitimately
     //    return the *same* build -- one that was running when (1) polled and
@@ -134,8 +145,8 @@ pub(crate) async fn execute(
     //
     //    The map also fixes the emission order, which the queries do not:
     //    `BTreeMap<i64, _>` iterates ascending by build id, so the run emits
-    //    oldest-first whether the server answered newest-first (real TeamCity)
-    //    or ascending (`knobas-mockd`, its deviation 12). Keying on the *id*
+    //    oldest-first whether the server answered newest-first (both real
+    //    TeamCity and `knobas-mockd` do) or ascending. Keying on the *id*
     //    rather than on the entity key is what makes that numeric: the key's
     //    string order puts `build:1188` before `build:412`.
     let mut observed: BTreeMap<i64, &Rec<Build>> = BTreeMap::new();
@@ -176,7 +187,7 @@ pub(crate) async fn execute(
         builds.push(map::build_item(source_id, &b.raw, &b.rec));
     }
 
-    // 4. The configurations of the builds that moved. Fetched from the same
+    // 5. The configurations of the builds that moved. Fetched from the same
     //    listing a full sync uses, so a configuration's payload never
     //    alternates between a rich and a lean shape -- and only when something
     //    moved, so an idle poll stays silent.
@@ -206,11 +217,13 @@ pub(crate) async fn execute(
         // items" as "nothing happened" and writes no activity line.
         return Ok(cursor_in.unwrap_or_else(|| cursor::render(cursor::new(0))));
     }
-    let before = previous.map_or(0, |p| p.since_build_id);
     Ok(cursor::render(cursor::new(cursor::advance(
         before,
-        max_finished,
-        min_unfinished,
+        cursor::Seen {
+            max_finished,
+            min_unfinished,
+            ceiling,
+        },
     ))))
 }
 
@@ -264,6 +277,105 @@ async fn all_of(
         }
         count = count.saturating_mul(2).min(ceiling);
     }
+}
+
+/// The highest build id in existence, or `None` on a server with no builds.
+///
+/// One request, deliberately un-widened. `count:2` rather than `count:1`
+/// because the second row costs nothing and is the only **evidence** this
+/// query's own assumption is holding: see below.
+///
+/// **`defaultFilter:false` is load-bearing.** TeamCity's default filter hides
+/// everything that is not a finished, non-personal, non-canceled build, so
+/// without it this would name the newest *finished* build rather than the
+/// newest build. That is not merely a lower number: it would pin the watermark
+/// below every build that was queued or running when the run started,
+/// including the foreign ones the clamp deliberately ignores
+/// ([`cursor::advance`]'s asymmetry), and a scoped source on a busy server
+/// would stop advancing at all.
+///
+/// No `state:` dimension: `state:` names a set of builds to fetch, and the
+/// answer wanted here is one number about *every* build whatever its state.
+///
+/// # The assumption, and why this query witnesses it rather than assuming it
+///
+/// Reading row 0 as "the newest build" is an assumption about **ordering**,
+/// and it is the most expensive one in the crate: the ceiling clamps the
+/// watermark *down*, so an ordering that is the wrong way round pins it near
+/// the bottom of the id space, and past [`MAX_BUILDS_PER_QUERY`] finished
+/// builds [`since`] then refuses to re-read them and the cursor never moves
+/// again. Not a re-fetch -- a source that has stopped.
+///
+/// Nothing in the vendored spec states the ordering, so this asks for **two**
+/// rows and checks them against each other. Two rows in ascending id order are
+/// a direct contradiction of the assumption, on the server's own evidence, in
+/// the run that would otherwise have wedged -- including the very first one.
+/// There is no threshold and no inference from magnitude here: `ids[0] <
+/// ids[1]` either happened or it did not. A server with one build or none
+/// offers no evidence and needs none, because with fewer than two builds the
+/// ceiling cannot be wrong by ordering.
+///
+/// # Errors
+///
+/// [`SourceError::Protocol`] in two cases, both of them the server
+/// contradicting something this query has to be able to rely on.
+///
+/// 1. **The page is oldest-first**, as above. Caught on run one.
+/// 2. **The newest build is below `watermark`**, which on a correct server
+///    cannot happen: ids are monotonic and never reused, the watermark is an
+///    id this source has already seen, and TeamCity's cleanup removes the
+///    *oldest* builds rather than the newest. Case 1 catches a server that was
+///    always wrong; this catches one that *starts* being wrong -- a source
+///    repointed at another instance, a restore from an older backup, an
+///    upgrade that changed an undocumented default. That is the quieter and
+///    more expensive variant: an always-wrong server announces itself at
+///    commissioning, while drift arrives years in on a source everyone trusts.
+///
+/// Refusing is the same trade [`all_of`] makes, for the same reason: a
+/// watermark computed from an answer the run knows to be wrong is how a build
+/// becomes permanently unreachable. A failed run leaves the cursor where it
+/// is, and a source whose server really was replaced recovers by resetting the
+/// cursor -- after which the watermark is 0 and case 2 can no longer fire.
+///
+/// **What remains.** A server that answers this page newest-first and is
+/// nonetheless wrong about which build is newest is not detectable here. No
+/// case of it is known; it is recorded because the check above is evidence
+/// about *this page*, which is not quite the same claim as "row 0 is the
+/// highest id on the server".
+async fn ceiling(rest: &dyn Rest, watermark: i64) -> Result<Option<i64>, SourceError> {
+    let page = rest
+        .builds(&Locator {
+            default_filter: Some(false),
+            count: CEILING_PROBE,
+            ..Locator::default()
+        })
+        .await?;
+    if let [first, second] = &page[..]
+        && first.rec.id < second.rec.id
+    {
+        return Err(SourceError::Protocol(format!(
+            "teamcity: `/app/rest/builds` answered oldest-first -- ids {} then {} -- where this \
+             adapter needs newest-first. It reads row 0 of that page as the newest build in \
+             existence and holds the watermark at or below it, so on an oldest-first server the \
+             watermark would be pinned near the bottom of the id space and every later run would \
+             fail trying to re-read everything above it. Refusing on the first run instead.",
+            first.rec.id, second.rec.id
+        )));
+    }
+    let newest = page.first().map(|b| b.rec.id);
+    if let Some(id) = newest
+        && id < watermark
+    {
+        return Err(SourceError::Protocol(format!(
+            "teamcity: the newest build this server reports is {id}, which is older than this \
+             source's watermark {watermark}. Build ids are monotonic and are never reused, so a \
+             build newer than {watermark} has to exist -- either this source now points at a \
+             different server, or one was restored from a state older than the watermark. \
+             Refusing rather than clamping the watermark down to it; reset the source's cursor \
+             if the server really was replaced."
+        )));
+    }
+    Ok(newest)
 }
 
 /// Every finished build newer than `since_build_id`.
@@ -377,9 +489,10 @@ mod tests {
     struct FakeRest {
         build_types: Vec<serde_json::Value>,
         builds: Vec<serde_json::Value>,
-        /// Newest first, as real TeamCity answers. `knobas-mockd` answers
-        /// ascending (its deviation 12), which is why the run may not depend
-        /// on either -- `tests/mockd.rs` is the other half of this pair.
+        /// Newest first, as both real TeamCity and `knobas-mockd` answer.
+        /// The ascending variant is kept because the run may not depend on
+        /// either order: it is the only thing left that can witness a
+        /// dependency on one, now that both servers agree.
         newest_first: bool,
         calls: Mutex<Vec<String>>,
     }
@@ -444,10 +557,18 @@ mod tests {
                     raw: raw.clone(),
                     rec: serde_json::from_value(raw.clone()).expect("fixture parses"),
                 })
-                .filter(|r| {
-                    locator
-                        .state
-                        .is_none_or(|s| s.matches(r.rec.state.as_deref()))
+                .filter(|r| match (locator.state, locator.default_filter) {
+                    // `state:` names the states wanted.
+                    (Some(state), _) => state.matches(r.rec.state.as_deref()),
+                    // No `state:`, default filter off: every build there is.
+                    (None, Some(false)) => true,
+                    // No `state:` and no `defaultFilter:false` is TeamCity's
+                    // default filter, which hides everything unfinished. The
+                    // ceiling query would name the newest *finished* build
+                    // rather than the newest build without the dimension, so
+                    // a fake that ignored this could not witness the
+                    // difference.
+                    (None, _) => StateFilter::Finished.matches(r.rec.state.as_deref()),
                 })
                 .filter(|r| {
                     locator
@@ -528,14 +649,17 @@ mod tests {
         // 1188 is still running: the watermark must stay below it, or 1188
         // would be unreachable by `sinceBuild` once it finishes.
         assert_eq!(cursor, r#"{"v":1,"since_build_id":1187}"#);
-        // ONE in-flight poll -- no repeated `state` dimension, and nothing
-        // outside the locator grammar -- and it comes **first**, before the
-        // per-configuration queries that can take ~40 s to walk. See
+        // The whole request budget of a full sync, in order: the ceiling,
+        // then ONE in-flight poll -- no repeated `state` dimension, and
+        // nothing outside the locator grammar -- and only then the
+        // per-configuration queries, which can take ~40 s to walk. See
         // `a_build_that_finishes_mid_run_is_not_lost_between_the_two_queries`
-        // for what the order buys; this pins the requests themselves.
+        // and `a_build_queued_after_the_opening_poll_is_not_skipped` for what
+        // the order buys; this pins the requests themselves.
         assert_eq!(
             rest.calls(),
             [
+                "defaultFilter:false,count:2",
                 "state:(queued:true,running:true),count:100",
                 "buildTypes",
                 "buildType:(id:Ledger_Deploy_Staging),state:finished,count:100",
@@ -558,12 +682,14 @@ mod tests {
         let (items, second) = run(&rest, &cfg, Some(first.clone())).await;
         assert!(items.is_empty());
         assert_eq!(second, first, "byte-identical, not merely equivalent");
-        // Two requests and no `/buildTypes`: an idle poll costs the in-flight
-        // query plus the finished one, in that order. (The full sync above made
-        // three: the in-flight poll, the listing, one per-configuration query.)
+        // Three requests and no `/buildTypes`: an idle poll costs the
+        // ceiling, the in-flight query and the finished one, in that order.
+        // (The full sync above made four: those three, with the listing and
+        // one per-configuration query in place of the last.)
         assert_eq!(
-            rest.calls()[3..],
+            rest.calls()[4..],
             [
+                "defaultFilter:false,count:2",
                 "state:(queued:true,running:true),count:100",
                 "state:finished,sinceBuild:(id:412),count:100",
             ]
@@ -738,7 +864,8 @@ mod tests {
         assert_eq!(keys(&items), ["buildType:Payout_Build", "build:300"]);
         assert_eq!(
             second, r#"{"v":1,"since_build_id":400}"#,
-            "400 is foreign and finished: the run saw it and will never want it again, so              leaving the watermark at 300 would re-fetch it on every poll for good"
+            "400 is foreign and finished: the run saw it and will never want it again, so \
+             leaving the watermark at 300 would re-fetch it on every poll for good"
         );
     }
 
@@ -970,44 +1097,138 @@ mod tests {
         );
     }
 
-    /// A [`Rest`] whose build 500 is running on the first query and finished on
-    /// every later one -- the race in the middle of a run, made deterministic.
+    /// A [`Rest`] whose builds change **once**, between the run's two build
+    /// queries: it serves `before` at t0 and `after` from t1 on. The race in
+    /// the middle of a run, made deterministic.
     ///
     /// The window is not theoretical: a full sync issues one request per
-    /// configuration before it would reach a trailing in-flight poll, and at
-    /// the default 5 req/s two hundred configurations is ~40 s.
-    struct FinishesMidRun {
-        inner: FakeRest,
-        seen: Mutex<usize>,
+    /// configuration between the two, and at the default 5 req/s two hundred
+    /// configurations is ~40 s.
+    ///
+    /// **The ceiling probe reads the clock without advancing it.** It is part
+    /// of opening the run, not one of the two queries the race sits between --
+    /// and counting it would silently move t1 one request earlier, so that
+    /// every test built on this would stop discriminating the order of the two
+    /// queries and quietly start passing under either. That is not
+    /// hypothetical: adding the probe to the front of the run did exactly
+    /// that, and [`is_ceiling_probe`] is the repair.
+    ///
+    /// Nothing about that repair is self-evident from a green suite, so
+    /// [`elapsed`](MidRun::elapsed) is exposed and
+    /// `the_mid_run_clock_advances_on_exactly_the_two_queries_the_race_sits_between`
+    /// pins it.
+    struct MidRun {
+        build_types: Vec<serde_json::Value>,
+        before: Vec<serde_json::Value>,
+        after: Vec<serde_json::Value>,
+        elapsed: Mutex<usize>,
+    }
+
+    /// Is this locator the run's opening ceiling probe?
+    ///
+    /// The probe is the run's only single-build query and its only query with
+    /// no `state:` at all, so that shape identifies it without naming
+    /// `defaultFilter`. Two reasons not to name it. It would exempt any future
+    /// query that also turns the default filter off -- the same class of
+    /// accident this function exists to undo -- and, more immediately, it
+    /// would make `defaultFilter` un-mutatable: flipping it in
+    /// [`ceiling`] would silently move this clock too, and the kill
+    /// for `the_ceiling_counts_the_builds_in_flight_at_run_start` could no
+    /// longer be attributed to the thing under test.
+    fn is_ceiling_probe(l: &Locator) -> bool {
+        l.count == CEILING_PROBE
+            && l.state.is_none()
+            && l.since_build_id.is_none()
+            && l.build_type_id.is_none()
+    }
+
+    impl MidRun {
+        fn new(
+            build_types: Vec<serde_json::Value>,
+            before: Vec<serde_json::Value>,
+            after: Vec<serde_json::Value>,
+        ) -> Self {
+            Self {
+                build_types,
+                before,
+                after,
+                elapsed: Mutex::new(0),
+            }
+        }
+
+        /// The server as it stands at one of the two instants this fake has.
+        fn snapshot(&self, builds: &[serde_json::Value]) -> FakeRest {
+            FakeRest::new(self.build_types.clone(), builds.to_vec())
+        }
+
+        /// How many clock-advancing queries the run made. Exactly two on a
+        /// correct run: the in-flight poll and the finished query.
+        fn elapsed(&self) -> usize {
+            *self.elapsed.lock().expect("not poisoned")
+        }
     }
 
     #[async_trait::async_trait]
-    impl Rest for FinishesMidRun {
+    impl Rest for MidRun {
         async fn server(&self) -> Result<crate::rest::Server, SourceError> {
-            self.inner.server().await
+            self.snapshot(&self.before).server().await
         }
         async fn current_user(&self) -> Result<crate::rest::CurrentUser, SourceError> {
-            self.inner.current_user().await
+            self.snapshot(&self.before).current_user().await
         }
         async fn build_types(&self) -> Result<Vec<Rec<BuildType>>, SourceError> {
-            self.inner.build_types().await
+            self.snapshot(&self.before).build_types().await
         }
         async fn builds(&self, locator: &Locator) -> Result<Vec<Rec<Build>>, SourceError> {
-            let first = {
-                let mut seen = self.seen.lock().expect("not poisoned");
-                *seen += 1;
-                *seen == 1
+            let at_t0 = {
+                let mut elapsed = self.elapsed.lock().expect("not poisoned");
+                if !is_ceiling_probe(locator) {
+                    *elapsed += 1;
+                }
+                *elapsed <= 1
             };
-            let state = if first { "running" } else { "finished" };
-            let rest = FakeRest::new(
-                vec![build_type("Payout_Build", "Payout")],
-                vec![
-                    build(500, "Payout_Build", "Payout", state),
-                    build(600, "Payout_Build", "Payout", "finished"),
-                ],
-            );
-            rest.builds(locator).await
+            let builds = if at_t0 { &self.before } else { &self.after };
+            self.snapshot(builds).builds(locator).await
         }
+    }
+
+    /// The clock [`MidRun`] keeps is what makes every mid-run test able to
+    /// fail, and nothing else checks it.
+    ///
+    /// Two clock-advancing queries, no more and no fewer: the in-flight poll
+    /// is t0 and the finished query is t1, and the ceiling probe is neither.
+    /// A third would mean the probe started counting, which moves t1 one
+    /// request earlier and leaves
+    /// `a_build_that_finishes_mid_run_is_not_lost_between_the_two_queries`
+    /// passing under **either** query order -- a vacuous test, produced by a
+    /// change that never touched it.
+    ///
+    /// An incremental run, because a full sync's per-configuration queries are
+    /// clock-advancing too and would drown the number this is about.
+    #[tokio::test]
+    async fn the_mid_run_clock_advances_on_exactly_the_two_queries_the_race_sits_between() {
+        let rest = MidRun::new(
+            vec![build_type("Payout_Build", "Payout")],
+            vec![build(500, "Payout_Build", "Payout", "running")],
+            vec![build(500, "Payout_Build", "Payout", "finished")],
+        );
+        let mut sink = VecSink(Vec::new());
+        execute(
+            "teamcity",
+            &TeamCityConfig::default(),
+            &rest,
+            Some(r#"{"v":1,"since_build_id":400}"#.to_owned()),
+            &mut sink,
+        )
+        .await
+        .expect("run");
+        assert_eq!(
+            rest.elapsed(),
+            2,
+            "the in-flight poll and the finished query advance the clock; the ceiling probe must \
+             not, or t1 moves one request earlier and the mid-run tests stop \
+             discriminating the query order"
+        );
     }
 
     /// Finding: a build that is running when the run starts and finished when
@@ -1022,10 +1243,17 @@ mod tests {
     /// again. This test fails in that order, which is the point of it.
     #[tokio::test]
     async fn a_build_that_finishes_mid_run_is_not_lost_between_the_two_queries() {
-        let rest = FinishesMidRun {
-            inner: tidewater(),
-            seen: Mutex::new(0),
-        };
+        let rest = MidRun::new(
+            vec![build_type("Payout_Build", "Payout")],
+            vec![
+                build(500, "Payout_Build", "Payout", "running"),
+                build(600, "Payout_Build", "Payout", "finished"),
+            ],
+            vec![
+                build(500, "Payout_Build", "Payout", "finished"),
+                build(600, "Payout_Build", "Payout", "finished"),
+            ],
+        );
         let mut sink = VecSink(Vec::new());
         let cursor = execute(
             "teamcity",
@@ -1053,20 +1281,229 @@ mod tests {
         );
     }
 
-    /// The run must not depend on the server's ordering: real TeamCity answers
-    /// newest-first, `knobas-mockd` answers ascending (its deviation 12).
+    /// An oldest-first server is refused on its **first** run, before it can
+    /// do any damage.
     ///
-    /// This pins **determinism**, not direction: both runs pass through the
-    /// same ordering, so they move together under any change to it. Direction
-    /// is pinned by
-    /// `builds_are_emitted_oldest_first_whatever_the_server_sent` instead.
+    /// The damage is worth spelling out, because it is what the second row of
+    /// the ceiling probe is paying for. Reading row 0 as "the newest build" on
+    /// an oldest-first server pins the watermark near the bottom of the id
+    /// space. A watermark that is merely low re-reads and moves on; one pinned
+    /// at the bottom does not, because past [`MAX_BUILDS_PER_QUERY`] finished
+    /// builds [`since`] refuses to return a truncated page. The run fails, the
+    /// cursor stays, and every later run fails identically -- and a cursor
+    /// reset does not recover it, because the full sync re-runs the same probe
+    /// and re-pins the ceiling in the same place.
+    ///
+    /// None of that happens now: the probe sees its own two rows in ascending
+    /// order and refuses. The evidence is the server's, not an inference from
+    /// how far the ceiling sits below something else, so it works on run one
+    /// with no history to compare against.
+    ///
+    /// Three builds, not two, so the page the probe reads is a *page* rather
+    /// than the whole server -- the check has to work on a truncated view,
+    /// which is the only view it ever gets.
     #[tokio::test]
-    async fn the_run_is_the_same_whichever_order_the_server_answers_in() {
-        let cfg = TeamCityConfig::default();
-        let (newest_first, cursor_a) = run(&tidewater(), &cfg, None).await;
-        let (ascending, cursor_b) = run(&tidewater().ascending(), &cfg, None).await;
-        assert_eq!(keys(&newest_first), keys(&ascending));
-        assert_eq!(cursor_a, cursor_b);
+    async fn an_oldest_first_server_is_refused_on_its_first_run() {
+        let rest = tidewater().ascending();
+        let mut sink = VecSink(Vec::new());
+        let err = execute(
+            "teamcity",
+            &TeamCityConfig::default(),
+            &rest,
+            None,
+            &mut sink,
+        )
+        .await
+        .expect_err("an oldest-first server must be refused, not believed");
+        assert!(
+            matches!(&err, SourceError::Protocol(m)
+                if m.contains("answered oldest-first")
+                    && m.contains("ids 412 then 1187")
+                    && m.contains("newest-first")),
+            "the message must name the ordering it saw and the one it needs: {err:?}"
+        );
+        assert!(sink.0.is_empty(), "nothing is emitted from a refused run");
+        assert_eq!(
+            rest.calls(),
+            ["defaultFilter:false,count:2"],
+            "it refuses on the opening probe, before spending the run"
+        );
+    }
+
+    /// ...and the same fixture answering newest-first is not refused, so the
+    /// check above is a check rather than a blanket refusal. Identical builds,
+    /// only the order differs, which is what makes both able to fail.
+    #[tokio::test]
+    async fn a_newest_first_server_is_not_refused() {
+        let (items, cursor) = run(&tidewater(), &TeamCityConfig::default(), None).await;
+        assert!(!items.is_empty());
+        assert_eq!(cursor, r#"{"v":1,"since_build_id":1187}"#);
+    }
+
+    /// A server with a single build gives the probe no ordering evidence, and
+    /// needs none: with one build the ceiling cannot be wrong by ordering.
+    ///
+    /// Worth its own test because the check reads a two-element slice, and
+    /// "fewer than two rows" is the branch that must stay silent rather than
+    /// guess.
+    #[tokio::test]
+    async fn one_build_is_not_enough_evidence_to_refuse() {
+        let rest = FakeRest::new(
+            vec![build_type("Payout_Build", "Payout")],
+            vec![build(412, "Payout_Build", "Payout", "finished")],
+        );
+        let (items, cursor) = run(&rest, &TeamCityConfig::default(), None).await;
+        assert_eq!(keys(&items), ["buildType:Payout_Build", "build:412"]);
+        assert_eq!(cursor, r#"{"v":1,"since_build_id":412}"#);
+    }
+
+    /// A ceiling *below* the watermark is refused, not clamped away.
+    ///
+    /// Ids are monotonic and never reused and the watermark is an id this
+    /// source has already seen, so the server cannot honestly report a newest
+    /// build older than it. Where the ordering check above catches a server
+    /// that was always wrong, this catches one that *starts* being wrong --
+    /// repointed at another instance, restored from an older backup -- which
+    /// is the quieter case, because it arrives on a source everyone already
+    /// trusts. The run fails naming what it saw instead of computing a
+    /// watermark from it, and, unlike the silent clamp it replaces, it fails
+    /// before spending the rest of the run's request budget.
+    #[tokio::test]
+    async fn a_ceiling_below_the_watermark_is_refused_not_clamped() {
+        let rest = FakeRest::new(
+            vec![build_type("Payout_Build", "Payout")],
+            vec![build(412, "Payout_Build", "Payout", "finished")],
+        );
+        let mut sink = VecSink(Vec::new());
+        let err = execute(
+            "teamcity",
+            &TeamCityConfig::default(),
+            &rest,
+            Some(r#"{"v":1,"since_build_id":1187}"#.to_owned()),
+            &mut sink,
+        )
+        .await
+        .expect_err("a server that contradicts monotonic ids must not be trusted");
+        assert!(
+            matches!(&err, SourceError::Protocol(m)
+                if m.contains("newest build this server reports is 412")
+                    && m.contains("watermark 1187")
+                    && m.contains("points at a different server")),
+            "the message must name what it saw and the likely cause: {err:?}"
+        );
+        assert!(sink.0.is_empty(), "nothing is emitted from a refused run");
+        assert_eq!(
+            rest.calls(),
+            ["defaultFilter:false,count:2"],
+            "it refuses on the opening probe rather than after spending the run"
+        );
+    }
+
+    /// The loss class the opening in-flight poll **traded** rather than
+    /// closed, and the ceiling closes.
+    ///
+    /// Build 1100 is queued after the poll, so the poll cannot have seen it,
+    /// and it is still running when the finished query goes out, so that query
+    /// cannot see it either. It is in neither set: nothing emits it and
+    /// nothing clamps below it. Build 1200 was queued later still and finished
+    /// inside the same run, which is what pushes `max_finished` to 1200 -- and
+    /// a watermark at 1200 puts 1100 permanently out of `sinceBuild`'s reach,
+    /// with a full sync being a window rather than the corpus, so not even a
+    /// cursor reset recovers it.
+    ///
+    /// The ceiling is the highest build id in existence when the run started,
+    /// 1000 here. Everything queued afterwards has an id above it, so a
+    /// watermark that may not pass it cannot skip any of them. The cost is
+    /// re-fetching 1200 next run, and upserts are idempotent.
+    ///
+    /// 1200 is what makes this fixture able to fail: without a build that both
+    /// appeared and finished inside the run, `max_finished` would never rise
+    /// above the ceiling and a run with no ceiling at all would land on the
+    /// same number.
+    #[tokio::test]
+    async fn a_build_queued_after_the_opening_poll_is_not_skipped() {
+        let rest = MidRun::new(
+            vec![build_type("Payout_Build", "Payout")],
+            vec![build(1000, "Payout_Build", "Payout", "finished")],
+            vec![
+                build(1000, "Payout_Build", "Payout", "finished"),
+                build(1100, "Payout_Build", "Payout", "running"),
+                build(1200, "Payout_Build", "Payout", "finished"),
+            ],
+        );
+        let mut sink = VecSink(Vec::new());
+        let cursor = execute(
+            "teamcity",
+            &TeamCityConfig::default(),
+            &rest,
+            Some(r#"{"v":1,"since_build_id":900}"#.to_owned()),
+            &mut sink,
+        )
+        .await
+        .expect("run");
+        assert_eq!(
+            cursor, r#"{"v":1,"since_build_id":1000}"#,
+            "1000 was the newest build in existence when the run opened; 1100 was queued after \
+             the poll and is still running, so the watermark may not pass 1000 or `sinceBuild` \
+             will never offer 1100 again"
+        );
+    }
+
+    /// The ceiling counts builds that are **in flight** at run start, not only
+    /// finished ones -- which is what `defaultFilter:false` on the ceiling
+    /// query buys, and the whole reason it is there.
+    ///
+    /// Build 1100 belongs to a foreign configuration and is running when the
+    /// run opens, so it does not clamp: a scoped source must not be held below
+    /// a build it will never emit ([`cursor::advance`]'s asymmetry). It
+    /// finishes during the run and turns up in the global finished query, and
+    /// a foreign *finished* build is exactly the case the watermark must
+    /// advance past, or the incremental query re-offers it on every poll for
+    /// good.
+    ///
+    /// TeamCity's default filter hides unfinished builds, so a ceiling taken
+    /// without `defaultFilter:false` would name 1000 here and pin the
+    /// watermark there -- reinstating, through the ceiling, the very clamp the
+    /// asymmetry removes.
+    #[tokio::test]
+    async fn the_ceiling_counts_the_builds_in_flight_at_run_start() {
+        let types = vec![
+            build_type("Payout_Build", "Payout"),
+            build_type("Ledger_Deploy_Staging", "Ledger"),
+        ];
+        let rest = MidRun::new(
+            types,
+            vec![
+                build(1000, "Payout_Build", "Payout", "finished"),
+                build(1100, "Ledger_Deploy_Staging", "Ledger", "running"),
+            ],
+            vec![
+                build(1000, "Payout_Build", "Payout", "finished"),
+                build(1100, "Ledger_Deploy_Staging", "Ledger", "finished"),
+            ],
+        );
+        let cfg = TeamCityConfig::from_json(&serde_json::json!({ "project_ids": ["Payout"] }))
+            .expect("config");
+        let mut sink = VecSink(Vec::new());
+        let cursor = execute(
+            "teamcity",
+            &cfg,
+            &rest,
+            Some(r#"{"v":1,"since_build_id":900}"#.to_owned()),
+            &mut sink,
+        )
+        .await
+        .expect("run");
+        assert_eq!(
+            keys(&sink.0),
+            ["buildType:Payout_Build", "build:1000"],
+            "1100 is foreign and is not emitted"
+        );
+        assert_eq!(
+            cursor, r#"{"v":1,"since_build_id":1100}"#,
+            "1100 existed when the run opened, so the ceiling is 1100 and the foreign build it \
+             saw finish is free to move the watermark"
+        );
     }
 
     /// The emission order is the run's own, asserted against the property
@@ -1075,6 +1512,14 @@ mod tests {
     /// The server here answers newest-first (3, 2, 1) and the run must still
     /// emit oldest-first. A fixture whose ids arrive already ascending could
     /// not tell the two apart.
+    ///
+    /// This is now the *only* pin on emission order being the run's own
+    /// rather than the server's. It used to be paired with a run against an
+    /// ascending server, asserting both produced the same items; since
+    /// `ceiling` refuses an oldest-first server outright
+    /// (`an_oldest_first_server_is_refused_on_its_first_run`), no such run can
+    /// reach this code any more, and a comparison test that cannot execute
+    /// half of itself is worse than none.
     #[tokio::test]
     async fn builds_are_emitted_oldest_first_whatever_the_server_sent() {
         let rest = FakeRest::new(

@@ -74,22 +74,17 @@
 //!     `fields=` accepts a name that is legal for the *type* even when this
 //!     particular instance does not carry it — asking a finished build for
 //!     `running-info` is a 200 without the key, not a 400.
-//! 12. **Builds come back ascending by id**, where real TeamCity returns the
-//!     newest first. Ascending is what makes `sinceBuild` paging obvious to read
-//!     in a test, and no knobas adapter depends on the order.
-//! 13. **Every build is `triggered.type: "vcs"` with no `triggered.user`.** The
-//!     names are served — `triggered(type,date,user(username,name))` is a 200,
-//!     not the 400 it used to be, which is what lets
-//!     `knobas-source-teamcity` widen its `BUILD_FIELDS` without recording a
-//!     violation. What they are *not* is authorship:
-//!     `fixtures/tidewater/work.json` records no triggerer for any of its three
-//!     builds, so `SyncItem::author` stays `None` for every build even after
-//!     that widening. Putting an invented person here would be worse than the
-//!     gap — it would be indexed and searched as if the fixture had said it.
-//!     Closing it for real needs a triggerer in the fixture, which is
-//!     `knobas-source-mock`'s to add, not this crate's. Note also that because
-//!     `user` is `null`, a *sub*-name of it cannot be validated (deviation 11's
-//!     consequence, one level down): `triggered(user(nosuchfield))` is a 200.
+//! 12. **A build's `triggered` comes from the fixture and from nowhere else.**
+//!     `fixtures/tidewater/work.json` gives build 1188 a `triggered_by` and the
+//!     other two none, so 1188 is `type: "user"` with that person's `username`
+//!     and `name`, and the rest are `type: "vcs"` with no `user` at all — which
+//!     is exactly what a real server serves for a branch build. This is a
+//!     deviation only in that mockd could invent a person and refuses to: an
+//!     invented one would reach `SyncItem::author` and be indexed and searched
+//!     as if the dataset had said it. The consequence of a `null` `user` is
+//!     deviation 11 one level down — a null carries no key set, so a *sub*-name
+//!     of it cannot be validated: `triggered(user(nosuchfield))` is a 400
+//!     against an answer containing 1188 and a 200 against one that does not.
 //!
 //! ## The shared credentials
 //!
