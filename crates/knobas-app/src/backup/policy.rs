@@ -176,9 +176,23 @@ where
 }
 
 /// Whether a file name is one of ours.
+///
+/// A **file name**, and the check is structural rather than textual, because
+/// [`restore`](crate::backup::restore) joins this onto the backup directory: a
+/// prefix-and-suffix test alone waves through `knobas-x/../../elsewhere.knobas`,
+/// which carries our prefix and our extension and still names a file two
+/// directories up. So the name has to be one ordinary path component before
+/// it is anything else -- no separator, no `..`, no root.
 pub fn is_archive_name(name: &str) -> bool {
-    name.starts_with("knobas-")
-        && name.ends_with(&format!(".{}", knobas_db::backup::ARCHIVE_EXTENSION))
+    let mut components = std::path::Path::new(name).components();
+    let (Some(std::path::Component::Normal(only)), None) = (components.next(), components.next())
+    else {
+        return false;
+    };
+    only.to_str().is_some_and(|name| {
+        name.starts_with("knobas-")
+            && name.ends_with(&format!(".{}", knobas_db::backup::ARCHIVE_EXTENSION))
+    })
 }
 
 /// Which of `names` have aged out, newest-first retention of `keep`.
@@ -340,6 +354,24 @@ mod tests {
         assert!(is_archive_name(&earlier));
         assert!(!is_archive_name("notes.txt"));
         assert!(!is_archive_name("knobas-20260828-030000.tar"));
+    }
+
+    /// An archive name is a *file* name.
+    ///
+    /// `restore` joins it onto the backup directory, so a name carrying a path
+    /// resolves somewhere the directory does not reach. The dangerous shape is
+    /// not `../outside.knobas` -- that fails the prefix on its own -- but one
+    /// wearing both our prefix and our extension with a path in the middle.
+    #[test]
+    fn a_name_carrying_a_path_is_not_an_archive_name() {
+        assert!(!is_archive_name("knobas-x/../../outside.knobas"));
+        assert!(!is_archive_name("knobas-/etc/passwd.knobas"));
+        assert!(!is_archive_name("subdir/knobas-20260828-030000.knobas"));
+        assert!(!is_archive_name("/knobas-20260828-030000.knobas"));
+        assert!(
+            is_archive_name("knobas-20260828-030000.knobas"),
+            "and the ordinary name is still one"
+        );
     }
 
     /// Retention keeps the newest and names the rest, and it never touches a

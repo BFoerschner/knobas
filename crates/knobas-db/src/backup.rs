@@ -57,6 +57,22 @@ pub const OWNED_SCHEMA: &str = "knobas";
 /// The extension spec §14 gives a knobas archive.
 pub const ARCHIVE_EXTENSION: &str = "knobas";
 
+/// The one `knobas` table that does not count as *occupancy*.
+///
+/// `knobas.setting` is knobas's own bookkeeping -- migration `0002` comment 6
+/// names "first-run completion, the last opened context, later the export
+/// schedule" -- and the backup service writes it by itself, within seconds of
+/// a first start. Counting it would make [`restore`] refuse the machine it
+/// exists for: nobody restores into a knobas that has never run, so by the
+/// time a user has an archive to pick, the nightly task has already recorded
+/// one. A guard that fires on every machine is not conservative, it is a dead
+/// command.
+///
+/// It is still *in* the archive -- the ratified scope is the whole schema --
+/// and [`restore`] therefore clears it first, because the rows collide on the
+/// primary key.
+const BOOKKEEPING_TABLE: &str = "setting";
+
 const PG_DUMP: &str = if cfg!(windows) {
     "pg_dump.exe"
 } else {
@@ -280,6 +296,8 @@ fn is_description_word(word: &str) -> bool {
 ///
 /// Refuses rather than merges when the target holds knobas rows
 /// ([`BackupError::TargetNotEmpty`]): merge-restore with a preview is M4.
+/// "Holds rows" means *content*; [`BOOKKEEPING_TABLE`] is excluded and
+/// replaced by the archive's own, for the reason recorded there.
 ///
 /// # Foreign keys
 ///
@@ -302,6 +320,20 @@ pub async fn restore(connector: &Connector, archive: &Path) -> Result<(), Backup
         }
         Occupancy::Empty => {}
     }
+    // Every other table in the schema has just been proved empty, so the only
+    // rows here are the ones this knobas wrote about itself. The archive
+    // carries its own, keyed the same way, and a data-only load would collide
+    // on the primary key -- `--disable-triggers` holds off *triggers*, not a
+    // unique index. The archive's settings are the user's; these are a default
+    // this machine invented on its way to asking for them back.
+    // Both halves of the name are crate constants; nothing from a caller
+    // reaches this string, which is what `AssertSqlSafe` is asserting (the
+    // same use `test_util::scratch_database` makes of it).
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "delete from {OWNED_SCHEMA}.{BOOKKEEPING_TABLE}"
+    )))
+    .execute(&mut conn)
+    .await?;
     let _ = conn.close().await;
 
     // Explicit, although `PGDATABASE` is set: `pg_restore` treats "no
@@ -370,6 +402,7 @@ select c.relname::text as table_name,
   join pg_namespace n on n.oid = c.relnamespace
  where n.nspname = $1
    and c.relkind = 'r'
+   and c.relname <> $2
  order by c.relname
 ";
 
@@ -384,6 +417,7 @@ async fn owned_rows(conn: &mut sqlx::PgConnection) -> Result<Occupancy, sqlx::Er
 
     let occupied: Option<(String, i64)> = sqlx::query_as(OCCUPANCY)
         .bind(OWNED_SCHEMA)
+        .bind(BOOKKEEPING_TABLE)
         .fetch_all(&mut *conn)
         .await?
         .into_iter()

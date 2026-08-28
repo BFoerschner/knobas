@@ -244,6 +244,48 @@ async fn retention_deletes_the_oldest_and_spares_what_is_not_an_archive() {
     );
 }
 
+/// A *directory* wearing an archive's name is not an archive.
+///
+/// `archives` reads the backup directory with `read_dir`, which yields
+/// directories too, and retention then hands what it finds to `remove_file`.
+/// One directory called `knobas-....knobas` -- a half-unpacked something, a
+/// user's own tidying -- would therefore fail every export from then on, long
+/// after whoever made it had forgotten it. It is not ours; it is not touched;
+/// and the export it does not belong to still succeeds.
+#[tokio::test]
+async fn a_directory_named_like_an_archive_is_neither_listed_nor_pruned() {
+    let (service, dir) = service("archivedir").await;
+    backup::save_schedule(
+        &service.pool,
+        BackupSchedule {
+            keep: 1,
+            ..BackupSchedule::default()
+        },
+    )
+    .await
+    .expect("store a schedule");
+
+    let impostor = dir.path().join("knobas-20200101-030000.knobas");
+    std::fs::create_dir(&impostor).unwrap();
+
+    let record = backup::export_now(&service)
+        .await
+        .expect("a directory in the way must not fail the export");
+
+    assert!(impostor.is_dir(), "the directory was not left alone");
+    assert_eq!(
+        backup::status(&service)
+            .await
+            .expect("status")
+            .archives
+            .iter()
+            .map(|archive| archive.file.as_str())
+            .collect::<Vec<_>>(),
+        vec![record.file.as_str()],
+        "a directory must not be listed as an archive"
+    );
+}
+
 /// *Restore*, minimal: a name that is not an archive in this profile's
 /// directory is refused before anything touches the database.
 ///
@@ -259,10 +301,15 @@ async fn a_restore_only_accepts_an_archive_in_the_backup_directory() {
         "someone-elses.dump",
         "knobas-20260101-030000.knobas", // an archive name, but no such file
         "../outside.knobas",
+        // Prefixed *and* suffixed like ours, and still not a file name: this
+        // is the one a `starts_with`/`ends_with` pair waves through, and
+        // `directory.join` then resolves outside the directory entirely.
+        "knobas-x/../../outside.knobas",
     ] {
         let error = backup::restore(&service, name)
             .await
-            .expect_err("{name} must be refused");
+            .err()
+            .unwrap_or_else(|| panic!("{name} must be refused"));
         assert!(
             matches!(error, backup::ExportError::NoSuchArchive(_)),
             "{name}: {error:?}"
@@ -274,15 +321,19 @@ async fn a_restore_only_accepts_an_archive_in_the_backup_directory() {
     }
 }
 
-/// ...and restoring over a database that still holds knobas data is a
+/// ...and restoring over a database that still holds knobas *content* is a
 /// `conflict`, not an overwrite. Merge-restore is M4.
+///
+/// Content, and deliberately not `knobas.setting`: that table is knobas's own
+/// bookkeeping and knobas fills it in by itself, so a rule that counted it
+/// would refuse every machine rather than every populated one -- which is what
+/// `a_fresh_machine_restores_after_taking_its_own_first_backup` is about.
 #[tokio::test]
 async fn a_restore_over_a_populated_database_is_a_conflict() {
     let (service, _dir) = service("restoreconflict").await;
     let record = backup::export_now(&service).await.expect("export");
+    seed_entity(&service.pool, "conflict").await;
 
-    // `export_now` itself wrote `knobas.setting`, so the database is no longer
-    // empty -- which is exactly the state a user re-restoring would be in.
     let error = backup::restore(&service, &record.file)
         .await
         .expect_err("a populated knobas must not be overwritten");
@@ -291,6 +342,81 @@ async fn a_restore_over_a_populated_database_is_a_conflict() {
         knobas_app::IpcErrorCode::Conflict,
         "the frontend branches on this code to offer the M4 merge later"
     );
+}
+
+/// The fresh-machine path spec §14 calls **primary**, at the moment a user
+/// actually reaches it.
+///
+/// Nobody restores into a knobas that has never run: to have an archive to
+/// pick you must have installed knobas, started it, and gone looking -- and by
+/// then the nightly task has fired once (`STARTUP_DELAY` is 30 seconds) and
+/// written `backup.last` into `knobas.setting`. A restore that treats *any*
+/// row in the `knobas` schema as "populated" is therefore refused on every
+/// machine it exists to serve, which is not a conservative guard but a dead
+/// command.
+///
+/// So: an old machine's corpus, archived; a new machine that has already taken
+/// its own first backup; and the old archive restored onto it.
+#[tokio::test]
+async fn a_fresh_machine_restores_after_taking_its_own_first_backup() {
+    // The old machine: a corpus, and an archive of it.
+    let (old, old_dir) = service("oldmachine").await;
+    let entity = seed_entity(&old.pool, "oldmachine").await;
+    let archive = backup::export_now(&old).await.expect("the old machine's backup");
+
+    // The new machine: empty, but its nightly job has already run once, so
+    // `knobas.setting` holds `backup.last`.
+    let (fresh, fresh_dir) = service("freshmachine").await;
+    backup::export_if_due(&fresh)
+        .await
+        .expect("the first nightly run")
+        .expect("a machine that has never backed up is due");
+    let settings: i64 = sqlx::query_scalar("select count(*) from knobas.setting")
+        .fetch_one(&fresh.pool)
+        .await
+        .unwrap();
+    assert!(
+        settings > 0,
+        "this test is about a database knobas has written its own bookkeeping into"
+    );
+
+    // The user drops the old machine's archive into the new profile.
+    std::fs::copy(
+        old_dir.path().join(&archive.file),
+        fresh_dir.path().join(&archive.file),
+    )
+    .unwrap();
+
+    backup::restore(&fresh, &archive.file)
+        .await
+        .expect("the fresh-machine restore §14 calls the primary path");
+
+    let restored: Option<String> = sqlx::query_scalar("select id from knobas.entity where id = $1")
+        .bind(&entity)
+        .fetch_optional(&fresh.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        restored.as_deref(),
+        Some(entity.as_str()),
+        "the old machine's corpus did not come across"
+    );
+}
+
+/// One entity, run-unique, so a database can be *populated* in the sense the
+/// occupancy guard means. Returns its id.
+async fn seed_entity(pool: &sqlx::PgPool, tag: &str) -> String {
+    let id = format!(
+        "mock:{tag}-{}-{}",
+        std::process::id(),
+        uuid::Uuid::new_v4().simple()
+    );
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ticket', 'seeded')")
+        .bind(&id)
+        .execute(pool)
+        .await
+        .expect("seed an entity");
+    id
 }
 
 // ---------------------------------------------------------------------------

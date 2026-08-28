@@ -330,6 +330,12 @@ pub async fn restore(state: &BackupState, file: &str) -> Result<(), ExportError>
 /// A missing or unreadable directory is an empty list, not an error: "there
 /// are no backups yet" is exactly what the settings dialog should say before
 /// the first one.
+///
+/// Regular files only. `read_dir` yields directories as happily as files, and
+/// everything downstream of here treats what it returns as something
+/// `remove_file` can take -- so a directory called `knobas-....knobas` would
+/// be listed to the user as an archive and then fail every export that tried
+/// to age it out.
 fn archives(state: &BackupState) -> Vec<ArchiveFile> {
     let Ok(entries) = std::fs::read_dir(&state.directory) else {
         return Vec::new();
@@ -341,11 +347,12 @@ fn archives(state: &BackupState) -> Vec<ArchiveFile> {
             if !policy::is_archive_name(&name) {
                 return None;
             }
+            let meta = entry.metadata().ok()?;
+            if !meta.is_file() {
+                return None;
+            }
             Some(ArchiveFile {
-                bytes: entry
-                    .metadata()
-                    .ok()
-                    .map_or(0, |meta| i64::try_from(meta.len()).unwrap_or(i64::MAX)),
+                bytes: i64::try_from(meta.len()).unwrap_or(i64::MAX),
                 file: name,
             })
         })
