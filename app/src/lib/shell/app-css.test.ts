@@ -136,7 +136,7 @@ test("every text token clears 4.5:1 on the surfaces it is read on", () => {
   expect(failures, "spec §14 sets 4.5:1 for text").toEqual([]);
 });
 
-test("the three rules that put faint text on a hover surface are lifted", () => {
+test("the four rules that put faint text on a hover surface are lifted", () => {
   // `--raised` is the one background `--faint` does not clear, and it is a
   // hover or selected state rather than a resting surface. Deleting these
   // overrides would put small text at 4.09:1 under a pointer, which is exactly
