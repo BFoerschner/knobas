@@ -35,6 +35,15 @@ pub struct SearchFilters {
     /// never appears here: the echo is what the launcher redraws its chips
     /// from, and putting usernames the user never typed into that row would
     /// have the chips claim a filter nobody wrote.
+    ///
+    /// The one field here carrying `#[serde(default)]`, because it is the one
+    /// field that was **added** to a frozen struct (§10.8): a caller written
+    /// against the four-field shape sends no `authors`, and refusing its query
+    /// outright is a worse answer than reading the absence as "named nobody".
+    /// The mirror declares it required, so the launcher always sends it and
+    /// `the_response_shape_matches_its_typescript_mirror` keeps that true --
+    /// the default is the wire being permissive, not the frontend being
+    /// allowed to forget.
     #[serde(default)]
     pub authors: Vec<String>,
 }
@@ -140,6 +149,43 @@ pub struct Segment {
 mod tests {
     use super::*;
 
+    /// The lines between `export interface <name> {` and its closing brace.
+    ///
+    /// The mirror is one file holding eight interfaces and two functions, so a
+    /// search that is not scoped to a declaration is not a search for that
+    /// declaration -- see [`declares`].
+    fn interface_body<'a>(mirror: &'a str, name: &str) -> &'a str {
+        let header = format!("export interface {name} {{");
+        let start = mirror
+            .find(&header)
+            .unwrap_or_else(|| panic!("`{header}` is not in app/src/lib/ipc/search.ts"))
+            + header.len();
+        let rest = &mirror[start..];
+        let end = rest
+            .find("\n}")
+            .unwrap_or_else(|| panic!("`interface {name}` is never closed"));
+        &rest[..end]
+    }
+
+    /// Whether `body` **declares** `key` -- a line whose first token is `key:`.
+    ///
+    /// Not `contains`, and not over the whole file. Both halves are
+    /// load-bearing, and these tests had neither until a mutation proved it:
+    /// deleting `authors: string[];` from `interface SearchFilters` left every
+    /// assertion below green, because `mirror.contains("authors:")` was
+    /// satisfied by the `authors: []` inside `noFilters()`'s body sixty lines
+    /// further down. A doc comment inside the block does the same for the
+    /// field it documents.
+    ///
+    /// This is verbatim the failure `crates/knobas-app/src/commands/search.rs`
+    /// records finding and fixing in its own mirror test, with the same two
+    /// helpers. It was fixed there and left standing here; the negative
+    /// controls below are what stop a slice quietly ceasing to slice.
+    fn declares(body: &str, key: &str) -> bool {
+        body.lines()
+            .any(|line| line.trim_start().starts_with(&format!("{key}:")))
+    }
+
     /// Every key one hit puts on the wire, in the spelling
     /// `app/src/lib/ipc/search.ts` declares -- and **no `row`**.
     ///
@@ -191,14 +237,25 @@ mod tests {
             "the flatten put something unexpected on the wire"
         );
 
+        let body = interface_body(mirror, "SearchHit");
+        // The negative control: `hits` is a `ResultGroup` field declared eight
+        // lines below this interface's closing brace, so a slice that reaches
+        // it is not a slice.
+        assert!(
+            !declares(body, "hits"),
+            "the SearchHit slice reaches ResultGroup.hits, so it is searching \
+             more than the declaration:\n{body}"
+        );
+
         for key in &keys {
             assert!(
-                mirror.contains(&format!("{key}:")),
-                "SearchHit.{key} is missing from app/src/lib/ipc/search.ts"
+                declares(body, key),
+                "`interface SearchHit` in app/src/lib/ipc/search.ts does not \
+                 declare `{key}`, which the Rust type puts on the wire:\n{body}"
             );
         }
         assert!(
-            !mirror.contains("row:"),
+            !declares(body, "row"),
             "the TS mirror declares a nested `row`, but `#[serde(flatten)]` inlines it"
         );
     }
@@ -228,20 +285,36 @@ mod tests {
         };
 
         let wire = serde_json::to_value(&response).expect("a response serializes");
+
+        // The negative control, on the slice the mutation escaped through:
+        // `text` is a `ParsedQuery` field twenty lines below `SearchFilters`'
+        // closing brace, and `authors` also appears in `noFilters()`'s body
+        // further down again. A `SearchFilters` slice that reaches either is
+        // not a slice, and a rearrangement that did not fix it would look
+        // identical from here.
+        let filters_body = interface_body(mirror, "SearchFilters");
+        assert!(
+            !declares(filters_body, "text"),
+            "the SearchFilters slice reaches ParsedQuery.text, so it is \
+             searching more than the declaration:\n{filters_body}"
+        );
+
         for (path, value) in [
             ("SearchResponse", &wire),
             ("ParsedQuery", &wire["interpreted"]),
             ("SearchFilters", &wire["interpreted"]["filters"]),
             ("ResultGroup", &wire["groups"][0]),
         ] {
+            let body = interface_body(mirror, path);
             for key in value
                 .as_object()
                 .unwrap_or_else(|| panic!("{path} is a JSON object"))
                 .keys()
             {
                 assert!(
-                    mirror.contains(&format!("{key}:")),
-                    "{path}.{key} is missing from app/src/lib/ipc/search.ts"
+                    declares(body, key),
+                    "`interface {path}` in app/src/lib/ipc/search.ts does not \
+                     declare `{key}`, which the Rust type puts on the wire:\n{body}"
                 );
             }
         }
