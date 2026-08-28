@@ -10,6 +10,14 @@ export interface SearchFilters {
   kinds: string[];
   updated_within_days: number | null;
   mine: boolean;
+  /**
+   * The people the query named — `@jonas`, `author:jonas`, `owner:`, `by:`.
+   *
+   * `mine` is a separate dimension and never lands here: the backend resolves
+   * it to the configured usernames on its own, and echoing those would put
+   * names the user never typed into the chip row.
+   */
+  authors: string[];
 }
 
 /** `knobas_search::SearchQuery` — the raw box text; the backend parses it. */
@@ -86,7 +94,7 @@ export interface SearchResponse {
 
 /** No filters — what the box sends until the chips exist. */
 export function noFilters(): SearchFilters {
-  return { sources: [], kinds: [], updated_within_days: null, mine: false };
+  return { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] };
 }
 
 /** Answer one launcher query. */

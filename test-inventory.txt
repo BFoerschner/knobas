@@ -385,10 +385,11 @@ knobas-search	lib/knobas_search	lists::tests::only_the_identity_lists_read_the_i
 knobas-search	lib/knobas_search	lists::tests::the_badge_is_news_and_not_noise
 knobas-search	lib/knobas_search	lists::tests::the_summary_projects_every_lists_three_columns
 knobas-search	lib/knobas_search	lists::tests::the_two_statements_agree_on_the_seen_key
-knobas-search	lib/knobas_search	query::tests::a_named_person_is_reported_rather_than_silently_ignored
+knobas-search	lib/knobas_search	query::tests::a_named_person_is_an_author_filter_in_every_spelling
 knobas-search	lib/knobas_search	query::tests::each_dimension_alone_makes_a_query_filtered
 knobas-search	lib/knobas_search	query::tests::inline_key_values_fill_the_filters_they_have_a_home_for
 knobas-search	lib/knobas_search	query::tests::leading_prefixes_are_exclusive_and_consume_their_marker
+knobas-search	lib/knobas_search	query::tests::me_and_a_name_are_both_bound_but_only_the_name_is_echoed
 knobas-search	lib/knobas_search	query::tests::mine_without_an_identity_resolves_to_no_authors_but_stays_set
 knobas-search	lib/knobas_search	query::tests::source_aliases_resolve_to_every_instance_of_that_adapter
 knobas-search	lib/knobas_search	query::tests::text_filters_win_over_chips_dimension_by_dimension
@@ -458,6 +459,7 @@ knobas-search	test/search	a_deleted_item_disappears_from_the_index
 knobas-search	test/search	a_filter_with_no_text_browses_rather_than_answering_nothing
 knobas-search	test/search	a_kind_no_one_declared_is_still_grouped_and_labelled
 knobas-search	test/search	a_kind_the_limit_cut_still_reports_its_count
+knobas-search	test/search	a_named_person_filters_with_or_without_search_text
 knobas-search	test/search	an_empty_query_is_the_boards_job_not_a_full_table_count
 knobas-search	test/search	corpora_that_m1_does_not_have_return_nothing_rather_than_pretending
 knobas-search	test/search	every_row_carries_its_provenance

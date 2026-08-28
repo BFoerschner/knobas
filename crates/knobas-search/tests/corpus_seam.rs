@@ -204,7 +204,8 @@ async fn a_second_corpus_adds_no_binds_and_still_executes() {
         kinds: vec!["ticket".to_owned(), "note".to_owned()],
         updated_within_days: Some(30),
         mine: false,
-        authors: Vec::new(),
+        named_authors: Vec::new(),
+        identity_authors: Vec::new(),
     };
     let one = search_sql(&[&corpus::LIVE_ITEM], Some("sepa"), true, &filters, 10, 20);
     let two = search_sql(

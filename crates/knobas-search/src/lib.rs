@@ -301,6 +301,7 @@ fn validate(mut query: SearchQuery) -> Result<SearchQuery, SearchError> {
     for (dimension, values) in [
         ("sources", &query.filters.sources),
         ("kinds", &query.filters.kinds),
+        ("authors", &query.filters.authors),
     ] {
         if values.len() > MAX_FILTER_VALUES {
             return Err(SearchError::Invalid(format!(
@@ -412,6 +413,13 @@ mod tests {
             },
             SearchFilters {
                 kinds: many.clone(),
+                ..SearchFilters::default()
+            },
+            // Authors are a chip dimension too (ruling E-Q1), and a chip list
+            // is deserialized from the frontend rather than typed: the raw-text
+            // cap that bounds `@a @b @c ...` does not reach it.
+            SearchFilters {
+                authors: many.clone(),
                 ..SearchFilters::default()
             },
         ] {

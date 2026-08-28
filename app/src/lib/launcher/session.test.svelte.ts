@@ -22,7 +22,7 @@ function answer(raw: string, titles: string[] = ["one"]): SearchResponse {
     interpreted: {
       text: raw,
       prefix: null,
-      filters: { sources: [], kinds: [], updated_within_days: null, mine: false },
+      filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
       unknown_tokens: [],
     },
     groups: [

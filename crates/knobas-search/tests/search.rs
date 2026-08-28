@@ -399,6 +399,83 @@ async fn filters_narrow_and_are_echoed_back_as_the_launcher_will_chip_them() {
     assert_eq!(r.total, 3);
 }
 
+/// A named person narrows, in all four spellings, with text and without it
+/// (ruling **E-Q1**).
+///
+/// The no-text half is the one that can regress silently. [`Searcher::search`]
+/// refuses a query with neither text nor a filter -- that answer belongs to
+/// the board -- so an author list the refusal does not count reads as "no
+/// filter", and `@jonas` on its own comes back empty instead of with jonas's
+/// work. Nothing else in this file would notice.
+///
+/// The two authors are tokens rather than names, because every test in this
+/// binary shares one database: a filter on a plain `jonas` would be answered
+/// with whatever another test seeded under that name.
+#[tokio::test]
+async fn a_named_person_filters_with_or_without_search_text() {
+    let pool = pool().await;
+    let t = token("author");
+    let hers = format!("ada-{t}");
+    let his = format!("bob-{t}");
+    seed(
+        &pool,
+        &format!("jira:{t}-1"),
+        "ticket",
+        "jira",
+        &format!("{t} hers"),
+        "body",
+        Some(&hers),
+        Utc::now() - Duration::days(1),
+    )
+    .await;
+    seed(
+        &pool,
+        &format!("gitea:{t}-2"),
+        "pr",
+        "gitea",
+        &format!("{t} his"),
+        "body",
+        Some(&his),
+        Utc::now() - Duration::days(2),
+    )
+    .await;
+    let s = searcher(&pool);
+
+    let ids = |r: &knobas_search::SearchResponse| -> Vec<String> {
+        r.groups
+            .iter()
+            .flat_map(|g| &g.hits)
+            .map(|h| h.row.entity_id.clone())
+            .collect()
+    };
+
+    // The control: without the author filter the text matches both rows, so
+    // the filter has something to remove rather than an empty world to be
+    // trivially right in.
+    assert_eq!(ids(&s.search(q(&t)).await.unwrap()).len(), 2);
+
+    for raw in [
+        format!("@{hers} {t}"),
+        format!("author:{hers} {t}"),
+        format!("owner:{hers} {t}"),
+        format!("by:{hers} {t}"),
+    ] {
+        let r = s.search(q(&raw)).await.unwrap();
+        assert_eq!(ids(&r), [format!("jira:{t}-1")], "{raw:?}");
+        assert_eq!(r.interpreted.filters.authors, [hers.as_str()], "{raw:?}");
+        assert!(r.interpreted.unknown_tokens.is_empty(), "{raw:?}");
+        assert_eq!(r.interpreted.prefix, Some(Prefix::Person), "{raw:?}");
+        // A named person is not `mine`: reading it as the identity filter
+        // would answer with the wrong person's work.
+        assert!(!r.interpreted.filters.mine, "{raw:?}");
+    }
+
+    // And with no search word at all: a browse of that person's items.
+    let r = s.search(q(&format!("@{his}"))).await.unwrap();
+    assert_eq!(ids(&r), [format!("gitea:{t}-2")]);
+    assert_eq!(r.total, 1);
+}
+
 /// A chip the user clicked is part of the query, so it has to come back in the
 /// echo -- otherwise the launcher redraws a narrower query than the one it has
 /// results for.

@@ -58,14 +58,6 @@ const LEADING: &[(&str, Prefix)] = &[
 pub struct Parsed {
     /// The public echo: text, prefix, filters, unknown tokens.
     pub query: ParsedQuery,
-    /// People named with `@name` / `author:name`.
-    ///
-    /// Always empty today: `SearchFilters` has only `mine`, so a named person
-    /// has nowhere to land and is reported as an unknown token instead (open
-    /// question **E-Q1**). The field exists because the merge and the query
-    /// builder both already handle a list of authors -- granting E-Q1 is one
-    /// additive field, not a new code path.
-    pub authors: Vec<String>,
     /// Whether the last word is still being typed, and should therefore match
     /// as a prefix (`sep` finds `sepa`).
     pub prefix_last_term: bool,
@@ -81,24 +73,45 @@ pub struct Parsed {
 /// clicked chips have been reconciled by [`merge`].
 ///
 /// Not part of the IPC contract: `SearchFilters` is what crosses the bridge,
-/// this is what reaches the SQL builder. The difference is [`Self::authors`],
-/// which is `mine` already resolved to usernames.
+/// this is what reaches the SQL builder. The difference is
+/// [`Self::identity_authors`], which is `mine` already resolved to usernames
+/// and which the bridge deliberately never carries.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EffectiveFilters {
     pub sources: Vec<String>,
     pub kinds: Vec<String>,
     pub updated_within_days: Option<u32>,
     pub mine: bool,
-    /// The usernames `mine` and any `@person` resolved to.
+    /// The people the query **named** -- `@jonas`, `author:jonas`, or an
+    /// author chip (ruling **E-Q1**).
+    ///
+    /// A filter in its own right, which is why [`Self::is_empty`] consults it:
+    /// `@jonas` with no text is a query somebody asked, not a browse.
+    pub named_authors: Vec<String>,
+    /// The usernames **`mine`** resolved to, and nothing else.
     ///
     /// Empty **with `mine` set** is a real state, not "no filter": it means
     /// no source was configured with a username, so knobas does not know who
     /// the user is. The builder emits an author predicate that matches nothing
     /// rather than dropping the filter -- see `sql::search_sql`.
-    pub authors: Vec<String>,
+    pub identity_authors: Vec<String>,
 }
 
 impl EffectiveFilters {
+    /// Everything the author predicate binds: the named people, plus whoever
+    /// `mine` stands for.
+    ///
+    /// One list because the predicate is one `= any(...)`: `@me @jonas` is
+    /// "mine or jonas's", the same OR every other multi-valued dimension uses.
+    #[must_use]
+    pub fn authors(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for name in self.identity_authors.iter().chain(&self.named_authors) {
+            push_unique(&mut out, name);
+        }
+        out
+    }
+
     /// Whether anything is actually being filtered on.
     ///
     /// The engine's reason for asking: a query with neither text nor a filter
@@ -106,16 +119,19 @@ impl EffectiveFilters {
     /// generate and which counts every row in the mirror. That answer belongs
     /// to the launcher board, not to a SQL statement.
     ///
-    /// [`Self::authors`] is deliberately not consulted, and cannot be: it is
-    /// `mine` already resolved, so it is empty exactly when knobas does not
-    /// know who the user is -- and reading that as "no filter" would turn
-    /// `@me` on an unconfigured install into an unfiltered scan.
+    /// [`Self::identity_authors`] is deliberately not consulted, and cannot
+    /// be: it is `mine` already resolved, so it is empty exactly when knobas
+    /// does not know who the user is -- and reading that as "no filter" would
+    /// turn `@me` on an unconfigured install into an unfiltered scan.
+    /// [`Self::named_authors`] is the opposite case and *is* consulted: it is
+    /// empty exactly when nobody was named.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.sources.is_empty()
             && self.kinds.is_empty()
             && self.updated_within_days.is_none()
             && !self.mine
+            && self.named_authors.is_empty()
     }
 
     /// What the launcher draws its chips from.
@@ -123,8 +139,9 @@ impl EffectiveFilters {
     /// The *merged* filters, not the typed ones: a chip the user clicked is
     /// part of what the query ran with, and echoing only the typed half would
     /// have the UI redraw a narrower query than the one it got results for.
-    /// [`Self::authors`] stays behind -- it is `mine` resolved to usernames,
-    /// and `SearchFilters` has no home for it (open question **E-Q1**).
+    /// [`Self::identity_authors`] stays behind -- it is `mine` resolved to
+    /// usernames, and echoing it would put names the user never typed into the
+    /// chip row, where the `@me` chip already says the same thing.
     #[must_use]
     pub fn echo(&self) -> SearchFilters {
         SearchFilters {
@@ -132,6 +149,7 @@ impl EffectiveFilters {
             kinds: self.kinds.clone(),
             updated_within_days: self.updated_within_days,
             mine: self.mine,
+            authors: self.named_authors.clone(),
         }
     }
 }
@@ -200,22 +218,19 @@ pub fn merge(parsed: &Parsed, chips: &SearchFilters) -> EffectiveFilters {
     let typed = &parsed.query.filters;
     let mine = typed.mine || chips.mine;
 
-    let mut authors: Vec<String> = Vec::new();
-    if mine {
-        for name in &parsed.identity {
-            push_unique(&mut authors, name);
-        }
-    }
-    for name in &parsed.authors {
-        push_unique(&mut authors, name);
-    }
-
     EffectiveFilters {
         sources: pick(&typed.sources, &chips.sources),
         kinds: pick(&typed.kinds, &chips.kinds),
         updated_within_days: typed.updated_within_days.or(chips.updated_within_days),
         mine,
-        authors,
+        named_authors: pick(&typed.authors, &chips.authors),
+        // `mine` is what puts the identity in play, and only `mine`: a query
+        // that named somebody else must not also quietly match the user.
+        identity_authors: if mine {
+            parsed.identity.clone()
+        } else {
+            Vec::new()
+        },
     }
 }
 
@@ -228,7 +243,6 @@ impl Parsed {
                 filters: SearchFilters::default(),
                 unknown_tokens: Vec::new(),
             },
-            authors: Vec::new(),
             prefix_last_term: false,
             list_id: None,
             identity: vocab.identity.clone(),
@@ -318,7 +332,7 @@ fn apply_token(token: &str, vocab: &Vocabulary, parsed: &mut Parsed, terms: &mut
     }
     if let Some(person) = token.strip_prefix('@') {
         parsed.claim_prefix(Prefix::Person);
-        apply_person(parsed, person, token);
+        apply_person(parsed, person);
         return;
     }
     if let Some(rest) = token.strip_prefix('#') {
@@ -407,7 +421,7 @@ fn apply_key_value(
         }
         "author" | "owner" | "by" => {
             parsed.claim_prefix(Prefix::Person);
-            apply_person(parsed, value, token);
+            apply_person(parsed, value);
         }
         // The estate's own keys. They have no home before M4, and demoting
         // them to search words would quietly widen the result set.
@@ -417,16 +431,25 @@ fn apply_key_value(
     true
 }
 
-/// `@me` is the identity filter; anybody else has nowhere to land (**E-Q1**).
-fn apply_person(parsed: &mut Parsed, person: &str, token: &str) {
+/// `@me` is the identity filter; anybody else is an author filter (**E-Q1**).
+///
+/// The name is kept **verbatim**, not lowercased: `sync.item.author` holds the
+/// username as its source spells it, the predicate is an equality, and folding
+/// the case here would only make the filter miss on any source that
+/// distinguishes it.
+///
+/// The one person this cannot serve is somebody actually called `me`, and that
+/// is the right trade: `@me` is the filter §4 puts on a chip.
+fn apply_person(parsed: &mut Parsed, person: &str) {
     if person.eq_ignore_ascii_case("me") {
         parsed.query.filters.mine = true;
     } else if !person.is_empty() {
-        parsed.unknown(token);
+        push_unique(&mut parsed.query.filters.authors, person);
     }
-    // A bare `@` is someone who has just typed the marker. The prefix is
-    // already claimed; reporting it as unknown would grey out a token that is
-    // one keystroke from being valid.
+    // A bare `@` -- or an `author:` with nothing after it -- is someone who
+    // has just typed the marker. The prefix is already claimed; reporting it
+    // as unknown would grey out a token that is one keystroke from being
+    // valid.
 }
 
 fn resolve_sources(parsed: &mut Parsed, vocab: &Vocabulary, alias: &str, token: &str) {
@@ -709,16 +732,20 @@ mod tests {
         }
     }
 
-    /// A named person has no field in `SearchFilters` (**E-Q1**), so the
-    /// honest answer is to say so rather than to filter by nothing.
+    /// A named person is a filter, in all four spellings (**E-Q1**, granted).
+    ///
+    /// The four spellings are one filter, and none of them is `mine`: `@me`
+    /// resolves to whoever the sources are configured as, a name resolves to
+    /// itself, and reading a name as `mine` would answer with the wrong
+    /// person's work.
     #[test]
-    fn a_named_person_is_reported_rather_than_silently_ignored() {
+    fn a_named_person_is_an_author_filter_in_every_spelling() {
         let v = fixture();
         for raw in ["@jonas", "author:jonas", "owner:jonas", "by:jonas"] {
             let p = parse(raw, &v);
             assert_eq!(p.query.prefix, Some(Prefix::Person), "{raw:?}");
-            assert_eq!(p.query.unknown_tokens, [raw], "{raw:?}");
-            assert!(p.authors.is_empty(), "{raw:?}");
+            assert!(p.query.unknown_tokens.is_empty(), "{raw:?}");
+            assert_eq!(p.query.filters.authors, ["jonas"], "{raw:?}");
             assert!(!p.query.filters.mine, "{raw:?}");
             assert!(p.query.text.is_empty(), "{raw:?}");
         }
@@ -757,13 +784,21 @@ mod tests {
             kinds: vec!["pr".into()],
             updated_within_days: Some(30),
             mine: false,
+            authors: vec!["jonas".into()],
         };
         let eff = merge(&parse("/ji sepa", &v), &chips);
         assert_eq!(eff.sources, ["jira", "jira-eu"]); // the text spoke: it decides
         assert_eq!(eff.kinds, ["pr"]); // the text was silent: the chip holds
         assert_eq!(eff.updated_within_days, Some(30));
         assert!(!eff.mine);
-        assert!(eff.authors.is_empty());
+        // Authors are a dimension like any other: the chip holds where the
+        // text was silent, and `mine` stayed off, so nobody's identity joined.
+        assert_eq!(eff.named_authors, ["jonas"]);
+        assert_eq!(eff.authors(), ["jonas"]);
+
+        // ... and the text replaces it where it spoke.
+        let eff = merge(&parse("@mara", &v), &chips);
+        assert_eq!(eff.named_authors, ["mara"]);
 
         // The text speaking on a dimension the chip also speaks on replaces it
         // rather than unioning: changing your mind is the common case.
@@ -774,7 +809,10 @@ mod tests {
         // `mine` is the one dimension that ORs: a chip and an `@me` mean the
         // same thing, and neither can express "not mine".
         assert!(merge(&parse("@me", &v), &SearchFilters::default()).mine);
-        assert_eq!(merge(&parse("@me", &v), &chips).authors, ["mara.lindqvist"]);
+        assert_eq!(
+            merge(&parse("@me", &v), &SearchFilters::default()).authors(),
+            ["mara.lindqvist"]
+        );
         // Including when only the chip said so -- which is why the identity
         // travels with the parse rather than only being read at `@me`.
         let mine_chip = SearchFilters {
@@ -783,7 +821,49 @@ mod tests {
         };
         let eff = merge(&parse("sepa", &v), &mine_chip);
         assert!(eff.mine);
-        assert_eq!(eff.authors, ["mara.lindqvist"]);
+        assert_eq!(eff.authors(), ["mara.lindqvist"]);
+    }
+
+    /// `@me` and a name are two dimensions that both reach the same predicate.
+    ///
+    /// The predicate is one `= any(...)`, so "mine or jonas's" is the only
+    /// reading -- but the two halves have to stay distinguishable up to that
+    /// point, because only one of them is something the user typed and only
+    /// one of them may reach the chip row.
+    #[test]
+    fn me_and_a_name_are_both_bound_but_only_the_name_is_echoed() {
+        let v = fixture();
+        let eff = merge(&parse("@me @jonas", &v), &SearchFilters::default());
+        assert!(eff.mine);
+        assert_eq!(eff.named_authors, ["jonas"]);
+        assert_eq!(eff.identity_authors, ["mara.lindqvist"]);
+        assert_eq!(eff.authors(), ["mara.lindqvist", "jonas"]);
+        assert_eq!(eff.echo().authors, ["jonas"]);
+        assert!(eff.echo().mine);
+
+        // A name on its own leaves the identity out entirely: answering with
+        // the user's own work as well would be the wrong person's results.
+        let eff = merge(&parse("@jonas", &v), &SearchFilters::default());
+        assert!(!eff.mine);
+        assert!(eff.identity_authors.is_empty());
+        assert_eq!(eff.authors(), ["jonas"]);
+
+        // Two names are two binds; the same name twice is one.
+        assert_eq!(
+            merge(&parse("@jonas author:mara", &v), &SearchFilters::default()).authors(),
+            ["jonas", "mara"]
+        );
+        assert_eq!(
+            merge(&parse("@jonas by:jonas", &v), &SearchFilters::default()).authors(),
+            ["jonas"]
+        );
+        // And `@me` twice over -- once typed, once resolved -- is still one.
+        let mut same = Vocabulary::fixture();
+        same.identity = vec!["jonas".to_owned()];
+        assert_eq!(
+            merge(&parse("@me @jonas", &same), &SearchFilters::default()).authors(),
+            ["jonas"]
+        );
     }
 
     /// Not knowing who the user is must not read as "no filter".
@@ -793,7 +873,11 @@ mod tests {
         v.identity.clear();
         let eff = merge(&parse("@me", &v), &SearchFilters::default());
         assert!(eff.mine);
-        assert!(eff.authors.is_empty());
+        assert!(eff.authors().is_empty());
+        assert!(
+            !eff.is_empty(),
+            "`mine` is a filter even with nobody behind it"
+        );
     }
 
     #[test]
@@ -828,16 +912,18 @@ mod tests {
             kinds: vec!["ticket".to_owned()],
             updated_within_days: Some(7),
             mine: true,
-            // `mine` resolved. `SearchFilters` has no home for it (E-Q1), and
-            // an echo that invented one would put usernames the user never
-            // typed into the chip row.
-            authors: vec!["mara.lindqvist".to_owned()],
+            named_authors: vec!["jonas".to_owned()],
+            // `mine` resolved. The `@me` chip already says this, and echoing
+            // the usernames behind it would put names the user never typed
+            // into the chip row.
+            identity_authors: vec!["mara.lindqvist".to_owned()],
         };
         let echo = filters.echo();
         assert_eq!(echo.sources, ["jira"]);
         assert_eq!(echo.kinds, ["ticket"]);
         assert_eq!(echo.updated_within_days, Some(7));
         assert!(echo.mine);
+        assert_eq!(echo.authors, ["jonas"]);
         assert!(!echo.is_empty());
         assert_eq!(EffectiveFilters::default().echo(), SearchFilters::default());
     }
@@ -865,6 +951,13 @@ mod tests {
             // knowing who the user is must not widen the query to everything.
             EffectiveFilters {
                 mine: true,
+                ..EffectiveFilters::default()
+            },
+            // And a named person is a filter on its own, or `@jonas` with no
+            // search word would be answered with the board instead of jonas's
+            // work (`Searcher::search` refuses a query that filters nothing).
+            EffectiveFilters {
+                named_authors: vec!["jonas".to_owned()],
                 ..EffectiveFilters::default()
             },
         ];

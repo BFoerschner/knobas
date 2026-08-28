@@ -533,11 +533,43 @@ async fn every_filter_narrows_the_match_and_none_of_them_is_a_literal() {
     assert_eq!(
         only(EffectiveFilters {
             mine: true,
-            authors: vec!["mara".to_owned()],
+            identity_authors: vec!["mara".to_owned()],
             ..EffectiveFilters::default()
         })
         .await,
         [format!("sq-jira:{tag}-1")]
+    );
+    // A *named* person narrows to that person and nobody else -- `mine` off,
+    // so nothing the user wrote is in the answer either (ruling E-Q1).
+    assert_eq!(
+        only(EffectiveFilters {
+            named_authors: vec!["jonas".to_owned()],
+            ..EffectiveFilters::default()
+        })
+        .await,
+        [format!("sq-gitea:{tag}-2")]
+    );
+    // `@me @jonas` is one predicate over both: "mine or jonas's".
+    let mut both = only(EffectiveFilters {
+        mine: true,
+        identity_authors: vec!["mara".to_owned()],
+        named_authors: vec!["jonas".to_owned()],
+        ..EffectiveFilters::default()
+    })
+    .await;
+    both.sort();
+    assert_eq!(
+        both,
+        [format!("sq-gitea:{tag}-2"), format!("sq-jira:{tag}-1")]
+    );
+    // A name nobody wrote under matches nothing rather than everything.
+    assert!(
+        only(EffectiveFilters {
+            named_authors: vec!["nobody".to_owned()],
+            ..EffectiveFilters::default()
+        })
+        .await
+        .is_empty()
     );
     // `mine` with nobody behind it filters everything out rather than nothing.
     assert!(
@@ -555,7 +587,8 @@ async fn every_filter_narrows_the_match_and_none_of_them_is_a_literal() {
             kinds: vec!["ticket".to_owned()],
             updated_within_days: Some(7),
             mine: true,
-            authors: vec!["mara".to_owned()],
+            identity_authors: vec!["mara".to_owned()],
+            named_authors: Vec::new(),
         })
         .await,
         [format!("sq-jira:{tag}-1")]
@@ -740,7 +773,8 @@ async fn hostile_text_is_a_search_term_and_nothing_else() {
                 kinds: vec![evil.to_owned()],
                 updated_within_days: Some(7),
                 mine: true,
-                authors: vec![evil.to_owned()],
+                identity_authors: vec![evil.to_owned()],
+                named_authors: vec![evil.to_owned()],
             },
             10,
             50,

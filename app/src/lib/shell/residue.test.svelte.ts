@@ -144,7 +144,7 @@ const LAUNCHER_PORTS = {
       interpreted: {
         text: "sepa",
         prefix: null,
-        filters: { sources: [], kinds: [], updated_within_days: null, mine: false },
+        filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
         unknown_tokens: [],
       },
       groups: [],
