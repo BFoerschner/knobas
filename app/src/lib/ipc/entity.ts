@@ -137,6 +137,14 @@ export interface LinkRow {
   id: string;
   from_id: string;
   to_id: string;
+  /**
+   * What kind of link this is — `"related"` unless one was named.
+   *
+   * Always **lower case**: the backend folds it on write, so `Blocks` and
+   * `blocks` are one relation and one panel group rather than two. Key the
+   * curated list and the inverse-label lookup on this spelling; capitalize
+   * for display from the whole string.
+   */
   relation: string;
   origin: "manual" | "suggested" | "imported" | "source" | "implied";
   /**
@@ -207,18 +215,22 @@ export function getEntity(entityId: string): Promise<EntityDetail> {
 /**
  * Draw a link between two entities — `knobas_app::commands::entity::create_link`.
  *
- * `relation` defaults to `"related"`; `note` is optional. Both are normalized
- * backend-side, so a field the user left alone may be sent as `""`. The origin
- * is always `"manual"` and is deliberately not suppliable: the other origins
- * belong to the suggestion engine and to import.
+ * `relation` defaults to `"related"` and is folded to lower case; `note` is
+ * optional and kept as typed — it is prose, not a group key. Both are
+ * normalized backend-side, so a field the user left alone may be sent as `""`.
+ * The origin is always `"manual"` and is deliberately not suppliable: the
+ * other origins belong to the suggestion engine and to import.
  *
  * There is no matching read: an entity's links arrive with `getEntity`, and
  * they are undirected, so a link drawn from either end is on both.
  *
- * Rejects with `invalid` for an id that is not an entity id, `not_found` when
- * an endpoint is not in the local mirror — it has not synced yet — and
- * `conflict` when that pair is already linked under that relation ("already
- * linked"). Emits `EVENTS.activityNew`.
+ * Rejects with `invalid` for an id that is not an entity id or for an entity
+ * linked to itself, `not_found` when an endpoint is not in the local mirror —
+ * it has not synced yet — and `conflict` when that pair is already linked
+ * under that relation ("already linked"). Emits `EVENTS.activityNew`.
+ *
+ * The `conflict` is **directed**: the same pair linked the other way round is
+ * not refused, and shows as a second row on both ends. Known — see #70.
  */
 export function createLink(
   fromId: string,

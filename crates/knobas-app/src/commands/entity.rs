@@ -490,6 +490,30 @@ fn present(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|text| !text.is_empty())
 }
 
+/// The relation a link will carry, folded to the one spelling that groups it.
+///
+/// A relation is a *key*, not prose: the panel groups rows by this value and
+/// the duplicate rule compares it verbatim, so `Blocks` and `blocks` would be
+/// two headers for one relationship and neither would see the other as a
+/// duplicate. Björn's ruling on the review of #52 (2026-08-28) is that they are
+/// one relation, and folding on write is what makes that true everywhere at
+/// once -- the stored value, the unique index, and every later reader.
+///
+/// Lowercase because the curated list, [`DEFAULT_RELATION`] and the design's
+/// own vocabulary (`blocks`, `implements`, `documents`, `depends-on`) are all
+/// written that way; a folded value is therefore already the spelling #53's
+/// inverse-label lookup will key on. Display capitalization is the panel's, and
+/// it has the whole string to do it from.
+///
+/// [`str::to_lowercase`] rather than the ASCII form: a user typing a relation
+/// in their own language should get the same folding an English one gets.
+///
+/// The **note** is deliberately not folded -- it is prose in the user's own
+/// words and nothing groups by it.
+fn relation_of(value: Option<&str>) -> String {
+    present(value).map_or_else(|| DEFAULT_RELATION.to_owned(), |named| named.to_lowercase())
+}
+
 /// What an activity line says about a link: the other end, the relation, and
 /// which link it was.
 ///
@@ -506,16 +530,20 @@ fn link_detail(link: &LinkRow) -> serde_json::Value {
 
 /// Draw a link between two entities.
 ///
-/// `relation` defaults to [`DEFAULT_RELATION`]; `note` is optional; the origin
-/// is always [`Origin::Manual`] -- it is deliberately not client-suppliable in
-/// v1, because the other origins belong to the suggestion engine and to import.
+/// `relation` defaults to [`DEFAULT_RELATION`] and is folded by
+/// [`relation_of`]; `note` is optional and is kept as typed; the origin is
+/// always [`Origin::Manual`] -- it is deliberately not client-suppliable in v1,
+/// because the other origins belong to the suggestion engine and to import.
+///
+/// An entity may not be linked to itself.
 ///
 /// The behaviour lives here rather than in the command so it is reachable from
 /// a test: a `#[tauri::command]` cannot be called directly.
 ///
 /// # Errors
 ///
-/// [`Invalid`](crate::IpcErrorCode::Invalid) if either id is not an entity id;
+/// [`Invalid`](crate::IpcErrorCode::Invalid) if either id is not an entity id,
+/// or if the two are the same entity;
 /// [`NotFound`](crate::IpcErrorCode::NotFound) if either endpoint has no local
 /// entity -- linking to something that has not synced yet is an ordinary event,
 /// not a fault; [`Conflict`](crate::IpcErrorCode::Conflict) if that pair is
@@ -532,12 +560,21 @@ pub async fn create_link_inner(
     // address, and the two want different words on screen.
     let from = EntityRef::parse(from_id).map_err(IpcError::invalid)?;
     let to = EntityRef::parse(to_id).map_err(IpcError::invalid)?;
+    // Also before any query: an entity linked to itself is a bad *request*, not
+    // a missing thing -- both ends resolve, they are simply the same one, and
+    // the row would draw as a panel entry pointing at the entity you are
+    // already looking at. Björn's ruling on the review of #52 (2026-08-28).
+    if from == to {
+        return Err(IpcError::invalid(format!(
+            "{from} cannot be linked to itself"
+        )));
+    }
 
     let link = knobas_core::link::create(
         pool,
         &from,
         &to,
-        present(relation).unwrap_or(DEFAULT_RELATION),
+        &relation_of(relation),
         Origin::Manual,
         present(note),
         ACTOR,

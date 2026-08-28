@@ -990,7 +990,8 @@ From this commit on, each of the following requires an orchestrator decision **a
   file rather than in new ones: the `commands/` + `ipc/` module layout is frozen, and the read side
   of links is already there -- `get_entity` returns them, and `links_of` is undirected, so an
   entity's backlinks are the same query and need no endpoint of their own. Reads are unchanged; the
-  target picker reuses `search`. `EntityDetail` keeps its shape.
+  target picker reuses `search`. `EntityDetail` keeps its shape. Ratified by the orchestrator as
+  issue #52 itself, whose acceptance criteria specify both commands.
 
   One DTO field changes: `knobas_core::link::LinkRow` gains `note: Option<String>`, mirrored as
   `note: string | null`. The column has been in `0001` since M0 and reached nothing; #52's fourth
@@ -1002,8 +1003,9 @@ From this commit on, each of the following requires an orchestrator decision **a
   `create` now returns the `LinkRow` it wrote rather than a bare id, and `unlink` returns
   `Option<LinkRow>` -- `None` where the link was already withdrawn. Same precedent, same reason as
   #50's `activity::record`: the command has to announce what it wrote, and reading back "the newest
-  row" in a shared table is a guess. No wire spelling or column changes. Ratified by the
-  orchestrator as issue #52 itself, whose acceptance criteria specify both commands.
+  row" in a shared table is a guess. No wire spelling or column changes, and it is the same
+  ratification above that carries it: #52's fifth acceptance criterion is one activity line per
+  *mutation*, which is the distinction `unlink`'s `Option` exists to make.
 
 - **The IPC schema and `crates/knobas-app/src/profile.rs`, issue #38 (2026-08-28):** the scheduled
   backup export adds four commands — `backup_status`, `backup_now`, `set_backup_schedule`,

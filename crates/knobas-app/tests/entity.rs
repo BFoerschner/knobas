@@ -657,7 +657,15 @@ async fn a_note_travels_from_the_write_to_the_entity_detail_read() {
 }
 
 /// Linking the same pair under the same relation twice is `conflict`, not a
-/// second row: the panel never shows duplicates.
+/// second row.
+///
+/// **In this direction.** The uniqueness rule is directed -- `link_active_idx`
+/// is on `(from_id, to_id, relation)` -- while `links_of` reads undirected, so
+/// `B -> A` after `A -> B` still succeeds and both panels then show two rows
+/// for one relationship. That is **#70**: pre-existing store behaviour that
+/// #52 wired up, ruled 2026-08-28 to be its own sub-issue rather than this
+/// slice's to fix. So this test proves what it says and not #40's story 14
+/// ("the panel never shows duplicates") in full -- do not read it as that.
 #[tokio::test]
 async fn a_duplicate_pair_and_relation_is_a_conflict() {
     let pool = seeded().await;
@@ -955,4 +963,117 @@ async fn a_link_over_the_seam_fills_the_demo_profiles_empty_links_panel() {
     assert_eq!(drawn.to_id, "mock:PAY-228");
     assert_eq!(drawn.relation, "documents");
     assert_eq!(drawn.note.as_deref(), Some("the retry storm postmortem"));
+}
+
+/// An entity cannot be linked to itself.
+///
+/// Björn's ruling (2026-08-28, on the review of #52): a self-link is refused.
+/// It is a bad request rather than a missing thing -- both endpoints resolve,
+/// they are simply the same one -- so it is `invalid`, the code a malformed id
+/// already gets, and not a new error.
+///
+/// Refused before either endpoint is looked up: the shape of the request is
+/// wrong whether or not the entity exists.
+#[tokio::test]
+async fn an_entity_cannot_be_linked_to_itself() {
+    let pool = seeded().await;
+    let (from, _to) = linkable_pair(&pool).await;
+
+    for relation in [None, Some("blocks")] {
+        let refused = create_link_inner(&pool, &from, &from, relation, None)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            refused.code,
+            knobas_app::IpcErrorCode::Invalid,
+            "{from} -> itself ({relation:?}) produced {refused}"
+        );
+    }
+
+    // ... and nothing was written on the way to refusing.
+    assert!(
+        !links_on(&pool, &from)
+            .await
+            .iter()
+            .any(|row| row.from_id == row.to_id),
+        "a self-link reached the table"
+    );
+
+    // An entity that is not in the mirror at all is still `not_found` rather
+    // than `invalid`: the self-link check must not swallow the endpoint check.
+    let absent = format!("nowhere-{}:GONE-1", unique());
+    assert_eq!(
+        create_link_inner(&pool, &absent, &absent, None, None)
+            .await
+            .unwrap_err()
+            .code,
+        knobas_app::IpcErrorCode::Invalid,
+        "the same id twice is a bad request first, whatever it addresses"
+    );
+}
+
+/// A relation's case does not split its group: `Blocks` and `blocks` are one
+/// relation.
+///
+/// Björn's ruling (2026-08-28, on the review of #52). The panel groups by this
+/// value verbatim, so without folding, a user who typed `Blocks` once and
+/// `blocks` once gets two headers for one relationship -- and the duplicate
+/// rule, which compares the stored strings, would not see the second as a
+/// duplicate at all.
+///
+/// The *note* is deliberately not folded: it is prose in the user's own words,
+/// not a key anything groups by.
+#[tokio::test]
+async fn a_relations_case_does_not_split_its_group() {
+    let pool = seeded().await;
+    let (from, to) = linkable_pair(&pool).await;
+
+    let written = create_link_inner(&pool, &from, &to, Some("  Blocks  "), Some("Why It Blocks"))
+        .await
+        .unwrap();
+    assert_eq!(
+        written.link.relation, "blocks",
+        "the relation is folded on write, so the panel has one group and not two"
+    );
+    assert_eq!(
+        written.link.note.as_deref(),
+        Some("Why It Blocks"),
+        "the note is prose, not a group key -- its case is the user's"
+    );
+
+    // The folded value is what both ends read back.
+    for end in [&from, &to] {
+        let row = links_on(&pool, end)
+            .await
+            .into_iter()
+            .find(|row| row.id == written.link.id)
+            .unwrap_or_else(|| panic!("the link is missing from {end}'s detail"));
+        assert_eq!(row.relation, "blocks");
+    }
+
+    // ... and the same relation in another case is the *same* relation, so the
+    // second attempt is the duplicate it really is. (Same direction: the
+    // reverse-direction hole is #70.)
+    let again = create_link_inner(&pool, &from, &to, Some("BLOCKS"), None)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        again.code,
+        knobas_app::IpcErrorCode::Conflict,
+        "`BLOCKS` after `Blocks` is already linked: {again}"
+    );
+
+    // A relation that differs by more than case is still its own group.
+    create_link_inner(&pool, &from, &to, Some("Documents"), None)
+        .await
+        .unwrap();
+    let relations: std::collections::BTreeSet<String> = links_on(&pool, &from)
+        .await
+        .into_iter()
+        .map(|row| row.relation)
+        .collect();
+    assert!(
+        relations.contains("blocks") && relations.contains("documents"),
+        "folding must not merge distinct relations: {relations:?}"
+    );
 }

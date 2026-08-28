@@ -133,6 +133,12 @@ pub struct LinkRow {
 ///
 /// # Errors
 ///
+/// The uniqueness this rests on is **directed** -- `link_active_idx` is on
+/// `(from_id, to_id, relation)` while [`links_of`] reads undirected, so the
+/// same pair linked the other way round is not a duplicate here and shows as a
+/// second row on both ends. Known, filed as **#70**; do not read the error
+/// below as "this pair is linked".
+///
 /// [`CoreError::Duplicate`] if an active link with the same
 /// `(from, to, relation)` already exists; [`CoreError::EndpointMissing`] if
 /// either endpoint has no `knobas.entity` row; [`CoreError::Db`] for anything
