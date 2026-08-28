@@ -12,7 +12,8 @@ knobas_core::closed_vocabulary! {
     /// Why a run happened.
     ///
     /// Stored in `knobas.sync_run.trigger`, whose `sync_run_trigger_chk`
-    /// allows exactly these spellings.
+    /// allows exactly these spellings -- as last defined, which is 0004 for
+    /// this vocabulary and 0002 for `SyncOutcome`.
     pub enum SyncTrigger {
         /// The scheduler's interval elapsed.
         Schedule => "schedule",
@@ -20,6 +21,16 @@ knobas_core::closed_vocabulary! {
         Manual => "manual",
         /// The first sync after a source was added (the first-run wizard's).
         FirstRun => "first_run",
+        /// A deliberate cursor-less run that widens the payload of items an
+        /// incremental would never re-fetch (#32), and is **forbidden to
+        /// reconcile**: ratified non-sweeping by Björn 2026-08-28, because the
+        /// way a cursor-less run goes wrong produces no error -- a credential
+        /// that quietly loses sight of a project answers with a smaller corpus
+        /// and a 200, and a sweeping backfill would read that as "those items
+        /// are gone". Its own spelling because logged as `Manual` it would be
+        /// indistinguishable from *Sync now*, and the one question anybody asks
+        /// of a suspicious tombstone count is which run produced it.
+        Backfill => "backfill",
     }
 }
 
@@ -506,8 +517,15 @@ mod tests {
         }
     }
 
-    /// **Every variant is a spelling migration 0002's CHECK allows, and every
+    /// **Every variant is a spelling the migrations' CHECK allows, and every
     /// spelling it allows is a variant.**
+    ///
+    /// Reads the *effective* constraint, not 0002's: a later migration may
+    /// redefine one (0004 does, adding `backfill`), and 0002 can never be
+    /// edited to match -- sqlx checksums applied migrations, so an edit fails
+    /// startup on every existing database. The last migration that names a
+    /// constraint is therefore the one in force, and pinning this test to 0002
+    /// would have made it assert a schema no database has.
     ///
     /// Driven by `ALL`, which the `closed_vocabulary!` macro generates from
     /// the same list as the variants -- so a variant cannot be added without
@@ -521,7 +539,12 @@ mod tests {
     /// produce" is dead vocabulary that the next reader has to reason about.
     #[test]
     fn the_vocabularies_are_exactly_what_the_migration_allows() {
-        let migration = include_str!("../../knobas-db/migrations/0002_m1_cockpit.sql");
+        // Ordered oldest-first, so the last hit for a constraint wins.
+        let migrations = [
+            include_str!("../../knobas-db/migrations/0002_m1_cockpit.sql"),
+            include_str!("../../knobas-db/migrations/0003_link_origin.sql"),
+            include_str!("../../knobas-db/migrations/0004_backfill_trigger.sql"),
+        ];
 
         for (constraint, spellings) in [
             (
@@ -539,10 +562,18 @@ mod tests {
                     .collect::<Vec<_>>(),
             ),
         ] {
-            let line = migration
-                .lines()
-                .find(|line| line.contains(constraint))
-                .unwrap_or_else(|| panic!("{constraint} is missing from 0002"));
+            // `check (...)` only. Not load-bearing today and deliberately
+            // kept: 0004's `add` follows its `drop`, so `rfind` already picks
+            // the right line and dropping this clause leaves the test green.
+            // It earns its place on the day a migration *ends* on a `drop
+            // constraint` -- that line names the constraint and lists no
+            // spellings, so without it this would report "the constraint
+            // allows none" instead of the real problem.
+            let line = migrations
+                .iter()
+                .flat_map(|migration| migration.lines())
+                .rfind(|line| line.contains(constraint) && line.contains("check ("))
+                .unwrap_or_else(|| panic!("{constraint} is defined by no migration"));
 
             for spelling in &spellings {
                 assert!(

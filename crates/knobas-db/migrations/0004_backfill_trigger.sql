@@ -1,0 +1,36 @@
+-- 0004_backfill_trigger.sql -- `backfill` joins the sync-run trigger vocabulary.
+--
+-- Single-writer (orchestrator), like every migration: a stream that needs
+-- more schema requests 0005 and never edits this file or its predecessors --
+-- sqlx checksums applied migrations and an edit fails startup on every
+-- existing database.
+--
+-- Issue #32 adds a deliberate cursor-less run that widens the payload of
+-- issues an incremental would never re-fetch. Björn ratified it 2026-08-28 as
+-- **non-sweeping**, and that is the whole reason it needs its own spelling.
+--
+-- Every other cursor-less run reconciles: `full_sync_exhaustive` is per kind
+-- (ADR-0003) and a full sync that saw the whole corpus may tombstone what it
+-- did not see. A backfill deliberately may not, because the way a cursor-less
+-- Jira run goes wrong produces *no error* -- a credential that quietly loses
+-- sight of a project answers with a smaller corpus and a 200. A sweeping
+-- backfill would read that as "those issues are gone".
+--
+-- So a backfill is a run that is cursor-less **and forbidden to reconcile**,
+-- which is a state no existing trigger describes. Logged as `manual` it is
+-- indistinguishable from *Sync now* -- and the one question anybody asks of a
+-- suspicious tombstone count is which run produced it. The spelling is what
+-- makes "this run could not have swept" readable after the fact.
+--
+-- Same discipline and shape as 0002's two run-log vocabularies and 0003's
+-- link origin: plain `text` with a closed list, enforced here because the enum
+-- that writes it (`knobas_sync::run_log::SyncTrigger`) lives in another
+-- language. Additive and re-entrant -- dropping and re-adding a CHECK
+-- revalidates the rows already there, and every existing row carries one of
+-- the original three.
+--
+-- Keep the spellings on one line: the cross-check reads this file and finds
+-- the vocabulary by the line that lists it, so neither list can grow without
+-- the other.
+alter table knobas.sync_run drop constraint sync_run_trigger_chk;
+alter table knobas.sync_run add constraint sync_run_trigger_chk check (trigger in ('schedule','manual','first_run','backfill'));
