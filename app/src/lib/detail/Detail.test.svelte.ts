@@ -82,6 +82,7 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
 
 const { default: Detail } = await import("./Detail.svelte");
 const { toasts } = await import("../shell/toasts.svelte");
+const { linkChanges } = await import("./links.svelte");
 
 function detail(over: Partial<EntityDetail> = {}): EntityDetail {
   return {
@@ -715,6 +716,39 @@ test("Esc in the dialog closes the dialog and not the detail", async () => {
   expect(screen.target.querySelector('[role="dialog"]')).toBeNull();
   expect(reachedTheShell, "one keystroke must not unwind two ladders").toEqual([]);
   expect(screen.onclose).not.toHaveBeenCalled();
+
+  screen.done();
+});
+
+/**
+ * #55's other half, from the detail's side.
+ *
+ * The launcher can link this entity while the slide-over is open, and the
+ * write happens in the shell. A panel that then kept saying "Nothing linked
+ * yet" would be showing a state the app has already left.
+ */
+test("a link drawn from outside the detail brings the panel up to date", async () => {
+  let links: LinkEntry[] = [];
+  answer = () => Promise.resolve(detail({ links }));
+
+  const screen = render();
+  await vi.waitFor(() => expect(screen.text()).toContain("Nothing linked yet"));
+  flushSync();
+
+  links = [
+    link({
+      id: "44444444-4444-4444-4444-444444444444",
+      to: "mock:ENG-SEPA",
+      otherKind: "page",
+      otherTitle: "Linked from the launcher",
+    }),
+  ];
+  linkChanges.count += 1;
+  flushSync();
+
+  await vi.waitFor(() => expect(screen.text()).toContain("Linked from the launcher"));
+  expect(calls).toEqual(["mock:PAY-231", "mock:PAY-231"]);
+  expect(screen.text()).not.toContain("Nothing linked yet");
 
   screen.done();
 });

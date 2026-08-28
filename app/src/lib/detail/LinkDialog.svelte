@@ -30,7 +30,7 @@
   import Monogram from "../shell/Monogram.svelte";
   import { kindRegistry } from "../shell/kind-registry.svelte";
   import { kindMonogram, kindSingular } from "../shell/kinds";
-  import { linkFailureMessage } from "./links";
+  import { linkFailureMessage } from "./links.svelte";
   import { DEFAULT_RELATION, RELATIONS } from "./relations";
 
   let {

@@ -16,6 +16,7 @@
   import FirstRun from "./lib/sources/FirstRun.svelte";
   import SourcesView from "./lib/sources/SourcesView.svelte";
   import { ipcErrorMessage } from "./lib/ipc";
+  import { linkTo } from "./lib/detail/links.svelte";
 
   /**
    * The rooms the switcher offers: *All work*, plus one per configured source.
@@ -41,6 +42,24 @@
    * mount here is the two lines that integration is.
    */
   let launcherOpen = $state(false);
+
+  /**
+   * The entity the slide-over has open, as the launcher's `Tab` chain names it.
+   *
+   * Read off the address rather than off the detail component: the address is
+   * what says an entity is open, and it is the shell's to read (spec §2). The
+   * label is the id's key — the same half `Detail.svelte` puts in its header —
+   * because the title is the detail's read and is not known here.
+   *
+   * `undefined` while no detail is open, which is what makes *Link to…* absent
+   * from the chain rather than offered against nothing.
+   */
+  const openEntity = $derived.by(() => {
+    const route = router.route;
+    if (route.view !== "room" || !route.detail) return undefined;
+    const id = route.detail.entityId;
+    return { entityId: id, label: id.slice(id.indexOf(":") + 1) };
+  });
 
   onMount(() => {
     /**
@@ -223,6 +242,13 @@
   <Launcher
     bind:open={launcherOpen}
     sources={health.all}
+    {openEntity}
+    onlink={(targetId, targetTitle) => {
+      // Guarded because the prop outlives one keystroke: the chain is only
+      // built while something is open, and this is where that stops being an
+      // assumption.
+      if (openEntity) void linkTo(openEntity.entityId, targetId, targetTitle);
+    }}
     onnavigate={(hash) => router.go(hash)}
     onclose={() => {}}
   />

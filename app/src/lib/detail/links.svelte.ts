@@ -4,6 +4,9 @@
  * Two surfaces draw a link — the *Link to…* dialog and the launcher's Tab
  * action chain — and the sentence they show for a refusal has to be the same
  * one, because it is the sentence that tells the reader nothing is broken.
+ *
+ * A `.svelte.ts` module because of {@link linkChanges}: `$state` is compiler
+ * syntax, and only this suffix is compiled.
  */
 import { createLink, ipcErrorMessage, isIpcError } from "../ipc";
 import { push } from "../shell/toasts.svelte";
@@ -27,6 +30,19 @@ export function linkFailureMessage(rejection: unknown): string {
 }
 
 /**
+ * How many links have been drawn from **outside** a detail view.
+ *
+ * The launcher can link the entity a detail has open without that detail
+ * knowing, and a panel that then kept saying "Nothing linked yet" would be
+ * showing a state the app has already left. A counter rather than an event bus:
+ * there is one fact here — *something changed* — and the only reader is a
+ * slide-over that re-reads.
+ *
+ * The dialog does not bump it; it is inside the detail, which refreshes itself.
+ */
+export const linkChanges = $state({ count: 0 });
+
+/**
  * Draw a manual `related` link between two entities, and acknowledge it.
  *
  * The one-keystroke path (#40's story 17): no relation, no note, no dialog.
@@ -39,6 +55,7 @@ export function linkFailureMessage(rejection: unknown): string {
 export async function linkTo(fromId: string, toId: string, label: string): Promise<void> {
   try {
     await createLink(fromId, toId);
+    linkChanges.count += 1;
     push({ text: `Linked ${label}` });
   } catch (rejection) {
     push({ text: linkFailureMessage(rejection), tone: "err" });

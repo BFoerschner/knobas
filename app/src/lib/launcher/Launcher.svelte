@@ -16,11 +16,17 @@
   follows, and the reason it is a rule is that two handlers unwinding two
   ladders on one keystroke is indistinguishable from a bug.
 
-  ## What is reserved rather than bound
+  ## The Tab action chain
 
-  `Tab` is M2's action chain (§4: *Change status › Comment › Link to…*). It is
-  swallowed here rather than left alone, because the alternative is `Tab`
-  moving focus out of the box — training a habit the app will have to break.
+  §4's *"do it here"* rows, over the selected result. M2 has exactly one of
+  them: **Link to ⟨the open entity⟩**, and it exists only while a detail is
+  open — an action chain that offered "link to nothing" would be a row that
+  cannot be pressed. `Tab` still swallows the keystroke when the chain would be
+  empty, because the alternative is `Tab` moving focus out of the box.
+
+  The launcher does not write the link. It says *which* result the reader chose
+  and lets the shell do it, for the same reason it does not navigate: this is
+  stream E, and the entity that is open, the IPC and the toast are the shell's.
 -->
 <script lang="ts">
   import { onMount, tick } from "svelte";
@@ -43,6 +49,8 @@
     actions = [],
     onnavigate,
     onclose,
+    openEntity,
+    onlink,
     ports,
     now,
   }: {
@@ -60,6 +68,19 @@
     actions?: LauncherAction[];
     onnavigate: (hash: string) => void;
     onclose: () => void;
+    /**
+     * The entity the shell has open behind the overlay, or `undefined`.
+     *
+     * The presence of this is what puts *Link to…* in a result's `Tab` chain:
+     * §4's action rows act on the selected result, and this one needs a second
+     * end. `label` is what the row says — the shell's word for what is open.
+     */
+    openEntity?: { entityId: string; label: string } | undefined;
+    /**
+     * Link the chosen result to the open entity. The write, the
+     * acknowledgement and the failure message are the shell's.
+     */
+    onlink?: ((targetId: string, targetTitle: string) => void) | undefined;
     /**
      * The IPC, injectable. Production passes nothing and gets the real
      * bridge; a test passes fakes and needs no `window.__TAURI_INTERNALS__`.
@@ -103,6 +124,68 @@
   const health = $derived(sources ?? session.home?.sources ?? []);
 
   let box = $state<ReturnType<typeof QueryBox> | null>(null);
+
+  /** One row of a result's `Tab` chain. */
+  interface ChainAction {
+    id: string;
+    label: string;
+    run: () => void;
+  }
+
+  /**
+   * The open action chain, or `null`.
+   *
+   * `rowId` is remembered so the chain closes when the selection moves off the
+   * row it belongs to: a chain acting on a row nobody is looking at any more
+   * is a chain that acts on the wrong thing.
+   */
+  let chain = $state<{ rowId: string; actions: ChainAction[]; selected: number } | null>(null);
+
+  /** The entity a row stands for, if it stands for one. */
+  function entityOf(row: LauncherRow): { entityId: string; title: string } | null {
+    switch (row.kind) {
+      case "hit":
+        return { entityId: row.hit.entity_id, title: row.hit.title };
+      case "recent":
+        return { entityId: row.row.entity_id, title: row.row.title };
+      // A list, a syntax card and a navigation action are not entities, so
+      // there is nothing to link.
+      case "list":
+      case "action":
+      case "syntax":
+        return null;
+    }
+  }
+
+  /**
+   * What can be done to `row` right now.
+   *
+   * Empty — and therefore no chain at all — when nothing is open, when the row
+   * is not an entity, and when the row *is* the open entity: an entity cannot
+   * be linked to itself, and the backend refuses it, so offering the row would
+   * be offering an error.
+   */
+  function chainFor(row: LauncherRow): ChainAction[] {
+    const entity = entityOf(row);
+    const open = openEntity;
+    if (!entity || !open || !onlink || entity.entityId === open.entityId) return [];
+    const link = onlink;
+    return [
+      {
+        id: "link",
+        label: `Link to ${open.label}`,
+        run: () => {
+          link(entity.entityId, entity.title);
+          chain = null;
+        },
+      },
+    ];
+  }
+
+  // The chain belongs to one row. Moving the cursor abandons it.
+  $effect(() => {
+    if (chain && session.current?.id !== chain.rowId) chain = null;
+  });
 
   /**
    * The `>` palette: navigation plus whatever the shell appended, narrowed by
@@ -199,28 +282,57 @@
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
-        session.move(1);
+        // While a chain is open the arrows walk *it*: it is the thing in front
+        // of the reader, and moving the result selection underneath would pull
+        // the chain out from under its own row.
+        if (chain) {
+          chain.selected = Math.min(chain.actions.length - 1, chain.selected + 1);
+        } else {
+          session.move(1);
+        }
         return;
       case "ArrowUp":
         event.preventDefault();
-        session.move(-1);
+        if (chain) {
+          chain.selected = Math.max(0, chain.selected - 1);
+        } else {
+          session.move(-1);
+        }
         return;
       case "Enter": {
         event.preventDefault();
+        if (chain) {
+          chain.actions[chain.selected]?.run();
+          return;
+        }
         const row = session.current;
         if (row) activate(row);
         return;
       }
-      case "Tab":
-        // Reserved for M2's action chain. Swallowed, never forwarded: the
-        // default would move focus out of the box.
+      case "Tab": {
+        // Swallowed either way, never forwarded: the default would move focus
+        // out of the box.
         event.preventDefault();
+        if (chain) {
+          chain = null;
+          return;
+        }
+        const row = session.current;
+        if (!row) return;
+        const actions = chainFor(row);
+        // No chain rather than an empty one: a strip with nothing in it says
+        // there is something here.
+        if (actions.length === 0) return;
+        chain = { rowId: row.id, actions, selected: 0 };
         return;
+      }
       case "Escape":
         // One rung per press, and the key never reaches the shell's ladder.
         event.preventDefault();
         event.stopPropagation();
-        if (session.raw !== "") {
+        if (chain) {
+          chain = null;
+        } else if (session.raw !== "") {
           session.set("");
         } else {
           close();
@@ -329,10 +441,27 @@
         {/if}
       </div>
 
+      {#if chain}
+        <div class="chain" role="listbox" aria-label="Actions on the selected result">
+          {#each chain.actions as action, index (action.id)}
+            <button
+              class="pfx chain-a"
+              class:on={index === chain.selected}
+              role="option"
+              aria-selected={index === chain.selected}
+              onclick={() => action.run()}
+              onmouseenter={() => chain && (chain.selected = index)}
+            >
+              <span class="nm">{action.label}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
+
       <div class="search-f">
         <span><kbd>↑↓</kbd> move</span>
         <span><kbd>↵</kbd> open</span>
-        <span title="Actions on the selected result arrive in M2"><kbd>Tab</kbd> actions (M2)</span>
+        <span title="Actions on the selected result"><kbd>Tab</kbd> actions</span>
         <span><kbd>Esc</kbd> back one step</span>
         <span class="sp"></span>
         {#if session.response}
@@ -376,6 +505,17 @@
   }
   .search-f .sp {
     flex: 1;
+  }
+  /* The chain sits between the results and the footnote: it acts on the row
+     above it, and it is the thing the keyboard is now driving. */
+  .chain {
+    flex: none;
+    border-top: 1px solid var(--hair);
+    background: var(--panel);
+  }
+  .chain-a {
+    grid-template-columns: 1fr;
+    border-bottom: 0;
   }
   .secl {
     display: flex;

@@ -19,6 +19,7 @@
   import { push } from "../shell/toasts.svelte";
   import HistoryPanel from "./HistoryPanel.svelte";
   import LinkDialog from "./LinkDialog.svelte";
+  import { linkChanges } from "./links.svelte";
   import LinksPanel from "./LinksPanel.svelte";
   import PayloadView from "./PayloadView.svelte";
   import { projectPayload } from "./payload";
@@ -91,6 +92,24 @@
       push({ text: `Could not re-read this item: ${ipcErrorMessage(rejection)}`, tone: "err" });
     }
   }
+
+  /**
+   * Re-read when something outside this panel drew a link.
+   *
+   * The launcher's `Tab` chain can link the entity this slide-over has open,
+   * and the write happens in the shell. Without this the panel would keep
+   * saying what it said before the link — a state the app has already left.
+   *
+   * `seen` is a plain `let`, so writing it cannot re-trigger the effect; the
+   * first run only records where the counter stood when the panel opened.
+   */
+  let seenLinkChanges = linkChanges.count;
+  $effect(() => {
+    const now = linkChanges.count;
+    if (now === seenLinkChanges) return;
+    seenLinkChanges = now;
+    void refresh();
+  });
 
   /**
    * Whether *Link to…* is up.
