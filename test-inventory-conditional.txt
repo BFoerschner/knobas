@@ -1,0 +1,19 @@
+# Tests that exist on some platforms and not others, so no single
+# `test-inventory.txt` can pin them: the file is generated on one machine and
+# checked on another (CI is `ubuntu-latest`, development here is macOS), and a
+# `#[cfg(target_os = ...)]` test is a line on one side and absent on the other.
+#
+# Every line below is dropped from both sides before the diff. That is exactly
+# the deletion the gate stops catching, so a line here needs the same
+# justification a `-` line in a PR diff would get: say why the test cannot be
+# written to compile everywhere. "It is slow" or "it is flaky" is not a reason
+# to list it here.
+#
+# Blank lines and `#` lines are ignored. Everything else must match a full
+# inventory line, byte for byte: `package<TAB>kind/target<TAB>test name`.
+
+# Drives `apple-native-keyring-store`'s own `decode_error`, which does not exist
+# off macOS -- the whole point of the test is that it asserts what the platform
+# layer does rather than what the docs claim, so there is nothing portable left
+# once the platform layer is stubbed out.
+knobas-secrets	lib/knobas_secrets	keyring_store::tests::the_macos_codes_land_where_the_docs_say_they_do

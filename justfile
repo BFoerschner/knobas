@@ -35,7 +35,11 @@ check: fmt front clippy clippy-libs inventory test
 # two crates that both have `tests/mockd.rs` stay distinct and a test that moves
 # between crates reads as one removal plus one addition. Doctests are not listed
 # -- cargo builds no binary for them, so there is nothing to enumerate; they are
-# still run by `test`.
+# still run by `test`. Nor are the tests named in
+# `test-inventory-conditional.txt`: a `#[cfg(target_os = ...)]` test exists on
+# one platform and not another, and the file is written on macOS and checked on
+# `ubuntu-latest`, so it cannot be pinned by a list that has to match on both.
+# Each line there costs the gate one test and is argued for in place.
 inventory:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -68,6 +72,12 @@ inventory-update:
 # depending on version (`<path>#<version>` and `<path>#<name>@<version>`); both
 # are handled. LC_ALL=C keeps the sort byte-wise, so the file does not churn
 # when a machine's locale differs.
+#
+# `test-inventory-conditional.txt` is subtracted here rather than at diff time,
+# so `test-inventory.txt` means one thing on every machine: the tests that exist
+# everywhere. Filtering only the *actual* side would leave the committed file
+# platform-shaped, and filtering both sides at the diff would still let
+# `inventory-update` write a file whose contents depend on who ran it.
 _inventory-write FILE:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -78,7 +88,9 @@ _inventory-write FILE:
                | "\($pkg)\t\(.target.kind[0])/\(.target.name)\t\(.executable)"' \
       | while IFS=$'\t' read -r pkg target exe; do
             "$exe" --list 2>/dev/null | sed -n 's/: test$//p' | sed "s|^|${pkg}\t${target}\t|"
-        done | LC_ALL=C sort > "{{FILE}}"
+        done \
+      | grep -vxF -f <(sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' test-inventory-conditional.txt) \
+      | LC_ALL=C sort > "{{FILE}}"
 
 fmt:
     env -u RUSTUP_TOOLCHAIN cargo fmt --all --check
