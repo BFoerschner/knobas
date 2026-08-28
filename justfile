@@ -40,11 +40,24 @@ check: fmt front clippy clippy-libs inventory test
 # one platform and not another, and the file is written on macOS and checked on
 # `ubuntu-latest`, so it cannot be pinned by a list that has to match on both.
 # Each line there costs the gate one test and is argued for in place.
+#
+# The scratch file is per-invocation, from `mktemp`. It used to be a fixed
+# `/tmp` path, which two `just check` runs on one machine -- the parallel
+# worktrees this repo is worked in -- wrote at the same time, so the `diff`
+# read a half-written or foreign file and the gate failed on lines belonging to
+# nobody's tree. A gate that can fail for reasons unconnected to its own diff
+# is one everybody learns to re-run, which is how a real `-` line gets waved
+# through; that is the failure this recipe exists to prevent, so its scratch
+# file cannot be shared. `inventory-update` needs nothing of the kind: it
+# writes `test-inventory.txt` inside the worktree, and each worktree has its
+# own.
 inventory:
     #!/usr/bin/env bash
     set -euo pipefail
-    just _inventory-write /tmp/knobas-inventory-actual.txt
-    if ! diff -u test-inventory.txt /tmp/knobas-inventory-actual.txt; then
+    actual=$(mktemp "${TMPDIR:-/tmp}/knobas-inventory-actual.XXXXXX")
+    trap 'rm -f "$actual"' EXIT
+    just _inventory-write "$actual"
+    if ! diff -u test-inventory.txt "$actual"; then
         echo >&2
         echo "error: the test inventory does not match test-inventory.txt." >&2
         echo "  '-' lines are tests that no longer exist. If that is deliberate," >&2
