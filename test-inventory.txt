@@ -2,6 +2,7 @@ knobas-app	lib/knobas_app	backup::policy::tests::a_backup_taken_after_the_bounda
 knobas-app	lib/knobas_app	backup::policy::tests::a_database_that_has_never_been_backed_up_is_due_at_once
 knobas-app	lib/knobas_app	backup::policy::tests::a_disabled_schedule_is_never_due
 knobas-app	lib/knobas_app	backup::policy::tests::a_machine_asleep_at_the_scheduled_hour_is_due_when_it_wakes
+knobas-app	lib/knobas_app	backup::policy::tests::a_name_carrying_a_path_is_not_an_archive_name
 knobas-app	lib/knobas_app	backup::policy::tests::an_archive_name_sorts_chronologically
 knobas-app	lib/knobas_app	backup::policy::tests::an_impossible_schedule_is_clamped_into_range
 knobas-app	lib/knobas_app	backup::policy::tests::retention_keeps_the_newest_and_spares_what_is_not_ours
@@ -52,7 +53,9 @@ knobas-app	test/backup	a_restore_brings_back_no_mirror_rows_of_its_own
 knobas-app	test/backup	a_restore_refuses_a_database_that_already_holds_knobas_data
 knobas-app	test/backup	a_restored_backup_still_links_the_entities_a_later_sync_rebuilt
 knobas-app	test/backup_ipc	a_database_with_no_stored_schedule_is_nightly_by_default
+knobas-app	test/backup_ipc	a_directory_named_like_an_archive_is_neither_listed_nor_pruned
 knobas-app	test/backup_ipc	a_disabled_schedule_exports_nothing
+knobas-app	test/backup_ipc	a_fresh_machine_restores_after_taking_its_own_first_backup
 knobas-app	test/backup_ipc	a_misspelled_argument_is_refused_before_the_body_runs
 knobas-app	test/backup_ipc	a_restore_only_accepts_an_archive_in_the_backup_directory
 knobas-app	test/backup_ipc	a_restore_over_a_populated_database_is_a_conflict

@@ -362,7 +362,9 @@ async fn a_fresh_machine_restores_after_taking_its_own_first_backup() {
     // The old machine: a corpus, and an archive of it.
     let (old, old_dir) = service("oldmachine").await;
     let entity = seed_entity(&old.pool, "oldmachine").await;
-    let archive = backup::export_now(&old).await.expect("the old machine's backup");
+    let archive = backup::export_now(&old)
+        .await
+        .expect("the old machine's backup");
 
     // The new machine: empty, but its nightly job has already run once, so
     // `knobas.setting` holds `backup.last`.
