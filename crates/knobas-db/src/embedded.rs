@@ -31,7 +31,7 @@ pub const DATABASE_NAME: &str = "knobas";
 /// itself and to create [`DATABASE_NAME`] when it is missing. Connecting to
 /// [`DATABASE_NAME`] cannot do either job -- on a server that has not got it
 /// yet, the connection is what fails.
-const MAINTENANCE_DATABASE: &str = "postgres";
+pub(crate) const MAINTENANCE_DATABASE: &str = "postgres";
 
 /// Loopback host. Never a Unix socket -- see the module docs.
 const HOST: &str = "127.0.0.1";

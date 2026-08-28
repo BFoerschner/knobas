@@ -304,10 +304,21 @@ pub async fn restore(connector: &Connector, archive: &Path) -> Result<(), Backup
     }
     let _ = conn.close().await;
 
+    // Explicit, although `PGDATABASE` is set: `pg_restore` treats "no
+    // `--dbname` and no `--file`" as "print the SQL to stdout" and refuses
+    // outright rather than falling back to the environment, so a restore
+    // without it is not a restore into the wrong database -- it is no restore
+    // at all, reported as an error.
+    let dbname = format!(
+        "--dbname={}",
+        connector.database().unwrap_or(crate::DATABASE_NAME)
+    );
+
     run_tool(
         connector,
         PG_RESTORE,
         &[
+            OsStr::new(&dbname),
             OsStr::new("--data-only"),
             OsStr::new("--disable-triggers"),
             OsStr::new("--single-transaction"),
