@@ -48,9 +48,18 @@ check: fmt front clippy clippy-libs inventory test
 # nobody's tree. A gate that can fail for reasons unconnected to its own diff
 # is one everybody learns to re-run, which is how a real `-` line gets waved
 # through; that is the failure this recipe exists to prevent, so its scratch
-# file cannot be shared. `inventory-update` needs nothing of the kind: it
-# writes `test-inventory.txt` inside the worktree, and each worktree has its
-# own.
+# file cannot be shared.
+#
+# `inventory-update` keeps writing `test-inventory.txt` directly, because that
+# path is inside the worktree and no two worktrees share it. It is not atomic,
+# though: the redirect in `_inventory-write` truncates the file the moment the
+# pipeline starts, and the first stage of that pipeline is a cargo build. So a
+# `just check` running *in the same worktree* can still diff against a
+# half-written committed file, and an interrupted `inventory-update` leaves an
+# empty one behind (`git checkout test-inventory.txt` restores it). That window
+# is narrow -- cargo's target-dir lock serialises most of it -- and no other
+# worktree can reach it, so it is not the race fixed here; closing it is a
+# separate change.
 inventory:
     #!/usr/bin/env bash
     set -euo pipefail
