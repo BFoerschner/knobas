@@ -745,8 +745,8 @@ mod tests {
             .expect("the mock declares at least one kind")
             .clone();
 
-        let resolved = kind_info_for(Some("mock"), &declared.id)
-            .expect("a kind the mock declares resolves");
+        let resolved =
+            kind_info_for(Some("mock"), &declared.id).expect("a kind the mock declares resolves");
         assert_eq!(resolved.id, declared.id);
         assert_eq!(resolved.label, declared.label);
         assert_eq!(resolved.plural, declared.plural);

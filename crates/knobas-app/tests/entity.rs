@@ -355,9 +355,16 @@ async fn returns_the_row_its_source_and_the_raw_payload() {
     // at the bottom of this file are what that assertion became, and one of
     // them links `mock:PAY-231`.)
     assert!(d.deleted_at.is_none());
+    // §3a end to end: the mock declares `ticket`, and the detail carries the
+    // adapter's own words rather than the frontend humanising the id.
+    let info = d
+        .kind_info
+        .as_ref()
+        .expect("the mock declares `ticket`, so the registry resolves it");
+    assert_eq!(info.id, "ticket");
     assert!(
-        d.kind_info.is_none(),
-        "resolving kind_info needs the adapter registry -- task 21"
+        !info.label.is_empty() && !info.plural.is_empty() && !info.monogram.is_empty(),
+        "a resolved KindInfo with an empty field is worse than none: {info:?}"
     );
 }
 
@@ -505,6 +512,15 @@ async fn an_entity_whose_source_was_never_configured_is_still_readable() {
     assert_eq!(
         d.source.display_name, source,
         "an unconfigured source falls back to its id, not to an empty name"
+    );
+    // ...and there is no adapter to ask what its kind is called. §3a's whole
+    // point is that this still renders: the frontend's humaniser takes it from
+    // here, so `None` is the designed path rather than a degradation. This is
+    // also the case `run_once` produces in ordinary use, so a resolution that
+    // unwrapped `adapter_kind` would panic on a perfectly normal corpus.
+    assert!(
+        d.kind_info.is_none(),
+        "no configuration row means no adapter to ask"
     );
     assert_eq!(d.source.adapter_kind, source);
 }

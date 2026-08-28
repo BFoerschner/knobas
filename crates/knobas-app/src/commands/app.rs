@@ -437,15 +437,25 @@ mod tests {
 
         // Read out of this file rather than listed, so a command added below
         // is covered without anyone remembering to add it here.
+        //
+        // The attribute is **assembled** rather than written out, and no
+        // string literal in this test spells it either. That is not cosmetic:
+        // `tests/wiring.rs` scans this same directory for the command
+        // attribute to build its own list of declared commands, and it strips
+        // comments but *not* string literals. A spelled-out copy here is
+        // counted as another command whose "name" is the next line of this
+        // test, and the handler-list assertion then fails with nonsense
+        // entries -- which is exactly what it did.
+        let marker = format!("#[{}::{}]", "tauri", "command");
         let mut commands: Vec<&str> = Vec::new();
         for (index, line) in code.lines().enumerate() {
-            if line.trim() != "#[tauri::command]" {
+            if line.trim() != marker {
                 continue;
             }
             let signature = code
                 .lines()
                 .nth(index + 1)
-                .expect("a #[tauri::command] is followed by its signature");
+                .expect("the command attribute is followed by its signature");
             let name = signature
                 .split("fn ")
                 .nth(1)
