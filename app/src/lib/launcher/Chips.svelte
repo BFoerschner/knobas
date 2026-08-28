@@ -75,8 +75,10 @@
         // The same rule the row's provenance line and the board's source
         // strip branch on, spelled in `shell/health.svelte` and nowhere else:
         // a chip's dot and a row's complaint disagreeing about one source is
-        // indistinguishable from a bug.
-        fail: state !== undefined && isActionable(state),
+        // indistinguishable from a bug. `state` is `undefined` when the store
+        // has no row for this id yet, which is a case the rule answers itself
+        // (#72) — a guard here would be a second place the rule is written.
+        fail: isActionable(state),
       });
     }
     for (const kind of interpreted.filters.kinds) {
