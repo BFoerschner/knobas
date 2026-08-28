@@ -53,15 +53,17 @@ function render(links: LinkEntry[]) {
   document.body.append(target);
   const onopen = vi.fn();
   const onunlink = vi.fn();
+  const onlink = vi.fn();
   const app = mount(LinksPanel, {
     target,
-    props: { entityId: VIEWED, links, onopen, onunlink },
+    props: { entityId: VIEWED, links, onopen, onunlink, onlink },
   });
   flushSync();
   return {
     target,
     onopen,
     onunlink,
+    onlink,
     /** The panel's text with runs of whitespace collapsed (see `Detail.test`). */
     text: () => (target.textContent ?? "").replace(/\s+/g, " "),
     buttons: (label: string) =>
@@ -193,6 +195,13 @@ test("the empty state invites linking and carries no read-only caveat", () => {
   // `title` attribute, where `textContent` would never have seen it.
   expect(screen.text()).not.toContain("does not yet write");
   expect(screen.target.innerHTML).not.toContain("M2");
+
+  // ...and the invitation is an action, not only a sentence.
+  const invitation = screen.buttons("Link to");
+  expect(invitation.length).toBeGreaterThan(0);
+  invitation[invitation.length - 1]!.click();
+  flushSync();
+  expect(screen.onlink).toHaveBeenCalled();
 
   screen.done();
 });

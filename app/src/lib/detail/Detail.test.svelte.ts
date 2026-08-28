@@ -18,6 +18,9 @@ let answer: (entityId: string) => Promise<EntityDetail> = () => Promise.resolve(
 const unlinked: string[] = [];
 let unlinkFails = false;
 
+/** Every `create_link` the *Link to…* dialog issued. */
+const created: { fromId: string; toId: string }[] = [];
+
 vi.mock("../ipc/entity", () => ({
   getEntity: (entityId: string) => {
     calls.push(entityId);
@@ -27,6 +30,43 @@ vi.mock("../ipc/entity", () => ({
     unlinked.push(linkId);
     if (unlinkFails) throw { code: "not_found", message: "no such link", source_id: null };
   },
+  createLink: async (fromId: string, toId: string) => {
+    created.push({ fromId, toId });
+    return {};
+  },
+}));
+
+/** The dialog's target picker. One fixed answer is enough here: this file is
+    about the detail's wiring, not about the picker (`LinkDialog.test`). */
+vi.mock("../ipc/search", () => ({
+  search: async () => ({
+    interpreted: { prefix: "none", text: "", segments: [], filters: null },
+    groups: [
+      {
+        kind: "page",
+        label: "Page",
+        plural: "Pages",
+        monogram: "PG",
+        total: 1,
+        hits: [
+          {
+            entity_id: "mock:ENG-SEPA",
+            kind: "page",
+            source_id: "mock",
+            updated_at: null,
+            synced_at: "2026-08-28T09:30:00Z",
+            title: "SEPA retry runbook",
+            rank: 1,
+            snippet: [],
+          },
+        ],
+      },
+    ],
+    total: 1,
+    took_ms: 2,
+  }),
+  launcherHome: () => Promise.reject(new Error("the dialog never loads the board")),
+  noFilters: () => ({ sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }),
 }));
 
 /** What the OS opener was handed, and whether it refused. */
@@ -106,6 +146,7 @@ beforeEach(() => {
   calls.length = 0;
   opened.length = 0;
   unlinked.length = 0;
+  created.length = 0;
   openerFails = false;
   unlinkFails = false;
   answer = () => Promise.resolve(detail());
@@ -577,6 +618,104 @@ test("an unlink that fails is reported and changes nothing", async () => {
   expect(calls, "a refused unlink does not re-read").toEqual(["mock:PAY-231"]);
 
   toasts.items = [];
+  screen.done();
+});
+
+/**
+ * #54's criterion, literally: *the created link appears in the panel without
+ * reopening the detail*.
+ *
+ * The whole path in one test, because that is what the criterion is: the
+ * header's button opens the dialog, the dialog writes, and the panel shows the
+ * row afterwards — with the slide-over never having closed.
+ */
+test("a link made in the dialog appears in the panel without reopening the detail", async () => {
+  let links: LinkEntry[] = [];
+  answer = () => Promise.resolve(detail({ links }));
+
+  const screen = render();
+  await vi.waitFor(() => expect(screen.text()).toContain("Nothing linked yet"));
+  flushSync();
+
+  const openDialog = [...screen.target.querySelectorAll<HTMLButtonElement>(".d-h button")].find(
+    (button) => button.textContent?.includes("Link to"),
+  )!;
+  openDialog.click();
+  flushSync();
+  expect(screen.target.querySelector('[role="dialog"]')).not.toBeNull();
+
+  const picker = screen.target.querySelector<HTMLInputElement>('input[placeholder="Search everything"]')!;
+  picker.value = "sepa";
+  picker.dispatchEvent(new Event("input", { bubbles: true }));
+  await vi.waitFor(() =>
+    expect(screen.target.querySelectorAll('[role="option"]').length).toBeGreaterThan(0),
+  );
+  picker.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  flushSync();
+
+  // What the backend will answer once the write lands.
+  links = [
+    link({
+      id: "33333333-3333-3333-3333-333333333333",
+      to: "mock:ENG-SEPA",
+      relation: "related",
+      otherKind: "page",
+      otherTitle: "SEPA retry runbook",
+    }),
+  ];
+  [...screen.target.querySelectorAll<HTMLButtonElement>("button")]
+    .find((button) => button.textContent?.trim() === "Link")!
+    .click();
+
+  // The re-read, not the dialog's own echo of the picked target: the title is
+  // on screen either way, so what is waited for is the second `get_entity`.
+  await vi.waitFor(() => expect(calls).toHaveLength(2));
+  flushSync();
+
+  expect(created).toEqual([{ fromId: "mock:PAY-231", toId: "mock:ENG-SEPA" }]);
+  expect(screen.text()).toContain("SEPA retry runbook");
+  // The panel is the backend's answer, re-read — not a locally spliced array.
+  expect(calls).toEqual(["mock:PAY-231", "mock:PAY-231"]);
+  expect(screen.text()).not.toContain("Nothing linked yet");
+  // The dialog is done and the detail never closed.
+  expect(screen.target.querySelector('[role="dialog"]')).toBeNull();
+  expect(screen.text(), "the new row reads under its own heading").toContain("related to");
+  expect(screen.onclose).not.toHaveBeenCalled();
+  expect(screen.text()).toContain("Retry failed SEPA payouts");
+
+  screen.done();
+});
+
+/**
+ * The Esc ladder, from the detail's side: the dialog is rung 1, so one press
+ * closes it and leaves the slide-over standing.
+ */
+test("Esc in the dialog closes the dialog and not the detail", async () => {
+  const screen = render();
+  await vi.waitFor(() => expect(screen.text()).toContain("Linked items"));
+  flushSync();
+
+  [...screen.target.querySelectorAll<HTMLButtonElement>(".d-h button")]
+    .find((button) => button.textContent?.includes("Link to"))!
+    .click();
+  flushSync();
+
+  // The shell's global ladder, stood up for real: `installKeys` binds `window`,
+  // so a key that reaches it here is a key that would unwind the slide-over as
+  // well as the dialog on one press.
+  const reachedTheShell: string[] = [];
+  const listener = (event: KeyboardEvent) => reachedTheShell.push(event.key);
+  window.addEventListener("keydown", listener);
+
+  const dialog = screen.target.querySelector<HTMLElement>('[role="dialog"]')!;
+  dialog.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  flushSync();
+  window.removeEventListener("keydown", listener);
+
+  expect(screen.target.querySelector('[role="dialog"]')).toBeNull();
+  expect(reachedTheShell, "one keystroke must not unwind two ladders").toEqual([]);
+  expect(screen.onclose).not.toHaveBeenCalled();
+
   screen.done();
 });
 

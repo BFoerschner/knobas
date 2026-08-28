@@ -3,8 +3,8 @@
   entity's side.
 
   **Presentational on purpose.** The panel does no IPC of its own: it is handed
-  the hydrated entries `get_entity` returned and hands two intentions back
-  (open, unlink). `Detail.svelte` owns the writes and the refresh, which
+  the hydrated entries `get_entity` returned and hands three intentions back
+  (open, unlink, link). `Detail.svelte` owns the writes and the refresh, which
   is what lets this file be tested by mounting it with an array — the sibling
   `HistoryPanel.svelte` draws the same line.
 
@@ -34,6 +34,7 @@
     links,
     onopen,
     onunlink,
+    onlink,
   }: {
     /** The entity whose detail this is — which end of each link is "here". */
     entityId: string;
@@ -41,6 +42,8 @@
     /** Navigate to an address (spec §2). The shell's router is the only one. */
     onopen: (hash: string) => void;
     onunlink: (entry: LinkEntry) => void;
+    /** Open *Link to…*. The empty state's invitation is the same action. */
+    onlink: () => void;
   } = $props();
 
   const groups = $derived(groupLinks(links, entityId));
@@ -75,6 +78,9 @@
   <div class="sec-h">
     <span class="lab">Linked items</span>
     <span class="k muted">{links.length}</span>
+    <span class="acts">
+      <button class="btn sm" onclick={onlink}>Link to…</button>
+    </span>
   </div>
 
   {#if groups.length === 0}
@@ -87,6 +93,7 @@
     <div class="empty">
       <p>Nothing linked yet.</p>
       <p>Link this to the ticket it implements, the build it broke, or the page that documents it.</p>
+      <button class="btn" onclick={onlink}>Link to…</button>
     </div>
   {:else}
     {#each groups as group (group.reading)}

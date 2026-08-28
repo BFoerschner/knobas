@@ -18,6 +18,7 @@
   import { ago } from "../shell/time";
   import { push } from "../shell/toasts.svelte";
   import HistoryPanel from "./HistoryPanel.svelte";
+  import LinkDialog from "./LinkDialog.svelte";
   import LinksPanel from "./LinksPanel.svelte";
   import PayloadView from "./PayloadView.svelte";
   import { projectPayload } from "./payload";
@@ -90,6 +91,15 @@
       push({ text: `Could not re-read this item: ${ipcErrorMessage(rejection)}`, tone: "err" });
     }
   }
+
+  /**
+   * Whether *Link to…* is up.
+   *
+   * The dialog is `Modal`-based, so it takes rung 1 of the Esc ladder: one
+   * press closes it and hands focus back to the button that opened it, and the
+   * slide-over underneath stays open.
+   */
+  let linking = $state(false);
 
   /**
    * Withdraw a link, and show the result.
@@ -174,6 +184,14 @@
         state for an item withdrawn upstream and for any source that has no
         per-item URL. A disabled button would claim there is somewhere to go.
       -->
+      <button class="btn sm" onclick={() => (linking = true)}>
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M6.5 9.5 9.5 6.5" />
+          <path d="M7 4.5 8.5 3a2.5 2.5 0 0 1 3.5 3.5L10.5 8" />
+          <path d="M9 11.5 7.5 13A2.5 2.5 0 0 1 4 9.5L5.5 8" />
+        </svg>
+        Link to…
+      </button>
       {#if webUrl}
         <button class="btn sm" onclick={() => void open(webUrl)}>
           <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -292,8 +310,26 @@
         links={detail.links}
         onopen={onnavigate}
         onunlink={(entry) => void removeLink(entry)}
+        onlink={() => (linking = true)}
       />
       <HistoryPanel activity={detail.activity} />
+
+      <!--
+        Mounted only while it is open, and keyed on nothing: a closed dialog
+        that keeps its half-typed search around is a dialog that reopens with
+        somebody else's question in it.
+      -->
+      {#if linking}
+        <LinkDialog
+          fromId={detail.row.entity_id}
+          fromTitle={detail.row.title}
+          onclose={() => (linking = false)}
+          oncreated={() => {
+            linking = false;
+            void refresh();
+          }}
+        />
+      {/if}
     {/if}
   </div>
 </aside>
