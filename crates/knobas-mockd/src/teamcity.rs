@@ -275,11 +275,12 @@ fn build_type_json(bt: &TcBuildType, base: &str) -> Value {
         "projectId": bt.project_id,
         "href": format!("/app/rest/buildTypes/id:{}", bt.id),
         "webUrl": format!("{base}/viewType.html?buildTypeId={}", bt.id),
-        // The fixture gives no configuration prose, so `description` is the
-        // null that means "known name, absent here". `paused` is a genuine
-        // `false`: nothing in the fixture is paused, and a configuration that
-        // is merely quiet is not a paused one.
-        "description": Value::Null,
+        // No fixture configuration has prose, so `description` is normally the
+        // null that means "known name, absent here";
+        // `MockState::describe_build_type` is what puts one there. `paused` is
+        // a genuine `false`: nothing in the fixture is paused, and a
+        // configuration that is merely quiet is not a paused one.
+        "description": bt.description,
         "paused": false,
     })
 }

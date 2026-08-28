@@ -722,7 +722,7 @@ Stream T note for the Gitea live suite: the seed **cannot** reproduce fixture PR
 - **§5 the as-built mockd locator subset also includes `defaultFilter:`** (the M1 amendment
   above added `start:`; the §5 listing remains stale for both).
 - **§4.2 TeamCity gains a watermark ceiling.** Every run opens with one
-  `locator=defaultFilter:false,count:1` query and records the highest build id in existence;
+  `locator=defaultFilter:false,count:2` query and records the highest build id in existence;
   the watermark may not pass it within that run. This closes the loss class PR #25's reorder
   *traded* rather than subsetted — a build queued after the opening poll, still running when
   the finished query goes out, is in neither result set, and a later-queued build that
@@ -747,11 +747,25 @@ Stream T note for the Gitea live suite: the seed **cannot** reproduce fixture PR
   `running-info(percentageComplete)`.
 - **The budget test named in the M1 amendment above is renamed**
   `the_selectors_ask_for_nothing_outside_the_mock_contract` →
-  `the_selectors_ask_for_nothing_no_reader_looks_at`, because the old name stated a rule that
-  does not hold: `href` and `paused` are **served** by mockd (200, not the 400 an unknown name
-  gets), so they are unasked for budget rather than excluded by the mock contract. The
-  failure message says so, and says that when a name is missing a *reader* the fix is to add
-  the reader — which is what `description` above turned out to need.
+  `the_selectors_ask_for_nothing_no_reader_looks_at`, and pairs each unasked name with the
+  selector it is unasked *from*. Whether leaving a name out is budget or contract turns on the
+  **type**, not the name: mockd serves `build(href)`, `buildType(href)` and
+  `buildType(paused)` (200), but `build(paused)` is a 400 + `UnknownField` violation, because
+  `paused` is not a field on a build. An earlier revision of this record said `href` and
+  `paused` were both simply served, which is false for that fourth cell.
+- **§5 mockd gains `MockState::describe_build_type`**, alongside `finish_build`/`queue_build`.
+  The dataset describes no build configuration and mockd does not invent prose, so with
+  `description` `null` everywhere a selector that asks for it and one that does not produce
+  identical output — the widening above had no wire-level witness until a test could set one.
+- **§4.2 the TeamCity ceiling probe checks its own ordering assumption.** Nothing in
+  `testenv/specs/teamcity.json` states that `/app/rest/builds` answers newest-first, and the
+  ceiling reads row 0 of its page as the newest build. The probe therefore asks for **two**
+  rows and refuses with `SourceError::Protocol` when they arrive in ascending id order — the
+  server contradicting the assumption on its own evidence, on the first run, with no threshold
+  and no history to compare against. It also refuses a newest build below the stored watermark,
+  which monotonic ids make impossible and which catches *drift* (a source repointed at another
+  instance, a restore from an older backup, an upgrade changing an undocumented default) rather
+  than a server that was always wrong.
 
 ---
 

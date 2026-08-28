@@ -328,6 +328,28 @@ impl MockState {
         id
     }
 
+    /// Gives a build configuration a `description`.
+    ///
+    /// No fixture configuration has one, because the dataset describes none.
+    /// That makes the whole `description` wire path -- selector asks, mockd
+    /// serves, the adapter maps it into the search blob -- untestable from the
+    /// fixture alone: with the value `null` everywhere, a selector that asks
+    /// for it and one that does not produce identical output. This is the
+    /// counterpart of `finish_build`/`queue_build`: the one thing a frozen
+    /// fixture cannot express, made expressible, so the test can fail.
+    ///
+    /// # Panics
+    ///
+    /// If no configuration has `id` -- a test naming one that is not there is
+    /// asserting against nothing.
+    pub fn describe_build_type(&self, id: &str, description: &str) {
+        let mut inner = self.write();
+        let Some(t) = inner.build_types.iter_mut().find(|t| t.id == id) else {
+            panic!("describe_build_type: no build type {id:?} in the fixture");
+        };
+        t.description = Some(description.to_owned());
+    }
+
     pub fn set_max_results_cap(&self, cap: u32) {
         self.write().max_results_cap = cap;
     }

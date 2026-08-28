@@ -16,15 +16,20 @@
 //! and it is why `the_field_selectors_cover_everything_the_mapping_reads`
 //! exists.
 //!
-//! The second half is budget rather than correctness, with one sharp edge:
-//! `knobas-mockd` validates `fields=` against a closed set of names and
+//! The second half is usually budget rather than correctness, and the
+//! difference turns on **which type** a name is asked of, not on the name.
+//! `knobas-mockd` validates `fields=` against a closed set per type and
 //! answers an unknown one with 400 + an `UnknownField` violation (mockd
-//! deviation 6), so a *misspelled* name fails loudly in `tests/mockd.rs`. A
-//! correctly spelled name for something nothing reads does not fail anywhere
-//! -- mockd serves `href` and `paused` quite happily -- it just costs response
-//! size and puts a field in `payload` that no reader will ever look at. Hence
-//! `triggered(user(username))` rather than
-//! `triggered(type,date,user(username,name))`, which mockd would also serve.
+//! deviation 6). So `href` is served on builds *and* configurations and costs
+//! only response size; `paused` is served on a configuration and is a 400 on a
+//! **build**, where it is not a field at all. There is no list of "names we
+//! leave out" that is true independently of the type it is asked of, and
+//! `the_selectors_ask_for_nothing_no_reader_looks_at` pairs each name with its
+//! selector for exactly that reason.
+//!
+//! Within one type it is budget: `triggered(user(username))` rather than
+//! `triggered(type,date,user(username,name))`, which mockd would serve
+//! happily.
 
 use chrono::{DateTime, Utc};
 
@@ -436,16 +441,17 @@ mod tests {
             assert!(!rendered.contains("state:queued"), "{rendered}");
         }
         // The run's opening ceiling query: no `state`, the default filter
-        // explicitly off, one build. `state` would answer a different
-        // question -- see the field's doc.
+        // explicitly off, two builds. `state` would answer a different
+        // question -- see the field's doc -- and the second build is the
+        // ordering evidence, not a spare row (`sync::ceiling`).
         assert_eq!(
             Locator {
                 default_filter: Some(false),
-                count: 1,
+                count: 2,
                 ..Locator::default()
             }
             .render(),
-            "defaultFilter:false,count:1"
+            "defaultFilter:false,count:2"
         );
         // No dimension may repeat: the mock rejects a locator that names one
         // twice, whichever one it is.
@@ -557,33 +563,67 @@ mod tests {
     /// The other direction: a selector must not ask for a name **no** reader
     /// in `map` looks at.
     ///
-    /// Every name below is one `knobas-mockd` serves -- asking for `href` or
-    /// `paused` is a 200, not the 400 an unknown name gets (deviation 6) --
-    /// so nothing here is about the mock contract, and a failure here is never
-    /// a violation. It is response size and a `payload` key with no reader.
+    /// Paired name-with-selector rather than iterated as a cross-product,
+    /// because the reason a name is left out is a property of the *pair* and
+    /// not of the name. `paused` is a real field on a build configuration and
+    /// is not a field on a build at all, so `BUILD_TYPE_FIELDS` omitting it is
+    /// budget and `BUILD_FIELDS` omitting it is the mock contract -- mockd
+    /// answers `build(paused)` with 400 + an `UnknownField` violation, exactly
+    /// as it answers a name nobody has ever heard of. A cross-product cannot
+    /// say two different things about two cells, so it said the wrong one
+    /// about that one, twice. Each row below carries its own reason and its
+    /// own consequence.
     ///
-    /// **Which is why the fix is never "delete the name from the selector"
-    /// when a reader is what is missing.** `description` used to fail this
-    /// test, and it was the *test* that was wrong: `map::build_config_item`
-    /// has always put `bt.description` in the search blob, so the selector
-    /// omitting it meant a configuration's prose silently never reached the
-    /// index. It is asked for now. If one of these names acquires a reader,
-    /// add it here in the same change.
+    /// **The fix is never "delete the name from the selector" when a reader is
+    /// what is missing.** `description` used to be on this list, and it was
+    /// the *list* that was wrong: `map::build_config_item` has always put
+    /// `bt.description` in the search blob, so the selector omitting it meant
+    /// a configuration's prose silently never reached the index. It is asked
+    /// for now.
     #[test]
     fn the_selectors_ask_for_nothing_no_reader_looks_at() {
-        for unread in ["paused", "href"] {
-            for (name, selector) in [
-                ("BUILD_FIELDS", BUILD_FIELDS),
-                ("BUILD_TYPE_FIELDS", BUILD_TYPE_FIELDS),
-            ] {
-                assert!(
-                    !selector.contains(unread),
-                    "{name} asks for {unread}. mockd serves it, so this is not a violation -- it \
-                     is response size and a payload key nothing in `map` reads. If you added a \
-                     reader for it, add the name here too; if you did not, drop it."
-                );
-            }
+        // (selector, its name, the unasked name, what asking would cost)
+        let unread = [
+            (
+                BUILD_FIELDS,
+                "BUILD_FIELDS",
+                "href",
+                "mockd serves `build(href)`, so this is not a violation -- it is response size \
+                 and a payload key nothing in `map` reads",
+            ),
+            (
+                BUILD_TYPE_FIELDS,
+                "BUILD_TYPE_FIELDS",
+                "href",
+                "mockd serves `buildType(href)`, so this is not a violation -- it is response \
+                 size and a payload key nothing in `map` reads",
+            ),
+            (
+                BUILD_TYPE_FIELDS,
+                "BUILD_TYPE_FIELDS",
+                "paused",
+                "mockd serves `buildType(paused)`, so this is not a violation -- it is response \
+                 size and a payload key nothing in `map` reads",
+            ),
+        ];
+        for (selector, name, missing, why) in unread {
+            assert!(
+                !selector.contains(missing),
+                "{name} asks for {missing}: {why}. If you added a reader for it, add the name \
+                 here too; if you did not, drop it."
+            );
         }
+        // ...and the one that is *not* budget: `paused` is not a field on a
+        // build, so `BUILD_FIELDS` asking for it is a 400 and a recorded
+        // violation, and `tests/mockd.rs` would fail on
+        // `assert_no_violations()`. Adding a reader would not make this legal,
+        // which is the opposite of the advice above -- hence its own case.
+        assert!(
+            !BUILD_FIELDS.contains("paused"),
+            "BUILD_FIELDS asks for `paused`, which is not a field on a build: mockd answers 400 \
+             + an UnknownField violation, the same as a misspelling. Adding a reader would not \
+             help; the name does not exist on this type."
+        );
         // `triggered` is asked for at exactly the depth `map::build_item`
         // reads it, and no deeper: mockd would serve
         // `triggered(type,date,user(username,name))` without complaint.
