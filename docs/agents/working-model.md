@@ -32,7 +32,14 @@ and migrations as the #1 collision source. The one designed stop: a session that
 decision comments the question on its issue and swaps `ready-for-agent` → `ready-for-human`; the
 driver prints the comment and exits. Answer on the issue, relabel it `ready-for-agent`, rerun. A
 session that ends without closing or escalating stops the driver for inspection (exit 3, log path
-printed) — it never retries on its own. Logs land under `$TMPDIR/knobas-autopilot-logs/`.
+printed) — it never retries on its own, with one exception judged from the output rather than the
+exit code: a **usage-limit refusal** is neither a failure nor a decision (the children bill the
+same subscription windows as interactive sessions), so the driver waits and relaunches the same
+issue every 15 minutes until the window resets, telling the new session to continue from its
+predecessor's branch. Logs land under `$TMPDIR/knobas-autopilot-logs/`. Do not export
+`ANTHROPIC_API_KEY` in the shell that runs autopilot — it outranks the subscription login in
+Claude Code's credential precedence and would silently flip the whole run to pay-per-token API
+billing.
 
 **Concurrency is bounded by the machine, not by task independence (rule, 2026-08-25 — learned the hard way).** Five implementers were dispatched at once because their streams were genuinely disjoint; within minutes all five were dead. Load average hit **79.7 on a 12-core / 16 GB machine**, three agents were killed by a 600 s no-progress watchdog, and one reported the cause plainly: "other agents' builds plus a zombie of my own were racing". Disjoint files do not mean disjoint *resources* — every Rust implementer runs `cargo build`/`cargo test --workspace` (measured: 56 s at 471 % CPU, i.e. ~4.7 cores) and most also start one embedded Postgres **per test binary**.
 

@@ -167,9 +167,31 @@ while :; do
     echo "=== issue #$picked ($(gh issue view "$picked" --json title --jq .title))"
     echo "=== log: $log"
     # The session's own judgment decides success, not its exit code: what the
-    # driver trusts is the state it left on GitHub.
-    claude -p "$(prompt_for "$picked")" --dangerously-skip-permissions \
-        >"$log" 2>&1 || true
+    # driver trusts is the state it left on GitHub. One exception is judged
+    # from the output instead: the children run on the same subscription
+    # windows as interactive sessions, and a usage-limit refusal ("You've hit
+    # your session limit -- resets 3:45pm") is neither a failure nor a
+    # decision for Björn -- the window just has to reset. The driver waits and
+    # relaunches the same issue every 15 minutes (a refused launch costs
+    # nothing), telling the new session to pick up its predecessor's branch.
+    resume=""
+    while :; do
+        claude -p "$(prompt_for "$picked")$resume" --dangerously-skip-permissions \
+            >>"$log" 2>&1 || true
+        [ "$(gh issue view "$picked" --json state --jq .state)" = "CLOSED" ] && break
+        if tail -20 "$log" | grep -qiE "hit your (session|weekly) limit|usage limit reached"; then
+            echo "=== usage limit ($(tail -20 "$log" | grep -oiE 'resets.*' | tail -1 | head -c 60)) -- retrying every 15 min"
+            resume="
+
+Note: an earlier session on this very issue was cut off by a usage limit. Its
+branch and worktree may already exist, holding committed and possibly
+uncommitted work -- start by inspecting them and continue from what is there
+rather than starting over."
+            sleep 900
+            continue
+        fi
+        break
+    done
     tail -5 "$log"
 
     state="$(gh issue view "$picked" --json state --jq .state)"
