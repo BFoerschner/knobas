@@ -37,6 +37,13 @@ pub struct JiraConfig {
     /// membership survives in `payload` for M2's link work. Discovering the id
     /// automatically needs `GET /rest/api/2/field`, which is outside M1's
     /// endpoint set.
+    ///
+    /// Still needed after #32 widened `BASE_FIELDS` to include `parent`, and
+    /// not made redundant by it: the two spellings belong to different kinds
+    /// of project. A next-gen or a recent company-managed project puts epic
+    /// membership in `fields.parent`, which every run now fetches; a
+    /// **classic** Data Center project puts it in a custom field, which only
+    /// this option can name because its id differs per instance.
     pub epic_link_field: Option<String>,
     /// `maxResults` per `/search` page (interfaces §4.1 default: 100).
     pub page_size: u32,

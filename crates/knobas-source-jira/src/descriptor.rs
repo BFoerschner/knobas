@@ -74,7 +74,7 @@ fn config_schema() -> serde_json::Value {
             },
             "epic_link_field": {
                 "type": ["string", "null"], "default": null, "title": "Epic Link field id",
-                "description": "e.g. customfield_10008. Adds that field to the synced payload so epic membership is preserved."
+                "description": "e.g. customfield_10008. Only for classic projects: epic membership on a next-gen project is synced already, via fields.parent."
             },
             "page_size": {
                 "type": "integer", "minimum": 1, "maximum": 1000, "default": 100,
