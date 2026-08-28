@@ -66,9 +66,10 @@ fn all() -> EntityFilter {
     }
 }
 
-/// Scoped to the `mock` source, like every windowed read in this binary: the
-/// recency test writes fresher `ticket` rows under its own `clock-*` source,
-/// and an unscoped limit-2 window would show those whenever they commit first
+/// Scoped to the `mock` source, for the same reason
+/// [`offset_walks_the_same_ordering_and_total_does_not_move`] is: the recency
+/// test writes fresher `ticket` rows under its own `clock-*` source, and an
+/// unscoped limit-2 window would show those whenever they commit first
 /// (issue #30). The intruder below is that neighbour, seeded deterministically
 /// instead of raced for, so the scoping is proven rather than assumed.
 #[tokio::test]
