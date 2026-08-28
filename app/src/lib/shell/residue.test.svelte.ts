@@ -105,6 +105,43 @@ vi.mock("../ipc/entity", () => ({
   recentActivity: () => deferred([LINE]),
 }));
 
+/**
+ * The sources view's IPC.
+ *
+ * Every read answers through `deferred`, so `land()` decides when it lands —
+ * which is what lets the second pass unmount the view *inside* the window
+ * where its `list_sources` is still in flight.
+ */
+vi.mock("../ipc/sources", () => ({
+  listSources: () => deferred([]),
+  syncNow: () => deferred(1),
+  syncAll: () => deferred([1]),
+  deleteSource: () => deferred(undefined),
+  setSourceSecret: () =>
+    deferred({
+      source_id: "mock",
+      state: "ok",
+      checked_at: null,
+      detail: null,
+      secret_expires_at: null,
+    }),
+  credentialHealth: () => deferred([]),
+  listSyncRuns: () => deferred([]),
+  dbStats: () =>
+    deferred({
+      db_bytes: 0,
+      entity_count: 0,
+      item_count: 0,
+      per_source: [],
+      oldest_synced_at: null,
+      newest_synced_at: null,
+    }),
+  listAdapters: () => deferred([]),
+  addSource: () => deferred(undefined),
+  testSource: () => deferred({ ok: true, account: null, server_version: null, secret_expires_at: null, error: null, code: null, elapsed_ms: 1 }),
+  reindexFts: () => deferred(undefined),
+}));
+
 vi.mock("@tauri-apps/api/event", () => ({
   listen: (event: string, handler: (payload: { payload: unknown }) => void) => {
     // Modelled as a real `window` listener so that failing to unsubscribe is
@@ -129,6 +166,9 @@ const Tile = (await import("./Tile.svelte")).default;
 const Detail = (await import("../detail/Detail.svelte")).default;
 const Launcher = (await import("../launcher/Launcher.svelte")).default;
 const QueryBox = (await import("../launcher/QueryBox.svelte")).default;
+const ReenterSecret = (await import("../sources/ReenterSecret.svelte")).default;
+const SourcesView = (await import("../sources/SourcesView.svelte")).default;
+const { createHealth } = await import("./health.svelte");
 
 /**
  * The launcher's IPC, injected.
@@ -299,6 +339,30 @@ const CASES: Case[] = [
           oninput: () => {},
           onkeydown: () => {},
           onclose: () => {},
+        },
+      }),
+    }),
+  },
+  {
+    name: "SourcesView",
+    source: "lib/sources/SourcesView.svelte",
+    // Its own store, not the shell's singleton: seeding the module-level one
+    // from a residue test would leak state into whatever runs next.
+    open: (target) => ({
+      app: mount(SourcesView, { target, props: { health: createHealth() } }),
+    }),
+  },
+  {
+    name: "ReenterSecret",
+    source: "lib/sources/ReenterSecret.svelte",
+    open: (target) => ({
+      app: mount(ReenterSecret, {
+        target,
+        props: {
+          sourceId: "mock",
+          displayName: "Mock",
+          onhealth: () => {},
+          oncancel: () => {},
         },
       }),
     }),

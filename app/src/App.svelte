@@ -7,23 +7,29 @@
   import Shell from "./lib/shell/Shell.svelte";
   import Toast from "./lib/shell/Toast.svelte";
   import { builtinContexts } from "./lib/shell/contexts";
+  import { health } from "./lib/shell/health.svelte";
   import { installKeys } from "./lib/shell/keys";
   import { lifecycle } from "./lib/shell/lifecycle.svelte";
   import { router } from "./lib/shell/router.svelte";
   import { push } from "./lib/shell/toasts.svelte";
+  import SourcesView from "./lib/sources/SourcesView.svelte";
   import { ipcErrorMessage } from "./lib/ipc";
 
   /**
-   * The rooms the switcher offers.
+   * The rooms the switcher offers: *All work*, plus one per configured source.
    *
-   * One per configured source, plus *All work* — and there are no configured
-   * sources to list until task 18, because `listSources` is stream F's and is
-   * not merged yet. An empty list is not a placeholder here: it is the truth
-   * for a knobas that has synced nothing, and *All work* still reads the whole
-   * mirror.
+   * Derived from the live `source:health` store rather than from a second
+   * `list_sources` call — the store already knows every source id, it is kept
+   * current by `source:health`, and one fact with one home is what keeps the
+   * tab strip from disagreeing with the sources view about which sources exist.
+   *
+   * The label is the source id. `display_name` lives on `SourceSummary`, which
+   * this store does not carry; a tab reading `jira-eu` is honest and is the
+   * word the address `#/ctx/src:jira-eu` uses.
    */
-  const sources: { id: string; label: string }[] = [];
-  const contexts = builtinContexts(sources);
+  const contexts = $derived(
+    builtinContexts(health.all.map((source) => ({ id: source.source_id, label: source.source_id }))),
+  );
 
   /**
    * Whether the ⌘K overlay is up.
@@ -56,8 +62,13 @@
 
     const stopRouter = router.start();
     const stopKeys = installKeys(router, { openLauncher });
+    // Seeded and kept current for the whole session, not per component: the
+    // top strip, the sources view and the launcher all draw this, and three
+    // independent fetches is three chances for them to disagree (#27).
+    const stopHealth = health.start();
 
     return () => {
+      stopHealth();
       stopKeys();
       stopRouter();
       lifecycle.stop();
@@ -98,10 +109,7 @@
           <button class="btn" onclick={() => router.back()}>Back to the room</button>
         </div>
       {:else if router.route.view === "sources"}
-        <!-- Phase 2, task 17: stream F's sources CRUD has to land first. -->
-        <div class="empty">
-          <p>Sources arrive in phase 2 of this stream.</p>
-        </div>
+        <SourcesView />
       {:else if router.route.view === "first-run"}
         <div class="empty">
           <p>The first-run wizard arrives in phase 3 of this stream.</p>
@@ -111,8 +119,16 @@
       {/if}
     {/snippet}
   </Shell>
+  <!--
+    `sources` is supplied, and supplying it is the point: the launcher's rows
+    and chips then read the live `source:health` store instead of the copy the
+    board fetches once per opening. An empty list here means *watching, nothing
+    to complain about* — which is why the prop's contract distinguishes it from
+    `undefined` (#36).
+  -->
   <Launcher
     bind:open={launcherOpen}
+    sources={health.all}
     onnavigate={(hash) => router.go(hash)}
     onclose={() => {}}
   />

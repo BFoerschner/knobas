@@ -173,13 +173,67 @@ test("no {@html} — source text is untrusted (gotcha 7)", () => {
 /**
  * `default-src 'self'`: a bundle reaches nothing on the network but the IPC.
  * Fonts are npm-vendored (`@fontsource/*`) and bundled, never fetched.
- * Loopback is allowed because the QA convention documents a local preview
- * server.
+ *
+ * Two exemptions, and both are exempt because they cannot reach anything:
+ *
+ * * **loopback**, because the QA convention documents a local preview server;
+ * * **the reserved names** of RFC 2606 and RFC 6761 — `.example`, `.invalid`,
+ *   `.test`, `.localhost`, and `example.com/net/org`. The IANA guarantees
+ *   these never resolve, which is the exact property this rule protects, and
+ *   a source's `base_url` is the single most common thing a sources-view
+ *   fixture has to spell. Without them the rule pushes fixtures towards a
+ *   plausible-looking real domain, which is strictly worse: it is a hostname
+ *   that *could* answer.
+ *
+ * A hostname that is neither loopback nor reserved is an offence wherever it
+ * appears, test file or not.
  */
+const RESERVED_HOST =
+  /^(?:localhost|127\.0\.0\.1|\[::1\]|(?:[\w-]+\.)*(?:example|invalid|test|localhost)|(?:[\w-]+\.)*example\.(?:com|net|org))(?::[^/.]*)?$/;
+
 test("no runtime network references (default-src 'self')", () => {
   expect(
-    offenders((text) => /https?:\/\/(?!localhost|127\.0\.0\.1)/.test(text)),
+    offenders((text) => {
+      for (const match of text.matchAll(/https?:\/\/([^\s"'`/)\]}>]+)/g)) {
+        if (!RESERVED_HOST.test(match[1]!)) return true;
+      }
+      return false;
+    }),
   ).toEqual([]);
+});
+
+/**
+ * The rule above is a regex over a hostname, and a regex that is wrong in the
+ * permissive direction is a lint that has quietly stopped being one. So it is
+ * exercised against the shapes it has to separate, rather than trusted.
+ */
+test("the reserved-host exemption admits only names that cannot resolve", () => {
+  const allowed = [
+    "localhost",
+    "localhost:5301",
+    // The QA convention's documented command line, where the port is a shell
+    // variable rather than a number.
+    "localhost:$PORT",
+    "127.0.0.1:1420",
+    "jira.tidewater.example",
+    "example.com",
+    "api.example.org",
+    "anything.invalid",
+    "mock.test",
+  ];
+  const refused = [
+    "jira.tidewater.example.co",
+    "example.company.com",
+    "notexample.com",
+    "atlassian.net",
+    "fonts.googleapis.com",
+    "127.0.0.1.evil.com",
+    "example.com.evil.net",
+    // The port is allowed to be non-numeric, but it may not smuggle a host in.
+    "localhost:evil.com",
+  ];
+  expect(allowed.filter((host) => !RESERVED_HOST.test(host))).toEqual([]);
+  expect(refused.filter((host) => RESERVED_HOST.test(host))).toEqual([]);
 });
 
 /** The dev harness, as a path rather than as a spelling. */
