@@ -86,7 +86,7 @@ impl Source for Parked {
     }
 
     async fn write(&self, _op: WriteOp) -> Result<(), SourceError> {
-        Err(SourceError::Protocol("read-only".into()))
+        Err(SourceError::protocol("read-only"))
     }
 }
 
@@ -120,7 +120,7 @@ impl Source for Failing {
         Err(SourceError::Unreachable("simulated".into()))
     }
     async fn write(&self, _op: WriteOp) -> Result<(), SourceError> {
-        Err(SourceError::Protocol("read-only".into()))
+        Err(SourceError::protocol("read-only"))
     }
 }
 

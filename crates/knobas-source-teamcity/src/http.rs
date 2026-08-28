@@ -1,17 +1,20 @@
 //! The only module in this crate that names [`knobas_http`] or `reqwest`.
 //!
-//! The transport is the shared one and that crate is **read-only for M1**
-//! (interfaces §8 P8): rustls with the platform's root store, the retry
-//! budget, `Retry-After`, the per-instance rate limiter, the `User-Agent`, and
-//! the one fault mapping every adapter must agree on (401 **and** 403 →
-//! [`SourceError::Unauthorized`]; connect/DNS/TLS/timeout →
-//! [`SourceError::Unreachable`]; everything else →
-//! [`SourceError::Protocol`]). [`knobas_http::HttpClient::send`] is the only
-//! way onto the wire -- the [`knobas_http::Request`] its builder hands back
-//! deliberately has no `send` of its own.
+//! The transport is the shared one and that crate changes only through the
+//! orchestrator (interfaces §8 P8, §10.8): rustls with the platform's root
+//! store, the retry budget, `Retry-After`, the per-instance rate limiter, the
+//! `User-Agent`, and the one fault mapping every adapter must agree on (401
+//! **and** 403 → [`SourceError::Unauthorized`]; connect/DNS/TLS/timeout →
+//! [`SourceError::Unreachable`]; everything else → [`SourceError::Protocol`]),
+//! each carrying the status it came from ([`SourceError::status`], ADR-0004).
+//! [`knobas_http::HttpClient::send`] is the only way onto the wire -- the
+//! [`knobas_http::Request`] its builder hands back deliberately has no `send`
+//! of its own.
 //!
-//! Two things are TeamCity's and therefore here: which [`Auth`] variant the
-//! configured [`AuthMethod`] means, and the client's timeouts and rate limit.
+//! Three things are TeamCity's and therefore here: which [`Auth`] variant the
+//! configured [`AuthMethod`] means, the client's timeouts and rate limit, and
+//! reading TeamCity's own error text out of a failing body ([`error_message`],
+//! a [`knobas_http::BodyMessage`] per ADR-0004).
 //!
 //! `Accept: application/json` is **not** here, because it is not this
 //! adapter's to remember: [`knobas_http::HttpClient::new`] sets it as a
@@ -56,7 +59,7 @@ pub(crate) fn credential(
     // with a secret in hand, and send the user to retype a token that was
     // never the problem.
     let scheme = scheme(auth, username)?;
-    let secret = secret.ok_or(SourceError::Unauthorized)?;
+    let secret = secret.ok_or_else(SourceError::unauthorized)?;
     Ok(match scheme {
         Scheme::Bearer => Auth::Bearer(secret.to_owned()),
         Scheme::Basic(username) => Auth::Basic {
@@ -77,7 +80,7 @@ fn scheme(auth: Option<AuthMethod>, username: Option<&str>) -> Result<Scheme<'_>
         // `SourceInstance::auth` is optional because some sources need no
         // credential at all (P6). TeamCity is not one of them, and neither
         // method the descriptor declares can be guessed at from a bare secret.
-        return Err(SourceError::Protocol(
+        return Err(SourceError::protocol(
             "this TeamCity source has no authentication method configured; choose an access \
              token or user + password"
                 .to_owned(),
@@ -91,14 +94,14 @@ fn scheme(auth: Option<AuthMethod>, username: Option<&str>) -> Result<Scheme<'_>
             .filter(|u| !u.is_empty())
             .map(Scheme::Basic)
             .ok_or_else(|| {
-                SourceError::Protocol(
+                SourceError::protocol(
                     "user + password authentication needs a username in the source configuration"
                         .to_owned(),
                 )
             }),
         // Declared in neither `descriptor_template().auth_methods` nor
         // reachable from the Add-source form; refused rather than guessed at.
-        other => Err(SourceError::Protocol(format!(
+        other => Err(SourceError::protocol(format!(
             "{other:?} authentication is not supported for TeamCity; use an access token or \
              user + password"
         ))),
@@ -126,7 +129,46 @@ pub(crate) fn client(
         burst: cfg.burst(),
         connect_timeout: CONNECT_TIMEOUT,
         request_timeout: REQUEST_TIMEOUT,
+        body_message: Some(error_message),
     })
+}
+
+/// The sentence inside TeamCity's error text, for `knobas-http` to build the
+/// message out of ([`knobas_http::BodyMessage`], ADR-0004).
+///
+/// TeamCity answers errors as `text/plain` even to a client that asked for
+/// JSON, in the shape
+///
+/// ```text
+/// Error has occurred during request processing (Not Found).
+/// Error: jetbrains.buildServer.server.rest.errors.NotFoundException: No project found by name or internal/external id 'tidewatr'.
+/// ```
+///
+/// The first line restates the status `knobas-http` has already put in the
+/// message, and the fully-qualified Java class name in front of the second is
+/// noise to everyone who is not reading TeamCity's source. What is left is the
+/// sentence that says which project was not found.
+///
+/// `None` for anything that is not that shape -- an HTML error page from a
+/// reverse proxy, an empty body -- which keeps the raw excerpt.
+fn error_message(body: &str) -> Option<String> {
+    let detail = body
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        // The first line is the status, which the message already carries.
+        .find(|line| !line.starts_with("Error has occurred during request processing"))?;
+    // `Error: <fully.qualified.Exception>: <sentence>` -- keep the sentence.
+    let detail = detail
+        .strip_prefix("Error: ")
+        .and_then(|rest| {
+            let (class, sentence) = rest.split_once(": ")?;
+            // Only when it really is a class name, so a plain `Error: nope`
+            // keeps its text instead of being split on the first colon.
+            (class.contains('.') && !class.contains(' ')).then_some(sentence.trim())
+        })
+        .unwrap_or(detail);
+    (!detail.is_empty()).then(|| detail.to_owned())
 }
 
 #[cfg(test)]
@@ -157,29 +199,29 @@ mod tests {
     fn construction_refuses_credentials_it_cannot_use() {
         assert!(matches!(
             credential(Some(AuthMethod::Pat), None, None),
-            Err(SourceError::Unauthorized)
+            Err(SourceError::Unauthorized { .. })
         ));
         let err =
             credential(Some(AuthMethod::UserPassword), None, Some("pw")).expect_err("no username");
         assert!(
-            matches!(&err, SourceError::Protocol(m) if m.contains("username")),
+            matches!(&err, SourceError::Protocol { message: m, .. } if m.contains("username")),
             "{err:?}"
         );
         // A blank username is the same mistake with whitespace in it.
         let err = credential(Some(AuthMethod::UserPassword), Some("  "), Some("pw"))
             .expect_err("blank username");
         assert!(
-            matches!(&err, SourceError::Protocol(m) if m.contains("username")),
+            matches!(&err, SourceError::Protocol { message: m, .. } if m.contains("username")),
             "{err:?}"
         );
         // No method at all: a configuration problem, not a credential one.
         let err = credential(None, None, Some("tok")).expect_err("no method");
-        assert!(matches!(err, SourceError::Protocol(_)), "{err:?}");
+        assert!(matches!(err, SourceError::Protocol { .. }), "{err:?}");
         // A method the descriptor does not declare.
         for other in [AuthMethod::OAuth, AuthMethod::ApiToken] {
             let err = credential(Some(other), None, Some("tok")).expect_err("undeclared");
             assert!(
-                matches!(err, SourceError::Protocol(_)),
+                matches!(err, SourceError::Protocol { .. }),
                 "{other:?}: {err:?}"
             );
         }
@@ -192,7 +234,7 @@ mod tests {
         let err =
             credential(Some(AuthMethod::UserPassword), None, None).expect_err("both are wrong");
         assert!(
-            matches!(&err, SourceError::Protocol(m) if m.contains("username")),
+            matches!(&err, SourceError::Protocol { message: m, .. } if m.contains("username")),
             "the actionable half is the configuration, not the credential: {err:?}"
         );
     }
@@ -228,7 +270,82 @@ mod tests {
             let err = client(bad, &cfg, Auth::Bearer("tok".to_owned()))
                 .err()
                 .unwrap_or_else(|| panic!("{bad:?} must be refused"));
-            assert!(matches!(err, SourceError::Protocol(_)), "{bad:?}: {err:?}");
+            assert!(
+                matches!(err, SourceError::Protocol { .. }),
+                "{bad:?}: {err:?}"
+            );
+        }
+    }
+
+    /// TeamCity's error text, read where the body still exists (ADR-0004).
+    ///
+    /// Asserted through `knobas_http::status_error` -- the function that
+    /// actually consults the hook -- so the `HTTP <status>: ` prefix this crate
+    /// does not own is pinned where it comes from. The body is the shape
+    /// `knobas-mockd`'s `tc_error` serves, which is the shape a real TeamCity
+    /// serves.
+    #[test]
+    fn teamcitys_error_text_becomes_the_message() {
+        let error = knobas_http::status_error(
+            knobas_http::StatusCode::NOT_FOUND,
+            "Error has occurred during request processing (Not Found).\nError: \
+             jetbrains.buildServer.server.rest.errors.NotFoundException: No project found by \
+             name or internal/external id 'tidewatr'.\n",
+            Some(error_message),
+        );
+        assert!(
+            matches!(&error, SourceError::Protocol { message, .. }
+                     if message == "HTTP 404 Not Found: No project found by name or \
+                                    internal/external id 'tidewatr'."),
+            "the status line and the Java class name are noise the message already \
+             carries or nobody can use: {error:?}"
+        );
+
+        // The first line alone -- what `tc_error` serves for a fault with no
+        // detail -- says only what the status already said, so there is nothing
+        // to lift and the raw excerpt is kept.
+        assert_eq!(
+            error_message("Error has occurred during request processing (400).\n"),
+            None
+        );
+        // A detail line that is not `Error: <class>: <sentence>` is kept whole
+        // rather than split on its first colon.
+        assert_eq!(
+            error_message("Error has occurred during request processing (400).\nError: nope: 1\n"),
+            Some("Error: nope: 1".to_owned())
+        );
+        assert_eq!(
+            error_message("Error has occurred during request processing (400).\nlocator is bad\n"),
+            Some("locator is bad".to_owned())
+        );
+        // And nothing at all is read out of an empty body or a proxy's HTML.
+        assert_eq!(error_message(""), None);
+        assert_eq!(error_message("   \n \n"), None);
+        assert_eq!(
+            error_message("<html><body>502</body></html>"),
+            Some("<html><body>502</body></html>".to_owned())
+        );
+    }
+
+    /// Interfaces §4.1: 401 *and* 403 are `Unauthorized`, whatever the body
+    /// says -- and ADR-0004 makes them tell-apart-able by the status they
+    /// carry without collapsing that.
+    #[test]
+    fn a_refusal_keeps_its_class_whatever_the_body_says() {
+        for status in [
+            knobas_http::StatusCode::UNAUTHORIZED,
+            knobas_http::StatusCode::FORBIDDEN,
+        ] {
+            let error = knobas_http::status_error(
+                status,
+                "Error has occurred during request processing (401).\nAuthentication required\n",
+                Some(error_message),
+            );
+            assert!(
+                matches!(error, SourceError::Unauthorized { .. }),
+                "{status}: {error:?}"
+            );
+            assert_eq!(error.status(), Some(status.as_u16()), "{status}");
         }
     }
 

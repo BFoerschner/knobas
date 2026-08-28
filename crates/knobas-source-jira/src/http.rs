@@ -7,20 +7,24 @@
 //!
 //! # What lives here and what does not
 //!
-//! The transport is [`knobas_http`]'s, and that crate is **read-only for M1**
-//! (interfaces §8 P8): rustls with the platform's root store, the retry budget,
-//! `Retry-After`, the per-instance rate limiter, the `User-Agent`, and the one
-//! fault mapping every adapter must agree on (401 **and** 403 →
-//! [`SourceError::Unauthorized`]; connect/DNS/TLS/timeout →
-//! [`SourceError::Unreachable`]; everything else → [`SourceError::Protocol`]).
+//! The transport is [`knobas_http`]'s, and that crate changes only through the
+//! orchestrator (interfaces §8 P8, §10.8): rustls with the platform's root
+//! store, the retry budget, `Retry-After`, the per-instance rate limiter, the
+//! `User-Agent`, and the one fault mapping every adapter must agree on (401
+//! **and** 403 → [`SourceError::Unauthorized`]; connect/DNS/TLS/timeout →
+//! [`SourceError::Unreachable`]; everything else → [`SourceError::Protocol`]),
+//! each carrying the status it came from ([`SourceError::status`], ADR-0004).
 //! `knobas_http::HttpClient::send` is the only way onto the wire -- the
 //! [`knobas_http::Request`] its builder hands back deliberately has no `send`
 //! of its own.
 //!
 //! What is Jira's and therefore here: which [`knobas_http::Auth`] variant the
-//! configured [`AuthMethod`] means, and lifting Jira's `errorMessages`
-//! envelope out of an error body so the sources view shows a sentence rather
-//! than a JSON document.
+//! configured [`AuthMethod`] means, and reading Jira's `errorMessages`
+//! envelope out of a failing response body so the sources view shows a sentence
+//! rather than a JSON document. That reading is handed to `knobas-http` as a
+//! [`knobas_http::BodyMessage`] (ADR-0004) and runs where the body still
+//! exists; it used to be a rewrite of the finished message afterwards, which
+//! could only ever recover what the excerpt had already kept.
 //!
 //! Confining every mention of `knobas-http` to this one file is on purpose: a
 //! change requested from the orchestrator then costs one file to apply, not a
@@ -52,7 +56,7 @@ pub(crate) fn credential(
     // and reporting `Unauthorized` for it -- which is what checking the secret
     // first does -- sends the user to retype a token that was never the issue.
     let scheme = scheme(auth, username)?;
-    let secret = secret.ok_or(SourceError::Unauthorized)?;
+    let secret = secret.ok_or_else(SourceError::unauthorized)?;
     Ok(match scheme {
         Scheme::Bearer => Auth::Bearer(secret.to_owned()),
         Scheme::Basic(username) => Auth::Basic {
@@ -73,7 +77,7 @@ fn scheme(auth: Option<AuthMethod>, username: Option<&str>) -> Result<Scheme<'_>
         // `SourceInstance::auth` is optional because some sources need no
         // credential (P6). Jira DC is not one of them, and neither method the
         // descriptor declares can be guessed at from a bare secret.
-        return Err(SourceError::Protocol(
+        return Err(SourceError::protocol(
             "this Jira source has no authentication method configured; choose a personal access \
              token or user + password"
                 .to_owned(),
@@ -83,14 +87,14 @@ fn scheme(auth: Option<AuthMethod>, username: Option<&str>) -> Result<Scheme<'_>
         // Jira DC >= 8.14: personal access tokens are Bearer tokens.
         AuthMethod::Pat => Ok(Scheme::Bearer),
         AuthMethod::UserPassword => username.map(Scheme::Basic).ok_or_else(|| {
-            SourceError::Protocol(
+            SourceError::protocol(
                 "user + password authentication needs a username in the source configuration"
                     .to_owned(),
             )
         }),
         // Declared in neither `descriptor_template().auth_methods` nor
         // reachable from the Add-source form; refused rather than guessed at.
-        other => Err(SourceError::Protocol(format!(
+        other => Err(SourceError::protocol(format!(
             "{other:?} authentication is not supported for Jira Data Center; use a personal \
              access token or user + password"
         ))),
@@ -129,6 +133,7 @@ impl JiraHttp {
             burst: cfg.rate_burst,
             connect_timeout: std::time::Duration::from_secs(cfg.connect_timeout_secs),
             request_timeout: std::time::Duration::from_secs(cfg.request_timeout_secs),
+            body_message: Some(error_envelope),
         })?;
         Ok(Self { client })
     }
@@ -146,53 +151,42 @@ impl JiraHttp {
     /// # Errors
     ///
     /// The [`SourceError`] the failure maps to, with Jira's own words in the
-    /// message where it sent any (see [`humanize`]).
+    /// message where it sent any (see [`error_envelope`]).
     pub(crate) async fn get_json<T: serde::de::DeserializeOwned>(
         &self,
         path: &str,
         query: &[(&str, String)],
     ) -> Result<T, SourceError> {
         let request = self.client.request(Method::GET, path).query(query);
-        let response = self.client.send(request).await.map_err(humanize)?;
+        let response = self.client.send(request).await?;
         response.json::<T>().await.map_err(|error| {
-            SourceError::Protocol(format!(
+            SourceError::protocol(format!(
                 "{path} did not answer with the shape the Jira REST v2 contract documents: {error}"
             ))
         })
     }
 }
 
-/// Replace an embedded Jira error envelope with the sentence inside it.
+/// The sentence inside Jira's error envelope, for `knobas-http` to build the
+/// message out of ([`knobas_http::BodyMessage`], ADR-0004).
 ///
-/// `knobas-http` builds a protocol message as `HTTP <status>: <body excerpt>`,
-/// and for Jira that body is `{"errorMessages":[…],"errors":{…}}` -- correct,
-/// bounded, and unreadable on screen. The commonest sync failure by far is a
-/// mistyped `jql_filter`, whose 400 carries the exact sentence the user needs;
-/// showing them raw JSON instead is the difference between a fixable error and
-/// a support question.
+/// A failing Jira answers `{"errorMessages":[…],"errors":{…}}`, which is
+/// correct, bounded and unreadable on screen. The commonest sync failure by far
+/// is a mistyped `jql_filter`, whose 400 carries the exact sentence the user
+/// needs; showing them raw JSON instead is the difference between a fixable
+/// error and a support question.
 ///
-/// Deliberately a rewrite of the *message* and not of the response: the body is
-/// consumed inside `HttpClient::send`, which is the only door onto the wire.
-/// Cleaner would be a body → message hook in `knobas-http`; that crate is
-/// read-only for M1, so this is the local half and the hook is worth
-/// requesting later. It degrades to the identity for anything it cannot parse,
-/// including an envelope the excerpt truncated, and it never changes the
-/// variant -- so the worst case is the message `knobas-http` already produced.
-fn humanize(error: SourceError) -> SourceError {
-    match error {
-        SourceError::Protocol(message) => SourceError::Protocol(jira_message(&message)),
-        // `Unauthorized` carries nothing, and `Unreachable`/`Sink` never carry
-        // a response body. Rewriting either would only risk reclassifying the
-        // one fault the user is asked to act on.
-        other => other,
-    }
-}
-
-/// The message with any embedded Jira error envelope replaced by its contents.
+/// `None` for anything that is not the envelope -- an SSO proxy's HTML login
+/// page, a gateway's plain text -- which keeps the raw excerpt `knobas-http`
+/// would have built. So the worst case is the message it already produced.
 ///
-/// Everything before the envelope (`HTTP 400: `) is kept, so the status stays
-/// on screen; anything that is not the envelope is returned unchanged.
-fn jira_message(message: &str) -> String {
+/// This used to run *after* the fact, on the finished `HTTP <status>: <body
+/// excerpt>` message, because `knobas-http` was read-only for M1 and the body
+/// was consumed inside its `send`. It could therefore only recover what the
+/// excerpt had already kept -- an envelope the 400-character cut had truncated
+/// was no longer JSON, and fell through unread. Running here, on the whole
+/// body, it does not have that hole.
+fn error_envelope(body: &str) -> Option<String> {
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Envelope {
@@ -202,12 +196,7 @@ fn jira_message(message: &str) -> String {
         errors: serde_json::Map<String, serde_json::Value>,
     }
 
-    let Some(start) = message.find('{') else {
-        return message.to_owned();
-    };
-    let Ok(envelope) = serde_json::from_str::<Envelope>(&message[start..]) else {
-        return message.to_owned();
-    };
+    let envelope = serde_json::from_str::<Envelope>(body.trim()).ok()?;
     let mut parts = envelope.error_messages;
     parts.extend(envelope.errors.iter().map(|(field, detail)| {
         let detail = detail
@@ -215,12 +204,9 @@ fn jira_message(message: &str) -> String {
             .map_or_else(|| detail.to_string(), str::to_owned);
         format!("{field}: {detail}")
     }));
-    if parts.is_empty() {
-        // A well-formed envelope that says nothing is less useful than the raw
-        // body it came in: keep what we were given.
-        return message.to_owned();
-    }
-    format!("{}{}", &message[..start], parts.join("; "))
+    // A well-formed envelope that says nothing is less useful than the raw body
+    // it came in: keep what we were given.
+    (!parts.is_empty()).then(|| parts.join("; "))
 }
 
 #[cfg(test)]
@@ -265,7 +251,7 @@ mod tests {
     fn basic_auth_without_a_username_is_a_configuration_error() {
         let e = credential(Some(AuthMethod::UserPassword), None, Some(SECRET)).unwrap_err();
         assert!(
-            matches!(&e, SourceError::Protocol(m) if m.contains("username")),
+            matches!(&e, SourceError::Protocol { message: m, .. } if m.contains("username")),
             "{e:?}"
         );
     }
@@ -277,7 +263,7 @@ mod tests {
     fn a_missing_secret_is_unauthorized() {
         assert!(matches!(
             credential(Some(AuthMethod::Pat), None, None),
-            Err(SourceError::Unauthorized)
+            Err(SourceError::Unauthorized { .. })
         ));
     }
 
@@ -289,7 +275,7 @@ mod tests {
     fn a_jira_with_no_auth_method_is_refused_rather_than_tried_anonymously() {
         let e = credential(None, None, Some(SECRET)).unwrap_err();
         assert!(
-            matches!(&e, SourceError::Protocol(m)
+            matches!(&e, SourceError::Protocol { message: m, .. }
                      if m.contains("personal access token") && m.contains("password")),
             "{e:?}"
         );
@@ -310,7 +296,7 @@ mod tests {
         ] {
             let e = credential(auth, username, None).unwrap_err();
             assert!(
-                matches!(&e, SourceError::Protocol(_)),
+                matches!(&e, SourceError::Protocol { .. }),
                 "{auth:?}/{username:?} with no secret should name the configuration: {e:?}"
             );
         }
@@ -318,7 +304,7 @@ mod tests {
         // `missing_secret`, and still reads as unauthorized.
         assert!(matches!(
             credential(Some(AuthMethod::UserPassword), Some("mara"), None),
-            Err(SourceError::Unauthorized)
+            Err(SourceError::Unauthorized { .. })
         ));
     }
 
@@ -326,7 +312,7 @@ mod tests {
     fn unsupported_auth_methods_are_refused_by_name() {
         for method in [AuthMethod::OAuth, AuthMethod::ApiToken] {
             let e = credential(Some(method), Some("mara"), Some(SECRET)).unwrap_err();
-            assert!(matches!(e, SourceError::Protocol(_)), "{method:?}");
+            assert!(matches!(e, SourceError::Protocol { .. }), "{method:?}");
         }
     }
 
@@ -349,67 +335,79 @@ mod tests {
         assert!(shown.contains("jira.tidewater.example"), "{shown}");
     }
 
-    /// Jira's error envelope, exactly as the WADL documents it, lifted out of
-    /// the `HTTP <status>: <body>` message `knobas-http` builds.
+    /// Jira's error envelope, exactly as the WADL documents it, read out of the
+    /// failing body and handed back as the sentence the message is built from.
+    ///
+    /// Asserted through `knobas_http::status_error` -- the function that
+    /// actually consults the hook -- rather than on the hook alone, so the
+    /// `HTTP <status>: ` prefix this crate does *not* own is pinned where it
+    /// comes from.
     #[test]
     fn the_jira_error_envelope_becomes_the_message() {
-        let got = humanize(SourceError::Protocol(
-            r#"HTTP 400 Bad Request: {"errorMessages":["Error in the JQL Query: 'nope' is an unknown field"],"errors":{}}"#
-                .to_owned(),
-        ));
-        let SourceError::Protocol(message) = got else {
-            panic!("a 400 stays a protocol error");
-        };
-        assert_eq!(
-            message,
-            "HTTP 400 Bad Request: Error in the JQL Query: 'nope' is an unknown field"
+        let error = knobas_http::status_error(
+            knobas_http::StatusCode::BAD_REQUEST,
+            r#"{"errorMessages":["Error in the JQL Query: 'nope' is an unknown field"],"errors":{}}"#,
+            Some(error_envelope),
         );
-
-        let got = humanize(SourceError::Protocol(
-            r#"HTTP 400: {"errorMessages":[],"errors":{"jql":"Unable to parse the query"}}"#
-                .to_owned(),
-        ));
-        let SourceError::Protocol(message) = got else {
-            panic!("a 400 stays a protocol error");
-        };
-        assert_eq!(message, "HTTP 400: jql: Unable to parse the query");
-    }
-
-    /// A DC instance behind an SSO proxy answers with an HTML login page, and
-    /// a 4 MB one at that. `knobas-http` already excerpts it; lifting the Jira
-    /// envelope must not put any of it back.
-    #[test]
-    fn a_body_that_is_not_jiras_envelope_is_left_exactly_as_it_arrived() {
-        let excerpt = format!("HTTP 401: <html>{}…", "x".repeat(400));
-        let got = humanize(SourceError::Protocol(excerpt.clone()));
-        let SourceError::Protocol(message) = got else {
-            panic!("still a protocol error");
-        };
-        assert_eq!(message, excerpt);
-
-        // An envelope that the excerpt cut in half is not valid JSON, so it
-        // falls through untouched rather than being half-parsed.
-        let cut = r#"HTTP 400: {"errorMessages":["Error in the JQL Que…"#;
-        let got = humanize(SourceError::Protocol(cut.to_owned()));
         assert!(
-            matches!(&got, SourceError::Protocol(m) if m == cut),
-            "{got:?}"
+            matches!(&error, SourceError::Protocol { message, .. }
+                     if message == "HTTP 400 Bad Request: Error in the JQL Query: 'nope' is an \
+                                    unknown field"),
+            "{error:?}"
+        );
+
+        // The `errors` map is the other half of the envelope, and the one a
+        // bad JQL usually arrives in.
+        assert_eq!(
+            error_envelope(r#"{"errorMessages":[],"errors":{"jql":"Unable to parse the query"}}"#),
+            Some("jql: Unable to parse the query".to_owned())
+        );
+        // Both halves, in the order Jira documents them.
+        assert_eq!(
+            error_envelope(r#"{"errorMessages":["first"],"errors":{"jql":"second"}}"#),
+            Some("first; jql: second".to_owned())
         );
     }
 
-    /// Interfaces §4.1: 401 *and* 403 are `Unauthorized`, and that survives
-    /// this crate's message rewriting -- `Unauthorized` is the one fault the
-    /// user is asked to act on, and it carries no body to prettify.
+    /// A DC instance behind an SSO proxy answers with an HTML login page, and a
+    /// 4 MB one at that. Reading nothing out of it is what keeps
+    /// `knobas-http`'s bounded excerpt of the real body on screen.
     #[test]
-    fn humanizing_never_reclassifies_a_fault() {
-        assert!(matches!(
-            humanize(SourceError::Unauthorized),
-            SourceError::Unauthorized
-        ));
-        assert!(matches!(
-            humanize(SourceError::Unreachable("refused".to_owned())),
-            SourceError::Unreachable(m) if m == "refused"
-        ));
+    fn a_body_that_is_not_jiras_envelope_is_read_as_nothing() {
+        assert_eq!(
+            error_envelope(&format!("<html>{}</html>", "x".repeat(4000))),
+            None
+        );
+        assert_eq!(error_envelope(""), None);
+        assert_eq!(error_envelope("Service Unavailable"), None);
+        // A well-formed envelope that says nothing: the raw body it came in is
+        // more use than an empty sentence.
+        assert_eq!(error_envelope(r#"{"errorMessages":[],"errors":{}}"#), None);
+        // And a body that is JSON but not Jira's envelope reads as nothing
+        // rather than as an empty message.
+        assert_eq!(error_envelope(r#"{"detail":"nope"}"#), None);
+    }
+
+    /// Interfaces §4.1: 401 *and* 403 are `Unauthorized`, and no reading of a
+    /// body may change that -- it is the one fault the user is asked to act on.
+    /// ADR-0004 makes them tell-apart-able by status without collapsing that.
+    #[test]
+    fn a_refusal_keeps_its_class_whatever_the_body_says() {
+        for status in [
+            knobas_http::StatusCode::UNAUTHORIZED,
+            knobas_http::StatusCode::FORBIDDEN,
+        ] {
+            let error = knobas_http::status_error(
+                status,
+                r#"{"errorMessages":["You do not have permission"],"errors":{}}"#,
+                Some(error_envelope),
+            );
+            assert!(
+                matches!(error, SourceError::Unauthorized { .. }),
+                "{status}: {error:?}"
+            );
+            assert_eq!(error.status(), Some(status.as_u16()), "{status}");
+        }
     }
 
     /// Interfaces §4.1: connect failures are `Unreachable`, which is what makes
@@ -445,7 +443,7 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            matches!(&e, SourceError::Protocol(m) if m.contains("jira.example.com")),
+            matches!(&e, SourceError::Protocol { message: m, .. } if m.contains("jira.example.com")),
             "{e:?}"
         );
     }

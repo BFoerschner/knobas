@@ -381,8 +381,8 @@ fn auth_state_of(error: &knobas_source::SourceError) -> knobas_sync::config::Aut
     use knobas_source::SourceError as Se;
     use knobas_sync::config::AuthState;
     match error {
-        Se::Unauthorized => AuthState::Unauthorized,
-        Se::Unreachable(_) | Se::Protocol(_) | Se::Sink(_) => AuthState::Unreachable,
+        Se::Unauthorized { .. } => AuthState::Unauthorized,
+        Se::Unreachable(_) | Se::Protocol { .. } | Se::Sink(_) => AuthState::Unreachable,
     }
 }
 
@@ -584,13 +584,13 @@ mod tests {
     fn a_failed_test_only_blames_the_credential_when_the_source_did() {
         use knobas_source::SourceError as Se;
         use knobas_sync::config::AuthState;
-        assert_eq!(auth_state_of(&Se::Unauthorized), AuthState::Unauthorized);
+        assert_eq!(auth_state_of(&Se::unauthorized()), AuthState::Unauthorized);
         assert_eq!(
             auth_state_of(&Se::Unreachable("dns".to_owned())),
             AuthState::Unreachable
         );
         assert_eq!(
-            auth_state_of(&Se::Protocol("bad json".to_owned())),
+            auth_state_of(&Se::protocol("bad json")),
             AuthState::Unreachable
         );
         assert_eq!(

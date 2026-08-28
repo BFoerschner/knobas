@@ -165,7 +165,7 @@ impl SyncRun<'_> {
                 // Not a `break`: see the note on MAX_PAGES. Leaving the loop
                 // here and returning `Ok` would hand the engine a partial walk
                 // wearing a completed one's clothes.
-                return Err(SourceError::Protocol(format!(
+                return Err(SourceError::protocol(format!(
                     "the Jira search did not reach its own reported total of {total} issues \
                      within {MAX_PAGES} pages of {}; refusing to report a partial walk as a \
                      completed sync. Narrow this source with `projects` or `jql_filter`.",
@@ -388,7 +388,7 @@ mod tests {
             _fields: &str,
         ) -> Result<SearchPage, SourceError> {
             if self.unauthorized {
-                return Err(SourceError::Unauthorized);
+                return Err(SourceError::unauthorized());
             }
             self.calls
                 .lock()
@@ -932,7 +932,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            matches!(&got, SourceError::Protocol(m) if m.contains("partial walk")),
+            matches!(&got, SourceError::Protocol { message: m, .. } if m.contains("partial walk")),
             "{got:?}"
         );
         // The cap fired where it is meant to, rather than the run ending for
@@ -976,7 +976,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            matches!(&got, SourceError::Protocol(m) if m.contains("partial walk")),
+            matches!(&got, SourceError::Protocol { message: m, .. } if m.contains("partial walk")),
             "{got:?}"
         );
     }
@@ -1219,6 +1219,6 @@ mod tests {
         let got = run(&api, &cfg(serde_json::json!({})), None, &mut sink)
             .await
             .unwrap_err();
-        assert!(matches!(got, SourceError::Unauthorized), "{got:?}");
+        assert!(matches!(got, SourceError::Unauthorized { .. }), "{got:?}");
     }
 }

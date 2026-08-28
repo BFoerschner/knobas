@@ -93,7 +93,7 @@ impl knobas_sync::scheduler::AdapterRegistry for Registry {
             .iter()
             .find(|a| a.kind == instance.kind)
             .ok_or_else(|| {
-                SourceError::Protocol(format!(
+                SourceError::protocol(format!(
                     "no adapter of kind {:?} is compiled in",
                     instance.kind
                 ))

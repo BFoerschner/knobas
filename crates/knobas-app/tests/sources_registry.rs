@@ -199,7 +199,7 @@ fn an_unknown_kind_is_refused_by_name() {
     // `Box<dyn Source>` is not `Debug`, so the success arm is matched rather
     // than unwrapped.
     match Registry::builtin().build(instance("whatever", "nope")) {
-        Err(knobas_source::SourceError::Protocol(message)) => {
+        Err(knobas_source::SourceError::Protocol { message, .. }) => {
             assert!(message.contains("nope"), "{message}");
         }
         Err(other) => panic!("expected a Protocol error naming the kind, got {other:?}"),

@@ -81,7 +81,7 @@ impl HttpRest {
     ) -> Result<Vec<Rec<T>>, SourceError> {
         let body = self.get_raw(path, query).await?;
         let envelope: ListEnvelope = serde_json::from_value(body).map_err(|e| {
-            SourceError::Protocol(format!(
+            SourceError::protocol(format!(
                 "{path} did not answer with the collection envelope the TeamCity REST contract \
                  documents: {e}"
             ))
@@ -92,7 +92,7 @@ impl HttpRest {
             .map(|raw| {
                 serde_json::from_value(raw.clone())
                     .map(|rec| Rec { raw, rec })
-                    .map_err(|e| SourceError::Protocol(format!("teamcity: {path}: {e}")))
+                    .map_err(|e| SourceError::protocol(format!("teamcity: {path}: {e}")))
             })
             .collect()
     }
@@ -104,7 +104,7 @@ impl HttpRest {
     ) -> Result<T, SourceError> {
         let body = self.get_raw(path, query).await?;
         serde_json::from_value(body)
-            .map_err(|e| SourceError::Protocol(format!("teamcity: {path}: {e}")))
+            .map_err(|e| SourceError::protocol(format!("teamcity: {path}: {e}")))
     }
 }
 

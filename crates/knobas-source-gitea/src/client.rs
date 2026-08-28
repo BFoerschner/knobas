@@ -6,12 +6,16 @@
 //!
 //! # What lives here and what does not
 //!
-//! The transport is [`knobas_http`]'s, and that crate is **read-only for M1**
-//! (interfaces §8 P8): rustls with the platform's root store, the retry budget,
-//! `Retry-After`, the per-instance rate limiter, the `User-Agent`, and the one
-//! fault mapping every adapter must agree on (401 **and** 403 →
-//! [`SourceError::Unauthorized`]; connect/DNS/TLS/timeout →
-//! [`SourceError::Unreachable`]; everything else → [`SourceError::Protocol`]).
+//! The transport is [`knobas_http`]'s, and that crate changes only through the
+//! orchestrator (interfaces §8 P8, §10.8): rustls with the platform's root
+//! store, the retry budget, `Retry-After`, the per-instance rate limiter, the
+//! `User-Agent`, and the one fault mapping every adapter must agree on (401
+//! **and** 403 → [`SourceError::Unauthorized`]; connect/DNS/TLS/timeout →
+//! [`SourceError::Unreachable`]; everything else → [`SourceError::Protocol`]),
+//! each carrying the status it came from ([`SourceError::status`], ADR-0004) --
+//! which is what lets this crate tell a dead credential from a repository it
+//! may not read. This adapter's own reading of a failing body is
+//! [`error_message`], handed over as a [`knobas_http::BodyMessage`].
 //! [`knobas_http::HttpClient::send`] is the only way onto the wire -- the
 //! [`knobas_http::Request`] the builder hands back deliberately has no `send`
 //! of its own.
@@ -64,55 +68,38 @@ pub(crate) fn credential(
     match auth {
         Some(AuthMethod::Pat) => {}
         Some(other) => {
-            return Err(SourceError::Protocol(format!(
+            return Err(SourceError::protocol(format!(
                 "gitea: {other:?} authentication is not supported; this adapter authenticates \
                  with a personal access token"
             )));
         }
         None => {
-            return Err(SourceError::Protocol(
+            return Err(SourceError::protocol(
                 "gitea: this source has no authentication method configured; choose a personal \
                  access token"
                     .to_owned(),
             ));
         }
     }
-    let secret = secret.ok_or(SourceError::Unauthorized)?;
+    let secret = secret.ok_or_else(SourceError::unauthorized)?;
     // Gitea: "API tokens must be prepended with `token` followed by a space"
     // (interfaces §4.2). The header spelling itself is `knobas-http`'s and is
     // pinned there; what this crate owns is picking the variant.
     Ok(Auth::GiteaToken(secret.to_owned()))
 }
 
-/// The HTTP status behind a failure, when the failure carries one.
+/// The sentence inside Gitea's error envelope, for `knobas-http` to build the
+/// message out of ([`knobas_http::BodyMessage`], ADR-0004).
 ///
-/// `knobas-http` builds a protocol message as `HTTP <status>: <body excerpt>`
-/// and hands back no structured status, so this reads it back out of the
-/// message it produced. Two decisions in this crate need it and cannot be
-/// taken without it: a 409 from `/commits` means "this repository has no
-/// commits yet", and a 404 on one repository means "skip it", neither of which
-/// is the same as the generic protocol failure they arrive as.
-///
-/// A structured status on `SourceError` would be better and is worth
-/// requesting; `knobas-http` is read-only for M1 (P8), so this is the local
-/// half. It is pinned by a test that builds its input with
-/// [`knobas_http::status_error`] rather than with a hand-written string, so
-/// the day that format changes this crate fails its own suite instead of
-/// silently reclassifying every 409 and 404.
-///
-/// 401 and 403 deliberately have no status here: `knobas-http` maps both to
-/// [`SourceError::Unauthorized`], which carries nothing. That is what
-/// [`is_repo_scoped`] exists to handle.
-pub(crate) fn status_of(error: &SourceError) -> Option<u16> {
-    let SourceError::Protocol(message) = error else {
-        return None;
-    };
-    message
-        .strip_prefix("HTTP ")?
-        .split([' ', ':'])
-        .next()?
-        .parse()
-        .ok()
+/// A failing Gitea answers `{"message": "…", "url": "…"}`, the `url` being a
+/// link to its own API documentation and of no use to anyone reading a sync
+/// failure. `None` for anything else, which keeps the raw excerpt `knobas-http`
+/// would have built -- a body this could not read is still the most informative
+/// thing knobas has.
+fn error_message(body: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(body.trim()).ok()?;
+    let message = value.get("message")?.as_str()?.trim();
+    (!message.is_empty()).then(|| message.to_owned())
 }
 
 /// Whether a failure is about **one repository** rather than about the source.
@@ -122,23 +109,21 @@ pub(crate) fn status_of(error: &SourceError) -> Option<u16> {
 /// run's identity preflight (`GET /user`) has already proved the credential
 /// itself works, which is what makes that reading available at all.
 ///
-/// 403 arrives as a bare [`SourceError::Unauthorized`] because `knobas-http`
-/// maps 401 and 403 alike, so both are read here as repository-scoped.
+/// **A 401 is not repository-scoped, and never was**: a credential the server
+/// rejected is a fact about the run, not about the object it was asked for.
+/// Until ADR-0004 this could not be said here -- `knobas-http` mapped 401 and
+/// 403 onto one indistinguishable [`SourceError::Unauthorized`], so both had to
+/// be read as repository-scoped and `sync::credential_still_good` re-ran the
+/// identity probe to recover the difference by measuring. The status is carried
+/// now, so task 5's original classification -- 403/404 skip, 401 fatal -- is
+/// simply what this reads.
 ///
-/// **This predicate alone cannot tell a refused repository from a dead
-/// credential, and it does not try to.** `sync::credential_still_good` is what
-/// separates them, by re-running the identity probe before any refusal is
-/// allowed to become a skip; a `true` from here means "not a sink or transport
-/// failure", not "the token is fine". The `walked == 0` guard in `sync::run` is
-/// a different rule again -- it catches a live token whose *scope* covers
-/// nothing -- and covers neither case on its own.
+/// A failure carrying no status at all is not repository-scoped either, and
+/// that is the same rule rather than a second one: a sink failure, a DNS blip,
+/// a keychain entry that is gone and a body that would not decode are all about
+/// the run.
 pub(crate) fn is_repo_scoped(error: &SourceError) -> bool {
-    match error {
-        SourceError::Unauthorized => true,
-        // Never a sink failure and never a connectivity failure: those are
-        // about the run, not about one repository.
-        other => status_of(other) == Some(404),
-    }
+    matches!(error.status(), Some(403 | 404))
 }
 
 /// One configured Gitea instance's API access.
@@ -169,6 +154,7 @@ impl GiteaClient {
             burst: config.rate_burst(),
             connect_timeout: CONNECT_TIMEOUT,
             request_timeout: REQUEST_TIMEOUT,
+            body_message: Some(error_message),
         })?;
         Ok(Self { http })
     }
@@ -208,7 +194,7 @@ impl GiteaClient {
             )
             .await?;
         body.data.ok_or_else(|| {
-            SourceError::Protocol("gitea: /repos/search returned no data array".to_owned())
+            SourceError::protocol("gitea: /repos/search returned no data array".to_owned())
         })
     }
 
@@ -300,7 +286,7 @@ impl GiteaClient {
         match self.get_json(&path, &query).await {
             // 409 is Gitea's "this repository has no commits yet". A freshly
             // created repository is not a failure.
-            Err(error) if status_of(&error) == Some(409) => Ok(Vec::new()),
+            Err(error) if error.status() == Some(409) => Ok(Vec::new()),
             other => other,
         }
     }
@@ -318,7 +304,7 @@ impl GiteaClient {
         let request = self.http.request(Method::GET, &path).query(query);
         let response = self.http.send(request).await?;
         response.json::<T>().await.map_err(|error| {
-            SourceError::Protocol(format!(
+            SourceError::protocol(format!(
                 "gitea: {path} answered an unreadable body: {error}"
             ))
         })
@@ -343,7 +329,7 @@ fn segment(value: &str) -> Result<&str, SourceError> {
         && value != "."
         && value != "..";
     ok.then_some(value).ok_or_else(|| {
-        SourceError::Protocol(format!(
+        SourceError::protocol(format!(
             "gitea: {value:?} is not a usable owner or repository name"
         ))
     })
@@ -374,7 +360,7 @@ mod tests {
     fn a_missing_secret_is_unauthorized() {
         assert!(matches!(
             credential(Some(AuthMethod::Pat), None),
-            Err(SourceError::Unauthorized)
+            Err(SourceError::Unauthorized { .. })
         ));
     }
 
@@ -392,7 +378,7 @@ mod tests {
             for secret in [None, Some(SECRET)] {
                 let error = credential(method, secret).unwrap_err();
                 assert!(
-                    matches!(error, SourceError::Protocol(ref m) if m.contains("token")),
+                    matches!(error, SourceError::Protocol { message: ref m, .. } if m.contains("token")),
                     "{method:?}/{}: {error:?}",
                     secret.is_some()
                 );
@@ -428,67 +414,75 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            matches!(error, SourceError::Protocol(ref m) if m.contains("gitea.example.com")),
+            matches!(error, SourceError::Protocol { message: ref m, .. } if m.contains("gitea.example.com")),
             "{error:?}"
         );
     }
 
-    /// The coupling that makes 409-is-empty and 404-is-a-skip work.
+    /// Gitea's error envelope, read where the body still exists so the message
+    /// carries the sentence and not the JSON document around it.
     ///
-    /// The input is built with `knobas_http::status_error` -- the function that
-    /// actually produces these errors -- rather than with a hand-written
-    /// string, so this fails the day that message format changes instead of
-    /// this crate silently treating every 409 as a hard failure and every
-    /// missing repository as a fatal one.
+    /// Asserted through `knobas_http::status_error` -- the function that
+    /// actually consults the hook -- so the `HTTP <status>: ` prefix this crate
+    /// does not own is pinned where it comes from.
     #[test]
-    fn the_status_behind_a_protocol_failure_is_recoverable() {
-        for status in [
+    fn giteas_error_envelope_becomes_the_message() {
+        let error = knobas_http::status_error(
             StatusCode::NOT_FOUND,
-            StatusCode::CONFLICT,
-            StatusCode::BAD_REQUEST,
-            StatusCode::INTERNAL_SERVER_ERROR,
+            r#"{"message":"user redirect does not exist [name: tidewatr]","url":"https://gitea.example/api/swagger"}"#,
+            Some(error_message),
+        );
+        assert!(
+            matches!(&error, SourceError::Protocol { message, .. }
+                     if message == "HTTP 404 Not Found: user redirect does not exist \
+                                    [name: tidewatr]"),
+            "the url to Gitea's own swagger page helps nobody reading a sync failure: {error:?}"
+        );
+
+        // Anything that is not the envelope reads as nothing, which keeps the
+        // raw excerpt knobas-http would have built.
+        for body in [
+            "",
+            "<html>502 Bad Gateway</html>",
+            r#"{"url":"https://gitea.example/api/swagger"}"#,
+            r#"{"message":"   "}"#,
+            r#"{"message":42}"#,
         ] {
-            let error = knobas_http::status_error(status, "{\"message\":\"nope\"}");
-            assert_eq!(
-                status_of(&error),
-                Some(status.as_u16()),
-                "{status} -> {error:?}"
-            );
-        }
-        // 401 and 403 are `Unauthorized`, which carries no status at all.
-        for status in [StatusCode::UNAUTHORIZED, StatusCode::FORBIDDEN] {
-            assert_eq!(
-                status_of(&knobas_http::status_error(status, "")),
-                None,
-                "{status}"
-            );
-        }
-        // Nothing else carries a status either, and none of them may be read
-        // as one: a sink failure that parsed as a 404 would be swallowed as a
-        // skipped repository.
-        for other in [
-            SourceError::Unreachable("connection refused".to_owned()),
-            SourceError::Sink("pool closed".to_owned()),
-            SourceError::Protocol("gitea: /user answered an unreadable body".to_owned()),
-        ] {
-            assert_eq!(status_of(&other), None, "{other:?}");
+            assert_eq!(error_message(body), None, "{body:?}");
         }
     }
 
     /// Ruling B4: 403 and 404 are about one repository; everything else is
-    /// about the run and must abort it.
+    /// about the run and must abort it -- **401 included**.
+    ///
+    /// The 401 is the line ADR-0004 moved. It used to arrive here as the same
+    /// bare `Unauthorized` a 403 did, so it had to be read as repository-scoped
+    /// and `sync::credential_still_good` re-measured to recover the difference.
+    /// The status is carried now, and a credential the server rejected ends the
+    /// run without a second request.
     #[test]
     fn only_a_refusal_or_an_absence_is_scoped_to_one_repository() {
-        assert!(is_repo_scoped(&SourceError::Unauthorized));
-        assert!(is_repo_scoped(&knobas_http::status_error(
-            StatusCode::NOT_FOUND,
-            ""
+        for status in [StatusCode::FORBIDDEN, StatusCode::NOT_FOUND] {
+            assert!(
+                is_repo_scoped(&knobas_http::status_error(status, "", None)),
+                "{status}"
+            );
+        }
+        // A dead credential is the run's verdict, not one repository's.
+        assert!(!is_repo_scoped(&knobas_http::status_error(
+            StatusCode::UNAUTHORIZED,
+            "",
+            None
         )));
+        // And so is a source with no secret in the keychain at all, which
+        // carries no status to be mistaken for a refusal of one repository.
+        assert!(!is_repo_scoped(&SourceError::unauthorized()));
         for other in [
-            knobas_http::status_error(StatusCode::CONFLICT, ""),
-            knobas_http::status_error(StatusCode::INTERNAL_SERVER_ERROR, ""),
+            knobas_http::status_error(StatusCode::CONFLICT, "", None),
+            knobas_http::status_error(StatusCode::INTERNAL_SERVER_ERROR, "", None),
             SourceError::Unreachable("connection refused".to_owned()),
             SourceError::Sink("pool closed".to_owned()),
+            SourceError::protocol("gitea: /user answered an unreadable body"),
         ] {
             assert!(!is_repo_scoped(&other), "{other:?}");
         }
@@ -669,7 +663,7 @@ mod wire_tests {
             .await;
         let error = client_for(&server).await.search_repos(1).await.unwrap_err();
         assert!(
-            matches!(error, SourceError::Protocol(ref m) if m.contains("data array")),
+            matches!(error, SourceError::Protocol { message: ref m, .. } if m.contains("data array")),
             "{error:?}"
         );
     }
@@ -733,6 +727,6 @@ mod wire_tests {
             .commits("tidewater", "broken", "main", None, 1)
             .await
             .unwrap_err();
-        assert!(matches!(error, SourceError::Protocol(_)), "{error:?}");
+        assert!(matches!(error, SourceError::Protocol { .. }), "{error:?}");
     }
 }

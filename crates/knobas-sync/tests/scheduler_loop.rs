@@ -85,7 +85,7 @@ impl Source for Slow {
         Ok(r#"{"v":1,"n":1}"#.into())
     }
     async fn write(&self, _op: knobas_source::WriteOp) -> Result<(), SourceError> {
-        Err(SourceError::Protocol("read-only".into()))
+        Err(SourceError::protocol("read-only"))
     }
 }
 

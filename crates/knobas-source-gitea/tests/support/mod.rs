@@ -29,9 +29,6 @@ pub const TOKEN: &str = "tidewater-pat";
 
 /// Wiremock matches lower numbers first; the defaults sit at 5.
 const FORBIDDEN_PRIORITY: u8 = 3;
-/// Between the good `/user` (default 5) and the catch-alls, so it takes over
-/// exactly when the good one's allowance is spent.
-const BROKEN_IDENTITY_PRIORITY: u8 = 6;
 const EMPTY_PAGE_PRIORITY: u8 = 8;
 const BAD_TOKEN_PRIORITY: u8 = 9;
 
@@ -40,18 +37,6 @@ const BAD_TOKEN_PRIORITY: u8 = 9;
 enum Reads {
     TokenOnly,
     Anonymous,
-}
-
-/// What `/user` does over the life of a run: the three outcomes the credential
-/// probe has to tell apart.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Identity {
-    /// Always answers -- every fixture but the two below.
-    Always,
-    /// One answer, then a revoked token.
-    OnceThen401,
-    /// One answer, then a 500: the credential is *unknown*, not dead.
-    OnceThen500,
 }
 
 /// What the fake serves. Mutate it and call [`Fake::remount`] to make the
@@ -68,14 +53,22 @@ pub struct State {
     pub comments: BTreeMap<String, Vec<Value>>,
     /// `owner/repo#index` -> the HTTP status that discussion is refused with.
     /// A 404 is what Gitea answers for a repository with its issue unit
-    /// disabled; a 403 is a token without issue scope, and arrives at the
-    /// adapter indistinguishable from the 401 of a revoked one.
+    /// disabled and a 403 is a token without issue scope -- both cost the
+    /// discussion and nothing more. A 401 is a revoked credential and ends the
+    /// run. The three used to arrive at the adapter as one value; ADR-0004
+    /// carries the status, which is what lets this fixture mean three things.
     pub discussion_status: BTreeMap<String, u16>,
     /// `owner/repo@branch` -> commit records, newest first.
     pub commits: BTreeMap<String, Vec<Value>>,
     /// `owner/repo` entries every request under is answered 403 for -- a
     /// repository the listing offers and the token may not read (ruling B4).
     pub forbidden: BTreeSet<String>,
+    /// `owner/repo` entries every request under is answered **401** for -- what
+    /// a token revoked mid-run gets, as opposed to `forbidden`'s 403. The two
+    /// used to be one thing here because they were one thing in the adapter;
+    /// ADR-0004 carries the status, so the fixture has to be able to say which
+    /// it is serving.
+    pub revoked: BTreeSet<String>,
 }
 
 pub fn repo(owner: &str, name: &str, updated: &str) -> Value {
@@ -208,6 +201,7 @@ impl State {
                 ),
             ]),
             forbidden: BTreeSet::new(),
+            revoked: BTreeSet::new(),
             discussion_status: BTreeMap::new(),
         }
     }
@@ -293,34 +287,6 @@ impl Fake {
         self.mount(state, 1_000).await;
     }
 
-    /// The same instance, but the token stops working **after the first
-    /// `/user`** -- a credential revoked mid-run.
-    ///
-    /// `/user` answers once (the run's identity preflight, which must succeed
-    /// or the run never gets far enough to be interesting) and then falls
-    /// through to the fake's 401. Everything else is mounted as usual, so which
-    /// repositories still answer is `State::forbidden`'s business: a
-    /// repository listed as forbidden stands in for the repositories a
-    /// revoked token can no longer read, and the adapter cannot tell that 403
-    /// from the 401 it would really get -- which is the whole point.
-    pub async fn remount_revoked_after_preflight(&self, state: &State) {
-        self.server.reset().await;
-        self.mount_with_identity(state, 1_000, Reads::TokenOnly, Identity::OnceThen401)
-            .await;
-    }
-
-    /// `/user` answers once and then **breaks** -- a 500, which is not in
-    /// `status_is_transient` and so is not retried.
-    ///
-    /// The third outcome of the credential probe: not "alive", not "revoked",
-    /// but *unknown*. A revoked token and a broken `/user` are different events
-    /// and the run must not report them as the same one.
-    pub async fn remount_identity_broken_after_preflight(&self, state: &State) {
-        self.server.reset().await;
-        self.mount_with_identity(state, 1_000, Reads::TokenOnly, Identity::OnceThen500)
-            .await;
-    }
-
     /// How many requests the fake has answered so far, which is how a test
     /// asserts that an idle run costs what the module docs claim.
     pub async fn requests(&self) -> usize {
@@ -347,17 +313,6 @@ impl Fake {
     }
 
     async fn mount_as(&self, state: &State, page_size: usize, reads: Reads) {
-        self.mount_with_identity(state, page_size, reads, Identity::Always)
-            .await;
-    }
-
-    async fn mount_with_identity(
-        &self,
-        state: &State,
-        page_size: usize,
-        reads: Reads,
-        identity_mode: Identity,
-    ) {
         let ok = |body: Value| ResponseTemplate::new(200).set_body_json(body);
         let token = format!("token {TOKEN}");
         // `/user` is guarded whatever the instance does with its repositories:
@@ -368,14 +323,22 @@ impl Fake {
             Reads::Anonymous => m,
         };
 
-        // A repository the token may not read. Mounted first so it wins over
-        // the records below, which is what lets one `State` describe both.
-        for full_name in &state.forbidden {
+        // A repository the token may not read (403), and one a revoked token
+        // is refused outright for (401). Mounted first so they win over the
+        // records below, which is what lets one `State` describe both -- and
+        // kept apart, because the adapter's answer differs: 403 skips that
+        // repository, 401 ends the run (ADR-0004).
+        for (full_name, status) in state
+            .forbidden
+            .iter()
+            .map(|name| (name, 403))
+            .chain(state.revoked.iter().map(|name| (name, 401)))
+        {
             authed(
                 Mock::given(method("GET")).and(path_prefix(&format!("/api/v1/repos/{full_name}"))),
             )
             .respond_with(
-                ResponseTemplate::new(403)
+                ResponseTemplate::new(status)
                     .set_body_json(json!({ "message": "user does not have permission" })),
             )
             .with_priority(FORBIDDEN_PRIORITY)
@@ -387,29 +350,12 @@ impl Fake {
             .respond_with(ok(json!({ "version": "1.24.3" })))
             .mount(&self.server)
             .await;
-        let user = identity(Mock::given(method("GET")).and(path("/api/v1/user"))).respond_with(ok(
-            json!({ "login": "mara", "id": 7, "full_name": "Mara Lindqvist" }),
-        ));
-        match identity_mode {
-            Identity::Always => user.mount(&self.server).await,
-            // One good answer, then whatever the fixture wants `/user` to do.
-            // The 401 case simply falls through to the catch-all below; the
-            // 500 needs its own mock, mounted between the two so it wins once
-            // the allowance above is spent.
-            Identity::OnceThen401 => user.up_to_n_times(1).mount(&self.server).await,
-            Identity::OnceThen500 => {
-                user.up_to_n_times(1).mount(&self.server).await;
-                Mock::given(method("GET"))
-                    .and(path("/api/v1/user"))
-                    .respond_with(
-                        ResponseTemplate::new(500)
-                            .set_body_json(json!({ "message": "internal server error" })),
-                    )
-                    .with_priority(BROKEN_IDENTITY_PRIORITY)
-                    .mount(&self.server)
-                    .await;
-            }
-        }
+        identity(Mock::given(method("GET")).and(path("/api/v1/user")))
+            .respond_with(ok(
+                json!({ "login": "mara", "id": 7, "full_name": "Mara Lindqvist" }),
+            ))
+            .mount(&self.server)
+            .await;
         for (index, chunk) in pages(&state.repos, page_size) {
             authed(
                 Mock::given(method("GET"))

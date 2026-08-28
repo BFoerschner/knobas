@@ -61,7 +61,7 @@ impl TeamCityConfig {
             return Ok(Self::default());
         }
         let cfg: Self = serde_json::from_value(value.clone())
-            .map_err(|e| SourceError::Protocol(format!("teamcity config: {e}")))?;
+            .map_err(|e| SourceError::protocol(format!("teamcity config: {e}")))?;
         cfg.validate()?;
         Ok(cfg)
     }
@@ -79,13 +79,13 @@ impl TeamCityConfig {
 
     fn validate(&self) -> Result<(), SourceError> {
         if self.builds_per_config == 0 || self.builds_per_config > MAX_BUILDS_PER_CONFIG {
-            return Err(SourceError::Protocol(format!(
+            return Err(SourceError::protocol(format!(
                 "teamcity config: builds_per_config must be 1..={MAX_BUILDS_PER_CONFIG}, got {}",
                 self.builds_per_config
             )));
         }
         if self.rate_limit_per_sec == 0 {
-            return Err(SourceError::Protocol(
+            return Err(SourceError::protocol(
                 "teamcity config: rate_limit_per_sec must be at least 1".to_owned(),
             ));
         }
@@ -167,7 +167,7 @@ mod tests {
         let err = TeamCityConfig::from_json(&serde_json::json!({ "projects": ["Payout"] }))
             .expect_err("unknown key");
         assert!(
-            matches!(&err, SourceError::Protocol(m) if m.contains("projects")),
+            matches!(&err, SourceError::Protocol { message: m, .. } if m.contains("projects")),
             "{err:?}"
         );
     }
@@ -180,7 +180,7 @@ mod tests {
             serde_json::json!({ "rate_limit_per_sec": 0 }),
         ] {
             let err = TeamCityConfig::from_json(&bad).expect_err("{bad} must be refused");
-            assert!(matches!(err, SourceError::Protocol(_)), "{err:?}");
+            assert!(matches!(err, SourceError::Protocol { .. }), "{err:?}");
         }
         // ...and the edges of the same ranges are accepted, so the test that
         // pins the refusal cannot be satisfied by refusing everything.

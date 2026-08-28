@@ -73,13 +73,13 @@ impl JiraConfig {
     /// blob, an unsupported dialect, or a value outside its range.
     pub fn from_json(value: &serde_json::Value) -> Result<Self, SourceError> {
         let cfg: Self = serde_json::from_value(value.clone())
-            .map_err(|e| SourceError::Protocol(format!("jira configuration is not valid: {e}")))?;
+            .map_err(|e| SourceError::protocol(format!("jira configuration is not valid: {e}")))?;
         cfg.validate()?;
         Ok(cfg)
     }
 
     fn validate(&self) -> Result<(), SourceError> {
-        let bad = |m: String| Err(SourceError::Protocol(m));
+        let bad = |m: String| Err(SourceError::protocol(m));
         if self.flavor == Flavor::Cloud {
             return bad(
                 "jira flavor \"cloud\" is not implemented yet: Cloud speaks \

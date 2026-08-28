@@ -189,70 +189,12 @@ impl From<SourceError> for RepoError {
 /// the one value where a user is most likely to check the arithmetic;
 /// `a_cap_fires_at_exactly_the_boundary_it_names` pins that boundary.
 fn cap_reached(what: &str, cap: u32) -> SourceError {
-    SourceError::Protocol(format!(
+    SourceError::protocol(format!(
         "gitea: at least {} {what} to walk in one run; stopping at the cap would report a \
          complete mirror of a corpus this run never finished walking. \
          Narrow the source with owners[] or repos[].",
         cap * PAGE_SIZE
     ))
-}
-
-/// Whether a repository-scoped refusal is believable, or the credential itself
-/// has gone.
-///
-/// `knobas-http` maps **401 and 403 alike** onto a bare
-/// [`SourceError::Unauthorized`] (`crates/knobas-http/src/classify.rs`), so the
-/// status that separates "this repository is not ours" from "this token is
-/// dead" never reaches this crate. Task 5's brief classified 403/404 as a skip
-/// and 401 as fatal; with the status gone, that classification is recovered by
-/// **measuring** instead of guessing -- re-run the identity probe the run
-/// already opened with.
-///
-/// **The probe has three outcomes, not two**, and each gets its own:
-///
-/// 1. **It answers** ⇒ the credential is alive, so the refusal really was about
-///    that one repository (ruling B4: skip with a warning). `Ok(())`.
-/// 2. **It answers `Unauthorized`** ⇒ the credential died mid-run. That is the
-///    run's verdict, passed through unchanged so it stays the fault class the
-///    sources view offers *Re-enter* on (interfaces §3).
-/// 3. **It fails any other way** -- a 500 (not in `status_is_transient`, so not
-///    retried), a timeout, a DNS blip. The credential is then *unknown*, which
-///    is neither of the above. This **ends the run**: believing the refusal
-///    would be guessing in the direction that loses data silently, which is the
-///    thing this function exists to stop. But it ends it honestly --
-///    * the probe's own fault class is kept, so a timeout is still
-///      `Unreachable` and never gets relabelled `Unauthorized`, and nothing
-///      puts *Re-enter* on screen over a credential nobody has disproved;
-///    * the message names **the repository that was actually refused**, not
-///      `/user`, because that is the event the user has to act on.
-///
-/// The cost is one extra request per refused repository, on a path that was
-/// already losing a repository, and none at all on a healthy run. It is not
-/// cached across refusals within a run on purpose: a cached "alive" is a
-/// refusal believed without checking, which is exactly what this replaced.
-async fn credential_still_good(
-    source: &crate::GiteaSource,
-    repository: &str,
-    refusal: &SourceError,
-) -> Result<(), SourceError> {
-    match source.client.current_user().await {
-        Ok(_) => Ok(()),
-        // The credential is gone: the run's verdict, unchanged.
-        Err(SourceError::Unauthorized) => Err(SourceError::Unauthorized),
-        // Unknown. Keep the probe's fault class, name the real event.
-        Err(probe) => {
-            let why = format!(
-                "gitea: {repository} refused this run ({refusal}), and the identity probe that \
-                 would say whether the credential is still good could not be completed: {probe}"
-            );
-            Err(match probe {
-                SourceError::Unreachable(_) => SourceError::Unreachable(why),
-                // `current_user` cannot produce a `Sink` failure -- it never
-                // touches one -- so everything left is a protocol fault.
-                _ => SourceError::Protocol(why),
-            })
-        }
-    }
 }
 
 /// Copy the stored position of every repository this run refused into the
@@ -333,11 +275,9 @@ pub(crate) async fn run(
             // module docs.
             Err(RepoError::Skip(error)) if full_sync => return Err(error),
             Err(RepoError::Skip(error)) => {
-                // Believe the refusal only while the credential is still good:
-                // a 401 arrives here indistinguishable from a 403, and a token
-                // revoked after the first repository was walked would otherwise
-                // be reported as a healthy sync.
-                credential_still_good(source, &selected.full_name, &error).await?;
+                // A 403 or a 404, and nothing else: a revoked credential
+                // answers 401, which `is_repo_scoped` reads as fatal and this
+                // arm therefore never sees (ADR-0004).
                 tracing::warn!(
                     repository = %selected.full_name,
                     %error,
@@ -409,10 +349,10 @@ async fn select_repos(
             match source.client.get_repo(owner, name).await {
                 Ok(raw) => push_selected(&mut out, raw, config),
                 Err(error) if is_repo_scoped(&error) && !full_sync => {
-                    // The same measurement the walk loop makes: 401 and 403 are
-                    // one error here, so a dead credential would otherwise read
-                    // as "the user configured a repository they cannot see".
-                    credential_still_good(source, entry, &error).await?;
+                    // Again a 403 or a 404 only. A dead credential answers 401
+                    // and raises through the `Err(error) => return` arm below,
+                    // rather than reading as "the user configured a repository
+                    // they cannot see".
                     tracing::warn!(
                         repository = %entry,
                         %error,
@@ -745,25 +685,22 @@ fn close_watermark<K: Ord + Clone>(
 /// # What a refusal here costs, and what it is allowed to hide
 ///
 /// A refusal costs searchable text, not the run -- the pull request itself was
-/// readable a moment ago on the same credential. But `knobas-http` collapses
-/// 401 and 403 into a bare [`SourceError::Unauthorized`], so "this token has no
-/// issue scope" and "this token was just revoked" arrive identically, and
-/// swallowing both would let a run whose credential died report success.
+/// readable a moment ago on the same credential. Which refusal it is decides
+/// whether that reading is available, and until ADR-0004 it could not be known:
+/// `knobas-http` collapsed 401 and 403 into one bare
+/// [`SourceError::Unauthorized`], so "this token has no issue scope" and "this
+/// token was just revoked" arrived identically, and an identity probe had to be
+/// re-run per refusal to tell them apart. The status is carried now, and
+/// [`crate::client::is_repo_scoped`] reads it:
 ///
-/// So the two are separated the way the rest of this module separates them, by
-/// **measuring**:
-///
-/// * **404** -- unambiguous, and the common case: Gitea answers it for a
-///   repository with its issue unit disabled. Never a credential fault, so it
-///   is indexed without discussion and costs nothing extra.
-/// * **`Unauthorized`** -- ambiguous, so the identity probe decides. Alive means
-///   the token really lacks issue scope (index without discussion, and the
-///   warning names the setting that turns this off); dead is the run's verdict.
-///
-/// The probe is one extra request per *refused* discussion fetch. A healthy run
-/// pays nothing; a token scoped away from issues pays it per pull request that
-/// has comments, which is what `include_pr_comments: false` exists to switch
-/// off.
+/// * **403** -- the token really lacks issue scope. The pull request is indexed
+///   without its discussion, and the warning names the setting that turns the
+///   asking off.
+/// * **404** -- Gitea's answer for a repository with its issue unit disabled,
+///   and the common case. Never a credential fault; same treatment.
+/// * **401** -- the credential is gone, which is not repository-scoped and
+///   never was. It is the run's verdict, and it costs no extra request to say
+///   so.
 ///
 /// # Why this is not ruling B4's "fatal on a cursor-less run"
 ///
@@ -801,13 +738,6 @@ async fn fetch_comments(
     };
     if !is_repo_scoped(&error) {
         return Err(RepoError::from(error));
-    }
-    if matches!(error, SourceError::Unauthorized) {
-        // Ambiguous: 401 and 403 arrive identically. Believe it only while the
-        // credential is provably still good.
-        credential_still_good(source, at.full_name, &error)
-            .await
-            .map_err(RepoError::Fatal)?;
     }
     tracing::warn!(
         repository = %at.full_name,
@@ -966,20 +896,30 @@ mod tests {
 
     /// A sink failure must never be read as "skip this repository": that would
     /// swallow the one error battery clause 6 requires to abort the run.
+    ///
+    /// **A 401 is fatal here too, and that is ADR-0004's line.** It used to
+    /// arrive as the same bare `Unauthorized` a 403 did and therefore became a
+    /// `Skip`, which only `credential_still_good` -- one extra request per
+    /// refusal -- kept from reporting a healthy sync over a revoked token.
     #[test]
     fn only_a_repository_scoped_failure_becomes_a_skip() {
-        assert!(matches!(
-            RepoError::from(SourceError::Unauthorized),
-            RepoError::Skip(_)
-        ));
-        assert!(matches!(
-            RepoError::from(knobas_http::status_error(StatusCode::NOT_FOUND, "")),
-            RepoError::Skip(_)
-        ));
+        for skipped in [
+            knobas_http::status_error(StatusCode::FORBIDDEN, "", None),
+            knobas_http::status_error(StatusCode::NOT_FOUND, "", None),
+        ] {
+            assert!(
+                matches!(RepoError::from(skipped), RepoError::Skip(_)),
+                "ruling B4: a refusal or an absence is about one repository"
+            );
+        }
         for fatal in [
+            // The credential itself, in both its shapes: rejected by the
+            // server, and absent from the keychain.
+            knobas_http::status_error(StatusCode::UNAUTHORIZED, "", None),
+            SourceError::unauthorized(),
             SourceError::Sink("pool closed".to_owned()),
             SourceError::Unreachable("connection refused".to_owned()),
-            knobas_http::status_error(StatusCode::INTERNAL_SERVER_ERROR, ""),
+            knobas_http::status_error(StatusCode::INTERNAL_SERVER_ERROR, "", None),
         ] {
             assert!(
                 matches!(RepoError::from(fatal), RepoError::Fatal(_)),
@@ -1151,7 +1091,8 @@ mod tests {
     /// moves it, because it is what the user sees when a source is too big.
     #[test]
     fn a_reached_cap_names_the_limit_and_the_lever() {
-        let SourceError::Protocol(message) = cap_reached("repositories", MAX_LIST_PAGES) else {
+        let SourceError::Protocol { message, .. } = cap_reached("repositories", MAX_LIST_PAGES)
+        else {
             panic!("a reached cap is a protocol failure");
         };
         assert!(message.contains("1000"), "{message}");

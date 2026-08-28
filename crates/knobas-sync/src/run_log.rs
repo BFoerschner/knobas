@@ -61,7 +61,7 @@ impl SyncOutcome {
     #[must_use]
     pub fn of(error: &SyncError) -> Self {
         match error {
-            SyncError::Source(knobas_source::SourceError::Unauthorized) => {
+            SyncError::Source(knobas_source::SourceError::Unauthorized { .. }) => {
                 SyncOutcome::Unauthorized
             }
             SyncError::Source(knobas_source::SourceError::Unreachable(_)) => {
@@ -569,13 +569,13 @@ mod tests {
         use knobas_source::SourceError;
 
         let cases = [
-            (SourceError::Unauthorized, SyncOutcome::Unauthorized),
+            (SourceError::unauthorized(), SyncOutcome::Unauthorized),
             (
                 SourceError::Unreachable("dns".to_owned()),
                 SyncOutcome::Unreachable,
             ),
             (
-                SourceError::Protocol("bad json".to_owned()),
+                SourceError::protocol("bad json".to_owned()),
                 SyncOutcome::Error,
             ),
             (SourceError::Sink("rejected".to_owned()), SyncOutcome::Error),

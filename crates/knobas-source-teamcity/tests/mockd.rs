@@ -606,12 +606,12 @@ async fn a_401_is_unauthorized_from_both_entry_points() {
     let source = adapter(&server.base_url(), serde_json::json!({}));
     let connected = source.test_connection().await;
     assert!(
-        matches!(connected, Err(SourceError::Unauthorized)),
+        matches!(connected, Err(SourceError::Unauthorized { .. })),
         "{connected:?}"
     );
     let synced = source.sync(None, &mut VecSink(Vec::new())).await;
     assert!(
-        matches!(synced, Err(SourceError::Unauthorized)),
+        matches!(synced, Err(SourceError::Unauthorized { .. })),
         "{synced:?}"
     );
     // A faulted server still gets well-formed requests.
@@ -627,12 +627,12 @@ async fn a_server_error_is_a_protocol_failure() {
     let source = adapter(&server.base_url(), serde_json::json!({}));
     let connected = source.test_connection().await;
     assert!(
-        matches!(connected, Err(SourceError::Protocol(_))),
+        matches!(connected, Err(SourceError::Protocol { .. })),
         "{connected:?}"
     );
     let synced = source.sync(None, &mut VecSink(Vec::new())).await;
     assert!(
-        matches!(synced, Err(SourceError::Protocol(_))),
+        matches!(synced, Err(SourceError::Protocol { .. })),
         "{synced:?}"
     );
     server.assert_no_violations();

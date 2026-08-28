@@ -41,7 +41,7 @@ async fn a_refused_connection_is_unreachable() {
 #[tokio::test]
 async fn a_bad_base_url_is_refused_up_front() {
     let error = HttpClient::new(config("not a url".to_owned())).expect_err("bad base url");
-    assert!(matches!(error, SourceError::Protocol(_)), "{error:?}");
+    assert!(matches!(error, SourceError::Protocol { .. }), "{error:?}");
 }
 
 /// Each `Auth` variant's exact wire spelling. Gitea's is the one that bites:
@@ -162,6 +162,11 @@ struct CountingServer {
 impl CountingServer {
     /// Serve `status` (with optional extra headers) forever, counting requests.
     fn always(status: u16, extra: &'static str) -> Self {
+        Self::always_with_body(status, extra, "")
+    }
+
+    /// The same, with a body -- what a source's own error envelope arrives in.
+    fn always_with_body(status: u16, extra: &'static str, body: &'static str) -> Self {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         let port = listener.local_addr().expect("addr").port();
         listener.set_nonblocking(true).expect("nonblocking");
@@ -182,7 +187,9 @@ impl CountingServer {
                     let _ = socket.read(&mut buffer).await;
                     counter.fetch_add(1, Ordering::SeqCst);
                     let response = format!(
-                        "HTTP/1.1 {status} X\r\n{extra}content-length: 0\r\nconnection: close\r\n\r\n"
+                        "HTTP/1.1 {status} X\r\n{extra}content-length: {}\r\nconnection: \
+                         close\r\n\r\n{body}",
+                        body.len()
                     );
                     let _ = socket.write_all(response.as_bytes()).await;
                     let _ = socket.shutdown().await;
@@ -219,7 +226,7 @@ async fn a_transient_failure_costs_exactly_the_documented_attempts() {
         .get_json::<serde_json::Value>("/thing", &[])
         .await
         .expect_err("503 every time");
-    assert!(matches!(error, SourceError::Protocol(_)), "{error:?}");
+    assert!(matches!(error, SourceError::Protocol { .. }), "{error:?}");
     assert_eq!(
         server.hits(),
         knobas_http::MAX_ATTEMPTS as usize,
@@ -237,7 +244,7 @@ async fn a_deterministic_failure_is_asked_once() {
         .get_json::<serde_json::Value>("/thing", &[])
         .await
         .expect_err("500");
-    assert!(matches!(error, SourceError::Protocol(_)), "{error:?}");
+    assert!(matches!(error, SourceError::Protocol { .. }), "{error:?}");
     assert_eq!(server.hits(), 1, "500 is deliberately not retried");
 }
 
@@ -252,7 +259,10 @@ async fn an_unauthorized_answer_is_not_retried_and_keeps_its_class() {
         .get_json::<serde_json::Value>("/thing", &[])
         .await
         .expect_err("401");
-    assert!(matches!(error, SourceError::Unauthorized), "{error:?}");
+    assert!(
+        matches!(error, SourceError::Unauthorized { .. }),
+        "{error:?}"
+    );
     assert_eq!(server.hits(), 1, "a credential does not improve on retry");
 }
 
@@ -275,7 +285,7 @@ async fn retry_after_is_waited_out_before_the_retry() {
         .expect_err("429 every time");
     let elapsed = started.elapsed();
 
-    assert!(matches!(error, SourceError::Protocol(_)), "{error:?}");
+    assert!(matches!(error, SourceError::Protocol { .. }), "{error:?}");
     assert_eq!(server.hits(), knobas_http::MAX_ATTEMPTS as usize);
     // Two waits of one second each between three attempts. Compared against
     // the exponential it replaces (250 ms + 500 ms), so this cannot pass by
@@ -356,7 +366,7 @@ async fn a_retry_after_longer_than_the_budget_ends_the_call() {
 
     // The 429 itself, classified -- not a budget-specific error. What the
     // caller needs to know is what the source said.
-    assert!(matches!(error, SourceError::Protocol(_)), "{error:?}");
+    assert!(matches!(error, SourceError::Protocol { .. }), "{error:?}");
     assert_eq!(
         server.hits(),
         1,
@@ -426,4 +436,58 @@ impl SilentServer {
     fn url(&self) -> String {
         format!("http://127.0.0.1:{}", self.port)
     }
+}
+
+/// The body → message hook is reached from `send`, and only `send` can reach
+/// it: the response body is consumed there, inside the one door onto the wire.
+///
+/// End to end on purpose. The hook travels `HttpConfig` → `HttpClient` →
+/// `send`, and `classify`'s own tests prove none of that wiring -- a client
+/// that dropped the hook on the way would leave every adapter's error envelope
+/// unread with the whole unit suite still green.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_callers_reading_of_a_failing_body_reaches_the_message() {
+    fn lift(body: &str) -> Option<String> {
+        let value: serde_json::Value = serde_json::from_str(body).ok()?;
+        Some(value.get("message")?.as_str()?.to_owned())
+    }
+
+    let server = CountingServer::always_with_body(
+        400,
+        "content-type: application/json\r\n",
+        r#"{"message":"the jql_filter names a field that does not exist"}"#,
+    );
+    let client = HttpClient::new(HttpConfig {
+        body_message: Some(lift),
+        ..config(server.url())
+    })
+    .expect("client");
+
+    let error = client
+        .get_json::<serde_json::Value>("/thing", &[])
+        .await
+        .expect_err("400");
+    let SourceError::Protocol { message, status } = &error else {
+        panic!("a 400 is a protocol fault: {error:?}");
+    };
+    assert_eq!(
+        message, "HTTP 400 Bad Request: the jql_filter names a field that does not exist",
+        "the sentence the source sent is what the user reads"
+    );
+    // The status the response carried, structurally -- not read back out of
+    // the message above (ADR-0004).
+    assert_eq!(*status, Some(400));
+
+    // Without a hook the same answer keeps its raw body, so the assertion
+    // above is about the hook and not about the message format.
+    let bare = HttpClient::new(config(server.url())).expect("client");
+    let error = bare
+        .get_json::<serde_json::Value>("/thing", &[])
+        .await
+        .expect_err("400");
+    assert!(
+        matches!(&error, SourceError::Protocol { message, .. }
+                 if message.contains("{\"message\":")),
+        "{error:?}"
+    );
 }

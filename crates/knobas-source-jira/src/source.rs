@@ -109,7 +109,7 @@ impl Source for JiraSource {
         // M1 is read-only toward every source (interfaces §4.1); the descriptor
         // declares no write ops, so refusing here is the contract, not a gap.
         // Jira write-back (transition, comment, create) is M2.
-        Err(SourceError::Protocol(format!(
+        Err(SourceError::protocol(format!(
             "the Jira adapter is read-only in this version and does not support {:?}",
             op.identifier()
         )))
@@ -177,7 +177,7 @@ mod tests {
             .err()
             .expect("the cloud flavor is refused");
         assert!(
-            matches!(&e, SourceError::Protocol(m) if m.contains("cloud")),
+            matches!(&e, SourceError::Protocol { message: m, .. } if m.contains("cloud")),
             "{e:?}"
         );
     }
@@ -189,7 +189,7 @@ mod tests {
     fn a_source_with_no_secret_is_unauthorized() {
         let mut i = instance(json!({}));
         i.secret = None;
-        assert!(matches!(build(i), Err(SourceError::Unauthorized)));
+        assert!(matches!(build(i), Err(SourceError::Unauthorized { .. })));
     }
 
     #[test]
@@ -200,7 +200,7 @@ mod tests {
             .err()
             .expect("basic auth with no username is refused");
         assert!(
-            matches!(&e, SourceError::Protocol(m) if m.contains("username")),
+            matches!(&e, SourceError::Protocol { message: m, .. } if m.contains("username")),
             "{e:?}"
         );
 
@@ -213,7 +213,7 @@ mod tests {
     fn a_base_url_that_is_not_a_url_is_refused() {
         let mut i = instance(json!({}));
         i.base_url = "jira.tidewater.example".to_owned();
-        assert!(matches!(build(i), Err(SourceError::Protocol(_))));
+        assert!(matches!(build(i), Err(SourceError::Protocol { .. })));
     }
 
     /// P5 and P10 together: the `/browse/<key>` link is built from the URL the
@@ -249,7 +249,7 @@ mod tests {
             })
             .await;
         assert!(
-            matches!(refused, Err(SourceError::Protocol(_))),
+            matches!(refused, Err(SourceError::Protocol { .. })),
             "{refused:?}"
         );
     }
