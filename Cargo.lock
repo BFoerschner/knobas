@@ -2786,6 +2786,7 @@ dependencies = [
  "knobas-source",
  "knobas-source-jira",
  "knobas-source-mock",
+ "knobas-source-teamcity",
  "knobas-sync",
  "serde",
  "serde_json",
