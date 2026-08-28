@@ -166,6 +166,7 @@ const Tile = (await import("./Tile.svelte")).default;
 const Detail = (await import("../detail/Detail.svelte")).default;
 const Launcher = (await import("../launcher/Launcher.svelte")).default;
 const QueryBox = (await import("../launcher/QueryBox.svelte")).default;
+const AddSource = (await import("../sources/AddSource.svelte")).default;
 const ReenterSecret = (await import("../sources/ReenterSecret.svelte")).default;
 const SourcesView = (await import("../sources/SourcesView.svelte")).default;
 const { createHealth } = await import("./health.svelte");
@@ -350,6 +351,13 @@ const CASES: Case[] = [
     // from a residue test would leak state into whatever runs next.
     open: (target) => ({
       app: mount(SourcesView, { target, props: { health: createHealth() } }),
+    }),
+  },
+  {
+    name: "AddSource",
+    source: "lib/sources/AddSource.svelte",
+    open: (target) => ({
+      app: mount(AddSource, { target, props: { onclose: () => {}, onsaved: () => {} } }),
     }),
   },
   {

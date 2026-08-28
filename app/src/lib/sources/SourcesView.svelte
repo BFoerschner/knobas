@@ -31,6 +31,7 @@
   import Modal from "../shell/Modal.svelte";
   import { health as sharedHealth, type Health } from "../shell/health.svelte";
   import { push } from "../shell/toasts.svelte";
+  import AddSource from "./AddSource.svelte";
   import ReenterSecret from "./ReenterSecret.svelte";
   import SourceRow from "./SourceRow.svelte";
 
@@ -58,6 +59,8 @@
   let fixing = $state<string | null>(null);
   /** The source a delete confirm is asking about, if any. */
   let deleting = $state<SourceSummary | null>(null);
+  /** Whether the Add-source dialog is up. */
+  let adding = $state(false);
   let purge = $state(false);
 
   async function load() {
@@ -167,7 +170,7 @@
       {#if sources.length > 0}
         <button class="btn sm" onclick={() => void all()}>Sync all</button>
       {/if}
-      <button class="btn sm pri">Add source</button>
+      <button class="btn sm pri" onclick={() => (adding = true)}>Add source</button>
     </span>
   </div>
 
@@ -221,11 +224,25 @@
             knobas mirrors work from the systems you point it at. Add one and its tickets, pull
             requests and builds become searchable here.
           </p>
+          <button class="btn pri" onclick={() => (adding = true)}>Add source</button>
         </div>
       {/if}
     {/if}
   </div>
 </div>
+
+{#if adding}
+  <AddSource
+    onclose={() => (adding = false)}
+    onsaved={(source) => {
+      adding = false;
+      health.patch(source.health);
+      push({ text: `${source.display_name} added.` });
+      // A new row is a change to the row set, so this re-lists.
+      void load();
+    }}
+  />
+{/if}
 
 {#if deleting}
   <Modal title="Remove {deleting.display_name}?" center onclose={() => (deleting = null)}>
