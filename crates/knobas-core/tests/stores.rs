@@ -36,11 +36,12 @@ async fn seeded_pool() -> (sqlx::PgPool, EntityRef, EntityRef) {
 async fn link_lifecycle_with_tombstone() {
     let (pool, t, n) = seeded_pool().await;
 
-    let id = link::create(&pool, &t, &n, "documents", link::Origin::Manual, "mara")
+    let id = link::create(&pool, &t, &n, "documents", link::Origin::Manual, None, "mara")
         .await
-        .unwrap();
+        .unwrap()
+        .id;
     // duplicate active link is rejected
-    let dup = link::create(&pool, &t, &n, "documents", link::Origin::Manual, "mara").await;
+    let dup = link::create(&pool, &t, &n, "documents", link::Origin::Manual, None, "mara").await;
     assert!(matches!(dup, Err(CoreError::Duplicate)), "{dup:?}");
     // visible from both ends
     assert_eq!(link::links_of(&pool, &t).await.unwrap().len(), 1);
@@ -56,7 +57,7 @@ async fn link_lifecycle_with_tombstone() {
         .unwrap();
     assert_eq!(cnt, 1);
     // and re-linking after unlink is allowed again
-    link::create(&pool, &t, &n, "documents", link::Origin::Manual, "mara")
+    link::create(&pool, &t, &n, "documents", link::Origin::Manual, None, "mara")
         .await
         .unwrap();
 }
@@ -71,10 +72,12 @@ async fn link_row_carries_its_origin_and_direction() {
         &n,
         "documents",
         link::Origin::Suggested,
+        None,
         "sync:jira",
     )
     .await
-    .unwrap();
+    .unwrap()
+    .id;
 
     let rows = link::links_of(&pool, &n).await.unwrap();
     assert_eq!(rows.len(), 1);
@@ -92,12 +95,14 @@ async fn several_relations_coexist_and_come_back_newest_first() {
     let (pool, t, n) = seeded_pool().await;
 
     let before = chrono::Utc::now();
-    let documents = link::create(&pool, &t, &n, "documents", link::Origin::Manual, "mara")
+    let documents = link::create(&pool, &t, &n, "documents", link::Origin::Manual, None, "mara")
         .await
-        .unwrap();
-    let blocks = link::create(&pool, &t, &n, "blocks", link::Origin::Manual, "mara")
+        .unwrap()
+        .id;
+    let blocks = link::create(&pool, &t, &n, "blocks", link::Origin::Manual, None, "mara")
         .await
-        .unwrap();
+        .unwrap()
+        .id;
     let after = chrono::Utc::now();
 
     let rows = link::links_of(&pool, &t).await.unwrap();
@@ -127,12 +132,24 @@ async fn several_relations_coexist_and_come_back_newest_first() {
 async fn unlink_is_idempotent_but_unknown_ids_are_reported() {
     let (pool, t, n) = seeded_pool().await;
 
-    let id = link::create(&pool, &t, &n, "documents", link::Origin::Manual, "mara")
+    let id = link::create(&pool, &t, &n, "documents", link::Origin::Manual, None, "mara")
         .await
-        .unwrap();
-    link::unlink(&pool, id).await.unwrap();
+        .unwrap()
+        .id;
+    let withdrawn = link::unlink(&pool, id).await.unwrap();
+    assert_eq!(
+        withdrawn.map(|row| row.id),
+        Some(id),
+        "the call that tombstoned the link hands back the row it tombstoned"
+    );
     // unlinking an already-tombstoned link changes nothing and is not an error
-    link::unlink(&pool, id).await.unwrap();
+    assert_eq!(
+        link::unlink(&pool, id).await.unwrap().map(|row| row.id),
+        None,
+        "the second call changed nothing, and says so by handing back no row -- \
+         a caller that logged one line per `Ok` would write a second `unlinked` \
+         for a link that was already withdrawn"
+    );
 
     let missing = link::unlink(&pool, Uuid::new_v4()).await;
     assert!(
@@ -281,7 +298,7 @@ async fn a_link_endpoint_with_no_entity_row_is_its_own_error() {
     // would leave the other end reporting `internal`.
     for (from, to) in [(&ticket, &absent), (&absent, &ticket)] {
         let created =
-            link::create(&pool, from, to, "documents", link::Origin::Manual, "mara").await;
+            link::create(&pool, from, to, "documents", link::Origin::Manual, None, "mara").await;
         assert!(
             matches!(created, Err(CoreError::EndpointMissing)),
             "{created:?}"
@@ -379,4 +396,119 @@ async fn a_foreign_key_violation_outside_a_link_write_is_not_an_endpoint() {
         "a foreign key that is not a link endpoint must stay a database fault, \
          got {classified:?}"
     );
+}
+
+/// The link write hands back the row it wrote, `note` and all.
+///
+/// The same reason [`the_activity_write_returns_the_row_it_wrote`] exists: the
+/// caller has to announce what it wrote -- the command layer puts the link's
+/// id, its other end and its relation into an activity line -- and `id` and
+/// `created_at` are the database's to choose. A write that handed back only an
+/// id would make the caller read back a row it just wrote, in a table where
+/// "the newest row" is not reliably its own.
+///
+/// Asserted against an independent [`link::links_of`] read rather than against
+/// the arguments, so an implementation that echoed its own inputs back fails.
+#[tokio::test]
+async fn the_link_write_returns_the_stored_row_including_its_note() {
+    let (pool, t, n) = seeded_pool().await;
+
+    let written = link::create(
+        &pool,
+        &t,
+        &n,
+        "documents",
+        link::Origin::Manual,
+        Some("the retry storm postmortem"),
+        "user",
+    )
+    .await
+    .unwrap();
+
+    let stored = link::links_of(&pool, &t)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|row| row.id == written.id)
+        .expect("the written link is in the store");
+
+    assert_eq!(written.from_id, stored.from_id);
+    assert_eq!(written.to_id, stored.to_id);
+    assert_eq!(written.relation, stored.relation);
+    assert_eq!(written.origin, stored.origin);
+    assert_eq!(written.created_by, stored.created_by);
+    assert_eq!(written.created_at, stored.created_at);
+    assert_eq!(
+        written.note.as_deref(),
+        Some("the retry storm postmortem"),
+        "the note the caller gave is the note the row carries"
+    );
+    assert_eq!(
+        stored.note, written.note,
+        "and the read sees the same one -- `note` is a column, not a field the \
+         writer invented on the way out"
+    );
+
+    // A link made without one carries no note, rather than an empty string:
+    // `note` is nullable, and `Some(\"\")` is a note the user did not write.
+    let bare = link::create(&pool, &t, &n, "blocks", link::Origin::Manual, None, "user")
+        .await
+        .unwrap();
+    assert_eq!(bare.note, None);
+    assert_eq!(
+        link::links_of(&pool, &n)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == bare.id)
+            .expect("the second link is in the store")
+            .note,
+        None
+    );
+}
+
+/// Unlinking hands back the row it tombstoned, so its caller can name the
+/// link, its other end and its relation without a second read -- and hands
+/// back nothing when there was nothing to withdraw.
+///
+/// The distinction is the whole point: `unlink` is idempotent, so `Ok` alone
+/// cannot tell "I withdrew this" from "somebody already had". One activity
+/// line per *mutation* needs the difference.
+#[tokio::test]
+async fn unlink_returns_the_row_it_withdrew_and_only_the_first_time() {
+    let (pool, t, n) = seeded_pool().await;
+
+    let created = link::create(
+        &pool,
+        &t,
+        &n,
+        "documents",
+        link::Origin::Manual,
+        Some("why"),
+        "user",
+    )
+    .await
+    .unwrap();
+
+    let withdrawn = link::unlink(&pool, created.id)
+        .await
+        .unwrap()
+        .expect("the first unlink withdrew the link");
+    assert_eq!(withdrawn.id, created.id);
+    assert_eq!(withdrawn.from_id, created.from_id);
+    assert_eq!(withdrawn.to_id, created.to_id);
+    assert_eq!(withdrawn.relation, created.relation);
+    assert_eq!(
+        withdrawn.note.as_deref(),
+        Some("why"),
+        "the withdrawn row is the whole row, not a stub carrying an id"
+    );
+
+    assert!(
+        link::unlink(&pool, created.id).await.unwrap().is_none(),
+        "the second unlink withdrew nothing"
+    );
+    // ... and it is still not an error, which is the behaviour that was there
+    // before the return type grew.
+    assert!(link::unlink(&pool, created.id).await.is_ok());
 }

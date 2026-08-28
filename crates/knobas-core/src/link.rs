@@ -83,6 +83,22 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for Origin {
     }
 }
 
+/// Every column of `knobas.link` that leaves this module, in one place.
+///
+/// [`LinkRow`] is a `FromRow`, so a column this list forgets is not a compile
+/// error anywhere -- it is a decode failure at run time, in whichever of the
+/// three statements below was written without it. Naming them once is what
+/// stops `create`'s `returning`, `links_of`'s `select` and `unlink`'s
+/// `returning` from drifting apart.
+///
+/// A macro rather than a `const` because the statements are `concat!`ed at
+/// compile time, and `concat!` takes literals.
+macro_rules! link_columns {
+    () => {
+        "id, from_id, to_id, relation, origin, note, created_by, created_at"
+    };
+}
+
 /// One active link, as seen from either of its ends.
 #[derive(Clone, Debug, Serialize, sqlx::FromRow)]
 pub struct LinkRow {
@@ -91,13 +107,29 @@ pub struct LinkRow {
     pub to_id: String,
     pub relation: String,
     pub origin: Origin,
+    /// Why the link exists, in the user's own words -- `None` unless one was
+    /// given.
+    ///
+    /// The column has been in the schema since `0001` and reached nothing
+    /// until Links v1 wired it through (#40): store row, DTO, TypeScript
+    /// mirror. Nullable rather than defaulted to `""`, because "no reason
+    /// recorded" and "a reason recorded as nothing" are different facts and
+    /// only one of them is worth a line in the panel.
+    pub note: Option<String>,
     pub created_by: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-/// Link `from` to `to`, returning the new link's id.
+/// Link `from` to `to`, returning the row that was written.
 ///
 /// Links are directed as stated but read undirected by [`links_of`].
+///
+/// The whole row and not just the id, for the reason
+/// [`crate::activity::record`] hands its row back: `id` and `created_at` are
+/// the database's to choose, and the caller has to *announce* what it wrote --
+/// the link command puts the link's id, its other end and its relation into an
+/// activity line. Reading back what was just written would mean guessing which
+/// of a table's rows is your own.
 ///
 /// # Errors
 ///
@@ -111,22 +143,28 @@ pub async fn create(
     to: &EntityRef,
     relation: &str,
     origin: Origin,
+    note: Option<&str>,
     created_by: &str,
-) -> Result<Uuid, CoreError> {
-    let (id,): (Uuid,) = sqlx::query_as(
-        r#"insert into knobas.link (from_id, to_id, relation, origin, created_by)
-           values ($1, $2, $3, $4, $5)
-           returning id"#,
-    )
+) -> Result<LinkRow, CoreError> {
+    let row = sqlx::query_as::<_, LinkRow>(concat!(
+        "insert into knobas.link (from_id, to_id, relation, origin, note, created_by)
+         values ($1, $2, $3, $4, $5, $6)
+         returning ",
+        link_columns!()
+    ))
     .bind(from.to_string())
     .bind(to.to_string())
     .bind(relation)
     .bind(origin.as_str())
+    .bind(note)
     .bind(created_by)
     .fetch_one(pool)
     .await
+    // Not a plain `?`: the crate-wide `From<sqlx::Error>` does not classify a
+    // foreign-key violation, and an endpoint that has not synced yet would
+    // cross the IPC boundary as `internal` rather than as `not_found`.
     .map_err(CoreError::from_link_write)?;
-    Ok(id)
+    Ok(row)
 }
 
 /// Every active link `entity` takes part in, in either direction, newest
@@ -136,12 +174,13 @@ pub async fn create(
 ///
 /// [`CoreError::Db`] if the query fails.
 pub async fn links_of(pool: &PgPool, entity: &EntityRef) -> Result<Vec<LinkRow>, CoreError> {
-    let rows = sqlx::query_as::<_, LinkRow>(
-        r#"select id, from_id, to_id, relation, origin, created_by, created_at
-           from knobas.link
-           where deleted_at is null and (from_id = $1 or to_id = $1)
-           order by created_at desc, id desc"#,
-    )
+    let rows = sqlx::query_as::<_, LinkRow>(concat!(
+        "select ",
+        link_columns!(),
+        " from knobas.link
+          where deleted_at is null and (from_id = $1 or to_id = $1)
+          order by created_at desc, id desc"
+    ))
     .bind(entity.to_string())
     .fetch_all(pool)
     .await?;
@@ -151,23 +190,31 @@ pub async fn links_of(pool: &PgPool, entity: &EntityRef) -> Result<Vec<LinkRow>,
 /// Withdraw a link by tombstoning it: the row stays, `deleted_at` is set.
 ///
 /// Idempotent -- withdrawing an already-withdrawn link succeeds and changes
-/// nothing.
+/// nothing. The two outcomes are distinguishable, which is what the `Option`
+/// is for: `Some(row)` is "this call withdrew that link", `None` is "there was
+/// nothing left to withdraw". A caller writing one activity line per *mutation*
+/// needs the difference -- `Ok` alone would have it announce an unlink that did
+/// not happen.
+///
+/// The row comes back whole so the caller can name the link's ends and its
+/// relation. It is the row **as it now stands**, tombstone included.
 ///
 /// # Errors
 ///
 /// [`CoreError::LinkNotFound`] if no link carries `id` at all;
 /// [`CoreError::Db`] if the statement fails.
-pub async fn unlink(pool: &PgPool, id: Uuid) -> Result<(), CoreError> {
-    let updated: Option<(Uuid,)> = sqlx::query_as(
-        r#"update knobas.link set deleted_at = now()
-           where id = $1 and deleted_at is null
-           returning id"#,
-    )
+pub async fn unlink(pool: &PgPool, id: Uuid) -> Result<Option<LinkRow>, CoreError> {
+    let updated = sqlx::query_as::<_, LinkRow>(concat!(
+        "update knobas.link set deleted_at = now()
+         where id = $1 and deleted_at is null
+         returning ",
+        link_columns!()
+    ))
     .bind(id)
     .fetch_optional(pool)
     .await?;
     if updated.is_some() {
-        return Ok(());
+        return Ok(updated);
     }
 
     // Nothing was updated: the link is either already tombstoned, which is
@@ -176,7 +223,7 @@ pub async fn unlink(pool: &PgPool, id: Uuid) -> Result<(), CoreError> {
         .bind(id)
         .fetch_optional(pool)
         .await?;
-    existing.map(|_| ()).ok_or(CoreError::LinkNotFound(id))
+    existing.map(|_| None).ok_or(CoreError::LinkNotFound(id))
 }
 
 #[cfg(test)]
