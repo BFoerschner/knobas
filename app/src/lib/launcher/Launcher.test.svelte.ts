@@ -656,6 +656,67 @@ test("a source chip is marked when that source is refusing the credential", asyn
 });
 
 /**
+ * The chip whose source the health store has no row for at all.
+ *
+ * `/nowhere` is a source id the user can type before the scheduler's first run
+ * has produced a reading for it — or one that never existed. The chip renders
+ * either way, and "we have not heard from it" is not "it is refusing our
+ * credential": marking it red would put a complaint on a fresh install, which
+ * is the same wrong `unknown` is deliberately kept out of `ACTIONABLE` to
+ * avoid.
+ *
+ * Before #72 this was the call site's own `state !== undefined` guard; now it
+ * is `shell/health.svelte::isActionable` answering for its own missing case.
+ * The assertion is the same either way, which is the point — the fold moved
+ * where the clause is written, not what it decides. `gitea` is the control:
+ * without a genuinely failing chip in the same render, a `fail` that was
+ * never set at all would pass.
+ */
+test("a chip for a source with no health reading is not marked failing", async () => {
+  open({
+    ports: {
+      launcherHome: async (): Promise<LauncherHome> => ({
+        ...HOME,
+        sources: [
+          {
+            source_id: "gitea",
+            state: "unauthorized",
+            checked_at: null,
+            detail: "401",
+            secret_expires_at: null,
+          },
+        ],
+      }),
+      search: async () =>
+        response({
+          interpreted: {
+            text: "sepa",
+            prefix: null,
+            filters: {
+              sources: ["gitea", "nowhere"],
+              kinds: [],
+              updated_within_days: null,
+              mine: false,
+              authors: [],
+            },
+            unknown_tokens: [],
+          },
+        }),
+    },
+  });
+  await settle();
+  target.querySelector("input")!.value = "/gitea /nowhere sepa";
+  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+
+  const chips = [...target.querySelectorAll(".fchip.on")].map((el) => el.textContent?.trim());
+  expect(chips).toEqual(["gitea", "nowhere"]);
+  const failing = [...target.querySelectorAll(".fchip.on.fail")].map((el) => el.textContent?.trim());
+  expect(failing).toEqual(["gitea"]);
+});
+
+/**
  * The chip that ruling **E-Q1** made possible, and the two halves it keeps
  * apart.
  *

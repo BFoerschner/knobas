@@ -60,12 +60,35 @@ const ACTIONABLE: Record<AuthState, boolean> = {
  * chip dot and this module's own {@link Health.failing} — and four inline
  * copies is four chances for them to disagree about what a red dot means.
  *
- * `=== true` rather than a bare lookup because the state arrives over the IPC
- * bridge: a value outside `AuthState` is a state this build does not know, and
- * "do not shout about it" is the same safe answer `unknown` gets.
+ * **`undefined` is a state too, and it is answered here** (#72). A caller can
+ * hold a source id the health store has no row for — a `/gitea` chip typed
+ * before the first scheduler run — and "no reading yet" deserves exactly the
+ * answer `unknown` gets. Taking `AuthState | undefined` is what keeps that
+ * half of the rule from living at the call site: while the signature forbade
+ * `undefined`, `Chips.svelte` had to guard for it itself, and a rule with a
+ * clause outside its own function is a rule that can be spelled two ways.
+ *
+ * Two doors, then, and both close on "do not shout about it": `undefined` for
+ * the reading that has not arrived, and `=== true` rather than a bare lookup
+ * for the one that arrived in a shape this build has no name for. The second
+ * is not the first made redundant — `AuthState` is a mirror of a Rust enum
+ * across the IPC bridge, so a newer backend can hand over a variant that
+ * satisfies no branch of the union the compiler checked.
+ *
+ * The widening costs something, and it is worth naming here rather than
+ * discovering later: every *other* caller — `launcher/format.ts`,
+ * `launcher/Board.svelte`, `shell/TopStrip.svelte`, `sources/SourceRow.svelte`
+ * and {@link Health.failing} — passes a `CredentialHealth.state`, which is
+ * required, so for them the parameter is now looser than the value. Were that
+ * field ever to become optional, those five would quietly read `false` instead
+ * of failing `svelte-check` — the same silent-safe direction the table above
+ * is a `Record` and not a `Set` to avoid. The trade is taken deliberately: one
+ * caller genuinely holds `undefined` (a chip naming a source the store has no
+ * row for), and a rule that cannot answer for its own missing case is a rule
+ * every caller has to finish.
  */
-export function isActionable(state: AuthState): boolean {
-  return ACTIONABLE[state] === true;
+export function isActionable(state: AuthState | undefined): boolean {
+  return state !== undefined && ACTIONABLE[state] === true;
 }
 
 /** The IPC this store needs, injectable so a test needs no Tauri bridge. */
