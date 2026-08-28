@@ -75,12 +75,25 @@ pub(crate) fn parse(raw: &str) -> Option<CursorState> {
 ///
 /// `None` means the run could not name one (a server with no builds at all),
 /// which is the same server on which `max_finished` is `None` too.
-pub(crate) fn advance(
-    previous: i64,
-    max_finished: Option<i64>,
-    min_unfinished: Option<i64>,
-    ceiling: Option<i64>,
-) -> i64 {
+/// What one run observed, as three build ids that are **not** interchangeable
+/// -- each is compared in a different direction, and all three are `i64`, so
+/// nothing but a name distinguishes them at a call site.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Seen {
+    /// The newest **finished** build the run saw, in scope or not.
+    pub max_finished: Option<i64>,
+    /// The oldest **in-scope** build the run saw queued or running.
+    pub min_unfinished: Option<i64>,
+    /// The highest build id that existed when the run **started**.
+    pub ceiling: Option<i64>,
+}
+
+pub(crate) fn advance(previous: i64, seen: Seen) -> i64 {
+    let Seen {
+        max_finished,
+        min_unfinished,
+        ceiling,
+    } = seen;
     let mut next = max_finished.map_or(previous, |newest| previous.max(newest));
     if let Some(highest_at_start) = ceiling {
         next = next.min(highest_at_start);
@@ -97,6 +110,30 @@ pub(crate) fn advance(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Positional shim, deliberately shadowing [`super::advance`].
+    ///
+    /// The production call site names its fields so the compiler catches a
+    /// swap; the cases below were written against the positional form and are
+    /// left exactly as they were, because rewriting an assertion and the
+    /// inputs it checks in the same change is how a transcription slip becomes
+    /// invisible. This is the only place the order is spelled out, and it is
+    /// four lines long.
+    fn advance(
+        previous: i64,
+        max_finished: Option<i64>,
+        min_unfinished: Option<i64>,
+        ceiling: Option<i64>,
+    ) -> i64 {
+        super::advance(
+            previous,
+            Seen {
+                max_finished,
+                min_unfinished,
+                ceiling,
+            },
+        )
+    }
 
     /// The envelope shape is fixed by interfaces §4.2 and must stay
     /// byte-stable: an idle run hands back exactly what it was given, and
@@ -182,12 +219,25 @@ mod tests {
         assert_eq!(advance(0, Some(1200), Some(500), Some(1000)), 499);
     }
 
-    /// A ceiling below where the watermark already stands does not drag it
-    /// back. A regressing watermark re-emits the same builds on every run for
-    /// ever, which is not a recovery from anything.
+    /// A ceiling below where the watermark already stands never reaches here:
+    /// `sync::ceiling` refuses that answer as proof the server contradicts
+    /// monotonic ids, because it is the input that would clamp the watermark
+    /// *down* -- and clamping down is not the cheap direction, it is how a
+    /// source wedges (`sync::tests::a_ceiling_below_the_watermark_is_refused_not_clamped`,
+    /// and `..._wedges_the_source_rather_than_merely_re_reading` for the cost).
+    ///
+    /// The floor below stays anyway, because it is what the *other* two
+    /// arguments are held to as well, and a silent regression here would
+    /// re-emit every build on every run for ever.
     #[test]
-    fn the_ceiling_never_pushes_the_watermark_backwards() {
-        assert_eq!(advance(1187, Some(1200), None, Some(500)), 1187);
+    fn the_watermark_has_a_floor_under_every_argument() {
+        assert_eq!(
+            advance(1187, Some(1200), None, Some(500)),
+            1187,
+            "a ceiling under the floor is refused upstream; if one ever arrives it must not \
+             drag the watermark back"
+        );
+        assert_eq!(advance(1187, Some(400), Some(2), Some(1200)), 1187);
     }
 
     /// No ceiling is the server with no builds on it at all -- which is the

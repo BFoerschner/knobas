@@ -16,8 +16,11 @@
 //!   real error *and* a recorded [`Violation`](knobas_mockd::Violation), which
 //!   is why every test here ends with `assert_no_violations()`.
 //! * **Builds come back newest-first**, as they do on a real server. Nothing
-//!   below asserts an order anyway, and `sync`'s own unit tests run the same
-//!   fixture through both orderings so the run cannot come to depend on one.
+//!   below asserts an order, but the run is no longer indifferent to one: the
+//!   opening ceiling query reads `count:1` as "the newest build", so on a
+//!   server that answered the other way the watermark would be pinned near the
+//!   bottom of the id space. `sync`'s own unit tests run this fixture through
+//!   both orderings and spell out what the wrong one costs.
 //!
 //! Expectations are **computed from `knobas_source_mock::fixture()`**, not
 //! hard-coded: mockd transcribes `build.num` to `build.id` and `build.cfg` to

@@ -553,13 +553,12 @@ async fn the_mutators_advance_the_clock_and_stamp_the_build() {
     assert_eq!(s.state().build(id).unwrap().start_date, queued_at);
 }
 
-// -- the authorship fields the M1 adapter cannot ask for yet -----------------
+// -- the authorship fields --------------------------------------------------
 //
-// `knobas-source-teamcity`'s `rest` module docs record the gap these two tests
-// close: `triggered(user(username))` is the only place TeamCity names the
-// person who started a build, and mockd's serialiser did not carry the name,
-// so asking for it was a 400 + `UnknownField` violation rather than a field.
-// The adapter therefore hard-codes `SyncItem::author = None` for every build.
+// `triggered(user(username))` is the only place TeamCity names the person who
+// started a build, and `knobas-source-teamcity` asks for it. These tests are
+// mockd's half of that: the names are servable, and what they carry is what
+// the fixture says.
 //
 // `triggered` is served from the fixture and from nowhere else. A person
 // invented here would flow through the adapter into `SyncItem::author` and be

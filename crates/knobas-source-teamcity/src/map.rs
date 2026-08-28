@@ -304,8 +304,8 @@ mod tests {
         assert!(!it.deleted);
     }
 
-    /// A configuration with nothing but an id still maps: the mock's
-    /// serialiser sends no `description`, and a real server may send no
+    /// A configuration with nothing but an id still maps: no fixture
+    /// configuration has a `description`, and a real server may send no
     /// `projectName` either.
     #[test]
     fn a_bare_build_configuration_still_maps() {

@@ -737,10 +737,21 @@ Stream T note for the Gitea live suite: the seed **cannot** reproduce fixture PR
   mockd inventing one was refused in #28. mockd serves `triggered.user` from it, and
   `MockSource` carries it to `SyncItem::author`.
 - **§4.2 TeamCity `BUILD_FIELDS` widens to `triggered(user(username))`**, so a build names the
-  person who started it. The budget test is renamed
-  `the_selectors_ask_for_nothing_they_do_not_read`: `href` stays out because mockd has no
-  such name, `description`/`paused` stay out because nothing in the mapping reads them, and
-  `triggered` is now asserted present at exactly the depth the mapping reads.
+  person who started it, at exactly the depth `map::build_item` reads and no deeper.
+- **§4.2 TeamCity `BUILD_TYPE_FIELDS` widens to include `description`**, closing a live gap
+  review round 1 found: `map::build_config_item` has always put a configuration's description
+  in the search blob, and the selector never asked for it, so it was silently `None` on every
+  configuration and the prose never reached the index.
+- **§4.2 TeamCity `BUILD_FIELDS` drops its top-level `percentageComplete`** — `struct Build`
+  has no such field, so the name was requested and never parsed; the mapping reads
+  `running-info(percentageComplete)`.
+- **The budget test named in the M1 amendment above is renamed**
+  `the_selectors_ask_for_nothing_outside_the_mock_contract` →
+  `the_selectors_ask_for_nothing_no_reader_looks_at`, because the old name stated a rule that
+  does not hold: `href` and `paused` are **served** by mockd (200, not the 400 an unknown name
+  gets), so they are unasked for budget rather than excluded by the mock contract. The
+  failure message says so, and says that when a name is missing a *reader* the fix is to add
+  the reader — which is what `description` above turned out to need.
 
 ---
 
