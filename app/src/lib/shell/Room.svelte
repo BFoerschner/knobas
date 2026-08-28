@@ -14,6 +14,7 @@
   import RoomBar from "./RoomBar.svelte";
   import Tile from "./Tile.svelte";
   import { contextById, type RoomContext } from "./contexts";
+  import { kindRegistry } from "./kind-registry.svelte";
   import { tilesFor } from "./kinds";
   import { hashFor, type Router } from "./router.svelte";
 
@@ -67,7 +68,12 @@
       });
   });
 
-  const tiles = $derived(kinds === null ? [] : tilesFor(kinds));
+  // The registry is read, not merely consulted: it is a rune, so a tile drawn
+  // before `list_adapters` answered redraws with the adapter's own word rather
+  // than keeping the humanised one for the session.
+  const tiles = $derived(
+    kinds === null ? [] : tilesFor(kinds, (kind) => kindRegistry.info(kind)),
+  );
   /**
    * Two columns, so the row count is half the tiles — capped at the four the
    * stylesheet declares (`.tiles.rows-*`), past which the board scrolls rather

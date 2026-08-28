@@ -8,6 +8,7 @@
   import Toast from "./lib/shell/Toast.svelte";
   import { builtinContexts } from "./lib/shell/contexts";
   import { health } from "./lib/shell/health.svelte";
+  import { kindRegistry } from "./lib/shell/kind-registry.svelte";
   import { installKeys } from "./lib/shell/keys";
   import { lifecycle } from "./lib/shell/lifecycle.svelte";
   import { router } from "./lib/shell/router.svelte";
@@ -67,6 +68,10 @@
     // top strip, the sources view and the launcher all draw this, and three
     // independent fetches is three chances for them to disagree (#27).
     const stopHealth = health.start();
+    // Once, at shell start: `list_adapters` is static per build and answers
+    // before the database is up, so there is nothing to poll and nothing to
+    // tear down.
+    void kindRegistry.load();
 
     return () => {
       stopHealth();

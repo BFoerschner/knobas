@@ -64,8 +64,18 @@ const VOCABULARY: Record<string, { label: string; plural: string; monogram: stri
  * kind the corpus does not have; a bucket nothing fills is not drawn; and
  * anything no bucket claims gets a tile of its own, in the order the corpus
  * reported it.
+ *
+ * `declared` is layer 1 — what an adapter says this kind is called. Passing it
+ * is what makes §3a's *"a new source's items get grouped, chipped and labeled
+ * without touching core"* literally true for the room: an open kind's tile
+ * then carries the adapter's own plural rather than knobas humanising the
+ * word. Omitting it falls through to layers 2 and 3, which is what a caller
+ * with no registry to hand gets.
  */
-export function tilesFor(kinds: string[]): TileSpec[] {
+export function tilesFor(
+  kinds: string[],
+  declared: (kind: string) => KindInfo | null = () => null,
+): TileSpec[] {
   const present = [...new Set(kinds)];
   const claimed = new Set<string>();
   const tiles: TileSpec[] = [];
@@ -79,7 +89,7 @@ export function tilesFor(kinds: string[]): TileSpec[] {
 
   for (const kind of present) {
     if (claimed.has(kind)) continue;
-    tiles.push({ id: kind, label: kindLabel(kind, null), kinds: [kind] });
+    tiles.push({ id: kind, label: kindLabel(kind, declared(kind)), kinds: [kind] });
   }
 
   return tiles;

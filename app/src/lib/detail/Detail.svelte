@@ -12,6 +12,7 @@
   import { ipcErrorMessage, isIpcError } from "../ipc";
   import { getEntity, type EntityDetail } from "../ipc/entity";
   import Monogram from "../shell/Monogram.svelte";
+  import { kindRegistry } from "../shell/kind-registry.svelte";
   import { kindMonogram, kindSingular } from "../shell/kinds";
   import { openExternal } from "../shell/open-external";
   import { ago } from "../shell/time";
@@ -83,7 +84,18 @@
 
   /** The address's kind until the read lands, then the row's own. */
   const shownKind = $derived(detail?.row.kind ?? kind ?? "entity");
-  const label = $derived(kindSingular(shownKind, detail?.kind_info));
+  /**
+   * The adapter's word for this kind.
+   *
+   * `EntityDetail.kind_info` is the authoritative answer — the backend
+   * resolves it by the source's *adapter* kind, so a `ticket` from two
+   * adapters gets the right one of the two words. The registry is the fallback
+   * for the frame drawn before `get_entity` answers, where the address already
+   * carries a kind and the header would otherwise flash the humanised form.
+   */
+  const declared = $derived(detail?.kind_info ?? kindRegistry.info(shownKind));
+
+  const label = $derived(kindSingular(shownKind, declared));
   const key = $derived(entityId.slice(entityId.indexOf(":") + 1));
   const fields = $derived(detail ? projectPayload(detail.payload) : []);
   /** Narrowed once, so the button and its handler agree that it is a string. */
@@ -183,7 +195,7 @@
       <div class="d-title">
         <div>
           <span class="k">
-            <Monogram text={kindMonogram(shownKind, detail.kind_info)} label={label} />
+            <Monogram text={kindMonogram(shownKind, declared)} label={label} />
             {key}
           </span>
           <h2 id={titleId}>{detail.row.title}</h2>
