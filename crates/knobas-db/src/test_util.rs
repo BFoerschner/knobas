@@ -377,7 +377,8 @@ fn stop_server(root: &Path) {
     if !root.join("data").join("postmaster.pid").exists() {
         return;
     }
-    let Some(pg_ctl) = find_pg_ctl(&crate::embedded::installation_dir()) else {
+    let Some(pg_ctl) = crate::embedded::find_tool(&crate::embedded::installation_dir(), PG_CTL)
+    else {
         return;
     };
     let _ = std::process::Command::new(pg_ctl)
@@ -386,20 +387,6 @@ fn stop_server(root: &Path) {
         .arg(root.join("data"))
         .args(["-m", "immediate", "-w"])
         .output();
-}
-
-/// `pg_ctl` sits at either `<install>/bin/pg_ctl` or, once the archive has
-/// been unpacked into a version subdirectory, `<install>/<version>/bin/pg_ctl`.
-fn find_pg_ctl(installation_dir: &Path) -> Option<PathBuf> {
-    let direct = installation_dir.join("bin").join(PG_CTL);
-    if direct.is_file() {
-        return Some(direct);
-    }
-    std::fs::read_dir(installation_dir)
-        .ok()?
-        .flatten()
-        .map(|entry| entry.path().join("bin").join(PG_CTL))
-        .find(|path| path.is_file())
 }
 
 #[cfg(test)]

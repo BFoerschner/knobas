@@ -2820,6 +2820,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "knobas-db",
+ "percent-encoding",
  "postgresql_archive",
  "postgresql_embedded",
  "serde_json",
@@ -2828,6 +2829,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+ "url",
  "uuid",
 ]
 

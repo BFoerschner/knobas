@@ -24,10 +24,19 @@ postgresql_archive = { version = "0.21", default-features = false, features = [
     "theseus",
     "tls-native-tls",
 ] }
+# `percent-encoding` and `url`: how a connection URL's password is read back
+# out of it, the same two crates and the same way `sqlx-core` does it (it
+# depends on both, so this adds nothing to the build). `pg_dump` is a child
+# process and needs the password libpq's way -- see `embedded::password_of`.
+percent-encoding = "2"
 sqlx.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+# `process` is `backup`'s: `pg_dump` and `pg_restore` are run as children, and
+# awaiting them on the runtime rather than blocking a thread is what keeps a
+# scheduled backup off the UI's back.
+tokio = { workspace = true, features = ["process", "sync"] }
 tracing = "0.1"
+url = "2"
 
 [dev-dependencies]
 # Only `tests/schema.rs` reaches for the column types the migrations declare;
