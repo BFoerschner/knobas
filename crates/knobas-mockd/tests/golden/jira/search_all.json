@@ -102,9 +102,32 @@
         },
         "created": "2026-08-08T13:48:00.000+0200",
         "description": "When the SEPA batch at the PSP returns a transient error (HTTP 503 or PSP code `TEMP_UNAVAILABLE`), retry the payout with exponential backoff (base 30 s, factor 2, max 5 attempts, jitter). Permanent failures go to the manual review queue.",
+        "issuelinks": [],
         "issuetype": {
           "name": "Story",
           "subtask": false
+        },
+        "labels": [],
+        "parent": {
+          "fields": {
+            "issuetype": {
+              "name": "Epic",
+              "subtask": false
+            },
+            "priority": null,
+            "status": {
+              "id": "3",
+              "name": "In Progress",
+              "statusCategory": {
+                "key": "indeterminate",
+                "name": "In Progress"
+              }
+            },
+            "summary": "Payout reliability"
+          },
+          "id": "10000",
+          "key": "PAY-200",
+          "self": "http://mockd.test/rest/api/2/issue/10000"
         },
         "priority": {
           "name": "High"
@@ -128,6 +151,7 @@
           "self": "http://mockd.test/rest/api/2/user?username=mara.lindqvist",
           "timeZone": "Europe/Berlin"
         },
+        "resolution": null,
         "status": {
           "id": "3",
           "name": "In Progress",
@@ -137,6 +161,8 @@
           }
         },
         "summary": "Retry failed SEPA payouts",
+        "timeoriginalestimate": 57600,
+        "timespent": 16200,
         "updated": "2026-08-22T13:48:00.000+0200",
         "worklog": {
           "maxResults": 1,
@@ -217,9 +243,32 @@
         },
         "created": "2026-08-08T10:12:00.000+0200",
         "description": "Finance reports the payout dashboard takes 8–12 s to load for August. Target < 2 s.",
+        "issuelinks": [],
         "issuetype": {
           "name": "Task",
           "subtask": false
+        },
+        "labels": [],
+        "parent": {
+          "fields": {
+            "issuetype": {
+              "name": "Epic",
+              "subtask": false
+            },
+            "priority": null,
+            "status": {
+              "id": "3",
+              "name": "In Progress",
+              "statusCategory": {
+                "key": "indeterminate",
+                "name": "In Progress"
+              }
+            },
+            "summary": "Payout reliability"
+          },
+          "id": "10000",
+          "key": "PAY-200",
+          "self": "http://mockd.test/rest/api/2/issue/10000"
         },
         "priority": {
           "name": "Medium"
@@ -243,6 +292,7 @@
           "self": "http://mockd.test/rest/api/2/user?username=priya.nair",
           "timeZone": "Europe/Berlin"
         },
+        "resolution": null,
         "status": {
           "id": "10000",
           "name": "To Do",
@@ -252,6 +302,8 @@
           }
         },
         "summary": "Payout dashboard latency",
+        "timeoriginalestimate": null,
+        "timespent": null,
         "updated": "2026-08-22T10:12:00.000+0200",
         "worklog": {
           "maxResults": 0,
@@ -290,9 +342,66 @@
         },
         "created": "2026-08-07T18:05:00.000+0200",
         "description": null,
+        "issuelinks": [
+          {
+            "id": "40000",
+            "inwardIssue": {
+              "fields": {
+                "issuetype": {
+                  "name": "Task",
+                  "subtask": false
+                },
+                "priority": {
+                  "name": "Medium"
+                },
+                "status": {
+                  "id": "10000",
+                  "name": "To Do",
+                  "statusCategory": {
+                    "key": "new",
+                    "name": "To Do"
+                  }
+                },
+                "summary": "On-call runbook outdated"
+              },
+              "id": "10006",
+              "key": "OPS-77",
+              "self": "http://mockd.test/rest/api/2/issue/10006"
+            },
+            "self": "http://mockd.test/rest/api/2/issueLink/40000",
+            "type": {
+              "id": "10000",
+              "inward": "is blocked by",
+              "name": "Blocks",
+              "outward": "blocks"
+            }
+          }
+        ],
         "issuetype": {
           "name": "Bug",
           "subtask": false
+        },
+        "labels": [],
+        "parent": {
+          "fields": {
+            "issuetype": {
+              "name": "Epic",
+              "subtask": false
+            },
+            "priority": null,
+            "status": {
+              "id": "3",
+              "name": "In Progress",
+              "statusCategory": {
+                "key": "indeterminate",
+                "name": "In Progress"
+              }
+            },
+            "summary": "Payout reliability"
+          },
+          "id": "10000",
+          "key": "PAY-200",
+          "self": "http://mockd.test/rest/api/2/issue/10000"
         },
         "priority": {
           "name": "High"
@@ -316,6 +425,7 @@
           "self": "http://mockd.test/rest/api/2/user?username=mara.lindqvist",
           "timeZone": "Europe/Berlin"
         },
+        "resolution": null,
         "status": {
           "id": "10002",
           "name": "In Review",
@@ -325,6 +435,8 @@
           }
         },
         "summary": "Ledger drift on partial refunds",
+        "timeoriginalestimate": null,
+        "timespent": 9600,
         "updated": "2026-08-21T18:05:00.000+0200",
         "worklog": {
           "maxResults": 1,
@@ -405,9 +517,32 @@
         },
         "created": "2026-08-06T02:00:00.000+0200",
         "description": null,
+        "issuelinks": [],
         "issuetype": {
           "name": "Story",
           "subtask": false
+        },
+        "labels": [],
+        "parent": {
+          "fields": {
+            "issuetype": {
+              "name": "Epic",
+              "subtask": false
+            },
+            "priority": null,
+            "status": {
+              "id": "3",
+              "name": "In Progress",
+              "statusCategory": {
+                "key": "indeterminate",
+                "name": "In Progress"
+              }
+            },
+            "summary": "Payout reliability"
+          },
+          "id": "10000",
+          "key": "PAY-200",
+          "self": "http://mockd.test/rest/api/2/issue/10000"
         },
         "priority": {
           "name": "Low"
@@ -431,6 +566,7 @@
           "self": "http://mockd.test/rest/api/2/user?username=jonas.becker",
           "timeZone": "Europe/Berlin"
         },
+        "resolution": null,
         "status": {
           "id": "10000",
           "name": "To Do",
@@ -440,6 +576,8 @@
           }
         },
         "summary": "Payout CSV export for finance",
+        "timeoriginalestimate": null,
+        "timespent": null,
         "updated": "2026-08-20T02:00:00.000+0200",
         "worklog": {
           "maxResults": 0,
@@ -478,10 +616,46 @@
         },
         "created": "2026-08-05T02:00:00.000+0200",
         "description": null,
+        "issuelinks": [
+          {
+            "id": "40000",
+            "outwardIssue": {
+              "fields": {
+                "issuetype": {
+                  "name": "Bug",
+                  "subtask": false
+                },
+                "priority": {
+                  "name": "High"
+                },
+                "status": {
+                  "id": "10002",
+                  "name": "In Review",
+                  "statusCategory": {
+                    "key": "indeterminate",
+                    "name": "In Progress"
+                  }
+                },
+                "summary": "Ledger drift on partial refunds"
+              },
+              "id": "10002",
+              "key": "PAY-228",
+              "self": "http://mockd.test/rest/api/2/issue/10002"
+            },
+            "self": "http://mockd.test/rest/api/2/issueLink/40000",
+            "type": {
+              "id": "10000",
+              "inward": "is blocked by",
+              "name": "Blocks",
+              "outward": "blocks"
+            }
+          }
+        ],
         "issuetype": {
           "name": "Task",
           "subtask": false
         },
+        "labels": [],
         "priority": {
           "name": "Medium"
         },
@@ -504,6 +678,7 @@
           "self": "http://mockd.test/rest/api/2/user?username=tomasz.wojcik",
           "timeZone": "Europe/Berlin"
         },
+        "resolution": null,
         "status": {
           "id": "10000",
           "name": "To Do",
@@ -513,6 +688,8 @@
           }
         },
         "summary": "On-call runbook outdated",
+        "timeoriginalestimate": null,
+        "timespent": null,
         "updated": "2026-08-19T02:00:00.000+0200",
         "worklog": {
           "maxResults": 0,
@@ -551,9 +728,32 @@
         },
         "created": "2026-08-04T02:00:00.000+0200",
         "description": null,
+        "issuelinks": [],
         "issuetype": {
           "name": "Task",
           "subtask": false
+        },
+        "labels": [],
+        "parent": {
+          "fields": {
+            "issuetype": {
+              "name": "Epic",
+              "subtask": false
+            },
+            "priority": null,
+            "status": {
+              "id": "3",
+              "name": "In Progress",
+              "statusCategory": {
+                "key": "indeterminate",
+                "name": "In Progress"
+              }
+            },
+            "summary": "Payout reliability"
+          },
+          "id": "10000",
+          "key": "PAY-200",
+          "self": "http://mockd.test/rest/api/2/issue/10000"
         },
         "priority": {
           "name": "Medium"
@@ -577,6 +777,10 @@
           "self": "http://mockd.test/rest/api/2/user?username=mara.lindqvist",
           "timeZone": "Europe/Berlin"
         },
+        "resolution": {
+          "id": "10000",
+          "name": "Done"
+        },
         "status": {
           "id": "10001",
           "name": "Done",
@@ -586,6 +790,8 @@
           }
         },
         "summary": "Rotate PSP credentials",
+        "timeoriginalestimate": null,
+        "timespent": null,
         "updated": "2026-08-18T02:00:00.000+0200",
         "worklog": {
           "maxResults": 0,
@@ -610,10 +816,12 @@
         },
         "created": "2026-07-09T16:32:00.000+0200",
         "description": null,
+        "issuelinks": [],
         "issuetype": {
           "name": "Epic",
           "subtask": false
         },
+        "labels": [],
         "priority": null,
         "project": {
           "key": "PAY",
@@ -634,6 +842,7 @@
           "self": "http://mockd.test/rest/api/2/user?username=priya.nair",
           "timeZone": "Europe/Berlin"
         },
+        "resolution": null,
         "status": {
           "id": "3",
           "name": "In Progress",
@@ -643,6 +852,8 @@
           }
         },
         "summary": "Payout reliability",
+        "timeoriginalestimate": null,
+        "timespent": null,
         "updated": "2026-07-23T16:32:00.000+0200",
         "worklog": {
           "maxResults": 0,

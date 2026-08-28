@@ -12,7 +12,7 @@ use knobas_source_mock::MockSource;
 use knobas_sync::config::{self, AuthKind, AuthState, InsertConfig};
 use knobas_sync::run_log::{self, SyncOutcome, SyncTrigger};
 use knobas_sync::scheduler::{
-    AdapterRegistry, RunConnections, SchedulerDeps, SourceSyncStatus, SyncEvents,
+    AdapterRegistry, RunConnections, RunMode, SchedulerDeps, SourceSyncStatus, SyncEvents,
 };
 
 /// A registry that builds a `MockSource` under whatever id it is handed, with
@@ -33,6 +33,13 @@ struct MockRegistry {
     /// harness builds the mock itself rather than going through the real
     /// registry.
     tombstone: Mutex<bool>,
+    /// Every cursor an adapter this registry built was handed, in order.
+    ///
+    /// The registry is where this has to live: a run builds its own adapter
+    /// and drops it, so a handle taken from outside is the only way to see
+    /// what the adapter was asked. It is what `RunMode::Backfill` is visible
+    /// *as* -- the mode changes nothing else about the run.
+    cursors: Arc<Mutex<Vec<Option<knobas_source::Cursor>>>>,
 }
 
 impl AdapterRegistry for MockRegistry {
@@ -49,6 +56,7 @@ impl AdapterRegistry for MockRegistry {
         Ok(Box::new(Renamed {
             id: instance.id,
             inner,
+            cursors: Arc::clone(&self.cursors),
         }))
     }
 }
@@ -58,6 +66,7 @@ impl AdapterRegistry for MockRegistry {
 struct Renamed {
     id: String,
     inner: MockSource,
+    cursors: Arc<Mutex<Vec<Option<knobas_source::Cursor>>>>,
 }
 
 #[async_trait::async_trait]
@@ -76,6 +85,7 @@ impl Source for Renamed {
         cursor: Option<knobas_source::Cursor>,
         sink: &mut (dyn knobas_source::Sink + Send),
     ) -> Result<knobas_source::Cursor, SourceError> {
+        self.cursors.lock().unwrap().push(cursor.clone());
         // Rewrite the mock's namespace onto this instance's id, which is what a
         // real adapter does natively.
         let mut renaming = Renaming {
@@ -177,6 +187,7 @@ async fn harness(auth: AuthKind, with_secret: bool) -> Harness {
     let registry = Arc::new(MockRegistry {
         fault: Mutex::new(Fault::None),
         tombstone: Mutex::new(false),
+        cursors: Arc::new(Mutex::new(Vec::new())),
     });
 
     Harness {
@@ -200,11 +211,21 @@ async fn harness(auth: AuthKind, with_secret: bool) -> Harness {
 /// statement; a swapped pair there is invisible to any assertion that only
 /// checks the row against a remembered constant.
 async fn one_run(h: &Harness, trigger: SyncTrigger) -> (run_log::SyncRunRow, run_log::RunResult) {
+    one_run_in(h, trigger, RunMode::Incremental).await
+}
+
+/// [`one_run`], in a chosen [`RunMode`].
+async fn one_run_in(
+    h: &Harness,
+    trigger: SyncTrigger,
+    mode: RunMode,
+) -> (run_log::SyncRunRow, run_log::RunResult) {
     let run_id = run_log::start(&h.deps.pool, &h.id, trigger).await.unwrap();
     let result = knobas_sync::scheduler::execute_run(
         &h.deps,
         &h.id,
         run_id,
+        mode,
         None,
         std::time::Instant::now(),
     )
@@ -492,6 +513,7 @@ async fn status_reports_running_then_the_finished_shape() {
         &h.deps,
         &h.id,
         run_id,
+        RunMode::Incremental,
         None,
         std::time::Instant::now(),
     )
@@ -656,6 +678,7 @@ async fn a_run_with_no_channel_reports_nothing() {
         &h.deps,
         &h.id,
         run_id,
+        RunMode::Incremental,
         None,
         std::time::Instant::now(),
     )
@@ -666,4 +689,46 @@ async fn a_run_with_no_channel_reports_nothing() {
         0,
         "a sink nobody attached must never be reported to"
     );
+}
+
+/// `RunMode::Backfill` is what the scheduler does with #32's third part, and
+/// the *only* thing it changes about a run is the position the adapter is
+/// handed. So that is what this asserts, at the one place a wiring mistake
+/// would be invisible: `execute_run`'s dispatch, where a `Backfill` arm still
+/// calling `run_from_stored_cursor` compiles, passes every other test in this
+/// file, and quietly makes the backfill an ordinary incremental run.
+///
+/// Three runs, because two cannot tell the modes apart: the first run of any
+/// source is cursor-less already (nothing is stored yet), so `None` there says
+/// nothing. The second establishes that this source *does* resume, and the
+/// third is the one under test.
+#[tokio::test]
+async fn a_backfill_hands_the_adapter_no_position_even_though_one_is_stored() {
+    let h = harness(AuthKind::None, false).await;
+
+    one_run(&h, SyncTrigger::FirstRun).await;
+    one_run(&h, SyncTrigger::Schedule).await;
+    let (row, result) = one_run_in(&h, SyncTrigger::Backfill, RunMode::Backfill).await;
+
+    let seen = h.registry.cursors.lock().unwrap().clone();
+    assert_eq!(seen.len(), 3, "{seen:?}");
+    assert!(seen[0].is_none(), "a source's first run has nothing stored");
+    assert!(
+        seen[1].is_some(),
+        "the second run must resume, or the third proves nothing: {seen:?}"
+    );
+    assert!(
+        seen[2].is_none(),
+        "a backfill re-reads from the top whatever is stored: {seen:?}"
+    );
+
+    // Everything else about the run is unchanged, which is the other half of
+    // the claim: it is logged, it succeeds, and it round-trips its trigger.
+    // The trigger is passed in here, so this is not what pins the *spelling* a
+    // backfill is logged under -- that is
+    // `a_backfill_is_logged_under_its_own_trigger` in `scheduler_loop.rs`,
+    // which goes through `Scheduler::backfill` and so has no say in it.
+    assert_eq!(result.outcome, SyncOutcome::Ok);
+    assert_eq!(row.trigger, SyncTrigger::Backfill);
+    assert!(row.finished_at.is_some());
 }

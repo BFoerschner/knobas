@@ -382,3 +382,104 @@ async fn a_project_scope_is_pushed_into_the_jql() {
     assert_eq!(keys.len(), every.len() - 1, "{keys:?} vs {every:?}");
     jira.assert_no_violations();
 }
+
+// -- the widened payload (issue #32) ----------------------------------------
+
+/// `payload` is the product, not a by-product.
+///
+/// Spec §3a keeps the raw record so a later mapping can re-project it without
+/// re-syncing, and the §3a generic detail view renders straight out of it. So
+/// a name missing from `BASE_FIELDS` is not merely a field the *mapping* does
+/// not read today -- it is data the mirror will never hold, and the only way
+/// to get it is a re-sync of every issue. Which is why this is asserted
+/// against the wire rather than against the constant: `assert_no_violations`
+/// is what certifies the widened query is one a real Jira would accept, and
+/// the constant on its own certifies nothing.
+///
+/// Both branches of every field, from the fixture, so an adapter that hard-
+/// coded any of them fails here.
+#[tokio::test]
+async fn a_synced_issue_carries_epic_membership_links_and_resolution() {
+    let jira = spawn_mock_jira().await;
+    let source = source(&jira.base_url(), serde_json::json!({}));
+    let mut sink = VecSink(Vec::new());
+    source.sync(None, &mut sink).await.unwrap();
+    let payload = |key: &str| {
+        sink.0
+            .iter()
+            .find(|i| i.entity.key == key)
+            .unwrap_or_else(|| panic!("{key} is in the fixture"))
+            .payload
+            .clone()
+    };
+
+    // Epic membership -- what the Contexts work reads, and the whole reason
+    // this widening is ordered before it.
+    assert_eq!(payload("PAY-231")["fields"]["parent"]["key"], "PAY-200");
+    assert_eq!(
+        payload("PAY-231")["fields"]["parent"]["fields"]["issuetype"]["name"],
+        "Epic"
+    );
+    assert!(
+        payload("OPS-77")["fields"].get("parent").is_none(),
+        "an issue with no epic must not acquire one"
+    );
+
+    // Links, at both ends.
+    let blocked = payload("PAY-228");
+    assert_eq!(blocked["fields"]["issuelinks"][0]["type"]["name"], "Blocks");
+    assert_eq!(
+        blocked["fields"]["issuelinks"][0]["inwardIssue"]["key"],
+        "OPS-77"
+    );
+    assert_eq!(
+        payload("OPS-77")["fields"]["issuelinks"][0]["outwardIssue"]["key"],
+        "PAY-228"
+    );
+    assert_eq!(
+        payload("PAY-240")["fields"]["issuelinks"]
+            .as_array()
+            .expect("the container is served even when empty")
+            .len(),
+        0
+    );
+
+    // Resolution, labels, and the two time fields.
+    assert_eq!(payload("PAY-219")["fields"]["resolution"]["name"], "Done");
+    assert!(payload("PAY-231")["fields"]["resolution"].is_null());
+    assert!(payload("PAY-231")["fields"]["labels"].is_array());
+    assert_eq!(payload("PAY-231")["fields"]["timeoriginalestimate"], 57_600);
+    assert_eq!(payload("PAY-231")["fields"]["timespent"], 16_200);
+    assert!(payload("PAY-240")["fields"]["timespent"].is_null());
+
+    jira.assert_no_violations();
+}
+
+/// The same payload, through the *incremental* path.
+///
+/// `/search` is one query and every run sends the same `fields=`, so this
+/// cannot realistically diverge -- but it is what the backfill's premise
+/// rests on, and stating it here is what makes the premise checked rather
+/// than assumed: an incremental run delivers the widened payload for the
+/// issues it returns, and returns **only** those. Everything else keeps
+/// whatever the mirror last stored, which is what the cursor-less backfill
+/// exists to repair.
+#[tokio::test]
+async fn an_incremental_run_delivers_the_widened_payload_for_what_it_returns() {
+    let jira = spawn_mock_jira().await;
+    let source = source(&jira.base_url(), serde_json::json!({}));
+    let (_, cursor) = sync_all(source.as_ref(), None).await;
+
+    jira.touch_issue("PAY-228");
+    let mut sink = VecSink(Vec::new());
+    source.sync(Some(cursor), &mut sink).await.unwrap();
+
+    assert_eq!(sink.0.len(), 1, "only the touched issue comes back");
+    assert_eq!(sink.0[0].entity.key, "PAY-228");
+    assert_eq!(
+        sink.0[0].payload["fields"]["issuelinks"][0]["inwardIssue"]["key"], "OPS-77",
+        "an incremental run sends the same fields= as a full one"
+    );
+    assert_eq!(sink.0[0].payload["fields"]["parent"]["key"], "PAY-200");
+    jira.assert_no_violations();
+}

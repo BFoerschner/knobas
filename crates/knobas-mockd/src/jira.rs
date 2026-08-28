@@ -157,6 +157,17 @@ pub(crate) struct FieldSel {
 
 /// Everything `*navigable` covers: the whole issue except the two collections
 /// Jira also keeps off the default projection.
+///
+/// **Widened in issue #32.** The first ten are what M1 served, and for a while
+/// they were also the whole of what `knobas-source-jira`'s `BASE_FIELDS`
+/// asked for -- because asking for anything else was a 400 here. That is the
+/// dependency the wrong way round: a mock's coverage was deciding what
+/// production fetched, so the mirror's `payload` was missing epic membership,
+/// links and resolution on every issue knobas had ever synced. The six below
+/// close it. Each is served from the fixture and nothing here is invented
+/// (see the transcription table in [`crate::state`]); the set stays *closed*,
+/// so deviation 5 is widened rather than retired and a name mockd does not
+/// serve is still a 400 plus an `UnknownField` violation.
 const NAVIGABLE: &[&str] = &[
     "summary",
     "description",
@@ -168,6 +179,12 @@ const NAVIGABLE: &[&str] = &[
     "project",
     "created",
     "updated",
+    "labels",
+    "parent",
+    "resolution",
+    "issuelinks",
+    "timeoriginalestimate",
+    "timespent",
 ];
 const NON_NAVIGABLE: &[&str] = &["comment", "worklog"];
 
@@ -257,6 +274,59 @@ fn status_json(status: &str) -> Value {
         "id": id,
         "statusCategory": { "key": cat_key, "name": cat_name },
     })
+}
+
+/// The resolution a DC instance with the default workflow would report.
+///
+/// Jira sets a resolution when and only when an issue reaches a status in the
+/// `done` category, so this is read off [`status_json`]'s own category rather
+/// than off a second list of status names -- two lists would be two answers to
+/// "is this issue finished".
+fn resolution_json(status: &str) -> Value {
+    if status_json(status)["statusCategory"]["key"] == "done" {
+        json!({ "name": "Done", "id": "10000" })
+    } else {
+        Value::Null
+    }
+}
+
+/// The abbreviated issue Jira nests inside `parent` and inside each
+/// `issuelinks` entry: identity plus the handful of fields it carries.
+fn issue_ref_json(base: &str, r: &crate::state::JiraIssueRef) -> Value {
+    json!({
+        "id": r.id.to_string(),
+        "key": r.key,
+        "self": format!("{base}/rest/api/2/issue/{}", r.id),
+        "fields": {
+            "summary": r.summary,
+            "issuetype": { "name": r.issue_type, "subtask": false },
+            "status": status_json(&r.status),
+            "priority": r.priority.as_ref().map_or(Value::Null, |p| json!({ "name": p })),
+        },
+    })
+}
+
+/// One `issuelinks` entry. The link *type* is the same object at both ends;
+/// which of `inwardIssue` / `outwardIssue` is present is what says which end
+/// this is, and exactly one of them ever is.
+fn issue_link_json(base: &str, l: &crate::state::JiraLink) -> Value {
+    let mut out = json!({
+        "id": l.id.to_string(),
+        "self": format!("{base}/rest/api/2/issueLink/{}", l.id),
+        "type": {
+            "id": "10000",
+            "name": "Blocks",
+            "inward": "is blocked by",
+            "outward": "blocks",
+        },
+    });
+    let side = if l.inward {
+        "inwardIssue"
+    } else {
+        "outwardIssue"
+    };
+    out[side] = issue_ref_json(base, &l.other);
+    out
 }
 
 /// Jira's human-readable duration: `16200` -> `"4h 30m"`.
@@ -397,6 +467,48 @@ pub(crate) fn issue_json(
     }
     if fields.has("updated") {
         f.insert("updated".into(), json!(jira_date(issue.updated, off)));
+    }
+    if fields.has("labels") {
+        // Always empty: the dataset names no labels, and mockd inventing some
+        // would put them in `payload` and in the search index (the #28 ruling).
+        f.insert("labels".into(), json!([]));
+    }
+    if fields.has("parent") {
+        // Absent, not null, where there is no epic -- which is how Jira
+        // serves an issue with no parent, and why a reader can test for the
+        // key rather than having to distinguish null from missing.
+        if let Some(p) = &issue.parent {
+            f.insert("parent".into(), issue_ref_json(base, p));
+        }
+    }
+    if fields.has("resolution") {
+        f.insert("resolution".into(), resolution_json(&issue.status));
+    }
+    if fields.has("issuelinks") {
+        f.insert(
+            "issuelinks".into(),
+            Value::Array(
+                issue
+                    .links
+                    .iter()
+                    .map(|l| issue_link_json(base, l))
+                    .collect(),
+            ),
+        );
+    }
+    if fields.has("timeoriginalestimate") {
+        f.insert(
+            "timeoriginalestimate".into(),
+            issue
+                .original_estimate_secs
+                .map_or(Value::Null, |s| json!(s)),
+        );
+    }
+    if fields.has("timespent") {
+        f.insert(
+            "timespent".into(),
+            issue.time_spent_secs().map_or(Value::Null, |s| json!(s)),
+        );
     }
     if fields.has("comment") {
         f.insert(

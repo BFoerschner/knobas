@@ -45,18 +45,39 @@ use crate::{JiraConfig, time::parse_jira_time};
 /// set. `comment` and `worklog` are in the list -- neither is navigable -- so
 /// the common case costs one request per page instead of one per issue.
 ///
-/// **Why exactly these twelve.** `fields=` accepts any field a Jira instance
-/// has, and a wider list (`labels`, `resolution`, `parent`, `issuelinks`,
-/// `components`, `fixVersions`, the time-tracking trio) would enrich `payload`
-/// on a real instance. It would also be a request no test in this workspace
-/// can certify: `knobas-mockd` validates `fields=` against the closed set its
-/// WADL-derived fixture actually serves, and answers anything else with a 400
-/// and a recorded `UnknownField` violation. Shipping an uncertified query
-/// parameter is precisely what the mockd gate exists to prevent, so the list
-/// stops where the certification stops. Widening it is one constant here plus
-/// one constant in mockd, in that order.
+/// **Why these eighteen (issue #32).** This list used to stop after twelve,
+/// and the reason it gave was the wrong way round: `knobas-mockd` validated
+/// `fields=` against a closed set, so anything wider was a 400 plus a recorded
+/// `UnknownField` violation, and the list "stopped where the certification
+/// stopped". That makes a mock's coverage decide what production fetches. The
+/// mock is there to certify the query, not to bound it, so mockd's set was
+/// widened first (its deviation 5) and this follows.
+///
+/// The six that came back are `labels`, `parent`, `resolution`, `issuelinks`,
+/// `timeoriginalestimate` and `timespent`. The reader is **`payload`**: spec
+/// §3a keeps the raw record precisely so a later, smarter mapping can
+/// re-project existing data without re-syncing, and the §3a generic detail
+/// view renders out of it. So the TeamCity rule -- ask for nothing no reader
+/// looks at -- lands differently here: a name left out of this list is not a
+/// slightly larger response saved, it is data the mirror never holds, and
+/// recovering it costs a full re-fetch of every issue in the source. `parent`
+/// in particular is where epic membership lives, which is what the Contexts
+/// work reads.
+///
+/// `components`, `fixVersions` and `timeestimate` are still out, and now for
+/// their own reason rather than for mockd's: the Tidewater fixture records no
+/// source for any of them, so mockd would have to invent one, and an invented
+/// value reaches `payload` and the search index as if the dataset had said it
+/// (the #28 ruling). They are one fixture field away, not one constant away.
+///
+/// Certified at the wire, not here: `tests/mockd.rs`'s
+/// `a_synced_issue_carries_epic_membership_links_and_resolution` runs this
+/// exact query against the mock and ends in `assert_no_violations()`, so a
+/// name this instance would refuse fails there rather than silently thinning
+/// the payload in production.
 const BASE_FIELDS: &str = "summary,description,issuetype,status,priority,assignee,reporter,\
-project,created,updated,comment,worklog";
+project,created,updated,labels,parent,resolution,issuelinks,timeoriginalestimate,timespent,\
+comment,worklog";
 
 /// A stop so a server that keeps reporting "more" cannot spin a run forever.
 /// At the default page size this is half a million issues.
@@ -1168,6 +1189,89 @@ mod tests {
                 "{required} missing from {fields}"
             );
         }
+    }
+
+    /// The other direction, and the half nothing else can see: a name that is
+    /// **out** of the list, and the reason it is out.
+    ///
+    /// The positive half of #32's widening is certified at the wire --
+    /// `tests/mockd.rs` runs this exact query against the mock and ends in
+    /// `assert_no_violations()`, which is the only thing that can say the
+    /// server would accept it. What no wire test can say is why a name is
+    /// absent, and that is what went wrong the first time: the list stopped at
+    /// twelve because mockd's closed set stopped there, so a mock's coverage
+    /// was silently deciding what production fetched.
+    ///
+    /// Each row below is paired with its own reason, on the #33 precedent,
+    /// because the reasons differ and a shared message would be false about
+    /// at least one of them. **The fix for any of these is a fixture field,
+    /// not this list**: adding the name alone makes mockd invent the value,
+    /// and an invented value reaches `payload` and the search index as if the
+    /// dataset had said it (the #28 ruling).
+    #[test]
+    fn the_field_list_asks_for_nothing_the_fixture_cannot_answer() {
+        let config = cfg(serde_json::json!({}));
+        let api = FakeApi::default();
+        let run = SyncRun {
+            api: &api,
+            cfg: &config,
+            source_id: "jira",
+            base_url: "https://jira.example",
+        };
+        let fields = run.fields();
+        let names: Vec<&str> = fields.split(',').collect();
+
+        for (missing, why) in [
+            (
+                "components",
+                "no ticket in fixtures/tidewater/work.json names a component, so mockd would \
+                 have to invent one",
+            ),
+            (
+                "fixVersions",
+                "the fixture records no releases at all, so mockd would have to invent one",
+            ),
+            (
+                "timeestimate",
+                "the fixture records an estimate and worklogs but no *remaining* estimate, and \
+                 deriving one would be arithmetic mockd made up",
+            ),
+        ] {
+            assert!(
+                !names.contains(&missing),
+                "{missing} is in {fields}: {why}. mockd answers it with 400 + an UnknownField \
+                 violation, so tests/mockd.rs fails too -- but fix it by giving the fixture the \
+                 field, not by widening mockd's set around an invented value."
+            );
+        }
+
+        // ...and the widened six, each named with what its absence costs.
+        // Absence is not a smaller response here: `payload` is the reader
+        // (spec §3a), so a name left out is data the mirror never holds and
+        // a full re-fetch of the source is the only way back.
+        for (needed, cost) in [
+            ("parent", "epic membership, which the Contexts work reads"),
+            ("issuelinks", "the blocks/blocked-by graph"),
+            ("resolution", "whether a done issue was fixed or dropped"),
+            ("labels", "every label-driven view and filter"),
+            ("timeoriginalestimate", "the estimate side of time tracking"),
+            ("timespent", "the logged side of time tracking"),
+        ] {
+            assert!(
+                names.contains(&needed),
+                "{needed} is missing from {fields}, so the mirror loses {cost} for every issue \
+                 -- and gets it back only by re-syncing the whole source (#32)"
+            );
+        }
+
+        // No whitespace and no duplicates: this goes into a query string
+        // verbatim, and a repeated name is a widening that was applied twice.
+        assert!(!fields.contains(' '), "{fields}");
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        let before = sorted.len();
+        sorted.dedup();
+        assert_eq!(before, sorted.len(), "a name appears twice in {fields}");
     }
 
     /// The configured Epic Link custom field rides along in `fields=`, which is

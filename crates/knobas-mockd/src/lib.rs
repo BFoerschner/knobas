@@ -38,6 +38,17 @@
 //! 5. **`fields=` and `expand=` values are validated against a closed set**;
 //!    real Jira ignores names it does not know. A typo that silently drops a
 //!    field from a sync is worth a 400.
+//!
+//!    **What this deviation must not become (issue #32).** A closed set here
+//!    is a gate on the *adapter*; it is not a budget for what production is
+//!    allowed to fetch. For a while it was read as one — `BASE_FIELDS` in
+//!    `knobas-source-jira` stopped exactly where this list stopped, and said
+//!    so — and the consequence was a mirror whose `payload` carried no epic
+//!    membership, no links and no resolution for any issue knobas had ever
+//!    synced. The dependency runs the other way: production decides what it
+//!    needs, and this set widens to serve it from the fixture. Widening it is
+//!    one constant here (`jira::NAVIGABLE`) plus one in the adapter, mockd
+//!    first.
 //! 6. **TeamCity `fields=` is mandatory on the collections, strict about
 //!    names, and only `$long` of its presets is honoured.** Real TeamCity has a
 //!    default projection and silently drops names it does not know; mockd
@@ -85,6 +96,16 @@
 //!     deviation 11 one level down — a null carries no key set, so a *sub*-name
 //!     of it cannot be validated: `triggered(user(nosuchfield))` is a 400
 //!     against an answer containing 1188 and a 200 against one that does not.
+//! 13. **An issue's `parent` is its epic.** The fixture records epic
+//!     membership (`Ticket::epic`) and no sub-tasks at all, so `fields.parent`
+//!     carries the epic — the spelling a next-gen or a recent company-managed
+//!     project serves, and the one issue #32 ratified for reading epic
+//!     membership. A *classic* Data Center project keeps that relationship in
+//!     a custom field instead, which knobas configures separately
+//!     (`JiraConfig::epic_link_field`). mockd serves one spelling because the
+//!     dataset records one relationship, not because the other does not exist;
+//!     an adapter that reads only `parent` will find nothing on a classic
+//!     instance and this mock cannot tell it so.
 //!
 //! ## The shared credentials
 //!

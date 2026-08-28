@@ -297,6 +297,70 @@ pub async fn run_from_stored_cursor(
     run_inner(pool, Host::Dedicated(conn), source, CursorSource::Stored).await
 }
 
+/// **Backfill** `source`: hand the adapter no position at all, whatever is
+/// stored, and do not sweep.
+///
+/// A backfill is a deliberate full sync whose purpose is re-fetching *unchanged*
+/// items after the fetched payload widened (CONTEXT.md). It exists because
+/// nothing else can do that job: an incremental run re-fetches what changed
+/// **upstream**, and widening a `fields=` list changes nothing upstream, so an
+/// item nobody has touched keeps the narrower record for ever. Issue #32 is the
+/// worked example -- Jira's `BASE_FIELDS` gained `parent`, `issuelinks`,
+/// `resolution` and three more, and every already-mirrored issue needed
+/// re-reading before epic membership could be built on top of `payload`.
+///
+/// # Why it does not sweep
+///
+/// This is the one way a backfill is not simply [`run_once`] with `None`, and
+/// it is deliberate. The sweep tombstones every row of an exhaustive kind that
+/// a cursor-less run did not return (ADR-0003) -- right for a source's *first*
+/// sync, wrong here for two reasons that compound:
+///
+/// * **It is not what was asked for.** An operator asking for a wider payload
+///   is not asking the engine to judge which items still exist. A backfill that
+///   reconciles as a side effect makes "re-read the source" an operation nobody
+///   can run without also accepting deletions they never inspected.
+/// * **The failure mode has no error to catch.** A credential that quietly
+///   loses sight of a project, or a `projects` list naming one that was
+///   archived, answers with a *smaller corpus and a 200*. There is no status
+///   code, no `SourceError`, nothing for a classification to branch on -- and
+///   the sweep's own emptiness guard does not help, because the other projects
+///   still emitted plenty. Before this entry point existed, a cursor-less run
+///   in a live installation was a source's first sync and *Load demo data*,
+///   which bounded the exposure; making backfills routine removes that bound.
+///   A stale row is the cheap error and a tombstoned corpus is not, which is
+///   the same trade *(2)* under [`run_once`]'s *Limitations* already makes.
+///
+/// Reconciliation therefore stays where it was: a source's first sync, and
+/// [`run_once`] with an explicit `None`.
+///
+/// That is also why a run started this way is logged under
+/// [`SyncTrigger::Backfill`] rather than `Manual` (`scheduler::Scheduler::backfill`):
+/// the sweep is the one behaviour a backfill *removes*, so "which run produced
+/// this tombstone count" has to be answerable from the log, and it is not if a
+/// backfill and *Sync now* write the same word.
+///
+/// [`SyncTrigger::Backfill`]: crate::run_log::SyncTrigger::Backfill
+///
+/// The position the run comes back with **is** stored, exactly as any other
+/// run's is, so the next scheduled run is incremental again. Clearing the
+/// stored cursor instead -- the obvious spelling of "run without one" -- would
+/// leave the next scheduled run a full sweeping sync, which is precisely what
+/// the paragraph above refuses.
+///
+/// # Errors
+///
+/// As [`run_from_stored_cursor`], including [`SyncError::NotConfigured`]: a
+/// backfill needs somewhere to store the position it comes back with, and the
+/// refusal happens before the source is read.
+pub async fn run_backfill(
+    conn: &mut PgConnection,
+    pool: &PgPool,
+    source: &dyn Source,
+) -> Result<SyncReport, SyncError> {
+    run_inner(pool, Host::Dedicated(conn), source, CursorSource::Backfill).await
+}
+
 /// Where a run's transaction -- and therefore its advisory lock -- lives.
 ///
 /// The distinction exists because of interfaces §10.6(c). It is not a
@@ -333,6 +397,40 @@ enum CursorSource {
     Explicit(Option<Cursor>),
     /// Read from `knobas.source_config` **inside the run's own lock**.
     Stored,
+    /// [`run_backfill`]: the stored row is read (for the same
+    /// [`SyncError::NotConfigured`] refusal `Stored` makes) and then
+    /// deliberately not used, and the sweep is off.
+    ///
+    /// This is what splits two things that were one: *the adapter was handed
+    /// no position* and *this run may reconcile*. `Explicit(None)` and
+    /// `Stored`-with-nothing-stored are both, a backfill is only the first.
+    Backfill,
+}
+
+impl CursorSource {
+    /// Whether a run started this way is allowed to tombstone what it did not
+    /// return -- assuming it also turns out to be cursor-less, which is
+    /// checked separately in `run_locked`.
+    ///
+    /// Both conditions, never one: dropping the cursor-less half sweeps on an
+    /// incremental run, and dropping this half sweeps on a backfill. The
+    /// reasons they exist are different and neither implies the other, which
+    /// is why they are two expressions and not one flag.
+    fn may_sweep(&self) -> bool {
+        !matches!(self, CursorSource::Backfill)
+    }
+
+    /// Whether the position stored for the source is read for the
+    /// [`SyncError::NotConfigured`] refusal and then thrown away, rather than
+    /// resumed from.
+    ///
+    /// A method beside [`Self::may_sweep`] rather than a `matches!` inlined in
+    /// `run_locked`, because the two are the whole of what a backfill *is* and
+    /// a reader should find them together. They are still two, not one flag:
+    /// each has its own reason and neither implies the other.
+    fn discards_the_stored_position(&self) -> bool {
+        matches!(self, CursorSource::Backfill)
+    }
 }
 
 async fn run_inner(
@@ -469,27 +567,43 @@ async fn run_locked(
         .await?;
 
     // Inside the lock, deliberately: see `run_from_stored_cursor`.
-    let cursor = match from {
-        CursorSource::Explicit(cursor) => cursor,
-        CursorSource::Stored => {
+    // Read before `from` is consumed below, and kept apart on purpose: what a
+    // run resumes from and whether it may reconcile are two questions, and a
+    // backfill answers them differently (see `CursorSource::may_sweep`).
+    let may_sweep = from.may_sweep();
+    let discards_the_stored_position = from.discards_the_stored_position();
+    // `cursor` is what the adapter is handed; `previous` is where the source
+    // stood before this run. The same value for every run but a backfill,
+    // which is the point of separating them: a backfill *has* a position and
+    // deliberately does not resume from it, and reporting `previous` as `None`
+    // there would tell the activity log that a source with a stored position
+    // had none.
+    let (cursor, previous) = match from {
+        CursorSource::Explicit(cursor) => (cursor.clone(), cursor),
+        CursorSource::Stored | CursorSource::Backfill => {
             let row: Option<(Option<Cursor>,)> =
                 sqlx::query_as("select cursor from knobas.source_config where id = $1")
                     .bind(source_id)
                     .fetch_optional(&mut **tx)
                     .await?;
-            match row {
-                Some((cursor,)) => cursor,
-                // Nothing was read from the source and nothing written; the
-                // caller rolls back, which is what releases the lock.
-                None => {
-                    return Err(SyncError::NotConfigured {
-                        id: source_id.to_owned(),
-                    });
-                }
+            // Nothing was read from the source and nothing written; the caller
+            // rolls back, which is what releases the lock.
+            let Some((stored,)) = row else {
+                return Err(SyncError::NotConfigured {
+                    id: source_id.to_owned(),
+                });
+            };
+            // A backfill reads the row for that refusal -- so a source with
+            // nowhere to store a position costs no network traffic -- and then
+            // throws the position away. That is the whole of what makes it
+            // cursor-less.
+            if discards_the_stored_position {
+                (None, stored)
+            } else {
+                (stored.clone(), stored)
             }
         }
     };
-    let previous = cursor.clone();
     let full_sync = cursor.is_none();
 
     let (cursor, upserted, deleted, emitted) = {
@@ -504,8 +618,14 @@ async fn run_locked(
     // Reconcile what a full sync did not see. Inside the same transaction as
     // the writes, so a failure rolls the tombstones back with them.
     //
-    // Three conditions, and dropping any one of them alone is a bug:
+    // Four conditions, and dropping any one of them alone is a bug:
     //  * `full_sync` -- an incremental run has not seen the whole source;
+    //  * `may_sweep` -- a **backfill** is a cursor-less run that must not
+    //    reconcile. It has seen the whole source, so `full_sync` cannot stand
+    //    in for this: the reason is that reconciling is not what was asked for,
+    //    and that the way a backfill goes wrong (a credential that quietly
+    //    narrowed answers with a smaller corpus and a 200) produces no error
+    //    for anything to catch. See `run_backfill`;
     //  * `exhaustive` -- a *bounded* full sync (TeamCity: newest N builds per
     //    configuration) does not return everything, so absence is not deletion.
     //    Read **per kind** (ADR-0003): one adapter routinely walks some kinds
@@ -529,7 +649,7 @@ async fn run_locked(
     // correctness property here rests on the intersection above; a reader
     // looking for what stops the sweep firing should look there and not at
     // this condition.
-    let swept = if full_sync && !sweep_kinds.is_empty() {
+    let swept = if full_sync && may_sweep && !sweep_kinds.is_empty() {
         sqlx::query(SWEEP)
             .bind(source_id)
             .bind(&sweep_kinds)
