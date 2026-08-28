@@ -143,8 +143,14 @@ impl SourceSyncStatus {
 pub struct RunCounts {
     pub upserted: i64,
     pub deleted: i64,
-    /// Rows the full-sync sweep tombstoned -- `SyncReport::swept`. Zero for an
-    /// incremental run and for an adapter whose full sync is not exhaustive.
+    /// Rows the full-sync sweep tombstoned -- `SyncReport::swept`. Zero for
+    /// an incremental run, and per kind for any kind that did not declare
+    /// `full_sync_exhaustive` or emitted nothing this run.
+    ///
+    /// **Not per adapter.** ADR-0003 moved the gate onto the kind, so there is
+    /// no answer of the form "this source is not exhaustive" any more: one
+    /// Gitea run sweeps its repos and branches while sparing its commits and
+    /// prs, and contributes a non-zero count here.
     pub swept: i64,
     pub cursor_after: Option<String>,
 }

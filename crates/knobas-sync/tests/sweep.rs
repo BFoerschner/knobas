@@ -473,4 +473,22 @@ async fn a_kind_that_emitted_nothing_is_not_swept_even_when_another_kind_did() {
     assert!(deleted_at(&pool, &format!("{id}:H-repo-1")).await.is_none());
     assert!(deleted_at(&pool, &format!("{id}:H-repo-2")).await.is_none());
     assert_eq!(live_count(&pool, &id).await, 3);
+
+    // And it does not resolve itself on the next run, or the one after. The
+    // guard is stateless -- it asks only what *this* run emitted -- so a kind
+    // whose corpus has genuinely gone to zero keeps every row live for as long
+    // as it stays empty. That is the documented residual on `run_once`
+    // (*Limitations*, case 2) and it is pinned here so the doc and the
+    // behaviour cannot drift: close the gap and this loop fails, which is the
+    // point.
+    for round in 3..=4 {
+        a_moment_passes().await;
+        let again = knobas_sync::run_once(&pool, &src, None).await.unwrap();
+        assert_eq!(again.swept, 0, "round {round}");
+        assert!(
+            deleted_at(&pool, &format!("{id}:H-repo-2")).await.is_none(),
+            "round {round}: a repo row of an empty-listing kind is never retired"
+        );
+        assert_eq!(live_count(&pool, &id).await, 3, "round {round}");
+    }
 }

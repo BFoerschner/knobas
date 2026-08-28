@@ -113,7 +113,10 @@ export interface SourceRef {
   adapter_kind: string;
 }
 
-/** An adapter's display metadata for one kind — `knobas_source::KindInfo`. */
+/**
+ * An adapter's metadata for one kind — `knobas_source::KindInfo`: how to
+ * display it, and whether a full sync of it is exhaustive.
+ */
 export interface KindInfo {
   id: string;
   label: string;

@@ -80,8 +80,8 @@ pub struct SyncReport {
     /// Rows a **full** sync tombstoned because this run did not see them
     /// (hard-delete reconciliation). Counts only rows of a kind that declared
     /// `full_sync_exhaustive` *and* emitted something this run, so it is 0 for
-    /// an incremental run, for a source with no exhaustive kind, and for a
-    /// kind that emitted nothing -- see [`SWEEP`].
+    /// an incremental run, for a kind that did not declare the flag, and for a
+    /// kind that declared it and emitted nothing -- see [`SWEEP`].
     ///
     /// A run over a source with both kinds of kind reports one number for the
     /// exhaustive half; the budgeted half is never in it. What that leaves
@@ -181,22 +181,45 @@ fn check_source_id(id: &str) -> Result<(), SyncError> {
 ///
 /// # Limitations
 ///
-/// **Hard deletes in a non-exhaustive kind are inexpressible.** A full sync
-/// reconciles only the kinds that declared `full_sync_exhaustive` (ADR-0003):
-/// for those, an item the source stopped mentioning is tombstoned by the
-/// sweep. For every other kind -- Gitea's budgeted `commit` and `pr`,
-/// TeamCity's windowed `build` and `build_config` -- "stopped being returned"
-/// and "deleted upstream" are the same observation, so the row stays live and
-/// the mirror keeps what it last saw.
+/// **Hard deletes are inexpressible in three cases**, and reading only the
+/// first is how a reader comes away expecting the sweep to fire far more often
+/// than it does. Each is deliberate, and [`SyncReport::swept`] states the same
+/// three rules from the other side.
 ///
-/// This is a documented residual, not an oversight. The engine sees only what
-/// the adapter pushes; the only ways to close it are a reconcile call on the
-/// `Sink` SPI (rejected in ADR-0003 -- `Sink` staying write-only is the
-/// verified reason the tombstone deferral was sound) or an adapter that stops
-/// budgeting the kind, which is a decision about that adapter's read path.
-/// Until then a stale row of a budgeted kind is the accepted cost, and it is
-/// the cheap side of the trade: sweeping such a kind would tombstone
-/// everything past the cap on every full sync.
+/// **(1) A non-exhaustive kind is never swept.** A full sync reconciles only
+/// the kinds that declared `full_sync_exhaustive` (ADR-0003). For every other
+/// kind -- Gitea's budgeted `commit` and `pr`, TeamCity's windowed `build` and
+/// `build_config` -- "stopped being returned" and "deleted upstream" are the
+/// same observation, so the row stays live and the mirror keeps what it last
+/// saw. The ways to close it are a reconcile call on the `Sink` SPI (rejected
+/// in ADR-0003 -- `Sink` staying write-only is the verified reason the
+/// tombstone deferral was sound) or an adapter that stops budgeting the kind,
+/// which is a decision about that adapter's read path. Until then the stale
+/// row is the accepted cost, and it is the cheap side of the trade: sweeping a
+/// budgeted kind would tombstone everything past the cap on every full sync.
+///
+/// **(2) An exhaustive kind that emitted nothing is never swept either** --
+/// not even when the same run emitted plenty of another kind. That is the
+/// emptiness guard in `run_locked`, and its consequence is that a kind whose
+/// corpus goes to *zero* upstream keeps every row of it live indefinitely: a
+/// Gitea source whose last repository is deleted, or whose `owners[]` narrows
+/// to nothing, goes on holding that `repo` row and the branch rows under it,
+/// however many full syncs run afterwards.
+///
+/// This is the deliberate side of a trade the engine cannot win. An empty
+/// listing and a credential that quietly lost its scope are the same 200 with
+/// the same empty body, so the alternative is tombstoning a whole kind on a
+/// token change. A stale row is the cheap error; a wiped corpus is not.
+///
+/// **(3) An incremental run reconciles nothing, of any kind.** The sweep is
+/// gated on `cursor.is_none()`, and a run that resumed from a position has not
+/// seen the whole source. This bounds (1) and (2) rather than adding to them,
+/// but it is the one that decides how often any of this happens at all:
+/// scheduled runs go through [`run_from_stored_cursor`], so in a running
+/// installation a cursor-less run is a source's *first* sync and *Load demo
+/// data*, and little else. A repository deleted upstream is therefore retired
+/// the next time that source syncs in full -- which, absent a cleared cursor,
+/// may be never.
 ///
 /// # Errors
 ///
@@ -493,8 +516,17 @@ async fn run_locked(
     //    the branch walk succeeded would otherwise pass a source-wide test.
     //
     // The two sets are intersected rather than checked in sequence, so a kind
-    // only reaches the sweep on both counts at once.
+    // only reaches the sweep on both counts at once. Intersection is the only
+    // operator that is safe in both directions: `exhaustive` alone drops the
+    // emptiness guard, `emitted` alone drops the gate and sweeps budgeted
+    // kinds, and a union is both bugs at once.
     let sweep_kinds: Vec<String> = emitted.intersection(&exhaustive).cloned().collect();
+    // `!sweep_kinds.is_empty()` is a **saved round trip, not a safety check**,
+    // and no test covers it -- `i.kind = any('{}')` matches nothing, so
+    // dropping it changes only whether an empty statement is issued. Every
+    // correctness property here rests on the intersection above; a reader
+    // looking for what stops the sweep firing should look there and not at
+    // this condition.
     let swept = if full_sync && !sweep_kinds.is_empty() {
         sqlx::query(SWEEP)
             .bind(source_id)

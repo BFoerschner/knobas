@@ -64,9 +64,14 @@
 //! The per-kind declaration closes the two that mattered:
 //!
 //! * **A repository** that stops appearing in the listing is now retired by the
-//!   engine's sweep after any cursor-less run. (Its cursor entry was already
-//!   dropped the next time the run emitted anything; the live `repo` row is
-//!   what had no way to go.)
+//!   engine's sweep after any cursor-less run **that emitted at least one
+//!   repository**. (Its cursor entry was already dropped the next time the run
+//!   emitted anything; the live `repo` row is what had no way to go.) The
+//!   qualifier is the engine's emptiness guard and it is load-bearing here: a
+//!   listing that came back empty is exactly what a token which quietly lost
+//!   its repo scope returns, so a source whose *last* repository is deleted --
+//!   or whose `owners[]` narrows to nothing -- keeps that row, and the branch
+//!   rows under it, indefinitely. See `knobas_sync::run_once`, *Limitations*.
 //! * **A branch** is tombstoned *by this adapter* only when the run can see
 //!   that it is gone, and the only thing that remembers a branch is the
 //!   previous cursor (`before.branches`, in `branches` below). A run holding no
