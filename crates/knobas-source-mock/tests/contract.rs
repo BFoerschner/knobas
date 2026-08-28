@@ -336,7 +336,7 @@ async fn faults_reach_test_connection_sync_and_write() {
 fn is_mapped(fault: Fault, err: &SourceError) -> bool {
     matches!(
         (fault, err),
-        (Fault::Unauthorized, SourceError::Unauthorized)
+        (Fault::Unauthorized, SourceError::Unauthorized { .. })
             | (Fault::Unreachable, SourceError::Unreachable(_))
     )
 }

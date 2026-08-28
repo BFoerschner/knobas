@@ -16,7 +16,12 @@
 //!   request on the wire. [`HttpClient::request`] hands back a [`Request`],
 //!   which has no `send` of its own -- see that type for why.
 //! * **One fault mapping** ([`classify`]), because `Unauthorized` is the fault
-//!   the user is asked to act on.
+//!   the user is asked to act on -- carrying the **status** it came from, so an
+//!   adapter can tell a dead credential (401) from one object it may not read
+//!   (403) without a second request (ADR-0004).
+//! * **One place a failing body is read**: the caller's
+//!   [`BodyMessage`](classify::BodyMessage), consulted inside [`HttpClient::send`]
+//!   where the body still exists.
 //! * **`User-Agent: knobas/<version> (<adapter_kind>/<adapter_version>)`** --
 //!   an admin reading their access log can tell what is calling them.
 
@@ -33,7 +38,7 @@ use governor::{Quota, RateLimiter};
 use knobas_source::SourceError;
 use reqwest::header::{ACCEPT, HeaderMap, HeaderValue, USER_AGENT};
 
-pub use classify::{reqwest_error, status_error};
+pub use classify::{BodyMessage, reqwest_error, status_error};
 
 // Every type this crate's signatures name, re-exported: an adapter depends on
 // `knobas-http` and on nothing else for its transport. Otherwise all three
@@ -141,6 +146,16 @@ pub struct HttpConfig {
     pub connect_timeout: Duration,
     /// How long to wait for a whole request, connection included.
     pub request_timeout: Duration,
+    /// How this adapter reads its own error envelope out of a failing response
+    /// body (ADR-0004), or `None` to keep the raw excerpt.
+    ///
+    /// The body is consumed inside [`HttpClient::send`], the only door onto the
+    /// wire, so this is the adapter's one chance at it. Every source knobas
+    /// reads has an envelope of its own -- Jira's `{"errorMessages":[…]}`,
+    /// Gitea's `{"message":…}`, TeamCity's plain text -- and the commonest sync
+    /// failure of all, a mistyped filter, is a 400 whose body is the exact
+    /// sentence the user needs.
+    pub body_message: Option<classify::BodyMessage>,
 }
 
 impl Default for HttpConfig {
@@ -154,6 +169,7 @@ impl Default for HttpConfig {
             burst: 10,
             connect_timeout: Duration::from_secs(10),
             request_timeout: Duration::from_secs(30),
+            body_message: None,
         }
     }
 }
@@ -168,6 +184,9 @@ pub struct HttpClient {
     base_url: String,
     auth: Auth,
     limiter: Arc<Limiter>,
+    /// The adapter's reading of a failing response body; see
+    /// [`HttpConfig::body_message`].
+    body_message: Option<classify::BodyMessage>,
 }
 
 impl std::fmt::Debug for HttpClient {
@@ -192,10 +211,10 @@ impl HttpClient {
     /// must surface when the source is saved rather than mid-sync.
     pub fn new(config: HttpConfig) -> Result<Self, SourceError> {
         let parsed = url::Url::parse(&config.base_url).map_err(|error| {
-            SourceError::Protocol(format!("base url {:?}: {error}", config.base_url))
+            SourceError::protocol(format!("base url {:?}: {error}", config.base_url))
         })?;
         if !matches!(parsed.scheme(), "http" | "https") {
-            return Err(SourceError::Protocol(format!(
+            return Err(SourceError::protocol(format!(
                 "base url {:?} is not http(s)",
                 config.base_url
             )));
@@ -214,7 +233,7 @@ impl HttpClient {
         headers.insert(
             USER_AGENT,
             HeaderValue::from_str(&agent)
-                .map_err(|error| SourceError::Protocol(format!("user agent: {error}")))?,
+                .map_err(|error| SourceError::protocol(format!("user agent: {error}")))?,
         );
 
         let client = reqwest::Client::builder()
@@ -231,7 +250,7 @@ impl HttpClient {
             .timeout(config.request_timeout)
             .default_headers(headers)
             .build()
-            .map_err(|error| SourceError::Protocol(format!("building the http client: {error}")))?;
+            .map_err(|error| SourceError::protocol(format!("building the http client: {error}")))?;
 
         let quota = Quota::per_second(nonzero(config.requests_per_second))
             .allow_burst(nonzero(config.burst));
@@ -242,6 +261,7 @@ impl HttpClient {
             base_url: config.base_url.trim_end_matches('/').to_owned(),
             auth: config.auth,
             limiter: Arc::new(RateLimiter::direct(quota)),
+            body_message: config.body_message,
         })
     }
 
@@ -328,7 +348,8 @@ impl HttpClient {
                     let transient = retry::status_is_transient(status.as_u16());
                     // Read before the body is consumed to build the message.
                     let asked_for = classify::parse_retry_after(response.headers());
-                    let error = classify::status_error(status, &body_of(response).await);
+                    let error =
+                        classify::status_error(status, &body_of(response).await, self.body_message);
                     if last || !transient {
                         return Err(error);
                     }
@@ -403,7 +424,7 @@ impl HttpClient {
         response
             .json::<T>()
             .await
-            .map_err(|error| SourceError::Protocol(format!("decoding {path}: {error}")))
+            .map_err(|error| SourceError::protocol(format!("decoding {path}: {error}")))
     }
 }
 
@@ -452,7 +473,7 @@ impl Request {
     pub fn build(self) -> Result<reqwest::Request, SourceError> {
         self.inner
             .build()
-            .map_err(|error| SourceError::Protocol(format!("building the request: {error}")))
+            .map_err(|error| SourceError::protocol(format!("building the request: {error}")))
     }
 }
 

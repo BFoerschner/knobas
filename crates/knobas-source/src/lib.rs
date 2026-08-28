@@ -212,22 +212,91 @@ pub type Cursor = String;
 /// error, so an adapter must classify the same failure the same way whether it
 /// surfaces from [`Source::test_connection`] or mid-[`sync`](Source::sync).
 ///
-/// Every variant carries at most a string, so the error crosses a process
-/// boundary as plain data (spec §3a). The serde form is structural, not the
-/// [`Display`](std::fmt::Display) text thiserror generates: `Unauthorized`
-/// round-trips as the bare variant, the others as `{"Unreachable": "<detail>"}`.
+/// **A failure that came from a response also carries the status it came from**
+/// (ADR-0004). The four fault classes are the *user's* axis and are unchanged
+/// -- 401 and 403 are both `Unauthorized`, which is what puts *Re-enter* on
+/// screen and what a Jira DC CAPTCHA lockout needs -- but the adapter's axis is
+/// finer than that, and had no home: a 401 is a dead credential and ends the
+/// run, a 403 is one object this token may not read, a 404 is one object that
+/// is gone, a 409 from Gitea's `/commits` is an empty repository. Before this
+/// the status was parsed back out of the `HTTP <status>: <body>` message
+/// `knobas-http` had just built, and 401 and 403 could not be told apart at
+/// all. [`status`](Self::status) is now the one way to ask.
+///
+/// Every variant carries at most a string and a status, so the error crosses a
+/// process boundary as plain data (spec §3a). The serde form is structural, not
+/// the [`Display`](std::fmt::Display) text thiserror generates:
+/// `{"Unauthorized": {"status": 401}}`, `{"Unreachable": "<detail>"}`. Both
+/// status fields are `#[serde(default)]`, so a peer that sends none -- an
+/// out-of-process adapter built against an older SPI -- still decodes, as the
+/// adapter that never learned about a status.
 #[derive(Debug, thiserror::Error, serde::Serialize, serde::Deserialize)]
 pub enum SourceError {
+    /// The credential was refused, or there is none to send.
+    ///
+    /// `status` is what the source answered -- `401` for a credential it
+    /// rejected, `403` for a request it refused -- and `None` when the adapter
+    /// raised this without asking anyone, which is the `missing_secret` state
+    /// of interfaces §3.
     #[error("unauthorized")]
-    Unauthorized,
+    Unauthorized {
+        #[serde(default)]
+        status: Option<u16>,
+    },
     #[error("unreachable: {0}")]
     Unreachable(String),
-    #[error("protocol: {0}")]
-    Protocol(String),
+    /// knobas could not make sense of what the source said, or the source said
+    /// no with a status that is not about the credential.
+    ///
+    /// `status` is that status when the failure came from a response, and
+    /// `None` for the adapter's own faults -- an undecodable body, a base URL
+    /// that is not a URL, a configuration that cannot authenticate at all.
+    #[error("protocol: {message}")]
+    Protocol {
+        #[serde(default)]
+        status: Option<u16>,
+        message: String,
+    },
     /// The [`Sink`] rejected an item and the sync was abandoned. Raised by the
     /// sink, propagated -- never manufactured -- by the adapter.
     #[error("sink: {0}")]
     Sink(String),
+}
+
+impl SourceError {
+    /// The HTTP status behind this failure, when it came from one.
+    ///
+    /// `None` for every fault an adapter raised on its own account, and that
+    /// is load-bearing in both directions: a sink failure or a DNS failure
+    /// that read as a 404 would be swallowed as a skipped repository, and a
+    /// 401 that read as nothing would be believed as a refusal of one object
+    /// rather than the death of the credential.
+    #[must_use]
+    pub fn status(&self) -> Option<u16> {
+        match self {
+            Self::Unauthorized { status } | Self::Protocol { status, .. } => *status,
+            Self::Unreachable(_) | Self::Sink(_) => None,
+        }
+    }
+
+    /// The credential was refused and nobody was asked: a missing secret.
+    #[must_use]
+    pub fn unauthorized() -> Self {
+        Self::Unauthorized { status: None }
+    }
+
+    /// A fault of the adapter's own, carrying no status.
+    ///
+    /// Everything that *did* come from a response is built by
+    /// `knobas_http::status_error`, which is the only place a status is
+    /// attached -- so an adapter cannot accidentally claim one.
+    #[must_use]
+    pub fn protocol(message: impl Into<String>) -> Self {
+        Self::Protocol {
+            status: None,
+            message: message.into(),
+        }
+    }
 }
 
 /// A write knobas asks an adapter to perform on the remote system.
@@ -286,7 +355,8 @@ pub trait Source: Send + Sync {
     /// the credential-health poll. The same fault classification as
     /// [`sync`](Source::sync) applies: 401/403 → [`SourceError::Unauthorized`],
     /// connect/DNS/TLS/timeout → [`SourceError::Unreachable`], anything else →
-    /// [`SourceError::Protocol`].
+    /// [`SourceError::Protocol`] -- each carrying the status it came from
+    /// ([`SourceError::status`]), which is what tells 401 from 403.
     async fn test_connection(&self) -> Result<ConnectionInfo, SourceError>;
     /// Push every item changed since `cursor` (None = full sync); return the new cursor.
     ///
@@ -435,12 +505,52 @@ mod tests {
         assert_eq!(json, serde_json::json!({ "Unreachable": "refused" }));
         let back: SourceError = serde_json::from_value(json).unwrap();
         assert!(matches!(back, SourceError::Unreachable(d) if d == "refused"));
-        let back: SourceError = serde_json::from_value(serde_json::json!("Unauthorized")).unwrap();
-        assert_eq!(back.to_string(), "unauthorized");
         let json = serde_json::to_value(SourceError::Sink("pool closed".into())).unwrap();
         assert_eq!(json, serde_json::json!({ "Sink": "pool closed" }));
         let back: SourceError = serde_json::from_value(json).unwrap();
         assert_eq!(back.to_string(), "sink: pool closed");
+
+        // ADR-0004: the status rides along, so an out-of-process adapter's
+        // "this repository is not ours" does not arrive as "this token is
+        // dead". It is the *only* thing that separates them -- both are
+        // `Unauthorized` -- so a hop that dropped it would silently turn every
+        // 403 into a fatal run.
+        let json = serde_json::to_value(SourceError::Unauthorized { status: Some(403) }).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "Unauthorized": { "status": 403 } })
+        );
+        let back: SourceError = serde_json::from_value(json).unwrap();
+        assert_eq!(back.status(), Some(403));
+        assert_eq!(back.to_string(), "unauthorized");
+        let json = serde_json::to_value(SourceError::Protocol {
+            status: Some(409),
+            message: "HTTP 409 Conflict: Git Repository is empty.".to_owned(),
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "Protocol": {
+                    "status": 409,
+                    "message": "HTTP 409 Conflict: Git Repository is empty."
+                }
+            })
+        );
+        let back: SourceError = serde_json::from_value(json).unwrap();
+        assert_eq!(back.status(), Some(409));
+
+        // Both status fields are `#[serde(default)]`, so a peer that sends
+        // none -- an adapter built against an SPI that had no status -- still
+        // decodes, as the fault it is with no status attached.
+        let back: SourceError =
+            serde_json::from_value(serde_json::json!({ "Unauthorized": {} })).unwrap();
+        assert_eq!(back.status(), None);
+        let back: SourceError =
+            serde_json::from_value(serde_json::json!({ "Protocol": { "message": "boom" } }))
+                .unwrap();
+        assert_eq!(back.status(), None);
+        assert_eq!(back.to_string(), "protocol: boom");
     }
 
     /// Write ops travel adapter-ward, so they round-trip in both directions.
@@ -454,5 +564,42 @@ mod tests {
         let back: WriteOp = serde_json::from_str(&json).unwrap();
         let WriteOp::Comment { entity, body } = back;
         assert_eq!((entity.as_str(), body.as_str()), ("jira:PAY-231", "on it"));
+    }
+
+    /// ADR-0004: a failure that came from a response carries the **status** it
+    /// came from, so an adapter reads it instead of parsing it back out of the
+    /// message `knobas-http` built. 401 and 403 stay the one fault class the
+    /// user is asked to act on and are nonetheless told apart.
+    #[test]
+    fn a_fault_from_a_response_carries_the_status_it_came_from() {
+        assert_eq!(
+            SourceError::Unauthorized { status: Some(401) }.status(),
+            Some(401)
+        );
+        assert_eq!(
+            SourceError::Unauthorized { status: Some(403) }.status(),
+            Some(403)
+        );
+        assert_eq!(
+            SourceError::Protocol {
+                status: Some(404),
+                message: "HTTP 404 Not Found: gone".to_owned(),
+            }
+            .status(),
+            Some(404)
+        );
+        // A fault the adapter raised without asking anyone carries none, and
+        // nothing may invent one for it: a sink failure read as a 404 would be
+        // swallowed as a skipped repository.
+        assert_eq!(SourceError::unauthorized().status(), None);
+        assert_eq!(
+            SourceError::protocol("no authentication method is configured").status(),
+            None
+        );
+        assert_eq!(
+            SourceError::Unreachable("refused".to_owned()).status(),
+            None
+        );
+        assert_eq!(SourceError::Sink("pool closed".to_owned()).status(), None);
     }
 }

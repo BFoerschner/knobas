@@ -231,7 +231,7 @@ impl RunFailure {
         match self {
             RunFailure::MissingSecret => SyncOutcome::Unauthorized,
             RunFailure::Sync(error) => SyncOutcome::of(error),
-            RunFailure::Source(SourceError::Unauthorized) => SyncOutcome::Unauthorized,
+            RunFailure::Source(SourceError::Unauthorized { .. }) => SyncOutcome::Unauthorized,
             RunFailure::Source(SourceError::Unreachable(_)) => SyncOutcome::Unreachable,
             RunFailure::NotConfigured
             | RunFailure::Secret(_)

@@ -57,7 +57,7 @@ impl GiteaConfig {
     /// of zero.
     pub fn from_json(value: &serde_json::Value) -> Result<Self, SourceError> {
         let config: Self = serde_json::from_value(value.clone())
-            .map_err(|e| SourceError::Protocol(format!("gitea: invalid source config: {e}")))?;
+            .map_err(|e| SourceError::protocol(format!("gitea: invalid source config: {e}")))?;
         config.validate()?;
         Ok(config)
     }
@@ -65,7 +65,7 @@ impl GiteaConfig {
     fn validate(&self) -> Result<(), SourceError> {
         for entry in &self.repos {
             let bad = || {
-                SourceError::Protocol(format!(
+                SourceError::protocol(format!(
                     "gitea: repos entry {entry:?} must be \"owner/name\""
                 ))
             };
@@ -75,7 +75,7 @@ impl GiteaConfig {
             }
         }
         if self.rate_limit_per_sec == 0 {
-            return Err(SourceError::Protocol(
+            return Err(SourceError::protocol(
                 "gitea: rate_limit_per_sec must be at least 1".to_owned(),
             ));
         }
@@ -183,7 +183,7 @@ mod tests {
     fn an_unknown_field_is_refused() {
         let err = GiteaConfig::from_json(&serde_json::json!({ "owner": "tidewater" })).unwrap_err();
         assert!(
-            matches!(err, SourceError::Protocol(ref m) if m.contains("owner")),
+            matches!(err, SourceError::Protocol { message: ref m, .. } if m.contains("owner")),
             "{err:?}"
         );
     }
@@ -193,7 +193,7 @@ mod tests {
         for bad in ["payout-service", "tidewater/", "/payout-service", "a/b/c"] {
             let err = GiteaConfig::from_json(&serde_json::json!({ "repos": [bad] })).unwrap_err();
             assert!(
-                matches!(err, SourceError::Protocol(_)),
+                matches!(err, SourceError::Protocol { .. }),
                 "{bad:?} -> {err:?}"
             );
         }
@@ -206,7 +206,7 @@ mod tests {
     fn a_zero_rate_limit_is_refused() {
         let err =
             GiteaConfig::from_json(&serde_json::json!({ "rate_limit_per_sec": 0 })).unwrap_err();
-        assert!(matches!(err, SourceError::Protocol(_)), "{err:?}");
+        assert!(matches!(err, SourceError::Protocol { .. }), "{err:?}");
         assert_eq!(
             GiteaConfig::from_json(&serde_json::json!({ "rate_limit_per_sec": 1 }))
                 .unwrap()

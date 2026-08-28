@@ -158,7 +158,7 @@ where
     //    Auth failure maps to Unauthorized, connectivity failure to Unreachable.
     let unauthorized = make(Fault::Unauthorized).test_connection().await;
     assert!(
-        matches!(unauthorized, Err(crate::SourceError::Unauthorized)),
+        matches!(unauthorized, Err(crate::SourceError::Unauthorized { .. })),
         "test_connection must map an auth failure to SourceError::Unauthorized, got \
          {unauthorized:?}"
     );
@@ -174,7 +174,7 @@ where
         .sync(None, &mut VecSink(Vec::new()))
         .await;
     assert!(
-        matches!(unauthorized, Err(crate::SourceError::Unauthorized)),
+        matches!(unauthorized, Err(crate::SourceError::Unauthorized { .. })),
         "sync must map an auth failure to SourceError::Unauthorized, got {unauthorized:?}"
     );
     let unreachable = make(Fault::Unreachable)
@@ -223,7 +223,7 @@ where
         }
         let refused = s.write(op).await;
         assert!(
-            matches!(refused, Err(crate::SourceError::Protocol(_))),
+            matches!(refused, Err(crate::SourceError::Protocol { .. })),
             "write of {id:?}, which descriptor.write_ops does not declare, must be refused with \
              SourceError::Protocol, got {refused:?}"
         );
@@ -314,12 +314,10 @@ mod tests {
         fn faulted(&self, misclassify_auth: bool, misclassify_reach: bool) -> Option<SourceError> {
             match self.fault {
                 Fault::None => None,
-                Fault::Unauthorized if misclassify_auth => {
-                    Some(SourceError::Protocol("401".into()))
-                }
-                Fault::Unauthorized => Some(SourceError::Unauthorized),
+                Fault::Unauthorized if misclassify_auth => Some(SourceError::protocol("401")),
+                Fault::Unauthorized => Some(SourceError::unauthorized()),
                 Fault::Unreachable if misclassify_reach => {
-                    Some(SourceError::Protocol("no route to host".into()))
+                    Some(SourceError::protocol("no route to host"))
                 }
                 Fault::Unreachable => Some(SourceError::Unreachable("connection refused".into())),
             }
@@ -378,7 +376,7 @@ mod tests {
             // fault correctly, so this behavior fails clause 3's new
             // assertion and nothing else.
             if self.behavior == Behavior::FailsWhileHealthy && self.fault == Fault::None {
-                return Err(SourceError::Protocol("the server said no".into()));
+                return Err(SourceError::protocol("the server said no"));
             }
             match self.faulted(
                 self.behavior == Behavior::MisclassifiesAuthOnConnect,
@@ -456,7 +454,7 @@ mod tests {
             if self.behavior == Behavior::AcceptsUndeclaredWrite {
                 return Ok(());
             }
-            Err(SourceError::Protocol(format!("unsupported op: {op:?}")))
+            Err(SourceError::protocol(format!("unsupported op: {op:?}")))
         }
     }
 

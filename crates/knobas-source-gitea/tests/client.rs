@@ -40,7 +40,7 @@ async fn a_bad_token_is_unauthorized() {
             .unwrap();
     assert!(matches!(
         source.test_connection().await,
-        Err(SourceError::Unauthorized)
+        Err(SourceError::Unauthorized { .. })
     ));
 }
 
@@ -80,7 +80,7 @@ async fn every_write_is_refused() {
         })
         .await;
     assert!(
-        matches!(refused, Err(SourceError::Protocol(_))),
+        matches!(refused, Err(SourceError::Protocol { .. })),
         "{refused:?}"
     );
     assert_eq!(fake.requests().await, before, "write must not call out");
@@ -96,7 +96,7 @@ async fn a_missing_token_cannot_authenticate() {
     input.secret = None;
     assert!(matches!(
         knobas_source_gitea::build(input),
-        Err(SourceError::Unauthorized)
+        Err(SourceError::Unauthorized { .. })
     ));
 }
 
@@ -112,7 +112,7 @@ async fn an_unsupported_auth_method_is_refused_at_build_time() {
         .err()
         .expect("must be refused");
     assert!(
-        matches!(err, SourceError::Protocol(ref m) if m.contains("token")),
+        matches!(err, SourceError::Protocol { message: ref m, .. } if m.contains("token")),
         "{err:?}"
     );
 }
@@ -133,7 +133,7 @@ async fn an_unusable_instance_id_is_refused_at_build_time() {
         assert!(
             matches!(
                 knobas_source_gitea::build(input),
-                Err(SourceError::Protocol(_))
+                Err(SourceError::Protocol { .. })
             ),
             "{bad:?}"
         );

@@ -37,7 +37,7 @@ pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
     // a second copy is how an adapter passes its own suite and is then refused
     // by the engine on every real sync.
     validate_instance_id(&instance.id).map_err(|error| {
-        SourceError::Protocol(format!(
+        SourceError::protocol(format!(
             "gitea: instance id {:?} is unusable: {error}",
             instance.id
         ))
@@ -96,7 +96,7 @@ impl Source for GiteaSource {
         // Interfaces §4.1: M1 is read-only toward every source. The descriptor
         // declares no write ops, so refusing here is the contract, not a gap;
         // write-back is M2's identity release.
-        Err(SourceError::Protocol(format!(
+        Err(SourceError::protocol(format!(
             "gitea: {:?} is not supported -- this adapter is read-only in M1",
             op.identifier()
         )))
@@ -166,7 +166,7 @@ mod tests {
             .err()
             .unwrap_or_else(|| panic!("{bad:?} must be refused"));
             assert!(
-                matches!(error, SourceError::Protocol(ref m) if m.contains(bad)),
+                matches!(error, SourceError::Protocol { message: ref m, .. } if m.contains(bad)),
                 "{bad:?} -> {error:?}"
             );
         }
@@ -187,7 +187,7 @@ mod tests {
                 secret: None,
                 ..instance()
             }),
-            Err(SourceError::Unauthorized)
+            Err(SourceError::Unauthorized { .. })
         ));
     }
 
@@ -200,7 +200,7 @@ mod tests {
         ] {
             let error = build(SourceInstance { auth, ..instance() }).err().unwrap();
             assert!(
-                matches!(error, SourceError::Protocol(ref m) if m.contains("token")),
+                matches!(error, SourceError::Protocol { message: ref m, .. } if m.contains("token")),
                 "{auth:?} -> {error:?}"
             );
         }
@@ -217,7 +217,7 @@ mod tests {
         .err()
         .unwrap();
         assert!(
-            matches!(error, SourceError::Protocol(ref m) if m.contains("owner")),
+            matches!(error, SourceError::Protocol { message: ref m, .. } if m.contains("owner")),
             "{error:?}"
         );
     }
@@ -235,7 +235,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            matches!(refused, SourceError::Protocol(ref m) if m.contains("comment")),
+            matches!(refused, SourceError::Protocol { message: ref m, .. } if m.contains("comment")),
             "{refused:?}"
         );
     }

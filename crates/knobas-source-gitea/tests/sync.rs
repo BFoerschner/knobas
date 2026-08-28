@@ -225,7 +225,10 @@ async fn a_revoked_token_fails_the_run_rather_than_syncing_a_subset() {
             .unwrap();
     let mut sink = VecSink(Vec::new());
     let error = source.sync(None, &mut sink).await.unwrap_err();
-    assert!(matches!(error, SourceError::Unauthorized), "{error:?}");
+    assert!(
+        matches!(error, SourceError::Unauthorized { .. }),
+        "{error:?}"
+    );
     assert!(sink.0.is_empty());
 }
 
@@ -242,7 +245,10 @@ async fn a_dead_token_against_a_publicly_readable_instance_still_fails() {
             .unwrap();
     let mut sink = VecSink(Vec::new());
     let error = revoked.sync(None, &mut sink).await.unwrap_err();
-    assert!(matches!(error, SourceError::Unauthorized), "{error:?}");
+    assert!(
+        matches!(error, SourceError::Unauthorized { .. }),
+        "{error:?}"
+    );
     assert!(sink.0.is_empty(), "{:?}", sink.0);
 
     // The fixture really would have served a sync: the same instance with a
@@ -306,7 +312,10 @@ async fn every_repository_refusing_us_raises() {
 
     let mut sink = VecSink(Vec::new());
     let error = source.sync(Some(cursor), &mut sink).await.unwrap_err();
-    assert!(matches!(error, SourceError::Unauthorized), "{error:?}");
+    assert!(
+        matches!(error, SourceError::Unauthorized { .. }),
+        "{error:?}"
+    );
     assert!(sink.0.is_empty());
 }
 
@@ -324,7 +333,10 @@ async fn a_forbidden_repository_is_fatal_during_a_full_sync() {
 
     let mut sink = VecSink(Vec::new());
     let error = source.sync(None, &mut sink).await.unwrap_err();
-    assert!(matches!(error, SourceError::Unauthorized), "{error:?}");
+    assert!(
+        matches!(error, SourceError::Unauthorized { .. }),
+        "{error:?}"
+    );
 
     // The same fixture without the refusal syncs both repositories, so the
     // assertion above is about the refusal and not about the fixture.
@@ -373,7 +385,7 @@ async fn a_run_holding_no_position_is_a_full_sync_whatever_cursor_it_was_handed(
             .map(|c| format!("Ok({c})"))
             .unwrap_err();
         assert!(
-            matches!(error, SourceError::Unauthorized),
+            matches!(error, SourceError::Unauthorized { .. }),
             "{label}: {error:?}"
         );
     }
@@ -471,15 +483,20 @@ async fn a_refused_repository_keeps_its_position_on_either_selection_path() {
 }
 
 /// The compound case the two guards left open: the token dies **after** the
-/// first repository was walked. `walked == 0` cannot see it, and 401 arrives
-/// indistinguishable from 403, so the run used to return `Ok` with an advanced
-/// cursor over a credential that no longer exists -- and the sources view never
-/// offered *Re-enter*.
+/// first repository was walked. `walked == 0` cannot see it, so the run used to
+/// return `Ok` with an advanced cursor over a credential that no longer exists
+/// -- and the sources view never offered *Re-enter*.
+///
+/// The credential's death and one repository's refusal are two different
+/// answers -- 401 and 403 -- and until ADR-0004 they arrived at this adapter as
+/// one indistinguishable `SourceError::Unauthorized`, so telling them apart
+/// cost a second `GET /user` per refusal (`sync::credential_still_good`). The
+/// status is carried now and the classification is read straight off it.
 ///
 /// Both selection paths, because they refuse in different places, and each with
-/// its control: the identical fixture with the credential still alive must
-/// still *skip*, or this would be a test of "any refusal raises" and would have
-/// traded ruling B4 away rather than implemented it.
+/// its control: the identical fixture answering 403 must still *skip*, or this
+/// would be a test of "any refusal raises" and would have traded ruling B4 away
+/// rather than implemented it.
 #[tokio::test]
 async fn a_credential_revoked_after_the_first_repository_raises() {
     for config in [
@@ -498,18 +515,20 @@ async fn a_credential_revoked_after_the_first_repository_raises() {
             .forbidden
             .insert("tidewater/payout-service".to_owned());
 
-        // Control: credential alive. Ruling B4 -- skip, warn, return Ok.
+        // Control: a 403. Ruling B4 -- skip, warn, return Ok.
         fake.remount(&state).await;
         let mut sink = VecSink(Vec::new());
         let outcome = source.sync(Some(cursor.clone()), &mut sink).await;
         assert!(
             outcome.is_ok(),
-            "{config}: a live token must still skip, not raise: {outcome:?}"
+            "{config}: a forbidden repository must still skip, not raise: {outcome:?}"
         );
 
-        // The one condition changed: the token stops working after the run's
-        // identity preflight.
-        fake.remount_revoked_after_preflight(&state).await;
+        // The one condition changed: the same repository answers 401 instead --
+        // the token was revoked after the run's identity preflight.
+        state.forbidden.clear();
+        state.revoked.insert("tidewater/payout-service".to_owned());
+        fake.remount(&state).await;
         let mut sink = VecSink(Vec::new());
         let error = source
             .sync(Some(cursor.clone()), &mut sink)
@@ -517,81 +536,16 @@ async fn a_credential_revoked_after_the_first_repository_raises() {
             .map(|c| format!("Ok({c})"))
             .unwrap_err();
         assert!(
-            matches!(error, SourceError::Unauthorized),
+            matches!(error, SourceError::Unauthorized { .. }),
             "{config}: a revoked credential must be the run's verdict: {error:?}"
         );
+        assert_eq!(
+            error.status(),
+            Some(401),
+            "{config}: and it must be the 401 that says so, not a 403 believed \
+             without checking"
+        );
     }
-}
-
-/// The credential probe's **third** outcome: `/user` neither answers nor
-/// refuses, it breaks. The credential is then *unknown*, and the run must not
-/// round that off to either of the other two.
-///
-/// Three properties, and each one fails differently in production:
-///
-/// * it **ends the run** -- believing the refusal would be guessing in the
-///   direction that silently loses a repository;
-/// * it does **not** say `Unauthorized` -- that would put *Re-enter* on screen
-///   over a credential nobody has disproved, and send the user to rotate a
-///   token that was never the problem;
-/// * the message names **the repository that was actually refused**, not
-///   `/user`, because that is the event to act on.
-#[tokio::test]
-async fn a_probe_that_breaks_ends_the_run_without_blaming_the_credential() {
-    let mut state = State::tidewater().with_elsewhere();
-    let fake = Fake::start(&state).await;
-    let source = source(fake.base_url(), serde_json::json!({}));
-    let (_, cursor) = full(&*source).await;
-
-    // `elsewhere/unrelated` sorts first and walks; the refusal lands on the
-    // second repository, so this is the partial-walk shape and not the
-    // `walked == 0` guard.
-    state
-        .forbidden
-        .insert("tidewater/payout-service".to_owned());
-
-    // Control: the identical refusal with a working `/user` is a skip.
-    fake.remount(&state).await;
-    let mut sink = VecSink(Vec::new());
-    assert!(
-        source.sync(Some(cursor.clone()), &mut sink).await.is_ok(),
-        "a working probe must still skip"
-    );
-
-    // The one condition changed: `/user` answers the preflight, then 500s.
-    fake.remount_identity_broken_after_preflight(&state).await;
-    let mut sink = VecSink(Vec::new());
-    let error = source
-        .sync(Some(cursor.clone()), &mut sink)
-        .await
-        .map(|c| format!("Ok({c})"))
-        .unwrap_err();
-
-    assert!(
-        !matches!(error, SourceError::Unauthorized),
-        "an unknown credential is not a revoked one: {error:?}"
-    );
-    let SourceError::Protocol(ref message) = error else {
-        panic!("a broken probe is a protocol fault, not {error:?}");
-    };
-    assert!(
-        message.contains("tidewater/payout-service"),
-        "the message must name the repository that was refused: {message}"
-    );
-
-    // And a *revoked* token on the very same shape still says Unauthorized, so
-    // the assertion above is about the 500 and not about any probe failure.
-    fake.remount_revoked_after_preflight(&state).await;
-    let mut sink = VecSink(Vec::new());
-    let revoked = source
-        .sync(Some(cursor), &mut sink)
-        .await
-        .map(|c| format!("Ok({c})"))
-        .unwrap_err();
-    assert!(
-        matches!(revoked, SourceError::Unauthorized),
-        "a revoked token is still the credential verdict: {revoked:?}"
-    );
 }
 
 /// More than one page of branches: the walk must not stop at `PAGE_SIZE`.
@@ -652,7 +606,7 @@ async fn a_branch_listing_that_would_exceed_the_cap_fails_the_run() {
     // Names the *branch* cap, so this cannot pass on the repository listing's
     // message instead.
     assert!(
-        matches!(error, SourceError::Protocol(ref m)
+        matches!(error, SourceError::Protocol { message: ref m, .. }
             if m.contains("1000 branches in one repository") && m.contains("never finished walking")),
         "{error:?}"
     );
@@ -681,7 +635,7 @@ async fn a_repository_listing_that_would_exceed_the_cap_fails_the_run() {
     // come from the same `cap_reached` and both name that lever, so asserting
     // it would pass on the branch cap's message too.
     assert!(
-        matches!(error, SourceError::Protocol(ref m)
+        matches!(error, SourceError::Protocol { message: ref m, .. }
             if m.contains("1000 repositories") && m.contains("owners[]")),
         "{error:?}"
     );
@@ -714,7 +668,7 @@ async fn a_cap_fires_at_exactly_the_boundary_it_names() {
     let mut sink = VecSink(Vec::new());
     let error = at_boundary.sync(None, &mut sink).await.unwrap_err();
     assert!(
-        matches!(error, SourceError::Protocol(ref m) if m.contains("at least 1000 branches")),
+        matches!(error, SourceError::Protocol { message: ref m, .. } if m.contains("at least 1000 branches")),
         "exactly 1000 must fail, and say so accurately: {error:?}"
     );
 
@@ -914,53 +868,83 @@ async fn the_pull_request_budget_keeps_the_newest() {
     assert!(!asked.iter().any(|p| p.ends_with("/pulls")), "{asked:?}");
 }
 
-/// A repository with its issue unit switched off answers 404 for the
-/// discussion. That is unambiguous -- never a credential fault -- so the pull
-/// request is indexed without its comment text and the run carries on.
+/// A repository with its issue unit switched off answers **404** for the
+/// discussion; a token without issue scope answers **403**. Neither is a
+/// credential fault, so the pull request is indexed without its comment text and
+/// the run carries on.
+///
+/// The 403 is the case ADR-0004 unlocked: it used to arrive as the same value a
+/// revoked token's 401 did, and could only be believed after a second `GET
+/// /user` proved the credential alive.
 #[tokio::test]
 async fn a_pull_request_whose_discussion_is_refused_is_still_indexed() {
-    let mut state = State::tidewater();
-    state
-        .discussion_status
-        .insert("tidewater/payout-service#142".to_owned(), 404);
-    let fake = Fake::start(&state).await;
-    let source = source(fake.base_url(), serde_json::json!({}));
+    for status in [404, 403] {
+        let mut state = State::tidewater();
+        state
+            .discussion_status
+            .insert("tidewater/payout-service#142".to_owned(), status);
+        let fake = Fake::start(&state).await;
+        let source = source(fake.base_url(), serde_json::json!({}));
 
-    let (items, _) = full(&*source).await;
-    let sepa = items
-        .iter()
-        .find(|i| i.entity.key.ends_with("#142"))
-        .expect("the pull request itself is still emitted");
-    assert!(sepa.body_text.contains("Retries transient PSP errors."));
-    assert!(!sepa.body_text.contains("Bounded to"), "{}", sepa.body_text);
-    // …and the run reached the pull request that follows it.
-    assert!(
-        items.iter().any(|i| i.entity.key.ends_with("#144")),
-        "{items:?}"
-    );
+        let (items, _) = full(&*source).await;
+        let sepa = items
+            .iter()
+            .find(|i| i.entity.key.ends_with("#142"))
+            .unwrap_or_else(|| panic!("{status}: the pull request itself is still emitted"));
+        assert!(sepa.body_text.contains("Retries transient PSP errors."));
+        assert!(
+            !sepa.body_text.contains("Bounded to"),
+            "{status}: {}",
+            sepa.body_text
+        );
+        // …and the run reached the pull request that follows it.
+        assert!(
+            items.iter().any(|i| i.entity.key.ends_with("#144")),
+            "{status}: {items:?}"
+        );
+        // Exactly one request for that discussion: the identity probe that
+        // used to follow a refusal is gone (ADR-0004).
+        let asked = fake.paths().await;
+        assert_eq!(
+            asked
+                .iter()
+                .filter(|p| p.ends_with("/issues/142/comments"))
+                .count(),
+            1,
+            "{status}: {asked:?}"
+        );
+        assert_eq!(
+            asked.iter().filter(|p| p.ends_with("/api/v1/user")).count(),
+            1,
+            "{status}: only the run's own identity preflight: {asked:?}"
+        );
+    }
 }
 
-/// The hole a plain swallow would leave. A 403 on the discussion reaches this
-/// adapter as a bare `Unauthorized`, exactly as a revoked token's 401 does --
-/// so believing it without measuring would let a run whose credential died
-/// report success with an advanced cursor.
+/// The hole a plain swallow would leave: a discussion refused **401** is a
+/// credential that has died mid-run, and swallowing it would report success
+/// with an advanced cursor over a source nobody can read any more.
 ///
-/// The control is the test above: the identical refusal with a *live*
-/// credential still only costs the discussion, so this is not "any refusal
-/// raises".
+/// The control is the test above, which is the same shape with a 403 and a 404:
+/// those cost the discussion and nothing else. Before ADR-0004 all three
+/// arrived here as the same value and only a second `GET /user` per refusal
+/// separated them.
 #[tokio::test]
 async fn a_discussion_refused_by_a_dead_credential_fails_the_run() {
     let mut state = State::tidewater();
     state
         .discussion_status
-        .insert("tidewater/payout-service#142".to_owned(), 403);
+        .insert("tidewater/payout-service#142".to_owned(), 401);
     let fake = Fake::start(&state).await;
     let source = source(fake.base_url(), serde_json::json!({}));
-    fake.remount_revoked_after_preflight(&state).await;
 
     let mut sink = VecSink(Vec::new());
     let error = source.sync(None, &mut sink).await.unwrap_err();
-    assert!(matches!(error, SourceError::Unauthorized), "{error:?}");
+    assert!(
+        matches!(error, SourceError::Unauthorized { .. }),
+        "{error:?}"
+    );
+    assert_eq!(error.status(), Some(401), "{error:?}");
 }
 
 // --------------------------------------------------------------- commits ----

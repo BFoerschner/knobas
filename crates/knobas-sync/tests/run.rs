@@ -161,7 +161,7 @@ impl Source for FakeSource {
     }
 
     async fn write(&self, _op: WriteOp) -> Result<(), SourceError> {
-        Err(SourceError::Protocol("read-only".to_owned()))
+        Err(SourceError::protocol("read-only".to_owned()))
     }
 }
 
@@ -203,7 +203,7 @@ impl Source for LockProbingSource {
     }
 
     async fn write(&self, _op: WriteOp) -> Result<(), SourceError> {
-        Err(SourceError::Protocol("read-only".to_owned()))
+        Err(SourceError::protocol("read-only".to_owned()))
     }
 }
 

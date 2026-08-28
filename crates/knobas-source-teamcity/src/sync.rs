@@ -273,7 +273,7 @@ async fn all_of(
             return Ok(page);
         }
         if count >= ceiling {
-            return Err(SourceError::Protocol(overflowed()));
+            return Err(SourceError::protocol(overflowed()));
         }
         count = count.saturating_mul(2).min(ceiling);
     }
@@ -353,7 +353,7 @@ async fn ceiling(rest: &dyn Rest, watermark: i64) -> Result<Option<i64>, SourceE
     if let [first, second] = &page[..]
         && first.rec.id < second.rec.id
     {
-        return Err(SourceError::Protocol(format!(
+        return Err(SourceError::protocol(format!(
             "teamcity: `/app/rest/builds` answered oldest-first -- ids {} then {} -- where this \
              adapter needs newest-first. It reads row 0 of that page as the newest build in \
              existence and holds the watermark at or below it, so on an oldest-first server the \
@@ -366,7 +366,7 @@ async fn ceiling(rest: &dyn Rest, watermark: i64) -> Result<Option<i64>, SourceE
     if let Some(id) = newest
         && id < watermark
     {
-        return Err(SourceError::Protocol(format!(
+        return Err(SourceError::protocol(format!(
             "teamcity: the newest build this server reports is {id}, which is older than this \
              source's watermark {watermark}. Build ids are monotonic and are never reused, so a \
              build newer than {watermark} has to exist -- either this source now points at a \
@@ -960,7 +960,7 @@ mod tests {
         .await
         .expect_err("a run that cannot carry them all must fail");
         assert!(
-            matches!(&err, SourceError::Protocol(m) if m.contains("1000")),
+            matches!(&err, SourceError::Protocol { message: m, .. } if m.contains("1000")),
             "{err:?}"
         );
         assert!(
@@ -1088,7 +1088,7 @@ mod tests {
         .await
         .expect_err("a run that cannot see the whole queue must fail");
         assert!(
-            matches!(&err, SourceError::Protocol(m) if m.contains("queued or running")),
+            matches!(&err, SourceError::Protocol { message: m, .. } if m.contains("queued or running")),
             "{err:?}"
         );
         assert!(
@@ -1316,7 +1316,7 @@ mod tests {
         .await
         .expect_err("an oldest-first server must be refused, not believed");
         assert!(
-            matches!(&err, SourceError::Protocol(m)
+            matches!(&err, SourceError::Protocol { message: m, .. }
                 if m.contains("answered oldest-first")
                     && m.contains("ids 412 then 1187")
                     && m.contains("newest-first")),
@@ -1385,7 +1385,7 @@ mod tests {
         .await
         .expect_err("a server that contradicts monotonic ids must not be trusted");
         assert!(
-            matches!(&err, SourceError::Protocol(m)
+            matches!(&err, SourceError::Protocol { message: m, .. }
                 if m.contains("newest build this server reports is 412")
                     && m.contains("watermark 1187")
                     && m.contains("points at a different server")),

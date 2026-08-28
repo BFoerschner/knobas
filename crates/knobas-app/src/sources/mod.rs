@@ -261,10 +261,12 @@ pub fn to_ipc(error: &SourcesError, source_id: Option<&str>) -> crate::IpcError 
         // rejected credential gets, and the same code.
         SourcesError::Secret(knobas_secrets::SecretError::NotFound) => Code::Unauthorized,
         SourcesError::Secret(_) => Code::Internal,
-        SourcesError::Source(Se::Unauthorized) => Code::Unauthorized,
+        SourcesError::Source(Se::Unauthorized { .. }) => Code::Unauthorized,
         SourcesError::Source(Se::Unreachable(_)) => Code::Unreachable,
         SourcesError::Source(_) => Code::Internal,
-        SourcesError::Sync(knobas_sync::SyncError::Source(Se::Unauthorized)) => Code::Unauthorized,
+        SourcesError::Sync(knobas_sync::SyncError::Source(Se::Unauthorized { .. })) => {
+            Code::Unauthorized
+        }
         SourcesError::Sync(knobas_sync::SyncError::Source(Se::Unreachable(_))) => Code::Unreachable,
         SourcesError::Sync(knobas_sync::SyncError::NotConfigured { .. }) => Code::NotFound,
         SourcesError::Sync(_) => Code::Internal,

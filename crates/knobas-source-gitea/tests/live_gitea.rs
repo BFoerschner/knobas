@@ -515,12 +515,12 @@ async fn a_revoked_token_is_unauthorized() {
     let source = env.source_with(&revoked(), serde_json::json!({}));
     assert!(matches!(
         source.test_connection().await,
-        Err(SourceError::Unauthorized)
+        Err(SourceError::Unauthorized { .. })
     ));
     let mut sink = VecSink(Vec::new());
     assert!(matches!(
         source.sync(None, &mut sink).await,
-        Err(SourceError::Unauthorized)
+        Err(SourceError::Unauthorized { .. })
     ));
     assert!(
         sink.0.is_empty(),

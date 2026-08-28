@@ -88,9 +88,9 @@ impl IpcError {
     #[must_use]
     pub fn from_source_error(error: &SourceError, source_id: Option<&str>) -> Self {
         let code = match error {
-            SourceError::Unauthorized => IpcErrorCode::Unauthorized,
+            SourceError::Unauthorized { .. } => IpcErrorCode::Unauthorized,
             SourceError::Unreachable(_) => IpcErrorCode::Unreachable,
-            SourceError::Protocol(_) | SourceError::Sink(_) => IpcErrorCode::Internal,
+            SourceError::Protocol { .. } | SourceError::Sink(_) => IpcErrorCode::Internal,
         };
         let mut mapped = Self::new(code, error);
         mapped.source_id = source_id.map(ToOwned::to_owned);
@@ -226,13 +226,13 @@ mod tests {
     fn source_faults_keep_their_kind() {
         use knobas_source::SourceError;
         let cases = [
-            (SourceError::Unauthorized, IpcErrorCode::Unauthorized),
+            (SourceError::unauthorized(), IpcErrorCode::Unauthorized),
             (
                 SourceError::Unreachable("refused".into()),
                 IpcErrorCode::Unreachable,
             ),
             (
-                SourceError::Protocol("unexpected 500".into()),
+                SourceError::protocol("unexpected 500"),
                 IpcErrorCode::Internal,
             ),
             (
@@ -255,7 +255,7 @@ mod tests {
     #[test]
     fn a_failed_run_keeps_the_source_it_belongs_to() {
         use knobas_source::SourceError;
-        let unauthorized = knobas_sync::SyncError::Source(SourceError::Unauthorized);
+        let unauthorized = knobas_sync::SyncError::Source(SourceError::unauthorized());
 
         let routed = IpcError::from_sync_error(&unauthorized, Some("jira-eu"));
         assert_eq!(routed.code, IpcErrorCode::Unauthorized);
@@ -279,7 +279,7 @@ mod tests {
 
         // And the plain `From` still works, for callers with no id at all.
         assert_eq!(
-            IpcError::from(knobas_sync::SyncError::Source(SourceError::Unauthorized)).source_id,
+            IpcError::from(knobas_sync::SyncError::Source(SourceError::unauthorized())).source_id,
             None
         );
     }

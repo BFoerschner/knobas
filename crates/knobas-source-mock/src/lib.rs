@@ -400,7 +400,7 @@ impl MockSource {
     fn fault_error(&self) -> Option<SourceError> {
         match self.fault {
             Fault::None => None,
-            Fault::Unauthorized => Some(SourceError::Unauthorized),
+            Fault::Unauthorized => Some(SourceError::unauthorized()),
             Fault::Unreachable => Some(SourceError::Unreachable(
                 "simulated: connection refused".into(),
             )),
@@ -697,7 +697,7 @@ impl Source for MockSource {
         // advertised is a caller bug, and stays one whether or not the remote
         // system happens to be reachable.
         if !self.descriptor().write_ops.iter().any(|w| w == id) {
-            return Err(SourceError::Protocol(format!("unsupported write op: {id}")));
+            return Err(SourceError::protocol(format!("unsupported write op: {id}")));
         }
         if let Some(err) = self.fault_error() {
             return Err(err);
@@ -733,13 +733,13 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// namespace nothing can address.
 pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
     if instance.kind != SOURCE_ID {
-        return Err(SourceError::Protocol(format!(
+        return Err(SourceError::protocol(format!(
             "knobas-source-mock cannot build an instance of kind {:?}",
             instance.kind
         )));
     }
     knobas_source::instance::validate_instance_id(&instance.id)
-        .map_err(|error| SourceError::Protocol(error.to_string()))?;
+        .map_err(|error| SourceError::protocol(error.to_string()))?;
     Ok(Box::new(MockSource {
         id: instance.id,
         ..MockSource::new()

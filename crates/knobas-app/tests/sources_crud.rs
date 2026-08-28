@@ -59,7 +59,7 @@ impl Source for Refusing {
         Err((self.error)())
     }
     async fn write(&self, _op: knobas_source::WriteOp) -> Result<(), SourceError> {
-        Err(SourceError::Protocol("read-only".into()))
+        Err(SourceError::protocol("read-only"))
     }
 }
 
@@ -607,7 +607,7 @@ async fn a_credential_that_is_still_wrong_does_not_release_the_backoff() {
         .await
         .unwrap();
 
-    let refusing = RefusingRegistry(|| SourceError::Unauthorized);
+    let refusing = RefusingRegistry(SourceError::unauthorized);
     let health = sources::crud::set_secret(
         &f.pool,
         &f.secrets,

@@ -242,9 +242,11 @@ knobas-db	test/schema	zero_three_applies_through_the_runner_to_a_database_that_p
 knobas-db	test/schema	zero_two_adds_the_listing_indexes_and_drops_the_one_it_supersedes
 knobas-http	lib/knobas_http	classify::tests::a_body_excerpt_is_bounded
 knobas-http	lib/knobas_http	classify::tests::a_body_excerpt_survives_multibyte_text
+knobas-http	lib/knobas_http	classify::tests::a_refusal_carries_the_status_that_says_which_refusal_it_was
 knobas-http	lib/knobas_http	classify::tests::no_retry_after_header_is_no_delay
 knobas-http	lib/knobas_http	classify::tests::retry_after_is_read_in_its_delay_seconds_form
 knobas-http	lib/knobas_http	classify::tests::statuses_map_to_the_fault_the_user_sees
+knobas-http	lib/knobas_http	classify::tests::the_caller_maps_a_failing_body_into_the_message
 knobas-http	lib/knobas_http	retry::tests::a_broken_request_or_a_broken_server_is_not_tried_again
 knobas-http	lib/knobas_http	retry::tests::a_busy_server_is_tried_again
 knobas-http	lib/knobas_http	retry::tests::the_delay_doubles_and_never_wraps
@@ -260,6 +262,7 @@ knobas-http	test/transport	an_unauthorized_answer_is_not_retried_and_keeps_its_c
 knobas-http	test/transport	each_auth_variant_has_its_own_wire_spelling
 knobas-http	test/transport	every_attempt_waits_for_the_rate_limiter
 knobas-http	test/transport	retry_after_is_waited_out_before_the_retry
+knobas-http	test/transport	the_callers_reading_of_a_failing_body_reaches_the_message
 knobas-mockd	lib/knobas_mockd	tc_fields::tests::an_unbalanced_expression_is_refused
 knobas-mockd	lib/knobas_mockd	tc_fields::tests::an_unknown_name_is_reported_by_name
 knobas-mockd	lib/knobas_mockd	tc_fields::tests::long_is_everything_and_the_other_presets_are_refused
@@ -527,6 +530,7 @@ knobas-source	lib/knobas_source	instance::tests::accepts_the_ids_the_contract_na
 knobas-source	lib/knobas_source	instance::tests::debug_redacts_the_secret
 knobas-source	lib/knobas_source	instance::tests::rejects_everything_else
 knobas-source	lib/knobas_source	instance::tests::round_trips_as_plain_json
+knobas-source	lib/knobas_source	tests::a_fault_from_a_response_carries_the_status_it_came_from
 knobas-source	lib/knobas_source	tests::descriptor_serializes_to_plain_json
 knobas-source	lib/knobas_source	tests::spi_types_round_trip_in_both_directions
 knobas-source	lib/knobas_source	tests::write_op_round_trips
@@ -536,9 +540,9 @@ knobas-source-gitea	lib/knobas_source_gitea	client::tests::a_missing_secret_is_u
 knobas-source-gitea	lib/knobas_source_gitea	client::tests::a_pat_becomes_a_gitea_token_credential
 knobas-source-gitea	lib/knobas_source_gitea	client::tests::a_path_segment_cannot_walk_out_of_the_api_root
 knobas-source-gitea	lib/knobas_source_gitea	client::tests::debug_never_prints_the_secret
+knobas-source-gitea	lib/knobas_source_gitea	client::tests::giteas_error_envelope_becomes_the_message
 knobas-source-gitea	lib/knobas_source_gitea	client::tests::only_a_refusal_or_an_absence_is_scoped_to_one_repository
 knobas-source-gitea	lib/knobas_source_gitea	client::tests::paging_parameters_carry_the_contracts_page_size
-knobas-source-gitea	lib/knobas_source_gitea	client::tests::the_status_behind_a_protocol_failure_is_recoverable
 knobas-source-gitea	lib/knobas_source_gitea	client::wire_tests::a_broken_commit_listing_still_fails
 knobas-source-gitea	lib/knobas_source_gitea	client::wire_tests::a_commit_listing_turns_off_the_projections_gitea_defaults_to_on
 knobas-source-gitea	lib/knobas_source_gitea	client::wire_tests::a_first_commit_listing_sends_no_since_at_all
@@ -626,7 +630,6 @@ knobas-source-gitea	test/sync	a_full_sync_emits_pull_requests_with_their_discuss
 knobas-source-gitea	test/sync	a_full_sync_emits_the_repository_and_every_branch
 knobas-source-gitea	test/sync	a_moved_branch_head_is_re_emitted_and_an_untouched_one_is_not
 knobas-source-gitea	test/sync	a_new_commit_on_a_moved_branch_is_emitted_once
-knobas-source-gitea	test/sync	a_probe_that_breaks_ends_the_run_without_blaming_the_credential
 knobas-source-gitea	test/sync	a_pull_request_whose_discussion_is_refused_is_still_indexed
 knobas-source-gitea	test/sync	a_refused_repository_keeps_its_position_on_either_selection_path
 knobas-source-gitea	test/sync	a_repository_listing_that_would_exceed_the_cap_fails_the_run
@@ -682,15 +685,15 @@ knobas-source-jira	lib/knobas_source_jira	descriptor::tests::the_schema_defaults
 knobas-source-jira	lib/knobas_source_jira	descriptor::tests::the_template_is_read_only_and_self_describing
 knobas-source-jira	lib/knobas_source_jira	descriptor::tests::the_template_survives_a_json_round_trip
 knobas-source-jira	lib/knobas_source_jira	http::tests::a_base_url_that_is_not_a_url_is_refused
-knobas-source-jira	lib/knobas_source_jira	http::tests::a_body_that_is_not_jiras_envelope_is_left_exactly_as_it_arrived
+knobas-source-jira	lib/knobas_source_jira	http::tests::a_body_that_is_not_jiras_envelope_is_read_as_nothing
 knobas-source-jira	lib/knobas_source_jira	http::tests::a_configuration_problem_outranks_a_missing_secret
 knobas-source-jira	lib/knobas_source_jira	http::tests::a_jira_with_no_auth_method_is_refused_rather_than_tried_anonymously
 knobas-source-jira	lib/knobas_source_jira	http::tests::a_missing_secret_is_unauthorized
 knobas-source-jira	lib/knobas_source_jira	http::tests::a_pat_becomes_a_bearer_credential
+knobas-source-jira	lib/knobas_source_jira	http::tests::a_refusal_keeps_its_class_whatever_the_body_says
 knobas-source-jira	lib/knobas_source_jira	http::tests::a_refused_connection_is_unreachable
 knobas-source-jira	lib/knobas_source_jira	http::tests::basic_auth_without_a_username_is_a_configuration_error
 knobas-source-jira	lib/knobas_source_jira	http::tests::debug_never_prints_the_secret
-knobas-source-jira	lib/knobas_source_jira	http::tests::humanizing_never_reclassifies_a_fault
 knobas-source-jira	lib/knobas_source_jira	http::tests::the_jira_error_envelope_becomes_the_message
 knobas-source-jira	lib/knobas_source_jira	http::tests::unsupported_auth_methods_are_refused_by_name
 knobas-source-jira	lib/knobas_source_jira	http::tests::user_and_password_become_a_basic_credential
@@ -804,9 +807,11 @@ knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::the_templat
 knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::the_template_survives_the_ipc_hop
 knobas-source-teamcity	lib/knobas_source_teamcity	http::tests::a_base_url_that_is_not_a_url_is_refused_at_build_time
 knobas-source-teamcity	lib/knobas_source_teamcity	http::tests::a_misconfigured_source_is_not_reported_as_a_missing_secret
+knobas-source-teamcity	lib/knobas_source_teamcity	http::tests::a_refusal_keeps_its_class_whatever_the_body_says
 knobas-source-teamcity	lib/knobas_source_teamcity	http::tests::construction_refuses_credentials_it_cannot_use
 knobas-source-teamcity	lib/knobas_source_teamcity	http::tests::debug_never_prints_the_secret
 knobas-source-teamcity	lib/knobas_source_teamcity	http::tests::each_auth_method_maps_to_its_own_scheme
+knobas-source-teamcity	lib/knobas_source_teamcity	http::tests::teamcitys_error_text_becomes_the_message
 knobas-source-teamcity	lib/knobas_source_teamcity	http::tests::the_base_url_may_carry_a_path_prefix_with_or_without_a_trailing_slash
 knobas-source-teamcity	lib/knobas_source_teamcity	map::tests::a_bare_build_configuration_still_maps
 knobas-source-teamcity	lib/knobas_source_teamcity	map::tests::a_build_and_a_configuration_cannot_share_a_key

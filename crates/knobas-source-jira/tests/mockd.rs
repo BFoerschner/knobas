@@ -247,11 +247,11 @@ async fn a_rejected_credential_is_unauthorized_from_both_entry_points() {
     jira.set_fault(MockFault::Unauthorized);
     assert!(matches!(
         source.test_connection().await,
-        Err(SourceError::Unauthorized)
+        Err(SourceError::Unauthorized { .. })
     ));
     let synced = source.sync(None, &mut VecSink(Vec::new())).await;
     assert!(
-        matches!(synced, Err(SourceError::Unauthorized)),
+        matches!(synced, Err(SourceError::Unauthorized { .. })),
         "{synced:?}"
     );
     jira.assert_no_violations();
@@ -302,7 +302,7 @@ async fn the_adapter_is_read_only() {
         })
         .await;
     assert!(
-        matches!(refused, Err(SourceError::Protocol(_))),
+        matches!(refused, Err(SourceError::Protocol { .. })),
         "{refused:?}"
     );
     let after = jira
