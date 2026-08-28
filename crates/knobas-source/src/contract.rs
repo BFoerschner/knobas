@@ -367,8 +367,8 @@ mod tests {
                     label: "Ticket".into(),
                     plural: "Tickets".into(),
                     monogram: "TE".into(),
+                    full_sync_exhaustive: true,
                 }],
-                full_sync_exhaustive: true,
                 config_schema: serde_json::json!({ "type": "object", "properties": {} }),
             }
         }

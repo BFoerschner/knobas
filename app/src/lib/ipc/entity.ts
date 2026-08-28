@@ -120,6 +120,13 @@ export interface KindInfo {
   plural: string;
   /** Two characters, e.g. `"PR"`. */
   monogram: string;
+  /**
+   * Whether a full sync returns every item **of this kind** — the sync
+   * engine's tombstone sweep runs only for kinds that say so (ADR-0003).
+   * Declared per kind, not per source: one adapter can enumerate its
+   * repositories exhaustively while budgeting its commits.
+   */
+  full_sync_exhaustive: boolean;
 }
 
 /** One link — `knobas_core::link::LinkRow`. Always empty in M1. */

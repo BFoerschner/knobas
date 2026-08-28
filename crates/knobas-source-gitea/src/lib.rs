@@ -74,24 +74,28 @@ pub fn entity_kinds() -> Vec<KindInfo> {
             label: "Repository".into(),
             plural: "Repositories".into(),
             monogram: "RE".into(),
+            full_sync_exhaustive: false,
         },
         KindInfo {
             id: KIND_BRANCH.into(),
             label: "Branch".into(),
             plural: "Branches".into(),
             monogram: "BR".into(),
+            full_sync_exhaustive: false,
         },
         KindInfo {
             id: KIND_PR.into(),
             label: "Pull request".into(),
             plural: "Pull requests".into(),
             monogram: "PR".into(),
+            full_sync_exhaustive: false,
         },
         KindInfo {
             id: KIND_COMMIT.into(),
             label: "Commit".into(),
             plural: "Commits".into(),
             monogram: "CM".into(),
+            full_sync_exhaustive: false,
         },
     ]
 }
@@ -111,22 +115,10 @@ pub fn descriptor_template() -> SourceDescriptor {
         adapter_version: ADAPTER_VERSION.to_owned(),
         auth_methods: vec![AuthMethod::Pat],
         write_ops: Vec::new(),
+        // Each kind carries its own `full_sync_exhaustive` -- see
+        // `entity_kinds`, which is where the 2026-08-25 budget ruling and
+        // ADR-0003 meet.
         entity_kinds: entity_kinds(),
-        // **`false`, per the 2026-08-25 ruling**, superseding interfaces
-        // §4.2's `true`: `commits_per_repo` / `prs_per_repo` bound what one
-        // run mirrors per repository, including a cursor-less one, and the
-        // flag means precisely "a cursor-less run emits the complete corpus".
-        // Declaring `true` would license the engine's hard-delete sweep to
-        // tombstone every commit past the cap on every full sync.
-        // Pinned by `a_budgeted_full_sync_is_not_exhaustive`.
-        //
-        // `sync` still refuses to return `Ok` over a hole -- a reached page cap
-        // and a repository skipped during a cursor-less run are both fatal (see
-        // `sync::run`). That is no longer the sweep's precondition; it is the
-        // weaker promise this adapter can still keep: what a run *did* walk, it
-        // walked completely, so an incomplete mirror is reported and not
-        // silently served.
-        full_sync_exhaustive: false,
         config_schema: config::config_schema(),
     }
 }
@@ -164,8 +156,6 @@ mod tests {
                 k.id
             );
         }
-        // The sweep's precondition -- see `a_budgeted_full_sync_is_not_exhaustive`.
-        assert!(!d.full_sync_exhaustive);
         assert_eq!(d.config_schema["type"], "object");
     }
 
@@ -201,7 +191,10 @@ mod tests {
             "the per-repository budgets the ruling is about"
         );
         assert!(
-            !descriptor_template().full_sync_exhaustive,
+            !descriptor_template()
+                .entity_kinds
+                .iter()
+                .any(|k| k.full_sync_exhaustive),
             "{budgets:?} bound what a cursor-less run emits, so the run is not \
              exhaustive and the engine must not sweep after it"
         );

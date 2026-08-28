@@ -303,7 +303,11 @@ async fn run_inner(
     check_source_id(&descriptor.id)?;
     let source_id = descriptor.id;
     // Read before `entity_kinds` is consumed below.
-    let exhaustive = descriptor.full_sync_exhaustive;
+    let exhaustive = !descriptor.entity_kinds.is_empty()
+        && descriptor
+            .entity_kinds
+            .iter()
+            .all(|kind| kind.full_sync_exhaustive);
     let kinds: HashSet<String> = descriptor
         .entity_kinds
         .into_iter()

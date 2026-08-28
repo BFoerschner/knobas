@@ -139,7 +139,7 @@ mod tests {
         assert!(d.write_ops.is_empty());
         // Including the 2026-08-25 budget ruling -- an instance cannot quietly
         // re-grant the sweep the template refuses it.
-        assert!(!d.full_sync_exhaustive);
+        assert!(!d.entity_kinds.iter().any(|k| k.full_sync_exhaustive));
     }
 
     /// An id that cannot be an `EntityRef` namespace fails when the source is

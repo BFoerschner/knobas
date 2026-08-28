@@ -39,7 +39,10 @@ async fn mock_sync_lands_in_postgres_and_is_searchable() {
     assert_eq!(report.swept, 0);
     assert_eq!(again.swept, 0);
     assert!(
-        src.descriptor().full_sync_exhaustive,
+        src.descriptor()
+            .entity_kinds
+            .iter()
+            .all(|k| k.full_sync_exhaustive),
         "the assertion above is only meaningful for an exhaustive full sync"
     );
     let (cnt,): (i64,) = sqlx::query_as("select count(*) from sync.item where source_id = 'mock'")
@@ -129,10 +132,10 @@ impl Source for FakeSource {
                 label: "Ticket".to_owned(),
                 plural: "Tickets".to_owned(),
                 monogram: "TK".to_owned(),
+                // Everything it is given, every run: the engine's sweep may
+                // tombstone what it stops emitting.
+                full_sync_exhaustive: true,
             }],
-            // Everything it is given, every run: the engine's sweep may
-            // tombstone what it stops emitting.
-            full_sync_exhaustive: true,
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
         }
     }

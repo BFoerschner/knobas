@@ -154,7 +154,7 @@ async fn descriptor_declares_write_only_and_five_kinds() {
     assert_eq!(d.write_ops, ["comment"]);
     // The fixture is the whole world, so a full sync is exhaustive and the
     // engine's sweep may tombstone what it stops emitting.
-    assert!(d.full_sync_exhaustive);
+    assert!(d.entity_kinds.iter().all(|k| k.full_sync_exhaustive));
     assert!(d.auth_methods.is_empty(), "the mock authenticates nothing");
     let kinds: Vec<&str> = d.entity_kinds.iter().map(|k| k.id.as_str()).collect();
     assert_eq!(kinds, ["ticket", "pr", "build", "page", "commit"]);

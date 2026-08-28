@@ -37,8 +37,6 @@ export interface SourceDescriptor {
   auth_methods: AuthMethod[];
   write_ops: string[];
   entity_kinds: KindInfo[];
-  /** Whether a full sync of this adapter returns everything it has. */
-  full_sync_exhaustive: boolean;
   /** JSON Schema. The form is generated from it — never hand-built per adapter. */
   config_schema: unknown;
 }

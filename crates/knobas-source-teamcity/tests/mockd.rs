@@ -469,7 +469,13 @@ async fn a_full_sync_is_a_window_which_is_why_the_sweep_must_not_run() {
     );
     // Which is precisely why the engine must not tombstone what this run did
     // not re-emit.
-    assert!(!windowed.descriptor().full_sync_exhaustive);
+    assert!(
+        !windowed
+            .descriptor()
+            .entity_kinds
+            .iter()
+            .any(|k| k.full_sync_exhaustive)
+    );
     server.assert_no_violations();
 }
 

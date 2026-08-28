@@ -72,8 +72,8 @@ impl Source for Flood {
                 label: "T".into(),
                 plural: "T".into(),
                 monogram: "FL".into(),
+                full_sync_exhaustive: true,
             }],
-            full_sync_exhaustive: true,
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
         }
     }
@@ -127,9 +127,15 @@ async fn the_decorator_forwards_every_item_untouched_and_returns_the_adapters_cu
     // descriptor off it to build the namespace guard, so a decorator that
     // reported a different id would make every item fail the guard.
     assert_eq!(observed.descriptor().id, inner.descriptor().id);
+    let sweep_gate = |d: knobas_source::SourceDescriptor| {
+        d.entity_kinds
+            .into_iter()
+            .map(|k| (k.id, k.full_sync_exhaustive))
+            .collect::<Vec<_>>()
+    };
     assert_eq!(
-        observed.descriptor().full_sync_exhaustive,
-        inner.descriptor().full_sync_exhaustive,
+        sweep_gate(observed.descriptor()),
+        sweep_gate(inner.descriptor()),
         "the sweep gate is read off the decorated descriptor"
     );
 }

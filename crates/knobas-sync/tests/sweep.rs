@@ -49,8 +49,8 @@ impl Source for Shrinking {
                 label: "Ticket".into(),
                 plural: "Tickets".into(),
                 monogram: "SH".into(),
+                full_sync_exhaustive: self.exhaustive,
             }],
-            full_sync_exhaustive: self.exhaustive,
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
         }
     }
