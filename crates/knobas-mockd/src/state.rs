@@ -19,6 +19,12 @@
 //! | `created` | `updated - 14 days`. |
 //! | comment `id` | `20000 + running index over all comments in fixture order`. |
 //! | worklog `id` | `30000 + running index`; `started` = the worklog's date at 09:00 UTC; `timeSpentSeconds` = `minutes * 60`. |
+//! | `parent` | the ticket's `epic`, resolved to that issue. Absent where the fixture names none (PAY-200 is itself the epic; OPS-77 belongs to none). |
+//! | `issuelinks` | one link per `blocked_by` entry, served at **both** ends: `inwardIssue` on the blocked issue, `outwardIssue` on the blocker, sharing one `id` = `40000 + running index over all `blocked_by` entries in fixture order`. |
+//! | `resolution` | `Done` (id `10000`) exactly when the status is in the `done` category, `null` otherwise — Jira sets a resolution when and only when an issue reaches a done status. |
+//! | `timeoriginalestimate` | `estimate_h * 3600`, `null` where the fixture records no estimate. |
+//! | `timespent` | the sum of the issue's worklog seconds, `null` where it has none. |
+//! | `labels` | always `[]`. The dataset names no labels and mockd will not invent any (the #28 ruling: an invented value reaches `SyncItem::payload` and is indexed as if the dataset had said it). |
 //! | clock | starts at `fixture().today` and advances **exactly one minute** per `touch_issue`/`add_comment` — JQL time resolution is one minute, so a smaller step would make two touches indistinguishable to the very query an adapter runs. |
 //!
 //! ## The server is deliberately not on UTC
@@ -77,6 +83,54 @@ pub struct JiraIssue {
     pub updated: DateTime<Utc>,
     pub comments: Vec<JiraComment>,
     pub worklogs: Vec<JiraWorklog>,
+    /// The epic this belongs to, as `fields.parent`.
+    pub parent: Option<JiraIssueRef>,
+    /// `fields.issuelinks`, this issue's end of each of them.
+    pub links: Vec<JiraLink>,
+    /// `fields.timeoriginalestimate`, in seconds.
+    pub original_estimate_secs: Option<u64>,
+}
+
+impl JiraIssue {
+    /// `fields.timespent`: the sum of what has been logged, or `None` when
+    /// nothing has. `None` rather than `0`, because Jira reports zero for an
+    /// issue whose logged time was deleted and null for one that never had
+    /// any.
+    #[must_use]
+    pub fn time_spent_secs(&self) -> Option<u64> {
+        (!self.worklogs.is_empty())
+            .then(|| self.worklogs.iter().map(|w| w.time_spent_seconds).sum())
+    }
+}
+
+/// The other end of a `parent` or an `issuelinks` entry.
+///
+/// Jira nests a whole (abbreviated) issue there, so mockd resolves the
+/// fixture's `epic` / `blocked_by` keys into one of these when the state is
+/// built. Resolved once rather than on every request because nothing mockd
+/// serves can change what it holds: `touch_issue` moves `updated` and
+/// `add_comment` appends a comment, and neither is a field of this shape.
+#[derive(Debug, Clone)]
+pub struct JiraIssueRef {
+    pub id: u64,
+    pub key: String,
+    pub summary: String,
+    pub issue_type: String,
+    pub status: String,
+    pub priority: Option<String>,
+}
+
+/// One `issuelinks` entry, from this issue's side of it.
+#[derive(Debug, Clone)]
+pub struct JiraLink {
+    /// Shared by both ends: in Jira one link is one object seen from two
+    /// sides, not two links.
+    pub id: u64,
+    /// `true` when this issue is the blocked one, so the other end is served
+    /// as `inwardIssue` ("is blocked by"); `false` when it is the blocker, so
+    /// the other end is `outwardIssue` ("blocks").
+    pub inward: bool,
+    pub other: JiraIssueRef,
 }
 
 #[derive(Debug, Clone)]
@@ -483,7 +537,76 @@ fn build_issues() -> (Vec<JiraIssue>, u64) {
             updated,
             comments,
             worklogs,
+            // Both need every issue to exist first; filled in below.
+            parent: None,
+            links: Vec::new(),
+            original_estimate_secs: t.estimate_h.map(|h| u64::from(h) * 3600),
         });
     }
+    resolve_references(&mut issues, fx);
     (issues, next_comment_id)
+}
+
+/// The second pass: `parent` and `issuelinks`, which point at *other* issues
+/// and therefore cannot be built in the first.
+///
+/// A fixture key that names no ticket is a broken fixture, not a missing
+/// reference, so it panics rather than being skipped -- a silently dropped
+/// epic would show up as an adapter that stopped reading epic membership.
+fn resolve_references(issues: &mut [JiraIssue], fx: &knobas_source_mock::Fixture) {
+    let reference = |key: &str| -> JiraIssueRef {
+        let i = issues
+            .iter()
+            .find(|i| i.key == key)
+            .unwrap_or_else(|| panic!("fixture ticket {key:?} is referenced but does not exist"));
+        JiraIssueRef {
+            id: i.id,
+            key: i.key.clone(),
+            summary: i.summary.clone(),
+            issue_type: i.issue_type.clone(),
+            status: i.status.clone(),
+            priority: i.priority.clone(),
+        }
+    };
+
+    let parents: Vec<Option<JiraIssueRef>> = fx
+        .tickets
+        .iter()
+        .map(|t| t.epic.as_deref().map(&reference))
+        .collect();
+
+    // One link object, two ends. The blocked issue gets the inward end and the
+    // blocker the outward one, both under the same id.
+    let mut next_link_id = 40_000;
+    let mut links: Vec<Vec<JiraLink>> = vec![Vec::new(); fx.tickets.len()];
+    for (idx, t) in fx.tickets.iter().enumerate() {
+        for blocker_key in &t.blocked_by {
+            let id = next_link_id;
+            next_link_id += 1;
+            let blocker_idx = fx
+                .tickets
+                .iter()
+                .position(|o| &o.key == blocker_key)
+                .unwrap_or_else(|| {
+                    panic!("fixture ticket {blocker_key:?} blocks nothing that exists")
+                });
+            let blocked = reference(&t.key);
+            let blocker = reference(blocker_key);
+            links[idx].push(JiraLink {
+                id,
+                inward: true,
+                other: blocker,
+            });
+            links[blocker_idx].push(JiraLink {
+                id,
+                inward: false,
+                other: blocked,
+            });
+        }
+    }
+
+    for (issue, (parent, link)) in issues.iter_mut().zip(parents.into_iter().zip(links)) {
+        issue.parent = parent;
+        issue.links = link;
+    }
 }
