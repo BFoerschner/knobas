@@ -110,6 +110,7 @@
 
 use std::collections::BTreeMap;
 
+use chrono::{DateTime, Utc};
 use knobas_source::{Cursor, Sink, SourceError, SyncItem};
 use serde_json::Value;
 
@@ -121,6 +122,10 @@ use crate::model;
 /// At 50 per page: 1,000 repositories, and 1,000 branches per repository.
 const MAX_LIST_PAGES: u32 = 20;
 const MAX_BRANCH_PAGES: u32 = 20;
+/// 1,000 pull requests per repository, which is five times the largest budget
+/// the config schema allows -- the cap is a runaway guard, not a bound the
+/// user is meant to feel.
+const MAX_PR_PAGES: u32 = 20;
 
 /// One repository this run will walk.
 pub(crate) struct Selected {
@@ -492,6 +497,9 @@ async fn sync_repo(
     // 2. Branches, and the ones that vanished. Task 7 walks commits for
     //    exactly the branches this reports as moved.
     let _moved = branches(source, at, before, after, sink, emitted).await?;
+
+    // 3. Pull requests, newest-updated first, down to the watermark.
+    pulls(source, at, before, after, sink, emitted).await?;
     Ok(())
 }
 
@@ -562,6 +570,190 @@ async fn branches(
 
     after.branches = heads;
     Ok(moved)
+}
+
+/// Pull requests changed since the watermark, newest-updated first.
+///
+/// The walk relies on `sort=recentupdate` ordering the answer newest first, so
+/// the first record strictly below the watermark ends it. That assumption is
+/// checked against the real server in `tests/live_gitea.rs` rather than
+/// trusted -- if a Gitea release ever changed it, this walk would silently
+/// truncate every sync and no fixture would notice, because the fake is
+/// written to the same assumption.
+///
+/// # Why a budget here is not the truncation the module docs forbid
+///
+/// `prs_per_repo` is a bound the **user configured** on the corpus knobas
+/// mirrors; a reached page cap or a refusal is a hole nobody asked for. That is
+/// the whole distinction, and it is why `pr` declares
+/// `full_sync_exhaustive: false` (ADR-0003): a budgeted kind is never swept, so
+/// stopping at the budget can never be read downstream as "the rest was
+/// deleted".
+async fn pulls(
+    source: &crate::GiteaSource,
+    at: RepoRef<'_>,
+    before: &RepoCursor,
+    after: &mut RepoCursor,
+    sink: &mut (dyn Sink + Send),
+    emitted: &mut u64,
+) -> Result<(), RepoError> {
+    // Carried first, so every early return below leaves the position it came
+    // in with rather than a blank one.
+    after.pulls_updated_to = before.pulls_updated_to;
+    after.pulls_at_watermark = before.pulls_at_watermark.clone();
+    if source.config.prs_per_repo == 0 {
+        return Ok(());
+    }
+
+    let watermark = before.pulls_updated_to;
+    let mut budget = source.config.prs_per_repo;
+    // Every pull request this run looked at -- delivered, or recognised as
+    // already delivered. The new watermark is computed from this, so a pull
+    // request skipped as already-delivered still holds the boundary open.
+    let mut examined: Vec<(u64, Option<DateTime<Utc>>)> = Vec::new();
+
+    'paging: for page in 1..=MAX_PR_PAGES {
+        let batch = source.client.pulls(at.owner, at.name, page).await?;
+        let last = batch.len() < PAGE_SIZE as usize;
+        for raw in batch {
+            let pr: model::PullRequest = match serde_json::from_value(raw.clone()) {
+                Ok(pr) => pr,
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        repository = %at.full_name,
+                        "gitea: skipping an unreadable pull request"
+                    );
+                    continue;
+                }
+            };
+            let updated = map::real_time(pr.updated_at).or_else(|| map::real_time(pr.created_at));
+            if let (Some(mark), Some(when)) = (watermark, updated) {
+                if when < mark {
+                    break 'paging;
+                }
+                if when == mark && before.pulls_at_watermark.contains(&pr.number) {
+                    examined.push((pr.number, updated));
+                    continue;
+                }
+            }
+            let comments = fetch_comments(source, at, &pr).await?;
+            examined.push((pr.number, updated));
+            push(
+                sink,
+                map::pr_item(&source.id, &raw, at, &pr, &comments),
+                emitted,
+            )
+            .await?;
+            budget -= 1;
+            if budget == 0 {
+                break 'paging;
+            }
+        }
+        if last {
+            break;
+        }
+    }
+
+    after.pulls_updated_to = examined
+        .iter()
+        .filter_map(|(_, when)| *when)
+        .max()
+        .or(watermark);
+    after.pulls_at_watermark = match after.pulls_updated_to {
+        Some(mark) => {
+            let mut numbers: Vec<u64> = examined
+                .iter()
+                .filter(|(_, when)| *when == Some(mark))
+                .map(|(number, _)| *number)
+                .collect();
+            if after.pulls_updated_to == watermark {
+                // The position did not move, so whatever the previous run
+                // recorded at this instant is still delivered -- even if this
+                // run's budget stopped before reaching it. Dropping those
+                // numbers would re-deliver them on the next poll, and battery
+                // clause 2 would fail on the second idle run rather than the
+                // first, which is the hard version of this bug to find.
+                numbers.extend(before.pulls_at_watermark.iter().copied());
+            }
+            numbers.sort_unstable();
+            numbers.dedup();
+            numbers
+        }
+        None => Vec::new(),
+    };
+    Ok(())
+}
+
+/// The discussion, when there is any and the source wants it indexed.
+///
+/// Gitea keeps a pull request's discussion on the **issue** of the same index,
+/// which is the fifth read endpoint ruling B1 granted. `pr.comments == 0` is
+/// what makes an idle-ish run cheap: no discussion, no request.
+///
+/// # What a refusal here costs, and what it is allowed to hide
+///
+/// A refusal costs searchable text, not the run -- the pull request itself was
+/// readable a moment ago on the same credential. But `knobas-http` collapses
+/// 401 and 403 into a bare [`SourceError::Unauthorized`], so "this token has no
+/// issue scope" and "this token was just revoked" arrive identically, and
+/// swallowing both would let a run whose credential died report success.
+///
+/// So the two are separated the way the rest of this module separates them, by
+/// **measuring**:
+///
+/// * **404** -- unambiguous, and the common case: Gitea answers it for a
+///   repository with its issue unit disabled. Never a credential fault, so it
+///   is indexed without discussion and costs nothing extra.
+/// * **`Unauthorized`** -- ambiguous, so the identity probe decides. Alive means
+///   the token really lacks issue scope (index without discussion, and the
+///   warning names the setting that turns this off); dead is the run's verdict.
+///
+/// The probe is one extra request per *refused* discussion fetch. A healthy run
+/// pays nothing; a token scoped away from issues pays it per pull request that
+/// has comments, which is what `include_pr_comments: false` exists to switch
+/// off.
+async fn fetch_comments(
+    source: &crate::GiteaSource,
+    at: RepoRef<'_>,
+    pr: &model::PullRequest,
+) -> Result<Vec<model::Comment>, RepoError> {
+    if !source.config.include_pr_comments || pr.comments == 0 {
+        return Ok(Vec::new());
+    }
+    let error = match source
+        .client
+        .issue_comments(at.owner, at.name, pr.number)
+        .await
+    {
+        Ok(raw) => {
+            // A single unreadable comment is dropped rather than failing the
+            // pull request: the rest of the discussion is still worth indexing.
+            return Ok(raw
+                .into_iter()
+                .filter_map(|c| serde_json::from_value(c).ok())
+                .collect());
+        }
+        Err(error) => error,
+    };
+    if !is_repo_scoped(&error) {
+        return Err(RepoError::from(error));
+    }
+    if matches!(error, SourceError::Unauthorized) {
+        // Ambiguous: 401 and 403 arrive identically. Believe it only while the
+        // credential is provably still good.
+        credential_still_good(source, at.full_name, &error)
+            .await
+            .map_err(RepoError::Fatal)?;
+    }
+    tracing::warn!(
+        repository = %at.full_name,
+        number = pr.number,
+        %error,
+        "gitea: indexing this pull request without its discussion; \
+         set include_pr_comments to false to stop asking"
+    );
+    Ok(Vec::new())
 }
 
 /// Hand one item to the engine.

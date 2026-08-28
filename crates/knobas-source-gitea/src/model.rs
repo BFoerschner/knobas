@@ -85,13 +85,6 @@ pub(crate) struct PayloadUser {
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "wired in task 6: pull requests and their discussion"
-    )
-)]
 pub(crate) struct PullRequest {
     pub number: u64,
     #[serde(default)]

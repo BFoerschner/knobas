@@ -147,13 +147,6 @@ pub(crate) fn branch_tombstone(source_id: &str, at: RepoRef<'_>, branch: &str) -
     }
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "wired in task 6: pull requests and their discussion"
-    )
-)]
 pub(crate) fn pr_item(
     source_id: &str,
     raw: &Value,

@@ -234,13 +234,6 @@ impl GiteaClient {
         .await
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "wired in task 6: pull requests and their discussion"
-        )
-    )]
     pub(crate) async fn pulls(
         &self,
         owner: &str,
@@ -263,13 +256,6 @@ impl GiteaClient {
     }
 
     /// Pull-request discussion. Gitea keeps it on the issue with the same index.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "wired in task 6: pull requests and their discussion"
-        )
-    )]
     pub(crate) async fn issue_comments(
         &self,
         owner: &str,

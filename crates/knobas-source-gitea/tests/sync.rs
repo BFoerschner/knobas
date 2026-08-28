@@ -784,3 +784,168 @@ async fn a_second_instance_emits_into_its_own_namespace() {
         "{items:?}"
     );
 }
+
+// ---------------------------------------------------------------- pulls ----
+
+/// Björn's stated pain is bad source-system search; review discussion is
+/// exactly the text Jira's and Gitea's own search will not find for him, so it
+/// is folded into the indexed body rather than left in the payload.
+#[tokio::test]
+async fn a_full_sync_emits_pull_requests_with_their_discussion() {
+    let fake = Fake::start(&State::tidewater()).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+    let (items, _) = full(&*source).await;
+
+    assert_eq!(
+        ids(&items, "pr"),
+        vec![
+            "gitea:tidewater/payout-service#142",
+            "gitea:tidewater/payout-service#144",
+        ]
+    );
+    let sepa = items
+        .iter()
+        .find(|i| i.entity.key.ends_with("#142"))
+        .expect("the fixture has #142");
+    assert_eq!(sepa.title, "SEPA retry with exponential backoff");
+    assert!(
+        sepa.body_text.contains("Bounded to +/-10 %"),
+        "{}",
+        sepa.body_text
+    );
+    assert_eq!(sepa.author.as_deref(), Some("mara"));
+}
+
+/// The exit criterion, in miniature: something changed upstream, and the next
+/// incremental run returns exactly that and nothing else.
+#[tokio::test]
+async fn an_incremental_run_returns_only_the_pull_request_that_moved() {
+    let mut state = State::tidewater();
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+    let (_, cursor) = full(&*source).await;
+
+    state.touch_pull("tidewater/payout-service", 142, "2026-08-22T15:10:00Z");
+    fake.remount(&state).await;
+
+    let (items, moved) = again(&*source, &cursor).await;
+    assert_eq!(
+        ids(&items, "pr"),
+        vec!["gitea:tidewater/payout-service#142"]
+    );
+    assert_eq!(items.len(), 1, "only the pull request moved: {items:?}");
+    assert_ne!(moved, cursor);
+}
+
+/// Gitea timestamps have one-second resolution. Two pull requests updated in
+/// the same second must both be delivered once -- and neither of them again on
+/// the next poll, which is what `pulls_at_watermark` is for.
+#[tokio::test]
+async fn two_pull_requests_on_the_same_second_are_delivered_once_each() {
+    let mut state = State::tidewater();
+    state.touch_pull("tidewater/payout-service", 142, "2026-08-22T13:50:00Z");
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+
+    let (items, cursor) = full(&*source).await;
+    assert_eq!(ids(&items, "pr").len(), 2, "{items:?}");
+    assert!(cursor.contains("pulls_at_watermark"), "{cursor}");
+
+    let (again_items, again_cursor) = again(&*source, &cursor).await;
+    assert!(again_items.is_empty(), "re-delivered {again_items:?}");
+    assert_eq!(again_cursor, cursor);
+}
+
+#[tokio::test]
+async fn discussion_can_be_left_out_of_the_index() {
+    let fake = Fake::start(&State::tidewater()).await;
+    let source = source(
+        fake.base_url(),
+        serde_json::json!({ "include_pr_comments": false }),
+    );
+    let (items, _) = full(&*source).await;
+    let sepa = items
+        .iter()
+        .find(|i| i.entity.key.ends_with("#142"))
+        .expect("the fixture has #142");
+    assert!(!sepa.body_text.contains("Bounded to"), "{}", sepa.body_text);
+    assert!(sepa.body_text.contains("Retries transient PSP errors."));
+    // …and the request was never made, which is what the setting is for.
+    let asked = fake.paths().await;
+    assert!(
+        !asked.iter().any(|p| p.contains("/issues/142/comments")),
+        "{asked:?}"
+    );
+}
+
+/// A budget is a bound on the corpus, not a page size: the newest-updated
+/// pull requests are the ones worth mirroring.
+#[tokio::test]
+async fn the_pull_request_budget_keeps_the_newest() {
+    let fake = Fake::start(&State::tidewater()).await;
+    let one = source(fake.base_url(), serde_json::json!({ "prs_per_repo": 1 }));
+    let (items, _) = full(&*one).await;
+    assert_eq!(
+        ids(&items, "pr"),
+        vec!["gitea:tidewater/payout-service#144"],
+        "the budget keeps the most recently updated"
+    );
+
+    // Zero mirrors none at all, and costs no request: a fresh fake, so the
+    // paths below are this run's alone.
+    let quiet = Fake::start(&State::tidewater()).await;
+    let none = source(quiet.base_url(), serde_json::json!({ "prs_per_repo": 0 }));
+    let (items, _) = full(&*none).await;
+    assert!(ids(&items, "pr").is_empty(), "{items:?}");
+    let asked = quiet.paths().await;
+    assert!(!asked.iter().any(|p| p.ends_with("/pulls")), "{asked:?}");
+}
+
+/// A repository with its issue unit switched off answers 404 for the
+/// discussion. That is unambiguous -- never a credential fault -- so the pull
+/// request is indexed without its comment text and the run carries on.
+#[tokio::test]
+async fn a_pull_request_whose_discussion_is_refused_is_still_indexed() {
+    let mut state = State::tidewater();
+    state
+        .discussion_status
+        .insert("tidewater/payout-service#142".to_owned(), 404);
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+
+    let (items, _) = full(&*source).await;
+    let sepa = items
+        .iter()
+        .find(|i| i.entity.key.ends_with("#142"))
+        .expect("the pull request itself is still emitted");
+    assert!(sepa.body_text.contains("Retries transient PSP errors."));
+    assert!(!sepa.body_text.contains("Bounded to"), "{}", sepa.body_text);
+    // …and the run reached the pull request that follows it.
+    assert!(
+        items.iter().any(|i| i.entity.key.ends_with("#144")),
+        "{items:?}"
+    );
+}
+
+/// The hole a plain swallow would leave. A 403 on the discussion reaches this
+/// adapter as a bare `Unauthorized`, exactly as a revoked token's 401 does --
+/// so believing it without measuring would let a run whose credential died
+/// report success with an advanced cursor.
+///
+/// The control is the test above: the identical refusal with a *live*
+/// credential still only costs the discussion, so this is not "any refusal
+/// raises".
+#[tokio::test]
+async fn a_discussion_refused_by_a_dead_credential_fails_the_run() {
+    let mut state = State::tidewater();
+    state
+        .discussion_status
+        .insert("tidewater/payout-service#142".to_owned(), 403);
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+    fake.remount_revoked_after_preflight(&state).await;
+
+    let mut sink = VecSink(Vec::new());
+    let error = source.sync(None, &mut sink).await.unwrap_err();
+    assert!(matches!(error, SourceError::Unauthorized), "{error:?}");
+}
