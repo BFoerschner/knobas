@@ -42,7 +42,7 @@
 //!   transport instead of through a cap -- and the worse one, because it
 //!   reports `Ok`. Issue #81, ruled 2026-08-29.
 //! * **A page cap that is reached ends the run with an error.** Returning `Ok`
-//!   after walking 1,000 of 1,400 repositories would report a complete mirror
+//!   after walking 950 of 1,400 repositories would report a complete mirror
 //!   of a corpus that was never walked.
 //! * **A repository skipped during a full sync is fatal too.** Ruling B4
 //!   grants skip-with-warning for a 403 or 404 on one repository, and that is
