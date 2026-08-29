@@ -264,6 +264,92 @@ test("progress from the channel is rendered per phase and item count", async () 
   expect(button("Retry")).toBeUndefined();
 });
 
+test("a real source's finished run lands on the DONE step (#156)", async () => {
+  // `stepIndex = 3` used to be assigned in exactly one place, `loadDemo`. A real
+  // source finished at step 2 and was offered a bare *Finish*, so the sentence
+  // three pieces of work were ruled about — #84/ADR-0005 (the count means the
+  // corpus), #120 (no microtask flash of *0 items*), #137 (no digit it cannot
+  // vouch for) — only ever rendered after a demo load. The breadcrumb promised
+  // the step to every user regardless: `STEPS` draws *Done* for a real source
+  // too.
+  //
+  // Click-neutral, which is the whole argument for landing here rather than
+  // restating the rulings against the stats row: a finished step 2 offered one
+  // button and DONE offers one button. What the reader gains is the sentence
+  // and the ⌘K pointer.
+  render({ source: summary() });
+  button("Next")!.click();
+  flushSync();
+  button("Next")!.click();
+  flushSync();
+  button("Start the first sync")!.click();
+  await settle();
+
+  progress({ phase: "fetching", items: 40, elapsed_ms: 900 });
+  expect(step()).toBe("First sync");
+
+  progress({ phase: "finished", items: 7, elapsed_ms: 4200 });
+  await settle();
+  expect(step()).toBe("Done");
+  expect(text()).toContain("knobas mirrored");
+  expect(text()).toContain("⌘K");
+  // One button before, one button after.
+  expect(target.querySelectorAll(".acts button")).toHaveLength(1);
+  expect(button("Finish")).toBeTruthy();
+});
+
+test("a wizard whose only message is the ending lands on DONE too (#156)", async () => {
+  // Off the *ending*, not off having watched the run: ADR-0005 says every
+  // caller handed a run id receives an ending whether it started the run,
+  // joined one in flight, or was served a terminal message synthesised for a
+  // run already over. The last of those is the ordinary shape after
+  // `add_source`'s wake, and it is the one where this ending is the only
+  // message the channel ever carries — so it is the one a `stepIndex` driven by
+  // anything but the ending would miss.
+  render({ source: summary() });
+  button("Next")!.click();
+  flushSync();
+  button("Next")!.click();
+  flushSync();
+  button("Start the first sync")!.click();
+  await settle();
+
+  progress({ phase: "finished", items: 0, elapsed_ms: 4200 });
+  await settle();
+  expect(step()).toBe("Done");
+  // …and the corpus, not the nothing that run wrote.
+  expect(text()).toContain("213 items");
+});
+
+test("a failed run stays at the first-sync step (#156)", async () => {
+  // DONE is for an ending that said `finished`. A failure keeps its stats row,
+  // its message and its *Retry* / *Skip for now* pair, where the reader decides
+  // what to do with it — landing them on a success panel would be the defect
+  // #156 exists to fix, inverted.
+  render({ source: summary() });
+  button("Next")!.click();
+  flushSync();
+  button("Next")!.click();
+  flushSync();
+  button("Start the first sync")!.click();
+  await settle();
+
+  progress({ phase: "failed", items: 0, elapsed_ms: 300, message: "401 from /rest/api/2/myself" });
+  await settle();
+  expect(step()).toBe("First sync");
+  expect(text()).not.toContain("knobas mirrored");
+  expect(button("Retry")).toBeTruthy();
+  expect(button("Skip for now")).toBeTruthy();
+
+  // And a retry that works walks the reader on, so the failure is a detour
+  // rather than a dead end.
+  button("Retry")!.click();
+  await settle();
+  progress({ phase: "finished", items: 3, elapsed_ms: 4200 });
+  await settle();
+  expect(step()).toBe("Done");
+});
+
 test("the finished panel reports the corpus, never what the run happened to write", async () => {
   // The interleaving ADR-0005 is about: adding a source wakes the scheduler,
   // so the run this wizard is watching may be the one that already found the
@@ -357,6 +443,11 @@ test("a corpus that cannot be read costs the count, not the sentence", async () 
 
   progress({ phase: "finished", items: 9, elapsed_ms: 4200 });
   await settle();
+  // On the DONE panel, and on the **real** path (#156): this is the sentence
+  // the ruling is about, and until the ending moved the wizard here it rendered
+  // only after a demo load.
+  expect(step()).toBe("Done");
+  expect(text()).toContain("knobas mirrored your items");
   expect(text()).not.toContain("9 items");
   expect(text()).not.toMatch(/\d+ items/);
   // A resolved answer is the answer: nothing to retry for.
@@ -364,7 +455,6 @@ test("a corpus that cannot be read costs the count, not the sentence", async () 
   // The sync worked: a count that could not be re-read is not a failed sync.
   expect(button("Finish")).toBeTruthy();
   expect(button("Retry")).toBeUndefined();
-  expect(text()).toMatch(/finished/);
 });
 
 test("a corpus read that is held open and then fails renders no count at all", async () => {
@@ -385,20 +475,23 @@ test("a corpus read that is held open and then fails renders no count at all", a
   // that makes the old fallback say *0 items* over a full mirror.
   progress({ phase: "finished", items: 0, elapsed_ms: 4200 });
   await settle();
-  // Still waiting, and saying so. Asserted as the string it renders rather than
-  // as the absence of a digit, because *no digit* is equally true of the state
-  // this test is about — so a negative here and a negative after the release
-  // would be one assertion taken twice, passing over a panel that never moved.
-  expect(text()).toContain("· … items ·");
+  // Still waiting, and saying so — on the DONE panel now (#156), which is where
+  // the ending puts a real source. Asserted as the string it renders rather
+  // than as the absence of a digit, because *no digit* is equally true of the
+  // state this test is about — so a negative here and a negative after the
+  // release would be one assertion taken twice, passing over a panel that never
+  // moved.
+  expect(step()).toBe("Done");
+  expect(text()).toContain("knobas mirrored … items");
 
   gate.release();
   await settle();
   expect(calls.listSources).toBe(2);
-  // Conceded, and that is a different thing from still pending: the row now
-  // reads the dash. Without this line every assertion below it also holds of a
-  // panel stuck on `…` for ever, which is not what the ruling asked for and is
-  // the failure a `corpus` left `undefined` would produce.
-  expect(text()).toContain("· — ·");
+  // Conceded, and that is a different thing from still pending: the sentence
+  // drops the count instead. Without this line every assertion below it also
+  // holds of a panel stuck on `…` for ever, which is not what the ruling asked
+  // for and is the failure a `corpus` left `undefined` would produce.
+  expect(text()).toContain("knobas mirrored your items");
   expect(text()).not.toContain("0 items");
   expect(text()).not.toMatch(/\d+ items/);
   expect(button("Finish")).toBeTruthy();

@@ -2,7 +2,16 @@
   The first-run wizard — spec §14a: *"initialize the database → add the first
   source (the §3 flow) → initial sync with progress → land in the launcher."*
 
-  Four panels over the mockup's `.steps` breadcrumb.
+  Four panels over the mockup's `.steps` breadcrumb, and **DONE is the terminal
+  one for a real source and a demo load alike** (#156, ruled 2026-08-29). It was
+  not always: `stepIndex = 3` was assigned only in `loadDemo`, so a real first
+  sync ended at step 2 offering a bare *Finish*, and the sentence below —
+  *knobas mirrored N items*, which #84/ADR-0005, #120 and #137 were each ruled
+  about — could only ever be read after a demo load. The breadcrumb drew *Done*
+  for everybody regardless. The turnover is off the run's **ending** and costs
+  no extra click: a finished step 2 offered one button, DONE offers one button,
+  and what the reader gains is the sentence and the ⌘K pointer. A *failed*
+  ending stays at step 2, where *Retry* and *Skip for now* are.
 
   **Known deviation from task 20 step 3.** The brief asks for the Add-source
   flow "embedded inline rather than in a modal; a modal over an otherwise empty
@@ -197,10 +206,26 @@
   /**
    * The stats row's `· N items ·` segment, or a dash where the count would go.
    *
-   * The same rule as the sentence and for the same reason: the row sits beside
-   * `finished`, so a number in it is read as what was mirrored. A dash rather
+   * The same rule as the sentence and for the same reason: the row sat beside
+   * `finished`, so a number in it was read as what was mirrored. A dash rather
    * than dropping the segment, so the row keeps its shape between a pending
    * read, a count and no count.
+   *
+   * **Both of the other two states are now unreachable here, and are kept on
+   * purpose** (#156). The row renders only at step 2, and since the ending
+   * moves a real source to DONE this derived can no longer see either of the
+   * states the paragraph above is about: `"…"` needs `corpusPending`, and
+   * `null` needs a settled `readCorpus`, and both need `finished`. So the row
+   * only ever reads `· N items ·` off the run's own progress now, and the two
+   * remaining branches are dead — untested with it, since the assertions that
+   * pinned them moved to the DONE panel where the states actually render.
+   *
+   * They stay because **retiring them retires the surface #137's constraint 3
+   * was placed on**, and re-aiming a ruling is Björn's call, not an
+   * implementer's or a reviewer's — the same fork this issue's ruling
+   * deliberately left open. If he takes fork 2 (the real path ends at step 2)
+   * every branch here is load-bearing again; if he does not, this derived
+   * collapses to a template literal and the dash goes with it.
    */
   const itemsReading = $derived(mirrored === null ? "—" : `${mirrored} items`);
 
@@ -263,6 +288,17 @@
           // `corpusPending` is what makes that safe — the panel can render
           // without a count because it has a way to say it has not got one.
           void readCorpus(id);
+          // **DONE, for a real source too** (#156). This used to be assigned in
+          // exactly one place, `loadDemo`, so a real first sync ended at step 2
+          // under a bare *Finish* and the sentence below — the one #84/ADR-0005,
+          // #120 and #137 were each ruled about — rendered only after a demo
+          // load, over a breadcrumb that promised *Done* to everybody.
+          //
+          // Off the **ending**, so it covers every shape ADR-0005 enumerates:
+          // this wizard started the run, joined it in flight, or was served a
+          // terminal message synthesised for a run already over. Only
+          // `finished`; a failure stays at step 2 with its Retry.
+          stepIndex = 3;
         }
         if (message.phase === "failed") {
           // The message is a line an upstream server wrote, and it is
@@ -406,6 +442,13 @@
               Indeterminate while it runs: there is no total until the run ends
               (`items` grows and nothing knows where it stops), and a bar that
               invented one would be a lie that moves.
+
+              …and indeterminate is now the only thing it is (#156). `phase` and
+              `stepIndex` are assigned in the same channel callback, so step 2
+              never renders with `finished` true and the filled branch of each
+              ternary is dead. Left rather than simplified for the same reason
+              as `itemsReading` above: it is the same one question about the
+              same surface, and it is Björn's.
             -->
             <progress max={finished ? 1 : undefined} value={finished ? 1 : undefined}></progress>
             <p class="reading">
@@ -420,14 +463,16 @@
           {/if}
 
           <div class="acts">
+            <!--
+              Failure only. A run that ended `finished` is on the DONE panel by
+              the time this renders (#156), so the *Finish* branch that used to
+              sit here was unreachable — and an unreachable branch on this exact
+              surface is what three pieces of work tripped over.
+            -->
             {#if failed}
               <button class="btn pri" disabled={starting} onclick={() => void sync()}>Retry</button>
               <button class="btn" disabled={finishing} onclick={() => void finish()}>
                 Skip for now
-              </button>
-            {:else if finished}
-              <button class="btn pri" disabled={finishing} onclick={() => void finish()}>
-                Finish
               </button>
             {/if}
           </div>
