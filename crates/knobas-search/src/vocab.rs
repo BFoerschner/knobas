@@ -271,36 +271,95 @@ const MONOGRAM_PAD: char = '·';
 /// mirror, a disabled adapter, a source added by a plugin -- still has to be
 /// grouped, labelled and chipped, so everything is *derivable* and declared
 /// metadata merely wins where it exists.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct KindCatalog {
     /// `BTreeMap` rather than `HashMap`: [`Self::declared_kinds`] feeds chips
     /// and generated SQL, and both want a stable order.
     declared: BTreeMap<String, KindInfo>,
+    /// The kinds knobas **owns**, which no descriptor declares.
+    ///
+    /// Separate from `declared` rather than merged into it, and that is the
+    /// whole shape of the seam. Two reasons, and both are load-bearing:
+    ///
+    /// * [`Self::is_empty`] means *"nothing has told me what kinds exist"* --
+    ///   the E-Q2 state the product ships in. Owned kinds are compiled in and
+    ///   are always here, so folding them into `declared` would make the
+    ///   catalog claim to have been told, and `type:hypervisor` would start
+    ///   being reported as unknown while nothing had wired the registry
+    ///   through.
+    /// * a descriptor must not be able to claim one. Merged, "first
+    ///   declaration wins" would hand `note` to whichever adapter declared it
+    ///   first; kept apart, [`Self::info`] can prefer the owner.
+    owned: BTreeMap<String, KindInfo>,
+}
+
+impl Default for KindCatalog {
+    /// The honest default while nothing wires the adapter registry through
+    /// (**E-Q2**): no descriptor has spoken, and knobas' own kinds are still
+    /// knobas'.
+    fn default() -> Self {
+        Self {
+            declared: BTreeMap::new(),
+            owned: owned_kinds(),
+        }
+    }
 }
 
 impl KindCatalog {
-    /// Build a catalog from what the compiled-in adapters declare.
+    /// Build a catalog from what the compiled-in adapters declare, plus what
+    /// knobas owns.
     ///
     /// First declaration of a kind wins, so the result does not depend on how
     /// a registry happens to order two adapters that both emit `"ticket"`.
+    ///
+    /// A descriptor that declares a kind knobas owns is **ignored for that
+    /// kind** -- see [`Self::owned`]. It is not an error here: refusing an
+    /// adapter is the sync engine's job (`PgSink::check`), and a catalog that
+    /// panicked or failed would take the launcher down over a labelling
+    /// question.
+    ///
+    /// [`Self::owned`]: KindCatalog
     pub fn from_descriptors(descriptors: impl IntoIterator<Item = SourceDescriptor>) -> Self {
+        let owned = owned_kinds();
         let mut declared: BTreeMap<String, KindInfo> = BTreeMap::new();
         for descriptor in descriptors {
             for kind in descriptor.entity_kinds {
+                if owned.contains_key(&kind.id) {
+                    continue;
+                }
                 declared.entry(kind.id.clone()).or_insert(kind);
             }
         }
-        Self { declared }
+        Self { declared, owned }
     }
 
-    /// Display metadata for one kind: declared if an adapter said so, derived
-    /// otherwise.
+    /// Display metadata for one kind: knobas' own if it owns the kind, the
+    /// adapter's if one declared it, derived otherwise.
+    ///
+    /// Owned first, because a kind knobas owns is not an adapter's to rename.
     #[must_use]
     pub fn info(&self, kind: &str) -> KindInfo {
-        self.declared
+        self.owned
             .get(kind)
+            .or_else(|| self.declared.get(kind))
             .cloned()
             .unwrap_or_else(|| derive_kind_info(kind))
+    }
+
+    /// The kinds knobas owns rather than mirrors, in a stable order.
+    #[must_use]
+    pub fn owned_kinds(&self) -> Vec<String> {
+        self.owned.keys().cloned().collect()
+    }
+
+    /// Whether this catalog knows the kind at all -- declared by an adapter, or
+    /// owned by knobas.
+    ///
+    /// This is what the grammar disambiguates on: `type:note` is a kind filter
+    /// because knobas owns notes, even though no descriptor mentions them.
+    #[must_use]
+    pub fn is_known(&self, kind: &str) -> bool {
+        self.owned.contains_key(kind) || self.declared.contains_key(kind)
     }
 
     /// Every kind a compiled-in adapter declares, in a stable order.
@@ -309,23 +368,29 @@ impl KindCatalog {
         self.declared.keys().cloned().collect()
     }
 
-    /// Whether the catalog knows of any kind at all.
+    /// Whether any **adapter** has told this catalog what kinds it emits.
     ///
     /// An empty catalog is **not** the statement "there are no kinds"; it is
-    /// knobas not yet knowing what kinds exist, because nothing wires the
-    /// adapter registry through until stream F's `list_adapters` (open question
-    /// **E-Q2**). Callers that disambiguate on [`Self::is_declared`] have to
-    /// check this first, or they will read "I have not been told" as "no".
+    /// knobas not yet knowing what kinds sources have, because nothing wires
+    /// the adapter registry through until stream F's `list_adapters` (open
+    /// question **E-Q2**). Callers that disambiguate on [`Self::is_known`] have
+    /// to check this first, or they will read "I have not been told" as "no".
+    ///
+    /// Owned kinds are deliberately *not* counted. They are compiled in, so
+    /// they are here in every catalog including the default one -- and a
+    /// predicate that they made non-empty would answer "I have been told"
+    /// before anybody had said anything.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.declared.is_empty()
     }
 
-    /// Whether an adapter declared this kind.
+    /// Whether an **adapter** declared this kind.
     ///
-    /// The grammar needs this to tell `type:build` (a kind filter) from
-    /// `type:hypervisor` (the estate's `type:` chip, which is M4 and has no
-    /// home yet) -- see [`crate::query::parse`].
+    /// Deliberately narrower than [`Self::is_known`]: a kind knobas owns is
+    /// declared by nobody, which is the whole of story 21, and a predicate that
+    /// blurred the two would make "no descriptor declares it" untestable. The
+    /// grammar wants `is_known`; this is for anything asking about descriptors.
     #[must_use]
     pub fn is_declared(&self, kind: &str) -> bool {
         self.declared.contains_key(kind)
@@ -343,8 +408,39 @@ impl KindCatalog {
                 .into_iter()
                 .map(|kind| (kind.to_owned(), derive_kind_info(kind)))
                 .collect(),
+            owned: owned_kinds(),
         }
     }
+}
+
+/// The kinds knobas owns, as the catalog holds them.
+///
+/// The list is `knobas_core::entity::OWNED_KINDS` and lives there rather than
+/// here because it is tied to `RESERVED_NAMESPACES`: an owned kind's id is also
+/// the namespace its entities are addressed in, which is what migration
+/// `0006`'s sweep-safety constraint is written on.
+///
+/// `full_sync_exhaustive: false`, always. An owned kind is emitted by no sync,
+/// so there is no full sync for it to be exhaustive over -- and the same
+/// reasoning `derive_kind_info` records applies twice over here: an affirmative
+/// would be a claim nothing vouches for, on the one kind that has no source to
+/// re-fetch it from.
+fn owned_kinds() -> BTreeMap<String, KindInfo> {
+    knobas_core::entity::OWNED_KINDS
+        .iter()
+        .map(|owned| {
+            (
+                owned.id.to_owned(),
+                KindInfo {
+                    id: owned.id.to_owned(),
+                    label: owned.label.to_owned(),
+                    plural: owned.plural.to_owned(),
+                    monogram: owned.monogram.to_owned(),
+                    full_sync_exhaustive: false,
+                },
+            )
+        })
+        .collect()
 }
 
 /// Everything a kind's chip needs, worked out from its id alone.
@@ -484,6 +580,85 @@ mod tests {
         assert_eq!(catalog.info("pr").plural, "Pull requests");
         assert_eq!(catalog.info("branch").plural, "Branches");
         assert_eq!(catalog.info("repo").plural, "Repositories");
+    }
+
+    /// **The catalog seam, in both directions** (issue #46, story 21).
+    ///
+    /// Forwards: a kind knobas owns is in the catalog, with knobas' own label,
+    /// plural and monogram, and **no descriptor declares it**. That last clause
+    /// is the point -- the alternative was a fake descriptor, which would put a
+    /// source in the sources list that nobody configured and that syncs
+    /// nothing.
+    ///
+    /// Backwards: everything the previous test asserts about descriptor-declared
+    /// kinds still holds. A seam that made owned kinds work by making declared
+    /// ones stop being declared would pass the forward half on its own.
+    #[test]
+    fn an_owned_kind_is_in_the_catalog_and_no_descriptor_declared_it() {
+        let catalog = KindCatalog::from_descriptors([descriptor(&[KindInfo {
+            id: "ticket".to_owned(),
+            label: "Ticket".to_owned(),
+            plural: "Tickets".to_owned(),
+            monogram: "JI".to_owned(),
+            full_sync_exhaustive: true,
+        }])]);
+
+        assert_eq!(catalog.owned_kinds(), ["note"]);
+        for owned in knobas_core::entity::OWNED_KINDS {
+            let info = catalog.info(owned.id);
+            assert_eq!(
+                (
+                    info.label.as_str(),
+                    info.plural.as_str(),
+                    info.monogram.as_str()
+                ),
+                (owned.label, owned.plural, owned.monogram),
+                "knobas declares its own kinds' display metadata"
+            );
+            // Emitted by no sync, so there is no full sync for it to be
+            // exhaustive over. The sweep reads the *descriptor*, never this --
+            // but an affirmative here would still be a claim nothing vouches
+            // for, which is the same reasoning `derive_kind_info` records.
+            assert!(!info.full_sync_exhaustive);
+            assert!(catalog.is_known(owned.id), "the grammar can resolve it");
+            assert!(
+                !catalog.is_declared(owned.id),
+                "and no descriptor pretended to be a source for it"
+            );
+            assert!(!catalog.declared_kinds().iter().any(|k| k == owned.id));
+        }
+
+        // Backwards: the descriptor half is untouched.
+        assert_eq!(catalog.info("ticket").monogram, "JI");
+        assert_eq!(catalog.declared_kinds(), ["ticket"]);
+        assert!(catalog.is_declared("ticket") && catalog.is_known("ticket"));
+        assert!(!catalog.is_declared("build_config") && !catalog.is_known("build_config"));
+        // ...including while nothing has wired the registry through at all
+        // (**E-Q2**), which is what the product ships with today.
+        assert!(KindCatalog::default().is_empty(), "no descriptor has spoken");
+        assert!(KindCatalog::default().is_known("note"), "and yet notes exist");
+    }
+
+    /// A descriptor cannot take a kind knobas owns away from it.
+    ///
+    /// Not defensiveness: `info` is what labels a result group and chips a row,
+    /// so an adapter declaring `note` would rename the user's own notes in the
+    /// launcher. The sink refuses to *mirror* such a kind
+    /// (`knobas_sync::PgSink::check`); this is the display half of the same
+    /// statement, and it is here because the catalog is the only place that
+    /// merges the two lists.
+    #[test]
+    fn a_descriptor_cannot_claim_a_kind_knobas_owns() {
+        let catalog = KindCatalog::from_descriptors([descriptor(&[KindInfo {
+            id: "note".to_owned(),
+            label: "Sticky".to_owned(),
+            plural: "Stickies".to_owned(),
+            monogram: "ST".to_owned(),
+            full_sync_exhaustive: true,
+        }])]);
+        assert_eq!(catalog.info("note").plural, "Notes");
+        assert!(!catalog.is_declared("note"));
+        assert!(catalog.declared_kinds().is_empty());
     }
 
     #[test]

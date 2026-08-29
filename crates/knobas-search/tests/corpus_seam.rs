@@ -14,6 +14,13 @@
 //! through `sql::search_sql`, `sql::query_as_with`, `group::group` and
 //! `snippet::segments` untouched.
 //!
+//! `corpus::NOTE` was test-only when this was written and ships in the
+//! launcher's corpus list since #46. That makes the file *more* load-bearing
+//! rather than redundant: what it still proves is the property the product
+//! now depends on -- two corpora, one statement, one bind list, ranking
+//! comparable across both -- and it drives the builder directly, so a
+//! regression shows here before it shows in the launcher.
+//!
 //! Every test in this binary shares one database -- fresh per run, shared
 //! across the tests in it -- so each seeds a token unique to itself.
 //!
@@ -55,7 +62,19 @@ async fn seed_item(pool: &sqlx::PgPool, id: &str, kind: &str, title: &str, body:
     .unwrap();
 }
 
+/// A note, seeded as its two rows rather than through `knobas_core::note`.
+///
+/// The entity row is not optional: `0006`'s `note_entity_fk` says a note that
+/// is not an entity is a note nothing can link to. Written by hand here on
+/// purpose -- this file is about the *corpus*, and going through the store
+/// would make the seam test depend on the store's reconciliation.
 async fn seed_note(pool: &sqlx::PgPool, id: &str, title: &str, body: &str) {
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'note',$2)")
+        .bind(id)
+        .bind(title)
+        .execute(pool)
+        .await
+        .unwrap();
     sqlx::query("insert into knobas.note (id, title, body_md) values ($1,$2,$3)")
         .bind(id)
         .bind(title)

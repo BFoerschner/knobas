@@ -2875,6 +2875,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "criterion",
+ "knobas-core",
  "knobas-db",
  "knobas-search",
  "knobas-source",

@@ -748,3 +748,180 @@ async fn a_kind_no_one_declared_is_still_grouped_and_labelled() {
         2
     );
 }
+
+/// One query, both corpora: what knobas synced and what it owns come back
+/// together (#46 stories 12 and 13).
+///
+/// Written through `knobas_core::note`, not by seeding two rows, because the
+/// claim is that a note the user *wrote* is findable -- and the store is what
+/// writes one. Story 15's "as soon as I have written it" is the same
+/// assertion: the corpus is `knobas.note` itself and `fts` is a stored
+/// generated column, so there is no index to catch up.
+#[tokio::test]
+async fn a_note_is_found_by_the_same_search_that_finds_a_ticket() {
+    let pool = pool().await;
+    seed_sources(&pool).await;
+    let t = token("note");
+
+    seed(
+        &pool,
+        &format!("jira:{t}-1"),
+        "ticket",
+        "jira",
+        &format!("{t} SEPA retry"),
+        "the retry counter is off by one",
+        Some("mara.lindqvist"),
+        Utc::now(),
+    )
+    .await;
+    let note = knobas_core::note::create(
+        &pool,
+        &format!("{t} investigation"),
+        "the counter starts at zero, not one",
+        "user",
+    )
+    .await
+    .unwrap();
+
+    // Story 13: the *body* is searchable, not just the title -- the phrase
+    // below is in neither title.
+    let by_body = searcher(&pool).search(q(&format!("{t} counter"))).await.unwrap();
+    let found: Vec<&str> = by_body
+        .groups
+        .iter()
+        .flat_map(|group| &group.hits)
+        .map(|hit| hit.row.entity_id.as_str())
+        .collect();
+    assert!(found.contains(&note.id.as_str()), "{found:?}");
+    assert!(found.contains(&format!("jira:{t}-1").as_str()), "{found:?}");
+
+    // Story 12: one search box, and the note is grouped and labelled like
+    // anything else -- from the catalog, which knows the kind knobas owns
+    // even though no adapter declares it.
+    let both = searcher(&pool).search(q(&t)).await.unwrap();
+    let groups: Vec<(&str, &str)> = both
+        .groups
+        .iter()
+        .map(|group| (group.kind.as_str(), group.plural.as_str()))
+        .collect();
+    assert_eq!(groups, [("ticket", "Tickets"), ("note", "Notes")]);
+    assert_eq!(both.total, 2);
+}
+
+/// Story 14: `note:` narrows to what the user wrote, and does not narrow it
+/// away.
+#[tokio::test]
+async fn the_note_prefix_returns_notes_and_only_notes() {
+    let pool = pool().await;
+    seed_sources(&pool).await;
+    let t = token("pfx");
+
+    seed(
+        &pool,
+        &format!("jira:{t}-1"),
+        "ticket",
+        "jira",
+        &format!("{t} a ticket"),
+        "",
+        None,
+        Utc::now(),
+    )
+    .await;
+    let note = knobas_core::note::create(&pool, &format!("{t} a note"), "", "user")
+        .await
+        .unwrap();
+
+    for raw in [format!("note: {t}"), format!("type:note {t}")] {
+        let answer = searcher(&pool).search(q(&raw)).await.unwrap();
+        let ids: Vec<&str> = answer
+            .groups
+            .iter()
+            .flat_map(|group| &group.hits)
+            .map(|hit| hit.row.entity_id.as_str())
+            .collect();
+        assert_eq!(ids, [note.id.as_str()], "{raw:?}");
+        assert_eq!(answer.total, 1, "{raw:?}");
+        // The prefix is understood and echoed, not silently dropped.
+        assert!(answer.interpreted.unknown_tokens.is_empty(), "{raw:?}");
+        assert!(
+            answer
+                .interpreted
+                .filters
+                .kinds
+                .iter()
+                .any(|kind| kind == "note"),
+            "{raw:?}"
+        );
+    }
+    // And `note:` is no longer a prefix that answers with nothing on purpose.
+    assert_eq!(
+        searcher(&pool)
+            .search(q(&format!("note: {t}")))
+            .await
+            .unwrap()
+            .interpreted
+            .prefix,
+        Some(Prefix::Note)
+    );
+}
+
+/// Story 16, and the standing rule behind it: a snippet is **segments**, and
+/// the text in them is text.
+///
+/// Markdown in a note is the case that makes the rule easy to forget, because
+/// an excerpt full of `#` and `[[…]]` looks like something to render. Nothing
+/// here renders it: the highlight is the `hit` flag, the sentinels the
+/// highlighter used are gone, and what the user typed is in `text` for the
+/// frontend to print as text.
+///
+/// Not asserted, and deliberately so: that a `<b>` the user typed comes back.
+/// `ts_headline` elides *well-formed* tags, which `snippet.rs` records as a
+/// fidelity accident and explicitly not a sanitiser -- `onclick=` travels
+/// through untouched. Asserting on the elision would pin the accident.
+#[tokio::test]
+async fn a_notes_snippet_is_segments_of_the_markdown_the_user_typed() {
+    let pool = pool().await;
+    seed_sources(&pool).await;
+    let t = token("snip");
+
+    // The ref sits *next to* the match, so it is inside whatever window
+    // `ts_headline` chooses rather than left to luck.
+    let body = format!(
+        "## Runbook\n\nThe {t} escalation [[jira:PAY-231]] path is not the on-call rota."
+    );
+    let note = knobas_core::note::create(&pool, &format!("{t} runbook"), &body, "user")
+        .await
+        .unwrap();
+
+    let answer = searcher(&pool)
+        .search(q(&format!("{t} escalation")))
+        .await
+        .unwrap();
+    let hit = answer
+        .groups
+        .iter()
+        .flat_map(|group| &group.hits)
+        .find(|hit| hit.row.entity_id == note.id)
+        .expect("the note is in the answer");
+
+    assert!(
+        hit.snippet.iter().any(|segment| segment.hit),
+        "something in the excerpt is marked as the match: {:?}",
+        hit.snippet
+    );
+    let joined: String = hit.snippet.iter().map(|s| s.text.as_str()).collect();
+    // Nothing the *highlighter* added survives: no sentinel, no tag of its own.
+    assert!(!joined.contains(knobas_search::snippet::HIT_START));
+    assert!(!joined.contains(knobas_search::snippet::HIT_STOP));
+    assert!(!joined.contains("<b>escalation</b>"));
+    assert!(joined.contains(&t), "{joined:?}");
+    assert!(joined.contains("escalation"), "{joined:?}");
+    // And the markdown is **markdown source**, verbatim: the ref is four
+    // brackets and an id, not a chip and not stripped. Rendering is the
+    // frontend's decision and it makes it the same way for every corpus --
+    // by printing `segment.text` as text.
+    assert!(
+        joined.contains("[[jira:PAY-231]]"),
+        "the excerpt quotes what the user typed: {joined:?}"
+    );
+}
