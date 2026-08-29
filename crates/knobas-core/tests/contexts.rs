@@ -49,12 +49,7 @@ async fn entity_only(pool: &PgPool, namespace: &str, kind: &str, key: &str) -> S
 }
 
 /// One live mirror item with a payload -- what the epic seeds read.
-async fn with_payload(
-    pool: &PgPool,
-    kind: &str,
-    key: &str,
-    payload: serde_json::Value,
-) -> String {
+async fn with_payload(pool: &PgPool, kind: &str, key: &str, payload: serde_json::Value) -> String {
     mirrored(pool, SOURCE, kind, key, payload).await
 }
 
@@ -222,8 +217,14 @@ async fn an_unrecognized_issue_type_shape_misses_toward_ticket() {
     let pool = scratch().await;
     for (key, payload) in [
         ("PAY-1", serde_json::json!({})),
-        ("PAY-2", serde_json::json!({"fields": {"issuetype": "Epic"}})),
-        ("PAY-3", serde_json::json!({"fields": {"issuetype": {"id": 5}}})),
+        (
+            "PAY-2",
+            serde_json::json!({"fields": {"issuetype": "Epic"}}),
+        ),
+        (
+            "PAY-3",
+            serde_json::json!({"fields": {"issuetype": {"id": 5}}}),
+        ),
     ] {
         let id = with_payload(&pool, "ticket", key, payload).await;
         let ctx = context::promote(&pool, &EntityRef::parse(&id).unwrap())
@@ -240,7 +241,9 @@ async fn an_unrecognized_issue_type_shape_misses_toward_ticket() {
 #[tokio::test]
 async fn membership_reaches_the_add_its_links_and_one_hop_no_further() {
     let pool = scratch().await;
-    let ctx = context::create_adhoc(&pool, "payout retries").await.unwrap();
+    let ctx = context::create_adhoc(&pool, "payout retries")
+        .await
+        .unwrap();
     let ticket = entity_only(&pool, SOURCE, "ticket", "PAY-1").await;
     let pr = entity_only(&pool, "gitea", "pr", "tidewater/payout#1").await;
     let build = entity_only(&pool, "teamcity", "build", "Payout_Main/41").await;
@@ -280,7 +283,9 @@ async fn a_promoted_anchor_is_a_member_and_seeds_the_walk() {
 #[tokio::test]
 async fn a_proposal_never_counts_toward_membership_at_any_step() {
     let pool = scratch().await;
-    let ctx = context::create_adhoc(&pool, "payout retries").await.unwrap();
+    let ctx = context::create_adhoc(&pool, "payout retries")
+        .await
+        .unwrap();
     let ticket = entity_only(&pool, SOURCE, "ticket", "PAY-1").await;
     let guessed_add = entity_only(&pool, SOURCE, "ticket", "PAY-2").await;
     let guessed_hop = entity_only(&pool, "gitea", "pr", "tidewater/payout#1").await;
@@ -295,7 +300,9 @@ async fn a_proposal_never_counts_toward_membership_at_any_step() {
 #[tokio::test]
 async fn a_withdrawn_link_never_counts_toward_membership() {
     let pool = scratch().await;
-    let ctx = context::create_adhoc(&pool, "payout retries").await.unwrap();
+    let ctx = context::create_adhoc(&pool, "payout retries")
+        .await
+        .unwrap();
     let ticket = entity_only(&pool, SOURCE, "ticket", "PAY-1").await;
     let written = link::create(
         &pool,
@@ -384,8 +391,14 @@ async fn a_foreign_or_misshapen_parent_contributes_nothing() {
         .unwrap();
 
     let got = members(&pool, &ctx.id).await;
-    assert!(!got.contains(&foreign), "{foreign} is another source's ticket");
-    assert!(!got.contains(&misshapen), "{misshapen}'s parent is not the recorded shape");
+    assert!(
+        !got.contains(&foreign),
+        "{foreign} is another source's ticket"
+    );
+    assert!(
+        !got.contains(&misshapen),
+        "{misshapen}'s parent is not the recorded shape"
+    );
     assert_eq!(got, set(&[&epic]));
 }
 

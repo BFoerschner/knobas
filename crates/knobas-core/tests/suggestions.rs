@@ -1129,7 +1129,11 @@ async fn the_tray_scopes_by_membership_when_a_context_room_asks() {
     let elsewhere = suggest::proposals(&pool, &[], Some(&[branch.clone()]), 50)
         .await
         .unwrap();
-    assert_eq!(pairs(&elsewhere), pairs(&scoped), "the branch end scopes too");
+    assert_eq!(
+        pairs(&elsewhere),
+        pairs(&scoped),
+        "the branch end scopes too"
+    );
     let none = suggest::proposals(&pool, &[], Some(&["note:unrelated".to_owned()]), 50)
         .await
         .unwrap();
@@ -1143,7 +1147,9 @@ async fn the_tray_scopes_by_membership_when_a_context_room_asks() {
             .is_empty()
     );
     assert_eq!(
-        suggest::proposal_count(&pool, &[], Some(&[])).await.unwrap(),
+        suggest::proposal_count(&pool, &[], Some(&[]))
+            .await
+            .unwrap(),
         0,
         "{other_ticket} and friends must not leak into a memberless context"
     );

@@ -417,7 +417,10 @@ mod tests {
 
     #[test]
     fn kind_serializes_as_its_column_value() {
-        assert_eq!(serde_json::to_string(&ContextKind::Adhoc).unwrap(), "\"adhoc\"");
+        assert_eq!(
+            serde_json::to_string(&ContextKind::Adhoc).unwrap(),
+            "\"adhoc\""
+        );
     }
 
     #[test]

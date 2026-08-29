@@ -87,7 +87,9 @@ async fn promoting_the_unsynced_is_not_found_and_a_bad_id_is_invalid() {
         .unwrap_err();
     assert_eq!(code(&missing), IpcErrorCode::NotFound);
 
-    let malformed = promote_context_inner(&pool, "no-separator").await.unwrap_err();
+    let malformed = promote_context_inner(&pool, "no-separator")
+        .await
+        .unwrap_err();
     assert_eq!(code(&malformed), IpcErrorCode::Invalid);
 }
 
@@ -102,16 +104,26 @@ async fn a_stored_context_scopes_the_page_and_its_total() {
     let pr = item(&pool, &source, "pr", "payout#1").await;
     let build = item(&pool, &source, "build", "Main/41").await;
     let page = item(&pool, &source, "page", "ENG/design").await;
-    create_link_inner(&pool, &ticket, &pr, None, None).await.unwrap();
-    create_link_inner(&pool, &pr, &build, None, None).await.unwrap();
-    create_link_inner(&pool, &build, &page, None, None).await.unwrap();
+    create_link_inner(&pool, &ticket, &pr, None, None)
+        .await
+        .unwrap();
+    create_link_inner(&pool, &pr, &build, None, None)
+        .await
+        .unwrap();
+    create_link_inner(&pool, &build, &page, None, None)
+        .await
+        .unwrap();
 
     let ctx = promote_context_inner(&pool, &ticket).await.unwrap();
 
     let listed = list_entities_inner(&pool, &scoped_to(&ctx.id), 50, 0)
         .await
         .unwrap();
-    let ids: Vec<&str> = listed.rows.iter().map(|row| row.entity_id.as_str()).collect();
+    let ids: Vec<&str> = listed
+        .rows
+        .iter()
+        .map(|row| row.entity_id.as_str())
+        .collect();
     assert!(ids.contains(&ticket.as_str()), "the anchor is a member");
     assert!(ids.contains(&pr.as_str()), "a direct link is a member");
     assert!(ids.contains(&build.as_str()), "one hop out is a member");

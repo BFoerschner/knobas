@@ -1742,7 +1742,9 @@ mod tests {
 /// database is still coming up, [`Internal`](crate::IpcErrorCode::Internal)
 /// for a query failure.
 #[tauri::command]
-pub async fn list_contexts(lifecycle: State<'_, Lifecycle>) -> Result<Vec<knobas_core::context::ContextRow>, IpcError> {
+pub async fn list_contexts(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<Vec<knobas_core::context::ContextRow>, IpcError> {
     let pool = lifecycle.pool()?;
     Ok(knobas_core::context::list(&pool).await?)
 }
@@ -1754,7 +1756,10 @@ pub async fn list_contexts(lifecycle: State<'_, Lifecycle>) -> Result<Vec<knobas
 /// [`Invalid`](crate::IpcErrorCode::Invalid) if the label is blank -- a room
 /// with no name is not addressable by a person;
 /// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
-pub async fn create_context_inner(pool: &PgPool, title: &str) -> Result<knobas_core::context::ContextRow, IpcError> {
+pub async fn create_context_inner(
+    pool: &PgPool,
+    title: &str,
+) -> Result<knobas_core::context::ContextRow, IpcError> {
     let title = title.trim();
     if title.is_empty() {
         return Err(IpcError::invalid("a context needs a label"));
@@ -1811,7 +1816,11 @@ pub async fn context_members(
 }
 
 /// One activity line per context mutation, on the context's own entity.
-async fn record(pool: &PgPool, verb: &str, row: &knobas_core::context::ContextRow) -> Result<(), IpcError> {
+async fn record(
+    pool: &PgPool,
+    verb: &str,
+    row: &knobas_core::context::ContextRow,
+) -> Result<(), IpcError> {
     let entity = EntityRef::parse(&row.id).map_err(IpcError::internal)?;
     let mut detail = serde_json::json!({
         "context_id": row.id,

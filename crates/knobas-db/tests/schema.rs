@@ -1355,7 +1355,10 @@ async fn the_context_kind_vocabulary_is_closed() {
     .await
     .unwrap();
     for kind in CONTEXT_KINDS {
-        assert!(definition.contains(kind), "{kind:?} missing from {definition}");
+        assert!(
+            definition.contains(kind),
+            "{kind:?} missing from {definition}"
+        );
     }
     // ... and nothing else, or the constraint could allow a fourth spelling no
     // Rust variant produces and every assertion above would still pass.
