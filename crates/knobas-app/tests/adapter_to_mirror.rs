@@ -233,6 +233,17 @@ async fn stored(pool: &PgPool, source_id: &str, key: &str) -> StoredItem {
 /// Presence, not truthiness: `resolution` is `null` on an unresolved issue and
 /// that null **is** the widened record. A check that treated it as missing
 /// would report the mirror as narrow for every open ticket.
+/// Every name under `payload.fields`, sorted -- the comparable summary of how
+/// wide a record is.
+fn field_names(payload: &Value) -> Vec<String> {
+    let mut names: Vec<String> = payload["fields"]
+        .as_object()
+        .map(|f| f.keys().cloned().collect())
+        .unwrap_or_default();
+    names.sort();
+    names
+}
+
 fn widened_names(payload: &Value) -> Vec<&'static str> {
     WIDENED_BY_32
         .into_iter()
@@ -344,6 +355,15 @@ async fn a_backfill_widens_the_stored_payload_of_an_issue_nobody_touched() {
     let mut compared = 0_usize;
     for item in &parsed.0 {
         let row = stored(&pool, &id, &item.entity.key).await;
+        // The key sets first, and separately: a whole-row `assert_eq!` over two
+        // Jira issues prints two screens of JSON and leaves the reader to spot
+        // the one name that differs. This says which names went missing.
+        assert_eq!(
+            field_names(&row.payload),
+            field_names(&item.payload),
+            "{}: the `fields` the mirror holds are not the `fields` the adapter parsed",
+            item.entity
+        );
         assert_eq!(
             row,
             StoredItem {
