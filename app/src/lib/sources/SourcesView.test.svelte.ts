@@ -298,6 +298,52 @@ test("a sync:state event patches the matching row rather than re-listing", async
   expect(calls.listSources).toBe(listedOnce);
 });
 
+/**
+ * The row and the diagnostics are one view, and they have to agree.
+ *
+ * `sync:state` patches the row's *running* half, but "synced 10 min ago" and
+ * the item count come off `SourceSummary` — `last_run` and `item_count` —
+ * which only `list_sources` moves. A terminal transition bumped the
+ * diagnostics' `reloadKey` and nothing else, so the panel showed the run that
+ * had just finished while the row above it still showed the state before it
+ * (#83). A reader who came here *because* they suspect a source is not syncing
+ * then finds a stale timestamp, which is evidence for exactly the thing they
+ * came to check.
+ */
+test("a finished run refreshes the row's sync columns, not just the diagnostics", async () => {
+  sources = [source(), source({ id: "gitea", adapter_kind: "gitea", display_name: "G" })];
+  render();
+  await settle();
+  expect(rowFor("jira")!.textContent).toContain("10 min ago");
+  expect(rowFor("jira")!.textContent).toContain("213");
+
+  // What `list_sources` would answer after the run: a newer `last_run` and a
+  // bigger corpus. Only the row reads these — the event carries neither.
+  sources = [
+    source({ last_run: run({ finished_at: "2026-08-25T11:59:00Z" }), item_count: 240 }),
+    source({ id: "gitea", adapter_kind: "gitea", display_name: "G" }),
+  ];
+
+  emit("sync:state", {
+    source_id: "jira",
+    running: false,
+    run_id: 9,
+    started_at: "2026-08-25T11:58:00Z",
+    last_finished_at: "2026-08-25T11:59:00Z",
+    last_outcome: "ok",
+    next_run_at: null,
+    backoff_until: null,
+  });
+  await settle();
+
+  const row = rowFor("jira")!;
+  expect(row.textContent, "the row still shows the state before the run it just watched finish").toContain(
+    "1 min ago",
+  );
+  expect(row.textContent).toContain("240");
+  expect(row.textContent).not.toContain("10 min ago");
+});
+
 test("a source whose health is unauthorized offers Re-enter, not Sync now", async () => {
   sources = [
     source({
