@@ -277,17 +277,28 @@ pub(crate) async fn execute(
 /// moves the judgement off an assumption this adapter makes about the server
 /// and onto a statement the server makes about itself.
 ///
-/// **The short page is kept as a second condition, deliberately.** `more` is a
-/// positive claim that there is another page; its *absence* is not a positive
-/// claim of exhaustion -- a reverse proxy, a TeamCity too old to send
-/// `nextHref`, or a `fields=` that stopped asking for it all produce the same
-/// absence. Ending on `!more` alone would truncate every walk at its first page
-/// under any of those, which is a worse regression than the one being removed
-/// here. Requiring the page to be short *as well* means the walk stops only
-/// when two independent things agree, and the one outcome that must never
-/// happen -- stopping on a page the server filled -- is unreachable. Against a
-/// server that omits `nextHref` this degrades to exactly the old behaviour
-/// rather than to something new.
+/// **The short page is kept as a second condition, deliberately, and it is
+/// free.** TeamCity reports a next page whenever the page came back *filled to
+/// the number of rows it served* -- `count:41` and `count:42` over exactly 42
+/// matches both answered a `nextHref`, `count:43` answered none -- so on a
+/// server that serves what it was asked for the two conditions say the same
+/// thing and the second costs nothing. They diverge in exactly one place, which
+/// is the one this is about: a page short of `count:` but filled to the
+/// server's own ceiling reports more while being short.
+///
+/// What the second condition buys is the other direction. `more` is a positive
+/// claim that another page exists; its *absence* is not a positive claim of
+/// exhaustion -- a reverse proxy, a TeamCity too old to send `nextHref`, or a
+/// `fields=` that stopped asking for it all produce the same absence over a
+/// server with plenty left. Ending on `!more` alone would truncate every walk
+/// at its first page under any of those, which is a worse regression than the
+/// one being removed here and one no fixture written against a well-behaved
+/// fake would show. Requiring the page to be short as well means the walk stops
+/// only when two independent things agree, the one outcome that must never
+/// happen -- stopping on a page the server filled -- is unreachable, and against
+/// a server that omits `nextHref` this degrades to exactly the old rule rather
+/// than to something new
+/// (`a_server_that_never_reports_a_next_page_is_still_walked_to_the_end`).
 ///
 /// **What is left, stated rather than guarded.** A server that both serves
 /// fewer rows than it was asked for *and* omits `nextHref` while doing it is
@@ -791,10 +802,14 @@ mod tests {
         /// partial page.
         ///
         /// It reports the truncation the way a real TeamCity does, through
-        /// `nextHref` -- measured on JetBrains' public instance 2026-08-29,
-        /// where `count:42` over exactly 42 matches answered `nextHref:
-        /// …start:42` and `count:43` over the same 42 answered none. That is
-        /// the signal [`all_of`] ends a walk on; see [`Page::more`].
+        /// `nextHref`: a page filled to the number of rows the server served
+        /// reports a further page, whether or not one is there. Measured on
+        /// JetBrains' public instance 2026-08-29, over a query with exactly 42
+        /// matches -- `count:41` and `count:42` both answered a `nextHref`,
+        /// `count:43` answered none. A capped page is filled to the cap, so it
+        /// says there is more while being short, which is the one combination
+        /// no other constructor here can produce and the one [`all_of`] has to
+        /// read correctly; see [`Page::more`].
         fn capped(mut self, cap: usize) -> Self {
             assert!(
                 0 < cap && cap < PAGE as usize,
@@ -914,15 +929,21 @@ mod tests {
                 PageOrder::AsGiven => {}
             }
             // What the server puts on the page, and what it then says about
-            // the rest -- a real TeamCity computes `nextHref` from the page it
-            // produced, not from the `count:` it was asked for, so a capped
-            // page still reports the remainder. Measured on JetBrains' public
-            // instance 2026-08-29; see `FakeRest::capped`.
+            // the rest. A real TeamCity reports a next page whenever the page
+            // came back **filled to the number of rows it served** -- measured
+            // over a query with exactly 42 matches, `count:41` and `count:42`
+            // both answered a `nextHref` and `count:43` answered none -- so it
+            // is `serves` and not `asked` that the comparison is against, and
+            // a capped page reports the remainder even though it is short.
+            // That is the whole difference issue #114 turns on.
             let asked = locator.count as usize;
             let serves = self.cap.map_or(asked, |cap| cap.min(asked));
-            let more = !self.silent && out.len() > serves;
+            let filled = serves > 0 && out.len() >= serves;
             out.truncate(serves);
-            Ok(Page { items: out, more })
+            Ok(Page {
+                items: out,
+                more: filled && !self.silent,
+            })
         }
         /// The by-id endpoint answers from the corpus, not from a page:
         /// `/app/rest/builds/id:{id}` takes no `count` and no ordering, which

@@ -419,6 +419,10 @@ async fn build_types(State(s): State<Arc<MockState>>, req: Request) -> Response 
     let full = json!({
         "count": types.len(),
         "href": "/app/rest/buildTypes",
+        // Never paged, and so never a next page: this endpoint takes no
+        // locator here, and a real TeamCity answers it whole -- 4,253 build
+        // configurations in one response with no `nextHref`, measured
+        // read-only against JetBrains' public instance on 2026-08-29.
         "nextHref": Value::Null,
         "buildType": types.iter().map(|t| build_type_json(t, &base)).collect::<Vec<_>>(),
     });
@@ -444,11 +448,24 @@ async fn builds(State(s): State<Arc<MockState>>, req: Request) -> Response {
     }
     let base = s.base_url(API);
     let types = s.build_types();
-    let hits: Vec<TcBuild> = loc.apply(s.builds());
+    let (hits, more) = loc.apply(s.builds());
     let full = json!({
         "count": hits.len(),
         "href": format!("/app/rest/builds?locator={raw_locator}"),
-        "nextHref": Value::Null,
+        // Present exactly when the page came back filled, which is what a
+        // real TeamCity answers and the only thing in the response that tells
+        // a capped page from an exhausted query (issue #114). The href is the
+        // offset continuation the real server serves; mockd honours `start:`,
+        // so following it works here as it does there.
+        "nextHref": if more {
+            json!(format!(
+                "/app/rest/builds?locator={},start:{}",
+                raw_locator,
+                loc.start + hits.len()
+            ))
+        } else {
+            Value::Null
+        },
         "build": hits.iter().map(|b| build_json(b, &base, &s, &types)).collect::<Vec<_>>(),
     });
     match project(full, sel.as_ref()) {
@@ -610,7 +627,8 @@ impl Locator {
         })
     }
 
-    /// Filters, orders **newest first**, then pages.
+    /// Filters, orders **newest first**, then pages -- and says whether the
+    /// paging left anything behind.
     ///
     /// The order is part of the contract, not a presentation detail:
     /// `/app/rest/builds` answers newest-first on a real server, so `count:1`
@@ -619,7 +637,25 @@ impl Locator {
     /// see either -- it validates the shape of a response, never the order of
     /// a collection. `start:`/`count:` page over this order, so they page the
     /// same way here as they do in production.
-    fn apply(&self, all: Vec<TcBuild>) -> Vec<TcBuild> {
+    ///
+    /// The second half of the return is `nextHref`'s: **whether this page was
+    /// filled to the number of rows the server put on it**, which is the one
+    /// statement a real server makes about the rest of the collection. A fake
+    /// that always answered "no more" taught adapters to infer the end from a
+    /// page's *length* instead -- sound only against a server that serves
+    /// exactly the `count:` it was asked for. That inference is issue #114, in
+    /// the TeamCity adapter, and mockd answering `nextHref: null` on every
+    /// truncated page is part of how it survived.
+    ///
+    /// **Filled, not "has a successor"** -- and the difference is measurable.
+    /// Read-only against JetBrains' public instance, 2026-08-29, over a query
+    /// with exactly 42 matches: `count:41` and `count:42` both answered a
+    /// `nextHref`, `count:43` answered none. So a page filled to its limit is
+    /// reported as continuing whether or not anything follows it, and only a
+    /// page the server could not fill ends a collection. Reproduced rather
+    /// than improved on: a mock that resolved the ambiguity the real server
+    /// leaves would let an adapter depend on a promise TeamCity does not make.
+    fn apply(&self, all: Vec<TcBuild>) -> (Vec<TcBuild>, bool) {
         let states = self.states();
         let mut hits: Vec<TcBuild> = all
             .into_iter()
@@ -635,7 +671,9 @@ impl Locator {
         // happens to hand these over ascending, and a `reverse()` would depend
         // on that silently.
         hits.sort_by_key(|b| std::cmp::Reverse(b.id));
-        hits.into_iter().skip(self.start).take(self.count).collect()
+        let page: Vec<TcBuild> = hits.into_iter().skip(self.start).take(self.count).collect();
+        let more = self.count > 0 && page.len() == self.count;
+        (page, more)
     }
 }
 
@@ -708,6 +746,47 @@ fn split_top_level(raw: &str) -> Result<Vec<&str>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_page_reports_a_next_one_when_it_came_back_filled() {
+        let builds: Vec<TcBuild> = crate::state::MockState::from_fixture().builds();
+        let total = builds.len();
+        assert!(total >= 3, "the fixture needs a few builds: {total}");
+
+        let page = |locator: &str| {
+            Locator::parse(locator)
+                .unwrap_or_else(|e| panic!("{locator}: {e}"))
+                .apply(builds.clone())
+        };
+
+        // Filled to the count asked for: a next page is reported whether or
+        // not one is there. That second half is not mockd being lazy -- it is
+        // what a real TeamCity answers, measured over a query with exactly 42
+        // matches, where `count:42` still carried a `nextHref`.
+        let (rows, more) = page(&format!("state:any,count:{}", total - 1));
+        assert_eq!(rows.len(), total - 1);
+        assert!(more, "a page that could not fit the rest reports the rest");
+        let (rows, more) = page(&format!("state:any,count:{total}"));
+        assert_eq!(rows.len(), total);
+        assert!(more, "a page filled to its limit is not proof it is the last");
+
+        // Not filled: the one answer that ends a collection.
+        let (rows, more) = page(&format!("state:any,count:{}", total + 1));
+        assert_eq!(rows.len(), total);
+        assert!(!more, "a page the server could not fill is the end");
+
+        // ...and `start:` pages over the same order, so the continuation the
+        // `nextHref` names actually leads somewhere.
+        let (rows, more) = page(&format!("state:any,count:1,start:{}", total - 1));
+        assert_eq!(rows.len(), 1);
+        assert!(
+            more,
+            "TeamCity reports a next page off the page being filled, not off what remains"
+        );
+        let (rows, more) = page(&format!("state:any,count:2,start:{}", total - 1));
+        assert_eq!(rows.len(), 1, "one row left after skipping the rest");
+        assert!(!more);
+    }
 
     #[test]
     fn the_default_locator_is_finished_only() {
