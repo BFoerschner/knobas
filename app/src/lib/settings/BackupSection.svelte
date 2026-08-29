@@ -39,6 +39,7 @@
     type BackupSchedule,
     type BackupStatus,
   } from "../ipc/backup";
+  import { latestRead } from "../shell/latest-read";
   import Modal from "../shell/Modal.svelte";
   import { ago } from "../shell/time";
   import { push } from "../shell/toasts.svelte";
@@ -78,16 +79,29 @@
   let restoring = $state<ArchiveFile | null>(null);
   let restoreInFlight = $state(false);
 
-  async function load() {
-    try {
-      status = await backupStatus();
-      error = null;
-    } catch (cause) {
-      // Not an empty archive list: "no backups yet" is a claim about the disk,
-      // and a section that could not ask has not earned it. The same rule the
-      // sources view follows for `list_sources`.
-      error = ipcErrorMessage(cause);
-    }
+  /**
+   * Which `backup_status` is the current one.
+   *
+   * Two *Retry* presses over a failing read put two in flight at once, and
+   * nothing makes them answer in the order they were asked. The same guard the
+   * sources view puts on `list_sources`, and the same module, so the rejection
+   * half cannot be dropped in one place and kept in the other (#107).
+   */
+  const read = latestRead();
+
+  function load() {
+    return read(backupStatus, {
+      ok: (next) => {
+        status = next;
+        error = null;
+      },
+      fail: (cause) => {
+        // Not an empty archive list: "no backups yet" is a claim about the
+        // disk, and a section that could not ask has not earned it. The same
+        // rule the sources view follows for `list_sources`.
+        error = ipcErrorMessage(cause);
+      },
+    });
   }
 
   $effect(() => {

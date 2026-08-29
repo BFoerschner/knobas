@@ -28,6 +28,13 @@ const calls = {
 
 let status: BackupStatus;
 let statusFails: unknown = null;
+/**
+ * Answers `backup_status` per call, when a test needs two reads in flight at
+ * once. `status` alone cannot express that: it is read at resolution time, so
+ * every pending read would answer with the same snapshot. Same shape as the
+ * sources view's `answerList` — the two views share the hazard.
+ */
+let answerStatus: ((call: number) => Promise<BackupStatus>) | null = null;
 let nowFails: unknown = null;
 let restoreFails: unknown = null;
 /**
@@ -45,6 +52,7 @@ let stores: (posted: BackupSchedule) => BackupSchedule = (posted) => posted;
 vi.mock("../ipc/backup", () => ({
   backupStatus: () => {
     calls.status += 1;
+    if (answerStatus) return answerStatus(calls.status);
     return statusFails ? Promise.reject(statusFails) : Promise.resolve(status);
   },
   backupNow: () => {
@@ -128,6 +136,7 @@ beforeEach(() => {
   calls.restore = [];
   status = statusOf();
   statusFails = null;
+  answerStatus = null;
   nowFails = null;
   restoreFails = null;
   stores = (posted) => posted;
@@ -571,6 +580,88 @@ test("backup_status failing renders what failed, not an empty backup story", asy
   await settle();
   expect(text()).toContain("after 03:00");
   expect(button("Export now")).toBeTruthy();
+});
+
+/**
+ * Two reads in flight answer in whatever order they like, and the last answer
+ * to land used to win.
+ *
+ * Reaching it here takes a second *Retry* over a failing `backup_status` —
+ * genuinely rarer than the sources view's *Sync all*, which puts one read per
+ * source in flight at once (#83, #99). It is the same hazard nonetheless, and
+ * the settings shell is built to grow sections, so both call sites go through
+ * `latestRead` rather than through two hand-rolled counters (#107).
+ */
+test("a backup_status overtaken by a later one does not write what it read", async () => {
+  const stale = () => statusOf({ last: null });
+  const fresh = () => statusOf();
+
+  statusFails = { message: "not_ready" };
+  render();
+  await settle();
+  expect(button("Retry"), "the failed read is what puts a second one within reach").toBeTruthy();
+
+  // The first *Retry*'s read is held open; the second one answers straight away.
+  let release: (() => void) | undefined;
+  const held = calls.status + 1;
+  answerStatus = (call) =>
+    call === held
+      ? new Promise<BackupStatus>((resolve) => {
+          release = () => resolve(stale());
+        })
+      : Promise.resolve(fresh());
+
+  button("Retry")!.click();
+  await settle();
+  button("Retry")!.click();
+  await settle();
+  expect(calls.status, "both retries read the status").toBe(held + 1);
+  expect(text()).toContain("Last export");
+
+  release!();
+  await settle();
+
+  expect(text(), "the overtaken read wrote its stale snapshot over the newer one").toContain(
+    "Last export",
+  );
+  expect(text()).not.toContain("No backup has been taken yet");
+});
+
+/**
+ * The half most easily dropped when the guard is copied by hand: a *stale
+ * rejection* must not blank a status that has since read fine.
+ *
+ * Without it the section lands on "Could not read the backup settings" while
+ * holding a perfectly good status, and the message it shows is the one from
+ * the read that was already out of date.
+ */
+test("a backup_status rejection that has been overtaken does not blank the section", async () => {
+  statusFails = { message: "not_ready" };
+  render();
+  await settle();
+
+  let reject: (() => void) | undefined;
+  const held = calls.status + 1;
+  answerStatus = (call) =>
+    call === held
+      ? new Promise<BackupStatus>((_resolve, fail) => {
+          reject = () => fail({ message: "the stale failure" });
+        })
+      : Promise.resolve(statusOf());
+
+  button("Retry")!.click();
+  await settle();
+  button("Retry")!.click();
+  await settle();
+  expect(text()).toContain("after 03:00");
+
+  reject!();
+  await settle();
+
+  expect(text(), "a stale rejection blanked a status that read fine").toContain("after 03:00");
+  expect(text()).not.toContain("Could not read the backup settings");
+  expect(text()).not.toContain("the stale failure");
+  expect(button("Retry")).toBeUndefined();
 });
 
 /**
