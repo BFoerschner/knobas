@@ -66,6 +66,8 @@ pub mod queue;
 use async_trait::async_trait;
 use knobas_core::entity::EntityRef;
 use knobas_core::start_work::{self as store, Advance, FlowStep, Step, StepOutcome};
+
+pub use knobas_core::start_work::flow;
 use sqlx::PgPool;
 
 use crate::IpcError;
@@ -220,6 +222,7 @@ pub async fn run(
     steps: &dyn Steps,
     ticket: &EntityRef,
 ) -> Result<Vec<FlowStep>, IpcError> {
+    let mut last: Option<i64> = None;
     loop {
         let flow = store::flow(pool, ticket).await?;
         let id = match store::advance(&flow) {
@@ -229,15 +232,26 @@ pub async fn run(
             // answer.
             _ => return Ok(flow),
         };
-        perform(pool, steps, &flow, id).await?;
 
-        // A step that came back still pending would spin this loop for ever.
-        // `perform` always settles the step it was given, so this is a guard
-        // against a future arm that forgets to -- not an expected path.
-        let after = store::get(pool, id).await?;
-        if after.is_none_or(|step| step.outcome == StepOutcome::Pending) {
-            return store::flow(pool, ticket).await.map_err(IpcError::from);
+        // **Progress, or raise.** Being handed the same step twice running means
+        // the sequence did not move, and a loop that kept going would spin for
+        // ever against a live database and a real source. It cannot happen while
+        // `advance` stops at a failed step and `perform` settles what it was
+        // given, so reaching it is knobas' own bug -- and it is raised rather
+        // than returned quietly, because a flow that silently stopped where it
+        // should have gone on is the failure a stepper is least able to explain.
+        //
+        // Loud, and *not* a substitute for the rule above it: an edit that broke
+        // `advance`'s stop-on-failure would fail these tests here as well as in
+        // `knobas-core`, rather than hanging them.
+        if last == Some(id) {
+            return Err(IpcError::internal(format!(
+                "the start-work flow was handed step {id} twice without it moving"
+            )));
         }
+        last = Some(id);
+
+        perform(pool, steps, &flow, id).await?;
     }
 }
 
