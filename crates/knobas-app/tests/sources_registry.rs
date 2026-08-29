@@ -227,3 +227,68 @@ fn the_registry_routes_on_the_kind_and_not_on_the_instance_id() {
         "an unknown kind must be refused however the instance is named"
     );
 }
+
+/// The `username` convention, across every adapter that has one at once.
+///
+/// `username` is the sole source of the identity `@me`, *My items* and *Mine,
+/// untouched* resolve against, and it is filled in by the Add-source dialog
+/// from `ConnectionInfo::account` on a successful *Test connection* -- keyed on
+/// the property **name**, which is what makes the dialog's fill
+/// adapter-agnostic rather than a per-adapter table (#82). Two things follow,
+/// and neither is checkable inside one adapter crate:
+///
+/// - the property has to be drawable as a **text** field, or there is nothing
+///   the dialog can put a string into;
+/// - its description has to describe the field the app actually has. Saying it
+///   is *"only"* for one authentication method is what put a token user in
+///   front of two surfaces that disagreed: the schema told them the field was
+///   not theirs, and the identity lists told them to go and fill it in.
+#[test]
+fn every_username_field_is_fillable_and_says_so() {
+    let mut checked = 0_usize;
+    for t in Registry::builtin().descriptors() {
+        let Some(property) = t.config_schema["properties"].get("username") else {
+            continue;
+        };
+        checked += 1;
+        let kind = &t.adapter_kind;
+
+        // `["string", "null"]` is how an adapter spells an optional string and
+        // is what the form draws as text; anything else is not fillable.
+        let drawable = match &property["type"] {
+            serde_json::Value::String(one) => one == "string",
+            serde_json::Value::Array(members) => {
+                let named: Vec<&serde_json::Value> =
+                    members.iter().filter(|m| *m != "null").collect();
+                named == [&serde_json::Value::from("string")]
+            }
+            _ => false,
+        };
+        assert!(
+            drawable,
+            "{kind}'s username is typed {}, which the generated form cannot fill \
+             with an account",
+            property["type"]
+        );
+
+        let description = property["description"].as_str().unwrap_or_default();
+        assert!(
+            description.contains("Test connection"),
+            "{kind}'s username description does not mention the thing that fills \
+             it in: {description:?}"
+        );
+        assert!(
+            !description.to_lowercase().contains("only"),
+            "{kind}'s username description restricts the field to one \
+             authentication method, which contradicts what the identity lists \
+             tell the same user to do: {description:?}"
+        );
+    }
+    // The loop can only check adapters that have the field; an empty one would
+    // pass while saying nothing.
+    assert!(
+        checked >= 3,
+        "only {checked} adapters declare a username; this test has stopped \
+         checking the convention it names"
+    );
+}

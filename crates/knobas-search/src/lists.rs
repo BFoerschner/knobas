@@ -495,7 +495,8 @@ fn describe(list: &BuiltinList, identity: &[String]) -> String {
 #[must_use]
 pub fn describe_missing_identity() -> String {
     "No source has a username configured, so knobas cannot tell which items \
-     are yours. Add a username to a source to fill this list."
+     are yours. Run Test connection on a source to fill its username in, or \
+     type one yourself."
         .to_owned()
 }
 
@@ -574,6 +575,20 @@ mod tests {
             MARK_SEEN_SQL.contains(&format!("'{SEEN_KEY}'")),
             "{MARK_SEEN_SQL}"
         );
+    }
+
+    /// The advice has to be followable, and since #82 the shortest route to a
+    /// username is not typing one: the Add-source dialog fills the field from
+    /// what *Test connection* reports. Advice naming only the typing is advice
+    /// to redo by hand what the app already did -- the contradiction #82 was
+    /// about, in its last surviving corner.
+    #[test]
+    fn the_missing_identity_advice_names_the_thing_that_fills_it() {
+        let advice = describe_missing_identity();
+        assert!(advice.contains("Test connection"), "{advice}");
+        // And still names the field itself, which is what a reader has to go
+        // and find on a source.
+        assert!(advice.contains("username"), "{advice}");
     }
 
     #[test]
