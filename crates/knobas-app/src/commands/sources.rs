@@ -409,6 +409,165 @@ pub async fn reindex_fts<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<
         .map_err(|error| to_ipc(&crate::sources::SourcesError::Db(error), None))
 }
 
+// -- The write queue (issue #42) ----------------------------------------------
+//
+// Here rather than in a module of their own: the `commands/` + `ipc/` layout is
+// frozen, and the queue exists because a *source* cannot accept a write. Its
+// reads and its three user decisions belong beside the source's own commands.
+//
+// Every body forwards, like the rest of this file: the store is
+// `knobas_core::write_queue` and the flush loop is `knobas_sync::write_queue`,
+// both of which have their own batteries. The one real decision -- what an
+// amendment may change -- lives in `crate::sources::write_queue`, where a test
+// can reach it; the `Option -> conflict` mappings below only translate
+// "nothing matched" into the caller's vocabulary.
+
+/// Every write knobas still owes a source, newest first.
+///
+/// Pending, **held** and refused alike -- `CONTEXT.md` calls the whole queue
+/// pending writes and a held write "a pending write whose target changed", so
+/// this is the list that glossary names. Each row carries its own `state`,
+/// which is what the panel tells them apart by.
+///
+/// The authoritative read. There is no `write:queued` event and deliberately
+/// so: every queue transition already writes an activity line, so the shell
+/// refreshes on `activity:new` rather than on a second channel saying the same
+/// thing.
+///
+/// # Errors
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up;
+/// `internal` if the read fails.
+#[tauri::command]
+pub async fn pending_writes<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<knobas_core::write_queue::QueuedWrite>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    Ok(knobas_core::write_queue::open(&state.pool).await?)
+}
+
+/// How many writes are waiting, how many need a decision, how many were
+/// refused.
+///
+/// Three numbers rather than one, because the shell has to say that something
+/// needs a *decision* rather than patience: a single total would let "3
+/// waiting" absorb a held write, which is the one thing the badge exists to
+/// prevent.
+///
+/// # Errors
+/// As [`pending_writes`].
+#[tauri::command]
+pub async fn write_queue_counts<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<knobas_core::write_queue::QueueCounts, IpcError> {
+    let state = crate::sources::state(&app)?;
+    Ok(knobas_core::write_queue::counts(&state.pool).await?)
+}
+
+/// Flush the queue now: one source, or every source when `source_id` is
+/// `None`.
+///
+/// *I know the source is back, do not make me wait out a schedule* (story 10).
+/// The scheduler's own tick already does this every few seconds, so this is
+/// impatience rather than necessity -- which is why it cannot fail for a
+/// source that is still down: a write that cannot go simply stays queued, with
+/// its reason updated.
+///
+/// **It cannot release a held write.** A flush does not decide anything on the
+/// user's behalf; [`apply_held_write`] is the only thing that moves one.
+///
+/// # Errors
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up;
+/// `internal` if the queue's own reads or writes fail.
+#[tauri::command]
+pub async fn flush_writes<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    source_id: Option<String>,
+) -> Result<(), IpcError> {
+    let state = crate::sources::state(&app)?;
+    let deps = state.scheduler.deps();
+    match source_id {
+        Some(id) => knobas_sync::write_queue::flush_source(deps, &id)
+            .await
+            .map_err(|error| IpcError::internal(error).with_source(id)),
+        None => {
+            knobas_sync::write_queue::flush_all(deps).await;
+            Ok(())
+        }
+    }
+}
+
+/// *I know, and I still mean it* (story 13): release a held write and send it.
+///
+/// The version the user was shown becomes the version the write is measured
+/// against, so the flush that follows sends it rather than holding it on the
+/// same change again. A change arriving **after** they looked holds it again,
+/// deliberately -- what they consented to overwrite is what they saw.
+///
+/// # Errors
+/// `conflict` if the write is not held: it settled, or somebody else acted on
+/// it, while the panel was open.
+#[tauri::command]
+pub async fn apply_held_write<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    id: i64,
+) -> Result<(), IpcError> {
+    let state = crate::sources::state(&app)?;
+    knobas_sync::write_queue::apply_anyway(state.scheduler.deps(), id)
+        .await
+        .map_err(IpcError::internal)?
+        .map(|_| ())
+        .ok_or_else(|| IpcError::conflict(format!("write {id} is no longer held")))
+}
+
+/// *Edit and send* (story 15): replace a held or refused write's payload with
+/// one the user has just written.
+///
+/// `payload` is the row's own `payload`, edited -- the same serialized
+/// `WriteOp` that came back from [`pending_writes`]. It is **decoded before it
+/// is stored**, so a payload the SPI cannot read is `invalid` here rather than
+/// an undecodable row discovered at flush time.
+///
+/// Two things it may not change, and both refusals are the point rather than
+/// paranoia: **the operation** and **the target**. Turning a queued comment
+/// into a transition, or repointing it at another ticket, is a different write
+/// from the one the user reviewed -- and it would inherit that write's place in
+/// its entity's queue and its snapshot. Queue a new write instead.
+///
+/// # Errors
+/// `invalid` if the payload is not a write op, or names a different op or
+/// target; `not_found` if no write carries `id`; `conflict` if the write has
+/// already settled.
+#[tauri::command]
+pub async fn amend_write<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    id: i64,
+    payload: serde_json::Value,
+) -> Result<(), IpcError> {
+    let state = crate::sources::state(&app)?;
+    crate::sources::write_queue::amend(state.scheduler.deps(), id, payload).await
+}
+
+/// Withdraw a write -- cancelling a pending one (story 7) or conceding a held
+/// one (story 14) are the same act on the same row.
+///
+/// The row is kept, tombstoned: the activity stream refers to it, and "it was
+/// discarded" and "it never existed" are different answers.
+///
+/// # Errors
+/// `conflict` if there was nothing open left to withdraw.
+#[tauri::command]
+pub async fn discard_write<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    id: i64,
+) -> Result<(), IpcError> {
+    let state = crate::sources::state(&app)?;
+    knobas_sync::write_queue::discard(state.scheduler.deps(), id)
+        .await
+        .map_err(IpcError::internal)?
+        .map(|_| ())
+        .ok_or_else(|| IpcError::conflict(format!("write {id} has already settled")))
+}
+
 /// Emit one event, best effort.
 ///
 /// A webview that is not listening is not a failure of the operation that just

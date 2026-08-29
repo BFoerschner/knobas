@@ -673,3 +673,88 @@ async fn zero_three_applies_through_the_runner_to_a_database_that_predates_it() 
     .await
     .unwrap();
 }
+
+/// The write queue's two vocabularies and its two paired invariants, as the
+/// live catalog enforces them (migration `0005`).
+///
+/// The same pin the run log's `trigger`/`outcome` and the link's `origin` get,
+/// and it bites hardest here: `knobas_core::write_queue`'s decoders *refuse* a
+/// spelling they do not know, so a stray value is a queued write that can
+/// never be read back -- an edit the user is owed and knobas can no longer
+/// see. The Rust half is `WriteState::ALL`/`WaitReason::ALL` walked against
+/// the migration text in that module; this is the half that only a real
+/// database can answer.
+#[tokio::test]
+async fn the_write_queue_constrains_its_states_and_reasons() {
+    let pool = &knobas_db::test_util::test_pool().await;
+    migrate::run(pool).await.unwrap();
+
+    let source = format!("chk-{}", uuid::Uuid::new_v4().simple());
+    let (id,): (i64,) = sqlx::query_as(
+        "insert into knobas.write_queue (source_id, entity_id, op, payload, target_snapshot)
+         values ($1, $1 || ':PAY-1', 'comment', '{}'::jsonb, '{}'::jsonb) returning id",
+    )
+    .bind(&source)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+
+    for state in ["pending", "held", "refused"] {
+        sqlx::query("update knobas.write_queue set state = $2 where id = $1")
+            .bind(id)
+            .bind(state)
+            .execute(pool)
+            .await
+            .unwrap_or_else(|error| panic!("state {state:?} refused: {error}"));
+    }
+    for bad in ["expired", "Pending", "cancelled", ""] {
+        let refused = sqlx::query("update knobas.write_queue set state = $2 where id = $1")
+            .bind(id)
+            .bind(bad)
+            .execute(pool)
+            .await;
+        assert!(refused.is_err(), "state {bad:?} should be refused");
+    }
+
+    // A terminal state and its timestamp are one fact: neither half is
+    // writable alone, in either direction.
+    for (state, settled) in [("sent", false), ("pending", true)] {
+        let refused = sqlx::query(
+            "update knobas.write_queue set state = $2, settled_at = case when $3 then now() end
+              where id = $1",
+        )
+        .bind(id)
+        .bind(state)
+        .bind(settled)
+        .execute(pool)
+        .await;
+        assert!(
+            refused.is_err(),
+            "state {state:?} with settled_at present={settled} should be refused"
+        );
+    }
+
+    // A reason to wait belongs only to a write that is waiting.
+    sqlx::query("update knobas.write_queue set state = 'pending', wait_reason = $2 where id = $1")
+        .bind(id)
+        .bind("unreachable")
+        .execute(pool)
+        .await
+        .unwrap();
+    for bad in ["refused", "target_changed", ""] {
+        let refused = sqlx::query("update knobas.write_queue set wait_reason = $2 where id = $1")
+            .bind(id)
+            .bind(bad)
+            .execute(pool)
+            .await;
+        assert!(refused.is_err(), "wait_reason {bad:?} should be refused");
+    }
+    let refused = sqlx::query("update knobas.write_queue set state = 'held' where id = $1")
+        .bind(id)
+        .execute(pool)
+        .await;
+    assert!(
+        refused.is_err(),
+        "a held write may not also claim to be waiting on a source"
+    );
+}

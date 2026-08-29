@@ -2,6 +2,7 @@ pub mod activity;
 pub mod entity;
 mod error;
 pub mod link;
+pub mod write_queue;
 
 pub use error::CoreError;
 

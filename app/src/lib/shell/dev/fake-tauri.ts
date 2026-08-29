@@ -175,6 +175,25 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     sync_all: () => FIXTURE_SOURCES.map((_, index) => 91 + index),
     reindex_fts: () => null,
     delete_source: () => null,
+
+    // The write queue (issue #42). Three rows, and the mix is the point: one
+    // held write, one refused, one merely waiting -- because the whole surface
+    // exists to keep those three apart, and a fixture with one of them cannot
+    // show that it does.
+    pending_writes: () => FIXTURE_QUEUE,
+    write_queue_counts: () => ({
+      pending: FIXTURE_QUEUE.filter((row) => row.state === "pending").length,
+      held: FIXTURE_QUEUE.filter((row) => row.state === "held").length,
+      refused: FIXTURE_QUEUE.filter((row) => row.state === "refused").length,
+    }),
+    // Answered, never performed -- the same rule as the credential above, and
+    // it matters more here: a fixture that appeared to *send* a held write
+    // would be showing a reader the one outcome this feature exists to make
+    // impossible without their say-so.
+    flush_writes: () => null,
+    apply_held_write: () => null,
+    amend_write: () => null,
+    discard_write: () => null,
     // Writes are answered, never performed: the fixture has no keychain and no
     // database, and a QA pass that appeared to save a credential would be the
     // most misleading thing in this file.
@@ -596,6 +615,81 @@ const FIXTURE_ADAPTERS = [
     // agreeing with nothing — and this is the import that makes `fixtures.ts`'s
     // "not test-only" true rather than aspirational.
     config_schema: JIRA_SCHEMA,
+  },
+];
+
+/**
+ * The write queue a QA pass sees: one write held on a changed target, one the
+ * source refused, one still waiting on a server that did not answer.
+ *
+ * The held row's two snapshots differ by a reply, which is exactly what
+ * `knobas_core::write_queue::project` holds a comment against -- so the
+ * side-by-side in the panel shows the real thing rather than two copies of one
+ * string.
+ */
+const FIXTURE_QUEUE = [
+  {
+    id: 31,
+    source_id: "mock",
+    entity_id: "mock:PAY-231",
+    op: "comment",
+    payload: {
+      Comment: {
+        entity: "mock:PAY-231",
+        body: "Taking this — the retry job is dropping the idempotency key.",
+      },
+    },
+    target_snapshot: {
+      op: "comment",
+      live: true,
+      text: "Retry failed SEPA payouts\n\nThe nightly batch leaves 14 payouts unsettled.",
+    },
+    state: "held",
+    wait_reason: null,
+    detail: null,
+    queued_at: "2026-08-25T11:41:00Z",
+    attempted_at: "2026-08-25T11:52:00Z",
+    attempts: 2,
+    held_snapshot: {
+      op: "comment",
+      live: true,
+      text:
+        "Retry failed SEPA payouts\n\nThe nightly batch leaves 14 payouts unsettled." +
+        "\n\njonas.weiss: already on it — it is the idempotency key.",
+    },
+    settled_at: null,
+  },
+  {
+    id: 30,
+    source_id: "mock",
+    entity_id: "mock:PAY-228",
+    op: "comment",
+    payload: { Comment: { entity: "mock:PAY-228", body: "Closing — superseded by PAY-231." } },
+    target_snapshot: { op: "comment", live: true, text: "Payout retries pile up" },
+    state: "refused",
+    wait_reason: null,
+    detail: "this issue type does not accept comments",
+    queued_at: "2026-08-25T10:12:00Z",
+    attempted_at: "2026-08-25T10:12:00Z",
+    attempts: 1,
+    held_snapshot: null,
+    settled_at: null,
+  },
+  {
+    id: 29,
+    source_id: "mock",
+    entity_id: "mock:PAY-300",
+    op: "comment",
+    payload: { Comment: { entity: "mock:PAY-300", body: "Ledger drift is the same root cause." } },
+    target_snapshot: { op: "comment", live: true, text: "Payout ledger drift" },
+    state: "pending",
+    wait_reason: "unreachable",
+    detail: "connection timed out",
+    queued_at: "2026-08-25T11:55:00Z",
+    attempted_at: "2026-08-25T11:56:00Z",
+    attempts: 3,
+    held_snapshot: null,
+    settled_at: null,
   },
 ];
 

@@ -210,8 +210,13 @@ pub async fn status_for(pool: &PgPool, id: &str) -> Result<Option<SourceSyncStat
 pub(crate) const MISSING_SECRET_MESSAGE: &str = "no stored credential -- re-enter it";
 
 /// Why a run did not produce a report.
+///
+/// `pub(crate)` because the write queue's flush loop builds an adapter through
+/// the same [`build_source`] seam and has to classify the same failures --
+/// with the queue's own vocabulary, not the run log's, since a source that
+/// cannot be built means "these writes wait", not "this run failed".
 #[derive(Debug)]
-enum RunFailure {
+pub(crate) enum RunFailure {
     NotConfigured,
     MissingSecret,
     Secret(String),
@@ -240,7 +245,7 @@ impl RunFailure {
         }
     }
 
-    fn message(&self) -> String {
+    pub(crate) fn message(&self) -> String {
         match self {
             RunFailure::NotConfigured => "the source has no configuration row".to_owned(),
             RunFailure::MissingSecret => MISSING_SECRET_MESSAGE.to_owned(),
@@ -253,7 +258,11 @@ impl RunFailure {
 }
 
 /// Build the adapter for a stored configuration, fetching its secret.
-async fn build_source(
+///
+/// `pub(crate)`: `crate::write_queue` builds its adapter here too, so that a
+/// flush and a sync agree on what a configured source *is* -- including which
+/// auth kinds need a keychain entry at all.
+pub(crate) async fn build_source(
     deps: &SchedulerDeps,
     cfg: &config::SourceConfigRow,
 ) -> Result<Box<dyn Source>, RunFailure> {
@@ -955,6 +964,19 @@ impl Scheduler {
         Ok(Scheduler { inner })
     }
 
+    /// What the scheduler was built with.
+    ///
+    /// The write queue's flush loop takes the same [`SchedulerDeps`] -- it
+    /// builds an adapter through the same seam and writes through the same
+    /// pool -- and the desktop shell holds a `Scheduler`, not the deps it was
+    /// handed. Exposing them is what lets a `#[tauri::command]` reach
+    /// [`crate::write_queue`] without `SourcesState` growing a second copy of
+    /// four fields that must not drift from these.
+    #[must_use]
+    pub fn deps(&self) -> &SchedulerDeps {
+        &self.inner.deps
+    }
+
     /// Start a run for one source and return its `sync_run.id` **immediately**
     /// (P3): the row exists before the task is spawned, so the caller has
     /// something to watch without waiting on the network.
@@ -1520,6 +1542,20 @@ async fn tick_loop(inner: Arc<Inner>) {
             }
             Err(error) => tracing::warn!(%error, "looking for due sources failed"),
         }
+
+        // The write queue drains on the same tick (issue #42, story 9:
+        // "recovery needs no ceremony from me"). Here rather than after a
+        // successful sync, because the two are independent: a source whose
+        // sync is disabled still owes its writes, and a credential re-entered
+        // while nothing is due would otherwise leave the queue sitting until
+        // the next scheduled run.
+        //
+        // Nearly free when nothing is owed: `flush_source` returns before
+        // building an adapter or touching the keychain if the source's queue
+        // is empty. Cancellation is not checked between the two -- a flush
+        // that has started is one write against one source, and `shutdown`'s
+        // grace window covers it.
+        crate::write_queue::flush_all(&inner.deps).await;
 
         tokio::select! {
             biased;
