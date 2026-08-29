@@ -408,25 +408,29 @@ test("a list_sources overtaken by a later one does not write what it read", asyn
 });
 
 /**
- * A credential fixed by hand and a `list_sources` already in flight.
+ * A credential fixed by hand while a `list_sources` is already in flight.
  *
  * `onhealth` writes the reading `set_source_secret` answered with straight
- * into the shared store, because the person watching wants the chip to go
- * green as they press the button rather than a round trip later. But the list
- * path *replaces* that store wholesale — deliberately, so a deleted source's
- * chip disappears — so a read issued before the fix and landing after it
- * writes the credential's old state back over the new one.
+ * into the shared store, because the person is watching the chip they pressed
+ * a button to fix and a round trip later is not when they are looking. But the
+ * list path *replaces* that store wholesale — deliberately, so a deleted
+ * source's chip disappears — so a read issued before the password was typed
+ * and landing after it used to write the rejected credential back over the
+ * green chip, with no action of the reader's.
  *
  * The window is ordinary rather than exotic: this view re-lists on every
- * terminal `sync:state`, and fixing a credential is the thing a person does
- * right after watching a sync fail. So the two events collide in the view
- * someone opened *because* they suspect a source is misbehaving, and the chip
- * flips back to "auth failed" with no action of theirs — evidence for exactly
- * the thing they came to check (#83's argument, #144).
+ * terminal `sync:state`, and fixing a credential is what a person does right
+ * after watching a sync fail. So the collision happens in the view someone
+ * opened *because* they suspect a source is misbehaving, and the revert is
+ * evidence for exactly the thing they came to check — #83's argument, #144.
  *
- * The read is held open *across* the fix rather than before it: run in
- * sequence these two are fine, and a test that called them in order would pass
- * against the bug.
+ * **Both reads are held open across the fix**, which is what makes this a
+ * race and not a sequence. Called in order these two are fine, so a test that
+ * released each read before the next step would pass against the bug. Held,
+ * the three assertions separate the three things that have to be true: the
+ * chip is green from the patch alone before either read has landed; the
+ * overtaken read drops its stale answer rather than applying it; and the read
+ * the fix issued lands on the same reading.
  */
 test("a credential fixed by hand is not reverted by a list_sources already in flight", async () => {
   const rejected = (): CredentialHealth => ({
@@ -443,16 +447,20 @@ test("a credential fixed by hand is not reverted by a list_sources already in fl
   expect(button("Re-enter", rowFor("jira")!)).toBeTruthy();
   const listedSoFar = calls.listSources;
 
-  // The read that a run finishing puts in flight. It is answered from the
-  // database as it stood *before* the password is typed below, which is what
-  // makes it a stale reading rather than a second opinion.
-  let release: (() => void) | undefined;
+  // Two reads, neither answered until this test says so. The first is the one
+  // a finished run puts in flight, answered from the database as it stood
+  // *before* the password below is typed — a stale reading, not a second
+  // opinion. The second is whatever the fix issues.
+  let releaseStale: (() => void) | undefined;
+  let releaseFresh: (() => void) | undefined;
   answerList = (call) =>
     call === listedSoFar + 1
       ? new Promise<SourceSummary[]>((resolve) => {
-          release = () => resolve([source({ health: rejected() })]);
+          releaseStale = () => resolve([source({ health: rejected() })]);
         })
-      : Promise.resolve([source()]);
+      : new Promise<SourceSummary[]>((resolve) => {
+          releaseFresh = () => resolve([source()]);
+        });
 
   emit("sync:state", {
     source_id: "jira",
@@ -477,18 +485,24 @@ test("a credential fixed by hand is not reverted by a list_sources already in fl
   button("Save and retry sync", target.querySelector(".src-fix")!)!.click();
   await settle();
 
-  // The chip they were watching.
-  expect(store.get("jira")!.state).toBe("ok");
+  // The chip they are watching, and nothing has landed yet: this reading can
+  // only have come from the patch `onhealth` applies.
+  expect(store.get("jira")!.state, "the chip does not go green until a read answers").toBe("ok");
   expect(button("Sync now", rowFor("jira")!)).toBeTruthy();
+  expect(calls.listSources, "fixing a credential did not re-list").toBe(listedSoFar + 2);
 
-  release!();
+  releaseStale!();
   await settle();
-
   expect(store.get("jira")!.state, "the in-flight read wrote the old credential state back").toBe(
     "ok",
   );
   expect(button("Re-enter", rowFor("jira")!)).toBeUndefined();
   expect(rowFor("jira")!.textContent).not.toContain("401 from /rest/api/2/myself");
+
+  releaseFresh!();
+  await settle();
+  expect(store.get("jira")!.state).toBe("ok");
+  expect(button("Sync now", rowFor("jira")!)).toBeTruthy();
 });
 
 test("a source whose health is unauthorized offers Re-enter, not Sync now", async () => {
