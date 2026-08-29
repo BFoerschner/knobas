@@ -19,6 +19,7 @@
 //! and `sources_crud::nothing_in_the_ipc_surface_reads_a_secret_back` scans
 //! this file to keep it that way.
 
+use knobas_sync::scheduler::Purge;
 use tauri::State;
 
 use crate::sources::{
@@ -86,6 +87,11 @@ pub async fn add_source<R: tauri::Runtime>(
     let summary = crud::add(&state.pool, &state.secrets, state.registry.as_ref(), input)
         .await
         .map_err(|error| to_ipc(&error, Some(&id)))?;
+    // Something exists under this id again, so a purge the scheduler still owes
+    // the *previous* holder of it must not fire over this source's first sync
+    // (#127). Told after the insert committed, for the same reason
+    // `delete_source` tells it after the delete did.
+    state.scheduler.source_added(&id).await;
     // A brand-new source is due now; do not make the user wait out a tick.
     state.scheduler.wake();
     Ok(summary)
@@ -118,6 +124,24 @@ pub async fn update_source<R: tauri::Runtime>(
 /// new source could be handed the deleted source's ending. Told after the
 /// delete has committed, so a delete that failed leaves the scheduler's claim
 /// exactly as it was.
+///
+/// **`purge_items` is told to the scheduler too, and that is the ordering
+/// guarantee (#127).** The purge is not the last word: a run of this source can
+/// still be in flight, it checked that its source existed only at the very top
+/// of the run, and its commit lands however many minutes later the remote
+/// system takes -- writing the mirror back *and* clearing the tombstones the
+/// purge set, so items the user deleted return **live** to `sync.live_item` for
+/// a source that no longer exists. This command does not cancel that run and
+/// does not wait for it (either would change what it promises over IPC, which
+/// contract §10.8 freezes). It hands the purge intent to
+/// [`Scheduler::forget_source`], which applies the purge again once that run
+/// settles. The guarantee is therefore **eventual and unconditional**: once the
+/// last run of a source deleted with `purge_items` is over, it has no
+/// `sync.item` rows and nothing of it is searchable. What it is not is
+/// synchronous -- the mirror can be non-empty for the length of one
+/// already-running sync after this returns.
+///
+/// [`Scheduler::forget_source`]: knobas_sync::scheduler::Scheduler::forget_source
 #[tauri::command]
 pub async fn delete_source<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -125,10 +149,11 @@ pub async fn delete_source<R: tauri::Runtime>(
     purge_items: bool,
 ) -> Result<(), IpcError> {
     let state = crate::sources::state(&app)?;
+    let purge = if purge_items { Purge::Items } else { Purge::Keep };
     crud::delete(&state.pool, &state.secrets, &id, purge_items)
         .await
         .map_err(|error| to_ipc(&error, Some(&id)))?;
-    state.scheduler.forget_source(&id).await;
+    state.scheduler.forget_source(&id, purge).await;
     Ok(())
 }
 
@@ -467,13 +492,61 @@ mod tests {
     /// its own tests live in `knobas-sync`; this pins that it is *called*.
     #[test]
     fn deleting_a_source_tells_the_scheduler_to_forget_it() {
+        let body = body_of(include_str!("sources.rs"), "pub async fn delete_source")
+            .expect("delete_source is not in this file any more");
         assert!(
-            body_of(include_str!("sources.rs"), "pub async fn delete_source")
-                .expect("delete_source is not in this file any more")
-                .contains("scheduler.forget_source("),
+            body.contains("scheduler.forget_source("),
             "delete_source must tell the scheduler, or a source added again \
              under this id inherits the deleted one's run entry -- and with it \
              the ending the first-run wizard is served (#119, ADR-0005)"
+        );
+        assert_eq!(
+            forget_arguments(&body),
+            Some("&id, purge".to_owned()),
+            "the forget has to carry what the delete was asked to do with the \
+             mirror. Without it a source deleted with `purge_items` while a \
+             sync of it was in flight gets its items -- and its cleared \
+             tombstones -- written back by that run, live in `sync.live_item` \
+             for ever (#127)"
+        );
+        assert!(
+            body.contains("purge_items { Purge::Items }"),
+            "...and the intent has to be *this* command's `purge_items`, not a \
+             constant that happens to type-check"
+        );
+    }
+
+    /// The argument list of the `forget_source(` call in a body, or `None` if
+    /// there is no such call.
+    ///
+    /// Text, because a `#[tauri::command]` body cannot be called from a test
+    /// and the argument is the whole of what #127 added here: the call was
+    /// already present and already green before the purge intent rode along
+    /// with it, so "is it called?" cannot notice the intent going missing.
+    fn forget_arguments(body: &str) -> Option<String> {
+        let at = body.find("forget_source(")? + "forget_source(".len();
+        let rest = &body[at..];
+        let end = rest.find(')')?;
+        Some(rest[..end].to_owned())
+    }
+
+    /// **`add_source` voids a purge the scheduler still owes that id** (#127).
+    ///
+    /// The other end of the same in-memory intent, and the same reason for a
+    /// source scan: the body is a `#[tauri::command]`. Losing this line is
+    /// silent and worse than the defect it guards -- a source deleted with
+    /// `purge_items` and added straight back under the same id would have its
+    /// **new** mirror purged the moment the old source's run settled, with
+    /// nothing on screen to say why.
+    #[test]
+    fn adding_a_source_voids_a_purge_the_scheduler_still_owes_that_id() {
+        assert!(
+            body_of(include_str!("sources.rs"), "pub async fn add_source")
+                .expect("add_source is not in this file any more")
+                .contains("scheduler.source_added("),
+            "add_source must tell the scheduler the id has changed hands, or a \
+             purge armed for the source that used to hold it fires over this \
+             one's first sync (#127)"
         );
     }
 
@@ -494,6 +567,15 @@ mod tests {
             "the scan must read this command's body, not the whole file -- \
              another command making the call is not this one making it"
         );
+
+        // ...and the argument scan can tell the intent being carried from the
+        // intent being dropped, which is the #127 half of this guard.
+        assert_eq!(forget_arguments(with), Some("&id".to_owned()));
+        assert_eq!(
+            forget_arguments("state.scheduler.forget_source(&id, purge).await;"),
+            Some("&id, purge".to_owned())
+        );
+        assert_eq!(forget_arguments("nothing of the sort"), None);
 
         // ...and a signature quoted inside a string literal is not a
         // declaration of it. This file is full of those -- the two literals

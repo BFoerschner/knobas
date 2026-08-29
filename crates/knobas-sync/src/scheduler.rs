@@ -24,7 +24,7 @@
 //! `tauri::async_runtime::spawn`, so they land on Tauri's runtime (which *is*
 //! tokio) without this crate naming it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -536,6 +536,30 @@ pub async fn settle(deps: &SchedulerDeps, source_id: &str, run_id: i64, result: 
     emit_state(deps, source_id).await;
 }
 
+/// Re-apply a deleted source's purge, now that the run which was in flight when
+/// it was deleted has committed (#127).
+///
+/// The same statement `delete_source`'s own purge runs -- [`config::purge_items`]
+/// is the one copy of it, so the two cannot drift apart on what a tombstone
+/// means.
+///
+/// Best-effort like everything else after a run's own transaction: a purge that
+/// fails is warned about rather than raised, because there is nobody left to
+/// raise it to. `delete_source` returned long ago.
+async fn sweep(deps: &SchedulerDeps, source_id: &str) {
+    match config::purge_items(&deps.pool, source_id).await {
+        Ok(()) => tracing::info!(
+            source_id,
+            "purged the mirror a deleted source's in-flight run wrote back"
+        ),
+        Err(error) => tracing::warn!(
+            source_id,
+            %error,
+            "a deleted source's mirror could not be purged; its items are still searchable"
+        ),
+    }
+}
+
 async fn apply_health_and_backoff(deps: &SchedulerDeps, source_id: &str, result: &RunResult) {
     let (state, detail) = match result.outcome {
         SyncOutcome::Ok => (Some(AuthState::Ok), None),
@@ -677,6 +701,23 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
 /// already cancelled by the time this is reached.
 const POOL_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// What `delete_source` asked to happen to a deleted source's mirror.
+///
+/// Carried into the scheduler rather than staying in `delete_source`, because
+/// the delete's own purge is not the last word: a run of that source can still
+/// be in flight, and its commit lands *after* the purge. See
+/// [`Scheduler::forget_source`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Purge {
+    /// *Remove source and its items*. The mirror goes, and goes again if a run
+    /// still in flight writes any of it back.
+    Items,
+    /// *Remove source, keep items* -- a real choice in the sources view
+    /// (interfaces §3, Delete), and the reason a foreign key from
+    /// `sync.item` to `source_config` could never have stood in for this.
+    Keep,
+}
+
 /// Why a trigger did not start a run.
 #[derive(Debug, thiserror::Error)]
 pub enum TriggerError {
@@ -695,7 +736,7 @@ pub struct Scheduler {
     inner: Arc<Inner>,
 }
 
-/// One source's most recent run, as [`Inner::runs`] holds it.
+/// One source's most recent run, as [`Claims::runs`] holds it.
 ///
 /// The flag is the *claim on the source's first sync*, and it is what makes
 /// **spent when taken** true wherever the taking happened. A caller that asks
@@ -719,9 +760,17 @@ struct RunEntry {
     first_run_claimed: bool,
 }
 
-struct Inner {
-    deps: SchedulerDeps,
-    permits: Semaphore,
+/// Everything this scheduler remembers about a source *id*, under one lock.
+///
+/// One lock and not two, and that is load-bearing rather than tidy. The two
+/// halves are read against each other: [`Scheduler::forget_source`] has to know
+/// whether the deleted source's run is still going before it decides between
+/// arming a purge and applying one, and the run has to claim any armed purge
+/// and close its watchers without that decision changing underneath it. With a
+/// lock each there is an interleaving -- the run claims nothing, then the
+/// delete arms a purge nobody will ever claim -- and the mirror keeps rows the
+/// user deleted.
+struct Claims {
     /// source id → the run this scheduler last started for it, and the set of
     /// sinks watching that run ([`Watchers`]).
     ///
@@ -749,7 +798,31 @@ struct Inner {
     /// a brand-new source describing something the user threw away.
     /// [`Scheduler::forget_source`] is where that life ends, and `delete_source`
     /// is what calls it.
-    runs: Mutex<HashMap<String, RunEntry>>,
+    ///
+    /// Held with the pending purges under one lock ([`Claims`]), because
+    /// "is a run of this source still going?" and "does its mirror still owe
+    /// somebody a purge?" have to be asked and answered together.
+    runs: HashMap<String, RunEntry>,
+    /// Source ids deleted with `purge_items: true` while a run of them was
+    /// **still in flight** -- the purge that run's late commit is about to
+    /// undo, waiting to be applied again once it has (#127).
+    ///
+    /// In memory and not a table, deliberately: the only writer that can undo
+    /// the purge is that run's own uncommitted transaction, and a process that
+    /// dies takes the transaction with it, server-side. There is nothing left
+    /// to sweep after a crash, so there is nothing to make durable.
+    ///
+    /// An entry is removed by the run that claims it, and by
+    /// [`Scheduler::source_added`] when the user puts a source back under that
+    /// id -- their newest instruction about the id wins, and a sweep firing
+    /// after a re-add would purge the *new* source's first mirror.
+    pending_purges: HashSet<String>,
+}
+
+struct Inner {
+    deps: SchedulerDeps,
+    permits: Semaphore,
+    claims: Mutex<Claims>,
     /// Poked when something changed that might make a source due (a finished
     /// run, a new source, a re-entered credential), so the UI does not wait out
     /// a tick.
@@ -784,7 +857,10 @@ impl Scheduler {
         let inner = Arc::new(Inner {
             deps,
             permits: Semaphore::new(SYNC_CONCURRENCY),
-            runs: Mutex::new(HashMap::new()),
+            claims: Mutex::new(Claims {
+                runs: HashMap::new(),
+                pending_purges: HashSet::new(),
+            }),
             wake: Notify::new(),
             cancel: CancellationToken::new(),
             tasks: Mutex::new(Vec::new()),
@@ -890,7 +966,7 @@ impl Scheduler {
     /// source is gone.
     ///
     /// **Where a [`RunEntry`]'s life ends.** The entry outliving its *run* is
-    /// deliberate ([`Inner::runs`]); outliving its *source* is not, and nothing
+    /// deliberate ([`Claims::runs`]); outliving its *source* is not, and nothing
     /// else would ever notice, because `knobas.sync_run` has no foreign key to
     /// `source_config` on purpose -- deleting a source must not rewrite its
     /// history -- so a run of the deleted source is still readable under an id
@@ -906,8 +982,81 @@ impl Scheduler {
     /// ADR-0005 is about the caller, not about the configuration row. What goes
     /// is only this scheduler's claim on the *id*, so the next trigger for it
     /// is about whatever holds that id now.
-    pub async fn forget_source(&self, source_id: &str) {
-        self.inner.runs.lock().await.remove(source_id);
+    ///
+    /// # The purge outlives the delete, because the run does (#127)
+    ///
+    /// `purge` is what `delete_source` was asked to do with the mirror, and it
+    /// is here because the delete's own purge is **not** the last word. A run
+    /// only checks that its source still exists once, at the top of
+    /// `run_locked`, before a byte of network traffic; after that it fetches
+    /// for as long as the remote system takes and then commits. A delete that
+    /// commits anywhere in that window purges a mirror the run is about to
+    /// write back -- and the entity upsert's `deleted_at = excluded.deleted_at`
+    /// clears the tombstone the purge set, so the items the user deleted come
+    /// back **live in `sync.live_item`**, for a source with no configuration
+    /// row and nothing left that will ever sync or tombstone them again.
+    ///
+    /// So, under the one lock ([`Claims`]) and against the run's own state:
+    ///
+    /// * **the run is still going** -- arm the purge. The run applies it when
+    ///   it settles, after its transaction has committed, and before it tells
+    ///   anybody it is over.
+    /// * **the last run of this id is over** -- apply the purge here. Its
+    ///   commit may have landed after `delete_source`'s, in which case those
+    ///   rows are sitting in the mirror right now. Cheap and unconditional
+    ///   rather than conditioned on comparing two commit times, which nothing
+    ///   here can do honestly.
+    /// * **this scheduler has no run of the id at all** -- nothing to do. No
+    ///   run exists that could write, and none can start: `trigger` reads
+    ///   `source_config` under this same lock and answers
+    ///   [`TriggerError::UnknownSource`] for a source that is gone.
+    ///
+    /// **It still cancels nothing**, and the sweep never touches
+    /// [`Watchers`]: the enrolled caller is told how the run really ended, and
+    /// the ending is about the *run* (it did upsert N items) while the purge is
+    /// about the *mirror*.
+    pub async fn forget_source(&self, source_id: &str, purge: Purge) {
+        // Held across the purge, not dropped before it. Between a release and
+        // the statement, `add_source` plus a wake could start a run for a
+        // source re-created under this id, and the purge would take the *new*
+        // source's first mirror with it. `trigger` already holds this lock
+        // across its own database work, so this is the shape of the lock, not a
+        // new one.
+        let mut claims = self.inner.claims.lock().await;
+        let entry = claims.runs.remove(source_id);
+        if purge == Purge::Keep {
+            return;
+        }
+        // `attach(None)` asks the run's own state whether it is still open, and
+        // it is the only honest way to ask: see [`Watchers::attach`]. The run
+        // claims its purge and closes its watchers under *this* lock, so
+        // `Joined` here means the claim has not happened yet and will.
+        match entry {
+            Some(entry) if entry.watchers.attach(None) == Attach::Joined => {
+                claims.pending_purges.insert(source_id.to_owned());
+            }
+            Some(_) => sweep(&self.inner.deps, source_id).await,
+            None => {}
+        }
+    }
+
+    /// A source now exists under this id, so nothing this scheduler still meant
+    /// to do to the *old* one's mirror applies any more.
+    ///
+    /// Called by `add_source`. The race it closes is delete-then-add under one
+    /// id while the deleted source's run is still in flight: the purge armed by
+    /// [`forget_source`](Self::forget_source) would otherwise fire after the
+    /// new source's first sync and take that sync's items with it. The user's
+    /// newest instruction about the id wins.
+    ///
+    /// **What stays accepted**, because clearing the intent is what accepts it:
+    /// the old run's late commit merges into the re-added source's mirror,
+    /// under item ids the old source minted. It is the narrow window "delete,
+    /// add again under the same id, old sync still running", the rows are the
+    /// same shape the new source writes, and the new source's next full sync
+    /// reconciles them.
+    pub async fn source_added(&self, source_id: &str) {
+        self.inner.claims.lock().await.pending_purges.remove(source_id);
     }
 
     /// Look for due sources now rather than at the next tick.
@@ -973,8 +1122,8 @@ impl Inner {
         let asks_for_the_first_sync = trigger == SyncTrigger::FirstRun && progress.is_some();
         // The whole check-and-claim under one lock: two `sync_now` calls
         // arriving together must not both decide the source is idle.
-        let mut runs = self.runs.lock().await;
-        if let Some(entry) = runs.get_mut(source_id) {
+        let mut claims = self.claims.lock().await;
+        if let Some(entry) = claims.runs.get_mut(source_id) {
             let run_id = entry.watchers.run_id();
             // Enrolled or not, under the run's own lock -- so a sink offered a
             // microsecond before the ending still hears it, and one offered a
@@ -991,7 +1140,7 @@ impl Inner {
             let unclaimed = !entry.first_run_claimed;
             // That run is over, so the entry has no claim on the source any
             // more and the next trigger must not find it.
-            runs.remove(source_id);
+            claims.runs.remove(source_id);
             // ...but this trigger may still want it, if nobody spent the claim
             // while the run was going. A caller asking for the source's *first
             // sync* is asking about a job, not for a job: hand it that run and
@@ -1021,7 +1170,7 @@ impl Inner {
         // The caller that started the run is a watcher like any other; nothing
         // below this line knows which of them it was.
         watchers.attach(progress);
-        runs.insert(
+        claims.runs.insert(
             source_id.to_owned(),
             RunEntry {
                 watchers: Arc::clone(&watchers),
@@ -1031,7 +1180,7 @@ impl Inner {
                 first_run_claimed: asks_for_the_first_sync,
             },
         );
-        drop(runs);
+        drop(claims);
 
         // **Before the spawn, and therefore before this returns.** `sync_now`
         // hands the caller a run id (P3) and the docs promise `sync:state` says
@@ -1108,22 +1257,43 @@ impl Inner {
         // closes its connection -- which is why `settle` can still write.
 
         settle(&self.deps, &source_id, run_id, &result).await;
-        // The ending, and with it the release of the source: a trigger that
-        // finds these watchers closed knows the run is over and may start one
-        // of its own. Sent *after* `settle`, so the row a late arrival reads
-        // says the same thing this message does.
-        //
-        // `started`, not `0` -- the terminal message is the one a progress bar
-        // shows as the run's duration, and a hardcoded zero made it report
-        // every run as instantaneous.
-        watchers.close(ending(
+        let ending = ending(
             run_id,
             &source_id,
             result.outcome,
             result.error.clone(),
             u64::try_from(result.counts.upserted).unwrap_or(0),
             elapsed_ms(started),
-        ));
+        );
+        {
+            // **The purge the delete could not finish (#127).** This run's
+            // transaction has committed by now -- dropping the run future
+            // above is what settles it either way -- so if the source was
+            // deleted with `purge_items` while this run was fetching, the rows
+            // it just wrote are the ones that undo the purge, tombstones and
+            // all. Applied *before* the ending, so a caller that has been told
+            // the run is over is looking at a mirror this run no longer owns.
+            let mut claims = self.claims.lock().await;
+            if claims.pending_purges.remove(&source_id) {
+                sweep(&self.deps, &source_id).await;
+            }
+            // The ending, and with it the release of the source: a trigger that
+            // finds these watchers closed knows the run is over and may start
+            // one of its own. Sent *after* `settle`, so the row a late arrival
+            // reads says the same thing this message does.
+            //
+            // `started`, not `0` -- the terminal message is the one a progress
+            // bar shows as the run's duration, and a hardcoded zero made it
+            // report every run as instantaneous.
+            //
+            // Under the same lock as the claim above, and that is the whole of
+            // what makes the arming race-free: `forget_source` decides between
+            // arming a purge and applying one by asking whether these watchers
+            // are still open. Split the claim from the close and a delete
+            // landing between them sees an open run, arms a purge, and nothing
+            // ever claims it.
+            watchers.close(ending);
+        }
         self.wake.notify_one();
     }
 }
