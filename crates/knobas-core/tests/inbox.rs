@@ -267,7 +267,15 @@ async fn a_review_request_on_a_closed_pull_request_has_left_the_stream() {
 #[tokio::test]
 async fn a_mention_is_the_marked_name_and_not_every_appearance_of_it() {
     let pool = &scratch().await;
-    let at = ticket(pool, "PAY-1", Some(THEM), None, "@mara.lindqvist ping?", days_ago(1)).await;
+    let at = ticket(
+        pool,
+        "PAY-1",
+        Some(THEM),
+        None,
+        "@mara.lindqvist ping?",
+        days_ago(1),
+    )
+    .await;
     let jira = ticket(
         pool,
         "PAY-2",
@@ -286,7 +294,15 @@ async fn a_mention_is_the_marked_name_and_not_every_appearance_of_it() {
         days_ago(1),
     )
     .await;
-    let other = ticket(pool, "PAY-4", Some(ME), None, "@jonas.becker ping?", days_ago(1)).await;
+    let other = ticket(
+        pool,
+        "PAY-4",
+        Some(ME),
+        None,
+        "@jonas.becker ping?",
+        days_ago(1),
+    )
+    .await;
 
     let keys = keys(&stream(pool).await);
     assert!(keys.contains(&format!("mention:{at}")), "{keys:?}");
@@ -334,8 +350,24 @@ async fn a_mention_of_a_longer_name_is_not_a_mention_of_its_prefix() {
 #[tokio::test]
 async fn a_failed_build_i_triggered_is_mine_and_a_green_one_is_nobodys() {
     let pool = &scratch().await;
-    let red = build(pool, "build:1187", "FAILURE", "Payout_Tests", Some(ME), days_ago(1)).await;
-    let green = build(pool, "build:1188", "SUCCESS", "Payout_Lint", Some(ME), days_ago(1)).await;
+    let red = build(
+        pool,
+        "build:1187",
+        "FAILURE",
+        "Payout_Tests",
+        Some(ME),
+        days_ago(1),
+    )
+    .await;
+    let green = build(
+        pool,
+        "build:1188",
+        "SUCCESS",
+        "Payout_Lint",
+        Some(ME),
+        days_ago(1),
+    )
+    .await;
     let theirs = build(
         pool,
         "build:1189",
@@ -393,9 +425,33 @@ async fn a_failed_build_reaches_me_through_a_confirmed_link_and_not_through_a_pr
 #[tokio::test]
 async fn a_failed_build_leaves_when_the_same_configuration_goes_green_again() {
     let pool = &scratch().await;
-    let fixed = build(pool, "build:1187", "FAILURE", "Payout_Tests", Some(ME), days_ago(2)).await;
-    let still = build(pool, "build:1180", "FAILURE", "Ledger_Tests", Some(ME), days_ago(2)).await;
-    build(pool, "build:1190", "SUCCESS", "Payout_Tests", Some(ME), days_ago(1)).await;
+    let fixed = build(
+        pool,
+        "build:1187",
+        "FAILURE",
+        "Payout_Tests",
+        Some(ME),
+        days_ago(2),
+    )
+    .await;
+    let still = build(
+        pool,
+        "build:1180",
+        "FAILURE",
+        "Ledger_Tests",
+        Some(ME),
+        days_ago(2),
+    )
+    .await;
+    build(
+        pool,
+        "build:1190",
+        "SUCCESS",
+        "Payout_Tests",
+        Some(ME),
+        days_ago(1),
+    )
+    .await;
 
     let keys = keys(&stream(pool).await);
     assert!(
@@ -420,7 +476,10 @@ async fn a_ticket_assigned_to_me_arrives_unless_i_raised_it_or_it_is_old() {
     let ancient = ticket(pool, "PAY-100", Some(THEM), Some(ME), "", days_ago(90)).await;
 
     let keys = keys(&stream(pool).await);
-    assert!(keys.contains(&format!("new_assignment:{arrived}")), "{keys:?}");
+    assert!(
+        keys.contains(&format!("new_assignment:{arrived}")),
+        "{keys:?}"
+    );
     assert!(
         !keys.contains(&format!("new_assignment:{my_own}")),
         "assigning my own ticket to myself is not news: {keys:?}"
@@ -474,7 +533,11 @@ async fn a_snoozed_item_is_absent_before_its_date_and_present_after() {
     let shelf = inbox::items(pool, &me(), now(), Shelf::Snoozed)
         .await
         .unwrap();
-    assert_eq!(keys(&shelf), vec![key.clone()], "it is deferred, not deleted");
+    assert_eq!(
+        keys(&shelf),
+        vec![key.clone()],
+        "it is deferred, not deleted"
+    );
     assert_eq!(
         shelf[0].snoozed_until,
         Some(until),
@@ -517,9 +580,13 @@ async fn the_count_excludes_snoozed_items() {
     pull_request(pool, "acme/payouts#145", &[ME], "open").await;
     assert_eq!(inbox::count(pool, &me(), now()).await.unwrap(), 2);
 
-    inbox::snooze(pool, &format!("review_request:{a}"), now() + Duration::days(1))
-        .await
-        .unwrap();
+    inbox::snooze(
+        pool,
+        &format!("review_request:{a}"),
+        now() + Duration::days(1),
+    )
+    .await
+    .unwrap();
     assert_eq!(
         inbox::count(pool, &me(), now()).await.unwrap(),
         1,
@@ -539,7 +606,15 @@ async fn the_count_excludes_snoozed_items() {
 #[tokio::test]
 async fn an_item_marked_done_leaves_and_returns_when_its_subject_moves() {
     let pool = &scratch().await;
-    let id = ticket(pool, "PAY-1", Some(THEM), None, "@mara.lindqvist ping?", days_ago(2)).await;
+    let id = ticket(
+        pool,
+        "PAY-1",
+        Some(THEM),
+        None,
+        "@mara.lindqvist ping?",
+        days_ago(2),
+    )
+    .await;
     let key = format!("mention:{id}");
     assert!(keys(&stream(pool).await).contains(&key));
 
@@ -614,7 +689,15 @@ async fn with_no_identity_only_the_rule_that_needs_none_produces_anything() {
     let pool = &scratch().await;
     source(pool, "jira", Some(now() + Duration::days(5)), true).await;
     pull_request(pool, "acme/payouts#144", &[ME], "open").await;
-    ticket(pool, "PAY-1", Some(THEM), Some(ME), "@mara.lindqvist ping?", days_ago(1)).await;
+    ticket(
+        pool,
+        "PAY-1",
+        Some(THEM),
+        Some(ME),
+        "@mara.lindqvist ping?",
+        days_ago(1),
+    )
+    .await;
 
     let items = inbox::items(pool, &[], now(), Shelf::Stream).await.unwrap();
     assert_eq!(keys(&items), vec!["credential_expiry:jira".to_owned()]);
@@ -663,7 +746,15 @@ async fn a_credential_expiry_carries_its_source_and_no_entity() {
 async fn one_rule_sees_only_its_own_category() {
     let pool = &scratch().await;
     pull_request(pool, "acme/payouts#144", &[ME], "open").await;
-    ticket(pool, "PAY-1", Some(THEM), None, "@mara.lindqvist ping?", days_ago(1)).await;
+    ticket(
+        pool,
+        "PAY-1",
+        Some(THEM),
+        None,
+        "@mara.lindqvist ping?",
+        days_ago(1),
+    )
+    .await;
 
     let rule = inbox::rule(Category::Mention).expect("a rule for mentions");
     let items = inbox::items_from(pool, rule, &me(), now(), Shelf::Stream)

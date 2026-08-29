@@ -768,10 +768,7 @@ mod tests {
     #[test]
     fn every_category_has_a_rule() {
         for category in Category::ALL {
-            assert!(
-                rule(*category).is_some(),
-                "{category} has no rule in RULES"
-            );
+            assert!(rule(*category).is_some(), "{category} has no rule in RULES");
         }
         assert_eq!(RULES.len(), Category::ALL.len());
     }

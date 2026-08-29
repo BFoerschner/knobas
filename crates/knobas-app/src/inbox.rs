@@ -369,7 +369,10 @@ mod tests {
                 ticket_type: String::new(),
             },
         ];
-        let identifiers: Vec<&str> = known.iter().map(knobas_source::WriteOp::identifier).collect();
+        let identifiers: Vec<&str> = known
+            .iter()
+            .map(knobas_source::WriteOp::identifier)
+            .collect();
         for category in Category::ALL {
             for op in category.candidate_ops() {
                 assert!(

@@ -185,14 +185,9 @@ impl Harness {
 
     /// The stream, with each entry's offered actions.
     async fn stream(&self) -> Vec<InboxEntry> {
-        inbox_items_inner(
-            self.pool(),
-            self.registry.as_ref(),
-            now(),
-            Shelf::Stream,
-        )
-        .await
-        .expect("the inbox reads")
+        inbox_items_inner(self.pool(), self.registry.as_ref(), now(), Shelf::Stream)
+            .await
+            .expect("the inbox reads")
     }
 
     async fn entry(&self, key: &str) -> InboxEntry {
@@ -355,17 +350,19 @@ async fn an_item_offers_only_the_ops_its_own_source_declares() {
 async fn an_item_with_no_write_op_is_still_an_item() {
     let h = harness().await;
     h.source("tracker", "tracker", ME).await;
-    sqlx::query(
-        "update knobas.source_config set secret_expires_at = $1 where id = 'tracker'",
-    )
-    .bind(now() + Duration::days(4))
-    .execute(h.pool())
-    .await
-    .unwrap();
+    sqlx::query("update knobas.source_config set secret_expires_at = $1 where id = 'tracker'")
+        .bind(now() + Duration::days(4))
+        .execute(h.pool())
+        .await
+        .unwrap();
 
     let entry = h.entry("credential_expiry:tracker").await;
     assert!(entry.actions.is_empty(), "nothing at a source can fix this");
-    assert!(entry.item.reason.contains("expires"), "{}", entry.item.reason);
+    assert!(
+        entry.item.reason.contains("expires"),
+        "{}",
+        entry.item.reason
+    );
 }
 
 // -- an action, all the way to a source -------------------------------------
@@ -437,7 +434,10 @@ async fn snoozing_records_one_line_naming_the_item_and_its_date() {
     assert_eq!(rows[0].actor, "user");
     assert_eq!(rows[0].entity_id.as_deref(), Some(pr.as_str()));
     assert_eq!(rows[0].detail["item_key"], serde_json::json!(key));
-    assert_eq!(rows[0].detail["category"], serde_json::json!("review_request"));
+    assert_eq!(
+        rows[0].detail["category"],
+        serde_json::json!("review_request")
+    );
     assert!(
         rows[0].detail["until"].is_string(),
         "the line says when it comes back: {}",
@@ -489,7 +489,10 @@ async fn answering_an_item_that_is_no_longer_there_is_refused_and_records_nothin
         .expect_err("no such item");
     assert_eq!(error.code, knobas_app::IpcErrorCode::NotFound);
     assert!(error.message.contains("acme/gone#1"), "{}", error.message);
-    assert!(h.activity().await.is_empty(), "nothing happened, so nothing is logged");
+    assert!(
+        h.activity().await.is_empty(),
+        "nothing happened, so nothing is logged"
+    );
 }
 
 /// A snoozed item can be snoozed again -- that is changing your mind about a

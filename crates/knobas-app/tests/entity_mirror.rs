@@ -830,11 +830,13 @@ fn the_inbox_categories_match_their_typescript_mirror() {
 /// member on one side would be a shelf the backend never fills.
 #[test]
 fn the_inbox_shelves_match_their_typescript_mirror() {
-    let spellings: Vec<serde_json::Value> =
-        [knobas_core::inbox::Shelf::Stream, knobas_core::inbox::Shelf::Snoozed]
-            .into_iter()
-            .map(|shelf| serde_json::to_value(shelf).unwrap())
-            .collect();
+    let spellings: Vec<serde_json::Value> = [
+        knobas_core::inbox::Shelf::Stream,
+        knobas_core::inbox::Shelf::Snoozed,
+    ]
+    .into_iter()
+    .map(|shelf| serde_json::to_value(shelf).unwrap())
+    .collect();
     let spellings: Vec<&str> = spellings
         .iter()
         .map(|shelf| shelf.as_str().expect("a shelf serializes as a string"))
