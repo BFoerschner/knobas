@@ -31,6 +31,12 @@ import type { CredentialHealth } from "./lib/ipc/sources";
 /** Readings `credential_health` hands back, and how many times it was asked. */
 let healthRows: CredentialHealth[] = [];
 let healthCalls = 0;
+/**
+ * Answers `credential_health` by hand, when a test needs the seed *in flight*
+ * rather than answered. `healthRows` cannot express that: it is read at
+ * resolution time, and the mock below resolves at once.
+ */
+let answerHealth: (() => Promise<CredentialHealth[]>) | null = null;
 
 /** What `app_status` says the database is doing. Flipped by a test mid-run. */
 let dbReady = false;
@@ -55,6 +61,7 @@ vi.mock("./lib/ipc/app", () => ({
 vi.mock("./lib/ipc/sources", () => ({
   credentialHealth: () => {
     healthCalls += 1;
+    if (answerHealth) return answerHealth();
     return Promise.resolve(healthRows);
   },
   listSources: () => Promise.resolve([]),
@@ -97,19 +104,39 @@ vi.mock("./lib/ipc/entity", () => ({
  */
 let listenCalls = 0;
 
+/** The handlers the shell subscribed, so a test can deliver an event by hand. */
+const listeners = new Map<string, ((event: { payload: unknown }) => void)[]>();
+
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: () => {
+  listen: (event: string, handler: (event: { payload: unknown }) => void) => {
     listenCalls += 1;
-    return Promise.resolve(() => {});
+    const existing = listeners.get(event) ?? [];
+    existing.push(handler);
+    listeners.set(event, existing);
+    return Promise.resolve(() => {
+      listeners.set(
+        event,
+        (listeners.get(event) ?? []).filter((h) => h !== handler),
+      );
+    });
   },
 }));
+
+function emit(event: string, payload: unknown) {
+  for (const handler of [...(listeners.get(event) ?? [])]) handler({ payload });
+  flushSync();
+}
 
 const { default: App } = await import("./App.svelte");
 const { health } = await import("./lib/shell/health.svelte");
 const { lifecycle } = await import("./lib/shell/lifecycle.svelte");
 
-function row(source_id: string, state: CredentialHealth["state"]): CredentialHealth {
-  return { source_id, state, checked_at: null, detail: null, secret_expires_at: null };
+function row(
+  source_id: string,
+  state: CredentialHealth["state"],
+  checked_at: string | null = null,
+): CredentialHealth {
+  return { source_id, state, checked_at, detail: null, secret_expires_at: null };
 }
 
 let target: HTMLDivElement;
@@ -118,7 +145,9 @@ let app: Record<string, unknown> | undefined;
 beforeEach(() => {
   healthRows = [];
   healthCalls = 0;
+  answerHealth = null;
   listenCalls = 0;
+  listeners.clear();
   dbReady = false;
   health.replace([]);
   target = document.createElement("div");
@@ -201,4 +230,63 @@ test("the seed lands the moment the lifecycle says ready", async () => {
   // The reading the top strip's `401` is drawn from, arriving without anything
   // having navigated to the sources view first.
   expect(health.unauthorized).toBe(true);
+});
+
+/**
+ * The boot seed is a *read*, and the shell's is the other door into the same
+ * race the sources view has (#148).
+ *
+ * `$effect(() => { if (lifecycle.ready) void health.reseed(); })` is right
+ * above this test's subject, and `reseed()` ends in `health.replace`. So a
+ * `source:health` that lands while `credential_health` is in flight used to be
+ * written back to whatever the database held *before* the check — and in this
+ * direction that is a rejected credential going back to looking fine, on the
+ * very first screen of the session, with nothing that would ever correct it:
+ * the scheduler emits on a *change*, and it has already emitted this one.
+ *
+ * This is the call site no subscription in `SourcesView` could have covered,
+ * and it is why the fix went into the store rather than into that view.
+ *
+ * **The seed is held open across the event.** Released first, the two are fine
+ * in either order. `jira` is in the seed's rows and not in the store, so
+ * waiting for it to appear is a positive signal that the `replace` actually
+ * ran — without it the assertion below would pass on a seed that never landed.
+ */
+test("a rejection landing while the boot seed is in flight is not written back to ok", async () => {
+  dbReady = true;
+  let releaseSeed: (() => void) | undefined;
+  answerHealth = () =>
+    new Promise<CredentialHealth[]>((resolve) => {
+      releaseSeed = () => resolve([row("gitea", "ok", "2026-08-25T11:50:00Z"), row("jira", "ok")]);
+    });
+
+  app = mount(App, { target, props: {} });
+  // Both halves of bring-up, because they do not finish in a fixed order: the
+  // seed hangs off the lifecycle's first `app_status`, while `health.start()`
+  // waits on the dynamic import in `onMount`. Waiting for the seed alone made
+  // this test emit into a store with no subscription yet — a race in the
+  // *test*, and one that would have read as the fix failing.
+  await until(
+    () => healthCalls > 0 && releaseSeed !== undefined && (listeners.get("source:health") ?? []).length > 0,
+    "the shell never both subscribed and issued the boot seed",
+  );
+
+  // …and with that read open, the scheduler's check comes back refused. The
+  // event reaches the store through the subscription `health.start()` opened
+  // at mount — long before this seed, which is the whole point of subscribing
+  // first.
+  emit("source:health", row("gitea", "unauthorized", "2026-08-25T11:59:00Z"));
+  await until(() => health.get("gitea") !== null, "the event never reached the store");
+  expect(health.get("gitea")!.state).toBe("unauthorized");
+
+  releaseSeed!();
+  await until(() => health.get("jira") !== null, "the boot seed never landed");
+
+  expect(
+    health.get("gitea")!.state,
+    "the boot seed wrote a stale ok over a credential the scheduler had just seen refused",
+  ).toBe("unauthorized");
+  expect(health.unauthorized, "the top strip's 401 reading went quiet on a live rejection").toBe(
+    true,
+  );
 });
