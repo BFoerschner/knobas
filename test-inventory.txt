@@ -156,6 +156,7 @@ knobas-app	test/sources_registry	an_unknown_kind_is_refused_by_name
 knobas-app	test/sources_registry	building_an_instance_of_a_known_kind_yields_an_adapter_under_that_instances_id
 knobas-app	test/sources_registry	every_adapter_crate_linked_into_the_app_has_a_row
 knobas-app	test/sources_registry	every_template_names_its_own_kind_and_declares_a_config_schema
+knobas-app	test/sources_registry	every_username_field_is_fillable_and_says_so
 knobas-app	test/sources_registry	no_real_adapter_declares_a_write
 knobas-app	test/sources_registry	the_registry_routes_on_the_kind_and_not_on_the_instance_id
 knobas-app	test/wiring	every_command_is_in_the_handler_list
@@ -400,6 +401,7 @@ knobas-search	lib/knobas_search	lists::tests::a_stamp_with_an_offset_is_read_as_
 knobas-search	lib/knobas_search	lists::tests::every_list_has_a_distinct_id_and_summary_column
 knobas-search	lib/knobas_search	lists::tests::only_the_identity_lists_read_the_identity_parameter
 knobas-search	lib/knobas_search	lists::tests::the_badge_is_news_and_not_noise
+knobas-search	lib/knobas_search	lists::tests::the_missing_identity_advice_names_the_thing_that_fills_it
 knobas-search	lib/knobas_search	lists::tests::the_summary_projects_every_lists_three_columns
 knobas-search	lib/knobas_search	lists::tests::the_two_statements_agree_on_the_seen_key
 knobas-search	lib/knobas_search	query::tests::a_named_person_is_an_author_filter_in_every_spelling
