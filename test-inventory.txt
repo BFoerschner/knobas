@@ -279,6 +279,7 @@ knobas-mockd	lib/knobas_mockd	teamcity::tests::a_page_reports_a_next_one_when_it
 knobas-mockd	lib/knobas_mockd	teamcity::tests::commas_inside_parentheses_do_not_split
 knobas-mockd	lib/knobas_mockd	teamcity::tests::the_default_locator_is_finished_only
 knobas-mockd	lib/knobas_mockd	teamcity::tests::the_nested_state_spelling_parses_and_the_repeated_one_does_not
+knobas-mockd	lib/knobas_mockd	teamcity::tests::the_next_page_a_filled_one_names_is_a_locator_this_server_accepts
 knobas-mockd	test/allowlist	a_known_path_with_the_wrong_verb_reports_what_is_allowed
 knobas-mockd	test/allowlist	a_literal_segment_wins_over_a_template_segment
 knobas-mockd	test/allowlist	response_schemas_are_present_for_every_endpoint_mockd_serves
@@ -802,6 +803,7 @@ knobas-source-mock	test/contract	the_tombstoning_mock_passes_the_contract_batter
 knobas-source-mock	test/contract	write_records_the_comment
 knobas-source-teamcity	lib/knobas_source_teamcity	client::tests::a_server_that_names_nobody_still_reports_a_connection
 knobas-source-teamcity	lib/knobas_source_teamcity	client::tests::only_a_404_is_read_as_absence
+knobas-source-teamcity	lib/knobas_source_teamcity	client::tests::the_next_href_a_server_sends_reaches_page_more
 knobas-source-teamcity	lib/knobas_source_teamcity	client::tests::the_server_and_user_records_become_a_connection_report
 knobas-source-teamcity	lib/knobas_source_teamcity	config::tests::an_empty_config_is_all_defaults
 knobas-source-teamcity	lib/knobas_source_teamcity	config::tests::an_unknown_key_is_rejected

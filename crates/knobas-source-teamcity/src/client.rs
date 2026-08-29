@@ -247,6 +247,78 @@ pub(crate) fn connection_info(server: &Server, user: Option<&CurrentUser>) -> Co
 mod tests {
     use super::*;
 
+    /// The seam issue #114's fix hangs on: the server's own `nextHref` reaches
+    /// [`Page::more`], over HTTP, through the decode.
+    ///
+    /// Both halves of the new rule are pinned elsewhere and **neither crosses
+    /// this line**. `sync`'s unit tests hand a [`Page`] to `last_page` from a
+    /// fake that constructs `more` itself, and `tests/mockd.rs` reads
+    /// `nextHref` off the wire with a bare `reqwest`. Between them sit two
+    /// lines -- the `envelope.next_href.is_some()` in [`HttpRest::list`] and
+    /// [`ListEnvelope`]'s `nextHref` rename -- and deleting either puts every
+    /// walk back on the page-length assumption #114 removed, silently, with
+    /// the rest of the suite green. `BUILD_FIELDS` naming the field is pinned
+    /// as a string in `rest.rs`; that the answer to it is *read* is pinned
+    /// here.
+    ///
+    /// Against mockd, which answers the field the way a real TeamCity does:
+    /// present exactly when the page came back filled to the rows served.
+    #[tokio::test]
+    async fn the_next_href_a_server_sends_reaches_page_more() {
+        let mock = knobas_mockd::spawn_mock_teamcity().await;
+        let instance = SourceInstance {
+            id: "teamcity".to_owned(),
+            kind: crate::ADAPTER_KIND.to_owned(),
+            display_name: "Tidewater CI".to_owned(),
+            base_url: mock.base_url(),
+            auth: Some(knobas_source::AuthMethod::Pat),
+            secret: Some(knobas_mockd::TEAMCITY_TOKEN.to_owned()),
+            config: serde_json::json!({}),
+        };
+        let rest = HttpRest::new(&instance, &TeamCityConfig::default())
+            .expect("the adapter builds against mockd");
+        let page = async |count: u32| {
+            rest.builds(&Locator {
+                default_filter: Some(false),
+                count,
+                ..Locator::default()
+            })
+            .await
+            .expect("mockd answers")
+        };
+
+        // Wider than the corpus: the one answer that ends a collection.
+        let all = page(100).await;
+        let total = u32::try_from(all.items.len()).expect("a small fixture");
+        assert!(total >= 2, "the fixture needs more than one build: {total}");
+        assert!(
+            !all.more,
+            "a page the server could not fill is the end of its collection"
+        );
+
+        // Filled *exactly*, which is the case a page's own length cannot tell
+        // from an exhausted query -- and the reason `more` has to be read.
+        let exact = page(total).await;
+        assert_eq!(
+            u32::try_from(exact.items.len()).expect("a small page"),
+            total
+        );
+        assert!(
+            exact.more,
+            "a page filled to its limit is not proof it is the last, and `nextHref` is where \
+             the server says so"
+        );
+
+        let short = page(total - 1).await;
+        assert_eq!(
+            u32::try_from(short.items.len()).expect("a small page"),
+            total - 1
+        );
+        assert!(short.more, "a truncated page reports the rest");
+
+        mock.assert_no_violations();
+    }
+
     /// A 404 is the only answer read as "that build is not on this server",
     /// because `sync::refuse_a_replaced_server` reads that as a replaced
     /// server and refuses the run.

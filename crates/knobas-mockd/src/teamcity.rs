@@ -455,13 +455,12 @@ async fn builds(State(s): State<Arc<MockState>>, req: Request) -> Response {
         // Present exactly when the page came back filled, which is what a
         // real TeamCity answers and the only thing in the response that tells
         // a capped page from an exhausted query (issue #114). The href is the
-        // offset continuation the real server serves; mockd honours `start:`,
-        // so following it works here as it does there.
+        // offset continuation the real server serves, and it is one this
+        // server itself accepts -- see [`continuation`].
         "nextHref": if more {
             json!(format!(
-                "/app/rest/builds?locator={},start:{}",
-                raw_locator,
-                loc.start + hits.len()
+                "/app/rest/builds?locator={}",
+                continuation(raw_locator, loc.start + hits.len())
             ))
         } else {
             Value::Null
@@ -714,6 +713,29 @@ fn parse_states(value: &str) -> Result<Vec<TcState>, String> {
 }
 
 /// Splits on commas that are not inside parentheses.
+/// The locator a filled page's `nextHref` names: the request's own, with
+/// `start:` advanced past the rows just served.
+///
+/// **Replaced, not appended**, which is the difference between a continuation
+/// and a 400. [`Locator::parse`] refuses a locator that names a dimension
+/// twice, so appending `,start:N` to a request that already carried a `start:`
+/// would produce a `nextHref` this very server rejects -- a link nothing can
+/// follow, which is not what a real TeamCity serves and would quietly undo the
+/// point of answering the field at all. Split at the top level so the commas
+/// inside a nested value (`state:(queued:true,running:true)`) survive.
+fn continuation(raw_locator: &str, start: usize) -> String {
+    let kept: Vec<&str> = split_top_level(raw_locator)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|p| !p.starts_with("start:"))
+        .collect();
+    if kept.is_empty() {
+        format!("start:{start}")
+    } else {
+        format!("{},start:{start}", kept.join(","))
+    }
+}
+
 fn split_top_level(raw: &str) -> Result<Vec<&str>, String> {
     let mut out = Vec::new();
     let mut depth = 0usize;
@@ -789,6 +811,47 @@ mod tests {
         let (rows, more) = page(&format!("state:any,count:2,start:{}", total - 1));
         assert_eq!(rows.len(), 1, "one row left after skipping the rest");
         assert!(!more);
+    }
+
+    /// A `nextHref` has to be followable, and following it twice has to work:
+    /// the second hop is the one that would repeat `start:`.
+    ///
+    /// [`Locator::parse`] refuses a repeated dimension, so a continuation built
+    /// by appending `,start:N` to the request's own locator is a link this
+    /// server answers 400 to as soon as the request it continues already
+    /// carried one. That is a fake advertising a page it will not serve --
+    /// exactly the kind of gap issue #114 was, arriving from the other side.
+    #[test]
+    fn the_next_page_a_filled_one_names_is_a_locator_this_server_accepts() {
+        let builds: Vec<TcBuild> = crate::state::MockState::from_fixture().builds();
+        let total = builds.len();
+        assert!(total >= 3, "the fixture needs a few builds: {total}");
+
+        // Walk the whole collection one row at a time, following only what the
+        // `nextHref` names, and never parse a locator this server would refuse.
+        let mut locator = "state:any,count:1".to_owned();
+        let mut seen = Vec::new();
+        for _ in 0..total {
+            let parsed = Locator::parse(&locator)
+                .unwrap_or_else(|e| panic!("the continuation {locator:?} has to parse: {e}"));
+            let (rows, more) = parsed.apply(builds.clone());
+            assert_eq!(rows.len(), 1, "one row per hop, from {locator:?}");
+            seen.push(rows[0].id);
+            assert!(more, "there is still more after {locator:?}");
+            locator = continuation(&locator, parsed.start + rows.len());
+        }
+        assert_eq!(seen.len(), total, "every row, once");
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(seen.len(), total, "and no row twice");
+
+        // The dimension is replaced rather than repeated, and a nested value's
+        // own commas are not a split point.
+        assert_eq!(
+            continuation("state:(queued:true,running:true),count:2,start:4", 6),
+            "state:(queued:true,running:true),count:2,start:6"
+        );
+        assert_eq!(continuation("", 3), "start:3");
     }
 
     #[test]
