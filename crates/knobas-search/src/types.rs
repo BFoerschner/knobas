@@ -31,6 +31,16 @@ pub struct SearchFilters {
     /// A username as the source spells it, matched exactly, because that is
     /// what `sync.item.author` holds and what `mine` already matches against.
     ///
+    /// **What a source can answer depends on the source** (issue #106): a
+    /// TeamCity item carries an author only when a person pressed Run, which
+    /// on a real server is effectively never -- 100 of 100 of the newest
+    /// finished builds on JetBrains' public instance named no user. So an
+    /// author query narrowed to a corpus of builds legitimately comes back
+    /// empty, and that is the data being sparse rather than this filter being
+    /// broken. Ruled and left as it is on 2026-08-29; making the emptiness
+    /// visible in the response is a change to this frozen schema and is
+    /// Björn's call, not one taken here.
+    ///
     /// [`Self::mine`] is a *separate* dimension and its resolved identity
     /// never appears here: the echo is what the launcher redraws its chips
     /// from, and putting usernames the user never typed into that row would

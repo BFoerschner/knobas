@@ -102,6 +102,17 @@
 //!     deviation 11 one level down — a null carries no key set, so a *sub*-name
 //!     of it cannot be validated: `triggered(user(nosuchfield))` is a 400
 //!     against an answer containing 1188 and a 200 against one that does not.
+//!     **The fixture's one-in-three is a narrative, not a distribution**
+//!     (issue #106): `mockups/shared/dataset.md` records Mara triggering
+//!     #1188 in her own worklog draft and says nothing about who started the
+//!     other two, where a real server names nobody for effectively every build
+//!     -- 100 of 100 measured on JetBrains' public instance, 2026-08-29. Read
+//!     as a sample the fixture is off by two orders of magnitude, so a test
+//!     about *how often* a build has an author must build its own corpus
+//!     rather than count these three; `knobas-source-teamcity`'s
+//!     `effectively_every_build_names_nobody_and_the_adapter_leaves_the_author_empty`
+//!     is the one that does, and padding this fixture with builds no narrative
+//!     describes would be the same invention this deviation refuses.
 //! 13. **One epic relationship, served in both of Jira's spellings.** The
 //!     fixture records epic membership (`Ticket::epic`) and no sub-tasks at
 //!     all, so `fields.parent` carries the epic — the spelling a next-gen or a
