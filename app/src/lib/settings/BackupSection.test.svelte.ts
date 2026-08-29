@@ -83,6 +83,22 @@ function statusOf(over: Partial<BackupStatus> = {}): BackupStatus {
 let target: HTMLDivElement;
 let app: Record<string, unknown> | undefined;
 
+/**
+ * Rejections nobody caught.
+ *
+ * A `bind:` on a field of a nullable object is read again *after* the object
+ * is set to null — Svelte's input binding reads its getter on a later tick, by
+ * which time closing the dialog has taken the value away. It throws into a
+ * promise nothing awaits, so every assertion in this file passes and the run
+ * still fails. Recorded here so the failure names the gesture that caused it
+ * rather than arriving as an unattributed error at the end of the suite.
+ */
+const unhandled: unknown[] = [];
+
+function onrejection(reason: unknown) {
+  unhandled.push(reason);
+}
+
 function render() {
   app = mount(BackupSection, { target, props: { now: NOW } });
   flushSync();
@@ -119,14 +135,30 @@ beforeEach(() => {
   nowFails = null;
   restoreFails = null;
   toasts.items = [];
+  unhandled.length = 0;
+  process.on("unhandledRejection", onrejection);
   target = document.createElement("div");
   document.body.append(target);
 });
 
-afterEach(() => {
+/** Let a rejection that is going to happen actually happen. */
+async function drain() {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/**
+ * Every test in this file, not only the one that names it: a rejection nobody
+ * caught fails the run without failing an assertion, so the run reports "21
+ * passed" and exits 1. Asserting it here attributes it to the test that caused
+ * it.
+ */
+afterEach(async () => {
+  await drain();
+  process.off("unhandledRejection", onrejection);
   if (app) unmount(app);
   app = undefined;
   target.remove();
+  expect(unhandled, "something rejected and nobody was holding it").toEqual([]);
 });
 
 /**
@@ -524,4 +556,39 @@ test("backup_status failing renders what failed, not an empty backup story", asy
   await settle();
   expect(text()).toContain("after 03:00");
   expect(button("Export now")).toBeTruthy();
+});
+
+/**
+ * Closing the schedule dialog must not throw into a promise nobody is holding.
+ *
+ * Both exits are walked, because they are different code paths onto the same
+ * hazard: *Cancel* drops the draft, and *Save* drops it after a round trip.
+ */
+test("closing the schedule dialog raises nothing, whichever way it is closed", async () => {
+  render();
+  await settle();
+
+  button("Schedule…")!.click();
+  flushSync();
+  type(field("Hour"), "22");
+  button("Cancel", dialog()!)!.click();
+  await settle();
+  await drain();
+  expect(unhandled, "cancelling raised").toEqual([]);
+
+  button("Schedule…")!.click();
+  flushSync();
+  type(field("Keep"), "3");
+  button("Save", dialog()!)!.click();
+  await settle();
+  await drain();
+  expect(unhandled, "saving raised").toEqual([]);
+
+  // And the restore confirm, which is the other dialog over a nullable value.
+  button("Restore", archiveRow("knobas-20260829-030000.knobas")!)!.click();
+  flushSync();
+  button("Cancel", dialog()!)!.click();
+  await settle();
+  await drain();
+  expect(unhandled, "closing the restore confirm raised").toEqual([]);
 });

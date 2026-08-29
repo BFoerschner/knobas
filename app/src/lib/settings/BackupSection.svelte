@@ -47,13 +47,22 @@
   /** Whether an export is in flight — see `exportNow` for why it is here. */
   let exporting = $state(false);
   /**
-   * The schedule the dialog is editing, or `null` while it is closed.
+   * The schedule the dialog edits.
    *
    * A copy, not the live one: *Cancel* has to leave the section reading what
    * is actually stored, and editing `status.schedule` in place would have
    * already changed the sentence behind the dialog.
+   *
+   * **Always an object, with a separate flag for whether the dialog is up.**
+   * The obvious `BackupSchedule | null` does not survive `bind:value`: Svelte
+   * reads a binding's getter again on a later tick, and by then closing the
+   * dialog has made the object `null` — so every close threw
+   * `Cannot read properties of null` into a promise nothing awaits, which no
+   * assertion sees and which fails the run anyway. Keeping the draft alive
+   * past the close costs one stale object and removes the whole class.
    */
-  let editing = $state<BackupSchedule | null>(null);
+  let draft = $state<BackupSchedule>({ enabled: true, hour: 3, minute: 0, keep: 7 });
+  let editing = $state(false);
   let saving = $state(false);
   /** The archive a restore confirm is asking about, if any. */
   let restoring = $state<ArchiveFile | null>(null);
@@ -77,7 +86,9 @@
 
   /** Open the dialog on a copy of the schedule that is in force. */
   function openSchedule() {
-    if (status) editing = { ...status.schedule };
+    if (!status) return;
+    draft = { ...status.schedule };
+    editing = true;
   }
 
   /**
@@ -108,18 +119,17 @@
    * schedule that is merely believed to be stored.
    */
   async function saveSchedule() {
-    if (!editing) return;
     const next: BackupSchedule = {
-      enabled: editing.enabled,
-      hour: bounded(String(editing.hour), 0, 23, 3),
-      minute: bounded(String(editing.minute), 0, 59, 0),
-      keep: bounded(String(editing.keep), 1, 365, 7),
+      enabled: draft.enabled,
+      hour: bounded(String(draft.hour), 0, 23, 3),
+      minute: bounded(String(draft.minute), 0, 59, 0),
+      keep: bounded(String(draft.keep), 1, 365, 7),
     };
     saving = true;
     try {
       status = await setBackupSchedule(next);
       error = null;
-      editing = null;
+      editing = false;
     } catch (cause) {
       push({ text: `Could not save the schedule: ${ipcErrorMessage(cause)}`, tone: "err" });
     } finally {
@@ -293,35 +303,35 @@
 {/if}
 
 {#if editing}
-  <Modal title="Nightly backup" center onclose={() => (editing = null)}>
+  <Modal title="Nightly backup" center onclose={() => (editing = false)}>
     {#snippet body()}
       <label class="chk">
-        <input type="checkbox" bind:checked={editing!.enabled} />
+        <input type="checkbox" bind:checked={draft.enabled} />
         Take a backup automatically
       </label>
       <div class="flds">
         <span class="fld">
           <label for="bk-hour">Hour</label>
-          <input id="bk-hour" type="number" min="0" max="23" bind:value={editing!.hour} />
+          <input id="bk-hour" type="number" min="0" max="23" bind:value={draft.hour} />
         </span>
         <span class="fld">
           <label for="bk-minute">Minute</label>
-          <input id="bk-minute" type="number" min="0" max="59" bind:value={editing!.minute} />
+          <input id="bk-minute" type="number" min="0" max="59" bind:value={draft.minute} />
         </span>
         <span class="fld">
           <label for="bk-keep">Keep</label>
-          <input id="bk-keep" type="number" min="1" max="365" bind:value={editing!.keep} />
+          <input id="bk-keep" type="number" min="1" max="365" bind:value={draft.keep} />
         </span>
       </div>
       <!--
         The sentence, live, over the values being typed — so the boundary rule
         is read at the moment the time is chosen rather than after saving it.
       -->
-      <p class="note">{nightlySentence(editing!)}</p>
-      <p class="note">{retentionSentence(editing!.keep)}</p>
+      <p class="note">{nightlySentence(draft)}</p>
+      <p class="note">{retentionSentence(draft.keep)}</p>
     {/snippet}
     {#snippet footer()}
-      <button class="btn" onclick={() => (editing = null)}>Cancel</button>
+      <button class="btn" onclick={() => (editing = false)}>Cancel</button>
       <button class="btn pri" disabled={saving} onclick={() => void saveSchedule()}>Save</button>
     {/snippet}
   </Modal>
