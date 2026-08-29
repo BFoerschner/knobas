@@ -596,7 +596,7 @@ test("a backup_status overtaken by a later one does not write what it read", asy
   const stale = () => statusOf({ last: null });
   const fresh = () => statusOf();
 
-  statusFails = { message: "not_ready" };
+  statusFails = { code: "not_ready", message: "the database is still starting", source_id: null };
   render();
   await settle();
   expect(button("Retry"), "the failed read is what puts a second one within reach").toBeTruthy();
@@ -636,7 +636,7 @@ test("a backup_status overtaken by a later one does not write what it read", asy
  * the read that was already out of date.
  */
 test("a backup_status rejection that has been overtaken does not blank the section", async () => {
-  statusFails = { message: "not_ready" };
+  statusFails = { code: "not_ready", message: "the database is still starting", source_id: null };
   render();
   await settle();
 
@@ -645,7 +645,7 @@ test("a backup_status rejection that has been overtaken does not blank the secti
   answerStatus = (call) =>
     call === held
       ? new Promise<BackupStatus>((_resolve, fail) => {
-          reject = () => fail({ message: "the stale failure" });
+          reject = () => fail({ code: "internal", message: "the stale failure", source_id: null });
         })
       : Promise.resolve(statusOf());
 
