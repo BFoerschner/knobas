@@ -17,9 +17,11 @@
  * would otherwise collide on one key. `:` is legal in a URI fragment, so the
  * address stays readable.
  *
- * `#/inbox`, `#/time`, `#/standup`, `#/assets/*`, `#/route/*`, `#/monitor/*`
- * and `#/start-work/*` are M2–M4. They parse to `unknown` rather than being
- * mistaken for kinds, so the shell can say which milestone they arrive in.
+ * `#/inbox`, `#/time`, `#/standup`, `#/assets/*`, `#/route/*` and `#/monitor/*`
+ * are M2–M4. They parse to `unknown` rather than being mistaken for kinds, so
+ * the shell can say which milestone they arrive in. `#/start-work/*` was one of
+ * them until #44 and is now a view of its own — it stays in `RESERVED` so that
+ * an adapter declaring a `start-work` *kind* could never take the address.
  */
 
 export type Route =
@@ -32,6 +34,12 @@ export type Route =
   | { view: "sources" }
   | { view: "settings" }
   | { view: "first-run" }
+  /**
+   * The start-work stepper for one ticket (#44). `key` is the ticket's entity
+   * id — the flow starts from a ticket and is keyed on it, so the address is
+   * the flow's identity as well as its location.
+   */
+  | { view: "start-work"; key: string }
   | { view: "unknown"; hash: string };
 
 /** The room every session starts in. */
@@ -101,6 +109,12 @@ export function parseHash(hash: string, ctx: string = DEFAULT_CTX): Route {
   if (head === "sources") return { view: "sources" };
   if (head === "settings") return { view: "settings" };
   if (head === "first-run") return { view: "first-run" };
+  // Before the open-kind branch and before `RESERVED` is consulted: the word is
+  // in that set so no adapter's kind can claim the address, which would
+  // otherwise make this unreachable.
+  if (head === "start-work") {
+    return tail === "" ? { view: "unknown", hash } : { view: "start-work", key: tail };
+  }
   if (head === "entity") {
     return { view: "room", ctx, detail: { kind: null, entityId: tail } };
   }
@@ -141,6 +155,8 @@ export function hashFor(route: Route): string {
       return "#/settings";
     case "first-run":
       return "#/first-run";
+    case "start-work":
+      return `#/start-work/${encodeId(route.key)}`;
     case "unknown":
       return route.hash;
     case "room": {

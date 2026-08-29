@@ -7,6 +7,7 @@
   import Shell from "./lib/shell/Shell.svelte";
   import Toast from "./lib/shell/Toast.svelte";
   import { builtinContexts } from "./lib/shell/contexts";
+  import { startFollowingMerges } from "./lib/shell/follow-merges";
   import { health } from "./lib/shell/health.svelte";
   import { kindRegistry } from "./lib/shell/kind-registry.svelte";
   import { installKeys } from "./lib/shell/keys";
@@ -16,6 +17,7 @@
   import SettingsView from "./lib/settings/SettingsView.svelte";
   import FirstRun from "./lib/sources/FirstRun.svelte";
   import SourcesView from "./lib/sources/SourcesView.svelte";
+  import StartWork from "./lib/start-work/StartWork.svelte";
   import { ipcErrorMessage } from "./lib/ipc";
   import { linkTo } from "./lib/detail/links.svelte";
 
@@ -76,6 +78,7 @@
      */
     let disposed = false;
     let stopHealth: (() => void) | undefined;
+    let stopMerges: (() => void) | undefined;
 
     void (async () => {
       // Dev only, and behind `import.meta.env.DEV` so Rollup folds the branch
@@ -102,6 +105,11 @@
       // up. Behind the same await as the lifecycle, for the same reason: it is
       // a `listen`, and a `listen` before the fixture is a listen into nothing.
       stopHealth = health.start();
+      // The reverse direction's trigger (#44): every sync ending runs the
+      // follow-merges pass, and a moved ticket is announced. Session-wide for
+      // the same reason the health store is -- a merged pull request does not
+      // care which view is open.
+      stopMerges = startFollowingMerges();
       // Once, at shell start: `list_adapters` is static per build and answers
       // before the database is up, so there is nothing to poll and nothing to
       // tear down.
@@ -116,6 +124,7 @@
     return () => {
       disposed = true;
       stopHealth?.();
+      stopMerges?.();
       stopKeys();
       stopRouter();
       lifecycle.stop();
@@ -230,6 +239,21 @@
         <SettingsView />
       {:else if router.route.view === "first-run"}
         <FirstRun demo={lifecycle.status?.demo ?? false} onfinish={onFirstRunDone} />
+      {:else if router.route.view === "start-work"}
+        <!--
+          Keyed on the ticket. A flow's state *is* its address, and this branch
+          stays selected when the address moves from one ticket to another --
+          so without the key Svelte would keep the mounted component and hand it
+          new props, leaving one ticket's steps on screen under another's
+          heading.
+        -->
+        {#key router.route.key}
+          <StartWork
+            entityId={router.route.key}
+            onnavigate={(hash) => router.go(hash)}
+            onclose={() => router.back()}
+          />
+        {/key}
       {:else}
         <Room {router} {contexts} />
       {/if}

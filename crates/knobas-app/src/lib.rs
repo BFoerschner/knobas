@@ -29,6 +29,7 @@ pub mod commands;
 mod error;
 mod profile;
 pub mod sources;
+pub mod start_work;
 
 pub use commands::app::{DbState, Lifecycle};
 pub use error::{IpcError, IpcErrorCode};
@@ -188,6 +189,12 @@ pub fn run() {
             commands::entity::room_suggestions,
             commands::entity::accept_suggestion,
             commands::entity::dismiss_suggestion,
+            commands::entity::start_work_flow,
+            commands::entity::start_work_run,
+            commands::entity::start_work_retry,
+            commands::entity::start_work_skip,
+            commands::entity::start_work_amend,
+            commands::entity::follow_merges,
             commands::entity::submit_write,
             commands::search::search,
             commands::search::launcher_home,

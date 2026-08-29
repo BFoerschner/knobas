@@ -13,6 +13,7 @@
   import { getEntity, unlink, type EntityDetail, type LinkEntry } from "../ipc/entity";
   import Monogram from "../shell/Monogram.svelte";
   import { kindRegistry } from "../shell/kind-registry.svelte";
+  import { hashFor } from "../shell/router.svelte";
   import { kindMonogram, kindSingular } from "../shell/kinds";
   import { openExternal } from "../shell/open-external";
   import { ago } from "../shell/time";
@@ -217,6 +218,22 @@
         state for an item withdrawn upstream and for any source that has no
         per-item URL. A disabled button would claim there is somewhere to go.
       -->
+      <!--
+        On a ticket and nowhere else, and *absent* rather than disabled on
+        everything else -- the same rule *Open in browser* follows above: a
+        disabled button would claim there is a flow to start where there is
+        none. The address is the flow's identity, so this navigates rather than
+        opening a dialog; whether a flow already exists is the stepper's
+        question to answer, not this button's.
+      -->
+      {#if shownKind === "ticket"}
+        <button class="btn sm" onclick={() => onnavigate(hashFor({ view: "start-work", key: entityId }))}>
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M5 3.5v9l7-4.5z" />
+          </svg>
+          Start work
+        </button>
+      {/if}
       <button class="btn sm" onclick={() => (linking = true)}>
         <svg viewBox="0 0 16 16" aria-hidden="true">
           <path d="M6.5 9.5 9.5 6.5" />

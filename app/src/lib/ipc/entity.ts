@@ -556,3 +556,143 @@ export function dismissSuggestion(linkId: string): Promise<void> {
 export function submitWrite(payload: WriteOpPayload): Promise<QueuedWrite> {
   return invoke<QueuedWrite>("submit_write", { payload });
 }
+
+// ---------------------------------------------------------------------------
+// The start-work flow — `knobas_app::commands::entity`'s start-work block and
+// `knobas_core::start_work` (issue #44).
+// ---------------------------------------------------------------------------
+
+/**
+ * Which step of a start-work flow this is —
+ * `knobas_core::start_work::Step`.
+ *
+ * Three of the four are `WriteOp` identifiers; `link_pull_request` is not, and
+ * that is the point — the link is knobas-owned and local, written to neither
+ * source, which is why the relationship survives whatever Jira and Gitea
+ * record.
+ */
+export type StartWorkStepKind =
+  | "create_branch"
+  | "create_pull_request"
+  | "link_pull_request"
+  | "transition";
+
+/**
+ * What happened to one step — `knobas_core::start_work::StepOutcome`.
+ *
+ * `queued` is neither a success nor a failure: the source could not take the
+ * write, so it is a pending write and will go when the source can. The flow's
+ * completion and the write's delivery are different events, and a stepper that
+ * drew them the same way would report work that has not happened.
+ */
+export type StartWorkOutcome =
+  | "pending"
+  | "running"
+  | "succeeded"
+  | "queued"
+  | "failed"
+  | "skipped";
+
+/**
+ * One step of a flow — `knobas_core::start_work::FlowStep`.
+ *
+ * `payload` is **the proposal**, as the user last left it: the serialized
+ * `WriteOp` this step will submit, or the link's relation. Untyped on the wire
+ * for {@link submitWrite}'s reason — `WriteOp` grows per milestone.
+ *
+ * `write_id` names the `knobas.write_queue` row this step dispatched, once it
+ * has one. It is what makes a retry safe: a step whose write is still open is
+ * retried by acting on that write rather than by queueing a second one.
+ */
+export interface StartWorkStep {
+  id: number;
+  /** The ticket the flow is about — and the flow's identity. */
+  ticket_id: string;
+  step: StartWorkStepKind;
+  /** Where the step sits in the sequence; the stepper renders in this order. */
+  position: number;
+  outcome: StartWorkOutcome;
+  payload: unknown;
+  write_id: number | null;
+  /** What happened, in whoever's words. Untrusted source text. */
+  detail: string | null;
+  updated_at: string;
+}
+
+/**
+ * The flow for a ticket, proposing one if there is none and `repoId` says where
+ * it would go — `knobas_app::commands::entity::start_work_flow`.
+ *
+ * An empty array means there is no flow and no repository was named, which is
+ * the state where the view asks for one. **Proposing dispatches nothing**: the
+ * sequence is composed and stored so it can be shown before anything happens.
+ *
+ * Rejects with `invalid` for an id that is not an entity id, and `not_found` if
+ * the ticket is not in the mirror.
+ */
+export function startWorkFlow(entityId: string, repoId: string | null): Promise<StartWorkStep[]> {
+  return invoke<StartWorkStep[]>("start_work_flow", { entityId, repoId });
+}
+
+/**
+ * Run the flow as far as it will go, and answer where it stopped —
+ * `knobas_app::commands::entity::start_work_run`.
+ *
+ * A step that fails stops the sequence; a step whose source cannot take the
+ * write leaves it queued and waiting. Neither is a rejection here — both are
+ * outcomes in the rows that come back, which is what the stepper draws. Emits
+ * `EVENTS.activityNew` for every queue transition the run causes.
+ */
+export function startWorkRun(entityId: string): Promise<StartWorkStep[]> {
+  return invoke<StartWorkStep[]>("start_work_run", { entityId });
+}
+
+/**
+ * Retry one step, without redoing the ones that succeeded —
+ * `knobas_app::commands::entity::start_work_retry`.
+ *
+ * A step whose write is still open is retried by reading that write, not by
+ * queueing a second one; otherwise knobas looks for the effect at the source
+ * before sending anything again.
+ *
+ * Rejects with `conflict` if an earlier step is where the flow stopped —
+ * running a later step over a failed one is what the sequence exists to
+ * prevent.
+ */
+export function startWorkRetry(stepId: number): Promise<StartWorkStep[]> {
+  return invoke<StartWorkStep[]>("start_work_retry", { stepId });
+}
+
+/**
+ * Skip one step — `knobas_app::commands::entity::start_work_skip`.
+ *
+ * A skipped step is settled, so the sequence carries on past it: a ticket that
+ * needs no branch still gets its status moved.
+ */
+export function startWorkSkip(stepId: number): Promise<StartWorkStep[]> {
+  return invoke<StartWorkStep[]>("start_work_skip", { stepId });
+}
+
+/**
+ * Replace a step's proposal with the one the reader edited —
+ * `knobas_app::commands::entity::start_work_amend`.
+ *
+ * `payload` is the step's own stored value, edited. Rejects with `conflict` if
+ * the step has already happened: editing it then would change nothing at the
+ * source and everything on screen.
+ */
+export function startWorkAmend(stepId: number, payload: unknown): Promise<StartWorkStep[]> {
+  return invoke<StartWorkStep[]>("start_work_amend", { stepId, payload });
+}
+
+/**
+ * The reverse direction: move every ticket whose linked pull request has been
+ * merged — `knobas_app::commands::entity::follow_merges`.
+ *
+ * Answers how many moved, so an automatic change can be announced rather than
+ * happening silently. It acts **only on links knobas holds**: a merged pull
+ * request nobody connected to a ticket does nothing at all.
+ */
+export function followMerges(): Promise<number> {
+  return invoke<number>("follow_merges");
+}
