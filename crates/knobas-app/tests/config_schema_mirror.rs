@@ -1,4 +1,52 @@
 //! `app/src/lib/sources/fixtures.ts` against the adapters' real `config_schema`.
+//!
+//! The Add-source form is *generated* from an adapter's `config_schema`, which
+//! reaches the frontend over IPC as `unknown`. So `app/` cannot import the
+//! schemas and transcribes them instead -- and a transcription drifts. It has
+//! already cost one user-facing bug: the fixture spelled `username` as
+//! `{type: "string"}` while every adapter spells an optional string
+//! `{type: ["string", "null"]}`, so the form fell through to a JSON textarea
+//! and typing a username was a parse error unless you knew to quote it (#82,
+//! fixed in #110). No test could see it, because the fixture *was* the tests'
+//! idea of reality. Two more of the same kind were found afterwards (#124).
+//!
+//! This file is the side of that comparison that can be made to work, and it
+//! is here rather than in `app/` because of what the drift is made of:
+//!
+//! * The adapter's schema is a real `serde_json::Value`, so
+//!   `"maximum": MAX_BUILDS_PER_CONFIG` -- a Rust `const`, and the property
+//!   that drifted furthest -- arrives already **resolved to `10000`**. A check
+//!   inside `app/` could only have scraped that as text, i.e. could not have
+//!   compared the one value it most needed to.
+//! * Because both sides are values, the check tells **drift from a legitimate
+//!   change**: change an adapter and update the fixture to match and it stays
+//!   green; change one without the other and it goes red. A test that pins the
+//!   number instead fires either way, which is a value pin doing a drift
+//!   detector's job by accident.
+//!
+//! The idiom is `tests/sources_mirror.rs`'s: `include_str!` the TypeScript,
+//! compare it against a real value. The difference is that the mirror there is
+//! a set of `interface` declarations, where a key set is the whole content;
+//! here the mirror is data, so the comparison is over values.
+//!
+//! **The rule, taken from the fixture's own header:** *a property that is here
+//! is verbatim; a property may be absent, and each absence is named.* The
+//! licence to be absent is spent at exactly one level, the `properties` map.
+//! Everything else present in the fixture -- including a top-level `required`
+//! the adapter never declared -- is compared.
+//!
+//! **Nothing here skips.** A literal this file cannot parse, a fixture that is
+//! no longer `as const`, a fixture that has been renamed away, a fixture with
+//! no adapter behind it: each is a panic naming the text. A drift detector
+//! that quietly declines to check is the failure this file exists to remove.
+//!
+//! **What it cannot see, and what does:** absence, and key *order*. A property
+//! dropped from the fixture is licensed here by construction, and a
+//! `serde_json::Map` has no order to compare -- but the form is generated in
+//! the schema's own order, so a reordered fixture draws a different form.
+//! `app/src/lib/sources/fixtures.test.ts` pins both: the exact key list per
+//! fixture, in order, against the header's named absence lists. It also names
+//! this file as the home for the half it cannot do.
 
 /// A TypeScript `export const X = { … } as const;` literal, as JSON.
 ///
