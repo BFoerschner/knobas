@@ -509,3 +509,598 @@ async fn a_couple_of_shared_words_is_below_the_similarity_floor() {
         suggest::SIMILARITY_FLOOR
     );
 }
+
+// -- idempotence: the property most likely to be quietly broken -------------
+
+/// Running detection twice proposes each suggestion once.
+#[tokio::test]
+async fn a_second_pass_over_an_unchanged_mirror_proposes_nothing() {
+    let pool = scratch().await;
+    item(&pool, "ticket", "PAY-231", "Payout retry storm", "").await;
+    item(&pool, "branch", "b1", "feature/PAY-231-retry", "").await;
+    item(&pool, "commit", "c1", "Fix PAY-231", "").await;
+
+    let first = suggest::detect(&pool).await.unwrap();
+    assert!(first > 0, "the first pass has something to propose");
+    let after_first = pairs(&tray(&pool).await);
+
+    let second = suggest::detect(&pool).await.unwrap();
+
+    assert_eq!(second, 0, "a second pass over the same mirror proposes nothing");
+    assert_eq!(
+        pairs(&tray(&pool).await),
+        after_first,
+        "and the tray is unchanged"
+    );
+}
+
+/// Re-running detection after a sync does not resurrect a dismissed proposal.
+///
+/// The sync is real in the way that matters: the branch row is written again,
+/// exactly as an incremental run would rewrite it, so the pass that follows has
+/// every reason to propose the same thing.
+#[tokio::test]
+async fn a_dismissed_suggestion_is_not_resurrected_by_a_later_pass() {
+    let pool = scratch().await;
+    let ticket = item(&pool, "ticket", "PAY-231", "Payout retry storm", "").await;
+    let branch = item(&pool, "branch", "b1", "feature/PAY-231-retry", "").await;
+
+    suggest::detect(&pool).await.unwrap();
+    let proposal = between(&tray(&pool).await, &branch, &ticket)
+        .expect("the branch proposes its ticket")
+        .link
+        .id;
+
+    let dismissed = suggest::dismiss(&pool, proposal)
+        .await
+        .unwrap()
+        .expect("the proposal was there to dismiss");
+    assert_eq!(dismissed.id, proposal);
+
+    // The mirror moves under it, the way a sync moves it.
+    sqlx::query("update sync.item set synced_at = now(), title = title where entity_id = $1")
+        .bind(&branch)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let written = suggest::detect(&pool).await.unwrap();
+
+    assert_eq!(written, 0, "a dismissal is remembered across a re-sync");
+    assert!(
+        between(&tray(&pool).await, &branch, &ticket).is_none(),
+        "the same suggestion must never be proposed twice"
+    );
+}
+
+/// A link the user removed is never proposed back (#41 story 9).
+///
+/// The tombstone `unlink` leaves and the tombstone `dismiss` leaves are the
+/// same row in the same state: one mechanism, so removing a link means
+/// something to the detector too.
+#[tokio::test]
+async fn a_link_the_user_unlinked_is_never_proposed_back() {
+    let pool = scratch().await;
+    let ticket = item(&pool, "ticket", "PAY-231", "Payout retry storm", "").await;
+    let branch = item(&pool, "branch", "b1", "feature/PAY-231-retry", "").await;
+
+    let drawn = link::create(
+        &pool,
+        &EntityRef::parse(&branch).unwrap(),
+        &EntityRef::parse(&ticket).unwrap(),
+        "related",
+        Origin::Manual,
+        None,
+        "user",
+    )
+    .await
+    .unwrap();
+    link::unlink(&pool, drawn.id).await.unwrap();
+
+    let written = suggest::detect(&pool).await.unwrap();
+
+    assert_eq!(written, 0, "detection may not undo an unlink");
+    assert!(between(&tray(&pool).await, &branch, &ticket).is_none());
+}
+
+/// The suppression is undirected: removing `A -> B` also suppresses `B -> A`.
+///
+/// The unique index is directed (#70) but the *fact* "these two are connected"
+/// is not, and a detector that re-proposed the mirror image of a link the user
+/// removed would be exactly the silent resurrection the withdrawal memory
+/// exists to prevent.
+#[tokio::test]
+async fn the_suppression_does_not_care_which_way_round_the_removed_link_was() {
+    let pool = scratch().await;
+    let ticket = item(&pool, "ticket", "PAY-231", "Payout retry storm", "").await;
+    let branch = item(&pool, "branch", "b1", "feature/PAY-231-retry", "").await;
+
+    // Drawn ticket -> branch; detection proposes branch -> ticket.
+    let drawn = link::create(
+        &pool,
+        &EntityRef::parse(&ticket).unwrap(),
+        &EntityRef::parse(&branch).unwrap(),
+        "related",
+        Origin::Manual,
+        None,
+        "user",
+    )
+    .await
+    .unwrap();
+    link::unlink(&pool, drawn.id).await.unwrap();
+
+    suggest::detect(&pool).await.unwrap();
+
+    assert!(
+        between(&tray(&pool).await, &branch, &ticket).is_none(),
+        "the same pair the other way round is the same pair"
+    );
+}
+
+/// A pair that is already linked produces no suggestion (#41 story 17).
+#[tokio::test]
+async fn a_pair_that_is_already_linked_produces_no_suggestion() {
+    let pool = scratch().await;
+    let ticket = item(&pool, "ticket", "PAY-231", "Payout retry storm", "").await;
+    let branch = item(&pool, "branch", "b1", "feature/PAY-231-retry", "").await;
+    link::create(
+        &pool,
+        &EntityRef::parse(&branch).unwrap(),
+        &EntityRef::parse(&ticket).unwrap(),
+        "related",
+        Origin::Manual,
+        None,
+        "user",
+    )
+    .await
+    .unwrap();
+
+    let written = suggest::detect(&pool).await.unwrap();
+
+    assert_eq!(written, 0, "the tray is not filled with things I have done");
+    assert!(tray(&pool).await.is_empty());
+}
+
+/// Two rules that see the same connection propose it once, in one pass.
+///
+/// The suppression reads the snapshot its statement started from, so a pass
+/// where a branch *and* a commit both name PAY-231 in the same source could
+/// write two rows for one pair if the driver did not also de-duplicate within
+/// the statement and between rules.
+#[tokio::test]
+async fn one_connection_seen_by_two_rules_is_proposed_once() {
+    let pool = scratch().await;
+    let ticket = item(&pool, "ticket", "PAY-231", "Payout retry storm", "").await;
+    // A page that both names the key and reads like the ticket: the exact-key
+    // rule and the similarity rule are both entitled to propose this pair.
+    let page = item(
+        &pool,
+        "page",
+        "ENG:Storm",
+        "Payout retry storm floods the ledger",
+        "PAY-231: the payout retry storm floods the ledger with duplicate transfers.",
+    )
+    .await;
+    sqlx::query("update sync.item set body_text = $2 where entity_id = $1")
+        .bind(&ticket)
+        .bind("The payout retry storm floods the ledger with duplicate transfers.")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    suggest::detect(&pool).await.unwrap();
+
+    let entries = tray(&pool).await;
+    let touching: Vec<&suggest::SuggestionEntry> = entries
+        .iter()
+        .filter(|e| {
+            [&e.link.from_id, &e.link.to_id].contains(&&page)
+                && [&e.link.from_id, &e.link.to_id].contains(&&ticket)
+        })
+        .collect();
+    assert_eq!(touching.len(), 1, "one connection, one proposal");
+    assert_eq!(
+        touching[0].link.rule.as_deref(),
+        Some("page_text_key"),
+        "the specific evidence wins the pair, so the reason is the better one"
+    );
+}
+
+/// Detection never writes a confirmed link, whatever it proposes.
+#[tokio::test]
+async fn detection_never_writes_a_confirmed_link() {
+    let pool = scratch().await;
+    item(&pool, "ticket", "PAY-231", "Payout retry storm", "").await;
+    item(&pool, "branch", "b1", "feature/PAY-231-retry", "").await;
+    item(&pool, "commit", "c1", "Fix PAY-231", "").await;
+    item(&pool, "page", "ENG:Storm", "Runbook", "See PAY-231.").await;
+
+    let written = suggest::detect(&pool).await.unwrap();
+    assert!(written > 0);
+
+    let (confirmed,): (i64,) =
+        sqlx::query_as("select count(*) from knobas.link where confirmed_at is not null")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        confirmed, 0,
+        "nothing enters the graph without the user's say-so"
+    );
+    let (proposals,): (i64,) = sqlx::query_as("select count(*) from knobas.proposed_link")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(proposals, written as i64);
+}
+
+// -- what happens when the user answers -------------------------------------
+
+/// An accepted suggestion is an ordinary link, and appears in the links panel.
+#[tokio::test]
+async fn an_accepted_suggestion_is_indistinguishable_from_a_hand_drawn_link() {
+    let pool = scratch().await;
+    let ticket = item(&pool, "ticket", "PAY-231", "Payout retry storm", "").await;
+    let branch = item(&pool, "branch", "b1", "feature/PAY-231-retry", "").await;
+    // A hand-drawn link on the same branch, to compare against.
+    let other = item(&pool, "ticket", "PAY-999", "Something else", "").await;
+    let hand = link::create(
+        &pool,
+        &EntityRef::parse(&branch).unwrap(),
+        &EntityRef::parse(&other).unwrap(),
+        "related",
+        Origin::Manual,
+        None,
+        "user",
+    )
+    .await
+    .unwrap();
+
+    suggest::detect(&pool).await.unwrap();
+    let proposal = between(&tray(&pool).await, &branch, &ticket)
+        .expect("the branch proposes its ticket")
+        .link
+        .clone();
+
+    let accepted = suggest::accept(&pool, proposal.id)
+        .await
+        .unwrap()
+        .expect("there was a proposal to accept");
+
+    assert_eq!(accepted.id, proposal.id, "the row does not move");
+    assert!(accepted.confirmed_at.is_some());
+
+    // The panel, from both ends -- the same read every other link arrives
+    // through.
+    let from_branch = link::entries_of(&pool, &EntityRef::parse(&branch).unwrap())
+        .await
+        .unwrap();
+    let ids: Vec<uuid::Uuid> = from_branch.iter().map(|e| e.link.id).collect();
+    assert!(ids.contains(&proposal.id), "an accepted suggestion is a link");
+    assert!(ids.contains(&hand.id), "beside the hand-drawn one");
+    let on_ticket = link::entries_of(&pool, &EntityRef::parse(&ticket).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(on_ticket.len(), 1, "and it is on the other end too");
+
+    // Ordinary in the way that matters: it is unlinked by the panel's own
+    // action, not by a suggestion-shaped one.
+    link::unlink(&pool, proposal.id)
+        .await
+        .unwrap()
+        .expect("an accepted suggestion unlinks like any link");
+    assert!(
+        link::entries_of(&pool, &EntityRef::parse(&ticket).unwrap())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    // ...and the reason survives, because a link that can still say why knobas
+    // thought so is more useful than one that cannot.
+    assert_eq!(
+        accepted.reason.as_deref(),
+        Some("the branch name contains PAY-231")
+    );
+}
+
+/// The links panel cannot show a proposal, and the tray cannot show a link --
+/// asserted in both directions on one corpus.
+#[tokio::test]
+async fn the_panel_shows_no_proposal_and_the_tray_shows_no_link() {
+    let pool = scratch().await;
+    let ticket = item(&pool, "ticket", "PAY-231", "Payout retry storm", "").await;
+    let branch = item(&pool, "branch", "b1", "feature/PAY-231-retry", "").await;
+    let page = item(&pool, "page", "ENG:Storm", "Runbook", "").await;
+    let drawn = link::create(
+        &pool,
+        &EntityRef::parse(&page).unwrap(),
+        &EntityRef::parse(&ticket).unwrap(),
+        "documents",
+        Origin::Manual,
+        None,
+        "user",
+    )
+    .await
+    .unwrap();
+
+    suggest::detect(&pool).await.unwrap();
+
+    let panel = link::entries_of(&pool, &EntityRef::parse(&ticket).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        panel.iter().map(|e| e.link.id).collect::<Vec<_>>(),
+        vec![drawn.id],
+        "the panel holds the drawn link and nothing knobas merely proposed"
+    );
+    assert!(
+        panel.iter().all(|e| e.link.confirmed_at.is_some()),
+        "a links panel showing an unconfirmed guess is a correctness bug"
+    );
+
+    let entries = tray(&pool).await;
+    assert!(
+        entries.iter().all(|e| e.link.confirmed_at.is_none()),
+        "the tray holds proposals only"
+    );
+    assert!(
+        !entries.iter().any(|e| e.link.id == drawn.id),
+        "a link the user drew is not a suggestion"
+    );
+    assert!(between(&entries, &branch, &ticket).is_some(), "and the proposal is there");
+}
+
+/// Accepting and dismissing are idempotent, and each says whether it did
+/// anything -- which is what lets a caller write one activity line per
+/// mutation.
+#[tokio::test]
+async fn accept_and_dismiss_report_whether_they_changed_anything() {
+    let pool = scratch().await;
+    let ticket = item(&pool, "ticket", "PAY-231", "Payout retry storm", "").await;
+    item(&pool, "branch", "b1", "feature/PAY-231-retry", "").await;
+    item(&pool, "commit", "c1", "Fix PAY-231", "").await;
+    suggest::detect(&pool).await.unwrap();
+
+    let entries = tray(&pool).await;
+    let accepted_id = entries[0].link.id;
+    let dismissed_id = entries[1].link.id;
+
+    assert!(suggest::accept(&pool, accepted_id).await.unwrap().is_some());
+    assert!(
+        suggest::accept(&pool, accepted_id).await.unwrap().is_none(),
+        "accepting twice accepts once"
+    );
+    assert!(
+        suggest::dismiss(&pool, accepted_id).await.unwrap().is_none(),
+        "a confirmed link is never tombstoned through the tray's door"
+    );
+    assert!(
+        link::entries_of(&pool, &EntityRef::parse(&ticket).unwrap())
+            .await
+            .unwrap()
+            .iter()
+            .any(|e| e.link.id == accepted_id),
+        "and it is still in the panel"
+    );
+
+    assert!(suggest::dismiss(&pool, dismissed_id).await.unwrap().is_some());
+    assert!(
+        suggest::dismiss(&pool, dismissed_id).await.unwrap().is_none(),
+        "dismissing twice dismisses once"
+    );
+    assert!(
+        suggest::accept(&pool, dismissed_id).await.unwrap().is_none(),
+        "a dismissal is not undone by pressing the other button"
+    );
+
+    // An id nothing carries is a different answer from "nothing to do".
+    let unknown = Uuid::new_v4();
+    assert!(matches!(
+        suggest::accept(&pool, unknown).await,
+        Err(CoreError::LinkNotFound(_))
+    ));
+    assert!(matches!(
+        suggest::dismiss(&pool, unknown).await,
+        Err(CoreError::LinkNotFound(_))
+    ));
+}
+
+/// Drawing by hand the link knobas had already proposed accepts it, rather
+/// than being refused as a duplicate.
+///
+/// The unique index spans proposals and links alike, so without
+/// [`suggest::accept_edge`] the user is told "already linked" about a pair
+/// whose links panel is empty.
+#[tokio::test]
+async fn drawing_a_proposed_link_by_hand_accepts_the_proposal() {
+    let pool = scratch().await;
+    let ticket = item(&pool, "ticket", "PAY-231", "Payout retry storm", "").await;
+    let branch = item(&pool, "branch", "b1", "feature/PAY-231-retry", "").await;
+    suggest::detect(&pool).await.unwrap();
+    let proposal = between(&tray(&pool).await, &branch, &ticket)
+        .expect("a proposal")
+        .link
+        .id;
+
+    let from = EntityRef::parse(&branch).unwrap();
+    let to = EntityRef::parse(&ticket).unwrap();
+    let refused = link::create(&pool, &from, &to, "related", Origin::Manual, None, "user").await;
+    assert!(matches!(refused, Err(CoreError::Duplicate)));
+
+    let promoted = suggest::accept_edge(&pool, &from, &to, "related")
+        .await
+        .unwrap()
+        .expect("the blocker was a proposal, so it is accepted instead");
+    assert_eq!(promoted.id, proposal);
+    assert!(promoted.confirmed_at.is_some());
+    assert!(
+        suggest::accept_edge(&pool, &from, &to, "related")
+            .await
+            .unwrap()
+            .is_none(),
+        "a genuine duplicate is still a duplicate"
+    );
+}
+
+// -- the tray is a query -----------------------------------------------------
+
+/// The tray is scoped to the room it is drawn in, and a proposal belongs to a
+/// room if **either** end does.
+#[tokio::test]
+async fn the_tray_shows_the_proposals_of_the_room_it_is_in() {
+    let pool = scratch().await;
+    let ticket = item(&pool, "ticket", "PAY-231", "Payout retry storm", "").await;
+    let branch = from(
+        &pool,
+        "gitea",
+        "branch",
+        "tidewater/payout#b1",
+        "feature/PAY-231-retry",
+        "",
+        serde_json::json!({}),
+    )
+    .await;
+    // A connection that touches neither room.
+    let other_ticket = from(
+        &pool,
+        "jira-eu",
+        "ticket",
+        "EU-1",
+        "Something else",
+        "",
+        serde_json::json!({}),
+    )
+    .await;
+    let other_page = from(
+        &pool,
+        "jira-eu",
+        "page",
+        "EU:Notes",
+        "Notes",
+        "See EU-1.",
+        serde_json::json!({}),
+    )
+    .await;
+
+    suggest::detect(&pool).await.unwrap();
+
+    for room in ["jira", "gitea"] {
+        let entries = suggest::proposals(&pool, &[room.to_owned()], 50)
+            .await
+            .unwrap();
+        assert_eq!(
+            pairs(&entries),
+            [(branch.clone(), ticket.clone())].into_iter().collect(),
+            "{room} sees the proposal that touches it"
+        );
+        assert_eq!(
+            suggest::proposal_count(&pool, &[room.to_owned()])
+                .await
+                .unwrap(),
+            1,
+            "and the count says so before the rows are drawn"
+        );
+    }
+
+    let eu = suggest::proposals(&pool, &["jira-eu".to_owned()], 50)
+        .await
+        .unwrap();
+    assert_eq!(
+        pairs(&eu),
+        [(other_page.clone(), other_ticket.clone())]
+            .into_iter()
+            .collect()
+    );
+
+    // An empty scope is every source, not no source.
+    assert_eq!(tray(&pool).await.len(), 2);
+    assert_eq!(suggest::proposal_count(&pool, &[]).await.unwrap(), 2);
+}
+
+/// A proposal whose end the source withdrew is marked, not dropped.
+///
+/// The tray hydrates through `knobas.entity` for the reason the links panel
+/// does: §5a keeps the entity so a link never dangles.
+#[tokio::test]
+async fn a_withdrawn_end_still_resolves_in_the_tray() {
+    let pool = scratch().await;
+    let ticket = item(&pool, "ticket", "PAY-231", "Payout retry storm", "").await;
+    let branch = item(&pool, "branch", "b1", "feature/PAY-231-retry", "").await;
+    suggest::detect(&pool).await.unwrap();
+
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(&ticket)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let entries = tray(&pool).await;
+    let found = between(&entries, &branch, &ticket).expect("the proposal survives the tombstone");
+    assert_eq!(found.to.title, "Payout retry storm");
+    assert!(
+        found.to.deleted_at.is_some(),
+        "the withdrawal is a fact the reader is shown, not a filter"
+    );
+    assert!(found.from.deleted_at.is_none());
+}
+
+/// A proposal reaching an entity the mirror never had still resolves.
+///
+/// knobas' own kinds -- notes, contexts -- have a `knobas.entity` row and no
+/// `sync.item`, so the tray's source join has to be a left join or they vanish.
+#[tokio::test]
+async fn a_proposal_touching_a_knobas_owned_entity_is_still_readable() {
+    let pool = scratch().await;
+    let ticket = item(&pool, "ticket", "PAY-231", "Payout retry storm", "").await;
+    let note = entity_only(&pool, "note", "note", "7f2c").await;
+    // No rule reaches a note -- they are not in the mirror -- so the proposal
+    // is written here exactly the way the driver writes one.
+    sqlx::query(
+        "insert into knobas.link
+                (from_id, to_id, relation, origin, created_by,
+                 confirmed_at, rule, rule_class, reason)
+         values ($1, $2, 'related', 'suggested', 'knobas',
+                 null, 'branch_name_key', 'exact_key', 'the note names PAY-231')",
+    )
+    .bind(&note)
+    .bind(&ticket)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let entries = tray(&pool).await;
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].from.entity_id, note);
+    assert_eq!(entries[0].from.kind, "note");
+    assert_eq!(
+        suggest::proposal_count(&pool, &["jira".to_owned()])
+            .await
+            .unwrap(),
+        1,
+        "the ticket's room holds it, through the end that has a source"
+    );
+}
+
+/// A proposal without a reason is not storable, because it is not shippable.
+#[tokio::test]
+async fn the_database_refuses_a_proposal_that_cannot_say_why() {
+    let pool = scratch().await;
+    let ticket = item(&pool, "ticket", "PAY-231", "Payout retry storm", "").await;
+    let branch = item(&pool, "branch", "b1", "feature/PAY-231-retry", "").await;
+
+    let refused = sqlx::query(
+        "insert into knobas.link (from_id, to_id, relation, origin, created_by, confirmed_at)
+         values ($1, $2, 'related', 'suggested', 'knobas', null)",
+    )
+    .bind(&branch)
+    .bind(&ticket)
+    .execute(&pool)
+    .await
+    .unwrap_err();
+    assert_eq!(
+        refused.as_database_error().and_then(|e| e.code()).as_deref(),
+        Some("23514"),
+        "an unconfirmed row must carry a rule, a class and a reason"
+    );
+}
