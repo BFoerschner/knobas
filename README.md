@@ -55,6 +55,13 @@ push to `main` (`.github/workflows/check.yml`). CI deliberately does not
 restate the gate — it only provides a Linux machine to run it on, so the two
 cannot drift apart.
 
+**Both workflows are disabled right now**, so nothing runs that gate but you.
+`gh workflow list --all` shows `check` and `testenv` as `disabled_manually`,
+and the runs `gh pr checks` reports are the seconds-long failures the billing
+outage left behind. `gh workflow enable check` and `gh workflow enable testenv`
+turn them back on; until then, `docs/agents/working-model.md` (review economics
+rule 4) says who runs the gate and when.
+
 Setting `KNOBAS_DB_URL` points **the app** at a Postgres you manage instead of
 starting an embedded one — for developing against a server with real data in
 it. It has no effect on `just check`: the tests always stand up their own
@@ -237,6 +244,10 @@ changed.
   parallel agents (§3).
 - **Task tracking** — GitHub Issues (milestone `M2` onward); the executed M0/M1
   plan files live in git history (`git show 736ac1f:docs/superpowers/plans/<file>`).
+- **Decisions** — `docs/adr/`: ratified architecture decisions, numbered, each
+  fixing a shape the code must keep. `docs/decisions/`: dated operational
+  records of what was ruled during a stretch of work, and why.
+  `docs/decisions/README.md` draws the line between the two.
 
 From the end of M0 the **`Source` trait, the migration baseline, and the IPC
 schema are frozen**: changing any of them takes an orchestrator decision plus a
