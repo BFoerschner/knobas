@@ -239,17 +239,33 @@ demo: deps
 #
 # Gitea and its seed only: `testenv/seed` also waits for uptime-kuma and mockd,
 # which this suite never touches. Both steps are idempotent, so re-running this
-# against an already-seeded environment just runs the tests. Serial, because the
-# suite opens branches and pull requests through Gitea's own API and the runs
-# share one server.
+# against an already-seeded environment just runs the tests.
 #
-# **This recipe grows the fixture and nothing prunes it**: every run leaves
-# three new branches, two new pull requests and 51 comments in `payout-service`,
-# deliberately (the suite header says why). Prune stray ones through Gitea's API
-# -- `DELETE /api/v1/repos/{owner}/{repo}/issues/{index}` for a pull request,
-# which takes its discussion with it, and `DELETE .../branches/{name}` for a
-# branch -- or, when the whole environment is expendable, `testenv/reset`
-# followed by `testenv/seed`.
+# WHAT IT CREATES AND WHAT IT REMOVES. The suite is not read-only: three of its
+# tests open a branch through Gitea's own API, two of those a pull request on
+# it, and one of those 51 comments. That is deliberate -- exit criterion B is
+# about what the real server does with something it has just been told -- and
+# all of it is deleted again when each test ends, passing or panicking alike
+# (`live_env::Litter`, whose Drop also checks the removal really happened).
+# Anything a *killed* run left behind is swept away by the next run before it
+# starts. So this recipe is repeatable: measured, the seeded corpus is the same
+# shape after twelve runs as before the first, and each run takes the same time
+# as the one before it. `testenv/reset` -- which destroys every testenv volume,
+# Uptime Kuma's included -- is the deliberate remedy, not the routine one.
+# Before issue #143 there was no cleanup: every run left three branches, two
+# pull requests and 51 comments behind, and seven runs were enough to make
+# `gitea-live-capped` refuse to start.
+#
+# Serial, and `--test-threads=1` for two reasons now: the runs share one server,
+# and the sweep above cannot tell a sibling test's live branch from a corpse.
+#
+# ONE ENVIRONMENT, ONE OWNER. There is a single Docker environment shared by
+# every worktree on the machine, and worktree exclusivity does not cover it:
+# `seed-gitea.sh` re-mints the Gitea token when the worktree it runs from has
+# no `seed-state.json`, so a second agent seeding mid-run makes the first
+# agent's requests answer 401 -- and a `seed-state.json` in a worktree that did
+# not do the latest seed holds a token that is already dead. Claim it before you
+# run this. testenv/README.md, "One environment, one owner at a time".
 gitea-live:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -291,6 +307,13 @@ gitea-live:
 # either way: the real containment is the `MAX_RESPONSE_ITEMS: "50"` pin in
 # docker-compose.yml, which uncaps on the next `docker compose up` whatever
 # happened to this shell.
+#
+# ONE ENVIRONMENT, ONE OWNER -- and this recipe is the harder of the two to
+# share. It seeds (so it re-mints the Gitea token, 401ing anyone else mid-run)
+# *and* it recreates the shared container capped to one record and back again,
+# so a concurrent `just gitea-live` reads a server answering short pages and
+# fails for a reason that is not in its own tree. Claim the environment before
+# you run this. testenv/README.md, "One environment, one owner at a time".
 gitea-live-capped:
     #!/usr/bin/env bash
     set -euo pipefail

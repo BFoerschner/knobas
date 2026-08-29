@@ -71,6 +71,39 @@ export KNOBAS_GITEA_REPO=payout-service
 
 `eval "$(./seed --env)"` re-prints them without re-seeding.
 
+## One environment, one owner at a time
+
+The repo's standing rule is that a worktree has exactly one owner. **This
+Docker environment is not covered by it**: there is one of it, shared by every
+worktree on the machine, and two agents seeding or running live suites against
+it at the same time will break each other. Three ways:
+
+- **The seed re-mints the Gitea token.** `seed-gitea.sh` reuses the token
+  recorded in `seed-state.json` while it still authenticates, but
+  `seed-state.json` is git-ignored and therefore lives *inside one worktree*. A
+  second agent seeding from its own worktree finds no recorded token, deletes
+  every existing `knobas-seed` token and mints a fresh one — and the first
+  agent's in-flight run starts answering 401. This happened during PR #130's
+  review. The same mechanism leaves **every other worktree's `seed-state.json`
+  holding a token that is already dead**, so a 401 from `eval "$(./seed --env)"`
+  usually means "another tree seeded last", not "the environment is broken";
+  re-running `./seed-gitea.sh` from *your* tree fixes it and rotates the token
+  again, which is the same collision from the other side.
+- **The Gitea live suite sweeps.** `tests/live_gitea.rs` removes any leftover
+  `knobas-` branch in `payout-service` before it starts, which is how a killed
+  run heals (issue #143). It cannot tell a sibling's live branch from a corpse.
+- **`just gitea-live-capped` reconfigures the shared container.** It recreates
+  Gitea with `MAX_RESPONSE_ITEMS: 1` and uncaps it again from a trap, so for
+  the length of that run every other reader of this environment is talking to a
+  server that answers one record per page. A concurrent `just gitea-live` fails
+  on missing records, which reads as an adapter defect and is not one.
+
+So: **claim the environment before running `./seed`, `just gitea-live` or
+`just gitea-live-capped`, and say when you release it.** The failure mode is a
+mid-run 401 or a vanished branch, neither of which reads as "somebody else is
+in here". Nothing in the tooling enforces this, and closing it properly would
+mean a lock the tooling does not have.
+
 ## What the seed **cannot** reproduce — read this before writing assertions
 
 `fixtures/tidewater/work.json` records commit shas like `c90d11` and pull

@@ -22,28 +22,6 @@
 //!
 //! or, in one step, `just gitea-live`.
 //!
-//! # This suite grows the fixture, and nothing prunes it
-//!
-//! Three of these tests open a branch through Gitea's own API and leave it
-//! behind; two of them open a pull request on it, and one of those two writes a
-//! discussion of `PAGE + 1` comments. That is the point: exit criterion B is
-//! about what the *real* server does with something it has just been told, so a
-//! test that deleted its own work would be certifying a corpus it had reset.
-//! The cost is that `payout-service` grows by **three branches, two pull
-//! requests and 51 comments every run of this file**, and nothing takes them
-//! away again: thirty runs of `a_pull_request_opened_...` alone left it holding
-//! 32 pull requests against the seeded 2 -- measured 2026-08-29, when this file
-//! opened one pull request per run rather than two, before the discussion test
-//! arrived with #131 and doubled the rate. The walks under test are paged, so
-//! that grows without bound into a corpus the seed never described.
-//!
-//! So prune deliberately. `DELETE /api/v1/repos/{owner}/{repo}/issues/{index}`
-//! closes a stray pull request out -- a pull request is the issue of the same
-//! index, and its discussion goes with it -- and `DELETE .../branches/{name}`
-//! its branch, leaving the rest of the environment alone. `testenv/reset` is
-//! the big lever: it destroys every testenv volume, Gitea's included, so
-//! `testenv/seed` has to run again after it.
-//!
 //! # What this file does NOT certify
 //!
 //! Every corpus `testenv/seed-gitea.sh` creates fits in one page of the 50 the
@@ -54,6 +32,62 @@
 //! that separates them needs a server that caps its pages below the requested
 //! limit, and that is a different compose configuration: see
 //! `tests/live_gitea_capped.rs` and `just gitea-live-capped`.
+//!
+//! **The contract battery no longer runs at owner scope here.** Since issue
+//! #146 it runs against the two seeded repositories no test in this file
+//! writes to, because its clause 2 -- "an incremental sync yields no items
+//! *when nothing changed*" -- needs a quiet corpus for its antecedent to hold,
+//! and this file's own mutations are changes. So the live battery certifies
+//! the contract against the real server over a quiescent scope, and no longer
+//! over the whole organisation; the doc comment on
+//! [`passes_the_contract_battery_against_the_real_container`] names the
+//! mechanism, the measurement, and where each piece of the lost coverage is
+//! still held. Nothing in `crates/knobas-source/src/**` changed: the clause is
+//! correct, and an adapter that went quiet about a genuinely changed entity
+//! would be the defect it exists to catch.
+//!
+//! # What this file creates in the container, and what it takes away
+//!
+//! It is not read-only, and that is the point: exit criterion B is about what
+//! the *real* server does with something it has just been told. Three tests
+//! open a branch through Gitea's own API, two of those open a pull request on
+//! it, and one of those writes `PAGE + 1` comments. Every assertion is made
+//! against content that is really there.
+//!
+//! **All of it is removed again** -- afterwards, never before an assertion --
+//! by [`Litter`], which creates each branch and later deletes it together with
+//! every pull request opened from it, and so every comment on those, from
+//! `Drop`. Three consequences, each a decision:
+//!
+//! * **The failure path is the success path.** A test that panics unwinds
+//!   through the same cleanup a passing test returns through. A cleanup that
+//!   ran only on success would leave the residue on exactly the runs that were
+//!   already going badly.
+//! * **The removal is checked, not hoped for.** `Litter`'s `Drop` re-reads the
+//!   listings afterwards and fails the test if anything it created is still
+//!   standing, so a cleanup that quietly stopped deleting cannot pass as a
+//!   clean run.
+//! * **A killed process is swept, not mourned.** `Drop` cannot survive a
+//!   `SIGKILL` or a Ctrl-C at the wrong moment, so the next run's first
+//!   mutating test removes whatever such a run left. Recovery from a dirty
+//!   environment is "run the suite again".
+//!
+//! So `testenv/reset` -- which destroys every testenv volume, Uptime Kuma's
+//! included -- is back to being the deliberate remedy rather than the routine
+//! one. Before issue #143 there was no cleanup at all: `payout-service` grew by
+//! three branches, two pull requests and 51 comments *every run*, and seven
+//! runs took its branch listing to 25 and made `just gitea-live-capped` refuse
+//! to start.
+//!
+//! # A red run here is never answered by running it again
+//!
+//! The rule this suite exists under (#35 task 8): when the fake and the server
+//! disagree the **fake** is wrong. The corollary is that a failure in a live
+//! suite means the adapter or the fake is wrong, and **re-running is not a
+//! resolution** -- a re-run is for capturing the emission, nothing else. Two
+//! flakes were fixed by finding their mechanism (#140, #146) and neither would
+//! have been found by anyone who treated the red as noise. A tolerance or a
+//! retry loop around an assertion in this file is re-running with extra steps.
 //!
 //! # What cannot be asserted here, and why
 //!
@@ -68,7 +102,7 @@ mod live_env;
 
 use knobas_source::contract::{Fault, VecSink, battery};
 use knobas_source::{SourceError, SyncItem};
-use live_env::{Env, env, full, of_kind};
+use live_env::{Env, Litter, env, full, of_kind};
 
 /// A port nothing listens on: bound to learn the number, then dropped.
 fn dead_url() -> String {
@@ -114,11 +148,17 @@ fn dead_url() -> String {
 /// `::the_position_after_one_change_is_itself_idle_stable`, against a fake whose
 /// `updated_at` stands still unless the test moves it; and live by
 /// `passes_the_contract_battery_against_the_real_container`, whose clause 2
-/// asserts the whole run empty and exempts nothing. That live half is currently
-/// weaker than it looks -- the battery test flakes on this same mechanism, which
-/// is #146 -- so if #146 is ever closed by dropping the clause rather than
-/// narrowing the scope, this exemption loses its live cover and should be
-/// revisited.
+/// asserts the whole run empty and exempts nothing.
+///
+/// That live half used to be weaker than it looked -- the battery test flaked
+/// on this same mechanism, 4 serial runs of this file in 6, which was #146.
+/// **#146 was closed by narrowing the battery's scope to repositories nothing
+/// writes to, not by weakening the clause**, so the cover this exemption rests
+/// on is intact and is now reliable rather than intermittent. Anyone tempted to
+/// weaken clause 2 in `crates/knobas-source/src/contract.rs` should read this
+/// paragraph as the reason not to: the exemption above is only affordable
+/// because something else still asserts the unexempted form against a real
+/// server.
 fn re_delivered<'a>(items: &'a [SyncItem], full_name: &str) -> Vec<(&'a str, &'a str)> {
     items
         .iter()
@@ -133,11 +173,63 @@ fn revoked() -> String {
     format!("revoked-{}", std::process::id())
 }
 
+/// The contract battery -- the suite every adapter must pass -- against the
+/// server rather than against the fake, and scoped to the seeded repositories
+/// **nothing in this file writes to** (issue #146).
+///
+/// # Why the scope is not the whole organisation
+///
+/// The battery's clause 2 reads "incremental sync from the returned cursor
+/// yields no items *when nothing changed*". Run at owner scope, at the end of
+/// a file whose other tests have just opened a branch and a pull request in
+/// `payout-service`, its full->idle pair straddles a write that is still
+/// landing: **Gitea moves a repository's `updated_at` as its own bookkeeping
+/// catches up, and that write can arrive after the create call returned.** The
+/// idle run then emits the repository -- correctly. Measured on the pinned
+/// container, the battery failed **4 serial runs of this file in 6** that way.
+///
+/// So the antecedent was false, not the consequent. An adapter that stayed
+/// silent about a repository whose `updated_at` had genuinely moved would be
+/// *suppressing a change*, which is the defect clause 2 exists to catch from
+/// the other side. Establishing quiescence is this harness's job, and
+/// [`Env::quiet_repos`] establishes it by construction: only `env.repo` is ever
+/// mutated, so from the end of the seed onwards nothing moves these two.
+///
+/// **The clause was never the problem, and it is not weakened here.** Nothing
+/// under `crates/knobas-source/src/**` changes; no tolerance, no retry, and no
+/// re-run. A red run of this test still means the adapter is wrong.
+///
+/// # What this narrowing costs, and where each piece is still held
+///
+/// The battery no longer runs its full->idle pair at **owner** scope against a
+/// live server. Every part of that is certified elsewhere:
+///
+/// * the owner-scoped repository *listing* walk, by
+///   [`the_shapes_the_fake_only_assumes_are_certified_here`] here and by
+///   `live_gitea_capped.rs`'s `whole_owner()` walk;
+/// * idle behaviour of the walks this file mutates, by the idle clauses of
+///   [`a_pull_request_opened_through_the_api_appears_in_the_next_incremental_run`]
+///   and [`a_commit_pushed_through_the_api_arrives_once_and_only_once`];
+/// * the full->idle pair over the repository-*listing* walk, against the
+///   docker-free fake in `tests/sync.rs` --
+///   `an_idle_run_emits_nothing_and_returns_the_same_bytes` and
+///   `the_position_after_one_change_is_itself_idle_stable`, both on the
+///   unfiltered selection, which walks the same listing an `owners[]` scope
+///   does (`sync.rs`'s module doc: an empty `owners[]` means every repository
+///   the token can see). Quiescence there is by construction.
+///
+/// Said exactly, because a record of a coverage loss is worth nothing if it
+/// overstates what is left: **no docker-free test runs an idle pair with
+/// `owners[]` actually set.** `an_owner_filter_drops_everything_else` in
+/// `tests/sync.rs` certifies that the filter is a filter over that same walk,
+/// and it does one full sync rather than a pair. So what this narrowing gives
+/// up outright is the idle pair with the owner filter applied, live or fake;
+/// what it keeps is the idle pair over the walk the filter sits on.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Gitea container"]
 async fn passes_the_contract_battery_against_the_real_container() {
     let env = env();
-    let scope = serde_json::json!({ "owners": [env.owner.clone()] });
+    let scope = serde_json::json!({ "repos": env.quiet_repos() });
     battery(move |fault| {
         let (token, base) = match fault {
             Fault::None => (env.token.clone(), None),
@@ -367,12 +459,17 @@ async fn pull_requests_come_back_newest_updated_first() {
 /// runs this file concurrently -- `just gitea-live` is serial by recipe -- so a
 /// second is enough.
 ///
-/// It also leaves a branch and a pull request behind in the seeded repository,
-/// by design; see this file's header on pruning them.
+/// The branch and the pull request it opens are removed again when the test
+/// ends, whether it passes or panics; see this file's header and
+/// [`live_env::Litter`].
 #[tokio::test]
 #[ignore = "needs testenv's seeded Gitea container"]
 async fn a_pull_request_opened_through_the_api_appears_in_the_next_incremental_run() {
     let env = env();
+    // Built before the baseline sync: sweeping what a killed run left behind is
+    // itself a change to the repository, and this run's cursor must be taken after
+    // it rather than before.
+    let mut litter = Litter::new(&env).await;
     let source = env.one_repo();
     let (_, cursor) = full(&*source).await;
 
@@ -386,18 +483,7 @@ async fn a_pull_request_opened_through_the_api_appears_in_the_next_incremental_r
     let http = reqwest::Client::new();
     let auth = format!("token {}", env.token);
 
-    let created = http
-        .post(format!("{api}/branches"))
-        .header("Authorization", &auth)
-        .json(&serde_json::json!({ "new_branch_name": branch, "old_branch_name": "main" }))
-        .send()
-        .await
-        .expect("create the branch");
-    assert!(
-        created.status().is_success(),
-        "branch: {}",
-        created.text().await.unwrap_or_default()
-    );
+    litter.branch_off_main(&branch).await;
 
     let opened = http
         .post(format!("{api}/pulls"))
@@ -498,11 +584,16 @@ async fn a_pull_request_opened_through_the_api_appears_in_the_next_incremental_r
 ///
 /// As above, the repository entity may ride along in any run and nothing here
 /// asserts it away (#140); the branch name carries the same epoch-second
-/// caveat; and the branch this pushes onto is left behind -- see the header.
+/// caveat; and the branch this pushes onto is removed again when the test ends,
+/// passing or panicking alike -- see the header.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Gitea container"]
 async fn a_commit_pushed_through_the_api_arrives_once_and_only_once() {
     let env = env();
+    // Built before the baseline sync: sweeping what a killed run left behind is
+    // itself a change to the repository, and this run's cursor must be taken after
+    // it rather than before.
+    let mut litter = Litter::new(&env).await;
     let source = env.one_repo();
     let (_, cursor) = full(&*source).await;
 
@@ -515,18 +606,7 @@ async fn a_commit_pushed_through_the_api_arrives_once_and_only_once() {
     let http = reqwest::Client::new();
     let auth = format!("token {}", env.token);
 
-    let created = http
-        .post(format!("{api}/branches"))
-        .header("Authorization", &auth)
-        .json(&serde_json::json!({ "new_branch_name": branch, "old_branch_name": "main" }))
-        .send()
-        .await
-        .expect("create the branch");
-    assert!(
-        created.status().is_success(),
-        "branch: {}",
-        created.text().await.unwrap_or_default()
-    );
+    litter.branch_off_main(&branch).await;
 
     // A unique path, so a re-run cannot collide; fixed content, so this needs
     // no base64 encoder. `a25vYmFzIGxpdmUgY2hlY2sK` is "knobas live check\n".
@@ -710,6 +790,10 @@ const PAGE: usize = 50;
 #[ignore = "needs testenv's seeded Gitea container"]
 async fn the_discussion_endpoint_does_not_page() {
     let env = env();
+    // Built before the baseline sync: sweeping what a killed run left behind is
+    // itself a change to the repository, and this run's cursor must be taken after
+    // it rather than before.
+    let mut litter = Litter::new(&env).await;
     let source = env.one_repo();
     let (_, cursor) = full(&*source).await;
 
@@ -757,18 +841,7 @@ async fn the_discussion_endpoint_does_not_page() {
     let branch = format!("knobas-live-discussion-{stamp}");
     let note = |n: usize| format!("knobas live discussion note #{n:03} of run {stamp}");
 
-    let created = http
-        .post(format!("{api}/branches"))
-        .header("Authorization", &auth)
-        .json(&serde_json::json!({ "new_branch_name": branch, "old_branch_name": "main" }))
-        .send()
-        .await
-        .expect("create the branch");
-    assert!(
-        created.status().is_success(),
-        "branch: {}",
-        created.text().await.unwrap_or_default()
-    );
+    litter.branch_off_main(&branch).await;
     let opened = http
         .post(format!("{api}/pulls"))
         .header("Authorization", &auth)

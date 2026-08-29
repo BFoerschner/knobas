@@ -74,10 +74,17 @@ const REQUESTED: usize = 50;
 /// their own budget -- correct behaviour, but it would arrive at the assertions
 /// below as missing records and read as the defect under test.
 ///
-/// It is reachable: `just gitea-live` leaves a branch and a pull request behind
-/// on every run, and the seeded volume outlives them. When a listing here grows
-/// past this, the answer is `testenv/reset` and a fresh seed, not a bigger
-/// number.
+/// It used to be reachable in one run: `just gitea-live` left three branches
+/// and two pull requests behind every time, the seeded volume outlived them,
+/// and seven runs were enough to take the branch listing of `payout-service`
+/// to 25 and make this suite refuse to start. Since issue #143 that suite
+/// removes what it creates (`live_env::Litter`), so the corpus stays at its
+/// seeded shape and this ceiling is reached only by somebody writing to the
+/// container by hand. If a listing here does grow past it, prune the strays --
+/// `DELETE /repos/{owner}/{repo}/issues/{index}` for a pull request and
+/// `DELETE .../branches/{name}` for its branch -- before reaching for
+/// `testenv/reset`, which destroys every testenv volume. A bigger number is
+/// never the answer: the budgets in `sync.rs` are what it measures.
 const HEADROOM: usize = 19;
 
 /// One listing as the server actually serves it.
