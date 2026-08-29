@@ -157,6 +157,46 @@ export interface LinkRow {
   created_by: string;
   /** RFC 3339. */
   created_at: string;
+  /**
+   * RFC 3339 when the user accepted this link, else `null` — and `null` is the
+   * whole difference between a link and a **suggestion**.
+   *
+   * A row with `confirmed_at: null` is a proposal knobas made and nobody has
+   * accepted. It is never in `EntityDetail.links` (that read is the confirmed
+   * view) and it is the only thing `roomSuggestions` returns (that read is the
+   * proposed view). The two cannot overlap: their predicates are each other's
+   * negation over the same rows.
+   *
+   * Every link drawn by hand is confirmed the moment it is written.
+   */
+  confirmed_at: string | null;
+  /**
+   * The named detection rule that proposed this link, or `null` for one a
+   * person drew — `"branch_name_key"`, `"similar_text"`, …
+   *
+   * Deliberately not a union: rules grow, and a closed list here would be a
+   * frontend that has to ship before a new detector can. Branch on
+   * `rule_class`, and show `rule` only as provenance.
+   */
+  rule: string | null;
+  /**
+   * Which class of evidence `rule` is, or `null` for a link a person drew.
+   *
+   * This is the axis a reader calibrates trust on and the one a badge should
+   * show: `exact_key` is "the two ends name each other", `similarity` is a
+   * guess from overlapping text, `source_relation` is a relation the source
+   * system already states.
+   */
+  rule_class: "exact_key" | "similarity" | "source_relation" | null;
+  /**
+   * Why knobas proposed this link, in the detector's own words — "the branch
+   * name contains PAY-231" — or `null` for a link a person drew.
+   *
+   * Stored, never re-rendered from `rule`: a suggestion whose reason cannot be
+   * shown is not shippable, and the database refuses an unconfirmed row that
+   * has no reason. Raw text; render as text.
+   */
+  reason: string | null;
 }
 
 /**
@@ -397,4 +437,88 @@ export function saveNote(noteId: string, title: string, bodyMd: string): Promise
  */
 export function deleteNote(noteId: string): Promise<boolean> {
   return invoke<boolean>("delete_note", { noteId });
+}
+
+/**
+ * One proposal as the room tray draws it —
+ * `knobas_core::suggest::SuggestionEntry`.
+ *
+ * **Both** ends, unlike `LinkEntry`, which resolves only the end the reader is
+ * not on: the tray is read from a room rather than from an entity, so there is
+ * no "here" for it to leave out, and both ends have to be openable before the
+ * reader decides.
+ */
+export interface SuggestionEntry {
+  link: LinkRow;
+  from: LinkEnd;
+  to: LinkEnd;
+}
+
+/** One page of a room's tray — `SuggestionPage`. */
+export interface SuggestionPage {
+  rows: SuggestionEntry[];
+  /**
+   * Every proposal in the room, before `limit` — the number the tray's heading
+   * shows. Not `rows.length`: "how many are waiting" is the question that
+   * decides whether to look at all.
+   */
+  total: number;
+}
+
+/**
+ * Run a detection pass over the mirror, resolving to how many proposals it
+ * wrote — `detect_suggestions`.
+ *
+ * Idempotent and cheap to repeat: a pass over an unchanged mirror writes
+ * nothing, and a pass after a sync writes only what the new items justify and
+ * resurrects nothing that was dismissed. This is what makes detection something
+ * a surface calls rather than something the user asks for.
+ *
+ * It never creates a confirmed link, and nothing it writes reaches a source.
+ */
+export function detectSuggestions(): Promise<number> {
+  return invoke<number>("detect_suggestions");
+}
+
+/**
+ * The proposals a room holds, newest first — `room_suggestions`.
+ *
+ * `sources` is the room's membership, the same convention `EntityFilter.sources`
+ * uses: `[]` means every source, and an enumerated list would hide anything
+ * synced by a source with no configuration row. A proposal belongs to a room
+ * when *either* of its ends does.
+ *
+ * The tray holds no state: this call is the whole of it.
+ */
+export function roomSuggestions(sources: string[], limit: number): Promise<SuggestionPage> {
+  return invoke<SuggestionPage>("room_suggestions", { sources, limit });
+}
+
+/**
+ * Accept a suggestion — `accept_suggestion`. It becomes an ordinary link and
+ * appears in both ends' links panels.
+ *
+ * Idempotent: accepting an already-accepted or already-dismissed suggestion
+ * resolves, writes no activity line and emits nothing. Rejects with `invalid`
+ * for something that is not a link id and `not_found` for one nothing carries.
+ * Emits `EVENTS.activityNew`.
+ */
+export function acceptSuggestion(linkId: string): Promise<void> {
+  return invoke<void>("accept_suggestion", { linkId });
+}
+
+/**
+ * Dismiss a suggestion — `dismiss_suggestion`. It is remembered, so the same
+ * suggestion is never proposed again, and neither is the link it would have
+ * become.
+ *
+ * The same tombstone `unlink` leaves, deliberately: a dismissed suggestion and
+ * an unlinked link are one fact to the detector.
+ *
+ * Idempotent, and refuses nothing when the id names a link that has already
+ * been accepted — that is a link, and `unlink` is what withdraws it. Emits
+ * `EVENTS.activityNew`.
+ */
+export function dismissSuggestion(linkId: string): Promise<void> {
+  return invoke<void>("dismiss_suggestion", { linkId });
 }

@@ -29,10 +29,11 @@
 
 use chrono::{DateTime, TimeZone, Utc};
 use knobas_app::commands::entity::{
-    EntityDetail, EntityFilter, EntityOrder, EntityPage, EntityRow, SourceRef,
+    EntityDetail, EntityFilter, EntityOrder, EntityPage, EntityRow, SourceRef, SuggestionPage,
 };
 use knobas_core::activity::ActivityRow;
 use knobas_core::link::{LinkEnd, LinkEntry, LinkRow, Origin};
+use knobas_core::suggest::{RuleClass, SuggestionEntry};
 use knobas_sync::mirror::{declared_inline_union, declared_union, interface_body};
 
 const MIRROR: &str = include_str!("../../../app/src/lib/ipc/entity.ts");
@@ -102,10 +103,14 @@ fn activity_row() -> ActivityRow {
     }
 }
 
-/// A link with **no** note, because `note` is the nullable field on this row
-/// and the file's second rule is that nullable fields are exercised as `None`:
-/// a `skip_serializing_if` added to it would drop the key and hand the panel
+/// A link with **no** note, because `note` is a nullable field on this row and
+/// the file's second rule is that nullable fields are exercised as `None`: a
+/// `skip_serializing_if` added to it would drop the key and hand the panel
 /// `undefined` where the mirror promised `string | null`.
+///
+/// A *confirmed* link, so `rule`, `rule_class` and `reason` are `None` too --
+/// the four suggestion fields (#41) split cleanly between the two states, and
+/// [`proposal_row`] is the other half.
 fn link_row() -> LinkRow {
     LinkRow {
         id: uuid::Uuid::nil(),
@@ -116,6 +121,24 @@ fn link_row() -> LinkRow {
         note: None,
         created_by: "mara".to_owned(),
         created_at: at(),
+        confirmed_at: Some(at()),
+        rule: None,
+        rule_class: None,
+        reason: None,
+    }
+}
+
+/// The same row in the other state: a proposal, which is what makes
+/// `confirmed_at` null and the other three present.
+fn proposal_row() -> LinkRow {
+    LinkRow {
+        origin: Origin::Suggested,
+        created_by: "knobas".to_owned(),
+        confirmed_at: None,
+        rule: Some("branch_name_key".to_owned()),
+        rule_class: Some(RuleClass::ExactKey),
+        reason: Some("the branch name contains PAY-231".to_owned()),
+        ..link_row()
     }
 }
 
@@ -293,15 +316,21 @@ fn link_entry() -> LinkEntry {
 const LINK_END_FIELDS: &[&str] = &["deleted_at", "entity_id", "kind", "title"];
 
 const LINK_ROW_FIELDS: &[&str] = &[
+    "confirmed_at",
     "created_at",
     "created_by",
     "from_id",
     "id",
     "note",
     "origin",
+    "reason",
     "relation",
+    "rule",
+    "rule_class",
     "to_id",
 ];
+
+const SUGGESTION_ENTRY_FIELDS: &[&str] = &["from", "link", "to"];
 
 /// The link row, and every origin its `origin` field can hold.
 ///
@@ -344,6 +373,99 @@ fn the_link_row_shape_matches_its_typescript_mirror() {
     .unwrap();
     assert_shape("LinkRow", &annotated, LINK_ROW_FIELDS);
     assert_eq!(annotated["note"], serde_json::json!("why this link exists"));
+}
+
+/// The four fields a **suggestion** rides on (#41), in both of the states a
+/// link row can be in.
+///
+/// Both, because they are different failures and the shape check alone catches
+/// neither. `confirmed_at` is the *state* the two reads are cut on, so a
+/// `skip_serializing_if` on it would hand the frontend `undefined` exactly
+/// where it branches on `null`; and a proposal that lost `reason` on the wire
+/// is a suggestion the tray cannot draw, which #41 says is not shippable.
+#[test]
+fn a_proposal_and_a_confirmed_link_are_the_same_shape_in_two_states() {
+    let confirmed = serde_json::to_value(link_row()).unwrap();
+    assert_shape("LinkRow", &confirmed, LINK_ROW_FIELDS);
+    assert!(confirmed["confirmed_at"].is_string());
+    for absent in ["rule", "rule_class", "reason"] {
+        assert_eq!(
+            confirmed[absent],
+            serde_json::Value::Null,
+            "a link a person drew keeps {absent} and nulls it"
+        );
+    }
+
+    let proposal = serde_json::to_value(proposal_row()).unwrap();
+    assert_shape("LinkRow", &proposal, LINK_ROW_FIELDS);
+    assert_eq!(
+        proposal["confirmed_at"],
+        serde_json::Value::Null,
+        "the null is the whole difference between a link and a suggestion"
+    );
+    assert_eq!(
+        proposal["reason"],
+        serde_json::json!("the branch name contains PAY-231")
+    );
+    assert_eq!(proposal["rule"], serde_json::json!("branch_name_key"));
+    assert_eq!(proposal["rule_class"], serde_json::json!("exact_key"));
+
+    // The class union is declared inline on the field, so it is read off that
+    // field's line -- a class the frontend cannot name is a badge it cannot
+    // draw, and it is the axis a reader calibrates trust on.
+    let classes: Vec<&str> = RuleClass::ALL.iter().map(|class| class.as_str()).collect();
+    assert_same_members(
+        &classes,
+        declared_inline_union(interface_body(MIRROR, "LinkRow"), "rule_class"),
+        "a rule class declared on one side only is a suggestion the other side \
+         cannot label",
+    );
+}
+
+/// The tray's own two shapes: a proposal with **both** ends resolved, and the
+/// page that carries the room's total beside the rows.
+///
+/// Nested for the same reason `LinkEntry` is: flattening `link`, `from` and
+/// `to` into one bag would collide `id` three ways.
+#[test]
+fn the_suggestion_shapes_match_their_typescript_mirror() {
+    let entry = SuggestionEntry {
+        link: proposal_row(),
+        from: LinkEnd {
+            entity_id: "gitea:tidewater/payout#b1".to_owned(),
+            kind: "branch".to_owned(),
+            title: "feature/PAY-231-retry".to_owned(),
+            deleted_at: None,
+        },
+        // The withdrawn state, on the end that is likelier to have it: a
+        // proposal may point at something the source removed between the pass
+        // that found it and the reader looking at it.
+        to: LinkEnd {
+            entity_id: "mock:PAY-231".to_owned(),
+            kind: "ticket".to_owned(),
+            title: "Payout retry storm".to_owned(),
+            deleted_at: Some(at()),
+        },
+    };
+    let wire = serde_json::to_value(&entry).unwrap();
+    assert_shape("SuggestionEntry", &wire, SUGGESTION_ENTRY_FIELDS);
+    assert_shape("LinkRow", &wire["link"], LINK_ROW_FIELDS);
+    assert_shape("LinkEnd", &wire["from"], LINK_END_FIELDS);
+    assert_shape("LinkEnd", &wire["to"], LINK_END_FIELDS);
+    assert_eq!(wire["from"]["deleted_at"], serde_json::Value::Null);
+    assert!(wire["to"]["deleted_at"].is_string());
+
+    let page = serde_json::to_value(SuggestionPage {
+        rows: vec![entry],
+        total: 7,
+    })
+    .unwrap();
+    assert_shape("SuggestionPage", &page, &["rows", "total"]);
+    assert_eq!(
+        page["total"], 7,
+        "the total is the room's, not the page's -- it is what the heading shows"
+    );
+    assert_shape("SuggestionEntry", &page["rows"][0], SUGGESTION_ENTRY_FIELDS);
 }
 
 /// The hydrated entry the links panel draws: the record, and the end the
