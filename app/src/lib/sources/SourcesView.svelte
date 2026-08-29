@@ -21,6 +21,25 @@
 
   A **mutation** re-lists too, because add/delete change the row *set* and
   nothing else tells the view about it.
+
+  A **credential fixed in the strip** re-lists as well, for a different reason:
+  it does not change the row set, it changes the shared health store *out of
+  band*. `load()` replaces that store wholesale (see below), so a read already
+  in flight when the password was typed lands afterwards and writes the
+  rejected credential back over the green chip. Re-listing here is what makes
+  that read stale, so its answer is dropped instead of applied (#144).
+
+  Every other path here that changes a row or the health store re-lists. The
+  *running* `sync:state` above reads like an exception and is not one: the
+  event carries the whole status, so that patch leaves nothing to read back.
+  Adding a path that changes a row or the health store without either
+  re-listing or carrying its own new state puts it back in the same race.
+
+  The store has one writer this view cannot see, and it is the exception worth
+  writing down: `createHealth` subscribes to `source:health`, so a reading the
+  scheduler discovers is patched in with no re-list behind it and the wholesale
+  replace below can still write over it — the same race in the other direction,
+  and #148's rather than this file's.
 -->
 <script lang="ts">
   import { listen } from "@tauri-apps/api/event";
@@ -205,8 +224,27 @@
   }
 
   function onhealth(next: CredentialHealth) {
+    // The reading `set_source_secret` answered with, applied at once: the
+    // person is watching the chip they just pressed a button to fix, and a
+    // round trip later is not when they are looking.
     health.patch(next);
     fixing = null;
+    // …and then a re-list, because that patch is *out of band* and `load()`
+    // replaces this store wholesale. A read issued before the password was
+    // typed and landing after it writes the rejected credential back over the
+    // green chip, with no action of the reader's — and re-listing on every
+    // terminal `sync:state` is what makes that window an ordinary one rather
+    // than an exotic one (#144). Issuing the read is itself the fix: it makes
+    // the in-flight one stale, so its answer is dropped rather than applied.
+    //
+    // `void`, not `await`, and for the same reason as `onsaved` below: this is
+    // a synchronous callback prop whose caller does not hold what it returns,
+    // so an `async` version would leave a promise nobody is holding. Nothing
+    // here needs the answer either — `latestRead` stamps the read the moment
+    // it is called, before its first `await`, so the older read is already
+    // overtaken by the time this line returns. `confirmDelete` awaits because
+    // it is already async and the re-list is the last half of what it does.
+    void load();
   }
 </script>
 

@@ -407,6 +407,110 @@ test("a list_sources overtaken by a later one does not write what it read", asyn
   expect(row.textContent).toContain("240");
 });
 
+/**
+ * A credential fixed by hand while a `list_sources` is already in flight.
+ *
+ * `onhealth` writes the reading `set_source_secret` answered with straight
+ * into the shared store, because the person is watching the chip they pressed
+ * a button to fix and a round trip later is not when they are looking. But the
+ * list path *replaces* that store wholesale — deliberately, so a deleted
+ * source's chip disappears — so a read issued before the password was typed
+ * and landing after it used to write the rejected credential back over the
+ * green chip, with no action of the reader's.
+ *
+ * The window is ordinary rather than exotic: this view re-lists on every
+ * terminal `sync:state`, and fixing a credential is what a person does right
+ * after watching a sync fail. So the collision happens in the view someone
+ * opened *because* they suspect a source is misbehaving, and the revert is
+ * evidence for exactly the thing they came to check — #83's argument, #144.
+ *
+ * **Both reads are held open across the fix**, which is what makes this a
+ * race and not a sequence. Called in order these two are fine, so a test that
+ * released each read before the next step would pass against the bug. Held,
+ * the three assertions separate the three things that have to be true: the
+ * chip is green from the patch alone before either read has landed; the
+ * overtaken read drops its stale answer rather than applying it; and the read
+ * the fix issued lands on the same reading.
+ */
+test("a credential fixed by hand is not reverted by a list_sources already in flight", async () => {
+  const rejected = (): CredentialHealth => ({
+    source_id: "jira",
+    state: "unauthorized",
+    checked_at: NOW.toISOString(),
+    detail: "401 from /rest/api/2/myself",
+    secret_expires_at: null,
+  });
+  sources = [source({ health: rejected() })];
+  const store = health();
+  render({ health: store });
+  await settle();
+  expect(button("Re-enter", rowFor("jira")!)).toBeTruthy();
+  const listedSoFar = calls.listSources;
+
+  // Two reads, neither answered until this test says so. The first is the one
+  // a finished run puts in flight, answered from the database as it stood
+  // *before* the password below is typed — a stale reading, not a second
+  // opinion. The second is whatever the fix issues, and it carries an item
+  // count the fixture does not, so that "the fresh read landed" is a fact this
+  // test can see rather than one it infers from a value the patch also wrote
+  // (the same `240` the read-ordering test above distinguishes its reads by).
+  let releaseStale: (() => void) | undefined;
+  let releaseFresh: (() => void) | undefined;
+  answerList = (call) =>
+    call === listedSoFar + 1
+      ? new Promise<SourceSummary[]>((resolve) => {
+          releaseStale = () => resolve([source({ health: rejected() })]);
+        })
+      : new Promise<SourceSummary[]>((resolve) => {
+          releaseFresh = () => resolve([source({ item_count: 240 })]);
+        });
+
+  emit("sync:state", {
+    source_id: "jira",
+    running: false,
+    run_id: 9,
+    started_at: "2026-08-25T11:58:00Z",
+    last_finished_at: "2026-08-25T11:59:00Z",
+    last_outcome: "error",
+    next_run_at: null,
+    backoff_until: null,
+  });
+  await settle();
+  expect(calls.listSources, "the terminal transition read the sources").toBe(listedSoFar + 1);
+
+  // …and now, with that read still open, the person fixes the credential.
+  button("Re-enter", rowFor("jira")!)!.click();
+  flushSync();
+  const input = target.querySelector<HTMLInputElement>(".src-fix input")!;
+  input.value = "s3cret";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  button("Save and retry sync", target.querySelector(".src-fix")!)!.click();
+  await settle();
+
+  // The chip they are watching, and nothing has landed yet: this reading can
+  // only have come from the patch `onhealth` applies.
+  expect(store.get("jira")!.state, "the chip does not go green until a read answers").toBe("ok");
+  expect(button("Sync now", rowFor("jira")!)).toBeTruthy();
+  expect(calls.listSources, "fixing a credential did not re-list").toBe(listedSoFar + 2);
+
+  releaseStale!();
+  await settle();
+  expect(store.get("jira")!.state, "the in-flight read wrote the old credential state back").toBe(
+    "ok",
+  );
+  expect(button("Re-enter", rowFor("jira")!)).toBeUndefined();
+  expect(rowFor("jira")!.textContent).not.toContain("401 from /rest/api/2/myself");
+
+  releaseFresh!();
+  await settle();
+  expect(store.get("jira")!.state).toBe("ok");
+  expect(button("Sync now", rowFor("jira")!)).toBeTruthy();
+  // …and it is *this* read's answer on screen, not the patch's value standing
+  // in for it: the count only the read the fix issued carries.
+  expect(rowFor("jira")!.textContent, "the read the fix issued did not land").toContain("240");
+});
+
 test("a source whose health is unauthorized offers Re-enter, not Sync now", async () => {
   sources = [
     source({
