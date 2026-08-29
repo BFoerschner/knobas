@@ -20,8 +20,9 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../ipc";
-  import { backupStatus, type BackupStatus } from "../ipc/backup";
+  import { backupNow, backupStatus, type BackupStatus } from "../ipc/backup";
   import { ago } from "../shell/time";
+  import { push } from "../shell/toasts.svelte";
   import { formatBytes } from "../sources/diagnostics";
   import { nightlySentence, retentionSentence } from "./schedule";
 
@@ -34,6 +35,8 @@
 
   let status = $state<BackupStatus | null>(null);
   let error = $state<string | null>(null);
+  /** Whether an export is in flight — see `exportNow` for why it is here. */
+  let exporting = $state(false);
 
   async function load() {
     try {
@@ -50,10 +53,44 @@
   $effect(() => {
     void load();
   });
+
+  /**
+   * *Export now* — take a backup whatever the schedule says.
+   *
+   * The flag is not cosmetic. `pg_dump` over a real corpus takes long enough
+   * that a button which does not visibly change reads as inert, and the
+   * reader's answer to an inert button is to press it again; two archives a
+   * second apart is a retention window one night shorter, for nothing.
+   *
+   * The re-read afterwards is a *re-read*, not an append: an export prunes
+   * past `keep`, so the eighth one with the ratified `keep: 7` removes a file
+   * as well as writing one. A list patched from the record would offer to
+   * restore an archive that is no longer there.
+   */
+  async function exportNow() {
+    exporting = true;
+    try {
+      const record = await backupNow();
+      push({ text: `Backed up to ${record.file}.` });
+      await load();
+    } catch (cause) {
+      // `pg_dump`'s own stderr rides in the message, because it is the only
+      // thing that says *why*: a full disk and a missing tool are different
+      // problems, and "Export failed" distinguishes neither.
+      push({ text: `Export failed: ${ipcErrorMessage(cause)}`, tone: "err" });
+    } finally {
+      exporting = false;
+    }
+  }
 </script>
 
 <div class="tile-h">
   <span class="lab">Backup</span>
+  <span class="acts">
+    <button class="btn sm" disabled={exporting} onclick={() => void exportNow()}>
+      {exporting ? "Exporting…" : "Export now"}
+    </button>
+  </span>
 </div>
 
 {#if error}

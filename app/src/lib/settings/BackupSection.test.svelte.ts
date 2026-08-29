@@ -56,6 +56,7 @@ vi.mock("../ipc/backup", () => ({
 }));
 
 const { default: BackupSection } = await import("./BackupSection.svelte");
+const { toasts } = await import("../shell/toasts.svelte");
 
 function schedule(over: Partial<BackupSchedule> = {}): BackupSchedule {
   return { enabled: true, hour: 3, minute: 0, keep: 7, ...over };
@@ -117,6 +118,7 @@ beforeEach(() => {
   statusFails = null;
   nowFails = null;
   restoreFails = null;
+  toasts.items = [];
   target = document.createElement("div");
   document.body.append(target);
 });
@@ -166,4 +168,95 @@ test("a knobas that has never exported says so", async () => {
 
   expect(text()).toMatch(/no backup|never/i);
   expect(text()).not.toContain("—  ·");
+});
+
+/**
+ * *Export now* has to say **where the file went**, not merely that it worked.
+ *
+ * An archive is a thing a person later has to find in a file manager, and
+ * "Backup complete" is the message that makes them go looking. The name and
+ * the directory are both on screen afterwards: the directory because it is
+ * always there, the name because the re-read has moved the *last export* line
+ * onto the file that was just written.
+ */
+test("Export now names the file it wrote and where it went", async () => {
+  render();
+  await settle();
+
+  status = statusOf({
+    last: { taken_at: NOW.toISOString(), file: "knobas-20260829-091400.knobas", bytes: 4_194_304 },
+    archives: [{ file: "knobas-20260829-091400.knobas", bytes: 4_194_304 }],
+  });
+  button("Export now")!.click();
+  await settle();
+
+  expect(calls.now).toBe(1);
+  expect(text()).toContain("knobas-20260829-091400.knobas");
+  expect(text()).toContain(DIR);
+  expect(toasts.items.map((toast) => toast.text).join(" ")).toContain(
+    "knobas-20260829-091400.knobas",
+  );
+});
+
+/**
+ * The archive list is re-read, not appended to.
+ *
+ * `export_now` writes a file *and* prunes past `keep`, so the list afterwards
+ * is not the list before plus a row — an eighth export with `keep: 7` removes
+ * one. A section that patched its own list would show an archive that is no
+ * longer on disk, and offer to restore it.
+ */
+test("an export re-reads what is on disk rather than assuming", async () => {
+  render();
+  await settle();
+  const readOnce = calls.status;
+
+  button("Export now")!.click();
+  await settle();
+
+  expect(calls.status).toBeGreaterThan(readOnce);
+});
+
+/**
+ * `pg_dump`'s stderr is the message, because it is the only thing that says
+ * *why* — a full disk and a missing tool are different problems with different
+ * fixes, and "Export failed" distinguishes neither.
+ */
+test("a failed export says what failed", async () => {
+  nowFails = {
+    code: "internal",
+    message: "pg_dump: error: could not write to output file: No space left on device",
+    source_id: null,
+  };
+  render();
+  await settle();
+
+  button("Export now")!.click();
+  await settle();
+
+  expect(toasts.items.map((toast) => toast.text).join(" ")).toContain("No space left on device");
+});
+
+/**
+ * One press, one archive.
+ *
+ * An export of a real corpus takes long enough to look like nothing happened,
+ * and the reader's response to a button that looks inert is to press it again.
+ * Two concurrent `pg_dump`s writing two archives a second apart is not a
+ * crash — it is a retention window quietly one night shorter.
+ */
+test("the export button is not offered twice while one is running", async () => {
+  render();
+  await settle();
+
+  button("Export now")!.click();
+  // No `settle`: this is the state a reader is looking at *during* the round
+  // trip, which is the whole window in which a second press is possible.
+  flushSync();
+  expect(button("Export now"), "a second press would write a second archive").toBeUndefined();
+  expect(target.querySelector("button[disabled]")).not.toBeNull();
+
+  await settle();
+  expect(calls.now).toBe(1);
+  expect(button("Export now"), "and it comes back when the export is done").toBeTruthy();
 });
