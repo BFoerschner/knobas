@@ -822,6 +822,53 @@ Stream T note for the Gitea live suite: the seed **cannot** reproduce fixture PR
   RunMode`), so the two cannot disagree — a `debug_assert` pairing them was rejected because it is
   compiled out of `tauri build`, which is exactly where the mislabelling would matter.
 
+### Amendments from the TeamCity watermark ceiling fix (2026-08-29, binding) — issue #91
+
+Ruled by Fable under delegation while Björn was away, 2026-08-29, on issue #91; Björn can
+overturn it. It **supersedes the last bullet of the M2 TeamCity package above** ("the TeamCity
+ceiling probe checks its own ordering assumption") in its entirety, and narrows the ceiling
+bullet before it. Both are left in place as history, the same treatment §9 gives the superseded
+TeamCity locator table.
+
+- **§4.2 the ceiling is the maximum id over the pages a run has *witnessed*, never row 0.**
+  `/app/rest/builds` does not answer in id order. Measured read-only against JetBrains' public
+  instance (2026.2 EAP, build 238763) on 2026-08-28, in one minute: `defaultFilter:false,count:200`
+  answered a page whose row 0 was `6518363` and whose maximum was `6520204`, and
+  `defaultFilter:false,count:20` answered `6518363, 6518362, 6466333, 6466438, 6471105, …` — two
+  descending rows and then an ascending run. `order:(id:desc)` is rejected outright (`Locator
+  dimension [order] is unknown`), so asking for an order is not available. Reading row 0 as the
+  newest build in existence made the source **permanently unsyncable after its second run**, and
+  the remedy the refusal named — reset the cursor — only restarted the loop.
+- **§4.2 the opening probe widens from `count:2` to `count:100`** (`PAGE`), still one un-widened
+  request. `count` is an independent locator dimension, so this adds no grammar the mock contract
+  does not already allow. `defaultFilter:false` stays and its reason is unchanged: the highest id
+  on the live instance belonged to a *personal* build configuration, and a canceled build is the
+  other class the default filter removes.
+- **§4.2 the ceiling's inputs are the probe page and the global in-flight page, and explicitly
+  **not** the finished pages.** The ceiling only has to be an id known to have existed when the
+  in-flight poll completed; every build queued later has a higher id. Finished-page ids can
+  post-date run start, so a ceiling taken from them re-opens the queued-mid-run loss the ceiling
+  exists to close: build Q is queued after the poll and still running when the finished query
+  answers, build R is queued after Q and finishes inside the run, `max(finished) ≥ R > Q`, the
+  clamp does nothing and `sinceBuild` never offers Q again. An under-estimate costs a re-fetch;
+  an over-estimate loses a build.
+- **§4.2 the two-row ordering guard is deleted.** Under a maximum there is no ordering assumption
+  left to protect, and the guard passed on the live page above — rows 0 and 1 descend — while that
+  page was not ordered at all.
+- **§4.2 the replaced-server refusal stays and re-founds its evidence on `GET
+  /app/rest/builds/id:{id}`**, already in this section's endpoint list and already served by mockd
+  (404 on an unknown id). When nothing the run witnessed reaches the watermark, the run fetches the
+  watermark's own build: **found** ⇒ the watermark stands and the run carries on (the ordinary case
+  on an unordered server); **404** ⇒ the same refusal as before, with the message re-worded onto
+  that evidence. This is also what makes the "reset the cursor" remedy work, which it did not
+  before: after a reset the ceiling comes from witnessed current ids rather than a stale row 0.
+  A `403` is *not* read as absence — the credential may not read the build, which is not the same
+  claim — so only a 404 refuses.
+- **§4.2 `BUILD_ID_FIELDS = "id"`** is the `fields=` selector for that request; the body is never
+  read, only the status, and §4.2's "always an explicit `fields=`" still holds.
+- **Frozen surfaces: none.** `crates/knobas-source-teamcity/**` is not in §10.8's list and the
+  `Rest` trait it extends is crate-private. No migration, no IPC change.
+
 ---
 
 ## 10. As built — the contract PR (2026-08-24)

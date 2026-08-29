@@ -67,7 +67,7 @@ _Avoid_: delete, remove
 An item that is not tombstoned — the only thing any reader reads.
 
 **Watermark**:
-A sync position that only advances as work completes. Its **ceiling** is the newest position recorded at run start, which the watermark may never pass within that run.
+A sync position that only advances as work completes. Its **ceiling** is the newest position the run *witnessed* at its start, which the watermark may never pass within that run. Witnessed, not the newest that exists: a ceiling too low costs a re-fetch, one too high loses work.
 
 **Backfill**:
 A deliberate full sync whose purpose is re-fetching unchanged items after the fetched payload widened.

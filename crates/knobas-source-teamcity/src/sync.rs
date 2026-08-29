@@ -1286,15 +1286,19 @@ mod tests {
 
     /// Is this locator the run's opening ceiling probe?
     ///
-    /// The probe is the run's only single-build query and its only query with
-    /// no `state:` at all, so that shape identifies it without naming
-    /// `defaultFilter`. Two reasons not to name it. It would exempt any future
-    /// query that also turns the default filter off -- the same class of
-    /// accident this function exists to undo -- and, more immediately, it
-    /// would make `defaultFilter` un-mutatable: flipping it in
-    /// [`ceiling`] would silently move this clock too, and the kill
-    /// for `the_ceiling_counts_the_builds_in_flight_at_run_start` could no
-    /// longer be attributed to the thing under test.
+    /// The probe is the run's only query with no `state:` at all, so that
+    /// shape identifies it without naming `defaultFilter`. Two reasons not to
+    /// name it. It would exempt any future query that also turns the default
+    /// filter off -- the same class of accident this function exists to undo
+    /// -- and, more immediately, it would make `defaultFilter` un-mutatable:
+    /// flipping it in [`probe`] would silently move this clock too, and the
+    /// kill for `the_ceiling_counts_a_build_the_default_filter_would_hide`
+    /// could no longer be attributed to the thing under test.
+    ///
+    /// `count` is matched too, and follows [`CEILING_PROBE`] rather than a
+    /// literal, so widening the probe cannot silently un-identify it. It no
+    /// longer discriminates on its own -- the probe and the in-flight poll
+    /// both ask for [`PAGE`] now -- which is why `state` carries the check.
     fn is_ceiling_probe(l: &Locator) -> bool {
         l.count == CEILING_PROBE
             && l.state.is_none()
@@ -1708,8 +1712,7 @@ mod tests {
     }
 
     /// The ceiling counts builds that are **in flight** at run start, not only
-    /// finished ones -- which is what `defaultFilter:false` on the ceiling
-    /// query buys, and the whole reason it is there.
+    /// finished ones.
     ///
     /// Build 1100 belongs to a foreign configuration and is running when the
     /// run opens, so it does not clamp: a scoped source must not be held below
@@ -1717,12 +1720,14 @@ mod tests {
     /// finishes during the run and turns up in the global finished query, and
     /// a foreign *finished* build is exactly the case the watermark must
     /// advance past, or the incremental query re-offers it on every poll for
-    /// good.
+    /// good. The ceiling is what lets it: 1100 existed when the run opened, so
+    /// the watermark is free to reach it.
     ///
-    /// TeamCity's default filter hides unfinished builds, so a ceiling taken
-    /// without `defaultFilter:false` would name 1000 here and pin the
-    /// watermark there -- reinstating, through the ceiling, the very clamp the
-    /// asymmetry removes.
+    /// Both opening pages witness 1100 here -- the probe because
+    /// `defaultFilter:false` does not hide a running build, the in-flight poll
+    /// because that is its whole subject. What `defaultFilter:false` buys
+    /// beyond the poll is
+    /// `the_ceiling_counts_a_build_the_default_filter_would_hide`.
     #[tokio::test]
     async fn the_ceiling_counts_the_builds_in_flight_at_run_start() {
         let types = vec![
@@ -1764,6 +1769,37 @@ mod tests {
         );
     }
 
+    /// What `defaultFilter:false` on the opening probe buys that the
+    /// in-flight poll does not, and the whole reason the dimension is there.
+    ///
+    /// Build 1100 is **canceled**: TeamCity reports one as finished with
+    /// `status: "UNKNOWN"` and `statusText: "Canceled"` -- 20 of 20 sampled
+    /// on the live instance -- and its default filter hides it. It is not in
+    /// flight, so the in-flight poll never sees it either. A probe without
+    /// the override therefore witnesses 1000, the ceiling clamps the
+    /// watermark there, and every later run re-reads build 1100 for nothing.
+    ///
+    /// The class is not hypothetical. The highest id in the id space of
+    /// JetBrains' public instance belonged to
+    /// `JetBrainsPublicProjects_Compose_AllPersonalBuild` -- a *personal*
+    /// build configuration, the other class the default filter removes.
+    #[tokio::test]
+    async fn the_ceiling_counts_a_build_the_default_filter_would_hide() {
+        let rest = FakeRest::new(
+            vec![build_type("Payout_Build", "Payout")],
+            vec![
+                build(1_000, "Payout_Build", "Payout", "finished"),
+                canceled_build(1_100, "Payout_Build", "Payout"),
+            ],
+        );
+        let (_, cursor) = run(&rest, &TeamCityConfig::default(), None).await;
+        assert_eq!(
+            cursor, r#"{"v":1,"since_build_id":1100}"#,
+            "1100 is canceled and the default filter hides it; a probe that took the default \
+             would witness 1000 and pin the watermark there"
+        );
+    }
+
     /// The emission order is the run's own, asserted against the property
     /// rather than against another run.
     ///
@@ -1771,13 +1807,12 @@ mod tests {
     /// emit oldest-first. A fixture whose ids arrive already ascending could
     /// not tell the two apart.
     ///
-    /// This is now the *only* pin on emission order being the run's own
-    /// rather than the server's. It used to be paired with a run against an
-    /// ascending server, asserting both produced the same items; since
-    /// `ceiling` refuses an oldest-first server outright
-    /// (`an_oldest_first_server_is_refused_on_its_first_run`), no such run can
-    /// reach this code any more, and a comparison test that cannot execute
-    /// half of itself is worse than none.
+    /// It is asserted against the property rather than against a second run
+    /// in the other order, which is a *different* claim and has its own test:
+    /// `an_oldest_first_server_syncs_rather_than_being_refused` runs the same
+    /// fixture both ways and compares them. That pairing was impossible while
+    /// the ceiling refused an oldest-first server outright; the ordering guard
+    /// is gone (issue #91), so it is available again and lives there.
     #[tokio::test]
     async fn builds_are_emitted_oldest_first_whatever_the_server_sent() {
         let rest = FakeRest::new(
