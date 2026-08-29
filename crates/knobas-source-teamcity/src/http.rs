@@ -215,6 +215,9 @@ fn json_error_message(body: &str) -> Option<String> {
     (!sentences.is_empty()).then(|| sentences.join("; "))
 }
 
+/// The sentence out of the older plain-text form, or `None` for a body that
+/// does not announce itself as one. See [`error_message`] for why this is
+/// still here.
 fn plaintext_error_message(body: &str) -> Option<String> {
     let mut lines = body.lines().map(str::trim).filter(|line| !line.is_empty());
     // The first line is the status, which the message already carries -- and it
