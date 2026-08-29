@@ -48,7 +48,6 @@ knobas-app	lib/knobas_app	inbox::tests::a_review_request_offers_the_ops_its_sour
 knobas-app	lib/knobas_app	inbox::tests::a_source_that_declares_nothing_offers_nothing
 knobas-app	lib/knobas_app	inbox::tests::an_op_the_source_does_not_declare_is_not_offered
 knobas-app	lib/knobas_app	inbox::tests::every_candidate_op_has_a_form_in_the_interface
-knobas-app	lib/knobas_app	inbox::tests::every_candidate_op_is_one_the_spi_defines
 knobas-app	lib/knobas_app	inbox::tests::the_categories_with_no_write_op_offer_nothing_from_any_source
 knobas-app	lib/knobas_app	profile::tests::a_blank_database_url_counts_as_unset
 knobas-app	lib/knobas_app	profile::tests::a_demo_profile_ignores_an_externally_managed_database
@@ -173,6 +172,7 @@ knobas-app	test/inbox_ipc	an_item_offers_only_the_ops_its_own_source_declares
 knobas-app	test/inbox_ipc	an_item_on_the_snoozed_shelf_can_still_be_answered
 knobas-app	test/inbox_ipc	an_item_with_no_write_op_is_still_an_item
 knobas-app	test/inbox_ipc	answering_an_item_that_is_no_longer_there_is_refused_and_records_nothing
+knobas-app	test/inbox_ipc	every_candidate_op_is_one_the_spi_defines
 knobas-app	test/inbox_ipc	marking_an_item_done_records_one_line_and_clears_the_count
 knobas-app	test/inbox_ipc	snoozing_records_one_line_naming_the_item_and_its_date
 knobas-app	test/inbox_ipc	the_action_an_item_offers_reaches_the_source_and_is_recorded

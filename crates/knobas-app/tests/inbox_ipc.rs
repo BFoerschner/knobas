@@ -522,3 +522,68 @@ async fn an_item_on_the_snoozed_shelf_can_still_be_answered() {
         "every inbox action, in order"
     );
 }
+
+/// Every candidate op a category names is one the SPI actually defines.
+///
+/// A typo would be an action silently never offered by any source, which
+/// nothing else in the tree would catch: `Category::candidate_ops` returns
+/// plain strings — deliberately, because `knobas-source` depends on
+/// `knobas-core` and not the reverse — so no compiler checks them.
+///
+/// **In this file rather than beside the table**, and that is the choke-point
+/// guard's doing rather than a preference: `knobas_sync`'s
+/// `write_choke_point.rs` fails any production file under `crates/*/src/` that
+/// so much as *names* `WriteOp` without implementing the trait, and it counts
+/// a `#[cfg(test)]` module. `knobas_app::inbox` names ops as identifiers and
+/// nothing else, which is exactly the property that guard exists to keep true,
+/// so the pin belongs in `tests/` where the scan does not reach.
+#[test]
+fn every_candidate_op_is_one_the_spi_defines() {
+    let known = [
+        WriteOp::Comment {
+            entity: String::new(),
+            body: String::new(),
+        },
+        WriteOp::Transition {
+            entity: String::new(),
+            status: String::new(),
+        },
+        WriteOp::Approve {
+            entity: String::new(),
+            body: String::new(),
+        },
+        WriteOp::RerunBuild {
+            entity: String::new(),
+        },
+        WriteOp::TriggerBuild {
+            entity: String::new(),
+        },
+        WriteOp::CreateBranch {
+            entity: String::new(),
+            name: String::new(),
+            from_ref: String::new(),
+        },
+        WriteOp::CreatePullRequest {
+            entity: String::new(),
+            title: String::new(),
+            body: String::new(),
+            head: String::new(),
+            base: String::new(),
+        },
+        WriteOp::CreateTicket {
+            entity: String::new(),
+            title: String::new(),
+            body: String::new(),
+            ticket_type: String::new(),
+        },
+    ];
+    let identifiers: Vec<&str> = known.iter().map(WriteOp::identifier).collect();
+    for category in knobas_core::inbox::Category::ALL {
+        for op in category.candidate_ops() {
+            assert!(
+                identifiers.contains(op),
+                "{category} asks for {op:?}, which no WriteOp identifies as"
+            );
+        }
+    }
+}

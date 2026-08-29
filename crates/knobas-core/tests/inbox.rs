@@ -56,23 +56,29 @@ async fn scratch() -> PgPool {
         .expect("a pool onto this test's own database")
 }
 
-/// One live mirror item: both halves, because every rule reads
-/// `sync.live_item`, which is the join of the two.
-async fn item(
-    pool: &PgPool,
-    source: &str,
-    kind: &str,
-    key: &str,
-    author: Option<&str>,
-    body: &str,
+/// One mirrored row, as a fixture writes it.
+///
+/// A struct rather than eight positional arguments, because the three shapes
+/// below build it field by field and a test reading `Some(THEM), "", payload`
+/// cannot say which of those is the author.
+struct Mirrored<'a> {
+    source: &'a str,
+    kind: &'a str,
+    key: &'a str,
+    author: Option<&'a str>,
+    body: &'a str,
     payload: serde_json::Value,
     updated: DateTime<Utc>,
-) -> String {
-    let id = EntityRef::new(source, key).to_string();
+}
+
+/// One live mirror item: both halves, because every rule reads
+/// `sync.live_item`, which is the join of the two.
+async fn item(pool: &PgPool, row: Mirrored<'_>) -> String {
+    let id = EntityRef::new(row.source, row.key).to_string();
     sqlx::query("insert into knobas.entity (id, kind, title) values ($1,$2,$3)")
         .bind(&id)
-        .bind(kind)
-        .bind(key)
+        .bind(row.kind)
+        .bind(row.key)
         .execute(pool)
         .await
         .unwrap();
@@ -82,13 +88,13 @@ async fn item(
          values ($1,$2,$3,$4,$5,$6,$7,$8)",
     )
     .bind(&id)
-    .bind(source)
-    .bind(kind)
-    .bind(key)
-    .bind(body)
-    .bind(author)
-    .bind(updated)
-    .bind(payload)
+    .bind(row.source)
+    .bind(row.kind)
+    .bind(row.key)
+    .bind(row.body)
+    .bind(row.author)
+    .bind(row.updated)
+    .bind(row.payload)
     .execute(pool)
     .await
     .unwrap();
@@ -97,20 +103,22 @@ async fn item(
 
 /// A pull request with a reviewer list.
 async fn pull_request(pool: &PgPool, key: &str, reviewers: &[&str], state: &str) -> String {
-    let payload = serde_json::json!({
-        "state": state,
-        "requested_reviewers": reviewers.iter().map(|r| serde_json::json!({"login": r}))
-                                        .collect::<Vec<_>>(),
-    });
     item(
         pool,
-        "gitea",
-        "pr",
-        key,
-        Some(THEM),
-        "",
-        payload,
-        days_ago(1),
+        Mirrored {
+            source: "gitea",
+            kind: "pr",
+            key,
+            author: Some(THEM),
+            body: "",
+            payload: serde_json::json!({
+                "state": state,
+                "requested_reviewers": reviewers.iter()
+                    .map(|r| serde_json::json!({"login": r}))
+                    .collect::<Vec<_>>(),
+            }),
+            updated: days_ago(1),
+        },
     )
     .await
 }
@@ -124,21 +132,22 @@ async fn build(
     triggered_by: Option<&str>,
     updated: DateTime<Utc>,
 ) -> String {
-    let payload = serde_json::json!({
-        "status": status,
-        "state": "finished",
-        "buildTypeId": config,
-        "statusText": "3 tests failed",
-    });
     item(
         pool,
-        "teamcity",
-        "build",
-        key,
-        triggered_by,
-        "",
-        payload,
-        updated,
+        Mirrored {
+            source: "teamcity",
+            kind: "build",
+            key,
+            author: triggered_by,
+            body: "",
+            payload: serde_json::json!({
+                "status": status,
+                "state": "finished",
+                "buildTypeId": config,
+                "statusText": "3 tests failed",
+            }),
+            updated,
+        },
     )
     .await
 }
@@ -152,12 +161,20 @@ async fn ticket(
     body: &str,
     updated: DateTime<Utc>,
 ) -> String {
-    let payload = match assignee {
-        Some(name) => serde_json::json!({ "fields": { "assignee": { "name": name } } }),
-        None => serde_json::json!({ "fields": { "assignee": serde_json::Value::Null } }),
-    };
     item(
-        pool, "jira", "ticket", key, reporter, body, payload, updated,
+        pool,
+        Mirrored {
+            source: "jira",
+            kind: "ticket",
+            key,
+            author: reporter,
+            body,
+            payload: match assignee {
+                Some(name) => serde_json::json!({ "fields": { "assignee": { "name": name } } }),
+                None => serde_json::json!({ "fields": { "assignee": serde_json::Value::Null } }),
+            },
+            updated,
+        },
     )
     .await
 }
