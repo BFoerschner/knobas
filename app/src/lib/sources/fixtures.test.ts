@@ -7,10 +7,18 @@
  * verbatim" is a claim about `crates/knobas-source-*`, and nothing under
  * `app/` can read a Rust `serde_json::json!` literal whose `maximum` is a
  * `const` — which is precisely the property that drifted (#124). Any check of
- * *that* has to run somewhere the adapters are in reach; the repo already has
- * the idiom for it, in `crates/knobas-app/tests/sources_mirror.rs`, where a
- * Rust test `include_str!`s a TypeScript file and compares it against a real
- * value. That is the recommended home and it is deliberately not built here.
+ * *that* has to run somewhere the adapters are in reach, on the idiom in
+ * `crates/knobas-app/tests/sources_mirror.rs`, where a Rust test
+ * `include_str!`s a TypeScript file and compares it against a real value.
+ *
+ * **It is built, in `crates/knobas-app/tests/config_schema_mirror.rs` (#135).**
+ * That file parses each `as const` literal here into a `serde_json::Value` and
+ * compares it against `Registry::builtin().descriptors()`, so `maximum`
+ * arrives with the `const` already resolved and the check tells drift from a
+ * legitimate change. Neither file replaces the other, and neither should be
+ * deleted for duplicating the other: what follows here is the half that one
+ * cannot see — the header's named absence lists, and key *order*, which a
+ * `serde_json::Map` does not keep and the generated form does.
  *
  * What this file does check is the rule's *other* half — the one about
  * absence, which is otherwise kept by memory alone. A property added to or
