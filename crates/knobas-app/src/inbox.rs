@@ -304,6 +304,28 @@ mod tests {
         assert!(offer(Category::CredentialExpiry, Some(&generous)).is_empty());
     }
 
+    /// Every candidate op a category names has a **form in the interface**.
+    ///
+    /// The other half of `app/src/lib/inbox/actions.ts`, and the half that
+    /// cannot be checked from TypeScript: that file skips an op it has no form
+    /// for, which is right for an op a *newer backend* offers (`WriteOp` grows
+    /// per milestone, ADR-0006) and wrong for one this build asks for. Without
+    /// this, adding a candidate op here would be a button that silently never
+    /// appears -- on the one surface whose whole promise is that the action an
+    /// item wants is one press away.
+    #[test]
+    fn every_candidate_op_has_a_form_in_the_interface() {
+        const FORMS: &str = include_str!("../../../app/src/lib/inbox/actions.ts");
+        for category in Category::ALL {
+            for op in category.candidate_ops() {
+                assert!(
+                    FORMS.contains(&format!("\n  {op}: {{")),
+                    "{category} asks for {op:?}, which ACTION_FORMS has no entry for"
+                );
+            }
+        }
+    }
+
     /// Every candidate op a category names is one the SPI actually defines.
     /// A typo here would be an action that is silently never offered by any
     /// source, which nothing else in the tree would catch.

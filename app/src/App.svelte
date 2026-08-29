@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
+  import InboxView from "./lib/inbox/InboxView.svelte";
+  import { inbox } from "./lib/inbox/inbox.svelte";
   import { Launcher } from "./lib/launcher";
   import Booting from "./lib/shell/Booting.svelte";
   import Room from "./lib/shell/Room.svelte";
@@ -79,6 +81,7 @@
     let disposed = false;
     let stopHealth: (() => void) | undefined;
     let stopMerges: (() => void) | undefined;
+    let stopInbox: (() => void) | undefined;
 
     void (async () => {
       // Dev only, and behind `import.meta.env.DEV` so Rollup folds the branch
@@ -110,6 +113,12 @@
       // the same reason the health store is -- a merged pull request does not
       // care which view is open.
       stopMerges = startFollowingMerges();
+      // The inbox moves when the mirror moves and when the reader answers
+      // something, so it subscribes to the two events that already say so
+      // rather than getting a channel of its own. Subscribing here, seeding
+      // below: `inbox_items` goes through the sync engine's state and answers
+      // `not_ready` for the whole of bring-up.
+      stopInbox = inbox.start();
       // Once, at shell start: `list_adapters` is static per build and answers
       // before the database is up, so there is nothing to poll and nothing to
       // tear down.
@@ -125,6 +134,7 @@
       disposed = true;
       stopHealth?.();
       stopMerges?.();
+      stopInbox?.();
       stopKeys();
       stopRouter();
       lifecycle.stop();
@@ -150,6 +160,19 @@
    */
   $effect(() => {
     if (lifecycle.ready) void health.reseed();
+  });
+
+  /**
+   * Seed the inbox the moment the database can answer, and never before.
+   *
+   * The same rule and the same shape as the health seed above: `inbox_items`
+   * reaches the sync engine's state for the adapter descriptors, which is
+   * managed only once the database is up, so a read at mount would throw its
+   * one answer away — and the strip's count would stay at zero for the session
+   * unless a sync happened to finish.
+   */
+  $effect(() => {
+    if (lifecycle.ready) void inbox.refresh();
   });
 
   /**
@@ -233,6 +256,8 @@
           <p><span class="mono">{router.route.hash}</span> arrives in a later milestone.</p>
           <button class="btn" onclick={() => router.back()}>Back to the room</button>
         </div>
+      {:else if router.route.view === "inbox"}
+        <InboxView {router} />
       {:else if router.route.view === "sources"}
         <SourcesView />
       {:else if router.route.view === "settings"}

@@ -5,12 +5,19 @@
   the configured sources), the launcher field, the sync monograms (task 18; the group is empty
   until there are sources to put in it), the gear, and settings.
 
-  The timer, inbox, Assets and Today/Day buttons of spec §2 are M2/M3/M4 and
-  are deliberately absent. Reserving a slot for a button that cannot work is
-  how a shell fills up with dead chrome, and a disabled control teaches the
-  reader nothing except that the app is unfinished.
+  The **inbox count** joined them in M2 (#45): spec §2 puts it in the strip and
+  story 18 is that the number is how a reader knows there is something without
+  opening it. It is a button, because a count nobody can act on is chrome — and
+  it is *absent* at zero rather than drawn as `0`, for the reason the rest of
+  this comment gives.
+
+  The timer, Assets and Today/Day buttons of spec §2 are M3/M4 and are
+  deliberately absent. Reserving a slot for a button that cannot work is how a
+  shell fills up with dead chrome, and a disabled control teaches the reader
+  nothing except that the app is unfinished.
 -->
 <script lang="ts">
+  import { inbox as sharedInbox, type Inbox } from "../inbox/inbox.svelte";
   import type { AuthState } from "../ipc/sources";
   import ContextTabs from "./ContextTabs.svelte";
   import Monogram from "./Monogram.svelte";
@@ -24,11 +31,22 @@
     onsearch,
     contexts = builtinContexts([]),
     health = sharedHealth,
+    inbox = sharedInbox,
   }: {
     router: Router;
     onsearch: () => void;
     /** The rooms the switcher offers. Defaults to *All work* alone. */
     contexts?: RoomContext[];
+    /**
+     * The live inbox store the count is read from.
+     *
+     * **Read, never counted here.** `inbox.count` is the backend's own
+     * statement counted, and it excludes snoozed items because the number
+     * means "needs me now" (#45, story 19). A badge derived from the length of
+     * whatever list this side happens to be holding would be a second
+     * definition of that, and snoozing is the first thing it would get wrong.
+     */
+    inbox?: Inbox;
     /**
      * The live `source:health` store the cluster draws.
      *
@@ -40,6 +58,7 @@
   } = $props();
 
   const onSources = $derived(router.route.view === "sources");
+  const onInbox = $derived(router.route.view === "inbox");
   /**
    * §14's settings surface (#69). A second labelled button rather than a menu
    * behind the gear: there are two destinations, and a two-item menu costs a
@@ -99,6 +118,26 @@
   </button>
 
   <span class="spacer"></span>
+
+  <!--
+    Absent at zero, deliberately. An empty inbox is the state a person should
+    be able to stop thinking about, and a permanent `0` in the strip is a slot
+    the eye keeps checking. The address stays reachable either way.
+  -->
+  {#if inbox.count > 0}
+    <button
+      class="tb-btn {onInbox ? 'on' : ''}"
+      aria-current={onInbox ? "page" : undefined}
+      aria-label="Inbox: {inbox.count} needing you"
+      title="Inbox — {inbox.count} needing you now (snoozed items are not counted)"
+      onclick={() => router.go("#/inbox")}
+    >
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M1.8 8.5h3l1 2h4.4l1-2h3M1.8 8.5 3.6 3h8.8l1.8 5.5v4a1 1 0 0 1-1 1H2.8a1 1 0 0 1-1-1z" />
+      </svg>
+      <span class="k">{inbox.count}</span>
+    </button>
+  {/if}
 
   {#if health.all.length > 0}
     <button

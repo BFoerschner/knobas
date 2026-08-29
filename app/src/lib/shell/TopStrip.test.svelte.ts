@@ -11,6 +11,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
+import { createInbox, type Inbox } from "../inbox/inbox.svelte";
 import type { AuthState, CredentialHealth } from "../ipc/sources";
 import TopStrip from "./TopStrip.svelte";
 import { createHealth } from "./health.svelte";
@@ -29,16 +30,41 @@ function row(source_id: string, state: AuthState): CredentialHealth {
 let target: HTMLDivElement;
 let app: Record<string, unknown> | undefined;
 
-function render(states: CredentialHealth[]) {
+/**
+ * An inbox store with a fixed count and no bridge behind it.
+ *
+ * The count is *given*, never derived from a list, which is the point the
+ * strip's own tests can make and the view's cannot: nothing in this component
+ * may compute the badge from anything it is holding.
+ */
+function inboxOf(count: number): Inbox {
+  const inbox = createInbox({
+    inboxItems: () => Promise.resolve([]),
+    inboxCount: () => Promise.resolve(count),
+    snoozeInboxItem: () => Promise.resolve(),
+    completeInboxItem: () => Promise.resolve(),
+    listen: () => Promise.resolve(() => {}),
+  });
+  return inbox;
+}
+
+function render(states: CredentialHealth[], inbox: Inbox = inboxOf(0)) {
   const health = createHealth({
     credentialHealth: () => Promise.resolve([]),
     listen: () => Promise.resolve(() => {}),
   });
   for (const entry of states) health.patch(entry);
   const router = createRouter();
-  app = mount(TopStrip, { target, props: { router, onsearch: () => {}, health } });
+  app = mount(TopStrip, { target, props: { router, onsearch: () => {}, health, inbox } });
   flushSync();
   return { health, router };
+}
+
+/** The inbox button, if the strip is drawing one. */
+function inboxButton(): HTMLButtonElement | undefined {
+  return [...target.querySelectorAll<HTMLButtonElement>("button")].find((button) =>
+    (button.getAttribute("aria-label") ?? "").startsWith("Inbox"),
+  );
 }
 
 function monograms() {
@@ -151,4 +177,38 @@ test("the strip marks the surface the reader is actually on", () => {
 
   expect(tool("Settings")!.getAttribute("aria-current")).toBe("page");
   expect(tool("Sources")!.getAttribute("aria-current")).toBeNull();
+});
+
+/**
+ * Story 18: the number is how a reader knows there is something without
+ * opening it, and pressing it is how they get there.
+ */
+test("the inbox count is in the strip, and it opens the inbox", async () => {
+  const inbox = inboxOf(3);
+  await inbox.refreshCount();
+  const { router } = render([], inbox);
+
+  const button = inboxButton();
+  expect(button, "no inbox button on a strip with three items waiting").toBeTruthy();
+  expect(button!.textContent).toContain("3");
+
+  button!.click();
+  flushSync();
+  expect(location.hash).toBe("#/inbox");
+  expect(router.route.view).toBe("inbox");
+});
+
+/**
+ * Absent at zero, not drawn as `0`.
+ *
+ * An empty inbox is the state a person should be able to stop thinking about,
+ * and a permanent zero in the strip is a slot the eye keeps checking. The rest
+ * of this file's cluster follows the same rule — "no sources means no cluster
+ * at all, not an empty box".
+ */
+test("an empty inbox draws no button at all", async () => {
+  const inbox = inboxOf(0);
+  await inbox.refreshCount();
+  render([], inbox);
+  expect(inboxButton()).toBeFalsy();
 });
