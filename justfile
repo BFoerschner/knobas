@@ -48,23 +48,34 @@ check: fmt front clippy clippy-libs inventory test
 # nobody's tree. A gate that can fail for reasons unconnected to its own diff
 # is one everybody learns to re-run, which is how a real `-` line gets waved
 # through; that is the failure this recipe exists to prevent, so its scratch
-# file cannot be shared.
+# file cannot be shared. The atomic write below removes the *torn* read, not the
+# *foreign* one -- a shared path would still hand this `diff` another worktree's
+# perfectly complete inventory -- so `mktemp` here is not redundant.
 #
-# `inventory-update` keeps writing `test-inventory.txt` directly, because that
-# path is inside the worktree and no two worktrees share it. It is not atomic,
-# though: the redirect in `_inventory-write` truncates the file the moment the
-# pipeline starts, and the first stage of that pipeline is a cargo build. So a
-# `just check` running *in the same worktree* can still diff against a
-# half-written committed file, and an interrupted `inventory-update` leaves an
-# empty one behind (`git checkout test-inventory.txt` restores it). That window
-# is narrow -- cargo's target-dir lock serialises most of it -- and no other
-# worktree can reach it, so it is not the race fixed here; closing it is a
-# separate change.
+# Both recipes trap `INT` and `TERM` as well as `EXIT`, because bash does not run
+# an `EXIT` trap when a signal it has no handler for terminates the shell: a
+# `SIGTERM`ed run was observed leaving its scratch file in `$TMPDIR`. Each signal
+# trap cleans up, restores the default disposition and re-raises, so the recipe
+# still dies of the signal it was sent rather than reporting a tidy exit 0.
+#
+# `inventory-update` writes `test-inventory.txt` in place -- that path is inside
+# the worktree, so no two worktrees share it -- and the write is atomic:
+# `_inventory-write` builds into a sibling temp file and `mv`s it over, so a
+# reader sees the whole old inventory or the whole new one. It used to be a
+# plain redirect, which truncates the destination the instant the pipeline
+# starts, and the first stage of that pipeline is a full cargo build. The
+# committed file therefore sat *empty* for the minutes that build ran: a
+# `just check` in the same worktree diffed against nothing, and an interrupted
+# `inventory-update` left an empty file behind to be committed. An empty
+# inventory is the worst state this file can be in -- it makes every test read
+# as deleted, which is the exact failure the gate exists to make visible.
 inventory:
     #!/usr/bin/env bash
     set -euo pipefail
     actual=$(mktemp "${TMPDIR:-/tmp}/knobas-inventory-actual.XXXXXX")
     trap 'rm -f "$actual"' EXIT
+    trap 'rm -f "$actual"; trap - INT; kill -INT $$' INT
+    trap 'rm -f "$actual"; trap - TERM; kill -TERM $$' TERM
     just _inventory-write "$actual"
     if ! diff -u test-inventory.txt "$actual"; then
         echo >&2
@@ -100,9 +111,32 @@ inventory-update:
 # everywhere. Filtering only the *actual* side would leave the committed file
 # platform-shaped, and filtering both sides at the diff would still let
 # `inventory-update` write a file whose contents depend on who ran it.
+#
+# The result is assembled in a temp file and `mv`d onto `$1`, because `$1` may
+# be the committed `test-inventory.txt` and a redirect would empty it for the
+# length of the build above. The temp file is a *sibling* of the destination on
+# purpose: `mv` is atomic only within one filesystem, and a `$TMPDIR` that is a
+# different mount would silently turn it back into copy-then-delete, i.e. a
+# destination that is observably partial again. Nothing ever reads the temp
+# file, so its only obligation is not to outlive the recipe -- hence the trap,
+# which covers the interrupt that used to be what left a truncated inventory in
+# the tree.
+#
+# The temp file is seeded from the destination first, for its *mode* and not its
+# contents: `mktemp` creates 0600 and `mv` carries the temp file's permissions
+# onto the destination, so a bare rename would tighten `test-inventory.txt` from
+# 0644 to 0600 on every `inventory-update` -- silently, because git tracks only
+# the exec bit, so neither the gate nor the diff would ever show it. Copying the
+# destination over the temp first makes the replacement inherit the mode it
+# replaces, which is what the redirect did.
 _inventory-write FILE:
     #!/usr/bin/env bash
     set -euo pipefail
+    tmp=$(mktemp "{{FILE}}.XXXXXX")
+    trap 'rm -f "$tmp"' EXIT
+    trap 'rm -f "$tmp"; trap - INT; kill -INT $$' INT
+    trap 'rm -f "$tmp"; trap - TERM; kill -TERM $$' TERM
+    if [ -e "{{FILE}}" ]; then cp -p "{{FILE}}" "$tmp"; fi
     env -u RUSTUP_TOOLCHAIN cargo test --workspace --no-run --message-format=json 2>/dev/null \
       | jq -r 'select(.executable != null and .profile.test == true)
                | (.package_id | if test("#.*@") then (split("#")[1] | split("@")[0])
@@ -112,7 +146,8 @@ _inventory-write FILE:
             "$exe" --list 2>/dev/null | sed -n 's/: test$//p' | sed "s|^|${pkg}\t${target}\t|"
         done \
       | grep -vxF -f <(sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' test-inventory-conditional.txt) \
-      | LC_ALL=C sort > "{{FILE}}"
+      | LC_ALL=C sort > "$tmp"
+    mv "$tmp" "{{FILE}}"
 
 fmt:
     env -u RUSTUP_TOOLCHAIN cargo fmt --all --check
