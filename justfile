@@ -121,6 +121,14 @@ inventory-update:
 # file, so its only obligation is not to outlive the recipe -- hence the trap,
 # which covers the interrupt that used to be what left a truncated inventory in
 # the tree.
+#
+# The temp file is seeded from the destination first, for its *mode* and not its
+# contents: `mktemp` creates 0600 and `mv` carries the temp file's permissions
+# onto the destination, so a bare rename would tighten `test-inventory.txt` from
+# 0644 to 0600 on every `inventory-update` -- silently, because git tracks only
+# the exec bit, so neither the gate nor the diff would ever show it. Copying the
+# destination over the temp first makes the replacement inherit the mode it
+# replaces, which is what the redirect did.
 _inventory-write FILE:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -128,6 +136,7 @@ _inventory-write FILE:
     trap 'rm -f "$tmp"' EXIT
     trap 'rm -f "$tmp"; trap - INT; kill -INT $$' INT
     trap 'rm -f "$tmp"; trap - TERM; kill -TERM $$' TERM
+    if [ -e "{{FILE}}" ]; then cp -p "{{FILE}}" "$tmp"; fi
     env -u RUSTUP_TOOLCHAIN cargo test --workspace --no-run --message-format=json 2>/dev/null \
       | jq -r 'select(.executable != null and .profile.test == true)
                | (.package_id | if test("#.*@") then (split("#")[1] | split("@")[0])
