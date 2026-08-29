@@ -120,3 +120,36 @@ it in one line if he disagrees.
 implementer had named** — `a_branch_listing_that_would_exceed_the_cap_fails_the_run` and its
 repository twin both feed 1,001 records and assert the number in the message. Without that fix
 the ruling's own edits would have failed CI.
+
+## A second deviation, and this one is worth Björn's eye
+
+PR #110 (#82) merged as `8f2729b`. Its merge-manager departed from Fable's ruling on one point, for a
+reason that is more interesting than the point itself.
+
+Fable's ruling item 4 asked that `describe_missing_identity()`'s advice point the reader at
+re-running *Test connection*. The implementer did exactly that:
+
+> "No source has a username configured, so knobas cannot tell which items are yours. Run Test
+> connection on a source to fill its username in, or type one yourself."
+
+That message renders when a **saved** source has no username — and a saved source offers Re-enter,
+Sync now and Delete. The only *Test connection* in the app is a step of the Add-source dialog, on a
+draft. Fable's own item 6 put re-enter-path backfill explicitly out of scope, which is what removed
+the path that would have made item 4's advice followable.
+
+So the ruling's item 4 rests on a premise its item 6 falsified, and the fix for *a surface telling a
+user to do something they cannot do* had replaced it with a more specific version of the same sin.
+The merge-manager applied the ruling's stated intent — the advice has to be followable — over its
+literal suggestion, reworded the message to say when the fill happens and admit the gap, and made
+the test refuse the imperative.
+
+I think that is right, and it is the same move Fable itself made against Björn's sketched option 1
+on the same ticket. Recorded because it is the second time in this batch that a written instruction
+was followed in spirit against its letter, and both times the letter was wrong for a reason the
+writer could not have seen. If Björn wants the literal wording restored, item 6 has to come back
+into scope with it.
+
+**Also from that merge, reported and now filed as #124:** `fixtures.ts` still invents a `required`
+Jira never declares, and gives TeamCity's `builds_per_config` a maximum 20× below the adapter's —
+with three existing tests asserting the wrong bound. The fixture drift that caused #82's JSON-textarea
+bug in the first place is a class, not an instance.
