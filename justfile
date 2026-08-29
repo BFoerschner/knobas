@@ -52,6 +52,12 @@ check: fmt front clippy clippy-libs inventory test
 # *foreign* one -- a shared path would still hand this `diff` another worktree's
 # perfectly complete inventory -- so `mktemp` here is not redundant.
 #
+# Both recipes trap `INT` and `TERM` as well as `EXIT`, because bash does not run
+# an `EXIT` trap when a signal it has no handler for terminates the shell: a
+# `SIGTERM`ed run was observed leaving its scratch file in `$TMPDIR`. Each signal
+# trap cleans up, restores the default disposition and re-raises, so the recipe
+# still dies of the signal it was sent rather than reporting a tidy exit 0.
+#
 # `inventory-update` writes `test-inventory.txt` in place -- that path is inside
 # the worktree, so no two worktrees share it -- and the write is atomic:
 # `_inventory-write` builds into a sibling temp file and `mv`s it over, so a
@@ -68,6 +74,8 @@ inventory:
     set -euo pipefail
     actual=$(mktemp "${TMPDIR:-/tmp}/knobas-inventory-actual.XXXXXX")
     trap 'rm -f "$actual"' EXIT
+    trap 'rm -f "$actual"; trap - INT; kill -INT $$' INT
+    trap 'rm -f "$actual"; trap - TERM; kill -TERM $$' TERM
     just _inventory-write "$actual"
     if ! diff -u test-inventory.txt "$actual"; then
         echo >&2
