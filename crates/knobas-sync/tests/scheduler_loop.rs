@@ -1866,6 +1866,181 @@ async fn adding_a_source_back_under_the_id_voids_the_purge_armed_for_the_old_one
     retire(&pool, &ids).await;
 }
 
+// -- #154: an add_source that commits inside delete_source's own body ---------
+
+/// The cursor stored for a source, or `None`.
+///
+/// Read *with* [`mirrored`] and never instead of it, because the state #154 is
+/// about is the pair. `PURGE_ITEMS` takes `sync.item` rows and tombstones
+/// entities; it never touches `knobas.source_config`, where the cursor lives.
+/// So a purge that fires over a source the user has just added leaves that
+/// source's cursor advanced past a corpus that is gone: the next incremental
+/// run asks for what changed since, is told nothing did, and the hole stays
+/// until somebody orders a backfill by hand. That is what makes this window
+/// worse than the #127 defect the machinery was built to close -- #127 left
+/// *extra* rows, this leaves an invisible absence.
+async fn cursor_of(pool: &PgPool, id: &str) -> Option<String> {
+    let (cursor,): (Option<String>,) =
+        sqlx::query_as("select cursor from knobas.source_config where id = $1")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    cursor
+}
+
+/// **A source added back under the id before the forget even happens is not
+/// purged either** (#154) -- the arm-it branch.
+///
+/// The door `source_added` closes is delete → forget → add. This is the same
+/// race through the opposite door, and it fits *inside `delete_source`'s own
+/// body*: the delete purges and commits, deletes the keychain item, and only
+/// then calls `forget_source`. An `add_source` for the same id that commits in
+/// that window has already run `source_added` by the time the forget arrives,
+/// so there is nothing left to clear the intent the forget is about to arm --
+/// and the run still in flight applies it when it settles, over a source the
+/// user has just created.
+///
+/// Same interleaving as
+/// [`adding_a_source_back_under_the_id_voids_the_purge_armed_for_the_old_one`]
+/// with the two calls in the order `delete_source` actually produces, which is
+/// the whole of the defect: `source_added` before `forget_source`, not after.
+///
+/// The interleaving is arranged rather than hoped for. The re-add is a real
+/// commit landing while a run is demonstrably inside the adapter
+/// ([`await_inside`]), and the run's ending is asserted to be a `Finished` that
+/// upserted its item -- without that, a run that refused at the top would leave
+/// an empty mirror and pass this over a scheduler that does nothing at all.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_source_added_inside_the_delete_does_not_have_the_forgets_purge_armed_over_it() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed_quiet(&pool, 1).await;
+    let id = ids[0].clone();
+    let (deps, inside) = deps_watching_the_adapter(sched_pool, Duration::from_millis(400)).await;
+    let scheduler = Scheduler::start(deps).await.unwrap();
+
+    let watcher = Heard::new();
+    scheduler
+        .trigger(&id, SyncTrigger::Manual, Some(watcher.sink()))
+        .await
+        .unwrap();
+    await_inside(&inside).await;
+
+    // `delete_source`, one statement at a time -- and the add landing between
+    // its second step and its third.
+    config::delete(&pool, &id, true).await.unwrap();
+    assert!(
+        inside.load(Ordering::SeqCst) > 0,
+        "the delete has to commit while the run is still fetching, or there is \
+         no in-flight run for the forget to arm a purge against"
+    );
+    re_add(&pool, &id).await;
+    scheduler.source_added(&id).await;
+    scheduler.forget_source(&id, Purge::Items).await;
+
+    let ending = await_ending(&watcher).await;
+    assert_eq!(
+        (ending.phase, ending.items),
+        (SyncPhase::Finished, 1),
+        "the run has to have committed after the delete, or the purge it \
+         arms has nothing to fire over: {ending:?}"
+    );
+    scheduler.shutdown().await;
+
+    assert_eq!(
+        mirrored(&pool, &id).await,
+        (1, 1),
+        "a source exists under this id again; the purge armed for the one the \
+         user deleted took the mirror out from under it (#154)"
+    );
+    assert!(
+        cursor_of(&pool, &id).await.is_some(),
+        "the run advanced the cursor of whatever row holds the id, which is \
+         the new source's -- the assertion above is what stops that cursor \
+         standing over an emptied mirror"
+    );
+    retire(&pool, &ids).await;
+}
+
+/// **The same window on the run-already-over branch** (#154): a forget that
+/// applies its purge on the spot does not apply it to a source that exists.
+///
+/// The other half of `forget_source`'s decision. When the last run of the id is
+/// over, the forget purges immediately rather than arming -- #127's gap branch,
+/// which is right for a deleted source and wrong for the one the user added
+/// back a moment ago. Here the new source has a mirror of its very own: it was
+/// added, and it synced, before the forget for the *old* source arrived.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_source_added_inside_the_delete_is_not_purged_by_the_forget_itself() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed_quiet(&pool, 1).await;
+    let id = ids[0].clone();
+    let (deps, _) = deps(sched_pool, Duration::from_millis(10)).await;
+    let scheduler = Scheduler::start(deps).await.unwrap();
+
+    // The deleted source's own run, over and settled, so the forget below takes
+    // the branch that purges on the spot.
+    let first = Heard::new();
+    let deleted_sources_run = scheduler
+        .trigger(&id, SyncTrigger::Manual, Some(first.sink()))
+        .await
+        .unwrap();
+    await_ending(&first).await;
+
+    config::delete(&pool, &id, true).await.unwrap();
+    assert_eq!(
+        mirrored(&pool, &id).await,
+        (0, 0),
+        "the delete's own purge is what leaves the mirror empty for the new \
+         source to fill"
+    );
+
+    // Inside `delete_source`'s body: a source added back under the id, and its
+    // first sync, both before the forget arrives.
+    re_add(&pool, &id).await;
+    scheduler.source_added(&id).await;
+    let newcomer = Heard::new();
+    // `Manual`, not `FirstRun`: the scheduler still holds the deleted source's
+    // closed entry -- nothing has forgotten it yet -- and a `FirstRun` trigger
+    // would be served *that* run's recorded ending (ADR-0005) instead of
+    // syncing, which is #119's defect and not this one. Asking for work gets
+    // work.
+    let newcomers_run = scheduler
+        .trigger(&id, SyncTrigger::Manual, Some(newcomer.sink()))
+        .await
+        .unwrap();
+    let ending = await_ending(&newcomer).await;
+    assert_ne!(
+        newcomers_run, deleted_sources_run,
+        "the new source has to have run at all, or this test purges nothing"
+    );
+    assert_eq!(
+        (ending.phase, ending.items),
+        (SyncPhase::Finished, 1),
+        "the new source has to have mirrored something, or this test purges \
+         nothing: {ending:?}"
+    );
+    assert_eq!(
+        mirrored(&pool, &id).await,
+        (1, 1),
+        "and its items have to be in the mirror before the forget arrives"
+    );
+
+    scheduler.forget_source(&id, Purge::Items).await;
+    scheduler.shutdown().await;
+
+    assert_eq!(
+        mirrored(&pool, &id).await,
+        (1, 1),
+        "the forget belonged to the source the user deleted; applying its \
+         purge over the source they added back takes that source's first \
+         sync (#154)"
+    );
+    retire(&pool, &ids).await;
+}
+
 /// **The window does not close when the run does** (#127): a run whose commit
 /// landed between `delete_source`'s purge and the forget is purged by the forget
 /// itself.
