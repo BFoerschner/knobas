@@ -87,7 +87,7 @@
    * sources view puts on `list_sources`, and the same module, so the rejection
    * half cannot be dropped in one place and kept in the other (#107).
    */
-  const read = latestRead();
+  const read = latestRead<BackupStatus>();
 
   function load() {
     return read(backupStatus, {
@@ -142,6 +142,12 @@
    * values instead would show a schedule that is merely believed to be stored
    * — the two differ whenever the stored row is not what was posted, which is
    * what `BackupSchedule::clamped` exists to make possible.
+   *
+   * That answer *is* a `backup_status`, so it is stamped like one. Written
+   * straight to `status` it was the one write in this component outside the
+   * guard, and a `backup_status` already in flight when the save started would
+   * land on top of it — putting the schedule that had just been replaced back
+   * on the screen while the disk holds the new one (#129).
    */
   async function saveSchedule() {
     const next: BackupSchedule = {
@@ -152,9 +158,24 @@
     };
     saving = true;
     try {
-      status = await setBackupSchedule(next);
-      error = null;
-      editing = false;
+      const saved = await setBackupSchedule(next);
+      // The stamp is claimed here rather than around the round trip, and the
+      // difference is the whole point: this answer was read *after* the write,
+      // so it is newer than anything issued while the save was in flight.
+      // Issuing the save through `read` would stamp it before the round trip
+      // and let one of those older reads count as newer.
+      await read(() => Promise.resolve(saved), {
+        ok: (current) => {
+          status = current;
+          error = null;
+          editing = false;
+        },
+        // Unreachable — the promise handed over is already resolved. The
+        // failure path is the `catch` below, deliberately outside the stamp:
+        // the currency rule decides what may be *written to the screen*, not
+        // whether a save that failed is worth telling the person about.
+        fail: () => {},
+      });
     } catch (cause) {
       push({ text: `Could not save the schedule: ${ipcErrorMessage(cause)}`, tone: "err" });
     } finally {
