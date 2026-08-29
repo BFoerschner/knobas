@@ -2,8 +2,16 @@
 //!
 //! Ruling P3 and roadmap §4: **events carry coarse state, at most a handful
 //! per run; per-item progress goes on a `tauri::ipc::Channel` and nowhere
-//! else.** A scheduled run has no channel and emits `sync:state` only; the
-//! first-run wizard attaches one because it draws a progress bar.
+//! else.** A scheduled run emits `sync:state` and nothing per item unless
+//! somebody is watching; the first-run wizard watches because it draws a
+//! progress bar.
+//!
+//! Every run holds a [`Watchers`] regardless, and that is ADR-0005: a caller
+//! can be handed the id of a run the scheduler started on its own -- the wake
+//! after *Add source* starts exactly that run -- and a run whose sinks were
+//! decided when it began would have nowhere to put that caller. So the set
+//! exists from the start and is usually empty, which costs one message built
+//! per throttle tick and delivered to nobody.
 //!
 //! The transport is a trait rather than the Tauri type so the engine stays
 //! free of the app shell (and testable without a webview); `knobas-app` wraps
@@ -50,8 +58,138 @@ pub enum SyncPhase {
 /// Where a run reports itself, when anyone is listening.
 pub trait ProgressSink: Send + Sync {
     /// Report one message. Implementations must not block or fail the run: a
-    /// webview that stopped listening is not a sync error.
+    /// webview that stopped listening is not a sync error -- which is why this
+    /// returns nothing rather than a `Result`. `knobas-app`'s `ChannelSink`
+    /// logs a closed channel and swallows it, so a listener that has gone away
+    /// is discarded where it is noticed and [`Watchers`] never hears of it at
+    /// all.
     fn report(&self, progress: SyncProgress);
+}
+
+/// The sinks watching one run, and the promise that each of them is told how it
+/// ended.
+///
+/// **ADR-0005 -- *a run id always comes with an ending*.** A run holds a *set*
+/// of sinks rather than one, so a caller handed the id of a run already in
+/// flight is enrolled beside whoever started it instead of displacing them or
+/// being dropped. The scheduler hands one of these to every run and reports
+/// through it, which is why the invariant is a property of the type rather than
+/// of each call site: there is one place a sink can be added and one place the
+/// ending is sent, and after the second the first refuses.
+///
+/// The whole state machine is two states and the transition is one way:
+///
+/// - **open** -- the run is going. `attach` enrols; `report` fans out.
+/// - **closed** -- [`close`](Self::close) has fanned the ending out to
+///   everyone enrolled at that moment, and nothing more will ever be sent
+///   through here. `attach` refuses with [`Attach::RunHadEnded`], which is the
+///   scheduler's cue to serve that caller an ending built from the run's log
+///   row instead.
+///
+/// The refusal is what makes the invariant structural. A sink enrolled a
+/// microsecond before the ending still hears it, because both go through the
+/// same lock; a sink that arrives a microsecond after is told so, rather than
+/// being enrolled into a run that will never speak again.
+///
+/// A `std` mutex and not tokio's: [`ProgressSink::report`] is synchronous and
+/// is called from inside the adapter's own stack, so this is never held across
+/// an await. It is recovered from poisoning rather than unwrapped -- a sink
+/// that panicked is a broken caller, and the *run* must not lose its ending
+/// over one.
+pub struct Watchers {
+    run_id: i64,
+    state: std::sync::Mutex<State>,
+}
+
+enum State {
+    /// The run is going; these hear everything it has left to say.
+    Open(Vec<std::sync::Arc<dyn ProgressSink>>),
+    /// The ending has been sent. Nothing is enrolled or reported again.
+    Closed,
+}
+
+/// What [`Watchers::attach`] found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Attach {
+    /// The run was still going. A sink, if one was offered, is enrolled and
+    /// will hear the run's remaining progress and its ending.
+    Joined,
+    /// The run had already ended, so nothing was enrolled -- and whoever holds
+    /// the sink now owes it an ending built from the run's record.
+    RunHadEnded,
+}
+
+impl Watchers {
+    #[must_use]
+    pub fn for_run(run_id: i64) -> std::sync::Arc<Watchers> {
+        std::sync::Arc::new(Watchers {
+            run_id,
+            state: std::sync::Mutex::new(State::Open(Vec::new())),
+        })
+    }
+
+    #[must_use]
+    pub fn run_id(&self) -> i64 {
+        self.run_id
+    }
+
+    /// Enrol a sink, and say whether there was still a run to enrol it in.
+    ///
+    /// `None` enrols nobody and only asks the question -- which is what a
+    /// caller with no channel of its own (the ticker, *Sync now* without a
+    /// progress bar) needs, and why this is one call and not a `is_open()`
+    /// followed by an `attach()`: between those two the run could end, and the
+    /// sink would be enrolled into a run that has already said its last word.
+    pub fn attach(&self, sink: Option<std::sync::Arc<dyn ProgressSink>>) -> Attach {
+        match &mut *self.lock() {
+            State::Open(sinks) => {
+                if let Some(sink) = sink {
+                    sinks.push(sink);
+                }
+                Attach::Joined
+            }
+            State::Closed => Attach::RunHadEnded,
+        }
+    }
+
+    /// Send the run's ending to everyone enrolled, and enrol nobody after.
+    ///
+    /// Idempotent, and the first call wins: the run closes its own watchers
+    /// when it settles, and the scheduler's guard closes them again if the task
+    /// died before reaching that -- the second call must not overwrite a true
+    /// ending with a fallback one.
+    pub fn close(&self, ending: SyncProgress) {
+        let mut state = self.lock();
+        let State::Open(sinks) = std::mem::replace(&mut *state, State::Closed) else {
+            return;
+        };
+        // Still under the lock, so the ending really is the last thing every
+        // one of these hears: a `report` racing this one either ran before the
+        // swap or finds `Closed` and drops its message.
+        for sink in sinks {
+            sink.report(ending.clone());
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, State> {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+impl ProgressSink for Watchers {
+    /// Fan one message out. Nothing at all once the run has ended, and nothing
+    /// at all when nobody is watching -- an unwatched run costs one `Vec` scan
+    /// per throttled message and no allocation beyond the message itself.
+    fn report(&self, progress: SyncProgress) {
+        let State::Open(sinks) = &*self.lock() else {
+            return;
+        };
+        for sink in sinks {
+            sink.report(progress.clone());
+        }
+    }
 }
 
 /// Report at most this often, whatever the item rate.

@@ -344,6 +344,15 @@ export function syncNow(sourceId: string): Promise<number> {
  * should call {@link syncNow} and listen to `EVENTS.syncState`: per-item
  * progress goes on the channel and nowhere else, and events carry coarse state
  * only.
+ *
+ * **This is the first-run wizard's command**, and it asks the scheduler for
+ * *the source's first sync* rather than for a sync (ADR-0005). Adding a source
+ * already wakes the scheduler, so on a fast source that first sync can be over
+ * before this call lands; when it is, the run that already happened comes back
+ * with its ending on the channel instead of a second run being started over a
+ * corpus that is already mirrored. Calling it again — the wizard's *Retry* —
+ * gets a run. Whatever happens, an ending arrives on the channel: there is no
+ * interleaving in which it is safe to add a timeout here.
  */
 export function syncNowWithProgress(
   sourceId: string,

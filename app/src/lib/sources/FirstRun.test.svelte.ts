@@ -31,7 +31,15 @@ const calls = {
   syncWithProgress: [] as string[],
   demoLoad: 0,
   completeFirstRun: 0,
+  listSources: 0,
 };
+
+/**
+ * The corpus `list_sources` reports — deliberately a different number from
+ * anything a run in these tests writes, so a panel reading the run's `upserted`
+ * instead cannot pass by coincidence.
+ */
+let corpus = 213;
 
 /** The channels handed to `sync_now_with_progress`, so a test can drive one. */
 const channels: { onmessage?: (progress: SyncProgress) => void }[] = [];
@@ -43,6 +51,10 @@ vi.mock("../ipc/sources", () => ({
     channels.push(channel);
     // P3: the run id, as soon as the run is *recorded*. Not when it finishes.
     return syncFails ? Promise.reject(syncFails) : Promise.resolve(11);
+  },
+  listSources: () => {
+    calls.listSources += 1;
+    return Promise.resolve([{ ...summary(), item_count: corpus }, { ...summary("mock"), item_count: corpus }]);
   },
   demoLoad: () => {
     calls.demoLoad += 1;
@@ -134,6 +146,8 @@ beforeEach(() => {
   calls.syncWithProgress = [];
   calls.demoLoad = 0;
   calls.completeFirstRun = 0;
+  calls.listSources = 0;
+  corpus = 213;
   channels.length = 0;
   syncFails = null;
   target = document.createElement("div");
@@ -170,6 +184,9 @@ test("the demo profile offers the Tidewater dataset as the first option", async 
   // Loading the demo set finishes the source step outright — it registers the
   // mock source and syncs it in one call.
   expect(step()).toBe("Done");
+  // …and the Done panel counts the mirror, not the run: `demo_load` answers
+  // with a `SyncReport`, whose `upserted` is 21 here and is the wrong half.
+  expect(text()).toContain("213 items");
 });
 
 test("the default profile does not offer demo data at all", () => {
@@ -193,6 +210,8 @@ test("progress from the channel is rendered per phase and item count", async () 
   await settle();
   expect(calls.syncWithProgress).toEqual(["jira"]);
 
+  // While it runs, the run's own count is the only number there is, and it is
+  // the honest one: it says how far this run has got.
   progress({ phase: "fetching", items: 40, elapsed_ms: 900 });
   expect(text()).toContain("40 items");
   expect(text()).toMatch(/fetching/i);
@@ -200,9 +219,52 @@ test("progress from the channel is rendered per phase and item count", async () 
   // P3 again: the command already resolved. Only the channel says it is done.
   expect(button("Finish")).toBeUndefined();
 
-  progress({ phase: "finished", items: 213, elapsed_ms: 4200 });
-  expect(text()).toContain("213 items");
+  progress({ phase: "finished", items: 7, elapsed_ms: 4200 });
+  await settle();
   expect(button("Finish")).toBeTruthy();
+  expect(button("Retry")).toBeUndefined();
+});
+
+test("the finished panel reports the corpus, never what the run happened to write", async () => {
+  // The interleaving ADR-0005 is about: adding a source wakes the scheduler,
+  // so the run this wizard is watching may be the one that already found the
+  // corpus mirrored and wrote nothing. `CONTEXT.md`: *a run that writes nothing
+  // over a full mirror upserted zero* — and *knobas mirrored 0 items* over a
+  // full first sync is the sentence this test exists to stop.
+  corpus = 213;
+  render({ source: summary() });
+  button("Next")!.click();
+  flushSync();
+  button("Next")!.click();
+  flushSync();
+  button("Start the first sync")!.click();
+  await settle();
+
+  progress({ phase: "finished", items: 0, elapsed_ms: 4200 });
+  await settle();
+
+  expect(calls.listSources).toBe(1);
+  expect(text()).toContain("213 items");
+  expect(text()).not.toContain("0 items");
+});
+
+test("a corpus that cannot be read falls back to the run's count rather than a failure panel", async () => {
+  render({ source: summary("nowhere") });
+  button("Next")!.click();
+  flushSync();
+  button("Next")!.click();
+  flushSync();
+  button("Start the first sync")!.click();
+  await settle();
+
+  // `list_sources` answers, but not about this source — the same shape as a
+  // read that failed outright. The sync worked, so the panel still offers
+  // *Finish*: a count that could not be re-read is not a failed sync.
+  progress({ phase: "finished", items: 9, elapsed_ms: 4200 });
+  await settle();
+  expect(text()).toContain("9 items");
+  expect(button("Finish")).toBeTruthy();
+  expect(button("Retry")).toBeUndefined();
 });
 
 test("a sync that only started does not offer Finish", async () => {

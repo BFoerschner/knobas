@@ -38,7 +38,7 @@ use tokio::sync::{Mutex, Notify, Semaphore};
 use tokio_util::sync::CancellationToken;
 
 use crate::config::{self, AuthState, CredentialHealth};
-use crate::progress::{Observed, ProgressSink, SyncPhase, SyncProgress};
+use crate::progress::{Attach, Observed, ProgressSink, SyncPhase, SyncProgress, Watchers};
 use crate::run_log::{self, RunResult, SyncOutcome, SyncTrigger};
 use crate::{SyncError, run_backfill, run_from_stored_cursor};
 
@@ -391,6 +391,76 @@ fn report(
     });
 }
 
+/// Milliseconds since a run started, saturating.
+fn elapsed_ms(started: std::time::Instant) -> u64 {
+    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
+/// The terminal message for a run, built from how the run ended.
+///
+/// **One constructor, two callers, and that is ADR-0005's *faithfully*.** The
+/// run builds this from the verdict it has just recorded; a caller that
+/// attaches after the run is over builds it from the row that verdict was
+/// written to ([`ending_of_record`]). Two constructors would be two chances for
+/// live and late to disagree, and the one that disagreed would be the one
+/// nobody was watching being built.
+fn ending(
+    run_id: i64,
+    source_id: &str,
+    outcome: SyncOutcome,
+    error: Option<String>,
+    items: u64,
+    elapsed_ms: u64,
+) -> SyncProgress {
+    SyncProgress {
+        run_id,
+        source_id: source_id.to_owned(),
+        // The failure phase, not merely "it is over": the first-run wizard's
+        // *Retry* / *Skip for now* offer is driven by this field and by the
+        // message beside it, so a wizard that joined late reaches the same
+        // panel as one that watched the failure happen.
+        phase: if outcome == SyncOutcome::Ok {
+            SyncPhase::Finished
+        } else {
+            SyncPhase::Failed
+        },
+        items,
+        elapsed_ms,
+        message: error,
+    }
+}
+
+/// The ending a run that has already finished owes a caller who has only just
+/// arrived, read back out of the run's log row.
+///
+/// `None` means *nothing faithful can be said about that run*, and there are
+/// two ways to get there: the row has been [pruned](run_log::prune), or it is
+/// still open. An open row is a run whose process died mid-flight --
+/// `outcome` is null while a run is in flight, so there is no recorded outcome
+/// to synthesise from at all. [`run_log::reconcile_abandoned`] closes those at
+/// the next start; until then the honest answer to a caller is a run of its
+/// own, not a guess about somebody else's.
+async fn ending_of_record(
+    pool: &PgPool,
+    source_id: &str,
+    run_id: i64,
+) -> Result<Option<SyncProgress>, sqlx::Error> {
+    let Some(row) = run_log::get(pool, run_id).await? else {
+        return Ok(None);
+    };
+    let (Some(finished_at), Some(outcome)) = (row.finished_at, row.outcome) else {
+        return Ok(None);
+    };
+    Ok(Some(ending(
+        run_id,
+        source_id,
+        outcome,
+        row.error,
+        u64::try_from(row.upserted).unwrap_or(0),
+        u64::try_from((finished_at - row.started_at).num_milliseconds()).unwrap_or(0),
+    )))
+}
+
 async fn attempt(
     deps: &SchedulerDeps,
     source_id: &str,
@@ -410,9 +480,15 @@ async fn attempt(
     // that was never going to run costs no connection at all.
     let mut conn = deps.connections.open().await.map_err(RunFailure::Db)?;
 
-    // The decorator only exists when somebody attached a channel: a scheduled
-    // run allocates nothing and reports nothing per item (P3). `Fetching` and
-    // `Writing` are emitted from inside it, where they are true.
+    // The decorator exists whenever the run has somewhere to report to.
+    // From the scheduler that is *every* run: ADR-0005 lets a caller attach to
+    // a run already in flight, so whether anybody is watching is not settled
+    // when the run starts and a run that decided at the top would have nowhere
+    // to put a later arrival. The cost of an unwatched run is one message built
+    // per throttled tick and handed to an empty set (P3 is about what crosses
+    // the bridge, and nothing does). `None` is for a caller driving a run
+    // directly -- the tests -- and then nothing is built at all. `Fetching` and
+    // `Writing` are emitted from inside the decorator, where they are true.
     // Two independent choices, composed rather than enumerated: whether the
     // run is watched, and which entry point it goes through. Crossing them in
     // one `match` gave four arms, two of which built the same decorator, and
@@ -619,13 +695,50 @@ pub struct Scheduler {
     inner: Arc<Inner>,
 }
 
+/// One source's most recent run, as [`Inner::runs`] holds it.
+///
+/// The flag is the *claim on the source's first sync*, and it is what makes
+/// **spent when taken** true wherever the taking happened. A caller that asks
+/// for [`SyncTrigger::FirstRun`] with a channel of its own -- in practice the
+/// first-run wizard, the only caller of `sync_now_with_progress` -- is asking
+/// about *the source's first sync*, and it is entitled to that answer once.
+/// Being enrolled in the run while it is still going is that answer just as
+/// much as being served the run's recorded ending afterwards is, so both spend
+/// the claim.
+///
+/// Spending it on the live join is the whole point: the wizard's *Retry* is the
+/// same command asking a second time, and a *Retry* that was handed the failure
+/// it is retrying is a button that does nothing. Marking the claim only on the
+/// after-the-fact path left that hole open in every interleaving where the
+/// wizard watched its own run fail, which is the ordinary one.
+///
+/// A trigger with no sink -- the ticker's wake -- never claims: it wants work
+/// done, and a run of its own is what it should get when the last one is over.
+struct RunEntry {
+    watchers: Arc<Watchers>,
+    first_run_claimed: bool,
+}
+
 struct Inner {
     deps: SchedulerDeps,
     permits: Semaphore,
-    /// source id → the run id currently in flight for it. The advisory lock
-    /// would serialise two runs anyway; this stops the *second one existing*,
-    /// which is what keeps the log honest and the UI showing one progress bar.
-    inflight: Mutex<HashMap<String, i64>>,
+    /// source id → the run this scheduler last started for it, and the set of
+    /// sinks watching that run ([`Watchers`]).
+    ///
+    /// While the run is going this is the in-flight claim: the advisory lock
+    /// would serialise two runs anyway, but this stops the *second one
+    /// existing*, which is what keeps the log honest and the UI showing one
+    /// progress bar. A second trigger is enrolled in the run it found instead
+    /// of being handed an id and then silence (ADR-0005).
+    ///
+    /// **The entry outlives the run**, and that is the other half of ADR-0005:
+    /// once the watchers are closed the entry is what lets the next trigger
+    /// discover that the run it would have been handed is already over, and
+    /// serve its caller that run's recorded ending rather than starting a
+    /// second sync over an already-mirrored corpus. It is replaced when a run
+    /// starts and removed when one is found closed, so the map is bounded by
+    /// the number of sources, not by the number of runs.
+    runs: Mutex<HashMap<String, RunEntry>>,
     /// Poked when something changed that might make a source due (a finished
     /// run, a new source, a re-entered credential), so the UI does not wait out
     /// a tick.
@@ -660,7 +773,7 @@ impl Scheduler {
         let inner = Arc::new(Inner {
             deps,
             permits: Semaphore::new(SYNC_CONCURRENCY),
-            inflight: Mutex::new(HashMap::new()),
+            runs: Mutex::new(HashMap::new()),
             wake: Notify::new(),
             cancel: CancellationToken::new(),
             tasks: Mutex::new(Vec::new()),
@@ -677,7 +790,19 @@ impl Scheduler {
     ///
     /// A source already running is not started again -- the id of the run in
     /// flight comes back instead, which makes a double-click on *Sync now*
-    /// harmless.
+    /// harmless. **The caller's sink comes with it** (ADR-0005): whichever of
+    /// those two things happened, the id it is handed is one it can watch, and
+    /// it will be told how that run ended. A caller that never learns is a
+    /// caller with no way to tell a working sync from a hung one, which is why
+    /// there is no timeout anywhere below this line -- a long first sync of a
+    /// large Jira is indistinguishable from a hang by wall-clock.
+    ///
+    /// [`SyncTrigger::FirstRun`] asks for something slightly different and says
+    /// so by its spelling: *the source's first sync*, not *a sync*. If that has
+    /// already happened -- `add_source` wakes the scheduler, so on a fast
+    /// source it can be over before the wizard's own trigger arrives -- the
+    /// caller is handed that run and its recorded ending instead of a second
+    /// run over a corpus that is already mirrored.
     ///
     /// # Errors
     /// [`TriggerError`].
@@ -806,18 +931,66 @@ impl Inner {
         if self.cancel.is_cancelled() {
             return Err(TriggerError::ShuttingDown);
         }
+        // *This* caller is asking about the source's first sync rather than for
+        // a sync: the spelling says which, and the channel says there is
+        // somebody to answer. See [`RunEntry`] for why it is spent on the live
+        // join as well as on the served-from-record one.
+        let asks_for_the_first_sync = trigger == SyncTrigger::FirstRun && progress.is_some();
         // The whole check-and-claim under one lock: two `sync_now` calls
         // arriving together must not both decide the source is idle.
-        let mut inflight = self.inflight.lock().await;
-        if let Some(run_id) = inflight.get(source_id) {
-            return Ok(*run_id);
+        let mut runs = self.runs.lock().await;
+        if let Some(entry) = runs.get_mut(source_id) {
+            let run_id = entry.watchers.run_id();
+            // Enrolled or not, under the run's own lock -- so a sink offered a
+            // microsecond before the ending still hears it, and one offered a
+            // microsecond after is told so rather than enrolled into a run that
+            // has already said its last word.
+            if entry.watchers.attach(progress.clone()) == Attach::Joined {
+                // Enrolment *is* the answer to "what happened to this source's
+                // first sync?", so it spends the claim: whoever asks next --
+                // the wizard's *Retry*, which is the same command asking a
+                // second time -- gets work rather than this run again.
+                entry.first_run_claimed |= asks_for_the_first_sync;
+                return Ok(run_id);
+            }
+            let unclaimed = !entry.first_run_claimed;
+            // That run is over, so the entry has no claim on the source any
+            // more and the next trigger must not find it.
+            runs.remove(source_id);
+            // ...but this trigger may still want it, if nobody spent the claim
+            // while the run was going. A caller asking for the source's *first
+            // sync* is asking about a job, not for a job: hand it that run and
+            // the ending the log recorded for it. Every other trigger --
+            // *Sync now*, the ticker, a backfill -- wants work done, and falls
+            // through to start a run of its own.
+            if asks_for_the_first_sync
+                && unclaimed
+                && let Some(sink) = progress.as_ref()
+                && let Some(ending) = ending_of_record(&self.deps.pool, source_id, run_id).await?
+            {
+                sink.report(ending);
+                return Ok(run_id);
+            }
         }
         if config::get(&self.deps.pool, source_id).await?.is_none() {
             return Err(TriggerError::UnknownSource(source_id.to_owned()));
         }
         let run_id = run_log::start(&self.deps.pool, source_id, trigger).await?;
-        inflight.insert(source_id.to_owned(), run_id);
-        drop(inflight);
+        let watchers = Watchers::for_run(run_id);
+        // The caller that started the run is a watcher like any other; nothing
+        // below this line knows which of them it was.
+        watchers.attach(progress);
+        runs.insert(
+            source_id.to_owned(),
+            RunEntry {
+                watchers: Arc::clone(&watchers),
+                // Starting the run is being served the first sync too: the
+                // wizard that got here first is watching the run it asked for,
+                // and its *Retry* must not be handed this one back.
+                first_run_claimed: asks_for_the_first_sync,
+            },
+        );
+        drop(runs);
 
         // **Before the spawn, and therefore before this returns.** `sync_now`
         // hands the caller a run id (P3) and the docs promise `sync:state` says
@@ -830,7 +1003,7 @@ impl Inner {
 
         let inner = Arc::clone(self);
         let id = source_id.to_owned();
-        let handle = tokio::spawn(async move { inner.run_task(id, run_id, mode, progress).await });
+        let handle = tokio::spawn(async move { inner.run_task(id, run_id, mode, watchers).await });
         let mut tasks = self.tasks.lock().await;
         tasks.retain(|task| !task.is_finished());
         tasks.push(handle);
@@ -838,13 +1011,14 @@ impl Inner {
     }
 
     /// One spawned run: take a permit, do the work (or give up when cancelled),
-    /// settle, release the source.
+    /// settle, tell everyone watching how it ended -- which is also what
+    /// releases the source.
     async fn run_task(
         self: Arc<Self>,
         source_id: String,
         run_id: i64,
         mode: RunMode,
-        progress: Option<Arc<dyn ProgressSink>>,
+        watchers: Arc<Watchers>,
     ) {
         // The permit is what caps concurrency. Acquired *after* the log row
         // exists, so a queued run is visible as "running" in the UI rather
@@ -853,6 +1027,19 @@ impl Inner {
         // behind the concurrency cap has been waiting, and the bar should say
         // so.
         let started = std::time::Instant::now();
+        // Closes the watchers however this task ends. `Watchers::close` is
+        // first-call-wins, so the real ending below still wins on every
+        // ordinary path; this one fires only when the task never reached it --
+        // a panicking adapter, or the abort `shutdown` falls back on. Without
+        // it a caller holding that run's id waits for ever, and the source is
+        // never released: the same failure ADR-0005 is about, arriving through
+        // a door the happy path cannot see.
+        let _closing = Closing {
+            watchers: Arc::clone(&watchers),
+            source_id: source_id.clone(),
+            run_id,
+            started,
+        };
         let permit = tokio::select! {
             biased;
             () = self.cancel.cancelled() => None,
@@ -866,7 +1053,12 @@ impl Inner {
                     biased;
                     () = self.cancel.cancelled() => cancelled_result(),
                     result = execute_run(
-                        &self.deps, &source_id, run_id, mode, progress.clone(), started,
+                        &self.deps,
+                        &source_id,
+                        run_id,
+                        mode,
+                        Some(Arc::clone(&watchers) as Arc<dyn ProgressSink>),
+                        started,
                     ) => result,
                 }
             }
@@ -875,26 +1067,57 @@ impl Inner {
         // closes its connection -- which is why `settle` can still write.
 
         settle(&self.deps, &source_id, run_id, &result).await;
-        if let Some(sink) = progress {
-            // `started`, not `0`: the terminal message is the one a progress
-            // bar shows as the run's duration, and a hardcoded zero made it
-            // report every run as instantaneous.
-            report(
-                &sink,
-                run_id,
-                &source_id,
-                if result.outcome == SyncOutcome::Ok {
-                    SyncPhase::Finished
-                } else {
-                    SyncPhase::Failed
-                },
-                u64::try_from(result.counts.upserted).unwrap_or(0),
-                started,
-                result.error.clone(),
-            );
-        }
-        self.inflight.lock().await.remove(&source_id);
+        // The ending, and with it the release of the source: a trigger that
+        // finds these watchers closed knows the run is over and may start one
+        // of its own. Sent *after* `settle`, so the row a late arrival reads
+        // says the same thing this message does.
+        //
+        // `started`, not `0` -- the terminal message is the one a progress bar
+        // shows as the run's duration, and a hardcoded zero made it report
+        // every run as instantaneous.
+        watchers.close(ending(
+            run_id,
+            &source_id,
+            result.outcome,
+            result.error.clone(),
+            u64::try_from(result.counts.upserted).unwrap_or(0),
+            elapsed_ms(started),
+        ));
         self.wake.notify_one();
+    }
+}
+
+/// What a run whose task died without settling is reported as.
+///
+/// Not a lie about the data: the run's transaction went with the task, so
+/// nothing it had fetched landed. It is a lie about nothing else either --
+/// there is no outcome recorded for such a run, which is exactly what the
+/// sentence says.
+const RUN_STOPPED_MESSAGE: &str = "the run stopped without recording an outcome";
+
+/// Closes a run's watchers if its task ends without doing so itself.
+///
+/// A guard rather than a `catch_unwind` or a second code path: this is the only
+/// construction that also covers the abort in [`Scheduler::shutdown`], and it
+/// cannot be forgotten by a later edit to `run_task` the way a line at the
+/// bottom of the function can.
+struct Closing {
+    watchers: Arc<Watchers>,
+    source_id: String,
+    run_id: i64,
+    started: std::time::Instant,
+}
+
+impl Drop for Closing {
+    fn drop(&mut self) {
+        self.watchers.close(ending(
+            self.run_id,
+            &self.source_id,
+            SyncOutcome::Error,
+            Some(RUN_STOPPED_MESSAGE.to_owned()),
+            0,
+            elapsed_ms(self.started),
+        ));
     }
 }
 

@@ -215,6 +215,26 @@ pub async fn sync_now<R: tauri::Runtime>(
 /// run started should call [`sync_now`] and listen to `sync:state`, because
 /// per-item progress goes on the channel and nowhere else (roadmap §4).
 ///
+/// # Why this one asks for `FirstRun` and [`sync_now`] does not
+///
+/// This is the first-run wizard's command -- the only caller of it, and the
+/// only surface in knobas that draws a per-item bar over a sync. ADR-0005:
+/// *the wizard triggers `FirstRun` rather than `Manual`, so a first sync
+/// carries that spelling whoever starts it and the run log stops recording who
+/// won a race.* Two paths reach the scheduler when a source is added -- the
+/// wake inside [`add_source`] and this command -- and before ADR-0005 the log
+/// said `first_run` or `manual` depending on which of them got there first.
+///
+/// The spelling also **asks for something narrower**: the source's first sync,
+/// rather than a sync. If the wake's run is already over by the time this
+/// arrives, the scheduler hands back that run and its recorded ending instead
+/// of starting a second one over a corpus that is already mirrored -- which is
+/// what used to put *knobas mirrored 0 items* over a full first sync. A second
+/// call (the wizard's *Retry*) finds nothing left to be handed and gets a run.
+///
+/// [`sync_now`], and therefore *Sync now* in the sources view and the retry
+/// behind *Re-enter*, keeps `Manual`: those ask for work, not for news.
+///
 /// # Errors
 /// As [`sync_now`].
 #[tauri::command]
@@ -228,7 +248,7 @@ pub async fn sync_now_with_progress<R: tauri::Runtime>(
         as std::sync::Arc<dyn knobas_sync::ProgressSink>;
     state
         .scheduler
-        .trigger(&source_id, knobas_sync::SyncTrigger::Manual, Some(sink))
+        .trigger(&source_id, knobas_sync::SyncTrigger::FirstRun, Some(sink))
         .await
         .map_err(|error| to_ipc(&error.into(), Some(&source_id)))
 }

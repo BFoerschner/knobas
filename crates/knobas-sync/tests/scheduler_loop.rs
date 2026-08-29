@@ -16,6 +16,7 @@ use knobas_secrets::MemoryStore;
 use knobas_source::instance::SourceInstance;
 use knobas_source::{Cursor, Sink, Source, SourceDescriptor, SourceError};
 use knobas_sync::config::{self, AuthKind, InsertConfig};
+use knobas_sync::progress::{ProgressSink, SyncPhase, SyncProgress};
 use knobas_sync::run_log::{self, SyncTrigger};
 use knobas_sync::scheduler::{
     AdapterRegistry, RunConnections, SYNC_CONCURRENCY, Scheduler, SchedulerDeps, SourceSyncStatus,
@@ -139,6 +140,63 @@ async fn serially() -> tokio::sync::MutexGuard<'static, ()> {
     SERIAL.lock().await
 }
 
+/// One caller's channel: everything it was told about a run, in order.
+///
+/// A test's stand-in for `knobas-app`'s `ChannelSink`, and the only way to say
+/// what a caller *observed* -- which is the whole subject of ADR-0005. Reading
+/// the log row instead would answer a different question, and would answer it
+/// for a caller that heard nothing at all.
+#[derive(Default)]
+struct Heard(std::sync::Mutex<Vec<SyncProgress>>);
+
+impl ProgressSink for Heard {
+    fn report(&self, progress: SyncProgress) {
+        self.0.lock().unwrap().push(progress);
+    }
+}
+
+impl Heard {
+    fn new() -> Arc<Heard> {
+        Arc::new(Heard::default())
+    }
+
+    /// The same recorder, as the trait object `trigger` takes.
+    fn sink(self: &Arc<Self>) -> Arc<dyn ProgressSink> {
+        Arc::clone(self) as Arc<dyn ProgressSink>
+    }
+
+    fn all(&self) -> Vec<SyncProgress> {
+        self.0.lock().unwrap().clone()
+    }
+
+    /// The run's ending, if this caller has been given one yet.
+    fn ending(&self) -> Option<SyncProgress> {
+        self.all()
+            .into_iter()
+            .find(|p| matches!(p.phase, SyncPhase::Finished | SyncPhase::Failed))
+    }
+}
+
+/// Wait for the ending ADR-0005 promises this caller, and fail loudly without
+/// one.
+///
+/// Polling the recorder rather than the log row: `settle` writes `finished_at`
+/// before the run tells anybody, so a test that waited on the row would pass
+/// over a caller that was never told -- which is precisely the defect.
+async fn await_ending(heard: &Arc<Heard>) -> SyncProgress {
+    for _ in 0..200 {
+        if let Some(ending) = heard.ending() {
+            return ending;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!(
+        "no ending in five seconds; the caller was handed a run id it cannot \
+         observe. Heard: {:?}",
+        heard.all()
+    );
+}
+
 /// A pool for the test's own reads, and a scheduler pool the scheduler will
 /// close on shutdown. Two, because `Scheduler::shutdown` closes the one it was
 /// given and a closed pool cannot serve the assertions afterwards.
@@ -176,6 +234,21 @@ async fn seed(pool: &PgPool, n: usize) -> Vec<String> {
         .unwrap();
         ids.push(id);
     }
+    ids
+}
+
+/// Sources the ticker will not adopt, for the tests that drive both trigger
+/// paths by hand.
+///
+/// The ADR-0005 tests below play the wizard and the wake against each other and
+/// count the runs that result; a third, uncontrolled actor starting runs of its
+/// own would make "exactly one run" a coin toss on a slow machine. Disabled
+/// rather than left enabled, because `config::due` skips a disabled source and
+/// [`Scheduler::trigger`] deliberately does not -- which is exactly the
+/// asymmetry these tests need.
+async fn seed_quiet(pool: &PgPool, n: usize) -> Vec<String> {
+    let ids = seed(pool, n).await;
+    retire(pool, &ids).await;
     ids
 }
 
@@ -644,14 +717,6 @@ async fn every_declared_phase_is_actually_emitted() {
 /// One run through the whole ticker, as wire spellings, plus the source ids to
 /// retire afterwards.
 async fn phases_of(fault: Option<fn() -> SourceError>) -> (Vec<String>, Vec<String>) {
-    #[derive(Default)]
-    struct Recorder(std::sync::Mutex<Vec<knobas_sync::progress::SyncProgress>>);
-    impl knobas_sync::progress::ProgressSink for Recorder {
-        fn report(&self, progress: knobas_sync::progress::SyncProgress) {
-            self.0.lock().unwrap().push(progress);
-        }
-    }
-
     let (pool, sched_pool) = pools().await;
     let ids = seed(&pool, 1).await;
     let id = ids[0].clone();
@@ -673,34 +738,18 @@ async fn phases_of(fault: Option<fn() -> SourceError>) -> (Vec<String>, Vec<Stri
     .await
     .unwrap();
 
-    let sink = Arc::new(Recorder::default());
+    let sink = Heard::new();
     let run_id = scheduler
-        .trigger(
-            &id,
-            SyncTrigger::Manual,
-            Some(Arc::clone(&sink) as Arc<dyn knobas_sync::progress::ProgressSink>),
-        )
+        .trigger(&id, SyncTrigger::Manual, Some(sink.sink()))
         .await
         .unwrap();
 
     // Wait for the terminal message rather than for the log row: it is the last
     // thing the run does, so anything earlier can read a half-finished list.
-    for _ in 0..200 {
-        let done = sink.0.lock().unwrap().iter().any(|p| {
-            matches!(
-                p.phase,
-                knobas_sync::progress::SyncPhase::Finished
-                    | knobas_sync::progress::SyncPhase::Failed
-            )
-        });
-        if done {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
+    await_ending(&sink).await;
     scheduler.shutdown().await;
 
-    let seen = sink.0.lock().unwrap().clone();
+    let seen = sink.all();
     assert!(!seen.is_empty(), "a channel that was attached saw nothing");
     assert!(
         seen.iter().all(|p| p.run_id == run_id && p.source_id == id),
@@ -744,10 +793,13 @@ async fn phases_of(fault: Option<fn() -> SourceError>) -> (Vec<String>, Vec<Stri
 /// **Two sources, one each, deliberately.** The same source twice would need
 /// the first run to be over before the second is triggered, and "over" has two
 /// meanings here that do not coincide: `settle` writes `finished_at` and only
-/// then does `run_task` release the source from the in-flight map, so a poll on
-/// the log row can win that race and the second trigger is handed the first
-/// run's id. (Observed -- the first draft of this test failed exactly there,
-/// `left: 5, right: 5`.) Two sources have nothing to serialise.
+/// then does `run_task` close the run's watchers, so a poll on the log row can
+/// win that race and the second trigger -- arriving while the watchers are
+/// still open -- is enrolled in the first run and handed its id. (Observed --
+/// the first draft of this test failed exactly there, `left: 5, right: 5`.)
+/// ADR-0005 did not close this window: it changed what the second caller *hears*
+/// (an ending, rather than silence), not when the source stops being claimed.
+/// Two sources have nothing to serialise.
 ///
 /// This goes through [`Scheduler::backfill`] rather than `execute_run`, which
 /// is the only way the spelling is under test at all -- `execute_run`'s callers
@@ -813,4 +865,595 @@ async fn await_finish(pool: &PgPool, run_id: i64) {
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
     panic!("run {run_id} never finished");
+}
+
+// -- ADR-0005: a run id always comes with an ending ---------------------------
+
+/// **A run holds a set of sinks, and the second one does not displace the
+/// first.**
+///
+/// The dedupe that hands a second caller the run already in flight is the
+/// behaviour that makes a double-clicked *Sync now* harmless, and it used to
+/// drop that caller's sink on the floor: an id, and then silence. Both callers
+/// hear the run now -- its progress while it runs and its ending when it ends
+/// -- and neither costs the other anything.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn two_callers_watching_one_run_both_hear_it_end() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed(&pool, 1).await;
+    let id = ids[0].clone();
+    let (deps, _) = deps(sched_pool, Duration::from_millis(600)).await;
+    let scheduler = Scheduler::start(deps).await.unwrap();
+
+    let starter = Heard::new();
+    let joiner = Heard::new();
+    let first = scheduler
+        .trigger(&id, SyncTrigger::Manual, Some(starter.sink()))
+        .await
+        .unwrap();
+    // Well inside the adapter's dwell, so the second caller joins a run that is
+    // genuinely still going rather than one that is already over.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let second = scheduler
+        .trigger(&id, SyncTrigger::Manual, Some(joiner.sink()))
+        .await
+        .unwrap();
+    assert_eq!(first, second, "one run, two watchers");
+
+    let by_starter = await_ending(&starter).await;
+    let by_joiner = await_ending(&joiner).await;
+    scheduler.shutdown().await;
+
+    assert_eq!(by_starter.phase, SyncPhase::Finished);
+    assert_eq!(by_joiner.phase, SyncPhase::Finished);
+    assert_eq!((by_starter.run_id, by_joiner.run_id), (first, first));
+    assert_eq!(by_starter.items, by_joiner.items, "one run, one count");
+    // Progress, not only the ending: the joiner attached while the adapter was
+    // still fetching, and a set of sinks that only fanned out the terminal
+    // message would leave its progress bar at zero until the run was over.
+    assert!(
+        joiner.all().len() > 1,
+        "the joiner heard only its ending: {:?}",
+        joiner.all()
+    );
+    assert_eq!(
+        starter.all().first().map(|p| p.phase),
+        Some(SyncPhase::Started),
+        "the caller that started the run still hears it start"
+    );
+    assert_eq!(
+        run_log::list(&pool, Some(&id), 10).await.unwrap().len(),
+        1,
+        "one run, one row"
+    );
+    retire(&pool, &ids).await;
+}
+
+/// **The invariant ADR-0005 says a later reader will simplify away: a caller
+/// that attaches to a run which has already finished is served its ending, at
+/// once, from the record.**
+///
+/// This is the interleaving the first-run wizard actually loses. `add_source`
+/// wakes the scheduler, the scheduler's run of a brand-new source is the whole
+/// first sync, and on a fast source it can be over before the wizard's own
+/// trigger reaches the engine. The wizard then used to start a *second* run
+/// over an already-mirrored corpus and report what that one wrote, which was
+/// nothing.
+///
+/// So the second trigger starts nothing: it is handed the run that already
+/// happened, together with a terminal message synthesised from that run's log
+/// row. The assertion is taken with nothing awaited after the trigger returns,
+/// because "eventually" is what a caller cannot tell apart from a hang.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_first_run_trigger_after_the_run_ended_is_served_the_ending_from_the_record() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed_quiet(&pool, 1).await;
+    let id = ids[0].clone();
+    let (deps, _) = deps(sched_pool, Duration::from_millis(300)).await;
+    let scheduler = Scheduler::start(deps).await.unwrap();
+
+    // The scheduler's own first run of a brand-new source: `FirstRun` and no
+    // channel, which is exactly what the ticker does with a source `add_source`
+    // just woke it for. **No sink here**, because a `FirstRun` caller carrying
+    // one is served the source's first sync and spends the claim on it -- and
+    // then the wizard below would be a *second* asker rather than the first,
+    // which is not the interleaving under test.
+    let scheduled = scheduler
+        .trigger(&id, SyncTrigger::FirstRun, None)
+        .await
+        .unwrap();
+    // Observed under `Manual` -- *Sync now* joining a run in flight -- only so
+    // the test can know that run is *completely* over: `settle` writes
+    // `finished_at` before the run tells anyone, so waiting on the log row
+    // would leave the run's sinks still open and test the in-flight path by
+    // accident. `Manual` asks for work rather than for the first sync, so it
+    // does not spend the claim either.
+    let observer = Heard::new();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(
+        scheduler
+            .trigger(&id, SyncTrigger::Manual, Some(observer.sink()))
+            .await
+            .unwrap(),
+        scheduled,
+        "the observer joined the wake's run rather than starting one"
+    );
+    await_ending(&observer).await;
+
+    let wizard = Heard::new();
+    let handed = scheduler
+        .trigger(&id, SyncTrigger::FirstRun, Some(wizard.sink()))
+        .await
+        .unwrap();
+    // No await in between: immediately, or not at all.
+    let served = wizard.all();
+    scheduler.shutdown().await;
+
+    assert_eq!(
+        handed, scheduled,
+        "the wizard is handed the run that already happened, not a second one"
+    );
+    let rows = run_log::list(&pool, Some(&id), 10).await.unwrap();
+    assert_eq!(rows.len(), 1, "adding a source produces one run: {rows:?}");
+    let row = &rows[0];
+    assert_eq!(row.trigger, SyncTrigger::FirstRun);
+
+    assert_eq!(
+        served.len(),
+        1,
+        "a caller that arrives after the end hears the ending and nothing else: {served:?}"
+    );
+    let ending = &served[0];
+    // Faithful to the record, field by field -- the row is where a later reader
+    // gets its answer, so it is where this one comes from.
+    assert_eq!(ending.phase, SyncPhase::Finished);
+    assert_eq!(ending.run_id, scheduled);
+    assert_eq!(ending.source_id, id);
+    assert_eq!(i64::try_from(ending.items).unwrap(), row.upserted);
+    assert_eq!(ending.message, row.error);
+    assert!(
+        ending.elapsed_ms > 0,
+        "the run took time and the ending says so: {ending:?}"
+    );
+    retire(&pool, &ids).await;
+}
+
+/// **A failure reads the same whether it was watched live or joined
+/// afterwards** -- and *Retry* is still a retry.
+///
+/// The wizard's failure panel, with its *Retry* and *Skip for now*, is driven
+/// entirely by the phase and the message on this channel. A caller that joined
+/// after the run failed therefore has to be given the failure phase and the
+/// error text the run stored, or it lands on a success panel over a sync that
+/// did not happen.
+///
+/// The second half of the test is why the claim is spent when it is taken:
+/// *Retry* is the same command asking a second time, and a *Retry* that replayed
+/// the failure it was retrying would be a button that does nothing.
+///
+/// **The interleaving is the production one, deliberately.** The run is started
+/// by the wake -- `FirstRun` with no channel of its own -- and the live watcher
+/// joins it under `Manual`, which is *Sync now* pressed while the first sync is
+/// going. Neither spends the claim on the source's first sync, so the wizard
+/// arriving afterwards is genuinely the first caller owed that answer. An
+/// earlier draft had the live watcher itself trigger `FirstRun`, which meant
+/// three callers where production has two -- and the third one silently spent
+/// the claim, so the *Retry* assertion below passed without the claim ever
+/// being spent by the caller that pressed the button. See
+/// [`the_wizards_retry_after_watching_its_own_run_fail_starts_a_run`], which is
+/// the case that draft could not see.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_failure_reads_the_same_live_or_joined_and_retry_still_runs() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed_quiet(&pool, 1).await;
+    let id = ids[0].clone();
+    let connector = knobas_db::test_util::test_connector().await;
+    let scheduler = Scheduler::start(SchedulerDeps {
+        pool: sched_pool,
+        connections: Arc::new(TestConnections(connector)),
+        registry: Arc::new(SlowRegistry {
+            inside: Arc::new(AtomicUsize::new(0)),
+            peak: Arc::new(AtomicUsize::new(0)),
+            // Long enough that the live watcher joins a run that is genuinely
+            // still going; the fault is raised after the dwell.
+            dwell: Duration::from_millis(400),
+            fault: Some(|| SourceError::Unreachable("simulated".into())),
+        }),
+        secrets: Arc::new(MemoryStore::new()),
+        events: Arc::new(Silent),
+    })
+    .await
+    .unwrap();
+
+    // The wake's run: `add_source` pokes the scheduler, and the ticker triggers
+    // with no channel of its own.
+    let failed = scheduler
+        .trigger(&id, SyncTrigger::FirstRun, None)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let live = Heard::new();
+    assert_eq!(
+        scheduler
+            .trigger(&id, SyncTrigger::Manual, Some(live.sink()))
+            .await
+            .unwrap(),
+        failed,
+        "the live watcher joined the run that was going, rather than starting one"
+    );
+    let watched = await_ending(&live).await;
+
+    let late = Heard::new();
+    let handed = scheduler
+        .trigger(&id, SyncTrigger::FirstRun, Some(late.sink()))
+        .await
+        .unwrap();
+    let joined = late.all();
+    assert_eq!(handed, failed, "the same run, not a second attempt at it");
+    assert_eq!(joined.len(), 1, "the ending, immediately: {joined:?}");
+    let joined = &joined[0];
+
+    assert_eq!(joined.phase, SyncPhase::Failed);
+    assert!(
+        joined
+            .message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("simulated"),
+        "the stored error text is what the panel renders: {joined:?}"
+    );
+    // Field by field against what the live watcher was told. `elapsed_ms` is
+    // the one that cannot match: the run measures it from a monotonic clock and
+    // the record from two timestamps, so the claim there is only that neither
+    // reports the run as instantaneous.
+    assert_eq!(
+        (
+            joined.phase,
+            joined.run_id,
+            joined.source_id.as_str(),
+            joined.items,
+            joined.message.as_deref()
+        ),
+        (
+            watched.phase,
+            watched.run_id,
+            watched.source_id.as_str(),
+            watched.items,
+            watched.message.as_deref()
+        ),
+        "a caller cannot tell watching live from joining late"
+    );
+    assert!(joined.elapsed_ms > 0 && watched.elapsed_ms > 0);
+
+    // *Retry*: the claim was spent by the caller that took it, so this one gets
+    // work rather than yesterday's news.
+    let retry = Heard::new();
+    let retried = scheduler
+        .trigger(&id, SyncTrigger::FirstRun, Some(retry.sink()))
+        .await
+        .unwrap();
+    assert_ne!(
+        retried, failed,
+        "Retry must start a run, not replay the failure it is retrying"
+    );
+    assert_eq!(await_ending(&retry).await.phase, SyncPhase::Failed);
+    scheduler.shutdown().await;
+    retire(&pool, &ids).await;
+}
+
+/// **The wizard's *Retry* starts a run even when the wizard watched the run it
+/// is retrying.**
+///
+/// The claim on a source's first sync is spent by whoever is served it, and
+/// there are two ways to be served: enrolled in the run while it is going, or
+/// handed its recorded ending afterwards. Only the second is visible from a
+/// test that puts a third caller between the failure and the *Retry* --
+/// [`a_failure_reads_the_same_live_or_joined_and_retry_still_runs`] used to,
+/// and the missing half was the ordinary case: the wizard triggers, watches its
+/// own run fail, and presses the button. If enrolment does not spend the claim,
+/// that press is served the failure it is retrying, starts nothing, and *Retry*
+/// needs pressing twice to do anything.
+///
+/// Two callers, which is what production has: this run has no late joiner.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_wizards_retry_after_watching_its_own_run_fail_starts_a_run() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed_quiet(&pool, 1).await;
+    let id = ids[0].clone();
+    let connector = knobas_db::test_util::test_connector().await;
+    let scheduler = Scheduler::start(SchedulerDeps {
+        pool: sched_pool,
+        connections: Arc::new(TestConnections(connector)),
+        registry: Arc::new(SlowRegistry {
+            inside: Arc::new(AtomicUsize::new(0)),
+            peak: Arc::new(AtomicUsize::new(0)),
+            dwell: Duration::from_millis(20),
+            fault: Some(|| SourceError::Unreachable("simulated".into())),
+        }),
+        secrets: Arc::new(MemoryStore::new()),
+        events: Arc::new(Silent),
+    })
+    .await
+    .unwrap();
+
+    let wizard = Heard::new();
+    let failed = scheduler
+        .trigger(&id, SyncTrigger::FirstRun, Some(wizard.sink()))
+        .await
+        .unwrap();
+    assert_eq!(await_ending(&wizard).await.phase, SyncPhase::Failed);
+
+    // *Retry*: the same command asking a second time, with nobody else having
+    // touched the source in between.
+    let retry = Heard::new();
+    let retried = scheduler
+        .trigger(&id, SyncTrigger::FirstRun, Some(retry.sink()))
+        .await
+        .unwrap();
+    assert_eq!(await_ending(&retry).await.phase, SyncPhase::Failed);
+    scheduler.shutdown().await;
+
+    assert_ne!(
+        retried, failed,
+        "Retry was handed the run it is retrying: the button does nothing"
+    );
+    assert_eq!(
+        run_log::list(&pool, Some(&id), 10).await.unwrap().len(),
+        2,
+        "a retry is a run, and the log should say so"
+    );
+    retire(&pool, &ids).await;
+}
+
+/// **The wizard that joined a run already in flight still gets a run when it
+/// retries.**
+///
+/// The same claim, spent on the other path: here the wake started the run and
+/// the wizard was enrolled in it mid-flight, which is the interleaving
+/// `add_source`'s wake produces on an ordinary machine. The press afterwards
+/// must still reach the scheduler.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_wizard_that_joined_the_wakes_run_still_gets_a_run_when_it_retries() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed_quiet(&pool, 1).await;
+    let id = ids[0].clone();
+    let connector = knobas_db::test_util::test_connector().await;
+    let scheduler = Scheduler::start(SchedulerDeps {
+        pool: sched_pool,
+        connections: Arc::new(TestConnections(connector)),
+        registry: Arc::new(SlowRegistry {
+            inside: Arc::new(AtomicUsize::new(0)),
+            peak: Arc::new(AtomicUsize::new(0)),
+            dwell: Duration::from_millis(300),
+            fault: Some(|| SourceError::Unreachable("simulated".into())),
+        }),
+        secrets: Arc::new(MemoryStore::new()),
+        events: Arc::new(Silent),
+    })
+    .await
+    .unwrap();
+
+    let woken = scheduler
+        .trigger(&id, SyncTrigger::FirstRun, None)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let wizard = Heard::new();
+    let joined = scheduler
+        .trigger(&id, SyncTrigger::FirstRun, Some(wizard.sink()))
+        .await
+        .unwrap();
+    assert_eq!(joined, woken, "the wizard joined the run the wake started");
+    assert_eq!(await_ending(&wizard).await.phase, SyncPhase::Failed);
+
+    let retry = Heard::new();
+    let retried = scheduler
+        .trigger(&id, SyncTrigger::FirstRun, Some(retry.sink()))
+        .await
+        .unwrap();
+    assert_eq!(await_ending(&retry).await.phase, SyncPhase::Failed);
+    scheduler.shutdown().await;
+
+    assert_ne!(
+        retried, woken,
+        "the wizard was enrolled in that run, so it is not owed it a second time"
+    );
+    retire(&pool, &ids).await;
+}
+
+/// **Adding a source produces exactly one run, whichever path reaches the
+/// scheduler first.**
+///
+/// `add_source` wakes the scheduler so a brand-new source is not idle until its
+/// first tick, and the wizard triggers a sync of its own because it draws the
+/// progress bar: two paths for one intention. Both orders end with one run in
+/// the log, spelled `first_run`, and the wizard hearing that run's ending.
+///
+/// The third interleaving -- the wake's run finishing before the wizard's
+/// trigger arrives -- is
+/// [`a_first_run_trigger_after_the_run_ended_is_served_the_ending_from_the_record`],
+/// which is the one that used to produce a second run over an already-mirrored
+/// corpus.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn adding_a_source_produces_exactly_one_run_on_every_interleaving() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed_quiet(&pool, 2).await;
+    let (wizard_first, wake_first) = (ids[0].clone(), ids[1].clone());
+    let (deps, _) = deps(sched_pool, Duration::from_millis(400)).await;
+    let scheduler = Scheduler::start(deps).await.unwrap();
+
+    // The wizard's trigger arrives first; the wake's finds the run it started.
+    let a = Heard::new();
+    let a_wizard = scheduler
+        .trigger(&wizard_first, SyncTrigger::FirstRun, Some(a.sink()))
+        .await
+        .unwrap();
+    let a_wake = scheduler
+        .trigger(&wizard_first, SyncTrigger::FirstRun, None)
+        .await
+        .unwrap();
+
+    // The wake's trigger arrives first and its run is still going when the
+    // wizard arrives.
+    let b_wake = scheduler
+        .trigger(&wake_first, SyncTrigger::FirstRun, None)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let b = Heard::new();
+    let b_wizard = scheduler
+        .trigger(&wake_first, SyncTrigger::FirstRun, Some(b.sink()))
+        .await
+        .unwrap();
+
+    assert_eq!(a_wizard, a_wake, "the wake joined the wizard's run");
+    assert_eq!(b_wizard, b_wake, "the wizard joined the wake's run");
+    assert_eq!(await_ending(&a).await.phase, SyncPhase::Finished);
+    assert_eq!(await_ending(&b).await.phase, SyncPhase::Finished);
+    scheduler.shutdown().await;
+
+    for id in &ids {
+        let rows = run_log::list(&pool, Some(id), 10).await.unwrap();
+        assert_eq!(rows.len(), 1, "{id}: one addition, one run: {rows:?}");
+        assert_eq!(
+            rows[0].trigger,
+            SyncTrigger::FirstRun,
+            "{id}: a first sync is logged as one whoever started it"
+        );
+    }
+    retire(&pool, &ids).await;
+}
+
+/// A watcher whose listener has gone away is discarded silently and never fails
+/// the run -- `ProgressSink`'s standing contract, now also the sink set's.
+///
+/// This is mostly structural: `report` returns nothing, so there is no route by
+/// which a sink *could* fail a run. The test guards the route a later edit
+/// would open -- a set that collected results and propagated one, or that
+/// treated a silent sink as a reason to stop -- and it puts the dead sink
+/// *first*, so a fan-out that gave up on the first bad sink would take the live
+/// one with it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_watcher_that_has_gone_away_does_not_fail_the_run() {
+    struct GoneAway;
+    impl ProgressSink for GoneAway {
+        fn report(&self, _progress: SyncProgress) {
+            // What `knobas-app`'s `ChannelSink` does over a channel whose
+            // webview has closed: the message goes nowhere and the run is never
+            // told.
+        }
+    }
+
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed_quiet(&pool, 1).await;
+    let id = ids[0].clone();
+    let (deps, _) = deps(sched_pool, Duration::from_millis(300)).await;
+    let scheduler = Scheduler::start(deps).await.unwrap();
+
+    let run = scheduler
+        .trigger(
+            &id,
+            SyncTrigger::Manual,
+            Some(Arc::new(GoneAway) as Arc<dyn ProgressSink>),
+        )
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let live = Heard::new();
+    scheduler
+        .trigger(&id, SyncTrigger::Manual, Some(live.sink()))
+        .await
+        .unwrap();
+
+    let ending = await_ending(&live).await;
+    scheduler.shutdown().await;
+    assert_eq!(ending.phase, SyncPhase::Finished);
+    assert_eq!(ending.run_id, run);
+
+    let row = &run_log::list(&pool, Some(&id), 1).await.unwrap()[0];
+    assert_eq!(
+        row.outcome,
+        Some(knobas_sync::run_log::SyncOutcome::Ok),
+        "a listener that stopped listening is not a sync error"
+    );
+    assert!(row.upserted > 0, "and the run still did its work");
+    retire(&pool, &ids).await;
+}
+
+/// **A run whose task dies still tells its watchers, and still releases its
+/// source.**
+///
+/// The invariant has a second door: a caller can be handed a run id for a task
+/// that then never reaches the line that reports an ending -- a panicking
+/// adapter, or the abort `shutdown` falls back on when a run does not stop
+/// inside the grace period. Before ADR-0005 that left the caller waiting for
+/// ever *and* left the source claimed for the life of the process, so it could
+/// never sync again. A guard closes the run's watchers however the task ends.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_run_whose_task_panics_still_gives_its_watchers_an_ending() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed_quiet(&pool, 1).await;
+    let id = ids[0].clone();
+    let connector = knobas_db::test_util::test_connector().await;
+    let scheduler = Scheduler::start(SchedulerDeps {
+        pool: sched_pool,
+        connections: Arc::new(TestConnections(connector)),
+        registry: Arc::new(SlowRegistry {
+            inside: Arc::new(AtomicUsize::new(0)),
+            peak: Arc::new(AtomicUsize::new(0)),
+            dwell: Duration::from_millis(10),
+            // Never returns: the adapter blows up where a bug in one would.
+            fault: Some(|| panic!("the adapter blew up")),
+        }),
+        secrets: Arc::new(MemoryStore::new()),
+        events: Arc::new(Silent),
+    })
+    .await
+    .unwrap();
+
+    let watcher = Heard::new();
+    let run = scheduler
+        .trigger(&id, SyncTrigger::Manual, Some(watcher.sink()))
+        .await
+        .unwrap();
+    let ending = await_ending(&watcher).await;
+    assert_eq!(ending.phase, SyncPhase::Failed);
+    assert_eq!(ending.run_id, run);
+    assert!(
+        ending.message.is_some(),
+        "a failed phase with nothing to say is not something a person can act on"
+    );
+
+    // And the source is free again: the next trigger gets a run of its own
+    // rather than the id of a run that will never speak.
+    let again = Heard::new();
+    let second = scheduler
+        .trigger(&id, SyncTrigger::Manual, Some(again.sink()))
+        .await
+        .unwrap();
+    assert_ne!(second, run, "the dead run still owned the source");
+    await_ending(&again).await;
+    scheduler.shutdown().await;
+
+    // Neither task reached `settle`, so both rows are still open --
+    // `reconcile_abandoned` is what closes rows like these at the next start.
+    // Closed here so the tests that assert the reconciler has nothing to do are
+    // not reading this one's residue.
+    sqlx::query(
+        "update knobas.sync_run set finished_at = now(), outcome = 'error'
+          where source_id = $1 and finished_at is null",
+    )
+    .bind(&id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    retire(&pool, &ids).await;
 }
