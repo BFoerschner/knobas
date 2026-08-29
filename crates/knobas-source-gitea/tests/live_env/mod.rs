@@ -157,9 +157,14 @@ pub fn of_kind<'a>(items: &'a [SyncItem], kind: &str) -> Vec<&'a SyncItem> {
 /// The prefix every branch the live suite creates carries.
 ///
 /// Load-bearing twice: [`Litter::branch_off_main`] refuses a name without it,
-/// and [`Litter::new`]'s sweep recognises an earlier run's leftovers by it.
-/// Nothing `testenv/seed-gitea.sh` creates begins with it, so the sweep can
-/// never take fixture content with it.
+/// and [`Litter::clear_leftovers`] recognises an earlier run's leftovers by it
+/// -- and **deletes** them. Nothing `testenv/seed-gitea.sh` creates begins with
+/// it, so no fixture branch is ever taken for a leftover.
+///
+/// That last sentence used to be a fact somebody had checked once. It is now a
+/// property `tests/litter_guard.rs` re-checks on every `just check`, against
+/// the fixture and the seed script themselves, because it is what stands
+/// between a rename and a destructive rule quietly widening onto real content.
 pub const LITTER: &str = "knobas-";
 
 /// Everything one test creates in the seeded container, removed when that test
@@ -170,25 +175,45 @@ pub const LITTER: &str = "knobas-";
 /// failure named was `testenv/reset`. Three properties make that not happen
 /// again, and each one is worth stating because each is a decision:
 ///
-/// 1. **Creation and cleanup are the same call.** A test does not create a
-///    branch and then remember to register it; it asks this guard to create
-///    one. There is no "forgot to track it" state to reach.
+/// 1. **A tracked *branch* is created by the same call that will remove it.**
+///    A test does not create a branch and then remember to register it; it asks
+///    this guard for one, and there is no "forgot to track it" state to reach.
+///    The guard's reach stops at branches, deliberately: a **pull request is
+///    opened by the test itself**, straight through Gitea's API, and this guard
+///    finds it again by matching its head ref against a branch it owns
+///    ([`remove`]). One tracked thing, and everything hanging off it recovered
+///    through that thing -- which is why nothing has to be registered twice,
+///    and why a pull request opened from an *untracked* branch is invisible
+///    here.
 /// 2. **Cleanup runs from [`Drop`], so the failure path is the success path.**
 ///    A panicking test unwinds through here exactly as a passing one returns
 ///    through it. What it cannot survive is a process that never unwinds --
 ///    a `SIGKILL`, or a Ctrl-C at the wrong moment -- which is what 3 is for.
-/// 3. **Every guard sweeps before it builds.** Whatever a killed run left
-///    behind is removed by the next run's first mutating test, so recovery is
-///    "run the suite again" rather than `testenv/reset`. The sweep matches on
-///    [`LITTER`] and is why these tests must not run in parallel with each
-///    other: it cannot tell a sibling's live branch from a corpse. The
-///    `gitea-live` recipe passes `--test-threads=1`, which it already had to
-///    for the shared server's sake.
+/// 3. **Every guard clears an earlier run's leftovers before it builds**
+///    ([`Litter::clear_leftovers`]). Whatever a killed run left behind is
+///    removed by the next run's first mutating test, so recovery is "run the
+///    suite again" rather than `testenv/reset`. It matches on [`LITTER`], and
+///    that is why these tests must not run in parallel with each other: it
+///    cannot tell a sibling's live branch from a corpse. The `gitea-live`
+///    recipe passes `--test-threads=1`, which it already had to for the shared
+///    server's sake.
 ///
 /// The removal is checked rather than hoped for: [`remove`] re-reads the
 /// listings afterwards and a branch or pull request still standing fails the
 /// test. A cleanup that quietly stopped deleting is the whole defect, so it
 /// may not be the one thing here that goes unasserted.
+///
+/// **Not `sweep`**, which is the word PR #153 used for principle 3 and which
+/// this crate already spends on the glossary's Sweep -- the engine pass that
+/// tombstones what a full sync no longer emitted (`sync.rs` says it thirteen
+/// times). Not `purge` either: `CONTEXT.md` gave that its own head-word under
+/// issue #127, for carrying out a user's deletion, and names `sweep` as the
+/// word to avoid *for it*. Two meanings of one word in one crate, the second
+/// of them destructive, is the reading mistake `purge_again` in
+/// `knobas-sync`'s scheduler already paid a longer name to remove.
+///
+/// What `just check` proves about all of this without a container:
+/// `tests/litter_guard.rs`.
 pub struct Litter {
     http: reqwest::Client,
     auth: String,
@@ -208,26 +233,42 @@ impl Litter {
             api: format!("{}/api/v1/repos/{}", env.url, env.full_name()),
             branches: Vec::new(),
         };
-        let stale: Vec<String> = branch_names(&litter.http, &litter.auth, &litter.api)
+        litter.clear_leftovers().await;
+        litter
+    }
+
+    /// Delete every [`LITTER`]-prefixed branch of this repository, and the pull
+    /// requests opened from them -- what a run that was **killed** rather than
+    /// failed left behind, since only a process that unwinds reaches [`Drop`].
+    ///
+    /// Nothing else in the repository matches the prefix
+    /// (`tests/litter_guard.rs` is what keeps that true), so this is scoped by
+    /// a name rather than by a record of what any particular run created --
+    /// which is the only way to reach the leftovers of a run that is gone.
+    ///
+    /// It runs before the guard is handed out, not after the suite: the corpus
+    /// a test measures must already be clean when it takes its baseline.
+    async fn clear_leftovers(&self) {
+        let left: Vec<String> = branch_names(&self.http, &self.auth, &self.api)
             .await
             .into_iter()
             .filter(|name| name.starts_with(LITTER))
             .collect();
-        if !stale.is_empty() {
-            println!(
-                "live suite: sweeping {} leftover branch(es) from a run that was killed rather \
-                 than failed: {stale:?}",
-                stale.len()
-            );
-            let failures = remove(&litter.http, &litter.auth, &litter.api, &stale).await;
-            assert!(
-                failures.is_empty(),
-                "the leftovers of an earlier run could not be swept, so this run would add to \
-                 them (issue #143): {}",
-                failures.join("; ")
-            );
+        if left.is_empty() {
+            return;
         }
-        litter
+        println!(
+            "live suite: clearing {} leftover branch(es) from a run that was killed rather than \
+             failed: {left:?}",
+            left.len()
+        );
+        let failures = remove(&self.http, &self.auth, &self.api, &left).await;
+        assert!(
+            failures.is_empty(),
+            "the leftovers of an earlier run could not be cleared, so this run would add to them \
+             (issue #143): {}",
+            failures.join("; ")
+        );
     }
 
     /// Create a branch off `main` through Gitea's own API, and own its removal
@@ -238,8 +279,8 @@ impl Litter {
     pub async fn branch_off_main(&mut self, name: &str) {
         assert!(
             name.starts_with(LITTER),
-            "every branch this suite creates must start with {LITTER:?} so the sweep in \
-             Litter::new can recognise it: {name:?}"
+            "every branch this suite creates must start with {LITTER:?} so \
+             Litter::clear_leftovers can recognise it: {name:?}"
         );
         self.branches.push(name.to_owned());
         let created = self
@@ -268,8 +309,8 @@ impl Drop for Litter {
         // `Drop` cannot await, and this one runs on a tokio worker thread, so
         // it cannot block on the current runtime either. A thread with a
         // runtime of its own can do both; joining it keeps the cleanup ordered
-        // before the next test starts, which is what the sweep in
-        // `Litter::new` counts on.
+        // before the next test starts, which is what the next guard's
+        // `clear_leftovers` counts on.
         //
         // The client is **built inside that runtime** rather than cloned from
         // `self`: a `reqwest::Client`'s connections are registered with the
@@ -316,6 +357,17 @@ impl Drop for Litter {
 /// repository is back to the shape it had before these branches existed.
 /// `DELETE /repos/{owner}/{repo}/issues/{index}` is what removes a pull
 /// request and its whole discussion in one call; Gitea 1.27 answers 204.
+///
+/// **Pull requests first, branches second, and that order is a decision.** The
+/// branch is the only durable marker [`Litter::clear_leftovers`] can find a
+/// killed run's leftovers by: it recognises a leftover by the branch's *name*,
+/// and it recovers the pull requests from it by matching their head refs. Delete
+/// the branch first and a process killed between the two calls leaves a pull
+/// request with nothing left to find it by -- it is not `knobas-`-prefixed
+/// itself, it is a number -- so it stays in the repository for good and counts
+/// against `live_gitea_capped`'s `HEADROOM` forever. This way round, an
+/// interruption at the same point leaves the branch standing, which is exactly
+/// the thing the next run looks for. `tests/litter_guard.rs` pins the order.
 async fn remove(http: &reqwest::Client, auth: &str, api: &str, branches: &[String]) -> Vec<String> {
     let mut tried = Vec::new();
     for (number, head) in pulls(http, auth, api).await {
