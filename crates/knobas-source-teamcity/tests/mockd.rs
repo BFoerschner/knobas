@@ -310,7 +310,11 @@ async fn effectively_every_build_names_nobody_and_the_adapter_leaves_the_author_
         .collect();
 
     let (items, _) = sync(
-        adapter(&server.base_url(), serde_json::json!({ "build_type_ids": [cfg] })).as_ref(),
+        adapter(
+            &server.base_url(),
+            serde_json::json!({ "build_type_ids": [cfg] }),
+        )
+        .as_ref(),
         None,
     )
     .await;
@@ -332,7 +336,10 @@ async fn effectively_every_build_names_nobody_and_the_adapter_leaves_the_author_
         "exactly the builds the *dataset* names a person for carry an author, and not one \
          more: an adapter that invented a triggerer for a VCS-triggered build would put a \
          username into the index that nobody ever pressed Run. Named: {:?}",
-        named.iter().map(|i| (&i.title, &i.author)).collect::<Vec<_>>()
+        named
+            .iter()
+            .map(|i| (&i.title, &i.author))
+            .collect::<Vec<_>>()
     );
     assert!(
         named.len() * 10 < builds.len(),
