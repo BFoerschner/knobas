@@ -41,6 +41,36 @@ fn config_title(id: &str, name: Option<&str>, project: Option<&str>) -> String {
     }
 }
 
+/// The one line that says what happened to a build: `finished SUCCESS`,
+/// `running`, `finished canceled`.
+///
+/// **`finished UNKNOWN` is rewritten, and nothing else is** (issue #105).
+/// TeamCity has no `canceled` state; a canceled build is a *finished* build
+/// with `status: "UNKNOWN"`, and `statusText` is where the server says which
+/// -- 20 of 20 sampled on JetBrains' public instance, which is also the
+/// predicate `live_teamcity.rs` certifies against the real server. Composed
+/// verbatim, every canceled build in the mirror would carry the literal string
+/// `finished UNKNOWN` in the element the launcher shows and FTS indexes:
+/// nobody searches "UNKNOWN", and in a snippet it reads as a fault in knobas
+/// rather than as a fact about the build.
+///
+/// The rewrite is a *rendering*, not a re-reading. `payload` keeps the record
+/// with its `UNKNOWN` verbatim (spec §3a), `statusText` is indexed
+/// independently, and no watermark, filter or key depends on this string.
+///
+/// This path was unreachable until issue #105: the two queries that produce
+/// items sent no dimension that could return a canceled build, so nothing
+/// could be mapped from one. Deciding the word became unavoidable the moment
+/// it could be read.
+fn status_element(state: Option<&str>, status: Option<&str>) -> Option<String> {
+    match (state, status) {
+        (Some("finished"), Some("UNKNOWN")) => Some("finished canceled".to_owned()),
+        (Some(state), Some(status)) => Some(format!("{state} {status}")),
+        (Some(state), None) => Some(state.to_owned()),
+        (None, status) => status.map(str::to_owned),
+    }
+}
+
 pub(crate) fn build_item(source_id: &str, raw: &serde_json::Value, b: &Build) -> SyncItem {
     let nested = b.build_type.as_ref();
     let type_id = b
@@ -57,11 +87,7 @@ pub(crate) fn build_item(source_id: &str, raw: &serde_json::Value, b: &Build) ->
     // when a queued build has none yet.
     let number = b.number.clone().unwrap_or_else(|| b.id.to_string());
     let title = format!("{config} #{number}");
-    let status = match (b.state.as_deref(), b.status.as_deref()) {
-        (Some(state), Some(status)) => Some(format!("{state} {status}")),
-        (Some(state), None) => Some(state.to_owned()),
-        (None, status) => status.map(str::to_owned),
-    };
+    let status = status_element(b.state.as_deref(), b.status.as_deref());
     let author = b
         .triggered
         .as_ref()
@@ -259,6 +285,83 @@ mod tests {
         // No number yet -- a queued build has none. The id keeps the title
         // unambiguous.
         assert_eq!(it.title, "Payout_Build #1190");
+    }
+
+    /// A canceled build reads `finished canceled`, and the word `UNKNOWN`
+    /// never reaches a user (issue #105).
+    ///
+    /// TeamCity has no `canceled` state: a canceled build is `state:
+    /// "finished"` with `status: "UNKNOWN"`, and `statusText` is where it says
+    /// what happened -- 20 of 20 sampled on JetBrains' public instance, and
+    /// the predicate `live_teamcity.rs` certifies. Composed verbatim, that is
+    /// the string `finished UNKNOWN` in the title-adjacent status element of
+    /// every canceled build in the mirror. Nobody searches "UNKNOWN", and read
+    /// in a launcher snippet it looks like a fault in knobas rather than a
+    /// fact about the build.
+    ///
+    /// Nothing is lost by rewording it: the raw record keeps `UNKNOWN`
+    /// verbatim in `payload` (spec §3a), and `statusText` is indexed
+    /// separately and independently.
+    #[test]
+    fn a_canceled_build_reads_finished_canceled_and_never_unknown() {
+        let raw = serde_json::json!({
+            "id": 1191, "number": "1191", "buildTypeId": "Payout_Build",
+            "state": "finished", "status": "UNKNOWN", "statusText": "Canceled",
+            "branchName": "feature/PAY-231-sepa-retry",
+            "startDate": "20260822T100600+0000", "finishDate": "20260822T101018+0000"
+        });
+        let b: Build = serde_json::from_value(raw.clone()).expect("build");
+        let it = build_item("teamcity", &raw, &b);
+        assert!(
+            it.body_text.contains("finished canceled"),
+            "a canceled build is searchable by the word a user would type: {:?}",
+            it.body_text
+        );
+        assert!(
+            !it.body_text.contains("UNKNOWN"),
+            "`UNKNOWN` must not reach a user through the status element: {:?}",
+            it.body_text
+        );
+        assert!(
+            it.body_text.contains("Canceled"),
+            "TeamCity's own statusText is still indexed: {:?}",
+            it.body_text
+        );
+        assert_eq!(
+            it.payload, raw,
+            "the record keeps its UNKNOWN verbatim -- only the rendering changed"
+        );
+    }
+
+    /// The rewording is narrow on purpose: it fires on a **finished** build
+    /// with an `UNKNOWN` status, which is the one combination TeamCity uses
+    /// for a cancellation, and leaves every other pairing composed verbatim.
+    ///
+    /// Without the state half, an `UNKNOWN` on any other state would be
+    /// relabelled a cancellation, which is a claim the server never made.
+    #[test]
+    fn nothing_but_a_finished_unknown_is_relabelled() {
+        for (state, status, expected) in [
+            ("finished", "SUCCESS", "finished SUCCESS"),
+            ("finished", "FAILURE", "finished FAILURE"),
+            ("finished", "ERROR", "finished ERROR"),
+            ("running", "UNKNOWN", "running UNKNOWN"),
+            ("queued", "UNKNOWN", "queued UNKNOWN"),
+        ] {
+            let raw = serde_json::json!({ "id": 1, "state": state, "status": status });
+            let b: Build = serde_json::from_value(raw.clone()).expect("build");
+            let it = build_item("teamcity", &raw, &b);
+            assert!(
+                it.body_text.contains(expected),
+                "{state}/{status} must compose verbatim as {expected:?}: {:?}",
+                it.body_text
+            );
+            assert!(
+                !it.body_text.contains("canceled"),
+                "{state}/{status} is not a cancellation: {:?}",
+                it.body_text
+            );
+        }
     }
 
     /// A build the server dated in a way this adapter cannot read gets no

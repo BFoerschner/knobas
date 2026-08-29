@@ -641,33 +641,36 @@ async fn most_builds_name_nobody_and_the_adapter_leaves_the_author_empty() {
     );
 }
 
-/// Finding 3, and a correction to it: a canceled build is `status: "UNKNOWN"`
-/// with `statusText: "Canceled"` — and **the adapter never mirrors one.**
+/// Finding 3, twice corrected: a canceled build is `status: "UNKNOWN"` with
+/// `statusText: "Canceled"` — and since issue #105 **the adapter mirrors it.**
 ///
 /// The issue that asked for this suite recorded that `defaultFilter:false`
 /// "deliberately *includes* canceled builds, so this path runs in production
-/// and is untested". Measured here, that is not what happens.
-/// `defaultFilter:false` is on the opening probe alone, whose page is read for
-/// one number and never mapped. The two queries that *do* produce items — the
-/// per-configuration full-sync query and the incremental
-/// `state:finished,sinceBuild:` — send no `defaultFilter`, and TeamCity's
-/// default filter hides canceled builds from both.
+/// and is untested". Measured, that was not what happened:
+/// `defaultFilter:false` was on the opening probe alone, whose page is read
+/// for one number and never mapped, and the two queries that *do* produce
+/// items sent no `defaultFilter` at all — so TeamCity's default filter hid
+/// canceled builds from both, permanently, because `sinceBuild` is exclusive
+/// and the watermark advances past them.
 ///
-/// So the `UNKNOWN` render path is not merely untested, it is unreachable, and
-/// canceled builds are silently absent from the mirror for good: `sinceBuild`
-/// is exclusive and the watermark advances past them. Whether that is right is
-/// a product question and not this suite's to answer; certifying it is.
+/// Issue #105 decided that: both item-producing locators now carry
+/// `canceled:any,failedToStart:any`. This test certifies the decision from
+/// both ends against the server that arbitrates it — the dimension is one
+/// TeamCity accepts and it really returns the build, **and** the default
+/// filter really would have hidden it, which is what makes the dimension the
+/// difference rather than a no-op.
 ///
 /// The comparison is made with the adapter's **own** per-configuration
 /// locator, on the canceled build's own configuration, so the two pages cover
-/// the same builds and the difference is the dimension under test.
+/// the same builds and the dimension under test is the only thing between
+/// them.
 #[tokio::test]
 #[ignore = "needs a live TeamCity: `just teamcity-live`"]
-async fn a_canceled_build_is_status_unknown_and_the_adapter_s_locator_hides_it() {
+async fn a_canceled_build_is_status_unknown_and_the_adapter_s_locator_serves_it() {
     let live = live_or_skip!();
     let page = live
         .builds(
-            "state:finished,defaultFilter:false,count:100",
+            "state:finished,canceled:any,count:100",
             "id,buildTypeId,status,statusText",
         )
         .await;
@@ -680,7 +683,8 @@ async fn a_canceled_build_is_status_unknown_and_the_adapter_s_locator_hides_it()
     let canceled: Vec<&serde_json::Value> =
         page.iter().filter(|b| status_of(b) == "UNKNOWN").collect();
     println!(
-        "LIVE cancellations: {}/{} of the newest finished builds are status UNKNOWN",
+        "LIVE cancellations: {}/{} of the newest finished builds are status UNKNOWN under \
+         canceled:any",
         canceled.len(),
         page.len()
     );
@@ -702,19 +706,24 @@ async fn a_canceled_build_is_status_unknown_and_the_adapter_s_locator_hides_it()
             .and_then(serde_json::Value::as_str)
             .is_some_and(|t| t.to_ascii_lowercase().contains("cancel")),
         "an UNKNOWN status on a finished build is a cancellation, and `statusText` is where \
-         TeamCity says so: {sample}"
+         TeamCity says so — the predicate `map::status_element` renders `finished canceled` on: \
+         {sample}"
     );
 
-    let widened: Vec<i64> = live
+    // The locator `sync::execute`'s full sync actually sends.
+    let adapters_own: Vec<i64> = live
         .builds(
-            &format!("buildType:(id:{build_type}),state:finished,defaultFilter:false,count:100"),
+            &format!(
+                "buildType:(id:{build_type}),state:finished,canceled:any,failedToStart:any,\
+                 count:100"
+            ),
             "id",
         )
         .await
         .iter()
         .map(id_of)
         .collect();
-    if !widened.contains(&id) {
+    if !adapters_own.contains(&id) {
         // Recorded, not asserted, for the same reason as the empty window
         // above: the corpus moved between two requests, which is a fact about
         // somebody else's server and not something anyone here can act on.
@@ -726,8 +735,10 @@ async fn a_canceled_build_is_status_unknown_and_the_adapter_s_locator_hides_it()
         return;
     }
 
-    // The locator `sync::execute`'s full sync actually sends.
-    let adapters_own: Vec<i64> = live
+    // ...and the same locator without the dimension, which is what the adapter
+    // sent before #105. The build must be missing from it, or the dimension is
+    // not what put it in the page above.
+    let without: Vec<i64> = live
         .builds(
             &format!("buildType:(id:{build_type}),state:finished,count:100"),
             "id",
@@ -737,15 +748,78 @@ async fn a_canceled_build_is_status_unknown_and_the_adapter_s_locator_hides_it()
         .map(id_of)
         .collect();
     assert!(
-        !adapters_own.contains(&id),
+        !without.contains(&id),
         "TeamCity's default filter no longer hides canceled builds: build {id} came back from \
-         the adapter's own per-configuration locator. That is a *fix* to the gap this test \
-         records, not a failure — the UNKNOWN render path is now reachable, and \
-         `map::build_item`'s \"finished UNKNOWN\" string finally needs a decision."
+         a locator that does not name the dimension. That is a *fix* on TeamCity's side, not a \
+         failure here — `canceled:any` has become redundant rather than wrong, and #105's \
+         decision still holds. Re-read this test before deleting the dimension."
     );
     println!(
-        "LIVE cancellations: build {id} in {build_type} is served with defaultFilter:false and \
-         hidden from the adapter's own locator — canceled builds never reach the mirror"
+        "LIVE cancellations: build {id} in {build_type} is served by the adapter's own locator \
+         and hidden from the same locator without `canceled:any` — the dimension is what \
+         mirrors it"
+    );
+}
+
+/// **Fable's observation trigger, made a test**: either new dimension
+/// disabling more than its own facet sends issue #105 back to Björn.
+///
+/// The whole reason the widening is `canceled:any,failedToStart:any` and not
+/// `defaultFilter:false` is that the two named dimensions re-open one facet
+/// each, where `defaultFilter:false` also opens the personal facet — and any
+/// facet nobody has enumerated. Personal builds are the class this adapter
+/// deliberately keeps out: nobody has decided that a work cockpit should
+/// mirror other people's experiments, and their absence is only defensible
+/// while it is *consistent*.
+///
+/// That claim is about somebody else's server and can only be held there. If a
+/// future TeamCity widens what these dimensions do, this fails with the
+/// message that says so.
+///
+/// Asserted by **form**, never on the corpus: an empty window is recorded and
+/// passes, because how many personal builds a public instance is running right
+/// now is not something this suite may depend on.
+#[tokio::test]
+#[ignore = "needs a live TeamCity: `just teamcity-live`"]
+async fn the_two_facet_dimensions_do_not_open_the_personal_facet() {
+    let live = live_or_skip!();
+    let personal = |b: &serde_json::Value| {
+        b.get("personal").and_then(serde_json::Value::as_bool) == Some(true)
+    };
+
+    // What `defaultFilter:false` — the alternative not taken — really opens,
+    // read first so the comparison below is against a measured window rather
+    // than against an assumption.
+    let wide = live
+        .builds(
+            "state:finished,defaultFilter:false,count:100",
+            "id,personal",
+        )
+        .await;
+    println!(
+        "LIVE facets: defaultFilter:false answered {}/{} personal builds",
+        wide.iter().filter(|b| personal(b)).count(),
+        wide.len()
+    );
+
+    let narrow = live
+        .builds(
+            "state:finished,canceled:any,failedToStart:any,count:100",
+            "id,personal",
+        )
+        .await;
+    let leaked: Vec<i64> = narrow.iter().filter(|b| personal(b)).map(id_of).collect();
+    println!(
+        "LIVE facets: canceled:any,failedToStart:any answered {}/{} personal builds",
+        leaked.len(),
+        narrow.len()
+    );
+    assert!(
+        leaked.is_empty(),
+        "`canceled:any,failedToStart:any` served personal builds {leaked:?}. Either dimension \
+         disabling more than its own facet is one of issue #105's stated triggers for sending \
+         the decision back to Björn: the widening was chosen over `defaultFilter:false` \
+         precisely because it does not mirror other people's personal builds."
     );
 }
 

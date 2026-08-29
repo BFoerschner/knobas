@@ -1050,6 +1050,104 @@ sentence a later insertion would quietly falsify.
 
 ---
 
+### Amendments from the TeamCity canceled-builds fix (2026-08-29, binding) — issue #105
+
+Ruled by Fable under delegation while Björn was away, 2026-08-29, on issue #105; Björn can
+overturn it. Recorded here because §4.2 pins TeamCity's locators and §5 pins mockd's as-built
+locator subset, and both change — the precedent is the `nextHref` bullet in the #114 amendment
+and the `fields=` widenings in the M2 TeamCity package. **It narrows the ceiling-probe bullets in
+the #91 amendment rather than superseding them:** the probe still sends `defaultFilter:false`,
+still reads one un-widened page, and is still the only query that sends that dimension.
+
+- **§4.2 the two item-producing locators carry `canceled:any,failedToStart:any`.** The
+  per-configuration full-sync query and the incremental `state:finished,sinceBuild:` query are the
+  only two whose answers become items, and both took TeamCity's default filter — which hides
+  canceled, failed-to-start and personal builds **even when `state:` is set**. So no canceled build
+  could enter the mirror, and `sinceBuild` being exclusive meant one canceled while the watermark
+  moved over it was missing *permanently* rather than late; `map.rs`'s `"finished UNKNOWN"` string
+  was unreachable by any path that creates an item. Certified live on 2026-08-29 read-only against
+  JetBrains' public instance: build `6521123` in
+  `Kotlin_KotlinPublic_JvmCodegenTests_LINUX_virtual_Batch_1_1` comes back from
+  `buildType:(id:…),state:finished,canceled:any,failedToStart:any,count:100` and is absent from the
+  same locator without the dimensions.
+- **§4.2 excluding them was the option that could not be taken, and the argument is not on the
+  issue's own fork.** `sync.rs` step 5 emits in-flight builds too and `cursor::advance` clamps the
+  watermark under them, so a running build is mirrored **before** anyone knows how it ends. Cancel
+  it and the finished queries can no longer return it, the in-flight poll stops returning it, and
+  M1 has no deletion channel — so that row says `running` for ever. The same happens to a queued
+  build that fails to start, which is why the two dimensions travel together. TeamCity's own UI
+  un-hides a canceled build with one click; a mirror that never stored it cannot.
+- **§4.2 `canceled:any,failedToStart:any` and not `defaultFilter:false`, and the distinction is
+  measured.** Read-only against JetBrains' public instance (2026.2 EAP, build 238763) on
+  2026-08-29, same window: `state:finished,canceled:any,count:100` answered one canceled build
+  (`status: UNKNOWN`, `statusText: "Canceled"`), no failed-to-start build and no personal build —
+  the dimension re-opens its own facet only — while `state:finished,defaultFilter:false,count:100`
+  answered the same canceled build **plus** a failed-to-start one, and disables the personal facet
+  and any facet nobody has enumerated along with it. `defaultFilter:false` would drag personal
+  builds into the mirror and force a client-side re-filter off a widened `BUILD_FIELDS`.
+  `branch:` is untouched: `state:finished,count:100` already answered 10/100 non-default-branch
+  builds, so branch coverage was never at issue.
+- **§4.2 personal builds stay out, in every state.** The default filter's personal facet applies to
+  the in-flight poll too — which is unchanged and carries neither dimension — so no personal build
+  is mirrored in any state and no row of one can go stale. The opening probe still *witnesses* them
+  through `defaultFilter:false`, which is a ceiling and not a mirror: the highest id on the live
+  instance belonged to a personal build configuration.
+- **§4.1 a canceled build's status element reads `finished canceled`; the word `UNKNOWN` never
+  reaches a user.** Fable declined to rule this wording earlier the same day, calling it a product
+  call; it stopped being deferrable the moment the path became reachable. `map::build_item`
+  composes `format!("{state} {status}")` into `body_text`, so option 1 as filed would index the
+  literal string `finished UNKNOWN` — nobody searches "UNKNOWN", and in a launcher snippet it reads
+  as a fault in knobas rather than a fact about the build. The rewrite fires on a **finished** build
+  with an `UNKNOWN` status and on nothing else. Nothing is lost: `payload` keeps the record verbatim
+  (§3a) and `statusText: "Canceled"` was already indexed independently. A failed-to-start build
+  needs no new wording — it is `FAILURE` with its own `statusText`.
+- **§4.2 what the widening costs, stated rather than discovered — and it is a different cost on
+  each of the two queries.** Both now match strictly more builds, but only one of them is walked.
+  - The incremental `state:finished,sinceBuild:` query goes through `sync::all_of`, so it moves
+    closer to the 1 000-per-query refusal (`MAX_BUILDS_PER_QUERY`). The size of the move is the
+    size of the two classes: 1/100 in the measured live window, and both are terminal states no
+    busy server produces in bulk — a mass cancellation is the case where it bites. The refusal is
+    deliberate and unchanged (mirroring part of a query and advancing the watermark past the rest
+    is the failure this crate refuses everywhere), and its remedy is unchanged: sync more often,
+    or narrow with `build_type_ids`/`project_ids`.
+  - The per-configuration full-sync query **never reaches that refusal**: it is one un-widened
+    request for the newest `builds_per_config`, and `execute` deliberately does not read
+    `Page::more` on it, because it is a *window* and the descriptor declares
+    `full_sync_exhaustive: false`. Its cost is **eviction, not overflow**: canceled and
+    failed-to-start builds now occupy slots in a fixed newest-N window, so the window reaches
+    correspondingly less far back in ordinary builds. That also shortens the healing window the
+    bullet below relies on — a configuration with many cancellations heals fewer stale `running`
+    rows per full sync, and `builds_per_config` is the lever.
+- **§4.2 the healing scope, written down where the cursor's reader will find it** (`sync::since`).
+  Builds canceled *before* this landed, whose ids sit under the watermark, stay absent — and
+  pre-existing stale `running` rows heal only when a full sync's per-configuration window reaches
+  them. A deliberate full sync after this lands is the healing move; anything older than
+  `builds_per_config` back is gone. That is the permanence issue #105 measured, now bounded instead
+  of ongoing.
+- **§5 mockd's default filter hides canceled and failed-to-start builds, and the locator subset
+  gains `canceled:` and `failedToStart:`** (`any|true|false` each). mockd applied the default filter
+  to the *states* alone, so a `state:finished` page here carried canceled builds a real server
+  hides — part of how #105 survived a green suite, the same shape as #113's error envelope one
+  layer up. `TcBuild` learns both classes and `TcStatus` learns `Unknown`, with
+  `MockState::cancel_build` / `fail_build_to_start` as the mutators, because the Tidewater fixture
+  has no vocabulary for either and mockd does not invent one. `any` is **not** `true`:
+  `canceled:true` narrows to the class, `canceled:any` does not narrow at all. Personal builds are
+  a documented absence in mockd rather than a rule — the fixture has none and nothing in knobas
+  asks for them; the live suite is where that facet is certified.
+- **The live suite certifies the decision instead of the gap.**
+  `a_canceled_build_is_status_unknown_and_the_adapter_s_locator_serves_it` asserts from both ends —
+  the dimension returns the build **and** the same locator without it does not — keeping the
+  property that a change on TeamCity's side reads as a fix with a message saying so.
+  `the_two_facet_dimensions_do_not_open_the_personal_facet` is Fable's second observation trigger
+  made a test. Neither fired on 2026-08-29.
+- **Frozen surfaces: none.** `crates/knobas-source-teamcity/**` and `crates/knobas-mockd/**` are not
+  in §10.8's list, the `Rest` trait is crate-private, and `knobas-http` is untouched. `canceled` and
+  `failedToStart` are dimensions of the `/app/rest/builds` locator §4.2 already lists — the live
+  server enumerates both in its own 400 message — so this is a value change inside a parameter the
+  contract already defines. No migration, no IPC change.
+
+---
+
 ## 10. As built — the contract PR (2026-08-24)
 
 *The task brief called this section §9. §9 was taken by the plan-authoring amendments before this ran, so the as-built record is §10; "§9 of the interfaces doc" in `plan-02-contract` means this section.*

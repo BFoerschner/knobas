@@ -332,23 +332,55 @@ impl MockState {
     /// If there is no such build. This is a test-driver API: a silent no-op
     /// would make a caller's test pass for the wrong reason.
     pub fn finish_build(&self, id: u64, status: TcStatus) {
+        finish(&mut self.write(), "finish_build", id, status);
+    }
+
+    /// Cancels a build: `finished`, [`TcStatus::Unknown`], `statusText:
+    /// "Canceled"`, and marked so the default filter hides it.
+    ///
+    /// The class no fixture build has, made expressible -- the counterpart of
+    /// `describe_build_type`. Without it nothing can serve the one shape issue
+    /// #105 is about: a build the mirror already holds as running, which the
+    /// server then stops.
+    ///
+    /// # Panics
+    ///
+    /// If there is no such build. This is a test-driver API, and a silent
+    /// no-op would make a caller's test pass for the wrong reason.
+    /// The finish and the flag are set under **one** lock, deliberately.
+    /// mockd serves requests concurrently, so two locks would leave a window
+    /// in which a `state:finished` page carried this build as an *ordinary*
+    /// one -- `UNKNOWN`, `statusText: "Canceled"`, `canceled: false` -- which
+    /// is precisely the fidelity gap issue #105 closed.
+    pub fn cancel_build(&self, id: u64) {
         let mut inner = self.write();
-        // Resolve before ticking, exactly as `touch_issue` does: a mutation
-        // that did not happen must not move the clock.
-        let Some(idx) = inner.builds.iter().position(|b| b.id == id) else {
-            panic!("finish_build: no build {id} in the fixture");
-        };
-        let now = inner.tick();
-        let b = &mut inner.builds[idx];
-        b.state = TcState::Finished;
-        b.status = status;
-        b.finish_date = Some(now);
-        b.status_text = match status {
-            TcStatus::Success => "Success".to_owned(),
-            TcStatus::Failure => "Failure".to_owned(),
-        };
-        b.percentage_complete = None;
-        b.current_stage_text = None;
+        let b = finish(&mut inner, "cancel_build", id, TcStatus::Unknown);
+        b.canceled = true;
+    }
+
+    /// Terminates a build as **failed to start**: `finished`, `FAILURE`, its
+    /// own `statusText`, and `failedToStart: true`, which the default filter
+    /// hides on.
+    ///
+    /// The other class the default filter removes, and the one a *queued*
+    /// build reaches without ever running.
+    ///
+    /// The flag stays server-side: mockd does not serve a `failedToStart` key,
+    /// because nothing in knobas reads one and `BUILD_FIELDS` asking for a name
+    /// no reader looks at is its own defect. The class is observable exactly
+    /// where it matters -- through the `failedToStart:` locator dimension and
+    /// the default filter -- which is how `personal` would work too if the
+    /// fixture had any.
+    ///
+    /// # Panics
+    ///
+    /// If there is no such build.
+    /// One lock, for the reason [`Self::cancel_build`] gives.
+    pub fn fail_build_to_start(&self, id: u64) {
+        let mut inner = self.write();
+        let b = finish(&mut inner, "fail_build_to_start", id, TcStatus::Failure);
+        b.failed_to_start = true;
+        b.status_text = "Failed to start: no agent could run this build".to_owned();
     }
 
     /// Appends a `queued` build with `id = max(existing ids) + 1` and returns
@@ -379,6 +411,8 @@ impl MockState {
             // A build the test harness queued is nobody's: the mutator is
             // given a configuration and a branch, which is a VCS trigger.
             triggered_by: None,
+            canceled: false,
+            failed_to_start: false,
         });
         id
     }
@@ -435,6 +469,50 @@ impl MockState {
     fn write(&self) -> std::sync::RwLockWriteGuard<'_, Inner> {
         self.inner.write().unwrap_or_else(|e| e.into_inner())
     }
+}
+
+/// Moves a build to `finished` with `status` under a lock the caller already
+/// holds, and hands the build back so a caller with a *facet* to set as well
+/// -- [`MockState::cancel_build`], [`MockState::fail_build_to_start`] -- can
+/// set it before anything else reads the build.
+///
+/// The lock is the caller's for that reason: mockd serves requests
+/// concurrently, and a finish that released before the flag was set would
+/// leave a window in which a `state:finished` page carried a canceled build
+/// as an ordinary one.
+///
+/// # Panics
+///
+/// If there is no build `id`. This is a test-driver API, and a silent no-op
+/// would make a caller's test pass for the wrong reason.
+fn finish<'a>(
+    inner: &'a mut Inner,
+    caller: &str,
+    id: u64,
+    status: TcStatus,
+) -> &'a mut crate::tc_state::TcBuild {
+    // Resolve before ticking, exactly as `touch_issue` does: a mutation
+    // that did not happen must not move the clock.
+    let Some(idx) = inner.builds.iter().position(|b| b.id == id) else {
+        panic!("{caller}: no build {id} in the fixture");
+    };
+    let now = inner.tick();
+    let b = &mut inner.builds[idx];
+    b.state = TcState::Finished;
+    b.status = status;
+    b.finish_date = Some(now);
+    b.status_text = match status {
+        TcStatus::Success => "Success".to_owned(),
+        TcStatus::Failure => "Failure".to_owned(),
+        // Reachable only through `cancel_build`, which sets `canceled` in the
+        // same critical section; a caller that finished a build UNKNOWN
+        // without it would have served a build the default filter treats as
+        // ordinary.
+        TcStatus::Unknown => "Canceled".to_owned(),
+    };
+    b.percentage_complete = None;
+    b.current_stage_text = None;
+    b
 }
 
 fn default_server_offset() -> FixedOffset {

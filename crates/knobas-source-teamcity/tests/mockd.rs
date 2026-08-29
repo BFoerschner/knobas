@@ -494,6 +494,71 @@ async fn a_newly_finished_build_arrives_incrementally_and_then_the_source_is_idl
     server.assert_no_violations();
 }
 
+/// **Issue #105, over the wire**: a build the mirror already holds as running,
+/// then canceled on the server, is re-emitted saying so instead of saying
+/// `running` for ever.
+///
+/// The in-crate fake holds the same property, and this is the half it cannot
+/// certify: that the locator carrying `canceled:any` is one mockd's grammar
+/// accepts, that the default filter really would have hidden the build without
+/// it, and that TeamCity's `status: "UNKNOWN"` survives the round trip into
+/// the string a user reads. mockd answers an unknown dimension with 400 and a
+/// recorded violation, so a locator this adapter cannot legally send fails
+/// here rather than passing against a lenient fake.
+#[tokio::test]
+async fn a_build_canceled_after_it_was_mirrored_running_is_re_emitted_as_canceled() {
+    let server = spawn_mock_teamcity().await;
+    let (running, cfg) = running_build();
+    let source = adapter(
+        &server.base_url(),
+        serde_json::json!({ "build_type_ids": [cfg] }),
+    );
+    let (first, cursor) = sync(source.as_ref(), None).await;
+    let key = format!("build:{running}");
+    assert!(
+        first
+            .iter()
+            .find(|i| i.entity.key == key)
+            .is_some_and(|i| i.body_text.contains("running")),
+        "the running build is mirrored before anyone knows how it ends; got {:?}",
+        keys(&first)
+    );
+
+    server.state().cancel_build(running as u64);
+
+    let (items, after) = sync(source.as_ref(), Some(cursor)).await;
+    let healed = items
+        .iter()
+        .find(|i| i.entity.key == key)
+        .unwrap_or_else(|| {
+            panic!(
+                "a canceled build must reach the mirror, or that row says \"running\" for ever \
+                 -- there is no deletion channel to retire it; got {:?}",
+                keys(&items)
+            )
+        });
+    assert!(
+        healed.body_text.contains("finished canceled"),
+        "and it must read as a cancellation rather than as `finished UNKNOWN`: {:?}",
+        healed.body_text
+    );
+    assert!(
+        !healed.body_text.contains("UNKNOWN"),
+        "`UNKNOWN` is TeamCity's word for it and never a user's: {:?}",
+        healed.body_text
+    );
+    assert_eq!(
+        healed.payload["status"], "UNKNOWN",
+        "the record is kept verbatim; only the rendering changed (spec §3a)"
+    );
+    assert_eq!(
+        after,
+        format!(r#"{{"v":1,"since_build_id":{running}}}"#),
+        "and nothing holds the watermark back any more"
+    );
+    server.assert_no_violations();
+}
+
 /// A build queued after the last run is in flight, so it arrives through the
 /// unconditional poll -- and holds the watermark below itself, because its id
 /// was assigned now and its finish is still to come.
