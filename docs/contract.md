@@ -1227,6 +1227,46 @@ which is the other half of why #131 read it as a listing.
   whole `reqwest::Response`, so the adapter reads the header in its own `get_json_counted`
   between the send and the decode. No migration, no IPC change, no new dependency.
 
+### Amendments from the TeamCity authorship ruling (2026-08-29, binding) — issue #106
+
+Ruled by Fable under delegation while Björn was away, 2026-08-29, on issue #106; Björn can
+overturn it. **Nothing in this contract becomes false, which is the point of recording it:** §4.1's
+`author` = "the source's username string" is precisely the meaning being *kept*, and this entry
+exists so the next reader of that sentence meets the measurement that makes it consequential
+instead of re-deriving it. No `BUILD_FIELDS` change, no locator change, no cursor or schema impact.
+
+- **§4.1 `author` on a TeamCity build is correct and empty, for effectively every build.**
+  `triggered.user.username` is the only place TeamCity names the person who started a build, and a
+  VCS-, schedule- or dependency-triggered build has none. Measured read-only against JetBrains'
+  public instance (2026.2 EAP): **100 of 100** of the newest finished builds name no user, over an
+  earlier sample of 300 with the field null throughout, and re-confirmed 100/100 at this PR's merge.
+  The consequence is that #39's `author:` and `@me` tokens match almost nothing for this source on
+  any realistic corpus — the field being sparse, not broken.
+- **§4.1 the committer of the change a build ran on was rejected as a fallback, on measurement.**
+  The issue's condition ("without a second round-trip per build") is met: one request with
+  `triggered(type,user(username)),changes(count,change(username,user(username)))` added to `fields=`
+  answered 100 builds in 9.8 KB. It answers with nothing to fall back to — **92 of 100 builds
+  carried zero changes** (87 of 100 were `snapshotDependency`-triggered, not one `vcsTrigger` in the
+  window), and the 8 that did named their committers as VCS display strings while
+  `change.user.username`, the TeamCity account, was null throughout. Filling ~8% of builds from a
+  different name-space than the one `@me` resolves against (`vocab.rs` builds it from the source
+  config's `username`) would make "author" mean two things depending on the build. §4.1's own
+  "(display-name mapping is M2's people work)" parenthesis is the schedule for re-opening this, as a
+  decided meaning rather than an incidental one.
+- **§5 the mockd TeamCity fixture is unchanged, deliberately.** `fixtures/tidewater/work.json` keeps
+  build 1188's `triggered_by`: it is transcribed from `mockups/shared/dataset.md` (Mara's worklog
+  line), removing it would contradict the dataset and delete #33's only authorship coverage, and
+  padding it with builds no narrative describes is the invention **mockd deviation 12** exists to
+  refuse. Its one-in-three is therefore a narrative and not a distribution, and deviation 12 now
+  says so and names the test that does count: `knobas-source-teamcity`'s
+  `effectively_every_build_names_nobody_and_the_adapter_leaves_the_author_empty`, which builds a
+  30-build VCS-triggered corpus of its own.
+- **Frozen surfaces: none.** The `crates/knobas-search/src/types.rs` edit is a doc comment on
+  `SearchFilters::authors` — no field, no type, no serde attribute, no TypeScript mirror change.
+  **Option 3** — a search surface saying which sources can answer an author query — changes
+  `SearchResponse` and is therefore §10.8-frozen; Fable declined to rule it and escalated it to
+  Björn. It is filed as issue #141, `ready-for-human`, and nothing here forecloses it.
+
 ---
 
 ## 10. As built — the contract PR (2026-08-24)

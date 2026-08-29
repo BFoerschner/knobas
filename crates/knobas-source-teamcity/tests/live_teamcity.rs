@@ -577,9 +577,16 @@ async fn a_build_answers_by_id_and_an_id_no_build_has_is_a_404() {
 ///
 /// `triggered.user.username` is the only place TeamCity names a person, and a
 /// VCS- or schedule-triggered build has none. `SyncItem::author` is therefore
-/// empty for most builds on a real server, which is what #39's `author:` and
-/// `@` search tokens rest on for this source — and no fixture shows the case
-/// at scale.
+/// empty for effectively every build on a real server — 100 of 100 in the
+/// window this test last printed — which is what #39's `author:` and `@`
+/// search tokens rest on for this source.
+///
+/// **This is the measurement; the docker-free half is
+/// `tests/mockd.rs::effectively_every_build_names_nobody_and_the_adapter_leaves_the_author_empty`**
+/// (issue #106), which builds a corpus of the right shape rather than counting
+/// the Tidewater fixture's three builds — whose one-in-three is a narrative
+/// ratio and would read as a healthy distribution to anyone who mistook it for
+/// a sample.
 ///
 /// Asserted from both ends: the record really omits the field, and the adapter
 /// maps that to `None` rather than inventing a triggerer (interfaces §4.1

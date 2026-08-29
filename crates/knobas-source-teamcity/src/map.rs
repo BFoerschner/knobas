@@ -112,7 +112,29 @@ pub(crate) fn build_item(source_id: &str, raw: &serde_json::Value, b: &Build) ->
         ]),
         // `triggered.user.username` is the only place TeamCity names the
         // person who started a build; `None` is a build no person started --
-        // a VCS or schedule trigger -- which is most of them on a busy server.
+        // a VCS, schedule or dependency trigger -- which is **effectively all
+        // of them** on a real server.
+        //
+        // Measured, not estimated (issue #106): 100 of 100 of the newest
+        // finished builds on JetBrains' public instance name no user, over an
+        // earlier sample of 300 with `triggered.user.username` null
+        // throughout. So `author` is empty for effectively every TeamCity
+        // build, and #39's `author:` and `@me` tokens match almost nothing for
+        // this source. **That is the field being correct and sparse, not
+        // broken**, and it was ruled to stay that way.
+        //
+        // The committer of the change a build ran on is not a fallback:
+        // measured the same day, 92 of 100 builds carried zero changes at all
+        // (87 of 100 were `snapshotDependency`-triggered), and the 8 that did
+        // named their committers as VCS display strings -- "artem tikhomirov"
+        // -- while `change.user.username`, the TeamCity account, was null
+        // throughout. Interfaces §4.1 pins `author` to "the source's username
+        // string", and `vocab.rs` resolves `@me` against the source config's
+        // TeamCity login, so a display name could never match it. Filling
+        // ~8% of builds with a value from a different name-space would make
+        // "author" mean two things depending on the build. The legitimate
+        // moment to revisit it is M2's username-mapping work, which §4.1's own
+        // parenthesis already schedules.
         author,
         // Finished, else started, else queued: the newest thing that happened
         // to this build.

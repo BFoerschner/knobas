@@ -268,6 +268,105 @@ async fn a_mirrored_build_carries_what_the_ui_and_the_index_read() {
     server.assert_no_violations();
 }
 
+/// **The distribution a real TeamCity actually has** (issue #106), which the
+/// three-build fixture next door cannot show.
+///
+/// Measured read-only against JetBrains' public instance on 2026-08-29:
+/// **100 of 100** of the newest finished builds name no user, and an earlier
+/// sample of 300 had `triggered.user.username` null throughout. Real CI builds
+/// are VCS-, schedule- or dependency-triggered, and a build no person started
+/// has no triggering person; `SyncItem::author` is therefore empty for
+/// effectively every TeamCity build. That is the field being *correct and
+/// sparse*, not broken — and it is what #39's `author:` and `@` search tokens
+/// rest on for this source.
+///
+/// The Tidewater fixture names a triggerer for one build of three, and that
+/// **1 in 3 is a narrative, not a distribution**: `mockups/shared/dataset.md`
+/// records Mara triggering #1188 in her own worklog draft, and the other two
+/// builds are nobody's because the dataset says nothing about who started
+/// them. Read as a sample it is off by two orders of magnitude, and the whole
+/// point of this test is that nobody later "fixes" a test that was only ever
+/// green because of it. The corpus is built with mockd's own mutators rather
+/// than by padding `fixtures/tidewater/work.json` with builds no narrative
+/// describes — the same refusal to invent dataset content that keeps mockd
+/// from inventing a triggerer (mockd deviation 12).
+///
+/// The consequence, asserted rather than described: over a realistic corpus an
+/// `author:` query can match at most the handful of builds a person pressed
+/// Run on, and `@me` matches those only when the searcher is that person.
+#[tokio::test]
+async fn effectively_every_build_names_nobody_and_the_adapter_leaves_the_author_empty() {
+    let server = spawn_mock_teamcity().await;
+    let (_, cfg) = running_build();
+    // Thirty builds nobody started, which is what a build farm is made of: a
+    // queued build the harness creates carries no triggerer, exactly as a VCS
+    // trigger carries none.
+    let vcs_triggered: Vec<u64> = (0..30)
+        .map(|_| {
+            let id = server.state().queue_build(&cfg, "main");
+            server.state().finish_build(id, TcStatus::Success);
+            id
+        })
+        .collect();
+
+    let (items, _) = sync(
+        adapter(
+            &server.base_url(),
+            serde_json::json!({ "build_type_ids": [cfg] }),
+        )
+        .as_ref(),
+        None,
+    )
+    .await;
+    let builds: Vec<&SyncItem> = items.iter().filter(|i| i.kind == "build").collect();
+    assert!(
+        builds.len() > vcs_triggered.len(),
+        "the corpus is the thirty plus whatever the fixture had: {:?}",
+        keys(&items)
+    );
+
+    let named: Vec<&&SyncItem> = builds.iter().filter(|i| i.author.is_some()).collect();
+    assert_eq!(
+        named.len(),
+        knobas_source_mock::fixture()
+            .builds
+            .iter()
+            .filter(|b| b.cfg == cfg && b.triggered_by.is_some())
+            .count(),
+        "exactly the builds the *dataset* names a person for carry an author, and not one \
+         more: an adapter that invented a triggerer for a VCS-triggered build would put a \
+         username into the index that nobody ever pressed Run. Named: {:?}",
+        named
+            .iter()
+            .map(|i| (&i.title, &i.author))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        named.len() * 10 < builds.len(),
+        "and they are a rounding error, which is the finding this test exists to keep true: \
+         {}/{} named here against 0/100 measured on a live server. A change that makes this \
+         ratio look healthy has made the fixture unrealistic, not the adapter better.",
+        named.len(),
+        builds.len()
+    );
+    for id in vcs_triggered {
+        let it = items
+            .iter()
+            .find(|i| i.entity.key == format!("build:{id}"))
+            .unwrap_or_else(|| panic!("build {id} missing; got {:?}", keys(&items)));
+        assert_eq!(
+            it.author, None,
+            "a build no person started reaches the mirror with no author, never an invented one"
+        );
+        assert!(
+            !it.body_text.contains("triggered by"),
+            "...and nothing in the search blob claims one either: {:?}",
+            it.body_text
+        );
+    }
+    server.assert_no_violations();
+}
+
 /// Authorship, at the wire: `triggered(user(username))` is the only place
 /// TeamCity names the person who started a build, so the selector has to ask
 /// for it and the mock has to recognise the name.
