@@ -16,6 +16,12 @@
   is what makes running one on every room switch affordable. On a corpus large
   enough for that to stop being true, the pass belongs on the sync scheduler's
   own completion — a backend change, not a change to this file's contract.
+
+  The room scope is the `sources` list, which **is** the membership rule for
+  every context the app mints today (`all` and `src:<id>`, contexts.ts).
+  Promoting it to CONTEXT.md's explicit adds + direct links + one hop out is
+  #47's work, which owns the membership ADR; the tray then gains a scope, not
+  a store.
 -->
 <script lang="ts">
   import { listen } from "@tauri-apps/api/event";

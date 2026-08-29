@@ -589,6 +589,12 @@ const PROPOSALS: &str = concat!(
 /// room if *either* end does -- a suggestion connecting this room to another is
 /// exactly the one worth surfacing here.
 ///
+/// Source scoping **is** the membership rule for every context the shipped app
+/// can mint -- `contexts.ts` mints `all` and `src:<id>` and nothing else. The
+/// full rule `CONTEXT.md` defines (explicit adds + direct links + one hop out)
+/// is **#47**'s to build, with the membership ADR; when it lands the tray gains
+/// a scope, not a store, and this signature is where it plugs in.
+///
 /// The tray holds no state: this is the whole of it.
 ///
 /// # Errors
