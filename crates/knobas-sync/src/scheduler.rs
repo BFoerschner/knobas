@@ -738,6 +738,17 @@ struct Inner {
     /// second sync over an already-mirrored corpus. It is replaced when a run
     /// starts and removed when one is found closed, so the map is bounded by
     /// the number of sources, not by the number of runs.
+    ///
+    /// **It does not outlive the source.** That is the one boundary the
+    /// outliving stops at, and it is not incidental: an entry is keyed by the
+    /// user's chosen source id, `knobas.sync_run` deliberately keeps no foreign
+    /// key to `source_config`, and a source deleted and added again under the
+    /// same id is therefore a *different* source wearing an id whose run
+    /// history is still readable. Left alone, the new source's first-run wizard
+    /// could be handed the deleted source's run -- knobas' first sentence about
+    /// a brand-new source describing something the user threw away.
+    /// [`Scheduler::forget_source`] is where that life ends, and `delete_source`
+    /// is what calls it.
     runs: Mutex<HashMap<String, RunEntry>>,
     /// Poked when something changed that might make a source due (a finished
     /// run, a new source, a re-entered credential), so the UI does not wait out
@@ -875,6 +886,30 @@ impl Scheduler {
         Ok(ids)
     }
 
+    /// Drop everything this scheduler remembers about a source, because the
+    /// source is gone.
+    ///
+    /// **Where a [`RunEntry`]'s life ends.** The entry outliving its *run* is
+    /// deliberate ([`Inner::runs`]); outliving its *source* is not, and nothing
+    /// else would ever notice, because `knobas.sync_run` has no foreign key to
+    /// `source_config` on purpose -- deleting a source must not rewrite its
+    /// history -- so a run of the deleted source is still readable under an id
+    /// a *new* source may now hold. Without this, adding a source back under a
+    /// deleted one's id could hand the first-run wizard the earlier source's
+    /// run and the ending recorded for it.
+    ///
+    /// Called by `delete_source`, which is the only place a source is deleted.
+    ///
+    /// **It cancels nothing.** A run of the deleted source that is still in
+    /// flight keeps its own handle on its watchers and closes them itself, so a
+    /// caller enrolled before the deletion is still told how that run ended --
+    /// ADR-0005 is about the caller, not about the configuration row. What goes
+    /// is only this scheduler's claim on the *id*, so the next trigger for it
+    /// is about whatever holds that id now.
+    pub async fn forget_source(&self, source_id: &str) {
+        self.inner.runs.lock().await.remove(source_id);
+    }
+
     /// Look for due sources now rather than at the next tick.
     pub fn wake(&self) {
         self.inner.wake.notify_one();
@@ -968,7 +1003,13 @@ impl Inner {
                 && let Some(sink) = progress.as_ref()
                 && let Some(ending) = ending_of_record(&self.deps.pool, source_id, run_id).await?
             {
-                sink.report(ending);
+                // Through `deliver` like every other delivery in this crate:
+                // this one runs in the caller's own stack and under the `runs`
+                // lock, so an uncontained panic here unwound straight out of
+                // `trigger` into the command that called it -- and it is the
+                // ADR-0005 path, which is the last one that should be the
+                // exception.
+                crate::progress::deliver(run_id, sink.as_ref(), ending);
                 return Ok(run_id);
             }
         }
@@ -1101,6 +1142,11 @@ const RUN_STOPPED_MESSAGE: &str = "the run stopped without recording an outcome"
 /// construction that also covers the abort in [`Scheduler::shutdown`], and it
 /// cannot be forgotten by a later edit to `run_task` the way a line at the
 /// bottom of the function can.
+///
+/// The panicking-adapter case runs this drop *during an unwind*, where a second
+/// panic escaping it aborts the process. [`Watchers::close`] is written not to
+/// panic for that reason -- it contains a misbehaving sink rather than letting
+/// it out -- so this guard is safe on the very path it exists for.
 struct Closing {
     watchers: Arc<Watchers>,
     source_id: String,

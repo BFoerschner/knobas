@@ -10,7 +10,7 @@ use knobas_source::{
     SyncItem, WriteOp,
 };
 use knobas_source_mock::MockSource;
-use knobas_sync::progress::{Observed, ProgressSink, SyncPhase, SyncProgress};
+use knobas_sync::progress::{Observed, ProgressSink, SyncPhase, SyncProgress, Watchers};
 
 #[derive(Default)]
 struct Recorder(Mutex<Vec<SyncProgress>>);
@@ -251,4 +251,123 @@ fn the_phases_cross_the_bridge_as_snake_case() {
             serde_json::json!(name)
         );
     }
+}
+
+// -- the fan-out, and what one misbehaving sink may cost the others -----------
+
+/// A sink that blows up where a bug in a caller's `report` would.
+///
+/// `ProgressSink`'s documented contract already forbids this -- the trait
+/// returns nothing so that a listener which has gone away cannot fail a run --
+/// so a sink like this is a *broken caller*. The point of the tests below is
+/// that a broken caller costs nobody else anything: "the caller broke its
+/// contract" is a poor reason for another caller to lose its ending, and a
+/// worse one for the process to abort.
+struct Boom;
+
+impl ProgressSink for Boom {
+    fn report(&self, _progress: SyncProgress) {
+        panic!("a sink that panics on purpose");
+    }
+}
+
+fn a_message(phase: SyncPhase) -> SyncProgress {
+    SyncProgress {
+        run_id: 7,
+        source_id: "jira".into(),
+        phase,
+        items: 3,
+        elapsed_ms: 12,
+        message: None,
+    }
+}
+
+/// **ADR-0005's fan-out is complete, whatever one sink does with its turn.**
+///
+/// The ending is where the ADR's promise -- *any caller that receives a run id
+/// receives an ending for it* -- is actually kept, so a sink that panics
+/// half-way through the fan-out must not take the rest of the vector with it.
+/// The bad sink is enrolled **first**, which is the only order in which the
+/// question is asked at all.
+#[test]
+fn the_ending_reaches_every_sink_enrolled_after_one_that_panics() {
+    let watchers = Watchers::for_run(7);
+    watchers.attach(Some(Arc::new(Boom) as Arc<dyn ProgressSink>));
+    let live = Arc::new(Recorder::default());
+    watchers.attach(Some(Arc::clone(&live) as Arc<dyn ProgressSink>));
+
+    watchers.close(a_message(SyncPhase::Finished));
+
+    let seen = live.seen();
+    assert_eq!(
+        seen.len(),
+        1,
+        "the sink enrolled after the panicking one lost its ending: {seen:?}"
+    );
+    assert_eq!(seen[0].phase, SyncPhase::Finished);
+    assert_eq!(seen[0].run_id, 7);
+}
+
+/// The same, for the run's ordinary progress rather than its ending.
+///
+/// `Watchers::report` is called from inside the adapter's own stack, so a panic
+/// escaping it does not merely cost the later sinks their message: it unwinds
+/// through the run and kills it. That is the one thing `ProgressSink`'s
+/// `-> ()` signature exists to make impossible.
+#[test]
+fn a_progress_message_reaches_every_sink_enrolled_after_one_that_panics() {
+    let watchers = Watchers::for_run(7);
+    watchers.attach(Some(Arc::new(Boom) as Arc<dyn ProgressSink>));
+    let live = Arc::new(Recorder::default());
+    watchers.attach(Some(Arc::clone(&live) as Arc<dyn ProgressSink>));
+
+    watchers.report(a_message(SyncPhase::Fetching));
+
+    assert_eq!(
+        live.seen().len(),
+        1,
+        "one panicking sink silenced the run for everyone behind it"
+    );
+}
+
+/// **A panicking sink during an unwind does not abort the process.**
+///
+/// `run_task` closes its watchers from a `Drop` guard, so on the path this
+/// models -- a run whose task panicked -- `close` runs *while already
+/// panicking*, and Rust aborts the process outright if a second panic escapes
+/// a drop there. An abort takes the whole test binary with it, so a regression
+/// here does not fail this test politely: it kills the run.
+#[test]
+fn a_sink_that_panics_while_the_run_is_already_unwinding_does_not_abort() {
+    struct Closing(Arc<Watchers>);
+    impl Drop for Closing {
+        fn drop(&mut self) {
+            self.0.close(a_message(SyncPhase::Failed));
+        }
+    }
+
+    let watchers = Watchers::for_run(7);
+    watchers.attach(Some(Arc::new(Boom) as Arc<dyn ProgressSink>));
+
+    let died = std::thread::spawn(move || {
+        let _closing = Closing(watchers);
+        panic!("the run's task blew up");
+    })
+    .join();
+
+    assert!(died.is_err(), "the thread was supposed to panic");
+}
+
+/// The recorder can tell a fan-out that reached it from one that did not.
+///
+/// Without this the three tests above would pass just as happily against a
+/// `close` that delivered to nobody at all.
+#[test]
+fn the_recorder_would_notice_a_fan_out_that_reached_nobody() {
+    let watchers = Watchers::for_run(7);
+    let live = Arc::new(Recorder::default());
+    watchers.attach(Some(Arc::clone(&live) as Arc<dyn ProgressSink>));
+    assert!(live.seen().is_empty());
+    watchers.close(a_message(SyncPhase::Finished));
+    assert_eq!(live.seen().len(), 1);
 }
