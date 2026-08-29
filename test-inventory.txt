@@ -54,6 +54,7 @@ knobas-app	lib/knobas_app	sources::demo::tests::re_registering_refreshes_the_des
 knobas-app	lib/knobas_app	tests::the_event_names_match_their_typescript_mirror
 knobas-app	lib/knobas_app	tests::the_main_window_is_declared_visible_and_run_does_not_show_it
 knobas-app	lib/knobas_app	tests::the_window_may_not_be_narrower_than_the_stylesheet_floor
+knobas-app	test/adapter_to_mirror	a_backfill_widens_the_stored_payload_of_an_issue_nobody_touched
 knobas-app	test/backup	a_restore_brings_back_no_mirror_rows_of_its_own
 knobas-app	test/backup	a_restore_refuses_a_database_that_already_holds_knobas_data
 knobas-app	test/backup	a_restored_backup_still_links_the_entities_a_later_sync_rebuilt
