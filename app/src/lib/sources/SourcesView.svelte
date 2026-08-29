@@ -35,6 +35,7 @@
     type SourceSummary,
     type SourceSyncStatus,
   } from "../ipc/sources";
+  import { latestRead } from "../shell/latest-read";
   import Modal from "../shell/Modal.svelte";
   import { health as sharedHealth, type Health } from "../shell/health.svelte";
   import { push } from "../shell/toasts.svelte";
@@ -74,7 +75,7 @@
   let purge = $state(false);
 
   /**
-   * Which read is the current one.
+   * Only the newest `list_sources` is allowed to write what it read.
    *
    * A terminal `sync:state` arrives once per source, so a five-source *Sync
    * all* now puts five `list_sources` in flight at once and nothing makes them
@@ -83,29 +84,32 @@
    * just finished — #83's own symptom, arriving through the fix for it. A read
    * that has been overtaken drops its answer instead, including its failure:
    * a stale rejection must not blank a list that has since been read fine.
+   *
+   * `latestRead` rather than a counter written out here, because the settings
+   * surface needs the same guard and a hand-copied one loses the rejection
+   * half (#107).
    */
-  let reading = 0;
+  const read = latestRead();
 
-  async function load() {
-    const mine = (reading += 1);
-    try {
-      const rows = await listSources();
-      if (mine !== reading) return;
-      sources = rows;
-      error = null;
-      // The rows carry health as of `list_sources`, and they are the whole set
-      // — so this *replaces* rather than patches. Patching kept the launcher's
-      // chips and this view reading one fact, but it could only ever add: a
-      // source deleted below stayed in the store, drawing its top-strip
-      // monogram and its room tab until the window was restarted.
-      health.replace(rows.map((row) => row.health));
-    } catch (cause) {
-      if (mine !== reading) return;
-      // Not a silent empty list: "No sources yet" is a claim about the
-      // database, and the view does not have one to make — it knows only that
-      // it could not ask.
-      error = ipcErrorMessage(cause);
-    }
+  function load() {
+    return read(listSources, {
+      ok: (rows) => {
+        sources = rows;
+        error = null;
+        // The rows carry health as of `list_sources`, and they are the whole
+        // set — so this *replaces* rather than patches. Patching kept the
+        // launcher's chips and this view reading one fact, but it could only
+        // ever add: a source deleted below stayed in the store, drawing its
+        // top-strip monogram and its room tab until the window was restarted.
+        health.replace(rows.map((row) => row.health));
+      },
+      fail: (cause) => {
+        // Not a silent empty list: "No sources yet" is a claim about the
+        // database, and the view does not have one to make — it knows only
+        // that it could not ask.
+        error = ipcErrorMessage(cause);
+      },
+    });
   }
 
   $effect(() => {

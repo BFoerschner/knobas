@@ -13,6 +13,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { BackupSchedule, BackupStatus } from "../ipc/backup";
+import { settleRejections, takeUnhandled } from "../shell/unhandled";
 
 const NOW = new Date("2026-08-29T09:14:00Z");
 const DIR = "/Users/x/Library/Application Support/dev.knobas.desktop/backups";
@@ -27,6 +28,13 @@ const calls = {
 
 let status: BackupStatus;
 let statusFails: unknown = null;
+/**
+ * Answers `backup_status` per call, when a test needs two reads in flight at
+ * once. `status` alone cannot express that: it is read at resolution time, so
+ * every pending read would answer with the same snapshot. Same shape as the
+ * sources view's `answerList` — the two views share the hazard.
+ */
+let answerStatus: ((call: number) => Promise<BackupStatus>) | null = null;
 let nowFails: unknown = null;
 let restoreFails: unknown = null;
 /**
@@ -44,6 +52,7 @@ let stores: (posted: BackupSchedule) => BackupSchedule = (posted) => posted;
 vi.mock("../ipc/backup", () => ({
   backupStatus: () => {
     calls.status += 1;
+    if (answerStatus) return answerStatus(calls.status);
     return statusFails ? Promise.reject(statusFails) : Promise.resolve(status);
   },
   backupNow: () => {
@@ -94,22 +103,6 @@ function statusOf(over: Partial<BackupStatus> = {}): BackupStatus {
 let target: HTMLDivElement;
 let app: Record<string, unknown> | undefined;
 
-/**
- * Rejections nobody caught.
- *
- * A `bind:` on a field of a nullable object is read again *after* the object
- * is set to null — Svelte's input binding reads its getter on a later tick, by
- * which time closing the dialog has taken the value away. It throws into a
- * promise nothing awaits, so every assertion in this file passes and the run
- * still fails. Recorded here so the failure names the gesture that caused it
- * rather than arriving as an unattributed error at the end of the suite.
- */
-const unhandled: unknown[] = [];
-
-function onrejection(reason: unknown) {
-  unhandled.push(reason);
-}
-
 function render() {
   app = mount(BackupSection, { target, props: { now: NOW } });
   flushSync();
@@ -143,34 +136,19 @@ beforeEach(() => {
   calls.restore = [];
   status = statusOf();
   statusFails = null;
+  answerStatus = null;
   nowFails = null;
   restoreFails = null;
   stores = (posted) => posted;
   toasts.items = [];
-  unhandled.length = 0;
-  process.on("unhandledRejection", onrejection);
   target = document.createElement("div");
   document.body.append(target);
 });
 
-/** Let a rejection that is going to happen actually happen. */
-async function drain() {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-/**
- * Every test in this file, not only the one that names it: a rejection nobody
- * caught fails the run without failing an assertion, so the run reports every
- * test passing and exits 1 anyway. Asserting it here attributes it to the test
- * that caused it.
- */
-afterEach(async () => {
-  await drain();
-  process.off("unhandledRejection", onrejection);
+afterEach(() => {
   if (app) unmount(app);
   app = undefined;
   target.remove();
-  expect(unhandled, "something rejected and nobody was holding it").toEqual([]);
 });
 
 /**
@@ -605,6 +583,88 @@ test("backup_status failing renders what failed, not an empty backup story", asy
 });
 
 /**
+ * Two reads in flight answer in whatever order they like, and the last answer
+ * to land used to win.
+ *
+ * Reaching it here takes a second *Retry* over a failing `backup_status` —
+ * genuinely rarer than the sources view's *Sync all*, which puts one read per
+ * source in flight at once (#83, #99). It is the same hazard nonetheless, and
+ * the settings shell is built to grow sections, so both call sites go through
+ * `latestRead` rather than through two hand-rolled counters (#107).
+ */
+test("a backup_status overtaken by a later one does not write what it read", async () => {
+  const stale = () => statusOf({ last: null });
+  const fresh = () => statusOf();
+
+  statusFails = { code: "not_ready", message: "the database is still starting", source_id: null };
+  render();
+  await settle();
+  expect(button("Retry"), "the failed read is what puts a second one within reach").toBeTruthy();
+
+  // The first *Retry*'s read is held open; the second one answers straight away.
+  let release: (() => void) | undefined;
+  const held = calls.status + 1;
+  answerStatus = (call) =>
+    call === held
+      ? new Promise<BackupStatus>((resolve) => {
+          release = () => resolve(stale());
+        })
+      : Promise.resolve(fresh());
+
+  button("Retry")!.click();
+  await settle();
+  button("Retry")!.click();
+  await settle();
+  expect(calls.status, "both retries read the status").toBe(held + 1);
+  expect(text()).toContain("Last export");
+
+  release!();
+  await settle();
+
+  expect(text(), "the overtaken read wrote its stale snapshot over the newer one").toContain(
+    "Last export",
+  );
+  expect(text()).not.toContain("No backup has been taken yet");
+});
+
+/**
+ * The half most easily dropped when the guard is copied by hand: a *stale
+ * rejection* must not blank a status that has since read fine.
+ *
+ * Without it the section lands on "Could not read the backup settings" while
+ * holding a perfectly good status, and the message it shows is the one from
+ * the read that was already out of date.
+ */
+test("a backup_status rejection that has been overtaken does not blank the section", async () => {
+  statusFails = { code: "not_ready", message: "the database is still starting", source_id: null };
+  render();
+  await settle();
+
+  let reject: (() => void) | undefined;
+  const held = calls.status + 1;
+  answerStatus = (call) =>
+    call === held
+      ? new Promise<BackupStatus>((_resolve, fail) => {
+          reject = () => fail({ code: "internal", message: "the stale failure", source_id: null });
+        })
+      : Promise.resolve(statusOf());
+
+  button("Retry")!.click();
+  await settle();
+  button("Retry")!.click();
+  await settle();
+  expect(text()).toContain("after 03:00");
+
+  reject!();
+  await settle();
+
+  expect(text(), "a stale rejection blanked a status that read fine").toContain("after 03:00");
+  expect(text()).not.toContain("Could not read the backup settings");
+  expect(text()).not.toContain("the stale failure");
+  expect(button("Retry")).toBeUndefined();
+});
+
+/**
  * Closing the schedule dialog must not throw into a promise nobody is holding.
  *
  * Both exits are walked, because they are different code paths onto the same
@@ -619,22 +679,22 @@ test("closing the schedule dialog raises nothing, whichever way it is closed", a
   type(field("Hour"), "22");
   button("Cancel", dialog()!)!.click();
   await settle();
-  await drain();
-  expect(unhandled, "cancelling raised").toEqual([]);
+  await settleRejections();
+  expect(takeUnhandled(), "cancelling raised").toEqual([]);
 
   button("Schedule…")!.click();
   flushSync();
   type(field("Keep"), "3");
   button("Save", dialog()!)!.click();
   await settle();
-  await drain();
-  expect(unhandled, "saving raised").toEqual([]);
+  await settleRejections();
+  expect(takeUnhandled(), "saving raised").toEqual([]);
 
   // And the restore confirm, which is the other dialog over a nullable value.
   button("Restore", archiveRow("knobas-20260829-030000.knobas")!)!.click();
   flushSync();
   button("Cancel", dialog()!)!.click();
   await settle();
-  await drain();
-  expect(unhandled, "closing the restore confirm raised").toEqual([]);
+  await settleRejections();
+  expect(takeUnhandled(), "closing the restore confirm raised").toEqual([]);
 });
