@@ -816,31 +816,31 @@ async fn the_bare_path_refuses_where_guestauth_admits_and_the_adapter_calls_it_u
     println!("LIVE auth: /guestAuth -> 200, bare -> 401 -> {err:?}");
 }
 
-/// **The fake and the server disagree about the error body, and by this
-/// suite's own standing rule the fake is wrong.**
+/// **The error shape, certified end to end** -- this test used to record the
+/// disagreement and now closes it (issue #113).
 ///
-/// `http::error_message` requires a body whose first line starts with `Error
-/// has occurred during request processing`, and its doc calls that "the shape
-/// `knobas-mockd`'s `tc_error` serves, which is the shape a real TeamCity
-/// serves". Measured here, a real TeamCity 2026.2 serves that shape to nobody:
-/// with `Accept: application/json` -- which `knobas-http` sets on every
-/// request and cannot be talked out of -- errors come back as a JSON envelope,
-/// `{"errors":[{"message": …, "statusText": …}]}`, and the message is in a
-/// field rather than on a line.
+/// `http::error_message` required a body whose first line starts with `Error
+/// has occurred during request processing`, on a doc comment calling that "the
+/// shape a real TeamCity serves". A real TeamCity 2026.2 serves that shape to
+/// nobody: with `Accept: application/json` -- which `knobas-http` sets on every
+/// request and cannot be talked out of -- errors come back as
+/// `{"errors":[{"message": …, "statusText": …}]}`, with the sentence in a field
+/// rather than on a line. So the function returned `None` on every error this
+/// adapter would ever see and the user was shown a JSON blob.
 ///
-/// So `error_message` returns `None` on every error this adapter will ever
-/// see, and the excerpt `knobas-http` falls back to puts a JSON blob on screen
-/// where the sentence was wanted. Nothing here is broken -- the error *class*
-/// is read off the status, not the body -- so this is a legibility defect and
-/// its own issue, exactly as the cancellation finding below is. This test
-/// certifies the shape and records the disagreement; it does not fix it.
+/// Two things are asserted, and the second is the one that could not be
+/// asserted anywhere else: the server sends the envelope, **and
+/// `error_message` reads it**, checked by pushing the real body through
+/// `knobas_http::status_error` -- the same function `HttpClient::send` calls,
+/// with the same hook the client is built with. A fake could show the second
+/// half alone; only this can show it over a body the server actually wrote.
 ///
-/// Asserted by form: the envelope's presence and a non-empty message, on both
-/// of the two statuses the adapter reads (400 and 404). The messages
+/// Asserted by form otherwise: the envelope's presence and a non-empty
+/// message, on both statuses the adapter reads (400 and 404). The messages
 /// themselves are printed.
 #[tokio::test]
 #[ignore = "needs a live TeamCity: `just teamcity-live`"]
-async fn a_rest_error_is_a_json_envelope_and_not_the_plaintext_the_fake_serves() {
+async fn a_rest_error_is_a_json_envelope_the_adapter_can_read() {
     let live = live_or_skip!();
     let newest = id_of(
         live.builds("defaultFilter:false,count:1", "id")
@@ -883,19 +883,80 @@ async fn a_rest_error_is_a_json_envelope_and_not_the_plaintext_the_fake_serves()
             !message.trim().is_empty(),
             "the envelope carries the sentence, not just a status: {body}"
         );
-        // The shape `error_message` requires, absent -- which is the finding.
+        // The plaintext shape `error_message` used to *require*, absent --
+        // which is why requiring it made the function useless here.
         let plaintext = body.as_str().unwrap_or_default();
         assert!(
             !plaintext.starts_with("Error has occurred during request processing"),
             "the body is both a JSON envelope and the plaintext shape, which cannot be: {body}"
         );
+
+        // The three keys beside it are the ones mockd transcribes, so a server
+        // that stopped sending them would be a fake drifting from a server
+        // again. `message` is the only one read, and it is read *because* the
+        // other two are noise: `additionalMessage` is the same sentence behind
+        // a fully-qualified Java class name.
+        for key in ["additionalMessage", "statusText"] {
+            assert!(
+                body["errors"][0].get(key).is_some(),
+                "the envelope carries {key}, which `knobas-mockd`'s `tc_error` transcribes: \
+                 {body}"
+            );
+        }
+        assert!(
+            !message.contains("jetbrains.buildServer") && !message.contains("javax.ws.rs"),
+            "the class name lives in additionalMessage, not in the sentence -- which is why \
+             `message` is the field read: {body}"
+        );
         println!("LIVE error {status} ({what}): errors[0].message = {message:?}");
     }
     println!(
-        "LIVE error: `http::error_message` parses none of these -- it wants a first line \
-         reading `Error has occurred during request processing`, which this server sends only \
-         to a client that did not ask for JSON. The fake serves that line; the server does not."
+        "LIVE error: `http::error_message` reads all of these. It used to want a first line \
+         reading `Error has occurred during request processing`, which this server sends to \
+         nobody -- a JSON-accepting client gets the envelope, any other Accept gets a 406 whose \
+         body is also the envelope, and no Accept at all gets XML."
     );
+
+    // **The end-to-end half.** Everything above reads the body with the test's
+    // own eyes; this reads it with the adapter's. A base URL nested one level
+    // inside `/app/rest` leaves every path this adapter builds under the REST
+    // resource -- so `test_connection`'s `app/rest/server` becomes
+    // `/app/rest/server/app/rest/server`, which the server answers 404 with its
+    // real error envelope. Still a GET, still read-only, and it is the only
+    // route from a *configuration* to a live REST error: every locator this
+    // adapter sends is one it built itself out of a listing the server gave it.
+    //
+    // Before #113 the message here was the whole envelope printed at the user.
+    let nested = live.source_at(
+        &format!("{}/app/rest/server", live.url),
+        serde_json::json!({}),
+    );
+    let error = nested
+        .test_connection()
+        .await
+        .expect_err("a path one level inside the REST resource is a 404");
+    let SourceError::Protocol { message, status } = &error else {
+        panic!("a 404 is a protocol fault, not a credential one: {error:?}");
+    };
+    assert_eq!(*status, Some(404), "ADR-0004: the status rides along");
+    for envelope_key in [
+        "errors",
+        "additionalMessage",
+        "statusText",
+        "stackTrace",
+        "{",
+    ] {
+        assert!(
+            !message.contains(envelope_key),
+            "the user is shown the server's sentence, not the envelope around it -- {envelope_key:?} \
+             is in {message:?}"
+        );
+    }
+    assert!(
+        message.starts_with("HTTP 404 Not Found: ") && message.len() > "HTTP 404 Not Found: ".len(),
+        "and there is a sentence after the status `knobas-http` prefixes: {message:?}"
+    );
+    println!("LIVE error rendered through the adapter: {message:?}");
 }
 
 /// Issue #114: `nextHref` is the server's own statement that a page is not the

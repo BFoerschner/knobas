@@ -72,24 +72,79 @@ pub fn router(state: Arc<MockState>) -> Router {
 
 // -- errors, violations, the guard ------------------------------------------
 
-/// TeamCity answers errors as plain text, not JSON, even to a client that asked
-/// for JSON. Reproduced rather than tidied up: an adapter that blindly
-/// `.json()`s an error response has a bug worth failing on.
+/// TeamCity's error envelope, as a real server serves it to a client that
+/// asked for JSON.
+///
+/// ```json
+/// {"errors":[{"message":"No build found by id '999999999'.",
+///             "additionalMessage":"jetbrains.buildServer.server.rest.errors.NotFoundException: No build found by id '999999999'.",
+///             "statusText":"Responding with error, status code: 404 (Not Found).",
+///             "stackTrace":null}]}
+/// ```
+///
+/// Transcribed from JetBrains' public instance (2026.2 EAP, build 238763),
+/// read-only on 2026-08-29, on a 400, a 404 and a 406.
+///
+/// **This used to be `text/plain`**, in the shape `Error has occurred during
+/// request processing (404).\n<message>\n`, on a comment asserting that a real
+/// TeamCity answers errors as plain text "even to a client that asked for
+/// JSON". It does not, and has not for a long time: with `Accept:
+/// application/json` -- which `knobas-http` sets on every request -- the body
+/// is the envelope above; with any other `Accept` the answer is a 406 whose
+/// body is *also* that envelope; with no `Accept` at all it is XML. The plain
+/// form reached nobody, and the TeamCity adapter's `http::error_message` was
+/// written to require it, so it parsed no error the adapter would ever be
+/// handed and every failure rendered as a raw blob (issue #113).
+///
+/// That is the standing rule doing its work: where the fake and the server
+/// disagree the **fake** is wrong. Leaving it would let the next reader derive
+/// the same wrong shape from the same green suite.
+///
+/// `additionalMessage` and `statusText` are carried because the real server
+/// carries them, and an adapter that lifted either would be reading noise it
+/// should not -- which is a thing worth being able to fail on. `stackTrace` is
+/// `null` for the same reason: it is a key a real answer has.
 pub(crate) fn tc_error(status: StatusCode, message: impl Into<String>) -> Response {
-    let body = format!(
-        "Error has occurred during request processing ({}).\n{}\n",
-        status.as_u16(),
-        message.into()
-    );
+    let message = message.into();
+    let reason = status.canonical_reason().unwrap_or("Error");
+    let body = json!({
+        "errors": [{
+            "message": message,
+            "additionalMessage": format!(
+                "jetbrains.buildServer.server.rest.errors.{}: {message}",
+                exception_for(status)
+            ),
+            "statusText": format!(
+                "Responding with error, status code: {} ({reason}).",
+                status.as_u16()
+            ),
+            "stackTrace": Value::Null,
+        }],
+    });
     (
         status,
         [(
             header::CONTENT_TYPE,
-            HeaderValue::from_static("text/plain;charset=UTF-8"),
+            HeaderValue::from_static("application/json"),
         )],
-        body,
+        body.to_string(),
     )
         .into_response()
+}
+
+/// The class name a real TeamCity puts in front of `additionalMessage`.
+///
+/// Only the three this mock can actually produce are named; anything else gets
+/// the generic one rather than an invented class, on the same rule as the
+/// fixture's people: a name that is not a real TeamCity's is a name an adapter
+/// could come to depend on.
+fn exception_for(status: StatusCode) -> &'static str {
+    match status {
+        StatusCode::NOT_FOUND => "NotFoundException",
+        StatusCode::BAD_REQUEST => "BadRequestException",
+        StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => "AuthorizationFailedException",
+        _ => "OperationException",
+    }
 }
 
 fn hint(mut r: Response, text: &'static str) -> Response {
