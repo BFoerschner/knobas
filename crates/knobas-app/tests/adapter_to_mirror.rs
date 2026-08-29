@@ -89,7 +89,11 @@ const UNTOUCHED: &str = "PAY-231";
 const TOUCHED: &str = "PAY-228";
 
 /// The fixture's seven Tidewater issues.
-const CORPUS: usize = 7;
+///
+/// Named for the fixture rather than `CORPUS`, because the glossary reserves
+/// that word: "a count of the mirror is a corpus, never a run's Upserted"
+/// (`CONTEXT.md`), and this number is compared against both.
+const FIXTURE_ISSUES: usize = 7;
 
 // -- the mirror as the pre-#32 adapter left it -------------------------------
 
@@ -228,11 +232,6 @@ async fn stored(pool: &PgPool, source_id: &str, key: &str) -> StoredItem {
     .unwrap_or_else(|e| panic!("{source_id}:{key} should be in the mirror: {e}"))
 }
 
-/// Which of the six #32 names the stored `payload` actually carries.
-///
-/// Presence, not truthiness: `resolution` is `null` on an unresolved issue and
-/// that null **is** the widened record. A check that treated it as missing
-/// would report the mirror as narrow for every open ticket.
 /// Every name under `payload.fields`, sorted -- the comparable summary of how
 /// wide a record is.
 fn field_names(payload: &Value) -> Vec<String> {
@@ -244,6 +243,11 @@ fn field_names(payload: &Value) -> Vec<String> {
     names
 }
 
+/// Which of the six #32 names the stored `payload` actually carries.
+///
+/// Presence, not truthiness: `resolution` is `null` on an unresolved issue and
+/// that null **is** the widened record. A check that treated it as missing
+/// would report the mirror as narrow for every open ticket.
 fn widened_names(payload: &Value) -> Vec<&'static str> {
     WIDENED_BY_32
         .into_iter()
@@ -272,11 +276,17 @@ async fn a_backfill_widens_the_stored_payload_of_an_issue_nobody_touched() {
     )
     .await
     .unwrap();
-    assert_eq!(filled.upserted as usize, CORPUS);
+    assert_eq!(filled.upserted as usize, FIXTURE_ISSUES);
+    let narrow = stored(&pool, &id, UNTOUCHED).await.payload;
     assert_eq!(
-        widened_names(&stored(&pool, &id, UNTOUCHED).await.payload),
+        widened_names(&narrow),
         Vec::<&str>::new(),
         "the starting state must be a narrow mirror, or nothing below is a widening"
+    );
+    assert!(
+        !field_names(&narrow).is_empty(),
+        "and it is still a real Jira record: an absent `fields` object would satisfy the \
+         assertion above without anything having been narrowed"
     );
 
     // 2. The query widens and one issue is edited upstream. The scheduled run
@@ -306,7 +316,7 @@ async fn a_backfill_widens_the_stored_payload_of_an_issue_nobody_touched() {
         .await
         .unwrap();
     assert_eq!(
-        backfill.upserted as usize, CORPUS,
+        backfill.upserted as usize, FIXTURE_ISSUES,
         "the whole corpus is re-fetched"
     );
     assert_eq!(
@@ -351,8 +361,7 @@ async fn a_backfill_widens_the_stored_payload_of_an_issue_nobody_touched() {
     // here goes missing.
     let mut parsed = VecSink(Vec::new());
     real.sync(None, &mut parsed).await.unwrap();
-    assert_eq!(parsed.0.len(), CORPUS);
-    let mut compared = 0_usize;
+    assert_eq!(parsed.0.len(), FIXTURE_ISSUES);
     for item in &parsed.0 {
         let row = stored(&pool, &id, &item.entity.key).await;
         // The key sets first, and separately: a whole-row `assert_eq!` over two
@@ -378,12 +387,7 @@ async fn a_backfill_widens_the_stored_payload_of_an_issue_nobody_touched() {
             "{} reached the mirror thinner than the adapter parsed it",
             item.entity
         );
-        compared += 1;
     }
-    assert_eq!(
-        compared, CORPUS,
-        "no issue was compared, so this proves nothing"
-    );
 
     // Every request this test made is one the vendored WADL declares, so the
     // widened `fields=` is a query a real Jira DC would accept.
