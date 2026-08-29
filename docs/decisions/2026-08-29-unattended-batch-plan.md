@@ -153,3 +153,33 @@ into scope with it.
 Jira never declares, and gives TeamCity's `builds_per_config` a maximum 20× below the adapter's —
 with three existing tests asserting the wrong bound. The fixture drift that caused #82's JSON-textarea
 bug in the first place is a class, not an instance.
+
+## A misattribution of mine, corrected by the last ruling
+
+I told Björn, more than once, that **ADR-0005 calls the wizard's DONE sentence "the first sentence
+knobas ever says to a new user."** It does not. That phrase is in **issue #84's body** and in
+Fable's own #137 ruling language, and it reached `FirstRun.svelte`'s doc comment from there.
+
+The distinction matters, and Fable is the one who caught it. ADR-0005 rules what *"mirrored N
+items"* **means** — the corpus, not a run's `Upserted` — not **which panel renders it**. So #156's
+fork 1 (make the DONE step reachable from a real sync) amends nothing, while fork 2 (re-aim the
+rulings at the stats row) would be an ADR supersession and is Björn's.
+
+Had the misattribution stood, #156 would have looked like a question about Björn's ADR when it is
+mostly a question about a component. I repeated it because it read as settled; it was settled, but
+not by the document I named.
+
+## Fable's closing summary, for the reading order
+
+Fifteen forks ruled across five batches, every one posted to its issue with the overturn line,
+nothing frozen touched, and no label, milestone or merge moved by Fable itself. Its suggested
+reading order for Björn:
+
+- **#82** — its one divergence from a mechanism Björn sketched.
+- **#91** — the most consequential.
+- **#154** — the only ruling that alters what a delete does.
+- **#156** — the ADR-quote correction above.
+
+Explicitly left for Björn: #156's fork 2 and the DONE panel's voice; #106's option 3
+(`SearchResponse`, frozen IPC); #146's battery-clause gate; #84's null-`finished_at` edge; #82's
+descriptor-declared identity; and any battery tolerance, ever.

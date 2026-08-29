@@ -182,3 +182,39 @@ Comment links: [#127](https://github.com/BFoerschner/knobas/issues/127#issuecomm
 **Labels (I may not change them):** both `needs-triage` → `ready-for-agent`; #148 sequenced on PR #147. Nothing in this batch was escalated as blocking on you — #146's Björn-gated route was declined rather than needed.
 
 Comment links: [#146](https://github.com/BFoerschner/knobas/issues/146#issuecomment-5461770884) · [#148](https://github.com/BFoerschner/knobas/issues/148#issuecomment-5461770968)
+
+---
+
+## The fifth and last batch, end of day — #154 and #156, the two findings deep-pass merge-managers judged too consequential to fix unreviewed
+
+**Appended under the same delegation.** Both were found at merge time and correctly left: #154 by PR #149's merge-manager (a destructive-path behaviour question), #156 independently by PR #150's merge-manager and its Spec reviewer (a product-structure question). Neither ruling touches a §10.8 frozen surface — checked for both, and the checks are quoted in the comments. One of them (#156) required correcting the record first: a quote three pieces of work attributed to ADR-0005 is not in the ADR.
+
+## #154 — an `add_source` committing inside `delete_source`'s own body
+
+**The fork:** guard the purge on the source still being absent; reorder `delete_source`; or accept and write it on `delete_source`'s guarantee. The issue says accept is legitimate, and the fix is a behaviour change on a destructive path.
+
+**Ruling:** fix it — the existence guard, inside `forget_source`, under the claims lock it already holds: before arming or applying a purge, `config::get(pool, source_id)`; `Some(_)` means a source exists under the id again, the user's newest instruction wins, and neither destructive act happens. `Ok(None)` is today's behaviour; `Err(_)` warns and proceeds as today, so a db blip cannot reopen #127's symptom — the misfire then needs the race *and* a read failure at the same instant, and that conjunction is the accepted residual, recorded beside #149's two on `delete_source`. `claims.runs.remove` stays unconditional (#119's rule: the entry never outlives its source; matching the sequential outcome), with the stripped-fresh-entry residual documented on `forget_source`. The `Purge` glossary gap is real and ruled closed: a `CONTEXT.md` head-word lands in the same PR (text in the comment — it defines the purge against **Sweep**, whose entry already forbids "purge" for the reconcile pass, so the vocabulary was half-pinned until this closes the loop).
+
+**Reasoning:** I weighed accept seriously — the window needs two overlapping IPC calls on one id — and three things beat it. The worst shape is silent and not self-healing: the cursor lives on `source_config` and the purge removes only items, so the new source's corpus stays gone until a manual backfill, entities tombstoned out of every reader's view — worse than the #127 defect this machinery exists to close. The principle is already ratified in the code (`source_added`: "The user's newest instruction about the id wins"); #149 enforced it through one door and left the other open. And the guard is one read made complete by lock order: `source_added` takes the same claims lock, so every add either committed before the guard's read (the row is visible) or clears the armed intent afterwards (#149's door); no run of the re-added source can start inside the window because `trigger` reads `source_config` under this same lock. ADR-0005 untouched — the guard cancels nothing and never touches `Watchers`.
+
+**If you disagree, the cost of reversing this is:** small in code — one read and three arms revert mechanically, nothing frozen moved — but reverting re-opens a silent purge-of-the-wrong-source's-corpus window on a destructive path, and the accept fork you would be choosing still owes the write-up on `delete_source`'s guarantee, so reversal is a swap of fix for documentation, not a deletion. The escalation trigger on the issue: if the honestly-interleaved test cannot be made (M8's refusal is the bar), the accept fork comes to you rather than the test getting weakened.
+
+## #156 — the wizard's DONE step is reachable only from a demo load
+
+**The fork:** make DONE reachable from a real sync; accept that the real path ends at step 2 and re-aim the ruled microcopy at the stats row; or give step 2 the sentence and let the demo keep its panel.
+
+**Ruling:** fork 1, click-neutral — in the channel callback, `stepIndex = 3` on the `finished` ending; step 2's now-dead `finished` branch removed; failure stays at step 2 with Retry/Skip; demo unchanged; the component header updated so the next reader finds the decision. No new microcopy and no ADR change: the DONE panel already renders through `mirrored`, the derived that carries #120's tri-state, #137's "your items", and ADR-0005's corpus rule, so every ruled constraint propagates by construction.
+
+**Reasoning, and the record correction:** the phrase "the first sentence knobas ever says to a new user…" is **not in ADR-0005** — I read the ADR end to end; it is my own #137 language and the component's doc comment. The ADR's actual consequence rules what "mirrored N items" *means*, not which panel renders it — so fork 1 amends nothing, while fork 2 (re-aiming #120/#137 at the stats row and re-reading the ADR's "user-facing" consequence) is a supersession of your ADR's reading and yours alone; I say that plainly in the comment and did not take it. On the product merits fork 1 also wins on evidence: the breadcrumb already promises the step to every user (`STEPS` ends in "Done"; `stepIndex = 3` is assigned only in `loadDemo`), §14a's fourth stage is the landing, and the change is click-neutral — today's finished step 2 offers exactly one button and so does DONE, so the issue's "another screen before the shell" cost does not exist.
+
+**If you disagree, the cost of reversing this is:** one assignment and one restored branch in one frontend component — but choosing fork 2 instead is not a plain reversal: it carries the restatement work (rulings re-aimed at the stats row, the demo-only status stated in the component, the ADR consequence's renderer named), and that package is yours by the supersession logic above. Any rewording of the DONE sentence itself is also yours — I ruled reachability, not voice.
+
+**Labels (I may not change them):** #154 keeps `ready-for-agent`; #156 `needs-triage` → `ready-for-agent`. Both are implementable now without you.
+
+Comment links: [#154](https://github.com/BFoerschner/knobas/issues/154#issuecomment-5462288872) · [#156](https://github.com/BFoerschner/knobas/issues/156#issuecomment-5462288959)
+
+---
+
+## Closing, end of day
+
+Fifteen forks ruled across five batches, every one posted on its issue with the overturn line, none touching a §10.8 frozen surface, and no labels, milestones, or merges moved. If you have limited time, read in this order: **#82** (the one place I diverged from a mechanism you sketched), **#91** (the most consequential engine change), **#154** (a behaviour change on a destructive path — the only ruling that alters what a delete does), and **#156** (where I corrected a misattributed ADR quote and deliberately took the fork that keeps ADR-0005 literally true rather than the one that reinterprets it). Explicitly left for you, gathered from the day: fork 2 of #156 and the DONE sentence's voice; #106's option 3 and any `SearchResponse` change; #146's battery-clause gate; the #84 null-`finished_at` edge; #82's descriptor-declared identity; and any battery tolerance, ever. Everything else in this file is implementable now, and each section carries the observation that would send it back to you.
