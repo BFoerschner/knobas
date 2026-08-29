@@ -1037,7 +1037,10 @@ async fn the_confirmed_and_proposed_views_partition_the_live_links() {
     .fetch_one(pool)
     .await
     .unwrap();
-    assert_eq!(both, 0, "a row in both views is a proposal the panel can show");
+    assert_eq!(
+        both, 0,
+        "a row in both views is a proposal the panel can show"
+    );
     assert_eq!(
         neither, 0,
         "a live row in neither view is a link nothing can read"
@@ -1092,7 +1095,10 @@ async fn the_rule_class_vocabulary_is_closed() {
     .await
     .unwrap_err();
     assert_eq!(
-        refused.as_database_error().and_then(|e| e.code()).as_deref(),
+        refused
+            .as_database_error()
+            .and_then(|e| e.code())
+            .as_deref(),
         Some("23514"),
         "a class outside the list is a suggestion the reader's decoder refuses"
     );
@@ -1213,12 +1219,11 @@ async fn zero_seven_backfills_every_existing_link_as_confirmed() {
     assert_eq!(drifted, 0, "the backfill must carry each link's own date");
 
     // And every one of them is in the panel's view rather than the tray's.
-    let (visible,): (i64,) = sqlx::query_as(
-        "select count(*) from knobas.confirmed_link where from_id = 'test:pre07-a'",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let (visible,): (i64,) =
+        sqlx::query_as("select count(*) from knobas.confirmed_link where from_id = 'test:pre07-a'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(visible, ORIGINS.len() as i64);
 
     // Re-entrant: a second pass applies nothing again.

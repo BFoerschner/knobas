@@ -12,11 +12,11 @@
 //! detection pass reads the whole mirror, so it would propose into every other
 //! test's corpus in the shared one.
 
+use knobas_app::IpcErrorCode;
 use knobas_app::commands::entity::{
     accept_suggestion_inner, create_link_inner, detect_suggestions_inner, dismiss_suggestion_inner,
     get_entity_inner, room_suggestions_inner,
 };
-use knobas_app::IpcErrorCode;
 use sqlx::PgPool;
 
 /// The demo corpus in a database nothing else touches.
@@ -95,7 +95,10 @@ async fn accepting_moves_a_proposal_into_the_panel_and_records_it() {
     let pool = demo().await;
     detect_suggestions_inner(&pool).await.unwrap();
     let page = room_suggestions_inner(&pool, &[], 500).await.unwrap();
-    let entry = page.rows.first().expect("the demo corpus proposes something");
+    let entry = page
+        .rows
+        .first()
+        .expect("the demo corpus proposes something");
     let id = entry.link.id.to_string();
     let (from, to) = (entry.from.entity_id.clone(), entry.to.entity_id.clone());
     let reason = entry.link.reason.clone().unwrap();
@@ -141,7 +144,10 @@ async fn dismissing_is_remembered_across_a_later_pass() {
     let pool = demo().await;
     detect_suggestions_inner(&pool).await.unwrap();
     let page = room_suggestions_inner(&pool, &[], 500).await.unwrap();
-    let entry = page.rows.first().expect("the demo corpus proposes something");
+    let entry = page
+        .rows
+        .first()
+        .expect("the demo corpus proposes something");
     let id = entry.link.id.to_string();
 
     let written = dismiss_suggestion_inner(&pool, &id)
@@ -153,7 +159,9 @@ async fn dismissing_is_remembered_across_a_later_pass() {
     // A full re-sync of the source, then another pass: the corpus is back
     // exactly as it was, so the rule that proposed this has every reason to do
     // it again.
-    knobas_app::sources::demo::demo_load_inner(&pool).await.unwrap();
+    knobas_app::sources::demo::demo_load_inner(&pool)
+        .await
+        .unwrap();
     assert_eq!(
         detect_suggestions_inner(&pool).await.unwrap(),
         0,
@@ -162,7 +170,12 @@ async fn dismissing_is_remembered_across_a_later_pass() {
     let after = room_suggestions_inner(&pool, &[], 500).await.unwrap();
     assert!(!after.rows.iter().any(|e| e.link.id == entry.link.id));
     assert_eq!(after.total, page.total - 1);
-    assert!(dismiss_suggestion_inner(&pool, &id).await.unwrap().is_none());
+    assert!(
+        dismiss_suggestion_inner(&pool, &id)
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 /// A malformed id is a bad address, and an id nothing carries is a missing
@@ -172,8 +185,12 @@ async fn a_bad_suggestion_id_is_invalid_and_an_unknown_one_is_not_found() {
     let pool = demo().await;
 
     for refused in [
-        accept_suggestion_inner(&pool, "not-a-uuid").await.unwrap_err(),
-        dismiss_suggestion_inner(&pool, "not-a-uuid").await.unwrap_err(),
+        accept_suggestion_inner(&pool, "not-a-uuid")
+            .await
+            .unwrap_err(),
+        dismiss_suggestion_inner(&pool, "not-a-uuid")
+            .await
+            .unwrap_err(),
     ] {
         assert_eq!(refused.code, IpcErrorCode::Invalid);
     }
@@ -201,17 +218,29 @@ async fn linking_a_proposed_pair_by_hand_accepts_it_instead_of_refusing() {
         .find(|e| e.link.relation == knobas_app::commands::entity::DEFAULT_RELATION)
         .expect("the corpus proposes a plain related link");
 
-    let written = create_link_inner(&pool, &entry.from.entity_id, &entry.to.entity_id, None, None)
-        .await
-        .expect("drawing a proposed link is accepting it, not a conflict");
+    let written = create_link_inner(
+        &pool,
+        &entry.from.entity_id,
+        &entry.to.entity_id,
+        None,
+        None,
+    )
+    .await
+    .expect("drawing a proposed link is accepting it, not a conflict");
     assert_eq!(written.link.id, entry.link.id, "the same row, promoted");
     assert!(written.link.confirmed_at.is_some());
     assert_eq!(written.activity.verb, "linked");
 
     // ...and a second attempt is the conflict it has always been.
-    let refused = create_link_inner(&pool, &entry.from.entity_id, &entry.to.entity_id, None, None)
-        .await
-        .unwrap_err();
+    let refused = create_link_inner(
+        &pool,
+        &entry.from.entity_id,
+        &entry.to.entity_id,
+        None,
+        None,
+    )
+    .await
+    .unwrap_err();
     assert_eq!(refused.code, IpcErrorCode::Conflict);
 }
 

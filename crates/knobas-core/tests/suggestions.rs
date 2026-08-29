@@ -328,7 +328,10 @@ async fn each_exact_key_rule_reads_only_its_own_kind() {
             "branch",
             item(&pool, "branch", "b1", "feature/PAY-231", "").await,
         );
-        by_kind.insert("commit", item(&pool, "commit", "c1", "Fix PAY-231", "").await);
+        by_kind.insert(
+            "commit",
+            item(&pool, "commit", "c1", "Fix PAY-231", "").await,
+        );
         by_kind.insert(
             "build",
             item(&pool, "build", "d1", "Verify #1", "PAY-231").await,
@@ -551,7 +554,10 @@ async fn a_second_pass_over_an_unchanged_mirror_proposes_nothing() {
 
     let second = suggest::detect(&pool).await.unwrap();
 
-    assert_eq!(second, 0, "a second pass over the same mirror proposes nothing");
+    assert_eq!(
+        second, 0,
+        "a second pass over the same mirror proposes nothing"
+    );
     assert_eq!(
         pairs(&tray(&pool).await),
         after_first,
@@ -801,7 +807,10 @@ async fn an_accepted_suggestion_is_indistinguishable_from_a_hand_drawn_link() {
         .await
         .unwrap();
     let ids: Vec<uuid::Uuid> = from_branch.iter().map(|e| e.link.id).collect();
-    assert!(ids.contains(&proposal.id), "an accepted suggestion is a link");
+    assert!(
+        ids.contains(&proposal.id),
+        "an accepted suggestion is a link"
+    );
     assert!(ids.contains(&hand.id), "beside the hand-drawn one");
     let on_ticket = link::entries_of(&pool, &EntityRef::parse(&ticket).unwrap())
         .await
@@ -873,7 +882,10 @@ async fn the_panel_shows_no_proposal_and_the_tray_shows_no_link() {
         !entries.iter().any(|e| e.link.id == drawn.id),
         "a link the user drew is not a suggestion"
     );
-    assert!(between(&entries, &branch, &ticket).is_some(), "and the proposal is there");
+    assert!(
+        between(&entries, &branch, &ticket).is_some(),
+        "and the proposal is there"
+    );
 }
 
 /// Accepting and dismissing are idempotent, and each says whether it did
@@ -897,7 +909,10 @@ async fn accept_and_dismiss_report_whether_they_changed_anything() {
         "accepting twice accepts once"
     );
     assert!(
-        suggest::dismiss(&pool, accepted_id).await.unwrap().is_none(),
+        suggest::dismiss(&pool, accepted_id)
+            .await
+            .unwrap()
+            .is_none(),
         "a confirmed link is never tombstoned through the tray's door"
     );
     assert!(
@@ -909,13 +924,24 @@ async fn accept_and_dismiss_report_whether_they_changed_anything() {
         "and it is still in the panel"
     );
 
-    assert!(suggest::dismiss(&pool, dismissed_id).await.unwrap().is_some());
     assert!(
-        suggest::dismiss(&pool, dismissed_id).await.unwrap().is_none(),
+        suggest::dismiss(&pool, dismissed_id)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        suggest::dismiss(&pool, dismissed_id)
+            .await
+            .unwrap()
+            .is_none(),
         "dismissing twice dismisses once"
     );
     assert!(
-        suggest::accept(&pool, dismissed_id).await.unwrap().is_none(),
+        suggest::accept(&pool, dismissed_id)
+            .await
+            .unwrap()
+            .is_none(),
         "a dismissal is not undone by pressing the other button"
     );
 
@@ -1124,7 +1150,10 @@ async fn the_database_refuses_a_proposal_that_cannot_say_why() {
     .await
     .unwrap_err();
     assert_eq!(
-        refused.as_database_error().and_then(|e| e.code()).as_deref(),
+        refused
+            .as_database_error()
+            .and_then(|e| e.code())
+            .as_deref(),
         Some("23514"),
         "an unconfirmed row must carry a rule, a class and a reason"
     );
