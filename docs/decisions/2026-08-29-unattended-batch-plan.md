@@ -183,3 +183,32 @@ reading order for Björn:
 Explicitly left for Björn: #156's fork 2 and the DONE panel's voice; #106's option 3
 (`SearchResponse`, frozen IPC); #146's battery-clause gate; #84's null-`finished_at` edge; #82's
 descriptor-declared identity; and any battery tolerance, ever.
+
+## Where the batch stopped, and why it stopped there
+
+**GitHub Actions went down repo-wide for billing** between 12:09 and 12:16, and it needs Björn:
+
+> The job was not started because recent account payments have failed or your spending limit needs
+> to be increased.
+
+Verified rather than relayed: the most recent run **on `main`** failed in one second with `steps: 0`.
+Every run before the block was green; every run after fails instantly.
+
+**PR #155 was merged on a locally-run gate rather than a green CI**, by its merge-manager, which
+flagged the judgement call plainly instead of quietly. The case for it: test-only change, its
+pre-rebase sha had been green on real CI for 8m24s, and the delta was a rebase onto a green `main`
+plus doc edits and two dead-binding removals. The merge is `90a5276` if Björn would rather it not
+stand.
+
+**I have stopped merging there, deliberately.** PRs #158 and #159 are open, locally gated, and
+**not** dispatched to merge-managers. One merge on a local gate, flagged, is a defensible call by
+the agent in front of it. Making that the batch's standing practice while Björn is away — across a
+scheduler guard on a destructive path and a change to what the first-run wizard shows — is not a
+call I should make on his behalf. They wait for CI.
+
+**Final state:** 33 issues merged across 29 commits to `main` today. Six PRs open — four gated on
+Björn by the frozen-contract rule (#98, #117, #128, #132) and two waiting on CI (#158, #159).
+Six worktrees, 217 GiB free. Every `ready-for-agent` issue that was open when the batch began has
+either merged or has a PR.
+
+**The first thing to do on return is the billing settings**, because it unblocks everything else.
