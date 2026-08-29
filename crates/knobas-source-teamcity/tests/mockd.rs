@@ -15,13 +15,14 @@
 //!   6) and **the route table is the allowlist**. Both answer a mistake with a
 //!   real error *and* a recorded [`Violation`](knobas_mockd::Violation), which
 //!   is why every test here ends with `assert_no_violations()`.
-//! * **Builds come back newest-first**, as they do on a real server. Nothing
-//!   below asserts an order, but the run is no longer indifferent to one: the
-//!   opening ceiling query reads row 0 of its page as the newest build. It
-//!   checks that page against itself rather than trusting it -- two rows in
-//!   ascending order are refused on the spot -- so a server that answered the
-//!   other way never gets as far as a watermark. `sync`'s own unit tests hold
-//!   both halves of that.
+//! * **Builds come back newest-first**, as they do on a real server, and
+//!   nothing below asserts an order -- because the run does not depend on one.
+//!   The opening probe's page is read for its **maximum** id, which is the
+//!   same number however the rows are arranged. It used to be read for row 0,
+//!   and a real TeamCity answering an unordered page wedged the source
+//!   permanently (issue #91); `sync`'s own unit tests hold that, against a
+//!   fake that can serve a page whose row 0 is not its maximum, which this one
+//!   cannot.
 //!
 //! Expectations are **computed from `knobas_source_mock::fixture()`**, not
 //! hard-coded: mockd transcribes `build.num` to `build.id` and `build.cfg` to
@@ -747,6 +748,40 @@ async fn the_superseded_in_flight_spelling_is_still_refused() {
         "the refusal names the spelling this adapter does send: {body}"
     );
     assert!(!server.violations().is_empty());
+}
+
+/// The replaced-server refusal, over the wire.
+///
+/// The unit tests hold the *decision*; this holds the request it rests on.
+/// `GET /app/rest/builds/id:{id}` is a route mockd's allowlist knows and
+/// `fields=id` a name its validator accepts, so an adapter that invented
+/// either would be a recorded violation here rather than a 404 — which is
+/// exactly the failure mode this check must not have, because it reads a 404
+/// as "the server was replaced" and would then say so about a healthy one.
+///
+/// A watermark far above anything in the fixture is the trigger: nothing the
+/// run witnesses reaches it, so the run asks the server about that one build
+/// and gets the only answer that refuses.
+#[tokio::test]
+async fn a_watermark_no_build_answers_to_is_refused_over_the_wire() {
+    let server = spawn_mock_teamcity().await;
+    let source = adapter(&server.base_url(), serde_json::json!({}));
+    let mut sink = VecSink(Vec::new());
+    let err = source
+        .sync(
+            Some(r#"{"v":1,"since_build_id":999999}"#.to_owned()),
+            &mut sink,
+        )
+        .await
+        .expect_err("a watermark no build on this server answers to must not be synced past");
+    assert!(
+        matches!(&err, SourceError::Protocol { message: m, .. }
+            if m.contains("`/app/rest/builds/id:999999` answers 404")
+                && m.contains("reset the source's cursor")),
+        "{err:?}"
+    );
+    assert!(sink.0.is_empty(), "nothing is emitted from a refused run");
+    server.assert_no_violations();
 }
 
 /// Two TeamCitys must not overwrite each other's rows: the instance id is the

@@ -41,6 +41,15 @@ pub(crate) const SERVER_FIELDS: &str = "version,buildNumber";
 /// as, which is what *Test connection* puts on screen (P4).
 pub(crate) const USER_FIELDS: &str = "username,name";
 
+/// What `GET /app/rest/builds/id:{id}` is asked for.
+///
+/// One name, because the only thing that request asks is whether the build is
+/// there at all -- `Rest::build_exists` reads the status, never the body. It
+/// is still an explicit `fields=`: interfaces §4.2 requires one on every
+/// TeamCity request, and TeamCity's default projection is not one any adapter
+/// should rely on.
+pub(crate) const BUILD_ID_FIELDS: &str = "id";
+
 /// What `/app/rest/buildTypes` is asked for. Without an explicit `fields=`,
 /// real TeamCity answers a hyperlink stub (`id`, `href`) and mockd answers 400
 /// -- the parameter is mandatory on the collections.
@@ -206,8 +215,8 @@ pub(crate) struct Locator {
     /// Distinct from `state`: `state:` names the states wanted and is the
     /// right dimension when the answer is a set of builds to emit.
     /// `defaultFilter:false` widens the population a *stateless* question is
-    /// asked over, which is what the run's opening ceiling query needs -- see
-    /// [`sync::ceiling`](crate::sync).
+    /// asked over, which is what the run's opening probe needs -- see
+    /// [`sync::probe`](crate::sync).
     pub default_filter: Option<bool>,
     pub count: u32,
 }
@@ -440,18 +449,19 @@ mod tests {
             assert!(!rendered.contains("state:running"), "{rendered}");
             assert!(!rendered.contains("state:queued"), "{rendered}");
         }
-        // The run's opening ceiling query: no `state`, the default filter
-        // explicitly off, two builds. `state` would answer a different
-        // question -- see the field's doc -- and the second build is the
-        // ordering evidence, not a spare row (`sync::ceiling`).
+        // The run's opening probe: no `state`, the default filter explicitly
+        // off, one page. `state` would answer a different question -- see the
+        // field's doc -- and the page is read for its maximum id rather than
+        // its first row, which is why its width is the whole page
+        // (`sync::probe`, `sync::ceiling`).
         assert_eq!(
             Locator {
                 default_filter: Some(false),
-                count: 2,
+                count: 100,
                 ..Locator::default()
             }
             .render(),
-            "defaultFilter:false,count:2"
+            "defaultFilter:false,count:100"
         );
         // No dimension may repeat: the mock rejects a locator that names one
         // twice, whichever one it is.

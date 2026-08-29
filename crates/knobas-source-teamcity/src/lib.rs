@@ -2,10 +2,14 @@
 //!
 //! Five endpoints, all JSON, all trimmed with an explicit `fields=`:
 //! `/app/rest/server` and `/app/rest/users/current` (test connection),
-//! `/app/rest/buildTypes` (the scope and the `build_config` items), and
-//! `/app/rest/builds` with two locator shapes -- finished-since-watermark, and
-//! an unconditional `state:(queued:true,running:true)` poll, because a running
-//! build mutates in place without ever getting a new id.
+//! `/app/rest/buildTypes` (the scope and the `build_config` items),
+//! `/app/rest/builds` with three locator shapes -- one page of any state to
+//! open the run, finished-since-watermark, and an unconditional
+//! `state:(queued:true,running:true)` poll, because a running build mutates in
+//! place without ever getting a new id -- and `/app/rest/builds/id:{id}`,
+//! asked once in the rare run whose opening pages do not reach the watermark
+//! and answered by its **status**, where a 404 is the one thing that proves
+//! the server is not the one this source's cursor came from.
 //!
 //! Every request sends `Accept: application/json`; without it real TeamCity
 //! answers XML, and `knobas-mockd` answers 406 + `X-Mockd-Hint` (interfaces

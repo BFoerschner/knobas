@@ -40,7 +40,7 @@ pub(crate) fn parse(raw: &str) -> Option<CursorState> {
 /// * `max_finished` -- the newest **finished** build this run observed.
 /// * `min_unfinished` -- the oldest **in-scope** build this run saw queued or
 ///   running.
-/// * `ceiling` -- the highest build id that existed when the run **started**.
+/// * `ceiling` -- the highest build id the run **witnessed** while opening.
 ///
 /// TeamCity assigns a build's id when it is **queued**, so ids are monotonic
 /// in queue order, not in finish order. A build queued at id 1150 that is
@@ -68,12 +68,19 @@ pub(crate) fn parse(raw: &str) -> Option<CursorState> {
 ///
 /// Ids are assigned at queue time and are monotonic, so **every** build queued
 /// after the run started has an id above every build that existed when it
-/// started. One number therefore covers all of them at once: the highest id in
-/// existence at that instant, which the watermark may not pass. The cost is
+/// started. One number therefore covers all of them at once: any id known to
+/// have existed at that instant, which the watermark may not pass. The cost is
 /// re-fetching the builds that finished inside this run on the next one, and
 /// upserts are idempotent -- the same trade the clamp above already makes.
 ///
-/// `None` means the run could not name one (a server with no builds at all),
+/// **Any** such id, not the highest one on the server, and the difference
+/// matters here because it decides which direction is dangerous. `sync`
+/// supplies the highest id it witnessed across the two pages that open a run;
+/// see `sync::ceiling` for why the pages it does *not* use are the finished
+/// ones. A ceiling lower than the true top of the id space costs a re-fetch;
+/// one above it loses a build.
+///
+/// `None` means the run witnessed nothing (a server with no builds at all),
 /// which is the same server on which `max_finished` is `None` too.
 /// What one run observed, as three build ids that are **not** interchangeable
 /// -- each is compared in a different direction, and all three are `i64`, so
@@ -84,7 +91,7 @@ pub(crate) struct Seen {
     pub max_finished: Option<i64>,
     /// The oldest **in-scope** build the run saw queued or running.
     pub min_unfinished: Option<i64>,
-    /// The highest build id that existed when the run **started**.
+    /// The highest build id the run **witnessed** while opening.
     pub ceiling: Option<i64>,
 }
 
@@ -219,23 +226,24 @@ mod tests {
         assert_eq!(advance(0, Some(1200), Some(500), Some(1000)), 499);
     }
 
-    /// A ceiling below where the watermark already stands never reaches here:
-    /// `sync::ceiling` refuses that answer as proof the server contradicts
-    /// monotonic ids, because it is the input that would clamp the watermark
-    /// *down* -- and clamping down is not the cheap direction, it is how a
-    /// source wedges (`sync::tests::a_ceiling_below_the_watermark_is_refused_not_clamped`,
-    /// and `..._wedges_the_source_rather_than_merely_re_reading` for the cost).
+    /// A ceiling below where the watermark already stands is an ordinary
+    /// answer, and the floor is what makes it harmless.
     ///
-    /// The floor below stays anyway, because it is what the *other* two
-    /// arguments are held to as well, and a silent regression here would
-    /// re-emit every build on every run for ever.
+    /// It reaches here whenever the two opening pages happen not to show a
+    /// build as new as the watermark -- routine on a server whose pages are
+    /// unordered, which is what issue #91 measured. `sync` asks the server
+    /// about the watermark's own build before believing anything worse of it
+    /// (`sync::refuse_a_replaced_server`); when the build is there the run
+    /// carries on and lands here, and the floor keeps the watermark exactly
+    /// where it was. Clamping *down* is the expensive direction -- a watermark
+    /// dragged back re-offers every build above it on every run afterwards --
+    /// so it is the one direction this function refuses.
     #[test]
     fn the_watermark_has_a_floor_under_every_argument() {
         assert_eq!(
             advance(1187, Some(1200), None, Some(500)),
             1187,
-            "a ceiling under the floor is refused upstream; if one ever arrives it must not \
-             drag the watermark back"
+            "a ceiling under the watermark clamps nothing and drags nothing back"
         );
         assert_eq!(advance(1187, Some(400), Some(2), Some(1200)), 1187);
     }
