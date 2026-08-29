@@ -24,7 +24,35 @@
 //!   so the witness belongs here, against a stand-in whose state the test
 //!   dictates, where there is no retry to be green on.
 //!
+//! * **The cleanup is bounded, so a wedged server says so.** `Litter::drop`
+//!   waits on a thread that talks HTTP, and `reqwest` carries no default
+//!   timeout, so a container that accepted the connection and then went quiet
+//!   used to stall the run forever -- with nothing on screen, because a `Drop`
+//!   that has not returned has not reported anything either. `just check` is
+//!   the only gate now that CI is disabled, and a gate that hangs is the one
+//!   failure shape a reader cannot act on. [`live_env::CLEANUP_BUDGET`] is the
+//!   bound; the third test here is what proves it reports rather than stalls.
+//!
 //! Both run in `just check`: no container, no token, no `#[ignore]`.
+//!
+//! # What dropping a guard actually needs, since it is easy to get wrong
+//!
+//! Issue #162 was filed on the reading that `Litter::drop` waiting on a thread
+//! would deadlock a `#[tokio::test]`, which is current-thread by default: the
+//! test's only worker is parked, so a fake served on that same runtime can
+//! never answer. **That is a real hazard and it is not this one.** wiremock
+//! 0.6.5 runs each `MockServer` on a thread of its own with its own runtime
+//! (`mock_server/bare_server.rs`, `std::thread::spawn` around a
+//! `new_current_thread` runtime), so the fake here answers whether or not the
+//! test's runtime is parked -- measured, not assumed: a guard holding a branch
+//! drops against this fake in 20 ms.
+//!
+//! So a test in this file may own branches and let `Drop` run. What it may not
+//! assume is that the server will answer: that is the case the bound covers,
+//! and the one the third test drives. A fake served with `tokio::spawn` on the
+//! *ambient* runtime would bring the original hazard back, and the symptom
+//! would be [`live_env::CLEANUP_BUDGET`] elapsing -- a message, now, rather
+//! than a hang.
 
 mod live_env;
 
@@ -390,6 +418,107 @@ async fn a_guard_clears_what_a_killed_run_left_and_takes_nothing_else_with_it() 
     );
 
     drop(guard);
+}
+
+/// A server that answers one empty listing and then never writes another byte,
+/// as an address to point a guard at.
+///
+/// The first answer is what lets `Litter::new` finish: its leftover sweep reads
+/// the branch listing and stops at the first empty page. Every connection after
+/// that is **accepted and held open** -- not refused, which would come back as
+/// an error in milliseconds and prove nothing. This is the shape a container
+/// that has wedged presents to a client, and the only shape that makes
+/// [`Litter`]'s cleanup wait forever: `reqwest` has no default timeout.
+fn a_server_that_answers_once_then_goes_quiet() -> String {
+    use std::io::{Read as _, Write as _};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a free port");
+    let address = listener.local_addr().expect("the bound address");
+    std::thread::spawn(move || {
+        let mut answered = false;
+        // Held rather than dropped: closing them would answer with a hangup,
+        // which `reqwest` reports in milliseconds -- the opposite of the
+        // silence this exists to present.
+        let mut quiet = Vec::new();
+        for mut stream in listener.incoming().flatten() {
+            if answered {
+                quiet.push(stream);
+                continue;
+            }
+            answered = true;
+            // Read the request out first. Answering a client that is still
+            // writing and then closing both halves resets the connection, and
+            // an error is not the empty listing `Litter::new` needs.
+            let mut request = Vec::new();
+            let mut byte = [0_u8; 1];
+            while !request.ends_with(b"\r\n\r\n") {
+                match stream.read(&mut byte) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => request.push(byte[0]),
+                }
+            }
+            let _ = stream.write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
+                  Content-Length: 2\r\nConnection: close\r\n\r\n[]",
+            );
+            let _ = stream.flush();
+            let _ = stream.shutdown(std::net::Shutdown::Write);
+        }
+    });
+    format!("http://{address}")
+}
+
+/// **The cleanup is bounded, so a server that stops answering produces a
+/// message instead of a stall** (issue #162).
+///
+/// `Litter::drop` waits for a thread that talks to the server over HTTP, and
+/// `reqwest` carries no default timeout, so before the bound a container that
+/// accepted the connection and then said nothing wedged the run *permanently*
+/// -- with nothing on screen, because a `Drop` that has not returned has not
+/// reported anything either. `just check` is the only gate now that CI is off,
+/// and a gate that stalls with no output is the one failure shape a reader
+/// cannot act on.
+///
+/// The budget is shortened here so the test costs milliseconds; what is being
+/// checked is that the bound exists and that what it says is worth reading, not
+/// how long it is.
+#[tokio::test]
+async fn a_guard_whose_server_stops_answering_reports_rather_than_stalling() {
+    let env = Env {
+        url: a_server_that_answers_once_then_goes_quiet(),
+        token: TOKEN.to_owned(),
+        owner: OWNER.to_owned(),
+        repo: REPO.to_owned(),
+    };
+
+    let mut guard = Litter::new(&env).await;
+    guard.cleanup_budget(std::time::Duration::from_millis(250));
+    guard.will_create(&format!("{LITTER}wedged-1"));
+
+    let started = std::time::Instant::now();
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || drop(guard)))
+        .expect_err("a cleanup that could not run must fail the test, not pass it quietly");
+    let report = panicked
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| panicked.downcast_ref::<&str>().copied())
+        .expect("the guard reports by panicking with a message")
+        .to_owned();
+
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "the guard took {:?} to give up on a server that never answers -- the bound is not \
+         bounding anything",
+        started.elapsed()
+    );
+    assert!(
+        report.contains("250ms"),
+        "the report must name the budget that ran out, so a reader knows what to raise: {report}"
+    );
+    assert!(
+        report.contains(&format!("{LITTER}wedged-1")),
+        "the report must name what was left behind, since nobody else will: {report}"
+    );
 }
 
 /// The other half of the destructive rule: a repository with no leftovers is

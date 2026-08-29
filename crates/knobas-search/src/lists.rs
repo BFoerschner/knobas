@@ -167,23 +167,42 @@
 //!   honestly pin. That is at or over the whole board's budget for one list,
 //!   and which side of it you land on is a property of the corpus rather than
 //!   of the code.
-//! * `knobas.link` makes the same question **exact and O(1)** in M2, so the
+//! * The link table makes the same question **exact and O(1)** in M2, so the
 //!   text probe is a stopgap with a known replacement rather than the design.
 //!
 //! ## What M2 restores
 //!
-//! With `knobas.link` populated the predicate stops being a text probe and
-//! becomes an index probe:
+//! With links populated the predicate stops being a text probe and becomes an
+//! index probe:
 //!
 //! ```sql
 //! count(*) filter (where i.kind = 'ticket'
-//!                    and exists (select 1 from knobas.link l
-//!                                 where l.from_id = i.entity_id
-//!                                   and l.deleted_at is null))
+//!                    and exists (select 1 from knobas.confirmed_link l
+//!                                 where l.from_id = i.entity_id))
 //! ```
 //!
-//! `link_from_idx` makes that O(1) per ticket, so it collapses into the single
-//! scan like every other list -- which is why that is now a rule.
+//! **`knobas.confirmed_link`, and not the table under it.** Migration `0007`
+//! (issue #41) put a second population in `knobas.link`: a row whose
+//! `confirmed_at` is `NULL` is a **proposal**, a machine-made guess sitting in
+//! the suggestion tray that nobody has accepted. A predicate over the base
+//! table counts those, so this list would quietly fill with pairs the user
+//! never agreed to -- #41's own stakes were *"the links panel showing an
+//! unconfirmed guess would be a correctness bug, not a cosmetic one"*, and a
+//! smart list is the same bug on another surface. The two views `0007` creates
+//! are each other's negation over the same rows, so choosing one is where the
+//! question "confirmed, or proposed?" gets asked and the answer cannot drift;
+//! `knobas_core::link::entries_of` reads `knobas.confirmed_link` and
+//! `knobas_core::suggest::proposals` reads `knobas.proposed_link` for exactly
+//! that reason. `knobas-core/tests/link_reads.rs` is what keeps this paragraph
+//! from going stale a second time.
+//!
+//! The old `and l.deleted_at is null` is gone from the predicate because it is
+//! inside the view, along with `confirmed_at is not null`.
+//!
+//! `link_from_idx` still makes that O(1) per ticket -- it is partial on exactly
+//! the `deleted_at is null` the view asks for, and `confirmed_at` is rechecked
+//! on the few rows it hands back -- so the list collapses into the single scan
+//! like every other one, which is why that is now a rule.
 //!
 //! # Why they are constants and not a little query language
 //!
