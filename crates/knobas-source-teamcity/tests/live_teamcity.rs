@@ -952,7 +952,9 @@ async fn a_page_says_for_itself_whether_the_collection_ran_out() {
         "{filled}"
     );
     assert!(
-        filled["nextHref"].as_str().is_some_and(|h| h.contains("start:")),
+        filled["nextHref"]
+            .as_str()
+            .is_some_and(|h| h.contains("start:")),
         "a filled page has to say there is more, and where it resumes: {filled}"
     );
 
@@ -966,7 +968,10 @@ async fn a_page_says_for_itself_whether_the_collection_ran_out() {
         .map(id_of)
         .max()
         .expect("the server has builds");
-    let exhausted = asked(&format!("state:finished,sinceBuild:(id:{newest}),count:100")).await;
+    let exhausted = asked(&format!(
+        "state:finished,sinceBuild:(id:{newest}),count:100"
+    ))
+    .await;
     let rows = exhausted["build"].as_array().map_or(0, Vec::len);
     assert!(
         rows < 100,

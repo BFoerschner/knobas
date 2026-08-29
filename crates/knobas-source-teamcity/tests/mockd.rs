@@ -878,7 +878,9 @@ async fn a_truncated_build_page_reports_the_next_one_and_an_exhausted_one_does_n
     let short = ask(total - 1).await;
     assert_eq!(rows(&short), total - 1);
     assert!(
-        short["nextHref"].as_str().is_some_and(|h| h.contains("start:")),
+        short["nextHref"]
+            .as_str()
+            .is_some_and(|h| h.contains("start:")),
         "a truncated page has to say so, and say where the rest starts: {short}"
     );
 

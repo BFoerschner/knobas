@@ -768,7 +768,10 @@ mod tests {
         assert!(more, "a page that could not fit the rest reports the rest");
         let (rows, more) = page(&format!("state:any,count:{total}"));
         assert_eq!(rows.len(), total);
-        assert!(more, "a page filled to its limit is not proof it is the last");
+        assert!(
+            more,
+            "a page filled to its limit is not proof it is the last"
+        );
 
         // Not filled: the one answer that ends a collection.
         let (rows, more) = page(&format!("state:any,count:{}", total + 1));
