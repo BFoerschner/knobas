@@ -145,11 +145,20 @@ async fn a_branch_name_proposes_the_ticket_it_names_and_nothing_else() {
     let pool = scratch().await;
     let ticket = item(&pool, "ticket", "PAY-231", "Payout retry storm", "").await;
     let named = item(&pool, "branch", "b1", "feature/PAY-231-retry", "").await;
-    // Two negative controls, and the second is the one that matters: a branch
-    // with no key at all is caught by any rule that reads the right column,
-    // but only a *longer* key catches a match with no word boundary.
+    // Four negative controls. The first is the cheap one -- a branch with no
+    // key at all is caught by any rule that reads the right column. The other
+    // three are what the pattern's word boundaries buy, and each fails
+    // differently:
+    //
+    // * `PAY-2311` is a *different ticket*, and the greedy digits already
+    //   swallow it whole, so this one is about the join and not the anchors.
+    // * `PAY-231x` needs `\M`: the digits stop at a letter on their own, so
+    //   without it the match ends mid-token and reads as PAY-231.
+    // * `xPAY-231` needs `\m`: the match simply starts at the first capital.
     let unnamed = item(&pool, "branch", "b2", "feature/retry-storm", "").await;
     let longer = item(&pool, "branch", "b3", "feature/PAY-2311-other", "").await;
+    let suffixed = item(&pool, "branch", "b4", "feature/PAY-231x-retry", "").await;
+    let prefixed = item(&pool, "branch", "b5", "feature/xPAY-231-retry", "").await;
 
     run_rule(&pool, "branch_name_key").await;
 
@@ -160,10 +169,13 @@ async fn a_branch_name_proposes_the_ticket_it_names_and_nothing_else() {
         "only the branch that names PAY-231 proposes it"
     );
     assert!(between(&entries, &unnamed, &ticket).is_none());
-    assert!(
-        between(&entries, &longer, &ticket).is_none(),
-        "PAY-2311 is not PAY-231"
-    );
+    for (branch, why) in [
+        (&longer, "PAY-2311 is not PAY-231"),
+        (&suffixed, "PAY-231x is not PAY-231"),
+        (&prefixed, "xPAY-231 is not PAY-231"),
+    ] {
+        assert!(between(&entries, branch, &ticket).is_none(), "{why}");
+    }
 
     let proposal = &entries[0];
     assert_eq!(
@@ -292,32 +304,45 @@ async fn a_page_proposes_the_ticket_its_text_mentions_and_nothing_else() {
 /// A key found by the wrong rule is not found at all.
 ///
 /// The four exact-key rules are one mechanism pointed at four kinds, and the
-/// cheapest way for that to go wrong is a `where kind = ...` that drifts. Every
-/// kind is present, every one of them names PAY-231, and each rule must claim
-/// exactly its own.
+/// cheapest way for that to go wrong is a `where kind = ...` that drifts.
+///
+/// **A corpus per rule, deliberately.** Running the four in turn against one
+/// corpus proves nothing about the last of them: by the time it runs, the
+/// suppression has already claimed every pair its neighbours found, so a page
+/// rule that had quietly grown `or kind = 'commit'` writes nothing extra and
+/// the test stays green. Found by mutating exactly that. Each rule therefore
+/// gets an untouched corpus holding one item of every kind, all naming
+/// PAY-231, and must claim exactly its own.
 #[tokio::test]
 async fn each_exact_key_rule_reads_only_its_own_kind() {
-    let pool = scratch().await;
-    let ticket = item(&pool, "ticket", "PAY-231", "Payout retry storm", "").await;
-    let branch = item(&pool, "branch", "b1", "feature/PAY-231", "").await;
-    let commit = item(&pool, "commit", "c1", "Fix PAY-231", "").await;
-    let build = item(&pool, "build", "d1", "Verify #1", "PAY-231").await;
-    let page = item(&pool, "page", "p1", "Notes", "PAY-231").await;
-
-    for (rule, expected) in [
-        ("branch_name_key", &branch),
-        ("commit_message_key", &commit),
-        ("build_parameter_key", &build),
-        ("page_text_key", &page),
+    for (rule, kind) in [
+        ("branch_name_key", "branch"),
+        ("commit_message_key", "commit"),
+        ("build_parameter_key", "build"),
+        ("page_text_key", "page"),
     ] {
-        let before = pairs(&tray(&pool).await);
+        let pool = scratch().await;
+        let ticket = item(&pool, "ticket", "PAY-231", "Payout retry storm", "").await;
+        let mut by_kind = std::collections::BTreeMap::new();
+        by_kind.insert(
+            "branch",
+            item(&pool, "branch", "b1", "feature/PAY-231", "").await,
+        );
+        by_kind.insert("commit", item(&pool, "commit", "c1", "Fix PAY-231", "").await);
+        by_kind.insert(
+            "build",
+            item(&pool, "build", "d1", "Verify #1", "PAY-231").await,
+        );
+        by_kind.insert("page", item(&pool, "page", "p1", "Notes", "PAY-231").await);
+
         run_rule(&pool, rule).await;
-        let after = pairs(&tray(&pool).await);
-        let fresh: Vec<(String, String)> = after.difference(&before).cloned().collect();
+
         assert_eq!(
-            fresh,
-            vec![(expected.clone(), ticket.clone())],
-            "{rule} proposed something that is not its kind"
+            pairs(&tray(&pool).await),
+            [(by_kind[kind].clone(), ticket.clone())]
+                .into_iter()
+                .collect(),
+            "{rule} must propose its own kind and nothing else"
         );
     }
 }
