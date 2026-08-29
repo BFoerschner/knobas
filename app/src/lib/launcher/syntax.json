@@ -50,7 +50,7 @@
   {
     "token": "note:",
     "insert": "note:",
-    "summary": "local notes (M2 — no notes exist yet)",
+    "summary": "notes you wrote in knobas",
     "probe": "note:standup",
     "prefix": "note",
     "expect": "recognised"

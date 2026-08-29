@@ -9,8 +9,10 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../ipc";
+  import { push } from "./toasts.svelte";
   import Detail from "../detail/Detail.svelte";
-  import { listEntities, type EntityRow } from "../ipc/entity";
+  import NoteView from "../notes/NoteView.svelte";
+  import { createNote, listEntities, type EntityRow } from "../ipc/entity";
   import RoomBar from "./RoomBar.svelte";
   import Tile from "./Tile.svelte";
   import { contextById, type RoomContext } from "./contexts";
@@ -81,13 +83,49 @@
    */
   const rows = $derived(Math.min(4, Math.max(1, Math.ceil(tiles.length / 2))));
 
+  /**
+   * Whether this address is a note.
+   *
+   * The **id** decides, and the kind word is only a fallback for the moment
+   * before one is available: `note:` is a namespace knobas keeps for itself
+   * (`RESERVED_NAMESPACES`), so no source can ever write an id that looks like
+   * one. `#/entity/<id>` carries no kind at all, and it still has to open the
+   * right view.
+   */
+  function isNote(entityId: string, kind: string | null): boolean {
+    return entityId.toLowerCase().startsWith("note:") || kind === "note";
+  }
+
+  /**
+   * Write a new note and open it.
+   *
+   * The row exists before the editor does, and that is the whole of story 2:
+   * `create_note` takes no arguments, so there is nothing to lose between
+   * *New note* and the first keystroke. What the reader then edits is a note
+   * that is already saved.
+   */
+  async function startNote() {
+    try {
+      const written = await createNote();
+      router.go(
+        hashFor({
+          view: "room",
+          ctx: context.id,
+          detail: { kind: "note", entityId: written.note.id },
+        }),
+      );
+    } catch (rejection) {
+      push({ text: `Could not start a note: ${ipcErrorMessage(rejection)}`, tone: "err" });
+    }
+  }
+
   function open(row: EntityRow) {
     router.go(hashFor({ view: "room", ctx: context.id, detail: { kind: row.kind, entityId: row.entity_id } }));
   }
 </script>
 
 <div class="room">
-  <RoomBar {context} count={total} />
+  <RoomBar {context} count={total} onnewnote={() => void startNote()} />
 
   {#if error}
     <div class="empty">
@@ -118,13 +156,32 @@
   -->
   {#if detail}
     {#key detail.entityId}
-      <Detail
-        entityId={detail.entityId}
-        kind={detail.kind}
-        contextLabel={context.label}
-        onclose={() => router.back()}
-        onnavigate={(hash) => router.go(hash)}
-      />
+      {#if isNote(detail.entityId, detail.kind)}
+        <!--
+          A note is an entity and opens where every entity opens; what it is
+          not is a mirror row, so `Detail`'s source/payload/synced frame has
+          nothing to fill (see `NoteView.svelte`).
+
+          Decided on the **id**, not on the address's kind word, so the
+          kind-agnostic `#/entity/<id>` alias lands in the right view too --
+          there the kind is `null` until a read answers, and a note's read is
+          not `get_entity`.
+        -->
+        <NoteView
+          entityId={detail.entityId}
+          contextLabel={context.label}
+          onclose={() => router.back()}
+          onnavigate={(hash) => router.go(hash)}
+        />
+      {:else}
+        <Detail
+          entityId={detail.entityId}
+          kind={detail.kind}
+          contextLabel={context.label}
+          onclose={() => router.back()}
+          onnavigate={(hash) => router.go(hash)}
+        />
+      {/if}
     {/key}
   {/if}
 </div>

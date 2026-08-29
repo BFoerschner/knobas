@@ -12,10 +12,21 @@
   let {
     context,
     count = null,
+    onnewnote,
   }: {
     context: RoomContext;
     /** How many items this room holds, or `null` while it is still counting. */
     count?: number | null;
+    /**
+     * Start a new note (#46).
+     *
+     * Its own slot rather than the `.acts` one below: `.acts` is spec §2's
+     * adaptive action bar -- *Start work*, *Trigger build*, *Log time* -- which
+     * is write-backs, chosen by what the room is about. Writing a note is
+     * neither. Putting it there would make the bar's rule "actions, plus this
+     * one", which is how a slot with a rule becomes a slot with a list.
+     */
+    onnewnote: () => void;
   } = $props();
 </script>
 
@@ -25,6 +36,9 @@
   {#if count !== null}
     <span class="mono faint">{count} item{count === 1 ? "" : "s"}</span>
   {/if}
+  <span class="own">
+    <button class="btn sm" onclick={onnewnote}>New note</button>
+  </span>
   <!-- M2: the adaptive action bar. See the comment above. -->
   <span class="acts"></span>
 </div>

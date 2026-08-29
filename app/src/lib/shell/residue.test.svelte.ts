@@ -90,6 +90,18 @@ const DETAIL: EntityDetail = {
   activity: [],
 };
 
+const NOTE = {
+  note: {
+    id: "note:7f2c",
+    title: "SEPA retry investigation",
+    body_md: "the counter starts at zero",
+    created_at: "2026-08-22T11:48:00Z",
+    updated_at: "2026-08-22T14:30:00Z",
+  },
+  refs: [],
+  links: [],
+};
+
 const LINE = {
   id: 1,
   at: "2026-08-22T14:30:00Z",
@@ -103,6 +115,10 @@ vi.mock("../ipc/entity", () => ({
   listEntities: () => deferred(PAGE),
   getEntity: () => deferred(DETAIL),
   recentActivity: () => deferred([LINE]),
+  getNote: () => deferred(NOTE),
+  saveNote: () => deferred(NOTE),
+  deleteNote: () => deferred(true),
+  unlink: () => deferred(undefined),
 }));
 
 /**
@@ -210,6 +226,7 @@ const StatusBar = (await import("./StatusBar.svelte")).default;
 const Tile = (await import("./Tile.svelte")).default;
 const Detail = (await import("../detail/Detail.svelte")).default;
 const Launcher = (await import("../launcher/Launcher.svelte")).default;
+const NoteView = (await import("../notes/NoteView.svelte")).default;
 const QueryBox = (await import("../launcher/QueryBox.svelte")).default;
 const AddSource = (await import("../sources/AddSource.svelte")).default;
 const Diagnostics = (await import("../sources/Diagnostics.svelte")).default;
@@ -347,6 +364,37 @@ const CASES: Case[] = [
         },
       }),
     }),
+  },
+  {
+    /**
+     * The note editor arms **two** timers: its own autosave, and the
+     * `Session` debounce behind `[[`. Both are armed by the same keystroke, so
+     * a pass that never typed would prove nothing about either teardown.
+     */
+    name: "NoteView",
+    source: "lib/notes/NoteView.svelte",
+    open: (target) => ({
+      app: mount(NoteView, {
+        target,
+        props: {
+          entityId: "note:7f2c",
+          contextLabel: "All work",
+          onclose: () => {},
+          onnavigate: () => {},
+        },
+      }),
+    }),
+    exercise: (target) => {
+      target.querySelectorAll<HTMLButtonElement>("button").forEach((button) => {
+        if (button.textContent?.trim() === "Edit") button.click();
+      });
+      flushSync();
+      const area = target.querySelector("textarea");
+      if (!area) return;
+      area.value = "off-by-one in [[pay";
+      area.setSelectionRange(area.value.length, area.value.length);
+      area.dispatchEvent(new Event("input", { bubbles: true }));
+    },
   },
   {
     name: "Flap",

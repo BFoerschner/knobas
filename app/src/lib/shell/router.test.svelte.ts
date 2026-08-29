@@ -41,6 +41,29 @@ test("any unreserved first segment is a kind, not a special view", () => {
   });
 });
 
+/**
+ * A note has a stable address like anything else (#46 story 17).
+ *
+ * `note` was a **reserved view word** until #46 -- listed with `inbox` and
+ * `time` so that a later milestone's address rendered "arrives in M<n>". Notes
+ * arrived, so it is a kind now, and this is the test that fails if it is ever
+ * put back: a reserved `note` makes every note in the app unopenable, and the
+ * symptom is a slide-over that says the address is from a later milestone.
+ */
+test("a note's address is a kind, because notes are a kind now", () => {
+  expect(parseHash("#/note/note:7f2c-4b2f")).toEqual({
+    view: "room",
+    ctx: "all",
+    detail: { kind: "note", entityId: "note:7f2c-4b2f" },
+  });
+  // ...and the kind-agnostic alias reaches it too.
+  expect(parseHash("#/entity/note:7f2c-4b2f")).toEqual({
+    view: "room",
+    ctx: "all",
+    detail: { kind: null, entityId: "note:7f2c-4b2f" },
+  });
+});
+
 /** The kind-agnostic alias, resolved to its canonical form by the caller. */
 test("#/entity/<id> is a detail whose kind is not known yet", () => {
   expect(parseHash("#/entity/mock:PAY-231")).toEqual({
@@ -64,6 +87,7 @@ test("round-trips every address it produces", () => {
     "#/ctx/src:jira",
     "#/ticket/mock:PAY-231",
     "#/entity/mock:PAY-231",
+    "#/note/note:7f2c-4b2f",
     "#/sources",
     "#/settings",
     "#/first-run",
