@@ -262,7 +262,7 @@
       that parsed it would be a second place to keep it right.
     -->
     {#each status.archives as archive (archive.file)}
-      <div class="row g3 arc" data-file={archive.file}>
+      <div class="row arc" data-file={archive.file}>
         <span class="mono">{archive.file}</span>
         <span class="r">{formatBytes(archive.bytes)}</span>
         <span class="r">
@@ -396,16 +396,24 @@
     font: 400 12px var(--mono);
   }
 
-  .arc {
+  /*
+    `.row` in `app.css` sets a five-column grid and a hover, both of which this
+    row wants neither of — it is a list of files, not a list of things to open.
+    Written as `.row.arc` rather than `.arc` so it outranks `.row` whatever
+    order the two stylesheets end up in: a component `<style>` is scoped, not
+    automatically later, and `vite build` concatenates the global sheet and the
+    extracted component styles into one file.
+  */
+  .row.arc {
     grid-template-columns: 1fr 90px 90px;
     cursor: default;
   }
 
-  .arc:hover {
+  .row.arc:hover {
     background: transparent;
   }
 
-  .arc .btn {
+  .row.arc .btn {
     height: 20px;
   }
 
