@@ -1768,7 +1768,7 @@ async fn a_purge_survives_the_run_that_was_in_flight_when_the_source_was_deleted
         inside.load(Ordering::SeqCst) > 0,
         "the delete has to commit while the run is still fetching. If the run \
          had already committed, the delete's own purge would tidy up after it \
-         and this test would be green over a scheduler that sweeps nothing"
+         and this test would be green over a scheduler that purges nothing"
     );
     scheduler.forget_source(&id, Purge::Items).await;
 
@@ -1811,7 +1811,7 @@ async fn a_purge_survives_the_run_that_was_in_flight_when_the_source_was_deleted
 ///
 /// The intent is in memory and keyed by id, so between arming it and applying
 /// it the id can change hands -- `add_source` under a deleted source's id is a
-/// real user action, and it is the one #119 exists for. A sweep that still
+/// real user action, and it is the one #119 exists for. A purge that still
 /// fired then would delete the *new* source's first sync, which is worse than
 /// the defect it is there to fix and would arrive with no error anywhere.
 ///
@@ -1842,7 +1842,7 @@ async fn adding_a_source_back_under_the_id_voids_the_purge_armed_for_the_old_one
         inside.load(Ordering::SeqCst) > 0,
         "the delete has to commit while the run is still fetching. If the run \
          had already committed, the delete's own purge would tidy up after it \
-         and this test would be green over a scheduler that sweeps nothing"
+         and this test would be green over a scheduler that purges nothing"
     );
     scheduler.forget_source(&id, Purge::Items).await;
     re_add(&pool, &id).await;
@@ -1852,7 +1852,7 @@ async fn adding_a_source_back_under_the_id_voids_the_purge_armed_for_the_old_one
     assert_eq!(
         (ending.phase, ending.items),
         (SyncPhase::Finished, 1),
-        "the run has to have committed after the delete, or the sweep it \
+        "the run has to have committed after the delete, or the purge it \
          arms has nothing to fire over: {ending:?}"
     );
     scheduler.shutdown().await;
@@ -1867,12 +1867,12 @@ async fn adding_a_source_back_under_the_id_voids_the_purge_armed_for_the_old_one
 }
 
 /// **The window does not close when the run does** (#127): a run whose commit
-/// landed between `delete_source`'s purge and the forget is swept by the forget
+/// landed between `delete_source`'s purge and the forget is purged by the forget
 /// itself.
 ///
 /// `delete_source` purges, deletes the keychain item, and only then tells the
 /// scheduler. A run finishing inside that gap has committed its mirror back
-/// with nothing left in flight for a later sweep to ride on, so the arm-it
+/// with nothing left in flight for a later purge to ride on, so the arm-it
 /// branch never fires and the rows would stay for ever. The forget applies the
 /// purge itself for exactly that case, which is what makes the guarantee
 /// *closed* rather than merely narrower than it was.
@@ -1881,7 +1881,7 @@ async fn adding_a_source_back_under_the_id_voids_the_purge_armed_for_the_old_one
 /// statement wide and the point is what the forget does with what it finds, not
 /// whether this machine can be made to lose that race on cue.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_run_that_committed_in_the_gap_before_the_forget_is_swept_by_it() {
+async fn a_run_that_committed_in_the_gap_before_the_forget_is_purged_by_it() {
     let _serial = serially().await;
     let (pool, sched_pool) = pools().await;
     let ids = seed_quiet(&pool, 1).await;
@@ -1946,7 +1946,7 @@ async fn a_run_that_committed_in_the_gap_before_the_forget_is_swept_by_it() {
 ///
 /// The other half of the intent, and the half a foreign key could never have
 /// had: keeping the items is a real choice in the sources view (interfaces §3,
-/// Delete), so the sweep must be something `delete_source` asks for rather than
+/// Delete), so the purge must be something `delete_source` asks for rather than
 /// something the scheduler does whenever a source goes away. A forget that
 /// purged regardless would delete a mirror the user explicitly kept, and it
 /// would do it only sometimes -- when a sync happened to be running.
@@ -1970,7 +1970,7 @@ async fn deleting_a_source_mid_run_without_purging_keeps_its_items() {
         inside.load(Ordering::SeqCst) > 0,
         "the delete has to commit while the run is still fetching. If the run \
          had already committed, the delete's own purge would tidy up after it \
-         and this test would be green over a scheduler that sweeps nothing"
+         and this test would be green over a scheduler that purges nothing"
     );
     scheduler.forget_source(&id, Purge::Keep).await;
 

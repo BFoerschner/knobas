@@ -545,8 +545,18 @@ pub async fn settle(deps: &SchedulerDeps, source_id: &str, run_id: i64, result: 
 ///
 /// Best-effort like everything else after a run's own transaction: a purge that
 /// fails is warned about rather than raised, because there is nobody left to
-/// raise it to. `delete_source` returned long ago.
-async fn sweep(deps: &SchedulerDeps, source_id: &str) {
+/// raise it to. `delete_source` returned long ago. It is also not retried, so
+/// a failure here is the one way the guarantee `delete_source` documents can
+/// come up short; the log line is what a reader chasing that symptom finds.
+///
+/// **Not `sweep`**, though that is what #127's ruling calls it in prose: this
+/// crate already uses that word for the glossary's Sweep -- the reconcile pass
+/// that tombstones what a full sync no longer emitted (`SyncReport::swept`,
+/// `run_locked`'s `sweep_kinds`) -- and `CONTEXT.md`'s entry for it names
+/// "purge" as the word to avoid *for that concept*. Two meanings of `sweep` in
+/// one crate, one of them destructive, is the reading mistake worth spending a
+/// longer name to remove.
+async fn purge_again(deps: &SchedulerDeps, source_id: &str) {
     match config::purge_items(&deps.pool, source_id).await {
         Ok(()) => tracing::info!(
             source_id,
@@ -720,7 +730,7 @@ pub enum Purge {
 
 impl From<bool> for Purge {
     /// From `delete_source`'s own `purge_items` flag, and **derived rather than
-    /// passed alongside it**: the delete and the sweep that finishes it have to
+    /// passed alongside it**: the delete and the purge that finishes it have to
     /// mean the same thing, and a second `if` at the call site is where they
     /// stop doing so. Same reasoning as `RunMode::from(SyncTrigger)`.
     fn from(purge_items: bool) -> Purge {
@@ -824,21 +834,27 @@ struct Claims {
     /// In memory and not a table, deliberately: the only writer that can undo
     /// the purge is that run's own uncommitted transaction, and a process that
     /// dies takes the transaction with it, server-side. There is nothing left
-    /// to sweep after a crash, so there is nothing to make durable.
+    /// to purge after a crash, so there is nothing to make durable.
     ///
     /// An entry is removed by the run that claims it, and by
     /// [`Scheduler::source_added`] when the user puts a source back under that
-    /// id -- their newest instruction about the id wins, and a sweep firing
-    /// after a re-add would purge the *new* source's first mirror.
+    /// id -- their newest instruction about the id wins, and a purge firing
+    /// after a re-add would take the *new* source's first mirror.
     ///
     /// **What is left behind, and why it is left:** a run whose task dies
     /// without reaching the claim -- a panicking adapter, or the abort
     /// `shutdown` falls back on -- leaves its intent here until the process
-    /// ends. That is one `String`, and on the path that produces it the run's
-    /// transaction went with the task, so there is nothing it would have swept.
-    /// The exception is a panic *after* the run committed and before the claim,
-    /// which is `settle` panicking; `settle` catches its own errors, so that is
-    /// a bug elsewhere and not a state to carry machinery for.
+    /// ends. That is one `String`, and on the usual version of that path the
+    /// run's transaction went with the task, so there is nothing it would have
+    /// purged. **Two versions are not that**, and both leave a deleted
+    /// source's items live in `sync.live_item`: a panic *after* the run
+    /// committed and before the claim, which is `settle` panicking (`settle`
+    /// catches its own errors, so that is a bug elsewhere); and `shutdown`
+    /// aborting a task that had committed but not yet reached the claim when
+    /// [`SHUTDOWN_GRACE`] ran out. Neither carries machinery here, and
+    /// durability would not buy any: the process is going away, the id is
+    /// already gone from `source_config`, and nothing on the next start would
+    /// have a run of it to hang the claim on.
     pending_purges: HashSet<String>,
 }
 
@@ -1034,7 +1050,7 @@ impl Scheduler {
     ///   `source_config` under this same lock and answers
     ///   [`TriggerError::UnknownSource`] for a source that is gone.
     ///
-    /// **It still cancels nothing**, and the sweep never touches
+    /// **It still cancels nothing**, and the re-applied purge never touches
     /// [`Watchers`]: the enrolled caller is told how the run really ended, and
     /// the ending is about the *run* (it did upsert N items) while the purge is
     /// about the *mirror*.
@@ -1058,7 +1074,7 @@ impl Scheduler {
             Some(entry) if entry.watchers.attach(None) == Attach::Joined => {
                 claims.pending_purges.insert(source_id.to_owned());
             }
-            Some(_) => sweep(&self.inner.deps, source_id).await,
+            Some(_) => purge_again(&self.inner.deps, source_id).await,
             None => {}
         }
     }
@@ -1303,7 +1319,7 @@ impl Inner {
             // the run is over is looking at a mirror this run no longer owns.
             let mut claims = self.claims.lock().await;
             if claims.pending_purges.remove(&source_id) {
-                sweep(&self.deps, &source_id).await;
+                purge_again(&self.deps, &source_id).await;
             }
             // The ending, and with it the release of the source: a trigger that
             // finds these watchers closed knows the run is over and may start
