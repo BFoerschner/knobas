@@ -7,3 +7,12 @@ dist
 # Written by tauri-build on every compile: the permission schemas for the
 # capability files. Regenerated, never edited.
 crates/knobas-app/gen/
+
+# Local credentials for the live adapter suites (`just *-live`). Never
+# committed: a token in git history is a token to rotate, not a token to
+# delete, and `.env` is the one file in the tree that is meant to hold one.
+# `.env.example` records the variable names, and their known-good public
+# values, without a secret.
+.env
+.env.*
+!.env.example
