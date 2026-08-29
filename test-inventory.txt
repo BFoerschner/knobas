@@ -1026,7 +1026,6 @@ knobas-source-teamcity	lib/knobas_source_teamcity	source::tests::an_instance_des
 knobas-source-teamcity	lib/knobas_source_teamcity	source::tests::an_op_this_adapter_does_not_declare_is_refused_by_name
 knobas-source-teamcity	lib/knobas_source_teamcity	source::tests::an_unreachable_instance_is_unreachable_from_both_entry_points
 knobas-source-teamcity	lib/knobas_source_teamcity	source::tests::basic_auth_needs_the_username_from_the_config
-knobas-source-teamcity	lib/knobas_source_teamcity	source::tests::every_write_is_refused
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_build_canceled_after_it_was_mirrored_as_running_does_not_stay_running
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_build_queued_after_the_opening_poll_is_not_skipped
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_build_that_failed_to_start_after_it_was_mirrored_as_queued_does_not_stay_queued

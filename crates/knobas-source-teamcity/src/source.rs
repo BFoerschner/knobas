@@ -272,22 +272,6 @@ mod tests {
         assert!(matches!(build(i), Err(SourceError::Protocol { .. })));
     }
 
-    /// M1 is read-only toward every source: nothing is declared, so everything
-    /// is refused -- which is also what battery clause 5 checks.
-    #[tokio::test]
-    async fn every_write_is_refused() {
-        let refused = built(instance(json!({})))
-            .write(WriteOp::Comment {
-                entity: "teamcity-eu:build:1187".to_owned(),
-                body: "not in M1".to_owned(),
-            })
-            .await;
-        assert!(
-            matches!(refused, Err(SourceError::Protocol { .. })),
-            "{refused:?}"
-        );
-    }
-
     /// Interfaces §4.1: the same classification from `test_connection` and
     /// from mid-`sync`. Both are exercised here against a port nothing listens
     /// on -- the mockd suite covers the 401 half against a live server.

@@ -739,6 +739,19 @@ pub async fn create_link<R: tauri::Runtime>(
 ///
 /// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the database
 /// is still coming up, and whatever [`unlink_inner`] refuses with.
+#[tauri::command]
+pub async fn unlink<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    link_id: String,
+) -> Result<(), IpcError> {
+    let pool = lifecycle.pool()?;
+    if let Some(written) = unlink_inner(&pool, &link_id).await? {
+        announce(&app, written.activity);
+    }
+    Ok(())
+}
+
 /// Ask a source to change something (issue #43): the one way the UI starts a
 /// write-back.
 ///
@@ -774,19 +787,6 @@ pub async fn submit_write<R: tauri::Runtime>(
 ) -> Result<knobas_core::write_queue::QueuedWrite, IpcError> {
     let state = crate::sources::state(&app)?;
     crate::sources::write_queue::submit(&state, payload).await
-}
-
-#[tauri::command]
-pub async fn unlink<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
-    lifecycle: State<'_, Lifecycle>,
-    link_id: String,
-) -> Result<(), IpcError> {
-    let pool = lifecycle.pool()?;
-    if let Some(written) = unlink_inner(&pool, &link_id).await? {
-        announce(&app, written.activity);
-    }
-    Ok(())
 }
 
 /// Everything the note view draws for one note (#46).

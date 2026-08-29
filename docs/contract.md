@@ -1947,15 +1947,23 @@ From this commit on, each of the following requires an orchestrator decision **a
 
   Ratified by the orchestrator as issue #41 itself, whose spec (written 2026-08-29 via `/to-spec`,
   seams confirmed by Björn) specifies the feature and its acceptance criteria.
+
 - **`crates/knobas-source/src/**`, `crates/knobas-http/**`, and the IPC command schema with
   both append-only barrels, issue #43 (2026-08-29):** M2's write-back set. **ADR-0006
   (`docs/adr/0006-writeop-grows-per-milestone.md`, accepted 2026-08-29) is the decision this
   entry records**, and it says exactly what this is: `WriteOp` grows per milestone, and each
   growth is a §10.8 ratified exception naming the variants and the adapters that declare them.
-  This is the first growth under it. Granted by the **orchestrator**; merged by the
-  merge-manager under Björn's 2026-08-29 delegation ("let Migration and ipc additions be merged
-  by fable too"). Milestone exits and the contract battery's clauses were not delegated and
-  remain his.
+  This is the first growth under it. Granted by the **orchestrator**.
+
+  **The merge gate, and a widening of the delegation recorded here because this entry is the
+  first thing it covers.** Björn's 2026-08-29 delegation ("let Migration and ipc additions be
+  merged by fable too") covered migrations and IPC additions; two of this entry's three
+  surfaces — the `WriteOp` growth and `knobas-http` — are neither, so the question was put to
+  him rather than stretched over them. Björn ruled the same day that the delegation covers
+  them ("yes it does"), so the frozen-contract gate delegated to Fable merge-managers now
+  covers migrations, IPC additions, `crates/knobas-source/src/**` (including `WriteOp` growth
+  under ADR-0006) and `crates/knobas-http/**`. Milestone exits and the contract battery's
+  clauses were not delegated and remain his.
 
   **The SPI.** `WriteOp` gains **seven** variants, one per operation and never per adapter,
   each with its stable snake_case identifier:
@@ -2062,9 +2070,17 @@ From this commit on, each of the following requires an orchestrator decision **a
   for that op alone; #42 designed that degradation (`null` means "no edit box", not "no actions")
   and widening it is #44/#45's when they need it.
 
+  **One seam is deliberately not here, and #44 hits it first: there is no read of a ticket's
+  *available* transitions.** The adapter resolves the status against the source's own list at
+  write time and refuses by name — which satisfies "read from the source, not assumed" — but a
+  UI that wants to *offer only the reachable statuses* has no method to ask through. `Source`
+  has no such read and adding one is a frozen-trait change, so it needs its own grant here
+  rather than arriving as a drive-by.
+
   **No migration.** `0005`'s `op` column deliberately has no CHECK, precisely so a `WriteOp`
-  growth is not also a schema change. `0006` was taken by Notes v1 (#46) while this was in
-  flight; **`0007` is the next free number.**
+  growth is not also a schema change. `0006` was taken by Notes v1 (#46) and `0007` by
+  Suggestions (#41) while this was in flight; **`0008` is the next free number**, as the #41
+  entry above already records.
 
   Outside the frozen list and noted because it is what the grant is for: each adapter gained a
   `write.rs` that **never names `WriteOp`** — the dispatch lives with its `impl Source for`,
