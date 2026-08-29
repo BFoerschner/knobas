@@ -585,11 +585,54 @@ struct Locator {
     count: usize,
     start: usize,
     default_filter: bool,
+    /// `canceled:`, `None` when the locator did not name it — which is what
+    /// leaves the default filter in charge of that facet.
+    canceled: Option<Facet>,
+    /// `failedToStart:`, same rule.
+    failed_to_start: Option<Facet>,
+}
+
+/// What a facet dimension (`canceled:`, `failedToStart:`) asks for.
+///
+/// Three values and not a boolean, because `any` is the one the adapter sends
+/// and it is **not** `true`: `canceled:true` asks for canceled builds and
+/// nothing else, `canceled:any` says the dimension does not narrow at all, so
+/// the page carries both classes. A mock that read `any` as `true` would serve
+/// a page of nothing but canceled builds and an adapter would look correct
+/// while asking the wrong question (issue #105).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Facet {
+    Any,
+    Only,
+    Never,
+}
+
+impl Facet {
+    fn parse(dimension: &str, value: &str) -> Result<Self, String> {
+        match value {
+            "any" => Ok(Self::Any),
+            "true" => Ok(Self::Only),
+            "false" => Ok(Self::Never),
+            other => Err(format!(
+                "{dimension}:{other} is not true, false or any"
+            )),
+        }
+    }
+
+    /// Does a build carrying (or not carrying) the flag pass this dimension?
+    fn admits(self, flagged: bool) -> bool {
+        match self {
+            Self::Any => true,
+            Self::Only => flagged,
+            Self::Never => !flagged,
+        }
+    }
 }
 
 const SUPPORTED: &str = "sinceBuild:(id:N), state:queued|running|finished|any, \
      state:(queued:true,running:true,finished:true), buildType:X, buildType:(id:X), \
-     count:N, start:N, defaultFilter:false";
+     count:N, start:N, defaultFilter:false, canceled:any|true|false, \
+     failedToStart:any|true|false";
 
 impl Locator {
     fn parse(raw: &str) -> Result<Self, String> {
@@ -600,6 +643,8 @@ impl Locator {
             count: DEFAULT_COUNT,
             start: 0,
             default_filter: true,
+            canceled: None,
+            failed_to_start: None,
         };
         let mut seen: Vec<&str> = Vec::new();
         for item in split_top_level(raw)? {
@@ -663,6 +708,10 @@ impl Locator {
                         .parse()
                         .map_err(|_| format!("defaultFilter:{value} is not true or false"))?;
                 }
+                "canceled" => out.canceled = Some(Facet::parse("canceled", value)?),
+                "failedToStart" => {
+                    out.failed_to_start = Some(Facet::parse("failedToStart", value)?);
+                }
                 other => {
                     return Err(format!(
                         "locator dimension {other:?} is not one mockd supports. Supported: \
@@ -672,6 +721,45 @@ impl Locator {
             }
         }
         Ok(out)
+    }
+
+    /// Does this locator admit `b`'s **facets** — canceled, failed-to-start?
+    ///
+    /// A separate question from [`Self::states`], and the one issue #105 turns
+    /// on. TeamCity's default filter hides three classes — canceled,
+    /// failed-to-start and personal — and it goes on hiding them **when
+    /// `state:` is set**, which is why every query the TeamCity adapter used
+    /// to emit items from silently missed the first two. mockd could not show
+    /// that: it applied the default filter to the *states* alone, so a
+    /// `state:finished` page here carried canceled builds that the real server
+    /// hides. Part of how #105 survived a green suite.
+    ///
+    /// The dimensions re-open one facet each and leave the others alone;
+    /// `defaultFilter:false` opens all of them at once. Measured read-only
+    /// against JetBrains' public instance (2026.2 EAP) on 2026-08-29:
+    /// `state:finished,canceled:any,count:100` answered one canceled build and
+    /// no failed-to-start one, while `state:finished,defaultFilter:false,
+    /// count:100` answered both.
+    ///
+    /// mockd has no personal builds — the Tidewater dataset has no vocabulary
+    /// for one, and nothing in knobas asks for them — so that facet of the
+    /// real filter is a documented absence here rather than a rule.
+    fn admits_facets(&self, b: &TcBuild) -> bool {
+        let canceled = self
+            .canceled
+            .unwrap_or(if self.default_filter {
+                Facet::Never
+            } else {
+                Facet::Any
+            });
+        let failed_to_start = self
+            .failed_to_start
+            .unwrap_or(if self.default_filter {
+                Facet::Never
+            } else {
+                Facet::Any
+            });
+        canceled.admits(b.canceled) && failed_to_start.admits(b.failed_to_start)
     }
 
     /// The states this locator selects.
@@ -722,6 +810,7 @@ impl Locator {
         let mut hits: Vec<TcBuild> = all
             .into_iter()
             .filter(|b| states.contains(&b.state))
+            .filter(|b| self.admits_facets(b))
             .filter(|b| {
                 self.build_type
                     .as_ref()

@@ -346,9 +346,61 @@ impl MockState {
         b.status_text = match status {
             TcStatus::Success => "Success".to_owned(),
             TcStatus::Failure => "Failure".to_owned(),
+            // Reachable only through `cancel_build`, which sets `canceled` as
+            // well; a caller that finished a build UNKNOWN without it would
+            // have served a build the default filter treats as ordinary.
+            TcStatus::Unknown => "Canceled".to_owned(),
         };
         b.percentage_complete = None;
         b.current_stage_text = None;
+    }
+
+    /// Cancels a build: `finished`, [`TcStatus::Unknown`], `statusText:
+    /// "Canceled"`, and marked so the default filter hides it.
+    ///
+    /// The class no fixture build has, made expressible -- the counterpart of
+    /// `describe_build_type`. Without it nothing can serve the one shape issue
+    /// #105 is about: a build the mirror already holds as running, which the
+    /// server then stops.
+    ///
+    /// # Panics
+    ///
+    /// If there is no such build. This is a test-driver API, and a silent
+    /// no-op would make a caller's test pass for the wrong reason.
+    pub fn cancel_build(&self, id: u64) {
+        self.finish_build(id, TcStatus::Unknown);
+        let mut inner = self.write();
+        let Some(b) = inner.builds.iter_mut().find(|b| b.id == id) else {
+            panic!("cancel_build: no build {id} in the fixture");
+        };
+        b.canceled = true;
+    }
+
+    /// Terminates a build as **failed to start**: `finished`, `FAILURE`, its
+    /// own `statusText`, and `failedToStart: true`, which the default filter
+    /// hides on.
+    ///
+    /// The other class the default filter removes, and the one a *queued*
+    /// build reaches without ever running.
+    ///
+    /// The flag stays server-side: mockd does not serve a `failedToStart` key,
+    /// because nothing in knobas reads one and `BUILD_FIELDS` asking for a name
+    /// no reader looks at is its own defect. The class is observable exactly
+    /// where it matters -- through the `failedToStart:` locator dimension and
+    /// the default filter -- which is how `personal` would work too if the
+    /// fixture had any.
+    ///
+    /// # Panics
+    ///
+    /// If there is no such build.
+    pub fn fail_build_to_start(&self, id: u64) {
+        self.finish_build(id, TcStatus::Failure);
+        let mut inner = self.write();
+        let Some(b) = inner.builds.iter_mut().find(|b| b.id == id) else {
+            panic!("fail_build_to_start: no build {id} in the fixture");
+        };
+        b.failed_to_start = true;
+        b.status_text = "Failed to start: no agent could run this build".to_owned();
     }
 
     /// Appends a `queued` build with `id = max(existing ids) + 1` and returns
@@ -379,6 +431,8 @@ impl MockState {
             // A build the test harness queued is nobody's: the mutator is
             // given a configuration and a branch, which is a VCS trigger.
             triggered_by: None,
+            canceled: false,
+            failed_to_start: false,
         });
         id
     }

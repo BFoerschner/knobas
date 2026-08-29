@@ -906,3 +906,153 @@ async fn builds_come_back_newest_first_so_count_1_is_the_newest_build() {
     );
     s.assert_no_violations();
 }
+
+/// **The fidelity gap that let issue #105 survive a green suite.**
+///
+/// TeamCity's default filter hides canceled and failed-to-start builds, and it
+/// goes on hiding them when the locator names a `state:`. mockd applied the
+/// default filter to the *states* alone, so a `state:finished` page here
+/// carried a canceled build that the real server would not have served — and
+/// the TeamCity adapter's two item-producing queries, which send exactly that
+/// locator, looked correct against it while mirroring nothing canceled in
+/// production.
+///
+/// The standing rule applies: where the fake and the server disagree, the fake
+/// is wrong.
+#[tokio::test]
+async fn the_default_filter_hides_a_canceled_build_from_a_query_that_names_a_state() {
+    let s = spawn_mock_teamcity().await;
+    s.state().cancel_build(1187);
+
+    let page = |locator: &str| {
+        let base = s.base_url();
+        let path = format!("/app/rest/builds?locator={locator}&fields=count,build(id,status)");
+        async move { tc(&base, &path).await.1 }
+    };
+
+    let (_, v) = tc(
+        &s.base_url(),
+        "/app/rest/builds?locator=state:finished,count:100&fields=count,build(id,status)",
+    )
+    .await;
+    assert!(
+        !ids(&v).contains(&1187),
+        "the default filter hides a canceled build even under `state:finished`: {v}"
+    );
+
+    let v = page("state:finished,canceled:any,count:100").await;
+    assert!(
+        ids(&v).contains(&1187),
+        "`canceled:any` is what puts it back: {v}"
+    );
+    let canceled = v["build"]
+        .as_array()
+        .expect("builds")
+        .iter()
+        .find(|b| b["id"] == 1187)
+        .expect("the canceled build");
+    assert_eq!(
+        canceled["status"], "UNKNOWN",
+        "a canceled build is UNKNOWN, which is the only thing on the wire that says so: {canceled}"
+    );
+    s.assert_no_violations();
+}
+
+/// Each dimension re-opens **its own** facet and nothing else — the
+/// distinction the #105 ruling rests on.
+///
+/// `defaultFilter:false` would have been the one-word alternative, and it
+/// disables every facet at once. Measured read-only against JetBrains' public
+/// instance (2026.2 EAP) on 2026-08-29 over one window:
+/// `state:finished,canceled:any,count:100` answered one canceled build and no
+/// failed-to-start one, `state:finished,defaultFilter:false,count:100`
+/// answered both. A mock that could not tell the two apart would let an
+/// adapter swap one for the other without a test noticing.
+#[tokio::test]
+async fn a_facet_dimension_re_opens_only_its_own_class() {
+    let s = spawn_mock_teamcity().await;
+    s.state().cancel_build(1187);
+    let stillborn = s.state().queue_build("Payout_Build", "main");
+    s.state().fail_build_to_start(stillborn);
+
+    let page = |locator: &str| {
+        let base = s.base_url();
+        let path = format!("/app/rest/builds?locator={locator}&fields=count,build(id)");
+        async move { ids(&tc(&base, &path).await.1) }
+    };
+
+    let plain = page("state:finished,count:100").await;
+    assert!(!plain.contains(&1187) && !plain.contains(&stillborn), "{plain:?}");
+
+    let canceled_only = page("state:finished,canceled:any,count:100").await;
+    assert!(canceled_only.contains(&1187), "{canceled_only:?}");
+    assert!(
+        !canceled_only.contains(&stillborn),
+        "`canceled:any` must not open the failed-to-start facet: {canceled_only:?}"
+    );
+
+    let failed_only = page("state:finished,failedToStart:any,count:100").await;
+    assert!(failed_only.contains(&stillborn), "{failed_only:?}");
+    assert!(
+        !failed_only.contains(&1187),
+        "`failedToStart:any` must not open the canceled facet: {failed_only:?}"
+    );
+
+    let both = page("state:finished,canceled:any,failedToStart:any,count:100").await;
+    assert!(both.contains(&1187) && both.contains(&stillborn), "{both:?}");
+    // The whole filter off, which is what the adapter's opening probe sends
+    // and what its item-producing queries deliberately do not.
+    let off = page("state:finished,defaultFilter:false,count:100").await;
+    assert!(off.contains(&1187) && off.contains(&stillborn), "{off:?}");
+    s.assert_no_violations();
+}
+
+/// `any` is not `true`, and a value that is neither is refused.
+///
+/// `canceled:true` asks for canceled builds and **nothing else**; `any` says
+/// the dimension does not narrow at all. A mock that read one as the other
+/// would serve a page of nothing but canceled builds to an adapter asking for
+/// every build, and the adapter would look correct.
+#[tokio::test]
+async fn a_facet_dimension_reads_any_true_and_false_apart() {
+    let s = spawn_mock_teamcity().await;
+    s.state().cancel_build(1187);
+
+    let page = |locator: &str| {
+        let base = s.base_url();
+        let path = format!("/app/rest/builds?locator={locator}&fields=count,build(id)");
+        async move { ids(&tc(&base, &path).await.1) }
+    };
+    assert_eq!(
+        page("state:finished,canceled:true,count:100").await,
+        vec![1187],
+        "`true` narrows to the class"
+    );
+    let any = page("state:finished,canceled:any,count:100").await;
+    assert!(
+        any.len() > 1 && any.contains(&1187),
+        "`any` does not narrow at all: {any:?}"
+    );
+    assert!(
+        !page("state:finished,canceled:false,count:100")
+            .await
+            .contains(&1187),
+        "`false` excludes it, which is what the default already does"
+    );
+    s.assert_no_violations();
+
+    let (st, v) = tc(
+        &s.base_url(),
+        "/app/rest/builds?locator=state:finished,canceled:maybe,count:100&fields=count,build(id)",
+    )
+    .await;
+    assert_eq!(st, 400, "a value the dimension does not take is refused: {v}");
+    assert_eq!(
+        s.violations()
+            .iter()
+            .filter(|v| v.kind == ViolationKind::UnsupportedQuery)
+            .count(),
+        1,
+        "and recorded, so an adapter cannot send it unnoticed"
+    );
+}

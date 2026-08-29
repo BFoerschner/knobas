@@ -28,6 +28,7 @@
 //! | `running-info` | `percentageComplete` from the fixture's `step` (`step 3/5 …` ⇒ 60), `currentStageText` = the step verbatim. |
 //! | buildType `description` | `None`: the dataset describes no configuration, and mockd does not invent prose any more than it invents a triggerer. `MockState::describe_build_type` is how a test that needs one gets one. |
 //! | `triggered` | the fixture's `triggered_by` resolved through `fixture().person`: `type: "user"` with that person's `username`/`name`, or `type: "vcs"` and no `user` where the fixture names nobody. |
+//! | `canceled` / `failedToStart` | `false`: the dataset has no vocabulary for either, and a mock that invented one would put a cancellation into every test that reads the fixture. [`MockState::cancel_build`](crate::state::MockState::cancel_build) and [`MockState::fail_build_to_start`](crate::state::MockState::fail_build_to_start) are how a test gets one. |
 
 use chrono::{DateTime, Duration, Utc};
 use knobas_source_mock::fixture;
@@ -44,6 +45,13 @@ pub fn tc_date(t: DateTime<Utc>) -> String {
 pub enum TcStatus {
     Success,
     Failure,
+    /// What TeamCity reports for a **canceled** build, which has no state of
+    /// its own: a canceled build is `state: "finished"` with this status, and
+    /// `statusText` is where the server says which -- 20 of 20 sampled
+    /// read-only on JetBrains' public instance. Transcribed rather than
+    /// improved on; a mock that gave cancellation its own state would teach an
+    /// adapter a shape no TeamCity serves.
+    Unknown,
 }
 
 impl TcStatus {
@@ -51,6 +59,7 @@ impl TcStatus {
         match self {
             Self::Success => "SUCCESS",
             Self::Failure => "FAILURE",
+            Self::Unknown => "UNKNOWN",
         }
     }
 }
@@ -105,6 +114,21 @@ pub struct TcBuild {
     /// which TeamCity serves as a VCS trigger with no `triggered.user` --
     /// never an invented one.
     pub triggered_by: Option<String>,
+    /// Somebody stopped this build. **Not a state**: TeamCity finishes it with
+    /// [`TcStatus::Unknown`], and this flag is what its default filter and the
+    /// `canceled:` locator dimension read (issue #105).
+    ///
+    /// No fixture build is one -- the dataset describes a company's work, not
+    /// its cancellations -- so
+    /// [`cancel_build`](crate::state::MockState::cancel_build) is how a test
+    /// gets one, the same way `describe_build_type` supplies the description
+    /// the fixture does not have.
+    pub canceled: bool,
+    /// The build never ran: no agent, a failed dependency, a bad
+    /// configuration. TeamCity finishes it `FAILURE` and serves
+    /// `failedToStart: true`, and its default filter hides it exactly as it
+    /// hides a canceled build.
+    pub failed_to_start: bool,
 }
 
 /// The build configurations the fixture's builds refer to, ascending by id.
@@ -175,6 +199,11 @@ fn transcribe(b: &knobas_source_mock::Build) -> TcBuild {
         percentage_complete: running.then(|| percentage(b.step.as_deref())).flatten(),
         current_stage_text: running.then(|| b.step.clone()).flatten(),
         triggered_by: b.triggered_by.clone(),
+        // The fixture's vocabulary is `running`/`failed`/`success`; neither
+        // class exists in it, and inventing one here would put a cancellation
+        // into every test that reads the dataset.
+        canceled: false,
+        failed_to_start: false,
     }
 }
 
