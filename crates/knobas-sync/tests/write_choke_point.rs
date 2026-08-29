@@ -16,7 +16,7 @@
 //! `WriteOp`.** Nothing can call `Source::write` without one, so naming it is
 //! the necessary condition, and it is unambiguous.
 //!
-//! Three kinds of file may name it, and they are different things:
+//! Four kinds of file may name it, and they are different things:
 //!
 //! 1. **The choke point** -- `knobas_sync::write_queue`, which is the only
 //!    place that *originates* a write.
@@ -27,6 +27,13 @@
 //!    four adapters, and the sync engine's `Observed` decorator. These *are*
 //!    `Source::write`, or forward it; none of them decides that a write should
 //!    happen.
+//! 4. **Callers that hand a write op *to* the queue** -- the desktop shell's
+//!    amendment guard builds a `WriteOp` out of what the reader typed and
+//!    passes it to `knobas_sync::write_queue::amend`. That is the queue being
+//!    used, not bypassed. This is the one list that grows, and it is
+//!    [`HANDS_TO_THE_QUEUE`]; every entry is additionally forbidden to contain
+//!    a `.write(` call at all, so an exemption cannot quietly become a second
+//!    path.
 //!
 //! Everything else is an offender. A new feature that wants to write to a
 //! source has to go through `knobas_sync::write_queue::submit`, and the way it
@@ -47,6 +54,30 @@ const CHOKE_POINT: &str = "knobas-sync/src/write_queue.rs";
 /// The SPI's conformance harness: it writes in order to certify that an
 /// adapter refuses, which is the battery's job and nobody else's.
 const BATTERY: &str = "knobas-source/src/contract.rs";
+
+/// Files that *build* a write op and hand it to the queue.
+///
+/// The queue's own callers, in other words -- the opposite of a bypass. They
+/// are exempt from the "may not name `WriteOp`" rule and **not** from the rule
+/// underneath it: an entry here may not contain a `.write(` call of any kind,
+/// so an exemption granted for constructing an op cannot later carry a
+/// dispatch of one.
+///
+/// Growing this list is allowed; doing it without noticing is not. Each entry
+/// is a decision a reviewer sees in a diff, which is the same treatment
+/// `house-rules.test.ts` gives the dev-harness import list.
+const HANDS_TO_THE_QUEUE: &[&str] = &[
+    // Story 15's guard: it decodes the reader's edited payload into a
+    // `WriteOp` so that an unreadable one is refused at the dialog, checks it
+    // still names the same op and target, and calls
+    // `knobas_sync::write_queue::amend`.
+    "knobas-app/src/sources/write_queue.rs",
+];
+
+/// A call spelled on a `Source`. Assembled so this file does not match itself.
+fn dispatches_a_write(code: &str) -> bool {
+    code.contains(concat!(".write", "("))
+}
 
 /// A file's code, with its comment lines removed.
 ///
@@ -84,6 +115,10 @@ fn offends(relative: &str, source: &str, needle: &str) -> bool {
     }
     if relative == CHOKE_POINT || relative == BATTERY {
         return false;
+    }
+    if HANDS_TO_THE_QUEUE.contains(&relative) {
+        // Exempt from naming the op, never from dispatching one.
+        return dispatches_a_write(&code);
     }
     !implements_the_trait(&code)
 }
@@ -172,6 +207,23 @@ fn the_rule_actually_rejects_a_second_call_site() {
     assert!(
         !offends("knobas-search/src/sql.rs", "fn build() {}", needle),
         "a file that never names the write op cannot call it"
+    );
+
+    // The exemption for a caller of the queue, and the rule underneath it:
+    // building a `WriteOp` to hand over is fine, dispatching one is not --
+    // otherwise the list is a loophole rather than a record.
+    let allowed = HANDS_TO_THE_QUEUE[0];
+    assert!(
+        !offends(
+            allowed,
+            "let op: WriteOp = serde_json::from_value(payload)?; queue::amend(deps, id, op).await",
+            needle,
+        ),
+        "handing a write op to the queue is using it, not bypassing it"
+    );
+    assert!(
+        offends(allowed, calls_it, needle),
+        "an exempt file that grows a dispatch is still a second write path"
     );
     assert!(
         !offends(
