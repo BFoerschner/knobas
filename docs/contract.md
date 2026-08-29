@@ -1619,9 +1619,12 @@ From this commit on, each of the following requires an orchestrator decision **a
 
 - **The IPC command schema and both append-only barrels, issue #42 (2026-08-29):** the write
   queue's six commands, granted by the **orchestrator under delegation while Björn was away**.
-  §10.8 requires an orchestrator decision *and* an entry here; this is the entry. **The merge is
-  still Björn's gate** — this PR also carries migration `0005`, so it stays open for him whatever
-  CI says, and it now changes two frozen surfaces rather than one.
+  §10.8 requires an orchestrator decision *and* an entry here; this is the entry. **The merge
+  gate**: when this entry was first written the merge was Björn's — the PR carries migration
+  `0005` and this grant, two frozen surfaces. On 2026-08-29 Björn delegated exactly those
+  ("let Migration and ipc additions be merged by fable too"), and the PR was merged by the
+  merge-manager under that instruction. Milestone exits and the contract battery's clauses were
+  not delegated and remain his.
 
   What the grant covers, and what it deliberately does not: **the frozen thing is the layout, not
   the existence of commands inside it.** #42's spec (seams confirmed by Björn) says "IPC lives in
@@ -1715,8 +1718,10 @@ From this commit on, each of the following requires an orchestrator decision **a
     schema-level statement of that.
 
   Ratified by the orchestrator as issue #42 itself, which specifies the feature and its seams, and
-  which allocated `0005` to that stream exclusively. **Not merged by an agent**: migrations are on
-  the frozen list above, so this PR stays open for Björn.
+  which allocated `0005` to that stream exclusively. **Merged under delegation**: migrations are
+  on the frozen list above and the merge was held for Björn until, on 2026-08-29, he delegated
+  the merging of migration and IPC additions to the merge-manager ("let Migration and ipc
+  additions be merged by fable too"); this PR landed under that instruction.
 
   Outside the frozen list and noted because it is what the migration is for:
   `knobas_core::write_queue` is the store, `knobas_sync::write_queue` is the flush loop and **the
