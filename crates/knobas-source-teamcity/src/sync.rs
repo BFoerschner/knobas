@@ -163,6 +163,15 @@ pub(crate) async fn execute(
                         // both carry the two dimensions: a build the mirror
                         // never stores is a build no later run can heal. See
                         // [`since`].
+                        //
+                        // The cost here is *eviction*, not the overflow
+                        // `all_of` refuses -- this query is never walked. A
+                        // canceled or failed-to-start build now occupies a
+                        // slot in a fixed newest-N window, so the window
+                        // reaches correspondingly less far back in ordinary
+                        // builds, and a configuration with many cancellations
+                        // heals fewer stale `running` rows per full sync.
+                        // `builds_per_config` is the lever.
                         canceled_any: true,
                         failed_to_start_any: true,
                         count: cfg.builds_per_config,

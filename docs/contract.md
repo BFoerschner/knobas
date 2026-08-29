@@ -1101,14 +1101,23 @@ still reads one un-widened page, and is still the only query that sends that dim
   with an `UNKNOWN` status and on nothing else. Nothing is lost: `payload` keeps the record verbatim
   (§3a) and `statusText: "Canceled"` was already indexed independently. A failed-to-start build
   needs no new wording — it is `FAILURE` with its own `statusText`.
-- **§4.2 what the widening costs against `MAX_BUILDS_PER_QUERY`, stated rather than discovered.**
-  Both item-producing queries now match strictly more builds, so every source moves closer to the
-  1 000-per-query refusal in `sync::all_of`. The size of the move is the size of the two classes:
-  1/100 in the measured live window, and both are terminal states no busy server produces in bulk
-  — a mass cancellation is the case where it bites. The refusal is deliberate and unchanged
-  (mirroring part of a query and advancing the watermark past the rest is the failure this crate
-  refuses everywhere), and its remedy is unchanged: sync more often, or narrow with
-  `build_type_ids`/`project_ids`.
+- **§4.2 what the widening costs, stated rather than discovered — and it is a different cost on
+  each of the two queries.** Both now match strictly more builds, but only one of them is walked.
+  - The incremental `state:finished,sinceBuild:` query goes through `sync::all_of`, so it moves
+    closer to the 1 000-per-query refusal (`MAX_BUILDS_PER_QUERY`). The size of the move is the
+    size of the two classes: 1/100 in the measured live window, and both are terminal states no
+    busy server produces in bulk — a mass cancellation is the case where it bites. The refusal is
+    deliberate and unchanged (mirroring part of a query and advancing the watermark past the rest
+    is the failure this crate refuses everywhere), and its remedy is unchanged: sync more often,
+    or narrow with `build_type_ids`/`project_ids`.
+  - The per-configuration full-sync query **never reaches that refusal**: it is one un-widened
+    request for the newest `builds_per_config`, and `execute` deliberately does not read
+    `Page::more` on it, because it is a *window* and the descriptor declares
+    `full_sync_exhaustive: false`. Its cost is **eviction, not overflow**: canceled and
+    failed-to-start builds now occupy slots in a fixed newest-N window, so the window reaches
+    correspondingly less far back in ordinary builds. That also shortens the healing window the
+    bullet below relies on — a configuration with many cancellations heals fewer stale `running`
+    rows per full sync, and `builds_per_config` is the lever.
 - **§4.2 the healing scope, written down where the cursor's reader will find it** (`sync::since`).
   Builds canceled *before* this landed, whose ids sit under the watermark, stay absent — and
   pre-existing stale `running` rows heal only when a full sync's per-configuration window reaches
