@@ -98,3 +98,25 @@ rather than by anyone with the remit.
 plus `mv` was silently dropping the tracked `test-inventory.txt` from 0644 to 0600 on every
 `inventory-update`, which git records nowhere and no gate would ever have shown. PRs #99 (#86,
 #83), #102 (#69) and #98 (this record) open; #91 and #92 in flight.
+
+## One deliberate deviation from a Fable ruling, by a merge-manager
+
+Fable's amended #81 ruling named three edits for PR #108. Two were applied as written. The third —
+*"the module docs' '950 of 1,400' back to 1,000"* — was applied as **1,050**, not 1,000, and the
+merge-manager recorded why in the PR body and the merge commit.
+
+Its reasoning: that sentence describes what a run *walked* when the cap fired, and at 21 requests
+× 50 records that is 1,050. Writing 1,000 would have restored the pre-PR number while making it
+false — which is the exact failure the whole PR is about. Fable's own ruling uses the same
+arithmetic elsewhere, saying the honest-server message becomes *"at least 1050"*, so the
+merge-manager read item 3 as an oversight rather than a position: Fable recomputed the error
+message but not the module doc.
+
+I think that reading is right, and it is the kind of disagreement worth having in the open rather
+than silently complying with a ruling into a false comment. Recorded here so Björn can overturn
+it in one line if he disagrees.
+
+**The same merge-manager also caught that the cap bump broke two tests neither Fable nor the
+implementer had named** — `a_branch_listing_that_would_exceed_the_cap_fails_the_run` and its
+repository twin both feed 1,001 records and assert the number in the message. Without that fix
+the ruling's own edits would have failed CI.
