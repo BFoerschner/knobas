@@ -25,7 +25,7 @@ use std::sync::Arc;
 use axum::extract::{Path, Request, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::{Value, json};
 
@@ -56,6 +56,9 @@ pub fn router(state: Arc<MockState>) -> Router {
         .route("/app/rest/buildTypes", get(build_types))
         .route("/app/rest/builds", get(builds))
         .route("/app/rest/builds/{locator}", get(build_by_locator))
+        // M2's write-back (issue #43): triggering a build and re-running one
+        // are the same request to TeamCity -- both put a build on the queue.
+        .route("/app/rest/buildQueue", post(queue_build))
         .fallback(unimplemented)
         // Same reasoning as the Jira router: axum's own 405 would carry an
         // `Allow` header describing mockd's routing table, an empty body and no
@@ -909,6 +912,73 @@ fn split_top_level(raw: &str) -> Result<Vec<&str>, String> {
         out.push(tail);
     }
     Ok(out)
+}
+
+// -- the build queue (issue #43) ---------------------------------------------
+
+/// `POST /app/rest/buildQueue` -- put a build on the queue.
+///
+/// The one write TeamCity's REST API needs for both of M2's ratified ops:
+/// **triggering and re-running are the same request**, differing only in how
+/// the caller found the build configuration. A real server answers **200** with
+/// the queued `Build`, whose `state` is `queued` and whose `id` is new.
+///
+/// `buildType.id` is the only field mockd requires, which is also the minimum a
+/// real TeamCity accepts. A body without it is a 400 rather than a build of
+/// something arbitrary -- a mock that guessed the configuration would let an
+/// adapter ship a request that triggers whatever the server felt like.
+async fn queue_build(State(s): State<Arc<MockState>>, req: Request) -> Response {
+    let bytes = match axum::body::to_bytes(req.into_body(), 64 * 1024).await {
+        Ok(bytes) => bytes,
+        Err(_) => return tc_error(StatusCode::BAD_REQUEST, "Could not read the request body"),
+    };
+    let parsed: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    let requested = parsed
+        .get("buildType")
+        .and_then(|t| t.get("id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty());
+    let Some(build_type_id) = requested else {
+        return tc_error(
+            StatusCode::BAD_REQUEST,
+            "No build type specified. Please specify build type as buildType.id",
+        );
+    };
+    if !s
+        .build_types()
+        .iter()
+        .any(|t| t.id == build_type_id)
+    {
+        return tc_error(
+            StatusCode::NOT_FOUND,
+            format!("No build type found by id {build_type_id:?}."),
+        );
+    }
+    if let Some(r) = fault(&s).await {
+        return r;
+    }
+
+    // `branchName` is optional and TeamCity builds the default branch without
+    // one -- which is what an adapter that does not model branches must be
+    // able to rely on.
+    let branch = parsed
+        .get("branchName")
+        .and_then(Value::as_str)
+        .filter(|b| !b.trim().is_empty())
+        .unwrap_or("refs/heads/main");
+
+    let id = s.queue_build(build_type_id, branch);
+    let queued = s.build(id).expect("the build was just queued");
+    // The whole record, unprojected: this endpoint takes no `fields=`, and a
+    // real server answers the created build in full.
+    Json(build_json(
+        &queued,
+        &s.base_url(API),
+        &s,
+        &s.build_types(),
+    ))
+    .into_response()
 }
 
 #[cfg(test)]

@@ -1,10 +1,13 @@
 //! The self-description stream F's `list_adapters` serves and stream D's
 //! Add-source form is generated from (spec §3a, interfaces §2.2).
 
-use knobas_source::{AuthMethod, KindInfo, SourceDescriptor};
+use knobas_source::{AuthMethod, Capability, KindInfo, SourceDescriptor};
 
 use crate::config::config_schema;
-use crate::{ADAPTER_KIND, ADAPTER_VERSION, KIND_BUILD, KIND_BUILD_CONFIG};
+use crate::{
+    ADAPTER_KIND, ADAPTER_VERSION, KIND_BUILD, KIND_BUILD_CONFIG, WRITE_OP_RERUN_BUILD,
+    WRITE_OP_TRIGGER_BUILD,
+};
 
 /// One descriptor per compiled-in adapter kind: the Add-source form is
 /// generated from `config_schema` + `auth_methods`, and the launcher reads
@@ -16,14 +19,19 @@ pub fn descriptor_template() -> SourceDescriptor {
         id: ADAPTER_KIND.to_owned(),
         adapter_kind: ADAPTER_KIND.to_owned(),
         name: "TeamCity".to_owned(),
-        // P12: M1 adapters declare no capabilities. `Capability::Search` is
-        // reserved for a future `Source::search`, and this adapter is
-        // read-only, so `Write` would have no ops to offer.
-        capabilities: Vec::new(),
+        // M2 (issue #43): this adapter writes. `Capability::Search` stays
+        // reserved for a future `Source::search`.
+        capabilities: vec![Capability::Write],
         adapter_version: ADAPTER_VERSION.to_owned(),
         // Bearer access token (TeamCity 2019.1+) or Basic user+password.
         auth_methods: vec![AuthMethod::Pat, AuthMethod::UserPassword],
-        write_ops: Vec::new(),
+        // M2's ratified TeamCity set (issue #43, ADR-0006), and the whole of
+        // what the action bar offers. The battery holds this and
+        // `Capability::Write` to each other in both directions.
+        write_ops: vec![
+            WRITE_OP_TRIGGER_BUILD.to_owned(),
+            WRITE_OP_RERUN_BUILD.to_owned(),
+        ],
         entity_kinds: vec![
             KindInfo {
                 id: KIND_BUILD.to_owned(),
@@ -66,10 +74,10 @@ mod tests {
         assert_eq!(d.id, "teamcity");
         assert_eq!(d.adapter_kind, "teamcity");
         assert_eq!(d.name, "TeamCity");
-        // P12: M1 adapters declare no capabilities, and read-only means
-        // write_ops stays empty -- the battery enforces both directions.
-        assert_eq!(d.capabilities, Vec::<Capability>::new());
-        assert!(d.write_ops.is_empty());
+        // The sources view renders its action bar from `write_ops` alone, so
+        // this list is exactly what the user is offered (issue #43).
+        assert_eq!(d.capabilities, vec![Capability::Write]);
+        assert_eq!(d.write_ops, vec!["trigger_build", "rerun_build"]);
         assert_eq!(d.auth_methods, [AuthMethod::Pat, AuthMethod::UserPassword]);
         let kinds: Vec<&str> = d.entity_kinds.iter().map(|k| k.id.as_str()).collect();
         assert_eq!(kinds, ["build", "build_config"]);
@@ -112,6 +120,9 @@ mod tests {
             json["auth_methods"],
             serde_json::json!(["Pat", "UserPassword"])
         );
-        assert_eq!(json["write_ops"], serde_json::json!([]));
+        assert_eq!(
+            json["write_ops"],
+            serde_json::json!(["trigger_build", "rerun_build"])
+        );
     }
 }

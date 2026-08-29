@@ -1091,3 +1091,163 @@ async fn a_truncated_build_page_reports_the_next_one_and_an_exhausted_one_does_n
 
     server.assert_no_violations();
 }
+
+// -- M2's write-back set (issue #43) ----------------------------------------
+//
+// Both ops are `POST /app/rest/buildQueue`. Every assertion below is on what
+// **the server has afterwards** -- a new build, queued, against the right
+// configuration -- rather than on what the adapter sent, and every test ends
+// with `assert_no_violations()`, which is what turns an invented endpoint or a
+// query parameter the route table does not have into a red test here rather
+// than a surprise against a real TeamCity.
+//
+// There is no live TeamCity suite (#92), and interfaces §5 forbids writing to
+// a server we do not own -- so these two ops are certified against mockd only,
+// and that is stated in the PR rather than left to be discovered.
+
+/// Story 9: triggering a build puts one on the queue, against the configuration
+/// that was named.
+///
+/// The configuration id is asserted, not just the count: a request that queued
+/// *something* would pass a count check while starting the wrong pipeline.
+#[tokio::test]
+async fn a_trigger_queues_a_build_for_the_configuration_it_named() {
+    let tc = spawn_mock_teamcity().await;
+    let source = adapter(&tc.base_url(), serde_json::json!({}));
+    let cfg = quiet_build_type();
+    let before = tc.state().builds().len();
+
+    source
+        .write(knobas_source::WriteOp::TriggerBuild {
+            entity: format!("teamcity:buildType:{cfg}"),
+        })
+        .await
+        .expect("a declared op is performed");
+
+    let builds = tc.state().builds();
+    assert_eq!(builds.len(), before + 1, "exactly one build was queued");
+    let queued = builds.last().expect("the build just queued");
+    assert_eq!(queued.build_type_id, cfg);
+    assert_eq!(queued.state, knobas_mockd::TcState::Queued);
+    tc.assert_no_violations();
+}
+
+/// Story 10: re-running a failed build runs **its own** configuration again,
+/// which the adapter has to ask the server for -- a build's entity id carries
+/// the build id and nothing else (§4.2).
+#[tokio::test]
+async fn a_rerun_asks_which_configuration_the_build_belonged_to() {
+    let tc = spawn_mock_teamcity().await;
+    let source = adapter(&tc.base_url(), serde_json::json!({}));
+    let existing = tc
+        .state()
+        .builds()
+        .into_iter()
+        .next()
+        .expect("the fixture has builds");
+    let before = tc.state().builds().len();
+
+    source
+        .write(knobas_source::WriteOp::RerunBuild {
+            entity: format!("teamcity:build:{}", existing.id),
+        })
+        .await
+        .expect("a declared op is performed");
+
+    let builds = tc.state().builds();
+    assert_eq!(builds.len(), before + 1);
+    let queued = builds.last().expect("the build just queued");
+    assert_eq!(
+        queued.build_type_id, existing.build_type_id,
+        "a re-run must run the same configuration, not whatever was first"
+    );
+    assert_ne!(queued.id, existing.id, "a re-run is a new build");
+    assert_eq!(queued.state, knobas_mockd::TcState::Queued);
+    tc.assert_no_violations();
+}
+
+/// A build that is gone answers 404, which the queue reads as a **refusal** and
+/// does not retry: there is nothing to run again, and waiting will not make
+/// there be.
+#[tokio::test]
+async fn re_running_a_build_that_is_gone_is_refused_rather_than_retried() {
+    let tc = spawn_mock_teamcity().await;
+    let source = adapter(&tc.base_url(), serde_json::json!({}));
+    let before = tc.state().builds().len();
+
+    let refused = source
+        .write(knobas_source::WriteOp::RerunBuild {
+            entity: "teamcity:build:999999999".to_owned(),
+        })
+        .await;
+    assert!(
+        matches!(refused, Err(SourceError::Protocol { status: Some(404), .. })),
+        "{refused:?}"
+    );
+    assert_eq!(
+        tc.state().builds().len(),
+        before,
+        "a refused re-run queues nothing"
+    );
+    tc.assert_no_violations();
+}
+
+/// A configuration the server does not have is likewise a refusal, and nothing
+/// is queued in its place.
+#[tokio::test]
+async fn triggering_a_configuration_that_is_gone_is_refused() {
+    let tc = spawn_mock_teamcity().await;
+    let source = adapter(&tc.base_url(), serde_json::json!({}));
+    let before = tc.state().builds().len();
+
+    let refused = source
+        .write(knobas_source::WriteOp::TriggerBuild {
+            entity: "teamcity:buildType:No_Such_Configuration".to_owned(),
+        })
+        .await;
+    assert!(
+        matches!(refused, Err(SourceError::Protocol { status: Some(404), .. })),
+        "{refused:?}"
+    );
+    assert_eq!(tc.state().builds().len(), before);
+    tc.assert_no_violations();
+}
+
+/// An op this adapter does not declare is refused **without reaching the
+/// server**: battery clause 5's promise, seen from the far end.
+#[tokio::test]
+async fn an_undeclared_op_never_reaches_the_server() {
+    let tc = spawn_mock_teamcity().await;
+    let source = adapter(&tc.base_url(), serde_json::json!({}));
+    let before = tc.state().builds().len();
+
+    let refused = source
+        .write(knobas_source::WriteOp::Comment {
+            entity: "teamcity:build:1187".to_owned(),
+            body: "builds do not take comments".to_owned(),
+        })
+        .await;
+    assert!(
+        matches!(refused, Err(SourceError::Protocol { .. })),
+        "{refused:?}"
+    );
+    assert_eq!(tc.state().builds().len(), before);
+    tc.assert_no_violations();
+}
+
+/// ADR-0004 on the write path: a server that is having a moment is
+/// `Unreachable`, which the queue waits on, rather than a refusal it would
+/// throw the request away for.
+#[tokio::test]
+async fn a_trigger_against_an_unreachable_server_waits_rather_than_being_refused() {
+    let source = adapter(&knobas_mockd::refused_url(), serde_json::json!({}));
+    let failed = source
+        .write(knobas_source::WriteOp::TriggerBuild {
+            entity: format!("teamcity:buildType:{}", quiet_build_type()),
+        })
+        .await;
+    assert!(
+        matches!(failed, Err(SourceError::Unreachable(_))),
+        "{failed:?}"
+    );
+}

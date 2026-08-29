@@ -1,4 +1,5 @@
-//! The TeamCity adapter: build configurations and builds, read-only (M1).
+//! The TeamCity adapter: build configurations and builds, plus M2's two
+//! ratified writes -- trigger a build, run one again (issue #43).
 //!
 //! Five endpoints, all JSON, all trimmed with an explicit `fields=`:
 //! `/app/rest/server` and `/app/rest/users/current` (test connection),
@@ -34,6 +35,7 @@ mod map;
 mod rest;
 mod source;
 mod sync;
+mod write;
 
 pub use config::{TeamCityConfig, config_schema};
 pub use descriptor::descriptor_template;
@@ -48,6 +50,14 @@ pub const ADAPTER_KIND: &str = "teamcity";
 /// This adapter's own version, reported in the descriptor and in the
 /// `User-Agent` (interfaces §4.1).
 pub const ADAPTER_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// The write ops this adapter declares, as `knobas_source::WriteOp`'s stable
+/// identifiers. Named constants because the descriptor and the dispatch in
+/// `source` must agree: an op listed and not dispatched is an action that
+/// 404s, and one dispatched and not listed is an action nothing offers.
+pub const WRITE_OP_TRIGGER_BUILD: &str = "trigger_build";
+/// See [`WRITE_OP_TRIGGER_BUILD`].
+pub const WRITE_OP_RERUN_BUILD: &str = "rerun_build";
 
 /// `SyncItem::kind` for one build.
 pub(crate) const KIND_BUILD: &str = "build";

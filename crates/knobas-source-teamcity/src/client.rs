@@ -194,6 +194,63 @@ impl Rest for HttpRest {
     }
 }
 
+impl HttpRest {
+    /// `POST /app/rest/buildQueue` -- put one configuration's build on the
+    /// queue (issue #43).
+    ///
+    /// Not on [`Rest`], deliberately. That trait is what `sync.rs` is written
+    /// against and what its fake answers; a write on it would make every read
+    /// fake implement a write nothing in a sync run may call. The write path
+    /// has one implementation and holds the real client, so it lives here.
+    ///
+    /// The answer is dropped: TeamCity replies with the queued `Build`, and
+    /// nothing in M2 has anywhere to put it -- `Source::write` answers `()`.
+    /// What matters is that the request was accepted, which `knobas-http` has
+    /// already decided by the time this returns.
+    ///
+    /// # Errors
+    ///
+    /// The [`SourceError`] the request maps to.
+    pub(crate) async fn queue_build(&self, build_type_id: &str) -> Result<(), SourceError> {
+        let request = self
+            .client
+            .request(knobas_http::Method::POST, "app/rest/buildQueue")
+            .json(&serde_json::json!({ "buildType": { "id": build_type_id } }));
+        self.client.send(request).await.map(|_| ())
+    }
+
+    /// Which build configuration a build belonged to.
+    ///
+    /// `GET /app/rest/builds/id:{id}` with an explicit `fields=` like every
+    /// other read this adapter makes -- asking for `buildType(id)` and nothing
+    /// else, because a re-run needs one string and a bare request would drag
+    /// the whole build record back.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError::Protocol`] when the build exists and names no
+    /// configuration; otherwise whatever the request maps to, a 404 for a
+    /// build that is gone included.
+    pub(crate) async fn build_type_of(&self, id: i64) -> Result<String, SourceError> {
+        let body = self
+            .get_raw(
+                &format!("app/rest/builds/id:{id}"),
+                &[("fields", "buildType(id)")],
+            )
+            .await?;
+        body.get("buildType")
+            .and_then(|t| t.get("id"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                SourceError::protocol(format!(
+                    "teamcity: build {id} names no build configuration, so there is nothing to \
+                     run again"
+                ))
+            })
+    }
+}
+
 /// What a by-id fetch's answer means: present, absent, or neither.
 ///
 /// A free function rather than a `match` inside [`Rest::build_exists`] so it
