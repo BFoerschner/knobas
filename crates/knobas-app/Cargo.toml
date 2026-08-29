@@ -96,6 +96,11 @@ knobas-db = { path = "../knobas-db", features = ["test-util"] }
 # above -- `cargo test` therefore builds the library with `test` on too, which
 # is how the mock runtime reaches the commands.
 tauri = { version = "2", features = ["test"] }
+# `tests/start_work_live.rs` talks to the real Gitea container directly, to
+# check the round trip against the *source's own* answer rather than against
+# knobas' mirror of it. The workspace's one copy -- `cargo tree -i reqwest`
+# stays at one.
+reqwest.workspace = true
 # `tests/backup.rs` writes archives somewhere that goes away with the test.
 tempfile = "3"
 tokio.workspace = true
