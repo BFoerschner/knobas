@@ -133,29 +133,107 @@ pub(crate) fn client(
     })
 }
 
-/// The sentence inside TeamCity's error text, for `knobas-http` to build the
+/// The sentence inside TeamCity's error body, for `knobas-http` to build the
 /// message out of ([`knobas_http::BodyMessage`], ADR-0004).
 ///
-/// TeamCity answers errors as `text/plain` even to a client that asked for
-/// JSON, in the shape
+/// **Two shapes, tried in that order**, because TeamCity has served two and
+/// only one of them reaches this adapter.
+///
+/// # The JSON envelope: what this adapter actually receives
+///
+/// ```json
+/// {"errors":[{"message":"No build found by id '6520690000'.",
+///             "additionalMessage":"jetbrains.buildServer.server.rest.errors.NotFoundException: No build found by id '6520690000'.",
+///             "statusText":"Responding with error, status code: 404 (Not Found).",
+///             "stackTrace":null}]}
+/// ```
+///
+/// [`knobas_http::HttpClient::new`] sets `Accept: application/json` on every
+/// request it builds and no adapter can talk it out of that, so this is the
+/// shape every error this adapter will ever see arrives in. Measured read-only
+/// against JetBrains' public instance (2026.2 EAP, build 238763) on
+/// 2026-08-29, on a 400 and a 404, and pinned live by
+/// `a_rest_error_is_a_json_envelope_the_adapter_can_read`.
+///
+/// `message` and nothing else: `additionalMessage` repeats the sentence behind
+/// a fully-qualified Java class name and `statusText` restates the status the
+/// message already carries. An envelope naming more than one fault keeps all
+/// of them, joined -- dropping the rest would hide the half a user needs.
+///
+/// # The plain-text form: kept, and this is the decision
 ///
 /// ```text
 /// Error has occurred during request processing (Not Found).
 /// Error: jetbrains.buildServer.server.rest.errors.NotFoundException: No project found by name or internal/external id 'tidewatr'.
 /// ```
 ///
-/// The first line restates the status `knobas-http` has already put in the
-/// message, and the fully-qualified Java class name in front of the second is
-/// noise to everyone who is not reading TeamCity's source. What is left is the
-/// sentence that says which project was not found.
+/// This is what `error_message` used to require, on a doc comment asserting it
+/// was "the shape a real TeamCity serves". It is not the shape 2026.2 serves
+/// anyone. That server content-negotiates, measured read-only on 2026-08-29
+/// (2026.2 EAP, build 238763) over `/app/rest/server`:
 ///
-/// `None` for anything that is not that shape -- an HTML error page from a
-/// reverse proxy, an empty body -- which keeps the raw excerpt. That is why the
-/// opening line is *required* rather than merely skipped: a body that does not
-/// announce itself as TeamCity's error text is not TeamCity's error text, and
-/// lifting its first line out of it would put `<html>` on screen where the
-/// bounded excerpt of the whole page was the more informative answer.
+/// | `Accept` | answer |
+/// |---|---|
+/// | `application/json` -- what `knobas-http` sends | JSON; errors are the envelope above |
+/// | `application/xml`, `*/*`, or no `Accept` at all | **XML** |
+/// | one the server cannot satisfy (`text/plain`, `text/html`) | **406**, whose body is itself the JSON envelope |
+///
+/// So the plain-text form below reaches nobody, and requiring it made this
+/// function return `None` on every real error -- issue #113. Note the middle
+/// row: `*/*` is what reqwest sends by default, which is why
+/// `knobas-mockd`'s deviation 1 refuses it, and why "any `Accept` other than
+/// JSON gets a 406" would be the wrong reading of the same measurement.
+///
+/// It is kept anyway, deliberately, as a fallback **after** the JSON attempt:
+///
+/// * It cannot mis-fire. The branch only runs on a body whose first line is
+///   literally that announcement, so no JSON body and no proxy page can reach
+///   it, and the JSON attempt has already had its turn.
+/// * The hook sees every failing body this client is handed, not only TeamCity's
+///   own -- a gateway, an older server, or a non-`/app/rest` path is not a case
+///   this adapter can enumerate, and the code to read the form is already here
+///   and already tested.
+/// * Deleting working code on one server's behaviour is the move this whole
+///   suite exists to argue against. One server surprised us into this issue;
+///   that is a reason to accept both forms, not to bet the other way.
+///
+/// # Neither shape
+///
+/// `None`, which keeps `knobas-http`'s bounded excerpt of the raw body -- an
+/// HTML error page from a reverse proxy, an empty body, a JSON object shaped
+/// like nothing above. A body this function did not understand is still the
+/// most informative thing knobas has, and lifting a line out of one that never
+/// claimed to be TeamCity's would put `<html>` on screen in its place.
+///
+/// What it does *not* do is check who sent the envelope: any body shaped
+/// `{"errors":[{"message": …}]}` is read, whether a TeamCity wrote it or a
+/// gateway in front of one did. That is the intent -- see the second bullet
+/// above -- and not an accident to tighten later.
 fn error_message(body: &str) -> Option<String> {
+    json_error_message(body).or_else(|| plaintext_error_message(body))
+}
+
+/// `errors[].message`, joined, or `None` if the body is not that envelope.
+fn json_error_message(body: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    let sentences: Vec<&str> = value
+        .get("errors")?
+        .as_array()?
+        .iter()
+        .filter_map(|error| error.get("message")?.as_str())
+        .map(str::trim)
+        .filter(|sentence| !sentence.is_empty())
+        .collect();
+    // An `errors` array with nothing readable in it is not a message this
+    // function found -- it is one it failed to find, and the excerpt of the
+    // whole body says more than an empty string would.
+    (!sentences.is_empty()).then(|| sentences.join("; "))
+}
+
+/// The sentence out of the older plain-text form, or `None` for a body that
+/// does not announce itself as one. See [`error_message`] for why this is
+/// still here.
+fn plaintext_error_message(body: &str) -> Option<String> {
     let mut lines = body.lines().map(str::trim).filter(|line| !line.is_empty());
     // The first line is the status, which the message already carries -- and it
     // is what identifies the body as TeamCity's in the first place.
@@ -285,15 +363,98 @@ mod tests {
         }
     }
 
-    /// TeamCity's error text, read where the body still exists (ADR-0004).
+    /// The error body a real TeamCity serves a client that asked for JSON --
+    /// which is every request this adapter makes.
+    ///
+    /// Verbatim from JetBrains' public instance (2026.2 EAP, build 238763),
+    /// read-only on 2026-08-29. `knobas-http` sets `Accept: application/json`
+    /// on every request it builds and an adapter cannot talk it out of that,
+    /// so this is the *only* error shape this adapter will ever be handed.
+    /// `error_message` used to require a plain-text first line instead and so
+    /// returned `None` on every one of them, putting a JSON blob on screen
+    /// where a sentence was meant (issue #113).
+    ///
+    /// `additionalMessage` repeats the sentence behind a fully-qualified Java
+    /// class name and `statusText` restates the status the message already
+    /// carries; both are noise, for the same reason the plain-text reading
+    /// drops its own first line and its own class name.
+    fn live_404() -> &'static str {
+        r#"{"errors":[{"additionalMessage":"jetbrains.buildServer.server.rest.errors.NotFoundException: No build found by id '999999999'.","statusText":"Responding with error, status code: 404 (Not Found).","stackTrace":null,"message":"No build found by id '999999999'."}]}"#
+    }
+
+    /// Issue #113: the shape the server actually sends becomes the sentence.
+    ///
+    /// Asserted through `knobas_http::status_error` -- the function that
+    /// consults the hook -- so the `HTTP <status>: ` prefix this crate does not
+    /// own is pinned where it comes from.
+    #[test]
+    fn teamcitys_json_error_envelope_becomes_the_message() {
+        let error = knobas_http::status_error(
+            knobas_http::StatusCode::NOT_FOUND,
+            live_404(),
+            Some(error_message),
+        );
+        assert!(
+            matches!(&error, SourceError::Protocol { message, .. }
+                     if message == "HTTP 404 Not Found: No build found by id '999999999'."),
+            "the sentence, not the envelope around it: {error:?}"
+        );
+
+        // The 400 half, and the one a user is most likely to see: a locator
+        // this adapter would never send, refused by name.
+        let locator = knobas_http::status_error(
+            knobas_http::StatusCode::BAD_REQUEST,
+            r#"{"errors":[{"message":"Error processing locator 'order:(id:desc)': Locator dimension [order] is unknown.","statusText":"Responding with error, status code: 400 (Bad Request)."}]}"#,
+            Some(error_message),
+        );
+        assert!(
+            matches!(&locator, SourceError::Protocol { message, .. }
+                     if message.contains("Locator dimension [order] is unknown")
+                        && !message.contains("statusText")),
+            "{locator:?}"
+        );
+
+        // An envelope naming more than one fault keeps all of them: dropping
+        // the rest would hide the half a user needs.
+        assert_eq!(
+            error_message(r#"{"errors":[{"message":"first thing"},{"message":"second thing"}]}"#),
+            Some("first thing; second thing".to_owned())
+        );
+
+        // A body that is JSON but not *this* envelope keeps the raw excerpt --
+        // a proxy's own error object says more as itself than as nothing.
+        for foreign in [
+            r#"{"error":"upstream connect error"}"#,
+            r#"{"errors":[]}"#,
+            r#"{"errors":[{"statusText":"no sentence here"}]}"#,
+            r#"{"errors":"not a list"}"#,
+            "[1,2,3]",
+        ] {
+            assert_eq!(error_message(foreign), None, "{foreign}");
+        }
+    }
+
+    /// The plain-text form, which is **kept as a fallback** and is no longer
+    /// claimed to be what a real TeamCity serves.
+    ///
+    /// It was, once, and the doc comment on this test used to say it was the
+    /// shape `knobas-mockd`'s `tc_error` serves "which is the shape a real
+    /// TeamCity serves". Both halves were wrong at once: 2026.2 serves the
+    /// JSON envelope to a JSON-accepting client and XML to one that sends no
+    /// `Accept` at all, and mockd was teaching the shape that hid it (issue
+    /// #113). mockd serves the envelope now.
+    ///
+    /// The reading stays because it cannot mis-fire -- it runs only on a body
+    /// whose first line is literally TeamCity's announcement, after the JSON
+    /// attempt has had its turn -- and because the hook sees every failing
+    /// body this client is handed, gateways and older servers included. See
+    /// [`error_message`].
     ///
     /// Asserted through `knobas_http::status_error` -- the function that
     /// actually consults the hook -- so the `HTTP <status>: ` prefix this crate
-    /// does not own is pinned where it comes from. The body is the shape
-    /// `knobas-mockd`'s `tc_error` serves, which is the shape a real TeamCity
-    /// serves.
+    /// does not own is pinned where it comes from.
     #[test]
-    fn teamcitys_error_text_becomes_the_message() {
+    fn the_plaintext_error_form_is_still_read_where_one_arrives() {
         let error = knobas_http::status_error(
             knobas_http::StatusCode::NOT_FOUND,
             "Error has occurred during request processing (Not Found).\nError: \
@@ -342,22 +503,68 @@ mod tests {
     /// Interfaces §4.1: 401 *and* 403 are `Unauthorized`, whatever the body
     /// says -- and ADR-0004 makes them tell-apart-able by the status they
     /// carry without collapsing that.
+    ///
+    /// **The property issue #113 must not break.** Reading the body is a
+    /// legibility change and nothing else: the fault *class* comes off the
+    /// status, so retryability, the `Unauthorized` mapping behind *Re-enter
+    /// password* and ADR-0004's carried status are all decided before
+    /// [`error_message`] is consulted -- and for `Unauthorized` it is not
+    /// consulted at all, because that fault carries no message.
+    ///
+    /// So every body below -- the envelope, one that is half-written, one that
+    /// is not JSON, and none at all -- produces the same class and the same
+    /// status as the others of its code. A reading that could change either
+    /// would be one a malformed body could talk out of retrying.
     #[test]
     fn a_refusal_keeps_its_class_whatever_the_body_says() {
+        let bodies = [
+            // The shape a real TeamCity serves.
+            r#"{"errors":[{"message":"Authentication required"}]}"#,
+            // Truncated mid-envelope, as a dropped connection leaves it.
+            r#"{"errors":[{"message":"Authenti"#,
+            // The plain-text form, and a proxy's page, and nothing at all.
+            "Error has occurred during request processing (401).\nAuthentication required\n",
+            "<html><body>401</body></html>",
+            "",
+        ];
         for status in [
             knobas_http::StatusCode::UNAUTHORIZED,
             knobas_http::StatusCode::FORBIDDEN,
         ] {
-            let error = knobas_http::status_error(
-                status,
-                "Error has occurred during request processing (401).\nAuthentication required\n",
-                Some(error_message),
-            );
-            assert!(
-                matches!(error, SourceError::Unauthorized { .. }),
-                "{status}: {error:?}"
-            );
-            assert_eq!(error.status(), Some(status.as_u16()), "{status}");
+            for body in bodies {
+                let error = knobas_http::status_error(status, body, Some(error_message));
+                assert!(
+                    matches!(error, SourceError::Unauthorized { .. }),
+                    "{status} with body {body:?}: {error:?}"
+                );
+                assert_eq!(error.status(), Some(status.as_u16()), "{status}: {body:?}");
+            }
+        }
+
+        // ...and the same on the message-carrying side, which is the half a
+        // body reading could actually reach. The status is what
+        // `retry::status_is_transient` and `client::presence` read, and it is
+        // the same whatever came back in the body -- including a body that is
+        // JSON but not an envelope, and one that is no shape at all.
+        for status in [
+            knobas_http::StatusCode::NOT_FOUND,
+            knobas_http::StatusCode::BAD_REQUEST,
+            knobas_http::StatusCode::TOO_MANY_REQUESTS,
+            knobas_http::StatusCode::INTERNAL_SERVER_ERROR,
+            knobas_http::StatusCode::SERVICE_UNAVAILABLE,
+        ] {
+            for body in bodies.into_iter().chain([r#"{"errors":[]}"#, "\u{0}\u{1}"]) {
+                let error = knobas_http::status_error(status, body, Some(error_message));
+                assert_eq!(
+                    error.status(),
+                    Some(status.as_u16()),
+                    "{status} with body {body:?}: {error:?}"
+                );
+                assert!(
+                    matches!(error, SourceError::Protocol { .. }),
+                    "{status} with body {body:?}: {error:?}"
+                );
+            }
         }
     }
 

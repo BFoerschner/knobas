@@ -620,22 +620,54 @@ async fn a_401_is_unauthorized_from_both_entry_points() {
 }
 
 /// A 500 is a protocol failure, not a credential one: the sources view must
-/// not offer *Re-enter* for someone else's outage.
+/// not offer *Re-enter* for someone else's outage -- and what the user is shown
+/// is the server's sentence, not the envelope around it (issue #113).
+///
+/// The two halves are one test because they are one property with two faces.
+/// The class comes off the **status**, which is what makes it survive any body
+/// at all; the message comes off the **body**, through
+/// `http::error_message`, which is what makes the refusal legible. #91 made
+/// this adapter's refusals load-bearing, and until #113 every one of them
+/// rendered as a raw JSON blob because `error_message` was written for a
+/// plain-text shape a JSON-accepting client never receives -- and mockd was
+/// serving that same plain-text shape, which is how the mismatch survived a
+/// green suite.
 #[tokio::test]
-async fn a_server_error_is_a_protocol_failure() {
+async fn a_server_error_is_a_protocol_failure_and_says_what_the_server_said() {
     let server = spawn_mock_teamcity().await;
     server.set_fault(MockFault::ServerError);
     let source = adapter(&server.base_url(), serde_json::json!({}));
-    let connected = source.test_connection().await;
-    assert!(
-        matches!(connected, Err(SourceError::Protocol { .. })),
-        "{connected:?}"
-    );
-    let synced = source.sync(None, &mut VecSink(Vec::new())).await;
-    assert!(
-        matches!(synced, Err(SourceError::Protocol { .. })),
-        "{synced:?}"
-    );
+
+    for (what, outcome) in [
+        (
+            "test_connection",
+            source.test_connection().await.map(|_| String::new()),
+        ),
+        (
+            "sync",
+            source
+                .sync(None, &mut VecSink(Vec::new()))
+                .await
+                .map(|_| String::new()),
+        ),
+    ] {
+        let error = outcome.expect_err(what);
+        let SourceError::Protocol { message, status } = &error else {
+            panic!("{what}: a 500 is a protocol failure, not a credential one: {error:?}");
+        };
+        // ADR-0004: the status rides along, and it is what decides
+        // retryability -- not anything read out of the body.
+        assert_eq!(*status, Some(500), "{what}: {message}");
+        assert_eq!(
+            message, "HTTP 500 Internal Server Error: Internal server error (injected by mockd)",
+            "{what}: the sentence the server sent, lifted out of its envelope -- not \
+             `{{\"errors\":[{{...}}]}}` printed at the user"
+        );
+        assert!(
+            !message.contains("errors") && !message.contains("additionalMessage"),
+            "{what}: the envelope's own keys are not part of the sentence: {message}"
+        );
+    }
     server.assert_no_violations();
 }
 
