@@ -13,10 +13,10 @@
   import { lifecycle } from "./lib/shell/lifecycle.svelte";
   import { router } from "./lib/shell/router.svelte";
   import { push } from "./lib/shell/toasts.svelte";
+  import SettingsView from "./lib/settings/SettingsView.svelte";
   import FirstRun from "./lib/sources/FirstRun.svelte";
   import SourcesView from "./lib/sources/SourcesView.svelte";
   import { ipcErrorMessage } from "./lib/ipc";
-  import SettingsView from "./lib/settings/SettingsView.svelte";
   import { linkTo } from "./lib/detail/links.svelte";
 
   /**

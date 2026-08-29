@@ -41,9 +41,10 @@ export const DEFAULT_CTX = "all";
  * First segments that are *not* a kind.
  *
  * Two groups, and the distinction matters.
- * `ctx`/`sources`/`settings`/`first-run`/`entity` are views that exist. The rest are addresses M2–M4 will claim; they are listed now
- * so that today they render "arrives in M<n>" instead of being taken for an
- * entity kind and sent to `get_entity`, which would 404 on a word.
+ * `ctx`/`sources`/`settings`/`first-run`/`entity` are views that exist. The
+ * rest are addresses M2–M4 will claim; they are listed now so that today they
+ * render "arrives in M<n>" instead of being taken for an entity kind and sent
+ * to `get_entity`, which would 404 on a word.
  */
 const RESERVED = new Set([
   "ctx",
