@@ -1,10 +1,10 @@
 /**
- * The room switcher's list, which in M1 is derived rather than stored.
- *
- * Spec §7's contexts (epic / ticket / ad-hoc, membership through links) need
- * `knobas.link`, which M1 never writes. What is here instead is one built-in
- * room plus one per configured source — the same shape, one prop away from
- * reading `knobas.context` when M2 lands.
+ * The room switcher's list: the derived rooms (one built-in *All work*, one
+ * per configured source) and, since #47, the stored ones — spec §7's contexts
+ * (epic / ticket / ad-hoc), whose membership is the fixed one-hop rule over
+ * `knobas.confirmed_link` (never the base table — ADR-0008), resolved
+ * server-side. What is tested here is the list's shape and order, not the
+ * membership rule: that lives in `crates/knobas-core/tests/contexts.rs`.
  */
 import { expect, test } from "vitest";
 
