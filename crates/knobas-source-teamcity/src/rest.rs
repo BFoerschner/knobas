@@ -84,7 +84,17 @@ pub(crate) struct ListEnvelope {
     /// (2026-08-29): `sinceBuild` over 42 matches answered `count:41` and
     /// `count:42` with a `nextHref`, and `count:43` with none. That is the
     /// signal [`sync::all_of`](crate::sync) ends a walk on; a short page alone
-    /// is not one.
+    /// is not one. Re-measured 2026-08-29 against a second, bounded query:
+    /// `buildType:(id:AndroidStudioReleasesList),state:finished` over exactly
+    /// 103 matches answered `count:102` and `count:103` with a `nextHref` and
+    /// `count:104` with none.
+    ///
+    /// **One measured exception, which this adapter never meets:** a
+    /// single-value locator resolves to one build and carries no `nextHref`
+    /// however small the `count:` -- `id:6520690,count:1` answers one row and
+    /// no such key. [`Locator`] has no `id` dimension, and the by-id request
+    /// this adapter does send goes to `/app/rest/builds/id:{id}`, which is one
+    /// record rather than a collection and never reaches this envelope.
     ///
     /// Absent unless `fields=` asks for it -- `count,build(id)` comes back
     /// with no `nextHref` key whatever the server has left, which is why

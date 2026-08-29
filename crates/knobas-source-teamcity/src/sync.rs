@@ -299,6 +299,9 @@ pub(crate) async fn execute(
 /// a server that omits `nextHref` this degrades to exactly the old rule rather
 /// than to something new
 /// (`a_server_that_never_reports_a_next_page_is_still_walked_to_the_end`).
+/// "Filled" there means filled to the `count:` **this request asked for**; the
+/// residual below is the other sense of the word, and the two do not
+/// contradict each other.
 ///
 /// **What is left, stated rather than guarded.** A server that both serves
 /// fewer rows than it was asked for *and* omits `nextHref` while doing it is
@@ -353,6 +356,19 @@ fn last_page(page: &Page<Build>, asked: u32) -> bool {
 /// builds, advancing the watermark past the rest, and reporting success. The
 /// failure names the ceiling ([`capped_short`]) so nobody spends the outage
 /// narrowing a source that was never too big.
+///
+/// **The boundary that costs, stated because it is new.** A query whose matches
+/// number *exactly* the server's ceiling is refused although it fitted: the
+/// page comes back filled to that ceiling, a real TeamCity reports a further
+/// page off a filled one whether or not anything follows, and the two signals
+/// then agree on "not the end" over a set the run had whole. That query synced
+/// correctly before this rule, so it is a regression -- in the safe direction,
+/// at one match count per capping server, and against the silent truncation
+/// this whole change removes. The `+ 1` on `ceiling` below is what keeps
+/// [`MAX_BUILDS_PER_QUERY`] itself off that boundary, and it cannot be aimed at
+/// a ceiling the client does not know. Held by
+/// `a_query_that_exactly_fills_a_server_s_ceiling_is_refused_though_it_fitted`,
+/// so the next reader meets it as a decision rather than as a bug.
 async fn all_of(
     rest: &dyn Rest,
     locator: &Locator,
@@ -397,6 +413,13 @@ async fn all_of(
 /// [`MAX_BUILDS_PER_QUERY`] would send the user looking for a thousand builds
 /// that are not there. Naming the two numbers the server itself produced is
 /// what lets the two cases be told apart without reading this file.
+///
+/// One case the wording overstates: at [`all_of`]'s boundary -- a query with
+/// exactly the ceiling's worth of matches -- the run *did* see everything, so
+/// "below what this run has to see in one query" is then a claim about the page
+/// rather than about the corpus. The remedy it names still works, and naming
+/// the ceiling still beats the caller's "narrow this source", which is wrong in
+/// both cases.
 fn capped_short(served: usize, asked: u32) -> Option<String> {
     (served < asked as usize).then(|| {
         format!(
@@ -1532,6 +1555,39 @@ mod tests {
             ["state:finished,sinceBuild:(id:0),count:100"],
             "one request: the server answered short and said there was nothing after it"
         );
+    }
+
+    /// The boundary the fix costs, pinned as a decision rather than met later
+    /// as a bug: a query with **exactly** the server's ceiling's worth of
+    /// matches is refused although it fitted.
+    ///
+    /// The page comes back filled to the cap, a real TeamCity reports a further
+    /// page off a filled one whether or not anything follows it, and
+    /// [`last_page`]'s two signals then agree on "not the end" over a set the
+    /// run had whole. That query synced correctly before issue #114, so this is
+    /// a regression -- in the safe direction, at one match count per capping
+    /// server, and against the silent truncation the change exists to remove.
+    /// [`all_of`]'s `+ 1` probe is what keeps [`MAX_BUILDS_PER_QUERY`] itself
+    /// off this boundary; it cannot be aimed at a ceiling the client does not
+    /// know.
+    #[tokio::test]
+    async fn a_query_that_exactly_fills_a_server_s_ceiling_is_refused_though_it_fitted() {
+        let (outcome, _) = capped_run(50, 50).await;
+        let error = outcome
+            .map(|items| format!("Ok({} items)", items.len()))
+            .expect_err("50 builds behind a 50-row ceiling fill the page, so the walk widens");
+        assert!(
+            matches!(&error, SourceError::Protocol { message: m, .. }
+                if m.contains("answered a request for 1001 builds with 50 of them")),
+            "{error:?}"
+        );
+
+        // One build below it is the ordinary case and still walks: this is a
+        // boundary, not "every capped server fails".
+        let (outcome, widened) = capped_run(50, 49).await;
+        let items = outcome.expect("49 builds behind a 50-row ceiling do not fill the page");
+        assert_eq!(items.iter().filter(|i| i.kind == "build").count(), 49);
+        assert_eq!(widened, ["state:finished,sinceBuild:(id:0),count:100"]);
     }
 
     /// [`last_page`]'s second condition, and the reason it is there: a walk

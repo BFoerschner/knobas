@@ -869,6 +869,77 @@ TeamCity locator table.
 - **Frozen surfaces: none.** `crates/knobas-source-teamcity/**` is not in §10.8's list and the
   `Rest` trait it extends is crate-private. No migration, no IPC change.
 
+### Amendments from the TeamCity short-page fix (2026-08-29, binding) — issue #114
+
+Ruled by Fable under delegation while Björn was away, 2026-08-29, on issue #114; Björn can
+overturn it. It **narrows the ceiling-probe bullets above** rather than superseding them: the
+probe still reads one un-widened page and still ignores what the server says about the rest.
+Recorded here because §4.2 pins TeamCity's `fields=` selectors and §5 pins mockd's as-built
+behaviour, and both change — the precedent is the `triggered(user(username))` and `description`
+widenings in the M2 TeamCity package above.
+
+- **§4.2 a TeamCity walk ends on the server's own `nextHref`, never on a short page.**
+  `sync::all_of` widened `count:` until `page.len() < count` and then returned that page as the
+  complete answer — the reading issue #81 removed from Gitea's four walks, and worse by one
+  degree, because a short page was the *result* rather than merely the end of the walk. A page
+  shorter than the `count:` a request named is proof of exhaustion only on a server that served
+  exactly what it was asked for, and nothing in `/app/rest/builds` promises that: a TeamCity may
+  be configured with its own per-request ceiling. The walk now ends only when **both** signals
+  agree — no reported next page **and** a page shorter than the `count:` asked for.
+- **§4.2 `BUILD_FIELDS` and `BUILD_TYPE_FIELDS` widen to include `nextHref`.** The field arrives
+  only when `fields=` asks for it: measured read-only against JetBrains' public instance
+  (2026.2 EAP, build 238763) on 2026-08-29, `fields=count,build(id)` comes back with no
+  `nextHref` key whatever the server has left. Dropping it from either selector would put every
+  walk back on the page-length assumption in silence, so `rest.rs` asserts both selectors name
+  it and `client::tests::the_next_href_a_server_sends_reaches_page_more` asserts the answer is
+  actually read — the one seam between the wire and the walk, which no other test crosses.
+- **§4.2 `nextHref` means "the page came back filled", not "a further page exists".** Measured
+  the same day over a query with exactly 42 matches: `count:41` and `count:42` both answered a
+  `nextHref`, `count:43` answered none; re-measured on
+  `buildType:(id:AndroidStudioReleasesList),state:finished` over exactly 103 matches, where
+  `count:102` and `count:103` carry it and `count:104` does not. So a filled page is never proof
+  it was the last, and a page the server could not fill is the end. One measured exception, which
+  this adapter never meets: a single-value locator (`id:6520690,count:1`) resolves to one build
+  and carries no `nextHref`; `Locator` has no `id` dimension and the adapter's by-id request goes
+  to `/app/rest/builds/id:{id}`, which is a record rather than a collection.
+- **§4.2 the `/app/rest/buildTypes` listing is refused when it reports a further page.** That
+  walk sends no `count:` — §4.2 lists the endpoint without a locator — and has no second request
+  to make, so an instance that paged it would silently narrow the scope of every full sync while
+  reporting success. The live server answers all 4,253 configurations in one response with no
+  `nextHref`, which is the assumption made explicit rather than assumed. A paged
+  build-configuration walk is the deliberate change to make when a server that needs one is met.
+- **§4.2 the two residuals, accepted rather than guarded.** (a) Against a server whose own
+  per-request ceiling sits below what one run must see, every widening returns at that ceiling
+  still reporting more, and the run **refuses** at `MAX_BUILDS_PER_QUERY` — deliberately
+  preferred to mirroring the ceiling's worth of builds and advancing the watermark past the rest,
+  and the message names the ceiling instead of the caller's "narrow this source", which under a
+  cap is a lie. Its boundary is stated in place: a query with *exactly* the ceiling's worth of
+  matches is refused although it fitted, which is a regression in the safe direction at one match
+  count per capping server. (b) A server that caps **and** omits `nextHref` is still
+  indistinguishable from an exhausted query — `/app/rest/builds` publishes no total and the only
+  other walk is the offset one this adapter refuses, since the collection grows at the front.
+  Both are recorded on `sync::all_of` and `sync::last_page` respectively.
+- **The capping case is reasoned, not measured.** JetBrains' instance honoured `count:5000` and
+  `count:1001`, so it does not cap, and no TeamCity with
+  `teamcity.rest.listRequest.maxNumberOfEntries` lowered was available. "A capping TeamCity still
+  reports `nextHref`" therefore rests on the measured *filled-page* rule plus the server's own
+  documentation of the field, and is modelled in `knobas-mockd` and `FakeRest::capped` rather
+  than observed. The half that *is* measured — that `nextHref` exists, is computed from the page
+  produced, and must be asked for — is what the fix hangs on; the unmeasured half only decides
+  whether the capping case refuses or truncates, and truncating is what it did before.
+- **§5 mockd's `/app/rest/builds` answers `nextHref` when the page came back filled**, and serves
+  the `start:` continuation it names. It answered `nextHref: null` on every page, so every short
+  page looked like an exhausted query and no fixture could tell a capped page from an exhausted
+  one — part of how #114 survived. The continuation **replaces** any `start:` the request
+  carried rather than appending one, because mockd refuses a locator that names a dimension
+  twice; appending would advertise a page mockd itself answers 400 to.
+  `/app/rest/buildTypes` keeps its `null` for the reason a real server does: it is not paged.
+  The as-built locator subset is unchanged.
+- **Frozen surfaces: none.** `crates/knobas-source-teamcity/**` and `crates/knobas-mockd/**` are
+  not in §10.8's list, the `Rest` trait is crate-private, and `knobas-http` is untouched.
+  `nextHref` is a field on an endpoint §4.2 already lists, requested through the `fields=`
+  parameter §4.2 already requires. No migration, no IPC change.
+
 ---
 
 ## 10. As built — the contract PR (2026-08-24)

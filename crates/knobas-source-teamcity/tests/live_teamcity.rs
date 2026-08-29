@@ -113,7 +113,7 @@ macro_rules! live_or_skip {
         match live() {
             Some(live) => live,
             None => {
-                eprintln!(
+                println!(
                     "SKIP: KNOBAS_TEAMCITY_URL is not set, so there is no server to certify \
                      against. `cp .env.example .env` -- its default value is a public, \
                      guest-readable TeamCity and needs no token -- then `just teamcity-live`."
@@ -959,32 +959,40 @@ async fn a_page_says_for_itself_whether_the_collection_ran_out() {
     );
 
     // The other end: a query the server could not fill reports nothing after
-    // it. `sinceBuild` past the newest id this run can see is the one query on
-    // a live server guaranteed to be small, and it is read-only.
-    let newest = live
-        .builds("defaultFilter:false,count:100", "id")
-        .await
-        .iter()
-        .map(id_of)
-        .max()
-        .expect("the server has builds");
-    let exhausted = asked(&format!(
-        "state:finished,sinceBuild:(id:{newest}),count:100"
-    ))
-    .await;
+    // it.
+    //
+    // `id:` is the locator that makes that deterministic on a server whose
+    // corpus moves. It matches at most one build, so `count:100` over it is a
+    // page the server cannot fill however busy it is -- and non-empty, which
+    // an empty page would not be.
+    //
+    // **Not `sinceBuild:` past the id this run witnessed**, which is what
+    // stood here and is the #91 trap wearing a new hat: the opening page is
+    // unordered, so its maximum is an id known to *exist*, never the newest on
+    // the server. Measured on this instance 2026-08-29, that query came back
+    // with a full 100 rows and a `nextHref` -- more than a hundred builds had
+    // finished above the witnessed id -- so the assertion was about JetBrains'
+    // build throughput rather than about `nextHref`.
+    let one = id_of(
+        live.builds("defaultFilter:false,count:1", "id")
+            .await
+            .first()
+            .expect("the server has builds"),
+    );
+    let exhausted = asked(&format!("id:{one},count:100")).await;
     let rows = exhausted["build"].as_array().map_or(0, Vec::len);
-    assert!(
-        rows < 100,
-        "a query for what finished after the newest id this run witnessed cannot fill a page \
-         of 100: {exhausted}"
+    assert_eq!(
+        rows, 1,
+        "`id:` names one build, so a page of 100 over it is one the server cannot fill: \
+         {exhausted}"
     );
     assert!(
         exhausted["nextHref"].is_null() || exhausted.get("nextHref").is_none(),
         "a page the server could not fill is the end of its collection, and must not claim a \
          successor -- ending a walk there is exactly what `sync::last_page` does: {exhausted}"
     );
-    eprintln!(
-        "FINDING nextHref: filled page -> {:?}; unfilled page ({rows} rows) -> {:?}; \
+    println!(
+        "LIVE nextHref: filled page -> {:?}; unfilled page ({rows} rows) -> {:?}; \
          unasked -> absent",
         filled["nextHref"].as_str().map(|_| "present"),
         exhausted.get("nextHref"),
@@ -1010,5 +1018,5 @@ async fn a_page_says_for_itself_whether_the_collection_ran_out() {
          here -- which is the assumption `sync::scope` is built on and refuses to sync \
          without: {types}"
     );
-    eprintln!("FINDING buildTypes: {listed} configurations in one answer, no nextHref");
+    println!("LIVE buildTypes: {listed} configurations in one answer, no nextHref");
 }
