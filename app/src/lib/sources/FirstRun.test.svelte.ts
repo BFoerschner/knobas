@@ -45,6 +45,27 @@ let corpus = 213;
 const channels: { onmessage?: (progress: SyncProgress) => void }[] = [];
 let syncFails: unknown = null;
 
+/**
+ * A latch `list_sources` waits behind, so a test can hold the corpus read open
+ * for as long as it likes.
+ *
+ * The defect #120 records is a **race**, and a race the fast path hides: the
+ * panel renders once between the run's ending arriving and the corpus read
+ * answering. Under an unlatched mock that gap is a microtask, and every
+ * assertion after `settle()` is taken on the far side of it — so a test that
+ * proved anything about the gap would have to prove it by inspection. This is
+ * how it is proved by observation instead: the read is a real round trip, and
+ * a slow one is what a large corpus on a busy machine actually produces.
+ */
+let corpusGate: { held: Promise<void>; release: () => void } | null = null;
+
+function holdTheCorpusRead() {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  corpusGate = { held, release };
+  return corpusGate;
+}
+
 vi.mock("../ipc/sources", () => ({
   syncNowWithProgress: (sourceId: string, channel: { onmessage?: (p: SyncProgress) => void }) => {
     calls.syncWithProgress.push(sourceId);
@@ -52,9 +73,10 @@ vi.mock("../ipc/sources", () => ({
     // P3: the run id, as soon as the run is *recorded*. Not when it finishes.
     return syncFails ? Promise.reject(syncFails) : Promise.resolve(11);
   },
-  listSources: () => {
+  listSources: async () => {
     calls.listSources += 1;
-    return Promise.resolve([{ ...summary(), item_count: corpus }, { ...summary("mock"), item_count: corpus }]);
+    if (corpusGate) await corpusGate.held;
+    return [{ ...summary(), item_count: corpus }, { ...summary("mock"), item_count: corpus }];
   },
   demoLoad: () => {
     calls.demoLoad += 1;
@@ -149,6 +171,7 @@ beforeEach(() => {
   calls.listSources = 0;
   corpus = 213;
   channels.length = 0;
+  corpusGate = null;
   syncFails = null;
   target = document.createElement("div");
   document.body.append(target);
@@ -246,6 +269,58 @@ test("the finished panel reports the corpus, never what the run happened to writ
   expect(calls.listSources).toBe(1);
   expect(text()).toContain("213 items");
   expect(text()).not.toContain("0 items");
+});
+
+test("a slow corpus read never lets the panel claim a count it does not have yet", async () => {
+  // #120, and the sentence ADR-0005 exists to eliminate arriving through the
+  // *render* path rather than the data path: `readCorpus` is fired on
+  // `finished` and the panel renders before `list_sources` answers, so for that
+  // window it showed the run's own count — *0 items* over a full mirror. The
+  // window widens with the corpus, so it is at its most visible exactly when a
+  // first sync is at its most impressive.
+  corpus = 213;
+  const gate = holdTheCorpusRead();
+  render({ source: summary() });
+  button("Next")!.click();
+  flushSync();
+  button("Next")!.click();
+  flushSync();
+  button("Start the first sync")!.click();
+  await settle();
+
+  // The run this wizard was handed found the corpus already mirrored and wrote
+  // nothing, which is the ordinary interleaving after `add_source`'s wake.
+  progress({ phase: "finished", items: 0, elapsed_ms: 4200 });
+  await settle();
+
+  expect(calls.listSources).toBe(1);
+  expect(text()).not.toContain("0 items");
+  // The sync is over and it worked, so the panel says so and offers the way on
+  // — waiting on a count is not waiting on the sync.
+  expect(button("Finish")).toBeTruthy();
+
+  gate.release();
+  await settle();
+  expect(text()).toContain("213 items");
+});
+
+test("a mirror that really is empty reads as zero, not as pending for ever", async () => {
+  // The other half of the same rule: *not known yet* and *known to be none* are
+  // different states, and a panel that could not tell them apart would trade
+  // one wrong sentence for a permanent one.
+  corpus = 0;
+  render({ source: summary() });
+  button("Next")!.click();
+  flushSync();
+  button("Next")!.click();
+  flushSync();
+  button("Start the first sync")!.click();
+  await settle();
+
+  progress({ phase: "finished", items: 0, elapsed_ms: 4200 });
+  await settle();
+  expect(text()).toContain("0 items");
+  expect(button("Finish")).toBeTruthy();
 });
 
 test("a corpus that cannot be read falls back to the run's count rather than a failure panel", async () => {

@@ -42,6 +42,18 @@
   may be one this wizard only joined at its end. Reporting what *that* run wrote
   put *knobas mirrored 0 items* over a full mirror.
 
+  …and the corpus read is a **round trip**, fired when the run ends, so there is
+  a window in which the run is over and the count is not back. The panel has a
+  state for that window (`corpusPending`) and renders it as pending rather than
+  as a number, because the only number it holds during it is the run's — the
+  very one the paragraph above is about. Awaiting the read before showing the
+  panel was the other way to close it, and it puts a round trip between the
+  ending and the news that the sync worked; this way the panel turns over the
+  instant the run does and only the count arrives late. On a fast machine the
+  window is one microtask, which is exactly why it needs a test that widens it
+  (`FirstRun.test.svelte.ts` holds `list_sources` behind a latch) rather than an
+  eye.
+
   ## Progress without an inline style
 
   A native `<progress>`, and no `style="width: …"`. `style-src 'self'` drops an
@@ -95,7 +107,19 @@
 
   let phase = $state<SyncPhase | null>(null);
   let items = $state(0);
-  let corpus = $state<number | null>(null);
+  /**
+   * The corpus, and **three states, not two**.
+   *
+   * `undefined` is *nobody has asked yet, or the answer has not come back*;
+   * `null` is *asked, and there is no count to be had* (the source is not in
+   * the answer, or the read threw); a number is the count. Collapsing the first
+   * two is what put *knobas mirrored 0 items* over a full mirror for as long as
+   * `list_sources` took to answer: the read is fired when the run ends and the
+   * panel renders before it returns, so a state that could not say *not yet*
+   * had to say something, and what it said was the run's own count — which for
+   * the run this wizard usually ends up watching is zero.
+   */
+  let corpus = $state<number | null | undefined>(undefined);
   let elapsed = $state(0);
   let failure = $state<string | null>(null);
   let starting = $state(false);
@@ -105,19 +129,41 @@
   const failed = $derived(phase === "failed" || failure !== null);
 
   /**
-   * The number the panel puts in front of a person.
+   * The run has ended and the corpus read that settles the sentence has not
+   * answered yet.
    *
-   * The corpus once it is known, and the run's own count until then. The two
-   * are different halves and `CONTEXT.md` names them: a *Mirror* count is a
-   * corpus, *Upserted* is what one run wrote, and *"a run that writes nothing
-   * over a full mirror upserted zero"*. While the bar is moving, the run's
-   * count is the only number that exists and it is the honest one — it is
+   * Only after the ending, because that is the only moment the claim changes
+   * hands: while the bar is moving the run's own count is the honest number and
+   * nothing is pending. A *failed* run is not pending either — no corpus read
+   * was fired, and the count beside a failure is the run's.
+   */
+  const corpusPending = $derived(finished && corpus === undefined);
+
+  /**
+   * The number the panel puts in front of a person — or an ellipsis while it
+   * genuinely does not have one.
+   *
+   * The corpus once it is known, and the run's own count until the run ends.
+   * The two are different halves and `CONTEXT.md` names them: a *Mirror* count
+   * is a corpus, *Upserted* is what one run wrote, and *"a run that writes
+   * nothing over a full mirror upserted zero"*. While the bar is moving, the
+   * run's count is the only number that exists and it is the honest one — it is
    * saying how far this run has got. The sentence at the end is about the
    * mirror, and it has to be true whichever run this wizard ended up watching:
    * adding a source wakes the scheduler, so the run that did the mirroring may
    * be one this wizard only joined at its ending.
+   *
+   * Which leaves the gap between those two: the run has ended, so the run's
+   * count is no longer the claim being made, and the corpus is not back yet.
+   * The panel says so rather than filling it with the number it happens to
+   * hold — *waiting on a count* is a true thing to render, and it is not
+   * *mirrored 0 items*. It cannot stick: `readCorpus` either resolves with a
+   * count, or with `null` because the source is not in the answer, or throws
+   * and is caught into `null`. A mirror that really is empty is `0` here and
+   * reads as zero, which is the distinction this whole tri-state exists to
+   * make.
    */
-  const mirrored = $derived(corpus ?? items);
+  const mirrored = $derived(corpusPending ? "…" : String(corpus ?? items));
 
   /**
    * Read the source's corpus off `SourceSummary.item_count`, which already
@@ -144,7 +190,7 @@
     starting = true;
     phase = "started";
     items = 0;
-    corpus = null;
+    corpus = undefined;
     failure = null;
 
     try {
@@ -161,6 +207,12 @@
           // The run is over, so the mirror is whatever it now is — including
           // when this wizard was handed a run that had already finished and
           // this ending is the only message it ever received.
+          //
+          // Deliberately not awaited: this is a channel callback, and holding
+          // the panel's turnover behind a `list_sources` round trip would make
+          // the news that the sync worked arrive later than the sync did.
+          // `corpusPending` is what makes that safe — the panel can render
+          // without a count because it has a way to say it has not got one.
           void readCorpus(id);
         }
         if (message.phase === "failed") {
