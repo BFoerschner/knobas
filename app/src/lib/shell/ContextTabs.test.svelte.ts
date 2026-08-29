@@ -7,7 +7,31 @@
  * "the address is the state" exists to prevent.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
+
+/** The labels `create_context` was asked to mint. */
+const created: string[] = [];
+
+vi.mock("../ipc/entity", () => ({
+  listContexts: () => Promise.resolve([]),
+  contextMembers: () => Promise.resolve([]),
+  promoteContext: () => Promise.reject(new Error("no promotion in this test")),
+  createContext: (title: string) => {
+    created.push(title);
+    return Promise.resolve({
+      id: "ctx:fresh",
+      kind: "adhoc",
+      title,
+      anchor_id: null,
+      created_at: "2026-08-29T12:00:00Z",
+      archived_at: null,
+    });
+  },
+}));
+
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: () => Promise.resolve(() => {}),
+}));
 
 import ContextTabs from "./ContextTabs.svelte";
 import { builtinContexts } from "./contexts";
@@ -93,16 +117,39 @@ test("the sources view is in no room, so no tab is current", () => {
 });
 
 /**
- * The one control that cannot work says so. A `+ new` that silently did
- * nothing would be indistinguishable from a bug.
+ * `+ new` mints an ad-hoc context and **navigates** (#47) — the address is
+ * the state here too, so the proof is the hash, not a callback.
  */
-test("+ new is disabled and names the milestone it arrives in", () => {
+test("+ new becomes an input, creates on Enter and lands in the new room", async () => {
   const screen = render("#/ctx/all");
-  const create = screen.target.querySelector<HTMLButtonElement>(".tab.new");
+  screen.target.querySelector<HTMLButtonElement>(".tab.new")?.click();
+  flushSync();
 
-  expect(create?.disabled).toBe(true);
-  expect(create?.title).toMatch(/M2/);
+  const input = screen.target.querySelector<HTMLInputElement>(".tab.new-name");
+  expect(input, "the tab becomes the input").not.toBeNull();
+  input!.value = "Staging DB configuration";
+  input!.dispatchEvent(new Event("input", { bubbles: true }));
+  input!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 
+  await vi.waitFor(() => expect(location.hash).toBe("#/ctx/ctx:fresh"));
+  expect(created).toEqual(["Staging DB configuration"]);
+  screen.done();
+});
+
+/** Escape backs out without minting anything. */
+test("Escape abandons the label and nothing is created", () => {
+  const before = created.length;
+  const screen = render("#/ctx/all");
+  screen.target.querySelector<HTMLButtonElement>(".tab.new")?.click();
+  flushSync();
+
+  const input = screen.target.querySelector<HTMLInputElement>(".tab.new-name");
+  input!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  flushSync();
+
+  expect(screen.target.querySelector(".tab.new-name")).toBeNull();
+  expect(screen.target.querySelector<HTMLButtonElement>(".tab.new")).not.toBeNull();
+  expect(created.length).toBe(before);
   screen.done();
 });
 

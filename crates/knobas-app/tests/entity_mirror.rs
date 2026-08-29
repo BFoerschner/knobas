@@ -197,6 +197,7 @@ fn the_entity_filter_shape_matches_its_typescript_mirror() {
         "kinds": ["ticket", "pr"],
         "updated_within_days": null,
         "order": "title_asc",
+        "context": null,
         "include_deleted": true,
     });
     let decoded: EntityFilter =
@@ -207,6 +208,7 @@ fn the_entity_filter_shape_matches_its_typescript_mirror() {
         "EntityFilter",
         &wire,
         &[
+            "context",
             "include_deleted",
             "kinds",
             "order",
@@ -845,5 +847,49 @@ fn the_inbox_shelves_match_their_typescript_mirror() {
         &spellings,
         declared_union(MIRROR, "InboxShelf"),
         "a shelf declared on one side only is a read the backend never answers",
+    );
+}
+
+const CONTEXT_ROW_FIELDS: &[&str] = &[
+    "anchor_id",
+    "archived_at",
+    "created_at",
+    "id",
+    "kind",
+    "title",
+];
+
+/// The switcher's row (#47). `anchor_id` and `archived_at` are the nullable
+/// fields and are exercised as `None` -- an ad-hoc, live context -- per this
+/// file's rule that every nullable field is empty somewhere.
+#[test]
+fn the_context_row_shape_matches_its_typescript_mirror() {
+    let wire = serde_json::to_value(knobas_core::context::ContextRow {
+        id: "ctx:5b1c0f1e".to_owned(),
+        kind: knobas_core::context::ContextKind::Adhoc,
+        title: "Staging DB configuration".to_owned(),
+        anchor_id: None,
+        created_at: Utc.with_ymd_and_hms(2026, 8, 29, 12, 0, 0).unwrap(),
+        archived_at: None,
+    })
+    .unwrap();
+    assert_shape("ContextRow", &wire, CONTEXT_ROW_FIELDS);
+    assert_eq!(wire["anchor_id"], serde_json::Value::Null);
+    assert_eq!(wire["archived_at"], serde_json::Value::Null);
+}
+
+/// Every context kind, in the spelling the mirror's union declares -- read
+/// out of `entity.ts` rather than listed here, the rule `EntityOrder` set.
+#[test]
+fn the_context_kinds_match_their_typescript_mirror() {
+    let spellings: Vec<&str> = knobas_core::context::ContextKind::ALL
+        .iter()
+        .map(|kind| kind.as_str())
+        .collect();
+    assert_same_members(
+        &spellings,
+        declared_union(MIRROR, "ContextKind"),
+        "a kind declared on one side only is a chip the other side can never \
+         draw",
     );
 }

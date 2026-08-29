@@ -1,0 +1,34 @@
+---
+status: accepted
+---
+
+# Context membership is seed + direct links + one hop, computed over confirmed links, never stored
+
+Spec §16.11, ratified 2026-08-27 (Björn): *"Context membership: explicit adds + direct links + one hop, fixed rule, not configurable in v1. Asset membership counts through ancestors."* This ADR is the ticket-mandated record (#47) of what that sentence means operationally, because its three terms admit two readings and the code has to pick one.
+
+**The rule, as implemented (`knobas_core::context::MEMBER_IDS`, one statement):** membership is three layers over the confirmed link graph. The **seed** is the explicit adds (every confirmed link touching the context's own `ctx:` entity — an *Add to context* is an ordinary link), the anchor for a promoted context, and the epic's children — mirrored items whose source-recorded parent (`fields.parent.key`, widened by #32) names the anchor, in the anchor's own source. **Direct links** are everything the seeds link to. **One hop** is everything *those* link to. Then it stops.
+
+The deciding evidence for the three-layer reading is §16.11's own parenthetical, *"(a member ticket's PRs, their builds)"*: the member ticket is a seed, its PRs are its direct links, and their builds are the one hop. The alternative reading — neighbours of the context node plus one hop, two layers — cannot produce that sentence for an epic, whose tickets already cost the first layer.
+
+Three subsidiary decisions ride along:
+
+1. **Membership is computed at read time, never materialized.** A membership table would be a second copy of the link graph that every link write has to keep honest. At this database's scale the walk is three indexed self-joins; if it ever costs too much, the fix is a cache with an invalidation story, taken as its own decision.
+2. **The walk reads `knobas.confirmed_link` at every step — a correctness constraint, not a style preference.** Since #41 the link table holds proposals too, and the tray *scopes proposals by membership* (`suggest::proposals`' `members` parameter). Membership built from proposals would make the two circular: a guess would admit an entity to the context, whose tray would then rank more guesses by it. `#41`'s own words draw the line — "the links panel showing an unconfirmed guess would be a correctness bug, not a cosmetic one" — and a context is a stronger claim than a panel. `link_reads.rs` scans the Rust tree; the M2 membership query is in Rust, so the scan holds it.
+3. **The walk never traverses another context.** Every expansion refuses `ctx`-kind neighbours. Without this, one shared ticket unions two contexts: ticket ∈ A, ticket linked to B, so B and then all of B's members arrive in A within the hop budget. Contexts are working sets, not graph nodes to route through.
+
+The epic-children read is a payload read outside an adapter and is governed by ADR-0007: it is confined to the one named statement, it misses rather than guesses (a `fields.parent` of any other shape contributes no seed; the child is matched inside the anchor's source id, so two Jiras stay two namespaces), and its failure direction is pinned by `a_foreign_or_misshapen_parent_contributes_nothing` — the failure is an absent member, never a wrong one. The promote path's issue-type read (`ANCHOR_SHAPE`) carries the same discipline with the same pin: a miss promotes a ticket-kind context, never a wrong epic.
+
+## Considered options
+
+- **Two layers: the context node's links, plus one hop.** Simpler to state, and right for a promoted ticket. Rejected because the ratified parenthetical is unreachable for an epic under it, and because "explicit adds + direct links + one hop" reads as three terms, not two.
+- **A recursive walk with a depth parameter.** Rejected by the ratification itself: *"fixed rule, not configurable in v1"*. The statement is three plain CTEs precisely so there is no knob.
+- **Storing membership rows (origin `implied`) on link creation.** Rejected: every subsequent link write anywhere in the graph can change any context's membership one hop away, so the invalidation surface is the whole link table. §5a's "auto-add asset to ticket's contexts" mockup behaviour can still be honoured later as an explicit `implied` link — that is an *add*, not a cache.
+- **Counting proposals toward membership, dimmed in the UI.** Rejected for the circularity in point 2, and because a context that quietly contains guesses breaks the export promise: a share-with-a-colleague export contains contexts, and nobody audits an export row by row.
+
+## Consequences
+
+- The tray gained a scope, not a store (`suggest::proposals(sources, members, limit)`), and the room's page, its tiles and the per-context inbox filter ("N here") all resolve membership server-side through `context::member_ids` — one rule, one statement, one battery (`crates/knobas-core/tests/contexts.rs`).
+- Membership can be wide. One hop from a busy ticket's PRs reaches every build those PRs touch; that is the ratified trade, accepted until real use shows the need for narrowing — which reopens *this* ADR rather than growing a filter somewhere.
+- A withdrawn entity stays a member (§5a: links to it survive), and each surface decides how to show it; the room's page filters through `sync.live_item` as every mirror read does, so a deleted member simply does not draw there.
+- **Asset membership through ancestors is ratified but latent.** No asset tree exists in the schema yet (M4); when it lands, ancestor-expansion joins the same statement, and the sentence in §16.11 is already its specification. Nothing else in this ADR needs reopening for it.
+- Ad-hoc contexts get the whole rule for free: their seed is just the explicit adds, so "a label with notes, time, links, assets — no code required" (spec §7) needs no special casing.

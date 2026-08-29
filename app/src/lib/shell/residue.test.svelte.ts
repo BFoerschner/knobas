@@ -112,6 +112,12 @@ const LINE = {
 };
 
 vi.mock("../ipc/entity", () => ({
+  // Contexts (#47): the store imports these at module level, so every mock of
+  // this module has to define them even where no context is ever made.
+  listContexts: () => Promise.resolve([]),
+  contextMembers: () => Promise.resolve([]),
+  createContext: () => Promise.reject(new Error("no context creation in this test")),
+  promoteContext: () => Promise.reject(new Error("no promotion in this test")),
   listEntities: () => deferred(PAGE),
   getEntity: () => deferred(DETAIL),
   recentActivity: () => deferred([LINE]),
@@ -238,6 +244,7 @@ const StatusBar = (await import("./StatusBar.svelte")).default;
 const Tile = (await import("./Tile.svelte")).default;
 const Detail = (await import("../detail/Detail.svelte")).default;
 const Launcher = (await import("../launcher/Launcher.svelte")).default;
+const InboxView = (await import("../inbox/InboxView.svelte")).default;
 const NoteView = (await import("../notes/NoteView.svelte")).default;
 const QueryBox = (await import("../launcher/QueryBox.svelte")).default;
 const StartWork = (await import("../start-work/StartWork.svelte")).default;
@@ -364,6 +371,35 @@ const CASES: Case[] = [
     source: "lib/shell/SuggestionTray.svelte",
     open: (target) => ({
       app: mount(SuggestionTray, { target, props: { sources: [], onopen: () => {} } }),
+    }),
+  },
+  {
+    /**
+     * The per-context filter (#47) fetches membership in an effect. It
+     * installs no listener and arms no timer today; the entry is what makes
+     * the next effect added here scanned from day one.
+     */
+    name: "InboxView",
+    source: "lib/inbox/InboxView.svelte",
+    open: (target) => ({
+      app: mount(InboxView, {
+        target,
+        props: {
+          router: createRouter(),
+          inbox: {
+            stream: [],
+            snoozed: [],
+            count: 0,
+            error: null,
+            busy: false,
+            refreshCount: async () => {},
+            refresh: async () => {},
+            snooze: async () => {},
+            complete: async () => {},
+            start: () => () => {},
+          },
+        },
+      }),
     }),
   },
   {

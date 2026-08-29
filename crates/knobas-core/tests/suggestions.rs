@@ -116,7 +116,7 @@ async fn run_rule(pool: &PgPool, name: &str) -> u64 {
 
 /// Every proposal in the corpus, newest first.
 async fn tray(pool: &PgPool) -> Vec<suggest::SuggestionEntry> {
-    suggest::proposals(pool, &[], 200).await.unwrap()
+    suggest::proposals(pool, &[], None, 200).await.unwrap()
 }
 
 /// The `(from, to)` pairs the tray holds, as a set.
@@ -1037,7 +1037,7 @@ async fn the_tray_shows_the_proposals_of_the_room_it_is_in() {
     suggest::detect(&pool).await.unwrap();
 
     for room in ["jira", "gitea"] {
-        let entries = suggest::proposals(&pool, &[room.to_owned()], 50)
+        let entries = suggest::proposals(&pool, &[room.to_owned()], None, 50)
             .await
             .unwrap();
         assert_eq!(
@@ -1046,7 +1046,7 @@ async fn the_tray_shows_the_proposals_of_the_room_it_is_in() {
             "{room} sees the proposal that touches it"
         );
         assert_eq!(
-            suggest::proposal_count(&pool, &[room.to_owned()])
+            suggest::proposal_count(&pool, &[room.to_owned()], None)
                 .await
                 .unwrap(),
             1,
@@ -1054,7 +1054,7 @@ async fn the_tray_shows_the_proposals_of_the_room_it_is_in() {
         );
     }
 
-    let eu = suggest::proposals(&pool, &["jira-eu".to_owned()], 50)
+    let eu = suggest::proposals(&pool, &["jira-eu".to_owned()], None, 50)
         .await
         .unwrap();
     assert_eq!(
@@ -1066,7 +1066,93 @@ async fn the_tray_shows_the_proposals_of_the_room_it_is_in() {
 
     // An empty scope is every source, not no source.
     assert_eq!(tray(&pool).await.len(), 2);
-    assert_eq!(suggest::proposal_count(&pool, &[]).await.unwrap(), 2);
+    assert_eq!(suggest::proposal_count(&pool, &[], None).await.unwrap(), 2);
+}
+
+/// The membership scope #47 adds: a stored context's room passes its member
+/// ids, and only proposals touching one of them come back. `Some(&[])` -- a
+/// context with no members -- is an honestly empty tray, **not** an unscoped
+/// one, because the difference between "no filter" and "a filter nothing
+/// passes" is exactly the bug `= any('{}')` conventions exist to keep visible.
+#[tokio::test]
+async fn the_tray_scopes_by_membership_when_a_context_room_asks() {
+    let pool = scratch().await;
+    let ticket = item(&pool, "ticket", "PAY-231", "Payout retry storm", "").await;
+    let branch = from(
+        &pool,
+        "gitea",
+        "branch",
+        "tidewater/payout#b1",
+        "feature/PAY-231-retry",
+        "",
+        serde_json::json!({}),
+    )
+    .await;
+    let other_ticket = from(
+        &pool,
+        "jira-eu",
+        "ticket",
+        "EU-1",
+        "Something else",
+        "",
+        serde_json::json!({}),
+    )
+    .await;
+    from(
+        &pool,
+        "jira-eu",
+        "page",
+        "EU:Notes",
+        "Notes",
+        "See EU-1.",
+        serde_json::json!({}),
+    )
+    .await;
+    suggest::detect(&pool).await.unwrap();
+
+    // Scoped to the ticket: the branch proposal touches it, EU's does not.
+    let scoped = suggest::proposals(&pool, &[], Some(std::slice::from_ref(&ticket)), 50)
+        .await
+        .unwrap();
+    assert_eq!(
+        pairs(&scoped),
+        [(branch.clone(), ticket.clone())].into_iter().collect()
+    );
+    assert_eq!(
+        suggest::proposal_count(&pool, &[], Some(std::slice::from_ref(&ticket)))
+            .await
+            .unwrap(),
+        1
+    );
+
+    // Scoped to an unrelated member: nothing, though proposals exist.
+    let elsewhere = suggest::proposals(&pool, &[], Some(std::slice::from_ref(&branch)), 50)
+        .await
+        .unwrap();
+    assert_eq!(
+        pairs(&elsewhere),
+        pairs(&scoped),
+        "the branch end scopes too"
+    );
+    let none = suggest::proposals(&pool, &[], Some(&["note:unrelated".to_owned()]), 50)
+        .await
+        .unwrap();
+    assert!(none.is_empty());
+
+    // And the empty membership is empty, not everything.
+    assert!(
+        suggest::proposals(&pool, &[], Some(&[]), 50)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        suggest::proposal_count(&pool, &[], Some(&[]))
+            .await
+            .unwrap(),
+        0,
+        "{other_ticket} and friends must not leak into a memberless context"
+    );
 }
 
 /// A proposal whose end the source withdrew is marked, not dropped.
@@ -1125,7 +1211,7 @@ async fn a_proposal_touching_a_knobas_owned_entity_is_still_readable() {
     assert_eq!(entries[0].from.entity_id, note);
     assert_eq!(entries[0].from.kind, "note");
     assert_eq!(
-        suggest::proposal_count(&pool, &["jira".to_owned()])
+        suggest::proposal_count(&pool, &["jira".to_owned()], None)
             .await
             .unwrap(),
         1,

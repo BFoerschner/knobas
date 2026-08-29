@@ -45,6 +45,12 @@ const DETAIL: EntityDetail = {
 };
 
 vi.mock("../ipc/entity", () => ({
+  // Contexts (#47): the store imports these at module level, so every mock of
+  // this module has to define them even where no context is ever made.
+  listContexts: () => Promise.resolve([]),
+  contextMembers: () => Promise.resolve([]),
+  createContext: () => Promise.reject(new Error("no context creation in this test")),
+  promoteContext: () => Promise.reject(new Error("no promotion in this test")),
   listEntities: () => Promise.resolve(PAGE),
   getEntity: () => Promise.resolve(DETAIL),
   recentActivity: () => Promise.resolve([]),

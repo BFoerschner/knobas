@@ -578,10 +578,12 @@ const PROPOSALS: &str = concat!(
        join knobas.entity t on t.id = l.to_id
        left join sync.item fi on fi.entity_id = l.from_id
        left join sync.item ti on ti.entity_id = l.to_id
-      where $1::text[] is null
-         or fi.source_id = any($1) or ti.source_id = any($1)
+      where ($1::text[] is null
+         or fi.source_id = any($1) or ti.source_id = any($1))
+        and ($2::text[] is null
+         or l.from_id = any($2) or l.to_id = any($2))
       order by l.created_at desc, l.id desc
-      limit $2"
+      limit $3"
 );
 
 /// The proposals a room holds, newest first.
@@ -593,11 +595,13 @@ const PROPOSALS: &str = concat!(
 /// room if *either* end does -- a suggestion connecting this room to another is
 /// exactly the one worth surfacing here.
 ///
-/// Source scoping **is** the membership rule for every context the shipped app
-/// can mint -- `contexts.ts` mints `all` and `src:<id>` and nothing else. The
-/// full rule `CONTEXT.md` defines (explicit adds + direct links + one hop out)
-/// is **#47**'s to build, with the membership ADR; when it lands the tray gains
-/// a scope, not a store, and this signature is where it plugs in.
+/// `members` is the second scope, and the one #47 promised this signature: a
+/// stored context's room passes its membership (ADR-0008's rule, computed by
+/// `crate::context::member_ids` plus the context's own entity), and only
+/// proposals touching it come back. `None` is unscoped -- the derived rooms --
+/// while `Some(&[])` is a context with no members, whose tray is honestly
+/// empty. Membership is computed from **confirmed** links only, so scoping
+/// proposals by it cannot become circular.
 ///
 /// The tray holds no state: this is the whole of it.
 ///
@@ -607,11 +611,13 @@ const PROPOSALS: &str = concat!(
 pub async fn proposals(
     pool: &PgPool,
     sources: &[String],
+    members: Option<&[String]>,
     limit: i64,
 ) -> Result<Vec<SuggestionEntry>, CoreError> {
     let scope = (!sources.is_empty()).then(|| sources.to_vec());
     let rows = sqlx::query_as::<_, ProposalRow>(PROPOSALS)
         .bind(scope)
+        .bind(members.map(<[String]>::to_vec))
         .bind(limit)
         .fetch_all(pool)
         .await?;
@@ -645,17 +651,24 @@ pub async fn proposals(
 /// # Errors
 ///
 /// [`CoreError::Db`] if the query fails.
-pub async fn proposal_count(pool: &PgPool, sources: &[String]) -> Result<i64, CoreError> {
+pub async fn proposal_count(
+    pool: &PgPool,
+    sources: &[String],
+    members: Option<&[String]>,
+) -> Result<i64, CoreError> {
     let scope = (!sources.is_empty()).then(|| sources.to_vec());
     let (count,): (i64,) = sqlx::query_as(
         "select count(*)
            from knobas.proposed_link l
            left join sync.item fi on fi.entity_id = l.from_id
            left join sync.item ti on ti.entity_id = l.to_id
-          where $1::text[] is null
-             or fi.source_id = any($1) or ti.source_id = any($1)",
+          where ($1::text[] is null
+             or fi.source_id = any($1) or ti.source_id = any($1))
+            and ($2::text[] is null
+             or l.from_id = any($2) or l.to_id = any($2))",
     )
     .bind(scope)
+    .bind(members.map(<[String]>::to_vec))
     .fetch_one(pool)
     .await?;
     Ok(count)

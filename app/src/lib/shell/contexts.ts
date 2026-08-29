@@ -1,17 +1,16 @@
 /**
  * The rooms the switcher offers.
  *
- * **Scope, stated plainly.** Spec §7's contexts — epic, ticket and ad-hoc,
- * with membership drawn through links — are M2: they need `knobas.link`, and
- * M1 never writes it. So M1's contexts are **read-only and derived**: one
- * built-in *All work* room, plus one room per configured source once stream F
- * can list them (task 18). The switcher stays on screen, says only what is
- * true, and is one prop away from reading `knobas.context` when M2 lands.
+ * Two populations since #47. The **derived** rooms — one built-in *All work*,
+ * plus one per configured source — exist as long as their source does and
+ * filter by `sources`. The **stored** rooms are `knobas.context` rows (spec
+ * §7: epic, ticket, ad-hoc), and filter by `context`: membership is the fixed
+ * one-hop rule (§16.11, ADR-0008), resolved server-side, never a source list.
  *
  * The address is the state (spec §2): a context is chosen by navigating to
  * `#/ctx/<id>`, never by a component-local `selected`.
  */
-import type { EntityFilter } from "../ipc/entity";
+import type { ContextRow, EntityFilter } from "../ipc/entity";
 
 /** One room in the switcher. */
 export interface RoomContext {
@@ -22,12 +21,14 @@ export interface RoomContext {
   /** The `.kind` chip beside the heading. */
   kindWord: string;
   /**
-   * What this room reads.
+   * What this room reads — the tiles supply `kinds` themselves, and the
+   * remaining fields are the caller's.
    *
-   * Only `sources` in M1 — the tiles supply `kinds` themselves, and the other
-   * three fields are the caller's.
+   * Exactly one of the two is ever narrowing: a derived room scopes by
+   * `sources` and leaves `context` null; a stored room scopes by `context`
+   * and leaves `sources` empty.
    */
-  filter: Pick<EntityFilter, "sources">;
+  filter: Pick<EntityFilter, "sources" | "context">;
 }
 
 /** The id of the room every session starts in. Matches `router.DEFAULT_CTX`. */
@@ -45,7 +46,7 @@ export const ALL_CONTEXT: RoomContext = {
   id: ALL_CONTEXT_ID,
   label: "All work",
   kindWord: "everything synced",
-  filter: { sources: [] },
+  filter: { sources: [], context: null },
 };
 
 /** *All work*, then one room per source, in the order given. */
@@ -56,9 +57,44 @@ export function builtinContexts(sources: { id: string; label: string }[]): RoomC
       id: `src:${source.id}`,
       label: source.label,
       kindWord: "source",
-      filter: { sources: [source.id] },
+      filter: { sources: [source.id], context: null },
     })),
   ];
+}
+
+/**
+ * The chip beside a stored room's heading.
+ *
+ * `adhoc` is respelled for reading; the promoted kinds are already words.
+ */
+function kindWordOf(row: ContextRow): string {
+  return row.kind === "adhoc" ? "ad-hoc" : row.kind;
+}
+
+/** One stored context, as the switcher offers it. */
+export function storedContext(row: ContextRow): RoomContext {
+  return {
+    id: row.id,
+    label: row.title,
+    kindWord: kindWordOf(row),
+    filter: { sources: [], context: row.id },
+  };
+}
+
+/**
+ * The whole switcher: *All work*, the stored contexts (newest first, as
+ * `list_contexts` answers), then the derived source rooms.
+ *
+ * Stored rooms before source rooms because they are the ones a person made on
+ * purpose — a promoted epic is closer to "what am I working on" than the raw
+ * feed of one source.
+ */
+export function switcherContexts(
+  stored: ContextRow[],
+  sources: { id: string; label: string }[],
+): RoomContext[] {
+  const derived = builtinContexts(sources);
+  return [derived[0]!, ...stored.map(storedContext), ...derived.slice(1)];
 }
 
 /**

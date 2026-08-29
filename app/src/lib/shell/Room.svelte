@@ -9,6 +9,8 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../ipc";
+  import { inbox } from "../inbox/inbox.svelte";
+  import { contextMembers } from "../ipc/entity";
   import { push } from "./toasts.svelte";
   import Detail from "../detail/Detail.svelte";
   import NoteView from "../notes/NoteView.svelte";
@@ -44,7 +46,7 @@
   let token = 0;
 
   $effect(() => {
-    const sources = context.filter.sources;
+    const { sources, context: ctx } = context.filter;
     const mine = ++token;
     kinds = null;
     total = null;
@@ -54,6 +56,7 @@
         sources,
         kinds: [],
         updated_within_days: null,
+        context: ctx,
         order: "updated_desc",
         include_deleted: false,
       },
@@ -69,6 +72,41 @@
         if (mine !== token) return;
         error = ipcErrorMessage(rejection);
       });
+  });
+
+  /**
+   * The room's membership, for the per-context inbox filter ("3 here").
+   *
+   * Fetched only for a stored context — a derived room's inbox is the global
+   * one — and intersected with the inbox *stream* the strip already holds, so
+   * the badge and the rows it stands for come from the same read by
+   * construction (the rule `inbox.svelte.ts` states for the global count does
+   * not apply: this is a filter over the visible stream, not a second
+   * definition of "needs me now").
+   */
+  let memberIds = $state<Set<string> | null>(null);
+  $effect(() => {
+    const ctx = context.filter.context;
+    memberIds = null;
+    if (!ctx) return;
+    const mine = ++membersToken;
+    void contextMembers(ctx)
+      .then((ids) => {
+        if (mine !== membersToken) return;
+        memberIds = new Set(ids);
+      })
+      .catch(() => {
+        // No members reading is no chip — the room still renders whole.
+      });
+  });
+  let membersToken = 0;
+
+  const inboxHere = $derived.by(() => {
+    if (memberIds === null) return null;
+    const members = memberIds;
+    return inbox.stream.filter(
+      (entry) => entry.item.entity_id !== null && members.has(entry.item.entity_id),
+    ).length;
   });
 
   // The registry is read, not merely consulted: it is a rune, so a tile drawn
@@ -126,7 +164,7 @@
 </script>
 
 <div class="room">
-  <RoomBar {context} count={total} onnewnote={() => void startNote()} />
+  <RoomBar {context} count={total} {inboxHere} onnewnote={() => void startNote()} />
 
   {#if error}
     <div class="empty">
@@ -144,7 +182,7 @@
   {:else}
     <div class="tiles rows-{rows} {tiles.length === 1 ? 'one' : ''}">
       {#each tiles as spec (spec.id)}
-        <Tile {spec} sources={context.filter.sources} onopen={open} />
+        <Tile {spec} sources={context.filter.sources} ctx={context.filter.context} onopen={open} />
       {/each}
     </div>
   {/if}
@@ -154,7 +192,11 @@
     is rather than as a chore of their own (#41). The strip is `flex: none`, so
     the tiles keep the space they had and the tray takes only what it needs.
   -->
-  <SuggestionTray sources={context.filter.sources} onopen={(hash) => router.go(hash)} />
+  <SuggestionTray
+    sources={context.filter.sources}
+    ctx={context.filter.context}
+    onopen={(hash) => router.go(hash)}
+  />
 
   <!--
     The slide-over is drawn *inside* the room, over its right-hand half

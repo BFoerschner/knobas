@@ -62,6 +62,7 @@ fn all() -> EntityFilter {
         sources: Vec::new(),
         kinds: Vec::new(),
         updated_within_days: None,
+        context: None,
         order: EntityOrder::UpdatedDesc,
         include_deleted: false,
     }

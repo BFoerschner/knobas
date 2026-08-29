@@ -17,11 +17,14 @@
   let {
     spec,
     sources,
+    ctx = null,
     onopen,
   }: {
     spec: TileSpec;
     /** The room's source filter; `[]` is every source. */
     sources: string[];
+    /** The stored context whose membership scopes this tile, or `null` (#47). */
+    ctx?: string | null;
     onopen: (row: EntityRow) => void;
   } = $props();
 
@@ -53,6 +56,7 @@
       sources,
       kinds: spec.kinds,
       updated_within_days: null,
+      context: ctx,
       order: "updated_desc" as const,
       include_deleted: false,
     };

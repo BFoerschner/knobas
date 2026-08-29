@@ -17,11 +17,9 @@
   enough for that to stop being true, the pass belongs on the sync scheduler's
   own completion — a backend change, not a change to this file's contract.
 
-  The room scope is the `sources` list, which **is** the membership rule for
-  every context the app mints today (`all` and `src:<id>`, contexts.ts).
-  Promoting it to CONTEXT.md's explicit adds + direct links + one hop out is
-  #47's work, which owns the membership ADR; the tray then gains a scope, not
-  a store.
+  The room scope is the `sources` list for a derived room, and — since #47 —
+  the context's one-hop membership (ADR-0008) for a stored room, resolved
+  server-side from confirmed links only. The tray gained a scope, not a store.
 -->
 <script lang="ts">
   import { listen } from "@tauri-apps/api/event";
@@ -46,10 +44,16 @@
 
   let {
     sources,
+    ctx = null,
     onopen,
   }: {
-    /** The room's membership; `[]` is every source. */
+    /** A derived room's membership; `[]` is every source. */
     sources: string[];
+    /**
+     * A stored context's room (#47): proposals scope to its one-hop
+     * membership plus the context's own entity, resolved server-side.
+     */
+    ctx?: string | null;
     /** Navigate to an address (spec §2). The shell's router is the only one. */
     onopen: (hash: string) => void;
   } = $props();
@@ -77,7 +81,7 @@
   async function refresh(detect: boolean, mine: number) {
     try {
       if (detect) await detectSuggestions();
-      const answer = await roomSuggestions(sources, PAGE);
+      const answer = await roomSuggestions(sources, ctx, PAGE);
       if (mine !== token) return;
       page = answer;
       error = null;
@@ -90,8 +94,9 @@
   }
 
   $effect(() => {
-    // Read for its dependency: the effect re-runs when the room changes.
+    // Read for their dependencies: the effect re-runs when the room changes.
     const room = sources;
+    void ctx;
     const mine = ++token;
     let dead = false;
     let off: (() => void) | undefined;
