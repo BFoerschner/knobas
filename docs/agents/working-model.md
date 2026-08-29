@@ -3,6 +3,8 @@
 Extracted verbatim 2026-08-28 from §3 of the roadmap (now `docs/roadmap.md`); internal §-references use the numbering of that document. Read this before dispatching agents.
 
 
+**Planning runs in one window; building runs in cleared ones (rule, 2026-08-27).** Grilling, `to-spec` and `to-tickets` happen in a single unbroken context window — the spec is the grilling collapsed, and the tickets are the spec split, so each step needs what the last one heard rather than a summary of it. If the window fills before `to-tickets` finishes, `/compact` at a phase boundary and never mid-grilling. Every implement run then starts from a cleared window: a ticket is a self-contained brief precisely so it does not need the planning session's context. Facts are the agent's job in that interview; the decisions are Björn's.
+
 **Process (amended 2026-08-28 — Björn: mattpocock-skills only).** The pinned agent roles
 (`implementer`, `pr-reviewer`, `pr-reviewer-std`, `integrator`) are retired with the superpowers
 flow; their definitions live in git history (`git show 06ed97f:.claude/agents/<name>.md`),
