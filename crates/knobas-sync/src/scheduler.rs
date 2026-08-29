@@ -536,6 +536,51 @@ pub async fn settle(deps: &SchedulerDeps, source_id: &str, run_id: i64, result: 
     emit_state(deps, source_id).await;
 }
 
+/// Whether a source holds `source_id` **now**, as [`Scheduler::forget_source`]
+/// asks it immediately before arming or applying a purge (#154).
+///
+/// A free function over the answer rather than the read itself, because the
+/// third arm is the one that matters and no integration test can reach it: it
+/// needs `config::get` to fail while `config::purge_items` still works, which
+/// one pool cannot produce. So the decision is separated from the query and
+/// pinned directly.
+///
+/// * `Ok(true)` -- a source exists under the id again. Neither destructive act
+///   happens: the user's newest instruction about the id wins, which is the
+///   principle [`Scheduler::source_added`] already ratified, applied at the
+///   same layer through the other door.
+/// * `Ok(false)` -- the id is free, which is what `delete_source` expects to
+///   find. Today's behaviour, unchanged.
+/// * `Err(_)` -- **warn and proceed as if the id were free.** Skipping the
+///   purge on a database blip would reopen #127's symptom (a deleted source's
+///   items live in `sync.live_item` for ever) on an error that occurs alone far
+///   more often than it occurs together with the re-add race. With this arm, a
+///   wrong purge needs the race *and* a read failure at that instant; that
+///   conjunction is the accepted residual, recorded on `delete_source`'s
+///   guarantee.
+fn a_source_holds_the_id_again(found: &Result<bool, sqlx::Error>, source_id: &str) -> bool {
+    match found {
+        Ok(true) => {
+            tracing::info!(
+                source_id,
+                "a source was added back under this id before the delete finished; \
+                 its mirror is not purged"
+            );
+            true
+        }
+        Ok(false) => false,
+        Err(error) => {
+            tracing::warn!(
+                source_id,
+                %error,
+                "could not check whether a source still holds this id; purging as \
+                 the delete asked"
+            );
+            false
+        }
+    }
+}
+
 /// Re-apply a deleted source's purge, now that the run which was in flight when
 /// it was deleted has committed (#127).
 ///
@@ -1054,6 +1099,36 @@ impl Scheduler {
     /// [`Watchers`]: the enrolled caller is told how the run really ended, and
     /// the ending is about the *run* (it did upsert N items) while the purge is
     /// about the *mirror*.
+    ///
+    /// # Neither, if a source holds the id again (#154)
+    ///
+    /// Both branches above are about a source that is *gone*, and
+    /// `delete_source`'s three steps are not atomic together: it purges and
+    /// commits, deletes the keychain item, and only then calls this. An
+    /// `add_source` for the same id that commits inside that window has already
+    /// called [`source_added`](Self::source_added) -- the door that voids an
+    /// armed purge -- by the time this runs, so nothing downstream would clear
+    /// what is armed here and the new source's first sync goes when the old
+    /// run settles. And it does not heal: [`config::purge_items`] takes
+    /// `sync.item` rows and tombstones entities, never touching the cursor on
+    /// `knobas.source_config`, so the new source is left with a cursor advanced
+    /// past a corpus that is gone until somebody orders a backfill by hand.
+    ///
+    /// So before either destructive act, and under this same lock, this asks
+    /// whether a source exists under the id *now*
+    /// ([`a_source_holds_the_id_again`]). One does: the user's newest
+    /// instruction about the id wins, exactly as `source_added` already rules,
+    /// and neither branch is taken.
+    ///
+    /// **`claims.runs.remove` stays unconditional**, above the question. #119's
+    /// rule is that an entry never outlives the source it was made for, and
+    /// unconditional removal is what the sequential order -- delete finishes,
+    /// then add -- produces anyway. The residual, in the race only: a fresh
+    /// entry belonging to the new source's already-started run can be stripped,
+    /// costing a duplicated run (which the advisory lock serialises) or a
+    /// wizard that starts a sync of its own instead of being served an ending.
+    /// No data is lost, and it is the same shape as the pre-existing #119
+    /// window.
     pub async fn forget_source(&self, source_id: &str, purge: Purge) {
         // Held across the purge, not dropped before it. Between a release and
         // the statement, `add_source` plus a wake could start a run for a
@@ -1064,6 +1139,28 @@ impl Scheduler {
         let mut claims = self.inner.claims.lock().await;
         let entry = claims.runs.remove(source_id);
         if purge == Purge::Keep {
+            return;
+        }
+        // **Does a source hold this id right now?** (#154) The delete's own
+        // steps are not atomic together: `delete_source` purges and commits,
+        // deletes the keychain item, and only then arrives here. An
+        // `add_source` for the same id that commits inside that window has
+        // already run [`source_added`](Self::source_added) -- the door that
+        // clears an armed purge -- so nothing downstream would clear the intent
+        // armed below, and the source the user has just created loses its first
+        // sync when the old run settles. Asked here, under the same lock, for
+        // the same reason `source_added` takes it: `add_source` calls
+        // `source_added` only after `crud::add` committed, so every add orders
+        // one of two ways against this critical section -- its `source_added`
+        // completed first, and this read sees the row it committed before that;
+        // or it runs after, and clears what this armed. There is no third
+        // interleaving in which the new source's data is at stake, because no
+        // run of it can start inside the window: `trigger` reads
+        // `source_config` under this same lock.
+        let found = config::get(&self.inner.deps.pool, source_id)
+            .await
+            .map(|row| row.is_some());
+        if a_source_holds_the_id_again(&found, source_id) {
             return;
         }
         // `attach(None)` asks the run's own state whether it is still open, and
@@ -1465,6 +1562,36 @@ mod tests {
         assert!(
             SYNC_CONCURRENCY < usize::try_from(SYNC_POOL_SIZE).unwrap(),
             "{SYNC_CONCURRENCY} runs against a pool of {SYNC_POOL_SIZE}"
+        );
+    }
+
+    /// **A database blip is not a reason to skip a purge** (#154).
+    ///
+    /// The guard in [`Scheduler::forget_source`] exists to spare a source the
+    /// user added back under a deleted one's id. It must not spare the deleted
+    /// source itself when the read simply fails: `Err` alone is far commoner
+    /// than `Err` *plus* the re-add race, and treating it as "a source exists"
+    /// would leave a deleted source's items live in `sync.live_item` for ever
+    /// -- #127's symptom, reopened by the fix for #154.
+    ///
+    /// Pinned here rather than in an integration test because no integration
+    /// test can reach this arm: it needs `config::get` to fail while
+    /// `config::purge_items` still works, and one pool cannot produce that.
+    #[test]
+    fn a_failed_existence_check_purges_rather_than_skipping() {
+        assert!(
+            a_source_holds_the_id_again(&Ok(true), "s"),
+            "a source exists under the id again: the newest instruction about \
+             it wins and neither destructive act happens"
+        );
+        assert!(
+            !a_source_holds_the_id_again(&Ok(false), "s"),
+            "the id is free, which is what the delete expects: purge"
+        );
+        assert!(
+            !a_source_holds_the_id_again(&Err(sqlx::Error::PoolClosed), "s"),
+            "the read failed, so nothing here knows a source exists; purging \
+             as the delete asked is the arm that keeps #127 closed"
         );
     }
 

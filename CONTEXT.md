@@ -59,6 +59,10 @@ _Avoid_: limit, cap
 The engine pass that tombstones items of an exhaustive kind that a full sync no longer emitted.
 _Avoid_: cleanup, purge, garbage collection
 
+**Purge**:
+Dropping a deleted source's items from the [Mirror](#mirror) and tombstoning the entities they named — what *Remove source and its items* asks for. Applied inside the delete, and applied again when a run that was in flight at delete time settles (#127). Not a [Sweep](#sweep): a sweep reconciles what a full sync no longer emitted; a purge carries out a user's deletion.
+_Avoid_: sweep, cleanup, delete (entities are tombstoned, never deleted)
+
 **Tombstone**:
 Marking an item deleted-at-source while keeping the row. Tombstoned items leave every reader's view.
 _Avoid_: delete, remove
