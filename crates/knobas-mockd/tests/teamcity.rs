@@ -399,6 +399,126 @@ async fn an_unknown_build_id_is_404() {
     s.assert_no_violations();
 }
 
+/// **Every error is the JSON envelope a real TeamCity serves**, on every
+/// status this mock produces (issue #113).
+///
+/// This used to be `text/plain`, in the shape `Error has occurred during
+/// request processing (404).\n<message>\n`, on a comment asserting that a real
+/// TeamCity answers errors as plain text even to a client that asked for JSON.
+/// Measured read-only against JetBrains' public instance (2026.2 EAP, build
+/// 238763) on 2026-08-29, it does not: with `Accept: application/json` the body
+/// is `{"errors":[{"message": …, "additionalMessage": …, "statusText": …,
+/// "stackTrace": null}]}`, with any other `Accept` the answer is a 406 whose
+/// body is *also* that envelope, and with no `Accept` at all it is XML.
+///
+/// The consequence of the fake teaching the other shape was not cosmetic: the
+/// TeamCity adapter's `http::error_message` was written to require it, so it
+/// parsed no error the adapter would ever be handed and every failure rendered
+/// as a raw blob -- and the adapter's own suite stayed green throughout,
+/// because it was reading this fake.
+///
+/// **This test is the thing that would have caught it**, and it is deliberately
+/// here rather than in the adapter: the adapter accepts *both* forms by a
+/// stated decision, so it cannot tell whether the fake regressed. Only the
+/// fake's own suite can hold the fake to the server.
+///
+/// The four statuses are the four this mock produces: a 404 from the by-id
+/// route, a 400 from the locator validator, a 401 from the credential guard,
+/// and a 406 from the `Accept` guard -- so the shape is pinned on the
+/// deviation-1 path too, which is exactly where a real server was measured to
+/// keep it.
+#[tokio::test]
+async fn every_error_is_the_json_envelope_a_real_teamcity_serves() {
+    let s = spawn_mock_teamcity().await;
+    let http = reqwest::Client::new();
+    /// The 401 and 406 cases are each reached by *withholding* one of the two
+    /// headers the guard wants, so a probe says which header to send rather
+    /// than carrying a whole request.
+    struct Probe {
+        want: u16,
+        path: &'static str,
+        /// The one header this request carries, or `None` for a well-formed
+        /// request that carries both.
+        only: Option<(&'static str, &'static str)>,
+    }
+    let probes = [
+        Probe {
+            want: 404,
+            path: "/app/rest/builds/id:999999?fields=id",
+            only: None,
+        },
+        Probe {
+            want: 400,
+            path: "/app/rest/builds?locator=personal:true&fields=count",
+            only: None,
+        },
+        Probe {
+            want: 401,
+            path: "/app/rest/server?fields=version",
+            only: Some(("Accept", "application/json")),
+        },
+        Probe {
+            want: 406,
+            path: "/app/rest/server?fields=version",
+            only: Some(("Accept", "application/xml")),
+        },
+    ];
+    for Probe { want, path, only } in probes {
+        let mut request = http.get(format!("{}{path}", s.base_url()));
+        request = match only {
+            Some((name, value)) => request.header(name, value),
+            None => request.header("Accept", "application/json").header(
+                "Authorization",
+                format!("Bearer {}", knobas_mockd::TEAMCITY_TOKEN),
+            ),
+        };
+        let response = request.send().await.expect("mockd answers");
+        assert_eq!(response.status().as_u16(), want, "{path}");
+        assert_eq!(
+            response
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok()),
+            Some("application/json"),
+            "{want} on {path}: a real TeamCity answers a JSON-shaped error, not text/plain"
+        );
+        let raw = response.text().await.expect("a body");
+        assert!(
+            !raw.starts_with("Error has occurred during request processing"),
+            "{want} on {path}: that is the plain-text shape this mock used to teach and no \
+             current TeamCity serves: {raw}"
+        );
+        let body: serde_json::Value =
+            serde_json::from_str(&raw).unwrap_or_else(|e| panic!("{want} on {path}: {e}: {raw}"));
+        let error = &body["errors"][0];
+        for key in ["message", "additionalMessage", "statusText", "stackTrace"] {
+            assert!(
+                error.get(key).is_some(),
+                "{want} on {path}: the envelope carries {key}: {body}"
+            );
+        }
+        let message = error["message"].as_str().unwrap_or_default();
+        assert!(
+            !message.is_empty(),
+            "{want} on {path}: the sentence is the one field an adapter reads: {body}"
+        );
+        // ...and the two keys beside it are the noise a reader must not lift:
+        // the class name lives in `additionalMessage`, never in `message`.
+        assert!(
+            error["additionalMessage"]
+                .as_str()
+                .is_some_and(|a| a.contains("jetbrains.buildServer") && a.ends_with(message)),
+            "{want} on {path}: additionalMessage is the sentence behind a class name: {body}"
+        );
+        assert!(
+            error["statusText"]
+                .as_str()
+                .is_some_and(|t| t.contains(&want.to_string())),
+            "{want} on {path}: statusText restates the status: {body}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn missing_or_typoed_fields_are_refused() {
     let s = spawn_mock_teamcity().await;
