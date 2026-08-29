@@ -166,12 +166,20 @@ create table knobas.write_queue (
   constraint write_queue_settled_chk check ((state in ('sent','discarded')) = (settled_at is not null))
 );
 
--- The flush read: for one source, the pending rows of one entity in queue
--- order. Partial on `state = 'pending'`, because that is the only state the
--- flush loop reads and the settled rows are the ones that accumulate forever.
+-- The flush read: for one source, the *oldest open* row of each entity.
+--
+-- Every open state, not just `pending`: the flush loop has to see a held or
+-- refused write in order to be blocked by it. An entity's queue is stopped by
+-- its oldest unfinished write whatever state that write is in -- if it were
+-- only stopped by a *pending* one, a held write's successor would sail past
+-- it and land first, which is the ordering guarantee (story 22) broken by the
+-- very mechanism that exists to protect the user.
+--
+-- Partial, because the settled rows are the ones that accumulate forever and
+-- the flush never reads them.
 create index write_queue_flush_idx
   on knobas.write_queue (source_id, entity_id, id)
-  where state = 'pending';
+  where state in ('pending','held','refused');
 
 -- The user-facing reads: the visible list of what knobas still owes (story 3),
 -- and the count in the shell (story 17). Both are "everything not settled",

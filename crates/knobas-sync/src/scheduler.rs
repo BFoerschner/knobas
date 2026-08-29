@@ -210,8 +210,13 @@ pub async fn status_for(pool: &PgPool, id: &str) -> Result<Option<SourceSyncStat
 pub(crate) const MISSING_SECRET_MESSAGE: &str = "no stored credential -- re-enter it";
 
 /// Why a run did not produce a report.
+///
+/// `pub(crate)` because the write queue's flush loop builds an adapter through
+/// the same [`build_source`] seam and has to classify the same failures --
+/// with the queue's own vocabulary, not the run log's, since a source that
+/// cannot be built means "these writes wait", not "this run failed".
 #[derive(Debug)]
-enum RunFailure {
+pub(crate) enum RunFailure {
     NotConfigured,
     MissingSecret,
     Secret(String),
@@ -240,7 +245,7 @@ impl RunFailure {
         }
     }
 
-    fn message(&self) -> String {
+    pub(crate) fn message(&self) -> String {
         match self {
             RunFailure::NotConfigured => "the source has no configuration row".to_owned(),
             RunFailure::MissingSecret => MISSING_SECRET_MESSAGE.to_owned(),
@@ -253,7 +258,11 @@ impl RunFailure {
 }
 
 /// Build the adapter for a stored configuration, fetching its secret.
-async fn build_source(
+///
+/// `pub(crate)`: `crate::write_queue` builds its adapter here too, so that a
+/// flush and a sync agree on what a configured source *is* -- including which
+/// auth kinds need a keychain entry at all.
+pub(crate) async fn build_source(
     deps: &SchedulerDeps,
     cfg: &config::SourceConfigRow,
 ) -> Result<Box<dyn Source>, RunFailure> {

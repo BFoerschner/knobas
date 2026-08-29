@@ -43,6 +43,7 @@ pub mod progress;
 pub mod run_log;
 pub mod scheduler;
 pub mod stats;
+pub mod write_queue;
 
 pub use health::{AuthState, CredentialHealth};
 pub use progress::{ProgressSink, SyncPhase, SyncProgress};

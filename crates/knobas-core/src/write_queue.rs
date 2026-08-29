@@ -393,29 +393,47 @@ pub async fn counts(pool: &PgPool) -> Result<QueueCounts, CoreError> {
     Ok(counts)
 }
 
-/// The writes a flush of `source_id` may attempt right now: **the oldest
-/// pending write of each entity, and no more than one per entity.**
+/// The writes a flush of `source_id` may attempt right now: **the head of each
+/// entity's queue, and only when that head is pending.**
 ///
-/// That shape is the whole of the ordering guarantee. Order is promised within
-/// one entity (story 22) and nowhere else, so handing out one write per entity
-/// makes a stalled write block its own successors and *only* those: a second
-/// entity's queue, and every other source's, keep moving (story 21). A caller
-/// that flushed everything this returns in parallel would still be correct.
+/// That shape is the whole of the ordering guarantee, and both halves of it
+/// matter:
 ///
-/// Held and refused writes are absent by construction -- they are not pending
-/// -- which is how "a held write never flushes on its own" is a property of
-/// the query rather than a rule the flush loop has to remember.
+/// * *One per entity*, so a stalled write blocks its own successors and
+///   nothing else -- a second entity's queue, and every other source's, keep
+///   moving (story 21).
+/// * *The head, whatever state it is in.* An entity whose oldest open write is
+///   held or refused yields **nothing**, rather than yielding the pending
+///   write behind it. Skipping to the successor would have a comment written
+///   second land first the moment its predecessor stopped for a decision --
+///   the ordering guarantee (story 22) broken by the very mechanism that
+///   exists to protect the user.
+///
+/// A held write therefore never reaches the flush loop at all: not because the
+/// loop remembers to skip it, but because it is not something this query can
+/// return. That is what makes "a held write never flushes on its own" a
+/// property rather than a rule.
+///
+/// A caller that flushed everything this returns in parallel would still be
+/// correct.
 ///
 /// # Errors
 ///
 /// [`CoreError::Db`] if the query fails.
 pub async fn due(pool: &PgPool, source_id: &str) -> Result<Vec<QueuedWrite>, CoreError> {
+    // `distinct on` picks each entity's oldest *open* write; the outer filter
+    // then drops the entities whose head is not pending. Filtering inside
+    // would pick the oldest pending write instead, which is the bug above.
     let rows = sqlx::query_as::<_, QueuedWrite>(concat!(
-        "select distinct on (entity_id) ",
+        "select ",
         queue_columns!(),
-        " from knobas.write_queue
-           where source_id = $1 and state = 'pending'
-           order by entity_id, id"
+        " from (select distinct on (entity_id) ",
+        queue_columns!(),
+        "        from knobas.write_queue
+                where source_id = $1 and state in ('pending','held','refused')
+                order by entity_id, id) as head
+           where state = 'pending'
+           order by id"
     ))
     .bind(source_id)
     .fetch_all(pool)
