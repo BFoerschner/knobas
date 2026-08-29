@@ -380,6 +380,26 @@ pub async fn list(
     Ok(rows.into_iter().map(Into::into).collect())
 }
 
+/// One run by id, or `None` if the log no longer carries it.
+///
+/// The read behind ADR-0005's synthesised ending: a caller that attaches to a
+/// run which has already finished is told how it ended, and this row is where
+/// "how it ended" is recorded. By id and not "the newest for this source",
+/// because the caller was handed an id and it is *that* run it is owed an
+/// answer about -- and because [`prune`] can have taken the row away, which is
+/// what the `None` is for.
+///
+/// # Errors
+/// [`sqlx::Error`] if the query fails.
+pub async fn get(pool: &sqlx::PgPool, run_id: i64) -> Result<Option<SyncRunRow>, sqlx::Error> {
+    let sql = format!("select {RUN_COLUMNS} from knobas.sync_run where id = $1");
+    let row: Option<RawRun> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .bind(run_id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.map(Into::into))
+}
+
 /// The newest **finished** run for a source -- what
 /// [`SourceSyncStatus::last_outcome`] reads.
 ///

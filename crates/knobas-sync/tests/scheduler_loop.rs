@@ -16,6 +16,7 @@ use knobas_secrets::MemoryStore;
 use knobas_source::instance::SourceInstance;
 use knobas_source::{Cursor, Sink, Source, SourceDescriptor, SourceError};
 use knobas_sync::config::{self, AuthKind, InsertConfig};
+use knobas_sync::progress::{ProgressSink, SyncPhase, SyncProgress};
 use knobas_sync::run_log::{self, SyncTrigger};
 use knobas_sync::scheduler::{
     AdapterRegistry, RunConnections, SYNC_CONCURRENCY, Scheduler, SchedulerDeps, SourceSyncStatus,
@@ -137,6 +138,63 @@ static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 async fn serially() -> tokio::sync::MutexGuard<'static, ()> {
     SERIAL.lock().await
+}
+
+/// One caller's channel: everything it was told about a run, in order.
+///
+/// A test's stand-in for `knobas-app`'s `ChannelSink`, and the only way to say
+/// what a caller *observed* -- which is the whole subject of ADR-0005. Reading
+/// the log row instead would answer a different question, and would answer it
+/// for a caller that heard nothing at all.
+#[derive(Default)]
+struct Heard(std::sync::Mutex<Vec<SyncProgress>>);
+
+impl ProgressSink for Heard {
+    fn report(&self, progress: SyncProgress) {
+        self.0.lock().unwrap().push(progress);
+    }
+}
+
+impl Heard {
+    fn new() -> Arc<Heard> {
+        Arc::new(Heard::default())
+    }
+
+    /// The same recorder, as the trait object `trigger` takes.
+    fn sink(self: &Arc<Self>) -> Arc<dyn ProgressSink> {
+        Arc::clone(self) as Arc<dyn ProgressSink>
+    }
+
+    fn all(&self) -> Vec<SyncProgress> {
+        self.0.lock().unwrap().clone()
+    }
+
+    /// The run's ending, if this caller has been given one yet.
+    fn ending(&self) -> Option<SyncProgress> {
+        self.all()
+            .into_iter()
+            .find(|p| matches!(p.phase, SyncPhase::Finished | SyncPhase::Failed))
+    }
+}
+
+/// Wait for the ending ADR-0005 promises this caller, and fail loudly without
+/// one.
+///
+/// Polling the recorder rather than the log row: `settle` writes `finished_at`
+/// before the run tells anybody, so a test that waited on the row would pass
+/// over a caller that was never told -- which is precisely the defect.
+async fn await_ending(heard: &Arc<Heard>) -> SyncProgress {
+    for _ in 0..200 {
+        if let Some(ending) = heard.ending() {
+            return ending;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!(
+        "no ending in five seconds; the caller was handed a run id it cannot \
+         observe. Heard: {:?}",
+        heard.all()
+    );
 }
 
 /// A pool for the test's own reads, and a scheduler pool the scheduler will
@@ -644,14 +702,6 @@ async fn every_declared_phase_is_actually_emitted() {
 /// One run through the whole ticker, as wire spellings, plus the source ids to
 /// retire afterwards.
 async fn phases_of(fault: Option<fn() -> SourceError>) -> (Vec<String>, Vec<String>) {
-    #[derive(Default)]
-    struct Recorder(std::sync::Mutex<Vec<knobas_sync::progress::SyncProgress>>);
-    impl knobas_sync::progress::ProgressSink for Recorder {
-        fn report(&self, progress: knobas_sync::progress::SyncProgress) {
-            self.0.lock().unwrap().push(progress);
-        }
-    }
-
     let (pool, sched_pool) = pools().await;
     let ids = seed(&pool, 1).await;
     let id = ids[0].clone();
@@ -673,34 +723,18 @@ async fn phases_of(fault: Option<fn() -> SourceError>) -> (Vec<String>, Vec<Stri
     .await
     .unwrap();
 
-    let sink = Arc::new(Recorder::default());
+    let sink = Heard::new();
     let run_id = scheduler
-        .trigger(
-            &id,
-            SyncTrigger::Manual,
-            Some(Arc::clone(&sink) as Arc<dyn knobas_sync::progress::ProgressSink>),
-        )
+        .trigger(&id, SyncTrigger::Manual, Some(sink.sink()))
         .await
         .unwrap();
 
     // Wait for the terminal message rather than for the log row: it is the last
     // thing the run does, so anything earlier can read a half-finished list.
-    for _ in 0..200 {
-        let done = sink.0.lock().unwrap().iter().any(|p| {
-            matches!(
-                p.phase,
-                knobas_sync::progress::SyncPhase::Finished
-                    | knobas_sync::progress::SyncPhase::Failed
-            )
-        });
-        if done {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
+    await_ending(&sink).await;
     scheduler.shutdown().await;
 
-    let seen = sink.0.lock().unwrap().clone();
+    let seen = sink.all();
     assert!(!seen.is_empty(), "a channel that was attached saw nothing");
     assert!(
         seen.iter().all(|p| p.run_id == run_id && p.source_id == id),
@@ -813,4 +847,140 @@ async fn await_finish(pool: &PgPool, run_id: i64) {
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
     panic!("run {run_id} never finished");
+}
+
+// -- ADR-0005: a run id always comes with an ending ---------------------------
+
+/// **A run holds a set of sinks, and the second one does not displace the
+/// first.**
+///
+/// The dedupe that hands a second caller the run already in flight is the
+/// behaviour that makes a double-clicked *Sync now* harmless, and it used to
+/// drop that caller's sink on the floor: an id, and then silence. Both callers
+/// hear the run now -- its progress while it runs and its ending when it ends
+/// -- and neither costs the other anything.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn two_callers_watching_one_run_both_hear_it_end() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed(&pool, 1).await;
+    let id = ids[0].clone();
+    let (deps, _) = deps(sched_pool, Duration::from_millis(600)).await;
+    let scheduler = Scheduler::start(deps).await.unwrap();
+
+    let starter = Heard::new();
+    let joiner = Heard::new();
+    let first = scheduler
+        .trigger(&id, SyncTrigger::Manual, Some(starter.sink()))
+        .await
+        .unwrap();
+    // Well inside the adapter's dwell, so the second caller joins a run that is
+    // genuinely still going rather than one that is already over.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let second = scheduler
+        .trigger(&id, SyncTrigger::Manual, Some(joiner.sink()))
+        .await
+        .unwrap();
+    assert_eq!(first, second, "one run, two watchers");
+
+    let by_starter = await_ending(&starter).await;
+    let by_joiner = await_ending(&joiner).await;
+    scheduler.shutdown().await;
+
+    assert_eq!(by_starter.phase, SyncPhase::Finished);
+    assert_eq!(by_joiner.phase, SyncPhase::Finished);
+    assert_eq!((by_starter.run_id, by_joiner.run_id), (first, first));
+    assert_eq!(by_starter.items, by_joiner.items, "one run, one count");
+    // Progress, not only the ending: the joiner attached while the adapter was
+    // still fetching, and a set of sinks that only fanned out the terminal
+    // message would leave its progress bar at zero until the run was over.
+    assert!(
+        joiner.all().len() > 1,
+        "the joiner heard only its ending: {:?}",
+        joiner.all()
+    );
+    assert_eq!(
+        starter.all().first().map(|p| p.phase),
+        Some(SyncPhase::Started),
+        "the caller that started the run still hears it start"
+    );
+    assert_eq!(
+        run_log::list(&pool, Some(&id), 10).await.unwrap().len(),
+        1,
+        "one run, one row"
+    );
+    retire(&pool, &ids).await;
+}
+
+/// **The invariant ADR-0005 says a later reader will simplify away: a caller
+/// that attaches to a run which has already finished is served its ending, at
+/// once, from the record.**
+///
+/// This is the interleaving the first-run wizard actually loses. `add_source`
+/// wakes the scheduler, the scheduler's run of a brand-new source is the whole
+/// first sync, and on a fast source it can be over before the wizard's own
+/// trigger reaches the engine. The wizard then used to start a *second* run
+/// over an already-mirrored corpus and report what that one wrote, which was
+/// nothing.
+///
+/// So the second trigger starts nothing: it is handed the run that already
+/// happened, together with a terminal message synthesised from that run's log
+/// row. The assertion is taken with nothing awaited after the trigger returns,
+/// because "eventually" is what a caller cannot tell apart from a hang.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_first_run_trigger_after_the_run_ended_is_served_the_ending_from_the_record() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed(&pool, 1).await;
+    let id = ids[0].clone();
+    let (deps, _) = deps(sched_pool, Duration::from_millis(20)).await;
+    let scheduler = Scheduler::start(deps).await.unwrap();
+
+    // The scheduler's own first run of a brand-new source, watched only so the
+    // test can know it is *completely* over -- `settle` writes `finished_at`
+    // before the run tells anyone, so waiting on the log row would leave the
+    // run's sinks still open and test the in-flight path by accident.
+    let wake = Heard::new();
+    let scheduled = scheduler
+        .trigger(&id, SyncTrigger::FirstRun, Some(wake.sink()))
+        .await
+        .unwrap();
+    await_ending(&wake).await;
+
+    let wizard = Heard::new();
+    let handed = scheduler
+        .trigger(&id, SyncTrigger::FirstRun, Some(wizard.sink()))
+        .await
+        .unwrap();
+    // No await in between: immediately, or not at all.
+    let served = wizard.all();
+    scheduler.shutdown().await;
+
+    assert_eq!(
+        handed, scheduled,
+        "the wizard is handed the run that already happened, not a second one"
+    );
+    let rows = run_log::list(&pool, Some(&id), 10).await.unwrap();
+    assert_eq!(rows.len(), 1, "adding a source produces one run: {rows:?}");
+    let row = &rows[0];
+    assert_eq!(row.trigger, SyncTrigger::FirstRun);
+
+    assert_eq!(
+        served.len(),
+        1,
+        "a caller that arrives after the end hears the ending and nothing else: {served:?}"
+    );
+    let ending = &served[0];
+    // Faithful to the record, field by field -- the row is where a later reader
+    // gets its answer, so it is where this one comes from.
+    assert_eq!(ending.phase, SyncPhase::Finished);
+    assert_eq!(ending.run_id, scheduled);
+    assert_eq!(ending.source_id, id);
+    assert_eq!(i64::try_from(ending.items).unwrap(), row.upserted);
+    assert_eq!(ending.message, row.error);
+    assert!(
+        ending.elapsed_ms > 0,
+        "the run took time and the ending says so: {ending:?}"
+    );
+    retire(&pool, &ids).await;
 }
