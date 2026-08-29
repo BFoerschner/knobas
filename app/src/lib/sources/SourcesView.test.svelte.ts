@@ -407,6 +407,90 @@ test("a list_sources overtaken by a later one does not write what it read", asyn
   expect(row.textContent).toContain("240");
 });
 
+/**
+ * A credential fixed by hand and a `list_sources` already in flight.
+ *
+ * `onhealth` writes the reading `set_source_secret` answered with straight
+ * into the shared store, because the person watching wants the chip to go
+ * green as they press the button rather than a round trip later. But the list
+ * path *replaces* that store wholesale — deliberately, so a deleted source's
+ * chip disappears — so a read issued before the fix and landing after it
+ * writes the credential's old state back over the new one.
+ *
+ * The window is ordinary rather than exotic: this view re-lists on every
+ * terminal `sync:state`, and fixing a credential is the thing a person does
+ * right after watching a sync fail. So the two events collide in the view
+ * someone opened *because* they suspect a source is misbehaving, and the chip
+ * flips back to "auth failed" with no action of theirs — evidence for exactly
+ * the thing they came to check (#83's argument, #144).
+ *
+ * The read is held open *across* the fix rather than before it: run in
+ * sequence these two are fine, and a test that called them in order would pass
+ * against the bug.
+ */
+test("a credential fixed by hand is not reverted by a list_sources already in flight", async () => {
+  const rejected = (): CredentialHealth => ({
+    source_id: "jira",
+    state: "unauthorized",
+    checked_at: NOW.toISOString(),
+    detail: "401 from /rest/api/2/myself",
+    secret_expires_at: null,
+  });
+  sources = [source({ health: rejected() })];
+  const store = health();
+  render({ health: store });
+  await settle();
+  expect(button("Re-enter", rowFor("jira")!)).toBeTruthy();
+  const listedSoFar = calls.listSources;
+
+  // The read that a run finishing puts in flight. It is answered from the
+  // database as it stood *before* the password is typed below, which is what
+  // makes it a stale reading rather than a second opinion.
+  let release: (() => void) | undefined;
+  answerList = (call) =>
+    call === listedSoFar + 1
+      ? new Promise<SourceSummary[]>((resolve) => {
+          release = () => resolve([source({ health: rejected() })]);
+        })
+      : Promise.resolve([source()]);
+
+  emit("sync:state", {
+    source_id: "jira",
+    running: false,
+    run_id: 9,
+    started_at: "2026-08-25T11:58:00Z",
+    last_finished_at: "2026-08-25T11:59:00Z",
+    last_outcome: "error",
+    next_run_at: null,
+    backoff_until: null,
+  });
+  await settle();
+  expect(calls.listSources, "the terminal transition read the sources").toBe(listedSoFar + 1);
+
+  // …and now, with that read still open, the person fixes the credential.
+  button("Re-enter", rowFor("jira")!)!.click();
+  flushSync();
+  const input = target.querySelector<HTMLInputElement>(".src-fix input")!;
+  input.value = "s3cret";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  button("Save and retry sync", target.querySelector(".src-fix")!)!.click();
+  await settle();
+
+  // The chip they were watching.
+  expect(store.get("jira")!.state).toBe("ok");
+  expect(button("Sync now", rowFor("jira")!)).toBeTruthy();
+
+  release!();
+  await settle();
+
+  expect(store.get("jira")!.state, "the in-flight read wrote the old credential state back").toBe(
+    "ok",
+  );
+  expect(button("Re-enter", rowFor("jira")!)).toBeUndefined();
+  expect(rowFor("jira")!.textContent).not.toContain("401 from /rest/api/2/myself");
+});
+
 test("a source whose health is unauthorized offers Re-enter, not Sync now", async () => {
   sources = [
     source({
