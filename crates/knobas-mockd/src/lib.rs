@@ -49,6 +49,12 @@
 //!    needs, and this set widens to serve it from the fixture. Widening it is
 //!    one constant here (`jira::NAVIGABLE`) plus one in the adapter, mockd
 //!    first.
+//!
+//!    The set includes exactly **one** custom field, [`jira::EPIC_LINK_FIELD`]
+//!    (issue #125, deviation 13). One id and not a `customfield_*` pattern:
+//!    a pattern would accept an id this instance does not have, serve nothing
+//!    under it, and let a misconfigured `epic_link_field` read as a working
+//!    setup — which is the very failure this deviation exists to make loud.
 //! 6. **TeamCity `fields=` is mandatory on the collections, strict about
 //!    names, and only `$long` of its presets is honoured.** Real TeamCity has a
 //!    default projection and silently drops names it does not know; mockd
@@ -96,16 +102,39 @@
 //!     deviation 11 one level down — a null carries no key set, so a *sub*-name
 //!     of it cannot be validated: `triggered(user(nosuchfield))` is a 400
 //!     against an answer containing 1188 and a 200 against one that does not.
-//! 13. **An issue's `parent` is its epic.** The fixture records epic
-//!     membership (`Ticket::epic`) and no sub-tasks at all, so `fields.parent`
-//!     carries the epic — the spelling a next-gen or a recent company-managed
-//!     project serves, and the one issue #32 ratified for reading epic
-//!     membership. A *classic* Data Center project keeps that relationship in
-//!     a custom field instead, which knobas configures separately
-//!     (`JiraConfig::epic_link_field`). mockd serves one spelling because the
-//!     dataset records one relationship, not because the other does not exist;
-//!     an adapter that reads only `parent` will find nothing on a classic
-//!     instance and this mock cannot tell it so.
+//! 13. **One epic relationship, served in both of Jira's spellings.** The
+//!     fixture records epic membership (`Ticket::epic`) and no sub-tasks at
+//!     all, so `fields.parent` carries the epic — the spelling a next-gen or a
+//!     recent company-managed project serves, and the one issue #32 ratified
+//!     for reading epic membership. A *classic* Data Center project keeps the
+//!     same relationship in a custom field instead, which knobas configures
+//!     separately (`JiraConfig::epic_link_field`), so mockd also serves it as
+//!     [`jira::EPIC_LINK_FIELD`] — one fixture relationship, two wire shapes,
+//!     nothing invented on either side. **Both configuration paths are
+//!     therefore runnable against this mock**, which is what this entry got
+//!     wrong until issue #125: it said which spelling mockd *prefers* and left
+//!     a reader to assume the other was merely unpreferred, when in fact
+//!     `fields=customfield_10008` was a 400 plus an `UnknownField` violation
+//!     and the classic path could not be exercised end to end at all.
+//!
+//!     What is and is not serveable, precisely:
+//!
+//!     * `fields.parent` — an abbreviated issue, **absent** where the fixture
+//!       names no epic (PAY-200 is itself the epic; OPS-77 belongs to none).
+//!     * [`jira::EPIC_LINK_FIELD`] — the epic's bare **key** as a string,
+//!       **`null`** rather than absent where there is no epic, because Jira
+//!       always answers a custom field a request named. That null-versus-absent
+//!       split is the one shape difference between the two, and it is real.
+//!     * **No other `customfield_*`.** The set is opened by exactly one id, not
+//!       by a pattern (deviation 5 still holds): every other custom field is a
+//!       400, so a mistyped `epic_link_field` fails a test instead of quietly
+//!       syncing nothing.
+//!
+//!     Where mockd still deviates: a real instance is *either* classic or
+//!     next-gen for a given project and would serve one of the two, and a real
+//!     instance's Epic Link id differs per instance — mockd has one id because
+//!     it is one instance. It also has no `GET /rest/api/2/field`, so nothing
+//!     here can be discovered; a test names [`jira::EPIC_LINK_FIELD`].
 //!
 //! ## The shared credentials
 //!

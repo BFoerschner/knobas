@@ -155,6 +155,30 @@ pub(crate) struct FieldSel {
     names: Vec<String>,
 }
 
+/// This instance's **Epic Link** custom field — the classic Data Center
+/// spelling of the relationship `parent` carries (deviation 13).
+///
+/// Every Jira DC instance has exactly one id for this field and the id differs
+/// per instance, which is the whole reason
+/// `JiraConfig::epic_link_field` exists as an option rather than a constant.
+/// mockd is one instance, so it has one id, and this is it: `10008` is the id a
+/// Greenhopper-provisioned DC instance most often lands on, and it is already
+/// the value the adapter's own goldens
+/// (`knobas-source-jira/tests/golden/search-page.json`) and its descriptor
+/// example use.
+///
+/// It is exported so a test names *the mock's* field rather than hard-coding a
+/// string that could stop meaning anything, the same reason [`crate::JIRA_TOKEN`]
+/// is a constant.
+///
+/// **Exactly one id, not a pattern (issue #125).** Any other `customfield_*` is
+/// still a 400 plus an `UnknownField` violation. A pattern would accept
+/// `customfield_99999`, serve nothing under it, and let a mistyped
+/// `epic_link_field` pass as a working configuration — which is the exact class
+/// of bug deviation 5 exists to catch, one field id away from the one that
+/// matters.
+pub const EPIC_LINK_FIELD: &str = "customfield_10008";
+
 /// Everything `*navigable` covers: the whole issue except the two collections
 /// Jira also keeps off the default projection.
 ///
@@ -168,6 +192,11 @@ pub(crate) struct FieldSel {
 /// (see the transcription table in [`crate::state`]); the set stays *closed*,
 /// so deviation 5 is widened rather than retired and a name mockd does not
 /// serve is still a 400 plus an `UnknownField` violation.
+///
+/// **Widened again by one name in issue #125**: [`EPIC_LINK_FIELD`]. It is
+/// navigable because a real instance's `*navigable` covers its custom fields
+/// too, and it is here rather than in a set of its own because a reader asking
+/// "what does this mock serve?" should find one answer.
 const NAVIGABLE: &[&str] = &[
     "summary",
     "description",
@@ -185,6 +214,7 @@ const NAVIGABLE: &[&str] = &[
     "issuelinks",
     "timeoriginalestimate",
     "timespent",
+    EPIC_LINK_FIELD,
 ];
 const NON_NAVIGABLE: &[&str] = &["comment", "worklog"];
 
@@ -480,6 +510,20 @@ pub(crate) fn issue_json(
         if let Some(p) = &issue.parent {
             f.insert("parent".into(), issue_ref_json(base, p));
         }
+    }
+    if fields.has(EPIC_LINK_FIELD) {
+        // The same fixture `epic`, in the classic Data Center spelling: the
+        // Epic Link custom field carries the epic's **key**, where `parent`
+        // nests an abbreviated issue. Null rather than absent where there is no
+        // epic -- a custom field a request named is always in the answer, and
+        // that is the one shape difference from `parent` above.
+        f.insert(
+            EPIC_LINK_FIELD.into(),
+            issue
+                .parent
+                .as_ref()
+                .map_or(Value::Null, |p| json!(p.key.clone())),
+        );
     }
     if fields.has("resolution") {
         f.insert("resolution".into(), resolution_json(&issue.status));

@@ -20,6 +20,7 @@
 //! | comment `id` | `20000 + running index over all comments in fixture order`. |
 //! | worklog `id` | `30000 + running index`; `started` = the worklog's date at 09:00 UTC; `timeSpentSeconds` = `minutes * 60`. |
 //! | `parent` | the ticket's `epic`, resolved to that issue. Absent where the fixture names none (PAY-200 is itself the epic; OPS-77 belongs to none). |
+//! | [`jira::EPIC_LINK_FIELD`](crate::jira::EPIC_LINK_FIELD) | the same `epic`, in the classic Data Center spelling: the epic's bare **key**. `null` — not absent — where the fixture names none, which is how Jira serves a requested custom field with no value. |
 //! | `issuelinks` | one link per `blocked_by` entry, served at **both** ends: `inwardIssue` on the blocked issue, `outwardIssue` on the blocker, sharing one `id` = `40000 + running index over all `blocked_by` entries in fixture order`. |
 //! | `resolution` | `Done` (id `10000`) exactly when the status is in the `done` category, `null` otherwise — Jira sets a resolution when and only when an issue reaches a done status. |
 //! | `timeoriginalestimate` | `estimate_h * 3600`, `null` where the fixture records no estimate. |
