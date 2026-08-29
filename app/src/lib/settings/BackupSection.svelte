@@ -23,7 +23,9 @@
   import {
     backupNow,
     backupStatus,
+    restoreBackup,
     setBackupSchedule,
+    type ArchiveFile,
     type BackupSchedule,
     type BackupStatus,
   } from "../ipc/backup";
@@ -53,6 +55,9 @@
    */
   let editing = $state<BackupSchedule | null>(null);
   let saving = $state(false);
+  /** The archive a restore confirm is asking about, if any. */
+  let restoring = $state<ArchiveFile | null>(null);
+  let restoreInFlight = $state(false);
 
   async function load() {
     try {
@@ -119,6 +124,38 @@
       push({ text: `Could not save the schedule: ${ipcErrorMessage(cause)}`, tone: "err" });
     } finally {
       saving = false;
+    }
+  }
+
+  /**
+   * Restore the archive the confirm was asking about.
+   *
+   * Nothing is re-read afterwards, and that is not an omission: a restore
+   * replaces the *database*, and every store in this window — credential
+   * health, the room tabs, the launcher's corpus, this section's own status —
+   * was read from the old one. Re-reading this one panel would make a single
+   * corner of a stale window agree with the disk, which reads as the restore
+   * having half worked. Saying "restart knobas" is the honest answer until
+   * something owns re-hydrating the whole shell.
+   */
+  async function confirmRestore() {
+    const target = restoring;
+    if (!target) return;
+    restoreInFlight = true;
+    try {
+      await restoreBackup(target.file);
+      restoring = null;
+      push({
+        text: `Restored from ${target.file}. Restart knobas so every view reads the restored database.`,
+        ms: 30_000,
+      });
+    } catch (cause) {
+      // The refusal a person can act on — "already holds knobas data (n rows
+      // in knobas.entity)" — is the message itself. The dialog stays open:
+      // this is a decision that has not been made yet, not one that failed.
+      push({ text: `Restore refused: ${ipcErrorMessage(cause)}`, tone: "err" });
+    } finally {
+      restoreInFlight = false;
     }
   }
 
@@ -190,6 +227,62 @@
       {/if}
     </p>
   </div>
+
+  <div class="tile-h">
+    <span class="lab">Archives</span>
+    <span class="cnt">{status.archives.length}</span>
+  </div>
+
+  {#if status.archives.length === 0}
+    <div class="empty">
+      <p>No archives on disk yet — nothing to restore.</p>
+    </div>
+  {:else}
+    <!--
+      Newest first, as `backup::archives` sorts them. The name carries its own
+      date (`knobas-YYYYMMDD-HHMMSS`), which is why there is no second column
+      re-deriving one here: that format is the Rust's to own, and a frontend
+      that parsed it would be a second place to keep it right.
+    -->
+    {#each status.archives as archive (archive.file)}
+      <div class="row g3 arc" data-file={archive.file}>
+        <span class="mono">{archive.file}</span>
+        <span class="r">{formatBytes(archive.bytes)}</span>
+        <span class="r">
+          <button class="btn sm" onclick={() => (restoring = archive)}>Restore</button>
+        </span>
+      </div>
+    {/each}
+  {/if}
+{/if}
+
+{#if restoring}
+  <Modal title="Restore {restoring.file}?" center onclose={() => (restoring = null)}>
+    {#snippet body()}
+      <p>
+        knobas reads <b>{restoring?.file}</b> ({formatBytes(restoring?.bytes ?? 0)}) back into this
+        profile's database: links, contexts, notes, the asset tree, worklogs, smart lists and your
+        source configurations. Stored credentials are not in the archive — the keychain is
+        untouched — so each source asks for its password again.
+      </p>
+      <p>
+        The synced mirror is not in the archive either, because it re-syncs. Every source starts
+        from nothing and fills itself back in on its next run, so search is thin until it has.
+      </p>
+      <p>
+        This only works into a knobas that <b>holds no data yet</b>. If this one already has
+        anything of its own, the restore is refused rather than merged or overwritten — merging an
+        archive into an existing corpus, with a preview of what changes, arrives in a later
+        milestone.
+      </p>
+    {/snippet}
+    {#snippet footer()}
+      <button class="btn" onclick={() => (restoring = null)}>Cancel</button>
+      <button class="btn danger" disabled={restoreInFlight} onclick={() => void confirmRestore()}>
+        Restore
+      </button>
+    {/snippet}
+  </Modal>
 {/if}
 
 {#if editing}
@@ -284,6 +377,19 @@
     background: var(--bg);
     color: var(--text);
     font: 400 12px var(--mono);
+  }
+
+  .arc {
+    grid-template-columns: 1fr 90px 90px;
+    cursor: default;
+  }
+
+  .arc:hover {
+    background: transparent;
+  }
+
+  .arc .btn {
+    height: 20px;
   }
 
   .note {

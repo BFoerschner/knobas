@@ -380,3 +380,125 @@ test("an emptied field is never posted as a broken schedule", async () => {
   // `keep: 0` would delete the archive the next export just wrote.
   expect(posted.keep).toBeGreaterThanOrEqual(1);
 });
+
+function archiveRow(file: string) {
+  return target.querySelector<HTMLElement>(`.arc[data-file="${file}"]`);
+}
+
+test("every archive on disk is listed with its size", async () => {
+  render();
+  await settle();
+
+  expect([...target.querySelectorAll(".arc[data-file]")].length).toBe(2);
+  expect(archiveRow("knobas-20260828-030000.knobas")!.textContent).toContain("3.9 MB");
+});
+
+test("no archives yet says so rather than showing an empty list", async () => {
+  status = statusOf({ last: null, archives: [] });
+  render();
+  await settle();
+
+  expect(text()).toMatch(/no archives|nothing to restore/i);
+  expect(target.querySelectorAll(".arc[data-file]").length).toBe(0);
+});
+
+/**
+ * Restore asks first, and the question names the archive.
+ *
+ * The second archive, not the first: a fixture with one row cannot tell a
+ * component that restores *the one you clicked* from one that restores the
+ * newest.
+ */
+test("Restore asks first, and confirming restores the archive that was clicked", async () => {
+  render();
+  await settle();
+
+  button("Restore", archiveRow("knobas-20260828-030000.knobas")!)!.click();
+  flushSync();
+  expect(calls.restore, "asking is the point of asking").toEqual([]);
+  expect(dialog()!.textContent).toContain("knobas-20260828-030000.knobas");
+
+  button("Restore", dialog()!)!.click();
+  await settle();
+  expect(calls.restore).toEqual(["knobas-20260828-030000.knobas"]);
+});
+
+/**
+ * What the confirm has to say, in the concrete.
+ *
+ * Restore is the one control here that changes the database, and the engine's
+ * ratified shape is narrow in a way the reader cannot guess: it restores into
+ * a knobas that holds **no data yet** and refuses over a populated one, rather
+ * than merging or overwriting (merge-with-a-preview is M4). A confirm that
+ * only asked "are you sure?" would leave a person expecting either an
+ * overwrite or a merge, and both expectations are wrong.
+ */
+test("the restore confirm says what the restore does and what it will not do", async () => {
+  render();
+  await settle();
+  button("Restore", archiveRow("knobas-20260829-030000.knobas")!)!.click();
+  flushSync();
+
+  const said = dialog()!.textContent ?? "";
+  // It only lands in an empty knobas...
+  expect(said).toMatch(/holds no|empty|nothing yet/i);
+  // ...and says what happens instead of an overwrite, so nobody expects one.
+  expect(said).toMatch(/refus|declin|will not/i);
+  // The mirror is not in the archive, so sources re-sync afterwards.
+  expect(said).toMatch(/re-sync|resync/i);
+});
+
+test("cancelling the restore confirm restores nothing", async () => {
+  render();
+  await settle();
+  button("Restore", archiveRow("knobas-20260829-030000.knobas")!)!.click();
+  flushSync();
+  button("Cancel", dialog()!)!.click();
+  await settle();
+
+  expect(calls.restore).toEqual([]);
+  expect(dialog()).toBeNull();
+});
+
+/**
+ * The refusal a person can act on carries the reason from the database itself
+ * — which table and how many rows. "Restore failed" would leave them with no
+ * way to tell a populated knobas from a broken `pg_restore`.
+ */
+test("a refused restore says why, in the database's own words", async () => {
+  restoreFails = {
+    code: "conflict",
+    message:
+      "the database already holds knobas data (14 row(s) in knobas.entity); " +
+      "restoring over it would merge, which knobas cannot do yet",
+    source_id: null,
+  };
+  render();
+  await settle();
+  button("Restore", archiveRow("knobas-20260829-030000.knobas")!)!.click();
+  flushSync();
+  button("Restore", dialog()!)!.click();
+  await settle();
+
+  const said = toasts.items.map((toast) => toast.text).join(" ");
+  expect(said).toContain("14 row(s) in knobas.entity");
+  expect(calls.restore).toEqual(["knobas-20260829-030000.knobas"]);
+});
+
+/**
+ * A restore replaces what every open view is drawing, and nothing in the app
+ * re-reads itself when it happens: the health store, the room tabs and the
+ * launcher's corpus are all still the old database's. Saying "restored" and
+ * leaving the window on stale data is how a person concludes the restore did
+ * not work.
+ */
+test("a completed restore says the window has to be restarted to see it", async () => {
+  render();
+  await settle();
+  button("Restore", archiveRow("knobas-20260829-030000.knobas")!)!.click();
+  flushSync();
+  button("Restore", dialog()!)!.click();
+  await settle();
+
+  expect(toasts.items.map((toast) => toast.text).join(" ")).toMatch(/restart/i);
+});
