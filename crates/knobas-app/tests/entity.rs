@@ -1165,13 +1165,19 @@ async fn a_relations_case_does_not_split_its_group() {
 /// The whole note lifecycle over the command seam, in the order a person does
 /// it: *New note*, type, refer to something, look at it from the other end.
 ///
-/// Written against `mock:PAY-231` -- a real row from the reference adapter's
-/// fixture -- so the ref has to resolve against the same mirror the launcher
-/// reads and not against a row this test invented.
+/// The ref points at a **run-unique mirrored entity** (`linkable_pair`) rather
+/// than at a fixture key, for the reason every link test in this file does:
+/// the database is shared by the whole binary, and
+/// `a_link_over_the_seam_fills_the_demo_profiles_empty_links_panel` asserts
+/// that `mock:PAY-231` has *no* links -- a note that referred to it would break
+/// that test, from here, by ordering. It is still a real mirror row and not a
+/// row invented for the occasion.
 #[tokio::test]
 async fn a_note_written_over_the_seam_carries_its_refs_and_its_backlink() {
     let pool = seeded().await;
     use knobas_app::commands::entity::{create_note_inner, get_note_inner, save_note_inner};
+
+    let (ticket, _unused) = linkable_pair(&pool).await;
 
     // Story 2: *New note* writes the row before anything is typed into it.
     let fresh = create_note_inner(&pool, None, None).await.unwrap();
@@ -1185,7 +1191,7 @@ async fn a_note_written_over_the_seam_carries_its_refs_and_its_backlink() {
         &pool,
         &id,
         "SEPA retry investigation",
-        "off-by-one in [[mock:PAY-231]], and [[mock:NOPE-1]] is a typo",
+        &format!("off-by-one in [[{ticket}]], and [[mock:NOPE-1]] is a typo"),
     )
     .await
     .unwrap();
@@ -1198,12 +1204,12 @@ async fn a_note_written_over_the_seam_carries_its_refs_and_its_backlink() {
             .iter()
             .map(|r| r.target_id.as_str())
             .collect::<Vec<_>>(),
-        ["mock:PAY-231", "mock:NOPE-1"]
+        [ticket.as_str(), "mock:NOPE-1"]
     );
     let resolved = saved.refs[0]
         .target
         .as_ref()
-        .expect("PAY-231 is in the mirror");
+        .expect("the ticket is in the mirror");
     assert_eq!(resolved.kind, "ticket");
     assert!(!resolved.title.is_empty());
     // Story 10: the typo is a ref with nothing behind it, and it is *shown*.
@@ -1211,7 +1217,7 @@ async fn a_note_written_over_the_seam_carries_its_refs_and_its_backlink() {
 
     // Story 11: from the ticket, the note is a backlink -- the same panel #53
     // built, filled by the same read.
-    let back = links_on(&pool, "mock:PAY-231").await;
+    let back = links_on(&pool, &ticket).await;
     let entry = back
         .iter()
         .find(|entry| entry.other.entity_id == id)
@@ -1226,7 +1232,7 @@ async fn a_note_written_over_the_seam_carries_its_refs_and_its_backlink() {
     assert!(
         read.links
             .iter()
-            .any(|entry| entry.other.entity_id == "mock:PAY-231")
+            .any(|entry| entry.other.entity_id == ticket)
     );
 }
 
