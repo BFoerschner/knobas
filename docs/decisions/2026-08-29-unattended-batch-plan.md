@@ -66,3 +66,35 @@ are genuinely blocked until #42 lands and are not dispatched.
 
 Each implementer works in its own worktree under `.worktrees/`, opens a PR, and stops. Merge-
 managers run afterwards, serially, and only for PRs outside the frozen-contract class.
+
+## Corrections and ratification requests, appended as the batch ran
+
+Three things arrived after the plan above was written and belong beside it rather than in a PR
+body somebody may not open.
+
+**A premise in my own dispatch was wrong, and the implementer built to the code instead.** #69's
+brief told the implementer that "restore is the destructive one — it replaces the user's
+database", and asked for a confirmation stating what would be lost. The landed engine does not
+overwrite: `knobas_db::backup::restore` refuses with `TargetNotEmpty` when the database holds
+knobas rows, because merge-with-a-preview is M4. A warning about losing existing data would have
+described a case that cannot happen. The confirm therefore states what comes back, that the
+keychain is untouched, that the mirror re-syncs, and that restore only works into a knobas
+holding no data yet. **This wants Björn's ratification** — it is the right reading of the code,
+but it is product semantics, and it was settled by an implementer correcting an orchestrator
+rather than by anyone with the remit.
+
+**Two follow-up tickets were filed from findings agents were told to recommend, not file:**
+
+- **#103** — a component test can pass every assertion while leaking an unhandled rejection, with
+  the only signal a bare non-zero exit at the end of `just check`. One file now guards against
+  it; no other does. Same shape as #71 and #86: a gate that can be green while something is
+  wrong.
+- **#104** — three documents say the backup settings surface is blocked or absent, and PR #102
+  makes all three false. Two sit inside the frozen `commands/` + `ipc/` paths, so the
+  implementer correctly stopped rather than editing them. Labelled `ready-for-human` for that
+  reason; the change itself is one comment line each.
+
+**Wave 1 outcome:** #78 merged (`3dadc74`) — the merge-manager found, in review, that `mktemp`
+plus `mv` was silently dropping the tracked `test-inventory.txt` from 0644 to 0600 on every
+`inventory-update`, which git records nowhere and no gate would ever have shown. PRs #99 (#86,
+#83), #102 (#69) and #98 (this record) open; #91 and #92 in flight.
