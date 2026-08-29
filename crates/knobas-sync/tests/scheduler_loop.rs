@@ -1764,6 +1764,12 @@ async fn a_purge_survives_the_run_that_was_in_flight_when_the_source_was_deleted
         .unwrap();
     await_inside(&inside).await;
     config::delete(&pool, &id, true).await.unwrap();
+    assert!(
+        inside.load(Ordering::SeqCst) > 0,
+        "the delete has to commit while the run is still fetching. If the run \
+         had already committed, the delete's own purge would tidy up after it \
+         and this test would be green over a scheduler that sweeps nothing"
+    );
     scheduler.forget_source(&id, Purge::Items).await;
 
     // ADR-0005 through the new path: the caller enrolled before the deletion is
@@ -1832,6 +1838,12 @@ async fn adding_a_source_back_under_the_id_voids_the_purge_armed_for_the_old_one
     // Delete with the purge, then think better of it -- all while the run is
     // still fetching.
     config::delete(&pool, &id, true).await.unwrap();
+    assert!(
+        inside.load(Ordering::SeqCst) > 0,
+        "the delete has to commit while the run is still fetching. If the run \
+         had already committed, the delete's own purge would tidy up after it \
+         and this test would be green over a scheduler that sweeps nothing"
+    );
     scheduler.forget_source(&id, Purge::Items).await;
     re_add(&pool, &id).await;
     scheduler.source_added(&id).await;
@@ -1954,6 +1966,12 @@ async fn deleting_a_source_mid_run_without_purging_keeps_its_items() {
         .unwrap();
     await_inside(&inside).await;
     config::delete(&pool, &id, false).await.unwrap();
+    assert!(
+        inside.load(Ordering::SeqCst) > 0,
+        "the delete has to commit while the run is still fetching. If the run \
+         had already committed, the delete's own purge would tidy up after it \
+         and this test would be green over a scheduler that sweeps nothing"
+    );
     scheduler.forget_source(&id, Purge::Keep).await;
 
     let ending = await_ending(&watcher).await;
