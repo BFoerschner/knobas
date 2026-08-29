@@ -155,8 +155,12 @@ function until(condition: () => boolean, whatWasWaitedFor: string): Promise<void
       if (!condition()) throw new Error(whatWasWaitedFor);
     },
     // Generous on purpose: this budget exists to absorb a loaded machine, and
-    // nothing here waits on it in the happy path.
-    { timeout: 5_000, interval: 5 },
+    // nothing here waits on it in the happy path. Deliberately *under*
+    // vitest's own 5 s test timeout, so a condition that never comes true
+    // fails saying which one — "the seed never reached the credential-health
+    // store" — rather than as a bare "test timed out", which is the same
+    // uninformative failure this issue was about.
+    { timeout: 3_000, interval: 5 },
   );
 }
 
