@@ -24,6 +24,9 @@ function entry(over: {
   title?: string;
   note?: string | null;
   deleted?: string | null;
+  /** Set to make this an *accepted suggestion* rather than a hand-drawn link. */
+  rule?: string;
+  reason?: string;
 }): LinkEntry {
   const to = over.to ?? "mock:PAY-228";
   const from = over.from ?? VIEWED;
@@ -38,6 +41,11 @@ function entry(over: {
       note: over.note ?? null,
       created_by: "user",
       created_at: "2026-08-28T09:30:00Z",
+      // A confirmed link, because that is the only kind this panel can hold.
+      confirmed_at: "2026-08-28T09:30:00Z",
+      rule: over.rule ?? null,
+      rule_class: over.rule ? "exact_key" : null,
+      reason: over.reason ?? null,
     },
     other: {
       entity_id: other,
@@ -212,6 +220,36 @@ test("a title is text, whatever a source put in it", () => {
 
   expect(screen.text()).toContain("<em>Retry</em> storm");
   expect(screen.target.querySelector("em")).toBeNull();
+
+  screen.done();
+});
+
+/**
+ * An accepted suggestion is an ordinary link here — same row, same *Unlink* —
+ * and it can still say why knobas proposed it.
+ *
+ * The two lines are not one voice: the note is the user's own words and the
+ * reason is knobas', so they are separate lines and a link with neither draws
+ * neither. A panel that lost the reason would satisfy #41's story 5 and quietly
+ * break its story 2 for every link that came from a suggestion.
+ */
+test("an accepted suggestion still shows the reason knobas proposed it with", () => {
+  const screen = render([
+    entry({ rule: "branch_name_key", reason: "the branch name contains PAY-231" }),
+  ]);
+
+  expect(screen.text()).toContain("the branch name contains PAY-231");
+  // ...and it is answerable like any other link.
+  expect(screen.buttons("Unlink").length).toBe(1);
+
+  screen.done();
+});
+
+/** A link a person drew has no reason, and draws no line where one would go. */
+test("a hand-drawn link draws no reason line", () => {
+  const screen = render([entry({})]);
+
+  expect(screen.target.querySelectorAll(".lwhy").length).toBe(0);
 
   screen.done();
 });
