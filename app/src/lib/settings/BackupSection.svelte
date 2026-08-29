@@ -191,14 +191,21 @@
 
 <div class="tile-h">
   <span class="lab">Backup</span>
-  <span class="acts">
-    {#if status}
+  <!--
+    Both actions are behind the read, not merely disabled by it. `backup_status`
+    rejects with `not_ready` for the whole of bring-up, and an *Export now* in
+    that window is a button that cannot work — it would reject on the same
+    missing state and teach the reader nothing. Same rule the sources view
+    applies to *Sync now* on a source that needs a password.
+  -->
+  {#if status && !error}
+    <span class="acts">
       <button class="btn sm" onclick={openSchedule}>Schedule…</button>
-    {/if}
-    <button class="btn sm" disabled={exporting} onclick={() => void exportNow()}>
-      {exporting ? "Exporting…" : "Export now"}
-    </button>
-  </span>
+      <button class="btn sm" disabled={exporting} onclick={() => void exportNow()}>
+        {exporting ? "Exporting…" : "Export now"}
+      </button>
+    </span>
+  {/if}
 </div>
 
 {#if error}

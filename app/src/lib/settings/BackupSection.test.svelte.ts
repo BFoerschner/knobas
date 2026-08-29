@@ -502,3 +502,26 @@ test("a completed restore says the window has to be restarted to see it", async 
 
   expect(toasts.items.map((toast) => toast.text).join(" ")).toMatch(/restart/i);
 });
+
+/**
+ * A failed read is not an empty disk.
+ *
+ * `backup_status` rejects with `not_ready` for the whole of bring-up, and
+ * "no archives on disk yet" in that window is a claim the section has not
+ * earned — the reader would go looking for backups that are, in fact, there.
+ */
+test("backup_status failing renders what failed, not an empty backup story", async () => {
+  statusFails = { code: "not_ready", message: "the database is still starting", source_id: null };
+  render();
+  await settle();
+
+  expect(text()).toContain("the database is still starting");
+  expect(text()).not.toMatch(/no archives|No backup has been taken/i);
+  expect(button("Export now"), "there is nothing to export from yet").toBeUndefined();
+
+  statusFails = null;
+  button("Retry")!.click();
+  await settle();
+  expect(text()).toContain("after 03:00");
+  expect(button("Export now")).toBeTruthy();
+});
