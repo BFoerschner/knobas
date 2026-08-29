@@ -73,9 +73,24 @@
   let transitions = $state(0);
   let purge = $state(false);
 
+  /**
+   * Which read is the current one.
+   *
+   * A terminal `sync:state` arrives once per source, so a five-source *Sync
+   * all* now puts five `list_sources` in flight at once and nothing makes them
+   * answer in the order they were asked. Whichever landed last used to win, so
+   * a slow early read could write the snapshot from *before* the run that had
+   * just finished — #83's own symptom, arriving through the fix for it. A read
+   * that has been overtaken drops its answer instead, including its failure:
+   * a stale rejection must not blank a list that has since been read fine.
+   */
+  let reading = 0;
+
   async function load() {
+    const mine = (reading += 1);
     try {
       const rows = await listSources();
+      if (mine !== reading) return;
       sources = rows;
       error = null;
       // The rows carry health as of `list_sources`, and they are the whole set
@@ -85,6 +100,7 @@
       // monogram and its room tab until the window was restarted.
       health.replace(rows.map((row) => row.health));
     } catch (cause) {
+      if (mine !== reading) return;
       // Not a silent empty list: "No sources yet" is a claim about the
       // database, and the view does not have one to make — it knows only that
       // it could not ask.
@@ -107,7 +123,10 @@
         // …and it is also a new `last_run` and a new `item_count` on the row
         // itself, which live on `SourceSummary` and arrive only from
         // `list_sources`. One signal, both readings: the panel and the row
-        // above it are one view and a reader compares them (#83).
+        // above it are one view and a reader compares them (#83). The re-list
+        // carries the shell's credential health with it, because `load()`
+        // replaces that store from the same rows — a run that has just
+        // discovered a rejected credential says so in the top strip too.
         void load();
       }
     })
