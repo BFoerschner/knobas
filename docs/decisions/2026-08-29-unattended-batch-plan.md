@@ -246,6 +246,15 @@ no comments and no reviews, and its own body reports `front` — svelte-check, v
 `vite build` — green. Removed rather than left standing on a merge-manager's session report
 alone.)
 
+(The PR #155 case does not survive checking either. That PR has no comments and no reviews, and
+the only failed `check` run on `m2/gitea-live-second-push` — `33252091024` — had its job alive
+two seconds with no steps: the billing failure, not a compile. The green run on that branch,
+`33250680535`, was the *pre-rebase* sha, and the merge landed at 12:23:35Z, after the block, so
+CI never ran on the post-rebase head at all — which is what this record already says two
+sections up: *"PR #155 was merged on a locally-run gate rather than a green CI"*. The paragraph's
+conclusion is unaffected: it rests on the #126 case, which does check out. Annotated by #169's
+merge-manager, 2026-08-29.)
+
 Björn's call, and the block is real. But it is an argument for running the gate on the merged head
 rather than the reviewed one.
 

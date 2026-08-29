@@ -56,9 +56,11 @@ restate the gate — it only provides a Linux machine to run it on, so the two
 cannot drift apart.
 
 **Both workflows are disabled right now**, so nothing runs that gate but you.
-`gh workflow list --all` shows `check` and `testenv` as `disabled_manually`,
-and the runs `gh pr checks` reports are the seconds-long failures the billing
-outage left behind. `gh workflow enable check` and `gh workflow enable testenv`
+`gh workflow list --all` shows `check` and `testenv` as `disabled_manually`.
+A branch pushed since then gets no run at all, so `gh pr checks` answers `no
+checks reported`. Where it does still show a run, that run predates the
+disable. It is a leftover of the billing outage, not a verdict on any tree.
+`gh workflow enable check` and `gh workflow enable testenv`
 turn them back on; until then, `docs/agents/working-model.md` (review economics
 rule 4) says who runs the gate and when.
 
