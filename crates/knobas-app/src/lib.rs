@@ -188,6 +188,7 @@ pub fn run() {
             commands::entity::room_suggestions,
             commands::entity::accept_suggestion,
             commands::entity::dismiss_suggestion,
+            commands::entity::submit_write,
             commands::search::search,
             commands::search::launcher_home,
             commands::search::smart_lists,

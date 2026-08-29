@@ -206,6 +206,7 @@ fn invoke_managing(
             knobas_app::commands::entity::create_link,
             knobas_app::commands::entity::recent_activity,
             knobas_app::commands::entity::unlink,
+            knobas_app::commands::entity::submit_write,
             knobas_app::commands::sources::demo_load,
             knobas_app::commands::sources::list_adapters,
             knobas_app::commands::sources::list_sources,
@@ -607,6 +608,129 @@ async fn sync_now_answers_before_the_run_and_reports_it_on_the_event() {
         outcome.as_deref(),
         Some("ok"),
         "the spawned run must close its own log row"
+    );
+}
+
+/// Issue #43: `submit_write` queues the write, the queue delivers it, and the
+/// mirror is re-read for the source **without waiting for the next scheduled
+/// sync** (story 15).
+///
+/// Three claims, and each is asserted where it actually happens:
+///
+/// * the command answers with the write **as queued**, before the attempt --
+///   which is why the state it comes back with is `pending` and not `sent`;
+/// * the queue then delivers it, so the row settles as `sent`;
+/// * a sync run for that source follows. knobas has no per-entity read -- the
+///   whole of the read direction is `Source::sync` -- so "refresh the mirror
+///   for the affected entity" is an *incremental* run of its source, which is
+///   what the log row proves happened.
+///
+/// The mock adapter declares `comment` and accepts it, so the write really
+/// goes; nothing here stubs the queue.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_submitted_write_is_queued_delivered_and_followed_by_a_re_read() {
+    let pool = knobas_db::test_util::test_pool().await;
+    knobas_db::migrate::run(&pool).await.unwrap();
+
+    // A **second instance** of the mock adapter, not the demo's `mock`:
+    // `sync_now_answers_before_the_run_and_reports_it_on_the_event` drives that
+    // one, this test triggers a run of its own, and the scheduler's in-flight
+    // dedupe would hand the two the same run. Two sources never wait on one
+    // another (story 21), which is exactly what makes them safe to run in
+    // parallel here.
+    let source_id = "mock-write";
+    knobas_app::sources::demo::demo_load_inner(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into knobas.source_config
+                (id, kind, display_name, base_url, auth_kind, config,
+                 sync_interval_secs, enabled)
+         values ($1, 'mock', 'Mock (writes)', '', 'none', '{}'::jsonb, 86400, true)
+         on conflict (id) do nothing",
+    )
+    .bind(source_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // **A run this source has already had**, recorded as finished now. Without
+    // it the scheduler's own tick syncs `mock-write` immediately -- a source
+    // with no run behind it is due at once -- and the assertion below would
+    // pass with the write-triggered re-read deleted. Found by mutation: it did.
+    // With a day's interval and a run a moment ago, the *only* thing that can
+    // start another run here is the write landing.
+    sqlx::query(
+        "insert into knobas.sync_run (source_id, trigger, started_at, finished_at, outcome)
+         values ($1, 'schedule', now(), now(), 'ok')",
+    )
+    .bind(source_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let runs_before: i64 =
+        sqlx::query_scalar("select count(*) from knobas.sync_run where source_id = $1")
+            .bind(source_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    let pool_for_state = pool.clone();
+    let queued = invoke_managing(
+        "submit_write",
+        serde_json::json!({
+            "payload": { "Comment": { "entity": "mock-write:PAY-231", "body": "on it" } }
+        }),
+        move |app| {
+            app.manage(ready_over(pool_for_state.clone()));
+            app.manage(sources_state(app, pool_for_state));
+        },
+    )
+    .expect("submit_write must answer")
+    .deserialize::<serde_json::Value>()
+    .expect("the queued write came back");
+
+    assert_eq!(queued["source_id"], serde_json::json!(source_id));
+    assert_eq!(queued["op"], serde_json::json!("comment"));
+    assert_eq!(
+        queued["state"],
+        serde_json::json!("pending"),
+        "the row is the write *as queued*, before the attempt -- reporting `sent` \
+         from it would be reporting a hope"
+    );
+    let id = queued["id"].as_i64().expect("a queue id");
+
+    let settled: Option<String> =
+        sqlx::query_scalar("select state from knobas.write_queue where id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        settled.as_deref(),
+        Some("sent"),
+        "the queue delivers a write a source can take, before the command returns"
+    );
+
+    // The re-read is asked for after the write lands and runs on its own task.
+    let mut runs_after = runs_before;
+    for _ in 0..200 {
+        runs_after =
+            sqlx::query_scalar("select count(*) from knobas.sync_run where source_id = $1")
+                .bind(source_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        if runs_after > runs_before {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert!(
+        runs_after > runs_before,
+        "a write that landed must be followed by a run that re-reads the source, or the \
+         app disagrees with itself until the next scheduled sync (story 15)"
     );
 }
 

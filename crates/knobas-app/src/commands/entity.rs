@@ -739,6 +739,43 @@ pub async fn create_link<R: tauri::Runtime>(
 ///
 /// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the database
 /// is still coming up, and whatever [`unlink_inner`] refuses with.
+/// Ask a source to change something (issue #43): the one way the UI starts a
+/// write-back.
+///
+/// `payload` is a serialized `knobas_source::WriteOp` -- the same shape
+/// [`crate::commands::sources::pending_writes`] hands back and
+/// [`crate::commands::sources::amend_write`] takes. Untyped on the wire for
+/// #42's ratified reasoning: `WriteOp` grows per milestone (ADR-0006), and a
+/// typed argument would drag the SPI's enum onto the IPC surface and make
+/// every growth an IPC change.
+///
+/// **The write is queued, not sent** -- and the row that comes back is the
+/// write *as queued*, before the attempt, because that is what happened. Read
+/// the outcome back with `pending_writes`, or watch `activity:new`: every
+/// queue transition writes a line. A UI that reported "sent" from this return
+/// value would be reporting a hope. The queue is what decides send, pend or
+/// hold (issue #42), and there is no path around it.
+///
+/// **There is no `source_id` argument.** Interfaces §4.1 makes the instance id
+/// and the `EntityRef` namespace the same string, so the target already names
+/// the source; a second argument could only agree or contradict, and a
+/// contradiction would aim a write at a source the target does not belong to.
+///
+/// # Errors
+///
+/// `invalid` if the payload is not a write op, if its target is not an entity
+/// id, or if the source does not offer that op; `not_found` if the target
+/// names a source that is not configured;
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up.
+#[tauri::command]
+pub async fn submit_write<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    payload: serde_json::Value,
+) -> Result<knobas_core::write_queue::QueuedWrite, IpcError> {
+    let state = crate::sources::state(&app)?;
+    crate::sources::write_queue::submit(&state, payload).await
+}
+
 #[tauri::command]
 pub async fn unlink<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,

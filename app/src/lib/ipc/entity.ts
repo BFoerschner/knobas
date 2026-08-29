@@ -1,6 +1,12 @@
 /** Entity and room reads — `crates/knobas-app/src/commands/entity.rs`. */
 import { invoke } from "@tauri-apps/api/core";
 
+// The write queue's own types live with the queue's other commands. A
+// write-back is an operation on an entity, which is why `submitWrite` is here;
+// what it hands over and what comes back are the queue's, and a second
+// declaration of either would be two shapes for one wire format.
+import type { QueuedWrite, WriteOpPayload } from "./sources";
+
 /**
  * One line in a room — `knobas_app::commands::entity::EntityRow`.
  *
@@ -521,4 +527,32 @@ export function acceptSuggestion(linkId: string): Promise<void> {
  */
 export function dismissSuggestion(linkId: string): Promise<void> {
   return invoke<void>("dismiss_suggestion", { linkId });
+}
+
+/**
+ * Ask a source to change something — `knobas_app::commands::entity::submit_write`.
+ *
+ * The one way the UI starts a write-back (issue #43). `payload` is a
+ * serialized `knobas_source::WriteOp`, the same {@link WriteOpPayload} shape
+ * {@link pendingWrites} hands back and {@link amendWrite} takes — untyped on
+ * the wire because `WriteOp` grows per milestone (ADR-0006) and a typed
+ * argument would make every growth an IPC change.
+ *
+ * **The write is queued, not sent**, and the row that comes back is the write
+ * *as queued*, before the attempt: the queue is what decides send, pend or
+ * hold, and there is no path around it. Read the outcome back with
+ * {@link pendingWrites}, or re-read on `EVENTS.activityNew` — every queue
+ * transition writes an activity line.
+ *
+ * **There is no source argument.** The target's namespace *is* the source id
+ * (interfaces §4.1), so a second argument could only agree or contradict.
+ *
+ * Rejects with `invalid` for a payload that is not a write op, a target that
+ * is not an entity id, or an op the source does not offer — which the action
+ * bar should never have rendered, since it is drawn from that source's
+ * `write_ops` — and `not_found` when the target names a source that is not
+ * configured.
+ */
+export function submitWrite(payload: WriteOpPayload): Promise<QueuedWrite> {
+  return invoke<QueuedWrite>("submit_write", { payload });
 }
