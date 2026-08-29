@@ -29,6 +29,7 @@ pub mod commands;
 mod error;
 mod profile;
 pub mod sources;
+pub mod start_work;
 
 pub use commands::app::{DbState, Lifecycle};
 pub use error::{IpcError, IpcErrorCode};

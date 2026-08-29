@@ -72,6 +72,14 @@ const HANDS_TO_THE_QUEUE: &[&str] = &[
     // still names the same op and target, and calls
     // `knobas_sync::write_queue::amend`.
     "knobas-app/src/sources/write_queue.rs",
+    // Issue #44's proposal builder. It composes the ops a start-work flow will
+    // submit -- a branch, a pull request, two transitions -- and stores each as
+    // its serialized payload, so that what the user was *shown* and what is
+    // *sent* are one value. Building those by hand as `json!` literals would
+    // put the SPI's serde shape in string literals, where a renamed field is a
+    // run-time surprise. Nothing here dispatches: the orchestrator beside it
+    // moves payloads and never names the enum at all.
+    "knobas-app/src/start_work/plan.rs",
 ];
 
 /// A call spelled on a `Source` -- method syntax or UFCS (`Source::write(..)`),

@@ -434,11 +434,7 @@ mod tests {
             .zip(outcomes)
             .enumerate()
             .map(|(position, (kind, outcome))| {
-                step(
-                    *kind,
-                    i32::try_from(position).expect("four steps"),
-                    outcome,
-                )
+                step(*kind, i32::try_from(position).expect("four steps"), outcome)
             })
             .collect()
     }
