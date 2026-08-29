@@ -98,6 +98,20 @@ vi.mock("../ipc/search", () => ({
   smartListItems: () => Promise.resolve([]),
 }));
 
+vi.mock("../ipc/backup", () => ({
+  backupStatus: () =>
+    Promise.resolve({
+      schedule: { enabled: true, hour: 3, minute: 0, keep: 7 },
+      directory: "/tmp/knobas-backups",
+      last: null,
+      next_due_at: null,
+      archives: [],
+    }),
+  backupNow: () => Promise.reject(new Error("unused")),
+  setBackupSchedule: () => Promise.reject(new Error("unused")),
+  restoreBackup: () => Promise.reject(new Error("unused")),
+}));
+
 vi.mock("@tauri-apps/api/event", () => ({
   listen: () => Promise.resolve(() => {}),
 }));
@@ -159,6 +173,7 @@ const ADDRESSES = [
   "#/ctx/all",
   "#/ctx/src:jira",
   "#/sources",
+  "#/settings",
   "#/first-run",
   "#/ticket/mock:PAY-231",
   // A Gitea key: `#` truncates a fragment at the browser level, so it is
@@ -222,6 +237,19 @@ test("the sources view is what #/sources renders, not a placeholder", async () =
   // The line the placeholder used to carry. Its absence is the seam being
   // real rather than promised.
   expect(text).not.toMatch(/arrives? in phase/i);
+});
+
+/**
+ * `#/settings` reaches the real §14 surface (#69), not the "arrives in a later
+ * milestone" pane the address used to fall through to.
+ */
+test("the settings view is what #/settings renders, not a later milestone", async () => {
+  const text = await open("#/settings");
+  expect(text).toContain("Settings");
+  expect(text).toContain("Backup");
+  // The boundary sentence, all the way through the shell.
+  expect(text).toContain("after 03:00");
+  expect(text).not.toMatch(/arrives in a later milestone/i);
 });
 
 test("the first-run wizard is what #/first-run renders, not a placeholder", async () => {

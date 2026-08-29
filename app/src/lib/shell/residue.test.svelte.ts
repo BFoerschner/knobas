@@ -163,6 +163,25 @@ vi.mock("../ipc/app", () => ({
   ping: () => deferred("pong"),
 }));
 
+/**
+ * The settings view's backup IPC, deferred for the same reason as the sources
+ * view's: the second pass unmounts the section while `backup_status` is still
+ * in flight, which is the window a stale `status = await …` would write into.
+ */
+vi.mock("../ipc/backup", () => ({
+  backupStatus: () =>
+    deferred({
+      schedule: { enabled: true, hour: 3, minute: 0, keep: 7 },
+      directory: "/tmp/knobas-backups",
+      last: null,
+      next_due_at: null,
+      archives: [],
+    }),
+  backupNow: () => deferred({ taken_at: "2026-08-29T01:00:00Z", file: "knobas-x.knobas", bytes: 1 }),
+  setBackupSchedule: () => deferred(undefined),
+  restoreBackup: () => deferred(undefined),
+}));
+
 vi.mock("@tauri-apps/api/event", () => ({
   listen: (event: string, handler: (payload: { payload: unknown }) => void) => {
     // Modelled as a real `window` listener so that failing to unsubscribe is
@@ -193,6 +212,7 @@ const Diagnostics = (await import("../sources/Diagnostics.svelte")).default;
 const FirstRun = (await import("../sources/FirstRun.svelte")).default;
 const ReenterSecret = (await import("../sources/ReenterSecret.svelte")).default;
 const SourcesView = (await import("../sources/SourcesView.svelte")).default;
+const BackupSection = (await import("../settings/BackupSection.svelte")).default;
 const { createHealth } = await import("./health.svelte");
 
 /**
@@ -397,6 +417,15 @@ const CASES: Case[] = [
     open: (target) => ({
       app: mount(AddSource, { target, props: { onclose: () => {}, onsaved: () => {} } }),
     }),
+  },
+  {
+    /**
+     * The settings view itself has no effect of its own — it is a frame around
+     * one section — so the section is what is walked here.
+     */
+    name: "BackupSection",
+    source: "lib/settings/BackupSection.svelte",
+    open: (target) => ({ app: mount(BackupSection, { target, props: {} }) }),
   },
   {
     name: "Diagnostics",

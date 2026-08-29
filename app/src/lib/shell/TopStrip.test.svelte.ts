@@ -117,3 +117,38 @@ test("a health event repaints the cluster without a remount", () => {
   expect(monograms()[0]!.className).toContain("err");
   expect(target.querySelector(".sync .err-txt")).toBeTruthy();
 });
+
+/** A strip button by its accessible name. */
+function tool(label: string) {
+  return target.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+}
+
+/**
+ * Settings is reached the way sources is: a labelled button on the strip.
+ *
+ * §14's backup surface (#69) had nowhere to be reached from — the strip's only
+ * destination was `#/sources`. This is the whole of the navigation that ticket
+ * adds; there is no settings router and no tab strip behind it.
+ */
+test("the strip has a way into settings, and it goes to #/settings", () => {
+  const { router } = render([]);
+
+  const settings = tool("Settings")!;
+  expect(settings).toBeTruthy();
+  // Two destinations, not one relabelled: sources has not moved.
+  expect(tool("Sources")).toBeTruthy();
+
+  settings.click();
+  flushSync();
+  expect(location.hash).toBe("#/settings");
+  expect(router.route).toEqual({ view: "settings" });
+});
+
+/** Which of the two is current, so the strip says where the reader is. */
+test("the strip marks the surface the reader is actually on", () => {
+  location.hash = "#/settings";
+  render([]);
+
+  expect(tool("Settings")!.getAttribute("aria-current")).toBe("page");
+  expect(tool("Sources")!.getAttribute("aria-current")).toBeNull();
+});
