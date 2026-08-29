@@ -178,6 +178,36 @@ const MAX_PR_PAGES: u32 = 20;
 /// budget the walk actually spends, and is what bites first.
 const MAX_COMMIT_PAGES: u32 = 20;
 
+/// The runaway guard on the discussion walk: at most this many requests per
+/// pull request, whatever the server chooses to put on a page.
+///
+/// **Sized by the same arithmetic as the exhaustive pair.** The target is a
+/// record count -- 1,000 comments on one pull request -- and at the 50 a
+/// request asks for that is twenty pages of records plus the one empty page
+/// that proves the discussion ended. A discussion that long is already an
+/// outlier; a thousand of them is not a corpus anyone reads, it is a
+/// `body_text` nobody can search.
+///
+/// **Reaching it warns and keeps what was walked; it does not fail the run**,
+/// which is the one place this walk parts company with the four listings. It
+/// is the reading [`fetch_comments`] already applies to a *refused* discussion,
+/// and it rests on the same three facts: the pull request itself is still
+/// emitted, no entity is missing from the mirror, and `pr` is a budgeted kind
+/// the sweep never touches (ADR-0003), so a shorter `body_text` cannot be read
+/// downstream as a deletion. What is lost is search text on one item. Failing
+/// instead would stop a whole Gitea mirror over one thousand-comment
+/// discussion, and [`cap_reached`]'s lever -- narrow the source with
+/// `owners[]`/`repos[]` -- would mean dropping the repository the discussion is
+/// in. The lever that fits is `include_pr_comments`, and the warning names it.
+///
+/// **So this is the one deliberate cap on interfaces §4.1's "`body_text` =
+/// title + description + comment texts".** It is written down as such (§9,
+/// issue #131) rather than left to be inferred from a constant: what §4.1
+/// promises is every comment of every discussion knobas mirrors, and this
+/// bounds it at a stated number with a stated warning, instead of at whatever
+/// `DEFAULT_PAGING_NUM` happens to be on the server.
+const MAX_COMMENT_PAGES: u32 = 21;
+
 /// One repository this run will walk.
 pub(crate) struct Selected {
     full_name: String,
@@ -756,6 +786,30 @@ fn close_watermark<K: Ord + Clone>(
 /// which is the fifth read endpoint ruling B1 granted. `pr.comments == 0` is
 /// what makes an idle-ish run cheap: no discussion, no request.
 ///
+/// # Why this is a walk and not a request
+///
+/// It was a request until issue #131, and it sent **no `limit` and no `page`**.
+/// That is a listing endpoint: Gitea answers a request naming no `limit` with
+/// `DEFAULT_PAGING_NUM` records -- **thirty**, on a stock install, no admin
+/// change of any kind -- and says nothing about the rest. So every discussion
+/// past thirty comments was mirrored down to thirty, and the failure is
+/// invisible from inside knobas: a truncated discussion looks exactly like a
+/// short one, with no error, no warning and a watermark that advances exactly
+/// as it would have. It is the failure the module docs above are about,
+/// arriving through the one endpoint that was never walking.
+///
+/// It now walks with the rule issue #81 settled for the other four
+/// ([`last_page`]): an explicit `limit` on every request, and the walk ends on
+/// an **empty** page, never on a short one, bounded by [`MAX_COMMENT_PAGES`].
+///
+/// **The price is one request per emitted pull request that has a discussion**
+/// -- the empty page that proves it ended -- and it is bounded by what already
+/// bounds this endpoint: `pr.comments == 0` skips it, `include_pr_comments`
+/// turns it off, and `prs_per_repo` bounds how many pull requests a run reaches
+/// at all. Paying it is the whole point: without that request, a full page is
+/// indistinguishable from the end of the discussion, which is exactly the
+/// reading #81 removed from the four listings.
+///
 /// # What a refusal here costs, and what it is allowed to hide
 ///
 /// A refusal costs searchable text, not the run -- the pull request itself was
@@ -787,6 +841,11 @@ fn close_watermark<K: Ord + Clone>(
 /// read the shorter `body_text` as a deletion. What is lost is search text on
 /// one item, and it is restored the next time that pull request is updated, or
 /// by the next full sync.
+///
+/// A refusal met **part-way through** the walk keeps the pages already read
+/// rather than throwing them away: half a discussion is more searchable text
+/// than none, and the warning is the same one either way. On the common case --
+/// the first request refused -- that is the empty answer it always was.
 async fn fetch_comments(
     source: &crate::GiteaSource,
     at: RepoRef<'_>,
@@ -795,32 +854,50 @@ async fn fetch_comments(
     if !source.config.include_pr_comments || pr.comments == 0 {
         return Ok(Vec::new());
     }
-    let error = match source
-        .client
-        .issue_comments(at.owner, at.name, pr.number)
-        .await
-    {
-        Ok(raw) => {
-            // A single unreadable comment is dropped rather than failing the
-            // pull request: the rest of the discussion is still worth indexing.
-            return Ok(raw
+    let mut discussion: Vec<model::Comment> = Vec::new();
+    for page in 1..=MAX_COMMENT_PAGES {
+        let batch = match source
+            .client
+            .issue_comments(at.owner, at.name, pr.number, page)
+            .await
+        {
+            Ok(batch) => batch,
+            Err(error) if is_repo_scoped(&error) => {
+                tracing::warn!(
+                    repository = %at.full_name,
+                    number = pr.number,
+                    %error,
+                    "gitea: indexing this pull request without its discussion; \
+                     set include_pr_comments to false to stop asking"
+                );
+                return Ok(discussion);
+            }
+            Err(error) => return Err(RepoError::from(error)),
+        };
+        let last = last_page(&batch);
+        // A single unreadable comment is dropped rather than failing the
+        // pull request: the rest of the discussion is still worth indexing.
+        discussion.extend(
+            batch
                 .into_iter()
-                .filter_map(|c| serde_json::from_value(c).ok())
-                .collect());
+                .filter_map(|c| serde_json::from_value(c).ok()),
+        );
+        if last {
+            return Ok(discussion);
         }
-        Err(error) => error,
-    };
-    if !is_repo_scoped(&error) {
-        return Err(RepoError::from(error));
     }
+    // The cap, and the one truncation this adapter chooses. See
+    // `MAX_COMMENT_PAGES` for why it warns instead of ending the run.
     tracing::warn!(
         repository = %at.full_name,
         number = pr.number,
-        %error,
-        "gitea: indexing this pull request without its discussion; \
-         set include_pr_comments to false to stop asking"
+        comments = discussion.len(),
+        pages = MAX_COMMENT_PAGES,
+        "gitea: this discussion is longer than one run walks; indexing the first \
+         {} comments of it and no more. Set include_pr_comments to false to stop asking",
+        discussion.len()
     );
-    Ok(Vec::new())
+    Ok(discussion)
 }
 
 /// New commits on the branches whose heads moved this run.

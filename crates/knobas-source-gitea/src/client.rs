@@ -256,20 +256,32 @@ impl GiteaClient {
         .await
     }
 
-    /// Pull-request discussion. Gitea keeps it on the issue with the same index.
+    /// Pull-request discussion, one page of it. Gitea keeps it on the issue
+    /// with the same index.
+    ///
+    /// **Paged like every other listing, since issue #131.** It used to send
+    /// neither `limit` nor `page` and read the one answer it got as the whole
+    /// discussion. That is a listing endpoint: with no `limit` Gitea serves
+    /// `DEFAULT_PAGING_NUM` records -- **thirty**, on a stock install, with no
+    /// admin change of any kind -- and says nothing about the rest, so every
+    /// discussion past thirty comments was mirrored down to thirty in silence.
+    /// The walk is [`crate::sync::fetch_comments`], and it ends on an empty
+    /// page like the other four.
     pub(crate) async fn issue_comments(
         &self,
         owner: &str,
         repo: &str,
         index: u64,
+        page: u32,
     ) -> Result<Vec<Value>, SourceError> {
+        let (limit, page) = page_params(page);
         self.get_json(
             &format!(
                 "/repos/{}/{}/issues/{index}/comments",
                 segment(owner)?,
                 segment(repo)?
             ),
-            &[],
+            &[limit, page],
         )
         .await
     }
@@ -707,6 +719,14 @@ mod wire_tests {
     /// Gitea keeps a pull request's discussion on the **issue** with the same
     /// index -- there is no `/pulls/{n}/comments`. Ruling B1 grants this fifth
     /// read endpoint; the path is the part nobody guesses right.
+    ///
+    /// The mock demands `limit` and `page` too (issue #131). This request used
+    /// to carry neither, and a discussion endpoint asked without a `limit` is
+    /// answered `DEFAULT_PAGING_NUM` records -- thirty on a stock Gitea -- with
+    /// nothing to say the rest exists. That the *walk* then reads page two is
+    /// what `sync::fetch_comments` is for and what
+    /// `a_discussion_longer_than_one_page_is_carried_in_full` asserts; this
+    /// test is only the wire.
     #[tokio::test]
     async fn pull_request_discussion_is_read_from_the_issue_with_the_same_index() {
         let server = MockServer::start().await;
@@ -714,6 +734,8 @@ mod wire_tests {
             .and(path(
                 "/api/v1/repos/tidewater/payout-service/issues/142/comments",
             ))
+            .and(query_param("limit", "50"))
+            .and(query_param("page", "3"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
                 { "id": 1, "body": "Should the jitter be bounded?" }
             ])))
@@ -721,9 +743,9 @@ mod wire_tests {
             .await;
         let got = client_for(&server)
             .await
-            .issue_comments("tidewater", "payout-service", 142)
+            .issue_comments("tidewater", "payout-service", 142, 3)
             .await
-            .expect("the discussion is on the issue path");
+            .expect("the mock answers only the fully-parameterised request");
         assert_eq!(got.len(), 1);
         assert_eq!(got[0]["body"], "Should the jitter be bounded?");
     }

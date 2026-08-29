@@ -822,6 +822,87 @@ async fn a_server_that_caps_its_pages_short_is_still_walked_to_the_end() {
     }
 }
 
+/// One comment body. Zero-padded, so no note's text is a prefix of another's
+/// and `contains` cannot report note 5 present because note 51 is.
+fn note(n: usize) -> String {
+    format!("review note #{n:03}")
+}
+
+/// A discussion of `count` comments on the fixture's `#142`, with the pull
+/// request's own `comments` count kept honest -- `fetch_comments` skips the
+/// request entirely when it reads zero.
+fn discussion_of(count: usize) -> State {
+    let full = "tidewater/payout-service";
+    let mut state = State::tidewater();
+    let notes: Vec<serde_json::Value> = (1..=count)
+        .map(|n| support::comment(&note(n), "jonas", "2026-08-22T09:30:00Z"))
+        .collect();
+    state
+        .comments
+        .insert(format!("{full}#142"), notes)
+        .expect("the fixture already has a discussion on #142");
+    let pulls = state.pulls.get_mut(full).expect("the fixture has pulls");
+    let sepa = pulls
+        .iter_mut()
+        .find(|p| p["number"] == serde_json::json!(142))
+        .expect("the fixture has #142");
+    sepa["comments"] = serde_json::json!(count);
+    state
+}
+
+/// Every comment of `#142`, in the order the server served them, as they land
+/// in the indexed text.
+fn notes_missing_from(items: &[SyncItem], count: usize) -> Vec<usize> {
+    let sepa = items
+        .iter()
+        .find(|i| i.entity.key.ends_with("#142"))
+        .expect("the fixture's discussion is on #142");
+    (1..=count)
+        .filter(|n| !sepa.body_text.contains(&note(*n)))
+        .collect()
+}
+
+/// Issue #131: `issue_comments` sent **no `limit`** and asked for **no second
+/// page**, so a discussion longer than whatever the server chose to put on one
+/// answer was mirrored down to that page and nothing said so. On a stock Gitea
+/// that page is `DEFAULT_PAGING_NUM` long -- thirty comments -- and no admin
+/// configuration change of any kind is needed to reach it. A truncated
+/// discussion is indistinguishable from a short one from inside knobas: no
+/// error, no warning, and a watermark that advances exactly as it would have.
+///
+/// **Asserted on `body_text`, where the comments land** (interfaces §4.1:
+/// title + description + comment texts), not on the request. A test that only
+/// checks the request carried a `limit` passes against a walk that reads the
+/// first page and stops, which is half the defect.
+///
+/// `PAGE + 1` is the boundary the adapter itself walks: one full page of the
+/// size it asks for, plus the one comment that only a second request can reach.
+#[tokio::test]
+async fn a_discussion_longer_than_one_page_is_carried_in_full() {
+    let count = PAGE + 1;
+    let state = discussion_of(count);
+    let fake = Fake::start_paged(&state).await;
+    let paged = source(fake.base_url(), serde_json::json!({}));
+    let (items, _) = full(&*paged).await;
+
+    assert_eq!(
+        notes_missing_from(&items, count),
+        Vec::<usize>::new(),
+        "a discussion of {count} came back truncated"
+    );
+
+    // The control: the same fixture served whole by a server that pages at
+    // nothing mirrors the same text, so the assertion above is about the page
+    // boundary and not about the fixture.
+    let honest = Fake::start(&state).await;
+    let (same, _) = full(&*source(honest.base_url(), serde_json::json!({}))).await;
+    assert_eq!(
+        notes_missing_from(&same, count),
+        Vec::<usize>::new(),
+        "the unpaged control lost comments, so the fixture is wrong"
+    );
+}
+
 /// A sink that rejects an item aborts the run -- the remaining items are not
 /// pushed at it, and no cursor is handed back over the gap (battery clause 6).
 #[tokio::test]

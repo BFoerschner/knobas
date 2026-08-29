@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use knobas_source::instance::SourceInstance;
 use knobas_source::{AuthMethod, Source};
 use serde_json::{Value, json};
-use wiremock::matchers::{any, header, method, path, query_param};
+use wiremock::matchers::{any, header, method, path, query_param, query_param_is_missing};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// The only token the fake accepts. Anything else gets Gitea's 401.
@@ -446,16 +446,44 @@ impl Fake {
             .mount(&self.server)
             .await;
         }
+        // A discussion is a listing like any other here, and it is paged like
+        // one -- which it was not until issue #131. A single mount serving the
+        // whole discussion whatever was asked for is a fixture in which the
+        // defect cannot appear: `issue_comments` sent neither `limit` nor
+        // `page`, so a real Gitea answered it `DEFAULT_PAGING_NUM` records and
+        // said nothing about the rest, and the fake answered it all of them.
+        //
+        // **A request naming no `page` is served the first one**, because that
+        // is what the server does and it is the whole shape of #131: a client
+        // that never asks for page 2 must still be *given* page 1, or the bug
+        // reads as "the discussion came back empty" instead of "the discussion
+        // came back truncated". The other listings mount no such route: the
+        // adapter has sent them a `page` since M1.
         for (key, comments) in &state.comments {
             let (full_name, index) = key
                 .split_once('#')
                 .expect("comment key is owner/repo#index");
-            authed(Mock::given(method("GET")).and(path(format!(
-                "/api/v1/repos/{full_name}/issues/{index}/comments"
-            ))))
-            .respond_with(ok(json!(comments)))
-            .mount(&self.server)
-            .await;
+            let route = format!("/api/v1/repos/{full_name}/issues/{index}/comments");
+            for (number, chunk) in pages(comments, page_size) {
+                authed(
+                    Mock::given(method("GET"))
+                        .and(path(route.clone()))
+                        .and(query_param("page", number.to_string().as_str())),
+                )
+                .respond_with(ok(json!(chunk)))
+                .mount(&self.server)
+                .await;
+                if number == 1 {
+                    authed(
+                        Mock::given(method("GET"))
+                            .and(path(route.clone()))
+                            .and(query_param_is_missing("page")),
+                    )
+                    .respond_with(ok(json!(chunk)))
+                    .mount(&self.server)
+                    .await;
+                }
+            }
         }
         for (key, commits) in &state.commits {
             let (full_name, branch) = key
