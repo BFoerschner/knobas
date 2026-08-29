@@ -270,15 +270,22 @@ pub(crate) struct Locator {
     /// in and the other out would be incoherent.
     pub failed_to_start_any: bool,
     /// TeamCity's default filter hides everything that is not a finished,
-    /// non-personal, non-canceled build. `Some(false)` turns it off, which is
-    /// the only way to ask a question about **every** build regardless of
-    /// state; `None` sends the dimension not at all and takes the default.
+    /// non-personal, non-canceled, non-failed-to-start build on the default
+    /// branch. `Some(false)` turns it off **whole**, which is the only way to
+    /// ask a question about every build regardless of state; `None` sends the
+    /// dimension not at all and takes the default.
     ///
     /// Distinct from `state`: `state:` names the states wanted and is the
     /// right dimension when the answer is a set of builds to emit.
     /// `defaultFilter:false` widens the population a *stateless* question is
     /// asked over, which is what the run's opening probe needs -- see
     /// [`sync::probe`](crate::sync).
+    ///
+    /// Distinct from [`Self::canceled_any`] and [`Self::failed_to_start_any`]
+    /// too, and only the probe uses this one: those name a single facet each,
+    /// this disables all of them at once -- personal builds included, and any
+    /// facet a future TeamCity adds. A query whose answer becomes items must
+    /// not send it (issue #105).
     pub default_filter: Option<bool>,
     pub count: u32,
 }

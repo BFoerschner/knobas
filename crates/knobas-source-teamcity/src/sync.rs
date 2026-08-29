@@ -17,6 +17,16 @@
 //! `state:finished,sinceBuild:(id:N)` -- build ids are server-wide, so one
 //! query covers every configuration -- then narrows to the scope client-side.
 //!
+//! Those two are the run's **item-producing** queries, and both carry
+//! `canceled:any,failedToStart:any` (issue #105). TeamCity's default filter
+//! hides canceled, failed-to-start and personal builds even when `state:` is
+//! set, and a build that never enters the mirror can never be corrected
+//! later: the mirror shows in-flight builds, has no deletion channel, and
+//! `sinceBuild` is exclusive, so a build shown as running and then canceled
+//! would say `running` for ever. The two named dimensions re-open exactly
+//! their own facets; personal builds stay out, which `defaultFilter:false`
+//! would not have allowed. See [`since`].
+//!
 //! Neither query is allowed to come back truncated. Both widen `count:` until
 //! the server itself says there is no page after the one it served, and
 //! **fail** at a ceiling rather than compute a watermark from a set the run
@@ -149,6 +159,12 @@ pub(crate) async fn execute(
                     rest.builds(&Locator {
                         build_type_id: Some(id),
                         state: Some(StateFilter::Finished),
+                        // One of the run's two **item-producing** locators, and
+                        // both carry the two dimensions: a build the mirror
+                        // never stores is a build no later run can heal. See
+                        // [`since`].
+                        canceled_any: true,
+                        failed_to_start_any: true,
                         count: cfg.builds_per_config,
                         ..Locator::default()
                     })
@@ -613,13 +629,58 @@ async fn refuse_a_replaced_server(
     )))
 }
 
-/// Every finished build newer than `since_build_id`.
+/// Every finished build newer than `since_build_id` -- **canceled and
+/// failed-to-start ones included** (issue #105).
+///
+/// # Why the two dimensions are here and not left to the server's default
+///
+/// TeamCity's default filter hides canceled, failed-to-start and personal
+/// builds, and goes on hiding them when `state:` is set. This query and the
+/// per-configuration one in [`execute`] step 4 are the only two that produce
+/// items, so with the default in force **no canceled build could ever enter
+/// the mirror**: `sinceBuild` is exclusive and the watermark advances past it,
+/// so one canceled while the watermark moved over it was missing permanently
+/// rather than late.
+///
+/// Excluding them is not the tidy alternative it looks like, and this is the
+/// argument the decision rests on: [`execute`] step 5 emits in-flight builds
+/// too, and [`cursor::advance`] clamps the watermark under them, so a running
+/// build is mirrored **before** anyone knows how it ends. Cancel it and the
+/// finished queries can no longer return it, the in-flight poll stops
+/// returning it, and `map::build_item` records that M1 has no deletion
+/// channel -- so that row says `running` for ever. The same happens to a
+/// queued build that fails to start. TeamCity's own UI un-hides a canceled
+/// build with one click; a mirror that never stored it cannot.
+///
+/// **`canceled:any,failedToStart:any` and not `defaultFilter:false`.** The two
+/// named dimensions re-open exactly their own facets. `defaultFilter:false`
+/// also opens the personal facet -- and every facet nobody has enumerated --
+/// which would mirror other people's experiments and force a client-side
+/// re-filter off a widened `BUILD_FIELDS`. Measured read-only against
+/// JetBrains' public instance (2026.2 EAP) on 2026-08-29 over one window:
+/// `state:finished,canceled:any,count:100` answered one canceled build, no
+/// failed-to-start build and no personal build, while
+/// `state:finished,defaultFilter:false,count:100` answered the same canceled
+/// build plus a failed-to-start one.
+///
+/// # What this does not heal
+///
+/// **Written here because this is where the next reader of the cursor will
+/// look.** `sinceBuild` is exclusive, so builds canceled *before* this landed,
+/// whose ids sit under the watermark, stay absent -- and pre-existing stale
+/// `running` rows heal only when a full sync's per-configuration window
+/// reaches them. A deliberate full sync after this lands is the healing move
+/// (CONTEXT.md calls it a backfill); anything older than
+/// `builds_per_config` back is gone. That is the permanence issue #105
+/// measured, now bounded instead of ongoing.
 async fn since(rest: &dyn Rest, since_build_id: i64) -> Result<Vec<Rec<Build>>, SourceError> {
     all_of(
         rest,
         &Locator {
             state: Some(StateFilter::Finished),
             since_build_id: Some(since_build_id),
+            canceled_any: true,
+            failed_to_start_any: true,
             ..Locator::default()
         },
         || {
@@ -920,20 +981,45 @@ mod tests {
                     raw: raw.clone(),
                     rec: serde_json::from_value(raw.clone()).expect("fixture parses"),
                 })
+                // Which **states** the query asks for.
                 .filter(|r| match (locator.state, locator.default_filter) {
                     // `state:` names the states wanted.
                     (Some(state), _) => state.matches(r.rec.state.as_deref()),
                     // No `state:`, default filter off: every build there is.
                     (None, Some(false)) => true,
-                    // No `state:` and no `defaultFilter:false` is TeamCity's
-                    // default filter, which hides everything that is not a
-                    // finished, non-personal, non-canceled build. Without the
-                    // dimension the opening probe would witness only the
+                    // No `state:` and no `defaultFilter:false` takes TeamCity's
+                    // default filter, whose state half is "finished". Without
+                    // the dimension the opening probe would witness only the
                     // newest ordinary finished builds, so a fake that ignored
                     // this could not witness the difference.
-                    (None, _) => {
-                        StateFilter::Finished.matches(r.rec.state.as_deref()) && !canceled(&r.rec)
+                    (None, _) => StateFilter::Finished.matches(r.rec.state.as_deref()),
+                })
+                // ...and which **facets** of them, which is a separate
+                // question from the state and the one issue #105 turns on.
+                //
+                // TeamCity's default filter hides three classes -- canceled,
+                // failed-to-start and personal -- and it goes on hiding them
+                // when `state:` is set, which is why every item-producing
+                // query missed the first two. `defaultFilter:false` opens all
+                // three at once; `canceled:any` and `failedToStart:any` open
+                // exactly their own and leave the personal facet closed.
+                // Measured read-only on JetBrains' public instance
+                // (2026-08-29): `state:finished,canceled:any` answered one
+                // canceled build and no failed-to-start or personal one, while
+                // `state:finished,defaultFilter:false` answered the canceled
+                // build plus a failed-to-start one.
+                //
+                // A fake that could not tell the two apart would let a
+                // `defaultFilter:false` on an item-producing locator pass --
+                // the widening this ruling deliberately did not make, because
+                // it mirrors other people's personal builds.
+                .filter(|r| {
+                    if locator.default_filter == Some(false) {
+                        return true;
                     }
+                    (locator.canceled_any || !canceled(&r.rec))
+                        && (locator.failed_to_start_any || !flagged(&r.raw, "failedToStart"))
+                        && !flagged(&r.raw, "personal")
                 })
                 .filter(|r| {
                     locator
@@ -1003,16 +1089,49 @@ mod tests {
 
     /// TeamCity reports a canceled build as finished with `status: "UNKNOWN"`
     /// and `statusText: "Canceled"` -- 20 of 20 sampled on the live instance
-    /// -- and its default filter hides it. That is the class
-    /// `defaultFilter:false` exists to put back.
+    /// -- and its default filter hides it. That is the class `canceled:any`
+    /// puts back on the two item-producing queries (issue #105).
     fn canceled(b: &Build) -> bool {
         b.status.as_deref() == Some("UNKNOWN")
+    }
+
+    /// A boolean the *record* carries and `struct Build` does not parse.
+    ///
+    /// `failedToStart` and `personal` are real fields on a TeamCity build and
+    /// nothing in `map` reads either, so `BUILD_FIELDS` does not ask for them
+    /// (`the_selectors_ask_for_nothing_no_reader_looks_at`). The server still
+    /// filters on them, so the fake reads them off the raw record -- which is
+    /// where a server keeps facts the client never parses.
+    fn flagged(raw: &serde_json::Value, name: &str) -> bool {
+        raw.get(name).and_then(serde_json::Value::as_bool) == Some(true)
     }
 
     fn canceled_build(id: i64, type_id: &str, project: &str) -> serde_json::Value {
         let mut b = build(id, type_id, project, "finished");
         b["status"] = serde_json::json!("UNKNOWN");
         b["statusText"] = serde_json::json!("Canceled");
+        b
+    }
+
+    /// A build that never ran: TeamCity finishes it with `status: "FAILURE"`
+    /// and its own `statusText`, and marks it `failedToStart`. The default
+    /// filter hides it exactly as it hides a canceled one, and
+    /// `failedToStart:any` is what puts it back.
+    fn failed_to_start_build(id: i64, type_id: &str, project: &str) -> serde_json::Value {
+        let mut b = build(id, type_id, project, "finished");
+        b["status"] = serde_json::json!("FAILURE");
+        b["statusText"] = serde_json::json!("Failed to start: no agent could run this build");
+        b["failedToStart"] = serde_json::json!(true);
+        b
+    }
+
+    /// Somebody else's experiment. The third class the default filter hides,
+    /// and the one this adapter deliberately leaves hidden: only
+    /// `defaultFilter:false` -- which no item-producing query sends -- would
+    /// bring it back.
+    fn personal_build(id: i64, type_id: &str, project: &str, state: &str) -> serde_json::Value {
+        let mut b = build(id, type_id, project, state);
+        b["personal"] = serde_json::json!(true);
         b
     }
 
@@ -1088,11 +1207,37 @@ mod tests {
                 "defaultFilter:false,count:100",
                 "state:(queued:true,running:true),count:100",
                 "buildTypes",
-                "buildType:(id:Ledger_Deploy_Staging),state:finished,count:100",
-                "buildType:(id:Payout_Build),state:finished,count:100",
-                "buildType:(id:Payout_IntegrationTests),state:finished,count:100",
+                concat!(
+                    "buildType:(id:Ledger_Deploy_Staging),state:finished,",
+                    "canceled:any,failedToStart:any,count:100"
+                ),
+                concat!(
+                    "buildType:(id:Payout_Build),state:finished,",
+                    "canceled:any,failedToStart:any,count:100"
+                ),
+                concat!(
+                    "buildType:(id:Payout_IntegrationTests),state:finished,",
+                    "canceled:any,failedToStart:any,count:100"
+                ),
             ]
         );
+        // The **in-flight poll carries neither dimension**, and that is the
+        // half of the decision that keeps personal builds out: `state:` names
+        // queued and running, and the rest of TeamCity's default filter -- the
+        // personal facet included -- still applies to it. A run that widened
+        // this query too would start mirroring other people's experiments the
+        // moment one was running.
+        let poll = rest
+            .calls()
+            .into_iter()
+            .find(|c| c.contains("queued:true"))
+            .expect("the in-flight poll");
+        for dimension in ["canceled:", "failedToStart:", "defaultFilter:"] {
+            assert!(
+                !poll.contains(dimension),
+                "the in-flight poll must not carry {dimension}: {poll}"
+            );
+        }
     }
 
     /// Contract battery clause 2, at the level where it is decided.
@@ -1117,7 +1262,7 @@ mod tests {
             [
                 "defaultFilter:false,count:100",
                 "state:(queued:true,running:true),count:100",
-                "state:finished,sinceBuild:(id:412),count:100",
+                "state:finished,sinceBuild:(id:412),canceled:any,failedToStart:any,count:100",
             ]
         );
     }
@@ -1402,11 +1547,11 @@ mod tests {
         assert_eq!(
             widened,
             [
-                "state:finished,sinceBuild:(id:0),count:100",
-                "state:finished,sinceBuild:(id:0),count:200",
-                "state:finished,sinceBuild:(id:0),count:400",
-                "state:finished,sinceBuild:(id:0),count:800",
-                "state:finished,sinceBuild:(id:0),count:1001",
+                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:100",
+                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:200",
+                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:400",
+                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:800",
+                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:1001",
             ]
         );
     }
@@ -1533,11 +1678,11 @@ mod tests {
         assert_eq!(
             widened,
             [
-                "state:finished,sinceBuild:(id:0),count:100",
-                "state:finished,sinceBuild:(id:0),count:200",
-                "state:finished,sinceBuild:(id:0),count:400",
-                "state:finished,sinceBuild:(id:0),count:800",
-                "state:finished,sinceBuild:(id:0),count:1001",
+                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:100",
+                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:200",
+                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:400",
+                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:800",
+                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:1001",
             ],
             "it widened rather than accepting the first short page"
         );
@@ -1552,7 +1697,7 @@ mod tests {
         );
         assert_eq!(
             widened,
-            ["state:finished,sinceBuild:(id:0),count:100"],
+            ["state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:100"],
             "one request: the server answered short and said there was nothing after it"
         );
     }
@@ -1587,7 +1732,7 @@ mod tests {
         let (outcome, widened) = capped_run(50, 49).await;
         let items = outcome.expect("49 builds behind a 50-row ceiling do not fill the page");
         assert_eq!(items.iter().filter(|i| i.kind == "build").count(), 49);
-        assert_eq!(widened, ["state:finished,sinceBuild:(id:0),count:100"]);
+        assert_eq!(widened, ["state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:100"]);
     }
 
     /// [`last_page`]'s second condition, and the reason it is there: a walk
@@ -2322,12 +2467,18 @@ mod tests {
     /// on the live instance -- and its default filter hides it. It is not in
     /// flight, so the in-flight poll never sees it either. A probe without
     /// the override therefore witnesses 1000, the ceiling clamps the
-    /// watermark there, and every later run re-reads build 1100 for nothing.
+    /// watermark there, and every later run re-reads build 1100.
     ///
-    /// The class is not hypothetical. The highest id in the id space of
-    /// JetBrains' public instance belonged to
-    /// `JetBrainsPublicProjects_Compose_AllPersonalBuild` -- a *personal*
-    /// build configuration, the other class the default filter removes.
+    /// **Issue #105 sharpened this rather than retiring it.** The
+    /// item-producing queries now send `canceled:any`, so build 1100 really is
+    /// emitted, and a ceiling of 1000 would hold the watermark below a build
+    /// the run just mirrored -- re-reading it on every run for ever instead of
+    /// merely losing a margin. The probe keeps `defaultFilter:false` and not
+    /// the two named dimensions because it asks a *stateless* question about
+    /// the id space: personal builds count toward the ceiling although they
+    /// are never mirrored, and the highest id on JetBrains' public instance
+    /// belonged to `JetBrainsPublicProjects_Compose_AllPersonalBuild` -- a
+    /// personal build configuration.
     #[tokio::test]
     async fn the_ceiling_counts_a_build_the_default_filter_would_hide() {
         let rest = FakeRest::new(
@@ -2342,6 +2493,227 @@ mod tests {
             cursor, r#"{"v":1,"since_build_id":1100}"#,
             "1100 is canceled and the default filter hides it; a probe that took the default \
              would witness 1000 and pin the watermark there"
+        );
+    }
+
+    /// **The argument the whole of issue #105 rests on**: a build the mirror
+    /// has already shown as running, then canceled on the server, must not say
+    /// "running" for ever.
+    ///
+    /// This is the reason "just exclude canceled builds" is not the clean
+    /// option it looks like. [`execute`] step 5 emits every observed in-scope
+    /// build, in-flight ones included, and [`cursor::advance`] holds the
+    /// watermark under them -- so a running build is mirrored *before* anyone
+    /// knows how it ends. Cancel it, and with the two item-producing queries
+    /// taking TeamCity's default filter the finished ones can never return it,
+    /// the in-flight poll stops returning it, and `map::build_item` records
+    /// that "M1 has no deletion channel: the adapter never sees the removal".
+    /// The row stays `running` until somebody notices by hand. TeamCity's own
+    /// UI un-hides a canceled build with one click; a mirror that never stored
+    /// it cannot.
+    ///
+    /// Two runs over the same server at two moments, which is the only way to
+    /// witness it: one fixture with the build running, one with it canceled.
+    #[tokio::test]
+    async fn a_build_canceled_after_it_was_mirrored_as_running_does_not_stay_running() {
+        let types = vec![build_type("Payout_Build", "Payout")];
+        let while_running = FakeRest::new(
+            types.clone(),
+            vec![
+                build(400, "Payout_Build", "Payout", "finished"),
+                build(500, "Payout_Build", "Payout", "running"),
+            ],
+        );
+        let cfg = TeamCityConfig::default();
+        let (first, cursor) = run(&while_running, &cfg, None).await;
+        let running = first
+            .iter()
+            .find(|i| i.entity.key == "build:500")
+            .expect("the running build is mirrored before anyone knows how it ends");
+        assert!(running.body_text.contains("running"), "{running:?}");
+        assert_eq!(
+            cursor, r#"{"v":1,"since_build_id":400}"#,
+            "the watermark is clamped under the running build"
+        );
+
+        // Somebody cancels it.
+        let after_cancel = FakeRest::new(
+            types,
+            vec![
+                build(400, "Payout_Build", "Payout", "finished"),
+                canceled_build(500, "Payout_Build", "Payout"),
+            ],
+        );
+        let (second, cursor) = run(&after_cancel, &cfg, Some(cursor)).await;
+        let healed = second
+            .iter()
+            .find(|i| i.entity.key == "build:500")
+            .unwrap_or_else(|| {
+                panic!(
+                    "the canceled build must be re-emitted so the mirror stops saying \"running\"; \
+                     this run emitted {:?}",
+                    keys(&second)
+                )
+            });
+        assert!(
+            healed.body_text.contains("finished canceled"),
+            "and it must say what actually happened to it: {:?}",
+            healed.body_text
+        );
+        assert!(
+            !healed.body_text.contains("running"),
+            "the stale state is gone, not merely joined: {:?}",
+            healed.body_text
+        );
+        assert_eq!(
+            cursor, r#"{"v":1,"since_build_id":500}"#,
+            "and nothing holds the watermark back any more"
+        );
+    }
+
+    /// The same permanence for the other class the default filter hides: a
+    /// queued build the in-flight poll mirrored can terminate as
+    /// **failed-to-start**, and that row would say "queued" for ever.
+    ///
+    /// Ruling canceled builds in while leaving failed-to-start out would leave
+    /// exactly the same stale row behind, which is why the two dimensions
+    /// travel together.
+    #[tokio::test]
+    async fn a_build_that_failed_to_start_after_it_was_mirrored_as_queued_does_not_stay_queued() {
+        let types = vec![build_type("Payout_Build", "Payout")];
+        let cfg = TeamCityConfig::default();
+        let (first, cursor) = run(
+            &FakeRest::new(
+                types.clone(),
+                vec![
+                    build(400, "Payout_Build", "Payout", "finished"),
+                    build(500, "Payout_Build", "Payout", "queued"),
+                ],
+            ),
+            &cfg,
+            None,
+        )
+        .await;
+        assert!(
+            first
+                .iter()
+                .find(|i| i.entity.key == "build:500")
+                .expect("the queued build is mirrored")
+                .body_text
+                .contains("queued")
+        );
+
+        let (second, _) = run(
+            &FakeRest::new(
+                types,
+                vec![
+                    build(400, "Payout_Build", "Payout", "finished"),
+                    failed_to_start_build(500, "Payout_Build", "Payout"),
+                ],
+            ),
+            &cfg,
+            Some(cursor),
+        )
+        .await;
+        let healed = second
+            .iter()
+            .find(|i| i.entity.key == "build:500")
+            .unwrap_or_else(|| {
+                panic!(
+                    "a build that failed to start must be re-emitted, or its row says \"queued\" \
+                     for ever; this run emitted {:?}",
+                    keys(&second)
+                )
+            });
+        assert!(
+            healed.body_text.contains("finished FAILURE"),
+            "a failed-to-start build is a FAILURE and needs no new wording: {:?}",
+            healed.body_text
+        );
+        assert!(
+            healed.body_text.contains("Failed to start"),
+            "TeamCity's own statusText is what says which kind of failure: {:?}",
+            healed.body_text
+        );
+    }
+
+    /// A full sync mirrors both hidden classes too, not only an incremental
+    /// run: the per-configuration query is the other item-producing locator,
+    /// and it carries the same two dimensions.
+    ///
+    /// Without them a first-ever sync of a configuration silently indexes less
+    /// than the configuration holds, which is ADR-0003's class -- and
+    /// `sinceBuild` is exclusive, so the watermark then moves past the builds
+    /// it skipped and no later run can offer them.
+    #[tokio::test]
+    async fn a_full_sync_mirrors_the_canceled_and_failed_to_start_builds_in_a_configuration() {
+        let rest = FakeRest::new(
+            vec![build_type("Payout_Build", "Payout")],
+            vec![
+                build(400, "Payout_Build", "Payout", "finished"),
+                canceled_build(401, "Payout_Build", "Payout"),
+                failed_to_start_build(402, "Payout_Build", "Payout"),
+            ],
+        );
+        let (items, cursor) = run(&rest, &TeamCityConfig::default(), None).await;
+        assert_eq!(
+            keys(&items),
+            [
+                "buildType:Payout_Build",
+                "build:400",
+                "build:401",
+                "build:402"
+            ],
+            "every finished build in the configuration, whichever way it ended"
+        );
+        assert_eq!(cursor, r#"{"v":1,"since_build_id":402}"#);
+        assert!(
+            items
+                .iter()
+                .any(|i| i.body_text.contains("finished canceled")),
+            "{items:?}"
+        );
+    }
+
+    /// **Personal builds stay out**, and this is what says the widening was
+    /// `canceled:any,failedToStart:any` rather than `defaultFilter:false`.
+    ///
+    /// The two named dimensions re-open exactly their own facets;
+    /// `defaultFilter:false` disables the personal facet as well -- and every
+    /// facet nobody has enumerated. Their absence from the mirror is
+    /// consistent, in *every* state: the personal facet applies to the
+    /// in-flight poll too, so no personal build is ever mirrored and no row of
+    /// one can go stale. Nobody has decided that a work cockpit should mirror
+    /// other people's experiments.
+    ///
+    /// The opening probe still *witnesses* them, which is deliberate and is
+    /// the reason it alone keeps `defaultFilter:false`: on JetBrains' public
+    /// instance the highest id in the whole id space belonged to a personal
+    /// build configuration, so a ceiling blind to them is a ceiling too low.
+    /// Witnessing is not mirroring -- the probe's page is read for one number
+    /// and never mapped to an item, and
+    /// [`the_ceiling_counts_a_build_the_default_filter_would_hide`] is where
+    /// the ceiling half is asserted.
+    #[tokio::test]
+    async fn a_personal_build_is_witnessed_by_the_ceiling_and_never_mirrored() {
+        let rest = FakeRest::new(
+            vec![build_type("Payout_Build", "Payout")],
+            vec![
+                build(400, "Payout_Build", "Payout", "finished"),
+                personal_build(700, "Payout_Build", "Payout", "finished"),
+                personal_build(701, "Payout_Build", "Payout", "running"),
+            ],
+        );
+        let (items, cursor) = run(&rest, &TeamCityConfig::default(), None).await;
+        assert_eq!(
+            keys(&items),
+            ["buildType:Payout_Build", "build:400"],
+            "neither personal build reaches the mirror, finished or running"
+        );
+        assert_eq!(
+            cursor, r#"{"v":1,"since_build_id":400}"#,
+            "and nothing about a build that is not in the mirror moves the watermark: 700 \
+             finished, and the run neither emitted it nor counted it"
         );
     }
 
