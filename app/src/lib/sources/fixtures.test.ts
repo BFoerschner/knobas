@@ -40,6 +40,7 @@ const TRANSCRIBED = [
     name: "JIRA_SCHEMA",
     schema: JIRA_SCHEMA as unknown,
     present: ["flavor", "projects", "jql_filter", "username"],
+    usernameType: ["string", "null"],
     absent: [
       "epic_link_field",
       "page_size",
@@ -53,12 +54,18 @@ const TRANSCRIBED = [
     name: "GITEA_SCHEMA",
     schema: GITEA_SCHEMA as unknown,
     present: ["owners", "repos", "username"],
+    usernameType: ["string", "null"],
     absent: ["commits_per_repo", "prs_per_repo", "include_pr_comments", "rate_limit_per_sec"],
   },
   {
     name: "TEAMCITY_SCHEMA",
     schema: TEAMCITY_SCHEMA as unknown,
     present: ["project_ids", "build_type_ids", "builds_per_config", "username"],
+    // The third spelling, and a real one: TeamCity's `username` is not
+    // nullable. It is why "drawable as text" cannot be the check — both
+    // spellings draw as text, so a Jira that drifted to this one would look
+    // perfectly legal to a rule that only asked whether the form can fill it.
+    usernameType: "string",
     absent: ["rate_limit_per_sec"],
   },
 ] as const;
@@ -105,22 +112,28 @@ test.each(TRANSCRIBED)("$name invents no `required` on an adapter's behalf", ({ 
 });
 
 /**
- * `username` is drawable as text in every fixture that has one.
+ * `username`'s **exact** spelling, per adapter — not merely "drawable".
  *
- * The convention the Add-source dialog's fill is keyed on (#82), and the exact
- * shape the first drift broke: `{type: "string"}` where the adapter says
- * `{type: ["string", "null"]}` reads as "not a string", draws a JSON textarea,
- * and makes typing a username a parse error unless the reader knows to quote
- * it. `sources_registry.rs` asserts the same convention over the real
- * descriptors; this asserts it over the corpus the form tests actually run on,
- * which is the copy that was wrong.
+ * This is the one property with a user-facing bug behind it, and it is the
+ * property the Add-source dialog's fill is keyed on by name (#82). The
+ * fixture spelled Jira's as `{type: "string"}` where the adapter says
+ * `{type: ["string", "null"]}`, which `controlFor` read as "not a string" and
+ * drew as a JSON textarea, so typing a username was a parse error unless the
+ * reader knew to quote it.
+ *
+ * The obvious check — "it draws as text" — was written first and **survived
+ * re-introducing that exact drift**, because both spellings draw as text:
+ * TeamCity's really is a plain `"string"`. A rule loose enough to admit both
+ * cannot tell the adapter that changed from the adapter that did not, so the
+ * spelling each adapter uses is named in the table above and compared
+ * literally. It is a second witness, not ground truth — that still needs a
+ * check with the adapters in reach — but it makes this drift a deliberate
+ * two-place edit rather than a one-character silence.
  */
-test.each(TRANSCRIBED)("$name's username is a string the dialog can fill", ({ schema }) => {
+test.each(TRANSCRIBED)("$name spells username exactly as its adapter does", ({ schema, usernameType }) => {
   const username = propertiesOf(schema).username;
   expect(username, "every M1 adapter has a username").toBeTruthy();
-  const type = username!.type;
-  const named = Array.isArray(type) ? type.filter((member) => member !== "null") : [type];
-  expect(named).toEqual(["string"]);
+  expect(username!.type).toEqual(usernameType);
 });
 
 test("the mock adapter needs no configuring, which is the empty-form case", () => {
