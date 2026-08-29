@@ -49,7 +49,7 @@
 
 use knobas_source::contract::VecSink;
 use knobas_source::instance::SourceInstance;
-use knobas_source::{AuthMethod, Source, SyncItem};
+use knobas_source::{AuthMethod, Source, SourceError, SyncItem};
 
 /// Read from the environment rather than hardcoded, so the suite can be
 /// pointed at a private TeamCity without a code change; `.env.example` carries
@@ -89,7 +89,20 @@ fn live() -> Option<Live> {
         } else {
             secret
         },
-        http: reqwest::Client::new(),
+        // Not `Client::new()`. `knobas-http` calls a bare client "a client
+        // with no rate limiter, no retry budget, no `Retry-After`", and the
+        // budget being spent here is somebody else's. The recipe runs this
+        // suite serially for the same reason; a timeout keeps a wedged
+        // request from holding that serial queue open, and the user agent
+        // means the server's operators can see who is asking.
+        http: reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .user_agent(concat!(
+                "knobas-live-certification/",
+                env!("CARGO_PKG_VERSION")
+            ))
+            .build()
+            .expect("a reqwest client with a timeout"),
     })
 }
 
@@ -154,11 +167,17 @@ impl Live {
     }
 
     fn source(&self, config: serde_json::Value) -> Box<dyn Source> {
+        self.source_at(&self.url, config)
+    }
+
+    /// The adapter against a base URL that is not necessarily the configured
+    /// one -- the un-prefixed root, for the 401 certification below.
+    fn source_at(&self, base_url: &str, config: serde_json::Value) -> Box<dyn Source> {
         match knobas_source_teamcity::build(SourceInstance {
             id: "teamcity".to_owned(),
             kind: knobas_source_teamcity::ADAPTER_KIND.to_owned(),
             display_name: "the live instance".to_owned(),
-            base_url: self.url.clone(),
+            base_url: base_url.to_owned(),
             auth: Some(AuthMethod::Pat),
             secret: Some(self.secret.clone()),
             config,
@@ -191,6 +210,17 @@ async fn full(source: &dyn Source) -> (Vec<SyncItem>, String) {
 
 fn of_kind<'a>(items: &'a [SyncItem], kind: &str) -> Vec<&'a SyncItem> {
     items.iter().filter(|i| i.kind == kind).collect()
+}
+
+/// Every test here scopes itself to a configuration it *discovered*, so this
+/// walk appears once per test; `id_of` is the same idea for the other half of
+/// the pair.
+fn build_type_of(build: &serde_json::Value) -> String {
+    build
+        .get("buildTypeId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_else(|| panic!("a build names its configuration: {build}"))
+        .to_owned()
 }
 
 fn id_of(build: &serde_json::Value) -> i64 {
@@ -247,12 +277,7 @@ async fn a_scoped_full_sync_lands_under_the_documented_key_forms() {
     let recent = live
         .builds("state:finished,count:1", "id,buildTypeId")
         .await;
-    let build_type = recent
-        .first()
-        .and_then(|b| b.get("buildTypeId"))
-        .and_then(serde_json::Value::as_str)
-        .expect("a finished build names its configuration")
-        .to_owned();
+    let build_type = build_type_of(recent.first().expect("the server has a finished build"));
     println!("LIVE scope: buildType {build_type}");
 
     let (items, cursor) = full(&*live.scoped_to(&build_type)).await;
@@ -266,6 +291,29 @@ async fn a_scoped_full_sync_lands_under_the_documented_key_forms() {
         vec![format!("buildType:{build_type}").as_str()],
         "the configuration key is buildType:<id>, and the scope holds"
     );
+    // The configuration carries the same shape the builds do; `tests/mockd.rs`
+    // asserts all of it against the fake, so all of it is re-asserted here.
+    for item in &configs {
+        assert!(
+            !item.title.trim().is_empty(),
+            "every configuration has a title"
+        );
+        assert!(
+            item.body_text.contains(&item.title),
+            "the indexed blob opens with the title: {:?}",
+            item.body_text
+        );
+        assert!(
+            item.web_url.is_some(),
+            "every configuration is openable in the browser (P5): {:?}",
+            item.title
+        );
+        assert!(
+            item.payload.get("id").is_some(),
+            "the payload is the record verbatim (spec §3a), not a re-serialisation"
+        );
+        assert!(!item.deleted, "M1 has no deletion channel for TeamCity");
+    }
 
     let builds = of_kind(&items, "build");
     assert!(
@@ -347,11 +395,7 @@ async fn a_watermark_at_the_top_of_a_page_does_not_wedge_the_next_run() {
         .builds("defaultFilter:false,count:100", "id,buildTypeId")
         .await;
     let watermark = page.iter().map(id_of).max().expect("the server has builds");
-    let build_type = page
-        .iter()
-        .find_map(|b| b.get("buildTypeId").and_then(serde_json::Value::as_str))
-        .expect("a build names its configuration")
-        .to_owned();
+    let build_type = build_type_of(page.first().expect("the server has builds"));
     println!("LIVE wedge check: resuming from the page maximum {watermark}");
 
     let source = live.scoped_to(&build_type);
@@ -373,6 +417,11 @@ async fn a_watermark_at_the_top_of_a_page_does_not_wedge_the_next_run() {
         .ok()
         .and_then(|v| v["since_build_id"].as_i64())
         .expect("a cursor this adapter wrote");
+    // `cursor::advance` ends in `next.max(previous)` and a zero-item run hands
+    // `cursor_in` back byte-for-byte, so this cannot fail against the adapter
+    // as it stands. It is here as the statement of the invariant a future edit
+    // to `cursor.rs` would have to break -- the *live* subject of this test is
+    // the `unwrap_or_else` above, which is where #91 landed.
     assert!(
         next >= watermark,
         "the watermark must never regress: {watermark} -> {next}"
@@ -473,11 +522,14 @@ async fn the_opening_page_carries_ids_but_promises_no_order() {
     let (status, body) = live
         .get("app/rest/builds?locator=defaultFilter:false,count:3,order:(id:desc)&fields=count")
         .await;
-    assert_ne!(
-        status, 200,
-        "this TeamCity now accepts `order:(id:desc)` on /app/rest/builds. That was the fix \
-         issue #91 could not use, and the ceiling's maximum-of-the-page reading could be \
-         revisited: {body}"
+    // `400`, not merely "not 200": a 429 or a 502 is a transient failure and
+    // must not read as "the dimension is still unknown".
+    assert_eq!(
+        status, 400,
+        "an unknown locator dimension is a 400. A 200 means this TeamCity now accepts \
+         `order:(id:desc)` on /app/rest/builds -- the fix issue #91 could not use, so the \
+         ceiling's maximum-of-the-page reading could be revisited. Any other status is a \
+         transient failure and this run proved nothing: {body}"
     );
     println!("LIVE order:(id:desc) -> HTTP {status}");
 }
@@ -536,9 +588,14 @@ async fn a_build_answers_by_id_and_an_id_no_build_has_is_a_404() {
 #[ignore = "needs a live TeamCity: `just teamcity-live`"]
 async fn most_builds_name_nobody_and_the_adapter_leaves_the_author_empty() {
     let live = live_or_skip!();
+    // The adapter's own locator, `defaultFilter` left off exactly as
+    // `sync::execute` leaves it off. Sampling from a `defaultFilter:false`
+    // page instead would pick builds the default filter hides -- a canceled
+    // one, say (see the cancellation test below) -- and the scoped run
+    // underneath could then legitimately come back with nothing.
     let page = live
         .builds(
-            "state:finished,defaultFilter:false,count:100",
+            "state:finished,count:100",
             "id,buildTypeId,triggered(user(username))",
         )
         .await;
@@ -556,16 +613,21 @@ async fn most_builds_name_nobody_and_the_adapter_leaves_the_author_empty() {
         anonymous.len(),
         page.len()
     );
-    let sample = *anonymous.first().expect(
-        "not one of the newest finished builds is VCS- or schedule-triggered, which would make \
-         this server unlike any CI server this finding was measured on",
-    );
-    let build_type = sample
-        .get("buildTypeId")
-        .and_then(serde_json::Value::as_str)
-        .expect("a build names its configuration");
+    let Some(sample) = anonymous.first().copied() else {
+        // Recorded, not asserted. That every build in one window names a user
+        // would be a surprising server rather than a broken adapter, and the
+        // window is not ours to arrange -- the same rule the cancellation
+        // test below follows.
+        println!(
+            "LIVE authorship: every build in this window names a user, so there is no \
+             anonymous build to carry through the adapter. That is not what this finding was \
+             measured on; re-run, and re-read the finding if it holds."
+        );
+        return;
+    };
+    let build_type = build_type_of(sample);
 
-    let (items, _) = full(&*live.scoped_to(build_type)).await;
+    let (items, _) = full(&*live.scoped_to(&build_type)).await;
     let builds = of_kind(&items, "build");
     assert!(!builds.is_empty());
     assert!(
@@ -633,11 +695,7 @@ async fn a_canceled_build_is_status_unknown_and_the_adapter_s_locator_hides_it()
         return;
     };
     let id = id_of(sample);
-    let build_type = sample
-        .get("buildTypeId")
-        .and_then(serde_json::Value::as_str)
-        .expect("a build names its configuration")
-        .to_owned();
+    let build_type = build_type_of(sample);
     assert!(
         sample
             .get("statusText")
@@ -656,12 +714,17 @@ async fn a_canceled_build_is_status_unknown_and_the_adapter_s_locator_hides_it()
         .iter()
         .map(id_of)
         .collect();
-    assert!(
-        widened.contains(&id),
-        "precondition: build {id} must be inside its own configuration's newest 100 finished \
-         builds for the comparison below to mean anything. It is not, so the corpus moved \
-         between the two requests — re-run."
-    );
+    if !widened.contains(&id) {
+        // Recorded, not asserted, for the same reason as the empty window
+        // above: the corpus moved between two requests, which is a fact about
+        // somebody else's server and not something anyone here can act on.
+        println!(
+            "LIVE cancellations: build {id} left its own configuration's newest 100 finished \
+             builds between two requests, so the comparison below would compare two different \
+             pages. Re-run."
+        );
+        return;
+    }
 
     // The locator `sync::execute`'s full sync actually sends.
     let adapters_own: Vec<i64> = live
@@ -683,5 +746,154 @@ async fn a_canceled_build_is_status_unknown_and_the_adapter_s_locator_hides_it()
     println!(
         "LIVE cancellations: build {id} in {build_type} is served with defaultFilter:false and \
          hidden from the adapter's own locator — canceled builds never reach the mirror"
+    );
+}
+
+/// The `/guestAuth` prefix is the whole credential story here, so the other
+/// half of it is certified too: **without** that prefix the same server
+/// refuses, and the adapter calls that refusal `Unauthorized`.
+///
+/// `tests/mockd.rs`'s `a_401_is_unauthorized_from_both_entry_points` encodes
+/// this against the fake; this is the same shape asked of the server that
+/// decides. It matters beyond the prefix: `Unauthorized` is what puts *Re-enter
+/// password* on screen, and a 401 misread as a protocol failure would report a
+/// dead credential as a broken server.
+///
+/// Only runs when there is a prefix to strip. Pointed at a TeamCity that is
+/// not guest-readable there is no un-prefixed variant to compare against, and
+/// inventing one would be a test about this file's idea of the URL rather than
+/// about the server.
+#[tokio::test]
+#[ignore = "needs a live TeamCity: `just teamcity-live`"]
+async fn the_bare_path_refuses_where_guestauth_admits_and_the_adapter_calls_it_unauthorized() {
+    let live = live_or_skip!();
+    let Some(bare) = live.url.strip_suffix("/guestAuth") else {
+        println!(
+            "LIVE auth: {} carries no /guestAuth prefix, so there is no un-prefixed variant of \
+             it to refuse. Nothing to certify here.",
+            live.url
+        );
+        return;
+    };
+
+    let (status, body) = live.get("app/rest/server?fields=version").await;
+    assert_eq!(
+        status, 200,
+        "the guestAuth prefix admits without a token: {body}"
+    );
+
+    let unprefixed = live
+        .http
+        .get(format!("{bare}/app/rest/server?fields=version"))
+        .header("Accept", "application/json")
+        .header("Authorization", format!("Bearer {}", live.secret))
+        .send()
+        .await
+        .expect("the un-prefixed root answers");
+    assert_eq!(
+        unprefixed.status().as_u16(),
+        401,
+        "the same server, the same header, without /guestAuth: the prefix is what authenticates \
+         the request, and if the bare path now admits too then `.env.example`'s note that the \
+         prefix is load-bearing is stale"
+    );
+
+    let err = live
+        .source_at(bare, serde_json::json!({}))
+        .test_connection()
+        .await
+        .expect_err("a refused credential is not a connection");
+    assert!(
+        matches!(err, SourceError::Unauthorized { .. }),
+        "a 401 is Unauthorized and nothing else -- a Protocol failure here would report a dead \
+         credential as a broken server: {err:?}"
+    );
+    assert_eq!(
+        err.status(),
+        Some(401),
+        "the status rides along, so the health strip can tell 401 from 403 (ADR-0004): {err:?}"
+    );
+    println!("LIVE auth: /guestAuth -> 200, bare -> 401 -> {err:?}");
+}
+
+/// **The fake and the server disagree about the error body, and by this
+/// suite's own standing rule the fake is wrong.**
+///
+/// `http::error_message` requires a body whose first line starts with `Error
+/// has occurred during request processing`, and its doc calls that "the shape
+/// `knobas-mockd`'s `tc_error` serves, which is the shape a real TeamCity
+/// serves". Measured here, a real TeamCity 2026.2 serves that shape to nobody:
+/// with `Accept: application/json` -- which `knobas-http` sets on every
+/// request and cannot be talked out of -- errors come back as a JSON envelope,
+/// `{"errors":[{"message": …, "statusText": …}]}`, and the message is in a
+/// field rather than on a line.
+///
+/// So `error_message` returns `None` on every error this adapter will ever
+/// see, and the excerpt `knobas-http` falls back to puts a JSON blob on screen
+/// where the sentence was wanted. Nothing here is broken -- the error *class*
+/// is read off the status, not the body -- so this is a legibility defect and
+/// its own issue, exactly as the cancellation finding below is. This test
+/// certifies the shape and records the disagreement; it does not fix it.
+///
+/// Asserted by form: the envelope's presence and a non-empty message, on both
+/// of the two statuses the adapter reads (400 and 404). The messages
+/// themselves are printed.
+#[tokio::test]
+#[ignore = "needs a live TeamCity: `just teamcity-live`"]
+async fn a_rest_error_is_a_json_envelope_and_not_the_plaintext_the_fake_serves() {
+    let live = live_or_skip!();
+    let newest = id_of(
+        live.builds("defaultFilter:false,count:1", "id")
+            .await
+            .first()
+            .expect("the server has a build"),
+    );
+    let probes = [
+        (
+            400,
+            "app/rest/builds?locator=defaultFilter:false,order:(id:desc)&fields=count".to_owned(),
+            "an unknown locator dimension",
+        ),
+        (
+            404,
+            format!(
+                "app/rest/builds/id:{}?fields=id",
+                newest.saturating_mul(1000)
+            ),
+            "an id no build has",
+        ),
+    ];
+    for (want, path, what) in probes {
+        let (status, body) = live.get(&path).await;
+        assert_eq!(status, want, "{what} is a {want}: {body}");
+        let message = body
+            .get("errors")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|errors| errors.first())
+            .and_then(|error| error.get("message"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_else(|| {
+                panic!(
+                    "{what} did not answer with TeamCity's JSON error envelope. If this is now \
+                     the plaintext body `http::error_message` parses, that function finally \
+                     works against a real server and this test records a *fix*: {body}"
+                )
+            });
+        assert!(
+            !message.trim().is_empty(),
+            "the envelope carries the sentence, not just a status: {body}"
+        );
+        // The shape `error_message` requires, absent -- which is the finding.
+        let plaintext = body.as_str().unwrap_or_default();
+        assert!(
+            !plaintext.starts_with("Error has occurred during request processing"),
+            "the body is both a JSON envelope and the plaintext shape, which cannot be: {body}"
+        );
+        println!("LIVE error {status} ({what}): errors[0].message = {message:?}");
+    }
+    println!(
+        "LIVE error: `http::error_message` parses none of these -- it wants a first line \
+         reading `Error has occurred during request processing`, which this server sends only \
+         to a client that did not ask for JSON. The fake serves that line; the server does not."
     );
 }
