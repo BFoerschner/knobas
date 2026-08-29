@@ -154,6 +154,9 @@ mod literal {
         /// A bare word that must be exactly `word` -- how `as const` is checked.
         fn keyword(&mut self, word: &str) {
             self.trivia();
+            if !self.peek().is_some_and(is_ident_start) {
+                self.fail(&format!("expected `{word}`"));
+            }
             let got = self.identifier();
             if got != word {
                 self.fail(&format!("expected `{word}`, found `{got}`"));
@@ -276,19 +279,19 @@ mod literal {
                             'b' => out.push('\u{8}'),
                             'f' => out.push('\u{c}'),
                             'u' => {
-                                let hex: String =
-                                    self.chars[self.pos..(self.pos + 4).min(self.chars.len())]
-                                        .iter()
-                                        .collect();
+                                let hex: String = self.chars
+                                    [self.pos..(self.pos + 4).min(self.chars.len())]
+                                    .iter()
+                                    .collect();
                                 let code = u32::from_str_radix(&hex, 16)
                                     .unwrap_or_else(|_| self.fail("a malformed \\u escape"));
                                 self.pos += 4;
-                                out.push(
-                                    char::from_u32(code)
-                                        .unwrap_or_else(|| self.fail("a \\u escape that is not a character")),
-                                );
+                                out.push(char::from_u32(code).unwrap_or_else(|| {
+                                    self.fail("a \\u escape that is not a character")
+                                }));
                             }
-                            other => self.fail(&format!("`\\{other}` is not an escape this parser knows")),
+                            other => self
+                                .fail(&format!("`\\{other}` is not an escape this parser knows")),
                         }
                     }
                     Some(c) => {
@@ -341,7 +344,10 @@ mod literal {
 
 #[test]
 fn an_object_literal_with_unquoted_keys_parses() {
-    let value = literal::as_const(r#"export const X = { type: "object", n: 1 } as const;"#, "X");
+    let value = literal::as_const(
+        r#"export const X = { type: "object", n: 1 } as const;"#,
+        "X",
+    );
     assert_eq!(value, serde_json::json!({ "type": "object", "n": 1 }));
 }
 
@@ -385,7 +391,7 @@ fn disagreements(fixture: &serde_json::Value, adapter: &serde_json::Value) -> Ve
         }
         // The one level the absence licence is spent at.
         let (Some(ours), Some(theirs)) = (ours.as_object(), theirs.as_object()) else {
-            found.push(format!("`properties` is not an object on both sides"));
+            found.push("`properties` is not an object on both sides".to_owned());
             continue;
         };
         for (name, ours) in ours {
@@ -411,7 +417,6 @@ fn disagreement(path: &str, ours: &serde_json::Value, theirs: &serde_json::Value
         serde_json::to_string_pretty(theirs).expect("a real schema re-serializes"),
     )
 }
-
 
 #[test]
 fn a_property_the_fixture_leaves_out_is_licensed_and_one_it_spells_differently_is_not() {
@@ -507,11 +512,46 @@ fn every_fixture_schema_says_what_its_adapter_says() {
 fn every_exported_fixture_is_compared_against_an_adapter() {
     let mut exported = literal::exported_const_names(FIXTURES);
     exported.sort();
-    let mut compared: Vec<String> = MIRRORED.iter().map(|(name, _)| (*name).to_owned()).collect();
+    let mut compared: Vec<String> = MIRRORED
+        .iter()
+        .map(|(name, _)| (*name).to_owned())
+        .collect();
     compared.sort();
     assert_eq!(
         exported, compared,
         "app/src/lib/sources/fixtures.ts exports a schema this test does not compare against any \
          adapter"
     );
+}
+
+// -- the parser refuses rather than skipping ------------------------------------
+
+/// The property that drifted furthest, in the shape a text scrape hits it in.
+///
+/// `"maximum": MAX_BUILDS_PER_CONFIG` is a `const` on the adapter's side, and
+/// the temptation for a checker that meets a name it cannot resolve is to move
+/// on. Moving on is how a drift detector reports success over the one property
+/// it could not read, so this is a panic.
+#[test]
+#[should_panic(expected = "is not a literal")]
+fn a_name_the_fixture_cannot_resolve_stops_the_test() {
+    literal::as_const(
+        "export const X = { maximum: MAX_BUILDS_PER_CONFIG } as const;",
+        "X",
+    );
+}
+
+/// A fixture that stops being `as const` is a fixture whose type widens --
+/// and, here, one whose end this parser never found.
+#[test]
+#[should_panic(expected = "expected `as`")]
+fn a_literal_that_is_not_as_const_stops_the_test() {
+    literal::as_const(r#"export const X = { type: "object" };"#, "X");
+}
+
+/// A fixture that was renamed or deleted must not read as "nothing to compare".
+#[test]
+#[should_panic(expected = "declares no")]
+fn a_fixture_that_is_gone_stops_the_test() {
+    literal::as_const(r#"export const Y = { type: "object" } as const;"#, "X");
 }
