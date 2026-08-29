@@ -307,6 +307,13 @@ gitea-live:
 # either way: the real containment is the `MAX_RESPONSE_ITEMS: "50"` pin in
 # docker-compose.yml, which uncaps on the next `docker compose up` whatever
 # happened to this shell.
+#
+# ONE ENVIRONMENT, ONE OWNER -- and this recipe is the harder of the two to
+# share. It seeds (so it re-mints the Gitea token, 401ing anyone else mid-run)
+# *and* it recreates the shared container capped to one record and back again,
+# so a concurrent `just gitea-live` reads a server answering short pages and
+# fails for a reason that is not in its own tree. Claim the environment before
+# you run this. testenv/README.md, "One environment, one owner at a time".
 gitea-live-capped:
     #!/usr/bin/env bash
     set -euo pipefail

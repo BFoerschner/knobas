@@ -210,8 +210,21 @@ fn revoked() -> String {
 /// * idle behaviour of the walks this file mutates, by the idle clauses of
 ///   [`a_pull_request_opened_through_the_api_appears_in_the_next_incremental_run`]
 ///   and [`a_commit_pushed_through_the_api_arrives_once_and_only_once`];
-/// * the owner-scoped idle pair itself, against the docker-free fake in
-///   `tests/sync.rs`, where quiescence is by construction.
+/// * the full->idle pair over the repository-*listing* walk, against the
+///   docker-free fake in `tests/sync.rs` --
+///   `an_idle_run_emits_nothing_and_returns_the_same_bytes` and
+///   `the_position_after_one_change_is_itself_idle_stable`, both on the
+///   unfiltered selection, which walks the same listing an `owners[]` scope
+///   does (`sync.rs`'s module doc: an empty `owners[]` means every repository
+///   the token can see). Quiescence there is by construction.
+///
+/// Said exactly, because a record of a coverage loss is worth nothing if it
+/// overstates what is left: **no docker-free test runs an idle pair with
+/// `owners[]` actually set.** `an_owner_filter_drops_everything_else` in
+/// `tests/sync.rs` certifies that the filter is a filter over that same walk,
+/// and it does one full sync rather than a pair. So what this narrowing gives
+/// up outright is the idle pair with the owner filter applied, live or fake;
+/// what it keeps is the idle pair over the walk the filter sits on.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Gitea container"]
 async fn passes_the_contract_battery_against_the_real_container() {

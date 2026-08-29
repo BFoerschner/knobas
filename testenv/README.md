@@ -76,7 +76,7 @@ export KNOBAS_GITEA_REPO=payout-service
 The repo's standing rule is that a worktree has exactly one owner. **This
 Docker environment is not covered by it**: there is one of it, shared by every
 worktree on the machine, and two agents seeding or running live suites against
-it at the same time will break each other. Two ways, both measured:
+it at the same time will break each other. Three ways:
 
 - **The seed re-mints the Gitea token.** `seed-gitea.sh` reuses the token
   recorded in `seed-state.json` while it still authenticates, but
@@ -92,6 +92,11 @@ it at the same time will break each other. Two ways, both measured:
 - **The Gitea live suite sweeps.** `tests/live_gitea.rs` removes any leftover
   `knobas-` branch in `payout-service` before it starts, which is how a killed
   run heals (issue #143). It cannot tell a sibling's live branch from a corpse.
+- **`just gitea-live-capped` reconfigures the shared container.** It recreates
+  Gitea with `MAX_RESPONSE_ITEMS: 1` and uncaps it again from a trap, so for
+  the length of that run every other reader of this environment is talking to a
+  server that answers one record per page. A concurrent `just gitea-live` fails
+  on missing records, which reads as an adapter defect and is not one.
 
 So: **claim the environment before running `./seed`, `just gitea-live` or
 `just gitea-live-capped`, and say when you release it.** The failure mode is a
