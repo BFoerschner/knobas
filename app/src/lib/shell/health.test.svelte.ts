@@ -246,6 +246,70 @@ test("replace forgets a source the authoritative list no longer carries", async 
   stop();
 });
 
+/**
+ * The seed is a *read*, and a read has a duration.
+ *
+ * `reseed()` fetches `credential_health` and hands the answer to
+ * {@link Health.replace}. Both of the shell's calls do it — `App.svelte`'s
+ * `$effect(() => { if (lifecycle.ready) void health.reseed(); })` at boot and
+ * `onFirstRunDone`'s call after the wizard — so an event that lands *while
+ * that read is in flight* meets a `replace` carrying the database as it stood
+ * before the event. `start()`'s comment used to claim this away ("the seed
+ * that follows is the newer reading"); it is a claim about ordering that the
+ * in-flight window breaks, and this test is what turns it into a guarantee.
+ *
+ * The direction matters: the seed's rows say `ok` and the event says
+ * `unauthorized`, so losing the merge does not raise a false alarm — it
+ * **hides a real one**, on the surface whose whole job is saying a source has
+ * stopped working (#148).
+ *
+ * **The read is held open across the event.** Called in sequence these two are
+ * fine, so a test that let the seed resolve before emitting would pass against
+ * the bug.
+ */
+test("a scheduler rejection landing mid-seed is not written back to ok by the seed", async () => {
+  let resolveSeed: ((rows: CredentialHealth[]) => void) | null = null;
+  const events = fakeListen();
+  const health = createHealth({
+    credentialHealth: () =>
+      new Promise<CredentialHealth[]>((resolve) => {
+        resolveSeed = resolve;
+      }),
+    listen: events.listen,
+  });
+  const stop = health.start();
+  await vi.waitFor(() => expect(events.handlers.length).toBe(1));
+
+  const seeding = health.reseed();
+  await vi.waitFor(() => expect(resolveSeed).not.toBeNull());
+
+  // …and with that read still open, the scheduler discovers the credential is
+  // being refused. `checked_at` is five minutes past the snapshot below.
+  events.emit(
+    row("gitea", "unauthorized", {
+      checked_at: "2026-08-22T10:05:00Z",
+      detail: "401 from /api/v1/user",
+    }),
+  );
+  flushSync();
+  expect(health.get("gitea")?.state).toBe("unauthorized");
+
+  // The seed answers from before the check: `gitea` is still green in it.
+  resolveSeed!([row("gitea", "ok"), row("jira", "ok")]);
+  await seeding;
+  flushSync();
+
+  expect(
+    health.get("gitea")?.state,
+    "the seed wrote a stale ok over a credential the scheduler had just seen refused",
+  ).toBe("unauthorized");
+  expect(health.get("gitea")?.detail).toBe("401 from /api/v1/user");
+  // …and the rest of the seed still lands: membership is the incoming set's,
+  // so the source the store had never heard of arrives.
+  expect(health.all.map((h) => h.source_id)).toEqual(["gitea", "jira"]);
+  stop();
+});
+
 /** Calling `start` twice must not leave a subscription nothing can unwind. */
 test("start is idempotent — a second call does not strand a listener", async () => {
   const events = fakeListen();
