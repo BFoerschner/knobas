@@ -492,7 +492,7 @@ async fn a_guard_whose_server_stops_answering_reports_rather_than_stalling() {
     };
 
     let mut guard = Litter::new(&env).await;
-    guard.cleanup_budget(std::time::Duration::from_millis(250));
+    guard.set_cleanup_budget(std::time::Duration::from_millis(250));
     guard.will_create(&format!("{LITTER}wedged-1"));
 
     let started = std::time::Instant::now();

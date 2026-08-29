@@ -23,10 +23,18 @@
 //! `link.rs` explains why it reads the view *instead of* the table, and this
 //! file's own header does the same. A scan that forbade the name would forbid
 //! the explanation. What it looks for is the table in a **read position**:
-//! `from knobas.link` and `join knobas.link`. Writes are not the hazard --
-//! `insert into knobas.link` and `update knobas.link` are how a link or a
-//! proposal comes to exist at all, and neither can be confused with the other
-//! population.
+//! `from knobas.link` and `join knobas.link`. `insert into knobas.link` and
+//! `update knobas.link` are how a link or a proposal comes to exist at all,
+//! neither can be confused with the other population, and neither needle
+//! matches them.
+//!
+//! `delete from knobas.link` does match, because the two words the needle wants
+//! are adjacent there too, and the message it would print names the wrong
+//! reason. Nothing in the tree hits it: a link is removed by a tombstone
+//! (`link::remove` writes `update knobas.link set deleted_at = now()`), and a
+//! hard delete would want an argument of its own anyway. Whoever writes the
+//! first one gets a report about seeing both populations and should read this
+//! paragraph instead.
 //!
 //! Comments are scanned along with code, deliberately, and that is the whole
 //! point: issue #161's actual defect was a **doc comment** in
@@ -41,6 +49,31 @@
 //! clause broken across two lines of a multi-line SQL literal is still seen.
 //! The character after the needle must not continue an identifier, so
 //! `knobas.link_pair_idx` is not mistaken for the table.
+//!
+//! ## What it cannot see
+//!
+//! The needle wants `from` and the table next to each other in the source
+//! text, so SQL that is assembled rather than written is out of its reach.
+//! `knobas-search/src/sql.rs` is the one place in the tree that assembles it:
+//!
+//! ```text
+//! let _ = write!(sql, "    from {}", corpus.relation);
+//! ```
+//!
+//! `Corpus::relation` is a `&'static str` (`corpus.rs`: `relation:
+//! "knobas.note n"`), so a corpus added later as `relation: "knobas.link l"`
+//! would be a shipping read of the base table that this test walks past, in the
+//! same crate #161's defect was in. The smart lists are not exposed that way --
+//! `lists.rs` builds its SQL from `concat!` over whole clauses, so a future
+//! `"    from knobas.confirmed_link l\n"` is one literal and the scan reads it
+//! -- but a clause split across two `concat!` arguments would slip through as
+//! well.
+//!
+//! Neither is worth a second needle today: there is no link corpus and no plan
+//! for one, and a rule over string literals that merely start with the table's
+//! name would report a table-name constant as a read. What the two cost is the
+//! scope of the claim. This test covers SQL written as text, which is all of
+//! the SQL there is right now.
 //!
 //! ## The two exemptions
 //!
@@ -224,6 +257,14 @@ fn the_rule_actually_rejects_a_read_of_the_base_table() {
             "insert into knobas.link (from_id, to_id, relation) values ($1, $2, $3)"
         ),
         "writing a link is not reading one, and a write cannot confuse the two populations"
+    );
+    assert!(
+        offends(
+            "knobas-core/src/note.rs",
+            "delete from knobas.link where id = $1"
+        ),
+        "a hard delete is caught too, because `from knobas.link` is in it -- see the header: \
+         the report names the wrong reason, and nothing in the tree hits it"
     );
     assert!(
         !offends(

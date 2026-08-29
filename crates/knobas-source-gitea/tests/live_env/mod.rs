@@ -269,7 +269,7 @@ impl Litter {
     /// that takes milliseconds. Nothing against the real container calls it:
     /// the live suite wants the full budget, because there the number is the
     /// only thing standing between a wedged server and a stalled run.
-    pub fn cleanup_budget(&mut self, budget: Duration) {
+    pub fn set_cleanup_budget(&mut self, budget: Duration) {
         self.budget = budget;
     }
 
