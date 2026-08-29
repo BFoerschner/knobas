@@ -946,8 +946,11 @@ async fn a_discussion_the_server_did_not_send_whole_ends_the_run() {
         panic!("{error:?}");
     };
     assert!(
-        message.contains("4 of its 5 comments") && message.contains("include_pr_comments"),
-        "the message must name what was missed and the lever that stops asking: {message}"
+        message.contains("4 of its 5 comments")
+            && message.contains("X-Total-Count")
+            && message.contains("include_pr_comments"),
+        "the message must name what was missed, the header it read it from, and the lever \
+         that stops asking: {message}"
     );
     // No cursor came back over the gap, so the next run re-reads from where
     // this one stood rather than past it.

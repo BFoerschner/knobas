@@ -830,7 +830,6 @@ fn close_watermark<K: Ord + Clone>(
 /// read the shorter `body_text` as a deletion. What is lost is search text on
 /// one item, and it is restored the next time that pull request is updated, or
 /// by the next full sync.
-///
 async fn fetch_comments(
     source: &crate::GiteaSource,
     at: RepoRef<'_>,
@@ -867,10 +866,10 @@ async fn fetch_comments(
         && total > discussion.raw.len()
     {
         return Err(RepoError::Fatal(SourceError::protocol(format!(
-            "gitea: {}#{} answered {} of its {total} comments and this endpoint has no second \
-             page to ask for, so every long discussion on this instance would be mirrored \
-             incomplete without saying so. Set include_pr_comments to false to index pull \
-             requests without their discussion.",
+            "gitea: {}#{} answered {} of its {total} comments (its own X-Total-Count header \
+             says {total}) and this endpoint has no second page to ask for, so every long \
+             discussion on this instance would be mirrored incomplete without saying so. Set \
+             include_pr_comments to false to index pull requests without their discussion.",
             at.full_name,
             pr.number,
             discussion.raw.len(),

@@ -1150,13 +1150,20 @@ still reads one un-widened page, and is still the only query that sends that dim
 
 ### Amendments from the Gitea discussion-completeness fix (2026-08-29, binding) — issue #131
 
+Ruled by Fable under delegation while Björn was away, 2026-08-29, on issue #131; Björn can
+overturn it. **This entry refuses the remedy its own ticket asked for**, which is why the marker
+matters more here than in its neighbours: the orchestrator confirmed the reversal on #131 and
+left the discarded paging implementation in that branch's history.
+
 Issue #131 reported that `client::issue_comments` sends no `limit` and does not page, and
 therefore truncates a pull-request discussion at Gitea's `DEFAULT_PAGING_NUM` — thirty comments,
 on a stock install, today — and asked for the walk issue #81 gave the other four listings.
 **Measured against the pinned container, the premise is false and the remedy would have been
 worse than the defect.** Recorded here because §4.1 defines `body_text` as title + description +
-comment texts and §4.2 pins Gitea's page size at 50, and because the next reader will otherwise
-re-file the same issue.
+comment texts **and** pins the page sizes ("Jira 100, Gitea 50, TeamCity 100"), and because the
+next reader will otherwise re-file the same issue. The endpoint itself is the fifth Gitea read,
+granted by ruling B1 and config-gated — it is not one of the four in §4.2's read-endpoints row,
+which is the other half of why #131 read it as a listing.
 
 - **§4.2 `issueGetComments` is not a paged endpoint, and knobas reads it in one request.**
   Measured read-only against `testenv`'s pinned Gitea (**1.27.2**) on 2026-08-29, three ways.
@@ -1183,9 +1190,16 @@ re-file the same issue.
   comments than it sent. There is no second page to recover with, so a short discussion is not
   one blemished item — it means every discussion this source reads past the page size is
   quietly short, on the field §4.1 defines and a `comment` write op's hold detection reads
-  (§9's write-queue entry). The failure names `include_pr_comments` as the lever. Same treatment,
-  same reasoning as #114's refusal of a `/app/rest/buildTypes` listing that reports a further
-  page: refuse now, page when a server that needs one is met.
+  (§9's write-queue entry). The failure names the header, both counts and `include_pr_comments`
+  as the lever. Same treatment, same reasoning as #114's refusal of a `/app/rest/buildTypes`
+  listing that reports a further page: refuse now, page when a server that needs one is met.
+- **A server that sends no readable `X-Total-Count` is believed**, which is the one place the
+  claim above is still an assumption. `client::issue_comments` carries `None` — an absent header,
+  an unparseable one, a proxy that strips it — and `sync::fetch_comments` then trusts what
+  arrived, exactly as this adapter did before it asked. Deliberate: the alternative is refusing
+  every discussion on any Gitea or proxy that does not send it, over a header the server is
+  entitled not to set. Pinned by
+  `client::wire_tests::a_discussion_with_no_count_header_is_no_count_at_all`.
 - **`PullRequest.comments` is not the completeness signal**, and a fix built on it would have
   been wrong: on the seeded `#142` it reads **3** where the endpoint sends **2** and
   `X-Total-Count` reads 2. It counts something this endpoint does not return, and stays what it
