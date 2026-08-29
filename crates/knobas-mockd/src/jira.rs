@@ -940,7 +940,10 @@ async fn create_issue(State(s): State<Arc<MockState>>, body: Option<Json<Value>>
         return jira_error(StatusCode::BAD_REQUEST, "project is required");
     };
     let Some(summary) = text("summary") else {
-        return jira_error(StatusCode::BAD_REQUEST, "You must specify a summary of the issue.");
+        return jira_error(
+            StatusCode::BAD_REQUEST,
+            "You must specify a summary of the issue.",
+        );
     };
     let Some(issue_type) = nested("issuetype", "name") else {
         return jira_error(StatusCode::BAD_REQUEST, "issue type is required");

@@ -1181,7 +1181,13 @@ async fn re_running_a_build_that_is_gone_is_refused_rather_than_retried() {
         })
         .await;
     assert!(
-        matches!(refused, Err(SourceError::Protocol { status: Some(404), .. })),
+        matches!(
+            refused,
+            Err(SourceError::Protocol {
+                status: Some(404),
+                ..
+            })
+        ),
         "{refused:?}"
     );
     assert_eq!(
@@ -1206,7 +1212,13 @@ async fn triggering_a_configuration_that_is_gone_is_refused() {
         })
         .await;
     assert!(
-        matches!(refused, Err(SourceError::Protocol { status: Some(404), .. })),
+        matches!(
+            refused,
+            Err(SourceError::Protocol {
+                status: Some(404),
+                ..
+            })
+        ),
         "{refused:?}"
     );
     assert_eq!(tc.state().builds().len(), before);

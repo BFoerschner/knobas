@@ -52,12 +52,7 @@ pub async fn submit(
     state: &crate::sources::SourcesState,
     payload: serde_json::Value,
 ) -> Result<QueuedWrite, IpcError> {
-    let (op, source_id) = submittable(
-        &state.pool,
-        state.registry.as_ref(),
-        payload,
-    )
-    .await?;
+    let (op, source_id) = submittable(&state.pool, state.registry.as_ref(), payload).await?;
 
     let scheduler = &state.scheduler;
     let queued = knobas_sync::write_queue::submit(scheduler.deps(), &source_id, op)
@@ -324,9 +319,7 @@ mod tests {
                 adapter_kind: kind.to_owned(),
                 display_name: id.to_owned(),
                 base_url: "http://127.0.0.1:1".to_owned(),
-                auth_kind: knobas_sync::config::AuthKind::Method(
-                    knobas_source::AuthMethod::Pat,
-                ),
+                auth_kind: knobas_sync::config::AuthKind::Method(knobas_source::AuthMethod::Pat),
                 config: serde_json::json!({}),
                 sync_interval_secs: 300,
                 enabled: true,
@@ -371,7 +364,11 @@ mod tests {
             .await
             .expect_err("not a write op");
         assert_eq!(error.code, crate::IpcErrorCode::Invalid);
-        assert!(error.message.contains("not a write operation"), "{}", error.message);
+        assert!(
+            error.message.contains("not a write operation"),
+            "{}",
+            error.message
+        );
     }
 
     /// A target that is not an entity id names nothing the queue could ever

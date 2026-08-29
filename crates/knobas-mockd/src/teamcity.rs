@@ -945,11 +945,7 @@ async fn queue_build(State(s): State<Arc<MockState>>, req: Request) -> Response 
             "No build type specified. Please specify build type as buildType.id",
         );
     };
-    if !s
-        .build_types()
-        .iter()
-        .any(|t| t.id == build_type_id)
-    {
+    if !s.build_types().iter().any(|t| t.id == build_type_id) {
         return tc_error(
             StatusCode::NOT_FOUND,
             format!("No build type found by id {build_type_id:?}."),
@@ -972,13 +968,7 @@ async fn queue_build(State(s): State<Arc<MockState>>, req: Request) -> Response 
     let queued = s.build(id).expect("the build was just queued");
     // The whole record, unprojected: this endpoint takes no `fields=`, and a
     // real server answers the created build in full.
-    Json(build_json(
-        &queued,
-        &s.base_url(API),
-        &s,
-        &s.build_types(),
-    ))
-    .into_response()
+    Json(build_json(&queued, &s.base_url(API), &s, &s.build_types())).into_response()
 }
 
 #[cfg(test)]

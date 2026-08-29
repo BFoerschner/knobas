@@ -367,7 +367,11 @@ impl MockState {
             .issues
             .iter()
             .filter(|i| i.project == project)
-            .filter_map(|i| i.key.rsplit_once('-').and_then(|(_, n)| n.parse::<u64>().ok()))
+            .filter_map(|i| {
+                i.key
+                    .rsplit_once('-')
+                    .and_then(|(_, n)| n.parse::<u64>().ok())
+            })
             .max()
             .unwrap_or(0)
             + 1;

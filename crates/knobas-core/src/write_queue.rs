@@ -388,7 +388,10 @@ pub fn project(op: &str, target: Option<&Target>) -> serde_json::Value {
             "live": live,
             "text": target.map(|t| t.body_text.as_str()),
         }),
-        "create_ticket" | "create_branch" | "create_pull_request" | "trigger_build"
+        "create_ticket"
+        | "create_branch"
+        | "create_pull_request"
+        | "trigger_build"
         | "rerun_build" => serde_json::json!({
             "op": op,
             "live": live,
@@ -932,8 +935,14 @@ mod tests {
     /// intended reading rather than a lookup quietly failing.
     #[test]
     fn a_create_into_an_unmirrored_container_is_not_held() {
-        assert_eq!(project("create_ticket", None), project("create_ticket", None));
-        assert_eq!(project("create_ticket", None)["live"], serde_json::json!(false));
+        assert_eq!(
+            project("create_ticket", None),
+            project("create_ticket", None)
+        );
+        assert_eq!(
+            project("create_ticket", None)["live"],
+            serde_json::json!(false)
+        );
     }
 
     /// Every op the SPI defines is projected as exactly one of the three

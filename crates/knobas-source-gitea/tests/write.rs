@@ -45,18 +45,18 @@ async fn accepting() -> MockServer {
         .respond_with(ResponseTemplate::new(201).set_body_json(json!({ "number": 145 })))
         .mount(&server)
         .await;
-    authed(
-        Mock::given(method("POST"))
-            .and(path("/api/v1/repos/tidewater/payout-service/issues/142/comments")),
-    )
+    authed(Mock::given(method("POST")).and(path(
+        "/api/v1/repos/tidewater/payout-service/issues/142/comments",
+    )))
     .respond_with(ResponseTemplate::new(201).set_body_json(json!({ "id": 9001 })))
     .mount(&server)
     .await;
-    authed(
-        Mock::given(method("POST"))
-            .and(path("/api/v1/repos/tidewater/payout-service/pulls/142/reviews")),
+    authed(Mock::given(method("POST")).and(path(
+        "/api/v1/repos/tidewater/payout-service/pulls/142/reviews",
+    )))
+    .respond_with(
+        ResponseTemplate::new(200).set_body_json(json!({ "id": 55, "state": "APPROVED" })),
     )
-    .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": 55, "state": "APPROVED" })))
     .mount(&server)
     .await;
     server

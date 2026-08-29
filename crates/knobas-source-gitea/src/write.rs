@@ -107,7 +107,10 @@ pub(crate) async fn comment(
         GiteaClient::path_segment(owner)?,
         GiteaClient::path_segment(repo)?
     );
-    client.post(&path, &json!({ "body": body })).await.map(|_| ())
+    client
+        .post(&path, &json!({ "body": body }))
+        .await
+        .map(|_| ())
 }
 
 /// Approve a pull request.

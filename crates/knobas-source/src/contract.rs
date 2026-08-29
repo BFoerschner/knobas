@@ -484,7 +484,11 @@ mod tests {
 
         async fn write(&self, op: WriteOp) -> Result<(), SourceError> {
             if self.behavior == Behavior::DeclaresAWriteOp
-                && self.descriptor().write_ops.iter().any(|w| w == op.identifier())
+                && self
+                    .descriptor()
+                    .write_ops
+                    .iter()
+                    .any(|w| w == op.identifier())
             {
                 // A real adapter would post a comment to a live system here.
                 // Only for the op this adapter *declares*: the battery probes

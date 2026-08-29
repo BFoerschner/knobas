@@ -397,8 +397,14 @@ mod tests {
             let Err(SourceError::Protocol { message, status }) = &refused else {
                 panic!("{name} must be refused with Protocol, got {refused:?}");
             };
-            assert!(message.contains(name), "the refusal must name {name}: {message}");
-            assert_eq!(*status, None, "a refusal knobas raised itself carries no status");
+            assert!(
+                message.contains(name),
+                "the refusal must name {name}: {message}"
+            );
+            assert_eq!(
+                *status, None,
+                "a refusal knobas raised itself carries no status"
+            );
         }
     }
 

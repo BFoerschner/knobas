@@ -66,24 +66,33 @@ async fn a_base_url_with_a_path_prefix_is_preserved() {
     );
 }
 
-/// M1 is read-only toward every source: `write` refuses everything, including
-/// the one op the SPI currently defines, and never reaches the network.
+/// Battery clause 5 against a server that would have answered: an op this
+/// adapter does not declare is refused **without a request being made**.
+///
+/// The ops it *does* declare are certified in `tests/write.rs` against a fake
+/// that records bodies, and live in `tests/live_gitea.rs`. What only this can
+/// see is the negative: the fake here answers, and the request count not moving
+/// is the proof that nothing was sent.
 #[tokio::test]
-async fn every_write_is_refused() {
+async fn an_undeclared_op_never_reaches_the_network() {
     let fake = Fake::start(&State::tidewater()).await;
     let source = source(fake.base_url(), serde_json::json!({}));
     let before = fake.requests().await;
     let refused = source
-        .write(WriteOp::Comment {
+        .write(WriteOp::Transition {
             entity: "gitea:tidewater/payout-service#142".into(),
-            body: "no".into(),
+            status: "Done".into(),
         })
         .await;
     assert!(
-        matches!(refused, Err(SourceError::Protocol { .. })),
+        matches!(refused, Err(SourceError::Protocol { message: ref m, .. }) if m.contains("transition")),
         "{refused:?}"
     );
-    assert_eq!(fake.requests().await, before, "write must not call out");
+    assert_eq!(
+        fake.requests().await,
+        before,
+        "an undeclared op must not call out"
+    );
 }
 
 #[tokio::test]

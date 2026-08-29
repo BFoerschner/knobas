@@ -750,9 +750,9 @@ knobas-source-gitea	test/client	a_base_url_with_a_path_prefix_is_preserved
 knobas-source-gitea	test/client	a_closed_port_is_unreachable
 knobas-source-gitea	test/client	a_missing_token_cannot_authenticate
 knobas-source-gitea	test/client	an_instance_describes_itself
+knobas-source-gitea	test/client	an_undeclared_op_never_reaches_the_network
 knobas-source-gitea	test/client	an_unsupported_auth_method_is_refused_at_build_time
 knobas-source-gitea	test/client	an_unusable_instance_id_is_refused_at_build_time
-knobas-source-gitea	test/client	every_write_is_refused
 knobas-source-gitea	test/client	test_connection_reports_the_account_and_the_server_version
 knobas-source-gitea	test/contract	passes_the_contract_battery
 knobas-source-gitea	test/litter_guard	a_guard_clears_what_a_killed_run_left_and_takes_nothing_else_with_it

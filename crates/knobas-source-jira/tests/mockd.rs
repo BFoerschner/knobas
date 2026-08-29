@@ -320,7 +320,10 @@ async fn a_transition_moves_the_ticket() {
     let jira = spawn_mock_jira().await;
     let source = source(&jira.base_url(), serde_json::json!({}));
     assert_eq!(
-        jira.state().issue("PAY-231").expect("in the fixture").status,
+        jira.state()
+            .issue("PAY-231")
+            .expect("in the fixture")
+            .status,
         "In Progress"
     );
 
@@ -333,7 +336,10 @@ async fn a_transition_moves_the_ticket() {
         .expect("a status the workflow offers");
 
     assert_eq!(
-        jira.state().issue("PAY-231").expect("in the fixture").status,
+        jira.state()
+            .issue("PAY-231")
+            .expect("in the fixture")
+            .status,
         "In Review"
     );
     jira.assert_no_violations();
@@ -368,7 +374,10 @@ async fn a_status_the_workflow_does_not_offer_is_refused_by_name() {
         "the refusal must say what the workflow does offer: {message}"
     );
     assert_eq!(
-        jira.state().issue("PAY-231").expect("in the fixture").status,
+        jira.state()
+            .issue("PAY-231")
+            .expect("in the fixture")
+            .status,
         "In Progress",
         "a refused transition must not have moved anything"
     );
@@ -389,7 +398,10 @@ async fn a_status_matches_however_the_user_spelled_it() {
         .await
         .expect("the same status, spelled by a human");
     assert_eq!(
-        jira.state().issue("PAY-231").expect("in the fixture").status,
+        jira.state()
+            .issue("PAY-231")
+            .expect("in the fixture")
+            .status,
         "In Review"
     );
     jira.assert_no_violations();
@@ -426,7 +438,10 @@ async fn a_create_files_a_new_ticket_in_the_project() {
         "a create that dropped the description would be reported as a success"
     );
     assert_eq!(created.issue_type, "Task");
-    assert_eq!(created.reporter, "mara.lindqvist", "story 17: attributed to me");
+    assert_eq!(
+        created.reporter, "mara.lindqvist",
+        "story 17: attributed to me"
+    );
     jira.assert_no_violations();
 }
 
@@ -453,7 +468,13 @@ async fn a_create_missing_what_jira_requires_is_refused_by_the_server() {
             })
             .await;
         assert!(
-            matches!(refused, Err(SourceError::Protocol { status: Some(400), .. })),
+            matches!(
+                refused,
+                Err(SourceError::Protocol {
+                    status: Some(400),
+                    ..
+                })
+            ),
             "{why}: {refused:?}"
         );
     }

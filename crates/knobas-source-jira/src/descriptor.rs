@@ -120,7 +120,12 @@ mod tests {
         let d = descriptor_template();
         assert_eq!(d.id, crate::ADAPTER_KIND);
         assert_eq!(d.adapter_kind, crate::ADAPTER_KIND);
-        assert_eq!(d.capabilities, vec![Capability::Write], "{:?}", d.capabilities);
+        assert_eq!(
+            d.capabilities,
+            vec![Capability::Write],
+            "{:?}",
+            d.capabilities
+        );
         assert_eq!(
             d.write_ops,
             vec!["comment", "transition", "create_ticket"],
