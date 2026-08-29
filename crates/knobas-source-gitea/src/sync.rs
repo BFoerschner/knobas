@@ -30,8 +30,17 @@
 //! "gone" instead of "we stopped early". A truncated walk that returned `Ok`
 //! would hand the sweep a corpus it never saw.
 //!
-//! Two things follow, and both are the same rule:
+//! Three things follow, and all three are the same rule:
 //!
+//! * **A page shorter than the one this run asked for is not the end of a
+//!   listing.** Every walk here pages until a page comes back *empty*
+//!   ([`last_page`]), never until one comes back short. `limit=50` is a
+//!   request and Gitea's 50 is a *default* an admin of a self-hosted instance
+//!   can lower, so a short page means "the collection ran out" or "the server
+//!   capped us" and nothing in the answer says which. Reading it as the first
+//!   is the same truncation as the two rules below, arriving through the
+//!   transport instead of through a cap -- and the worse one, because it
+//!   reports `Ok`. Issue #81, ruled 2026-08-29.
 //! * **A page cap that is reached ends the run with an error.** Returning `Ok`
 //!   after walking 1,000 of 1,400 repositories would report a complete mirror
 //!   of a corpus that was never walked.
@@ -114,12 +123,22 @@ use chrono::{DateTime, Utc};
 use knobas_source::{Cursor, Sink, SourceError, SyncItem};
 use serde_json::Value;
 
-use crate::client::{PAGE_SIZE, is_repo_scoped};
+use crate::client::is_repo_scoped;
 use crate::cursor::{GiteaCursor, RepoCursor};
 use crate::map::{self, RepoRef};
 use crate::model;
 
-/// At 50 per page: 1,000 repositories, and 1,000 branches per repository.
+/// The runaway guard on the two exhaustive walks: at most this many requests
+/// each, whatever the server chooses to put on a page.
+///
+/// A **request** budget rather than a record one, and since [`last_page`] the
+/// difference is visible: a walk spends its last request on the empty page that
+/// proves the listing ended, so 20 requests carry 19 pages of records. Against
+/// a server that serves the 50 asked for, that is 950 repositories and 950
+/// branches per repository, where terminating on a short page reached 999. Those
+/// 50 records are not worth trading for a walk with no bound at all against a
+/// server that ignores `page`, and a corpus past the guard fails loudly with the
+/// lever that fixes it ([`cap_reached`]) rather than being silently truncated.
 const MAX_LIST_PAGES: u32 = 20;
 const MAX_BRANCH_PAGES: u32 = 20;
 // The two budgeted walks' page caps. Both sit at 1,000 records, which is
@@ -136,6 +155,10 @@ const MAX_BRANCH_PAGES: u32 = 20;
 // mirror it never finished; `pr` and `commit` promise only the newest
 // `*_per_repo` of theirs and are never swept, so stopping is the normal case
 // and cannot be read downstream as a deletion.
+//
+// `last_page` costs these two nothing, unlike the exhaustive pair: a budget
+// of 1,000 is spent by the last record of page 20 and breaks the walk there,
+// before any request for the empty page that would have confirmed the end.
 /// Pull requests per repository, per run.
 const MAX_PR_PAGES: u32 = 20;
 /// Commits per *branch* per run. `commits_per_repo` is the whole-repository
@@ -183,18 +206,52 @@ impl From<SourceError> for RepoError {
 
 /// The failure a reached page cap ends the run with.
 ///
-/// **"at least", not "more than."** The cap fires when page `cap` came back
-/// full, and a full last page is not proof there is another one -- so a corpus
-/// of exactly `cap * PAGE_SIZE` fails too. Saying "more than" would be wrong at
-/// the one value where a user is most likely to check the arithmetic;
-/// `a_cap_fires_at_exactly_the_boundary_it_names` pins that boundary.
-fn cap_reached(what: &str, cap: u32) -> SourceError {
+/// **"at least", not "more than."** The cap fires when the cap'th page came
+/// back with something on it, and a non-empty page is not proof there is
+/// another one -- so a corpus that happens to end exactly on that page fails
+/// too. Saying "more than" would be wrong at the one value where a user is most
+/// likely to check the arithmetic; `a_cap_fires_at_exactly_the_boundary_it_names`
+/// pins that boundary.
+///
+/// **`seen` is what the walk actually counted**, and it used to be
+/// `cap * PAGE_SIZE`. That arithmetic assumed the server put the requested 50
+/// records on every page -- the assumption [`last_page`] exists to remove.
+/// Against an instance capping at 10, a reached cap means 200 records walked,
+/// and a message naming 1,000 would send the user narrowing a source that was
+/// never that big.
+fn cap_reached(what: &str, seen: usize) -> SourceError {
     SourceError::protocol(format!(
-        "gitea: at least {} {what} to walk in one run; stopping at the cap would report a \
+        "gitea: at least {seen} {what} to walk in one run; stopping at the cap would report a \
          complete mirror of a corpus this run never finished walking. \
-         Narrow the source with owners[] or repos[].",
-        cap * PAGE_SIZE
+         Narrow the source with owners[] or repos[]."
     ))
+}
+
+/// Whether a page just answered is the end of its listing.
+///
+/// **Empty, not short.** The obvious spelling -- `batch.len() < PAGE_SIZE` --
+/// reads a page shorter than the `limit` the request asked for as the end of
+/// the collection, and that is sound only if the server honoured `limit`
+/// exactly. It is not a promise it makes: `PAGE_SIZE` documents 50 as Gitea's
+/// *default* cap, a self-hosted instance can lower `MAX_RESPONSE_ITEMS`, an
+/// endpoint can carry its own maximum, and a loaded server can answer a partial
+/// page. Under any of those the short-page rule stops the walk early and
+/// returns `Ok`, with the watermark advancing past every record after the stop
+/// -- silent truncation, which is the failure the whole module docs above are
+/// about. An empty page is the one answer that cannot mean anything else.
+///
+/// **One spelling, in one place, for all four walks.** Issue #81 was filed
+/// because the rule had been copied to four sites and asked for one deliberate
+/// decision instead of four accidental ones; option 1 (page until empty) was
+/// ruled on 2026-08-29. Splitting it back into four inline comparisons is how
+/// three of them drift.
+///
+/// The price is one extra request per *exhausted* walk, under the 10 req/s
+/// limiter of interfaces §4.1 -- and the `MAX_*_PAGES` caps above are what keep
+/// "until empty" from becoming "until forever" against a server that ignores
+/// the `page` parameter.
+fn last_page(batch: &[Value]) -> bool {
+    batch.is_empty()
 }
 
 /// Copy the stored position of every repository this run refused into the
@@ -326,9 +383,11 @@ async fn select_repos(
 
     if config.repos.is_empty() {
         let mut page = 1;
+        let mut seen = 0usize;
         loop {
             let batch = source.client.search_repos(page).await?;
-            let last = batch.len() < PAGE_SIZE as usize;
+            let last = last_page(&batch);
+            seen += batch.len();
             for raw in batch {
                 push_selected(&mut out, raw, config);
             }
@@ -336,7 +395,7 @@ async fn select_repos(
                 break;
             }
             if page == MAX_LIST_PAGES {
-                return Err(cap_reached("repositories", MAX_LIST_PAGES));
+                return Err(cap_reached("repositories", seen));
             }
             page += 1;
         }
@@ -486,9 +545,11 @@ async fn branches(
     let mut moved = Vec::new();
 
     let mut page = 1;
+    let mut seen = 0usize;
     loop {
         let batch = source.client.branches(at.owner, at.name, page).await?;
-        let last = batch.len() < PAGE_SIZE as usize;
+        let last = last_page(&batch);
+        seen += batch.len();
         for raw in batch {
             let branch: model::Branch = match serde_json::from_value(raw.clone()) {
                 Ok(branch) => branch,
@@ -523,7 +584,7 @@ async fn branches(
         if page == MAX_BRANCH_PAGES {
             return Err(RepoError::Fatal(cap_reached(
                 "branches in one repository",
-                MAX_BRANCH_PAGES,
+                seen,
             )));
         }
         page += 1;
@@ -583,7 +644,7 @@ async fn pulls(
 
     'paging: for page in 1..=MAX_PR_PAGES {
         let batch = source.client.pulls(at.owner, at.name, page).await?;
-        let last = batch.len() < PAGE_SIZE as usize;
+        let last = last_page(&batch);
         for raw in batch {
             let pr: model::PullRequest = match serde_json::from_value(raw.clone()) {
                 Ok(pr) => pr,
@@ -805,7 +866,7 @@ async fn commits(
                 .client
                 .commits(at.owner, at.name, &branch, since, page)
                 .await?;
-            let last = batch.len() < PAGE_SIZE as usize;
+            let last = last_page(&batch);
             let mut fresh = 0usize;
             for raw in batch {
                 let commit: model::Commit = match serde_json::from_value(raw.clone()) {
@@ -1087,15 +1148,19 @@ mod tests {
         );
     }
 
-    /// The cap message has to name the limit that was hit and the lever that
-    /// moves it, because it is what the user sees when a source is too big.
+    /// The cap message has to name what was walked and the lever that moves the
+    /// limit, because it is what the user sees when a source is too big.
+    ///
+    /// The number is the walk's own count, hedged with "at least": since
+    /// `last_page` there is no page size to multiply by, and inventing one
+    /// would misreport every server that caps its pages lower than the 50 the
+    /// request asks for.
     #[test]
-    fn a_reached_cap_names_the_limit_and_the_lever() {
-        let SourceError::Protocol { message, .. } = cap_reached("repositories", MAX_LIST_PAGES)
-        else {
+    fn a_reached_cap_names_what_it_walked_and_the_lever() {
+        let SourceError::Protocol { message, .. } = cap_reached("repositories", 950) else {
             panic!("a reached cap is a protocol failure");
         };
-        assert!(message.contains("1000"), "{message}");
+        assert!(message.contains("at least 950 repositories"), "{message}");
         assert!(message.contains("owners[]"), "{message}");
         // And says why stopping is not an option: an `Ok` here would claim a
         // corpus the run never finished walking.

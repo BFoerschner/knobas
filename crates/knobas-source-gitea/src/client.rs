@@ -36,7 +36,19 @@ use serde_json::Value;
 
 use crate::config::GiteaConfig;
 
-/// Interfaces §4.1: "Page sizes: … Gitea 50". Also Gitea's own default cap.
+/// How many records a listing request asks for. Interfaces §4.1: "Page sizes:
+/// … Gitea 50", which is also Gitea's own default cap.
+///
+/// **A request, not a guarantee -- and nothing may end a walk on it.** What the
+/// server actually puts on a page is the server's to decide: `MAX_RESPONSE_ITEMS`
+/// is configurable on a self-hosted instance, an endpoint may carry its own
+/// maximum, and a loaded one may answer partially. So a page shorter than this
+/// means "the collection ran out" *or* "we were capped", with nothing in the
+/// answer to say which, and every paged walk ends on an **empty** page instead
+/// (`sync::last_page`): reading a short page as the end is a run that reports
+/// success while its watermark advances past records it never saw. Issue #81,
+/// ruled 2026-08-29. `sync.rs` does not mention this constant at all any more,
+/// which is the shape that keeps the assumption from growing back.
 pub(crate) const PAGE_SIZE: u32 = 50;
 
 /// Everything under `/api/v1`.

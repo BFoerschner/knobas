@@ -641,43 +641,18 @@ async fn a_repository_listing_that_would_exceed_the_cap_fails_the_run() {
     );
 }
 
-/// The cap fires at **exactly** `20 * PAGE`, not past it: page 20 comes back
-/// full and a full page is not proof there is no page 21. The conservatism is
-/// deliberate; what this pins is that the message says the same thing the code
-/// does, at the one value where "more than 1000" would have been a lie.
-#[tokio::test]
-async fn a_cap_fires_at_exactly_the_boundary_it_names() {
+/// One branch walk of `count` branches against a server that serves the 50 it
+/// is asked for.
+///
+/// `commits_per_repo: 0` scopes it to the branch *listing*. Every branch here
+/// is a fixture stub with no commit list mounted behind it, so the commit pass
+/// would otherwise spend one request per branch answering nothing -- a property
+/// of the fake, not of the walk.
+async fn branch_walk_of(count: usize) -> Result<Vec<SyncItem>, SourceError> {
     let mut state = State::tidewater();
-    let exactly: Vec<serde_json::Value> = (0..20 * PAGE)
-        .map(|i| {
-            branch(
-                &format!("wip/{i:05}"),
-                &format!("{i:040}"),
-                "work",
-                "2026-08-22T09:00:00Z",
-            )
-        })
-        .collect();
-    assert_eq!(exactly.len(), 1000, "the boundary this test is about");
-    state
-        .branches
-        .insert("tidewater/payout-service".to_owned(), exactly);
-    let fake = Fake::start_paged(&state).await;
-    let at_boundary = source(fake.base_url(), serde_json::json!({}));
-
-    let mut sink = VecSink(Vec::new());
-    let error = at_boundary.sync(None, &mut sink).await.unwrap_err();
-    assert!(
-        matches!(error, SourceError::Protocol { message: ref m, .. } if m.contains("at least 1000 branches")),
-        "exactly 1000 must fail, and say so accurately: {error:?}"
-    );
-
-    // One under the boundary walks cleanly, so the assertion above is about the
-    // boundary and not about a fixture that could never have succeeded.
-    let mut under = State::tidewater();
-    under.branches.insert(
+    state.branches.insert(
         "tidewater/payout-service".to_owned(),
-        (0..20 * PAGE - 1)
+        (0..count)
             .map(|i| {
                 branch(
                     &format!("wip/{i:05}"),
@@ -688,16 +663,162 @@ async fn a_cap_fires_at_exactly_the_boundary_it_names() {
             })
             .collect(),
     );
-    let fake = Fake::start_paged(&under).await;
-    // Same scoping as `branch_listings_are_paged`: this is about the branch
-    // listing's boundary, and 999 commit-less branches are 999 requests the
-    // fake would answer `[]` to.
-    let under_boundary = source(
+    let fake = Fake::start_paged(&state).await;
+    let source = source(
         fake.base_url(),
         serde_json::json!({ "commits_per_repo": 0 }),
     );
-    let (items, _) = full(&*under_boundary).await;
-    assert_eq!(ids(&items, "branch").len(), 20 * PAGE - 1);
+    let mut sink = VecSink(Vec::new());
+    source.sync(None, &mut sink).await?;
+    Ok(sink.0)
+}
+
+/// The cap fires at **exactly** the boundary its message names, not past it:
+/// the last request the cap affords came back with something on it, and a
+/// non-empty page is not proof there is no page after it. The conservatism is
+/// deliberate; what this pins is that the message says the same thing the code
+/// does, at the values where a user is most likely to check the arithmetic.
+///
+/// **The boundary moved with issue #81**, and 950-clean/951-fatal is where a
+/// reader can see what that cost. The walks now end on an *empty* page rather
+/// than a short one, so the last of the cap's 20 requests is spent proving the
+/// listing ran out: 19 pages of records walk cleanly where 999 records used to.
+/// The 50 records of headroom bought back by leaving the caps alone is the
+/// deliberate trade -- the cap is a bound on requests, and paging until empty
+/// without one would be no bound at all.
+#[tokio::test]
+async fn a_cap_fires_at_exactly_the_boundary_it_names() {
+    let clean = branch_walk_of(19 * PAGE)
+        .await
+        .expect("19 pages of records, and the 20th request proves the end");
+    assert_eq!(ids(&clean, "branch").len(), 19 * PAGE);
+
+    // One record more, and the 20th request comes back non-empty instead. The
+    // second case is the old boundary, still fatal and still accurate.
+    for count in [19 * PAGE + 1, 20 * PAGE] {
+        let error = branch_walk_of(count)
+            .await
+            .map(|items| format!("Ok({} branches)", ids(&items, "branch").len()))
+            .unwrap_err();
+        assert!(
+            matches!(&error, SourceError::Protocol { message, .. }
+                if message.contains(&format!("at least {count} branches"))),
+            "{count} must fail, and say accurately what it walked: {error:?}"
+        );
+    }
+}
+
+/// Three of everything, so each of the four paged walks needs more than one
+/// page against a server capping at two: three repositories in the listing, and
+/// three branches, three pull requests and three commits on one branch inside
+/// the first of them.
+fn three_of_each() -> State {
+    let full = "tidewater/payout-service";
+    let mut state = State::tidewater();
+    state
+        .repos
+        .push(support::repo("tidewater", "ledger", "2026-08-20T09:00:00Z"));
+    state.repos.push(support::repo(
+        "tidewater",
+        "settlement",
+        "2026-08-19T09:00:00Z",
+    ));
+    state.branches.get_mut(full).unwrap().push(branch(
+        "release/2026-08",
+        "5555555555555555555555555555555555555555",
+        "cut the August release",
+        "2026-08-20T08:00:00Z",
+    ));
+    state.pulls.get_mut(full).unwrap().insert(
+        0,
+        support::pull(146, "Retry the retry", "", "2026-08-22T15:00:00Z", 0),
+    );
+    state
+        .commits
+        .get_mut(format!("{full}@feature/PAY-231-sepa-retry").as_str())
+        .unwrap()
+        .insert(
+            0,
+            support::commit(
+                "6666666666666666666666666666666666666666",
+                "PAY-231: widen the retry window",
+                "2026-08-22T12:10:00Z",
+            ),
+        );
+    state
+}
+
+/// Issue #81: a page shorter than the `limit` the adapter asked for is **not**
+/// proof the collection ran out. A self-hosted Gitea may answer fewer -- an
+/// admin-lowered `MAX_RESPONSE_ITEMS`, a per-endpoint maximum, a partial page
+/// under load -- and a walk that stops there reports success while its
+/// watermark advances past everything it never saw, which is the silent,
+/// watermark-advancing failure ADR-0003 and ruling B4 exist to refuse. An
+/// **empty** page is the only unambiguous end.
+///
+/// Deliberately one test over all four walks rather than four tests: the
+/// decision is one rule applied at four sites, and four separate tests would
+/// let three of them drift back to `batch.len() < PAGE_SIZE` while the fourth
+/// kept the suite green. Reverting any single walk fails exactly one of the
+/// assertions below.
+#[tokio::test]
+async fn a_server_that_caps_its_pages_short_is_still_walked_to_the_end() {
+    let state = three_of_each();
+    let capped = Fake::start_capped(&state, 2).await;
+    let capped_source = source(capped.base_url(), serde_json::json!({}));
+    let (items, _) = full(&*capped_source).await;
+
+    // The repository listing. Two per page, three to find.
+    assert_eq!(
+        ids(&items, "repo"),
+        vec![
+            "gitea:tidewater/ledger",
+            "gitea:tidewater/payout-service",
+            "gitea:tidewater/settlement",
+        ],
+        "the repository listing stopped on a capped page"
+    );
+    assert_eq!(
+        ids(&items, "branch"),
+        vec![
+            "gitea:tidewater/payout-service@refs/heads/feature/PAY-231-sepa-retry",
+            "gitea:tidewater/payout-service@refs/heads/main",
+            "gitea:tidewater/payout-service@refs/heads/release/2026-08",
+        ],
+        "the branch listing stopped on a capped page"
+    );
+    assert_eq!(
+        ids(&items, "pr"),
+        vec![
+            "gitea:tidewater/payout-service#142",
+            "gitea:tidewater/payout-service#144",
+            "gitea:tidewater/payout-service#146",
+        ],
+        "the pull-request walk stopped on a capped page"
+    );
+    assert_eq!(
+        ids(&items, "commit"),
+        vec![
+            "gitea:tidewater/payout-service@1111111111111111111111111111111111111111",
+            "gitea:tidewater/payout-service@6666666666666666666666666666666666666666",
+            "gitea:tidewater/payout-service@a41f2c8b7d6e5f403192837465a0b1c2d3e4f506",
+            "gitea:tidewater/payout-service@c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192",
+        ],
+        "the commit walk stopped on a capped page"
+    );
+
+    // The control: the identical fixture served by a server that honours
+    // `limit=50` mirrors exactly the same corpus. Without it these four
+    // assertions would be about the fixture rather than about the cap.
+    let honest = Fake::start(&state).await;
+    let (same, _) = full(&*source(honest.base_url(), serde_json::json!({}))).await;
+    for kind in ["repo", "branch", "pr", "commit"] {
+        assert_eq!(
+            ids(&items, kind),
+            ids(&same, kind),
+            "{kind}: a capped server must mirror what an uncapped one does"
+        );
+    }
 }
 
 /// A sink that rejects an item aborts the run -- the remaining items are not
