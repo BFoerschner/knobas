@@ -89,7 +89,7 @@
    * surface needs the same guard and a hand-copied one loses the rejection
    * half (#107).
    */
-  const read = latestRead();
+  const read = latestRead<SourceSummary[]>();
 
   function load() {
     return read(listSources, {

@@ -665,6 +665,61 @@ test("a backup_status rejection that has been overtaken does not blank the secti
 });
 
 /**
+ * A save is a read too, and it has to be stamped like one.
+ *
+ * `set_backup_schedule` answers with the whole status, read back after the
+ * write — so the section redraws from it rather than from the draft. Written
+ * straight to `status`, that write is outside the guard: a `backup_status`
+ * already in flight when the save started is *older* than the save's answer
+ * and used to land on top of it, putting the schedule that was just replaced
+ * back on the screen while the disk holds the new one. The same currency rule
+ * this component already applies to its reads, applied to the one write that
+ * was left out of it (#129).
+ *
+ * *Export now* is what puts the read in flight; it is the section's own way of
+ * having a `backup_status` outstanding while the reader does something else.
+ */
+test("a backup_status in flight across a schedule save does not overwrite what was saved", async () => {
+  render();
+  await settle();
+  expect(text()).toContain("after 03:00");
+
+  // Snapshotted eagerly: the `set_backup_schedule` mock rewrites the shared
+  // `status`, and a held read that built its answer at resolution time would
+  // hand back the *new* schedule and agree with the save by accident.
+  const before = statusOf();
+  let release: (() => void) | undefined;
+  const held = calls.status + 1;
+  answerStatus = (call) =>
+    call === held
+      ? new Promise<BackupStatus>((resolve) => {
+          release = () => resolve(before);
+        })
+      : Promise.resolve(status);
+
+  button("Export now")!.click();
+  await settle();
+  expect(calls.status, "the export's re-read is the one held open").toBe(held);
+
+  button("Schedule…")!.click();
+  flushSync();
+  type(field("Hour"), "22");
+  type(field("Minute"), "30");
+  button("Save", dialog()!)!.click();
+  await settle();
+  expect(text()).toContain("after 22:30");
+
+  release!();
+  await settle();
+
+  expect(
+    text(),
+    "a backup_status from before the save wrote the old schedule back over it",
+  ).toContain("after 22:30");
+  expect(text()).not.toContain("after 03:00");
+});
+
+/**
  * Closing the schedule dialog must not throw into a promise nobody is holding.
  *
  * Both exits are walked, because they are different code paths onto the same

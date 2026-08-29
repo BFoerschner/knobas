@@ -423,21 +423,39 @@ test("the config carries what was typed into the generated form", async () => {
   });
 });
 
+/**
+ * Driven through a bound a real adapter really declares.
+ *
+ * It used to empty Jira's `flavor`, "the one required field in the Jira
+ * schema" — which the adapter does not declare and the fixture had invented,
+ * so the step this test watched being blocked is one the real dialog lets
+ * through (#124). TeamCity's `builds_per_config` is a constraint the source
+ * itself enforces (`MAX_BUILDS_PER_CONFIG`), so a form that refuses it is a
+ * form agreeing with the adapter rather than with a fixture.
+ */
 test("a config the validator rejects blocks the step it was typed on", async () => {
+  adapters = [
+    descriptor({
+      id: "teamcity",
+      adapter_kind: "teamcity",
+      name: "TeamCity",
+      config_schema: TEAMCITY_SCHEMA,
+    }),
+  ];
   render();
   await settle();
-  button("Jira Data Center")!.click();
+  button("TeamCity")!.click();
   flushSync();
   button("Next")!.click();
   flushSync();
-  type("#add-url", "https://jira.tidewater.example");
-  const flavor = target.querySelector<HTMLSelectElement>('[data-field="flavor"] select')!;
-  // The one required field in the Jira schema, emptied.
-  flavor.value = "";
-  flavor.dispatchEvent(new Event("change", { bubbles: true }));
+  type("#add-url", "https://teamcity.tidewater.example");
+  const budget = target.querySelector<HTMLInputElement>('[data-field="builds_per_config"] input')!;
+  budget.value = "10001";
+  budget.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
+
   expect(button("Next")!.disabled).toBe(true);
-  expect(text()).toMatch(/required/i);
+  expect(text()).toMatch(/at most 10000/);
 });
 
 test("the secret is never written anywhere but the request", async () => {
