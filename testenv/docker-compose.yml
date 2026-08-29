@@ -39,6 +39,20 @@ services:
       # The seed creates its users through the admin API; self-service sign-up
       # would only be another way in.
       GITEA__service__REQUIRE_SIGNIN_VIEW: "false"
+      # Gitea's own default, PINNED rather than left implicit, and the reason is
+      # that Gitea's environment-to-ini only ever *writes* /data/gitea/conf/
+      # app.ini -- it never removes a setting from it. `docker-compose.capped.yml`
+      # lowers this to 1, and app.ini keeps that value in the gitea-data volume,
+      # so a plain `docker compose up` afterwards comes back on a container with
+      # no such variable and a still-capped server. (Measured, not assumed: the
+      # container is recreated, `docker inspect` shows no MAX_RESPONSE_ITEMS, and
+      # app.ini still reads `MAX_RESPONSE_ITEMS = 1`.) Naming the default here is
+      # what puts it back, for `just gitea-live` and for anyone who ran the
+      # capped overlay once and never thought about it again.
+      #
+      # 50 is also `knobas_source_gitea::client::PAGE_SIZE`, the `limit` every
+      # listing in that adapter asks for.
+      GITEA__api__MAX_RESPONSE_ITEMS: "50"
       GITEA__log__LEVEL: warn
     ports:
       - "127.0.0.1:3000:3000"
