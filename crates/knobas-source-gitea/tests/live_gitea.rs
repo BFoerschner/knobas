@@ -173,6 +173,46 @@ fn revoked() -> String {
     format!("revoked-{}", std::process::id())
 }
 
+/// One commit on `branch`, made through Gitea's own contents endpoint, and the
+/// object id the server answers with.
+///
+/// The content is fixed and pre-encoded, so this needs no base64 encoder:
+/// `a25vYmFzIGxpdmUgY2hlY2sK` is "knobas live check\n". The **path** is what
+/// makes each call a new commit -- writing the same path twice is a 422, not a
+/// second commit -- so every caller passes a fresh one.
+async fn push_file(
+    http: &reqwest::Client,
+    env: &Env,
+    branch: &str,
+    path: &str,
+    message: &str,
+) -> String {
+    let wrote = http
+        .post(format!(
+            "{}/api/v1/repos/{}/contents/{path}",
+            env.url,
+            env.full_name()
+        ))
+        .header("Authorization", format!("token {}", env.token))
+        .json(&serde_json::json!({
+            "branch": branch,
+            "content": "a25vYmFzIGxpdmUgY2hlY2sK",
+            "message": message,
+        }))
+        .send()
+        .await
+        .expect("write the file");
+    assert!(
+        wrote.status().is_success(),
+        "contents: {}",
+        wrote.text().await.unwrap_or_default()
+    );
+    wrote.json::<serde_json::Value>().await.unwrap()["commit"]["sha"]
+        .as_str()
+        .expect("Gitea answers with the commit it made")
+        .to_owned()
+}
+
 /// The contract battery -- the suite every adapter must pass -- against the
 /// server rather than against the fake, and scoped to the seeded repositories
 /// **nothing in this file writes to** (issue #146).
@@ -209,7 +249,8 @@ fn revoked() -> String {
 ///   `live_gitea_capped.rs`'s `whole_owner()` walk;
 /// * idle behaviour of the walks this file mutates, by the idle clauses of
 ///   [`a_pull_request_opened_through_the_api_appears_in_the_next_incremental_run`]
-///   and [`a_commit_pushed_through_the_api_arrives_once_and_only_once`];
+///   and
+///   [`a_commit_pushed_through_the_api_arrives_once_and_only_once_and_so_does_the_next_push`];
 /// * the full->idle pair over the repository-*listing* walk, against the
 ///   docker-free fake in `tests/sync.rs` --
 ///   `an_idle_run_emits_nothing_and_returns_the_same_bytes` and
@@ -568,7 +609,27 @@ async fn a_pull_request_opened_through_the_api_appears_in_the_next_incremental_r
 ///
 /// A commit is pushed through Gitea's own API and the next incremental run must
 /// return **exactly** it -- not the branch's inherited history, and not it
-/// twice.
+/// twice. Then the same branch is pushed to **again**, and the run after that
+/// must return exactly the second commit.
+///
+/// # Why the branch is pushed to twice (issue #152)
+///
+/// `sync::commits` returns on `moved.is_empty()` **before it lists anything**,
+/// and an idle run's `moved` is empty. So run 3 below never enters the commit
+/// walk, and whatever it asserts it cannot observe where run 2 left
+/// `commits_since` and `commits_at_watermark`. Measured: suppress
+/// `close_watermark` on incremental runs -- so an incremental run's commit
+/// watermark never advances -- and runs 1 to 3 stay green, as does every
+/// docker-free test in this crate. Run 4 is the one that goes red, and its
+/// message names the re-delivered object id rather than reporting a bare diff.
+///
+/// A run that walks the branch a **second** time is the only thing that reaches
+/// it, because only then is the watermark run 2 wrote the `since=` the server is
+/// asked. That is run 4. It rides on the branch this test already opened rather
+/// than opening another, so it adds one *commit* and no further branch, pull
+/// request or comment -- and since issue #143 that branch, with everything on
+/// it, is deleted again when the test ends ([`Litter`]). So the second push
+/// costs the fixture nothing that outlives the run.
 ///
 /// # What this still rests on
 ///
@@ -582,13 +643,28 @@ async fn a_pull_request_opened_through_the_api_appears_in_the_next_incremental_r
 /// unentered -- which this test catches, because it asserts the commit arrives,
 /// not merely that nothing extra did.
 ///
+/// Run 4 rests on both facts one run later, and on nothing further. In
+/// particular it does **not** rest on the two pushes landing in different
+/// seconds, which is the kind of throughput dependency this suite has been
+/// bitten by. Run 2 leaves `commits_since` at the *first* push's own second, so
+/// an inclusive `since=` hands that commit back on run 4 whether or not the two
+/// share a second, and `commits_at_watermark` is what drops it in both cases.
+/// What a shared second changes is only how the *second* commit is kept: past
+/// the mark when the seconds differ, at the mark but absent from
+/// `commits_at_watermark` when they do not. Run 4's answer is the same either
+/// way. It also does not rest on run 3's cursor being byte-identical to run
+/// 2's -- the repository entity may have moved it -- because an idle run
+/// returns early from the commit walk and carries `commits_since` and
+/// `commits_at_watermark` across untouched, which is the very property run 4
+/// then measures.
+///
 /// As above, the repository entity may ride along in any run and nothing here
 /// asserts it away (#140); the branch name carries the same epoch-second
 /// caveat; and the branch this pushes onto is removed again when the test ends,
 /// passing or panicking alike -- see the header.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Gitea container"]
-async fn a_commit_pushed_through_the_api_arrives_once_and_only_once() {
+async fn a_commit_pushed_through_the_api_arrives_once_and_only_once_and_so_does_the_next_push() {
     let env = env();
     // Built before the baseline sync: sweeping what a killed run left behind is
     // itself a change to the repository, and this run's cursor must be taken after
@@ -602,34 +678,19 @@ async fn a_commit_pushed_through_the_api_arrives_once_and_only_once() {
         .unwrap()
         .as_secs();
     let branch = format!("knobas-commit-{stamp}");
-    let api = format!("{}/api/v1/repos/{}", env.url, env.full_name());
     let http = reqwest::Client::new();
-    let auth = format!("token {}", env.token);
 
     litter.branch_off_main(&branch).await;
 
-    // A unique path, so a re-run cannot collide; fixed content, so this needs
-    // no base64 encoder. `a25vYmFzIGxpdmUgY2hlY2sK` is "knobas live check\n".
-    let wrote = http
-        .post(format!("{api}/contents/knobas-live-{stamp}.txt"))
-        .header("Authorization", &auth)
-        .json(&serde_json::json!({
-            "branch": branch,
-            "content": "a25vYmFzIGxpdmUgY2hlY2sK",
-            "message": format!("knobas live check {stamp}")
-        }))
-        .send()
-        .await
-        .expect("write the file");
-    assert!(
-        wrote.status().is_success(),
-        "contents: {}",
-        wrote.text().await.unwrap_or_default()
-    );
-    let sha = wrote.json::<serde_json::Value>().await.unwrap()["commit"]["sha"]
-        .as_str()
-        .expect("Gitea answers with the commit it made")
-        .to_owned();
+    // A unique path, so a re-run cannot collide.
+    let sha = push_file(
+        &http,
+        &env,
+        &branch,
+        &format!("knobas-live-{stamp}.txt"),
+        &format!("knobas live check {stamp}"),
+    )
+    .await;
 
     let mut sink = VecSink(Vec::new());
     let moved = source
@@ -678,6 +739,41 @@ async fn a_commit_pushed_through_the_api_arrives_once_and_only_once() {
         } else {
             "moved"
         }
+    );
+
+    // Run 4: the same branch, pushed to a second time. Everything above stops
+    // at a run that never entered the commit walk, so this is the one that
+    // makes run 2's watermark observable at all -- see the doc comment.
+    let second = push_file(
+        &http,
+        &env,
+        &branch,
+        &format!("knobas-live-{stamp}-again.txt"),
+        &format!("knobas live check {stamp}, again"),
+    )
+    .await;
+
+    let mut walked = VecSink(Vec::new());
+    let onward = source
+        .sync(Some(same.clone()), &mut walked)
+        .await
+        .expect("the incremental sync after the second push");
+    let arrived: Vec<&str> = of_kind(&walked.0, "commit")
+        .iter()
+        .map(|i| i.entity.key.as_str())
+        .collect();
+    let only_the_second = format!("{}@{second}", env.full_name());
+    assert_eq!(
+        arrived,
+        vec![only_the_second.as_str()],
+        "the run after the second push must return exactly the commit that push \
+         made. The first push ({sha}) back as well means an incremental run's \
+         commit watermark never advanced past it (issue #152); nothing at all \
+         means the walk was not entered, so this assertion is measuring nothing"
+    );
+    assert_ne!(
+        onward, same,
+        "the position must move when something was emitted"
     );
 }
 
