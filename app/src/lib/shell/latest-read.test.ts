@@ -18,6 +18,7 @@
 import { expect, test } from "vitest";
 
 import { latestRead } from "./latest-read";
+import { settleRejections, takeUnhandled } from "./unhandled";
 
 /** A promise plus the handles to settle it, so a test controls the ordering. */
 function deferred<T>() {
@@ -58,6 +59,37 @@ test("an exception from the ok-handler is not laundered into the fail path", asy
   ).rejects.toBe(bug);
 
   expect(log, "the ok-handler's own exception was reported as a failed read").toEqual(["ok"]);
+});
+
+/**
+ * …and `void`-ed, which is how both call sites drive it, that exception is
+ * loud rather than lost.
+ *
+ * Neither `SourcesView` nor `BackupSection` awaits its `load()`; both call it
+ * from an `$effect`. So "the exception propagates" has to mean something at
+ * the call sites that exist, and what it means is a rejection nobody is
+ * holding — which `test-setup.ts`'s repo-wide guard turns into a named
+ * failure of the test that caused it (#103). A renderer's bug becomes a
+ * failing test about that renderer, where the old behaviour made it a green
+ * test and a message about the network.
+ *
+ * This test leaks on purpose, so it takes its own leak: `takeUnhandled`
+ * empties the record, and the shared `afterEach` then finds nothing left.
+ */
+test("a void-ed read whose ok-handler throws is recorded, not lost", async () => {
+  const read = latestRead<string>();
+  const bug = new Error("bug in the ok handler");
+
+  void read(() => Promise.resolve("fetched fine"), {
+    ok: () => {
+      throw bug;
+    },
+    fail: () => {},
+  });
+
+  await settleRejections();
+
+  expect(takeUnhandled(), "the ok-handler's exception went nowhere").toEqual([bug]);
 });
 
 /**
