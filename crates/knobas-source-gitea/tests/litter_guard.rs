@@ -106,9 +106,7 @@ fn strings(value: &serde_json::Value, into: &mut Vec<String>) {
     match value {
         serde_json::Value::String(text) => into.push(text.clone()),
         serde_json::Value::Array(rows) => rows.iter().for_each(|row| strings(row, into)),
-        serde_json::Value::Object(fields) => {
-            fields.values().for_each(|field| strings(field, into))
-        }
+        serde_json::Value::Object(fields) => fields.values().for_each(|field| strings(field, into)),
         _ => {}
     }
 }
@@ -139,7 +137,10 @@ fn nothing_the_seed_puts_in_the_container_could_be_taken_for_this_suites_litter(
 
     let mut everything = Vec::new();
     strings(&fixture(), &mut everything);
-    let suspects: Vec<&String> = everything.iter().filter(|s| s.starts_with(LITTER)).collect();
+    let suspects: Vec<&String> = everything
+        .iter()
+        .filter(|s| s.starts_with(LITTER))
+        .collect();
     assert!(
         suspects.is_empty(),
         "fixtures/tidewater/work.json carries {suspects:?}, which start with {LITTER:?} -- the \
@@ -147,4 +148,261 @@ fn nothing_the_seed_puts_in_the_container_could_be_taken_for_this_suites_litter(
          company and knobas- is this application's own name, so nothing in the fixture should \
          begin with it; if one of these is a branch name, the live suite will delete it."
     );
+}
+
+// ---------------------------------------------------------------------------
+// The stand-in the guard's own deletes run against.
+//
+// `tests/support/mod.rs` cannot carry this: it serves the *adapter's* read
+// routes and is deliberately static, and what has to be witnessed here is a
+// server whose listings CHANGE because of a DELETE. So this is a small stateful
+// fake of exactly four routes -- the two listings the guard reads and the two
+// deletes it issues -- and the state it mutates is what the assertions read.
+//
+// Its fidelity is not assumed: `tests/live_gitea.rs` drives the same guard
+// against the real pinned container, and the standing rule is that when a fake
+// and the server disagree, the fake is wrong.
+// ---------------------------------------------------------------------------
+
+use std::sync::{Arc, Mutex};
+
+use live_env::{Env, Litter};
+use serde_json::{Value, json};
+use wiremock::{Mock, MockServer, Request, ResponseTemplate, matchers::any};
+
+const TOKEN: &str = "tidewater-pat";
+const OWNER: &str = "tidewater";
+const REPO: &str = "payout-service";
+
+/// One repository, as the four routes see it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Repository {
+    /// Branch names, in listing order.
+    branches: Vec<String>,
+    /// `(index, head branch)` per pull request, whatever its state.
+    pulls: Vec<(u64, String)>,
+    /// Every DELETE the server was asked for, in the order it arrived --
+    /// `issues/<index>` or `branches/<name>`. The order is a property here,
+    /// not bookkeeping: see [`live_env`]'s `remove`.
+    deleted: Vec<String>,
+}
+
+impl Repository {
+    /// What `testenv/seed-gitea.sh` leaves behind, in the shape these four
+    /// routes serve: three branches of `payout-service` and the two pull
+    /// requests opened from two of them.
+    fn seeded() -> Self {
+        Self {
+            branches: [
+                "main",
+                "feature/PAY-231-sepa-retry",
+                "fix/PAY-228-partial-refund-drift",
+            ]
+            .map(str::to_owned)
+            .to_vec(),
+            pulls: vec![
+                (142, "feature/PAY-231-sepa-retry".to_owned()),
+                (139, "fix/PAY-228-partial-refund-drift".to_owned()),
+            ],
+            deleted: Vec::new(),
+        }
+    }
+
+    /// The same repository after a run that was killed mid-test: two branches
+    /// it never took away, one of them carrying a pull request.
+    fn after_a_killed_run() -> Self {
+        let mut left = Self::seeded();
+        left.branches.push(format!("{LITTER}live-9"));
+        left.branches.push(format!("{LITTER}commit-9"));
+        left.pulls.push((310, format!("{LITTER}live-9")));
+        left
+    }
+}
+
+struct Gitea {
+    server: MockServer,
+    state: Arc<Mutex<Repository>>,
+}
+
+impl Gitea {
+    async fn holding(repository: Repository) -> Gitea {
+        let state = Arc::new(Mutex::new(repository));
+        let server = MockServer::start().await;
+        let handler = Arc::clone(&state);
+        let auth = format!("token {TOKEN}");
+        let prefix = format!("/api/v1/repos/{OWNER}/{REPO}");
+        Mock::given(any())
+            .respond_with(move |request: &Request| {
+                let presented = request
+                    .headers
+                    .get("Authorization")
+                    .and_then(|value| value.to_str().ok());
+                if presented != Some(auth.as_str()) {
+                    return refused(401, "token does not exist");
+                }
+                let Some(route) = request.url.path().strip_prefix(prefix.as_str()) else {
+                    return refused(404, "the guard reached outside the repository it was given");
+                };
+                let mut repository = handler.lock().expect("the fake's state is not poisoned");
+                match (request.method.as_str(), route) {
+                    ("GET", "/branches") => {
+                        let names = page(&repository.branches, request);
+                        ResponseTemplate::new(200)
+                            .set_body_json(names.iter().map(|n| json!({ "name": n })).collect::<Vec<Value>>())
+                    }
+                    ("GET", "/pulls") => {
+                        let pulls = page(&repository.pulls, request);
+                        ResponseTemplate::new(200).set_body_json(
+                            pulls
+                                .iter()
+                                .map(|(number, head)| json!({ "number": number, "head": { "ref": head } }))
+                                .collect::<Vec<Value>>(),
+                        )
+                    }
+                    ("DELETE", route) => {
+                        repository.deleted.push(route.trim_start_matches('/').to_owned());
+                        if let Some(name) = route.strip_prefix("/branches/") {
+                            match repository.branches.iter().position(|b| b == name) {
+                                Some(at) => {
+                                    repository.branches.remove(at);
+                                    ResponseTemplate::new(204)
+                                }
+                                None => refused(404, "no such branch"),
+                            }
+                        } else if let Some(index) = route.strip_prefix("/issues/") {
+                            let index: u64 = index.parse().unwrap_or(0);
+                            match repository.pulls.iter().position(|(n, _)| *n == index) {
+                                Some(at) => {
+                                    repository.pulls.remove(at);
+                                    ResponseTemplate::new(204)
+                                }
+                                None => refused(404, "no such issue"),
+                            }
+                        } else {
+                            refused(404, "not a route this fake serves")
+                        }
+                    }
+                    _ => refused(404, "not a route this fake serves"),
+                }
+            })
+            .mount(&server)
+            .await;
+        Gitea { server, state }
+    }
+
+    fn env(&self) -> Env {
+        Env {
+            url: self.server.uri(),
+            token: TOKEN.to_owned(),
+            owner: OWNER.to_owned(),
+            repo: REPO.to_owned(),
+        }
+    }
+
+    fn repository(&self) -> Repository {
+        self.state
+            .lock()
+            .expect("the fake's state is not poisoned")
+            .clone()
+    }
+}
+
+fn refused(status: u16, message: &str) -> ResponseTemplate {
+    ResponseTemplate::new(status).set_body_json(json!({ "message": message }))
+}
+
+/// The slice of `records` the request's `page`/`limit` asks for. The guard
+/// pages until a page comes back empty, so a fake that ignored `page` would
+/// hang it for 64 requests and then panic.
+fn page<T: Clone>(records: &[T], request: &Request) -> Vec<T> {
+    let number = |key: &str, fallback: usize| {
+        request
+            .url
+            .query_pairs()
+            .find(|(name, _)| name == key)
+            .and_then(|(_, value)| value.parse().ok())
+            .unwrap_or(fallback)
+    };
+    let (limit, page) = (number("limit", 50), number("page", 1).max(1));
+    records
+        .chunks(limit.max(1))
+        .nth(page - 1)
+        .map(<[T]>::to_vec)
+        .unwrap_or_default()
+}
+
+/// **The removal of a killed run's leavings, witnessed.** Deleting the call
+/// from `Litter::new` reddens nothing in the live suite: residue only
+/// accumulates, until `live_gitea_capped`'s `HEADROOM` refuses to start at 19
+/// pull requests -- a different suite, several runs later. This is that
+/// witness, and it costs no container.
+///
+/// Three assertions, three separate ways it could go wrong:
+///
+/// 1. the leftovers are gone -- the branches *and* the pull request opened
+///    from one of them, which is not itself named after anything;
+/// 2. the seeded content is untouched, which is the destructive half: a
+///    prefix match that widened would take fixture branches with it;
+/// 3. the pull request is deleted **before** the branch it hangs off, because
+///    the branch is the only marker a later run can find either of them by.
+#[tokio::test]
+async fn a_guard_clears_what_a_killed_run_left_and_takes_nothing_else_with_it() {
+    let gitea = Gitea::holding(Repository::after_a_killed_run()).await;
+
+    let guard = Litter::new(&gitea.env()).await;
+
+    let after = gitea.repository();
+    let seeded = Repository::seeded();
+    assert_eq!(
+        after.branches, seeded.branches,
+        "after a guard was built, the branch listing should be back to the seeded one"
+    );
+    assert_eq!(
+        after.pulls, seeded.pulls,
+        "the pull request opened from a leftover branch is found by its head ref and must go with it"
+    );
+
+    let at = |what: &str| after.deleted.iter().position(|d| d == what);
+    let pull = at("issues/310").unwrap_or_else(|| {
+        panic!(
+            "the leftover pull request was never deleted; the guard sent {:?}",
+            after.deleted
+        )
+    });
+    let branch = at(&format!("branches/{LITTER}live-9")).unwrap_or_else(|| {
+        panic!(
+            "the leftover branch was never deleted; the guard sent {:?}",
+            after.deleted
+        )
+    });
+    assert!(
+        pull < branch,
+        "the pull request must be deleted before the branch it was opened from -- the branch is \
+         the only thing a later run can recognise either of them by. Order sent: {:?}",
+        after.deleted
+    );
+
+    drop(guard);
+}
+
+/// The other half of the destructive rule: a repository with no leftovers is
+/// left alone entirely. Not one DELETE, so a prefix match that started
+/// matching everything -- or a guard that deleted first and read afterwards --
+/// cannot pass as a clean run.
+#[tokio::test]
+async fn a_guard_over_a_clean_repository_deletes_nothing_at_all() {
+    let gitea = Gitea::holding(Repository::seeded()).await;
+
+    let guard = Litter::new(&gitea.env()).await;
+
+    let after = gitea.repository();
+    assert_eq!(
+        after.deleted,
+        Vec::<String>::new(),
+        "nothing in the seeded repository is this suite's litter, so nothing may be deleted"
+    );
+    assert_eq!(after.branches, Repository::seeded().branches);
+    assert_eq!(after.pulls, Repository::seeded().pulls);
+
+    drop(guard);
 }

@@ -57,7 +57,10 @@
 //! **All of it is removed again** -- afterwards, never before an assertion --
 //! by [`Litter`], which creates each branch and later deletes it together with
 //! every pull request opened from it, and so every comment on those, from
-//! `Drop`. Three consequences, each a decision:
+//! `Drop`. The *branch* is what the guard is asked for and what it tracks; a
+//! pull request is opened by the test itself and found again by matching its
+//! head ref against a tracked branch, which is why the branch is deleted last.
+//! Three consequences, each a decision:
 //!
 //! * **The failure path is the success path.** A test that panics unwinds
 //!   through the same cleanup a passing test returns through. A cleanup that
@@ -67,10 +70,14 @@
 //!   listings afterwards and fails the test if anything it created is still
 //!   standing, so a cleanup that quietly stopped deleting cannot pass as a
 //!   clean run.
-//! * **A killed process is swept, not mourned.** `Drop` cannot survive a
-//!   `SIGKILL` or a Ctrl-C at the wrong moment, so the next run's first
-//!   mutating test removes whatever such a run left. Recovery from a dirty
-//!   environment is "run the suite again".
+//! * **What a killed process left is cleared, not mourned.** `Drop` cannot
+//!   survive a `SIGKILL` or a Ctrl-C at the wrong moment, so the next run's
+//!   first mutating test removes whatever such a run left, by the `knobas-`
+//!   prefix every branch this suite creates carries. Recovery from a dirty
+//!   environment is "run the suite again". None of that needs a container to
+//!   be checked, and `tests/litter_guard.rs` checks it in `just check`: that
+//!   the prefix matches nothing the seed creates, that the leftovers really go,
+//!   and that a clean repository is left alone.
 //!
 //! So `testenv/reset` -- which destroys every testenv volume, Uptime Kuma's
 //! included -- is back to being the deliberate remedy rather than the routine
@@ -507,7 +514,7 @@ async fn pull_requests_come_back_newest_updated_first() {
 #[ignore = "needs testenv's seeded Gitea container"]
 async fn a_pull_request_opened_through_the_api_appears_in_the_next_incremental_run() {
     let env = env();
-    // Built before the baseline sync: sweeping what a killed run left behind is
+    // Built before the baseline sync: clearing what a killed run left behind is
     // itself a change to the repository, and this run's cursor must be taken after
     // it rather than before.
     let mut litter = Litter::new(&env).await;
@@ -666,7 +673,7 @@ async fn a_pull_request_opened_through_the_api_appears_in_the_next_incremental_r
 #[ignore = "needs testenv's seeded Gitea container"]
 async fn a_commit_pushed_through_the_api_arrives_once_and_only_once_and_so_does_the_next_push() {
     let env = env();
-    // Built before the baseline sync: sweeping what a killed run left behind is
+    // Built before the baseline sync: clearing what a killed run left behind is
     // itself a change to the repository, and this run's cursor must be taken after
     // it rather than before.
     let mut litter = Litter::new(&env).await;
@@ -886,7 +893,7 @@ const PAGE: usize = 50;
 #[ignore = "needs testenv's seeded Gitea container"]
 async fn the_discussion_endpoint_does_not_page() {
     let env = env();
-    // Built before the baseline sync: sweeping what a killed run left behind is
+    // Built before the baseline sync: clearing what a killed run left behind is
     // itself a change to the repository, and this run's cursor must be taken after
     // it rather than before.
     let mut litter = Litter::new(&env).await;

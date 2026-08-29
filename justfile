@@ -247,7 +247,7 @@ demo: deps
 # about what the real server does with something it has just been told -- and
 # all of it is deleted again when each test ends, passing or panicking alike
 # (`live_env::Litter`, whose Drop also checks the removal really happened).
-# Anything a *killed* run left behind is swept away by the next run before it
+# Anything a *killed* run left behind is cleared by the next run before it
 # starts. So this recipe is repeatable: measured, the seeded corpus is the same
 # shape after twelve runs as before the first, and each run takes the same time
 # as the one before it. `testenv/reset` -- which destroys every testenv volume,
@@ -257,7 +257,13 @@ demo: deps
 # `gitea-live-capped` refuse to start.
 #
 # Serial, and `--test-threads=1` for two reasons now: the runs share one server,
-# and the sweep above cannot tell a sibling test's live branch from a corpse.
+# and the clearing above cannot tell a sibling test's live branch from a corpse.
+#
+# WHAT DOES NOT NEED THIS RECIPE. The guard's own contracts -- that the
+# `knobas-` prefix it deletes by matches nothing `seed-gitea.sh` creates, that
+# the leftovers really go, and that a clean repository is left alone -- are
+# pinned docker-free in `crates/knobas-source-gitea/tests/litter_guard.rs` and
+# run in `just check`.
 #
 # ONE ENVIRONMENT, ONE OWNER. There is a single Docker environment shared by
 # every worktree on the machine, and worktree exclusivity does not cover it:
