@@ -19,8 +19,14 @@
  *    was just configured.
  *
  * Both are pinned here against the *lifecycle*, because "when the database is
- * ready" is the whole of what was wrong. The mocks answer immediately; the
- * assertions are about ordering, not timing.
+ * ready" is the whole of what was wrong. The mocks answer immediately for
+ * those two; the assertions are about ordering, not timing.
+ *
+ * The exception is the last test, and it is an exception on purpose: #148 is a
+ * race *inside* the seed's own duration, so `answerHealth` holds
+ * `credential_health` open while the event lands. A read that answered
+ * immediately could not express it — the two would be a sequence, and a
+ * sequence is fine in either order.
  */
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";

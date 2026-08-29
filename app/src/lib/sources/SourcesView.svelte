@@ -24,10 +24,14 @@
 
   A **credential fixed in the strip** re-lists as well, for a different reason:
   it does not change the row set, it changes the shared health store *out of
-  band*. `load()` replaces that store wholesale (see below), so a read already
-  in flight when the password was typed lands afterwards and writes the
-  rejected credential back over the green chip. Re-listing here is what makes
-  that read stale, so its answer is dropped instead of applied (#144).
+  band*. `load()` hands its rows to `health.replace`, which used to take them
+  wholesale (see below), so a read already in flight when the password was
+  typed landed afterwards and wrote the rejected credential back over the green
+  chip. Re-listing here is what makes that read stale, so its answer is dropped
+  instead of applied (#144). Since #148 the store keeps the newer reading per
+  row as well, so that chip now has two guards behind it rather than this one
+  alone — which is why the mutation that removes either of them leaves the
+  other's test still passing.
 
   Every other path here that changes a row or the health store re-lists. The
   *running* `sync:state` above reads like an exception and is not one: the
@@ -37,9 +41,14 @@
 
   The store has one writer this view cannot see, and it is the exception worth
   writing down: `createHealth` subscribes to `source:health`, so a reading the
-  scheduler discovers is patched in with no re-list behind it and the wholesale
-  replace below can still write over it — the same race in the other direction,
-  and #148's rather than this file's.
+  scheduler discovers is patched in with no re-list behind it. The replace
+  below used to write straight over it whenever a `list_sources` was already in
+  flight — the same race in the other direction, and the one that hides a
+  failure rather than showing a false one. That is #148, and it is closed in
+  the store rather than here: `replace` still takes membership from the
+  incoming set absolutely, but per surviving row it keeps whichever reading has
+  the newer `checked_at`, so no read of this view's can revert one. The rule is
+  `replace`'s and its doc is where it is spelled out.
 -->
 <script lang="ts">
   import { listen } from "@tauri-apps/api/event";
@@ -240,13 +249,19 @@
     // round trip later is not when they are looking.
     health.patch(next);
     fixing = null;
-    // …and then a re-list, because that patch is *out of band* and `load()`
-    // replaces this store wholesale. A read issued before the password was
-    // typed and landing after it writes the rejected credential back over the
-    // green chip, with no action of the reader's — and re-listing on every
-    // terminal `sync:state` is what makes that window an ordinary one rather
-    // than an exotic one (#144). Issuing the read is itself the fix: it makes
-    // the in-flight one stale, so its answer is dropped rather than applied.
+    // …and then a re-list, because that patch is *out of band*. A read issued
+    // before the password was typed and landing after it used to write the
+    // rejected credential back over the green chip, with no action of the
+    // reader's — and re-listing on every terminal `sync:state` is what makes
+    // that window an ordinary one rather than an exotic one (#144). Issuing
+    // the read is itself the fix: it makes the in-flight one stale, so its
+    // answer is dropped rather than applied.
+    //
+    // Since #148 the reading above would survive that read anyway: it is
+    // stamped later than the one in flight, and `replace` keeps the newer one
+    // per row. Both guards are deliberately here — this one refreshes the
+    // halves the health store does not hold (`last_run`, `item_count`), and
+    // the store's covers the call sites this view has no re-list for.
     //
     // `void`, not `await`, and for the same reason as `onsaved` below: this is
     // a synchronous callback prop whose caller does not hold what it returns,
