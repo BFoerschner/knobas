@@ -1930,6 +1930,45 @@ async fn a_run_that_committed_in_the_gap_before_the_forget_is_swept_by_it() {
     retire(&pool, &ids).await;
 }
 
+/// **"Remove source, keep items" survives the in-flight run too** (#127).
+///
+/// The other half of the intent, and the half a foreign key could never have
+/// had: keeping the items is a real choice in the sources view (interfaces §3,
+/// Delete), so the sweep must be something `delete_source` asks for rather than
+/// something the scheduler does whenever a source goes away. A forget that
+/// purged regardless would delete a mirror the user explicitly kept, and it
+/// would do it only sometimes -- when a sync happened to be running.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn deleting_a_source_mid_run_without_purging_keeps_its_items() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed_quiet(&pool, 1).await;
+    let id = ids[0].clone();
+    let (deps, inside) = deps_watching_the_adapter(sched_pool, Duration::from_millis(400)).await;
+    let scheduler = Scheduler::start(deps).await.unwrap();
+
+    let watcher = Heard::new();
+    scheduler
+        .trigger(&id, SyncTrigger::Manual, Some(watcher.sink()))
+        .await
+        .unwrap();
+    await_inside(&inside).await;
+    config::delete(&pool, &id, false).await.unwrap();
+    scheduler.forget_source(&id, Purge::Keep).await;
+
+    let ending = await_ending(&watcher).await;
+    assert_eq!((ending.phase, ending.items), (SyncPhase::Finished, 1));
+    scheduler.shutdown().await;
+
+    assert_eq!(
+        mirrored(&pool, &id).await,
+        (1, 1),
+        "the user asked to keep the items; a run being in flight is not a \
+         reason to throw them away"
+    );
+    retire(&pool, &ids).await;
+}
+
 /// **Forgetting a source does not take an ending away from anybody already
 /// watching its run.**
 ///
