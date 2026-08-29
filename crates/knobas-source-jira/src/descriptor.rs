@@ -70,7 +70,7 @@ fn config_schema() -> serde_json::Value {
             },
             "username": {
                 "type": ["string", "null"], "default": null, "title": "Username",
-                "description": "Only for user + password authentication."
+                "description": "Your Jira account. Filled in by Test connection; used for @me and My items. Also the login name for user + password authentication."
             },
             "epic_link_field": {
                 "type": ["string", "null"], "default": null, "title": "Epic Link field id",

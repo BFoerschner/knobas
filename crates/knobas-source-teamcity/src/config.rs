@@ -27,8 +27,14 @@ pub struct TeamCityConfig {
     pub build_type_ids: Vec<String>,
     /// How many finished builds a full sync fetches per configuration.
     pub builds_per_config: u32,
-    /// Only for [`AuthMethod::UserPassword`](knobas_source::AuthMethod); the
-    /// password is the keychain secret. Bearer tokens need no username.
+    /// The TeamCity account this credential belongs to. Filled in from
+    /// `test_connection`'s `account` by the Add-source dialog, and what
+    /// `@me`-style filters match `sync.item.author` against; it is *also* the
+    /// login name for
+    /// [`AuthMethod::UserPassword`](knobas_source::AuthMethod), whose password
+    /// is the keychain secret. A bearer token needs no username to
+    /// authenticate, which is why this was once described as belonging to one
+    /// auth method -- and why a token user was then told to fill it in anyway.
     pub username: Option<String>,
     /// Per-instance request budget (interfaces §4.1 default: 5 req/s).
     pub rate_limit_per_sec: u32,
@@ -125,7 +131,7 @@ pub fn config_schema() -> serde_json::Value {
             "username": {
                 "type": "string",
                 "title": "Username",
-                "description": "Only needed for user + password authentication; a token needs no username."
+                "description": "Your TeamCity account. Filled in by Test connection; used for @me and My items. Also the login name for user + password authentication."
             },
             "rate_limit_per_sec": {
                 "type": "integer",

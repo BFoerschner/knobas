@@ -30,7 +30,14 @@ pub struct JiraConfig {
     pub projects: Vec<String>,
     /// Any JQL, without an `ORDER BY`; the adapter appends its own.
     pub jql_filter: Option<String>,
-    /// Required for `AuthMethod::UserPassword`, unused for a PAT.
+    /// The Jira account this credential belongs to. Filled in from
+    /// `test_connection`'s `account` by the Add-source dialog, and what
+    /// `@me`-style filters match `sync.item.author` against; it is *also* the
+    /// login name for
+    /// [`AuthMethod::UserPassword`](knobas_source::AuthMethod), whose password
+    /// is the keychain secret. A bearer token needs no username to
+    /// authenticate, which is why this once said the field was unused for a
+    /// PAT -- and why a PAT user was then told to fill it in anyway (#82).
     pub username: Option<String>,
     /// The instance's Epic Link custom field (`customfield_10008` on many DC
     /// instances). Naming it adds it to the requested `fields=` list, so epic

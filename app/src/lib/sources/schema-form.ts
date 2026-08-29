@@ -137,8 +137,42 @@ export function schemaFields(schema: unknown): SchemaField[] {
   });
 }
 
-function controlFor(property: Record<string, unknown>): Control {
+/**
+ * The type a property is drawn as, with an optional `null` member discarded.
+ *
+ * JSON Schema spells "an optional string" as `{"type": ["string", "null"]}`,
+ * and that is what every shipped adapter uses for a field it may not have —
+ * Jira's `username`, `jql_filter` and `epic_link_field`, Gitea's `username`.
+ * Compared against `"string"` directly, each of them is *not* a string and
+ * falls through to a JSON textarea, so typing a username into one is a parse
+ * error unless the reader knows to quote it.
+ *
+ * The `null` mostly carries no drawing information the form does not already
+ * have: {@link validate} omits an empty optional value rather than sending
+ * `""`, so "unset" stays expressible in text, select, number and list.
+ *
+ * **`toggle` is the exception, and it is the one shape to be careful with.**
+ * `validate` writes `raw === true` unconditionally — a checkbox has two states
+ * and no third — so `["boolean", "null"]` draws as a toggle that can only ever
+ * send `true` or `false`, and the adapter's declared default can never apply.
+ * No shipped adapter declares one; an adapter that genuinely needs the third
+ * state wants an enum, not a nullable boolean, and this paragraph is where its
+ * author will find that out.
+ *
+ * A union that is not just "or null" *is* undrawable and keeps its JSON
+ * textarea. A single-member array collapses too (`["string"]` is `"string"`
+ * written the long way), which is why the rule is "one named member" rather
+ * than "drop the null".
+ */
+function typeOf(property: Record<string, unknown>): unknown {
   const { type } = property;
+  if (!Array.isArray(type)) return type;
+  const named = type.filter((member) => member !== "null");
+  return named.length === 1 ? named[0] : type;
+}
+
+function controlFor(property: Record<string, unknown>): Control {
+  const type = typeOf(property);
 
   if (Array.isArray(property.enum)) {
     const options = property.enum.filter((option): option is string => typeof option === "string");

@@ -13,7 +13,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { ConnectionReport, NewSource, SourceDescriptor, SourceDraft } from "../ipc/sources";
-import { GITEA_SCHEMA, JIRA_SCHEMA } from "./fixtures";
+import { GITEA_SCHEMA, JIRA_SCHEMA, TEAMCITY_SCHEMA } from "./fixtures";
 
 const calls = {
   listAdapters: 0,
@@ -386,8 +386,9 @@ test("Save sends the config from the generated form and the secret exactly once"
     secret: { value: "s3cret" },
     enabled: true,
   });
-  // From the generated form's declared default, not from a hand-written table.
-  expect(sent.config).toEqual({ flavor: "datacenter" });
+  // From the generated form's declared default, not from a hand-written table
+  // — plus the username the green test above filled in (#82).
+  expect(sent.config).toEqual({ flavor: "datacenter", username: "mara.oyelaran" });
   expect(saved.length).toBe(1);
 });
 
@@ -415,7 +416,11 @@ test("the config carries what was typed into the generated form", async () => {
   button("Save")!.click();
   await settle();
 
-  expect(calls.addSource[0]!.config).toEqual({ flavor: "datacenter", projects: ["PAY", "OPS"] });
+  expect(calls.addSource[0]!.config).toEqual({
+    flavor: "datacenter",
+    projects: ["PAY", "OPS"],
+    username: "mara.oyelaran",
+  });
 });
 
 test("a config the validator rejects blocks the step it was typed on", async () => {
@@ -559,4 +564,219 @@ test("an adapter whose schema declares a secret refuses the step instead of draw
   // Postgres. Saying so beats drawing a field that quietly does it.
   expect(text()).toMatch(/secret/i);
   expect(button("Next")!.disabled).toBe(true);
+});
+
+/*
+ * The identity, filled from what *Test connection* just reported (#82).
+ *
+ * `username` is the only source of the identity `@me`, *My items* and *Mine,
+ * untouched* resolve against, and author matching is case-sensitive — so a
+ * reader retyping by hand the account the dialog has just printed on screen is
+ * one slip away from an identity that matches nothing. The dialog cannot reach
+ * Save without a green test, so the account is in hand for every source that
+ * is ever saved.
+ *
+ * The fill is keyed on the property **name**, which all three adapters spell
+ * `username`; it is a convention, not per-adapter knowledge, and the dialog
+ * stays generated from `config_schema`.
+ */
+
+/** Walk a green test to the point where the report is on screen. */
+async function toTested() {
+  await toAuth();
+  type("#add-secret", "s3cret");
+  button("Next")!.click();
+  flushSync();
+  button("Test connection")!.click();
+  await settle();
+}
+
+/** Step 5 → Save, from the test step. */
+async function saveFromTest() {
+  button("Next")!.click();
+  flushSync();
+  button("Save")!.click();
+  await settle();
+}
+
+test("a successful test fills the username the reader never typed", async () => {
+  await toTested();
+  await saveFromTest();
+  expect(calls.addSource[0]!.config).toMatchObject({ username: "mara.oyelaran" });
+});
+
+test("the filled username is on screen and editable, not a hidden value", async () => {
+  await toTested();
+  button("Back")!.click();
+  flushSync();
+  button("Back")!.click();
+  flushSync();
+  expect(step()).toBe("Connection");
+  const field = input("#add-cfg-username");
+  expect(field.value).toBe("mara.oyelaran");
+  // Editable: the account the server reports is a starting point, not a lock.
+  type("#add-cfg-username", "mara");
+  expect(input("#add-cfg-username").value).toBe("mara");
+});
+
+test("the account is stored in the server's own spelling, never case-folded", async () => {
+  report = { ...report, account: "Mara.Oyelaran" };
+  await toTested();
+  await saveFromTest();
+  // `sync.item.author` is compared case-sensitively by construction, so the
+  // one spelling that can match is the one the source itself uses.
+  expect(calls.addSource[0]!.config).toMatchObject({ username: "Mara.Oyelaran" });
+});
+
+test("a username the reader typed is never overwritten by a later test", async () => {
+  render();
+  await settle();
+  button("Jira Data Center")!.click();
+  flushSync();
+  button("Next")!.click();
+  flushSync();
+  type("#add-url", "https://jira.tidewater.example");
+  type("#add-cfg-username", "m.lindqvist");
+  button("Next")!.click();
+  flushSync();
+  type("#add-secret", "s3cret");
+  button("Next")!.click();
+  flushSync();
+  button("Test connection")!.click();
+  await settle();
+  await saveFromTest();
+
+  expect(calls.addSource[0]!.config).toMatchObject({ username: "m.lindqvist" });
+});
+
+test("a source whose test reports no account saves exactly as it does today", async () => {
+  // Contract: `ConnectionInfo.account` is optional by design — a source whose
+  // API has no "who am I" endpoint is not a broken source.
+  report = { ...report, account: null };
+  await toTested();
+  await saveFromTest();
+
+  expect(calls.addSource.length).toBe(1);
+  // Not filled, and not sent as an empty string either: the adapter's own
+  // default has to be able to apply.
+  expect(calls.addSource[0]!.config).not.toHaveProperty("username");
+  expect(saved.length).toBe(1);
+});
+
+test("a report with no account leaves a typed username where it is", async () => {
+  // The absent-account path must not be a write of `null` dressed up as a
+  // no-op: that would empty a field the reader had filled in themselves.
+  report = { ...report, account: null };
+  render();
+  await settle();
+  button("Jira Data Center")!.click();
+  flushSync();
+  button("Next")!.click();
+  flushSync();
+  type("#add-url", "https://jira.tidewater.example");
+  type("#add-cfg-username", "m.lindqvist");
+  button("Next")!.click();
+  flushSync();
+  type("#add-secret", "s3cret");
+  button("Next")!.click();
+  flushSync();
+  button("Test connection")!.click();
+  await settle();
+  await saveFromTest();
+
+  expect(calls.addSource[0]!.config).toMatchObject({ username: "m.lindqvist" });
+});
+
+test("the fill is the property name, so an adapter this file never heard of gets it", async () => {
+  adapters = [
+    descriptor({
+      id: "quokka",
+      adapter_kind: "quokka",
+      name: "Quokka Tracker",
+      auth_methods: ["ApiToken"],
+      config_schema: {
+        type: "object",
+        properties: { username: { type: "string", title: "Username" } },
+      },
+    }),
+  ];
+  render();
+  await settle();
+  button("Quokka Tracker")!.click();
+  flushSync();
+  button("Next")!.click();
+  flushSync();
+  type("#add-url", "https://quokka.tidewater.example");
+  button("Next")!.click();
+  flushSync();
+  type("#add-secret", "s3cret");
+  button("Next")!.click();
+  flushSync();
+  button("Test connection")!.click();
+  await settle();
+  await saveFromTest();
+
+  expect(calls.addSource[0]!.config).toMatchObject({ username: "mara.oyelaran" });
+});
+
+/**
+ * Every shipped adapter's *own* schema, driven through the fill.
+ *
+ * The tests above exercise Jira's fixture and a synthetic `quokka`. These two
+ * drive the other real transcriptions, which is what makes `fixtures.ts`
+ * load-bearing rather than decorative: the three adapters spell `username`
+ * two ways -- Jira and Gitea `["string", "null"]`, TeamCity a plain
+ * `"string"` -- and a fixture that drifts back to a shape the form draws as a
+ * JSON textarea takes `fillIdentity`'s `control.kind !== "text"` branch and
+ * fails here rather than in the window. That drift is why nobody noticed the
+ * textarea in the first place (#82).
+ */
+for (const [name, kind, schema] of [
+  ["Gitea", "gitea", GITEA_SCHEMA],
+  ["TeamCity", "teamcity", TEAMCITY_SCHEMA],
+] as const) {
+  test(`${name}'s own schema is filled from the account its test reported`, async () => {
+    adapters = [descriptor({ id: kind, adapter_kind: kind, name, config_schema: schema })];
+    render();
+    await settle();
+    button(name)!.click();
+    flushSync();
+    button("Next")!.click();
+    flushSync();
+    // A literal, not an interpolation: the house rule scans for a reserved
+    // hostname and `${kind}` is not one it can read.
+    type("#add-url", "https://source.tidewater.example");
+    button("Next")!.click();
+    flushSync();
+    type("#add-secret", "s3cret");
+    button("Next")!.click();
+    flushSync();
+    button("Test connection")!.click();
+    await settle();
+    await saveFromTest();
+
+    expect(calls.addSource[0]!.config).toMatchObject({ username: "mara.oyelaran" });
+  });
+}
+
+test("an adapter with no username field has none invented for it", async () => {
+  adapters = [descriptor({ config_schema: { type: "object", properties: {} } })];
+  await toTested();
+  await saveFromTest();
+  expect(calls.addSource[0]!.config).toEqual({});
+});
+
+test("a failed test fills nothing, even if the report carries an account", async () => {
+  report = { ...report, ok: false, error: "401 Unauthorized" };
+  await toAuth();
+  type("#add-secret", "wrong");
+  button("Next")!.click();
+  flushSync();
+  button("Test connection")!.click();
+  await settle();
+  button("Back")!.click();
+  flushSync();
+  button("Back")!.click();
+  flushSync();
+  expect(input("#add-cfg-username").value).toBe("");
 });
