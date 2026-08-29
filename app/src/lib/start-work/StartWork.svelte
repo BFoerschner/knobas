@@ -109,6 +109,15 @@
   /** The step the sequence is on — the only one that may be acted upon. */
   const current = $derived(flow.steps.find((step) => demandOf(step.outcome) !== "done") ?? null);
   const done = $derived(flow.steps.length > 0 && current === null);
+  /**
+   * Whether the ticket actually moved. The footer may only claim "the ticket
+   * is In Progress" when the transition step *succeeded* -- a flow whose
+   * transition was skipped is finished too, and saying the ticket moved would
+   * be a false record of what happened.
+   */
+  const ticketMoved = $derived(
+    flow.steps.some((step) => step.step === "transition" && step.outcome === "succeeded"),
+  );
   /** Nothing has run yet, so the whole sequence is still a proposal. */
   const unstarted = $derived(
     flow.steps.length > 0 && flow.steps.every((step) => step.outcome === "pending"),
@@ -279,7 +288,11 @@
 
     <footer class="sw-foot">
       {#if done}
-        <p class="sw-note">Every step is finished. The ticket is In Progress.</p>
+        <p class="sw-note">
+          {ticketMoved
+            ? "Every step is finished. The ticket is In Progress."
+            : "Every step is settled. The ticket was not moved."}
+        </p>
       {:else if unstarted}
         <button class="btn pri" disabled={flow.busy} onclick={() => flow.run()}>
           Run the sequence

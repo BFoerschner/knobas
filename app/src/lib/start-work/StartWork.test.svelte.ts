@@ -390,6 +390,21 @@ test("with no flow yet the reader is asked which repository, and nothing is prop
 // -- the pure parts --------------------------------------------------------
 
 /** The three demands a reader can act on, and the one that means "finished". */
+test("the finished footer claims the ticket moved only when the transition succeeded", async () => {
+  flow = sequence(["succeeded", "succeeded", "succeeded", "skipped"]);
+  const page = render();
+  await settle();
+  expect(page.text()).toContain("Every step is settled. The ticket was not moved.");
+  expect(page.text()).not.toContain("The ticket is In Progress.");
+  page.done();
+
+  flow = sequence(["succeeded", "succeeded", "succeeded", "succeeded"]);
+  const moved = render();
+  await settle();
+  expect(moved.text()).toContain("Every step is finished. The ticket is In Progress.");
+  moved.done();
+});
+
 test("an outcome asks the reader for exactly one thing", () => {
   expect(demandOf("succeeded")).toBe("done");
   expect(demandOf("skipped")).toBe("done");

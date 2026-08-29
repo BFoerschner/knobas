@@ -15,7 +15,9 @@ use crate::entity::EntityRef;
 pub struct ActivityRow {
     pub id: i64,
     pub at: chrono::DateTime<chrono::Utc>,
-    /// `"user"`, or `"sync:<source_id>"` for a synced event.
+    /// `"user"`; `"knobas"` for an action knobas took on its own (the
+    /// start-work flow's reverse direction); or `"sync:<source_id>"` for a
+    /// synced event.
     pub actor: String,
     pub verb: String,
     pub entity_id: Option<String>,

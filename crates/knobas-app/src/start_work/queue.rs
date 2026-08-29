@@ -93,7 +93,7 @@ impl Steps for Queue<'_> {
         found(
             &self.state.pool,
             BRANCH_BY_NAME,
-            &format!("{repo}%"),
+            &like_prefix(repo),
             KIND_BRANCH,
             name,
         )
@@ -104,7 +104,7 @@ impl Steps for Queue<'_> {
         found(
             &self.state.pool,
             PULL_REQUEST_BY_HEAD,
-            &format!("{repo}%"),
+            &like_prefix(repo),
             KIND_PR,
             head,
         )
@@ -162,6 +162,28 @@ const PULL_REQUEST_BY_HEAD: &str = "select entity_id from sync.live_item
       where entity_id like $1 and kind = $2 and payload->'head'->>'ref' = $3
       order by entity_id limit 1";
 
+/// The repository's id as a `like` prefix, with `like`'s own metacharacters
+/// escaped.
+///
+/// `_` is common in repository names and matches *any* character in a
+/// pattern, so an unescaped `gitea:acme/payout_service%` would also match
+/// `payoutXservice` -- and a look-before-write that found the wrong
+/// repository's branch would settle a step "succeeded" against an effect that
+/// does not exist. Postgres' default escape character is `\`, and the value
+/// is bound, so escaping the three metacharacters is the whole job.
+fn like_prefix(repo: &EntityRef) -> String {
+    let id = repo.to_string();
+    let mut out = String::with_capacity(id.len() + 4);
+    for ch in id.chars() {
+        if matches!(ch, '%' | '_' | '\\') {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out.push('%');
+    out
+}
+
 /// One entity id, or `None`.
 ///
 /// Every value is a bound parameter and `sql` is a `&'static str` -- the rule
@@ -207,5 +229,21 @@ impl ProgressSink for Ending {
         if let Some(sender) = sender {
             let _ = sender.send(());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The look-before-write must not find another repository's branch. `_`
+    /// matches any character in a `like` pattern, and repository names carry
+    /// underscores all the time.
+    #[test]
+    fn a_repository_id_is_matched_literally_not_as_a_pattern() {
+        let repo = EntityRef::new("gitea", "acme/payout_service");
+        assert_eq!(like_prefix(&repo), "gitea:acme/payout\\_service%");
+        let plain = EntityRef::new("gitea", "acme/payouts");
+        assert_eq!(like_prefix(&plain), "gitea:acme/payouts%");
     }
 }

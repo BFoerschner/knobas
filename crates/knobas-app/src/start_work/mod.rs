@@ -302,15 +302,25 @@ pub async fn retry(
 ///
 /// # Errors
 ///
-/// [`NotFound`](crate::IpcErrorCode::NotFound) if no step carries `step_id`.
+/// [`NotFound`](crate::IpcErrorCode::NotFound) if no step carries `step_id`;
+/// [`Conflict`](crate::IpcErrorCode::Conflict) if the step already succeeded
+/// -- its effect exists at the source, and marking it skipped would only
+/// rewrite the record of what happened.
 pub async fn skip(
     pool: &PgPool,
     steps: &dyn Steps,
     step_id: i64,
 ) -> Result<Vec<FlowStep>, IpcError> {
     let step = step_of(pool, step_id).await?;
+    if step.outcome == StepOutcome::Succeeded {
+        return Err(IpcError::conflict(format!(
+            "the {} step has already happened -- skipping it now would only rewrite the record",
+            step.step
+        )));
+    }
     let ticket = EntityRef::parse(&step.ticket_id).map_err(IpcError::invalid)?;
     store::settle(pool, step_id, StepOutcome::Skipped, None, Some("skipped")).await?;
+    note(pool, &step, "skipped", "the user chose not to run it").await;
     run(pool, steps, &ticket).await
 }
 
@@ -401,16 +411,16 @@ async fn perform(
             // step that has already happened -- whether an earlier attempt made
             // it (#122's lost `POST`) or somebody made it by hand (story 22).
             if let Some(existing) = steps.branch(&repo, &name).await? {
-                return settle_ok(pool, step_id, &format!("{existing} is already there")).await;
+                return settle_ok(pool, step, &format!("{existing} is already there")).await;
             }
-            dispatch(pool, steps, step_id, &step.payload).await
+            dispatch(pool, steps, step, &step.payload).await
         }
         Step::CreatePullRequest => {
             let (repo, head) = pull_request_of(step)?;
             if let Some(existing) = steps.pull_request(&repo, &head).await? {
-                return settle_ok(pool, step_id, &format!("{existing} is already open")).await;
+                return settle_ok(pool, step, &format!("{existing} is already open")).await;
             }
-            dispatch(pool, steps, step_id, &step.payload).await
+            dispatch(pool, steps, step, &step.payload).await
         }
         Step::LinkPullRequest => link_step(pool, steps, flow, step).await,
         // A transition has no adapter-independent read (#43 left that seam
@@ -419,21 +429,27 @@ async fn perform(
         // way a create is not -- a status a ticket is already in creates no
         // second object -- so it goes, and the adapter resolves the name
         // against what the source says is reachable right now.
-        Step::Transition => dispatch(pool, steps, step_id, &step.payload).await,
+        Step::Transition => dispatch(pool, steps, step, &step.payload).await,
     }
 }
 
 /// Queue a step's op and record how the queue settled it.
+///
+/// The step is marked **running** for the duration (story 11): the row is
+/// what the stepper polls while the flow runs, and it is also what an
+/// interrupted session reads back -- a step found `running` with no landing
+/// was cut off mid-dispatch, which is honest in a way `pending` is not.
 async fn dispatch(
     pool: &PgPool,
     steps: &dyn Steps,
-    step_id: i64,
+    step: &FlowStep,
     payload: &serde_json::Value,
 ) -> Result<(), IpcError> {
+    store::settle(pool, step.id, StepOutcome::Running, None, None).await?;
     match steps.dispatch(payload).await {
         Ok((write_id, landing)) => {
             let (outcome, detail) = outcome_of(&landing);
-            store::settle(pool, step_id, outcome, Some(write_id), detail.as_deref()).await?;
+            store::settle(pool, step.id, outcome, Some(write_id), detail.as_deref()).await?;
             Ok(())
         }
         Err(error) => {
@@ -443,12 +459,15 @@ async fn dispatch(
             // failed command: the rest of the flow is still the user's to run.
             store::settle(
                 pool,
-                step_id,
+                step.id,
                 StepOutcome::Failed,
                 None,
                 Some(&error.message),
             )
             .await?;
+            // The queue never saw this write, so nothing else logs it
+            // (story 20).
+            note(pool, step, "failed", &error.message).await;
             Ok(())
         }
     }
@@ -469,12 +488,12 @@ async fn link_step(
     step: &FlowStep,
 ) -> Result<(), IpcError> {
     let Some(pr_step) = flow.iter().find(|s| s.step == Step::CreatePullRequest) else {
-        return settle_failed(pool, step.id, "this flow has no pull request step").await;
+        return settle_failed(pool, step, "this flow has no pull request step").await;
     };
     if pr_step.outcome == StepOutcome::Skipped {
         return settle_failed(
             pool,
-            step.id,
+            step,
             "the pull request step was skipped, so there is nothing to link",
         )
         .await;
@@ -489,7 +508,7 @@ async fn link_step(
     let Some(pr) = found else {
         return settle_failed(
             pool,
-            step.id,
+            step,
             &format!("no pull request from {head} has reached the mirror yet"),
         )
         .await;
@@ -505,9 +524,9 @@ async fn link_step(
         // exists, not that this attempt is the one that made it. It is also
         // what makes the step idempotent under retry with no read of its own.
         Ok(Linked::Made | Linked::Already) => {
-            settle_ok(pool, step.id, &format!("linked to {pr}")).await
+            settle_ok(pool, step, &format!("linked to {pr}")).await
         }
-        Err(error) => settle_failed(pool, step.id, &error.message).await,
+        Err(error) => settle_failed(pool, step, &error.message).await,
     }
 }
 
@@ -542,14 +561,35 @@ fn field(op: &serde_json::Value, name: &str) -> Result<String, IpcError> {
         .ok_or_else(|| IpcError::invalid(format!("this step's proposal has no {name:?}")))
 }
 
-async fn settle_ok(pool: &PgPool, step_id: i64, detail: &str) -> Result<(), IpcError> {
-    store::settle(pool, step_id, StepOutcome::Succeeded, None, Some(detail)).await?;
+async fn settle_ok(pool: &PgPool, step: &FlowStep, detail: &str) -> Result<(), IpcError> {
+    store::settle(pool, step.id, StepOutcome::Succeeded, None, Some(detail)).await?;
+    note(pool, step, "succeeded", detail).await;
     Ok(())
 }
 
-async fn settle_failed(pool: &PgPool, step_id: i64, detail: &str) -> Result<(), IpcError> {
-    store::settle(pool, step_id, StepOutcome::Failed, None, Some(detail)).await?;
+async fn settle_failed(pool: &PgPool, step: &FlowStep, detail: &str) -> Result<(), IpcError> {
+    store::settle(pool, step.id, StepOutcome::Failed, None, Some(detail)).await?;
+    note(pool, step, "failed", detail).await;
     Ok(())
+}
+
+/// Put a step's settlement in the activity log (story 20).
+///
+/// Only for the settlements the queue never sees: a step that succeeded
+/// against the mirror, failed before a write existed, or was skipped. A
+/// dispatched write already gets its line from the queue itself, and a second
+/// one here would say the same thing twice. Best-effort, like the queue's own:
+/// a step that settled is settled, and a lost log line is not a reason to
+/// fail it.
+async fn note(pool: &PgPool, step: &FlowStep, verb: &str, detail: &str) {
+    let entity = EntityRef::parse(&step.ticket_id).ok();
+    let body =
+        serde_json::json!({ "flow": "start-work", "step": step.step.as_str(), "detail": detail });
+    if let Err(error) =
+        knobas_core::activity::record(pool, "user", verb, entity.as_ref(), body).await
+    {
+        tracing::warn!(%error, step = %step.step, "a start-work activity line failed");
+    }
 }
 
 #[cfg(test)]

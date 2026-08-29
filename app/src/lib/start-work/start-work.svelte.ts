@@ -21,6 +21,7 @@
  * success it tells the reader work happened that has not. It gets its own
  * word, which is what {@link demandOf} is for.
  */
+import { ipcErrorMessage } from "../ipc";
 import {
   startWorkAmend,
   startWorkFlow,
@@ -154,6 +155,16 @@ export interface StartWork {
   amend(stepId: number, payload: unknown): Promise<void>;
 }
 
+/**
+ * How often the stepper re-reads the flow while `run` is in flight.
+ *
+ * The run command answers only when the whole sequence stops, but the rows
+ * move underneath it -- a step is marked `running` while its dispatch is out
+ * -- and polling is the only way the stepper can show that (story 11: a slow
+ * step must be distinguishable from a stuck one).
+ */
+const POLL_MS = 700;
+
 export function createStartWork(entityId: string): StartWork {
   const state = $state<{
     steps: StartWorkStep[];
@@ -161,6 +172,13 @@ export function createStartWork(entityId: string): StartWork {
     busy: boolean;
     loaded: boolean;
   }>({ steps: [], error: null, busy: false, loaded: false });
+
+  /**
+   * The generation of the newest action, so a poll that resolves late cannot
+   * overwrite the action's own answer -- the same device the suggestion
+   * tray's `token` is.
+   */
+  let generation = 0;
 
   async function load(repoId: string | null): Promise<void> {
     try {
@@ -170,7 +188,7 @@ export function createStartWork(entityId: string): StartWork {
       // The steps are left where they were rather than emptied: a failed read
       // is not evidence the flow is gone, and a stepper that blinked to nothing
       // is the thing story 16 exists to prevent.
-      state.error = message(error);
+      state.error = ipcErrorMessage(error);
     } finally {
       state.loaded = true;
     }
@@ -183,15 +201,37 @@ export function createStartWork(entityId: string): StartWork {
    * no second read to disagree with the first — and a failure leaves the rows
    * alone, because an action that was refused did not change them.
    */
-  async function act(run: () => Promise<StartWorkStep[]>): Promise<void> {
+  async function act(run: () => Promise<StartWorkStep[]>, live = false): Promise<void> {
     if (state.busy) return;
     state.busy = true;
+    const mine = ++generation;
+    // The interval lives strictly inside the action, and a peek applies only
+    // while its action is still the newest thing that happened -- cleared and
+    // invalidated before the command's answer is taken, so a slow poll can
+    // never overwrite it.
+    const poll = live
+      ? setInterval(() => {
+          void (async () => {
+            try {
+              const steps = await startWorkFlow(entityId, null);
+              if (mine === generation) state.steps = steps;
+            } catch {
+              // A failed peek changes nothing: the command's own answer is
+              // authoritative and still on its way.
+            }
+          })();
+        }, POLL_MS)
+      : null;
     try {
-      state.steps = await run();
+      const answer = await run();
+      generation += 1;
+      state.steps = answer;
       state.error = null;
     } catch (error) {
-      state.error = message(error);
+      generation += 1;
+      state.error = ipcErrorMessage(error);
     } finally {
+      if (poll !== null) clearInterval(poll);
       state.busy = false;
     }
   }
@@ -210,18 +250,10 @@ export function createStartWork(entityId: string): StartWork {
       return state.loaded;
     },
     load,
-    run: () => act(() => startWorkRun(entityId)),
+    run: () => act(() => startWorkRun(entityId), true),
     retry: (stepId) => act(() => startWorkRetry(stepId)),
     skip: (stepId) => act(() => startWorkSkip(stepId)),
     amend: (stepId, payload) => act(() => startWorkAmend(stepId, payload)),
   };
 }
 
-/** Whatever a rejection was, as something displayable. */
-function message(error: unknown): string {
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const text = (error as { message: unknown }).message;
-    if (typeof text === "string") return text;
-  }
-  return error instanceof Error ? error.message : String(error);
-}

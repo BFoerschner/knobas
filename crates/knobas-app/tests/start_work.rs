@@ -890,3 +890,84 @@ async fn a_merge_already_followed_is_not_followed_twice() {
         "the same merge would be followed again on the next pass, for ever"
     );
 }
+
+// -- what the round-1 review added ------------------------------------------
+
+/// A step that already happened cannot be skipped: its effect exists at the
+/// source, and marking it skipped would rewrite the record of what the flow
+/// did -- the record stories 16 and 20 exist for.
+#[tokio::test]
+async fn skipping_a_step_that_already_happened_is_refused() {
+    let pool = corpus("sw_skip_done").await;
+    let flow = planned(&pool).await;
+    let fake = Fake::new().revealing_on_refresh(&proposed_branch(&flow));
+
+    let flow = start_work::run(&pool, &fake, &ticket()).await.unwrap();
+    let branch = step_of(&flow, Step::CreateBranch);
+    assert_eq!(branch.outcome, StepOutcome::Succeeded);
+
+    let refusal = start_work::skip(&pool, &fake, branch.id)
+        .await
+        .expect_err("a succeeded step must not be skippable");
+    assert_eq!(refusal.code, IpcErrorCode::Conflict);
+}
+
+/// **Story 20.** A skipped step is a decision with no side effect anywhere
+/// else, so nothing but the flow itself would remember it -- the activity
+/// stream has to.
+#[tokio::test]
+async fn a_skipped_step_lands_in_the_activity_stream() {
+    let pool = corpus("sw_skip_audit").await;
+    let flow = planned(&pool).await;
+    let fake = Fake::new().revealing_on_refresh(&proposed_branch(&flow));
+
+    start_work::skip(&pool, &fake, step_of(&flow, Step::CreateBranch).id)
+        .await
+        .unwrap();
+
+    let (entity, step): (Option<String>, Option<String>) = sqlx::query_as(
+        "select entity_id, detail->>'step' from knobas.activity where verb = 'skipped'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("the skip wrote an activity line");
+    assert_eq!(entity.as_deref(), Some(TICKET));
+    assert_eq!(step.as_deref(), Some("create_branch"));
+}
+
+/// **Stories 19 and 20.** The queue's own activity line says a transition was
+/// queued; the reverse direction has to say *why* -- the merged pull request
+/// -- and may not claim the user asked for it.
+#[tokio::test]
+async fn the_reverse_direction_names_its_pull_request_in_the_activity_stream() {
+    let pool = corpus("sw_merged_audit").await;
+    item(
+        &pool,
+        PR,
+        "pr",
+        "WIP: payout dashboard latency",
+        serde_json::json!({"merged": true, "head": {"ref": "feature/PAY-231"}}),
+    )
+    .await;
+    knobas_app::commands::entity::create_link_inner(&pool, PR, TICKET, Some("implements"), None)
+        .await
+        .unwrap();
+
+    let moved = start_work::merge::follow_merges(&pool, &Fake::new(), "In Review")
+        .await
+        .unwrap();
+    assert_eq!(moved, 1);
+
+    let (actor, entity, pr): (String, Option<String>, Option<String>) = sqlx::query_as(
+        "select actor, entity_id, detail->>'pr' from knobas.activity where verb = 'followed'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("the follow wrote an activity line");
+    assert_eq!(entity.as_deref(), Some(TICKET));
+    assert_eq!(pr.as_deref(), Some(PR));
+    assert_eq!(
+        actor, "knobas",
+        "nobody asked for this write, and the log may not claim they did"
+    );
+}

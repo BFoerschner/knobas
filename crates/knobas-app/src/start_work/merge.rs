@@ -131,7 +131,30 @@ pub async fn follow_merges(
         match steps.dispatch(&payload).await {
             // Queued or delivered are both "knobas has followed this merge".
             // The queue is what makes the second one eventually true.
-            Ok((_, Landing::Sent | Landing::Waiting { .. })) => moved += 1,
+            Ok((_, Landing::Sent | Landing::Waiting { .. })) => {
+                moved += 1;
+                // The queue's own line says a transition was queued; this one
+                // says *why* -- the merged pull request -- which is the half
+                // of the audit trail (stories 19 and 20) the queue cannot
+                // know. Actor `knobas`, not `user`: nobody asked for this
+                // write, and the log may not claim they did. Best-effort,
+                // like every activity line.
+                if let Err(error) = knobas_core::activity::record(
+                    pool,
+                    "knobas",
+                    "followed",
+                    Some(&ticket),
+                    serde_json::json!({
+                        "flow": "start-work",
+                        "pr": pair.pr_id,
+                        "status": status,
+                    }),
+                )
+                .await
+                {
+                    tracing::warn!(%error, ticket = %pair.ticket_id, "the follow-merges activity line failed");
+                }
+            }
             Ok((_, other)) => {
                 tracing::info!(
                     ticket = %pair.ticket_id, pr = %pair.pr_id, landing = ?other,

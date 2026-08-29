@@ -166,8 +166,8 @@ create table knobas.start_work_step (
   constraint start_work_position_unq unique (ticket_id, position)
 );
 
--- The flow's own read: every step of one ticket, in order. It is the only read
--- this table has -- the stepper asks for a flow and gets all of it -- so the
--- index carries the ordering as well as the filter, and there is no second
--- index for a query nobody makes.
-create index start_work_flow_idx on knobas.start_work_step (ticket_id, position);
+-- The flow's own read -- every step of one ticket, in order -- runs on the
+-- index `start_work_position_unq` already maintains: a unique constraint is
+-- backed by an index on exactly its columns, so a second
+-- `(ticket_id, position)` index would be the same tree twice. No index is
+-- created here, deliberately.
