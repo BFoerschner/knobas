@@ -11,6 +11,13 @@
 
 use knobas_db::migrate;
 
+/// The three spellings `link_rule_class_chk` (migration 0007) allows.
+///
+/// Spelled out rather than read off `knobas_core::suggest::RuleClass`, for the
+/// reason [`ORIGINS`] is: this crate is below that one, and the point of the pin
+/// is that adding a class needs a migration and not just a variant.
+const RULE_CLASSES: [&str; 3] = ["exact_key", "similarity", "source_relation"];
+
 /// The five spellings `link_origin_chk` (migration 0003) allows.
 ///
 /// Spelled out rather than read off `knobas_core::link::Origin`, which is the
@@ -955,4 +962,280 @@ async fn a_note_row_needs_its_entity_and_lives_in_the_note_namespace() {
         .execute(pool)
         .await
         .unwrap();
+}
+
+/// The two views migration `0007` cuts the link table into are **disjoint and
+/// total** over its live rows.
+///
+/// This is the whole of "the links panel and the tray cannot blur". A `where`
+/// clause written out in two readers is a clause one of them can forget or
+/// invert; two views whose predicates are each other's negation cannot overlap
+/// however either reader is later edited. Asserted against a table holding one
+/// row in every state that matters, including the two the views must *both*
+/// exclude.
+#[tokio::test]
+async fn the_confirmed_and_proposed_views_partition_the_live_links() {
+    let pool = &knobas_db::test_util::test_pool().await;
+    migrate::run(pool).await.unwrap();
+
+    let run = uuid::Uuid::new_v4();
+    let from = format!("test:views-{run}-a");
+    let to = format!("test:views-{run}-b");
+    for id in [&from, &to] {
+        sqlx::query("insert into knobas.entity (id, kind) values ($1,'ticket')")
+            .bind(id)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    // A confirmed link, a live proposal, a dismissed proposal and an unlinked
+    // link -- the four states a row can be in.
+    sqlx::query(
+        "insert into knobas.link
+                (from_id, to_id, relation, origin, created_by,
+                 confirmed_at, rule, rule_class, reason, deleted_at)
+         values ($1, $2, 'confirmed-live',  'manual',    'user',   now(), null, null, null, null),
+                ($1, $2, 'proposal-live',   'suggested', 'knobas', null, 'r', 'exact_key', 'why', null),
+                ($1, $2, 'proposal-gone',   'suggested', 'knobas', null, 'r', 'exact_key', 'why', now()),
+                ($1, $2, 'confirmed-gone',  'manual',    'user',   now(), null, null, null, now())",
+    )
+    .bind(&from)
+    .bind(&to)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    async fn relations(pool: &sqlx::PgPool, view: &str, from: &str) -> Vec<String> {
+        let rows: Vec<(String,)> = sqlx::query_as(match view {
+            "confirmed" => "select relation from knobas.confirmed_link where from_id = $1",
+            _ => "select relation from knobas.proposed_link where from_id = $1",
+        })
+        .bind(from)
+        .fetch_all(pool)
+        .await
+        .unwrap();
+        rows.into_iter().map(|(r,)| r).collect()
+    }
+
+    assert_eq!(
+        relations(pool, "confirmed", &from).await,
+        ["confirmed-live"]
+    );
+    assert_eq!(relations(pool, "proposed", &from).await, ["proposal-live"]);
+
+    // Disjoint and total, said as a query rather than as two lists: no live row
+    // is in both views, and none is in neither.
+    let (both, neither): (i64, i64) = sqlx::query_as(
+        "select (select count(*) from knobas.confirmed_link c
+                   join knobas.proposed_link p on p.id = c.id),
+                (select count(*) from knobas.link l
+                  where l.deleted_at is null
+                    and not exists (select 1 from knobas.confirmed_link c where c.id = l.id)
+                    and not exists (select 1 from knobas.proposed_link  p where p.id = l.id))",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(both, 0, "a row in both views is a proposal the panel can show");
+    assert_eq!(
+        neither, 0,
+        "a live row in neither view is a link nothing can read"
+    );
+}
+
+/// `rule_class` is a closed vocabulary, and the database says so.
+///
+/// The same discipline `link_origin_chk` gets, and it bites for the same
+/// reason: `knobas_core::suggest::RuleClass`'s decoder refuses a spelling it
+/// does not know, so a stray value is a suggestion that can never be read back.
+#[tokio::test]
+async fn the_rule_class_vocabulary_is_closed() {
+    let pool = &knobas_db::test_util::test_pool().await;
+    migrate::run(pool).await.unwrap();
+
+    let run = uuid::Uuid::new_v4();
+    let from = format!("test:class-{run}-a");
+    let to = format!("test:class-{run}-b");
+    for id in [&from, &to] {
+        sqlx::query("insert into knobas.entity (id, kind) values ($1,'ticket')")
+            .bind(id)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    for class in RULE_CLASSES {
+        sqlx::query(
+            "insert into knobas.link
+                    (from_id, to_id, relation, origin, created_by,
+                     confirmed_at, rule, rule_class, reason)
+             values ($1, $2, $3, 'suggested', 'knobas', null, 'r', $3, 'why')",
+        )
+        .bind(&from)
+        .bind(&to)
+        .bind(class)
+        .execute(pool)
+        .await
+        .unwrap_or_else(|error| panic!("{class} must be allowed: {error}"));
+    }
+
+    let refused = sqlx::query(
+        "insert into knobas.link
+                (from_id, to_id, relation, origin, created_by,
+                 confirmed_at, rule, rule_class, reason)
+         values ($1, $2, 'certain', 'suggested', 'knobas', null, 'r', 'certain', 'why')",
+    )
+    .bind(&from)
+    .bind(&to)
+    .execute(pool)
+    .await
+    .unwrap_err();
+    assert_eq!(
+        refused.as_database_error().and_then(|e| e.code()).as_deref(),
+        Some("23514"),
+        "a class outside the list is a suggestion the reader's decoder refuses"
+    );
+
+    // ...and nothing else, so the constraint cannot allow a class no Rust
+    // variant produces.
+    let (definition,): (String,) = sqlx::query_as(
+        "select pg_get_constraintdef(oid) from pg_constraint
+          where conname = 'link_rule_class_chk'
+            and conrelid = 'knobas.link'::regclass",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        definition.matches('\'').count() / 2,
+        RULE_CLASSES.len(),
+        "the constraint allows a different number of classes than knobas writes: {definition}"
+    );
+}
+
+/// `0007` applied by the runner to a database that predates it and is already
+/// full of links.
+///
+/// The case that actually happens on an upgrade, and the one that costs
+/// something if it is wrong twice over: `migrate::run` is on the boot path, and
+/// `confirmed_at` is what decides whether a link is *in the graph*. A backfill
+/// that missed a row would not fail loudly -- it would quietly move that link
+/// out of its own links panel and into the suggestion tray, as a proposal with
+/// no reason that the CHECK would then have refused to store in the first
+/// place.
+///
+/// Same shape as `zero_three_applies_through_the_runner_to_a_database_that_
+/// predates_it`, and its own database for the same reason.
+#[tokio::test]
+async fn zero_seven_backfills_every_existing_link_as_confirmed() {
+    let shared = knobas_db::test_util::test_pool().await;
+    let name = format!("knobas_0007_{}", uuid::Uuid::new_v4().simple());
+    sqlx::query(sqlx::AssertSqlSafe(format!(r#"create database "{name}""#)))
+        .execute(&shared)
+        .await
+        .unwrap();
+
+    let options = (*shared.connect_options()).clone().database(&name);
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(2)
+        .connect_with(options)
+        .await
+        .unwrap();
+
+    // Wind it back to an installation that predates 0007: everything it did,
+    // undone, including the runner's record of having done it.
+    migrate::run(&pool).await.unwrap();
+    for statement in [
+        "drop view knobas.proposed_link",
+        "drop view knobas.confirmed_link",
+        "drop index knobas.link_proposed_idx",
+        "drop index knobas.link_pair_rev_idx",
+        "drop index knobas.link_pair_idx",
+        "alter table knobas.link drop constraint link_proposal_chk",
+        "alter table knobas.link drop constraint link_rule_class_chk",
+        "alter table knobas.link drop column reason",
+        "alter table knobas.link drop column rule_class",
+        "alter table knobas.link drop column rule",
+        "alter table knobas.link drop column confirmed_at",
+        "delete from public._sqlx_migrations where version = 7",
+    ] {
+        sqlx::query(sqlx::AssertSqlSafe(statement))
+            .execute(&pool)
+            .await
+            .unwrap_or_else(|error| panic!("winding back {statement}: {error}"));
+    }
+
+    // The links such an installation holds: every one of them drawn or
+    // imported by the user, and dated whenever it was drawn.
+    for id in ["test:pre07-a", "test:pre07-b"] {
+        sqlx::query("insert into knobas.entity (id, kind) values ($1,'ticket')")
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    for origin in ORIGINS {
+        sqlx::query(
+            "insert into knobas.link (from_id, to_id, relation, origin, created_by, created_at)
+             values ('test:pre07-a', 'test:pre07-b', $1, $2, 'user', now() - interval '30 days')",
+        )
+        .bind(origin)
+        .bind(origin)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    // The boot path, on that database.
+    migrate::run(&pool)
+        .await
+        .expect("0007 must apply to a database that already holds links");
+
+    let (unconfirmed,): (i64,) =
+        sqlx::query_as("select count(*) from knobas.link where confirmed_at is null")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        unconfirmed, 0,
+        "a link that predates suggestions is a link, not a proposal"
+    );
+
+    // Backfilled from `created_at`, not from the minute of the upgrade -- a
+    // link was confirmed when it was drawn, and dating them all at migration
+    // time is a fact the database would have invented.
+    let (drifted,): (i64,) =
+        sqlx::query_as("select count(*) from knobas.link where confirmed_at <> created_at")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(drifted, 0, "the backfill must carry each link's own date");
+
+    // And every one of them is in the panel's view rather than the tray's.
+    let (visible,): (i64,) = sqlx::query_as(
+        "select count(*) from knobas.confirmed_link where from_id = 'test:pre07-a'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(visible, ORIGINS.len() as i64);
+
+    // Re-entrant: a second pass applies nothing again.
+    migrate::run(&pool).await.unwrap();
+    let (applied,): (i64,) = sqlx::query_as(
+        "select count(*) from public._sqlx_migrations where version = 7 and success",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(applied, 1, "a second pass must not apply 0007 again");
+
+    pool.close().await;
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        r#"drop database if exists "{name}" with (force)"#
+    )))
+    .execute(&shared)
+    .await
+    .unwrap();
 }
