@@ -695,6 +695,30 @@ pub struct Scheduler {
     inner: Arc<Inner>,
 }
 
+/// One source's most recent run, as [`Inner::runs`] holds it.
+///
+/// The flag is the *claim on the source's first sync*, and it is what makes
+/// **spent when taken** true wherever the taking happened. A caller that asks
+/// for [`SyncTrigger::FirstRun`] with a channel of its own -- in practice the
+/// first-run wizard, the only caller of `sync_now_with_progress` -- is asking
+/// about *the source's first sync*, and it is entitled to that answer once.
+/// Being enrolled in the run while it is still going is that answer just as
+/// much as being served the run's recorded ending afterwards is, so both spend
+/// the claim.
+///
+/// Spending it on the live join is the whole point: the wizard's *Retry* is the
+/// same command asking a second time, and a *Retry* that was handed the failure
+/// it is retrying is a button that does nothing. Marking the claim only on the
+/// after-the-fact path left that hole open in every interleaving where the
+/// wizard watched its own run fail, which is the ordinary one.
+///
+/// A trigger with no sink -- the ticker's wake -- never claims: it wants work
+/// done, and a run of its own is what it should get when the last one is over.
+struct RunEntry {
+    watchers: Arc<Watchers>,
+    first_run_claimed: bool,
+}
+
 struct Inner {
     deps: SchedulerDeps,
     permits: Semaphore,
@@ -714,7 +738,7 @@ struct Inner {
     /// second sync over an already-mirrored corpus. It is replaced when a run
     /// starts and removed when one is found closed, so the map is bounded by
     /// the number of sources, not by the number of runs.
-    runs: Mutex<HashMap<String, Arc<Watchers>>>,
+    runs: Mutex<HashMap<String, RunEntry>>,
     /// Poked when something changed that might make a source due (a finished
     /// run, a new source, a re-entered credential), so the UI does not wait out
     /// a tick.
@@ -907,28 +931,40 @@ impl Inner {
         if self.cancel.is_cancelled() {
             return Err(TriggerError::ShuttingDown);
         }
+        // *This* caller is asking about the source's first sync rather than for
+        // a sync: the spelling says which, and the channel says there is
+        // somebody to answer. See [`RunEntry`] for why it is spent on the live
+        // join as well as on the served-from-record one.
+        let asks_for_the_first_sync = trigger == SyncTrigger::FirstRun && progress.is_some();
         // The whole check-and-claim under one lock: two `sync_now` calls
         // arriving together must not both decide the source is idle.
         let mut runs = self.runs.lock().await;
-        if let Some(watchers) = runs.get(source_id) {
-            let run_id = watchers.run_id();
+        if let Some(entry) = runs.get_mut(source_id) {
+            let run_id = entry.watchers.run_id();
             // Enrolled or not, under the run's own lock -- so a sink offered a
             // microsecond before the ending still hears it, and one offered a
             // microsecond after is told so rather than enrolled into a run that
             // has already said its last word.
-            if watchers.attach(progress.clone()) == Attach::Joined {
+            if entry.watchers.attach(progress.clone()) == Attach::Joined {
+                // Enrolment *is* the answer to "what happened to this source's
+                // first sync?", so it spends the claim: whoever asks next --
+                // the wizard's *Retry*, which is the same command asking a
+                // second time -- gets work rather than this run again.
+                entry.first_run_claimed |= asks_for_the_first_sync;
                 return Ok(run_id);
             }
+            let unclaimed = !entry.first_run_claimed;
             // That run is over, so the entry has no claim on the source any
             // more and the next trigger must not find it.
             runs.remove(source_id);
-            // ...but this trigger may still want it. A caller asking for the
-            // source's *first sync* is asking about a job, not for a job:
-            // hand it that run and the ending the log recorded for it. Every
-            // other trigger -- *Sync now*, the ticker, a backfill, and the
-            // wizard's *Retry*, which is the same command asking a second time
-            // -- wants work done, and falls through to start a run of its own.
-            if trigger == SyncTrigger::FirstRun
+            // ...but this trigger may still want it, if nobody spent the claim
+            // while the run was going. A caller asking for the source's *first
+            // sync* is asking about a job, not for a job: hand it that run and
+            // the ending the log recorded for it. Every other trigger --
+            // *Sync now*, the ticker, a backfill -- wants work done, and falls
+            // through to start a run of its own.
+            if asks_for_the_first_sync
+                && unclaimed
                 && let Some(sink) = progress.as_ref()
                 && let Some(ending) = ending_of_record(&self.deps.pool, source_id, run_id).await?
             {
@@ -944,7 +980,16 @@ impl Inner {
         // The caller that started the run is a watcher like any other; nothing
         // below this line knows which of them it was.
         watchers.attach(progress);
-        runs.insert(source_id.to_owned(), Arc::clone(&watchers));
+        runs.insert(
+            source_id.to_owned(),
+            RunEntry {
+                watchers: Arc::clone(&watchers),
+                // Starting the run is being served the first sync too: the
+                // wizard that got here first is watching the run it asked for,
+                // and its *Retry* must not be handed this one back.
+                first_run_claimed: asks_for_the_first_sync,
+            },
+        );
         drop(runs);
 
         // **Before the spawn, and therefore before this returns.** `sync_now`

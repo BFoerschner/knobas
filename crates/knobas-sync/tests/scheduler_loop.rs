@@ -793,10 +793,13 @@ async fn phases_of(fault: Option<fn() -> SourceError>) -> (Vec<String>, Vec<Stri
 /// **Two sources, one each, deliberately.** The same source twice would need
 /// the first run to be over before the second is triggered, and "over" has two
 /// meanings here that do not coincide: `settle` writes `finished_at` and only
-/// then does `run_task` release the source from the in-flight map, so a poll on
-/// the log row can win that race and the second trigger is handed the first
-/// run's id. (Observed -- the first draft of this test failed exactly there,
-/// `left: 5, right: 5`.) Two sources have nothing to serialise.
+/// then does `run_task` close the run's watchers, so a poll on the log row can
+/// win that race and the second trigger -- arriving while the watchers are
+/// still open -- is enrolled in the first run and handed its id. (Observed --
+/// the first draft of this test failed exactly there, `left: 5, right: 5`.)
+/// ADR-0005 did not close this window: it changed what the second caller *hears*
+/// (an ending, rather than silence), not when the source stops being claimed.
+/// Two sources have nothing to serialise.
 ///
 /// This goes through [`Scheduler::backfill`] rather than `execute_run`, which
 /// is the only way the spelling is under test at all -- `execute_run`'s callers
@@ -948,19 +951,36 @@ async fn a_first_run_trigger_after_the_run_ended_is_served_the_ending_from_the_r
     let (pool, sched_pool) = pools().await;
     let ids = seed_quiet(&pool, 1).await;
     let id = ids[0].clone();
-    let (deps, _) = deps(sched_pool, Duration::from_millis(20)).await;
+    let (deps, _) = deps(sched_pool, Duration::from_millis(300)).await;
     let scheduler = Scheduler::start(deps).await.unwrap();
 
-    // The scheduler's own first run of a brand-new source, watched only so the
-    // test can know it is *completely* over -- `settle` writes `finished_at`
-    // before the run tells anyone, so waiting on the log row would leave the
-    // run's sinks still open and test the in-flight path by accident.
-    let wake = Heard::new();
+    // The scheduler's own first run of a brand-new source: `FirstRun` and no
+    // channel, which is exactly what the ticker does with a source `add_source`
+    // just woke it for. **No sink here**, because a `FirstRun` caller carrying
+    // one is served the source's first sync and spends the claim on it -- and
+    // then the wizard below would be a *second* asker rather than the first,
+    // which is not the interleaving under test.
     let scheduled = scheduler
-        .trigger(&id, SyncTrigger::FirstRun, Some(wake.sink()))
+        .trigger(&id, SyncTrigger::FirstRun, None)
         .await
         .unwrap();
-    await_ending(&wake).await;
+    // Observed under `Manual` -- *Sync now* joining a run in flight -- only so
+    // the test can know that run is *completely* over: `settle` writes
+    // `finished_at` before the run tells anyone, so waiting on the log row
+    // would leave the run's sinks still open and test the in-flight path by
+    // accident. `Manual` asks for work rather than for the first sync, so it
+    // does not spend the claim either.
+    let observer = Heard::new();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(
+        scheduler
+            .trigger(&id, SyncTrigger::Manual, Some(observer.sink()))
+            .await
+            .unwrap(),
+        scheduled,
+        "the observer joined the wake's run rather than starting one"
+    );
+    await_ending(&observer).await;
 
     let wizard = Heard::new();
     let handed = scheduler
@@ -1012,6 +1032,18 @@ async fn a_first_run_trigger_after_the_run_ended_is_served_the_ending_from_the_r
 /// The second half of the test is why the claim is spent when it is taken:
 /// *Retry* is the same command asking a second time, and a *Retry* that replayed
 /// the failure it was retrying would be a button that does nothing.
+///
+/// **The interleaving is the production one, deliberately.** The run is started
+/// by the wake -- `FirstRun` with no channel of its own -- and the live watcher
+/// joins it under `Manual`, which is *Sync now* pressed while the first sync is
+/// going. Neither spends the claim on the source's first sync, so the wizard
+/// arriving afterwards is genuinely the first caller owed that answer. An
+/// earlier draft had the live watcher itself trigger `FirstRun`, which meant
+/// three callers where production has two -- and the third one silently spent
+/// the claim, so the *Retry* assertion below passed without the claim ever
+/// being spent by the caller that pressed the button. See
+/// [`the_wizards_retry_after_watching_its_own_run_fail_starts_a_run`], which is
+/// the case that draft could not see.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_failure_reads_the_same_live_or_joined_and_retry_still_runs() {
     let _serial = serially().await;
@@ -1025,7 +1057,9 @@ async fn a_failure_reads_the_same_live_or_joined_and_retry_still_runs() {
         registry: Arc::new(SlowRegistry {
             inside: Arc::new(AtomicUsize::new(0)),
             peak: Arc::new(AtomicUsize::new(0)),
-            dwell: Duration::from_millis(20),
+            // Long enough that the live watcher joins a run that is genuinely
+            // still going; the fault is raised after the dwell.
+            dwell: Duration::from_millis(400),
             fault: Some(|| SourceError::Unreachable("simulated".into())),
         }),
         secrets: Arc::new(MemoryStore::new()),
@@ -1034,11 +1068,22 @@ async fn a_failure_reads_the_same_live_or_joined_and_retry_still_runs() {
     .await
     .unwrap();
 
-    let live = Heard::new();
+    // The wake's run: `add_source` pokes the scheduler, and the ticker triggers
+    // with no channel of its own.
     let failed = scheduler
-        .trigger(&id, SyncTrigger::FirstRun, Some(live.sink()))
+        .trigger(&id, SyncTrigger::FirstRun, None)
         .await
         .unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let live = Heard::new();
+    assert_eq!(
+        scheduler
+            .trigger(&id, SyncTrigger::Manual, Some(live.sink()))
+            .await
+            .unwrap(),
+        failed,
+        "the live watcher joined the run that was going, rather than starting one"
+    );
     let watched = await_ending(&live).await;
 
     let late = Heard::new();
@@ -1096,6 +1141,128 @@ async fn a_failure_reads_the_same_live_or_joined_and_retry_still_runs() {
     );
     assert_eq!(await_ending(&retry).await.phase, SyncPhase::Failed);
     scheduler.shutdown().await;
+    retire(&pool, &ids).await;
+}
+
+/// **The wizard's *Retry* starts a run even when the wizard watched the run it
+/// is retrying.**
+///
+/// The claim on a source's first sync is spent by whoever is served it, and
+/// there are two ways to be served: enrolled in the run while it is going, or
+/// handed its recorded ending afterwards. Only the second is visible from a
+/// test that puts a third caller between the failure and the *Retry* --
+/// [`a_failure_reads_the_same_live_or_joined_and_retry_still_runs`] used to,
+/// and the missing half was the ordinary case: the wizard triggers, watches its
+/// own run fail, and presses the button. If enrolment does not spend the claim,
+/// that press is served the failure it is retrying, starts nothing, and *Retry*
+/// needs pressing twice to do anything.
+///
+/// Two callers, which is what production has: this run has no late joiner.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_wizards_retry_after_watching_its_own_run_fail_starts_a_run() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed_quiet(&pool, 1).await;
+    let id = ids[0].clone();
+    let connector = knobas_db::test_util::test_connector().await;
+    let scheduler = Scheduler::start(SchedulerDeps {
+        pool: sched_pool,
+        connections: Arc::new(TestConnections(connector)),
+        registry: Arc::new(SlowRegistry {
+            inside: Arc::new(AtomicUsize::new(0)),
+            peak: Arc::new(AtomicUsize::new(0)),
+            dwell: Duration::from_millis(20),
+            fault: Some(|| SourceError::Unreachable("simulated".into())),
+        }),
+        secrets: Arc::new(MemoryStore::new()),
+        events: Arc::new(Silent),
+    })
+    .await
+    .unwrap();
+
+    let wizard = Heard::new();
+    let failed = scheduler
+        .trigger(&id, SyncTrigger::FirstRun, Some(wizard.sink()))
+        .await
+        .unwrap();
+    assert_eq!(await_ending(&wizard).await.phase, SyncPhase::Failed);
+
+    // *Retry*: the same command asking a second time, with nobody else having
+    // touched the source in between.
+    let retry = Heard::new();
+    let retried = scheduler
+        .trigger(&id, SyncTrigger::FirstRun, Some(retry.sink()))
+        .await
+        .unwrap();
+    assert_eq!(await_ending(&retry).await.phase, SyncPhase::Failed);
+    scheduler.shutdown().await;
+
+    assert_ne!(
+        retried, failed,
+        "Retry was handed the run it is retrying: the button does nothing"
+    );
+    assert_eq!(
+        run_log::list(&pool, Some(&id), 10).await.unwrap().len(),
+        2,
+        "a retry is a run, and the log should say so"
+    );
+    retire(&pool, &ids).await;
+}
+
+/// **The wizard that joined a run already in flight still gets a run when it
+/// retries.**
+///
+/// The same claim, spent on the other path: here the wake started the run and
+/// the wizard was enrolled in it mid-flight, which is the interleaving
+/// `add_source`'s wake produces on an ordinary machine. The press afterwards
+/// must still reach the scheduler.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_wizard_that_joined_the_wakes_run_still_gets_a_run_when_it_retries() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed_quiet(&pool, 1).await;
+    let id = ids[0].clone();
+    let connector = knobas_db::test_util::test_connector().await;
+    let scheduler = Scheduler::start(SchedulerDeps {
+        pool: sched_pool,
+        connections: Arc::new(TestConnections(connector)),
+        registry: Arc::new(SlowRegistry {
+            inside: Arc::new(AtomicUsize::new(0)),
+            peak: Arc::new(AtomicUsize::new(0)),
+            dwell: Duration::from_millis(300),
+            fault: Some(|| SourceError::Unreachable("simulated".into())),
+        }),
+        secrets: Arc::new(MemoryStore::new()),
+        events: Arc::new(Silent),
+    })
+    .await
+    .unwrap();
+
+    let woken = scheduler
+        .trigger(&id, SyncTrigger::FirstRun, None)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let wizard = Heard::new();
+    let joined = scheduler
+        .trigger(&id, SyncTrigger::FirstRun, Some(wizard.sink()))
+        .await
+        .unwrap();
+    assert_eq!(joined, woken, "the wizard joined the run the wake started");
+    assert_eq!(await_ending(&wizard).await.phase, SyncPhase::Failed);
+
+    let retry = Heard::new();
+    let retried = scheduler
+        .trigger(&id, SyncTrigger::FirstRun, Some(retry.sink()))
+        .await
+        .unwrap();
+    assert_eq!(await_ending(&retry).await.phase, SyncPhase::Failed);
+    scheduler.shutdown().await;
+
+    assert_ne!(
+        retried, woken,
+        "the wizard was enrolled in that run, so it is not owed it a second time"
+    );
     retire(&pool, &ids).await;
 }
 
