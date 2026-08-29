@@ -147,11 +147,22 @@ export function schemaFields(schema: unknown): SchemaField[] {
  * falls through to a JSON textarea, so typing a username into one is a parse
  * error unless the reader knows to quote it.
  *
- * The `null` carries no drawing information the form does not already have:
- * {@link validate} omits an empty optional value rather than sending `""`, so
- * "unset" is already expressible in every control. A union that is not just
- * "or null" *is* undrawable and keeps its JSON textarea — `null` alone is the
- * one member this collapses.
+ * The `null` mostly carries no drawing information the form does not already
+ * have: {@link validate} omits an empty optional value rather than sending
+ * `""`, so "unset" stays expressible in text, select, number and list.
+ *
+ * **`toggle` is the exception, and it is the one shape to be careful with.**
+ * `validate` writes `raw === true` unconditionally — a checkbox has two states
+ * and no third — so `["boolean", "null"]` draws as a toggle that can only ever
+ * send `true` or `false`, and the adapter's declared default can never apply.
+ * No shipped adapter declares one; an adapter that genuinely needs the third
+ * state wants an enum, not a nullable boolean, and this paragraph is where its
+ * author will find that out.
+ *
+ * A union that is not just "or null" *is* undrawable and keeps its JSON
+ * textarea. A single-member array collapses too (`["string"]` is `"string"`
+ * written the long way), which is why the rule is "one named member" rather
+ * than "drop the null".
  */
 function typeOf(property: Record<string, unknown>): unknown {
   const { type } = property;

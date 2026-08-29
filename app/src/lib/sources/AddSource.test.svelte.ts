@@ -13,7 +13,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { ConnectionReport, NewSource, SourceDescriptor, SourceDraft } from "../ipc/sources";
-import { GITEA_SCHEMA, JIRA_SCHEMA } from "./fixtures";
+import { GITEA_SCHEMA, JIRA_SCHEMA, TEAMCITY_SCHEMA } from "./fixtures";
 
 const calls = {
   listAdapters: 0,
@@ -718,6 +718,46 @@ test("the fill is the property name, so an adapter this file never heard of gets
 
   expect(calls.addSource[0]!.config).toMatchObject({ username: "mara.oyelaran" });
 });
+
+/**
+ * Every shipped adapter's *own* schema, driven through the fill.
+ *
+ * The tests above exercise Jira's fixture and a synthetic `quokka`. These two
+ * drive the other real transcriptions, which is what makes `fixtures.ts`
+ * load-bearing rather than decorative: the three adapters spell `username`
+ * two ways -- Jira and Gitea `["string", "null"]`, TeamCity a plain
+ * `"string"` -- and a fixture that drifts back to a shape the form draws as a
+ * JSON textarea takes `fillIdentity`'s `control.kind !== "text"` branch and
+ * fails here rather than in the window. That drift is why nobody noticed the
+ * textarea in the first place (#82).
+ */
+for (const [name, kind, schema] of [
+  ["Gitea", "gitea", GITEA_SCHEMA],
+  ["TeamCity", "teamcity", TEAMCITY_SCHEMA],
+] as const) {
+  test(`${name}'s own schema is filled from the account its test reported`, async () => {
+    adapters = [descriptor({ id: kind, adapter_kind: kind, name, config_schema: schema })];
+    render();
+    await settle();
+    button(name)!.click();
+    flushSync();
+    button("Next")!.click();
+    flushSync();
+    // A literal, not an interpolation: the house rule scans for a reserved
+    // hostname and `${kind}` is not one it can read.
+    type("#add-url", "https://source.tidewater.example");
+    button("Next")!.click();
+    flushSync();
+    type("#add-secret", "s3cret");
+    button("Next")!.click();
+    flushSync();
+    button("Test connection")!.click();
+    await settle();
+    await saveFromTest();
+
+    expect(calls.addSource[0]!.config).toMatchObject({ username: "mara.oyelaran" });
+  });
+}
 
 test("an adapter with no username field has none invented for it", async () => {
   adapters = [descriptor({ config_schema: { type: "object", properties: {} } })];

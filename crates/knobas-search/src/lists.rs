@@ -494,9 +494,16 @@ fn describe(list: &BuiltinList, identity: &[String]) -> String {
 /// rather than a second copy of it.
 #[must_use]
 pub fn describe_missing_identity() -> String {
+    // Phrased as *when* the fill happens, not as an instruction to press a
+    // button: the only *Test connection* control in the app is inside the
+    // Add-source dialog, on a draft. A saved source has Re-enter, Sync now and
+    // Delete and nothing else, so "run Test connection on a source" would be
+    // this message committing the very sin #82 is about -- naming an action
+    // its reader cannot take. The second clause is the honest remainder, and
+    // it is also the shape of the follow-up that would close it.
     "No source has a username configured, so knobas cannot tell which items \
-     are yours. Run Test connection on a source to fill its username in, or \
-     type one yourself."
+     are yours. Test connection fills a source's username in when the source \
+     is added; there is no way yet to set one on a source that already exists."
         .to_owned()
 }
 
@@ -582,6 +589,11 @@ mod tests {
     /// what *Test connection* reports. Advice naming only the typing is advice
     /// to redo by hand what the app already did -- the contradiction #82 was
     /// about, in its last surviving corner.
+    ///
+    /// It has to name that mechanism **without** telling the reader to go and
+    /// operate it, because they cannot: the fill is an Add-source step, and a
+    /// saved source offers Re-enter, Sync now and Delete. An imperative here
+    /// would be a second false instruction replacing the first one.
     #[test]
     fn the_missing_identity_advice_names_the_thing_that_fills_it() {
         let advice = describe_missing_identity();
@@ -589,6 +601,9 @@ mod tests {
         // And still names the field itself, which is what a reader has to go
         // and find on a source.
         assert!(advice.contains("username"), "{advice}");
+        // Not an instruction to run it on a source that already exists --
+        // there is no control that does that, which is the whole point above.
+        assert!(!advice.contains("Run Test connection"), "{advice}");
     }
 
     #[test]

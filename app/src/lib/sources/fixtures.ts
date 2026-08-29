@@ -27,7 +27,15 @@ export const JIRA_SCHEMA = {
       description: "Data Center speaks REST v2; Cloud is not supported yet.",
     },
     projects: { type: "array", items: { type: "string" }, title: "Projects" },
-    jql_filter: { type: "string", title: "JQL filter" },
+    // Nullable too, and transcribed as such: leaving it a plain `"string"`
+    // here while the adapter says otherwise is the drift the block below was
+    // just corrected for, one property earlier.
+    jql_filter: {
+      type: ["string", "null"],
+      default: null,
+      title: "JQL filter",
+      description: "Alternative to Projects: any JQL, without an ORDER BY.",
+    },
     // `["string", "null"]`, verbatim from the adapter: it is how every shipped
     // adapter spells an optional string, and reading it as "not a string" is
     // what drew this field as a JSON textarea. The description is the
