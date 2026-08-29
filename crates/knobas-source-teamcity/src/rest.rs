@@ -41,6 +41,15 @@ pub(crate) const SERVER_FIELDS: &str = "version,buildNumber";
 /// as, which is what *Test connection* puts on screen (P4).
 pub(crate) const USER_FIELDS: &str = "username,name";
 
+/// What `GET /app/rest/builds/id:{id}` is asked for.
+///
+/// One name, because the only thing that request asks is whether the build is
+/// there at all -- `Rest::build_exists` reads the status, never the body. It
+/// is still an explicit `fields=`: interfaces §4.2 requires one on every
+/// TeamCity request, and TeamCity's default projection is not one any adapter
+/// should rely on.
+pub(crate) const BUILD_ID_FIELDS: &str = "id";
+
 /// What `/app/rest/buildTypes` is asked for. Without an explicit `fields=`,
 /// real TeamCity answers a hyperlink stub (`id`, `href`) and mockd answers 400
 /// -- the parameter is mandatory on the collections.

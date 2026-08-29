@@ -11,8 +11,8 @@ use knobas_source::{ConnectionInfo, SourceError};
 use crate::TeamCityConfig;
 use crate::http;
 use crate::rest::{
-    BUILD_FIELDS, BUILD_TYPE_FIELDS, Build, BuildType, CurrentUser, ListEnvelope, Locator,
-    SERVER_FIELDS, Server, USER_FIELDS,
+    BUILD_FIELDS, BUILD_ID_FIELDS, BUILD_TYPE_FIELDS, Build, BuildType, CurrentUser, ListEnvelope,
+    Locator, SERVER_FIELDS, Server, USER_FIELDS,
 };
 
 /// One record, kept both as parsed fields and as the JSON it arrived as --
@@ -32,6 +32,19 @@ pub(crate) trait Rest: Send + Sync {
     async fn current_user(&self) -> Result<CurrentUser, SourceError>;
     async fn build_types(&self) -> Result<Vec<Rec<BuildType>>, SourceError>;
     async fn builds(&self, locator: &Locator) -> Result<Vec<Rec<Build>>, SourceError>;
+    /// Is there a build with this id on the server?
+    ///
+    /// `GET /app/rest/builds/id:{id}`, which interfaces §4.2 already lists.
+    /// The only question this adapter asks whose **negative** answer is
+    /// information rather than a failure, which is why it is a `bool` and not
+    /// a record: `sync::refuse_a_replaced_server` needs to know that one
+    /// build is gone, not what it said.
+    ///
+    /// A 404 is that answer. Every other status still raises -- a 403 means
+    /// the credential may not read the build, not that the build is absent,
+    /// and reading one as the other would accuse an innocent server of having
+    /// been replaced.
+    async fn build_exists(&self, id: i64) -> Result<bool, SourceError>;
 }
 
 /// The real transport.
@@ -132,6 +145,23 @@ impl Rest for HttpRest {
             &[("locator", rendered.as_str()), ("fields", BUILD_FIELDS)],
         )
         .await
+    }
+
+    async fn build_exists(&self, id: i64) -> Result<bool, SourceError> {
+        match self
+            .get_raw(
+                &format!("app/rest/builds/id:{id}"),
+                &[("fields", BUILD_ID_FIELDS)],
+            )
+            .await
+        {
+            Ok(_) => Ok(true),
+            // The one status this adapter reads as an answer. `status()`
+            // rather than a message match: ADR-0004 carries it precisely so
+            // nobody has to parse prose to tell a 404 from a 403.
+            Err(error) if error.status() == Some(404) => Ok(false),
+            Err(error) => Err(error),
+        }
     }
 }
 
