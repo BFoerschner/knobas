@@ -30,6 +30,24 @@ function record<T>(what: string, value: T): Promise<T> {
 }
 
 vi.mock("../ipc/entity", () => ({
+  // Contexts (#47): one context whose only member is the fixture's review
+  // request, so the per-context filter has something to keep and something to
+  // drop.
+  listContexts: () =>
+    Promise.resolve([
+      {
+        id: "ctx:pay",
+        kind: "adhoc",
+        title: "Payout retries",
+        anchor_id: null,
+        created_at: "2026-08-25T12:00:00Z",
+        archived_at: null,
+      },
+    ]),
+  contextMembers: (ctxId: string) =>
+    record(`members ${ctxId}`, ctxId === "ctx:pay" ? ["gitea:acme/payouts#144"] : []),
+  createContext: () => Promise.reject(new Error("no context creation in this test")),
+  promoteContext: () => Promise.reject(new Error("no promotion in this test")),
   inboxItems: (shelf: InboxShelf) =>
     record(`items ${shelf}`, shelf === "stream" ? stream : snoozed),
   inboxCount: () => record("count", count),
@@ -367,4 +385,55 @@ test("an action this build cannot draw is skipped rather than shown", () => {
     "approve",
     "comment",
   ]);
+});
+
+/**
+ * The per-context filter (#47, spec §7's "3 here") is a lens over the one
+ * stream: membership decides which rows stay, the header counts what is
+ * shown, and clearing it is the whole inbox again.
+ */
+test("the context filter keeps members, counts them as here, and clears whole", async () => {
+  stream = [
+    entry(),
+    entry({
+      key: "mention:jira:PAY-9",
+      category: "mention",
+      source_id: "jira",
+      entity_id: "jira:PAY-9",
+      kind: "ticket",
+      title: "Somewhere else entirely",
+    }),
+  ];
+  count = 2;
+
+  const { contexts } = await import("../shell/contexts.svelte");
+  // `reseed` drops its answer unless the store is live — the guard against a
+  // read landing after teardown — so the shared store is started as the
+  // shell would have.
+  const stopContexts = contexts.start();
+  await contexts.reseed();
+
+  const inbox = createInbox();
+  await inbox.refresh();
+  const view = await draw(inbox);
+
+  const select = view.target.querySelector<HTMLSelectElement>("select.sel-inline");
+  expect(select, "the filter is offered once a context exists").not.toBeNull();
+
+  select!.value = "ctx:pay";
+  select!.dispatchEvent(new Event("change", { bubbles: true }));
+  await vi.waitFor(() => {
+    flushSync();
+    expect(view.text()).not.toContain("Somewhere else entirely");
+  });
+  expect(view.text()).toContain("Add payout CSV export");
+  expect(view.text()).toContain("1 here");
+
+  select!.value = "";
+  select!.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  expect(view.text()).toContain("Somewhere else entirely");
+
+  view.stop();
+  stopContexts();
 });

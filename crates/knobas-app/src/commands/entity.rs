@@ -90,6 +90,11 @@ pub struct EntityFilter {
     /// never dated are excluded by the window, because the window is about the
     /// source's own timestamp.
     pub updated_within_days: Option<u32>,
+    /// Only members of this stored context (`ctx:<id>`), by the fixed one-hop
+    /// rule (§16.11, ADR-0008). `None` is unscoped -- every derived room. The
+    /// membership is resolved server-side per read rather than shipped as an
+    /// id list, so a page and its `total` always describe the same instant.
+    pub context: Option<String>,
     pub order: EntityOrder,
     /// Whether to reach past `sync.live_item` for entities withdrawn upstream
     /// (§5a: links and notes may point at them).
@@ -131,6 +136,7 @@ select entity_id, source_id, kind, title, item_updated_at, synced_at,
  where ($1::text[] is null or source_id = any($1))
    and ($2::text[] is null or kind      = any($2))
    and ($3::int    is null or item_updated_at >= now() - make_interval(days => $3))
+   and ($6::text[] is null or entity_id = any($6))
  order by item_updated_at desc nulls last, entity_id
  limit $4 offset $5
 "#;
@@ -144,6 +150,7 @@ select entity_id, source_id, kind, title, item_updated_at, synced_at,
  where ($1::text[] is null or source_id = any($1))
    and ($2::text[] is null or kind      = any($2))
    and ($3::int    is null or item_updated_at >= now() - make_interval(days => $3))
+   and ($6::text[] is null or entity_id = any($6))
  order by title asc, entity_id
  limit $4 offset $5
 "#;
@@ -160,6 +167,7 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
  where ($1::text[] is null or i.source_id = any($1))
    and ($2::text[] is null or i.kind      = any($2))
    and ($3::int    is null or i.item_updated_at >= now() - make_interval(days => $3))
+   and ($6::text[] is null or i.entity_id = any($6))
  order by i.item_updated_at desc nulls last, i.entity_id
  limit $4 offset $5
 "#;
@@ -173,6 +181,7 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
  where ($1::text[] is null or i.source_id = any($1))
    and ($2::text[] is null or i.kind      = any($2))
    and ($3::int    is null or i.item_updated_at >= now() - make_interval(days => $3))
+   and ($6::text[] is null or i.entity_id = any($6))
  order by i.title asc, i.entity_id
  limit $4 offset $5
 "#;
@@ -218,12 +227,22 @@ pub async fn list_entities_inner(
             None => None,
         };
 
+    // Membership is a set of ids, resolved by the store that owns the rule
+    // (§16.11): the statements above stay static SQL, and a stored context
+    // scopes them by one more nullable parameter. `Some` of an empty set is a
+    // context with no members, whose room is honestly empty -- not unscoped.
+    let members = match filter.context.as_deref() {
+        Some(ctx) => Some(knobas_core::context::member_ids(pool, ctx).await?),
+        None => None,
+    };
+
     let rows = sqlx::query(statement(filter))
         .bind(any_of(&filter.sources))
         .bind(any_of(&filter.kinds))
         .bind(within)
         .bind(i64::from(limit))
         .bind(i64::from(offset))
+        .bind(members)
         .fetch_all(pool)
         .await?;
 
@@ -1005,9 +1024,16 @@ pub async fn detect_suggestions_inner(pool: &PgPool) -> Result<u32, IpcError> {
 
 /// The proposals a room holds, newest first, with both ends resolved.
 ///
-/// `sources` is the room's membership and follows [`EntityFilter`]'s
+/// `sources` is a derived room's membership and follows [`EntityFilter`]'s
 /// convention: **empty means every source**. A proposal belongs to a room when
 /// either of its ends does.
+///
+/// `ctx` is a stored context's room (#47): its membership -- the fixed
+/// one-hop rule, resolved by the store that owns it -- plus the context's own
+/// entity, so a proposed *add to this context* surfaces in the room it would
+/// add to. Membership is computed from confirmed links only (ADR-0008), which
+/// is what keeps "the tray scopes by membership" from becoming circular with
+/// "membership is built from links".
 ///
 /// # Errors
 ///
@@ -1015,11 +1041,21 @@ pub async fn detect_suggestions_inner(pool: &PgPool) -> Result<u32, IpcError> {
 pub async fn room_suggestions_inner(
     pool: &PgPool,
     sources: &[String],
+    ctx: Option<&str>,
     limit: u32,
 ) -> Result<SuggestionPage, IpcError> {
+    let members = match ctx {
+        Some(ctx) => {
+            let mut ids = knobas_core::context::member_ids(pool, ctx).await?;
+            ids.push(ctx.to_owned());
+            Some(ids)
+        }
+        None => None,
+    };
+    let members = members.as_deref();
     Ok(SuggestionPage {
-        rows: suggest::proposals(pool, sources, i64::from(limit)).await?,
-        total: suggest::proposal_count(pool, sources).await?,
+        rows: suggest::proposals(pool, sources, members, i64::from(limit)).await?,
+        total: suggest::proposal_count(pool, sources, members).await?,
     })
 }
 
@@ -1100,10 +1136,11 @@ pub async fn detect_suggestions(lifecycle: State<'_, Lifecycle>) -> Result<u32, 
 pub async fn room_suggestions(
     lifecycle: State<'_, Lifecycle>,
     sources: Vec<String>,
+    ctx: Option<String>,
     limit: u32,
 ) -> Result<SuggestionPage, IpcError> {
     let pool = lifecycle.pool()?;
-    room_suggestions_inner(&pool, &sources, limit).await
+    room_suggestions_inner(&pool, &sources, ctx.as_deref(), limit).await
 }
 
 /// Accept a proposal, and announce it.
@@ -1652,6 +1689,7 @@ mod tests {
             sources: Vec::new(),
             kinds: Vec::new(),
             updated_within_days: None,
+            context: None,
             order,
             include_deleted,
         };
@@ -1687,5 +1725,163 @@ mod tests {
             EntityOrder::TitleAsc
         );
         assert!(serde_json::from_str::<EntityOrder>("\"UpdatedDesc\"").is_err());
+    }
+}
+
+// -- contexts (#47) ---------------------------------------------------------
+//
+// In this module rather than one of their own: §10.8 freezes the `commands/`
+// + `ipc/` module layout ("no new module"), and contexts are the entity
+// stream's own objects — linkable, listable, and read by the same surfaces.
+
+/// The switcher's list: every unarchived context, newest first.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the
+/// database is still coming up, [`Internal`](crate::IpcErrorCode::Internal)
+/// for a query failure.
+#[tauri::command]
+pub async fn list_contexts(lifecycle: State<'_, Lifecycle>) -> Result<Vec<knobas_core::context::ContextRow>, IpcError> {
+    let pool = lifecycle.pool()?;
+    Ok(knobas_core::context::list(&pool).await?)
+}
+
+/// Create an ad-hoc context from a label.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) if the label is blank -- a room
+/// with no name is not addressable by a person;
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+pub async fn create_context_inner(pool: &PgPool, title: &str) -> Result<knobas_core::context::ContextRow, IpcError> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Err(IpcError::invalid("a context needs a label"));
+    }
+    let row = knobas_core::context::create_adhoc(pool, title).await?;
+    record(pool, "created", &row).await?;
+    Ok(row)
+}
+
+/// Promote an entity to a context of its own (spec §7).
+///
+/// Idempotent by the store's own promise: promoting twice answers with the one
+/// context, and only the first call writes an activity line -- the second
+/// mutated nothing, so it announces nothing.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) if `entity_id` is not an entity
+/// id; [`NotFound`](crate::IpcErrorCode::NotFound) if nothing local carries it;
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+pub async fn promote_context_inner(
+    pool: &PgPool,
+    entity_id: &str,
+) -> Result<knobas_core::context::ContextRow, IpcError> {
+    let anchor = EntityRef::parse(entity_id).map_err(IpcError::invalid)?;
+    let before = knobas_core::context::list(pool).await?;
+    let row = knobas_core::context::promote(pool, &anchor)
+        .await?
+        .ok_or_else(|| IpcError::not_found(format!("{anchor} is not in the local index")))?;
+    if !before.iter().any(|existing| existing.id == row.id) {
+        record(pool, "promoted", &row).await?;
+    }
+    Ok(row)
+}
+
+/// Who is in this context, by the fixed rule (§16.11, ADR-0008).
+///
+/// The per-context inbox filter ("3 here") intersects the inbox stream with
+/// this set on the frontend, so the badge and the list it filters are drawn
+/// from the same rows by construction.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the
+/// database is still coming up, [`Internal`](crate::IpcErrorCode::Internal)
+/// for a query failure.
+#[tauri::command]
+pub async fn context_members(
+    lifecycle: State<'_, Lifecycle>,
+    ctx_id: String,
+) -> Result<Vec<String>, IpcError> {
+    let pool = lifecycle.pool()?;
+    Ok(knobas_core::context::member_ids(&pool, &ctx_id).await?)
+}
+
+/// One activity line per context mutation, on the context's own entity.
+async fn record(pool: &PgPool, verb: &str, row: &knobas_core::context::ContextRow) -> Result<(), IpcError> {
+    let entity = EntityRef::parse(&row.id).map_err(IpcError::internal)?;
+    let mut detail = serde_json::json!({
+        "context_id": row.id,
+        "kind": row.kind,
+        "title": row.title,
+    });
+    // Absent rather than null for an ad-hoc context, the discipline
+    // `link_detail` records: a reader of the log should not meet a key that
+    // says "there is nothing here".
+    if let (Some(map), Some(anchor)) = (detail.as_object_mut(), row.anchor_id.as_deref()) {
+        map.insert("anchor_id".to_owned(), serde_json::Value::from(anchor));
+    }
+    knobas_core::activity::record(pool, ACTOR, verb, Some(&entity), detail).await?;
+    Ok(())
+}
+
+/// Create an ad-hoc context, and announce the switcher has a new room.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the
+/// database is still coming up, and whatever [`create_context_inner`] refuses
+/// with.
+#[tauri::command]
+pub async fn create_context<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    title: String,
+) -> Result<knobas_core::context::ContextRow, IpcError> {
+    let pool = lifecycle.pool()?;
+    let row = create_context_inner(&pool, &title).await?;
+    announce_context(&app, &row);
+    Ok(row)
+}
+
+/// Promote an entity to a context, and announce it.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the
+/// database is still coming up, and whatever [`promote_context_inner`] refuses
+/// with.
+#[tauri::command]
+pub async fn promote_context<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+) -> Result<knobas_core::context::ContextRow, IpcError> {
+    let pool = lifecycle.pool()?;
+    let row = promote_context_inner(&pool, &entity_id).await?;
+    announce_context(&app, &row);
+    Ok(row)
+}
+
+/// Put a changed context on `contexts:changed`.
+///
+/// Best-effort, like every emit in this app: a failure means no window is
+/// listening, which is not a reason to fail a write that already landed. What
+/// rides on the event is the row itself, so a listener can splice rather than
+/// re-list -- though re-listing is also correct, and is what the switcher
+/// does.
+fn announce_context<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    row: &knobas_core::context::ContextRow,
+) {
+    if let Err(error) = app.emit(crate::events::CONTEXTS_CHANGED, row) {
+        tracing::debug!(
+            event = crate::events::CONTEXTS_CHANGED,
+            %error,
+            "nothing was listening for this event"
+        );
     }
 }

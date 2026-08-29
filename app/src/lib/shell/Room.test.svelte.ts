@@ -25,6 +25,12 @@ let answer: (filter: EntityFilter) => Promise<EntityPage> = () =>
 const written: string[] = [];
 
 vi.mock("../ipc/entity", () => ({
+  // Contexts (#47): the store imports these at module level, so every mock of
+  // this module has to define them even where no context is ever made.
+  listContexts: () => Promise.resolve([]),
+  contextMembers: () => Promise.resolve([]),
+  createContext: () => Promise.reject(new Error("no context creation in this test")),
+  promoteContext: () => Promise.reject(new Error("no promotion in this test")),
   listEntities: (filter: EntityFilter, limit: number, offset: number) => {
     calls.push({ filter, limit, offset });
     return answer(filter);

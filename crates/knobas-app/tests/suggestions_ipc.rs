@@ -48,7 +48,7 @@ async fn a_pass_over_the_demo_corpus_proposes_suggestions_a_reader_can_judge() {
          column no adapter fills passes every unit test and proposes nothing here"
     );
 
-    let page = room_suggestions_inner(&pool, &[], 500).await.unwrap();
+    let page = room_suggestions_inner(&pool, &[], None, 500).await.unwrap();
     assert_eq!(page.total, i64::from(written));
     assert_eq!(page.rows.len(), written as usize);
 
@@ -94,7 +94,7 @@ async fn a_pass_over_the_demo_corpus_proposes_suggestions_a_reader_can_judge() {
 async fn accepting_moves_a_proposal_into_the_panel_and_records_it() {
     let pool = demo().await;
     detect_suggestions_inner(&pool).await.unwrap();
-    let page = room_suggestions_inner(&pool, &[], 500).await.unwrap();
+    let page = room_suggestions_inner(&pool, &[], None, 500).await.unwrap();
     let entry = page
         .rows
         .first()
@@ -130,7 +130,7 @@ async fn accepting_moves_a_proposal_into_the_panel_and_records_it() {
     }
 
     // ...and out of the tray.
-    let after = room_suggestions_inner(&pool, &[], 500).await.unwrap();
+    let after = room_suggestions_inner(&pool, &[], None, 500).await.unwrap();
     assert!(!after.rows.iter().any(|e| e.link.id == entry.link.id));
     assert_eq!(after.total, page.total - 1);
 
@@ -143,7 +143,7 @@ async fn accepting_moves_a_proposal_into_the_panel_and_records_it() {
 async fn dismissing_is_remembered_across_a_later_pass() {
     let pool = demo().await;
     detect_suggestions_inner(&pool).await.unwrap();
-    let page = room_suggestions_inner(&pool, &[], 500).await.unwrap();
+    let page = room_suggestions_inner(&pool, &[], None, 500).await.unwrap();
     let entry = page
         .rows
         .first()
@@ -167,7 +167,7 @@ async fn dismissing_is_remembered_across_a_later_pass() {
         0,
         "a dismissal survives a re-sync"
     );
-    let after = room_suggestions_inner(&pool, &[], 500).await.unwrap();
+    let after = room_suggestions_inner(&pool, &[], None, 500).await.unwrap();
     assert!(!after.rows.iter().any(|e| e.link.id == entry.link.id));
     assert_eq!(after.total, page.total - 1);
     assert!(
@@ -209,7 +209,7 @@ async fn a_bad_suggestion_id_is_invalid_and_an_unknown_one_is_not_found() {
 async fn linking_a_proposed_pair_by_hand_accepts_it_instead_of_refusing() {
     let pool = demo().await;
     detect_suggestions_inner(&pool).await.unwrap();
-    let page = room_suggestions_inner(&pool, &[], 500).await.unwrap();
+    let page = room_suggestions_inner(&pool, &[], None, 500).await.unwrap();
     // A proposal whose relation is the one *Link to…* defaults to, since that
     // is the collision a user can actually walk into.
     let entry = page
@@ -250,11 +250,11 @@ async fn the_tray_is_scoped_to_the_room_it_is_drawn_in() {
     let pool = demo().await;
     detect_suggestions_inner(&pool).await.unwrap();
 
-    let everywhere = room_suggestions_inner(&pool, &[], 500).await.unwrap();
-    let demo_room = room_suggestions_inner(&pool, &["mock".to_owned()], 500)
+    let everywhere = room_suggestions_inner(&pool, &[], None, 500).await.unwrap();
+    let demo_room = room_suggestions_inner(&pool, &["mock".to_owned()], None, 500)
         .await
         .unwrap();
-    let nowhere = room_suggestions_inner(&pool, &["no-such-source".to_owned()], 500)
+    let nowhere = room_suggestions_inner(&pool, &["no-such-source".to_owned()], None, 500)
         .await
         .unwrap();
 
@@ -270,7 +270,7 @@ async fn the_tray_is_scoped_to_the_room_it_is_drawn_in() {
 
     // `limit` caps the rows and not the count -- the heading answers "how many
     // are waiting", which a capped number would not.
-    let capped = room_suggestions_inner(&pool, &[], 1).await.unwrap();
+    let capped = room_suggestions_inner(&pool, &[], None, 1).await.unwrap();
     assert_eq!(capped.rows.len(), 1);
     assert_eq!(capped.total, everywhere.total);
 }

@@ -35,6 +35,8 @@ export const EVENTS = {
   sourceHealth: "source:health",
   /** `ActivityRow`, coalesced to at most one per second. */
   activityNew: "activity:new",
+  /** `ContextRow` — a context was created or promoted (#47). */
+  contextsChanged: "contexts:changed",
 } as const;
 
 /** Why a command failed — `knobas_app::IpcErrorCode`. */

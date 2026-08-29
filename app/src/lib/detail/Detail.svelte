@@ -10,7 +10,8 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage, isIpcError } from "../ipc";
-  import { getEntity, unlink, type EntityDetail, type LinkEntry } from "../ipc/entity";
+  import { getEntity, promoteContext, unlink, type EntityDetail, type LinkEntry } from "../ipc/entity";
+import { contexts as storedContexts } from "../shell/contexts.svelte";
   import Monogram from "../shell/Monogram.svelte";
   import { kindRegistry } from "../shell/kind-registry.svelte";
   import { hashFor } from "../shell/router.svelte";
@@ -207,6 +208,31 @@
       push({ text: `Could not open the link: ${ipcErrorMessage(rejection)}`, tone: "err" });
     }
   }
+
+  /** True while a promotion is in flight, so the button cannot double-fire. */
+  let promoting = $state(false);
+
+  /**
+   * Promote this ticket to a context of its own and go there (spec §7, #47).
+   *
+   * Idempotent on the backend, so pressing it on an already-promoted ticket
+   * simply lands in the existing room. The store is reseeded directly as well
+   * as by `contexts:changed`, because the navigation lands *now* and a room
+   * whose tab has not arrived yet would flash the *All work* fallback.
+   */
+  async function promote() {
+    if (promoting) return;
+    promoting = true;
+    try {
+      const row = await promoteContext(entityId);
+      await storedContexts.reseed();
+      onnavigate(`#/ctx/${row.id}`);
+    } catch (rejection) {
+      push({ text: `Could not promote: ${ipcErrorMessage(rejection)}`, tone: "err" });
+    } finally {
+      promoting = false;
+    }
+  }
 </script>
 
 <aside class="detail" aria-labelledby={titleId}>
@@ -232,6 +258,18 @@
             <path d="M5 3.5v9l7-4.5z" />
           </svg>
           Start work
+        </button>
+        <!--
+          Same placement rule as *Start work*: on a ticket and nowhere else,
+          absent rather than disabled elsewhere. Spec §7: "any ticket can be
+          promoted to a context" — an epic is a ticket kind too, and the
+          backend reads which of the two it is off the mirror.
+        -->
+        <button class="btn sm" disabled={promoting} onclick={() => void promote()}>
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M8 13V4M4.5 7.5 8 4l3.5 3.5" />
+          </svg>
+          Promote
         </button>
       {/if}
       <button class="btn sm" onclick={() => (linking = true)}>

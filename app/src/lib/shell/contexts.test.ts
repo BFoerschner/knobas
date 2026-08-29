@@ -8,7 +8,7 @@
  */
 import { expect, test } from "vitest";
 
-import { ALL_CONTEXT, builtinContexts, contextById } from "./contexts";
+import { ALL_CONTEXT, builtinContexts, contextById, storedContext, switcherContexts } from "./contexts";
 
 test("always offers All work first, then one room per source", () => {
   const cs = builtinContexts([
@@ -48,7 +48,7 @@ test("an unknown context id falls back to All work rather than blanking the room
  */
 test("the fallback is All work by identity, not by position", () => {
   const cs = [
-    { id: "src:jira", label: "Jira", kindWord: "source", filter: { sources: ["jira"] } },
+    { id: "src:jira", label: "Jira", kindWord: "source", filter: { sources: ["jira"], context: null } },
     ALL_CONTEXT,
   ];
   expect(contextById("src:gone", cs).id).toBe("all");
@@ -59,4 +59,52 @@ test("the fallback is All work by identity, not by position", () => {
 /** A room with no contexts at all still resolves to something renderable. */
 test("an empty list still yields All work", () => {
   expect(contextById("all", []).label).toBe("All work");
+});
+
+/**
+ * The switcher's assembly since #47: *All work* first, then the stored
+ * contexts in the order `list_contexts` answered, then the source rooms —
+ * the rooms a person made on purpose come before the raw feeds.
+ */
+test("stored contexts sit between All work and the source rooms", () => {
+  const cs = switcherContexts(
+    [
+      {
+        id: "ctx:b",
+        kind: "adhoc",
+        title: "Staging DB configuration",
+        anchor_id: null,
+        created_at: "2026-08-29T12:00:00Z",
+        archived_at: null,
+      },
+      {
+        id: "ctx:a",
+        kind: "epic",
+        title: "SEPA payout retries",
+        anchor_id: "jira:EPIC-1",
+        created_at: "2026-08-28T12:00:00Z",
+        archived_at: null,
+      },
+    ],
+    [{ id: "jira", label: "Tidewater Jira" }],
+  );
+
+  expect(cs.map((c) => c.id)).toEqual(["all", "ctx:b", "ctx:a", "src:jira"]);
+  // A stored room scopes by membership, never by source.
+  expect(cs[1]?.filter).toEqual({ sources: [], context: "ctx:b" });
+  expect(cs[2]?.kindWord).toBe("epic");
+});
+
+/** `adhoc` is the column's spelling; the chip reads as a word. */
+test("an ad-hoc context's chip says ad-hoc", () => {
+  const room = storedContext({
+    id: "ctx:x",
+    kind: "adhoc",
+    title: "x",
+    anchor_id: null,
+    created_at: "2026-08-29T12:00:00Z",
+    archived_at: null,
+  });
+  expect(room.kindWord).toBe("ad-hoc");
+  expect(room.label).toBe("x");
 });

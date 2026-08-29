@@ -92,6 +92,9 @@ a{color:var(--link);text-decoration:none}
 .tab.on{color:var(--text);border-bottom-color:var(--text)}
 .tab .dot{width:6px;height:6px;border-radius:50%;background:var(--amber)}
 .tab.new{color:var(--faint);font-family:var(--sans)}
+.tab.new-name{background:var(--raised);color:var(--text);border:1px solid var(--hair2);border-bottom:2px solid var(--text);width:160px}
+.room-bar .here{font-size:11px;color:var(--amber);border:1px solid var(--hair2);border-radius:9px;padding:1px 8px;text-decoration:none}
+.room-bar .here:hover{background:var(--raised)}
 .spacer{flex:1}
 .tb-btn{display:flex;align-items:center;gap:7px;height:30px;padding:0 9px;border-radius:2px;color:var(--muted);font-size:12px;white-space:nowrap;flex:none}
 .tb-btn:hover{background:var(--raised);color:var(--text)}

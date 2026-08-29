@@ -27,6 +27,11 @@ const RULE_CLASSES: [&str; 3] = ["exact_key", "similarity", "source_relation"];
 /// is `knobas_core::link`'s own test.
 const ORIGINS: [&str; 5] = ["manual", "suggested", "imported", "source", "implied"];
 
+/// The context kinds `0010` allows, spelled here for the reason [`ORIGINS`]
+/// is: the other half -- the enum walked against the migration -- is
+/// `knobas_core::context`'s own test.
+const CONTEXT_KINDS: [&str; 3] = ["epic", "ticket", "adhoc"];
+
 /// `link_active_idx` is what the link commands built on this schema rest on,
 /// in all three of its parts: a second *active* link over the same
 /// `(from, to, relation)` fails with SQLSTATE 23505; a different `relation`
@@ -1296,4 +1301,136 @@ async fn the_inbox_stores_a_decision_or_nothing() {
     .execute(pool)
     .await
     .expect("done is as good an answer as snoozed");
+}
+
+/// `context.kind` is a closed vocabulary, and the database says so (0010).
+///
+/// The same pin `origin` gets, for the same reason: the column is plain
+/// `text`, the list that writes it lives in Rust
+/// (`knobas_core::context::ContextKind`), whose decoder refuses a spelling it
+/// does not know -- so a stray value is a context that cannot be read back at
+/// all. The other half of this pin -- the enum's variants against the
+/// migration's list -- lives in `knobas_core::context`.
+#[tokio::test]
+async fn the_context_kind_vocabulary_is_closed() {
+    let pool = &knobas_db::test_util::test_pool().await;
+    migrate::run(pool).await.unwrap();
+
+    let run = uuid::Uuid::new_v4().simple().to_string();
+    for kind in CONTEXT_KINDS {
+        sqlx::query("insert into knobas.context (id, kind, title) values ($1, $2, $2)")
+            .bind(format!("ctx:kind-{run}-{kind}"))
+            .bind(kind)
+            .execute(pool)
+            .await
+            .unwrap_or_else(|error| panic!("kind {kind:?} refused: {error}"));
+    }
+
+    for bad in ["label", "Epic", ""] {
+        let refused =
+            sqlx::query("insert into knobas.context (id, kind, title) values ($1, $2, 'x')")
+                .bind(format!("ctx:kind-{run}-bad"))
+                .bind(bad)
+                .execute(pool)
+                .await
+                .unwrap_err();
+        assert_eq!(
+            refused
+                .as_database_error()
+                .and_then(|e| e.code())
+                .as_deref(),
+            Some("23514"),
+            "kind {bad:?} should be refused by the check constraint"
+        );
+    }
+
+    // Read from the live catalog rather than from the migration file: what
+    // this database enforces is what an existing installation got.
+    let (definition,): (String,) = sqlx::query_as(
+        "select pg_get_constraintdef(oid) from pg_constraint
+          where conname = 'context_kind_chk'
+            and conrelid = 'knobas.context'::regclass",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    for kind in CONTEXT_KINDS {
+        assert!(definition.contains(kind), "{kind:?} missing from {definition}");
+    }
+    // ... and nothing else, or the constraint could allow a fourth spelling no
+    // Rust variant produces and every assertion above would still pass.
+    assert_eq!(
+        definition.matches('\'').count() / 2,
+        CONTEXT_KINDS.len(),
+        "the constraint allows a different number of kinds than knobas writes: {definition}"
+    );
+}
+
+/// `context_anchor_idx` (0010) is what makes promotion idempotent between the
+/// check and the insert: one *unarchived* context per anchor, refused with
+/// SQLSTATE 23505 -- while an archived promotion does not block a fresh one,
+/// and ad-hoc rows (no anchor) never collide however many exist.
+#[tokio::test]
+async fn one_unarchived_context_per_anchor() {
+    let pool = &knobas_db::test_util::test_pool().await;
+    migrate::run(pool).await.unwrap();
+
+    let run = uuid::Uuid::new_v4().simple().to_string();
+    let anchor = format!("test:anchor-{run}");
+    sqlx::query("insert into knobas.entity (id, kind) values ($1,'ticket')")
+        .bind(&anchor)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    sqlx::query(
+        "insert into knobas.context (id, kind, title, anchor_id) values ($1,'ticket','a',$2)",
+    )
+    .bind(format!("ctx:anchor-{run}-1"))
+    .bind(&anchor)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let refused = sqlx::query(
+        "insert into knobas.context (id, kind, title, anchor_id) values ($1,'ticket','b',$2)",
+    )
+    .bind(format!("ctx:anchor-{run}-2"))
+    .bind(&anchor)
+    .execute(pool)
+    .await
+    .unwrap_err();
+    assert_eq!(
+        refused
+            .as_database_error()
+            .and_then(|e| e.code())
+            .as_deref(),
+        Some("23505"),
+        "a second unarchived context on one anchor must be refused"
+    );
+
+    // Archive the first: the anchor is free again, which is what lets a
+    // re-promotion mint a fresh room instead of resurrecting the old one.
+    sqlx::query("update knobas.context set archived_at = now() where id = $1")
+        .bind(format!("ctx:anchor-{run}-1"))
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into knobas.context (id, kind, title, anchor_id) values ($1,'ticket','c',$2)",
+    )
+    .bind(format!("ctx:anchor-{run}-3"))
+    .bind(&anchor)
+    .execute(pool)
+    .await
+    .expect("an archived promotion must not block a fresh one");
+
+    // And two ad-hoc rows with no anchor never collide.
+    for n in ["4", "5"] {
+        sqlx::query("insert into knobas.context (id, kind, title) values ($1,'adhoc','x')")
+            .bind(format!("ctx:anchor-{run}-{n}"))
+            .execute(pool)
+            .await
+            .expect("anchorless rows are outside the index");
+    }
 }

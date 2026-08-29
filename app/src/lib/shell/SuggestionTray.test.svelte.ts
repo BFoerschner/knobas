@@ -33,8 +33,8 @@ vi.mock("../ipc/entity", () => ({
     calls.push("detect");
     return Promise.resolve(0);
   },
-  roomSuggestions: (sources: string[], limit: number) => {
-    calls.push(`read ${JSON.stringify(sources)} ${limit}`);
+  roomSuggestions: (sources: string[], ctx: string | null, limit: number) => {
+    calls.push(`read ${JSON.stringify(sources)} ${JSON.stringify(ctx)} ${limit}`);
     const next = reads.shift() ?? (() => Promise.resolve(page([])));
     return next();
   },
@@ -125,7 +125,7 @@ test("runs a detection pass before its first read, scoped to the room", async ()
   await settle();
 
   expect(calls[0]).toBe("detect");
-  expect(calls[1]).toBe('read ["gitea"] 50');
+  expect(calls[1]).toBe('read ["gitea"] null 50');
   unmount(app);
   target.remove();
 });
@@ -232,9 +232,9 @@ test("accepting answers the proposal and then re-reads, rather than splicing it 
 
   expect(calls).toEqual([
     "detect",
-    "read [] 50",
+    "read [] null 50",
     "accept 00000000-0000-0000-0000-000000000001",
-    "read [] 50",
+    "read [] null 50",
   ]);
   expect(
     calls.filter((call) => call === "detect").length,

@@ -1,4 +1,5 @@
 pub mod activity;
+pub mod context;
 pub mod entity;
 mod error;
 pub mod inbox;

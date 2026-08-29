@@ -101,8 +101,12 @@ A machine-proposed link with a stated reason. Accepting makes a link; dismissing
 _Avoid_: recommendation
 
 **Context**:
-A working set of entities. Membership = explicit adds + direct links + one hop out; asset membership also counts through ancestors. The rule is fixed, not configurable.
+A working set of entities. Membership = explicit adds + direct links + one hop out; asset membership also counts through ancestors. The rule is fixed, not configurable — the operational reading (seed + direct + hop, computed over confirmed links only) is ADR-0008.
 _Avoid_: workspace, project, room (that is its view)
+
+**Member**:
+An entity the membership rule reaches for a given context — computed at read time, never stored. A proposal never makes a member.
+_Avoid_: item (that is the mirror's word)
 
 **Smart list**:
 A saved local query with a live count and change badge — built-ins plus any launcher search saved as a list.

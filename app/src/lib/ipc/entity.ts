@@ -55,6 +55,13 @@ export interface EntityFilter {
    */
   updated_within_days: number | null;
   order: EntityOrder;
+  /**
+   * Only members of this stored context (`ctx:<id>`), by the fixed one-hop
+   * rule (§16.11, ADR-0008) — or `null` for no scoping. Membership is
+   * resolved server-side per read, so a page and its `total` always describe
+   * the same instant.
+   */
+  context: string | null;
   /** Reach past the live-item view for entities withdrawn upstream (§5a). */
   include_deleted: boolean;
 }
@@ -494,10 +501,20 @@ export function detectSuggestions(): Promise<number> {
  * synced by a source with no configuration row. A proposal belongs to a room
  * when *either* of its ends does.
  *
+ * `ctx` is a stored context's room (#47): proposals are scoped to its
+ * membership — the fixed one-hop rule, resolved server-side — plus the
+ * context's own entity, so a proposed *add to this context* surfaces in the
+ * room it would add to. `null` leaves the derived rooms' source scoping as
+ * the whole rule.
+ *
  * The tray holds no state: this call is the whole of it.
  */
-export function roomSuggestions(sources: string[], limit: number): Promise<SuggestionPage> {
-  return invoke<SuggestionPage>("room_suggestions", { sources, limit });
+export function roomSuggestions(
+  sources: string[],
+  ctx: string | null,
+  limit: number,
+): Promise<SuggestionPage> {
+  return invoke<SuggestionPage>("room_suggestions", { sources, ctx, limit });
 }
 
 /**
@@ -843,4 +860,65 @@ export function snoozeInboxItem(itemKey: string, until: string): Promise<void> {
  */
 export function completeInboxItem(itemKey: string): Promise<void> {
   return invoke<void>("complete_inbox_item", { itemKey });
+}
+
+/** What kind of working set a context is — `ContextKind`. */
+export type ContextKind = "epic" | "ticket" | "adhoc";
+
+/** One stored context — `ContextRow` (#47). */
+export interface ContextRow {
+  /** `ctx:<uuid>` — a local id, and the id of the context's own entity. */
+  id: string;
+  kind: ContextKind;
+  title: string;
+  /** The promoted entity this context is about; `null` for an ad-hoc label. */
+  anchor_id: string | null;
+  /** RFC 3339. */
+  created_at: string;
+  /** RFC 3339, or `null` while the context is live. */
+  archived_at: string | null;
+}
+
+/**
+ * The switcher's list — `list_contexts`. Every unarchived context, newest
+ * first.
+ */
+export function listContexts(): Promise<ContextRow[]> {
+  return invoke<ContextRow[]>("list_contexts");
+}
+
+/**
+ * Mint an ad-hoc context from a label — `create_context`.
+ *
+ * Rejects with `invalid` for a blank label. Writes one activity line and
+ * emits `EVENTS.contextsChanged` with the new row.
+ */
+export function createContext(title: string): Promise<ContextRow> {
+  return invoke<ContextRow>("create_context", { title });
+}
+
+/**
+ * Promote an entity to a context of its own — `promote_context` (spec §7:
+ * "any ticket can be promoted").
+ *
+ * Idempotent: promoting twice answers with the one context. Rejects with
+ * `not_found` for an entity that never synced. Writes one activity line and
+ * emits `EVENTS.contextsChanged` — on the first promotion only, because the
+ * second mutated nothing.
+ */
+export function promoteContext(entityId: string): Promise<ContextRow> {
+  return invoke<ContextRow>("promote_context", { entityId });
+}
+
+/**
+ * Who is in a context — `context_members`, by the fixed one-hop rule
+ * (§16.11, ADR-0008): explicit adds and the anchor (an epic's tickets count
+ * through their source-recorded parent), their direct links, and one hop out.
+ *
+ * An unknown context has no members rather than an error. The per-context
+ * inbox filter ("3 here") intersects the inbox stream with this set, so the
+ * badge and the rows it stands for come from the same stream by construction.
+ */
+export function contextMembers(ctxId: string): Promise<string[]> {
+  return invoke<string[]>("context_members", { ctxId });
 }

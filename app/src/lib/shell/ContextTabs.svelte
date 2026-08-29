@@ -10,13 +10,48 @@
   and be pasteable into a message.
 -->
 <script lang="ts">
+  import { ipcErrorMessage } from "../ipc";
+  import { createContext } from "../ipc/entity";
   import type { RoomContext } from "./contexts";
   import { contextById } from "./contexts";
+  import { contexts as stored } from "./contexts.svelte";
   import type { Router } from "./router.svelte";
+  import { push } from "./toasts.svelte";
 
   let { router, contexts }: { router: Router; contexts: RoomContext[] } = $props();
 
   let open = $state(false);
+
+  /** Whether the *new* tab is an input right now. */
+  let naming = $state(false);
+  /** The ad-hoc label being typed. */
+  let label = $state("");
+  /** True while the create is in flight, so Enter cannot double-fire. */
+  let creating = $state(false);
+
+  /**
+   * Mint the ad-hoc context and go there (#47).
+   *
+   * The store is reseeded directly as well as by `contexts:changed`, because
+   * the navigation lands *now* and a room whose tab has not arrived yet would
+   * flash the *All work* fallback.
+   */
+  async function create() {
+    const title = label.trim();
+    if (title === "" || creating) return;
+    creating = true;
+    try {
+      const row = await createContext(title);
+      await stored.reseed();
+      naming = false;
+      label = "";
+      router.go(`#/ctx/${row.id}`);
+    } catch (rejection) {
+      push({ text: `Could not create the context: ${ipcErrorMessage(rejection)}`, tone: "err" });
+    } finally {
+      creating = false;
+    }
+  }
 
   /** The room the reader is in, or the one they will return to. */
   const current = $derived(contextById(router.ctx, contexts));
@@ -99,13 +134,36 @@
       onclick={() => go(context.id)}>{context.label}</button
     >
   {/each}
-  <!--
-    Disabled, and saying so. Creating a context means writing `knobas.context`
-    and drawing membership through `knobas.link`, both M2 — and a button that
-    silently did nothing would be worse than one that explains itself.
-  -->
-  <button class="tab new" disabled title="Contexts arrive in M2">
-    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" /></svg>
-    new
-  </button>
+  {#if naming}
+    <!--
+      The tab becomes the input: an ad-hoc context is a label and nothing
+      else (spec §7), so there is nothing a dialog would add. Escape backs
+      out; blur backs out too unless a create is already in flight.
+    -->
+    <!-- svelte-ignore a11y_autofocus -->
+    <input
+      class="tab new-name"
+      autofocus
+      aria-label="New context label"
+      placeholder="Context label…"
+      disabled={creating}
+      bind:value={label}
+      onkeydown={(event) => {
+        if (event.key === "Enter") void create();
+        if (event.key === "Escape") {
+          event.stopPropagation();
+          naming = false;
+          label = "";
+        }
+      }}
+      onblur={() => {
+        if (!creating) naming = false;
+      }}
+    />
+  {:else}
+    <button class="tab new" title="New ad-hoc context" onclick={() => (naming = true)}>
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" /></svg>
+      new
+    </button>
+  {/if}
 </div>

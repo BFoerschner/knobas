@@ -16,7 +16,8 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../ipc";
-  import { submitWrite, type InboxEntry } from "../ipc/entity";
+  import { contextMembers, submitWrite, type InboxEntry } from "../ipc/entity";
+  import { contexts as storedContexts } from "../shell/contexts.svelte";
   import Monogram from "../shell/Monogram.svelte";
   import { sourceMonogram } from "../shell/monogram";
   import { openExternal } from "../shell/open-external";
@@ -126,14 +127,71 @@
     if (!y || !m || !d) return;
     void snooze(key, new Date(y, m - 1, d, 9, 0, 0, 0));
   }
+
+  /**
+   * The per-context filter (#47, spec §7's "inbox filter: 3 here").
+   *
+   * A *view* over the one stream, never a second read: membership comes from
+   * `context_members` — the fixed one-hop rule, resolved server-side — and
+   * the rows are the same rows the unfiltered inbox draws, so the two can
+   * never disagree about what needs you. `""` is the whole inbox. View-local
+   * state rather than an address: the filter is a lens over this view, and
+   * `#/inbox` stays the one inbox address.
+   */
+  let ctxFilter = $state("");
+  let members = $state<Set<string> | null>(null);
+  let membersToken = 0;
+  $effect(() => {
+    const ctx = ctxFilter;
+    members = null;
+    if (ctx === "") return;
+    const mine = ++membersToken;
+    void contextMembers(ctx)
+      .then((ids) => {
+        if (mine !== membersToken) return;
+        members = new Set(ids);
+      })
+      .catch((rejection) => {
+        if (mine !== membersToken) return;
+        // Shown, not swallowed: a filter that silently failed open would show
+        // the whole inbox labelled as one context's.
+        push({ text: ipcErrorMessage(rejection), tone: "err" });
+        ctxFilter = "";
+      });
+  });
+
+  /** One rule for both shelves. While members load, the shelves hold back. */
+  function inContext(entries: InboxEntry[]): InboxEntry[] {
+    if (ctxFilter === "") return entries;
+    const scope = members;
+    if (scope === null) return [];
+    return entries.filter(
+      (entry) => entry.item.entity_id !== null && scope.has(entry.item.entity_id),
+    );
+  }
+
+  const stream = $derived(inContext(inbox.stream));
+  const snoozed = $derived(inContext(inbox.snoozed));
 </script>
 
 <section class="view">
   <div class="room-bar">
     <h1>
       Inbox
-      <span class="k">{inbox.count}</span>
+      <span class="k">{ctxFilter === "" ? inbox.count : `${stream.length} here`}</span>
     </h1>
+    {#if storedContexts.all.length > 0}
+      <!--
+        Only offered once a context exists: a filter over an empty list is a
+        control that can do nothing.
+      -->
+      <select class="sel-inline" aria-label="Filter by context" bind:value={ctxFilter}>
+        <option value="">All contexts</option>
+        {#each storedContexts.all as row (row.id)}
+          <option value={row.id}>{row.title}</option>
+        {/each}
+      </select>
+    {/if}
   </div>
 
   <div class="view-b">
@@ -141,14 +199,18 @@
       <p class="empty fail">{inbox.error}</p>
     {/if}
 
-    {#if inbox.stream.length === 0}
+    {#if stream.length === 0}
       <p class="empty">
-        Nothing needs you. Review requests, mentions, failed builds on your work, new
-        assignments and expiring credentials arrive here.
+        {#if ctxFilter === ""}
+          Nothing needs you. Review requests, mentions, failed builds on your work, new
+          assignments and expiring credentials arrive here.
+        {:else}
+          Nothing here needs you — nothing in the inbox is about this context's members.
+        {/if}
       </p>
     {/if}
 
-    {#each inbox.stream as entry (entry.item.key)}
+    {#each stream as entry (entry.item.key)}
       <div class="inbox-item">
         <Monogram text={sourceMonogram(entry.item.source_id)} label={entry.item.source_id} />
         <span class="when">{ago(entry.item.occurred_at, now)}</span>
@@ -249,9 +311,9 @@
       </div>
     {/each}
 
-    {#if inbox.snoozed.length > 0}
+    {#if snoozed.length > 0}
       <h2 class="lab snoozed-head">Snoozed</h2>
-      {#each inbox.snoozed as entry (entry.item.key)}
+      {#each snoozed as entry (entry.item.key)}
         <div class="inbox-item dim">
           <Monogram text={sourceMonogram(entry.item.source_id)} label={entry.item.source_id} />
           <span class="when">returns {ago(entry.item.snoozed_until, now)}</span>

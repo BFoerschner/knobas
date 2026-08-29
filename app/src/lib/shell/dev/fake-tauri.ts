@@ -227,6 +227,30 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     },
     demo_load: () => ({ source_id: "mock", upserted: 21, deleted: 0, swept: 0, cursor: "" }),
     complete_first_run: () => null,
+
+    // Contexts (#47). Stateful within the session, so the new-context tab and
+    // *Promote* can be walked in QA; membership is empty because the fixture
+    // has no link graph, and `list_entities` answers a context scope with an
+    // empty page for the same reason.
+    list_contexts: () => FAKE_CONTEXTS.slice(),
+    context_members: () => [],
+    create_context: (args) => {
+      const row = fakeContext("adhoc", String(args["title"] ?? "Untitled"), null);
+      FAKE_CONTEXTS.unshift(row);
+      return row;
+    },
+    promote_context: (args) => {
+      const anchor = String(args["entityId"] ?? "");
+      const existing = FAKE_CONTEXTS.find((row) => row.anchor_id === anchor);
+      if (existing) return existing;
+      const entry = CORPUS.find((candidate) => candidate.entity_id === anchor);
+      if (!entry) {
+        throw { code: "not_found", message: `${anchor} is not in the local index`, source_id: null };
+      }
+      const row = fakeContext("ticket", entry.title, anchor);
+      FAKE_CONTEXTS.unshift(row);
+      return row;
+    },
   };
 }
 
@@ -354,6 +378,29 @@ function row(
   };
 }
 
+/** The stored contexts the fixture session holds. Starts empty on purpose:
+ * the new-context flow is what a QA pass wants to see working. */
+const FAKE_CONTEXTS: {
+  id: string;
+  kind: string;
+  title: string;
+  anchor_id: string | null;
+  created_at: string;
+  archived_at: string | null;
+}[] = [];
+
+let nextContext = 1;
+function fakeContext(kind: string, title: string, anchor_id: string | null) {
+  return {
+    id: `ctx:fake-${nextContext++}`,
+    kind,
+    title,
+    anchor_id,
+    created_at: new Date().toISOString(),
+    archived_at: null,
+  };
+}
+
 /** The mirror row `list_entities` returns — the six columns, and no more. */
 function mirrorRow(entry: (typeof CORPUS)[number]) {
   return {
@@ -372,10 +419,15 @@ function listEntities(args: Record<string, unknown>) {
     sources?: string[];
     kinds?: string[];
     order?: string;
+    context?: string | null;
     include_deleted?: boolean;
   };
   const limit = Number(args["limit"] ?? 50);
   const offset = Number(args["offset"] ?? 0);
+
+  // The fixture has no link graph, so a context's membership is honestly
+  // empty — the same answer `context_members` gives.
+  if (filter.context) return { rows: [], total: 0 };
 
   let rows = CORPUS.filter((entry) => filter.include_deleted || entry.deleted_at === null);
   if (filter.sources?.length) rows = rows.filter(() => filter.sources?.includes("mock"));

@@ -12,11 +12,19 @@
   let {
     context,
     count = null,
+    inboxHere = null,
     onnewnote,
   }: {
     context: RoomContext;
     /** How many items this room holds, or `null` while it is still counting. */
     count?: number | null;
+    /**
+     * How many inbox items are about this room's members (#47, spec §7's
+     * "3 here") — `null` for a derived room, whose inbox is the global one.
+     * Zero is not drawn: a chip that says "0 here" on every quiet context is
+     * a chip nobody reads.
+     */
+    inboxHere?: number | null;
     /**
      * Start a new note (#46).
      *
@@ -35,6 +43,12 @@
   <span class="kind">{context.kindWord}</span>
   {#if count !== null}
     <span class="mono faint">{count} item{count === 1 ? "" : "s"}</span>
+  {/if}
+  {#if inboxHere !== null && inboxHere > 0}
+    <!-- An address, not a handler: the inbox is a place (spec §2). -->
+    <a class="here mono" href="#/inbox" title="Inbox items about this context's members"
+      >{inboxHere} here</a
+    >
   {/if}
   <span class="own">
     <button class="btn sm" onclick={onnewnote}>New note</button>

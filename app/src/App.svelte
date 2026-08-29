@@ -8,7 +8,8 @@
   import Room from "./lib/shell/Room.svelte";
   import Shell from "./lib/shell/Shell.svelte";
   import Toast from "./lib/shell/Toast.svelte";
-  import { builtinContexts } from "./lib/shell/contexts";
+  import { switcherContexts } from "./lib/shell/contexts";
+  import { contexts as storedContexts } from "./lib/shell/contexts.svelte";
   import { startFollowingMerges } from "./lib/shell/follow-merges";
   import { health } from "./lib/shell/health.svelte";
   import { kindRegistry } from "./lib/shell/kind-registry.svelte";
@@ -24,7 +25,8 @@
   import { linkTo } from "./lib/detail/links.svelte";
 
   /**
-   * The rooms the switcher offers: *All work*, plus one per configured source.
+   * The rooms the switcher offers: *All work*, the stored contexts (#47), and
+   * one room per configured source.
    *
    * Derived from the live `source:health` store rather than from a second
    * `list_sources` call — the store already knows every source id, it is kept
@@ -36,7 +38,10 @@
    * word the address `#/ctx/src:jira-eu` uses.
    */
   const contexts = $derived(
-    builtinContexts(health.all.map((source) => ({ id: source.source_id, label: source.source_id }))),
+    switcherContexts(
+      storedContexts.all,
+      health.all.map((source) => ({ id: source.source_id, label: source.source_id })),
+    ),
   );
 
   /**
@@ -82,6 +87,7 @@
     let stopHealth: (() => void) | undefined;
     let stopMerges: (() => void) | undefined;
     let stopInbox: (() => void) | undefined;
+    let stopContexts: (() => void) | undefined;
 
     void (async () => {
       // Dev only, and behind `import.meta.env.DEV` so Rollup folds the branch
@@ -119,6 +125,9 @@
       // below: `inbox_items` goes through the sync engine's state and answers
       // `not_ready` for the whole of bring-up.
       stopInbox = inbox.start();
+      // The stored contexts (#47): same split as health — subscribe now,
+      // seed once the database can answer.
+      stopContexts = storedContexts.start();
       // Once, at shell start: `list_adapters` is static per build and answers
       // before the database is up, so there is nothing to poll and nothing to
       // tear down.
@@ -135,6 +144,7 @@
       stopHealth?.();
       stopMerges?.();
       stopInbox?.();
+      stopContexts?.();
       stopKeys();
       stopRouter();
       lifecycle.stop();
@@ -173,6 +183,17 @@
    */
   $effect(() => {
     if (lifecycle.ready) void inbox.refresh();
+  });
+
+  /**
+   * Seed the stored contexts the moment the database can answer — the same
+   * rule and the same shape as the two seeds above: `list_contexts` rejects
+   * with `not_ready` for the whole of bring-up, and `contexts:changed` only
+   * fires on a mutation, so a fresh session would otherwise show no stored
+   * rooms until the first one is made.
+   */
+  $effect(() => {
+    if (lifecycle.ready) void storedContexts.reseed();
   });
 
   /**

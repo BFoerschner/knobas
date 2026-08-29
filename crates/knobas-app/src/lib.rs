@@ -57,6 +57,9 @@ pub mod events {
     pub const SOURCE_HEALTH: &str = "source:health";
     /// Payload: `ActivityRow`, coalesced to at most one per second.
     pub const ACTIVITY_NEW: &str = "activity:new";
+    /// Payload: `ContextRow` -- the context that was created or promoted
+    /// (#47). The switcher re-lists on it rather than splicing.
+    pub const CONTEXTS_CHANGED: &str = "contexts:changed";
 }
 
 use std::sync::{Mutex, PoisonError};
@@ -177,6 +180,10 @@ pub fn run() {
             commands::backup::backup_now,
             commands::backup::set_backup_schedule,
             commands::backup::restore_backup,
+            commands::entity::list_contexts,
+            commands::entity::create_context,
+            commands::entity::promote_context,
+            commands::entity::context_members,
             commands::entity::create_link,
             commands::entity::create_note,
             commands::entity::delete_note,
@@ -514,6 +521,7 @@ mod tests {
             super::events::SYNC_STATE,
             super::events::SOURCE_HEALTH,
             super::events::ACTIVITY_NEW,
+            super::events::CONTEXTS_CHANGED,
         ] {
             assert!(
                 mirror.contains(&format!("\"{name}\"")),
