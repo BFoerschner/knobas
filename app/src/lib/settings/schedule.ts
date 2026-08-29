@@ -53,8 +53,13 @@ export function nightlySentence(schedule: BackupSchedule): string {
  * A count on its own ("keep 7") does not say that the eighth is *deleted*, and
  * this is the only control on the screen that destroys anything without being
  * pressed.
+ *
+ * "its own" is load-bearing: `policy::expired` filters by `is_archive_name`
+ * before it deletes anything, so a file the user put in the backup directory
+ * themselves is never a candidate. "Anything older" would have promised a
+ * sweep of the whole directory.
  */
 export function retentionSentence(keep: number): string {
   const archives = keep === 1 ? "1 archive" : `${keep} archives`;
-  return `knobas keeps ${archives} and deletes anything older after each export.`;
+  return `knobas keeps its ${archives} and deletes its older ones after each export.`;
 }

@@ -29,6 +29,17 @@ let status: BackupStatus;
 let statusFails: unknown = null;
 let nowFails: unknown = null;
 let restoreFails: unknown = null;
+/**
+ * What `set_backup_schedule` *stores*, given what was posted.
+ *
+ * The default is an echo, which is the ordinary case and is also why an echo
+ * cannot on its own tell "redrew from the answer" apart from "redrew from the
+ * draft". A test that needs the two distinguished sets this to something that
+ * differs — which is not a contrivance: `BackupSchedule::clamped` is applied
+ * on the Rust side after the post, so a posted schedule and a stored one are
+ * allowed to differ.
+ */
+let stores: (posted: BackupSchedule) => BackupSchedule = (posted) => posted;
 
 vi.mock("../ipc/backup", () => ({
   backupStatus: () => {
@@ -46,7 +57,7 @@ vi.mock("../ipc/backup", () => ({
   },
   setBackupSchedule: (schedule: BackupSchedule) => {
     calls.setSchedule.push(schedule);
-    status = { ...status, schedule };
+    status = { ...status, schedule: stores(schedule) };
     return Promise.resolve(status);
   },
   restoreBackup: (file: string) => {
@@ -134,6 +145,7 @@ beforeEach(() => {
   statusFails = null;
   nowFails = null;
   restoreFails = null;
+  stores = (posted) => posted;
   toasts.items = [];
   unhandled.length = 0;
   process.on("unhandledRejection", onrejection);
@@ -353,6 +365,31 @@ test("saving posts the edited schedule and redraws the sentence from the answer"
   expect(text()).toContain("3 archives");
 });
 
+/**
+ * The test that can actually tell the two apart.
+ *
+ * The one above cannot: its `set_backup_schedule` echoes, so a section that
+ * redrew from the draft would render the same text. Here the command stores a
+ * minute that is not the one posted — the shape `BackupSchedule::clamped`
+ * gives it on the Rust side — and the section has to say what is stored.
+ */
+test("the sentence is redrawn from the schedule that was stored, not the one typed", async () => {
+  stores = (posted) => ({ ...posted, minute: 45 });
+  render();
+  await settle();
+
+  button("Schedule…")!.click();
+  flushSync();
+  type(field("Hour"), "22");
+  type(field("Minute"), "30");
+  button("Save", dialog()!)!.click();
+  await settle();
+
+  expect(calls.setSchedule).toEqual([{ enabled: true, hour: 22, minute: 30, keep: 7 }]);
+  expect(text()).toContain("after 22:45");
+  expect(text()).not.toContain("after 22:30");
+});
+
 test("cancelling the schedule dialog posts nothing and changes nothing", async () => {
   render();
   await settle();
@@ -480,6 +517,13 @@ test("the restore confirm says what the restore does and what it will not do", a
   expect(said).toMatch(/refus|declin|will not/i);
   // The mirror is not in the archive, so sources re-sync afterwards.
   expect(said).toMatch(/re-sync|resync/i);
+  // ...and the re-sync is not promised to bring the whole mirror back. The
+  // archive carries `knobas.source_config.cursor` and `knobas_db::backup::
+  // restore` clears only `knobas.setting`, so a restored source runs
+  // `run_from_stored_cursor` from the position the archive recorded — it
+  // fetches what changed upstream since, not everything it once held.
+  expect(said).toMatch(/does not rebuild/i);
+  expect(said).toMatch(/resume from the position/i);
 });
 
 test("cancelling the restore confirm restores nothing", async () => {

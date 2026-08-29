@@ -72,3 +72,16 @@ test("the retention sentence names how many are kept and that the rest go", () =
   expect(retentionSentence(1)).toContain("1 archive");
   expect(retentionSentence(7)).toContain("7 archives");
 });
+
+/**
+ * ...and deletes nothing else. `policy::expired` filters by `is_archive_name`
+ * before it names a candidate, and its own test "spares what is not ours", so
+ * a file the reader dropped in the backup directory is safe. The shorter
+ * "deletes anything older" would have said knobas sweeps the directory, which
+ * is a claim about their files rather than ours.
+ */
+test("the retention sentence claims only knobas's own archives", () => {
+  expect(retentionSentence(7)).not.toMatch(/anything older/i);
+  expect(retentionSentence(7)).toMatch(/its \d+ archives/);
+  expect(retentionSentence(7)).toMatch(/its older ones/);
+});

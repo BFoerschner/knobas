@@ -164,9 +164,13 @@ vi.mock("../ipc/app", () => ({
 }));
 
 /**
- * The settings view's backup IPC, deferred for the same reason as the sources
- * view's: the second pass unmounts the section while `backup_status` is still
- * in flight, which is the window a stale `status = await …` would write into.
+ * The settings view's backup IPC, deferred like the sources view's, so the
+ * section is mounted and unmounted with `backup_status` still in flight —
+ * the state a component is in when this harness counts its residue.
+ *
+ * What is checked here is listeners and timers, nothing else. The section is
+ * walked because this file's rule is that every component with an `$effect`
+ * is, not because it is suspected of leaking one.
  */
 vi.mock("../ipc/backup", () => ({
   backupStatus: () =>

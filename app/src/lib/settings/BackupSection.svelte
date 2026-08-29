@@ -15,8 +15,18 @@
   prunes older ones, so the archive list after one is not the list before it
   plus a row. `set_backup_schedule` is the exception that needs no re-read: it
   answers with the redrawn status itself, from the same transaction that stored
-  the change, so the next-run line can never disagree with the schedule that
-  produced it.
+  the change, so what this section says about the schedule cannot disagree with
+  the schedule that is actually on disk.
+
+  ## Why `next_due_at` is read and not shown
+
+  `backup_status` carries it (`policy::next_due`, whose own doc says it is
+  "for the settings dialog to show"), and this section deliberately renders no
+  moment. #69 rules that the wording "should not promise a fixed time", and a
+  timestamp is the most fixed-looking promise available: it would be right on a
+  machine that stays awake and quietly wrong on the laptop the boundary rule
+  exists for. The sentence above says the rule instead. Showing the prediction
+  as well is a decision for whoever finds the rule alone insufficient.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../ipc";
@@ -114,9 +124,10 @@
    * Store the edited schedule and redraw from the answer.
    *
    * `set_backup_schedule` returns the whole status, read back after the write,
-   * so the next-run line and the sentence can never disagree with the schedule
-   * that produced them. Redrawing from the *typed* values instead would show a
-   * schedule that is merely believed to be stored.
+   * and the sentence is drawn from that answer. Redrawing from the *typed*
+   * values instead would show a schedule that is merely believed to be stored
+   * — the two differ whenever the stored row is not what was posted, which is
+   * what `BackupSchedule::clamped` exists to make possible.
    */
   async function saveSchedule() {
     const next: BackupSchedule = {
@@ -280,11 +291,13 @@
         knobas reads <b>{restoring?.file}</b> ({formatBytes(restoring?.bytes ?? 0)}) back into this
         profile's database: links, contexts, notes, the asset tree, worklogs, smart lists and your
         source configurations. Stored credentials are not in the archive — the keychain is
-        untouched — so each source asks for its password again.
+        untouched — so a machine that has never held them asks for each source's password again.
       </p>
       <p>
-        The synced mirror is not in the archive either, because it re-syncs. Every source starts
-        from nothing and fills itself back in on its next run, so search is thin until it has.
+        The synced mirror is not in the archive either, and a restore does not rebuild it: search
+        is thin until each source has re-synced. Sources resume from the position the archive
+        recorded rather than from nothing, so a re-sync brings back what changed upstream since —
+        not necessarily everything the mirror used to hold.
       </p>
       <p>
         This only works into a knobas that <b>holds no data yet</b>. If this one already has
