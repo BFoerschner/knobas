@@ -196,10 +196,13 @@ fn adapter(id: &str, base_url: &str) -> Box<dyn Source> {
     configured(id, base_url, serde_json::json!({}))
 }
 
-/// The same, with a `source_config.config` of the caller's choosing — the
-/// column the Add-source dialog writes and the registry parses into
-/// `JiraConfig`. A test that hand-built a `JiraConfig` would skip that parse,
-/// which is part of the path an operator's setting actually travels.
+/// The same, with an instance `config` of the caller's choosing: the shape
+/// `source_config.config` holds -- the column the Add-source dialog writes and
+/// the scheduler reads -- handed to the registry to parse into `JiraConfig`.
+/// The **parse** is the part of an operator's path this covers, and a test that
+/// hand-built a `JiraConfig` would skip it. The column *read* is not in this
+/// path; said plainly because this file's whole premise is not letting a reader
+/// assume the half that is missing.
 fn configured(id: &str, base_url: &str, config: Value) -> Box<dyn Source> {
     let instance = SourceInstance {
         id: id.to_owned(),

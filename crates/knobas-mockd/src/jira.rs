@@ -161,11 +161,13 @@ pub(crate) struct FieldSel {
 /// Every Jira DC instance has exactly one id for this field and the id differs
 /// per instance, which is the whole reason
 /// `JiraConfig::epic_link_field` exists as an option rather than a constant.
-/// mockd is one instance, so it has one id, and this is it: `10008` is the id a
-/// Greenhopper-provisioned DC instance most often lands on, and it is already
-/// the value the adapter's own goldens
+/// mockd is one instance, so it has one id, and this is it. No id would be
+/// *realistic* -- a real instance's is whatever its Greenhopper provisioning
+/// happened to allocate, and `10008` is only one plausible outcome of that --
+/// so the id is chosen for **agreement** instead: it is already the value the
+/// adapter's own goldens
 /// (`knobas-source-jira/tests/golden/search-page.json`) and its descriptor
-/// example use.
+/// example use, so the two halves of the repo name one field.
 ///
 /// It is exported so a test names *the mock's* field rather than hard-coding a
 /// string that could stop meaning anything, the same reason [`crate::JIRA_TOKEN`]
