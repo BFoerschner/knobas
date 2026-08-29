@@ -375,7 +375,9 @@ impl GiteaClient {
         path: &str,
         query: &[(&str, String)],
     ) -> Result<T, SourceError> {
-        self.get_json_counted(path, query).await.map(|(body, _)| body)
+        self.get_json_counted(path, query)
+            .await
+            .map(|(body, _)| body)
     }
 
     /// The same request, keeping Gitea's `X-Total-Count` alongside the body.

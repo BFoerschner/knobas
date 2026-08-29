@@ -178,7 +178,6 @@ const MAX_PR_PAGES: u32 = 20;
 /// budget the walk actually spends, and is what bites first.
 const MAX_COMMIT_PAGES: u32 = 20;
 
-
 /// One repository this run will walk.
 pub(crate) struct Selected {
     full_name: String,
@@ -840,7 +839,11 @@ async fn fetch_comments(
     if !source.config.include_pr_comments || pr.comments == 0 {
         return Ok(Vec::new());
     }
-    let discussion = match source.client.issue_comments(at.owner, at.name, pr.number).await {
+    let discussion = match source
+        .client
+        .issue_comments(at.owner, at.name, pr.number)
+        .await
+    {
         Ok(discussion) => discussion,
         Err(error) if is_repo_scoped(&error) => {
             tracing::warn!(

@@ -653,7 +653,12 @@ async fn the_discussion_endpoint_does_not_page() {
 
     // 3 and 4: what the endpoint does with paging parameters, and what it says
     // about its own completeness.
-    for query in ["", "?limit=50&page=1", "?limit=2&page=1", "?limit=50&page=9"] {
+    for query in [
+        "",
+        "?limit=50&page=1",
+        "?limit=2&page=1",
+        "?limit=50&page=9",
+    ] {
         let answered = http
             .get(format!("{api}/issues/{number}/comments{query}"))
             .header("Authorization", &auth)
