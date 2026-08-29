@@ -130,7 +130,28 @@ function open(props: Record<string, unknown> = {}) {
   return app;
 }
 
-/** Let the injected promises settle and the DOM catch up. */
+/**
+ * Let the injected promises settle and the DOM catch up.
+ *
+ * **Three of what, and why that is not the hazard #86 was.** The count here is
+ * a count of **microtask** turns, and a microtask turn is a step down a
+ * promise chain rather than an interval of time: every promise these tests
+ * await is made by an already-resolved value — an injected `ports.search`, a
+ * `vi.mock` factory — so three turns is either always enough or never enough,
+ * and a loaded machine cannot change which. `App.test.svelte.ts` had a fixed
+ * budget of **macrotask** ticks waiting on a real `await import()`, and that
+ * is a time budget wearing a count's clothes: how long module resolution takes
+ * is a property of the machine, so the budget lost the race 2 runs in 6 under
+ * a parallel fan-out (#86). Nothing in this file dynamically imports anything.
+ *
+ * The 90 ms debounce is not a counterexample. Where a test waits it out, it
+ * does so with its own real timer (`setTimeout(…, 120)`) armed *after* the
+ * debounce's, and the timer queue fires in due order — so what puts the search
+ * before the assertion is the ordering, not the 30 ms of margin. The same
+ * reading applies to the other microtask-count `settle()` helpers in this
+ * repo (`SourcesView`, `Diagnostics`, `AddSource`, `FirstRun`): none of the
+ * components they drive dynamically imports anything either.
+ */
 async function settle() {
   await Promise.resolve();
   await Promise.resolve();
