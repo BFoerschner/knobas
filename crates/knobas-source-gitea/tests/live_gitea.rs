@@ -22,6 +22,28 @@
 //!
 //! or, in one step, `just gitea-live`.
 //!
+//! # This suite grows the fixture, and nothing prunes it
+//!
+//! Three of these tests open a branch through Gitea's own API and leave it
+//! behind; two of them open a pull request on it, and one of those two writes a
+//! discussion of `PAGE + 1` comments. That is the point: exit criterion B is
+//! about what the *real* server does with something it has just been told, so a
+//! test that deleted its own work would be certifying a corpus it had reset.
+//! The cost is that `payout-service` grows by **three branches, two pull
+//! requests and 51 comments every run of this file**, and nothing takes them
+//! away again: thirty runs of `a_pull_request_opened_...` alone left it holding
+//! 32 pull requests against the seeded 2 -- measured 2026-08-29, when this file
+//! opened one pull request per run rather than two, before the discussion test
+//! arrived with #131 and doubled the rate. The walks under test are paged, so
+//! that grows without bound into a corpus the seed never described.
+//!
+//! So prune deliberately. `DELETE /api/v1/repos/{owner}/{repo}/issues/{index}`
+//! closes a stray pull request out -- a pull request is the issue of the same
+//! index, and its discussion goes with it -- and `DELETE .../branches/{name}`
+//! its branch, leaving the rest of the environment alone. `testenv/reset` is
+//! the big lever: it destroys every testenv volume, Gitea's included, so
+//! `testenv/seed` has to run again after it.
+//!
 //! # What this file does NOT certify
 //!
 //! Every corpus `testenv/seed-gitea.sh` creates fits in one page of the 50 the
@@ -44,8 +66,8 @@
 
 mod live_env;
 
-use knobas_source::SourceError;
 use knobas_source::contract::{Fault, VecSink, battery};
+use knobas_source::{SourceError, SyncItem};
 use live_env::{Env, env, full, of_kind};
 
 /// A port nothing listens on: bound to learn the number, then dropped.
@@ -54,6 +76,55 @@ fn dead_url() -> String {
     let port = listener.local_addr().unwrap().port();
     drop(listener);
     format!("http://127.0.0.1:{port}")
+}
+
+/// What an idle run emitted that it should not have: everything except the one
+/// repository's own entity, as `(kind, key)` pairs.
+///
+/// # Why the repository entity is exempt, and why asserting it away was a flake
+///
+/// Gitea moves a repository's `updated_at` as its own bookkeeping catches up
+/// with a branch or a pull request just created through its API, and that write
+/// can land *after* the create call returned. So a run a second or two later
+/// legitimately reads a newer repository than the run before it did, and the
+/// adapter emits it -- `sync::repository` emits a repository exactly when its
+/// `updated_at` moved past the cursor, which is a changed entity, not a
+/// re-delivery of what the previous run already sent.
+///
+/// Asserting the whole idle run empty therefore failed for a reason nobody
+/// could act on: measured on the pinned container before this scoping, 5 of 25
+/// runs of the pull-request test and 4 of 25 of the commit one, every one of
+/// them the repository entity alone (#140). A live suite whose failures are
+/// supposed to mean "the fake is wrong" cannot afford to cry wolf, so what the
+/// two tests assert is what they are actually for: **the walk each one drives
+/// does not re-deliver what it just delivered.**
+///
+/// # What the exemption gives up
+///
+/// Stating it, because #140 asked for the choice rather than only its result: a
+/// repository entity re-delivered on *every* run now passes both tests
+/// unnoticed. Delete `after.repo_updated_at = updated_at` from
+/// `sync::repository` and that is exactly what happens -- this filter drops the
+/// item, and the cursor clause beside it only asks that a run which emitted
+/// something moved its position, which such a run does.
+///
+/// That property is certified where the timing does not move under it, and
+/// deliberately not here: docker-free by
+/// `tests/sync.rs::an_idle_run_emits_nothing_and_returns_the_same_bytes` and
+/// `::the_position_after_one_change_is_itself_idle_stable`, against a fake whose
+/// `updated_at` stands still unless the test moves it; and live by
+/// `passes_the_contract_battery_against_the_real_container`, whose clause 2
+/// asserts the whole run empty and exempts nothing. That live half is currently
+/// weaker than it looks -- the battery test flakes on this same mechanism, which
+/// is #146 -- so if #146 is ever closed by dropping the clause rather than
+/// narrowing the scope, this exemption loses its live cover and should be
+/// revisited.
+fn re_delivered<'a>(items: &'a [SyncItem], full_name: &str) -> Vec<(&'a str, &'a str)> {
+    items
+        .iter()
+        .filter(|i| !(i.kind == "repo" && i.entity.key == full_name))
+        .map(|i| (i.kind.as_str(), i.entity.key.as_str()))
+        .collect()
 }
 
 /// A token that never existed. Salted with the process id so a run cannot
@@ -277,6 +348,27 @@ async fn pull_requests_come_back_newest_updated_first() {
 /// Exit criterion B's middle clause: something is opened through Gitea's own
 /// API, and the very next incremental run returns it -- and the run after that
 /// is silent again.
+///
+/// # What this still rests on
+///
+/// Two ordering facts, and both are the server's own guarantee rather than a
+/// race, because this run asserts that both arrive: a branch and a pull request
+/// Gitea's create calls have answered are visible to the very next `/branches`
+/// and `?state=all&sort=recentupdate` listings. Everything else timed has been
+/// taken out. In particular the repository entity may ride along in **any** of
+/// the three runs, or in none of them, depending on when Gitea's bookkeeping
+/// lands (see `re_delivered`) -- this test deliberately says nothing about
+/// which, and saying something about it was #140.
+///
+/// One wall-clock *name*, which is not a timing dependency but is the one thing
+/// that would make two of these collide: the branch is named from the epoch
+/// **second**. Two runs of this test starting inside the same second would ask
+/// Gitea for the same branch twice, and the second create would fail. Nothing
+/// runs this file concurrently -- `just gitea-live` is serial by recipe -- so a
+/// second is enough.
+///
+/// It also leaves a branch and a pull request behind in the seeded repository,
+/// by design; see this file's header on pruning them.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Gitea container"]
 async fn a_pull_request_opened_through_the_api_appears_in_the_next_incremental_run() {
@@ -346,15 +438,38 @@ async fn a_pull_request_opened_through_the_api_appears_in_the_next_incremental_r
         "the position must move when something was emitted"
     );
 
-    // And the run after it is silent again, byte-identically (battery clause 2
-    // on a position this run wrote rather than on a fresh one).
+    // And the run after it re-delivers none of it -- not the pull request, not
+    // the branch, not a commit (battery clause 2 on a position this run wrote
+    // rather than on a fresh one). The repository entity is the one thing
+    // allowed to ride along, and `re_delivered` says why.
     let mut idle = VecSink(Vec::new());
     let same = source
         .sync(Some(moved.clone()), &mut idle)
         .await
         .expect("idle sync");
-    assert!(idle.0.is_empty(), "second run emitted {:?}", idle.0);
-    assert_eq!(same, moved);
+    assert_eq!(
+        re_delivered(&idle.0, &env.full_name()),
+        Vec::<(&str, &str)>::new(),
+        "the run after the incremental one re-delivered what it had already sent"
+    );
+    // Clause 2's cursor half, as the equivalence rather than as one arm of it:
+    // a run that emitted nothing hands its position back byte-identical, and a
+    // run that emitted the repository has to move it. Written this way neither
+    // half goes vacuous on the runs where the repository rides along.
+    assert_eq!(
+        same == moved,
+        idle.0.is_empty(),
+        "the run emitted {:?} and its cursor {}",
+        idle.0
+            .iter()
+            .map(|i| i.entity.to_string())
+            .collect::<Vec<_>>(),
+        if same == moved {
+            "stood still"
+        } else {
+            "moved"
+        }
+    );
 }
 
 /// Exit criterion B for the **commit** walk, which is where the docker-free
@@ -368,6 +483,22 @@ async fn a_pull_request_opened_through_the_api_appears_in_the_next_incremental_r
 /// A commit is pushed through Gitea's own API and the next incremental run must
 /// return **exactly** it -- not the branch's inherited history, and not it
 /// twice.
+///
+/// # What this still rests on
+///
+/// That Gitea's `since=` is second-resolution and inclusive, which is the whole
+/// point of `commits_at_watermark`; a second commit landing in the same second
+/// as this one would arrive with it, and this test pushes one.
+///
+/// And that the `/branches` listing in run 2 already reports the head this push
+/// moved. `sync::commits` walks only the branches `sync::branches` handed it as
+/// moved, so a listing still serving the old head would leave the commit walk
+/// unentered -- which this test catches, because it asserts the commit arrives,
+/// not merely that nothing extra did.
+///
+/// As above, the repository entity may ride along in any run and nothing here
+/// asserts it away (#140); the branch name carries the same epoch-second
+/// caveat; and the branch this pushes onto is left behind -- see the header.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Gitea container"]
 async fn a_commit_pushed_through_the_api_arrives_once_and_only_once() {
@@ -437,15 +568,37 @@ async fn a_commit_pushed_through_the_api_arrives_once_and_only_once() {
          commits_at_watermark are what have to leave all of it out"
     );
 
-    // …and the run after it is silent, which is the inclusive `since=` boundary
-    // being closed rather than merely narrow.
+    // …and the run after it re-delivers nothing, which is the inclusive
+    // `since=` boundary being closed rather than merely narrow. Same exemption
+    // and same reason as the pull-request test above: this walk's own flake
+    // rate before the scoping was 4 runs in 25, always the repository alone.
     let mut idle = VecSink(Vec::new());
     let same = source
         .sync(Some(moved.clone()), &mut idle)
         .await
         .expect("idle sync");
-    assert!(idle.0.is_empty(), "second run emitted {:?}", idle.0);
-    assert_eq!(same, moved);
+    assert_eq!(
+        re_delivered(&idle.0, &env.full_name()),
+        Vec::<(&str, &str)>::new(),
+        "the run after the incremental one re-delivered what it had already sent"
+    );
+    // Clause 2's cursor half as the equivalence, for the reason spelled out on
+    // the pull-request test above: byte-identical when the run emitted nothing,
+    // moved when the repository rode along, and neither half vacuous.
+    assert_eq!(
+        same == moved,
+        idle.0.is_empty(),
+        "the run emitted {:?} and its cursor {}",
+        idle.0
+            .iter()
+            .map(|i| i.entity.to_string())
+            .collect::<Vec<_>>(),
+        if same == moved {
+            "stood still"
+        } else {
+            "moved"
+        }
+    );
 }
 
 /// Exit criterion B's last clause. Also the one thing the docker-free fake
