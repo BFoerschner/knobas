@@ -637,3 +637,74 @@ fn the_note_detail_shape_matches_its_typescript_mirror() {
     assert_shape("LinkRow", &wire["links"][0]["link"], LINK_ROW_FIELDS);
     assert_shape("LinkEnd", &wire["links"][0]["other"], LINK_END_FIELDS);
 }
+
+// -- the start-work flow (#44) ---------------------------------------------
+
+/// One step, with every nullable field empty -- so a `skip_serializing_if`
+/// added to either would drop the key and hand the view `undefined` where the
+/// mirror declares `null`.
+fn flow_step() -> knobas_core::start_work::FlowStep {
+    knobas_core::start_work::FlowStep {
+        id: 7,
+        ticket_id: "jira:PAY-231".to_owned(),
+        step: knobas_core::start_work::Step::CreateBranch,
+        position: 0,
+        outcome: knobas_core::start_work::StepOutcome::Pending,
+        payload: serde_json::json!({
+            "CreateBranch": {
+                "entity": "gitea:tidewater/payout-service",
+                "name": "feature/PAY-231-sepa-retry",
+                "from_ref": "main"
+            }
+        }),
+        write_id: None,
+        detail: None,
+        updated_at: at(),
+    }
+}
+
+#[test]
+fn the_start_work_step_shape_matches_its_typescript_mirror() {
+    let wire = serde_json::to_value(flow_step()).unwrap();
+    assert_shape(
+        "StartWorkStep",
+        &wire,
+        &[
+            "id",
+            "ticket_id",
+            "step",
+            "position",
+            "outcome",
+            "payload",
+            "write_id",
+            "detail",
+            "updated_at",
+        ],
+    );
+}
+
+/// The two vocabularies, read out of the mirror rather than listed here.
+///
+/// A step kind the view cannot name is a row it draws as nothing; an outcome it
+/// cannot name is worse -- `queued` drawn as a failure would have the reader
+/// retry a write that is already on its way, and drawn as a success would have
+/// them believe work happened that has not.
+#[test]
+fn the_start_work_vocabularies_match_their_typescript_mirror() {
+    assert_same_members(
+        &knobas_core::start_work::Step::ALL
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>(),
+        declared_union(MIRROR, "StartWorkStepKind"),
+        "a step kind the stepper cannot name is a row it cannot draw",
+    );
+    assert_same_members(
+        &knobas_core::start_work::StepOutcome::ALL
+            .iter()
+            .map(|o| o.as_str())
+            .collect::<Vec<_>>(),
+        declared_union(MIRROR, "StartWorkOutcome"),
+        "an outcome the stepper cannot name is a step the reader misjudges",
+    );
+}
