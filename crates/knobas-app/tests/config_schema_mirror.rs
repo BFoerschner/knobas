@@ -344,3 +344,99 @@ fn an_object_literal_with_unquoted_keys_parses() {
     let value = literal::as_const(r#"export const X = { type: "object", n: 1 } as const;"#, "X");
     assert_eq!(value, serde_json::json!({ "type": "object", "n": 1 }));
 }
+
+// -- the rule the comparison applies -------------------------------------------
+
+/// Where the fixture disagrees with the adapter's real `config_schema`.
+///
+/// **The rule the fixture's own header states**, encoded: *a property that is
+/// here is verbatim; a property may be absent, and each absence is named.* So
+/// the licence to be absent is spent at exactly one level -- the `properties`
+/// map -- and nowhere else. Inside a property the fixture is compared whole:
+/// `type`, `title`, `description`, `default`, bounds, `items`. A looser rule
+/// that compared only the keys a reader thought to list is what shipped #82,
+/// because `username`'s `type` was never the key anybody thought to list.
+///
+/// Empty means the two agree. Every entry names a JSON path and prints both
+/// sides, so the failure says which half to change rather than only that they
+/// differ.
+fn disagreements(fixture: &serde_json::Value, adapter: &serde_json::Value) -> Vec<String> {
+    let mut found = Vec::new();
+    let (Some(fixture), Some(adapter)) = (fixture.as_object(), adapter.as_object()) else {
+        found.push(format!(
+            "the schema is not an object on both sides:\n  fixture: {fixture}\n  adapter: {adapter}"
+        ));
+        return found;
+    };
+    for (key, ours) in fixture {
+        let Some(theirs) = adapter.get(key) else {
+            found.push(format!(
+                "`{key}` is declared by the fixture and the adapter's schema does not have it at \
+                 all -- the fixture is stricter than the source, which is a form that rejects \
+                 what the adapter accepts\n  fixture: {ours}"
+            ));
+            continue;
+        };
+        if key != "properties" {
+            if ours != theirs {
+                found.push(disagreement(key, ours, theirs));
+            }
+            continue;
+        }
+        // The one level the absence licence is spent at.
+        let (Some(ours), Some(theirs)) = (ours.as_object(), theirs.as_object()) else {
+            found.push(format!("`properties` is not an object on both sides"));
+            continue;
+        };
+        for (name, ours) in ours {
+            match theirs.get(name) {
+                None => found.push(format!(
+                    "the fixture declares a property `{name}` the adapter's schema does not \
+                     have\n  fixture: {ours}"
+                )),
+                Some(theirs) if ours != theirs => {
+                    found.push(disagreement(&format!("properties.{name}"), ours, theirs));
+                }
+                Some(_) => {}
+            }
+        }
+    }
+    found
+}
+
+fn disagreement(path: &str, ours: &serde_json::Value, theirs: &serde_json::Value) -> String {
+    format!(
+        "`{path}` disagrees\n  fixture: {}\n  adapter: {}",
+        serde_json::to_string_pretty(ours).expect("a parsed value re-serializes"),
+        serde_json::to_string_pretty(theirs).expect("a real schema re-serializes"),
+    )
+}
+
+
+#[test]
+fn a_property_the_fixture_leaves_out_is_licensed_and_one_it_spells_differently_is_not() {
+    let adapter = serde_json::json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "username": { "type": ["string", "null"], "title": "Username" },
+            "page_size": { "type": "integer", "maximum": 1000 }
+        }
+    });
+    // `page_size` absent: the fixture header names its absences, and the check
+    // is over what is there.
+    let faithful = serde_json::json!({
+        "type": "object",
+        "properties": { "username": { "type": ["string", "null"], "title": "Username" } }
+    });
+    assert_eq!(disagreements(&faithful, &adapter), Vec::<String>::new());
+
+    // The #82 drift: an optional string read as a plain one.
+    let drifted = serde_json::json!({
+        "type": "object",
+        "properties": { "username": { "type": "string", "title": "Username" } }
+    });
+    let found = disagreements(&drifted, &adapter);
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert!(found[0].contains("properties.username"), "{found:#?}");
+}
