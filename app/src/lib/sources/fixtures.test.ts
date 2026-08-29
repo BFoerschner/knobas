@@ -128,13 +128,19 @@ test.each(TRANSCRIBED)("$name invents no `required` on an adapter's behalf", ({ 
  * spelling each adapter uses is named in the table above and compared
  * literally. It is a second witness, not ground truth — that still needs a
  * check with the adapters in reach — but it makes this drift a deliberate
- * two-place edit rather than a one-character silence.
+ * two-place edit rather than a one-character silence. The test's name says
+ * "the table above" for the same reason: nothing in this file reads an
+ * adapter, and a name that claimed otherwise would be the overclaim the
+ * header exists to avoid.
  */
-test.each(TRANSCRIBED)("$name spells username exactly as its adapter does", ({ schema, usernameType }) => {
-  const username = propertiesOf(schema).username;
-  expect(username, "every M1 adapter has a username").toBeTruthy();
-  expect(username!.type).toEqual(usernameType);
-});
+test.each(TRANSCRIBED)(
+  "$name spells username exactly as the table above records for its adapter",
+  ({ schema, usernameType }) => {
+    const username = propertiesOf(schema).username;
+    expect(username, "every M1 adapter has a username").toBeTruthy();
+    expect(username!.type).toEqual(usernameType);
+  },
+);
 
 test("the mock adapter needs no configuring, which is the empty-form case", () => {
   expect(EMPTY_SCHEMA).toEqual({ type: "object", properties: {} });

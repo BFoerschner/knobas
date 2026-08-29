@@ -39,17 +39,22 @@
  * ## What is absent, and why
  *
  * The absences are named rather than counted, because a name is checkable and
- * a count is one more thing to keep right. Every absent property is a bounded
- * integer or a boolean whose control shape is already covered by a property
- * that *is* here, so leaving them out costs the corpus no coverage — while
- * putting all of them in would make this a second copy of three adapters,
- * with three times the surface to keep verbatim.
+ * a count is one more thing to keep right. They are absent because putting all
+ * of them in would make this a second copy of three adapters, with three times
+ * the surface to keep verbatim — and all but one draw a control this corpus
+ * already exercises: `epic_link_field` is a nullable string like `jql_filter`,
+ * and the rest are integers like `builds_per_config`.
  *
  * - Jira: `epic_link_field`, `page_size`, `rate_per_sec`, `rate_burst`,
  *   `connect_timeout_secs`, `request_timeout_secs`.
  * - Gitea: `commits_per_repo`, `prs_per_repo`, `include_pr_comments`,
  *   `rate_limit_per_sec`.
  * - TeamCity: `rate_limit_per_sec`.
+ *
+ * The one that does cost coverage is Gitea's `include_pr_comments`: it is the
+ * only boolean any M1 adapter declares, so with it absent every `toggle` test
+ * in the suite runs on a schema written for the test rather than on one an
+ * adapter ships. That is a gap, not a licensed absence.
  *
  * Not test-only. `Diagnostics`/`AddSource` never read them, but a QA fixture
  * does, and a `.test.ts` module cannot be imported from a `.svelte` one.
