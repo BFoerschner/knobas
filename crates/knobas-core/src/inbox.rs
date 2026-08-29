@@ -377,6 +377,11 @@ macro_rules! mention {
 /// with a new id, so nothing at the source ever edits this record into a
 /// resolved one -- without this clause a red build would sit in the inbox for
 /// ever and story 17 would be false for the one category that most needs it.
+/// The newer build must itself be **finished**: the mirror holds queued and
+/// running builds too, and a running build's `status` is TeamCity's interim
+/// verdict -- a re-run that is green *so far* has not resolved anything, and
+/// hiding the red build while it runs would un-hide it minutes later if the
+/// re-run fails, which is a stream that flickers rather than resolves.
 macro_rules! failed_build {
     () => {
         "select 'failed_build', i.entity_id, i.source_id, i.entity_id, i.kind, i.title,
@@ -402,6 +407,7 @@ macro_rules! failed_build {
                    where newer.kind = 'build'
                      and newer.source_id = i.source_id
                      and newer.payload->>'status' = 'SUCCESS'
+                     and coalesce(newer.payload->>'state', 'finished') = 'finished'
                      and coalesce(newer.payload->>'buildTypeId',
                                   newer.payload->'buildType'->>'id')
                        = coalesce(i.payload->>'buildTypeId',
@@ -610,8 +616,12 @@ pub const RULES: &[Rule] = &[
     },
 ];
 
-/// The rule for a category. Total, because [`RULES`] has one per variant --
-/// `every_category_has_a_rule` is what keeps that true.
+/// The rule for a category.
+///
+/// `None` never happens today -- [`RULES`] has one rule per variant, and
+/// `every_category_has_a_rule` keeps that true -- but the signature stays
+/// honest about being a lookup rather than promising a totality the type
+/// system is not enforcing.
 #[must_use]
 pub fn rule(category: Category) -> Option<&'static Rule> {
     RULES.iter().find(|rule| rule.category == category)
@@ -701,7 +711,7 @@ pub async fn count(
     let (n,): (i64,) = sqlx::query_as(COUNT_ALL)
         .bind(identity)
         .bind(now)
-        .bind(false)
+        .bind(Shelf::Stream.snoozed())
         .fetch_one(pool)
         .await?;
     Ok(n)

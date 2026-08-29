@@ -26,7 +26,7 @@
  */
 import { listen as tauriListen } from "@tauri-apps/api/event";
 
-import { EVENTS } from "../ipc";
+import { EVENTS, ipcErrorMessage } from "../ipc";
 import {
   completeInboxItem as realComplete,
   inboxCount as realCount,
@@ -107,7 +107,7 @@ export function createInbox(ports?: InboxPorts): Inbox {
       // The number is left where it was rather than zeroed. A failed read is
       // not evidence that nothing needs you, and a badge that blinked to zero
       // during a hiccup is a review request the reader stops looking for.
-      state.error = message(error);
+      state.error = ipcErrorMessage(error);
     }
   }
 
@@ -125,7 +125,7 @@ export function createInbox(ports?: InboxPorts): Inbox {
       state.count = count;
       state.error = null;
     } catch (error) {
-      state.error = message(error);
+      state.error = ipcErrorMessage(error);
     }
   }
 
@@ -140,7 +140,7 @@ export function createInbox(ports?: InboxPorts): Inbox {
       // `not_found` here means the item was resolved at the source while this
       // list was on screen, so the list is the stale thing that caused it —
       // which the re-read below fixes.
-      state.error = message(error);
+      state.error = ipcErrorMessage(error);
     } finally {
       state.busy = false;
       await refresh();
@@ -200,14 +200,6 @@ export function createInbox(ports?: InboxPorts): Inbox {
   };
 }
 
-/** Whatever a rejection was, as something displayable. */
-function message(error: unknown): string {
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const text = (error as { message: unknown }).message;
-    if (typeof text === "string") return text;
-  }
-  return error instanceof Error ? error.message : String(error);
-}
 
 /**
  * The one the window uses.

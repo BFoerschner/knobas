@@ -98,17 +98,19 @@
   /**
    * The deadline a snooze preset can hang *after it expires* on.
    *
-   * Only a credential expiry has one, and only that item's own reason knows
-   * the date — so the preset is offered from the item's `occurred_at` plus the
-   * window it entered the stream on. Rather than re-deriving that arithmetic
-   * here, the backend's `snoozed_until` is not it and the expiry date is not on
-   * the wire, so this offers the preset only where the category says there is
-   * one to offer.
+   * Only a credential expiry has one, and the expiry date itself is not on
+   * the wire — the backend dates the item at `secret_expires_at` minus its
+   * window (`knobas_core::inbox::WINDOW_DAYS`), so the expiry is re-derived
+   * here as `occurred_at` plus that same window. `WINDOW_DAYS` below must
+   * equal the backend's; a Rust test pins the two together
+   * (`the_interfaces_window_matches_the_backends`).
    */
+  const WINDOW_DAYS = 14;
+
   function presetsFor(entry: InboxEntry) {
     const deadline =
       entry.item.category === "credential_expiry"
-        ? new Date(new Date(entry.item.occurred_at).getTime() + 14 * 86_400_000)
+        ? new Date(new Date(entry.item.occurred_at).getTime() + WINDOW_DAYS * 86_400_000)
         : null;
     return snoozePresets(now, deadline);
   }

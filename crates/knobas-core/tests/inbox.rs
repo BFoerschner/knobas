@@ -470,6 +470,38 @@ async fn a_failed_build_leaves_when_the_same_configuration_goes_green_again() {
     )
     .await;
 
+    // The negative control's negative control: a re-run that is merely
+    // *running* has not resolved anything. The mirror holds queued and running
+    // builds too, and TeamCity gives a running build an interim `status` --
+    // green *so far* -- so without the finished guard the red build would
+    // vanish the moment its re-run started and flicker back if it failed.
+    let inflight = build(
+        pool,
+        "build:1178",
+        "FAILURE",
+        "Fx_Tests",
+        Some(ME),
+        days_ago(2),
+    )
+    .await;
+    item(
+        pool,
+        Mirrored {
+            source: "teamcity",
+            kind: "build",
+            key: "build:1195",
+            author: Some(ME),
+            body: "",
+            payload: serde_json::json!({
+                "status": "SUCCESS",
+                "state": "running",
+                "buildTypeId": "Fx_Tests",
+            }),
+            updated: days_ago(0),
+        },
+    )
+    .await;
+
     let keys = keys(&stream(pool).await);
     assert!(
         !keys.contains(&format!("failed_build:{fixed}")),
@@ -478,6 +510,10 @@ async fn a_failed_build_leaves_when_the_same_configuration_goes_green_again() {
     assert!(
         keys.contains(&format!("failed_build:{still}")),
         "a different configuration is still red: {keys:?}"
+    );
+    assert!(
+        keys.contains(&format!("failed_build:{inflight}")),
+        "a re-run that is still running has not resolved its red build: {keys:?}"
     );
 }
 

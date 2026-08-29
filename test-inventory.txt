@@ -49,6 +49,7 @@ knobas-app	lib/knobas_app	inbox::tests::a_source_that_declares_nothing_offers_no
 knobas-app	lib/knobas_app	inbox::tests::an_op_the_source_does_not_declare_is_not_offered
 knobas-app	lib/knobas_app	inbox::tests::every_candidate_op_has_a_form_in_the_interface
 knobas-app	lib/knobas_app	inbox::tests::the_categories_with_no_write_op_offer_nothing_from_any_source
+knobas-app	lib/knobas_app	inbox::tests::the_interfaces_window_matches_the_backends
 knobas-app	lib/knobas_app	profile::tests::a_blank_database_url_counts_as_unset
 knobas-app	lib/knobas_app	profile::tests::a_demo_profile_ignores_an_externally_managed_database
 knobas-app	lib/knobas_app	profile::tests::demo_is_a_separate_directory_database_and_keychain
