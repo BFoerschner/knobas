@@ -1,6 +1,7 @@
 pub mod activity;
 pub mod entity;
 mod error;
+pub mod inbox;
 pub mod link;
 pub mod note;
 pub mod start_work;
