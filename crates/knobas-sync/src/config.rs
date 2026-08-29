@@ -318,6 +318,41 @@ pub async fn patch(
     Ok(row.map(Into::into))
 }
 
+/// Purge one source's mirror: drop its `sync.item` rows and tombstone the
+/// entities they named.
+///
+/// **One statement, in one place, because two callers apply it and they must
+/// not drift.** [`delete`] runs it inside the delete's own transaction, and the
+/// scheduler runs it again when a run that was still in flight at delete time
+/// finally settles -- that run's late commit writes the mirror back, and worse,
+/// its entity upsert sets `deleted_at = excluded.deleted_at`, which un-does the
+/// tombstone and puts the purged entities back in `sync.live_item` for ever
+/// (#127). A second copy of this CTE is a second thing to keep in step with
+/// `knobas.entity`'s tombstone rule.
+///
+/// Tombstoned, never deleted, for the reason [`delete`] gives: links, notes and
+/// activity rows point at these entities and `sync.item.entity_id` cascades.
+const PURGE_ITEMS: &str = r#"with gone as (
+     delete from sync.item where source_id = $1 returning entity_id
+   )
+   update knobas.entity e
+      set deleted_at = coalesce(e.deleted_at, now())
+     from gone
+    where e.id = gone.entity_id"#;
+
+/// Apply [`PURGE_ITEMS`] on its own, outside any transaction of the caller's.
+///
+/// The scheduler's half of #127: `delete_source` purged already, but the run
+/// that was in flight at the time had not committed yet, so the purge has to
+/// happen once more after it does.
+///
+/// # Errors
+/// [`sqlx::Error`] if the statement fails.
+pub async fn purge_items(pool: &PgPool, id: &str) -> Result<(), sqlx::Error> {
+    sqlx::query(PURGE_ITEMS).bind(id).execute(pool).await?;
+    Ok(())
+}
+
 /// Delete a source's configuration, optionally purging its synced mirror.
 ///
 /// The entities are **tombstoned, never deleted**: links, notes and activity
@@ -334,18 +369,7 @@ pub async fn patch(
 pub async fn delete(pool: &PgPool, id: &str, purge_items: bool) -> Result<bool, sqlx::Error> {
     let mut tx = pool.begin().await?;
     if purge_items {
-        sqlx::query(
-            r#"with gone as (
-                 delete from sync.item where source_id = $1 returning entity_id
-               )
-               update knobas.entity e
-                  set deleted_at = coalesce(e.deleted_at, now())
-                 from gone
-                where e.id = gone.entity_id"#,
-        )
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
+        sqlx::query(PURGE_ITEMS).bind(id).execute(&mut *tx).await?;
     }
     let removed = sqlx::query("delete from knobas.source_config where id = $1")
         .bind(id)

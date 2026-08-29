@@ -19,8 +19,8 @@ use knobas_sync::config::{self, AuthKind, InsertConfig};
 use knobas_sync::progress::{ProgressSink, SyncPhase, SyncProgress};
 use knobas_sync::run_log::{self, SyncTrigger};
 use knobas_sync::scheduler::{
-    AdapterRegistry, RunConnections, SYNC_CONCURRENCY, Scheduler, SchedulerDeps, SourceSyncStatus,
-    SyncEvents,
+    AdapterRegistry, Purge, RunConnections, SYNC_CONCURRENCY, Scheduler, SchedulerDeps,
+    SourceSyncStatus, SyncEvents,
 };
 use sqlx::PgPool;
 
@@ -265,14 +265,41 @@ async fn retire(pool: &PgPool, ids: &[String]) {
 }
 
 async fn deps(pool: PgPool, dwell: Duration) -> (SchedulerDeps, Arc<AtomicUsize>) {
+    let (deps, peak, _inside) = slow_deps(pool, dwell).await;
+    (deps, peak)
+}
+
+/// The same deps as [`deps`], returning the *inside* counter instead of the
+/// peak: how many runs are in the adapter's `sync` right now.
+///
+/// What a test needs it for is timing it cannot otherwise have. `trigger`
+/// returns as soon as the run's log row exists, but the run has not yet read
+/// `knobas.source_config` -- and that read is the one existence check a run
+/// makes, so a test that deletes the source before it happens gets a run that
+/// refuses and writes nothing, which is not the interleaving it meant to
+/// arrange. `Slow` bumps this counter on entry to `sync`, which is *after*
+/// that read, so waiting for it puts the test in the window it is about.
+async fn deps_watching_the_adapter(
+    pool: PgPool,
+    dwell: Duration,
+) -> (SchedulerDeps, Arc<AtomicUsize>) {
+    let (deps, _peak, inside) = slow_deps(pool, dwell).await;
+    (deps, inside)
+}
+
+async fn slow_deps(
+    pool: PgPool,
+    dwell: Duration,
+) -> (SchedulerDeps, Arc<AtomicUsize>, Arc<AtomicUsize>) {
     let connector = knobas_db::test_util::test_connector().await;
     let peak = Arc::new(AtomicUsize::new(0));
+    let inside = Arc::new(AtomicUsize::new(0));
     (
         SchedulerDeps {
             pool,
             connections: Arc::new(TestConnections(connector)),
             registry: Arc::new(SlowRegistry {
-                inside: Arc::new(AtomicUsize::new(0)),
+                inside: Arc::clone(&inside),
                 peak: Arc::clone(&peak),
                 dwell,
                 fault: None,
@@ -281,6 +308,7 @@ async fn deps(pool: PgPool, dwell: Duration) -> (SchedulerDeps, Arc<AtomicUsize>
             events: Arc::new(Silent),
         },
         peak,
+        inside,
     )
 }
 
@@ -1612,7 +1640,7 @@ async fn a_source_re_added_under_a_deleted_ones_id_is_not_served_the_deleted_one
 
     // What `delete_source` does, and what it now tells the scheduler.
     config::delete(&pool, &id, false).await.unwrap();
-    scheduler.forget_source(&id).await;
+    scheduler.forget_source(&id, Purge::Keep).await;
     re_add(&pool, &id).await;
 
     // The new source's wizard.
@@ -1637,6 +1665,324 @@ async fn a_source_re_added_under_a_deleted_ones_id_is_not_served_the_deleted_one
         rows.len(),
         2,
         "the deleted source's run stays in the log, and the new source has one of its own: {rows:?}"
+    );
+    retire(&pool, &ids).await;
+}
+
+// -- #127: the purge outlives the run that was in flight -----------------------
+
+/// Rows in the mirror for one source, and rows of it a reader can actually
+/// reach.
+///
+/// Two numbers and not one, because they answer different questions and the
+/// defect #127 is about shows up in the second. `sync.item` is the mirror;
+/// `sync.live_item` is the mirror minus what `knobas.entity` says is
+/// tombstoned, and it is what every reader -- the launcher, the board,
+/// `knobas-search`'s corpus -- is built on. An item can be gone from search
+/// while its row stays, and an entity can be resurrected into search while
+/// nobody deleted a row at all.
+async fn mirrored(pool: &PgPool, id: &str) -> (i64, i64) {
+    let (items,): (i64,) = sqlx::query_as("select count(*) from sync.item where source_id = $1")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let (live,): (i64,) =
+        sqlx::query_as("select count(*) from sync.live_item where source_id = $1")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    (items, live)
+}
+
+/// Wait until a run is *inside* the adapter -- past the one existence check a
+/// run makes -- and fail loudly if none ever gets there.
+///
+/// The interleaving this test is about is only real from here on. Before it,
+/// `run_locked`'s `select cursor from knobas.source_config` has not happened
+/// yet, a delete would be seen, and the run would refuse and write nothing:
+/// green, and about nothing.
+async fn await_inside(inside: &Arc<AtomicUsize>) {
+    for _ in 0..200 {
+        if inside.load(Ordering::SeqCst) > 0 {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("no run reached the adapter in two seconds; there is nothing to interleave with");
+}
+
+/// **Deleting a source with `purge_items` while a sync of it is in flight
+/// leaves nothing of it in the mirror and nothing of it in search** (#127).
+///
+/// The run checks that its source exists once, at the top, before any network
+/// traffic; everything after that is a window in which a delete commits
+/// unnoticed and the run then commits over it. What comes back is not an orphan
+/// row: `ENTITY_UPSERT` writes `deleted_at = excluded.deleted_at`, and a live
+/// incoming item carries none, so the purge's tombstones are *cleared* and the
+/// entities the user deleted return to `sync.live_item` -- for a source with no
+/// configuration row, which nothing will ever sync or tombstone again. The
+/// symptom is permanent searchable items, not a stray row, which is why this
+/// asserts on both numbers.
+///
+/// The interleaving is arranged, not hoped for: the delete happens while a run
+/// is demonstrably inside the adapter, and the run's own ending is asserted to
+/// be a `Finished` that upserted its item. Without that second assertion a run
+/// that refused at the top -- writing nothing, purging nothing -- would leave
+/// an empty mirror and pass this test over a scheduler that does nothing at
+/// all.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_purge_survives_the_run_that_was_in_flight_when_the_source_was_deleted() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed_quiet(&pool, 1).await;
+    let id = ids[0].clone();
+    let (deps, inside) = deps_watching_the_adapter(sched_pool, Duration::from_millis(400)).await;
+    let scheduler = Scheduler::start(deps).await.unwrap();
+
+    // A mirror to purge, first: one run to completion, so the source has an
+    // item and a live entity before anybody deletes anything.
+    let first = Heard::new();
+    scheduler
+        .trigger(&id, SyncTrigger::Manual, Some(first.sink()))
+        .await
+        .unwrap();
+    await_ending(&first).await;
+    assert_eq!(
+        mirrored(&pool, &id).await,
+        (1, 1),
+        "the source is mirrored and searchable before the delete, or this test purges nothing"
+    );
+
+    // The second run, deleted out from under it mid-flight -- what
+    // `delete_source(purge_items: true)` does, in the order it does it.
+    let watcher = Heard::new();
+    let in_flight = scheduler
+        .trigger(&id, SyncTrigger::Manual, Some(watcher.sink()))
+        .await
+        .unwrap();
+    await_inside(&inside).await;
+    config::delete(&pool, &id, true).await.unwrap();
+    assert!(
+        inside.load(Ordering::SeqCst) > 0,
+        "the delete has to commit while the run is still fetching. If the run \
+         had already committed, the delete's own purge would tidy up after it \
+         and this test would be green over a scheduler that purges nothing"
+    );
+    scheduler.forget_source(&id, Purge::Items).await;
+
+    // ADR-0005 through the new path: the caller enrolled before the deletion is
+    // still told how its run ended. Nothing here cancels anything.
+    let ending = await_ending(&watcher).await;
+    assert_eq!(ending.run_id, in_flight, "a run id came without its ending");
+    assert_eq!(
+        (ending.phase, ending.items),
+        (SyncPhase::Finished, 1),
+        "the deleted source's run has to have committed an item *after* the \
+         purge, or there is no defect here to fix: {ending:?}"
+    );
+
+    scheduler.shutdown().await;
+
+    assert_eq!(
+        mirrored(&pool, &id).await,
+        (0, 0),
+        "the run that was in flight when the source was deleted wrote its \
+         mirror back, and its entity upsert cleared the purge's tombstones: \
+         the items the user deleted are searchable again (#127)"
+    );
+    // Tombstoned, never dropped: links, notes and activity rows point at these.
+    let (tombstoned,): (bool,) =
+        sqlx::query_as("select deleted_at is not null from knobas.entity where id = $1")
+            .bind(format!("{id}:S-1"))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(
+        tombstoned,
+        "the purged source's entity is tombstoned, not deleted"
+    );
+    retire(&pool, &ids).await;
+}
+
+/// **A source added back under the id wins: the purge armed for the source
+/// that is gone does not fire over the new one's mirror** (#127).
+///
+/// The intent is in memory and keyed by id, so between arming it and applying
+/// it the id can change hands -- `add_source` under a deleted source's id is a
+/// real user action, and it is the one #119 exists for. A purge that still
+/// fired then would delete the *new* source's first sync, which is worse than
+/// the defect it is there to fix and would arrive with no error anywhere.
+///
+/// What this deliberately does **not** assert away is the residual: the old
+/// run's late commit merges into the re-added source's mirror. That is the
+/// accepted cost of letting the newest instruction about an id win, and it is
+/// documented where the intent is cleared.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn adding_a_source_back_under_the_id_voids_the_purge_armed_for_the_old_one() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed_quiet(&pool, 1).await;
+    let id = ids[0].clone();
+    let (deps, inside) = deps_watching_the_adapter(sched_pool, Duration::from_millis(400)).await;
+    let scheduler = Scheduler::start(deps).await.unwrap();
+
+    let watcher = Heard::new();
+    scheduler
+        .trigger(&id, SyncTrigger::Manual, Some(watcher.sink()))
+        .await
+        .unwrap();
+    await_inside(&inside).await;
+
+    // Delete with the purge, then think better of it -- all while the run is
+    // still fetching.
+    config::delete(&pool, &id, true).await.unwrap();
+    assert!(
+        inside.load(Ordering::SeqCst) > 0,
+        "the delete has to commit while the run is still fetching. If the run \
+         had already committed, the delete's own purge would tidy up after it \
+         and this test would be green over a scheduler that purges nothing"
+    );
+    scheduler.forget_source(&id, Purge::Items).await;
+    re_add(&pool, &id).await;
+    scheduler.source_added(&id).await;
+
+    let ending = await_ending(&watcher).await;
+    assert_eq!(
+        (ending.phase, ending.items),
+        (SyncPhase::Finished, 1),
+        "the run has to have committed after the delete, or the purge it \
+         arms has nothing to fire over: {ending:?}"
+    );
+    scheduler.shutdown().await;
+
+    assert_eq!(
+        mirrored(&pool, &id).await,
+        (1, 1),
+        "the purge was armed for the source the user deleted; firing it after \
+         they added one back under the same id takes the new source's mirror"
+    );
+    retire(&pool, &ids).await;
+}
+
+/// **The window does not close when the run does** (#127): a run whose commit
+/// landed between `delete_source`'s purge and the forget is purged by the forget
+/// itself.
+///
+/// `delete_source` purges, deletes the keychain item, and only then tells the
+/// scheduler. A run finishing inside that gap has committed its mirror back
+/// with nothing left in flight for a later purge to ride on, so the arm-it
+/// branch never fires and the rows would stay for ever. The forget applies the
+/// purge itself for exactly that case, which is what makes the guarantee
+/// *closed* rather than merely narrower than it was.
+///
+/// The late commit is written by hand here rather than raced for: it is one
+/// statement wide and the point is what the forget does with what it finds, not
+/// whether this machine can be made to lose that race on cue.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_run_that_committed_in_the_gap_before_the_forget_is_purged_by_it() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed_quiet(&pool, 1).await;
+    let id = ids[0].clone();
+    let (deps, _) = deps(sched_pool, Duration::from_millis(10)).await;
+    let scheduler = Scheduler::start(deps).await.unwrap();
+
+    // A run, over and settled, so the scheduler holds a closed entry for the
+    // id -- the state `delete_source` finds for any source that has ever
+    // synced in this process.
+    let first = Heard::new();
+    scheduler
+        .trigger(&id, SyncTrigger::Manual, Some(first.sink()))
+        .await
+        .unwrap();
+    await_ending(&first).await;
+
+    config::delete(&pool, &id, true).await.unwrap();
+    assert_eq!(
+        mirrored(&pool, &id).await,
+        (0, 0),
+        "the delete's own purge is what the late commit below undoes"
+    );
+
+    // The late commit, in the gap: the mirror back, and -- the part that makes
+    // this permanent -- `deleted_at` cleared, so the entity is live in
+    // `sync.live_item` again.
+    let entity = format!("{id}:S-1");
+    sqlx::query("update knobas.entity set deleted_at = null where id = $1")
+        .bind(&entity)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, payload)
+         values ($1, $2, 'ticket', 'slow', '{}'::jsonb)",
+    )
+    .bind(&entity)
+    .bind(&id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        mirrored(&pool, &id).await,
+        (1, 1),
+        "the resurrection this test is about did not happen"
+    );
+
+    scheduler.forget_source(&id, Purge::Items).await;
+    scheduler.shutdown().await;
+
+    assert_eq!(
+        mirrored(&pool, &id).await,
+        (0, 0),
+        "a commit that landed after the delete's purge and before the forget \
+         is nobody else's to clean up"
+    );
+    retire(&pool, &ids).await;
+}
+
+/// **"Remove source, keep items" survives the in-flight run too** (#127).
+///
+/// The other half of the intent, and the half a foreign key could never have
+/// had: keeping the items is a real choice in the sources view (interfaces §3,
+/// Delete), so the purge must be something `delete_source` asks for rather than
+/// something the scheduler does whenever a source goes away. A forget that
+/// purged regardless would delete a mirror the user explicitly kept, and it
+/// would do it only sometimes -- when a sync happened to be running.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn deleting_a_source_mid_run_without_purging_keeps_its_items() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed_quiet(&pool, 1).await;
+    let id = ids[0].clone();
+    let (deps, inside) = deps_watching_the_adapter(sched_pool, Duration::from_millis(400)).await;
+    let scheduler = Scheduler::start(deps).await.unwrap();
+
+    let watcher = Heard::new();
+    scheduler
+        .trigger(&id, SyncTrigger::Manual, Some(watcher.sink()))
+        .await
+        .unwrap();
+    await_inside(&inside).await;
+    config::delete(&pool, &id, false).await.unwrap();
+    assert!(
+        inside.load(Ordering::SeqCst) > 0,
+        "the delete has to commit while the run is still fetching. If the run \
+         had already committed, the delete's own purge would tidy up after it \
+         and this test would be green over a scheduler that purges nothing"
+    );
+    scheduler.forget_source(&id, Purge::Keep).await;
+
+    let ending = await_ending(&watcher).await;
+    assert_eq!((ending.phase, ending.items), (SyncPhase::Finished, 1));
+    scheduler.shutdown().await;
+
+    assert_eq!(
+        mirrored(&pool, &id).await,
+        (1, 1),
+        "the user asked to keep the items; a run being in flight is not a \
+         reason to throw them away"
     );
     retire(&pool, &ids).await;
 }
@@ -1671,7 +2017,7 @@ async fn forgetting_a_source_mid_run_still_gives_that_runs_watchers_their_ending
     // Deleted mid-run, and added again straight away -- the impatient version
     // of the same user action.
     config::delete(&pool, &id, false).await.unwrap();
-    scheduler.forget_source(&id).await;
+    scheduler.forget_source(&id, Purge::Keep).await;
     re_add(&pool, &id).await;
 
     let wizard = Heard::new();
