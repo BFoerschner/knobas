@@ -206,10 +206,26 @@
   /**
    * The stats row's `· N items ·` segment, or a dash where the count would go.
    *
-   * The same rule as the sentence and for the same reason: the row sits beside
-   * `finished`, so a number in it is read as what was mirrored. A dash rather
+   * The same rule as the sentence and for the same reason: the row sat beside
+   * `finished`, so a number in it was read as what was mirrored. A dash rather
    * than dropping the segment, so the row keeps its shape between a pending
    * read, a count and no count.
+   *
+   * **Both of the other two states are now unreachable here, and are kept on
+   * purpose** (#156). The row renders only at step 2, and since the ending
+   * moves a real source to DONE this derived can no longer see either of the
+   * states the paragraph above is about: `"…"` needs `corpusPending`, and
+   * `null` needs a settled `readCorpus`, and both need `finished`. So the row
+   * only ever reads `· N items ·` off the run's own progress now, and the two
+   * remaining branches are dead — untested with it, since the assertions that
+   * pinned them moved to the DONE panel where the states actually render.
+   *
+   * They stay because **retiring them retires the surface #137's constraint 3
+   * was placed on**, and re-aiming a ruling is Björn's call, not an
+   * implementer's or a reviewer's — the same fork this issue's ruling
+   * deliberately left open. If he takes fork 2 (the real path ends at step 2)
+   * every branch here is load-bearing again; if he does not, this derived
+   * collapses to a template literal and the dash goes with it.
    */
   const itemsReading = $derived(mirrored === null ? "—" : `${mirrored} items`);
 
@@ -426,6 +442,13 @@
               Indeterminate while it runs: there is no total until the run ends
               (`items` grows and nothing knows where it stops), and a bar that
               invented one would be a lie that moves.
+
+              …and indeterminate is now the only thing it is (#156). `phase` and
+              `stepIndex` are assigned in the same channel callback, so step 2
+              never renders with `finished` true and the filled branch of each
+              ternary is dead. Left rather than simplified for the same reason
+              as `itemsReading` above: it is the same one question about the
+              same surface, and it is Björn's.
             -->
             <progress max={finished ? 1 : undefined} value={finished ? 1 : undefined}></progress>
             <p class="reading">
