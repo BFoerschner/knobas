@@ -148,6 +148,14 @@ export interface Health {
    * same column at snapshot time — so this compares one clock against itself.
    * There is no skew to allow for.
    *
+   * **And a held reading cannot get stuck.** `knobas.source_config.auth_checked_at`
+   * is stamped `now()` on *every* check, changed or not — "freshness is not a
+   * change", `knobas-sync`'s `SET_HEALTH` — while `source:health` fires on a
+   * change only. So the column only ever moves forward, and the first read
+   * taken after the next check carries a strictly newer stamp than anything
+   * this store is holding. A reading survives at most until the source is
+   * checked again; it does not become the store's permanent answer.
+   *
    * **What it costs.** `replace` can no longer rewind a row: a backend flow
    * that wanted to reset a source's reading *without* removing the row and
    * without emitting a newer event would be ignored here until the next check.

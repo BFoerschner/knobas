@@ -120,6 +120,17 @@
         // launcher's chips and this view reading one fact, but it could only
         // ever add: a source deleted below stayed in the store, drawing its
         // top-strip monogram and its room tab until the window was restarted.
+        //
+        // What `replace` means has one clause more than it used to, and this
+        // call is why it was written (#148): the *set* is authoritative, so
+        // the deleted source still leaves, but per surviving row the store
+        // keeps whichever reading has the newer `checked_at`. This read has a
+        // duration, and a `source:health` landing inside it is *newer than
+        // what this read is carrying* — without that clause a credential the
+        // scheduler had just seen refused was written back to green here, on
+        // the surface whose job is saying so. See `shell/health.svelte`'s doc
+        // on `replace` for the full rule and for why it does not weaken the
+        // paragraph above.
         health.replace(rows.map((row) => row.health));
       },
       fail: (cause) => {
