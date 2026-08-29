@@ -274,3 +274,25 @@ is why the question is worth a minute rather than a shrug.
 
 **Still open and unruled, all recorded on their issues:** #104, #112, #122 (the idempotency-key
 SPI question), #141 (`SearchResponse`, frozen IPC), #157.
+
+## The frozen-contract gate is delegated to Fable (Björn, 2026-08-29)
+
+Björn's instruction: *"let Migration and ipc additions be merged by fable too."*
+
+So the rule this record opened with — *"Björn keeps the gate for milestone exits and for any change
+to a frozen contract"* — is now narrower. **Migrations and IPC additions are Fable's to merge**,
+under the same merge-manager discipline as everything else: deep review, mutations re-run, the full
+`just check` on the exact merged head, and a §10.8 ratified-exception entry recorded in
+`docs/contract.md`.
+
+**Two things this does not change, and I have not treated as delegated:**
+
+1. **Milestone exits.** He named migrations and IPC additions; a milestone exit is neither, and it
+   is the one gate in the working model that is about judging a body of work rather than a diff.
+2. **The battery clauses.** Fable itself ruled on #146 that a contract-battery change is Björn's,
+   citing ADR-0004's exception wording ("no battery clause added, removed or reworded"). A
+   delegation of *migrations and IPC* does not reach that, and Fable saying so about its own
+   authority is the reason to keep it.
+
+Recorded here because this record is itself one of the four PRs the delegation unblocks, and
+because the doctrine it opens with would otherwise be stale on the day it merged.
