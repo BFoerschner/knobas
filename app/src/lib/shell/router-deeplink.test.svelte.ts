@@ -120,27 +120,31 @@ const { default: App } = await import("../../App.svelte");
 
 let target: HTMLDivElement;
 let app: Record<string, unknown> | undefined;
+/**
+ * Errors thrown where nothing was awaiting them — a render, an event handler —
+ * which jsdom reports as a `window` `error` rather than as a thrown exception
+ * the test could catch.
+ *
+ * *Rejections* are not recorded here: nothing dispatches
+ * `window.unhandledrejection` under Vitest's jsdom, so the listener this file
+ * used to carry never fired even once. They are Node's event, and the shared
+ * guard in `shell/test-setup.ts` is the one place that watches for them (#103).
+ */
 const raised: unknown[] = [];
 
 function onerror(event: ErrorEvent) {
   raised.push(event.error ?? event.message);
 }
 
-function onrejection(event: PromiseRejectionEvent) {
-  raised.push(event.reason);
-}
-
 beforeEach(() => {
   raised.length = 0;
   window.addEventListener("error", onerror);
-  window.addEventListener("unhandledrejection", onrejection);
   target = document.createElement("div");
   document.body.append(target);
 });
 
 afterEach(() => {
   window.removeEventListener("error", onerror);
-  window.removeEventListener("unhandledrejection", onrejection);
   if (app) unmount(app);
   app = undefined;
   target.remove();

@@ -13,6 +13,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { BackupSchedule, BackupStatus } from "../ipc/backup";
+import { settleRejections, takeUnhandled } from "../shell/unhandled";
 
 const NOW = new Date("2026-08-29T09:14:00Z");
 const DIR = "/Users/x/Library/Application Support/dev.knobas.desktop/backups";
@@ -94,22 +95,6 @@ function statusOf(over: Partial<BackupStatus> = {}): BackupStatus {
 let target: HTMLDivElement;
 let app: Record<string, unknown> | undefined;
 
-/**
- * Rejections nobody caught.
- *
- * A `bind:` on a field of a nullable object is read again *after* the object
- * is set to null — Svelte's input binding reads its getter on a later tick, by
- * which time closing the dialog has taken the value away. It throws into a
- * promise nothing awaits, so every assertion in this file passes and the run
- * still fails. Recorded here so the failure names the gesture that caused it
- * rather than arriving as an unattributed error at the end of the suite.
- */
-const unhandled: unknown[] = [];
-
-function onrejection(reason: unknown) {
-  unhandled.push(reason);
-}
-
 function render() {
   app = mount(BackupSection, { target, props: { now: NOW } });
   flushSync();
@@ -147,30 +132,14 @@ beforeEach(() => {
   restoreFails = null;
   stores = (posted) => posted;
   toasts.items = [];
-  unhandled.length = 0;
-  process.on("unhandledRejection", onrejection);
   target = document.createElement("div");
   document.body.append(target);
 });
 
-/** Let a rejection that is going to happen actually happen. */
-async function drain() {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-/**
- * Every test in this file, not only the one that names it: a rejection nobody
- * caught fails the run without failing an assertion, so the run reports every
- * test passing and exits 1 anyway. Asserting it here attributes it to the test
- * that caused it.
- */
-afterEach(async () => {
-  await drain();
-  process.off("unhandledRejection", onrejection);
+afterEach(() => {
   if (app) unmount(app);
   app = undefined;
   target.remove();
-  expect(unhandled, "something rejected and nobody was holding it").toEqual([]);
 });
 
 /**
@@ -619,22 +588,22 @@ test("closing the schedule dialog raises nothing, whichever way it is closed", a
   type(field("Hour"), "22");
   button("Cancel", dialog()!)!.click();
   await settle();
-  await drain();
-  expect(unhandled, "cancelling raised").toEqual([]);
+  await settleRejections();
+  expect(takeUnhandled(), "cancelling raised").toEqual([]);
 
   button("Schedule…")!.click();
   flushSync();
   type(field("Keep"), "3");
   button("Save", dialog()!)!.click();
   await settle();
-  await drain();
-  expect(unhandled, "saving raised").toEqual([]);
+  await settleRejections();
+  expect(takeUnhandled(), "saving raised").toEqual([]);
 
   // And the restore confirm, which is the other dialog over a nullable value.
   button("Restore", archiveRow("knobas-20260829-030000.knobas")!)!.click();
   flushSync();
   button("Cancel", dialog()!)!.click();
   await settle();
-  await drain();
-  expect(unhandled, "closing the restore confirm raised").toEqual([]);
+  await settleRejections();
+  expect(takeUnhandled(), "closing the restore confirm raised").toEqual([]);
 });
