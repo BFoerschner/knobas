@@ -5,7 +5,9 @@
 //! Nothing downstream carries a hardcoded Jira table, which is why the kind
 //! metadata (label, plural, monogram) lives here and not in the launcher.
 
-use knobas_source::{AuthMethod, KindInfo, SourceDescriptor};
+use knobas_source::{AuthMethod, Capability, KindInfo, SourceDescriptor};
+
+use crate::{WRITE_OP_COMMENT, WRITE_OP_CREATE_TICKET, WRITE_OP_TRANSITION};
 
 /// The static, instance-free descriptor: `id == adapter_kind` (interfaces §4.2).
 /// A configured instance's descriptor is this with `id` and `name` replaced by
@@ -16,14 +18,23 @@ pub fn descriptor_template() -> SourceDescriptor {
         id: crate::ADAPTER_KIND.to_owned(),
         adapter_kind: crate::ADAPTER_KIND.to_owned(),
         name: "Jira".to_owned(),
-        // P12: read-only in M1, so no capabilities at all. `Capability::Search`
-        // is reserved for a future server-side `Source::search`.
-        capabilities: Vec::new(),
+        // M2 (issue #43): this adapter writes. `Capability::Search` stays
+        // reserved for a future server-side `Source::search` -- knobas'
+        // launcher answers from the local index either way.
+        capabilities: vec![Capability::Write],
         adapter_version: crate::ADAPTER_VERSION.to_owned(),
         // Bearer PAT (DC >= 8.14) or Basic user+password (spec §3).
         auth_methods: vec![AuthMethod::Pat, AuthMethod::UserPassword],
-        // M1 is read-only toward every source (interfaces §4.1).
-        write_ops: Vec::new(),
+        // M2's ratified Jira set (issue #43, ADR-0006). The UI renders its
+        // action bar from exactly this, so an op listed here that `write`
+        // refuses is an action that 404s, and one `write` accepts but this
+        // omits is an action nothing ever offers. The contract battery holds
+        // both directions.
+        write_ops: vec![
+            WRITE_OP_COMMENT.to_owned(),
+            WRITE_OP_TRANSITION.to_owned(),
+            WRITE_OP_CREATE_TICKET.to_owned(),
+        ],
         entity_kinds: vec![KindInfo {
             id: crate::KIND_TICKET.to_owned(),
             label: "Ticket".to_owned(),
@@ -100,16 +111,26 @@ fn config_schema() -> serde_json::Value {
 mod tests {
     use super::*;
 
-    /// P12: M1 adapters declare no capabilities and no write ops. The contract
-    /// battery reads both, and the sources view renders its action bar from
-    /// `write_ops` -- an accidental entry here is an action that 404s.
+    /// The sources view renders its action bar from `write_ops`, so what is
+    /// here is exactly what the user is offered: M2's ratified Jira set and
+    /// nothing else (issue #43, ADR-0006). `Capability::Search` stays absent --
+    /// it is reserved for a server-side `Source::search` the SPI does not have.
     #[test]
-    fn the_template_is_read_only_and_self_describing() {
+    fn the_template_declares_m2s_ratified_write_set_and_nothing_else() {
         let d = descriptor_template();
         assert_eq!(d.id, crate::ADAPTER_KIND);
         assert_eq!(d.adapter_kind, crate::ADAPTER_KIND);
-        assert!(d.capabilities.is_empty(), "{:?}", d.capabilities);
-        assert!(d.write_ops.is_empty(), "{:?}", d.write_ops);
+        assert_eq!(
+            d.capabilities,
+            vec![Capability::Write],
+            "{:?}",
+            d.capabilities
+        );
+        assert_eq!(
+            d.write_ops,
+            vec!["comment", "transition", "create_ticket"],
+            "the action bar is rendered from this list alone"
+        );
         assert_eq!(d.adapter_version, crate::ADAPTER_VERSION);
         assert_eq!(
             d.auth_methods,

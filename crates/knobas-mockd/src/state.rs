@@ -290,6 +290,115 @@ impl MockState {
         Some(id)
     }
 
+    /// The workflow mockd pretends to have, as `(transition id, name, target
+    /// status)` reachable from `from`.
+    ///
+    /// A real Jira's workflow is per-project and per-issue-type configuration,
+    /// which is exactly why interfaces §5 says the available set is *fetched*
+    /// and never hard-coded. What matters for a test double is that it is a
+    /// **workflow rather than a list of statuses**: from `In Progress` you can
+    /// reach `In Review` and go back to `To Do`, and you cannot jump straight
+    /// to `Done`. An adapter that assumed "any status is reachable" passes
+    /// against a mock that offers everything and fails against a real Jira.
+    #[must_use]
+    pub fn jira_transitions(from: &str) -> &'static [(&'static str, &'static str, &'static str)] {
+        match from {
+            "To Do" => &[("11", "Start Progress", "In Progress")],
+            "In Progress" => &[
+                ("21", "Send to Review", "In Review"),
+                ("41", "Stop Progress", "To Do"),
+            ],
+            "In Review" => &[
+                ("31", "Done", "Done"),
+                ("41", "Back to In Progress", "In Progress"),
+            ],
+            "Done" => &[("51", "Reopen", "To Do")],
+            _ => &[],
+        }
+    }
+
+    /// Move an issue by transition id, returning the status it landed on.
+    ///
+    /// `None` if there is no such issue; `Some(Err(..))` if the transition is
+    /// not one the issue's current status offers -- which is the 400 a real
+    /// Jira answers, and the failure story 2 exists to keep out of the UI.
+    ///
+    /// Same ordering rule as [`Self::add_comment`]: the clock does not tick
+    /// for a move that did not happen.
+    pub fn transition_issue(&self, key: &str, transition_id: &str) -> Option<Result<String, ()>> {
+        let mut inner = self.write();
+        let idx = inner.issues.iter().position(|i| i.key == key)?;
+        let Some((_, _, to)) = Self::jira_transitions(&inner.issues[idx].status)
+            .iter()
+            .find(|(id, _, _)| *id == transition_id)
+        else {
+            return Some(Err(()));
+        };
+        let to = (*to).to_owned();
+        let now = inner.tick();
+        inner.issues[idx].status.clone_from(&to);
+        inner.issues[idx].updated = now;
+        Some(Ok(to))
+    }
+
+    /// Append a new issue to `project` and return it.
+    ///
+    /// `None` if `project` is not one the fixture has -- a real Jira answers
+    /// a create into an unknown project with a 400 naming the project, and a
+    /// mock that invented the project instead would let an adapter ship a
+    /// typo.
+    pub fn create_issue(
+        &self,
+        project: &str,
+        summary: &str,
+        description: Option<&str>,
+        issue_type: &str,
+        reporter: &str,
+    ) -> Option<JiraIssue> {
+        let mut inner = self.write();
+        if !inner.issues.iter().any(|i| i.project == project) {
+            return None;
+        }
+        let now = inner.tick();
+        let id = inner.issues.iter().map(|i| i.id).max().unwrap_or(10_000) + 1;
+        // Jira numbers issue keys per project, from the highest that project
+        // has ever had.
+        let next = inner
+            .issues
+            .iter()
+            .filter(|i| i.project == project)
+            .filter_map(|i| {
+                i.key
+                    .rsplit_once('-')
+                    .and_then(|(_, n)| n.parse::<u64>().ok())
+            })
+            .max()
+            .unwrap_or(0)
+            + 1;
+        let issue = JiraIssue {
+            id,
+            key: format!("{project}-{next}"),
+            project: project.to_owned(),
+            summary: summary.to_owned(),
+            description: description.map(str::to_owned),
+            issue_type: issue_type.to_owned(),
+            // A new issue starts at the workflow's first status.
+            status: "To Do".to_owned(),
+            priority: None,
+            assignee: None,
+            reporter: reporter.to_owned(),
+            created: now,
+            updated: now,
+            comments: Vec::new(),
+            worklogs: Vec::new(),
+            parent: None,
+            links: Vec::new(),
+            original_estimate_secs: None,
+        };
+        inner.issues.push(issue.clone());
+        Some(issue)
+    }
+
     pub fn issue(&self, key: &str) -> Option<JiraIssue> {
         self.read().issues.iter().find(|i| i.key == key).cloned()
     }

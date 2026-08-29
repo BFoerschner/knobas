@@ -503,6 +503,35 @@ impl Request {
             inner: self.inner.header(name, value),
         }
     }
+
+    /// Send `body` as the JSON request body, with `Content-Type:
+    /// application/json`.
+    ///
+    /// Added for M2's write-backs (issue #43): every write in the ratified set
+    /// -- a Jira transition, a Gitea pull request, a TeamCity build trigger --
+    /// is a `POST` carrying a JSON document, and until this existed there was
+    /// no way to put one on the wire without building a second `reqwest`
+    /// client beside the limiter and the retry budget. Which is the one thing
+    /// this crate exists to prevent, so the method belongs here rather than in
+    /// an adapter.
+    ///
+    /// **The body is buffered, not streamed**, and that is load-bearing rather
+    /// than incidental: [`HttpClient::send`] retries by `try_clone`, which
+    /// answers `None` for a streaming body and turns a retryable failure into
+    /// a single attempt. A serialized `serde_json::Value` clones, so a write
+    /// gets the same retry budget every read has.
+    ///
+    /// A value that cannot be serialized -- which for `serde_json` means a map
+    /// with non-string keys or a type whose `Serialize` fails -- surfaces at
+    /// [`HttpClient::send`] as the transport fault `reqwest` reports, the same
+    /// as any other request that could not be built. Adapters build their
+    /// bodies from `serde_json::json!`, which cannot produce one.
+    #[must_use]
+    pub fn json<T: serde::Serialize + ?Sized>(self, body: &T) -> Self {
+        Self {
+            inner: self.inner.json(body),
+        }
+    }
 }
 
 /// A response body, or an empty string if it cannot be read -- this is only

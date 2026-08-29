@@ -25,14 +25,6 @@ fn instance(instance_id: &str, kind: &str) -> SourceInstance {
     }
 }
 
-/// The one adapter exempt from the read-only rule below.
-///
-/// Not a network source at all: the mock is the SPI's reference implementation
-/// and its `write_ops` are what the contract battery's write clauses run
-/// against. Named as a single literal rather than kept in a growing list, so
-/// the first *real* adapter that declares a write fails the test.
-const REFERENCE_ADAPTER: &str = "mock";
-
 /// `list_adapters` returns one **template** per compiled-in kind, with
 /// `id == adapter_kind` -- the Add-source form is generated from
 /// `config_schema` + `auth_methods`, and the launcher reads kind metadata, with
@@ -142,40 +134,62 @@ fn every_adapter_crate_linked_into_the_app_has_a_row() {
     );
 }
 
-/// M1 is read-only toward every source (interfaces §4.1). The battery already
-/// enforces `Capability::Write` ⇔ non-empty `write_ops` per adapter; this
-/// asserts the milestone-wide rule across the whole table at once.
+/// The write surface of the whole registry, as M2 ratified it (issue #43,
+/// ADR-0006).
+///
+/// The battery already holds each adapter to `Capability::Write` ⇔ non-empty
+/// `write_ops`, and each adapter's own suite holds its list to its dispatch.
+/// What only this can see is the **table**: the set of write ops knobas offers
+/// at all. ADR-0006 makes each milestone's growth a §10.8 ratified exception,
+/// so a variant that appeared without one is a diff a reviewer must be shown --
+/// and an adapter that quietly started declaring an op nobody ratified would
+/// otherwise pass every test in its own crate.
+///
+/// Spelled as the whole expected table rather than as a rule, deliberately: a
+/// rule ("every op is a known identifier") is satisfied by an adapter declaring
+/// an op it was never given, which is the thing being guarded against.
 #[test]
-fn no_real_adapter_declares_a_write() {
-    let mut checked = 0_usize;
+fn the_registry_declares_exactly_the_write_set_m2_ratified() {
+    let expected: std::collections::BTreeMap<&str, Vec<&str>> = [
+        ("mock", vec!["comment"]),
+        ("jira", vec!["comment", "transition", "create_ticket"]),
+        (
+            "gitea",
+            vec!["create_branch", "create_pull_request", "comment", "approve"],
+        ),
+        ("teamcity", vec!["trigger_build", "rerun_build"]),
+    ]
+    .into_iter()
+    .collect();
+
+    let actual: std::collections::BTreeMap<String, Vec<String>> = Registry::builtin()
+        .descriptors()
+        .into_iter()
+        .map(|t| (t.adapter_kind, t.write_ops))
+        .collect();
+    let actual_ref: std::collections::BTreeMap<&str, Vec<&str>> = actual
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.iter().map(String::as_str).collect()))
+        .collect();
+    assert_eq!(
+        actual_ref, expected,
+        "the registry's write surface is not M2's ratified set -- growing it is an ADR-0006 \
+         conversation and a contract §10.8 entry, not a descriptor edit"
+    );
+
+    // Two directions the battery checks per adapter and nothing checks across
+    // the table: an op no `WriteOp` variant answers to would be an action the
+    // UI renders and every adapter refuses, and a source that lists ops while
+    // reading as read-only would render actions the shell believes it cannot
+    // perform.
     for t in Registry::builtin().descriptors() {
-        if t.adapter_kind == REFERENCE_ADAPTER {
-            // The exemption is asserted, not assumed: if the mock ever stopped
-            // declaring a write, this test would silently become a check of
-            // nothing while still naming an exception.
-            assert!(
-                !t.write_ops.is_empty(),
-                "the reference adapter is exempt because it exercises the write \
-                 battery; it no longer declares a write, so the exemption is stale"
-            );
-            continue;
-        }
-        checked += 1;
-        assert!(
+        assert_eq!(
             t.write_ops.is_empty(),
-            "{} declares write ops in a read-only milestone",
-            t.adapter_kind
-        );
-        assert!(
             !t.capabilities.contains(&knobas_source::Capability::Write),
-            "{} declares Capability::Write",
+            "{}: Capability::Write and write_ops disagree",
             t.adapter_kind
         );
     }
-    assert!(
-        checked >= 1,
-        "no real adapter was checked, so this proves nothing"
-    );
 }
 
 #[test]

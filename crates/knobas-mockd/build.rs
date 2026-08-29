@@ -31,6 +31,7 @@ const SERVED: &[(&str, &str)] = &[
     ("GET", "api/2/issue/{issueIdOrKey}"),
     ("GET", "api/2/issue/{issueIdOrKey}/comment"),
     ("GET", "api/2/issue/{issueIdOrKey}/worklog"),
+    ("GET", "api/2/issue/{issueIdOrKey}/transitions"),
 ];
 
 /// Marks the WADL's embedded JSON *Schema* apart from its embedded *example*:

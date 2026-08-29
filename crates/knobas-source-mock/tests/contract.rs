@@ -297,7 +297,12 @@ async fn write_records_the_comment() {
     .expect("a declared op is accepted");
     let ops = s.written_ops();
     assert_eq!(ops.len(), 1);
-    let WriteOp::Comment { entity, body } = &ops[0];
+    let WriteOp::Comment { entity, body } = &ops[0] else {
+        panic!(
+            "the mock recorded {:?} rather than the comment it was handed",
+            ops[0]
+        );
+    };
     assert_eq!((entity.as_str(), body.as_str()), ("mock:PAY-231", "on it"));
 }
 

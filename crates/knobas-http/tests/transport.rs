@@ -491,3 +491,66 @@ async fn the_callers_reading_of_a_failing_body_reaches_the_message() {
         "{error:?}"
     );
 }
+
+// -- a request that carries a body (issue #43) --------------------------------
+
+/// M2's write-backs are `POST`s carrying JSON, and until `Request::json`
+/// existed there was no way to put a body on the wire through this crate at
+/// all. The body and its content type both have to arrive: a Jira transition
+/// sent without `Content-Type: application/json` is a 415, and one sent with
+/// the header and no body is a 400 -- two different bugs that a test asserting
+/// only the path would miss.
+#[test]
+fn a_json_body_and_its_content_type_both_reach_the_request() {
+    let client = HttpClient::new(config("https://jira.example".to_owned())).expect("client");
+    let request = client
+        .request(Method::POST, "/rest/api/2/issue/PAY-231/transitions")
+        .json(&serde_json::json!({ "transition": { "id": "31" } }))
+        .build()
+        .expect("a json body builds");
+
+    assert_eq!(request.method(), &Method::POST);
+    assert_eq!(
+        request
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok()),
+        Some("application/json"),
+    );
+    let body = request
+        .body()
+        .and_then(reqwest::Body::as_bytes)
+        .expect("a buffered body");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(body).expect("the body is the json"),
+        serde_json::json!({ "transition": { "id": "31" } }),
+    );
+}
+
+/// The body is buffered rather than streamed, which is what lets `send` retry
+/// it: `try_clone` answers `None` for a streaming body, and a write that
+/// silently got one attempt where every read gets three would fail on the first
+/// 503 a source served.
+///
+/// Asserted through the retry count rather than by inspecting the body,
+/// because that is the behaviour that would actually be lost.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_request_with_a_body_is_retried_like_any_other() {
+    let server = CountingServer::always(503, "");
+    let client = HttpClient::new(config(server.url())).expect("client");
+
+    let error = client
+        .send(
+            client
+                .request(Method::POST, "/app/rest/buildQueue")
+                .json(&serde_json::json!({ "buildType": { "id": "Payout_Build" } })),
+        )
+        .await
+        .expect_err("503 every time");
+    assert!(matches!(error, SourceError::Protocol { .. }), "{error:?}");
+    assert_eq!(
+        server.hits(),
+        knobas_http::MAX_ATTEMPTS as usize,
+        "a request with a body must get the documented attempts, not one"
+    );
+}

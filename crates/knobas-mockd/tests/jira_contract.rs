@@ -14,7 +14,7 @@ mod common;
 use common::{golden, normalise_base_url};
 use knobas_mockd::{allowlist::response_schema, spawn_mock_jira};
 
-/// The six endpoints mockd serves, as `(verb, WADL template, request path,
+/// The endpoints mockd serves, as `(verb, WADL template, request path,
 /// golden name)`. One table, used by both halves, so a new endpoint cannot be
 /// added to one gate and forgotten in the other.
 const SERVED: &[(&str, &str, &str, &str)] = &[
@@ -48,6 +48,15 @@ const SERVED: &[(&str, &str, &str, &str)] = &[
         "api/2/issue/{issueIdOrKey}/worklog",
         "/rest/api/2/issue/PAY-231/worklog",
         "worklogs_pay_231",
+    ),
+    // The read half of M2's transition write-back (issue #43). PAY-231 is
+    // `In Progress`, whose workflow offers two moves and does *not* offer
+    // `Done` -- so the golden is also the record of the workflow having shape.
+    (
+        "GET",
+        "api/2/issue/{issueIdOrKey}/transitions",
+        "/rest/api/2/issue/PAY-231/transitions",
+        "transitions_pay_231",
     ),
 ];
 

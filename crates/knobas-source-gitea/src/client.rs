@@ -414,6 +414,43 @@ impl GiteaClient {
     }
 }
 
+impl GiteaClient {
+    /// `POST <base>/api/v1/<path>` with `body` as JSON, keeping the response.
+    ///
+    /// M2's write-back (issue #43). The response is handed back rather than
+    /// decoded because Gitea's four writes answer four different records
+    /// (`Branch`, `PullRequest`, `Comment`, `PullReview`) and none of the four
+    /// callers needs one -- what they need is that the write landed, which
+    /// `knobas-http` has already decided by the time this returns.
+    ///
+    /// # Errors
+    ///
+    /// The [`SourceError`] the failure maps to, with Gitea's own sentence in
+    /// the message where it sent one ([`error_message`]).
+    pub(crate) async fn post(
+        &self,
+        path: &str,
+        body: &Value,
+    ) -> Result<knobas_http::Response, SourceError> {
+        let request = self
+            .http
+            .request(Method::POST, &format!("{API_ROOT}{path}"))
+            .json(body);
+        self.http.send(request).await
+    }
+
+    /// One path segment of a write, refused unless it is a name Gitea could
+    /// have issued -- the same guard the reads use, reachable from
+    /// [`crate::write`].
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError::Protocol`] for a name that could walk out of `/api/v1`.
+    pub(crate) fn path_segment(value: &str) -> Result<&str, SourceError> {
+        segment(value)
+    }
+}
+
 /// `("limit", "50"), ("page", "<n>")`.
 fn page_params(page: u32) -> ((&'static str, String), (&'static str, String)) {
     (("limit", PAGE_SIZE.to_string()), ("page", page.to_string()))

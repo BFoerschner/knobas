@@ -165,6 +165,27 @@ impl JiraHttp {
             ))
         })
     }
+
+    /// `POST <base>/<path>` with `body` as JSON, keeping the response.
+    ///
+    /// M2's write-back (issue #43). The response is handed back rather than
+    /// decoded here because the three writes answer three different ways: a
+    /// transition is **204 with no body**, a comment is 201 with the created
+    /// comment, and a create is 201 with `{id, key, self}`. A helper that
+    /// insisted on JSON would have to invent a body for the first.
+    ///
+    /// # Errors
+    ///
+    /// The [`SourceError`] the failure maps to, with Jira's own words in the
+    /// message where it sent any (see [`error_envelope`]).
+    pub(crate) async fn post_json(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<knobas_http::Response, SourceError> {
+        let request = self.client.request(Method::POST, path).json(body);
+        self.client.send(request).await
+    }
 }
 
 /// The sentence inside Jira's error envelope, for `knobas-http` to build the

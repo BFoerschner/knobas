@@ -4,6 +4,7 @@ use knobas_source::instance::SourceInstance;
 use knobas_source::{ConnectionInfo, Cursor, Sink, Source, SourceDescriptor, SourceError, WriteOp};
 
 use crate::client::{HttpRest, Rest, connection_info};
+use crate::write;
 use crate::{TeamCityConfig, descriptor_template, sync};
 
 /// One configured TeamCity instance.
@@ -40,6 +41,68 @@ pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
         cfg,
         rest,
     }))
+}
+
+impl TeamCitySource {
+    /// The key half of an entity id this source owns.
+    ///
+    /// The namespace check is not defensive noise: two TeamCitys are
+    /// `teamcity` and `teamcity-eu` (§4.1), and `buildType:Payout_Build` is a
+    /// plausible key on both -- so a write that trusted the routing would
+    /// start a build on the wrong server. The queue routes by namespace;
+    /// reaching here with a foreign one is knobas' own bug.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError::Protocol`] -- a refusal, which the queue does not retry.
+    fn key_of(&self, entity: &str) -> Result<String, SourceError> {
+        let parsed = knobas_core::entity::EntityRef::parse(entity)
+            .map_err(|error| SourceError::protocol(format!("teamcity: {error}")))?;
+        if parsed.namespace != self.id {
+            return Err(SourceError::protocol(format!(
+                "teamcity: {entity:?} belongs to source {:?}, not to {:?}",
+                parsed.namespace, self.id
+            )));
+        }
+        Ok(parsed.key)
+    }
+
+    /// The build configuration a trigger names.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::key_of`], plus an id that is not a build configuration.
+    fn build_config_id(&self, entity: &str) -> Result<String, SourceError> {
+        let key = self.key_of(entity)?;
+        key.strip_prefix("buildType:")
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                SourceError::protocol(format!(
+                    "teamcity: {entity:?} is not a build configuration -- a build is triggered \
+                     from one, so the target is an id like \"{}:buildType:Payout_Build\"",
+                    self.id
+                ))
+            })
+    }
+
+    /// The build a re-run names.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::key_of`], plus an id that is not a build.
+    fn build_id(&self, entity: &str) -> Result<i64, SourceError> {
+        let key = self.key_of(entity)?;
+        key.strip_prefix("build:")
+            .and_then(|id| id.parse::<i64>().ok())
+            .ok_or_else(|| {
+                SourceError::protocol(format!(
+                    "teamcity: {entity:?} is not a build -- running one again needs the build \
+                     itself, so the target is an id like \"{}:build:1187\"",
+                    self.id
+                ))
+            })
+    }
 }
 
 #[async_trait::async_trait]
@@ -81,14 +144,36 @@ impl Source for TeamCitySource {
         sync::execute(&self.id, &self.cfg, &self.rest, cursor, sink).await
     }
 
+    /// Perform one of the two writes M2 ratified for TeamCity, or refuse.
+    ///
+    /// The match unpacks and hands ids to [`crate::write`], which never names
+    /// `WriteOp`: knobas has one outbound write path and
+    /// `write_choke_point.rs` reads the tree to keep it that way.
+    ///
+    /// **Each op is checked against the kind of id it acts on.** A trigger is
+    /// aimed at a build *configuration* (`teamcity:buildType:Payout_Build`)
+    /// and a re-run at a *build* (`teamcity:build:1187`); the two key forms
+    /// exist precisely so they cannot be confused (`map::build_key` /
+    /// `map::build_config_key`), and sending `1187` as a configuration id
+    /// would trigger whatever configuration happened to be called that.
     async fn write(&self, op: WriteOp) -> Result<(), SourceError> {
-        // M1 is read-only toward every source (interfaces §4.1); the
-        // descriptor declares no write ops, so every op reaching here is
-        // undeclared. Triggering a build is M2.
-        Err(SourceError::protocol(format!(
-            "the TeamCity adapter is read-only in this version and does not support {:?}",
-            op.identifier()
-        )))
+        match &op {
+            WriteOp::TriggerBuild { entity } => {
+                write::trigger(&self.rest, &self.build_config_id(entity)?).await
+            }
+            WriteOp::RerunBuild { entity } => {
+                write::rerun(&self.rest, self.build_id(entity)?).await
+            }
+            WriteOp::Comment { .. }
+            | WriteOp::Transition { .. }
+            | WriteOp::CreateTicket { .. }
+            | WriteOp::CreateBranch { .. }
+            | WriteOp::CreatePullRequest { .. }
+            | WriteOp::Approve { .. } => Err(SourceError::protocol(format!(
+                "the TeamCity adapter does not support {:?}",
+                op.identifier()
+            ))),
+        }
     }
 }
 
@@ -127,8 +212,8 @@ mod tests {
         assert_eq!(d.id, "teamcity-eu");
         assert_eq!(d.adapter_kind, "teamcity");
         assert_eq!(d.name, "Tidewater CI (EU)");
-        assert!(d.write_ops.is_empty());
-        assert!(d.capabilities.is_empty());
+        assert_eq!(d.write_ops, vec!["trigger_build", "rerun_build"]);
+        assert_eq!(d.capabilities, vec![knobas_source::Capability::Write]);
         // The claim the engine's tombstone sweep rests on travels with the
         // instance descriptor too, not only with the template.
         assert!(
@@ -187,22 +272,6 @@ mod tests {
         assert!(matches!(build(i), Err(SourceError::Protocol { .. })));
     }
 
-    /// M1 is read-only toward every source: nothing is declared, so everything
-    /// is refused -- which is also what battery clause 5 checks.
-    #[tokio::test]
-    async fn every_write_is_refused() {
-        let refused = built(instance(json!({})))
-            .write(WriteOp::Comment {
-                entity: "teamcity-eu:build:1187".to_owned(),
-                body: "not in M1".to_owned(),
-            })
-            .await;
-        assert!(
-            matches!(refused, Err(SourceError::Protocol { .. })),
-            "{refused:?}"
-        );
-    }
-
     /// Interfaces §4.1: the same classification from `test_connection` and
     /// from mid-`sync`. Both are exercised here against a port nothing listens
     /// on -- the mockd suite covers the 401 half against a live server.
@@ -227,5 +296,88 @@ mod tests {
             matches!(synced, Err(SourceError::Unreachable(_))),
             "{synced:?}"
         );
+    }
+
+    /// Battery clause 5 from this adapter's side: an op the descriptor does not
+    /// declare is refused **by name**, so a descriptor that drifted from its
+    /// dispatch is diagnosable rather than merely broken.
+    #[tokio::test]
+    async fn an_op_this_adapter_does_not_declare_is_refused_by_name() {
+        let source = built(instance(json!({})));
+        for (op, name) in [
+            (
+                WriteOp::Comment {
+                    entity: "teamcity-eu:build:1187".to_owned(),
+                    body: "b".to_owned(),
+                },
+                "comment",
+            ),
+            (
+                WriteOp::Transition {
+                    entity: "teamcity-eu:build:1187".to_owned(),
+                    status: "Done".to_owned(),
+                },
+                "transition",
+            ),
+            (
+                WriteOp::Approve {
+                    entity: "teamcity-eu:build:1187".to_owned(),
+                    body: String::new(),
+                },
+                "approve",
+            ),
+        ] {
+            let refused = source.write(op).await;
+            let Err(SourceError::Protocol { message, .. }) = &refused else {
+                panic!("{name} must be refused with Protocol, got {refused:?}");
+            };
+            assert!(message.contains(name), "{message}");
+        }
+    }
+
+    /// The two key forms exist so a build and a configuration cannot be
+    /// confused (`map::build_key` / `map::build_config_key`), and the write
+    /// path is where confusing them would cost something: a trigger sent
+    /// `1187` as a configuration id starts whatever is called that, and a
+    /// re-run sent a configuration id has no build to read.
+    #[tokio::test]
+    async fn an_id_of_the_wrong_kind_is_refused_before_a_request_is_made() {
+        let source = built(instance(json!({})));
+        let refused = source
+            .write(WriteOp::TriggerBuild {
+                entity: "teamcity-eu:build:1187".to_owned(),
+            })
+            .await;
+        let Err(SourceError::Protocol { message, .. }) = &refused else {
+            panic!("a build handed to a trigger must be refused, got {refused:?}");
+        };
+        assert!(message.contains("not a build configuration"), "{message}");
+
+        let refused = source
+            .write(WriteOp::RerunBuild {
+                entity: "teamcity-eu:buildType:Payout_Build".to_owned(),
+            })
+            .await;
+        let Err(SourceError::Protocol { message, .. }) = &refused else {
+            panic!("a configuration handed to a re-run must be refused, got {refused:?}");
+        };
+        assert!(message.contains("is not a build"), "{message}");
+    }
+
+    /// A write aimed at another instance is refused rather than performed
+    /// here: `buildType:Payout_Build` is a plausible id on every TeamCity, so
+    /// believing the routing is how a build starts on the wrong server.
+    #[tokio::test]
+    async fn a_write_for_another_source_is_refused_rather_than_performed_here() {
+        let source = built(instance(json!({})));
+        let refused = source
+            .write(WriteOp::TriggerBuild {
+                entity: "teamcity-us:buildType:Payout_Build".to_owned(),
+            })
+            .await;
+        let Err(SourceError::Protocol { message, .. }) = &refused else {
+            panic!("a foreign namespace must be refused, got {refused:?}");
+        };
+        assert!(message.contains("teamcity-us"), "{message}");
     }
 }

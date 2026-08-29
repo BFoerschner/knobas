@@ -51,10 +51,46 @@ impl crate::Sink for FailingSink {
 /// `WriteOp::identifier` compiling, and adding it there is the moment to add
 /// its probe value here.
 fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
-    [crate::WriteOp::Comment {
-        entity: format!("{src_id}:contract-battery"),
-        body: "contract battery probe".into(),
-    }]
+    // Every target is namespaced to the source under test and named after this
+    // battery, so an adapter that (wrongly) attempted one would 404 rather than
+    // touch anything real.
+    let target = format!("{src_id}:contract-battery");
+    [
+        crate::WriteOp::Comment {
+            entity: target.clone(),
+            body: "contract battery probe".into(),
+        },
+        crate::WriteOp::Transition {
+            entity: target.clone(),
+            status: "contract-battery".into(),
+        },
+        crate::WriteOp::CreateTicket {
+            entity: target.clone(),
+            title: "contract battery probe".into(),
+            body: "contract battery probe".into(),
+            ticket_type: "contract-battery".into(),
+        },
+        crate::WriteOp::CreateBranch {
+            entity: target.clone(),
+            name: "contract-battery".into(),
+            from_ref: "contract-battery".into(),
+        },
+        crate::WriteOp::CreatePullRequest {
+            entity: target.clone(),
+            title: "contract battery probe".into(),
+            body: "contract battery probe".into(),
+            head: "contract-battery".into(),
+            base: "contract-battery".into(),
+        },
+        crate::WriteOp::Approve {
+            entity: target.clone(),
+            body: "contract battery probe".into(),
+        },
+        crate::WriteOp::TriggerBuild {
+            entity: target.clone(),
+        },
+        crate::WriteOp::RerunBuild { entity: target },
+    ]
     .into_iter()
     .map(|op| (op.identifier(), op))
     .collect()
@@ -447,8 +483,17 @@ mod tests {
         }
 
         async fn write(&self, op: WriteOp) -> Result<(), SourceError> {
-            if self.behavior == Behavior::DeclaresAWriteOp {
+            if self.behavior == Behavior::DeclaresAWriteOp
+                && self
+                    .descriptor()
+                    .write_ops
+                    .iter()
+                    .any(|w| w == op.identifier())
+            {
                 // A real adapter would post a comment to a live system here.
+                // Only for the op this adapter *declares*: the battery probes
+                // every op it knows, and refusing the undeclared ones is what
+                // this adapter is otherwise required to do.
                 unreachable!("battery must not perform a write the descriptor declares");
             }
             if self.behavior == Behavior::AcceptsUndeclaredWrite {

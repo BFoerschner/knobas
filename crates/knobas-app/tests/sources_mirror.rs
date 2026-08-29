@@ -429,13 +429,54 @@ fn the_write_queue_unions_match_the_rust_enums() {
 /// before it can fail it.
 #[test]
 fn every_write_op_variant_is_declared_in_the_mirror() {
-    let probes = [knobas_source::WriteOp::Comment {
-        entity: "jira:PAY-231".to_owned(),
-        body: "probe".to_owned(),
-    }];
+    let probes = [
+        knobas_source::WriteOp::Comment {
+            entity: "jira:PAY-231".to_owned(),
+            body: "probe".to_owned(),
+        },
+        knobas_source::WriteOp::Transition {
+            entity: "jira:PAY-231".to_owned(),
+            status: "In Progress".to_owned(),
+        },
+        knobas_source::WriteOp::CreateTicket {
+            entity: "jira:PAY".to_owned(),
+            title: "probe".to_owned(),
+            body: "probe".to_owned(),
+            ticket_type: "Task".to_owned(),
+        },
+        knobas_source::WriteOp::CreateBranch {
+            entity: "gitea:tidewater/payout-service".to_owned(),
+            name: "probe".to_owned(),
+            from_ref: "main".to_owned(),
+        },
+        knobas_source::WriteOp::CreatePullRequest {
+            entity: "gitea:tidewater/payout-service".to_owned(),
+            title: "probe".to_owned(),
+            body: "probe".to_owned(),
+            head: "probe".to_owned(),
+            base: "main".to_owned(),
+        },
+        knobas_source::WriteOp::Approve {
+            entity: "gitea:tidewater/payout-service#142".to_owned(),
+            body: String::new(),
+        },
+        knobas_source::WriteOp::TriggerBuild {
+            entity: "teamcity:buildType:Payout_Build".to_owned(),
+        },
+        knobas_source::WriteOp::RerunBuild {
+            entity: "teamcity:build:1187".to_owned(),
+        },
+    ];
     for op in &probes {
         let tag = match op {
             knobas_source::WriteOp::Comment { .. } => "Comment",
+            knobas_source::WriteOp::Transition { .. } => "Transition",
+            knobas_source::WriteOp::CreateTicket { .. } => "CreateTicket",
+            knobas_source::WriteOp::CreateBranch { .. } => "CreateBranch",
+            knobas_source::WriteOp::CreatePullRequest { .. } => "CreatePullRequest",
+            knobas_source::WriteOp::Approve { .. } => "Approve",
+            knobas_source::WriteOp::TriggerBuild { .. } => "TriggerBuild",
+            knobas_source::WriteOp::RerunBuild { .. } => "RerunBuild",
         };
         let json = serde_json::to_value(op).unwrap();
         assert!(

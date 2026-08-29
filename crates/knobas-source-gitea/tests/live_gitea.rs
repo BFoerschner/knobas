@@ -1052,3 +1052,216 @@ async fn the_discussion_endpoint_does_not_page() {
         "the first comment is in body_text more than once"
     );
 }
+
+// -- M2's write-back set, against the real server (issue #43) -----------------
+//
+// The fake in `tests/write.rs` encodes a reading of four endpoints -- the field
+// names Gitea's `CreateBranchRepoOption`, `CreatePullRequestOption`,
+// `CreateIssueCommentOption` and `CreatePullReviewOptions` declare, and the
+// fact that `event: "APPROVED"` is what separates an approval from a pending
+// review. **If this suite and that fake disagree, the fake is wrong.**
+//
+// One test rather than four: the four ops compose -- there is nothing to open a
+// pull request from until a branch exists, and nothing to approve until a pull
+// request does -- and splitting them would mean three tests each re-creating
+// the others' preconditions through Gitea's own API, which is precisely the
+// path this is supposed to be certifying.
+
+/// Stories 5-8: the adapter creates a branch, opens a pull request on it,
+/// replies to it and approves it -- and the **server** says so afterwards.
+///
+/// Every assertion is read back through Gitea's own API, not through the
+/// adapter: what is being certified is that the far end received a request it
+/// understood, and an assertion made through the same code that sent it would
+/// certify nothing.
+///
+/// The branch and the pull request opened from it are removed again when this
+/// returns, whether it passes or panics ([`live_env::Litter`]).
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn the_adapter_creates_a_branch_a_pull_request_a_comment_and_an_approval() {
+    let env = env();
+    let mut litter = Litter::new(&env).await;
+    let source = env.one_repo();
+    let repo_id = format!("gitea:{}", env.full_name());
+
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let branch = format!("knobas-write-{stamp}");
+
+    // Recorded before the create, so a branch made by a request whose answer
+    // was lost is still swept.
+    litter.will_create(&branch);
+    source
+        .write(knobas_source::WriteOp::CreateBranch {
+            entity: repo_id.clone(),
+            name: branch.clone(),
+            from_ref: "main".to_owned(),
+        })
+        .await
+        .expect("the adapter creates a branch");
+    assert!(
+        litter.branch_names().await.contains(&branch),
+        "the branch the adapter created is not in the server's own listing"
+    );
+
+    source
+        .write(knobas_source::WriteOp::CreatePullRequest {
+            entity: repo_id.clone(),
+            title: format!("knobas write-back check {stamp}"),
+            body: "Opened by the knobas Gitea adapter's write path.".to_owned(),
+            head: branch.clone(),
+            base: "main".to_owned(),
+        })
+        .await
+        .expect("the adapter opens a pull request");
+    let number = litter
+        .pulls()
+        .await
+        .into_iter()
+        .find(|(_, head)| head == &branch)
+        .map(|(number, _)| number)
+        .expect("the pull request the adapter opened is not in the server's own listing");
+
+    let pull_id = format!("gitea:{}#{number}", env.full_name());
+    let note = format!("a reply from the knobas write path, {stamp}");
+    source
+        .write(knobas_source::WriteOp::Comment {
+            entity: pull_id.clone(),
+            body: note.clone(),
+        })
+        .await
+        .expect("the adapter comments");
+    assert!(
+        litter.comments(number).await.contains(&note),
+        "the comment the adapter posted is not on the pull request's discussion -- Gitea keeps \
+         it on the issue of the same index, which is what `issues/{{index}}/comments` relies on"
+    );
+
+    // The approval needs a pull request **somebody else** opened: Gitea answers
+    // `approve your own pull is not allowed` with a 422, and everything above
+    // was authored by this suite's own token. So a second branch, and a pull
+    // request opened on it as one of the fixture's people.
+    let other_branch = format!("knobas-write-{stamp}-other");
+    litter.will_create(&other_branch);
+    source
+        .write(knobas_source::WriteOp::CreateBranch {
+            entity: repo_id,
+            name: other_branch.clone(),
+            from_ref: "main".to_owned(),
+        })
+        .await
+        .expect("the adapter creates the second branch");
+    let theirs = litter
+        .open_pull_as(
+            "jonas.becker",
+            &other_branch,
+            &format!("knobas write-back check {stamp}, opened by somebody else"),
+        )
+        .await;
+
+    source
+        .write(knobas_source::WriteOp::Approve {
+            entity: format!("gitea:{}#{theirs}", env.full_name()),
+            body: "approved by the knobas write path".to_owned(),
+        })
+        .await
+        .expect("the adapter approves");
+    let reviews = litter.reviews(theirs).await;
+    assert!(
+        reviews
+            .iter()
+            .any(|(state, body)| state == "APPROVED" && body == "approved by the knobas write path"),
+        "the server did not record an APPROVED review -- a `POST .../reviews` with no `event` \
+         files a PENDING one, which unblocks nobody: {reviews:?}"
+    );
+}
+
+/// The server's own rule, certified rather than assumed: **Gitea refuses an
+/// approval of your own pull request**, with a 422.
+///
+/// Recorded here because it is the reason the test above needs a second
+/// author, and because of what it means for the queue: 422 is not a fault that
+/// passes, so it arrives as a `Protocol` refusal that is **not retried** and
+/// carries Gitea's own sentence for the user to read. A knobas that retried it
+/// would ask forever.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn approving_your_own_pull_request_is_refused_by_the_server() {
+    let env = env();
+    let mut litter = Litter::new(&env).await;
+    let source = env.one_repo();
+    let repo_id = format!("gitea:{}", env.full_name());
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let branch = format!("knobas-write-own-{stamp}");
+
+    litter.will_create(&branch);
+    source
+        .write(knobas_source::WriteOp::CreateBranch {
+            entity: repo_id.clone(),
+            name: branch.clone(),
+            from_ref: "main".to_owned(),
+        })
+        .await
+        .expect("the adapter creates a branch");
+    source
+        .write(knobas_source::WriteOp::CreatePullRequest {
+            entity: repo_id,
+            title: format!("knobas self-approval check {stamp}"),
+            body: String::new(),
+            head: branch.clone(),
+            base: "main".to_owned(),
+        })
+        .await
+        .expect("the adapter opens a pull request");
+    let number = litter
+        .pulls()
+        .await
+        .into_iter()
+        .find(|(_, head)| head == &branch)
+        .map(|(number, _)| number)
+        .expect("the pull request the adapter opened");
+
+    let refused = source
+        .write(knobas_source::WriteOp::Approve {
+            entity: format!("gitea:{}#{number}", env.full_name()),
+            body: String::new(),
+        })
+        .await;
+    let Err(error) = &refused else {
+        panic!("Gitea allowed a self-approval; the suite above no longer needs a second author");
+    };
+    assert_eq!(error.status(), Some(422), "{error:?}");
+    assert!(
+        matches!(error, SourceError::Protocol { message: m, .. } if m.contains("approve your own")),
+        "the server's own sentence must reach the queue: {error:?}"
+    );
+}
+
+/// The other half of story 13, certified against the server that would
+/// otherwise have answered: an op this adapter does not declare is refused
+/// **before** a request is made.
+///
+/// Against the real container rather than the fake, because the claim is that
+/// nothing reached a server that was perfectly willing to answer.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn an_op_gitea_does_not_declare_never_reaches_the_real_server() {
+    let env = env();
+    let source = env.one_repo();
+    let refused = source
+        .write(knobas_source::WriteOp::Transition {
+            entity: format!("gitea:{}#1", env.full_name()),
+            status: "Done".to_owned(),
+        })
+        .await;
+    assert!(
+        matches!(refused, Err(SourceError::Protocol { message: ref m, .. }) if m.contains("transition")),
+        "{refused:?}"
+    );
+}
