@@ -20,7 +20,14 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../ipc";
-  import { backupNow, backupStatus, type BackupStatus } from "../ipc/backup";
+  import {
+    backupNow,
+    backupStatus,
+    setBackupSchedule,
+    type BackupSchedule,
+    type BackupStatus,
+  } from "../ipc/backup";
+  import Modal from "../shell/Modal.svelte";
   import { ago } from "../shell/time";
   import { push } from "../shell/toasts.svelte";
   import { formatBytes } from "../sources/diagnostics";
@@ -37,6 +44,15 @@
   let error = $state<string | null>(null);
   /** Whether an export is in flight — see `exportNow` for why it is here. */
   let exporting = $state(false);
+  /**
+   * The schedule the dialog is editing, or `null` while it is closed.
+   *
+   * A copy, not the live one: *Cancel* has to leave the section reading what
+   * is actually stored, and editing `status.schedule` in place would have
+   * already changed the sentence behind the dialog.
+   */
+  let editing = $state<BackupSchedule | null>(null);
+  let saving = $state(false);
 
   async function load() {
     try {
@@ -53,6 +69,58 @@
   $effect(() => {
     void load();
   });
+
+  /** Open the dialog on a copy of the schedule that is in force. */
+  function openSchedule() {
+    if (status) editing = { ...status.schedule };
+  }
+
+  /**
+   * A number field's value, never `NaN`.
+   *
+   * An `<input type="number">` a person has cleared reads as an empty string,
+   * which `Number()` makes `NaN` and `JSON.stringify` makes `null` — and the
+   * Rust `u32` on the other side refuses to decode that, so the save comes
+   * back as a rejection instead of a saved schedule. Clearing a field before
+   * typing into it is the ordinary way to use one, so this is the common path.
+   *
+   * Clamped to the same range `BackupSchedule::clamped` uses, and for its
+   * reason: `keep: 0` would delete the archive the next export had just
+   * written.
+   */
+  function bounded(value: string, min: number, max: number, fallback: number): number {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isNaN(parsed)) return fallback;
+    return Math.min(max, Math.max(min, parsed));
+  }
+
+  /**
+   * Store the edited schedule and redraw from the answer.
+   *
+   * `set_backup_schedule` returns the whole status, read back after the write,
+   * so the next-run line and the sentence can never disagree with the schedule
+   * that produced them. Redrawing from the *typed* values instead would show a
+   * schedule that is merely believed to be stored.
+   */
+  async function saveSchedule() {
+    if (!editing) return;
+    const next: BackupSchedule = {
+      enabled: editing.enabled,
+      hour: bounded(String(editing.hour), 0, 23, 3),
+      minute: bounded(String(editing.minute), 0, 59, 0),
+      keep: bounded(String(editing.keep), 1, 365, 7),
+    };
+    saving = true;
+    try {
+      status = await setBackupSchedule(next);
+      error = null;
+      editing = null;
+    } catch (cause) {
+      push({ text: `Could not save the schedule: ${ipcErrorMessage(cause)}`, tone: "err" });
+    } finally {
+      saving = false;
+    }
+  }
 
   /**
    * *Export now* — take a backup whatever the schedule says.
@@ -87,6 +155,9 @@
 <div class="tile-h">
   <span class="lab">Backup</span>
   <span class="acts">
+    {#if status}
+      <button class="btn sm" onclick={openSchedule}>Schedule…</button>
+    {/if}
     <button class="btn sm" disabled={exporting} onclick={() => void exportNow()}>
       {exporting ? "Exporting…" : "Export now"}
     </button>
@@ -121,6 +192,41 @@
   </div>
 {/if}
 
+{#if editing}
+  <Modal title="Nightly backup" center onclose={() => (editing = null)}>
+    {#snippet body()}
+      <label class="chk">
+        <input type="checkbox" bind:checked={editing!.enabled} />
+        Take a backup automatically
+      </label>
+      <div class="flds">
+        <span class="fld">
+          <label for="bk-hour">Hour</label>
+          <input id="bk-hour" type="number" min="0" max="23" bind:value={editing!.hour} />
+        </span>
+        <span class="fld">
+          <label for="bk-minute">Minute</label>
+          <input id="bk-minute" type="number" min="0" max="59" bind:value={editing!.minute} />
+        </span>
+        <span class="fld">
+          <label for="bk-keep">Keep</label>
+          <input id="bk-keep" type="number" min="1" max="365" bind:value={editing!.keep} />
+        </span>
+      </div>
+      <!--
+        The sentence, live, over the values being typed — so the boundary rule
+        is read at the moment the time is chosen rather than after saving it.
+      -->
+      <p class="note">{nightlySentence(editing!)}</p>
+      <p class="note">{retentionSentence(editing!.keep)}</p>
+    {/snippet}
+    {#snippet footer()}
+      <button class="btn" onclick={() => (editing = null)}>Cancel</button>
+      <button class="btn pri" disabled={saving} onclick={() => void saveSchedule()}>Save</button>
+    {/snippet}
+  </Modal>
+{/if}
+
 <style>
   .sec-b {
     padding: 12px;
@@ -142,5 +248,49 @@
 
   .fail {
     color: var(--fail);
+  }
+
+  .chk {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    font-size: 12px;
+  }
+
+  .chk input {
+    accent-color: var(--text);
+  }
+
+  .flds {
+    display: flex;
+    gap: 12px;
+    margin-top: 12px;
+  }
+
+  .fld {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .fld input {
+    width: 76px;
+    height: 24px;
+    padding: 0 6px;
+    border: 1px solid var(--hair2);
+    border-radius: 2px;
+    background: var(--bg);
+    color: var(--text);
+    font: 400 12px var(--mono);
+  }
+
+  .note {
+    margin-top: 12px;
+    max-width: 62ch;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--muted);
   }
 </style>

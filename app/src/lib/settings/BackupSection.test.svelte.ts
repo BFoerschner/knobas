@@ -260,3 +260,123 @@ test("the export button is not offered twice while one is running", async () => 
   expect(calls.now).toBe(1);
   expect(button("Export now"), "and it comes back when the export is done").toBeTruthy();
 });
+
+/** A number field in the schedule dialog, by the label that names it. */
+function field(label: string) {
+  const dlg = dialog()!;
+  const labelled = [...dlg.querySelectorAll("label")].find((l) =>
+    l.textContent?.trim().startsWith(label),
+  )!;
+  const id = labelled.getAttribute("for")!;
+  return dlg.querySelector<HTMLInputElement>(`#${id}`)!;
+}
+
+function type(input: HTMLInputElement, value: string) {
+  input.value = value;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+}
+
+test("Schedule… opens a dialog carrying the schedule that is in force", async () => {
+  status = statusOf({ schedule: schedule({ hour: 22, minute: 30, keep: 3 }) });
+  render();
+  await settle();
+
+  button("Schedule…")!.click();
+  flushSync();
+
+  expect(field("Hour").value).toBe("22");
+  expect(field("Minute").value).toBe("30");
+  expect(field("Keep").value).toBe("3");
+  expect(dialog()!.querySelector<HTMLInputElement>('input[type="checkbox"]')!.checked).toBe(true);
+  // Nothing is posted by opening it.
+  expect(calls.setSchedule).toEqual([]);
+});
+
+/**
+ * The section redraws from what `set_backup_schedule` *answered*, not from
+ * what was typed into the dialog: the command returns the whole status from
+ * the same read that stored the change, which is the only version of the
+ * schedule that is known to be on disk.
+ */
+test("saving posts the edited schedule and redraws the sentence from the answer", async () => {
+  render();
+  await settle();
+  expect(text()).toContain("after 03:00");
+
+  button("Schedule…")!.click();
+  flushSync();
+  type(field("Hour"), "22");
+  type(field("Minute"), "30");
+  type(field("Keep"), "3");
+  button("Save", dialog()!)!.click();
+  await settle();
+
+  expect(calls.setSchedule).toEqual([{ enabled: true, hour: 22, minute: 30, keep: 3 }]);
+  expect(dialog()).toBeNull();
+  expect(text()).toContain("after 22:30");
+  expect(text()).not.toContain("after 03:00");
+  expect(text()).toContain("3 archives");
+});
+
+test("cancelling the schedule dialog posts nothing and changes nothing", async () => {
+  render();
+  await settle();
+
+  button("Schedule…")!.click();
+  flushSync();
+  type(field("Hour"), "22");
+  button("Cancel", dialog()!)!.click();
+  await settle();
+
+  expect(calls.setSchedule).toEqual([]);
+  expect(text()).toContain("after 03:00");
+});
+
+/**
+ * Switching the nightly run off is the moment a reader most needs telling that
+ * *Export now* is untouched by it — `backup::export_now` never consults the
+ * schedule, and a section that only said "off" would read as "backups are off".
+ */
+test("turning the nightly export off says so, and says the manual export still works", async () => {
+  render();
+  await settle();
+
+  button("Schedule…")!.click();
+  flushSync();
+  dialog()!.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click();
+  flushSync();
+  button("Save", dialog()!)!.click();
+  await settle();
+
+  expect(calls.setSchedule).toEqual([{ enabled: false, hour: 3, minute: 0, keep: 7 }]);
+  expect(text()).toContain("The nightly export is off");
+  expect(text()).toContain("Export now still takes one");
+  // And the button it is talking about is still there.
+  expect(button("Export now")).toBeTruthy();
+});
+
+/**
+ * An emptied number field reads as `NaN`, and `JSON.stringify(NaN)` is `null`
+ * — which the Rust `u32` refuses to decode, so the schedule would come back as
+ * an `invalid` rejection rather than as a saved change. The field is a place a
+ * person clears before typing, so this is the ordinary path, not an edge.
+ */
+test("an emptied field is never posted as a broken schedule", async () => {
+  render();
+  await settle();
+
+  button("Schedule…")!.click();
+  flushSync();
+  type(field("Hour"), "");
+  type(field("Keep"), "");
+  button("Save", dialog()!)!.click();
+  await settle();
+
+  expect(calls.setSchedule).toHaveLength(1);
+  const posted = calls.setSchedule[0]!;
+  expect(Number.isInteger(posted.hour)).toBe(true);
+  expect(Number.isInteger(posted.keep)).toBe(true);
+  // `keep: 0` would delete the archive the next export just wrote.
+  expect(posted.keep).toBeGreaterThanOrEqual(1);
+});
