@@ -124,3 +124,33 @@ Comment links: [#91](https://github.com/BFoerschner/knobas/issues/91#issuecommen
 **If you disagree, the cost of reversing this is:** near zero — it is documentation and fixtures; no adapter, field, cursor, or schema change. Choosing option 2 later loses nothing done under option 1, and the fixtures it requires ("overwhelmingly null") are the ones option 2's tests would want anyway.
 
 Comment links: [#105](https://github.com/BFoerschner/knobas/issues/105#issuecomment-5460907220) · [#106](https://github.com/BFoerschner/knobas/issues/106#issuecomment-5460907457)
+
+---
+
+## The third batch, later the same day — #127 and #137, the two questions out of PR #126's merge-manager reviews
+
+**Appended under the same delegation.** Both came out of the #119/#120 merge (PR #126, `01cafa3`). One of them opened with a jurisdiction question — whether it was mine to rule at all — and the answer turned on which fork touches §10.8. Both rulings rest on code read today and quoted on the issues; the two merge-manager measurements #127 leaned on were verified in the code rather than taken on trust.
+
+## #127 — `delete_source` does not cancel the source's in-flight run
+
+**The fork:** four options; the issue leans option 3 (make the orphan harmless) because it may need no IPC change; options 1 and 2 change `delete_source` on the frozen surface.
+
+**Ruling:** option 3, settle-sweep shape — and it is mine, because this shape touches nothing frozen. `forget_source` carries the purge intent; when the one in-flight run settles, the scheduler re-applies the same purge CTE `crud::delete` uses (delete the source's `sync.item` rows, tombstone their entities). In-memory intent only — the sole writer is the run's own uncommitted transaction, which a process death rolls back server-side. `add_source` re-creating the id clears the pending intent (newest instruction wins), with the late-writes-into-a-namesake residual documented there. Recommended complement, not a substitute: a second config-row existence check at the bottom of `run_locked`, mirroring the top-of-run `NotConfigured` refusal, so the common case rolls back instead of writing-then-sweeping. ADR-0005 untouched by construction — the sweep never goes near `Watchers`. Options 1/2 explicitly not granted; the FK variant of option 3 refused twice over (migrations are frozen, and an FK cannot coexist with `purge_items: false` keeping the rows).
+
+**Reasoning:** both merge-manager measurements verified — the `runs` map mutates only in `trigger` and `forget_source`, and `run_locked` holds `pg_advisory_xact_lock(hashtext($1::text))` for the whole transaction — so exactly one writer can produce the orphan. Option 4 is refuted by reading: the run's only existence check is at the top of `run_locked`, before any network work, so under READ COMMITTED the window is nearly the run's whole duration; and the damage is worse than orphan rows, because the sink's upsert sets `deleted_at = excluded.deleted_at` and so resurrects the entities the purge just tombstoned — deleted items back in search, permanently, with no source left to ever correct them.
+
+**If you disagree, the cost of reversing this is:** small before implementation — one comment. After: the sweep and the intent plumbing revert mechanically (nothing frozen moved, which was the point), but reverting re-opens a user-visible defect, and choosing option 1 or 2 instead is not a reversal so much as an escalation — it needs your §10.8 ratified-exception entry either way, which is exactly why it was not chosen while a non-frozen shape sufficed.
+
+## #137 — the DONE panel's fallback still renders the run's count
+
+**The fork:** keep the fallback; say the corpus is unknown; retry before falling back. Product wording — the first sentence knobas says about a new source — plus a genuine contradiction between #120's "on any interleaving" criterion and the tested behaviour.
+
+**Ruling:** option 2. The criterion stands unamended; the behaviour moves. The `?? items` arm of the `mirrored` derivation goes; a corpus read that fails renders "knobas mirrored your items." with no number, under one enforceable constraint: no digit renders after the word "mirrored" that the panel cannot vouch for as a corpus count. Genuine zero still reads "0 items"; the demo path gets no exception; one optional immediate retry inside `readCorpus` is permitted, not required; the wizard timeout stays buried where ADR-0005 put it. The existing fallback test is rewritten, not deleted — its no-failure-panel half is still right.
+
+**Reasoning:** every authority points the same way. ADR-0005: "'mirrored N items' means the corpus … not a run's `Upserted` delta". CONTEXT.md forbids the exact word: under Upserted, "_Avoid_: synced, mirrored (both name the corpus)". And #120's criterion says "on any interleaving" — a `list_sources` that throws is an interleaving of the same round trip. The code's own defence of the fallback ("the only other number there is") is true and wrong: when the only other number is one the panel has reason to distrust, the honest rendering is no number, and the tri-state already knows how to render less than a count.
+
+**If you disagree, the cost of reversing this is:** near zero — one derived value, one sentence, one test, all frontend. If you want a different voice (an explicit "couldn't read the count", or a mandatory retry), that is a microcopy edit at any time; nothing structural hangs on it. The only thing worth guarding is the constraint itself — putting `Upserted` back after "mirrored" would re-litigate ADR-0005 through a fallback arm, which is how this issue happened.
+
+**Labels (I may not change them):** #127 keeps `ready-for-agent`; #137 `needs-triage` → `ready-for-agent`. Both are implementable now; nothing in this batch was escalated as needing you first, and the escalation triggers that would send either back are listed on the issues.
+
+Comment links: [#127](https://github.com/BFoerschner/knobas/issues/127#issuecomment-5461508014) · [#137](https://github.com/BFoerschner/knobas/issues/137#issuecomment-5461508235)
