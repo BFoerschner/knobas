@@ -114,7 +114,7 @@ async fn a_stored_context_scopes_the_page_and_its_total() {
         .await
         .unwrap();
 
-    let ctx = promote_context_inner(&pool, &ticket).await.unwrap();
+    let ctx = promote_context_inner(&pool, &ticket).await.unwrap().context;
 
     let listed = list_entities_inner(&pool, &scoped_to(&ctx.id), 50, 0)
         .await
@@ -160,7 +160,7 @@ async fn the_tray_scopes_by_the_contexts_membership() {
     let stranger = item(&pool, &source, "ticket", "EU-1").await;
     let stray = item(&pool, &source, "page", "EU/notes").await;
 
-    let ctx = promote_context_inner(&pool, &ticket).await.unwrap();
+    let ctx = promote_context_inner(&pool, &ticket).await.unwrap().context;
 
     // One proposal touching the member, one touching nobody in the context.
     for (from, to) in [(&ticket, &branch), (&stranger, &stray)] {
@@ -201,12 +201,16 @@ async fn promote_announces_once_however_often_it_is_pressed() {
 
     let first = promote_context_inner(&pool, &ticket).await.unwrap();
     let second = promote_context_inner(&pool, &ticket).await.unwrap();
-    assert_eq!(first.id, second.id);
+    assert_eq!(first.context.id, second.context.id);
+    assert!(
+        first.fresh && !second.fresh,
+        "freshness is the store's answer"
+    );
 
     let (lines,): (i64,) = sqlx::query_as(
         "select count(*) from knobas.activity where verb = 'promoted' and entity_id = $1",
     )
-    .bind(&first.id)
+    .bind(&first.context.id)
     .fetch_one(&pool)
     .await
     .unwrap();

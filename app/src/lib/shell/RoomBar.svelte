@@ -46,8 +46,10 @@
   {/if}
   {#if inboxHere !== null && inboxHere > 0}
     <!-- An address, not a handler: the inbox is a place (spec §2). -->
-    <a class="here mono" href="#/inbox" title="Inbox items about this context's members"
-      >{inboxHere} here</a
+    <a
+      class="here mono"
+      href="#/inbox/ctx/{context.id}"
+      title="Inbox items about this context's members">{inboxHere} here</a
     >
   {/if}
   <span class="own">

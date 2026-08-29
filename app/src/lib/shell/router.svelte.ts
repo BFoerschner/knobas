@@ -8,6 +8,7 @@
  * | `#/<kind>/<entity_id>` | the detail slide-over over the current room      |
  * | `#/entity/<entity_id>` | kind-agnostic alias, resolved via `get_entity`   |
  * | `#/inbox`              | the inbox — one actionable stream (#45)          |
+ * | `#/inbox/ctx/<id>`     | the inbox, pre-filtered to one context (#47)     |
  * | `#/sources`            | the sources view                                 |
  * | `#/settings`           | the settings view                                |
  * | `#/first-run`          | the §14a wizard                                  |
@@ -33,7 +34,11 @@ export type Route =
       /** `kind: null` is the `#/entity/<id>` alias: the kind is not known yet. */
       detail: { kind: string | null; entityId: string } | null;
     }
-  | { view: "inbox" }
+  | {
+      view: "inbox";
+      /** A stored context to pre-filter by (#47), or `null` for the whole stream. */
+      ctx: string | null;
+    }
   | { view: "sources" }
   | { view: "settings" }
   | { view: "first-run" }
@@ -114,7 +119,13 @@ export function parseHash(hash: string, ctx: string = DEFAULT_CTX): Route {
 
   if (head === "") return { view: "room", ctx, detail: null };
   if (head === "ctx") return { view: "room", ctx: tail || DEFAULT_CTX, detail: null };
-  if (head === "inbox") return { view: "inbox" };
+  if (head === "inbox") {
+    // `#/inbox/ctx/<id>` opens the view with the per-context filter already
+    // set (#47) — what the room's "N here" chip advertises has to be what it
+    // opens. The bare address stays the whole stream.
+    const ctx = segments[1] === "ctx" ? segments.slice(2).map(decode).join("/") : "";
+    return { view: "inbox", ctx: ctx === "" ? null : ctx };
+  }
   if (head === "sources") return { view: "sources" };
   if (head === "settings") return { view: "settings" };
   if (head === "first-run") return { view: "first-run" };
@@ -159,7 +170,7 @@ function encodeId(id: string): string {
 export function hashFor(route: Route): string {
   switch (route.view) {
     case "inbox":
-      return "#/inbox";
+      return route.ctx === null ? "#/inbox" : `#/inbox/ctx/${encodeId(route.ctx)}`;
     case "sources":
       return "#/sources";
     case "settings":

@@ -902,9 +902,10 @@ export function createContext(title: string): Promise<ContextRow> {
  * "any ticket can be promoted").
  *
  * Idempotent: promoting twice answers with the one context. Rejects with
- * `not_found` for an entity that never synced. Writes one activity line and
- * emits `EVENTS.contextsChanged` — on the first promotion only, because the
- * second mutated nothing.
+ * `not_found` for an entity that never synced, and with `invalid` for a
+ * context — a context about a context would union two working sets
+ * (ADR-0008). Writes one activity line and emits `EVENTS.contextsChanged` —
+ * on the first promotion only, because the second mutated nothing.
  */
 export function promoteContext(entityId: string): Promise<ContextRow> {
   return invoke<ContextRow>("promote_context", { entityId });

@@ -186,14 +186,30 @@ const ANCHOR_SHAPE: &str = "
       left join sync.live_item i on i.entity_id = e.id
      where e.id = $1";
 
+/// A promotion's answer: the context, and whether this call made it.
+///
+/// `fresh` is decided by **which statement ran**, never by comparing lists
+/// before and after -- a diff of two reads is a representation of the fact
+/// and is racy about it, while "my insert succeeded" is the fact itself. The
+/// caller that writes one activity line and one event per *mutation* is what
+/// the flag exists for.
+#[derive(Clone, Debug)]
+pub struct Promoted {
+    pub context: ContextRow,
+    /// True when this call inserted the context; false when it answered with
+    /// one that already existed.
+    pub fresh: bool,
+}
+
 /// Promote an entity to a context of its own (spec §7: "any ticket can be
 /// promoted").
 ///
 /// Idempotent: promoting an entity that already anchors an unarchived context
-/// answers with that context. The check-then-insert race is closed by
-/// `context_anchor_idx` (migration 0010), whose refusal classifies as
-/// [`CoreError::Duplicate`] and is answered by re-reading -- so two racing
-/// promotes both get the one context.
+/// answers with that context and `fresh: false`. The check-then-insert race is
+/// closed by `context_anchor_idx` (migration 0010), whose refusal classifies
+/// as [`CoreError::Duplicate`] and is answered by re-reading -- so two racing
+/// promotes both get the one context and exactly one of them hears
+/// `fresh: true`.
 ///
 /// `None` if `anchor` has no `knobas.entity` row: promoting something that
 /// never synced is a miss the caller turns into its own not-found, not a
@@ -201,8 +217,14 @@ const ANCHOR_SHAPE: &str = "
 ///
 /// # Errors
 ///
-/// [`CoreError::Db`] if a statement fails.
-pub async fn promote(pool: &PgPool, anchor: &EntityRef) -> Result<Option<ContextRow>, CoreError> {
+/// [`CoreError::AnchorIsAContext`] if `anchor` is itself a context: a context
+/// about a context would put a `ctx` node at the walk's root, which is the
+/// exact traversal [`MEMBER_IDS`]'s kind filter exists to refuse -- see the
+/// module note. [`CoreError::Db`] if a statement fails.
+pub async fn promote(pool: &PgPool, anchor: &EntityRef) -> Result<Option<Promoted>, CoreError> {
+    if anchor.namespace == "ctx" {
+        return Err(CoreError::AnchorIsAContext);
+    }
     let anchor_id = anchor.to_string();
     let Some((title, epic)) = sqlx::query_as::<_, (String, bool)>(ANCHOR_SHAPE)
         .bind(&anchor_id)
@@ -213,7 +235,10 @@ pub async fn promote(pool: &PgPool, anchor: &EntityRef) -> Result<Option<Context
     };
 
     if let Some(existing) = anchored(pool, &anchor_id).await? {
-        return Ok(Some(existing));
+        return Ok(Some(Promoted {
+            context: existing,
+            fresh: false,
+        }));
     }
 
     let kind = if epic {
@@ -230,10 +255,19 @@ pub async fn promote(pool: &PgPool, anchor: &EntityRef) -> Result<Option<Context
     };
 
     match insert(pool, &mint_id(), kind, &title, Some(&anchor_id)).await {
-        Ok(row) => Ok(Some(row)),
+        Ok(row) => Ok(Some(Promoted {
+            context: row,
+            fresh: true,
+        })),
         // The race the index exists for: someone promoted between the read
-        // and the write. The context they made is the answer.
-        Err(CoreError::Duplicate) => Ok(anchored(pool, &anchor_id).await?),
+        // and the write. The context they made is the answer; this call
+        // mutated nothing, so it is not fresh.
+        Err(CoreError::Duplicate) => {
+            Ok(anchored(pool, &anchor_id).await?.map(|context| Promoted {
+                context,
+                fresh: false,
+            }))
+        }
         Err(other) => Err(other),
     }
 }
@@ -301,7 +335,12 @@ const MEMBER_IDS: &str = "
          where (l.from_id = $1 or l.to_id = $1)
            and o.kind <> 'ctx'
         union
-        select $2::text where $2::text is not null
+        -- The anchor, checked like every other entrant: `promote` refuses a
+        -- ctx anchor, but a row written by import or by hand must not put a
+        -- context at the walk's root either.
+        select e.id
+          from knobas.entity e
+         where $2::text is not null and e.id = $2::text and e.kind <> 'ctx'
         union
         select i.entity_id
           from sync.live_item i
@@ -344,20 +383,34 @@ const MEMBER_IDS: &str = "
 ///
 /// [`CoreError::Db`] if the query fails.
 pub async fn member_ids(pool: &PgPool, ctx_id: &str) -> Result<Vec<String>, CoreError> {
-    let anchor = sqlx::query_as::<_, (Option<String>,)>(
-        "select anchor_id from knobas.context where id = $1",
+    let row = sqlx::query_as::<_, (Option<String>, ContextKind)>(
+        "select anchor_id, kind from knobas.context where id = $1",
     )
     .bind(ctx_id)
     .fetch_optional(pool)
-    .await?
-    .and_then(|(anchor_id,)| anchor_id)
-    .and_then(|id| EntityRef::parse(&id).ok());
+    .await?;
+    let (anchor, kind) = match row {
+        Some((anchor_id, kind)) => (
+            anchor_id.and_then(|id| EntityRef::parse(&id).ok()),
+            Some(kind),
+        ),
+        None => (None, None),
+    };
 
+    // The parent seed is the **epic's**: spec §7 gives the two promoted kinds
+    // different member rules ("epic: members = its tickets and everything
+    // linked" vs "ticket: focused"), and a plain story's sub-tasks name it in
+    // the same `fields.parent` -- seeding them into a ticket-kind context
+    // would make every promoted story an epic in all but name. A misdetected
+    // epic therefore loses its children (the issue-type read misses toward
+    // ticket), which is ADR-0007's direction: an absent member, never a wrong
+    // one.
+    let seeds_children = kind == Some(ContextKind::Epic);
     let (anchor_id, anchor_source, anchor_key) = match &anchor {
         Some(entity) => (
             Some(entity.to_string()),
-            Some(entity.namespace.clone()),
-            Some(entity.key.clone()),
+            seeds_children.then(|| entity.namespace.clone()),
+            seeds_children.then(|| entity.key.clone()),
         ),
         None => (None, None, None),
     };

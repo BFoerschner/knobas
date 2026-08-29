@@ -14,7 +14,7 @@
   import { createContext } from "../ipc/entity";
   import type { RoomContext } from "./contexts";
   import { contextById } from "./contexts";
-  import { contexts as stored } from "./contexts.svelte";
+  import { openFreshContext } from "./contexts.svelte";
   import type { Router } from "./router.svelte";
   import { push } from "./toasts.svelte";
 
@@ -29,23 +29,16 @@
   /** True while the create is in flight, so Enter cannot double-fire. */
   let creating = $state(false);
 
-  /**
-   * Mint the ad-hoc context and go there (#47).
-   *
-   * The store is reseeded directly as well as by `contexts:changed`, because
-   * the navigation lands *now* and a room whose tab has not arrived yet would
-   * flash the *All work* fallback.
-   */
+  /** Mint the ad-hoc context and go there (#47). */
   async function create() {
     const title = label.trim();
     if (title === "" || creating) return;
     creating = true;
     try {
       const row = await createContext(title);
-      await stored.reseed();
       naming = false;
       label = "";
-      router.go(`#/ctx/${row.id}`);
+      await openFreshContext(row, (hash) => router.go(hash));
     } catch (rejection) {
       push({ text: `Could not create the context: ${ipcErrorMessage(rejection)}`, tone: "err" });
     } finally {

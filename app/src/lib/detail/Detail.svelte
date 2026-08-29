@@ -10,8 +10,8 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage, isIpcError } from "../ipc";
-  import { getEntity, promoteContext, unlink, type EntityDetail, type LinkEntry } from "../ipc/entity";
-import { contexts as storedContexts } from "../shell/contexts.svelte";
+    import { getEntity, promoteContext, unlink, type EntityDetail, type LinkEntry } from "../ipc/entity";
+  import { openFreshContext } from "../shell/contexts.svelte";
   import Monogram from "../shell/Monogram.svelte";
   import { kindRegistry } from "../shell/kind-registry.svelte";
   import { hashFor } from "../shell/router.svelte";
@@ -216,17 +216,14 @@ import { contexts as storedContexts } from "../shell/contexts.svelte";
    * Promote this ticket to a context of its own and go there (spec §7, #47).
    *
    * Idempotent on the backend, so pressing it on an already-promoted ticket
-   * simply lands in the existing room. The store is reseeded directly as well
-   * as by `contexts:changed`, because the navigation lands *now* and a room
-   * whose tab has not arrived yet would flash the *All work* fallback.
+   * simply lands in the existing room.
    */
   async function promote() {
     if (promoting) return;
     promoting = true;
     try {
       const row = await promoteContext(entityId);
-      await storedContexts.reseed();
-      onnavigate(`#/ctx/${row.id}`);
+      await openFreshContext(row, onnavigate);
     } catch (rejection) {
       push({ text: `Could not promote: ${ipcErrorMessage(rejection)}`, tone: "err" });
     } finally {

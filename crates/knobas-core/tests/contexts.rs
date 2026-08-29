@@ -173,14 +173,18 @@ async fn promoting_a_ticket_yields_one_ticket_context_however_often() {
         .unwrap();
 
     let anchor = EntityRef::parse(&ticket).unwrap();
-    let ctx = context::promote(&pool, &anchor).await.unwrap().unwrap();
+    let promoted = context::promote(&pool, &anchor).await.unwrap().unwrap();
+    assert!(promoted.fresh, "the first promotion made the context");
+    let ctx = promoted.context;
     assert_eq!(ctx.kind, ContextKind::Ticket);
     assert_eq!(ctx.title, "Fix the payout retry");
     assert_eq!(ctx.anchor_id.as_deref(), Some(ticket.as_str()));
 
-    // Promoting again is the same context, not a second one.
+    // Promoting again is the same context, not a second one -- and the store
+    // says so, which is what lets the command log and announce exactly once.
     let again = context::promote(&pool, &anchor).await.unwrap().unwrap();
-    assert_eq!(again.id, ctx.id);
+    assert_eq!(again.context.id, ctx.id);
+    assert!(!again.fresh, "the second promotion mutated nothing");
     assert_eq!(context::list(&pool).await.unwrap().len(), 1);
 }
 
@@ -205,7 +209,8 @@ async fn promoting_an_epic_is_read_off_the_issue_type() {
     let ctx = context::promote(&pool, &EntityRef::parse(&epic).unwrap())
         .await
         .unwrap()
-        .unwrap();
+        .unwrap()
+        .context;
     assert_eq!(ctx.kind, ContextKind::Epic);
 }
 
@@ -230,7 +235,8 @@ async fn an_unrecognized_issue_type_shape_misses_toward_ticket() {
         let ctx = context::promote(&pool, &EntityRef::parse(&id).unwrap())
             .await
             .unwrap()
-            .unwrap();
+            .unwrap()
+            .context;
         assert_eq!(ctx.kind, ContextKind::Ticket, "payload of {key}");
     }
 }
@@ -271,7 +277,8 @@ async fn a_promoted_anchor_is_a_member_and_seeds_the_walk() {
     let ctx = context::promote(&pool, &EntityRef::parse(&ticket).unwrap())
         .await
         .unwrap()
-        .unwrap();
+        .unwrap()
+        .context;
 
     assert_eq!(members(&pool, &ctx.id).await, set(&[&ticket, &pr, &build]));
 }
@@ -351,7 +358,8 @@ async fn epic_children_seed_the_walk_through_the_recorded_parent() {
     let ctx = context::promote(&pool, &EntityRef::parse(&epic).unwrap())
         .await
         .unwrap()
-        .unwrap();
+        .unwrap()
+        .context;
 
     assert_eq!(
         members(&pool, &ctx.id).await,
@@ -388,7 +396,8 @@ async fn a_foreign_or_misshapen_parent_contributes_nothing() {
     let ctx = context::promote(&pool, &EntityRef::parse(&epic).unwrap())
         .await
         .unwrap()
-        .unwrap();
+        .unwrap()
+        .context;
 
     let got = members(&pool, &ctx.id).await;
     assert!(
@@ -436,7 +445,8 @@ async fn the_anchor_index_refuses_a_second_context_as_a_duplicate() {
     let ctx = context::promote(&pool, &EntityRef::parse(&ticket).unwrap())
         .await
         .unwrap()
-        .unwrap();
+        .unwrap()
+        .context;
 
     let refused = sqlx::query(
         "insert into knobas.context (id, kind, title, anchor_id)
@@ -450,5 +460,81 @@ async fn the_anchor_index_refuses_a_second_context_as_a_duplicate() {
         matches!(refused, Err(CoreError::Duplicate)),
         "a second context on {} must be refused, got {refused:?}",
         ctx.anchor_id.as_deref().unwrap_or("?")
+    );
+}
+
+/// The parent seed is the epic's alone: a plain story's sub-tasks name it in
+/// the same `fields.parent`, and seeding them would make every promoted story
+/// an epic in all but name -- spec §7 gives ticket-kind contexts the narrower
+/// "focused" rule. The sub-task still joins the ordinary way, by a link.
+#[tokio::test]
+async fn a_ticket_context_does_not_seed_its_subtasks() {
+    let pool = scratch().await;
+    let story = with_payload(&pool, "ticket", "PAY-1", serde_json::json!({})).await;
+    let subtask = with_payload(
+        &pool,
+        "ticket",
+        "PAY-2",
+        serde_json::json!({"fields": {"parent": {"key": "PAY-1"}}}),
+    )
+    .await;
+
+    let ctx = context::promote(&pool, &EntityRef::parse(&story).unwrap())
+        .await
+        .unwrap()
+        .unwrap()
+        .context;
+    assert_eq!(ctx.kind, ContextKind::Ticket);
+    assert_eq!(
+        members(&pool, &ctx.id).await,
+        set(&[&story]),
+        "{subtask} names {story} as parent, but a ticket context does not seed children"
+    );
+
+    // Linked, it is a member like anything else the anchor touches.
+    draw(&pool, &story, &subtask).await;
+    assert!(members(&pool, &ctx.id).await.contains(&subtask));
+}
+
+/// A context cannot be promoted: a context anchored on a context would put a
+/// `ctx` node at the walk's root and union the two working sets.
+#[tokio::test]
+async fn promoting_a_context_is_refused() {
+    let pool = scratch().await;
+    let ctx = context::create_adhoc(&pool, "payout retries")
+        .await
+        .unwrap();
+    let refused = context::promote(&pool, &EntityRef::parse(&ctx.id).unwrap()).await;
+    assert!(
+        matches!(refused, Err(CoreError::AnchorIsAContext)),
+        "got {refused:?}"
+    );
+    assert_eq!(context::list(&pool).await.unwrap().len(), 1);
+}
+
+/// ...and a context row that *arrives* anchored on a context -- an import, a
+/// hand write -- still cannot root the walk: the anchor enters the seed
+/// through the same kind filter as every other entrant.
+#[tokio::test]
+async fn a_hand_written_ctx_anchor_never_roots_the_walk() {
+    let pool = scratch().await;
+    let b = context::create_adhoc(&pool, "B").await.unwrap();
+    let bs_own = entity_only(&pool, SOURCE, "ticket", "PAY-1").await;
+    draw(&pool, &b.id, &bs_own).await;
+
+    // The row promote refuses to write, written anyway.
+    sqlx::query(
+        "insert into knobas.context (id, kind, title, anchor_id)
+         values ('ctx:handmade', 'ticket', 'about B', $1)",
+    )
+    .bind(&b.id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    assert!(
+        members(&pool, "ctx:handmade").await.is_empty(),
+        "neither {} nor its member {bs_own} may arrive through the anchor",
+        b.id
     );
 }

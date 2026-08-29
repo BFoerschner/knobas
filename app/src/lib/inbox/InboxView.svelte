@@ -15,6 +15,8 @@
   and the writes it queues — lands in the activity stream.
 -->
 <script lang="ts">
+  import { untrack } from "svelte";
+
   import { ipcErrorMessage } from "../ipc";
   import { contextMembers, submitWrite, type InboxEntry } from "../ipc/entity";
   import { contexts as storedContexts } from "../shell/contexts.svelte";
@@ -134,11 +136,20 @@
    * A *view* over the one stream, never a second read: membership comes from
    * `context_members` — the fixed one-hop rule, resolved server-side — and
    * the rows are the same rows the unfiltered inbox draws, so the two can
-   * never disagree about what needs you. `""` is the whole inbox. View-local
-   * state rather than an address: the filter is a lens over this view, and
-   * `#/inbox` stays the one inbox address.
+   * never disagree about what needs you. `""` is the whole inbox.
+   *
+   * The address can express it — `#/inbox/ctx/<id>` opens pre-filtered, which
+   * is what the room's "N here" chip promises — and the mount reads it off
+   * the route. After that the dropdown is a lens: changing it does not
+   * rewrite the address, because a filter being *tried* is not a place being
+   * *visited*, and `#/inbox` stays the one inbox address in every menu.
    */
-  let ctxFilter = $state("");
+  // `untrack` says the mount-time read is deliberate: the address seeds the
+  // filter once, and later route changes remount the view anyway (the shell
+  // draws it only while `view === "inbox"`).
+  let ctxFilter = $state(
+    untrack(() => (router.route.view === "inbox" ? (router.route.ctx ?? "") : "")),
+  );
   let members = $state<Set<string> | null>(null);
   let membersToken = 0;
   $effect(() => {

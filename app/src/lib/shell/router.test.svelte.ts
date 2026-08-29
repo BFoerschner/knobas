@@ -107,8 +107,19 @@ test("the start-work address reaches its own view, carrying the ticket", () => {
  * `mock:PAY-231` of kind `inbox`.
  */
 test("the inbox has an address, and `inbox` is still not a kind", () => {
-  expect(parseHash("#/inbox")).toEqual({ view: "inbox" });
-  expect(parseHash("#/inbox/mock:PAY-231")).toEqual({ view: "inbox" });
+  expect(parseHash("#/inbox")).toEqual({ view: "inbox", ctx: null });
+  expect(parseHash("#/inbox/mock:PAY-231")).toEqual({ view: "inbox", ctx: null });
+});
+
+/**
+ * `#/inbox/ctx/<id>` opens the inbox pre-filtered to one context (#47) — the
+ * address the room's "N here" chip hands out, so what it advertises is what
+ * it opens. A bare `ctx` tail is the whole stream, not a filter on nothing.
+ */
+test("the inbox address can carry a context filter", () => {
+  expect(parseHash("#/inbox/ctx/ctx:5b1c")).toEqual({ view: "inbox", ctx: "ctx:5b1c" });
+  expect(parseHash("#/inbox/ctx")).toEqual({ view: "inbox", ctx: null });
+  expect(parseHash("#/inbox/ctx/")).toEqual({ view: "inbox", ctx: null });
 });
 
 test("round-trips every address it produces", () => {
@@ -123,6 +134,7 @@ test("round-trips every address it produces", () => {
     "#/first-run",
     "#/start-work/mock:PAY-231",
     "#/inbox",
+    "#/inbox/ctx/ctx:5b1c",
   ]) {
     expect(hashFor(parseHash(hash))).toBe(hash);
   }

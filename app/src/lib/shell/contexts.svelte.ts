@@ -89,3 +89,19 @@ export function createContexts(ports?: ContextsPorts): Contexts {
 
 /** The one the window uses. Tests build their own with {@link createContexts}. */
 export const contexts = createContexts();
+
+/**
+ * Land in a context that was just made (#47) — the one navigation both
+ * makers share (the switcher's `+ new`, the detail's *Promote*).
+ *
+ * The store is reseeded directly as well as by `contexts:changed`, because
+ * the navigation lands *now* and a room whose tab has not arrived yet would
+ * flash the *All work* fallback.
+ */
+export async function openFreshContext(
+  row: ContextRow,
+  go: (hash: string) => void,
+): Promise<void> {
+  await contexts.reseed();
+  go(`#/ctx/${row.id}`);
+}

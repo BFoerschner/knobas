@@ -1778,21 +1778,23 @@ pub async fn create_context_inner(
 /// # Errors
 ///
 /// [`Invalid`](crate::IpcErrorCode::Invalid) if `entity_id` is not an entity
-/// id; [`NotFound`](crate::IpcErrorCode::NotFound) if nothing local carries it;
+/// id, or if it is itself a context;
+/// [`NotFound`](crate::IpcErrorCode::NotFound) if nothing local carries it;
 /// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
 pub async fn promote_context_inner(
     pool: &PgPool,
     entity_id: &str,
-) -> Result<knobas_core::context::ContextRow, IpcError> {
+) -> Result<knobas_core::context::Promoted, IpcError> {
     let anchor = EntityRef::parse(entity_id).map_err(IpcError::invalid)?;
-    let before = knobas_core::context::list(pool).await?;
-    let row = knobas_core::context::promote(pool, &anchor)
+    let promoted = knobas_core::context::promote(pool, &anchor)
         .await?
         .ok_or_else(|| IpcError::not_found(format!("{anchor} is not in the local index")))?;
-    if !before.iter().any(|existing| existing.id == row.id) {
-        record(pool, "promoted", &row).await?;
+    // One line per *mutation*: the store says which call inserted, so a
+    // re-promotion answers with the room and writes nothing.
+    if promoted.fresh {
+        record(pool, "promoted", &promoted.context).await?;
     }
-    Ok(row)
+    Ok(promoted)
 }
 
 /// Who is in this context, by the fixed rule (§16.11, ADR-0008).
@@ -1870,9 +1872,13 @@ pub async fn promote_context<R: tauri::Runtime>(
     entity_id: String,
 ) -> Result<knobas_core::context::ContextRow, IpcError> {
     let pool = lifecycle.pool()?;
-    let row = promote_context_inner(&pool, &entity_id).await?;
-    announce_context(&app, &row);
-    Ok(row)
+    let promoted = promote_context_inner(&pool, &entity_id).await?;
+    // Only a mutation is news: a re-promotion changed nothing the switcher
+    // could learn from re-listing.
+    if promoted.fresh {
+        announce_context(&app, &promoted.context);
+    }
+    Ok(promoted.context)
 }
 
 /// Put a changed context on `contexts:changed`.

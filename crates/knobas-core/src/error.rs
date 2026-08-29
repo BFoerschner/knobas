@@ -20,6 +20,14 @@ pub enum CoreError {
     #[error("no link with id {0}")]
     LinkNotFound(Uuid),
 
+    /// `context::promote` was asked to promote a context.
+    ///
+    /// Refused before any statement runs: a context anchored on a context
+    /// would put a `ctx` node at the membership walk's root and union the two
+    /// working sets -- the traversal ADR-0008's kind filter exists to refuse.
+    #[error("a context cannot be promoted to a context")]
+    AnchorIsAContext,
+
     /// A link was written with an endpoint that has no `knobas.entity` row.
     ///
     /// Produced by [`CoreError::from_link_write`] and by nothing else, so the

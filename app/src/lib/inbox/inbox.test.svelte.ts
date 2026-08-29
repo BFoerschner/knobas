@@ -93,7 +93,7 @@ function entry(over: Partial<InboxEntry["item"]> = {}, actions: string[] = []): 
 }
 
 const router = {
-  route: { view: "inbox" as const },
+  route: { view: "inbox" as const, ctx: null as string | null },
   ctx: "all",
   hash: "",
   go(hash: string) {
@@ -385,6 +385,40 @@ test("an action this build cannot draw is skipped rather than shown", () => {
     "approve",
     "comment",
   ]);
+});
+
+/** The chip's promise: `#/inbox/ctx/<id>` opens already filtered (#47). */
+test("a context deep link opens the inbox pre-filtered", async () => {
+  stream = [
+    entry(),
+    entry({
+      key: "mention:jira:PAY-9",
+      category: "mention",
+      source_id: "jira",
+      entity_id: "jira:PAY-9",
+      kind: "ticket",
+      title: "Somewhere else entirely",
+    }),
+  ];
+  count = 2;
+
+  const { contexts } = await import("../shell/contexts.svelte");
+  const stopContexts = contexts.start();
+  await contexts.reseed();
+
+  const inbox = createInbox();
+  await inbox.refresh();
+  router.route = { view: "inbox", ctx: "ctx:pay" };
+  const view = await draw(inbox);
+  await vi.waitFor(() => {
+    flushSync();
+    expect(view.text()).not.toContain("Somewhere else entirely");
+  });
+  expect(view.text()).toContain("Add payout CSV export");
+
+  router.route = { view: "inbox", ctx: null };
+  view.stop();
+  stopContexts();
 });
 
 /**
