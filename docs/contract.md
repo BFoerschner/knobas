@@ -1174,8 +1174,11 @@ which is the other half of why #131 read it as a listing.
   ignored, not merely defaulted. (c) The control that makes this a fact about the endpoint and
   not about the instance: the repository-wide `issueGetRepoComments`
   (`/repos/{owner}/{repo}/issues/comments`) **declares both and honours both** — same server,
-  same minute, `limit=2` answered two records of 104. So the "page sizes: … Gitea 50" of §4.1
-  is about the four *listing* walks and has never applied here.
+  same minute. Measured twice: `limit=2` answered two records of 104 against a volume carrying
+  the live suite's accumulated residue, and `limit=1` answered one record of 2 against a freshly
+  pruned one, with `page=1` and `page=2` returning **different** comment ids. Re-measure it on
+  whatever the volume holds; the collection size is the part that moves. So the "page sizes: …
+  Gitea 50" of §4.1 is about the four *listing* walks and has never applied here.
 - **§4.2 paging it would have been the worse bug.** `page` being ignored, a walk ending on an
   empty page never meets one: it re-reads the same discussion until `MAX_*_PAGES` runs out and
   folds every comment into `body_text` once per request. That was built and measured before it
@@ -1193,6 +1196,15 @@ which is the other half of why #131 read it as a listing.
   (§9's write-queue entry). The failure names the header, both counts and `include_pr_comments`
   as the lever. Same treatment, same reasoning as #114's refusal of a `/app/rest/buildTypes`
   listing that reports a further page: refuse now, page when a server that needs one is met.
+- **The header cannot fire the check against a healthy Gitea, because it is counted through the
+  same filter as the body.** This is what makes ending the run affordable, so it is measured
+  rather than argued. Two probes on 1.27.2, 2026-08-29: `?since=2099-01-01T00:00:00Z` answers an
+  empty body **and** `X-Total-Count: 0` — the count follows the filter rather than the
+  collection; and the seeded `#142`, which carries one review with a body, answers a body of 2
+  under a header of 2 while `PullRequest.comments` reads 3. So a review comment inflates the
+  field the adapter does **not** compare against and leaves the header alone. What is left for
+  the check to catch is the case it exists for — a Gitea that starts paging this endpoint — plus
+  a proxy that rewrote one of the two and not the other, which is a proxy worth stopping for.
 - **A server that sends no readable `X-Total-Count` is believed**, which is the one place the
   claim above is still an assumption. `client::issue_comments` carries `None` — an absent header,
   an unparseable one, a proxy that strips it — and `sync::fetch_comments` then trusts what
@@ -1202,8 +1214,10 @@ which is the other half of why #131 read it as a listing.
   `client::wire_tests::a_discussion_with_no_count_header_is_no_count_at_all`.
 - **`PullRequest.comments` is not the completeness signal**, and a fix built on it would have
   been wrong: on the seeded `#142` it reads **3** where the endpoint sends **2** and
-  `X-Total-Count` reads 2. It counts something this endpoint does not return, and stays what it
-  has always been — the zero-check that saves a request.
+  `X-Total-Count` reads 2. The third is a *review* — `#142` carries `review_comments: 1` and its
+  timeline reads `comment` 2, `review` 1 — so the field counts a kind of remark this endpoint
+  does not return. It stays what it has always been: the zero-check that saves a request, sound
+  because a field that over-counts cannot read 0 while a discussion exists.
 - **Request cost is unchanged**: one per emitted pull request that has comments, none for one
   that has none, however long the discussion. `crates/knobas-source-gitea/src/lib.rs`'s "what one
   run costs" now also states the empty page each of the four *listing* walks has spent since #81,
