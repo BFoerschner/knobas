@@ -261,6 +261,33 @@ impl Fake {
         fake
     }
 
+    /// A server that **ignores the `limit` the adapter asked for** and answers
+    /// at most `cap` records per page.
+    ///
+    /// Every other constructor here serves exactly what it was asked for, so on
+    /// them a page shorter than [`PAGE`] can only mean the collection ran out.
+    /// That is the one reading issue #81 is about, and a fake that cannot
+    /// express the other one cannot show the bug: an admin-lowered
+    /// `MAX_RESPONSE_ITEMS`, a per-endpoint maximum, or a partial page under
+    /// load all answer short with more still to come. Gitea's 50 is a
+    /// **default**, and knobas is aimed at self-hosted instances where defaults
+    /// get changed.
+    ///
+    /// With `cap` below [`PAGE`] every page of a non-empty listing is short, so
+    /// a walk that reads short as last mirrors `cap` records per listing and
+    /// reports success over everything after them.
+    pub async fn start_capped(state: &State, cap: usize) -> Self {
+        assert!(
+            0 < cap && cap < PAGE,
+            "a cap only says anything below the page size the adapter asks for"
+        );
+        let fake = Self {
+            server: MockServer::start().await,
+        };
+        fake.mount(state, cap).await;
+        fake
+    }
+
     /// An instance that serves its **public** repositories to anyone and only
     /// guards `/user`, which is what a Gitea with public repos actually does.
     ///
@@ -451,15 +478,31 @@ impl Fake {
         // never a 401, which would read as a credential fault. `/user` and
         // `/version` are excluded: they are not lists, and a `[]` there would
         // let a run past the identity preflight with no account at all.
+        //
+        // `/repos/search` is excluded too, and answered just below, because its
+        // empty page is **not** `[]`: it is the `{ok,data}` envelope with an
+        // empty `data`, which is what the real server returns for a page past
+        // the end. A `[]` there is not a repository listing at all and reads as
+        // an unreadable body, not as an end -- and nothing noticed, because no
+        // walk asked for the page past the last one until they started paging
+        // until *empty* rather than until short (issue #81).
         authed(
             Mock::given(method("GET")).and(|request: &wiremock::Request| {
-                !matches!(request.url.path(), "/api/v1/user" | "/api/v1/version")
+                !matches!(
+                    request.url.path(),
+                    "/api/v1/user" | "/api/v1/version" | "/api/v1/repos/search"
+                )
             }),
         )
         .respond_with(ok(json!([])))
         .with_priority(EMPTY_PAGE_PRIORITY)
         .mount(&self.server)
         .await;
+        authed(Mock::given(method("GET")).and(path("/api/v1/repos/search")))
+            .respond_with(ok(json!({ "ok": true, "data": [] })))
+            .with_priority(EMPTY_PAGE_PRIORITY)
+            .mount(&self.server)
+            .await;
         // Lowest priority: no token, or the wrong one. This is what Gitea
         // answers an invalid token with, and what the battery's Unauthorized
         // case relies on.
