@@ -275,47 +275,293 @@ async fn a_timeout_is_unreachable() {
     jira.assert_no_violations();
 }
 
-/// Exit criterion: `write_ops` empty, and every write refused.
+// -- M2's write-back set (issue #43) ----------------------------------------
+//
+// Every one of these asserts what the *far end received* -- the fixture after
+// the write -- rather than what the adapter built. `assert_no_violations()` is
+// what proves the request was one the WADL declares: a path, verb or query
+// parameter the contract does not have is recorded rather than answered.
+
+/// Story 3: replying to a ticket puts the reply on the ticket.
 ///
-/// mockd *implements* `POST /rest/api/2/issue/{key}/comment` for M2, so a write
-/// that leaked out would be accepted, not recorded as a violation. The check
-/// that the refusal is real is therefore the fixture itself: PAY-231 must still
-/// carry exactly the two comments it started with.
+/// The assertion is the comment's **text and author** in mockd's own state, not
+/// a 201: a request that reached the right path with an empty body would also
+/// be a 201 from a server less strict than this one.
 #[tokio::test]
-async fn the_adapter_is_read_only() {
+async fn a_comment_reaches_the_ticket() {
     let jira = spawn_mock_jira().await;
     let source = source(&jira.base_url(), serde_json::json!({}));
-    let d = source.descriptor();
-    assert!(d.write_ops.is_empty());
-    assert!(d.capabilities.is_empty());
+    let before = jira.state().issue("PAY-231").expect("in the fixture");
 
-    let before = jira
-        .state()
-        .issue("PAY-231")
-        .expect("PAY-231 is in the fixture")
-        .comments
-        .len();
-    let refused = source
+    source
         .write(WriteOp::Comment {
             entity: "jira:PAY-231".to_owned(),
-            body: "M2, not M1".to_owned(),
+            body: "picking this up now".to_owned(),
+        })
+        .await
+        .expect("a declared op is performed");
+
+    let after = jira.state().issue("PAY-231").expect("in the fixture");
+    assert_eq!(after.comments.len(), before.comments.len() + 1);
+    let posted = after.comments.last().expect("the comment just added");
+    assert_eq!(posted.body, "picking this up now");
+    assert_eq!(
+        posted.author, "mara.lindqvist",
+        "story 17: the source attributes the write to the credential's own account"
+    );
+    jira.assert_no_violations();
+}
+
+/// Story 1: a ticket moves, and the mirror's source of truth says so.
+///
+/// PAY-231 is `In Progress`, whose workflow offers `In Review`.
+#[tokio::test]
+async fn a_transition_moves_the_ticket() {
+    let jira = spawn_mock_jira().await;
+    let source = source(&jira.base_url(), serde_json::json!({}));
+    assert_eq!(
+        jira.state().issue("PAY-231").expect("in the fixture").status,
+        "In Progress"
+    );
+
+    source
+        .write(WriteOp::Transition {
+            entity: "jira:PAY-231".to_owned(),
+            status: "In Review".to_owned(),
+        })
+        .await
+        .expect("a status the workflow offers");
+
+    assert_eq!(
+        jira.state().issue("PAY-231").expect("in the fixture").status,
+        "In Review"
+    );
+    jira.assert_no_violations();
+}
+
+/// Story 2, from the other side: the workflow is **read**, and a status it does
+/// not offer is refused by name with what it does.
+///
+/// PAY-231 is `In Progress`, from which this workflow reaches `In Review` and
+/// `To Do` but not `Done`. An adapter that guessed a transition id, or that
+/// posted the status name as if it were one, would move the ticket somewhere
+/// or fail with the server's words instead of its own -- so the assertion is
+/// on the message *and* on the ticket not having moved.
+#[tokio::test]
+async fn a_status_the_workflow_does_not_offer_is_refused_by_name() {
+    let jira = spawn_mock_jira().await;
+    let source = source(&jira.base_url(), serde_json::json!({}));
+
+    let refused = source
+        .write(WriteOp::Transition {
+            entity: "jira:PAY-231".to_owned(),
+            status: "Done".to_owned(),
+        })
+        .await;
+
+    let Err(SourceError::Protocol { message, .. }) = &refused else {
+        panic!("an unreachable status must be refused, got {refused:?}");
+    };
+    assert!(message.contains("Done"), "{message}");
+    assert!(
+        message.contains("In Review"),
+        "the refusal must say what the workflow does offer: {message}"
+    );
+    assert_eq!(
+        jira.state().issue("PAY-231").expect("in the fixture").status,
+        "In Progress",
+        "a refused transition must not have moved anything"
+    );
+    jira.assert_no_violations();
+}
+
+/// The status the user picked comes back through a payload a person may have
+/// typed, so the match is trimmed and case-insensitive rather than byte-equal.
+#[tokio::test]
+async fn a_status_matches_however_the_user_spelled_it() {
+    let jira = spawn_mock_jira().await;
+    let source = source(&jira.base_url(), serde_json::json!({}));
+    source
+        .write(WriteOp::Transition {
+            entity: "jira:PAY-231".to_owned(),
+            status: "  in review ".to_owned(),
+        })
+        .await
+        .expect("the same status, spelled by a human");
+    assert_eq!(
+        jira.state().issue("PAY-231").expect("in the fixture").status,
+        "In Review"
+    );
+    jira.assert_no_violations();
+}
+
+/// Story 4: capturing work is one action, and the ticket exists afterwards.
+///
+/// The target is the **project** (`jira:PAY`), a container knobas does not
+/// mirror -- see `knobas_core::write_queue::project`.
+#[tokio::test]
+async fn a_create_files_a_new_ticket_in_the_project() {
+    let jira = spawn_mock_jira().await;
+    let source = source(&jira.base_url(), serde_json::json!({}));
+    let before = jira.state().issues().len();
+
+    source
+        .write(WriteOp::CreateTicket {
+            entity: "jira:PAY".to_owned(),
+            title: "SEPA retries need a dead-letter queue".to_owned(),
+            body: "the batch job times out and the payouts are lost".to_owned(),
+            ticket_type: "Task".to_owned(),
+        })
+        .await
+        .expect("a create in a project the fixture has");
+
+    let issues = jira.state().issues();
+    assert_eq!(issues.len(), before + 1);
+    let created = issues.last().expect("the ticket just created");
+    assert_eq!(created.project, "PAY");
+    assert_eq!(created.summary, "SEPA retries need a dead-letter queue");
+    assert_eq!(
+        created.description.as_deref(),
+        Some("the batch job times out and the payouts are lost"),
+        "a create that dropped the description would be reported as a success"
+    );
+    assert_eq!(created.issue_type, "Task");
+    assert_eq!(created.reporter, "mara.lindqvist", "story 17: attributed to me");
+    jira.assert_no_violations();
+}
+
+/// The three fields Jira requires all reach it: dropping any one is a 400,
+/// which the queue reads as a **refusal** and does not retry. Asserted one at a
+/// time against the server's own validation, because a test that only checked
+/// the path would pass for a body that carried none of them.
+#[tokio::test]
+async fn a_create_missing_what_jira_requires_is_refused_by_the_server() {
+    let jira = spawn_mock_jira().await;
+    let source = source(&jira.base_url(), serde_json::json!({}));
+    let before = jira.state().issues().len();
+
+    for (entity, ticket_type, why) in [
+        ("jira:NOPE", "Task", "a project the fixture does not have"),
+        ("jira:PAY", "", "no issue type"),
+    ] {
+        let refused = source
+            .write(WriteOp::CreateTicket {
+                entity: entity.to_owned(),
+                title: "a title".to_owned(),
+                body: String::new(),
+                ticket_type: ticket_type.to_owned(),
+            })
+            .await;
+        assert!(
+            matches!(refused, Err(SourceError::Protocol { status: Some(400), .. })),
+            "{why}: {refused:?}"
+        );
+    }
+    assert_eq!(
+        jira.state().issues().len(),
+        before,
+        "nothing was created by a refused create"
+    );
+    jira.assert_no_violations();
+}
+
+/// A create with no description omits the field rather than sending `""`: a
+/// Jira whose create screen does not carry description rejects the whole
+/// request for naming it.
+#[tokio::test]
+async fn a_create_with_no_body_files_a_ticket_with_no_description() {
+    let jira = spawn_mock_jira().await;
+    let source = source(&jira.base_url(), serde_json::json!({}));
+    source
+        .write(WriteOp::CreateTicket {
+            entity: "jira:OPS".to_owned(),
+            title: "rotate the staging PAT".to_owned(),
+            body: "   ".to_owned(),
+            ticket_type: "Task".to_owned(),
+        })
+        .await
+        .expect("a create with nothing in the body");
+    let created = jira
+        .state()
+        .issues()
+        .into_iter()
+        .next_back()
+        .expect("the ticket just created");
+    assert_eq!(created.project, "OPS");
+    assert!(created.description.is_none(), "{:?}", created.description);
+    jira.assert_no_violations();
+}
+
+/// An op this adapter does not declare must be refused **without reaching the
+/// server**, which is battery clause 5's promise seen from the far end: the
+/// fixture is unchanged and mockd recorded nothing.
+#[tokio::test]
+async fn an_undeclared_op_never_reaches_the_server() {
+    let jira = spawn_mock_jira().await;
+    let source = source(&jira.base_url(), serde_json::json!({}));
+    let before = jira.state().issues();
+
+    let refused = source
+        .write(WriteOp::Approve {
+            entity: "jira:PAY-231".to_owned(),
+            body: String::new(),
         })
         .await;
     assert!(
         matches!(refused, Err(SourceError::Protocol { .. })),
         "{refused:?}"
     );
-    let after = jira
-        .state()
-        .issue("PAY-231")
-        .expect("PAY-231 is in the fixture")
-        .comments
-        .len();
-    assert_eq!(
-        after, before,
-        "a refused write must not have reached the server"
+    let after = jira.state().issues();
+    assert_eq!(before.len(), after.len());
+    assert!(
+        before
+            .iter()
+            .zip(&after)
+            .all(|(b, a)| b.status == a.status && b.comments.len() == a.comments.len()),
+        "an undeclared op must not have touched anything"
     );
     jira.assert_no_violations();
+}
+
+/// ADR-0004, on the write path: a source that is down is `Unreachable` -- which
+/// the queue waits on -- and not a refusal, which it would not retry.
+#[tokio::test]
+async fn a_write_to_an_unreachable_jira_waits_rather_than_being_refused() {
+    let jira = spawn_mock_jira().await;
+    jira.set_fault(MockFault::Timeout { hang_ms: 2_000 });
+    let source = source(
+        &jira.base_url(),
+        serde_json::json!({ "request_timeout_secs": 1 }),
+    );
+    let failed = source
+        .write(WriteOp::Comment {
+            entity: "jira:PAY-231".to_owned(),
+            body: "into the void".to_owned(),
+        })
+        .await;
+    assert!(
+        matches!(failed, Err(SourceError::Unreachable(_))),
+        "{failed:?}"
+    );
+}
+
+/// The same for a credential the server rejects: `Unauthorized`, so the queue
+/// waits for a human to re-enter one rather than discarding what they typed.
+#[tokio::test]
+async fn a_write_with_a_rejected_credential_waits_for_a_human() {
+    let jira = spawn_mock_jira().await;
+    jira.set_fault(MockFault::Unauthorized);
+    let source = source(&jira.base_url(), serde_json::json!({}));
+    let failed = source
+        .write(WriteOp::Comment {
+            entity: "jira:PAY-231".to_owned(),
+            body: "not with this token".to_owned(),
+        })
+        .await;
+    assert!(
+        matches!(failed, Err(SourceError::Unauthorized { .. })),
+        "{failed:?}"
+    );
 }
 
 /// P4: the Add-source flow shows who it connected as and which server answered.

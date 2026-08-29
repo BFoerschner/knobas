@@ -1,0 +1,29 @@
+{
+  "expand": "transitions",
+  "transitions": [
+    {
+      "id": "21",
+      "name": "Send to Review",
+      "to": {
+        "id": "10002",
+        "name": "In Review",
+        "statusCategory": {
+          "key": "indeterminate",
+          "name": "In Progress"
+        }
+      }
+    },
+    {
+      "id": "41",
+      "name": "Stop Progress",
+      "to": {
+        "id": "10000",
+        "name": "To Do",
+        "statusCategory": {
+          "key": "new",
+          "name": "To Do"
+        }
+      }
+    }
+  ]
+}

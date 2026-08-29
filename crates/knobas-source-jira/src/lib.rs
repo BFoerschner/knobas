@@ -1,8 +1,11 @@
 //! The Jira **Data Center** adapter: `/rest/api/2/…`, `startAt` pagination.
 //!
-//! Read-only in M1 (interfaces doc §4.1): it declares no capabilities and no
-//! write ops, and [`Source::write`](knobas_source::Source::write) will refuse
-//! everything. Write-back (transition, comment, create) is M2.
+//! M2's ratified write-back set is here (issue #43): a ticket can be moved to
+//! another status, replied to, and created. Everything else
+//! [`Source::write`](knobas_source::Source::write) is handed is refused, which
+//! is the SPI's rule and what the contract battery checks. **No write reaches
+//! this adapter except through the write queue** -- `knobas_sync::write_queue`
+//! is knobas' one outbound write path (issue #42).
 //!
 //! # Which Jira this speaks
 //!
@@ -28,6 +31,7 @@ mod model;
 mod source;
 mod sync;
 mod time;
+mod write;
 
 pub use config::{Flavor, JiraConfig};
 pub use descriptor::descriptor_template;
@@ -40,6 +44,16 @@ pub const ADAPTER_KIND: &str = "jira";
 /// This adapter's own version, reported in the descriptor and in the
 /// `User-Agent` (interfaces doc §4.1).
 pub const ADAPTER_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// The write ops this adapter declares, as `knobas_source::WriteOp`'s stable
+/// identifiers. Named constants rather than literals because the descriptor
+/// and the dispatch in [`source`] must agree, and a typo in either is an
+/// action the UI offers and the adapter refuses.
+pub const WRITE_OP_COMMENT: &str = "comment";
+/// See [`WRITE_OP_COMMENT`].
+pub const WRITE_OP_TRANSITION: &str = "transition";
+/// See [`WRITE_OP_COMMENT`].
+pub const WRITE_OP_CREATE_TICKET: &str = "create_ticket";
 
 /// The one entity kind this adapter emits. Epics are Jira issues of type
 /// `Epic`, so they arrive as tickets too (interfaces doc §4.2: kinds = `ticket`).

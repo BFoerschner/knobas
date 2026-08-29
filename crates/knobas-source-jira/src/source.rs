@@ -6,6 +6,7 @@ use knobas_source::{ConnectionInfo, Cursor, Sink, Source, SourceDescriptor, Sour
 use crate::api::JiraApi;
 use crate::http::{self, JiraHttp};
 use crate::sync::SyncRun;
+use crate::write;
 use crate::{JiraConfig, descriptor_template};
 
 /// One configured Jira Data Center instance.
@@ -18,6 +19,66 @@ pub struct JiraSource {
     base_url: String,
     cfg: JiraConfig,
     http: JiraHttp,
+}
+
+impl JiraSource {
+    /// The issue key inside an entity id this source owns.
+    ///
+    /// Two refusals, and both are about a write going somewhere it was not
+    /// meant to. An id that does not parse cannot name anything; an id in
+    /// **another source's namespace** would otherwise have its key half posted
+    /// to *this* Jira, which is how a `jira-eu:PAY-231` reaches the wrong
+    /// instance and moves the wrong ticket. The queue routes by namespace
+    /// already, so reaching here with a foreign one is knobas' own bug -- and
+    /// the adapter refuses it rather than trusting the routing.
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError::Protocol`], which the queue reads as a refusal rather
+    /// than something to retry: nothing about waiting makes a wrong id right.
+    fn issue_key(&self, entity: &str) -> Result<String, SourceError> {
+        let parsed = knobas_core::entity::EntityRef::parse(entity)
+            .map_err(|error| SourceError::protocol(error.to_string()))?;
+        if parsed.namespace != self.id {
+            return Err(SourceError::protocol(format!(
+                "{entity:?} belongs to source {:?}, not to {:?}",
+                parsed.namespace, self.id
+            )));
+        }
+        Ok(parsed.key)
+    }
+
+    /// The project key a create targets -- the same id grammar, whose key half
+    /// is a project (`jira:PAY`) rather than an issue.
+    ///
+    /// knobas does not mirror Jira projects, so this names a container that has
+    /// no entity row. That is deliberate and is what the queue's hold detection
+    /// is built for: a create projects on liveness alone, and an unmirrored
+    /// container is `live: false` at queue time and at flush time alike, so it
+    /// never holds.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::issue_key`], plus a key that is not a project key -- Jira
+    /// project keys are `[A-Z][A-Z0-9_]*`, and `jira:PAY-231` reaching here
+    /// means a create was aimed at a *ticket*, which would otherwise be sent as
+    /// a project that does not exist.
+    fn project_key(&self, entity: &str) -> Result<String, SourceError> {
+        let key = self.issue_key(entity)?;
+        let looks_like_a_project = !key.is_empty()
+            && key.starts_with(|c: char| c.is_ascii_uppercase())
+            && key
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+        if !looks_like_a_project {
+            return Err(SourceError::protocol(format!(
+                "{entity:?} is not a Jira project -- a ticket is created in a project, so the \
+                 target is an id like \"{}:PAY\"",
+                self.id
+            )));
+        }
+        Ok(key)
+    }
 }
 
 /// The base URL as `SyncItem::web_url` is built from it: trimmed of
@@ -105,14 +166,57 @@ impl Source for JiraSource {
         .await
     }
 
+    /// Perform one of the three writes M2 ratified for Jira, or refuse.
+    ///
+    /// The match unpacks and hands the values to [`crate::write`], which never
+    /// names `WriteOp` -- knobas has one outbound write path and
+    /// `write_choke_point.rs` reads the tree to keep it that way, so an
+    /// adapter's dispatch lives with its `impl Source` and nowhere else.
+    ///
+    /// **The refusal arm is the contract, not a gap** (SPI doc, battery clause
+    /// 5): an adapter must reject every op absent from its own
+    /// `descriptor.write_ops` with `Protocol`, and it must say which op it
+    /// refused so a mis-declared descriptor is diagnosable from the message.
     async fn write(&self, op: WriteOp) -> Result<(), SourceError> {
-        // M1 is read-only toward every source (interfaces §4.1); the descriptor
-        // declares no write ops, so refusing here is the contract, not a gap.
-        // Jira write-back (transition, comment, create) is M2.
-        Err(SourceError::protocol(format!(
-            "the Jira adapter is read-only in this version and does not support {:?}",
-            op.identifier()
-        )))
+        match &op {
+            WriteOp::Comment { entity, body } => {
+                write::comment(&self.http, &self.issue_key(entity)?, body).await
+            }
+            WriteOp::Transition { entity, status } => {
+                write::transition(&self.http, &self.issue_key(entity)?, status).await
+            }
+            WriteOp::CreateTicket {
+                entity,
+                title,
+                body,
+                ticket_type,
+            } => {
+                let created = write::create_ticket(
+                    &self.http,
+                    &self.project_key(entity)?,
+                    title,
+                    body,
+                    ticket_type,
+                )
+                .await?;
+                // Dropped, and the value is in having asked for it:
+                // `Source::write` answers `()` (widening it is a frozen-SPI
+                // change nothing in M2 needs), but a Jira that accepted the
+                // create without naming what it made is a write reported as
+                // done with nothing to point at -- which `create_ticket`
+                // refuses rather than reports as success.
+                let _ = created;
+                Ok(())
+            }
+            WriteOp::CreateBranch { .. }
+            | WriteOp::CreatePullRequest { .. }
+            | WriteOp::Approve { .. }
+            | WriteOp::TriggerBuild { .. }
+            | WriteOp::RerunBuild { .. } => Err(SourceError::protocol(format!(
+                "the Jira adapter does not support {:?}",
+                op.identifier()
+            ))),
+        }
     }
 }
 
@@ -164,8 +268,8 @@ mod tests {
         assert_eq!(d.adapter_kind, crate::ADAPTER_KIND);
         assert_eq!(d.name, "Tidewater Jira");
         assert_eq!(d.entity_kinds.len(), 1);
-        assert!(d.capabilities.is_empty());
-        assert!(d.write_ops.is_empty());
+        assert_eq!(d.capabilities, vec![knobas_source::Capability::Write]);
+        assert_eq!(d.write_ops, vec!["comment", "transition", "create_ticket"]);
         // The claim the engine's tombstone sweep rests on travels with the
         // instance descriptor too, not only with the template.
         assert!(d.entity_kinds.iter().all(|k| k.full_sync_exhaustive));
@@ -237,15 +341,122 @@ mod tests {
         assert_eq!(source.base_url, "https://jira.tidewater.example");
     }
 
-    /// M1 is read-only toward every source: nothing is declared, so everything
-    /// is refused -- which is also what battery clause 5 checks.
+    /// Battery clause 5, from this adapter's side: an op the descriptor does
+    /// not declare is refused rather than attempted, and the refusal **names
+    /// the op** -- which is what makes a descriptor that drifted from its
+    /// dispatch diagnosable instead of merely broken.
+    ///
+    /// The adapter here points at a port nothing listens on, so a refusal that
+    /// slipped through to the network would surface as `Unreachable` and fail
+    /// this loudly rather than pass quietly.
     #[tokio::test]
-    async fn every_write_is_refused() {
-        let source = built(instance(json!({})));
+    async fn an_op_this_adapter_does_not_declare_is_refused_by_name() {
+        let mut i = instance(json!({}));
+        i.base_url = dead_port_url();
+        let source = built(i);
+        for (op, name) in [
+            (
+                WriteOp::CreateBranch {
+                    entity: "jira:PAY-231".to_owned(),
+                    name: "feature/x".to_owned(),
+                    from_ref: "main".to_owned(),
+                },
+                "create_branch",
+            ),
+            (
+                WriteOp::CreatePullRequest {
+                    entity: "jira:PAY-231".to_owned(),
+                    title: "t".to_owned(),
+                    body: "b".to_owned(),
+                    head: "feature/x".to_owned(),
+                    base: "main".to_owned(),
+                },
+                "create_pull_request",
+            ),
+            (
+                WriteOp::Approve {
+                    entity: "jira:PAY-231".to_owned(),
+                    body: String::new(),
+                },
+                "approve",
+            ),
+            (
+                WriteOp::TriggerBuild {
+                    entity: "jira:PAY-231".to_owned(),
+                },
+                "trigger_build",
+            ),
+            (
+                WriteOp::RerunBuild {
+                    entity: "jira:PAY-231".to_owned(),
+                },
+                "rerun_build",
+            ),
+        ] {
+            let refused = source.write(op).await;
+            let Err(SourceError::Protocol { message, status }) = &refused else {
+                panic!("{name} must be refused with Protocol, got {refused:?}");
+            };
+            assert!(message.contains(name), "the refusal must name {name}: {message}");
+            assert_eq!(*status, None, "a refusal knobas raised itself carries no status");
+        }
+    }
+
+    /// A write aimed at another instance's namespace is refused rather than
+    /// posted here with its key half. Two Jiras are `jira` and `jira-eu`
+    /// (§4.1), and the key `PAY-231` exists on both -- so believing the routing
+    /// is how a ticket moves on the wrong server.
+    #[tokio::test]
+    async fn a_write_for_another_source_is_refused_rather_than_posted_here() {
+        let mut i = instance(json!({}));
+        i.base_url = dead_port_url();
+        let source = built(i);
         let refused = source
             .write(WriteOp::Comment {
+                entity: "jira-eu:PAY-231".to_owned(),
+                body: "meant for the other one".to_owned(),
+            })
+            .await;
+        let Err(SourceError::Protocol { message, .. }) = &refused else {
+            panic!("a foreign namespace must be refused, got {refused:?}");
+        };
+        assert!(message.contains("jira-eu"), "{message}");
+        assert!(message.contains("jira"), "{message}");
+    }
+
+    /// A create is aimed at a **project**, so an id naming a ticket is a
+    /// mistake the adapter can see: `PAY-231` is not a project key, and sending
+    /// it would ask Jira to file the ticket in a project that does not exist.
+    #[tokio::test]
+    async fn a_create_aimed_at_a_ticket_rather_than_a_project_is_refused() {
+        let mut i = instance(json!({}));
+        i.base_url = dead_port_url();
+        let source = built(i);
+        let refused = source
+            .write(WriteOp::CreateTicket {
                 entity: "jira:PAY-231".to_owned(),
-                body: "not in M1".to_owned(),
+                title: "a new one".to_owned(),
+                body: String::new(),
+                ticket_type: "Task".to_owned(),
+            })
+            .await;
+        let Err(SourceError::Protocol { message, .. }) = &refused else {
+            panic!("a create aimed at a ticket must be refused, got {refused:?}");
+        };
+        assert!(message.contains("not a Jira project"), "{message}");
+    }
+
+    /// An id that does not parse names nothing, and nothing about waiting makes
+    /// it parse -- so it is a refusal, which the queue does not retry.
+    #[tokio::test]
+    async fn an_entity_id_that_is_not_one_is_refused() {
+        let mut i = instance(json!({}));
+        i.base_url = dead_port_url();
+        let source = built(i);
+        let refused = source
+            .write(WriteOp::Comment {
+                entity: "PAY-231".to_owned(),
+                body: "no namespace".to_owned(),
             })
             .await;
         assert!(

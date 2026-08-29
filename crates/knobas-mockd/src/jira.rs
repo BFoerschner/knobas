@@ -47,6 +47,15 @@ pub fn router(state: Arc<MockState>) -> Router {
             "/rest/api/2/issue/{issueIdOrKey}/worklog",
             get(issue_worklogs),
         )
+        // M2's write-back set (issue #43). `POST /issue` is a literal route and
+        // is registered *before* the templated `/issue/{issueIdOrKey}` for the
+        // same reason `allowlist::lookup` prefers a literal: `api/2/issue` must
+        // not resolve as an issue whose key is empty.
+        .route("/rest/api/2/issue", post(create_issue))
+        .route(
+            "/rest/api/2/issue/{issueIdOrKey}/transitions",
+            get(issue_transitions).merge(post(do_transition)),
+        )
         .fallback(unimplemented)
         // A verb the WADL declares on a path mockd *does* serve (`POST
         // /search`, `PUT /myself`, `PUT`/`DELETE /issue/{key}`, `POST
@@ -826,6 +835,137 @@ async fn post_comment(
             created,
             s.server_offset(),
         )),
+    )
+        .into_response()
+}
+
+// -- the M2 write-back set (issue #43) --------------------------------------
+
+/// `GET /rest/api/2/issue/{key}/transitions` -- what this issue's workflow
+/// offers **from where it stands now**.
+///
+/// Interfaces §5: the available set is fetched, never assumed. mockd's
+/// workflow is [`MockState::jira_transitions`]; the point of it having shape at
+/// all is that an adapter which believed every status reachable would pass here
+/// and fail against a real Jira.
+async fn issue_transitions(
+    State(s): State<Arc<MockState>>,
+    Path(id_or_key): Path<String>,
+) -> Response {
+    let Some(i) = find_issue(&s, &id_or_key) else {
+        return no_such_issue(&id_or_key);
+    };
+    let transitions: Vec<Value> = MockState::jira_transitions(&i.status)
+        .iter()
+        .map(|(id, name, to)| {
+            json!({
+                "id": id,
+                "name": name,
+                "to": status_json(to),
+            })
+        })
+        .collect();
+    Json(json!({ "expand": "transitions", "transitions": transitions })).into_response()
+}
+
+/// `POST /rest/api/2/issue/{key}/transitions` -- perform one.
+///
+/// A real Jira answers **204 with no body**, which is what makes this endpoint
+/// worth pinning: an adapter that insisted on decoding a response would work
+/// against a mock that invented one and fail against the real thing.
+async fn do_transition(
+    State(s): State<Arc<MockState>>,
+    Path(id_or_key): Path<String>,
+    body: Option<Json<Value>>,
+) -> Response {
+    let Some(i) = find_issue(&s, &id_or_key) else {
+        return no_such_issue(&id_or_key);
+    };
+    // Jira takes the transition by **id**, under `transition.id`, and the id
+    // is a string in its own responses.
+    let id = body
+        .as_ref()
+        .and_then(|Json(v)| v.get("transition"))
+        .and_then(|t| t.get("id"))
+        .map(|id| match id {
+            Value::String(s) => s.clone(),
+            other => other.to_string(),
+        })
+        .unwrap_or_default();
+    if id.is_empty() {
+        return jira_error(
+            StatusCode::BAD_REQUEST,
+            "Transition id is required, as transition.id",
+        );
+    }
+    match s.transition_issue(&i.key, &id) {
+        None => no_such_issue(&id_or_key),
+        Some(Err(())) => jira_error(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "It is not possible to perform this transition on {} from status {:?}",
+                i.key, i.status
+            ),
+        ),
+        Some(Ok(_)) => StatusCode::NO_CONTENT.into_response(),
+    }
+}
+
+/// `POST /rest/api/2/issue` -- create one.
+///
+/// A real Jira answers **201** with `{id, key, self}` and nothing else: the
+/// created issue is not echoed back, so an adapter that wanted the whole record
+/// would have to re-read it.
+async fn create_issue(State(s): State<Arc<MockState>>, body: Option<Json<Value>>) -> Response {
+    let fields = body.as_ref().and_then(|Json(v)| v.get("fields"));
+    let text = |name: &str| -> Option<&str> {
+        fields
+            .and_then(|f| f.get(name))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+    };
+    let nested = |name: &str, inner: &str| -> Option<&str> {
+        fields
+            .and_then(|f| f.get(name))
+            .and_then(|v| v.get(inner))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+    };
+
+    // Every one of these is required by a real Jira, and each is refused
+    // separately so a test can tell which field went missing.
+    let Some(project) = nested("project", "key") else {
+        return jira_error(StatusCode::BAD_REQUEST, "project is required");
+    };
+    let Some(summary) = text("summary") else {
+        return jira_error(StatusCode::BAD_REQUEST, "You must specify a summary of the issue.");
+    };
+    let Some(issue_type) = nested("issuetype", "name") else {
+        return jira_error(StatusCode::BAD_REQUEST, "issue type is required");
+    };
+    let description = text("description");
+
+    let reporter = knobas_source_mock::fixture()
+        .person(MYSELF)
+        .expect("the fixture has Mara")
+        .username
+        .clone();
+    let Some(created) = s.create_issue(project, summary, description, issue_type, &reporter) else {
+        return jira_error(
+            StatusCode::BAD_REQUEST,
+            format!("project: A value with ID {project:?} does not exist for the field 'project'."),
+        );
+    };
+    let base = s.base_url(API);
+    (
+        StatusCode::CREATED,
+        Json(json!({
+            "id": created.id.to_string(),
+            "key": created.key,
+            "self": format!("{base}/rest/api/2/issue/{}", created.id),
+        })),
     )
         .into_response()
 }
