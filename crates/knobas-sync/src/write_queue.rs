@@ -35,6 +35,9 @@
 //! * **Every state change writes one activity line**, through
 //!   `knobas_core::activity::record` -- the single activity writer.
 
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
+
 use knobas_core::activity;
 use knobas_core::entity::EntityRef;
 use knobas_core::write_queue::{self as store, QueuedWrite, WaitReason};
@@ -164,8 +167,8 @@ pub async fn submit(
 /// One source's failure never stops another's: each is flushed on its own and
 /// its errors are logged rather than raised, which is what story 21 asks for
 /// -- one broken credential must not stop everything. Sequential rather than
-/// concurrent, deliberately: the queue is small, and a flush already holds no
-/// locks worth parallelising around.
+/// concurrent, deliberately: the queue is small, and each source's flush takes
+/// its own lock anyway (see [`source_lock`]).
 pub async fn flush_all(deps: &SchedulerDeps) {
     let sources = match config::list(&deps.pool).await {
         Ok(sources) => sources,
@@ -179,6 +182,40 @@ pub async fn flush_all(deps: &SchedulerDeps) {
             tracing::warn!(source = %source.id, %error, "write queue flush failed");
         }
     }
+}
+
+/// One flush of a source at a time, process-wide.
+///
+/// Two flushers that both read [`due`](store::due) see the *same* head write
+/// and both call `Source::write`. The `where state = 'pending'` guard on
+/// [`sent`](store::sent) stops the second from settling the row -- it does not
+/// stop the second from posting the comment. A queue whose job is not to lose
+/// an edit must not post it twice either, and the two flushers that actually
+/// overlap are ordinary: [`submit`] flushes immediately, and the scheduler's
+/// tick flushes every five seconds.
+///
+/// In-process rather than a database lock, deliberately. `pg_advisory_xact_lock`
+/// would mean holding a transaction open across the adapter's HTTP call, which
+/// is the shape §10.6(c) had the sync engine move *away* from; a session-level
+/// `pg_advisory_lock` would be released only by an explicit unlock, so any
+/// early return would hand a pooled connection back with the lock still held
+/// and poison it for whoever got it next. A process-wide map has neither
+/// failure mode, and there is one scheduler per profile in one process --
+/// which `config::due` being whole-database already assumes.
+///
+/// Per source, not global: two sources must still flush independently
+/// (story 21).
+fn source_lock(source_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+    static LOCKS: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
+    let locks = LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut locks = locks
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    Arc::clone(
+        locks
+            .entry(source_id.to_owned())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
+    )
 }
 
 /// Flush what one source is owed.
@@ -195,6 +232,9 @@ pub async fn flush_all(deps: &SchedulerDeps) {
 /// credential -- is **not** an error: its writes wait, with the reason
 /// recorded, which is the whole point of the queue.
 pub async fn flush_source(deps: &SchedulerDeps, source_id: &str) -> Result<(), FlushError> {
+    let lock = source_lock(source_id);
+    let _flushing = lock.lock().await;
+
     if store::due(&deps.pool, source_id).await?.is_empty() {
         // Nothing owed: do not build an adapter or touch the keychain.
         return Ok(());

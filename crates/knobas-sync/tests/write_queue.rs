@@ -40,6 +40,10 @@ struct Fake {
     id: String,
     answer: Arc<Mutex<Answer>>,
     written: Arc<Mutex<Vec<WriteOp>>>,
+    /// How long the fake takes to answer. Zero everywhere but the concurrency
+    /// test, which needs the window between reading the queue and settling it
+    /// to be wide enough that a second flusher would fall into it.
+    dwell: Arc<Mutex<std::time::Duration>>,
 }
 
 #[async_trait::async_trait]
@@ -83,6 +87,10 @@ impl Source for Fake {
 
     async fn write(&self, op: WriteOp) -> Result<(), SourceError> {
         let answer = *self.answer.lock().unwrap();
+        let dwell = *self.dwell.lock().unwrap();
+        if !dwell.is_zero() {
+            tokio::time::sleep(dwell).await;
+        }
         if answer == Answer::Accept {
             self.written.lock().unwrap().push(op);
             return Ok(());
@@ -101,6 +109,7 @@ impl Source for Fake {
 struct FakeRegistry {
     answer: Arc<Mutex<Answer>>,
     written: Arc<Mutex<Vec<WriteOp>>>,
+    dwell: Arc<Mutex<std::time::Duration>>,
 }
 
 impl AdapterRegistry for FakeRegistry {
@@ -113,6 +122,7 @@ impl AdapterRegistry for FakeRegistry {
             id: instance.id,
             answer: Arc::clone(&self.answer),
             written: Arc::clone(&self.written),
+            dwell: Arc::clone(&self.dwell),
         }))
     }
 }
@@ -146,6 +156,7 @@ struct Harness {
     events: Arc<Recorder>,
     answer: Arc<Mutex<Answer>>,
     written: Arc<Mutex<Vec<WriteOp>>>,
+    dwell: Arc<Mutex<std::time::Duration>>,
     source: String,
 }
 
@@ -259,6 +270,7 @@ async fn harness() -> Harness {
 
     let answer = Arc::new(Mutex::new(Answer::Accept));
     let written = Arc::new(Mutex::new(Vec::new()));
+    let dwell = Arc::new(Mutex::new(std::time::Duration::ZERO));
     let events = Arc::new(Recorder::default());
     Harness {
         deps: SchedulerDeps {
@@ -267,6 +279,7 @@ async fn harness() -> Harness {
             registry: Arc::new(FakeRegistry {
                 answer: Arc::clone(&answer),
                 written: Arc::clone(&written),
+                dwell: Arc::clone(&dwell),
             }),
             secrets: Arc::new(secrets),
             events: Arc::clone(&events) as Arc<dyn SyncEvents>,
@@ -274,6 +287,7 @@ async fn harness() -> Harness {
         events,
         answer,
         written,
+        dwell,
         source,
     }
 }
@@ -640,4 +654,41 @@ async fn the_scheduler_drains_the_queue_on_its_own() {
 
     settled.expect("the scheduler's own tick must flush the queue");
     assert_eq!(h.delivered(), vec!["sent by nobody".to_owned()]);
+}
+
+/// Two flushers, one write, one delivery.
+///
+/// `submit` flushes at once and the scheduler's tick flushes every five
+/// seconds, so the two overlapping is ordinary rather than exotic. Both would
+/// read the same head write and both would call `Source::write`; the store's
+/// state guard stops the second from *settling* the row, but nothing in the
+/// store can un-post a comment. A queue that must not lose an edit must not
+/// post it twice either.
+///
+/// The fake dwells for the length of its write, so the window a second flusher
+/// would fall into is wide enough to observe rather than a matter of luck.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn two_flushes_of_one_source_deliver_a_write_once() {
+    let h = harness().await;
+    let ticket = h.mirror("PAY-15", "a payout fails").await;
+
+    h.answer(Answer::Unreachable);
+    let write = h.comment(&ticket, "exactly once").await;
+    assert_eq!(h.reload(write.id).await.state, WriteState::Pending);
+
+    h.answer(Answer::Accept);
+    *h.dwell.lock().unwrap() = std::time::Duration::from_millis(300);
+    let (a, b) = tokio::join!(
+        flusher::flush_source(&h.deps, &h.source),
+        flusher::flush_source(&h.deps, &h.source),
+    );
+    a.unwrap();
+    b.unwrap();
+
+    assert_eq!(
+        h.delivered(),
+        vec!["exactly once".to_owned()],
+        "the second flusher must not repost what the first was already sending"
+    );
+    assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
 }
