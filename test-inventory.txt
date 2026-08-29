@@ -796,6 +796,7 @@ knobas-source-mock	test/contract	the_opt_in_tombstone_reports_one_deterministic_
 knobas-source-mock	test/contract	the_tombstoning_mock_passes_the_contract_battery
 knobas-source-mock	test/contract	write_records_the_comment
 knobas-source-teamcity	lib/knobas_source_teamcity	client::tests::a_server_that_names_nobody_still_reports_a_connection
+knobas-source-teamcity	lib/knobas_source_teamcity	client::tests::only_a_404_is_read_as_absence
 knobas-source-teamcity	lib/knobas_source_teamcity	client::tests::the_server_and_user_records_become_a_connection_report
 knobas-source-teamcity	lib/knobas_source_teamcity	config::tests::an_empty_config_is_all_defaults
 knobas-source-teamcity	lib/knobas_source_teamcity	config::tests::an_unknown_key_is_rejected

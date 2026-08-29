@@ -235,9 +235,9 @@ mod tests {
     /// about the watermark's own build before believing anything worse of it
     /// (`sync::refuse_a_replaced_server`); when the build is there the run
     /// carries on and lands here, and the floor keeps the watermark exactly
-    /// where it was. Clamping *down* is the expensive direction -- it is how a
-    /// source wedges (`..._wedges_the_source_rather_than_merely_re_reading`
-    /// for the cost) -- so it is the one direction this function refuses.
+    /// where it was. Clamping *down* is the expensive direction -- a watermark
+    /// dragged back re-offers every build above it on every run afterwards --
+    /// so it is the one direction this function refuses.
     #[test]
     fn the_watermark_has_a_floor_under_every_argument() {
         assert_eq!(

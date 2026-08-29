@@ -148,20 +148,43 @@ impl Rest for HttpRest {
     }
 
     async fn build_exists(&self, id: i64) -> Result<bool, SourceError> {
-        match self
-            .get_raw(
+        presence(
+            self.get_raw(
                 &format!("app/rest/builds/id:{id}"),
                 &[("fields", BUILD_ID_FIELDS)],
             )
-            .await
-        {
-            Ok(_) => Ok(true),
-            // The one status this adapter reads as an answer. `status()`
-            // rather than a message match: ADR-0004 carries it precisely so
-            // nobody has to parse prose to tell a 404 from a 403.
-            Err(error) if error.status() == Some(404) => Ok(false),
-            Err(error) => Err(error),
-        }
+            .await,
+        )
+    }
+}
+
+/// What a by-id fetch's answer means: present, absent, or neither.
+///
+/// A free function rather than a `match` inside [`Rest::build_exists`] so it
+/// can be asserted per status without an HTTP server. That is not a stylistic
+/// preference: `sync::refuse_a_replaced_server` turns `Ok(false)` into an
+/// accusation that the server was replaced, so the set of answers that reach
+/// `Ok(false)` is exactly as load-bearing as the refusal it feeds, and the
+/// refusal has a test that dies when it is removed. This did not.
+///
+/// **Only a 404.** It is the one status that says the build is not there.
+/// A 403 says the credential may not read it -- a different claim, and the
+/// one that would resurrect issue #91's false refusal through a new door, on
+/// a healthy server whose token was narrowed after the fact. A 500 or a
+/// timeout say nothing at all, and a run that cannot get an answer must fail
+/// rather than guess at one. `status()` rather than a message match: ADR-0004
+/// carries the status precisely so nobody has to parse prose to tell a 404
+/// from a 403.
+///
+/// Deliberately narrower than the Gitea adapter's `matches!(error.status(),
+/// Some(403 | 404))`, which reads both as absence because a repository the
+/// credential cannot see is one it cannot mirror either. Here the two
+/// statuses answer different questions, so they get different answers.
+fn presence(answer: Result<serde_json::Value, SourceError>) -> Result<bool, SourceError> {
+    match answer {
+        Ok(_) => Ok(true),
+        Err(error) if error.status() == Some(404) => Ok(false),
+        Err(error) => Err(error),
     }
 }
 
@@ -187,6 +210,53 @@ pub(crate) fn connection_info(server: &Server, user: Option<&CurrentUser>) -> Co
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A 404 is the only answer read as "that build is not on this server",
+    /// because `sync::refuse_a_replaced_server` reads that as a replaced
+    /// server and refuses the run.
+    ///
+    /// The contract amendment for issue #91 states it as binding: "A `403` is
+    /// *not* read as absence -- the credential may not read the build, which
+    /// is not the same claim -- so only a 404 refuses." Widening the match to
+    /// `error.status().is_some()`, or to `Some(403 | 404)` as the Gitea
+    /// adapter has it, is caught here and nowhere else: every other test in
+    /// this crate reaches [`presence`] through a fake or through mockd, and
+    /// neither can answer a by-id fetch with a status that is not 200 or 404.
+    #[test]
+    fn only_a_404_is_read_as_absence() {
+        assert!(
+            presence(Ok(serde_json::json!({ "id": 6_520_991 }))).expect("a 200 is an answer"),
+            "the build is there"
+        );
+        assert!(
+            !presence(Err(SourceError::Protocol {
+                status: Some(404),
+                message: "No build found by id '999999999'.".to_owned(),
+            }))
+            .expect("a 404 is an answer"),
+            "the build is not there"
+        );
+        for refused in [
+            // The credential may not read this build. Reading it as absence
+            // would accuse a healthy server of having been replaced.
+            SourceError::Unauthorized { status: Some(403) },
+            SourceError::Unauthorized { status: Some(401) },
+            SourceError::Protocol {
+                status: Some(500),
+                message: "boom".to_owned(),
+            },
+            // No status at all: a transport failure answers nothing.
+            SourceError::Unreachable("connect timed out".to_owned()),
+        ] {
+            let described = format!("{refused:?}");
+            let raised = presence(Err(refused));
+            assert!(
+                raised.is_err(),
+                "{described} says nothing about whether the build exists, so it must raise \
+                 rather than become an answer: {raised:?}"
+            );
+        }
+    }
 
     fn server() -> Server {
         Server {
