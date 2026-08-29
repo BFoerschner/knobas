@@ -57,6 +57,28 @@ pub(crate) const PAGE_SIZE: u32 = 50;
 /// Everything under `/api/v1`.
 const API_ROOT: &str = "/api/v1";
 
+/// Gitea's own count of the collection a response is part of, which it sets on
+/// listing endpoints (`ctx.SetTotalCountHeader`). Read only by
+/// [`GiteaClient::issue_comments`], because that is the one read whose
+/// completeness nothing else can check: the four paged walks ask for the next
+/// page and find out.
+const TOTAL_COUNT: &str = "x-total-count";
+
+/// One pull request's discussion, and what the server said it consists of.
+///
+/// The pair travels together because apart they are two facts about different
+/// requests. [`crate::sync::fetch_comments`] compares them; see
+/// [`GiteaClient::issue_comments`] for why that comparison is the only
+/// completeness signal this endpoint offers.
+pub(crate) struct Discussion {
+    /// The comment records, verbatim, as [`crate::model::Comment`] is projected
+    /// from.
+    pub(crate) raw: Vec<Value>,
+    /// `X-Total-Count`, when the server sent a readable one. `None` degrades to
+    /// believing what arrived, which is what this adapter did before it asked.
+    pub(crate) total: Option<usize>,
+}
+
 /// Connect timeout, interfaces §4.1.
 const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 /// Whole-request timeout, interfaces §4.1.
@@ -256,22 +278,60 @@ impl GiteaClient {
         .await
     }
 
-    /// Pull-request discussion. Gitea keeps it on the issue with the same index.
+    /// Pull-request discussion, whole. Gitea keeps it on the issue with the
+    /// same index.
+    ///
+    /// # Why this one request is not the truncation issue #131 expected
+    ///
+    /// #131 read this as a listing asked without a `limit`, and therefore
+    /// answered `DEFAULT_PAGING_NUM` records -- thirty on a stock install --
+    /// with nothing to say the rest existed. It is not, and the pinned
+    /// container (interfaces §4.2 makes it this adapter's contract source)
+    /// says so three ways, measured on Gitea **1.27.2**, 2026-08-29:
+    ///
+    /// * **Its own OpenAPI document declares no paging here.**
+    ///   `swagger.v1.json`'s `issueGetComments` takes `since` and `before` and
+    ///   nothing else. The *repository-wide* `issueGetRepoComments`
+    ///   (`/repos/{o}/{r}/issues/comments`) declares `page` and `limit` -- so
+    ///   the difference is the endpoint, not the instance.
+    /// * **`limit` and `page` are ignored.** A discussion of 51 comments came
+    ///   back whole for no query at all, for `limit=50&page=1`, for
+    ///   `limit=2&page=1` and for `limit=50&page=9`. On the same server in the
+    ///   same minute, the repository-wide endpoint answered `limit=2` with two
+    ///   records of 104. Paging *this* one would therefore not walk a
+    ///   discussion -- it would re-read the same discussion until the walk ran
+    ///   out of budget, and fold every comment into `body_text` once per
+    ///   request.
+    /// * **`X-Total-Count` is sent, and it is the truth.** It equalled the
+    ///   number of records in the body on every pull request in the fixture and
+    ///   under every one of those queries -- including `#142`, where it read 2
+    ///   and the pull request's own `comments` field read 3. So the record
+    ///   count is a completeness signal and `PullRequest::comments` is not.
+    ///
+    /// So the request stays one request, sends no `limit` and no `page` --
+    /// parameters this endpoint does not have -- and carries the server's own
+    /// count back with it. [`crate::sync::fetch_comments`] is what refuses a
+    /// discussion the server says it did not send in full: the assumption is
+    /// checked on every read rather than trusted, which is what turns "a Gitea
+    /// that starts paging this endpoint" from a silent corpus-wide truncation
+    /// into a run that stops and names it.
     pub(crate) async fn issue_comments(
         &self,
         owner: &str,
         repo: &str,
         index: u64,
-    ) -> Result<Vec<Value>, SourceError> {
-        self.get_json(
-            &format!(
-                "/repos/{}/{}/issues/{index}/comments",
-                segment(owner)?,
-                segment(repo)?
-            ),
-            &[],
-        )
-        .await
+    ) -> Result<Discussion, SourceError> {
+        let (raw, total) = self
+            .get_json_counted(
+                &format!(
+                    "/repos/{}/{}/issues/{index}/comments",
+                    segment(owner)?,
+                    segment(repo)?
+                ),
+                &[],
+            )
+            .await?;
+        Ok(Discussion { raw, total })
     }
 
     /// `GET /repos/{o}/{r}/commits`. `stat`, `verification` and `files` all
@@ -315,14 +375,42 @@ impl GiteaClient {
         path: &str,
         query: &[(&str, String)],
     ) -> Result<T, SourceError> {
+        self.get_json_counted(path, query)
+            .await
+            .map(|(body, _)| body)
+    }
+
+    /// The same request, keeping Gitea's `X-Total-Count` alongside the body.
+    ///
+    /// The header exists only while the response does, and
+    /// [`knobas_http::HttpClient::send`] is the one place a response is ever
+    /// held -- so reading it has to happen here, between the send and the
+    /// decode, or not at all. Nothing in `knobas-http` changes for it:
+    /// `send` already hands back the whole response (§10.8's frozen crate is
+    /// untouched).
+    ///
+    /// `None` when the header is absent or unreadable, which is the honest
+    /// answer for a server that does not send one and degrades to exactly the
+    /// behaviour this adapter had before it read one.
+    async fn get_json_counted<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> Result<(T, Option<usize>), SourceError> {
         let path = format!("{API_ROOT}{path}");
         let request = self.http.request(Method::GET, &path).query(query);
         let response = self.http.send(request).await?;
-        response.json::<T>().await.map_err(|error| {
+        let total = response
+            .headers()
+            .get(TOTAL_COUNT)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.trim().parse::<usize>().ok());
+        let body = response.json::<T>().await.map_err(|error| {
             SourceError::protocol(format!(
                 "gitea: {path} answered an unreadable body: {error}"
             ))
-        })
+        })?;
+        Ok((body, total))
     }
 }
 
@@ -707,6 +795,12 @@ mod wire_tests {
     /// Gitea keeps a pull request's discussion on the **issue** with the same
     /// index -- there is no `/pulls/{n}/comments`. Ruling B1 grants this fifth
     /// read endpoint; the path is the part nobody guesses right.
+    ///
+    /// The mock also demands that **no** `limit` and **no** `page` are sent
+    /// (issue #131). This endpoint declares neither in Gitea's own OpenAPI
+    /// document and ignores both -- measured on the pinned container -- so
+    /// sending them would be a request the API has no parameter for, and the
+    /// next reader would take it as proof that the discussion pages.
     #[tokio::test]
     async fn pull_request_discussion_is_read_from_the_issue_with_the_same_index() {
         let server = MockServer::start().await;
@@ -714,6 +808,7 @@ mod wire_tests {
             .and(path(
                 "/api/v1/repos/tidewater/payout-service/issues/142/comments",
             ))
+            .and(|request: &wiremock::Request| request.url.query().is_none())
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
                 { "id": 1, "body": "Should the jitter be bounded?" }
             ])))
@@ -723,9 +818,63 @@ mod wire_tests {
             .await
             .issue_comments("tidewater", "payout-service", 142)
             .await
-            .expect("the discussion is on the issue path");
-        assert_eq!(got.len(), 1);
-        assert_eq!(got[0]["body"], "Should the jitter be bounded?");
+            .expect("the discussion is read from the issue path, unparameterised");
+        assert_eq!(got.raw.len(), 1);
+        assert_eq!(got.raw[0]["body"], "Should the jitter be bounded?");
+    }
+
+    /// `X-Total-Count` is the discussion's only completeness signal, and it has
+    /// to survive the trip from the wire to `sync::fetch_comments` -- the one
+    /// seam between the response and the check, which no other test crosses.
+    /// Without it the check reads `None` on every discussion and passes
+    /// everything, which is the shape of a guard that is not there at all.
+    #[tokio::test]
+    async fn the_servers_own_count_of_a_discussion_reaches_the_caller() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(
+                "/api/v1/repos/tidewater/payout-service/issues/142/comments",
+            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!([{ "id": 1, "body": "one of five" }]))
+                    .insert_header("X-Total-Count", "5"),
+            )
+            .mount(&server)
+            .await;
+        let got = client_for(&server)
+            .await
+            .issue_comments("tidewater", "payout-service", 142)
+            .await
+            .expect("a header the adapter reads is not a failure");
+        assert_eq!((got.raw.len(), got.total), (1, Some(5)));
+    }
+
+    /// A server that sends no such header -- an older Gitea, a proxy that
+    /// strips it -- leaves the count unknown, and unknown must mean "believe
+    /// what arrived" rather than "assume zero". Reading a missing header as 0
+    /// would be harmless; reading an unparseable one as 0 too is what keeps a
+    /// malformed header from failing every run.
+    #[tokio::test]
+    async fn a_discussion_with_no_count_header_is_no_count_at_all() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(
+                "/api/v1/repos/tidewater/payout-service/issues/142/comments",
+            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!([{ "id": 1, "body": "one" }]))
+                    .insert_header("X-Total-Count", "not a number"),
+            )
+            .mount(&server)
+            .await;
+        let got = client_for(&server)
+            .await
+            .issue_comments("tidewater", "payout-service", 142)
+            .await
+            .expect("an unreadable header is not a protocol failure");
+        assert_eq!(got.total, None);
     }
 
     /// Every other status still fails: only 409 is forgiven, and only there.

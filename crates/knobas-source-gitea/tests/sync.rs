@@ -762,6 +762,12 @@ fn three_of_each() -> State {
 /// let three of them drift back to `batch.len() < PAGE_SIZE` while the fourth
 /// kept the suite green. Reverting any single walk fails exactly one of the
 /// assertions below.
+///
+/// Four, not five: the pull-request discussion is not a paged listing and is
+/// not walked. Issue #131 established that against the pinned container -- the
+/// endpoint declares no `page` and ignores one -- and
+/// `a_discussion_the_server_did_not_send_whole_ends_the_run` is what guards it
+/// instead.
 #[tokio::test]
 async fn a_server_that_caps_its_pages_short_is_still_walked_to_the_end() {
     let state = three_of_each();
@@ -820,6 +826,177 @@ async fn a_server_that_caps_its_pages_short_is_still_walked_to_the_end() {
             "{kind}: a capped server must mirror what an uncapped one does"
         );
     }
+}
+
+/// One comment body. Zero-padded, so no note's text is a prefix of another's
+/// and `contains` cannot report note 5 present because note 51 is.
+fn note(n: usize) -> String {
+    format!("review note #{n:03}")
+}
+
+/// A discussion of `count` comments on the fixture's `#142`, with the pull
+/// request's own `comments` count kept honest -- `fetch_comments` skips the
+/// request entirely when it reads zero.
+fn discussion_of(count: usize) -> State {
+    let full = "tidewater/payout-service";
+    let mut state = State::tidewater();
+    let notes: Vec<serde_json::Value> = (1..=count)
+        .map(|n| support::comment(&note(n), "jonas", "2026-08-22T09:30:00Z"))
+        .collect();
+    state
+        .comments
+        .insert(format!("{full}#142"), notes)
+        .expect("the fixture already has a discussion on #142");
+    let pulls = state.pulls.get_mut(full).expect("the fixture has pulls");
+    let sepa = pulls
+        .iter_mut()
+        .find(|p| p["number"] == serde_json::json!(142))
+        .expect("the fixture has #142");
+    sepa["comments"] = serde_json::json!(count);
+    state
+}
+
+/// Every comment of `#142` missing from the indexed text.
+fn notes_missing_from(items: &[SyncItem], count: usize) -> Vec<usize> {
+    let sepa = items
+        .iter()
+        .find(|i| i.entity.key.ends_with("#142"))
+        .expect("the fixture's discussion is on #142");
+    (1..=count)
+        .filter(|n| !sepa.body_text.contains(&note(*n)))
+        .collect()
+}
+
+/// Issue #131's real question: a long discussion must reach `body_text` whole.
+///
+/// The issue expected the answer to be a paged walk. It is not -- Gitea's
+/// `issueGetComments` declares no `page` and ignores one, so the discussion
+/// arrives in a single response however long it is, and the fake models that
+/// (`support::mount_as`). What this pins is the property either design owed:
+/// far more comments than the 50 a listing request asks for, and every one of
+/// them in the indexed text.
+///
+/// Asserted on `body_text`, where the comments land (interfaces §4.1: title +
+/// description + comment texts), never on the request. A discussion long
+/// enough to page on a server that paged is the shape a regression here would
+/// take, whichever direction the regression came from.
+#[tokio::test]
+async fn a_long_discussion_reaches_the_indexed_text_whole() {
+    let count = PAGE + 1;
+    let state = discussion_of(count);
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+    let (items, _) = full(&*source).await;
+
+    assert_eq!(
+        notes_missing_from(&items, count),
+        Vec::<usize>::new(),
+        "a discussion of {count} came back truncated"
+    );
+    // And it cost exactly one request: the endpoint has no second page, and
+    // asking for one would re-read the discussion this fake -- like the server
+    // it stands for -- serves whole every time.
+    let asked = fake.paths().await;
+    assert_eq!(
+        asked
+            .iter()
+            .filter(|p| p.ends_with("/issues/142/comments"))
+            .count(),
+        1,
+        "{asked:?}"
+    );
+}
+
+/// The completeness check, and the only thing standing between a Gitea that
+/// pages this endpoint and a mirror that is quietly wrong on every long
+/// discussion.
+///
+/// `issue_comments` reads the whole discussion in one request because the
+/// pinned container has no second page to offer -- measured, and re-measured
+/// live by `live_gitea::the_discussion_endpoint_does_not_page`. A server that
+/// answered fewer records than its own `X-Total-Count` would break that premise
+/// silently: `body_text` (interfaces §4.1) would be short on every discussion
+/// past the page size, forever, with no error, no warning and a watermark that
+/// advanced exactly as it would have. There is no second request to recover
+/// with, so the run stops and says so.
+///
+/// **Fatal, deliberately, and the exception to everything else in
+/// `fetch_comments`.** A *refused* discussion warns and carries on -- the test
+/// above this one -- because it is one pull request the server said no to. A
+/// short one is a fact about the endpoint, and therefore about every discussion
+/// the source will ever read. Issue #114 gave TeamCity's unpaged
+/// `/app/rest/buildTypes` the same treatment for the same reason.
+#[tokio::test]
+async fn a_discussion_the_server_did_not_send_whole_ends_the_run() {
+    let mut state = discussion_of(4);
+    // Four comments served, five claimed: a server that truncated without
+    // saying so in the payload.
+    state
+        .discussion_total
+        .insert("tidewater/payout-service#142".to_owned(), 5);
+    let fake = Fake::start(&state).await;
+    let truncating = source(fake.base_url(), serde_json::json!({}));
+
+    let mut sink = VecSink(Vec::new());
+    let error = truncating
+        .sync(None, &mut sink)
+        .await
+        .expect_err("a discussion the server says it truncated cannot be mirrored quietly");
+    let SourceError::Protocol { message, .. } = &error else {
+        panic!("{error:?}");
+    };
+    assert!(
+        message.contains("4 of its 5 comments")
+            && message.contains("X-Total-Count")
+            && message.contains("include_pr_comments"),
+        "the message must name what was missed, the header it read it from, and the lever \
+         that stops asking: {message}"
+    );
+    // No cursor came back over the gap, so the next run re-reads from where
+    // this one stood rather than past it.
+    assert!(
+        !sink.0.iter().any(|i| i.entity.key.ends_with("#142")),
+        "the pull request must not be mirrored with a discussion known to be short"
+    );
+
+    // The control: the identical fixture whose header agrees with its body
+    // syncs, so the failure above is about the disagreement and not about the
+    // discussion being four comments long.
+    let honest = Fake::start(&discussion_of(4)).await;
+    let (items, _) = full(&*source(honest.base_url(), serde_json::json!({}))).await;
+    assert_eq!(notes_missing_from(&items, 4), Vec::<usize>::new());
+}
+
+/// The completeness check counts the records the **server sent**, not the
+/// comments that parsed -- and the difference is a whole run.
+///
+/// A comment `model::Comment` cannot read is dropped on purpose: the rest of
+/// the discussion is still worth indexing, and a field Gitea adds tomorrow is
+/// not a reason to lose a pull request. Count the survivors against
+/// `X-Total-Count` instead and that deliberate drop reads as truncation, so
+/// the adapter ends the run over a comment it chose to skip -- on a server
+/// that sent everything it had. Two lines apart in `fetch_comments`, and no
+/// other test tells them apart: a fixture where every record parses passes
+/// either way.
+#[tokio::test]
+async fn an_unreadable_comment_is_dropped_without_reading_as_a_truncation() {
+    let mut state = discussion_of(3);
+    // The middle record is one no `Comment` can be projected from -- a `body`
+    // that is not a string. The header still says three, because three is what
+    // the server sent.
+    state
+        .comments
+        .get_mut("tidewater/payout-service#142")
+        .expect("the fixture's discussion is on #142")[1] = serde_json::json!({ "body": 42 });
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+
+    let (items, _) = full(&*source).await;
+    assert_eq!(
+        notes_missing_from(&items, 3),
+        vec![2],
+        "the readable comments are indexed and only the unreadable one is gone"
+    );
 }
 
 /// A sink that rejects an item aborts the run -- the remaining items are not

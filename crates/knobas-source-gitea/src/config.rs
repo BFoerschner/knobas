@@ -25,8 +25,15 @@ pub struct GiteaConfig {
     pub commits_per_repo: u32,
     /// The same bound for pull requests, newest-updated first.
     pub prs_per_repo: u32,
-    /// Whether a pull request's comments are folded into `body_text` (one
-    /// extra request per emitted pull request that actually has comments).
+    /// Whether a pull request's comments are folded into `body_text`.
+    ///
+    /// One request per emitted pull request that actually has comments, and
+    /// none for one that has none. One and not two, however long the
+    /// discussion: Gitea's `issueGetComments` is not paged, so there is never a
+    /// second page to ask for (issue #131, `client::issue_comments`).
+    ///
+    /// It is also the lever a source whose Gitea *does* truncate a discussion
+    /// is left with, and the failure `sync::fetch_comments` raises names it.
     pub include_pr_comments: bool,
     /// Per-instance request rate. Interfaces §4.1 default: 10 req/s.
     pub rate_limit_per_sec: u32,

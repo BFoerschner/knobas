@@ -51,6 +51,16 @@ pub struct State {
     pub pulls: BTreeMap<String, Vec<Value>>,
     /// `owner/repo#index` -> comment records.
     pub comments: BTreeMap<String, Vec<Value>>,
+    /// `owner/repo#index` -> the `X-Total-Count` that discussion is served
+    /// with, when it must differ from the number of records actually served.
+    ///
+    /// Gitea sends the header on every discussion and it has always agreed with
+    /// the body; a fixture that makes it disagree is describing a Gitea that
+    /// truncated the discussion without saying so in the payload -- the only
+    /// shape in which `sync::fetch_comments`'s completeness check can be
+    /// witnessed, and the reason it is a check rather than an assumption
+    /// (issue #131).
+    pub discussion_total: BTreeMap<String, usize>,
     /// `owner/repo#index` -> the HTTP status that discussion is refused with.
     /// A 404 is what Gitea answers for a repository with its issue unit
     /// disabled and a 403 is a token without issue scope -- both cost the
@@ -203,6 +213,7 @@ impl State {
             forbidden: BTreeSet::new(),
             revoked: BTreeSet::new(),
             discussion_status: BTreeMap::new(),
+            discussion_total: BTreeMap::new(),
         }
     }
 
@@ -446,14 +457,38 @@ impl Fake {
             .mount(&self.server)
             .await;
         }
+        // **The discussion is served whole, whatever the request said, and
+        // whatever `page_size` the rest of this fake is honouring.** That is
+        // not laziness, it is the endpoint: Gitea's `issueGetComments` declares
+        // no `page` and no `limit` (its OpenAPI document says so, and the
+        // repository-wide `issueGetRepoComments` next to it declares both), and
+        // measured against the pinned container it ignores them -- 51 comments
+        // came back for `limit=2` and for `page=9` alike. A fake that paged
+        // this route would be a fake asserting a server that does not exist,
+        // and `just check` would go green over an adapter re-reading the same
+        // discussion until its budget ran out. Issue #131, measured 2026-08-29
+        // on Gitea 1.27.2; `live_gitea::the_discussion_endpoint_does_not_page`
+        // is what re-asserts it against the server that decides it.
+        //
+        // `X-Total-Count` rides along because the adapter's only completeness
+        // check reads it -- and `discussion_total` is how a fixture makes the
+        // header disagree with the body, which no real Gitea has been seen to
+        // do and which the adapter must refuse rather than mirror.
         for (key, comments) in &state.comments {
             let (full_name, index) = key
                 .split_once('#')
                 .expect("comment key is owner/repo#index");
+            let total = state
+                .discussion_total
+                .get(key)
+                .copied()
+                .unwrap_or(comments.len());
             authed(Mock::given(method("GET")).and(path(format!(
                 "/api/v1/repos/{full_name}/issues/{index}/comments"
             ))))
-            .respond_with(ok(json!(comments)))
+            .respond_with(
+                ok(json!(comments)).insert_header("X-Total-Count", total.to_string().as_str()),
+            )
             .mount(&self.server)
             .await;
         }

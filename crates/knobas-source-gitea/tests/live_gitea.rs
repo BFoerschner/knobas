@@ -514,3 +514,212 @@ async fn etag_support_probe() {
         println!("ETAG PROBE {path}: If-None-Match -> {}", second.status());
     }
 }
+
+/// The page size the adapter's *listing* requests ask for, mirrored here
+/// because `client::PAGE_SIZE` is crate-private and an integration test cannot
+/// see it. The discussion below is deliberately longer than one, which is the
+/// only size at which "the endpoint does not page" says anything.
+const PAGE: usize = 50;
+
+/// Issue #131, and the assumption the adapter now rests on, against the server
+/// that decides it.
+///
+/// #131 read `issue_comments` as a listing asked without a `limit`, and
+/// therefore truncated at Gitea's `DEFAULT_PAGING_NUM` -- thirty comments, on a
+/// stock install, today. If that were so, the fix would be to page it. It is
+/// not so, and the fix is the opposite: `issueGetComments` **is not a paged
+/// endpoint**, so a walk over it would re-read the same discussion until it ran
+/// out of budget and fold every comment into `body_text` once per request.
+///
+/// Nothing docker-free can settle that, which is exactly what this file is for.
+/// Four things are checked here, and the adapter is wrong in a different way if
+/// any of them stops holding:
+///
+/// 1. **The endpoint's own OpenAPI declaration carries no `page` and no
+///    `limit`** -- so the adapter sends neither.
+/// 2. **The repository-wide comments endpoint next to it declares and honours
+///    both.** The control that makes 1 a fact about the endpoint rather than
+///    about this instance's configuration.
+/// 3. **`limit` and `page` are ignored**: a discussion of `PAGE + 1` comes back
+///    whole for no query at all, for `limit=50&page=1`, for `limit=2&page=1`
+///    and for `limit=50&page=9`.
+/// 4. **`X-Total-Count` equals what the body carried**, which is the signal
+///    `sync::fetch_comments` refuses a short discussion on. A server where it
+///    did not would fail every run, so this is also the check that the guard
+///    cannot fire against a healthy Gitea.
+///
+/// And then the whole thing end to end: the adapter mirrors all `PAGE + 1`
+/// comments into the pull request's indexed text in one sync.
+///
+/// The discussion is written through Gitea's own API, like the pull request in
+/// the test above. `PAGE + 1` comment POSTs is what this test costs.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn the_discussion_endpoint_does_not_page() {
+    let env = env();
+    let source = env.one_repo();
+    let (_, cursor) = full(&*source).await;
+
+    let http = reqwest::Client::new();
+    let auth = format!("token {}", env.token);
+    let api = format!("{}/api/v1/repos/{}", env.url, env.full_name());
+
+    // 1 and 2: what the server says about itself, before anything is written.
+    let swagger: serde_json::Value = http
+        .get(format!("{}/swagger.v1.json", env.url))
+        .send()
+        .await
+        .expect("the container publishes its OpenAPI document")
+        .json()
+        .await
+        .expect("swagger.v1.json is JSON");
+    let params = |path: &str| -> Vec<String> {
+        swagger["paths"][path]["get"]["parameters"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{path} is in the document"))
+            .iter()
+            .filter_map(|p| p["name"].as_str().map(str::to_owned))
+            .collect()
+    };
+    let discussion = params("/repos/{owner}/{repo}/issues/{index}/comments");
+    assert!(
+        !discussion.contains(&"page".to_owned()) && !discussion.contains(&"limit".to_owned()),
+        "Gitea has given the discussion endpoint paging parameters: {discussion:?}. \
+         The adapter reads it in one request on the strength of their absence -- \
+         re-measure it and see client::issue_comments"
+    );
+    let repo_wide = params("/repos/{owner}/{repo}/issues/comments");
+    assert!(
+        repo_wide.contains(&"page".to_owned()) && repo_wide.contains(&"limit".to_owned()),
+        "the repository-wide comments endpoint is the control for the assertion above, \
+         and it has stopped declaring paging too: {repo_wide:?}"
+    );
+
+    // A pull request of this run's own, with a discussion longer than any
+    // listing page.
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let branch = format!("knobas-live-discussion-{stamp}");
+    let note = |n: usize| format!("knobas live discussion note #{n:03} of run {stamp}");
+
+    let created = http
+        .post(format!("{api}/branches"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "new_branch_name": branch, "old_branch_name": "main" }))
+        .send()
+        .await
+        .expect("create the branch");
+    assert!(
+        created.status().is_success(),
+        "branch: {}",
+        created.text().await.unwrap_or_default()
+    );
+    let opened = http
+        .post(format!("{api}/pulls"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "head": branch, "base": "main",
+            "title": format!("knobas live discussion check {stamp}"),
+            "body": "Opened by the knobas Gitea adapter's live suite (issue #131)."
+        }))
+        .send()
+        .await
+        .expect("open the pull request");
+    assert!(
+        opened.status().is_success(),
+        "pull: {}",
+        opened.text().await.unwrap_or_default()
+    );
+    let number = opened.json::<serde_json::Value>().await.unwrap()["number"]
+        .as_u64()
+        .expect("Gitea answers with the new pull request's number");
+
+    for n in 1..=PAGE + 1 {
+        let posted = http
+            .post(format!("{api}/issues/{number}/comments"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({ "body": note(n) }))
+            .send()
+            .await
+            .expect("comment on the pull request");
+        assert!(
+            posted.status().is_success(),
+            "comment {n}: {}",
+            posted.text().await.unwrap_or_default()
+        );
+    }
+
+    // 3 and 4: what the endpoint does with paging parameters, and what it says
+    // about its own completeness.
+    for query in [
+        "",
+        "?limit=50&page=1",
+        "?limit=2&page=1",
+        "?limit=50&page=9",
+    ] {
+        let answered = http
+            .get(format!("{api}/issues/{number}/comments{query}"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .expect("read the discussion back");
+        let total = answered
+            .headers()
+            .get("x-total-count")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<usize>().ok());
+        let body: Vec<serde_json::Value> = answered.json().await.expect("a comment array");
+        assert_eq!(
+            body.len(),
+            PAGE + 1,
+            "query {query:?} paged the discussion; the adapter reads it in one request"
+        );
+        assert_eq!(
+            total,
+            Some(PAGE + 1),
+            "query {query:?}: X-Total-Count is what sync::fetch_comments refuses a short \
+             discussion on, and it must agree with the body on a healthy server"
+        );
+    }
+
+    // End to end: the mirror carries all of it.
+    let mut sink = VecSink(Vec::new());
+    source
+        .sync(Some(cursor), &mut sink)
+        .await
+        .expect("incremental sync");
+    let key = format!("gitea:{}#{number}", env.full_name());
+    let pr = sink
+        .0
+        .iter()
+        .find(|i| i.entity.to_string() == key)
+        .unwrap_or_else(|| {
+            panic!(
+                "the new pull request is missing from {:?}",
+                sink.0
+                    .iter()
+                    .map(|i| i.entity.to_string())
+                    .collect::<Vec<_>>()
+            )
+        });
+    let missing: Vec<usize> = (1..=PAGE + 1)
+        .filter(|n| !pr.body_text.contains(&note(*n)))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "the discussion came back truncated: {} of {} comments are missing from body_text, \
+         first {:?}",
+        missing.len(),
+        PAGE + 1,
+        missing.first()
+    );
+    // Each comment exactly once: a walk over an endpoint that ignores `page`
+    // would have folded the whole discussion in once per request.
+    assert_eq!(
+        pr.body_text.matches(&note(1)).count(),
+        1,
+        "the first comment is in body_text more than once"
+    );
+}

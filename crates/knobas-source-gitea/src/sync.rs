@@ -259,6 +259,14 @@ fn cap_reached(what: &str, seen: usize) -> SourceError {
 /// ruled on 2026-08-29. Splitting it back into four inline comparisons is how
 /// three of them drift.
 ///
+/// **Four, and [`fetch_comments`] is deliberately not a fifth.** Issue #131
+/// read the discussion request as a paged listing that never paged, and the
+/// pinned container says it is not one: `issueGetComments` declares no `page`
+/// and no `limit` and ignores both, so "page until empty" there would re-read
+/// the same discussion until the budget ran out and fold it into `body_text`
+/// once per request. That read gets the server's own `X-Total-Count` instead
+/// -- see [`crate::client::GiteaClient::issue_comments`] for the measurements.
+///
 /// The price is one extra request per *exhausted* walk, under the 10 req/s
 /// limiter of interfaces §4.1 -- and the `MAX_*_PAGES` caps above are what keep
 /// "until empty" from becoming "until forever" against a server that ignores
@@ -756,6 +764,41 @@ fn close_watermark<K: Ord + Clone>(
 /// which is the fifth read endpoint ruling B1 granted. `pr.comments == 0` is
 /// what makes an idle-ish run cheap: no discussion, no request.
 ///
+/// # Why one request is enough here, and what proves it every time
+///
+/// Issue #131 read this as the fifth paged listing: no `limit`, no `page`, and
+/// therefore `DEFAULT_PAGING_NUM` records -- thirty on a stock Gitea -- with a
+/// discussion silently cut off there. Measured against the pinned container it
+/// is not a paged endpoint at all, and paging it would have been the worse bug
+/// of the two: `page` is ignored, so the walk would have re-read the same
+/// discussion until its budget ran out and folded every comment into
+/// `body_text` once per request. The three measurements are on
+/// [`crate::client::GiteaClient::issue_comments`], with the endpoint's own
+/// OpenAPI declaration and a same-minute control on the repository-wide
+/// comments endpoint, which does page and does honour `limit`.
+///
+/// So the shape #131 asked for is refused and the risk it was filed about is
+/// answered instead. **The completeness of a discussion is checked, not
+/// assumed**: Gitea sends `X-Total-Count`, it equalled the record count of
+/// every discussion in the fixture under every query, and a read where it does
+/// **not** ends the run.
+///
+/// Ending the run is the deliberate part, and it is the one thing here that is
+/// not "search text on one item". A short discussion means the measured
+/// premise of this whole function is false on that server -- and it would be
+/// false for *every* discussion it ever reads, so what looks like one blemish
+/// is a `body_text` that is quietly wrong across the source, on the very field
+/// interfaces §4.1 defines as title + description + comment texts and that a
+/// `comment` write op's hold detection reads. There is no second request to
+/// recover with, because there is no second page to ask for; the honest
+/// answers are to stop, or to turn the discussion off. The message offers the
+/// second (`include_pr_comments`), and any Gitea that needs it is a Gitea this
+/// adapter has to be re-measured against -- exactly the treatment issue #114
+/// gave TeamCity's unpaged `/app/rest/buildTypes`.
+///
+/// **The price is nothing.** One request per emitted pull request that has a
+/// discussion, unchanged since M1, and none at all for one that has none.
+///
 /// # What a refusal here costs, and what it is allowed to hide
 ///
 /// A refusal costs searchable text, not the run -- the pull request itself was
@@ -795,32 +838,50 @@ async fn fetch_comments(
     if !source.config.include_pr_comments || pr.comments == 0 {
         return Ok(Vec::new());
     }
-    let error = match source
+    let discussion = match source
         .client
         .issue_comments(at.owner, at.name, pr.number)
         .await
     {
-        Ok(raw) => {
-            // A single unreadable comment is dropped rather than failing the
-            // pull request: the rest of the discussion is still worth indexing.
-            return Ok(raw
-                .into_iter()
-                .filter_map(|c| serde_json::from_value(c).ok())
-                .collect());
+        Ok(discussion) => discussion,
+        Err(error) if is_repo_scoped(&error) => {
+            tracing::warn!(
+                repository = %at.full_name,
+                number = pr.number,
+                %error,
+                "gitea: indexing this pull request without its discussion; \
+                 set include_pr_comments to false to stop asking"
+            );
+            return Ok(Vec::new());
         }
-        Err(error) => error,
+        Err(error) => return Err(RepoError::from(error)),
     };
-    if !is_repo_scoped(&error) {
-        return Err(RepoError::from(error));
+    // Against the **records the server sent**, not against the comments that
+    // parsed: an unreadable comment is dropped below on purpose, and counting
+    // that as truncation would fail the run over a field Gitea added.
+    // `pr.comments` is not the comparison either -- it read 3 on the fixture's
+    // `#142` where the endpoint sent 2, so it counts something this endpoint
+    // does not return.
+    if let Some(total) = discussion.total
+        && total > discussion.raw.len()
+    {
+        return Err(RepoError::Fatal(SourceError::protocol(format!(
+            "gitea: {}#{} answered {} of its {total} comments (its own X-Total-Count header \
+             says {total}) and this endpoint has no second page to ask for, so every long \
+             discussion on this instance would be mirrored incomplete without saying so. Set \
+             include_pr_comments to false to index pull requests without their discussion.",
+            at.full_name,
+            pr.number,
+            discussion.raw.len(),
+        ))));
     }
-    tracing::warn!(
-        repository = %at.full_name,
-        number = pr.number,
-        %error,
-        "gitea: indexing this pull request without its discussion; \
-         set include_pr_comments to false to stop asking"
-    );
-    Ok(Vec::new())
+    // A single unreadable comment is dropped rather than failing the
+    // pull request: the rest of the discussion is still worth indexing.
+    Ok(discussion
+        .raw
+        .into_iter()
+        .filter_map(|c| serde_json::from_value(c).ok())
+        .collect())
 }
 
 /// New commits on the branches whose heads moved this run.
