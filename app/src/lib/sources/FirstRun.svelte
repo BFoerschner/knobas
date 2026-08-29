@@ -54,6 +54,11 @@
   (`FirstRun.test.svelte.ts` holds `list_sources` behind a latch) rather than an
   eye.
 
+  …and when the read cannot be had at all, the panel says *knobas mirrored your
+  items* and no number (#137). The count is the only part of that sentence it
+  cannot vouch for, so the count is the only part it drops; the run's own
+  `Upserted` does not stand in for it. See `mirrored`.
+
   ## Progress without an inline style
 
   A native `<progress>`, and no `style="width: …"`. `style-src 'self'` drops an
@@ -157,13 +162,47 @@
    * count is no longer the claim being made, and the corpus is not back yet.
    * The panel says so rather than filling it with the number it happens to
    * hold — *waiting on a count* is a true thing to render, and it is not
-   * *mirrored 0 items*. It cannot stick: `readCorpus` either resolves with a
-   * count, or with `null` because the source is not in the answer, or throws
-   * and is caught into `null`. A mirror that really is empty is `0` here and
-   * reads as zero, which is the distinction this whole tri-state exists to
-   * make.
+   * *mirrored 0 items*. A mirror that really is empty is `0` here and reads as
+   * zero, which is the distinction this whole tri-state exists to make.
+   *
+   * **And when the corpus cannot be read at all, there is no number** (#137,
+   * ruled 2026-08-29). `readCorpus` settles on `null` when the source is not in
+   * the answer or when the read threw twice, and the panel then renders `null`
+   * here — *no digit after the word "mirrored" that this panel cannot vouch for
+   * as a corpus count*. It used to fall back to `items`, on the reasoning that
+   * the run's count "is the only other number there is": true, and the wrong
+   * conclusion. It is a per-run `Upserted`, `CONTEXT.md` forbids *mirrored* for
+   * it by name, and it is nearest to zero in exactly the case ADR-0005 was
+   * written for — the wizard that joined a deduplicated run over a full mirror.
+   * A number the panel distrusts is worth less than no number, and this is the
+   * first sentence knobas ever says about a source.
+   *
+   * `items` survives here only in its other job: naming **one run's live
+   * progress** while the bar is moving, and the count beside a failure, neither
+   * of which claims to be the mirror.
    */
-  const mirrored = $derived(corpusPending ? "…" : String(corpus ?? items));
+  const mirrored = $derived.by(() => {
+    if (corpusPending) return "…";
+    // Asked, and there is no count to be had. The one state that renders no
+    // number at all.
+    if (corpus === null) return null;
+    // Nobody has asked yet, which — given `corpusPending` above — means the run
+    // has not ended. Spelled out rather than left as a `?? items` tail on the
+    // line below, because a tail reads as the fallback this issue deleted and
+    // the next reader would be right to delete it. This is the other job.
+    if (corpus === undefined) return String(items);
+    return String(corpus);
+  });
+
+  /**
+   * The stats row's `· N items ·` segment, or a dash where the count would go.
+   *
+   * The same rule as the sentence and for the same reason: the row sits beside
+   * `finished`, so a number in it is read as what was mirrored. A dash rather
+   * than dropping the segment, so the row keeps its shape between a pending
+   * read, a count and no count.
+   */
+  const itemsReading = $derived(mirrored === null ? "—" : `${mirrored} items`);
 
   /**
    * Read the source's corpus off `SourceSummary.item_count`, which already
@@ -173,15 +212,25 @@
    * one run's progress, and the corpus is not one run's to report.
    */
   async function readCorpus(id: string) {
-    try {
-      const rows = await listSources();
-      corpus = rows.find((row) => row.id === id)?.item_count ?? null;
-    } catch {
-      // The sync itself worked; a count that could not be re-read is not
-      // something to put a failure panel over. The reading falls back to what
-      // the run said, which is the only other number there is.
-      corpus = null;
+    // One immediate retry, then concede (#137). The panel is already rendering
+    // the wait as `…`, so a second attempt costs nothing visible, and one
+    // `list_sources` failing at this exact instant is likelier transient than
+    // terminal. It changes the odds, not the claim: after the last attempt the
+    // panel still refuses to put a number it cannot vouch for in front of a
+    // person, which is what the `null` below is.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const rows = await listSources();
+        // Resolved, so this is the answer whatever it says: a source missing
+        // from it has no count to retry for.
+        corpus = rows.find((row) => row.id === id)?.item_count ?? null;
+        return;
+      } catch {
+        // The sync itself worked; a count that could not be re-read is not
+        // something to put a failure panel over.
+      }
     }
+    corpus = null;
   }
 
   async function sync() {
@@ -240,10 +289,11 @@
     failure = null;
     try {
       const report = await demoLoad();
-      // The fallback, for a corpus that cannot be re-read. `demo_load`
-      // registers *and* syncs the mock source in one call, so for this one path
-      // the two numbers coincide.
-      items = report.upserted;
+      // No fallback to `report.upserted`, even though `demo_load` registers
+      // *and* syncs in one call so the two numbers coincide here. That makes
+      // the fallback harmless on this path, not right (#137): one rule
+      // everywhere, and a demo load whose re-read fails says *your items* like
+      // any other.
       await readCorpus(report.source_id);
       phase = "finished";
       // `demo_load` registers the mock source and syncs it in one call, so
@@ -360,7 +410,7 @@
             <progress max={finished ? 1 : undefined} value={finished ? 1 : undefined}></progress>
             <p class="reading">
               <b>{failed ? "failed" : (phase ?? "starting")}</b>
-              · {mirrored} items · {(elapsed / 1000).toFixed(1)} s
+              · {itemsReading} · {(elapsed / 1000).toFixed(1)} s
             </p>
           </div>
 
@@ -384,8 +434,12 @@
         {/if}
       {:else}
         <p class="lead">
-          knobas mirrored <b>{mirrored}</b> items. Press <kbd>⌘K</kbd> to search everything you just
-          synced.
+          <!--
+            The success is claimed because the run's ending said so; the count
+            is only claimed when there is one (#137).
+          -->
+          knobas mirrored {#if mirrored === null}your items{:else}<b>{mirrored}</b> items{/if}. Press
+          <kbd>⌘K</kbd> to search everything you just synced.
         </p>
         <div class="acts">
           <button class="btn pri" disabled={finishing} onclick={() => void finish()}>Finish</button>

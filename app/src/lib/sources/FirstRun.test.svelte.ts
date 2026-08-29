@@ -59,6 +59,17 @@ let syncFails: unknown = null;
  */
 let corpusGate: { held: Promise<void>; release: () => void } | null = null;
 
+/**
+ * How many of the next `list_sources` calls throw before one answers.
+ *
+ * A *throwing* read is a different interleaving from the one #120 covered and
+ * from a read that answers without this source in it, and #137 is about that
+ * one: the same round trip, failing. Counted rather than a boolean because the
+ * panel retries once, so "fails and then works" and "fails twice" are two
+ * behaviours and each needs saying.
+ */
+let corpusFailures = 0;
+
 function holdTheCorpusRead() {
   let release!: () => void;
   const held = new Promise<void>((resolve) => (release = resolve));
@@ -76,6 +87,10 @@ vi.mock("../ipc/sources", () => ({
   listSources: async () => {
     calls.listSources += 1;
     if (corpusGate) await corpusGate.held;
+    if (corpusFailures > 0) {
+      corpusFailures -= 1;
+      throw new Error("list_sources is unavailable");
+    }
     return [{ ...summary(), item_count: corpus }, { ...summary("mock"), item_count: corpus }];
   },
   demoLoad: () => {
@@ -172,6 +187,7 @@ beforeEach(() => {
   corpus = 213;
   channels.length = 0;
   corpusGate = null;
+  corpusFailures = 0;
   syncFails = null;
   target = document.createElement("div");
   document.body.append(target);
@@ -323,7 +339,14 @@ test("a mirror that really is empty reads as zero, not as pending for ever", asy
   expect(button("Finish")).toBeTruthy();
 });
 
-test("a corpus that cannot be read falls back to the run's count rather than a failure panel", async () => {
+test("a corpus that cannot be read costs the count, not the sentence", async () => {
+  // #137, ruled 2026-08-29: this used to fall back to the run's count, and the
+  // run's count is an `Upserted` — the very number `CONTEXT.md` forbids the
+  // word *mirrored* for, and the one that is zero in exactly the interleaving
+  // ADR-0005 was written for. So the count goes and nothing takes its place.
+  //
+  // `list_sources` answers, but not about this source — a read that resolved
+  // with no count to be had.
   render({ source: summary("nowhere") });
   button("Next")!.click();
   flushSync();
@@ -332,14 +355,96 @@ test("a corpus that cannot be read falls back to the run's count rather than a f
   button("Start the first sync")!.click();
   await settle();
 
-  // `list_sources` answers, but not about this source — the same shape as a
-  // read that failed outright. The sync worked, so the panel still offers
-  // *Finish*: a count that could not be re-read is not a failed sync.
   progress({ phase: "finished", items: 9, elapsed_ms: 4200 });
   await settle();
-  expect(text()).toContain("9 items");
+  expect(text()).not.toContain("9 items");
+  expect(text()).not.toMatch(/\d+ items/);
+  // A resolved answer is the answer: nothing to retry for.
+  expect(calls.listSources).toBe(1);
+  // The sync worked: a count that could not be re-read is not a failed sync.
   expect(button("Finish")).toBeTruthy();
   expect(button("Retry")).toBeUndefined();
+  expect(text()).toMatch(/finished/);
+});
+
+test("a corpus read that is held open and then fails renders no count at all", async () => {
+  // The failure path, proved by delaying and then failing the round trip rather
+  // than by reading the source. Both attempts fail, so the panel concedes.
+  const gate = holdTheCorpusRead();
+  corpusFailures = 2;
+  render({ source: summary() });
+  button("Next")!.click();
+  flushSync();
+  button("Next")!.click();
+  flushSync();
+  button("Start the first sync")!.click();
+  await settle();
+
+  // The run this wizard was handed found the corpus already mirrored and wrote
+  // nothing — the ordinary interleaving after `add_source`'s wake, and the one
+  // that makes the old fallback say *0 items* over a full mirror.
+  progress({ phase: "finished", items: 0, elapsed_ms: 4200 });
+  await settle();
+  // Still waiting, and saying so. Asserted as the string it renders rather than
+  // as the absence of a digit, because *no digit* is equally true of the state
+  // this test is about — so a negative here and a negative after the release
+  // would be one assertion taken twice, passing over a panel that never moved.
+  expect(text()).toContain("· … items ·");
+
+  gate.release();
+  await settle();
+  expect(calls.listSources).toBe(2);
+  // Conceded, and that is a different thing from still pending: the row now
+  // reads the dash. Without this line every assertion below it also holds of a
+  // panel stuck on `…` for ever, which is not what the ruling asked for and is
+  // the failure a `corpus` left `undefined` would produce.
+  expect(text()).toContain("· — ·");
+  expect(text()).not.toContain("0 items");
+  expect(text()).not.toMatch(/\d+ items/);
+  expect(button("Finish")).toBeTruthy();
+  expect(button("Retry")).toBeUndefined();
+});
+
+test("one failed corpus read is retried before the panel concedes", async () => {
+  // Permitted by the ruling and taken: the wizard is already waiting, `…` is
+  // already what the wait looks like, and a `list_sources` that fails at this
+  // instant is likelier transient than terminal. It changes how often the
+  // count-free sentence is reached, never what it claims.
+  corpusFailures = 1;
+  corpus = 213;
+  render({ source: summary() });
+  button("Next")!.click();
+  flushSync();
+  button("Next")!.click();
+  flushSync();
+  button("Start the first sync")!.click();
+  await settle();
+
+  progress({ phase: "finished", items: 0, elapsed_ms: 4200 });
+  await settle();
+  expect(calls.listSources).toBe(2);
+  expect(text()).toContain("213 items");
+});
+
+test("a demo load whose corpus read fails says so too, and never the run's count", async () => {
+  // The demo path earns no exception (#137). `demo_load` registers and syncs in
+  // one call, so its `upserted` really is the corpus — which makes the fallback
+  // harmless there, not right. It is also the only path that reaches the DONE
+  // panel's own sentence, so it is where that sentence is asserted.
+  corpusFailures = 2;
+  render({ demo: true });
+  button("Next")!.click();
+  flushSync();
+  target.querySelector<HTMLButtonElement>(".modules button")!.click();
+  await settle();
+
+  expect(calls.demoLoad).toBe(1);
+  expect(step()).toBe("Done");
+  expect(text()).toContain("knobas mirrored your items");
+  // 21 is `demo_load`'s own `upserted`, and it is not what this sentence is
+  // about.
+  expect(text()).not.toContain("21 items");
+  expect(text()).not.toMatch(/mirrored \d/);
 });
 
 test("a sync that only started does not offer Finish", async () => {
