@@ -964,6 +964,38 @@ async fn a_discussion_the_server_did_not_send_whole_ends_the_run() {
     assert_eq!(notes_missing_from(&items, 4), Vec::<usize>::new());
 }
 
+/// The completeness check counts the records the **server sent**, not the
+/// comments that parsed -- and the difference is a whole run.
+///
+/// A comment `model::Comment` cannot read is dropped on purpose: the rest of
+/// the discussion is still worth indexing, and a field Gitea adds tomorrow is
+/// not a reason to lose a pull request. Count the survivors against
+/// `X-Total-Count` instead and that deliberate drop reads as truncation, so
+/// the adapter ends the run over a comment it chose to skip -- on a server
+/// that sent everything it had. Two lines apart in `fetch_comments`, and no
+/// other test tells them apart: a fixture where every record parses passes
+/// either way.
+#[tokio::test]
+async fn an_unreadable_comment_is_dropped_without_reading_as_a_truncation() {
+    let mut state = discussion_of(3);
+    // The middle record is one no `Comment` can be projected from -- a `body`
+    // that is not a string. The header still says three, because three is what
+    // the server sent.
+    state
+        .comments
+        .get_mut("tidewater/payout-service#142")
+        .expect("the fixture's discussion is on #142")[1] = serde_json::json!({ "body": 42 });
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+
+    let (items, _) = full(&*source).await;
+    assert_eq!(
+        notes_missing_from(&items, 3),
+        vec![2],
+        "the readable comments are indexed and only the unreadable one is gone"
+    );
+}
+
 /// A sink that rejects an item aborts the run -- the remaining items are not
 /// pushed at it, and no cursor is handed back over the gap (battery clause 6).
 #[tokio::test]
