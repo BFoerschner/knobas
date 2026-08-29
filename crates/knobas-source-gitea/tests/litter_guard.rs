@@ -8,14 +8,15 @@
 //! proves is proved by `just check`. Two of the guard's properties are load
 //! bearing enough that they must not wait for someone to run `just gitea-live`:
 //!
-//! * **[`LITTER`] decides what gets deleted.** `Litter::new` deletes every
-//!   branch of the mutated repository whose name starts with it. That is safe
+//! * **[`LITTER`] decides what gets deleted.** `Litter::clear_leftovers`
+//!   deletes every branch of the mutated repository whose name starts with it,
+//!   and every pull request opened from one of those. That is safe
 //!   only while nothing `testenv/seed-gitea.sh` creates starts with it, and
 //!   that was a fact somebody checked by hand once (PR #153) rather than a
 //!   property anything re-checks. A fixture branch named `knobas-anything`
 //!   would be deleted by the next live run and nothing would say so.
 //! * **The removal of an earlier run's leftovers has no other witness.**
-//!   Deleting it from `Litter::new` breaks no live test: residue simply
+//!   Deleting the call from `Litter::new` breaks no live test: residue simply
 //!   accumulates until `live_gitea_capped`'s `HEADROOM` refuses to start at 19
 //!   pull requests, runs later and in another suite. A `Litter::new` that
 //!   *asserted* on residue would be red on the run that inherits it and green
@@ -27,7 +28,11 @@
 
 mod live_env;
 
-use live_env::LITTER;
+use std::sync::{Arc, Mutex};
+
+use live_env::{Env, LITTER, Litter};
+use serde_json::{Value, json};
+use wiremock::{Mock, MockServer, Request, ResponseTemplate, matchers::any};
 
 /// The repository root, from this crate's manifest directory.
 fn root() -> std::path::PathBuf {
@@ -111,8 +116,8 @@ fn strings(value: &serde_json::Value, into: &mut Vec<String>) {
     }
 }
 
-/// **The destructive rule, pinned.** `Litter::new` deletes every branch of the
-/// mutated repository whose name starts with [`LITTER`], so a seeded branch
+/// **The destructive rule, pinned.** `Litter::clear_leftovers` deletes every
+/// branch of the mutated repository whose name starts with [`LITTER`], so a seeded branch
 /// that started with it would be destroyed by the next `just gitea-live` and
 /// re-created by the next seed, silently, forever.
 ///
@@ -164,12 +169,6 @@ fn nothing_the_seed_puts_in_the_container_could_be_taken_for_this_suites_litter(
 // and the server disagree, the fake is wrong.
 // ---------------------------------------------------------------------------
 
-use std::sync::{Arc, Mutex};
-
-use live_env::{Env, Litter};
-use serde_json::{Value, json};
-use wiremock::{Mock, MockServer, Request, ResponseTemplate, matchers::any};
-
 const TOKEN: &str = "tidewater-pat";
 const OWNER: &str = "tidewater";
 const REPO: &str = "payout-service";
@@ -188,21 +187,22 @@ struct Repository {
 }
 
 impl Repository {
-    /// What `testenv/seed-gitea.sh` leaves behind, in the shape these four
-    /// routes serve: three branches of `payout-service` and the two pull
-    /// requests opened from two of them.
+    /// `tidewater/payout-service` as `testenv/seed-gitea.sh` leaves it, in the
+    /// shape these four routes serve: the four branches and two pull requests
+    /// `just gitea-live` measures before and after every run.
     fn seeded() -> Self {
         Self {
             branches: [
                 "main",
                 "feature/PAY-231-sepa-retry",
                 "fix/PAY-228-partial-refund-drift",
+                "feature/PAY-236-payout-csv-export",
             ]
             .map(str::to_owned)
             .to_vec(),
             pulls: vec![
                 (142, "feature/PAY-231-sepa-retry".to_owned()),
-                (139, "fix/PAY-228-partial-refund-drift".to_owned()),
+                (144, "feature/PAY-236-payout-csv-export".to_owned()),
             ],
             deleted: Vec::new(),
         }
@@ -331,7 +331,7 @@ fn page<T: Clone>(records: &[T], request: &Request) -> Vec<T> {
         .unwrap_or_default()
 }
 
-/// **The removal of a killed run's leavings, witnessed.** Deleting the call
+/// **The removal of a killed run's leftovers, witnessed.** Deleting the call
 /// from `Litter::new` reddens nothing in the live suite: residue only
 /// accumulates, until `live_gitea_capped`'s `HEADROOM` refuses to start at 19
 /// pull requests -- a different suite, several runs later. This is that
@@ -340,7 +340,7 @@ fn page<T: Clone>(records: &[T], request: &Request) -> Vec<T> {
 /// Three assertions, three separate ways it could go wrong:
 ///
 /// 1. the leftovers are gone -- the branches *and* the pull request opened
-///    from one of them, which is not itself named after anything;
+///    from one of them, which carries no `knobas-` name of its own;
 /// 2. the seeded content is untouched, which is the destructive half: a
 ///    prefix match that widened would take fixture branches with it;
 /// 3. the pull request is deleted **before** the branch it hangs off, because

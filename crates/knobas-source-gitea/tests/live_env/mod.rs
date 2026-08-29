@@ -157,7 +157,7 @@ pub fn of_kind<'a>(items: &'a [SyncItem], kind: &str) -> Vec<&'a SyncItem> {
 /// The prefix every branch the live suite creates carries.
 ///
 /// Load-bearing twice: [`Litter::branch_off_main`] refuses a name without it,
-/// and [`Litter::clear_leftovers`] recognises an earlier run's leavings by it
+/// and [`Litter::clear_leftovers`] recognises an earlier run's leftovers by it
 /// -- and **deletes** them. Nothing `testenv/seed-gitea.sh` creates begins with
 /// it, so no fixture branch is ever taken for a leftover.
 ///
@@ -179,17 +179,17 @@ pub const LITTER: &str = "knobas-";
 ///    A test does not create a branch and then remember to register it; it asks
 ///    this guard for one, and there is no "forgot to track it" state to reach.
 ///    The guard's reach stops at branches, deliberately: a **pull request is
-///    opened by the test directly**, through the adapter's own routes or
-///    Gitea's, and this guard finds it again by matching its head against a
-///    branch it owns ([`remove`]). One tracked thing, and everything hanging
-///    off it recovered by that thing -- which is why nothing has to be
-///    registered twice, and why a pull request opened from an *untracked*
-///    branch is invisible here.
+///    opened by the test itself**, straight through Gitea's API, and this guard
+///    finds it again by matching its head ref against a branch it owns
+///    ([`remove`]). One tracked thing, and everything hanging off it recovered
+///    through that thing -- which is why nothing has to be registered twice,
+///    and why a pull request opened from an *untracked* branch is invisible
+///    here.
 /// 2. **Cleanup runs from [`Drop`], so the failure path is the success path.**
 ///    A panicking test unwinds through here exactly as a passing one returns
 ///    through it. What it cannot survive is a process that never unwinds --
 ///    a `SIGKILL`, or a Ctrl-C at the wrong moment -- which is what 3 is for.
-/// 3. **Every guard clears an earlier run's leavings before it builds**
+/// 3. **Every guard clears an earlier run's leftovers before it builds**
 ///    ([`Litter::clear_leftovers`]). Whatever a killed run left behind is
 ///    removed by the next run's first mutating test, so recovery is "run the
 ///    suite again" rather than `testenv/reset`. It matches on [`LITTER`], and
@@ -244,7 +244,7 @@ impl Litter {
     /// Nothing else in the repository matches the prefix
     /// (`tests/litter_guard.rs` is what keeps that true), so this is scoped by
     /// a name rather than by a record of what any particular run created --
-    /// which is the only way to reach the leavings of a run that is gone.
+    /// which is the only way to reach the leftovers of a run that is gone.
     ///
     /// It runs before the guard is handed out, not after the suite: the corpus
     /// a test measures must already be clean when it takes its baseline.
@@ -360,7 +360,7 @@ impl Drop for Litter {
 ///
 /// **Pull requests first, branches second, and that order is a decision.** The
 /// branch is the only durable marker [`Litter::clear_leftovers`] can find a
-/// killed run's leavings by: it recognises a leftover by the branch's *name*,
+/// killed run's leftovers by: it recognises a leftover by the branch's *name*,
 /// and it recovers the pull requests from it by matching their head refs. Delete
 /// the branch first and a process killed between the two calls leaves a pull
 /// request with nothing left to find it by -- it is not `knobas-`-prefixed
