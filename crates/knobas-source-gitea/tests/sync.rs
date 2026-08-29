@@ -952,6 +952,57 @@ async fn a_discussion_longer_than_one_page_is_carried_in_full() {
     );
 }
 
+/// The one truncation this adapter chooses, and the boundary it chooses it at.
+///
+/// `MAX_COMMENT_PAGES` is the discussion walk's runaway guard, and reaching it
+/// is the single place where interfaces §4.1's "`body_text` = title +
+/// description + comment texts" is knowingly not the whole discussion (§9,
+/// issue #131). Three things have to be true of it, and a cap nobody exercises
+/// is a cap nobody can be sure of:
+///
+/// * it **fires** -- a discussion past it is not walked forever;
+/// * it **does not fail the run** -- the pull request is still emitted, the
+///   run still returns `Ok`, and everything after it is still mirrored, which
+///   is what makes this different from the two exhaustive listings, whose cap
+///   ends the run (`cap_reached`);
+/// * it fires **where it says it does**, so a reader who needs to know what a
+///   long discussion costs can read the number and believe it.
+///
+/// A server capping at one record a page is what makes that affordable to
+/// assert: the guard is a *request* budget, so at one comment per request the
+/// boundary is twenty-one comments rather than the thousand-odd it is against
+/// a server that fills a page.
+#[tokio::test]
+async fn a_discussion_past_the_page_cap_is_truncated_rather_than_failing_the_run() {
+    // Comfortably past 21 pages at one comment a page, so the walk runs out of
+    // requests long before the discussion runs out of comments.
+    let count = 25;
+    let state = discussion_of(count);
+    let fake = Fake::start_capped(&state, 1).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+    let (items, cursor) = full(&*source).await;
+
+    // The run survived it: the pull request is here, so is the one after it,
+    // and so is the position.
+    assert_eq!(
+        ids(&items, "pr"),
+        vec![
+            "gitea:tidewater/payout-service#142",
+            "gitea:tidewater/payout-service#144",
+        ],
+        "a discussion past the cap must not cost the run"
+    );
+    assert!(cursor.contains("pulls_updated_to"), "{cursor}");
+
+    // And it is truncated exactly where the constant says: twenty-one
+    // requests, one comment each.
+    assert_eq!(
+        notes_missing_from(&items, count),
+        (22..=count).collect::<Vec<usize>>(),
+        "the cap fired somewhere other than the 21 pages MAX_COMMENT_PAGES names"
+    );
+}
+
 /// A sink that rejects an item aborts the run -- the remaining items are not
 /// pushed at it, and no cursor is handed back over the gap (battery clause 6).
 #[tokio::test]

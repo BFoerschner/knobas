@@ -514,3 +514,158 @@ async fn etag_support_probe() {
         println!("ETAG PROBE {path}: If-None-Match -> {}", second.status());
     }
 }
+
+/// The page size the adapter asks for, mirrored here because `client::PAGE_SIZE`
+/// is crate-private and an integration test cannot see it. A discussion of
+/// `PAGE + 1` is the smallest one that only a second request can reach.
+const PAGE: usize = 50;
+
+/// Issue #131, against the server that decides it.
+///
+/// `issue_comments` used to send **no `limit` and no `page`** and read the one
+/// answer it got as the whole discussion. Two facts about this container make
+/// that a live defect rather than a theoretical one, and only this container
+/// can settle either:
+///
+/// * **A request naming no `limit` is answered `DEFAULT_PAGING_NUM` records** --
+///   thirty, on a stock Gitea, with no admin configuration change of any kind.
+///   Every discussion past thirty comments was mirrored down to thirty.
+/// * **A request naming `limit=50` is answered fifty**, `MAX_RESPONSE_ITEMS`
+///   being the ceiling rather than the count -- so the discussion below still
+///   needs a second request, and the walk is what makes it.
+///
+/// So a discussion of `PAGE + 1` crosses both boundaries at once: the fix's
+/// explicit `limit` is what carries comments 31 to 50, and its paging is what
+/// carries the 51st. Reverting either loses a comment here, and the assertion
+/// is on `body_text` -- where interfaces §4.1 puts them -- rather than on the
+/// request, because a request carrying a `limit` and a walk that reads one page
+/// look identical from the wire.
+///
+/// **This needs no capped server**, which is why it runs under the default
+/// profile: the truncation is what a stock install does today. The *other*
+/// half of the rule -- that a page shorter than the `limit` is not the end
+/// either -- needs a server capping below what was asked for, and lives on the
+/// wiremock fake (`sync::a_server_that_caps_its_pages_short_is_still_walked_to_the_end`)
+/// exactly as issue #81's four walks do.
+///
+/// The discussion is written through Gitea's own API, like the pull request in
+/// the test above: `PAGE + 1` comment POSTs is what this test costs, and it is
+/// the only way to have a discussion this long in a fixture whose comments the
+/// seed writes one at a time.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_discussion_longer_than_one_page_comes_back_whole() {
+    let env = env();
+    let source = env.one_repo();
+    let (_, cursor) = full(&*source).await;
+
+    // A unique name, so a re-run does not collide with the last one -- and a
+    // unique note text, so `contains` cannot be satisfied by an earlier run's
+    // pull request.
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let branch = format!("knobas-live-paging-{stamp}");
+    let note = |n: usize| format!("knobas live paging note #{n:03} of run {stamp}");
+    let api = format!("{}/api/v1/repos/{}", env.url, env.full_name());
+    let http = reqwest::Client::new();
+    let auth = format!("token {}", env.token);
+
+    let created = http
+        .post(format!("{api}/branches"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "new_branch_name": branch, "old_branch_name": "main" }))
+        .send()
+        .await
+        .expect("create the branch");
+    assert!(
+        created.status().is_success(),
+        "branch: {}",
+        created.text().await.unwrap_or_default()
+    );
+
+    let opened = http
+        .post(format!("{api}/pulls"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "head": branch, "base": "main",
+            "title": format!("knobas live paging check {stamp}"),
+            "body": "Opened by the knobas Gitea adapter's live suite (issue #131)."
+        }))
+        .send()
+        .await
+        .expect("open the pull request");
+    assert!(
+        opened.status().is_success(),
+        "pull: {}",
+        opened.text().await.unwrap_or_default()
+    );
+    let number = opened.json::<serde_json::Value>().await.unwrap()["number"]
+        .as_u64()
+        .expect("Gitea answers with the new pull request's number");
+
+    for n in 1..=PAGE + 1 {
+        let posted = http
+            .post(format!("{api}/issues/{number}/comments"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({ "body": note(n) }))
+            .send()
+            .await
+            .expect("comment on the pull request");
+        assert!(
+            posted.status().is_success(),
+            "comment {n}: {}",
+            posted.text().await.unwrap_or_default()
+        );
+    }
+
+    // What the server itself says the discussion is, before the adapter is
+    // asked: if this is not `PAGE + 1` the assertions below are about the
+    // fixture rather than about the walk.
+    let counted = http
+        .get(format!("{api}/pulls/{number}"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .expect("read the pull request back")
+        .json::<serde_json::Value>()
+        .await
+        .expect("Gitea answers a pull request record");
+    assert_eq!(
+        counted["comments"].as_u64(),
+        Some(PAGE as u64 + 1),
+        "the seed above did not land {} comments",
+        PAGE + 1
+    );
+
+    let mut sink = VecSink(Vec::new());
+    source
+        .sync(Some(cursor), &mut sink)
+        .await
+        .expect("incremental sync");
+    let key = format!("gitea:{}#{number}", env.full_name());
+    let pr = sink
+        .0
+        .iter()
+        .find(|i| i.entity.to_string() == key)
+        .unwrap_or_else(|| {
+            panic!(
+                "the new pull request is missing from {:?}",
+                sink.0.iter().map(|i| i.entity.to_string()).collect::<Vec<_>>()
+            )
+        });
+
+    let missing: Vec<usize> = (1..=PAGE + 1)
+        .filter(|n| !pr.body_text.contains(&note(*n)))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "the discussion came back truncated: {} of {} comments are missing from body_text, \
+         first {:?}. body_text was {} bytes",
+        missing.len(),
+        PAGE + 1,
+        missing.first(),
+        pr.body_text.len()
+    );
+}
