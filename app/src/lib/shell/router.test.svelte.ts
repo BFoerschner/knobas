@@ -81,6 +81,21 @@ test("a later milestone's address is known-unknown, not a kind", () => {
   }
 });
 
+/**
+ * The flow's address is its identity, so it carries a ticket id and reaches a
+ * view of its own -- not the "arrives in a later milestone" pane it reached
+ * before #44, and not the open-kind branch, which would send `start-work` to
+ * `get_entity` as if it were a kind.
+ */
+test("the start-work address reaches its own view, carrying the ticket", () => {
+  expect(parseHash("#/start-work/gitea:acme/repo%23142")).toEqual({
+    view: "start-work",
+    key: "gitea:acme/repo#142",
+  });
+  // Bare, it names no ticket, so there is nothing for the stepper to be about.
+  expect(parseHash("#/start-work")).toEqual({ view: "unknown", hash: "#/start-work" });
+});
+
 test("round-trips every address it produces", () => {
   for (const hash of [
     "#/ctx/all",
@@ -91,6 +106,7 @@ test("round-trips every address it produces", () => {
     "#/sources",
     "#/settings",
     "#/first-run",
+    "#/start-work/mock:PAY-231",
     "#/inbox",
   ]) {
     expect(hashFor(parseHash(hash))).toBe(hash);

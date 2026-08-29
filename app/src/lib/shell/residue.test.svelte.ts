@@ -123,6 +123,13 @@ vi.mock("../ipc/entity", () => ({
   // it can be unmounted with both still in flight.
   detectSuggestions: () => deferred(0),
   roomSuggestions: () => deferred({ rows: [], total: 0 }),
+  // The start-work stepper's reads, deferred like everything else, so it can be
+  // unmounted with both still in flight.
+  startWorkFlow: () => deferred([]),
+  startWorkRun: () => deferred([]),
+  startWorkRetry: () => deferred([]),
+  startWorkSkip: () => deferred([]),
+  startWorkAmend: () => deferred([]),
 }));
 
 /**
@@ -233,6 +240,7 @@ const Detail = (await import("../detail/Detail.svelte")).default;
 const Launcher = (await import("../launcher/Launcher.svelte")).default;
 const NoteView = (await import("../notes/NoteView.svelte")).default;
 const QueryBox = (await import("../launcher/QueryBox.svelte")).default;
+const StartWork = (await import("../start-work/StartWork.svelte")).default;
 const AddSource = (await import("../sources/AddSource.svelte")).default;
 const Diagnostics = (await import("../sources/Diagnostics.svelte")).default;
 const FirstRun = (await import("../sources/FirstRun.svelte")).default;
@@ -411,6 +419,27 @@ const CASES: Case[] = [
       area.setSelectionRange(area.value.length, area.value.length);
       area.dispatchEvent(new Event("input", { bubbles: true }));
     },
+  },
+  {
+    /**
+     * The stepper reads twice on open -- the ticket, and the flow -- and the
+     * second read is the one that matters here: it is armed by an effect keyed
+     * on the address, so a reader moving between two tickets re-runs it, and a
+     * pass that never unmounted mid-read would prove nothing about the
+     * teardown.
+     */
+    name: "StartWork",
+    source: "lib/start-work/StartWork.svelte",
+    open: (target) => ({
+      app: mount(StartWork, {
+        target,
+        props: {
+          entityId: "mock:PAY-231",
+          onnavigate: () => {},
+          onclose: () => {},
+        },
+      }),
+    }),
   },
   {
     name: "Flap",

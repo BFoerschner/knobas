@@ -16,6 +16,7 @@
   import SettingsView from "./lib/settings/SettingsView.svelte";
   import FirstRun from "./lib/sources/FirstRun.svelte";
   import SourcesView from "./lib/sources/SourcesView.svelte";
+  import StartWork from "./lib/start-work/StartWork.svelte";
   import { ipcErrorMessage } from "./lib/ipc";
   import { linkTo } from "./lib/detail/links.svelte";
 
@@ -230,6 +231,21 @@
         <SettingsView />
       {:else if router.route.view === "first-run"}
         <FirstRun demo={lifecycle.status?.demo ?? false} onfinish={onFirstRunDone} />
+      {:else if router.route.view === "start-work"}
+        <!--
+          Keyed on the ticket. A flow's state *is* its address, and this branch
+          stays selected when the address moves from one ticket to another --
+          so without the key Svelte would keep the mounted component and hand it
+          new props, leaving one ticket's steps on screen under another's
+          heading.
+        -->
+        {#key router.route.key}
+          <StartWork
+            entityId={router.route.key}
+            onnavigate={(hash) => router.go(hash)}
+            onclose={() => router.back()}
+          />
+        {/key}
       {:else}
         <Room {router} {contexts} />
       {/if}
