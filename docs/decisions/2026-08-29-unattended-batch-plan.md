@@ -245,3 +245,32 @@ half must not merge.
 
 Not an argument against the decision — it is Björn's call and the block is real. An argument for
 the gate being run on the merged head rather than the reviewed one.
+
+## Closing state
+
+**35 issues merged.** `main` is at `b0b85e8`. The last two — #154 and #156 — merged under the local
+gate, and both merge-managers ran the full `just check` on the exact head they merged rather than
+on the head they reviewed. #159's manager hardlink-cloned `node_modules` into its own worktree
+rather than skip the frontend half, which is the standard the dispatches asked for.
+
+Four worktrees remain, all belonging to open PRs Björn gates: `docs-batch` (#98), `i41` (#132),
+`i42` (#117), `i46` (#128). 224 GiB free.
+
+**Open for Björn, in merge order:** #98 (this record) → #117 (write queue, migration 0005) →
+#128 (Notes, 0006) → #132 (suggestions, 0007). #43, #44 and #45 are blocked until #117 lands, and
+#43 says so in its own spec.
+
+**One question escalated from the last merge, and it is one line of judgement.** #159's
+merge-manager asks whether step 2's stats row still needs its tri-state now that a finished run
+leaves that step. Two things there are now dead — `itemsReading`'s `—` branch and the `…` pending
+state, and the `<progress max={finished ? 1 : undefined}>` beside them. Neither was removed,
+deliberately: removing them retires the surface #137's ruling constraint 3 was explicitly placed
+on, which is fork 2 and Björn's.
+
+The manager added the fact that decides it: **the deadness is now unguarded.** It put loud sentinel
+values in all three arms and the entire 22-test suite stayed green. So they are unreachable *and*
+uncovered — a future edit breaks them silently. That is the concrete cost of keeping them, and it
+is why the question is worth a minute rather than a shrug.
+
+**Still open and unruled, all recorded on their issues:** #104, #112, #122 (the idempotency-key
+SPI question), #141 (`SearchResponse`, frozen IPC), #157.
