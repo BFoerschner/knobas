@@ -271,6 +271,18 @@ gitea-live:
 # container over the same volume, so the seeded corpus is still there; the trap
 # puts the uncapped container back afterwards, so a later `just gitea-live` is
 # not silently running against a capped server.
+#
+# `INT` and `TERM` as well as `EXIT`, the rule `inventory` above states and
+# `check-ports.sh` follows: bash need not run an `EXIT` trap when a signal it
+# has no handler for terminates the shell, and this recipe's slow live run is
+# one somebody will Ctrl-C. Each signal trap **clears the `EXIT` trap first**,
+# then restores, then re-raises -- so the container is uncapped exactly once and
+# the recipe still dies of the signal it was sent rather than reporting a tidy
+# exit 0. (`inventory` can let both fire because its handler is an idempotent
+# `rm -f`; this one is a `docker compose up`.) The trap is belt-and-braces
+# either way: the real containment is the `MAX_RESPONSE_ITEMS: "50"` pin in
+# docker-compose.yml, which uncaps on the next `docker compose up` whatever
+# happened to this shell.
 gitea-live-capped:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -279,7 +291,10 @@ gitea-live-capped:
     docker compose up -d --wait gitea
     ./seed-gitea.sh
     eval "$(./seed --env)"
-    trap 'cd "$testenv" && docker compose up -d --wait gitea >/dev/null' EXIT
+    uncap() { cd "$testenv" && docker compose up -d --wait gitea >/dev/null; }
+    trap 'uncap' EXIT
+    trap 'trap - EXIT INT; uncap; kill -INT $$' INT
+    trap 'trap - EXIT TERM; uncap; kill -TERM $$' TERM
     docker compose -f docker-compose.yml -f docker-compose.capped.yml up -d --wait gitea
     cd ..
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-gitea --test live_gitea_capped \
