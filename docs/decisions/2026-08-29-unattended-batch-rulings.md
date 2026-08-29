@@ -1,10 +1,16 @@
 # Unattended batch rulings — 2026-08-29, Fable under delegation
 
-Björn: you said "if any big decision needs to be made use fable to figure out the best way and write the decision down for me." Seven forks were ruled today; each ruling is posted as a comment on its issue, opening with a line saying you can overturn it. It was safe to decide these because none touches a §10.8 frozen surface (checked each against the list), none is a milestone-exit judgement, one (#84) was already decided by you via ADR-0005 and only needed confirming, and every ruling rests on code or issue text that is quoted in the comment — no ruling rests on a hypothesis about a document I did not read. The one place I diverge from a mechanism you sketched is #82, and it is flagged loudly both here and on the issue. Reading order if you have five minutes: #82 (the divergence), #91 (the most consequential), then skim the rest.
+Björn: you said "if any big decision needs to be made use fable to figure out the best way and write the decision down for me." Fifteen forks were ruled across five batches; each ruling is posted as a comment on its issue, opening with a line saying you can overturn it. It was safe to decide them because none touches a §10.8 frozen surface (checked each against the list), none is a milestone-exit judgement, one (#84) was already decided by you via ADR-0005 and only needed confirming, and every ruling rests on code or issue text that is quoted in the comment — no ruling rests on a hypothesis about a document I did not read.
+
+Each batch is its own section below, in the order it was ruled. **The reading order is at the foot of the file, not here** — it was rewritten once all five batches existed.
 
 ---
 
-## #91 — TeamCity watermark ceiling deadlock
+## The first batch — #91, #92, #81, #84, #82, #93 and #69
+
+The one place I diverge from a mechanism you sketched is #82, and it is flagged loudly both here and on the issue.
+
+### #91 — TeamCity watermark ceiling deadlock
 
 **The fork:** four options; the issue leans option 2 (derive the ceiling from the per-configuration pages the sync already fetches).
 
@@ -14,7 +20,7 @@ Björn: you said "if any big decision needs to be made use fable to figure out t
 
 **If you disagree, the cost of reversing this is:** moderate — it is all inside `knobas-source-teamcity` plus mockd fixtures, nothing frozen; but the doc comments this rewrites encode the loss-analysis, so a reversal should rewrite them too, not just the code. The one open risk I named on the issue: if a live run ever shows `builds/id:` 404ing for permission reasons on a build the source itself synced, the false refusal returns and the detection design is back on your desk.
 
-## #92 — TeamCity live certification suite
+### #92 — TeamCity live certification suite
 
 **The fork:** same PR as #91 or separate; does #91's regression test depend on it; what to do with absent credentials.
 
@@ -24,7 +30,7 @@ Björn: you said "if any big decision needs to be made use fable to figure out t
 
 **If you disagree, the cost of reversing this is:** near zero — it is sequencing and a defaults choice, both changeable before or after the PR lands.
 
-## #81 — Gitea paging terminates on a short page
+### #81 — Gitea paging terminates on a short page
 
 **The fork:** three options; the issue leans option 1 (page until empty).
 
@@ -34,7 +40,7 @@ Björn: you said "if any big decision needs to be made use fable to figure out t
 
 **If you disagree, the cost of reversing this is:** trivial — four termination conditions and their tests, no cursor or schema impact.
 
-## #84 — wizard DONE panel races the scheduler wake
+### #84 — wizard DONE panel races the scheduler wake
 
 **The fork:** you ruled "grill this before it becomes a ticket."
 
@@ -42,7 +48,7 @@ Björn: you said "if any big decision needs to be made use fable to figure out t
 
 **If you disagree, the cost of reversing this is:** it is your own ADR, so reversal is an ADR supersession, not a comment.
 
-## #82 — PAT user told contradictory things about `username`
+### #82 — PAT user told contradictory things about `username`
 
 **The fork:** your triage named three options and said an implementer should not choose alone; option 1 was "fill it backend-side in `add_source`."
 
@@ -50,7 +56,7 @@ Björn: you said "if any big decision needs to be made use fable to figure out t
 
 **If you disagree, the cost of reversing this is:** small if caught before implementation — the two viable backend shapes are named on the issue. After implementation, moving it backend-side re-does the tests but the text fixes and the only-if-empty rule carry over unchanged.
 
-## #93 — no test joins engine + real database + real adapter
+### #93 — no test joins engine + real database + real adapter
 
 **The fork:** three open questions — home, `just check` membership, adapter count.
 
@@ -58,7 +64,7 @@ Björn: you said "if any big decision needs to be made use fable to figure out t
 
 **If you disagree, the cost of reversing this is:** low — moving the harness or pulling it out of `check` is mechanical; the only ratchet is that once it guards the seam, removing it from `check` re-opens the gap the issue documents.
 
-## #69 — backup settings surface
+### #69 — backup settings surface
 
 **The fork:** genuinely blocked on a settings view, or build the surface itself?
 
@@ -68,7 +74,7 @@ Björn: you said "if any big decision needs to be made use fable to figure out t
 
 ---
 
-## Flagged: things I decided were NOT mine to rule
+### Flagged: things I decided were NOT mine to rule
 
 - **#82, option 2 (descriptor-declared identity binding).** It changes `SourceDescriptor` in `crates/knobas-source/src/**`, frozen by §10.8; your own triage says it is an ADR + orchestrator ruling. Not taken; noted as the right move only if an adapter ever spells its identity key differently than `username`.
 - **#82, the mechanism divergence itself.** I ruled it because the ticket needed an implementable answer and the backend premise was contradicted by code, but you sketched backend-side, so treat my choice as the most reversible reading of your option 1, not as settled doctrine.
@@ -81,7 +87,7 @@ Comment links: [#91](https://github.com/BFoerschner/knobas/issues/91#issuecommen
 
 ---
 
-## #81, amended later the same day — the caps' numbers follow the record target (PR #108)
+## Amendment to #81 — the caps' numbers follow the record target (PR #108)
 
 **Appended after the seven rulings above.** This amends my own #81 ruling; the earlier one did not anticipate it. PR #108 implemented page-until-empty and its implementer surfaced, rather than decided, a consequence: the `MAX_*_PAGES` caps are a *request* budget, a walk now spends its last request on the empty page that proves the end, so a cap of 20 carries 19 pages of records. 950 repositories or branches walk cleanly where 999 used to; 951 fails with `cap_reached`. My ruling had said the caps "stay as the loud bound", and the note under it said "unchanged" — a word written when a request count and a record count were the same thing, so it could not distinguish the two readings the PR forces apart. The implementer was right to leave the constants alone and flag it.
 
@@ -95,11 +101,11 @@ Comment links: [#91](https://github.com/BFoerschner/knobas/issues/91#issuecommen
 
 ---
 
-## The second batch, later the same day — #105 and #106, the two triage questions from the TeamCity live session
+## The second batch — #105 and #106
 
-**Appended under the same delegation.** Both issues came out of the first real-server contact (the session that found #91 and #113) and both carried `needs-triage` because each poses a product question. Both rulings rest on read-only measurements I made today against `https://teamcity.jetbrains.com/guestAuth` (2026.2 EAP), quoted in full on the issues. Nothing in either touches a §10.8 frozen surface; the one option that would (in #106) is flagged for you instead of ruled. I may not change labels: my recommendation for both is `ready-for-agent`.
+**Appended under the same delegation.** These are the two triage questions from the TeamCity live session. Both came out of the first real-server contact (the session that found #91 and #113) and both carried `needs-triage` because each poses a product question. Both rulings rest on read-only measurements I made today against `https://teamcity.jetbrains.com/guestAuth` (2026.2 EAP), quoted in full on the issues. Nothing in either touches a §10.8 frozen surface; the one option that would (in #106) is flagged for you instead of ruled. I may not change labels: my recommendation for both is `ready-for-agent`.
 
-## #105 — canceled TeamCity builds are permanently absent from the mirror
+### #105 — canceled TeamCity builds are permanently absent from the mirror
 
 **The fork:** mirror them; deliberately do not and say so; mirror-but-render-distinctly. The issue allows that exclusion "may well be *correct* product behaviour".
 
@@ -111,7 +117,7 @@ Comment links: [#91](https://github.com/BFoerschner/knobas/issues/91#issuecommen
 
 **If you disagree, the cost of reversing this is:** moderate before implementation — one comment. After: the adapter and mockd changes revert mechanically (nothing frozen — neither crate is in §10.8's list, and the contract edit is an amendment entry beside #91's, superseding §4.2's locator row rather than editing it), but reverting re-opens the stale-running-row defect this closes, and canceled builds that entered users' mirrors in the meantime would need a decision of their own (tombstone or leave). The wording alone (`finished canceled`) is trivial to change at any time.
 
-## #106 — TeamCity items carry no author, so #39's author:/@ tokens do nothing for that source
+### #106 — TeamCity items carry no author, so #39's author:/@ tokens do nothing for that source
 
 **The fork:** accept and document; fall back to the change's committer; make the emptiness visible in the search surface.
 
@@ -127,11 +133,11 @@ Comment links: [#105](https://github.com/BFoerschner/knobas/issues/105#issuecomm
 
 ---
 
-## The third batch, later the same day — #127 and #137, the two questions out of PR #126's merge-manager reviews
+## The third batch — #127 and #137
 
-**Appended under the same delegation.** Both came out of the #119/#120 merge (PR #126, `01cafa3`). One of them opened with a jurisdiction question — whether it was mine to rule at all — and the answer turned on which fork touches §10.8. Both rulings rest on code read today and quoted on the issues; the two merge-manager measurements #127 leaned on were verified in the code rather than taken on trust.
+**Appended under the same delegation.** These are the two questions raised by PR #126's merge-manager reviews; both came out of the #119/#120 merge (PR #126, `01cafa3`). One of them opened with a jurisdiction question — whether it was mine to rule at all — and the answer turned on which fork touches §10.8. Both rulings rest on code read today and quoted on the issues; the two merge-manager measurements #127 leaned on were verified in the code rather than taken on trust.
 
-## #127 — `delete_source` does not cancel the source's in-flight run
+### #127 — `delete_source` does not cancel the source's in-flight run
 
 **The fork:** four options; the issue leans option 3 (make the orphan harmless) because it may need no IPC change; options 1 and 2 change `delete_source` on the frozen surface.
 
@@ -141,7 +147,7 @@ Comment links: [#105](https://github.com/BFoerschner/knobas/issues/105#issuecomm
 
 **If you disagree, the cost of reversing this is:** small before implementation — one comment. After: the sweep and the intent plumbing revert mechanically (nothing frozen moved, which was the point), but reverting re-opens a user-visible defect, and choosing option 1 or 2 instead is not a reversal so much as an escalation — it needs your §10.8 ratified-exception entry either way, which is exactly why it was not chosen while a non-frozen shape sufficed.
 
-## #137 — the DONE panel's fallback still renders the run's count
+### #137 — the DONE panel's fallback still renders the run's count
 
 **The fork:** keep the fallback; say the corpus is unknown; retry before falling back. Product wording — the first sentence knobas says about a new source — plus a genuine contradiction between #120's "on any interleaving" criterion and the tested behaviour.
 
@@ -157,25 +163,25 @@ Comment links: [#127](https://github.com/BFoerschner/knobas/issues/127#issuecomm
 
 ---
 
-## The fourth batch, later the same day — #146 and #148, the two forks implementers named and declined to guess at
+## The fourth batch — #146 and #148
 
-**Appended under the same delegation.** Both are honest stops: #146 from PR #145's implementer (who measured the flake both ways over six serial runs), #148 from PR #147's implementer (who found the inverse of the bug it was fixing one door along). One of them brushed a §10.8 frozen surface, and the jurisdiction question is answered in the ruling itself rather than assumed; the answer turned out to be "not needed, and had it been needed, yours."
+**Appended under the same delegation.** These are the two forks implementers named and declined to guess at — honest stops: #146 from PR #145's implementer (who measured the flake both ways over six serial runs), #148 from PR #147's implementer (who found the inverse of the bug it was fixing one door along). One of them brushed a §10.8 frozen surface, and the jurisdiction question is answered in the ruling itself rather than assumed; the answer turned out to be "not needed, and had it been needed, yours."
 
-## #146 — the contract battery flakes in the Gitea live suite
+### #146 — the contract battery flakes in the Gitea live suite
 
 **The fork:** fix the battery's own assertion (frozen file, reaches all three adapters, §10.8 entry) or narrow the live suite's battery scope from `owners: [tidewater]` to something nothing mutates (test-only, changes what the battery certifies there). Plus the deeper question: is *"an idle run emits nothing"* too strong for any real server whose bookkeeping lags a write?
 
 **Ruling:** the clause stands as written — it is conditional ("Incremental sync from the returned cursor yields no items **when nothing changed**"), and against the live container the condition is false: Gitea's settling `updated_at` is a real change, and the adapter emitting the repository is compliance, not re-delivery — #145's own `re_delivered` doc says so verbatim. So nothing frozen moves and no §10.8 entry exists. The fix is route 2 sharpened: battery scope becomes `{"repos": ["tidewater/ledger-api", "tidewater/ops-runbooks"]}` — *both* seeded repos the suite never writes, not one — with the loss written down twice (a doc comment on the battery test, and the file header's "What this file does NOT certify"). The owner-scoped full walk stays live-certified by `the_shapes_the_fake_only_assumes_are_certified_here` and the capped suite's `whole_owner()` walk; only the owner-scoped *idle pair* leaves live coverage, and it keeps its docker-free certification. Restated as a rule on the issue: a live-suite failure is never resolved by re-running (#35 task 8; #86 and #140 are the bill for the other habit), and any retry/tolerance loop in or around the battery is refused in advance.
 
-**Jurisdiction, since you asked me to say which:** §10.8's letter ("an orchestrator decision and an update to this section") would cover me today, but the working model's human gate — you keep "any change to a frozen contract" — is stricter, and the battery is that contract's executable spec (your own doc: "The contract battery is the adapter's spec"); the ADR-0004 exception's care ("no battery clause added, removed or reworded") points the same way. So: a battery *clause* change is yours. This ruling did not need one, which is why it could be made today.
+**Jurisdiction, since you asked me to say which:** §10.8's letter ("an orchestrator decision and an update to this section") would cover me today, but the working model's human gate — you keep "any change to a frozen contract" — is stricter, and the battery is that contract's executable spec (your own doc: "The contract battery is the adapter's spec"); the care taken by ADR-0004's ratified exception in §10.8 — *"nothing more -- no battery clause added, removed or reworded"*, which is `docs/contract.md`'s wording, not the ADR's — points the same way. So: a battery *clause* change is yours. This ruling did not need one, which is why it could be made today.
 
 **If you disagree, the cost of reversing this is:** small — one JSON scope literal and two doc blocks, all in test files; nothing frozen moved, which was the point. The one ratchet: if you later *want* the clause weakened (a tolerance for lagging servers), that is not a reversal of this but a fresh frozen-surface decision at your gate, and the measured evidence on #146/#145 is the file to bring. Escalation triggers left on the issue: the battery still flaking at the quiet scope (then the fix is seed-side quiescence — orchestrator, not you), and anyone reaching for a battery tolerance (you).
 
-## #148 — the inverse of #144: a scheduler-discovered rejection written back to "ok"
+### #148 — the inverse of #144: a scheduler-discovered rejection written back to "ok"
 
 **The fork:** the view subscribes to `source:health` and re-lists (keeps the store's contract), or `replace` keeps the newer `checked_at` per surviving row (fixes both directions at one seam, changes what `replace` means). The implementer recommended the second.
 
-**Ruling:** shape 2, with the merge rule specified so nobody re-derives it: membership is the incoming set's absolutely (a source absent from `rows` leaves the store — which is exactly why the deleted-chip property and #147's pinned mutation survive: deletion removes the row, it never stales it); per surviving row the held reading wins only with a *strictly newer* `checked_at`, incoming wins ties, both-null, and held-null; compare as instants. No clock-skew caveat — both values are the backend's own `checked_at` column for the same source, so newest-wins compares one clock against itself. The decisive argument was not on either fork as filed: the boot-time `reseed()` has the identical race, and `health.svelte.ts`'s own comment ("the seed that follows is the newer reading") is currently a timing hope that this merge turns into a guarantee — shape 1 would have fixed the view and left the seed exposed. The contract change is made legible in the three comments that currently state the old contract (the `replace` doc, `SourcesView.svelte:100`, the `start()` comment). #147's re-list stays — it refreshes the `SourceSummary` halves the store never holds — and #148 lands on top of #147, whose tests must stay green.
+**Ruling:** shape 2, with the merge rule specified so nobody re-derives it: membership is the incoming set's absolutely (a source absent from `rows` leaves the store — which is exactly why the deleted-chip property and #147's pinned mutation survive: deletion removes the row, it never stales it); per surviving row the held reading wins only with a *strictly newer* `checked_at`, incoming wins ties, both-null, and held-null; compare as instants. No clock-skew caveat — both values are the backend's own `checked_at` column for the same source, so newest-wins compares one clock against itself. The decisive argument was not on either fork as filed: the boot-time `reseed()` has the identical race, and `health.svelte.ts`'s own comment ("the seed that follows is the newer reading") is currently a timing hope that this merge turns into a guarantee — shape 1 would have fixed the view and left the seed exposed. The contract change is made legible in the three comments that currently state the old contract (the `replace` doc, the one in `SourcesView.svelte`, the `start()` comment). #147's re-list stays — it refreshes the `SourceSummary` halves the store never holds — and #148 lands on top of #147, whose tests must stay green.
 
 **If you disagree, the cost of reversing this is:** small before #148 is implemented — one comment on the issue. After: reverting the merge re-opens a silent defect (a broken credential going on looking fine — the surface whose whole job is the opposite), and if you prefer shape 1 instead, the newest-wins tests convert to re-list tests but the deletion and #144-direction tests carry over unchanged. The genuine ratchet is semantic: once callers rely on "replace cannot rewind a row", any future backend flow that legitimately resets health backwards without an event needs your ruling first — that trigger is on the issue, alongside the tie case (same `checked_at`, different content).
 
@@ -185,11 +191,11 @@ Comment links: [#146](https://github.com/BFoerschner/knobas/issues/146#issuecomm
 
 ---
 
-## The fifth and last batch, end of day — #154 and #156, the two findings deep-pass merge-managers judged too consequential to fix unreviewed
+## The fifth and last batch — #154 and #156
 
-**Appended under the same delegation.** Both were found at merge time and correctly left: #154 by PR #149's merge-manager (a destructive-path behaviour question), #156 independently by PR #150's merge-manager and its Spec reviewer (a product-structure question). Neither ruling touches a §10.8 frozen surface — checked for both, and the checks are quoted in the comments. One of them (#156) required correcting the record first: a quote three pieces of work attributed to ADR-0005 is not in the ADR.
+**Appended under the same delegation.** These are the two findings deep-pass merge-managers judged too consequential to fix unreviewed. Both were found at merge time and correctly left: #154 by PR #149's merge-manager (a destructive-path behaviour question), #156 independently by PR #150's merge-manager and its Spec reviewer (a product-structure question). Neither ruling touches a §10.8 frozen surface — checked for both, and the checks are quoted in the comments. One of them (#156) required correcting the record first: a quote three pieces of work attributed to ADR-0005 is not in the ADR.
 
-## #154 — an `add_source` committing inside `delete_source`'s own body
+### #154 — an `add_source` committing inside `delete_source`'s own body
 
 **The fork:** guard the purge on the source still being absent; reorder `delete_source`; or accept and write it on `delete_source`'s guarantee. The issue says accept is legitimate, and the fix is a behaviour change on a destructive path.
 
@@ -199,7 +205,7 @@ Comment links: [#146](https://github.com/BFoerschner/knobas/issues/146#issuecomm
 
 **If you disagree, the cost of reversing this is:** small in code — one read and three arms revert mechanically, nothing frozen moved — but reverting re-opens a silent purge-of-the-wrong-source's-corpus window on a destructive path, and the accept fork you would be choosing still owes the write-up on `delete_source`'s guarantee, so reversal is a swap of fix for documentation, not a deletion. The escalation trigger on the issue: if the honestly-interleaved test cannot be made (M8's refusal is the bar), the accept fork comes to you rather than the test getting weakened.
 
-## #156 — the wizard's DONE step is reachable only from a demo load
+### #156 — the wizard's DONE step is reachable only from a demo load
 
 **The fork:** make DONE reachable from a real sync; accept that the real path ends at step 2 and re-aim the ruled microcopy at the stats row; or give step 2 the sentence and let the demo keep its panel.
 
@@ -217,4 +223,4 @@ Comment links: [#154](https://github.com/BFoerschner/knobas/issues/154#issuecomm
 
 ## Closing, end of day
 
-Fifteen forks ruled across five batches, every one posted on its issue with the overturn line, none touching a §10.8 frozen surface, and no labels, milestones, or merges moved. If you have limited time, read in this order: **#82** (the one place I diverged from a mechanism you sketched), **#91** (the most consequential engine change), **#154** (a behaviour change on a destructive path — the only ruling that alters what a delete does), and **#156** (where I corrected a misattributed ADR quote and deliberately took the fork that keeps ADR-0005 literally true rather than the one that reinterprets it). Explicitly left for you, gathered from the day: fork 2 of #156 and the DONE sentence's voice; #106's option 3 and any `SearchResponse` change; #146's battery-clause gate; the #84 null-`finished_at` edge; #82's descriptor-declared identity; and any battery tolerance, ever. Everything else in this file is implementable now, and each section carries the observation that would send it back to you.
+Fifteen forks ruled across five batches, every one posted on its issue with the overturn line, none touching a §10.8 frozen surface, and nothing moved *by me* — no label, no milestone, no merge. The `needs-triage` → `ready-for-agent` changes each ruling recommended were made by the orchestrator afterwards, within a couple of minutes each; all fifteen issues now carry `ready-for-agent`. If you have limited time, read in this order: **#82** (the one place I diverged from a mechanism you sketched), **#91** (the most consequential engine change), **#154** (a behaviour change on a destructive path — the only ruling that alters what a delete does), and **#156** (where I corrected a misattributed ADR quote and deliberately took the fork that keeps ADR-0005 literally true rather than the one that reinterprets it). Explicitly left for you, gathered from the day: fork 2 of #156 and the DONE sentence's voice; #106's option 3 and any `SearchResponse` change; #146's battery-clause gate; the #84 null-`finished_at` edge; #82's descriptor-declared identity; and any battery tolerance, ever. Everything else in this file is implementable now, and each section carries the observation that would send it back to you.

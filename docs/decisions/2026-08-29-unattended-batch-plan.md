@@ -1,4 +1,4 @@
-# Unattended batch, 2026-08-29 — what is running and why
+# Unattended batch, 2026-08-29 — what ran, and why
 
 Björn asked for "all the ready issues that are able to be implemented now in parallel by
 subagents if possible and not blocked by anything else", said he would be away, and delegated
@@ -18,9 +18,12 @@ pipelining waves, not from starting everything.
 
 Two rules landed on 2026-08-28 and they contradict each other:
 
-- `49c3baf` (11:39) — "Retire autopilot; Björn reviews every PR before merge".
-- `da61faf` (16:48, PR #75) — "Working model: agents merge their own PRs", whose body says in
-  terms: *"Overrides the review-gate rule landed in 49c3baf earlier the same day."*
+- `49c3baf` (authored 11:08, committed 11:39) — "Retire autopilot; Björn reviews every PR before
+  merge".
+- `da61faf` (16:48, PR #75) — "Working model: agents merge their own PRs", whose body names the
+  rule it replaces: *"Björn overrode the review-gate rule of 49c3baf on 2026-08-28: implementers
+  still stop at PR-open, but a per-PR merge-manager agent now runs the review pass and
+  squash-merges."*
 
 The later one wins, and it is the one checked into `docs/agents/working-model.md` today. So a
 per-PR **merge-manager** agent reviews and squash-merges, serially, one at a time. **Björn keeps
@@ -28,7 +31,7 @@ the gate for exactly two things: milestone exits, and any change to a frozen con
 `Source` trait, the migrations baseline, and the IPC schema. PRs in that class are left open for
 him no matter how green they are.
 
-(My session memory still carried the 11:39 rule and has been corrected.)
+(My session memory still carried the earlier rule and has been corrected.)
 
 ## Triage of the sixteen `ready-for-agent` issues
 
@@ -45,8 +48,9 @@ brief with acceptance criteria was posted to the issue at 03:01. It is implement
 and it is a deep-pass change (sync engine, progress sinks) with no frozen surface.
 
 **#69 — the blocker is void.** Its "Blocked by" wants a settings view to exist; #36 is closed and
-did not build one, and `app/src/lib/` is `detail`, `ipc`, `launcher`, `shell`, `sources`. Fable
-ruled that #69 builds the minimum shell itself rather than waiting for a view nobody is building.
+did not build one, and `app/src/lib/` held only `detail`, `ipc`, `launcher`, `shell`, `sources`.
+Fable ruled that #69 builds the minimum shell itself rather than waiting for a view nobody is
+building. (`settings/` is there now because #69 built it.)
 
 **Big M2 features, unblocked but gated:** #42 (write queue), #41 (suggestion engine),
 #46 (notes). Each explicitly needs a migration, and migrations are single-writer (orchestrator)
@@ -69,8 +73,7 @@ managers run afterwards, serially, and only for PRs outside the frozen-contract 
 
 ## Corrections and ratification requests, appended as the batch ran
 
-Three things arrived after the plan above was written and belong beside it rather than in a PR
-body somebody may not open.
+Three things arrived after the plan above was written.
 
 **A premise in my own dispatch was wrong, and the implementer built to the code instead.** #69's
 brief told the implementer that "restore is the destructive one — it replaces the user's
@@ -99,7 +102,7 @@ plus `mv` was silently dropping the tracked `test-inventory.txt` from 0644 to 06
 `inventory-update`, which git records nowhere and no gate would ever have shown. PRs #99 (#86,
 #83), #102 (#69) and #98 (this record) open; #91 and #92 in flight.
 
-## One deliberate deviation from a Fable ruling, by a merge-manager
+## A deliberate deviation from a Fable ruling, by a merge-manager (PR #108)
 
 Fable's amended #81 ruling named three edits for PR #108. Two were applied as written. The third —
 *"the module docs' '950 of 1,400' back to 1,000"* — was applied as **1,050**, not 1,000, and the
@@ -112,16 +115,15 @@ arithmetic elsewhere, saying the honest-server message becomes *"at least 1050"*
 merge-manager read item 3 as an oversight rather than a position: Fable recomputed the error
 message but not the module doc.
 
-I think that reading is right, and it is the kind of disagreement worth having in the open rather
-than silently complying with a ruling into a false comment. Recorded here so Björn can overturn
-it in one line if he disagrees.
+Recorded here so Björn can overturn it in one line. Complying silently would have written a false
+comment, which is the failure the whole PR is about.
 
 **The same merge-manager also caught that the cap bump broke two tests neither Fable nor the
 implementer had named** — `a_branch_listing_that_would_exceed_the_cap_fails_the_run` and its
 repository twin both feed 1,001 records and assert the number in the message. Without that fix
 the ruling's own edits would have failed CI.
 
-## A second deviation, and this one is worth Björn's eye
+## A second deviation, worth Björn's eye (PR #110)
 
 PR #110 (#82) merged as `8f2729b`. Its merge-manager departed from Fable's ruling on one point, for a
 reason that is more interesting than the point itself.
@@ -143,22 +145,25 @@ The merge-manager applied the ruling's stated intent — the advice has to be fo
 literal suggestion, reworded the message to say when the fill happens and admit the gap, and made
 the test refuse the imperative.
 
-I think that is right, and it is the same move Fable itself made against Björn's sketched option 1
-on the same ticket. Recorded because it is the second time in this batch that a written instruction
-was followed in spirit against its letter, and both times the letter was wrong for a reason the
-writer could not have seen. If Björn wants the literal wording restored, item 6 has to come back
-into scope with it.
+It is the same move Fable itself made against Björn's sketched option 1 on the same ticket, and the
+second time in this batch that an instruction was followed in spirit against its letter — both
+times because the letter was wrong for a reason its writer could not have seen. If Björn wants the
+literal wording restored, item 6 has to come back into scope with it.
 
 **Also from that merge, reported and now filed as #124:** `fixtures.ts` still invents a `required`
 Jira never declares, and gives TeamCity's `builds_per_config` a maximum 20× below the adapter's —
 with three existing tests asserting the wrong bound. The fixture drift that caused #82's JSON-textarea
-bug in the first place is a class, not an instance.
+bug is a class, not an instance.
 
 ## A misattribution of mine, corrected by the last ruling
 
 I told Björn, more than once, that **ADR-0005 calls the wizard's DONE sentence "the first sentence
-knobas ever says to a new user."** It does not. That phrase is in **issue #84's body** and in
-Fable's own #137 ruling language, and it reached `FirstRun.svelte`'s doc comment from there.
+knobas ever says to a new user."** It does not — the ADR contains no such phrase. That wording is
+**issue #84's**, verbatim: *"It is also the first sentence knobas ever says to a new user, at the
+moment they are deciding whether the tool works."* Fable's #137 ruling says it of a source rather
+than a user (*"the first sentence knobas ever says about a new source"*), and that is the form that
+reached `FirstRun.svelte`'s doc comment: *"this is the first sentence knobas ever says about a
+source."*
 
 The distinction matters, and Fable is the one who caught it. ADR-0005 rules what *"mirrored N
 items"* **means** — the corpus, not a run's `Upserted` — not **which panel renders it**. So #156's
@@ -171,18 +176,10 @@ not by the document I named.
 
 ## Fable's closing summary, for the reading order
 
-Fifteen forks ruled across five batches, every one posted to its issue with the overturn line,
-nothing frozen touched, and no label, milestone or merge moved by Fable itself. Its suggested
-reading order for Björn:
-
-- **#82** — its one divergence from a mechanism Björn sketched.
-- **#91** — the most consequential.
-- **#154** — the only ruling that alters what a delete does.
-- **#156** — the ADR-quote correction above.
-
-Explicitly left for Björn: #156's fork 2 and the DONE panel's voice; #106's option 3
-(`SearchResponse`, frozen IPC); #146's battery-clause gate; #84's null-`finished_at` edge; #82's
-descriptor-declared identity; and any battery tolerance, ever.
+Fifteen forks ruled across five batches, every one posted to its issue with the overturn line, and
+nothing frozen touched. Its reading order for Björn — **#82**, **#91**, **#154**, **#156** —
+and the list of what it explicitly left for him are in the rulings file's closing section, which
+is the copy to trust. They are not restated here, because two copies of a list drift.
 
 ## Where the batch stopped, and why it stopped there
 
@@ -191,8 +188,10 @@ descriptor-declared identity; and any battery tolerance, ever.
 > The job was not started because recent account payments have failed or your spending limit needs
 > to be increased.
 
-Verified rather than relayed: the most recent run **on `main`** failed in one second with `steps: 0`.
-Every run before the block was green; every run after fails instantly.
+Verified rather than relayed: the most recent run **on `main`** failed in one second with
+`steps: 0` (run `33252382037`, 12:23:38→12:23:39). Before the block, runs failed only on their own
+merits — two did that morning, `m2/adr0005-followups` at 08:20 and `m2/fixtures-mirror-check` at
+09:09 — and the last green `main` run was 12:08:43. After 12:16:27 every run fails instantly.
 
 **PR #155 was merged on a locally-run gate rather than a green CI**, by its merge-manager, which
 flagged the judgement call plainly instead of quietly. The case for it: test-only change, its
@@ -206,10 +205,10 @@ the agent in front of it. Making that the batch's standing practice while Björn
 scheduler guard on a destructive path and a change to what the first-run wizard shows — is not a
 call I should make on his behalf. They wait for CI.
 
-**Final state:** 33 issues merged across 29 commits to `main` today. Six PRs open — four gated on
-Björn by the frozen-contract rule (#98, #117, #128, #132) and two waiting on CI (#158, #159).
-Six worktrees, 217 GiB free. Every `ready-for-agent` issue that was open when the batch began has
-either merged or has a PR.
+**State at that point** (revised twice below, as the day went on): 33 issues merged across 29
+commits to `main`. Six PRs open — four gated on Björn by the frozen-contract rule (#98, #117,
+#128, #132) and two waiting on CI (#158, #159). Six worktrees, 217 GiB free. Every
+`ready-for-agent` issue that was open when the batch began has either merged or has a PR.
 
 **The first thing to do on return is the billing settings**, because it unblocks everything else.
 
@@ -233,32 +232,36 @@ by whoever owns that doctrine:**
    machine-enforced backstop (plan 01 task 11), independent of anyone's worktree."** There is no
    longer a backstop independent of anyone's worktree.
 
-**The consequence is worth stating plainly rather than leaving implied.** The backstop existed so a
-merge did not rest on one machine's word, and today's batch has three separate cases where CI
-caught something a local run did not: PR #126's merge-manager broke `tests/wiring.rs` in a way
-`cargo test -p knobas-app --lib` could not see, because that guard is an integration target;
-PR #142's manager could not run `svelte-check` or vitest at all in its scratch tree and said CI's
-`front` job was the only thing that had ever looked at its edit; and PR #155's manager hit a
-`-D warnings` failure on dead bindings only after a rebase. All three would now land on whoever
-runs the local gate, which is why the two dispatches say a manager that *cannot* run the frontend
-half must not merge.
+The backstop existed so a merge did not rest on one machine's word, and today's batch has two
+recorded cases where CI caught something a local run did not. PR #126's merge-manager broke
+`tests/wiring.rs` and said so on the PR: *"CI caught it (run 33242918211); local
+`-p knobas-app --lib` did not, because the guard lives in an integration target."* PR #155's
+manager hit a `-D warnings` failure on dead bindings that appeared only after its rebase. Both
+would now land on whoever runs the local gate, which is why the two dispatches say a manager that
+*cannot* run the frontend half must not merge.
 
-Not an argument against the decision — it is Björn's call and the block is real. An argument for
-the gate being run on the merged head rather than the reviewed one.
+(An earlier draft of this paragraph named a third case, PR #142, whose manager was said to have
+been unable to run `svelte-check` in its worktree. Nothing on #142 supports that: the PR carries
+no comments and no reviews, and its own body reports `front` — svelte-check, vitest and
+`vite build` — green. Removed rather than left standing on a merge-manager's session report
+alone.)
+
+Björn's call, and the block is real. But it is an argument for running the gate on the merged head
+rather than the reviewed one.
 
 ## Closing state
 
-**35 issues merged.** `main` is at `b0b85e8`. The last two — #154 and #156 — merged under the local
-gate, and both merge-managers ran the full `just check` on the exact head they merged rather than
-on the head they reviewed. #159's manager hardlink-cloned `node_modules` into its own worktree
-rather than skip the frontend half, which is the standard the dispatches asked for.
+**35 issues merged when the batch closed**, with `main` at `b0b85e8`. The last two — #154 and #156
+— merged under the local gate, and both merge-managers ran the full `just check` on the exact head
+they merged rather than on the head they reviewed. #159's manager hardlink-cloned `node_modules`
+into its own worktree rather than skip the frontend half, which is the standard the dispatches
+asked for.
 
-Four worktrees remain, all belonging to open PRs Björn gates: `docs-batch` (#98), `i41` (#132),
-`i42` (#117), `i46` (#128). 224 GiB free.
-
-**Open for Björn, in merge order:** #98 (this record) → #117 (write queue, migration 0005) →
-#128 (Notes, 0006) → #132 (suggestions, 0007). #43, #44 and #45 are blocked until #117 lands, and
-#43 says so in its own spec.
+Four worktrees stood at that point, all belonging to open PRs Björn gated: `docs-batch` (#98),
+`i41` (#132), `i42` (#117), `i46` (#128). 224 GiB free. The queue for him was #98 (this record)
+→ #117 (write queue, migration 0005) → #128 (Notes, 0006) → #132 (suggestions, 0007), with
+#43, #44 and #45 blocked until #117 landed — #43 says so in its own spec. The section below is
+what then happened to that queue.
 
 **One question escalated from the last merge, and it is one line of judgement.** #159's
 merge-manager asks whether step 2's stats row still needs its tri-state now that a finished run
@@ -269,11 +272,13 @@ on, which is fork 2 and Björn's.
 
 The manager added the fact that decides it: **the deadness is now unguarded.** It put loud sentinel
 values in all three arms and the entire 22-test suite stayed green. So they are unreachable *and*
-uncovered — a future edit breaks them silently. That is the concrete cost of keeping them, and it
-is why the question is worth a minute rather than a shrug.
+uncovered — a future edit breaks them silently. That is the cost of keeping them.
 
 **Still open and unruled, all recorded on their issues:** #104, #112, #122 (the idempotency-key
-SPI question), #141 (`SearchResponse`, frozen IPC), #157.
+SPI question), #141 (`SearchResponse`, frozen IPC), and two filed after this list was first
+written — #161, from PR #132's merge-manager, and #162, from PR #160's. Both are traps laid for
+the next person in the file rather than live defects. #157 was on this list and has since landed
+as `29adcba`.
 
 ## The frozen-contract gate is delegated to Fable (Björn, 2026-08-29)
 
@@ -290,9 +295,17 @@ under the same merge-manager discipline as everything else: deep review, mutatio
 1. **Milestone exits.** He named migrations and IPC additions; a milestone exit is neither, and it
    is the one gate in the working model that is about judging a body of work rather than a diff.
 2. **The battery clauses.** Fable itself ruled on #146 that a contract-battery change is Björn's,
-   citing ADR-0004's exception wording ("no battery clause added, removed or reworded"). A
-   delegation of *migrations and IPC* does not reach that, and Fable saying so about its own
-   authority is the reason to keep it.
+   citing the care taken by the one ratified exception that ever touched `contract.rs` —
+   ADR-0004's entry in §10.8, which is in `docs/contract.md`, not in the ADR itself: *"nothing
+   more -- no battery clause added, removed or reworded."* A delegation of *migrations and IPC*
+   does not reach that, and Fable saying so about its own authority is the reason to keep it.
 
 Recorded here because this record is itself one of the four PRs the delegation unblocks, and
 because the doctrine it opens with would otherwise be stale on the day it merged.
+
+**What the delegation unblocked, before this record merged.** All three frozen-contract PRs went
+through the Fable gate: #117 (write queue, migration 0005) as `83519a3`, #128 (Notes, 0006) as
+`8fdcf60`, #132 (suggestions, 0007) as `1ed92e2`, followed by #160 (#157) as `29adcba`, where
+`main` stands. The day's total is **39 issues across 35 commits**. #43 is unblocked by #117 and in
+flight; #44 and #45 follow it. Of the four PRs open at the delegation, this record is the last, and
+it merged on a full local `just check` run on its rebased head — no CI, per the section above.
