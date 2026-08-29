@@ -2,7 +2,16 @@
   The first-run wizard — spec §14a: *"initialize the database → add the first
   source (the §3 flow) → initial sync with progress → land in the launcher."*
 
-  Four panels over the mockup's `.steps` breadcrumb.
+  Four panels over the mockup's `.steps` breadcrumb, and **DONE is the terminal
+  one for a real source and a demo load alike** (#156, ruled 2026-08-29). It was
+  not always: `stepIndex = 3` was assigned only in `loadDemo`, so a real first
+  sync ended at step 2 offering a bare *Finish*, and the sentence below —
+  *knobas mirrored N items*, which #84/ADR-0005, #120 and #137 were each ruled
+  about — could only ever be read after a demo load. The breadcrumb drew *Done*
+  for everybody regardless. The turnover is off the run's **ending** and costs
+  no extra click: a finished step 2 offered one button, DONE offers one button,
+  and what the reader gains is the sentence and the ⌘K pointer. A *failed*
+  ending stays at step 2, where *Retry* and *Skip for now* are.
 
   **Known deviation from task 20 step 3.** The brief asks for the Add-source
   flow "embedded inline rather than in a modal; a modal over an otherwise empty
@@ -263,6 +272,17 @@
           // `corpusPending` is what makes that safe — the panel can render
           // without a count because it has a way to say it has not got one.
           void readCorpus(id);
+          // **DONE, for a real source too** (#156). This used to be assigned in
+          // exactly one place, `loadDemo`, so a real first sync ended at step 2
+          // under a bare *Finish* and the sentence below — the one #84/ADR-0005,
+          // #120 and #137 were each ruled about — rendered only after a demo
+          // load, over a breadcrumb that promised *Done* to everybody.
+          //
+          // Off the **ending**, so it covers every shape ADR-0005 enumerates:
+          // this wizard started the run, joined it in flight, or was served a
+          // terminal message synthesised for a run already over. Only
+          // `finished`; a failure stays at step 2 with its Retry.
+          stepIndex = 3;
         }
         if (message.phase === "failed") {
           // The message is a line an upstream server wrote, and it is
@@ -420,14 +440,16 @@
           {/if}
 
           <div class="acts">
+            <!--
+              Failure only. A run that ended `finished` is on the DONE panel by
+              the time this renders (#156), so the *Finish* branch that used to
+              sit here was unreachable — and an unreachable branch on this exact
+              surface is what three pieces of work tripped over.
+            -->
             {#if failed}
               <button class="btn pri" disabled={starting} onclick={() => void sync()}>Retry</button>
               <button class="btn" disabled={finishing} onclick={() => void finish()}>
                 Skip for now
-              </button>
-            {:else if finished}
-              <button class="btn pri" disabled={finishing} onclick={() => void finish()}>
-                Finish
               </button>
             {/if}
           </div>
