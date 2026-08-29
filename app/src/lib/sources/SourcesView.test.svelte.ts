@@ -780,6 +780,167 @@ test("a deleted source leaves the shared health store, not just the list", async
   expect(store.all.map((row) => row.source_id)).toEqual(["mock"]);
 });
 
+/**
+ * The inverse race, and the direction that hides a failure instead of showing
+ * a false one (#148).
+ *
+ * This view re-lists on every terminal `sync:state`, and the scheduler emits
+ * `source:health` the moment a check comes back refused — so the window where
+ * a `list_sources` is in flight while a rejection lands is the ordinary case,
+ * not an exotic one. `load()` hands its rows to `health.replace`, which used
+ * to be wholesale, so the read answered with the credential as it stood
+ * *before* the check and wrote a green chip back over a rejected one. Nothing
+ * in the window then says the source has stopped working — which is the one
+ * job this surface has.
+ *
+ * **The read is held open across the event**, which is what makes this a race
+ * rather than a sequence: released first, the two are fine in either order and
+ * a test would pass against the bug.
+ *
+ * The store here is the shell's own wiring — `createHealth()` subscribed with
+ * `start()` — because the event does not reach this view at all. It reaches
+ * the store, and the row draws `health ?? source.health`. A test that patched
+ * the store by hand would be testing a call this app never makes.
+ */
+test("a scheduler rejection landing mid-list is not written back to ok by that list", async () => {
+  const rejected = (): CredentialHealth => ({
+    source_id: "jira",
+    state: "unauthorized",
+    checked_at: "2026-08-25T11:59:00Z",
+    detail: "401 from /rest/api/2/myself",
+    secret_expires_at: null,
+  });
+  sources = [source()];
+  const store = createHealth();
+  const stop = store.start();
+  render({ health: store });
+  await settle();
+  expect(button("Sync now", rowFor("jira")!)).toBeTruthy();
+  const listedSoFar = calls.listSources;
+
+  // The read a finished run puts in flight, answering from the snapshot the
+  // database held before the check below — a stale reading, not a second
+  // opinion. Its `item_count` moved, so the assertion at the end can tell
+  // "the read was applied" from "the read was dropped".
+  let releaseStale: (() => void) | undefined;
+  answerList = (call) =>
+    call === listedSoFar + 1
+      ? new Promise<SourceSummary[]>((resolve) => {
+          releaseStale = () => resolve([source({ item_count: 240 })]);
+        })
+      : Promise.resolve([source({ item_count: 240, health: rejected() })]);
+
+  emit("sync:state", {
+    source_id: "jira",
+    running: false,
+    run_id: 9,
+    started_at: "2026-08-25T11:58:00Z",
+    last_finished_at: "2026-08-25T11:59:00Z",
+    last_outcome: "error",
+    next_run_at: null,
+    backoff_until: null,
+  });
+  await settle();
+  expect(calls.listSources, "the terminal transition read the sources").toBe(listedSoFar + 1);
+
+  // …and with that read still open, the scheduler's check comes back refused.
+  emit("source:health", rejected());
+  await settle();
+  expect(store.get("jira")!.state, "the event never reached the store").toBe("unauthorized");
+  expect(button("Re-enter", rowFor("jira")!)).toBeTruthy();
+
+  releaseStale!();
+  await settle();
+
+  expect(
+    store.get("jira")!.state,
+    "the in-flight list wrote a stale ok over a credential the scheduler had just seen refused",
+  ).toBe("unauthorized");
+  expect(rowFor("jira")!.textContent).toContain("401 from /rest/api/2/myself");
+  expect(button("Re-enter", rowFor("jira")!)).toBeTruthy();
+  expect(button("Sync now", rowFor("jira")!), "a source that cannot sync offered Sync now").toBeUndefined();
+  // …and the read was *applied*, not dropped: the halves the health store does
+  // not hold — `item_count`, `last_run` — still come from it. The fix is a
+  // merge, not a skip.
+  expect(rowFor("jira")!.textContent).toContain("240");
+  stop();
+});
+
+/**
+ * #144's direction, pinned on the merge rule rather than on the re-list.
+ *
+ * A credential fixed in the strip reverting to "auth failed" because an older
+ * `list_sources` landed afterwards is the visible half of the same race, and
+ * PR #147 closes it at this view by re-listing from `onhealth`. This test
+ * closes it one layer down: `onhealth` patches the store with the reading
+ * `set_source_secret` answered with, that reading is stamped later than the
+ * one in flight, and `replace` keeps it. Both guards stand — this one also
+ * covers the boot-time seed, which no re-list in this view can reach.
+ *
+ * It is here as the other direction of one rule: an implementation where the
+ * *failing* reading won would satisfy the test above and revert the reader's
+ * fix here.
+ */
+test("a credential fixed by hand outlives an older list_sources landing after it", async () => {
+  const rejected = (): CredentialHealth => ({
+    source_id: "jira",
+    state: "unauthorized",
+    checked_at: "2026-08-25T11:59:00Z",
+    detail: "401 from /rest/api/2/myself",
+    secret_expires_at: null,
+  });
+  sources = [source({ health: rejected() })];
+  const store = health();
+  render({ health: store });
+  await settle();
+  expect(button("Re-enter", rowFor("jira")!)).toBeTruthy();
+  const listedSoFar = calls.listSources;
+
+  let releaseStale: (() => void) | undefined;
+  answerList = (call) =>
+    call === listedSoFar + 1
+      ? new Promise<SourceSummary[]>((resolve) => {
+          releaseStale = () => resolve([source({ health: rejected() })]);
+        })
+      : Promise.resolve([source()]);
+
+  emit("sync:state", {
+    source_id: "jira",
+    running: false,
+    run_id: 9,
+    started_at: "2026-08-25T11:58:00Z",
+    last_finished_at: "2026-08-25T11:59:00Z",
+    last_outcome: "error",
+    next_run_at: null,
+    backoff_until: null,
+  });
+  await settle();
+  expect(calls.listSources, "the terminal transition read the sources").toBe(listedSoFar + 1);
+
+  // …and now, with that read still open, the person types the password.
+  // `set_source_secret` answers with a reading checked at 12:00 — after the
+  // 11:59 one the read is carrying.
+  button("Re-enter", rowFor("jira")!)!.click();
+  flushSync();
+  const input = target.querySelector<HTMLInputElement>(".src-fix input")!;
+  input.value = "s3cret";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  button("Save and retry sync", target.querySelector(".src-fix")!)!.click();
+  await settle();
+  expect(store.get("jira")!.state).toBe("ok");
+
+  releaseStale!();
+  await settle();
+
+  expect(
+    store.get("jira")!.state,
+    "the in-flight read wrote the rejected credential back over the fix",
+  ).toBe("ok");
+  expect(button("Re-enter", rowFor("jira")!)).toBeUndefined();
+  expect(rowFor("jira")!.textContent).not.toContain("401 from /rest/api/2/myself");
+});
+
 test("cancelling the confirm deletes nothing", async () => {
   sources = [source()];
   render();
