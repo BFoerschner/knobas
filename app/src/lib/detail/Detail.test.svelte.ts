@@ -449,6 +449,10 @@ function link(over: {
       note: over.note ?? null,
       created_by: "mara",
       created_at: "2026-08-22T12:00:00Z",
+      confirmed_at: "2026-08-22T12:00:00Z",
+      rule: null,
+      rule_class: null,
+      reason: null,
     },
     other: {
       entity_id: from === "mock:PAY-231" ? to : from,

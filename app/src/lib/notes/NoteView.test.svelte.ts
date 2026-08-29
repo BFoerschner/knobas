@@ -280,6 +280,12 @@ test("the note draws its links panel from what the read returned", async () => {
       note: null,
       created_by: "user",
       created_at: "2026-08-22T14:30:00Z",
+      // Confirmed, as everything `entries_of` can return is: these fixtures
+      // ride the panel's read, which is `knobas.confirmed_link` since 0007.
+      confirmed_at: "2026-08-22T14:30:00Z",
+      rule: null,
+      rule_class: null,
+      reason: null,
     },
     other: {
       entity_id: "mock:PAY-231",
@@ -334,6 +340,12 @@ test("unlinking a reference is refused, with the reason", async () => {
       note: null,
       created_by: "user",
       created_at: "2026-08-22T14:30:00Z",
+      // Confirmed, as everything `entries_of` can return is: these fixtures
+      // ride the panel's read, which is `knobas.confirmed_link` since 0007.
+      confirmed_at: "2026-08-22T14:30:00Z",
+      rule: null,
+      rule_class: null,
+      reason: null,
     },
     other: {
       entity_id: "mock:PAY-231",
@@ -373,6 +385,12 @@ test("a hand-drawn link the body still names is refused; one it does not name un
       note: "drawn in the panel",
       created_by: "user",
       created_at: "2026-08-22T14:30:00Z",
+      // Confirmed, as everything `entries_of` can return is: these fixtures
+      // ride the panel's read, which is `knobas.confirmed_link` since 0007.
+      confirmed_at: "2026-08-22T14:30:00Z",
+      rule: null,
+      rule_class: null,
+      reason: null,
     },
     other: {
       entity_id: "mock:PAY-231",
@@ -391,6 +409,12 @@ test("a hand-drawn link the body still names is refused; one it does not name un
       note: null,
       created_by: "user",
       created_at: "2026-08-22T14:30:00Z",
+      // Confirmed, as everything `entries_of` can return is: these fixtures
+      // ride the panel's read, which is `knobas.confirmed_link` since 0007.
+      confirmed_at: "2026-08-22T14:30:00Z",
+      rule: null,
+      rule_class: null,
+      reason: null,
     },
     other: {
       entity_id: "mock:OTHER-9",

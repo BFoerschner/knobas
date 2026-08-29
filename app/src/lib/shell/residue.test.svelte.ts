@@ -119,6 +119,10 @@ vi.mock("../ipc/entity", () => ({
   saveNote: () => deferred(NOTE),
   deleteNote: () => deferred(true),
   unlink: () => deferred(undefined),
+  // The tray's read and its detection pass, deferred like everything else, so
+  // it can be unmounted with both still in flight.
+  detectSuggestions: () => deferred(0),
+  roomSuggestions: () => deferred({ rows: [], total: 0 }),
 }));
 
 /**
@@ -221,6 +225,7 @@ const ContextTabs = (await import("./ContextTabs.svelte")).default;
 const Flap = (await import("./Flap.svelte")).default;
 const ModalFixture = (await import("./Modal.fixture.svelte")).default;
 const Room = (await import("./Room.svelte")).default;
+const SuggestionTray = (await import("./SuggestionTray.svelte")).default;
 const ShellFixture = (await import("./Shell.fixture.svelte")).default;
 const StatusBar = (await import("./StatusBar.svelte")).default;
 const Tile = (await import("./Tile.svelte")).default;
@@ -340,6 +345,17 @@ const CASES: Case[] = [
           onopen: () => {},
         },
       }),
+    }),
+  },
+  {
+    /**
+     * The tray installs a `sync:state` listener beside its read, and it is the
+     * listener that would accumulate: the effect re-runs on every room switch.
+     */
+    name: "SuggestionTray",
+    source: "lib/shell/SuggestionTray.svelte",
+    open: (target) => ({
+      app: mount(SuggestionTray, { target, props: { sources: [], onopen: () => {} } }),
     }),
   },
   {

@@ -10,6 +10,14 @@
 //! `(from_id, to_id, relation) where deleted_at is null`. Two entities may
 //! therefore carry several links as long as their relations differ, and a
 //! withdrawn link may be recreated.
+//!
+//! Since #41 the table holds two populations, told apart by
+//! [`LinkRow::confirmed_at`]: confirmed links, which are the graph, and
+//! *proposals*, which are suggestions nobody has accepted yet. Everything in
+//! this module is about the first; [`crate::suggest`] owns the second. The
+//! index above spans both, deliberately -- one active edge per
+//! `(from, to, relation)` whatever its state -- so a proposal and a link for
+//! one pair can never coexist and disagree.
 
 use serde::Serialize;
 use sqlx::PgPool;
@@ -113,10 +121,22 @@ macro_rules! link_columns {
             $prefix,
             "created_by, ",
             $prefix,
-            "created_at"
+            "created_at, ",
+            $prefix,
+            "confirmed_at, ",
+            $prefix,
+            "rule, ",
+            $prefix,
+            "rule_class, ",
+            $prefix,
+            "reason"
         )
     };
 }
+
+// `crate::suggest` writes and reads the same rows and must name the same
+// columns; the whole point of the list above is that there is one of it.
+pub(crate) use link_columns;
 
 /// One active link, as seen from either of its ends.
 #[derive(Clone, Debug, Serialize, sqlx::FromRow)]
@@ -137,6 +157,34 @@ pub struct LinkRow {
     pub note: Option<String>,
     pub created_by: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    /// When the user said yes -- and, by being `None`, the whole difference
+    /// between a link and a [proposal](crate::suggest).
+    ///
+    /// A row this is `None` on is a suggestion knobas made and nobody has
+    /// accepted. It is not in the graph: [`entries_of`] reads
+    /// `knobas.confirmed_link`, which cannot contain it, and the tray reads
+    /// `knobas.proposed_link`, which cannot contain anything else. Every link
+    /// that predates migration `0007` carries its own `created_at` here.
+    pub confirmed_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// The named detection rule that proposed this link, or `None` for one a
+    /// person drew.
+    ///
+    /// Deliberately not a closed vocabulary: rules are expected to grow, and a
+    /// constrained column would make each new one a migration. The *class*
+    /// below is the closed axis.
+    pub rule: Option<String>,
+    /// Which class of evidence [`rule`](Self::rule) is, or `None` for a link a
+    /// person drew.
+    pub rule_class: Option<crate::suggest::RuleClass>,
+    /// Why knobas proposed this link, in the detector's own words -- "the
+    /// branch name contains PAY-231".
+    ///
+    /// Stored, not rendered from [`rule`](Self::rule) at display time: a
+    /// suggestion whose reason cannot be shown is not shippable (#41), and a
+    /// reason assembled by whichever surface happens to draw it is one that
+    /// can be missing from the next surface. `link_proposal_chk` (migration
+    /// `0007`) refuses an unconfirmed row without one.
+    pub reason: Option<String>,
 }
 
 /// Link `from` to `to`, returning the row that was written.
@@ -226,8 +274,22 @@ pub struct LinkEntry {
     pub other: LinkEnd,
 }
 
-/// Every active link `entity` takes part in, in either direction, newest
-/// first, with the other end of each resolved.
+/// Every **confirmed** link `entity` takes part in, in either direction,
+/// newest first, with the other end of each resolved.
+///
+/// ## Why the read is `knobas.confirmed_link` and not `knobas.link`
+///
+/// A suggestion is a link row whose `confirmed_at` is null (#41), so the table
+/// itself holds two populations and the panel may show exactly one of them: a
+/// links panel drawing an unconfirmed guess is a correctness bug, not a
+/// cosmetic one. `knobas.confirmed_link` and `knobas.proposed_link` (migration
+/// `0007`) are each other's negation over the same rows, so this read and the
+/// tray's *cannot* overlap however either is later edited -- which a `where`
+/// clause written out here twice could not promise. Same treatment, same
+/// reason, as `sync.live_item` and the tombstone filter.
+///
+/// The view also drops the `deleted_at is null` half of the old predicate,
+/// because it is inside the view.
 ///
 /// ## Why the join is on `knobas.entity` and not on `sync.live_item`
 ///
@@ -250,10 +312,10 @@ pub async fn entries_of(pool: &PgPool, entity: &EntityRef) -> Result<Vec<LinkEnt
         "select ",
         link_columns!("l."),
         ", e.id as entity_id, e.kind, e.title, e.deleted_at
-           from knobas.link l
+           from knobas.confirmed_link l
            join knobas.entity e
              on e.id = case when l.from_id = $1 then l.to_id else l.from_id end
-          where l.deleted_at is null and (l.from_id = $1 or l.to_id = $1)
+          where l.from_id = $1 or l.to_id = $1
           order by l.created_at desc, l.id desc"
     ))
     .bind(entity.to_string())

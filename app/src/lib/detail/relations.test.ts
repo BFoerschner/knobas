@@ -25,6 +25,10 @@ function entry(over: { relation?: string; from?: string; to?: string; id?: strin
       note: null,
       created_by: "user",
       created_at: "2026-08-28T09:30:00Z",
+      confirmed_at: "2026-08-28T09:30:00Z",
+      rule: null,
+      rule_class: null,
+      reason: null,
     },
     other: { entity_id: to, kind: "ticket", title: "Retry storm", deleted_at: null },
   };

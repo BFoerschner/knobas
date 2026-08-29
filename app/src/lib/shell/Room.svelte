@@ -14,6 +14,7 @@
   import NoteView from "../notes/NoteView.svelte";
   import { createNote, listEntities, type EntityRow } from "../ipc/entity";
   import RoomBar from "./RoomBar.svelte";
+  import SuggestionTray from "./SuggestionTray.svelte";
   import Tile from "./Tile.svelte";
   import { contextById, type RoomContext } from "./contexts";
   import { kindRegistry } from "./kind-registry.svelte";
@@ -147,6 +148,13 @@
       {/each}
     </div>
   {/if}
+
+  <!--
+    Under the board and above the slide-over: suggestions arrive where the work
+    is rather than as a chore of their own (#41). The strip is `flex: none`, so
+    the tiles keep the space they had and the tray takes only what it needs.
+  -->
+  <SuggestionTray sources={context.filter.sources} onopen={(hash) => router.go(hash)} />
 
   <!--
     The slide-over is drawn *inside* the room, over its right-hand half

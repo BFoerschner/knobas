@@ -133,6 +133,16 @@
         {#if entry.link.note}
           <p class="lnote">{entry.link.note}</p>
         {/if}
+        <!--
+          An accepted suggestion keeps the reason knobas proposed it with, and
+          the panel shows it: "there are not two kinds of link to reason about"
+          (#41 story 5) cuts both ways -- the row behaves like every other one,
+          and it can still say why it exists. A hand-drawn link has no reason
+          and draws no line.
+        -->
+        {#if entry.link.reason}
+          <p class="lnote lwhy">{entry.link.reason}</p>
+        {/if}
       {/each}
     {/each}
   {/if}
@@ -171,6 +181,11 @@
     The note is prose the user wrote about *why* the link exists, so it gets a
     line of its own under the row rather than a column that would clip it.
   */
+  /* knobas' words, not the user's: fainter, so the two are not one voice. */
+  .lwhy {
+    color: var(--faint);
+  }
+
   .lnote {
     padding: 4px 0 6px 42px;
     color: var(--muted);

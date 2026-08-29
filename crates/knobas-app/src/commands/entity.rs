@@ -31,6 +31,7 @@ use chrono::{DateTime, Utc};
 use knobas_core::activity::ActivityRow;
 use knobas_core::entity::EntityRef;
 use knobas_core::link::{LinkEntry, LinkRow, Origin};
+use knobas_core::suggest::{self, SuggestionEntry};
 use sqlx::{PgPool, Row};
 use tauri::{Emitter, State};
 use uuid::Uuid;
@@ -554,11 +555,20 @@ fn relation_of(value: Option<&str>) -> String {
 /// does not already know. One helper, because `linked` and `unlinked` describe
 /// the same link and a reader of the log has to be able to pair them.
 fn link_detail(link: &LinkRow) -> serde_json::Value {
-    serde_json::json!({
+    let mut detail = serde_json::json!({
         "link_id": link.id,
         "to_id": link.to_id,
         "relation": link.relation,
-    })
+    });
+    // Only when there is one, which is only ever for a link knobas proposed:
+    // "accepted" with no reason beside it is a line that says a decision was
+    // made and not what it was about. A key that is absent and a key that is
+    // `null` are different facts to a reader of the log, and the second is the
+    // one worth avoiding.
+    if let (Some(map), Some(reason)) = (detail.as_object_mut(), link.reason.as_deref()) {
+        map.insert("reason".to_owned(), serde_json::Value::from(reason));
+    }
+    detail
 }
 
 /// Draw a link between two entities.
@@ -603,16 +613,35 @@ pub async fn create_link_inner(
         )));
     }
 
-    let link = knobas_core::link::create(
+    let relation = relation_of(relation);
+    let link = match knobas_core::link::create(
         pool,
         &from,
         &to,
-        &relation_of(relation),
+        &relation,
         Origin::Manual,
         present(note),
         ACTOR,
     )
-    .await?;
+    .await
+    {
+        Ok(link) => link,
+        // The pair may already carry a *proposal*: `link_active_idx` spans
+        // proposals and links alike (one active edge per triple, whatever its
+        // state), so knobas suggesting this link is what refused it. Drawing by
+        // hand the link knobas proposed is the same act as pressing *Accept*,
+        // and the alternative is telling the user "already linked" about a pair
+        // whose links panel is empty.
+        Err(knobas_core::CoreError::Duplicate) => {
+            match suggest::accept_edge(pool, &from, &to, &relation).await? {
+                Some(promoted) => promoted,
+                // Nothing to promote: the blocker is a real link, which is what
+                // `conflict` has always meant here.
+                None => return Err(knobas_core::CoreError::Duplicate.into()),
+            }
+        }
+        Err(other) => return Err(other.into()),
+    };
 
     let activity = record_link_activity(pool, "linked", &link).await?;
     Ok(LinkMutation { link, activity })
@@ -899,9 +928,236 @@ pub async fn delete_note(
     delete_note_inner(&pool, &note_id).await
 }
 
+// -- suggestions and the room tray -----------------------------------------
+//
+// Four commands, in this module and not a new one: a suggestion **is** a link
+// row (#41), these are the writes that move it between the two states the link
+// store already has, and the read is the same graph the panel above reads from
+// the other side. A `commands/suggest.rs` would be a second module over one
+// table.
+
+/// One page of a room's tray: the proposals, and how many there are in all.
+///
+/// `total` is the whole room, not the page -- #41's story 19 is "see how many
+/// suggestions are waiting, so that I can choose when to spend attention on
+/// them", and a number capped by `limit` answers a different question. Same
+/// shape and same reason as [`EntityPage`].
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SuggestionPage {
+    pub rows: Vec<SuggestionEntry>,
+    /// Every proposal in the room, before `limit`.
+    pub total: i64,
+}
+
+/// Run a detection pass, returning how many proposals it wrote.
+///
+/// Idempotent and cheap to repeat, which is what lets the room call it rather
+/// than the user (#41 story 22): a pass over an unchanged mirror writes
+/// nothing, and a pass after a sync writes only what the new items justify.
+/// It never creates a confirmed link and never writes to a source.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if a statement fails.
+pub async fn detect_suggestions_inner(pool: &PgPool) -> Result<u32, IpcError> {
+    let written = suggest::detect(pool).await?;
+    // A pass that proposed more than four billion links is not a number the
+    // frontend needs to be exact about.
+    Ok(u32::try_from(written).unwrap_or(u32::MAX))
+}
+
+/// The proposals a room holds, newest first, with both ends resolved.
+///
+/// `sources` is the room's membership and follows [`EntityFilter`]'s
+/// convention: **empty means every source**. A proposal belongs to a room when
+/// either of its ends does.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if a query fails.
+pub async fn room_suggestions_inner(
+    pool: &PgPool,
+    sources: &[String],
+    limit: u32,
+) -> Result<SuggestionPage, IpcError> {
+    Ok(SuggestionPage {
+        rows: suggest::proposals(pool, sources, i64::from(limit)).await?,
+        total: suggest::proposal_count(pool, sources).await?,
+    })
+}
+
+/// Accept a proposal, making it an ordinary link.
+///
+/// `Ok(None)` when there was nothing to accept -- it was accepted or dismissed
+/// already. Nothing was mutated, so nothing is written to the log and nothing
+/// is announced, exactly as [`unlink_inner`] does.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) if `link_id` is not a UUID;
+/// [`NotFound`](crate::IpcErrorCode::NotFound) if no link carries it;
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+pub async fn accept_suggestion_inner(
+    pool: &PgPool,
+    link_id: &str,
+) -> Result<Option<LinkMutation>, IpcError> {
+    let id = suggestion_id(link_id)?;
+    let Some(link) = suggest::accept(pool, id).await? else {
+        return Ok(None);
+    };
+    let activity = record_link_activity(pool, "accepted", &link).await?;
+    Ok(Some(LinkMutation { link, activity }))
+}
+
+/// Dismiss a proposal, and remember it.
+///
+/// The tombstone is the withdrawal memory Links v1 already had, so a dismissal
+/// suppresses re-proposal for exactly the same reason an unlink does -- there
+/// is one mechanism, not two.
+///
+/// `Ok(None)` when there was nothing to dismiss, which includes a link that has
+/// already been accepted: that is a link, and the panel's *Unlink* is what
+/// withdraws it.
+///
+/// # Errors
+///
+/// As [`accept_suggestion_inner`].
+pub async fn dismiss_suggestion_inner(
+    pool: &PgPool,
+    link_id: &str,
+) -> Result<Option<LinkMutation>, IpcError> {
+    let id = suggestion_id(link_id)?;
+    let Some(link) = suggest::dismiss(pool, id).await? else {
+        return Ok(None);
+    };
+    let activity = record_link_activity(pool, "dismissed", &link).await?;
+    Ok(Some(LinkMutation { link, activity }))
+}
+
+/// A suggestion is addressed by its link id, because it is a link row.
+fn suggestion_id(link_id: &str) -> Result<Uuid, IpcError> {
+    link_id
+        .parse()
+        .map_err(|_| IpcError::invalid(format!("{link_id} is not a link id")))
+}
+
+/// Run a detection pass over the mirror.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the database
+/// is still coming up, and whatever [`detect_suggestions_inner`] refuses with.
+#[tauri::command]
+pub async fn detect_suggestions(lifecycle: State<'_, Lifecycle>) -> Result<u32, IpcError> {
+    let pool = lifecycle.pool()?;
+    detect_suggestions_inner(&pool).await
+}
+
+/// One page of a room's suggestion tray.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the database
+/// is still coming up, and whatever [`room_suggestions_inner`] refuses with.
+#[tauri::command]
+pub async fn room_suggestions(
+    lifecycle: State<'_, Lifecycle>,
+    sources: Vec<String>,
+    limit: u32,
+) -> Result<SuggestionPage, IpcError> {
+    let pool = lifecycle.pool()?;
+    room_suggestions_inner(&pool, &sources, limit).await
+}
+
+/// Accept a proposal, and announce it.
+///
+/// Idempotent: accepting an already-accepted suggestion resolves, writes no
+/// second line and announces nothing.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the database
+/// is still coming up, and whatever [`accept_suggestion_inner`] refuses with.
+#[tauri::command]
+pub async fn accept_suggestion<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    link_id: String,
+) -> Result<(), IpcError> {
+    let pool = lifecycle.pool()?;
+    if let Some(written) = accept_suggestion_inner(&pool, &link_id).await? {
+        announce(&app, written.activity);
+    }
+    Ok(())
+}
+
+/// Dismiss a proposal, and announce it.
+///
+/// Idempotent, for the same reason [`accept_suggestion`] is.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the database
+/// is still coming up, and whatever [`dismiss_suggestion_inner`] refuses with.
+#[tauri::command]
+pub async fn dismiss_suggestion<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    link_id: String,
+) -> Result<(), IpcError> {
+    let pool = lifecycle.pool()?;
+    if let Some(written) = dismiss_suggestion_inner(&pool, &link_id).await? {
+        announce(&app, written.activity);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const MIRROR: &str = include_str!("../../../../app/src/lib/ipc/entity.ts");
+
+    /// Every command this module registers is invoked by that name from the
+    /// mirror, and every command the mirror invokes is registered.
+    ///
+    /// A `#[tauri::command]` is addressed by a *string*, so a rename on one
+    /// side is not a compile error anywhere -- it is a button that rejects with
+    /// Tauri's own "command not found" the first time somebody presses it. The
+    /// list is read off `lib.rs`'s handler barrel rather than written out here,
+    /// so a command registered and never mirrored fails this too.
+    #[test]
+    fn the_mirror_invokes_the_commands_by_their_registered_names() {
+        let barrel = include_str!("../lib.rs");
+        let registered: Vec<&str> = barrel
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("commands::entity::"))
+            .map(|line| line.trim_end_matches(','))
+            .collect();
+        assert!(
+            registered.len() >= 9,
+            "only {} entity commands found in the handler barrel -- the parse \
+             is wrong, not the barrel",
+            registered.len()
+        );
+        for command in &registered {
+            assert!(
+                MIRROR.contains(&format!("\"{command}\"")),
+                "{command} is registered but never invoked from entity.ts"
+            );
+        }
+        for invoked in MIRROR.split("invoke<").skip(1) {
+            let name = invoked
+                .split_once('"')
+                .and_then(|(_, rest)| rest.split_once('"'))
+                .map(|(name, _)| name)
+                .expect("every invoke names a command");
+            assert!(
+                registered.contains(&name),
+                "entity.ts invokes {name}, which is not in the handler barrel"
+            );
+        }
+    }
 
     /// §3a, as a resolution rather than as a claim.
     ///
