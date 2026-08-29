@@ -1,0 +1,346 @@
+//! `app/src/lib/sources/fixtures.ts` against the adapters' real `config_schema`.
+
+/// A TypeScript `export const X = { … } as const;` literal, as JSON.
+///
+/// A recursive-descent parser over the object literal, not a regex and not a
+/// text scrape. The distinction is the whole point of this module: the
+/// property that drifted furthest was TeamCity's `"maximum":
+/// MAX_BUILDS_PER_CONFIG`, a Rust `const` and not a literal, so a check that
+/// compared *text* could not see the one value it most needed to compare. Here
+/// the Rust side is a real `serde_json::Value` -- the constant is already
+/// resolved by the compiler -- and the TypeScript side is parsed into another
+/// one, so the comparison is between values.
+///
+/// **Every failure is a panic.** Nothing in here returns an `Option` a caller
+/// could quietly treat as "nothing to check": an unparseable literal, a
+/// missing `as const`, a bare identifier, a duplicate key all stop the test
+/// with a message naming the offending text. A drift detector that declines to
+/// check is the failure this file exists to remove.
+mod literal {
+    use serde_json::{Map, Value};
+
+    /// The value of `export const <name> = <literal> as const;` in `source`.
+    ///
+    /// # Panics
+    ///
+    /// If the declaration is missing, declared more than once, not followed by
+    /// `as const`, or contains anything this parser cannot turn into a value.
+    pub fn as_const(source: &str, name: &str) -> Value {
+        let needle = format!("export const {name} =");
+        let mut hits = source.match_indices(&needle);
+        let (byte_start, _) = hits.next().unwrap_or_else(|| {
+            panic!(
+                "app/src/lib/sources/fixtures.ts declares no `{needle} …`; a fixture that was \
+                 renamed or removed is a fixture nothing compares against any more"
+            )
+        });
+        assert!(
+            hits.next().is_none(),
+            "app/src/lib/sources/fixtures.ts declares `{needle} …` more than once, so which one \
+             is under test is undecidable"
+        );
+
+        let chars: Vec<char> = source.chars().collect();
+        let start = source[..byte_start].chars().count() + needle.chars().count();
+        let mut parser = Parser {
+            chars: &chars,
+            pos: start,
+            what: name,
+        };
+        let value = parser.value();
+        parser.keyword("as");
+        parser.keyword("const");
+        value
+    }
+
+    /// Every `export const <NAME>` in `source`, in declaration order.
+    ///
+    /// So the test can assert it compares *all* of them: a fixture added here
+    /// with no adapter behind it would otherwise be a schema the form is
+    /// developed against and nothing checks.
+    pub fn exported_const_names(source: &str) -> Vec<String> {
+        source
+            .match_indices("export const ")
+            .map(|(at, needle)| {
+                source[at + needle.len()..]
+                    .chars()
+                    .take_while(|c| is_ident_continue(*c))
+                    .collect()
+            })
+            .collect()
+    }
+
+    fn is_ident_start(c: char) -> bool {
+        c.is_ascii_alphabetic() || c == '_' || c == '$'
+    }
+
+    fn is_ident_continue(c: char) -> bool {
+        is_ident_start(c) || c.is_ascii_digit()
+    }
+
+    struct Parser<'a> {
+        chars: &'a [char],
+        pos: usize,
+        what: &'a str,
+    }
+
+    impl Parser<'_> {
+        fn peek(&self) -> Option<char> {
+            self.chars.get(self.pos).copied()
+        }
+
+        /// The text around the cursor, for a panic message that can be acted on.
+        fn here(&self) -> String {
+            let from = self.pos.saturating_sub(40);
+            let to = (self.pos + 40).min(self.chars.len());
+            format!(
+                "{}⟪here⟫{}",
+                self.chars[from..self.pos].iter().collect::<String>(),
+                self.chars[self.pos..to].iter().collect::<String>()
+            )
+        }
+
+        fn fail(&self, why: &str) -> ! {
+            panic!(
+                "app/src/lib/sources/fixtures.ts: {} in `{}`: {}",
+                why,
+                self.what,
+                self.here()
+            )
+        }
+
+        /// Whitespace, `// line` and `/* block */` comments.
+        ///
+        /// The fixture carries comments *inside* its object literals -- the two
+        /// that explain TeamCity's `maximum` and its plain-`"string"` username
+        /// -- so skipping them is not a nicety.
+        fn trivia(&mut self) {
+            loop {
+                while self.peek().is_some_and(char::is_whitespace) {
+                    self.pos += 1;
+                }
+                if self.peek() == Some('/') && self.chars.get(self.pos + 1) == Some(&'/') {
+                    while self.peek().is_some_and(|c| c != '\n') {
+                        self.pos += 1;
+                    }
+                    continue;
+                }
+                if self.peek() == Some('/') && self.chars.get(self.pos + 1) == Some(&'*') {
+                    self.pos += 2;
+                    loop {
+                        match self.peek() {
+                            None => self.fail("an unterminated /* comment"),
+                            Some('*') if self.chars.get(self.pos + 1) == Some(&'/') => {
+                                self.pos += 2;
+                                break;
+                            }
+                            Some(_) => self.pos += 1,
+                        }
+                    }
+                    continue;
+                }
+                return;
+            }
+        }
+
+        fn expect(&mut self, c: char) {
+            self.trivia();
+            if self.peek() != Some(c) {
+                self.fail(&format!("expected `{c}`"));
+            }
+            self.pos += 1;
+        }
+
+        /// A bare word that must be exactly `word` -- how `as const` is checked.
+        fn keyword(&mut self, word: &str) {
+            self.trivia();
+            let got = self.identifier();
+            if got != word {
+                self.fail(&format!("expected `{word}`, found `{got}`"));
+            }
+        }
+
+        fn identifier(&mut self) -> String {
+            if !self.peek().is_some_and(is_ident_start) {
+                self.fail("expected an identifier");
+            }
+            let from = self.pos;
+            while self.peek().is_some_and(is_ident_continue) {
+                self.pos += 1;
+            }
+            self.chars[from..self.pos].iter().collect()
+        }
+
+        fn value(&mut self) -> Value {
+            self.trivia();
+            match self.peek() {
+                Some('{') => self.object(),
+                Some('[') => self.array(),
+                Some('"' | '\'') => Value::String(self.string()),
+                Some(c) if c == '-' || c.is_ascii_digit() => self.number(),
+                Some('`') => self.fail(
+                    "a template literal. Only literals a JSON value can hold belong in this \
+                     fixture -- spell the string out",
+                ),
+                Some(c) if is_ident_start(c) => {
+                    let word = self.identifier();
+                    match word.as_str() {
+                        "true" => Value::Bool(true),
+                        "false" => Value::Bool(false),
+                        "null" => Value::Null,
+                        other => self.fail(&format!(
+                            "`{other}` is not a literal. This fixture is compared value-for-value \
+                             against the adapter, so every value here must be spelled out rather \
+                             than referenced"
+                        )),
+                    }
+                }
+                Some(_) => self.fail("not the start of a value"),
+                None => self.fail("the declaration ends before its value"),
+            }
+        }
+
+        fn object(&mut self) -> Value {
+            self.expect('{');
+            let mut map = Map::new();
+            loop {
+                self.trivia();
+                if self.peek() == Some('}') {
+                    self.pos += 1;
+                    return Value::Object(map);
+                }
+                let key = match self.peek() {
+                    Some('"' | '\'') => self.string(),
+                    Some(c) if is_ident_start(c) => self.identifier(),
+                    _ => self.fail("expected a property name or `}`"),
+                };
+                self.expect(':');
+                let value = self.value();
+                if map.insert(key.clone(), value).is_some() {
+                    self.fail(&format!("`{key}` is declared twice"));
+                }
+                self.trivia();
+                match self.peek() {
+                    Some(',') => self.pos += 1,
+                    Some('}') => {}
+                    _ => self.fail("expected `,` or `}` after a property"),
+                }
+            }
+        }
+
+        fn array(&mut self) -> Value {
+            self.expect('[');
+            let mut items = Vec::new();
+            loop {
+                self.trivia();
+                if self.peek() == Some(']') {
+                    self.pos += 1;
+                    return Value::Array(items);
+                }
+                items.push(self.value());
+                self.trivia();
+                match self.peek() {
+                    Some(',') => self.pos += 1,
+                    Some(']') => {}
+                    _ => self.fail("expected `,` or `]` after an element"),
+                }
+            }
+        }
+
+        fn string(&mut self) -> String {
+            let quote = match self.peek() {
+                Some(q @ ('"' | '\'')) => q,
+                _ => self.fail("expected a string"),
+            };
+            self.pos += 1;
+            let mut out = String::new();
+            loop {
+                match self.peek() {
+                    None | Some('\n') => self.fail("an unterminated string"),
+                    Some(c) if c == quote => {
+                        self.pos += 1;
+                        return out;
+                    }
+                    Some('\\') => {
+                        self.pos += 1;
+                        let escaped = match self.peek() {
+                            None => self.fail("an unterminated escape"),
+                            Some(c) => c,
+                        };
+                        self.pos += 1;
+                        match escaped {
+                            '"' | '\'' | '\\' | '/' => out.push(escaped),
+                            'n' => out.push('\n'),
+                            'r' => out.push('\r'),
+                            't' => out.push('\t'),
+                            'b' => out.push('\u{8}'),
+                            'f' => out.push('\u{c}'),
+                            'u' => {
+                                let hex: String =
+                                    self.chars[self.pos..(self.pos + 4).min(self.chars.len())]
+                                        .iter()
+                                        .collect();
+                                let code = u32::from_str_radix(&hex, 16)
+                                    .unwrap_or_else(|_| self.fail("a malformed \\u escape"));
+                                self.pos += 4;
+                                out.push(
+                                    char::from_u32(code)
+                                        .unwrap_or_else(|| self.fail("a \\u escape that is not a character")),
+                                );
+                            }
+                            other => self.fail(&format!("`\\{other}` is not an escape this parser knows")),
+                        }
+                    }
+                    Some(c) => {
+                        out.push(c);
+                        self.pos += 1;
+                    }
+                }
+            }
+        }
+
+        /// A number, `_` separators included -- `maximum: 10_000` is how the
+        /// fixture spells the adapter's `MAX_BUILDS_PER_CONFIG = 10_000`, and
+        /// reading it as `10` would be a check that agrees with the wrong thing.
+        fn number(&mut self) -> Value {
+            let from = self.pos;
+            if self.peek() == Some('-') {
+                self.pos += 1;
+            }
+            while self
+                .peek()
+                .is_some_and(|c| c.is_ascii_digit() || c == '_' || c == '.' || c == 'e' || c == 'E')
+            {
+                if matches!(self.peek(), Some('e' | 'E'))
+                    && matches!(self.chars.get(self.pos + 1), Some('+' | '-'))
+                {
+                    self.pos += 1;
+                }
+                self.pos += 1;
+            }
+            if self.peek().is_some_and(is_ident_start) {
+                self.fail("a number followed by a word");
+            }
+            let text: String = self.chars[from..self.pos]
+                .iter()
+                .filter(|c| **c != '_')
+                .collect();
+            if let Ok(int) = text.parse::<i64>() {
+                return Value::Number(int.into());
+            }
+            let float: f64 = text
+                .parse()
+                .unwrap_or_else(|_| self.fail(&format!("`{text}` is not a number")));
+            Value::Number(
+                serde_json::Number::from_f64(float)
+                    .unwrap_or_else(|| self.fail(&format!("`{text}` is not a finite number"))),
+            )
+        }
+    }
+}
+
+#[test]
+fn an_object_literal_with_unquoted_keys_parses() {
+    let value = literal::as_const(r#"export const X = { type: "object", n: 1 } as const;"#, "X");
+    assert_eq!(value, serde_json::json!({ "type": "object", "n": 1 }));
+}
