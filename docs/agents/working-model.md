@@ -5,7 +5,9 @@ Extracted verbatim 2026-08-28 from §3 of the roadmap (now `docs/roadmap.md`); i
 
 **Process (amended 2026-08-28 — Björn: mattpocock-skills only).** The pinned agent roles
 (`implementer`, `pr-reviewer`, `pr-reviewer-std`, `integrator`) are retired with the superpowers
-flow; their definitions live in git history (`git show 06ed97f:.claude/agents/<name>.md`).
+flow; their definitions live in git history (`git show 06ed97f:.claude/agents/<name>.md`),
+and they carry nine process rules worth reading before briefing any agent that reviews —
+every one of them was earned by an agent finding that its own instrument had lied to it.
 Implementation now runs ticket-driven:
 
 - **A GitHub Issue labelled `ready-for-agent` is the brief.** It is implemented test-first
@@ -75,6 +77,8 @@ The limits, until measurement says otherwise:
 
 Shifting left: implementers now **mutation-check their own load-bearing tests and paste the proof**. Vacuous tests were the most common finding across M0 — six-plus times, always caught downstream by an expensive reviewer. Catching them in the cheap seat removes that whole class from the review loop.
 
+The class itself, named at the M1 pause and carried here when `HANDOFF.md` was retired: **a check that measures a representation of the thing instead of the thing** — a lint satisfied by a comment mentioning it, a path substring standing in for a resolved path, a mutation that never compiled, a restore that left a phantom mutant, a benchmark timing an unvacuumed index, a fixture of zeros that cannot witness a swap. All of them fail *green*, which is why reading a passing run will never find one.
+
 **A mutation script never runs a tree-wide destructive checkout (rule, Björn 2026-08-28 — after ~40 minutes of work was destroyed).** An implementer's mutation harness ended with `git checkout -- crates app` to undo its edits; it also silently reverted every uncommitted change in those paths, and the work was gone with no reflog to recover it (`git checkout --` discards, it does not record). Two rules, both cheap:
 
 1. **Commit the baseline before mutating.** The point of a mutation check is that the tree is a known-good state you are deliberately breaking — if that state is not committed, the check has no floor to return to.
@@ -90,7 +94,7 @@ This is the same failure the "commit before going idle" rule addresses, arriving
 2. **Branches stay short-lived: one task = one branch = one PR to `main`**, named `m<milestone>/<stream>-<slug>` (e.g. `m1/jira-adapter-incremental-sync`), merged within its review loop — typically hours-to-a-day of divergence, so merge-back is trivial by construction. Long-lived per-feature branches are the *cause* of unmergeable code, not the cure; we use them only when a feature genuinely can't land in working slices, as `feat/<name>` integration branches fed by the same task-PR loop and merged to `main` after one final full review. Pre-1.0 there is no release to protect, so a half-built feature ships to `main` simply not wired into navigation rather than living on a stale branch.
 3. **`main` must always pass `just check`, and merges are serial.** The implementer rebases onto `origin/main` before opening the PR and again whenever `main` moved during review (re-running `just check` after every rebase); merges happen one PR at a time and, when a merge conflicts with a still-open PR, that PR's implementer rebases next (or has a fresh agent rebase faithfully to both sides' intent if the original is gone). GitHub Actions runs `just check` on every PR as the machine-enforced backstop (plan 01 task 11), independent of anyone's worktree. Those workflows are disabled at the moment, so the backstop is a person running the same command in a worktree instead; review economics rule 4 above says who, when, and what the substitution costs.
 
-Other standing rules (HANDOFF §6) stay in force: worktrees under `.worktrees/` (gitignored), harness cap 20 but **never launch more than agreed — ask before scaling** (suggested default: 4–6 concurrent; M0 is sequential anyway — one implementer + one reviewer alive at a time), agents report raw data. Cost note: deep reviews are the expensive step by design; re-reviews stay affordable because the continued review context only examines the delta.
+Other standing rules stay in force: worktrees under `.worktrees/` (gitignored), harness cap 20 but **never launch more than agreed — ask before scaling** (suggested default: 4–6 concurrent; M0 is sequential anyway — one implementer + one reviewer alive at a time), agents report raw data. Cost note: deep reviews are the expensive step by design; re-reviews stay affordable because the continued review context only examines the delta.
 
 What makes the streams independent (all built in M0):
 
