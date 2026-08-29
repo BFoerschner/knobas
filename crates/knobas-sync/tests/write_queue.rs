@@ -599,3 +599,45 @@ fn every_write_op_has_a_stated_projection() {
         "PROJECTED_OPS lists an op `WriteOp` does not define"
     );
 }
+
+/// Story 9: recovery needs no ceremony. A write queued while the source was
+/// down goes on the scheduler's own tick, with nobody asking for it.
+///
+/// The scheduler is the real one, started and shut down, because the claim is
+/// about the loop being *wired* -- calling `flush_all` by hand would prove
+/// only what the tests above already prove.
+#[tokio::test]
+async fn the_scheduler_drains_the_queue_on_its_own() {
+    let h = harness().await;
+    let ticket = h.mirror("PAY-14", "a payout fails").await;
+
+    h.answer(Answer::Unreachable);
+    let write = h.comment(&ticket, "sent by nobody").await;
+    assert_eq!(h.reload(write.id).await.state, WriteState::Pending);
+
+    // The source can take it now -- and nothing tells the queue so.
+    h.answer(Answer::Accept);
+    let scheduler = knobas_sync::scheduler::Scheduler::start(SchedulerDeps {
+        pool: knobas_db::test_util::test_pool().await,
+        connections: Arc::clone(&h.deps.connections),
+        registry: Arc::clone(&h.deps.registry),
+        secrets: Arc::clone(&h.deps.secrets),
+        events: Arc::clone(&h.deps.events),
+    })
+    .await
+    .unwrap();
+
+    let settled = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        loop {
+            if h.reload(write.id).await.state == WriteState::Sent {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    })
+    .await;
+    scheduler.shutdown().await;
+
+    settled.expect("the scheduler's own tick must flush the queue");
+    assert_eq!(h.delivered(), vec!["sent by nobody".to_owned()]);
+}

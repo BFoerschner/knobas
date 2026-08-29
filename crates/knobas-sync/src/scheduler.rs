@@ -1530,6 +1530,20 @@ async fn tick_loop(inner: Arc<Inner>) {
             Err(error) => tracing::warn!(%error, "looking for due sources failed"),
         }
 
+        // The write queue drains on the same tick (issue #42, story 9:
+        // "recovery needs no ceremony from me"). Here rather than after a
+        // successful sync, because the two are independent: a source whose
+        // sync is disabled still owes its writes, and a credential re-entered
+        // while nothing is due would otherwise leave the queue sitting until
+        // the next scheduled run.
+        //
+        // Nearly free when nothing is owed: `flush_source` returns before
+        // building an adapter or touching the keychain if the source's queue
+        // is empty. Cancellation is not checked between the two -- a flush
+        // that has started is one write against one source, and `shutdown`'s
+        // grace window covers it.
+        crate::write_queue::flush_all(&inner.deps).await;
+
         tokio::select! {
             biased;
             () = inner.cancel.cancelled() => return,
