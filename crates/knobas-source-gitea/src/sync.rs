@@ -283,11 +283,17 @@ fn cap_reached(what: &str, seen: usize) -> SourceError {
 /// -- silent truncation, which is the failure the whole module docs above are
 /// about. An empty page is the one answer that cannot mean anything else.
 ///
-/// **One spelling, in one place, for all four walks.** Issue #81 was filed
+/// **One spelling, in one place, for all five walks.** Issue #81 was filed
 /// because the rule had been copied to four sites and asked for one deliberate
 /// decision instead of four accidental ones; option 1 (page until empty) was
-/// ruled on 2026-08-29. Splitting it back into four inline comparisons is how
-/// three of them drift.
+/// ruled on 2026-08-29. Splitting it back into inline comparisons is how the
+/// others drift.
+///
+/// The fifth caller is [`fetch_comments`], which arrived at this rule from the
+/// other side: it was not paging at all, so nothing there could drift back to
+/// a short page -- it read the *first* page as the whole discussion and never
+/// asked for a second (issue #131). Having one place to call was what made
+/// that a two-line fix rather than a fifth decision.
 ///
 /// The price is one extra request per *exhausted* walk, under the 10 req/s
 /// limiter of interfaces §4.1 -- and the `MAX_*_PAGES` caps above are what keep

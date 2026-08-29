@@ -709,10 +709,10 @@ async fn a_cap_fires_at_exactly_the_boundary_it_names() {
     }
 }
 
-/// Three of everything, so each of the four paged walks needs more than one
+/// Three of everything, so each of the five paged walks needs more than one
 /// page against a server capping at two: three repositories in the listing, and
-/// three branches, three pull requests and three commits on one branch inside
-/// the first of them.
+/// three branches, three pull requests, three commits on one branch and a
+/// three-comment discussion inside the first of them.
 fn three_of_each() -> State {
     let full = "tidewater/payout-service";
     let mut state = State::tidewater();
@@ -746,6 +746,25 @@ fn three_of_each() -> State {
                 "2026-08-22T12:10:00Z",
             ),
         );
+    // The discussion is the fifth walk. Two comments would not exercise it: at
+    // a cap of two, the first page is *already* short of the 50 the request
+    // named, so a walk ending on a short page stops there -- and stopping there
+    // is only a loss once there is a third comment behind it.
+    state
+        .comments
+        .get_mut(format!("{full}#142").as_str())
+        .unwrap()
+        .push(support::comment(
+            "Merging once CI is green.",
+            "jonas",
+            "2026-08-22T10:25:00Z",
+        ));
+    let pulls = state.pulls.get_mut(full).unwrap();
+    let sepa = pulls
+        .iter_mut()
+        .find(|p| p["number"] == serde_json::json!(142))
+        .expect("the fixture has #142");
+    sepa["comments"] = serde_json::json!(3);
     state
 }
 
@@ -757,11 +776,16 @@ fn three_of_each() -> State {
 /// watermark-advancing failure ADR-0003 and ruling B4 exist to refuse. An
 /// **empty** page is the only unambiguous end.
 ///
-/// Deliberately one test over all four walks rather than four tests: the
-/// decision is one rule applied at four sites, and four separate tests would
-/// let three of them drift back to `batch.len() < PAGE_SIZE` while the fourth
+/// Deliberately one test over all five walks rather than five tests: the
+/// decision is one rule applied at five sites, and five separate tests would
+/// let four of them drift back to `batch.len() < PAGE_SIZE` while the fifth
 /// kept the suite green. Reverting any single walk fails exactly one of the
 /// assertions below.
+///
+/// The discussion is the fifth site and joined this test with issue #131,
+/// where it was not a walk at all. Its assertion is on `body_text` -- the
+/// comments' only landing place (interfaces §4.1) -- rather than on an id, so
+/// the shape differs from the four above it while the rule does not.
 #[tokio::test]
 async fn a_server_that_caps_its_pages_short_is_still_walked_to_the_end() {
     let state = three_of_each();
@@ -807,9 +831,26 @@ async fn a_server_that_caps_its_pages_short_is_still_walked_to_the_end() {
         ],
         "the commit walk stopped on a capped page"
     );
+    // The fifth walk: the discussion, which lands in `body_text` rather than
+    // in an id. Three comments, two to a page.
+    let sepa = items
+        .iter()
+        .find(|i| i.entity.key.ends_with("#142"))
+        .expect("the fixture's discussion is on #142");
+    for text in [
+        "Should the jitter be bounded",
+        "Bounded to +/-10 %",
+        "Merging once CI is green.",
+    ] {
+        assert!(
+            sepa.body_text.contains(text),
+            "the discussion walk stopped on a capped page: {:?} is missing {text:?}",
+            sepa.body_text
+        );
+    }
 
     // The control: the identical fixture served by a server that honours
-    // `limit=50` mirrors exactly the same corpus. Without it these four
+    // `limit=50` mirrors exactly the same corpus. Without it these five
     // assertions would be about the fixture rather than about the cap.
     let honest = Fake::start(&state).await;
     let (same, _) = full(&*source(honest.base_url(), serde_json::json!({}))).await;
@@ -820,6 +861,14 @@ async fn a_server_that_caps_its_pages_short_is_still_walked_to_the_end() {
             "{kind}: a capped server must mirror what an uncapped one does"
         );
     }
+    let uncapped = same
+        .iter()
+        .find(|i| i.entity.key.ends_with("#142"))
+        .expect("the control mirrors #142 too");
+    assert_eq!(
+        sepa.body_text, uncapped.body_text,
+        "the discussion: a capped server must mirror what an uncapped one does"
+    );
 }
 
 /// One comment body. Zero-padded, so no note's text is a prefix of another's

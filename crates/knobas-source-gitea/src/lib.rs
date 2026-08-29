@@ -24,10 +24,15 @@
 //!
 //! Gitea's branch listing has no incremental filter, so a run costs one
 //! identity request, `ceil(repos / 50)` listing requests, two per repository
-//! (branches and pulls), one commit page per branch that moved, and one more
-//! per emitted pull request that has comments. Twenty repositories on the
-//! default five-minute schedule is roughly forty requests a run at 10 req/s.
-//! The `owners`/`repos` allowlist is the lever when that is too much.
+//! (branches and pulls), one commit page per branch that moved, and one per
+//! emitted pull request that has comments -- **and one more for each of those
+//! walks**, the empty page it ends on. Nothing here reads a page shorter than
+//! the `limit` it asked for as the end of a listing (issue #81), and since
+//! issue #131 the pull-request discussion is a walk like the rest rather than
+//! a single request that took whatever it was given. Twenty repositories on
+//! the default five-minute schedule is roughly eighty requests a run at
+//! 10 req/s. The `owners`/`repos` allowlist is the lever when that is too
+//! much, and `include_pr_comments` is the one that costs a discussion.
 //!
 //! **A refusal costs no extra request** (ADR-0004). It used to cost one
 //! identity probe per skipped repository and per refused discussion, because
