@@ -75,7 +75,7 @@
   let purge = $state(false);
 
   /**
-   * Which read is the current one.
+   * Only the newest `list_sources` is allowed to write what it read.
    *
    * A terminal `sync:state` arrives once per source, so a five-source *Sync
    * all* now puts five `list_sources` in flight at once and nothing makes them
