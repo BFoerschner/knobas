@@ -63,6 +63,11 @@ pub trait ProgressSink: Send + Sync {
     /// logs a closed channel and swallows it, so a listener that has gone away
     /// is discarded where it is noticed and [`Watchers`] never hears of it at
     /// all.
+    ///
+    /// An implementation that **panics** has broken this contract, and
+    /// [`Watchers`] catches it rather than letting it stand: see [`deliver`].
+    /// That is containment, not permission -- a panicking sink still loses the
+    /// message it was being handed.
     fn report(&self, progress: SyncProgress);
 }
 
@@ -93,9 +98,18 @@ pub trait ProgressSink: Send + Sync {
 ///
 /// A `std` mutex and not tokio's: [`ProgressSink::report`] is synchronous and
 /// is called from inside the adapter's own stack, so this is never held across
-/// an await. It is recovered from poisoning rather than unwrapped -- a sink
-/// that panicked is a broken caller, and the *run* must not lose its ending
-/// over one.
+/// an await. It is recovered from poisoning rather than unwrapped -- the *run*
+/// must not lose its ending over a broken caller. A panicking sink can no
+/// longer poison it in the first place, because [`deliver`] catches the panic
+/// at the sink; the recovery stays as the backstop for a panic anywhere else
+/// under this lock, which is the case nobody has enumerated.
+///
+/// **One sink's misbehaviour costs no other sink anything.** Both fan-outs go
+/// through [`deliver`], so a sink that panics on its turn loses only its own
+/// message: the loop carries on, and everyone enrolled after it still hears
+/// the run out. Without that, the ending -- the one message ADR-0005 is a
+/// promise about -- was lost by an arbitrary *suffix* of the watchers,
+/// whichever ones happened to be enrolled behind the broken one.
 pub struct Watchers {
     run_id: i64,
     state: std::sync::Mutex<State>,
@@ -117,6 +131,33 @@ pub enum Attach {
     /// The run had already ended, so nothing was enrolled -- and whoever holds
     /// the sink now owes it an ending built from the run's record.
     RunHadEnded,
+}
+
+/// Hand one message to one sink, whatever that sink does with its turn.
+///
+/// [`ProgressSink::report`] returns nothing precisely so that a listener which
+/// has gone away cannot fail a run. A sink that *panics* defeats that by
+/// another route and takes two things with it that are not its to spend: every
+/// sink enrolled after it in the fan-out, and -- when the fan-out is
+/// [`Watchers::close`] -- the ending ADR-0005 promises them. So the panic is
+/// contained at the sink that raised it and the loop carries on.
+///
+/// Not a licence to panic: the sink that did loses the message it was handed,
+/// and says so in the log. It is the difference between one broken caller
+/// hearing nothing and every caller behind it hearing nothing.
+///
+/// `AssertUnwindSafe` because there is nothing here to be unwound into an
+/// inconsistent state: the sink is behind a shared reference, this crate reads
+/// nothing of it afterwards, and the message was already cloned for it.
+fn deliver(run_id: i64, sink: &dyn ProgressSink, progress: SyncProgress) {
+    let delivered =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sink.report(progress)));
+    if delivered.is_err() {
+        tracing::warn!(
+            run_id,
+            "a progress sink panicked; its message is lost and the run carries on"
+        );
+    }
 }
 
 impl Watchers {
@@ -158,6 +199,23 @@ impl Watchers {
     /// when it settles, and the scheduler's guard closes them again if the task
     /// died before reaching that -- the second call must not overwrite a true
     /// ending with a fallback one.
+    ///
+    /// **Every sink is delivered to, whatever the ones before it did.** This is
+    /// where ADR-0005's promise is actually kept, so it is the one loop that
+    /// must not be abandoned half-way: the state is already `Closed` by the
+    /// time the fan-out starts, so a sink that panicked out of here would leave
+    /// the rest of the vector with no ending and nothing left that could ever
+    /// send them one. Containment per sink ([`deliver`]) rather than a
+    /// re-ordered state transition, because the ordering is not the defect: an
+    /// escaping panic skips the remaining sinks whatever the state says, and
+    /// closing *after* the fan-out would leave a run whose watchers stayed
+    /// `Open` for ever -- the source never released, which is the failure
+    /// ADR-0005 exists to remove, arriving through a third door.
+    ///
+    /// Never panics, and that is load-bearing: the scheduler closes a run's
+    /// watchers from a `Drop` guard, so on the path where the run's task
+    /// panicked this runs *while already unwinding*, where a second panic
+    /// escaping a drop aborts the process.
     pub fn close(&self, ending: SyncProgress) {
         let mut state = self.lock();
         let State::Open(sinks) = std::mem::replace(&mut *state, State::Closed) else {
@@ -167,7 +225,7 @@ impl Watchers {
         // one of these hears: a `report` racing this one either ran before the
         // swap or finds `Closed` and drops its message.
         for sink in sinks {
-            sink.report(ending.clone());
+            deliver(self.run_id, sink.as_ref(), ending.clone());
         }
     }
 
@@ -187,7 +245,7 @@ impl ProgressSink for Watchers {
             return;
         };
         for sink in sinks {
-            sink.report(progress.clone());
+            deliver(self.run_id, sink.as_ref(), progress.clone());
         }
     }
 }

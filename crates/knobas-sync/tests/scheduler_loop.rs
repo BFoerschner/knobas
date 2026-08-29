@@ -1330,23 +1330,34 @@ async fn adding_a_source_produces_exactly_one_run_on_every_interleaving() {
     retire(&pool, &ids).await;
 }
 
-/// A watcher whose listener has gone away is discarded silently and never fails
-/// the run -- `ProgressSink`'s standing contract, now also the sink set's.
+/// **A sink that misbehaves costs the run nothing and the sink behind it
+/// nothing -- through a real run, end to end.**
 ///
-/// This is mostly structural: `report` returns nothing, so there is no route by
-/// which a sink *could* fail a run. The test guards the route a later edit
-/// would open -- a set that collected results and propagated one, or that
-/// treated a silent sink as a reason to stop -- and it puts the dead sink
-/// *first*, so a fan-out that gave up on the first bad sink would take the live
-/// one with it.
+/// This test was
+/// `a_watcher_that_has_gone_away_does_not_fail_the_run`, and under that name it
+/// pinned almost nothing: `ProgressSink::report` returns `()`, so there is no
+/// route by which *any* sink could fail a run, and a sink that merely stays
+/// silent is indistinguishable from one that worked. The property it really
+/// had -- because the bad sink is enrolled **first** -- is fan-out completeness
+/// past a sink that does not cooperate, so that is what it now says, and its
+/// bad sink now **panics** rather than staying quiet. A panic is the one thing
+/// a sink can do that genuinely reaches the run: before #118 it stranded every
+/// sink enrolled after it, and from `Closing::drop` during an unwind it aborted
+/// the process (`crates/knobas-sync/tests/progress.rs` pins both directly on
+/// `Watchers`).
+///
+/// So there are two claims here, and a live sink enrolled *behind* the broken
+/// one is what makes both falsifiable: the run still commits its work and logs
+/// `ok`, and the second watcher still receives that run's ending.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_watcher_that_has_gone_away_does_not_fail_the_run() {
-    struct GoneAway;
-    impl ProgressSink for GoneAway {
+async fn a_sink_that_panics_fails_neither_the_run_nor_the_sink_behind_it() {
+    struct Boom;
+    impl ProgressSink for Boom {
         fn report(&self, _progress: SyncProgress) {
-            // What `knobas-app`'s `ChannelSink` does over a channel whose
-            // webview has closed: the message goes nowhere and the run is never
-            // told.
+            // A caller with a bug in its `report`. Out of contract -- and
+            // "the caller broke its contract" is no reason for a *different*
+            // caller to lose its ending, or for the process to abort.
+            panic!("a sink that panics on purpose");
         }
     }
 
@@ -1361,7 +1372,7 @@ async fn a_watcher_that_has_gone_away_does_not_fail_the_run() {
         .trigger(
             &id,
             SyncTrigger::Manual,
-            Some(Arc::new(GoneAway) as Arc<dyn ProgressSink>),
+            Some(Arc::new(Boom) as Arc<dyn ProgressSink>),
         )
         .await
         .unwrap();
@@ -1381,7 +1392,7 @@ async fn a_watcher_that_has_gone_away_does_not_fail_the_run() {
     assert_eq!(
         row.outcome,
         Some(knobas_sync::run_log::SyncOutcome::Ok),
-        "a listener that stopped listening is not a sync error"
+        "a broken listener is not a sync error"
     );
     assert!(row.upserted > 0, "and the run still did its work");
     retire(&pool, &ids).await;

@@ -1101,6 +1101,11 @@ const RUN_STOPPED_MESSAGE: &str = "the run stopped without recording an outcome"
 /// construction that also covers the abort in [`Scheduler::shutdown`], and it
 /// cannot be forgotten by a later edit to `run_task` the way a line at the
 /// bottom of the function can.
+///
+/// The panicking-adapter case runs this drop *during an unwind*, where a second
+/// panic escaping it aborts the process. [`Watchers::close`] is written not to
+/// panic for that reason -- it contains a misbehaving sink rather than letting
+/// it out -- so this guard is safe on the very path it exists for.
 struct Closing {
     watchers: Arc<Watchers>,
     source_id: String,
