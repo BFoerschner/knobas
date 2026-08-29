@@ -64,10 +64,12 @@ pub trait ProgressSink: Send + Sync {
     /// is discarded where it is noticed and [`Watchers`] never hears of it at
     /// all.
     ///
-    /// An implementation that **panics** has broken this contract, and
-    /// [`Watchers`] catches it rather than letting it stand: see [`deliver`].
-    /// That is containment, not permission -- a panicking sink still loses the
-    /// message it was being handed.
+    /// An implementation that **panics** has broken this contract, and this
+    /// crate catches it rather than letting it stand: every delivery it makes
+    /// to a sink goes through [`deliver`], the two [`Watchers`] fan-outs and
+    /// the scheduler's synthesised ending alike. That is containment, not
+    /// permission -- a panicking sink still loses the message it was being
+    /// handed.
     fn report(&self, progress: SyncProgress);
 }
 
@@ -142,14 +144,27 @@ pub enum Attach {
 /// [`Watchers::close`] -- the ending ADR-0005 promises them. So the panic is
 /// contained at the sink that raised it and the loop carries on.
 ///
+/// **Every delivery this crate makes to a sink comes through here**, and that
+/// is the point of it being a free function rather than a method: the two
+/// [`Watchers`] fan-outs are not the only ones. `Scheduler`'s served-from-record
+/// path hands a lone caller its synthesised ending directly, in the caller's own
+/// stack and under the scheduler's `runs` lock, so a panic there unwound out of
+/// `trigger` and into the command that called it. That is ADR-0005's own
+/// delivery, and it should not be the one place a broken sink is uncontained.
+///
 /// Not a licence to panic: the sink that did loses the message it was handed,
 /// and says so in the log. It is the difference between one broken caller
 /// hearing nothing and every caller behind it hearing nothing.
 ///
-/// `AssertUnwindSafe` because there is nothing here to be unwound into an
-/// inconsistent state: the sink is behind a shared reference, this crate reads
-/// nothing of it afterwards, and the message was already cloned for it.
-fn deliver(run_id: i64, sink: &dyn ProgressSink, progress: SyncProgress) {
+/// `AssertUnwindSafe` because nothing this crate owns can be left half-updated
+/// by the unwind: the closure touches no state of [`Watchers`] or the
+/// scheduler, and the message was already cloned for this sink. What the panic
+/// *may* leave inconsistent is the sink's own interior, and a sink that panicked
+/// stays enrolled and is handed later messages -- deliberately, because nothing
+/// here can tell a sink that is broken from one that threw once, and dropping a
+/// caller's channel over a single `report` would cost it every message after,
+/// its ending included.
+pub(crate) fn deliver(run_id: i64, sink: &dyn ProgressSink, progress: SyncProgress) {
     let delivered =
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sink.report(progress)));
     if delivered.is_err() {

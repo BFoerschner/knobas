@@ -469,6 +469,7 @@ mod tests {
     fn deleting_a_source_tells_the_scheduler_to_forget_it() {
         assert!(
             body_of(include_str!("sources.rs"), "pub async fn delete_source")
+                .expect("delete_source is not in this file any more")
                 .contains("scheduler.forget_source("),
             "delete_source must tell the scheduler, or a source added again \
              under this id inherits the deleted one's run entry -- and with it \
@@ -481,28 +482,60 @@ mod tests {
     fn the_forget_scan_would_notice_the_call_going_missing() {
         let with = "pub async fn delete_source() {\n  state.scheduler.forget_source(&id).await;\n}\npub async fn next() {}";
         let without = "pub async fn delete_source() {\n  crud::delete().await\n}\npub async fn next() { state.scheduler.forget_source(&id).await; }";
-        assert!(body_of(with, "pub async fn delete_source").contains("scheduler.forget_source("));
         assert!(
-            !body_of(without, "pub async fn delete_source").contains("scheduler.forget_source("),
+            body_of(with, "pub async fn delete_source")
+                .unwrap()
+                .contains("scheduler.forget_source(")
+        );
+        assert!(
+            !body_of(without, "pub async fn delete_source")
+                .unwrap()
+                .contains("scheduler.forget_source("),
             "the scan must read this command's body, not the whole file -- \
              another command making the call is not this one making it"
         );
+
+        // ...and a signature quoted inside a string literal is not a
+        // declaration of it. This file is full of those -- the two literals
+        // above, one of which makes the very call the scan looks for -- so
+        // without the line-start rule the guard would land on one of them the
+        // moment `delete_source` was renamed away, and pass green over a
+        // command that no longer exists.
+        let decoy = "mod tests {\n    let a = \"pub async fn delete_source() { scheduler.forget_source(&id); }\";\n}";
+        assert!(
+            body_of(decoy, "pub async fn delete_source").is_none(),
+            "an indented look-alike is not the item this scan is about"
+        );
     }
 
-    /// From a function's signature to the start of the next item, comments
+    /// From a function's declaration to the start of the next item, comments
     /// stripped. Crude on purpose: it only has to be narrower than the file.
-    fn body_of(source: &str, signature: &str) -> String {
+    ///
+    /// **The signature has to start a line**, and that is what keeps this
+    /// honest rather than merely narrow. The same text also appears in this
+    /// file quoted inside the literals the test above drives this over -- one
+    /// of which makes the very call the scan looks for -- so a plain `find`
+    /// would land on one of those the moment the real item was renamed away,
+    /// and the guard would pass green over a command that no longer exists.
+    /// `None` instead, which its caller turns into a failure.
+    ///
+    /// The attribute above the item is deliberately *not* part of the anchor:
+    /// `#[tauri::command]` written anywhere in `src/commands/**`, string
+    /// literals included, is a command declaration as far as
+    /// `tests/wiring.rs::every_command_is_in_the_handler_list` is concerned.
+    fn body_of(source: &str, signature: &str) -> Option<String> {
         let code = strip_line_comments(source);
         let at = code
-            .find(signature)
-            .unwrap_or_else(|| panic!("{signature} is not in this file any more"));
+            .match_indices(signature)
+            .map(|(at, _)| at)
+            .find(|at| *at == 0 || code[..*at].ends_with('\n'))?;
         let rest = &code[at + signature.len()..];
         let end = ["\npub ", "\n#["]
             .iter()
             .filter_map(|marker| rest.find(marker))
             .min()
             .unwrap_or(rest.len());
-        rest[..end].to_owned()
+        Some(rest[..end].to_owned())
     }
 
     /// The scan itself, factored out so the test above can drive it over text

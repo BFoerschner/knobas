@@ -1003,7 +1003,13 @@ impl Inner {
                 && let Some(sink) = progress.as_ref()
                 && let Some(ending) = ending_of_record(&self.deps.pool, source_id, run_id).await?
             {
-                sink.report(ending);
+                // Through `deliver` like every other delivery in this crate:
+                // this one runs in the caller's own stack and under the `runs`
+                // lock, so an uncontained panic here unwound straight out of
+                // `trigger` into the command that called it -- and it is the
+                // ADR-0005 path, which is the last one that should be the
+                // exception.
+                crate::progress::deliver(run_id, sink.as_ref(), ending);
                 return Ok(run_id);
             }
         }

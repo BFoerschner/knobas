@@ -1469,6 +1469,81 @@ async fn a_run_whose_task_panics_still_gives_its_watchers_an_ending() {
     retire(&pool, &ids).await;
 }
 
+/// **The synthesised ending is delivered like every other message: a sink that
+/// panics on it does not unwind into the caller that triggered.**
+///
+/// The served-from-record branch of `Inner::trigger` is the one delivery that
+/// does not go through [`Watchers`] -- it hands a lone caller its ending
+/// directly, in that caller's own stack and under the scheduler's `runs` lock.
+/// So it was also the one place #118's containment did not reach, and the
+/// consequence is sharper than a lost message: the panic came out of `trigger`
+/// itself, so `sync_now` returned an error to a frontend that had asked about a
+/// run which had in fact finished perfectly well. That it is ADR-0005's own
+/// path is what makes it worth pinning rather than leaving to the contract
+/// `ProgressSink` already states.
+///
+/// The broken sink still hears nothing -- that is the trade `deliver` makes
+/// everywhere -- but it is the only caller that pays for its own bug.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_panicking_sink_served_from_the_record_does_not_unwind_into_the_caller() {
+    struct Boom;
+    impl ProgressSink for Boom {
+        fn report(&self, _progress: SyncProgress) {
+            panic!("a sink that panics on purpose");
+        }
+    }
+
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed_quiet(&pool, 1).await;
+    let id = ids[0].clone();
+    let (deps, _) = deps(sched_pool, Duration::from_millis(300)).await;
+    let scheduler = Scheduler::start(deps).await.unwrap();
+
+    // The same setup as
+    // `a_first_run_trigger_after_the_run_ended_is_served_the_ending_from_the_record`,
+    // and for the same reasons: no sink on the first trigger, so the `FirstRun`
+    // claim is still unspent, and `Manual` to know the run is completely over.
+    let scheduled = scheduler
+        .trigger(&id, SyncTrigger::FirstRun, None)
+        .await
+        .unwrap();
+    let observer = Heard::new();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    scheduler
+        .trigger(&id, SyncTrigger::Manual, Some(observer.sink()))
+        .await
+        .unwrap();
+    await_ending(&observer).await;
+
+    // The wizard arrives after the end with a sink that blows up on the
+    // message it is served. Without containment this `await` never returns a
+    // value -- it unwinds this task, and the test dies here rather than
+    // failing an assertion.
+    let handed = scheduler
+        .trigger(
+            &id,
+            SyncTrigger::FirstRun,
+            Some(Arc::new(Boom) as Arc<dyn ProgressSink>),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        handed, scheduled,
+        "the wizard is still handed the run that already happened"
+    );
+
+    // And the scheduler is still usable by everybody else, which is the part a
+    // panic escaping under the `runs` lock would have put in doubt.
+    let next = scheduler
+        .trigger(&id, SyncTrigger::Manual, None)
+        .await
+        .unwrap();
+    assert_ne!(next, scheduled, "the next trigger gets a run of its own");
+    scheduler.shutdown().await;
+    retire(&pool, &ids).await;
+}
+
 // -- #119: the entry's life ends with its source's -----------------------------
 
 /// Add a source back under an id that has just been deleted -- the user action
