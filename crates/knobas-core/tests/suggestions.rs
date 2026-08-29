@@ -1111,7 +1111,7 @@ async fn the_tray_scopes_by_membership_when_a_context_room_asks() {
     suggest::detect(&pool).await.unwrap();
 
     // Scoped to the ticket: the branch proposal touches it, EU's does not.
-    let scoped = suggest::proposals(&pool, &[], Some(&[ticket.clone()]), 50)
+    let scoped = suggest::proposals(&pool, &[], Some(std::slice::from_ref(&ticket)), 50)
         .await
         .unwrap();
     assert_eq!(
@@ -1119,14 +1119,14 @@ async fn the_tray_scopes_by_membership_when_a_context_room_asks() {
         [(branch.clone(), ticket.clone())].into_iter().collect()
     );
     assert_eq!(
-        suggest::proposal_count(&pool, &[], Some(&[ticket.clone()]))
+        suggest::proposal_count(&pool, &[], Some(std::slice::from_ref(&ticket)))
             .await
             .unwrap(),
         1
     );
 
     // Scoped to an unrelated member: nothing, though proposals exist.
-    let elsewhere = suggest::proposals(&pool, &[], Some(&[branch.clone()]), 50)
+    let elsewhere = suggest::proposals(&pool, &[], Some(std::slice::from_ref(&branch)), 50)
         .await
         .unwrap();
     assert_eq!(
