@@ -468,7 +468,7 @@ fn the_mirror_invokes_the_write_queue_commands_by_their_registered_names() {
         "discard_write",
     ] {
         assert!(
-            MIRROR.contains(&format!("invoke<")),
+            MIRROR.contains("invoke<"),
             "the mirror no longer invokes anything"
         );
         assert!(
