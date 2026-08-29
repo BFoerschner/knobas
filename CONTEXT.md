@@ -26,11 +26,15 @@ The per-system implementation that speaks a source's API and emits its items.
 _Avoid_: plugin, client
 
 **Mirror**:
-The local synced copy of every source's data, with provenance. Readers only ever see its live items.
+The local synced copy of every source's data, with provenance. Readers only ever see its live items. A count of the mirror is a corpus, never a run's [Upserted](#upserted).
 _Avoid_: cache, index
 
 **Item**:
 One mirrored record of a given kind.
+
+**Upserted**:
+The items one run wrote, new or changed. A per-run delta, not the size of the mirror: a run that writes nothing over a full mirror upserted zero.
+_Avoid_: synced, mirrored (both name the corpus)
 
 **Full sync**:
 A cursor-less run; the source is re-read from the top.
