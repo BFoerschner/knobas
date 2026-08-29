@@ -75,11 +75,12 @@ mod map;
 mod model;
 mod source;
 mod sync;
+mod write;
 
 pub use config::{GiteaConfig, config_schema};
 pub use source::{GiteaSource, build};
 
-use knobas_source::{AuthMethod, KindInfo, SourceDescriptor};
+use knobas_source::{AuthMethod, Capability, KindInfo, SourceDescriptor};
 
 /// The adapter kind, and the default instance id (interfaces §4.2).
 pub const ADAPTER_KIND: &str = "gitea";
@@ -150,6 +151,18 @@ pub fn entity_kinds() -> Vec<KindInfo> {
     ]
 }
 
+/// The write ops this adapter declares, as `knobas_source::WriteOp`'s stable
+/// identifiers. Named constants because the descriptor and the dispatch in
+/// [`source`] must agree: an op listed and not dispatched is an action that
+/// 404s, and one dispatched and not listed is an action nothing offers.
+pub const WRITE_OP_CREATE_BRANCH: &str = "create_branch";
+/// See [`WRITE_OP_CREATE_BRANCH`].
+pub const WRITE_OP_CREATE_PULL_REQUEST: &str = "create_pull_request";
+/// See [`WRITE_OP_CREATE_BRANCH`].
+pub const WRITE_OP_COMMENT: &str = "comment";
+/// See [`WRITE_OP_CREATE_BRANCH`].
+pub const WRITE_OP_APPROVE: &str = "approve";
+
 /// The descriptor `list_adapters` serves before any instance exists
 /// (interfaces §2.2): `id == adapter_kind`, name = the product name.
 #[must_use]
@@ -158,13 +171,21 @@ pub fn descriptor_template() -> SourceDescriptor {
         id: ADAPTER_KIND.to_owned(),
         adapter_kind: ADAPTER_KIND.to_owned(),
         name: "Gitea".to_owned(),
-        // Ruling P12: M1 adapters declare none. `Capability::Write` in
-        // particular must stay absent while `write_ops` is empty -- the battery
-        // enforces both directions.
-        capabilities: Vec::new(),
+        // M2 (issue #43): this adapter writes. `Capability::Search` stays
+        // absent -- it is reserved for a server-side `Source::search` the SPI
+        // does not have.
+        capabilities: vec![Capability::Write],
         adapter_version: ADAPTER_VERSION.to_owned(),
         auth_methods: vec![AuthMethod::Pat],
-        write_ops: Vec::new(),
+        // M2's ratified Gitea set (issue #43, ADR-0006), and the whole of what
+        // the action bar offers. The battery holds this and `Capability::Write`
+        // to each other in both directions.
+        write_ops: vec![
+            WRITE_OP_CREATE_BRANCH.to_owned(),
+            WRITE_OP_CREATE_PULL_REQUEST.to_owned(),
+            WRITE_OP_COMMENT.to_owned(),
+            WRITE_OP_APPROVE.to_owned(),
+        ],
         // Each kind carries its own `full_sync_exhaustive` -- see
         // `entity_kinds`, which is where the 2026-08-25 budget ruling and
         // ADR-0003 meet.
@@ -177,23 +198,21 @@ pub fn descriptor_template() -> SourceDescriptor {
 mod tests {
     use super::*;
 
-    /// The Add-source form, the launcher's chips and the read-only promise all
-    /// read this one value.
+    /// The Add-source form, the launcher's chips and the action bar all read
+    /// this one value.
     #[test]
-    fn the_template_describes_a_read_only_gitea() {
+    fn the_template_describes_a_gitea_that_writes() {
         let d = descriptor_template();
         assert_eq!(
             (d.id.as_str(), d.adapter_kind.as_str()),
             (ADAPTER_KIND, ADAPTER_KIND)
         );
         assert_eq!(d.name, "Gitea");
-        assert!(
-            d.capabilities.is_empty(),
-            "ruling P12: M1 adapters declare no capabilities"
-        );
-        assert!(
-            d.write_ops.is_empty(),
-            "interfaces §4.1: M1 is read-only toward every source"
+        assert_eq!(d.capabilities, vec![Capability::Write]);
+        assert_eq!(
+            d.write_ops,
+            vec!["create_branch", "create_pull_request", "comment", "approve"],
+            "the action bar is rendered from this list alone (issue #43)"
         );
         assert_eq!(d.auth_methods, vec![AuthMethod::Pat]);
         let kinds: Vec<&str> = d.entity_kinds.iter().map(|k| k.id.as_str()).collect();

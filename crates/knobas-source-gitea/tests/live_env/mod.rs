@@ -271,6 +271,128 @@ impl Litter {
         );
     }
 
+    /// Own the removal of a branch **something else** is about to create.
+    ///
+    /// The write-back suite (issue #43) certifies that the *adapter* creates a
+    /// branch, so the guard cannot be the one to make it. Recorded before the
+    /// create goes out, for the same reason [`Self::branch_off_main`] records
+    /// before its own request: a create that half-succeeded -- the branch made,
+    /// the answer lost -- must still be cleaned up, and a create that failed
+    /// costs one 404 on a delete.
+    pub fn will_create(&mut self, name: &str) {
+        assert!(
+            name.starts_with(LITTER),
+            "every branch this suite creates must start with {LITTER:?} so the sweep in \
+             Litter::new can recognise it: {name:?}"
+        );
+        self.branches.push(name.to_owned());
+    }
+
+    /// Open a pull request **as somebody else**, through Gitea's `Sudo`
+    /// header, and answer its number.
+    ///
+    /// Needed by exactly one assertion, and by a rule of the server rather
+    /// than a preference: **Gitea refuses `approve your own pull is not
+    /// allowed` with a 422.** Everything the seed and this suite create is
+    /// authored by the admin token, so an approval by the adapter of a pull
+    /// request the adapter opened cannot be certified at all -- which was
+    /// found by writing it that way and watching the real container say so.
+    ///
+    /// The head branch must already be owned by this guard, so the pull
+    /// request goes with it.
+    pub async fn open_pull_as(&self, author: &str, head: &str, title: &str) -> u64 {
+        assert!(
+            self.branches.iter().any(|b| b == head),
+            "open a pull request only from a branch this guard owns, or it is not cleaned up: \
+             {head:?}"
+        );
+        let opened = self
+            .http
+            .post(format!("{}/pulls", self.api))
+            .header("Authorization", &self.auth)
+            .header("Sudo", author)
+            .json(&serde_json::json!({
+                "head": head, "base": "main", "title": title,
+                "body": "Opened by the knobas live suite, as somebody the adapter is not."
+            }))
+            .send()
+            .await
+            .expect("open the pull request");
+        let status = opened.status();
+        let body: serde_json::Value = opened
+            .json()
+            .await
+            .unwrap_or_else(|error| panic!("open pull request -> {status}: {error}"));
+        assert!(
+            status.is_success(),
+            "open pull request as {author}: {status} {body}"
+        );
+        body["number"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("Gitea opened a pull request without a number: {body}"))
+    }
+
+    /// Every review on one pull request, as `(state, body)`.
+    ///
+    /// Read through Gitea's own API rather than through the adapter: the
+    /// adapter does not sync reviews, and the question this answers is what the
+    /// *server* recorded.
+    pub async fn reviews(&self, number: u64) -> Vec<(String, String)> {
+        listing(
+            &self.http,
+            &self.auth,
+            &format!("{}/pulls/{number}/reviews", self.api),
+        )
+        .await
+        .iter()
+        .map(|r| {
+            (
+                r["state"].as_str().unwrap_or_default().to_owned(),
+                r["body"].as_str().unwrap_or_default().to_owned(),
+            )
+        })
+        .collect()
+    }
+
+    /// Every branch name in the repository this guard watches.
+    pub async fn branch_names(&self) -> Vec<String> {
+        branch_names(&self.http, &self.auth, &self.api).await
+    }
+
+    /// Every pull request, as `(number, head branch)`.
+    pub async fn pulls(&self) -> Vec<(u64, String)> {
+        pulls(&self.http, &self.auth, &self.api).await
+    }
+
+    /// One pull request's discussion, as comment bodies in order.
+    ///
+    /// **One request, unpaged** -- unlike every other listing here, which walks
+    /// until a page comes back empty. `issues/{index}/comments` declares no
+    /// paging in Gitea's own OpenAPI document and *ignores* `limit` and `page`
+    /// (issue #131, measured on 1.27.2), so a walk over it re-reads the whole
+    /// discussion for every page and never reaches an empty one. Written the
+    /// paged way first, this hung until it hit the 64-page guard -- which is
+    /// the same fact `client::issue_comments` is built on, certified here
+    /// rather than merely asserted in a comment.
+    pub async fn comments(&self, number: u64) -> Vec<String> {
+        let url = format!("{}/issues/{number}/comments", self.api);
+        let response = self
+            .http
+            .get(&url)
+            .header("Authorization", &self.auth)
+            .send()
+            .await
+            .unwrap_or_else(|error| panic!("GET {url}: {error}"));
+        let status = response.status();
+        let rows: Vec<serde_json::Value> = response
+            .json()
+            .await
+            .unwrap_or_else(|error| panic!("GET {url} -> {status}: {error}"));
+        rows.iter()
+            .filter_map(|c| c["body"].as_str().map(str::to_owned))
+            .collect()
+    }
+
     /// Create a branch off `main` through Gitea's own API, and own its removal
     /// from this line onwards.
     ///
