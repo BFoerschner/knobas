@@ -27,12 +27,13 @@ pub struct GiteaConfig {
     pub prs_per_repo: u32,
     /// Whether a pull request's comments are folded into `body_text`.
     ///
-    /// Two requests per emitted pull request that actually has comments, and
-    /// none at all for one that has none: a discussion is a paged walk, and the
-    /// second request is the empty page that proves it ended (issue #131,
-    /// `sync::fetch_comments`). It was one until that walk existed, and what
-    /// the one bought was a discussion silently cut off at whatever the server
-    /// puts on a page.
+    /// One request per emitted pull request that actually has comments, and
+    /// none for one that has none. One and not two, however long the
+    /// discussion: Gitea's `issueGetComments` is not paged, so there is never a
+    /// second page to ask for (issue #131, `client::issue_comments`).
+    ///
+    /// It is also the lever a source whose Gitea *does* truncate a discussion
+    /// is left with, and the failure `sync::fetch_comments` raises names it.
     pub include_pr_comments: bool,
     /// Per-instance request rate. Interfaces §4.1 default: 10 req/s.
     pub rate_limit_per_sec: u32,
@@ -133,7 +134,7 @@ pub fn config_schema() -> serde_json::Value {
             "include_pr_comments": {
                 "type": "boolean", "default": true,
                 "title": "Search pull-request comments",
-                "description": "Fold review discussion into the searchable text. Two extra requests per pull request that has comments."
+                "description": "Fold review discussion into the searchable text. One extra request per pull request that has comments."
             },
             "rate_limit_per_sec": {
                 "type": "integer", "minimum": 1, "maximum": 100, "default": 10,

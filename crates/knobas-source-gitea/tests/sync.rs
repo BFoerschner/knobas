@@ -709,10 +709,10 @@ async fn a_cap_fires_at_exactly_the_boundary_it_names() {
     }
 }
 
-/// Three of everything, so each of the five paged walks needs more than one
+/// Three of everything, so each of the four paged walks needs more than one
 /// page against a server capping at two: three repositories in the listing, and
-/// three branches, three pull requests, three commits on one branch and a
-/// three-comment discussion inside the first of them.
+/// three branches, three pull requests and three commits on one branch inside
+/// the first of them.
 fn three_of_each() -> State {
     let full = "tidewater/payout-service";
     let mut state = State::tidewater();
@@ -746,25 +746,6 @@ fn three_of_each() -> State {
                 "2026-08-22T12:10:00Z",
             ),
         );
-    // The discussion is the fifth walk. Two comments would not exercise it: at
-    // a cap of two, the first page is *already* short of the 50 the request
-    // named, so a walk ending on a short page stops there -- and stopping there
-    // is only a loss once there is a third comment behind it.
-    state
-        .comments
-        .get_mut(format!("{full}#142").as_str())
-        .unwrap()
-        .push(support::comment(
-            "Merging once CI is green.",
-            "jonas",
-            "2026-08-22T10:25:00Z",
-        ));
-    let pulls = state.pulls.get_mut(full).unwrap();
-    let sepa = pulls
-        .iter_mut()
-        .find(|p| p["number"] == serde_json::json!(142))
-        .expect("the fixture has #142");
-    sepa["comments"] = serde_json::json!(3);
     state
 }
 
@@ -776,16 +757,17 @@ fn three_of_each() -> State {
 /// watermark-advancing failure ADR-0003 and ruling B4 exist to refuse. An
 /// **empty** page is the only unambiguous end.
 ///
-/// Deliberately one test over all five walks rather than five tests: the
-/// decision is one rule applied at five sites, and five separate tests would
-/// let four of them drift back to `batch.len() < PAGE_SIZE` while the fifth
+/// Deliberately one test over all four walks rather than four tests: the
+/// decision is one rule applied at four sites, and four separate tests would
+/// let three of them drift back to `batch.len() < PAGE_SIZE` while the fourth
 /// kept the suite green. Reverting any single walk fails exactly one of the
 /// assertions below.
 ///
-/// The discussion is the fifth site and joined this test with issue #131,
-/// where it was not a walk at all. Its assertion is on `body_text` -- the
-/// comments' only landing place (interfaces §4.1) -- rather than on an id, so
-/// the shape differs from the four above it while the rule does not.
+/// Four, not five: the pull-request discussion is not a paged listing and is
+/// not walked. Issue #131 established that against the pinned container -- the
+/// endpoint declares no `page` and ignores one -- and
+/// `a_discussion_the_server_did_not_send_whole_ends_the_run` is what guards it
+/// instead.
 #[tokio::test]
 async fn a_server_that_caps_its_pages_short_is_still_walked_to_the_end() {
     let state = three_of_each();
@@ -831,26 +813,9 @@ async fn a_server_that_caps_its_pages_short_is_still_walked_to_the_end() {
         ],
         "the commit walk stopped on a capped page"
     );
-    // The fifth walk: the discussion, which lands in `body_text` rather than
-    // in an id. Three comments, two to a page.
-    let sepa = items
-        .iter()
-        .find(|i| i.entity.key.ends_with("#142"))
-        .expect("the fixture's discussion is on #142");
-    for text in [
-        "Should the jitter be bounded",
-        "Bounded to +/-10 %",
-        "Merging once CI is green.",
-    ] {
-        assert!(
-            sepa.body_text.contains(text),
-            "the discussion walk stopped on a capped page: {:?} is missing {text:?}",
-            sepa.body_text
-        );
-    }
 
     // The control: the identical fixture served by a server that honours
-    // `limit=50` mirrors exactly the same corpus. Without it these five
+    // `limit=50` mirrors exactly the same corpus. Without it these four
     // assertions would be about the fixture rather than about the cap.
     let honest = Fake::start(&state).await;
     let (same, _) = full(&*source(honest.base_url(), serde_json::json!({}))).await;
@@ -861,14 +826,6 @@ async fn a_server_that_caps_its_pages_short_is_still_walked_to_the_end() {
             "{kind}: a capped server must mirror what an uncapped one does"
         );
     }
-    let uncapped = same
-        .iter()
-        .find(|i| i.entity.key.ends_with("#142"))
-        .expect("the control mirrors #142 too");
-    assert_eq!(
-        sepa.body_text, uncapped.body_text,
-        "the discussion: a capped server must mirror what an uncapped one does"
-    );
 }
 
 /// One comment body. Zero-padded, so no note's text is a prefix of another's
@@ -899,8 +856,7 @@ fn discussion_of(count: usize) -> State {
     state
 }
 
-/// Every comment of `#142`, in the order the server served them, as they land
-/// in the indexed text.
+/// Every comment of `#142` missing from the indexed text.
 fn notes_missing_from(items: &[SyncItem], count: usize) -> Vec<usize> {
     let sepa = items
         .iter()
@@ -911,96 +867,101 @@ fn notes_missing_from(items: &[SyncItem], count: usize) -> Vec<usize> {
         .collect()
 }
 
-/// Issue #131: `issue_comments` sent **no `limit`** and asked for **no second
-/// page**, so a discussion longer than whatever the server chose to put on one
-/// answer was mirrored down to that page and nothing said so. On a stock Gitea
-/// that page is `DEFAULT_PAGING_NUM` long -- thirty comments -- and no admin
-/// configuration change of any kind is needed to reach it. A truncated
-/// discussion is indistinguishable from a short one from inside knobas: no
-/// error, no warning, and a watermark that advances exactly as it would have.
+/// Issue #131's real question: a long discussion must reach `body_text` whole.
 ///
-/// **Asserted on `body_text`, where the comments land** (interfaces §4.1:
-/// title + description + comment texts), not on the request. A test that only
-/// checks the request carried a `limit` passes against a walk that reads the
-/// first page and stops, which is half the defect.
+/// The issue expected the answer to be a paged walk. It is not -- Gitea's
+/// `issueGetComments` declares no `page` and ignores one, so the discussion
+/// arrives in a single response however long it is, and the fake models that
+/// (`support::mount_as`). What this pins is the property either design owed:
+/// far more comments than the 50 a listing request asks for, and every one of
+/// them in the indexed text.
 ///
-/// `PAGE + 1` is the boundary the adapter itself walks: one full page of the
-/// size it asks for, plus the one comment that only a second request can reach.
+/// Asserted on `body_text`, where the comments land (interfaces §4.1: title +
+/// description + comment texts), never on the request. A discussion long
+/// enough to page on a server that paged is the shape a regression here would
+/// take, whichever direction the regression came from.
 #[tokio::test]
-async fn a_discussion_longer_than_one_page_is_carried_in_full() {
+async fn a_long_discussion_reaches_the_indexed_text_whole() {
     let count = PAGE + 1;
     let state = discussion_of(count);
-    let fake = Fake::start_paged(&state).await;
-    let paged = source(fake.base_url(), serde_json::json!({}));
-    let (items, _) = full(&*paged).await;
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+    let (items, _) = full(&*source).await;
 
     assert_eq!(
         notes_missing_from(&items, count),
         Vec::<usize>::new(),
         "a discussion of {count} came back truncated"
     );
-
-    // The control: the same fixture served whole by a server that pages at
-    // nothing mirrors the same text, so the assertion above is about the page
-    // boundary and not about the fixture.
-    let honest = Fake::start(&state).await;
-    let (same, _) = full(&*source(honest.base_url(), serde_json::json!({}))).await;
+    // And it cost exactly one request: the endpoint has no second page, and
+    // asking for one would re-read the discussion this fake -- like the server
+    // it stands for -- serves whole every time.
+    let asked = fake.paths().await;
     assert_eq!(
-        notes_missing_from(&same, count),
-        Vec::<usize>::new(),
-        "the unpaged control lost comments, so the fixture is wrong"
+        asked
+            .iter()
+            .filter(|p| p.ends_with("/issues/142/comments"))
+            .count(),
+        1,
+        "{asked:?}"
     );
 }
 
-/// The one truncation this adapter chooses, and the boundary it chooses it at.
+/// The completeness check, and the only thing standing between a Gitea that
+/// pages this endpoint and a mirror that is quietly wrong on every long
+/// discussion.
 ///
-/// `MAX_COMMENT_PAGES` is the discussion walk's runaway guard, and reaching it
-/// is the single place where interfaces §4.1's "`body_text` = title +
-/// description + comment texts" is knowingly not the whole discussion (§9,
-/// issue #131). Three things have to be true of it, and a cap nobody exercises
-/// is a cap nobody can be sure of:
+/// `issue_comments` reads the whole discussion in one request because the
+/// pinned container has no second page to offer -- measured, and re-measured
+/// live by `live_gitea::the_discussion_endpoint_does_not_page`. A server that
+/// answered fewer records than its own `X-Total-Count` would break that premise
+/// silently: `body_text` (interfaces §4.1) would be short on every discussion
+/// past the page size, forever, with no error, no warning and a watermark that
+/// advanced exactly as it would have. There is no second request to recover
+/// with, so the run stops and says so.
 ///
-/// * it **fires** -- a discussion past it is not walked forever;
-/// * it **does not fail the run** -- the pull request is still emitted, the
-///   run still returns `Ok`, and everything after it is still mirrored, which
-///   is what makes this different from the two exhaustive listings, whose cap
-///   ends the run (`cap_reached`);
-/// * it fires **where it says it does**, so a reader who needs to know what a
-///   long discussion costs can read the number and believe it.
-///
-/// A server capping at one record a page is what makes that affordable to
-/// assert: the guard is a *request* budget, so at one comment per request the
-/// boundary is twenty-one comments rather than the thousand-odd it is against
-/// a server that fills a page.
+/// **Fatal, deliberately, and the exception to everything else in
+/// `fetch_comments`.** A *refused* discussion warns and carries on -- the test
+/// above this one -- because it is one pull request the server said no to. A
+/// short one is a fact about the endpoint, and therefore about every discussion
+/// the source will ever read. Issue #114 gave TeamCity's unpaged
+/// `/app/rest/buildTypes` the same treatment for the same reason.
 #[tokio::test]
-async fn a_discussion_past_the_page_cap_is_truncated_rather_than_failing_the_run() {
-    // Comfortably past 21 pages at one comment a page, so the walk runs out of
-    // requests long before the discussion runs out of comments.
-    let count = 25;
-    let state = discussion_of(count);
-    let fake = Fake::start_capped(&state, 1).await;
-    let source = source(fake.base_url(), serde_json::json!({}));
-    let (items, cursor) = full(&*source).await;
+async fn a_discussion_the_server_did_not_send_whole_ends_the_run() {
+    let mut state = discussion_of(4);
+    // Four comments served, five claimed: a server that truncated without
+    // saying so in the payload.
+    state
+        .discussion_total
+        .insert("tidewater/payout-service#142".to_owned(), 5);
+    let fake = Fake::start(&state).await;
+    let truncating = source(fake.base_url(), serde_json::json!({}));
 
-    // The run survived it: the pull request is here, so is the one after it,
-    // and so is the position.
-    assert_eq!(
-        ids(&items, "pr"),
-        vec![
-            "gitea:tidewater/payout-service#142",
-            "gitea:tidewater/payout-service#144",
-        ],
-        "a discussion past the cap must not cost the run"
+    let mut sink = VecSink(Vec::new());
+    let error = truncating
+        .sync(None, &mut sink)
+        .await
+        .expect_err("a discussion the server says it truncated cannot be mirrored quietly");
+    let SourceError::Protocol { message, .. } = &error else {
+        panic!("{error:?}");
+    };
+    assert!(
+        message.contains("4 of its 5 comments") && message.contains("include_pr_comments"),
+        "the message must name what was missed and the lever that stops asking: {message}"
     );
-    assert!(cursor.contains("pulls_updated_to"), "{cursor}");
+    // No cursor came back over the gap, so the next run re-reads from where
+    // this one stood rather than past it.
+    assert!(
+        !sink.0.iter().any(|i| i.entity.key.ends_with("#142")),
+        "the pull request must not be mirrored with a discussion known to be short"
+    );
 
-    // And it is truncated exactly where the constant says: twenty-one
-    // requests, one comment each.
-    assert_eq!(
-        notes_missing_from(&items, count),
-        (22..=count).collect::<Vec<usize>>(),
-        "the cap fired somewhere other than the 21 pages MAX_COMMENT_PAGES names"
-    );
+    // The control: the identical fixture whose header agrees with its body
+    // syncs, so the failure above is about the disagreement and not about the
+    // discussion being four comments long.
+    let honest = Fake::start(&discussion_of(4)).await;
+    let (items, _) = full(&*source(honest.base_url(), serde_json::json!({}))).await;
+    assert_eq!(notes_missing_from(&items, 4), Vec::<usize>::new());
 }
 
 /// A sink that rejects an item aborts the run -- the remaining items are not

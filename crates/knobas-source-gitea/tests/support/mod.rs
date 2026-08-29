@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use knobas_source::instance::SourceInstance;
 use knobas_source::{AuthMethod, Source};
 use serde_json::{Value, json};
-use wiremock::matchers::{any, header, method, path, query_param, query_param_is_missing};
+use wiremock::matchers::{any, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// The only token the fake accepts. Anything else gets Gitea's 401.
@@ -51,6 +51,16 @@ pub struct State {
     pub pulls: BTreeMap<String, Vec<Value>>,
     /// `owner/repo#index` -> comment records.
     pub comments: BTreeMap<String, Vec<Value>>,
+    /// `owner/repo#index` -> the `X-Total-Count` that discussion is served
+    /// with, when it must differ from the number of records actually served.
+    ///
+    /// Gitea sends the header on every discussion and it has always agreed with
+    /// the body; a fixture that makes it disagree is describing a Gitea that
+    /// truncated the discussion without saying so in the payload -- the only
+    /// shape in which `sync::fetch_comments`'s completeness check can be
+    /// witnessed, and the reason it is a check rather than an assumption
+    /// (issue #131).
+    pub discussion_total: BTreeMap<String, usize>,
     /// `owner/repo#index` -> the HTTP status that discussion is refused with.
     /// A 404 is what Gitea answers for a repository with its issue unit
     /// disabled and a 403 is a token without issue scope -- both cost the
@@ -203,6 +213,7 @@ impl State {
             forbidden: BTreeSet::new(),
             revoked: BTreeSet::new(),
             discussion_status: BTreeMap::new(),
+            discussion_total: BTreeMap::new(),
         }
     }
 
@@ -446,44 +457,40 @@ impl Fake {
             .mount(&self.server)
             .await;
         }
-        // A discussion is a listing like any other here, and it is paged like
-        // one -- which it was not until issue #131. A single mount serving the
-        // whole discussion whatever was asked for is a fixture in which the
-        // defect cannot appear: `issue_comments` sent neither `limit` nor
-        // `page`, so a real Gitea answered it `DEFAULT_PAGING_NUM` records and
-        // said nothing about the rest, and the fake answered it all of them.
+        // **The discussion is served whole, whatever the request said, and
+        // whatever `page_size` the rest of this fake is honouring.** That is
+        // not laziness, it is the endpoint: Gitea's `issueGetComments` declares
+        // no `page` and no `limit` (its OpenAPI document says so, and the
+        // repository-wide `issueGetRepoComments` next to it declares both), and
+        // measured against the pinned container it ignores them -- 51 comments
+        // came back for `limit=2` and for `page=9` alike. A fake that paged
+        // this route would be a fake asserting a server that does not exist,
+        // and `just check` would go green over an adapter re-reading the same
+        // discussion until its budget ran out. Issue #131, measured 2026-08-29
+        // on Gitea 1.27.2; `live_gitea::the_discussion_endpoint_does_not_page`
+        // is what re-asserts it against the server that decides it.
         //
-        // **A request naming no `page` is served the first one**, because that
-        // is what the server does and it is the whole shape of #131: a client
-        // that never asks for page 2 must still be *given* page 1, or the bug
-        // reads as "the discussion came back empty" instead of "the discussion
-        // came back truncated". The other listings mount no such route: the
-        // adapter has sent them a `page` since M1.
+        // `X-Total-Count` rides along because the adapter's only completeness
+        // check reads it -- and `discussion_total` is how a fixture makes the
+        // header disagree with the body, which no real Gitea has been seen to
+        // do and which the adapter must refuse rather than mirror.
         for (key, comments) in &state.comments {
             let (full_name, index) = key
                 .split_once('#')
                 .expect("comment key is owner/repo#index");
-            let route = format!("/api/v1/repos/{full_name}/issues/{index}/comments");
-            for (number, chunk) in pages(comments, page_size) {
-                authed(
-                    Mock::given(method("GET"))
-                        .and(path(route.clone()))
-                        .and(query_param("page", number.to_string().as_str())),
-                )
-                .respond_with(ok(json!(chunk)))
-                .mount(&self.server)
-                .await;
-                if number == 1 {
-                    authed(
-                        Mock::given(method("GET"))
-                            .and(path(route.clone()))
-                            .and(query_param_is_missing("page")),
-                    )
-                    .respond_with(ok(json!(chunk)))
-                    .mount(&self.server)
-                    .await;
-                }
-            }
+            let total = state
+                .discussion_total
+                .get(key)
+                .copied()
+                .unwrap_or(comments.len());
+            authed(Mock::given(method("GET")).and(path(format!(
+                "/api/v1/repos/{full_name}/issues/{index}/comments"
+            ))))
+            .respond_with(
+                ok(json!(comments)).insert_header("X-Total-Count", total.to_string().as_str()),
+            )
+            .mount(&self.server)
+            .await;
         }
         for (key, commits) in &state.commits {
             let (full_name, branch) = key

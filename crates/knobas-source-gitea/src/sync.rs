@@ -178,35 +178,6 @@ const MAX_PR_PAGES: u32 = 20;
 /// budget the walk actually spends, and is what bites first.
 const MAX_COMMIT_PAGES: u32 = 20;
 
-/// The runaway guard on the discussion walk: at most this many requests per
-/// pull request, whatever the server chooses to put on a page.
-///
-/// **Sized by the same arithmetic as the exhaustive pair.** The target is a
-/// record count -- 1,000 comments on one pull request -- and at the 50 a
-/// request asks for that is twenty pages of records plus the one empty page
-/// that proves the discussion ended. A discussion that long is already an
-/// outlier; a thousand of them is not a corpus anyone reads, it is a
-/// `body_text` nobody can search.
-///
-/// **Reaching it warns and keeps what was walked; it does not fail the run**,
-/// which is the one place this walk parts company with the four listings. It
-/// is the reading [`fetch_comments`] already applies to a *refused* discussion,
-/// and it rests on the same three facts: the pull request itself is still
-/// emitted, no entity is missing from the mirror, and `pr` is a budgeted kind
-/// the sweep never touches (ADR-0003), so a shorter `body_text` cannot be read
-/// downstream as a deletion. What is lost is search text on one item. Failing
-/// instead would stop a whole Gitea mirror over one thousand-comment
-/// discussion, and [`cap_reached`]'s lever -- narrow the source with
-/// `owners[]`/`repos[]` -- would mean dropping the repository the discussion is
-/// in. The lever that fits is `include_pr_comments`, and the warning names it.
-///
-/// **So this is the one deliberate cap on interfaces §4.1's "`body_text` =
-/// title + description + comment texts".** It is written down as such (§9,
-/// issue #131) rather than left to be inferred from a constant: what §4.1
-/// promises is every comment of every discussion knobas mirrors, and this
-/// bounds it at a stated number with a stated warning, instead of at whatever
-/// `DEFAULT_PAGING_NUM` happens to be on the server.
-const MAX_COMMENT_PAGES: u32 = 21;
 
 /// One repository this run will walk.
 pub(crate) struct Selected {
@@ -283,17 +254,19 @@ fn cap_reached(what: &str, seen: usize) -> SourceError {
 /// -- silent truncation, which is the failure the whole module docs above are
 /// about. An empty page is the one answer that cannot mean anything else.
 ///
-/// **One spelling, in one place, for all five walks.** Issue #81 was filed
+/// **One spelling, in one place, for all four walks.** Issue #81 was filed
 /// because the rule had been copied to four sites and asked for one deliberate
 /// decision instead of four accidental ones; option 1 (page until empty) was
-/// ruled on 2026-08-29. Splitting it back into inline comparisons is how the
-/// others drift.
+/// ruled on 2026-08-29. Splitting it back into four inline comparisons is how
+/// three of them drift.
 ///
-/// The fifth caller is [`fetch_comments`], which arrived at this rule from the
-/// other side: it was not paging at all, so nothing there could drift back to
-/// a short page -- it read the *first* page as the whole discussion and never
-/// asked for a second (issue #131). Having one place to call was what made
-/// that a two-line fix rather than a fifth decision.
+/// **Four, and [`fetch_comments`] is deliberately not a fifth.** Issue #131
+/// read the discussion request as a paged listing that never paged, and the
+/// pinned container says it is not one: `issueGetComments` declares no `page`
+/// and no `limit` and ignores both, so "page until empty" there would re-read
+/// the same discussion until the budget ran out and fold it into `body_text`
+/// once per request. That read gets the server's own `X-Total-Count` instead
+/// -- see [`crate::client::GiteaClient::issue_comments`] for the measurements.
 ///
 /// The price is one extra request per *exhausted* walk, under the 10 req/s
 /// limiter of interfaces §4.1 -- and the `MAX_*_PAGES` caps above are what keep
@@ -792,29 +765,40 @@ fn close_watermark<K: Ord + Clone>(
 /// which is the fifth read endpoint ruling B1 granted. `pr.comments == 0` is
 /// what makes an idle-ish run cheap: no discussion, no request.
 ///
-/// # Why this is a walk and not a request
+/// # Why one request is enough here, and what proves it every time
 ///
-/// It was a request until issue #131, and it sent **no `limit` and no `page`**.
-/// That is a listing endpoint: Gitea answers a request naming no `limit` with
-/// `DEFAULT_PAGING_NUM` records -- **thirty**, on a stock install, no admin
-/// change of any kind -- and says nothing about the rest. So every discussion
-/// past thirty comments was mirrored down to thirty, and the failure is
-/// invisible from inside knobas: a truncated discussion looks exactly like a
-/// short one, with no error, no warning and a watermark that advances exactly
-/// as it would have. It is the failure the module docs above are about,
-/// arriving through the one endpoint that was never walking.
+/// Issue #131 read this as the fifth paged listing: no `limit`, no `page`, and
+/// therefore `DEFAULT_PAGING_NUM` records -- thirty on a stock Gitea -- with a
+/// discussion silently cut off there. Measured against the pinned container it
+/// is not a paged endpoint at all, and paging it would have been the worse bug
+/// of the two: `page` is ignored, so the walk would have re-read the same
+/// discussion until its budget ran out and folded every comment into
+/// `body_text` once per request. The three measurements are on
+/// [`crate::client::GiteaClient::issue_comments`], with the endpoint's own
+/// OpenAPI declaration and a same-minute control on the repository-wide
+/// comments endpoint, which does page and does honour `limit`.
 ///
-/// It now walks with the rule issue #81 settled for the other four
-/// ([`last_page`]): an explicit `limit` on every request, and the walk ends on
-/// an **empty** page, never on a short one, bounded by [`MAX_COMMENT_PAGES`].
+/// So the shape #131 asked for is refused and the risk it was filed about is
+/// answered instead. **The completeness of a discussion is checked, not
+/// assumed**: Gitea sends `X-Total-Count`, it equalled the record count of
+/// every discussion in the fixture under every query, and a read where it does
+/// **not** ends the run.
 ///
-/// **The price is one request per emitted pull request that has a discussion**
-/// -- the empty page that proves it ended -- and it is bounded by what already
-/// bounds this endpoint: `pr.comments == 0` skips it, `include_pr_comments`
-/// turns it off, and `prs_per_repo` bounds how many pull requests a run reaches
-/// at all. Paying it is the whole point: without that request, a full page is
-/// indistinguishable from the end of the discussion, which is exactly the
-/// reading #81 removed from the four listings.
+/// Ending the run is the deliberate part, and it is the one thing here that is
+/// not "search text on one item". A short discussion means the measured
+/// premise of this whole function is false on that server -- and it would be
+/// false for *every* discussion it ever reads, so what looks like one blemish
+/// is a `body_text` that is quietly wrong across the source, on the very field
+/// interfaces §4.1 defines as title + description + comment texts and that a
+/// `comment` write op's hold detection reads. There is no second request to
+/// recover with, because there is no second page to ask for; the honest
+/// answers are to stop, or to turn the discussion off. The message offers the
+/// second (`include_pr_comments`), and any Gitea that needs it is a Gitea this
+/// adapter has to be re-measured against -- exactly the treatment issue #114
+/// gave TeamCity's unpaged `/app/rest/buildTypes`.
+///
+/// **The price is nothing.** One request per emitted pull request that has a
+/// discussion, unchanged since M1, and none at all for one that has none.
 ///
 /// # What a refusal here costs, and what it is allowed to hide
 ///
@@ -848,10 +832,6 @@ fn close_watermark<K: Ord + Clone>(
 /// one item, and it is restored the next time that pull request is updated, or
 /// by the next full sync.
 ///
-/// A refusal met **part-way through** the walk keeps the pages already read
-/// rather than throwing them away: half a discussion is more searchable text
-/// than none, and the warning is the same one either way. On the common case --
-/// the first request refused -- that is the empty answer it always was.
 async fn fetch_comments(
     source: &crate::GiteaSource,
     at: RepoRef<'_>,
@@ -860,50 +840,46 @@ async fn fetch_comments(
     if !source.config.include_pr_comments || pr.comments == 0 {
         return Ok(Vec::new());
     }
-    let mut discussion: Vec<model::Comment> = Vec::new();
-    for page in 1..=MAX_COMMENT_PAGES {
-        let batch = match source
-            .client
-            .issue_comments(at.owner, at.name, pr.number, page)
-            .await
-        {
-            Ok(batch) => batch,
-            Err(error) if is_repo_scoped(&error) => {
-                tracing::warn!(
-                    repository = %at.full_name,
-                    number = pr.number,
-                    %error,
-                    "gitea: indexing this pull request without its discussion; \
-                     set include_pr_comments to false to stop asking"
-                );
-                return Ok(discussion);
-            }
-            Err(error) => return Err(RepoError::from(error)),
-        };
-        let last = last_page(&batch);
-        // A single unreadable comment is dropped rather than failing the
-        // pull request: the rest of the discussion is still worth indexing.
-        discussion.extend(
-            batch
-                .into_iter()
-                .filter_map(|c| serde_json::from_value(c).ok()),
-        );
-        if last {
-            return Ok(discussion);
+    let discussion = match source.client.issue_comments(at.owner, at.name, pr.number).await {
+        Ok(discussion) => discussion,
+        Err(error) if is_repo_scoped(&error) => {
+            tracing::warn!(
+                repository = %at.full_name,
+                number = pr.number,
+                %error,
+                "gitea: indexing this pull request without its discussion; \
+                 set include_pr_comments to false to stop asking"
+            );
+            return Ok(Vec::new());
         }
+        Err(error) => return Err(RepoError::from(error)),
+    };
+    // Against the **records the server sent**, not against the comments that
+    // parsed: an unreadable comment is dropped below on purpose, and counting
+    // that as truncation would fail the run over a field Gitea added.
+    // `pr.comments` is not the comparison either -- it read 3 on the fixture's
+    // `#142` where the endpoint sent 2, so it counts something this endpoint
+    // does not return.
+    if let Some(total) = discussion.total
+        && total > discussion.raw.len()
+    {
+        return Err(RepoError::Fatal(SourceError::protocol(format!(
+            "gitea: {}#{} answered {} of its {total} comments and this endpoint has no second \
+             page to ask for, so every long discussion on this instance would be mirrored \
+             incomplete without saying so. Set include_pr_comments to false to index pull \
+             requests without their discussion.",
+            at.full_name,
+            pr.number,
+            discussion.raw.len(),
+        ))));
     }
-    // The cap, and the one truncation this adapter chooses. See
-    // `MAX_COMMENT_PAGES` for why it warns instead of ending the run.
-    tracing::warn!(
-        repository = %at.full_name,
-        number = pr.number,
-        comments = discussion.len(),
-        pages = MAX_COMMENT_PAGES,
-        "gitea: this discussion is longer than one run walks; indexing the first \
-         {} comments of it and no more. Set include_pr_comments to false to stop asking",
-        discussion.len()
-    );
-    Ok(discussion)
+    // A single unreadable comment is dropped rather than failing the
+    // pull request: the rest of the discussion is still worth indexing.
+    Ok(discussion
+        .raw
+        .into_iter()
+        .filter_map(|c| serde_json::from_value(c).ok())
+        .collect())
 }
 
 /// New commits on the branches whose heads moved this run.

@@ -1148,6 +1148,59 @@ still reads one un-widened page, and is still the only query that sends that dim
 
 ---
 
+### Amendments from the Gitea discussion-completeness fix (2026-08-29, binding) — issue #131
+
+Issue #131 reported that `client::issue_comments` sends no `limit` and does not page, and
+therefore truncates a pull-request discussion at Gitea's `DEFAULT_PAGING_NUM` — thirty comments,
+on a stock install, today — and asked for the walk issue #81 gave the other four listings.
+**Measured against the pinned container, the premise is false and the remedy would have been
+worse than the defect.** Recorded here because §4.1 defines `body_text` as title + description +
+comment texts and §4.2 pins Gitea's page size at 50, and because the next reader will otherwise
+re-file the same issue.
+
+- **§4.2 `issueGetComments` is not a paged endpoint, and knobas reads it in one request.**
+  Measured read-only against `testenv`'s pinned Gitea (**1.27.2**) on 2026-08-29, three ways.
+  (a) The container's own `swagger.v1.json` declares `issueGetComments`
+  (`/repos/{owner}/{repo}/issues/{index}/comments`) with `since` and `before` and **no `page`,
+  no `limit`**. (b) A discussion of 51 comments came back **whole** for no query at all, for
+  `limit=50&page=1`, for `limit=2&page=1` and for `limit=50&page=9` — the parameters are
+  ignored, not merely defaulted. (c) The control that makes this a fact about the endpoint and
+  not about the instance: the repository-wide `issueGetRepoComments`
+  (`/repos/{owner}/{repo}/issues/comments`) **declares both and honours both** — same server,
+  same minute, `limit=2` answered two records of 104. So the "page sizes: … Gitea 50" of §4.1
+  is about the four *listing* walks and has never applied here.
+- **§4.2 paging it would have been the worse bug.** `page` being ignored, a walk ending on an
+  empty page never meets one: it re-reads the same discussion until `MAX_*_PAGES` runs out and
+  folds every comment into `body_text` once per request. That was built and measured before it
+  was discarded — it turned the live suite from 25 s to 108 s and broke the contract battery
+  against the real container, while every docker-free test stayed green and a live test asserting
+  "all 51 comments are present" passed both with and without it. A fake cannot find this; only
+  the container can, which is what §4.2 names it the contract source for.
+- **§4.1 `body_text`'s completeness claim is kept, and now checked rather than assumed.** Gitea
+  sends `X-Total-Count` on this endpoint and it equalled the number of records in the body on
+  every pull request in the fixture under every one of those queries. `client::issue_comments`
+  carries it back and `sync::fetch_comments` **ends the run** when the server reports more
+  comments than it sent. There is no second page to recover with, so a short discussion is not
+  one blemished item — it means every discussion this source reads past the page size is
+  quietly short, on the field §4.1 defines and a `comment` write op's hold detection reads
+  (§9's write-queue entry). The failure names `include_pr_comments` as the lever. Same treatment,
+  same reasoning as #114's refusal of a `/app/rest/buildTypes` listing that reports a further
+  page: refuse now, page when a server that needs one is met.
+- **`PullRequest.comments` is not the completeness signal**, and a fix built on it would have
+  been wrong: on the seeded `#142` it reads **3** where the endpoint sends **2** and
+  `X-Total-Count` reads 2. It counts something this endpoint does not return, and stays what it
+  has always been — the zero-check that saves a request.
+- **Request cost is unchanged**: one per emitted pull request that has comments, none for one
+  that has none, however long the discussion. `crates/knobas-source-gitea/src/lib.rs`'s "what one
+  run costs" now also states the empty page each of the four *listing* walks has spent since #81,
+  which that issue did not update.
+- **Frozen surfaces: none.** `crates/knobas-source-gitea/**` is not in §10.8's list.
+  `crates/knobas-http/**` **is**, and is untouched: `HttpClient::send` already hands back the
+  whole `reqwest::Response`, so the adapter reads the header in its own `get_json_counted`
+  between the send and the decode. No migration, no IPC change, no new dependency.
+
+---
+
 ## 10. As built — the contract PR (2026-08-24)
 
 *The task brief called this section §9. §9 was taken by the plan-authoring amendments before this ran, so the as-built record is §10; "§9 of the interfaces doc" in `plan-02-contract` means this section.*
