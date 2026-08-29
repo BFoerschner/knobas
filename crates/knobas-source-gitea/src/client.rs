@@ -44,10 +44,10 @@ use crate::config::GiteaConfig;
 /// is configurable on a self-hosted instance, an endpoint may carry its own
 /// maximum, and a loaded one may answer partially. So a page shorter than this
 /// means "the collection ran out" *or* "we were capped", with nothing in the
-/// answer to say which. So no walk in `sync.rs` ends a *listing* on a short
-/// page: it ends one on an **empty** page (`sync::last_page`), and the two
-/// budgeted walks stop on their own budget or watermark before they get that
-/// far. Reading a short page as the end is a run that reports success while its
+/// answer to say which. No walk in `sync.rs` ends a *listing* on a short page:
+/// it ends one on an **empty** page (`sync::last_page`), and the two budgeted
+/// walks stop on their own budget or watermark before they get that far.
+/// Reading a short page as the end is a run that reports success while its
 /// watermark advances past records it never saw. Issue #81, ruled 2026-08-29.
 /// `sync.rs` no longer **reads** this constant -- it does not import it, and
 /// names it only in prose -- which is the shape that keeps the assumption from
