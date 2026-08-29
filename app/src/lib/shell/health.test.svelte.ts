@@ -246,6 +246,214 @@ test("replace forgets a source the authoritative list no longer carries", async 
   stop();
 });
 
+/**
+ * The seed is a *read*, and a read has a duration.
+ *
+ * `reseed()` fetches `credential_health` and hands the answer to
+ * {@link Health.replace}. Both of the shell's calls do it — `App.svelte`'s
+ * `$effect(() => { if (lifecycle.ready) void health.reseed(); })` at boot and
+ * `onFirstRunDone`'s call after the wizard — so an event that lands *while
+ * that read is in flight* meets a `replace` carrying the database as it stood
+ * before the event. `start()`'s comment used to claim this away ("the seed
+ * that follows is the newer reading"); it is a claim about ordering that the
+ * in-flight window breaks, and this test is what turns it into a guarantee.
+ *
+ * The direction matters: the seed's rows say `ok` and the event says
+ * `unauthorized`, so losing the merge does not raise a false alarm — it
+ * **hides a real one**, on the surface whose whole job is saying a source has
+ * stopped working (#148).
+ *
+ * **The read is held open across the event.** Called in sequence these two are
+ * fine, so a test that let the seed resolve before emitting would pass against
+ * the bug.
+ */
+test("a scheduler rejection landing mid-seed is not written back to ok by the seed", async () => {
+  let resolveSeed: ((rows: CredentialHealth[]) => void) | null = null;
+  const events = fakeListen();
+  const health = createHealth({
+    credentialHealth: () =>
+      new Promise<CredentialHealth[]>((resolve) => {
+        resolveSeed = resolve;
+      }),
+    listen: events.listen,
+  });
+  const stop = health.start();
+  await vi.waitFor(() => expect(events.handlers.length).toBe(1));
+
+  const seeding = health.reseed();
+  await vi.waitFor(() => expect(resolveSeed).not.toBeNull());
+
+  // …and with that read still open, the scheduler discovers the credential is
+  // being refused. `checked_at` is five minutes past the snapshot below.
+  events.emit(
+    row("gitea", "unauthorized", {
+      checked_at: "2026-08-22T10:05:00Z",
+      detail: "401 from /api/v1/user",
+    }),
+  );
+  flushSync();
+  expect(health.get("gitea")?.state).toBe("unauthorized");
+
+  // The seed answers from before the check: `gitea` is still green in it.
+  resolveSeed!([row("gitea", "ok"), row("jira", "ok")]);
+  await seeding;
+  flushSync();
+
+  expect(
+    health.get("gitea")?.state,
+    "the seed wrote a stale ok over a credential the scheduler had just seen refused",
+  ).toBe("unauthorized");
+  expect(health.get("gitea")?.detail).toBe("401 from /api/v1/user");
+  // …and the rest of the seed still lands: membership is the incoming set's,
+  // so the source the store had never heard of arrives.
+  expect(health.all.map((h) => h.source_id)).toEqual(["gitea", "jira"]);
+  stop();
+});
+
+/**
+ * The same rule running the other way, and the reason it is a rule about
+ * *time* rather than about states.
+ *
+ * #144 was this race in its visible direction: a credential the reader had
+ * just fixed by hand reverted to "auth failed" when an older `list_sources`
+ * landed. An implementation that made a *failing* reading win would pass the
+ * test above and lose this one — and it would be the version that shouts about
+ * a source that is working. Newest-wins does not know which state is the
+ * alarming one, which is the whole of why it is safe in both directions.
+ */
+test("an older incoming reading does not revert a newer one, whichever way the state moved", () => {
+  const health = createHealth({
+    credentialHealth: () => Promise.resolve([]),
+    listen: () => Promise.resolve(() => {}),
+  });
+
+  // What `set_source_secret` answered with, straight into the store: the
+  // person is watching the chip they just pressed a button to fix.
+  health.patch(row("jira", "ok", { checked_at: "2026-08-22T10:05:00Z" }));
+  // …and the read that was already in flight when they typed the password.
+  health.replace([
+    row("jira", "unauthorized", {
+      checked_at: "2026-08-22T10:00:00Z",
+      detail: "401 from /rest/api/2/myself",
+    }),
+  ]);
+  flushSync();
+
+  expect(health.get("jira")?.state, "an older read reverted a credential that was fixed").toBe("ok");
+  expect(health.get("jira")?.detail).toBeNull();
+});
+
+/**
+ * Membership does not negotiate with freshness, and this is the test that says
+ * so with the freshness pointing the other way.
+ *
+ * "replace forgets a source the authoritative list no longer carries" above
+ * drops a row whose held reading is the *same age* as the incoming ones, which
+ * a keep-what-is-newer rule would also drop. Here the held row is newer than
+ * anything in the incoming set — the state a source is in for the moment
+ * between the scheduler checking it and the reader deleting it — and it still
+ * has to go. This is the property #148's fix must not trade away: the deleted
+ * source's monogram and room tab disappear because the row is *gone from the
+ * incoming set*, not because it was staled out.
+ */
+test("a held reading newer than the whole incoming set still leaves with its row", async () => {
+  const events = fakeListen();
+  const health = createHealth({
+    credentialHealth: () => Promise.resolve([row("gitea", "ok"), row("jira", "ok")]),
+    listen: events.listen,
+  });
+  const stop = health.start();
+  await health.reseed();
+
+  events.emit(row("jira", "unauthorized", { checked_at: "2026-08-22T23:59:00Z" }));
+  flushSync();
+  expect(health.get("jira")?.state).toBe("unauthorized");
+
+  // `jira` is deleted, and the re-list carries what is left.
+  health.replace([row("gitea", "ok")]);
+  flushSync();
+  expect(health.get("jira"), "the strip would keep drawing a source that is gone").toBeNull();
+  expect(health.all.map((h) => h.source_id)).toEqual(["gitea"]);
+  stop();
+});
+
+/**
+ * The draws, all four of them, and each one goes to the incoming set except
+ * the one where it has nothing to say.
+ *
+ * `checked_at` is "RFC 3339, or null if it has never been checked" — the state
+ * every source is in until the scheduler's first run — so a null on either
+ * side is ordinary rather than exotic. A reading with a timestamp is evidence
+ * of a check having happened, so it beats one without in either position.
+ */
+test("incoming wins every draw: a tie, both null, and a held reading that was never checked", () => {
+  const health = createHealth({
+    credentialHealth: () => Promise.resolve([]),
+    listen: () => Promise.resolve(() => {}),
+  });
+
+  // A tie, with different content on the two readings: one check, read twice.
+  health.patch(row("a", "ok", { checked_at: "2026-08-22T10:00:00Z", detail: "held" }));
+  // Never checked, so it is not evidence of anything being newer.
+  health.patch(row("b", "unauthorized", { checked_at: null }));
+  // Neither side has been checked.
+  health.patch(row("c", "unauthorized", { checked_at: null, detail: "held" }));
+  // …and the one direction the *held* row wins on a missing stamp: it has one
+  // and the incoming row does not.
+  health.patch(row("d", "unauthorized", { checked_at: "2026-08-22T10:00:00Z" }));
+
+  health.replace([
+    row("a", "unauthorized", { checked_at: "2026-08-22T10:00:00Z", detail: "incoming" }),
+    row("b", "ok", { checked_at: "2026-08-22T10:00:00Z" }),
+    row("c", "ok", { checked_at: null, detail: "incoming" }),
+    row("d", "ok", { checked_at: null }),
+  ]);
+  flushSync();
+
+  expect(health.get("a")?.detail, "a tie is one check read twice — the incoming set wins it").toBe(
+    "incoming",
+  );
+  expect(health.get("b")?.state, "a reading that has never been checked is not newer").toBe("ok");
+  expect(health.get("c")?.detail, "with neither side checked, the incoming set wins").toBe(
+    "incoming",
+  );
+  expect(health.get("d")?.state, "a checked reading beats one that never was").toBe("unauthorized");
+});
+
+/**
+ * Instants, not strings.
+ *
+ * `checked_at` is RFC 3339, which carries an offset, and `2026-08-22T12:00:00+02:00`
+ * is two hours *earlier* than `2026-08-22T11:00:00Z` while sorting after it
+ * lexically. Every stamp knobas has seen from the backend so far is `Z` — which
+ * is exactly what would let a string comparison sit here passing until the day
+ * something serialises an offset, and then hide a rejected credential again.
+ */
+test("checked_at is compared as an instant, so an offset stamp is not read as newer", () => {
+  const health = createHealth({
+    credentialHealth: () => Promise.resolve([]),
+    listen: () => Promise.resolve(() => {}),
+  });
+
+  // 10:00Z, wearing an offset. Sorts after "2026-08-22T11:00:00Z" as text.
+  health.patch(row("jira", "ok", { checked_at: "2026-08-22T12:00:00+02:00" }));
+  health.replace([
+    row("jira", "unauthorized", { checked_at: "2026-08-22T11:00:00Z", detail: "401" }),
+  ]);
+  flushSync();
+  expect(
+    health.get("jira")?.state,
+    "an offset stamp compared as text read as the newer reading",
+  ).toBe("unauthorized");
+
+  // …and the same pair the other way, so this cannot pass by always taking the
+  // incoming row.
+  health.patch(row("gitea", "unauthorized", { checked_at: "2026-08-22T14:00:00+02:00" }));
+  health.replace([row("gitea", "ok", { checked_at: "2026-08-22T11:00:00Z" })]);
+  flushSync();
+  expect(health.get("gitea")?.state).toBe("unauthorized");
+});
+
 /** Calling `start` twice must not leave a subscription nothing can unwind. */
 test("start is idempotent — a second call does not strand a listener", async () => {
   const events = fakeListen();

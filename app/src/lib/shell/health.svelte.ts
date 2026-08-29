@@ -112,12 +112,62 @@ export interface Health {
   /** Apply one reading. Exposed so a mutation elsewhere can seed it directly. */
   patch(next: CredentialHealth): void;
   /**
-   * Take a whole authoritative reading, forgetting anything not in it.
+   * Take a whole authoritative *membership*, keeping the newer reading per row.
    *
-   * The only operation that can *remove* a source. {@link patch} only ever
-   * adds, so a view that re-lists after a delete and patches each surviving
-   * row leaves the deleted one drawing its monogram and its room tab for the
-   * rest of the session.
+   * **Two halves, and they answer to different authorities** — this used to
+   * read "take a whole authoritative reading, forgetting anything not in it",
+   * and half of that is no longer true (#148):
+   *
+   * - **Membership is the incoming set's, absolutely.** A source absent from
+   *   `rows` leaves the store, whatever this store holds for it and however
+   *   fresh that is. This is the only operation that can *remove* a source:
+   *   {@link patch} only ever adds, so a view that re-lists after a delete and
+   *   patches each surviving row leaves the deleted one drawing its monogram
+   *   and its room tab for the rest of the session.
+   * - **Per surviving row, the newer `checked_at` wins.** A reading this store
+   *   already holds survives only when its `checked_at` is *strictly* newer
+   *   than the incoming one's. Incoming wins ties, wins when both are null,
+   *   and wins when the held reading has no `checked_at`; a reading with a
+   *   timestamp beats one without. Ties go to the incoming set because a tie
+   *   is two readings of one check, so neither is staler — and the set that
+   *   also decides membership is the one to believe when nothing separates
+   *   them. A genuine tie carrying *different* content would mean that is no
+   *   longer true, and is worth reporting rather than papering over.
+   *
+   * **Why the second half does not weaken the first**, which is the argument
+   * worth not making the next reader re-derive: a *deleted* source is gone
+   * from the incoming set entirely rather than sitting in it with a stale
+   * reading. Freshness never gets a say about it, so the deleted chip still
+   * disappears — pinned by `SourcesView`'s "a deleted source leaves the shared
+   * health store, not just the list" and by "replace forgets a source the
+   * authoritative list no longer carries" below it.
+   *
+   * **Why newest-wins is safe to decide here.** Both timestamps are the
+   * backend's own `checked_at` for the same source — the `source:health` event
+   * carries it at check time, `list_sources` and `credential_health` carry the
+   * same column at snapshot time — so this compares one clock against itself.
+   * There is no skew to allow for.
+   *
+   * **And a held reading cannot get stuck.** `knobas.source_config.auth_checked_at`
+   * is stamped `now()` on *every* check, changed or not — "freshness is not a
+   * change", `knobas-sync`'s `SET_HEALTH` — while `source:health` fires on a
+   * change only. So the column only ever moves forward, and the first read
+   * taken after the next check carries a strictly newer stamp than anything
+   * this store is holding. A reading survives at most until the source is
+   * checked again; it does not become the store's permanent answer.
+   *
+   * **What it costs.** `replace` can no longer rewind a row: a backend flow
+   * that wanted to reset a source's reading *without* removing the row and
+   * without emitting a newer event would be ignored here until the next check.
+   * Nothing does that today — every reading in the app is the result of an
+   * actual credential check, stamped with when that check happened, whether it
+   * reaches the store through the scheduler's event, `list_sources`,
+   * `credential_health` or `set_source_secret`'s answer. If such a flow ever
+   * appears, this rule is the thing to re-open rather than the caller.
+   *
+   * The reason the rule lives here rather than in a caller: `SourcesView.load()`
+   * is one door and the shell's boot-time {@link reseed} is the other, and both
+   * end in this line. Fixing one caller leaves the other exposed (#148).
    */
   replace(rows: CredentialHealth[]): void;
   /**
@@ -137,6 +187,43 @@ export interface Health {
    * on `reseed`.
    */
   start(): () => void;
+}
+
+/**
+ * When a reading was taken, as an instant — `null` for one that carries no
+ * usable answer.
+ *
+ * **Parsed, not compared as a string.** `checked_at` is "RFC 3339, or null if
+ * it has never been checked" (`ipc/sources.ts`), and RFC 3339 admits an offset:
+ * `2026-08-25T13:00:00+02:00` is an hour *earlier* than `2026-08-25T12:30:00Z`
+ * and sorts after it lexically. Every stamp knobas has seen from the backend is
+ * `Z`, which is exactly what makes a string comparison the kind of shortcut
+ * that works until the day it does not.
+ *
+ * An unparseable stamp answers `null` — the same as never having been checked.
+ * A reading whose timestamp cannot be read is not evidence of being newer, and
+ * the safe direction for a value coming across the IPC bridge is to let the
+ * authoritative set win.
+ */
+function checkedAt(row: CredentialHealth): number | null {
+  if (!row.checked_at) return null;
+  const at = Date.parse(row.checked_at);
+  return Number.isNaN(at) ? null : at;
+}
+
+/**
+ * Whether `held` is a *strictly* newer reading than `incoming`.
+ *
+ * The whole of {@link Health.replace}'s per-row rule, in one place so the two
+ * doors into `replace` cannot disagree about it. *Strictly* newer, so every
+ * draw goes to the incoming set — the reasoning is on `replace`. A timestamped
+ * reading beats one with no timestamp, in either position.
+ */
+function isNewer(held: CredentialHealth, incoming: CredentialHealth): boolean {
+  const heldAt = checkedAt(held);
+  if (heldAt === null) return false;
+  const incomingAt = checkedAt(incoming);
+  return incomingAt === null || heldAt > incomingAt;
 }
 
 export function createHealth(ports?: HealthPorts): Health {
@@ -175,7 +262,12 @@ export function createHealth(ports?: HealthPorts): Health {
     patch: apply,
     replace(rows: CredentialHealth[]) {
       const by: Record<string, CredentialHealth> = {};
-      for (const row of rows) by[row.source_id] = row;
+      for (const row of rows) {
+        const held = state.by[row.source_id];
+        // Membership from `rows` either way — the row is written on every
+        // branch — and only *which reading* it carries is in question.
+        by[row.source_id] = held !== undefined && isNewer(held, row) ? held : row;
+      }
       state.by = by;
     },
     async reseed() {
@@ -205,7 +297,16 @@ export function createHealth(ports?: HealthPorts): Health {
 
       // Subscribed at shell start, long before the seed the shell fires when
       // the database is ready: an event that lands in between is delivered
-      // rather than lost, and the seed that follows is the newer reading.
+      // rather than lost.
+      //
+      // What follows used to be a hope about ordering — "the seed that follows
+      // is the newer reading" — and it was wrong for the window that matters:
+      // a `credential_health` read *already in flight* when the event lands
+      // answers from before it, and `replace` wrote that older reading back
+      // over the event. Since #148 it is a guarantee instead of a hope, and it
+      // is `replace`'s newest-wins rule that makes it one: whichever of the
+      // two readings the backend checked later is the one that stands, in
+      // whichever order they arrive here.
       void io
         .listen(EVENTS.sourceHealth, (event) => {
           if (live) apply(event.payload);
