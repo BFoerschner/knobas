@@ -28,7 +28,17 @@ export const JIRA_SCHEMA = {
     },
     projects: { type: "array", items: { type: "string" }, title: "Projects" },
     jql_filter: { type: "string", title: "JQL filter" },
-    username: { type: "string", title: "Username", description: "Basic auth only." },
+    // `["string", "null"]`, verbatim from the adapter: it is how every shipped
+    // adapter spells an optional string, and reading it as "not a string" is
+    // what drew this field as a JSON textarea. The description is the
+    // adapter's too — it is one half of #82 and worth having under a test.
+    username: {
+      type: ["string", "null"],
+      default: null,
+      title: "Username",
+      description:
+        "Your Jira account. Filled in by Test connection; used for @me and My items. Also the login name for user + password authentication.",
+    },
   },
   required: ["flavor"],
 } as const;
@@ -39,7 +49,12 @@ export const GITEA_SCHEMA = {
   properties: {
     owners: { type: "array", items: { type: "string" }, title: "Owners" },
     repos: { type: "array", items: { type: "string" }, title: "Repositories" },
-    username: { type: "string", title: "Username" },
+    username: {
+      type: ["string", "null"],
+      default: null,
+      title: "Username",
+      description: "Your Gitea account. Filled in by Test connection; used for @me filters.",
+    },
   },
 } as const;
 
@@ -55,6 +70,15 @@ export const TEAMCITY_SCHEMA = {
       maximum: 500,
       default: 100,
       title: "Builds per config",
+    },
+    // A plain `"string"`, unlike the other two: the third spelling of the one
+    // property the Add-source dialog fills in, so the fill is exercised
+    // against every shape an adapter really declares it in.
+    username: {
+      type: "string",
+      title: "Username",
+      description:
+        "Your TeamCity account. Filled in by Test connection; used for @me and My items. Also the login name for user + password authentication.",
     },
   },
 } as const;

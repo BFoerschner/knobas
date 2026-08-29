@@ -170,6 +170,52 @@
     }
   });
 
+  /**
+   * The config property an adapter puts its identity in, by convention.
+   *
+   * All three shipped adapters spell it `username` — and so must a fourth, or
+   * `@me`, *My items* and *Mine, untouched* have nothing to resolve against on
+   * that source. Keying on the property **name** is what keeps this dialog
+   * adapter-agnostic: it is a convention every adapter follows, not a table of
+   * what each one's config keys mean, and the schema descriptions state it
+   * where an adapter author will read it (#82).
+   */
+  const IDENTITY_FIELD = "username";
+
+  /**
+   * Put the account the source just reported into the identity field.
+   *
+   * `username` is the only source of the identity the three identity lists
+   * read, and author matching is case-sensitive by construction — so the
+   * account is written in the server's own spelling and never normalised.
+   * That is the whole advantage over retyping it: the dialog has just printed
+   * *"Connected as …"* on screen, and a reader copying it back by hand is one
+   * slip away from an identity that matches nothing.
+   *
+   * **Only when the field is empty.** A value already there was typed by
+   * somebody who meant it — a service account, or a login that is not the
+   * account the API reports — and a test run afterwards must not quietly
+   * replace it. The filled value lands in the generated form, visible and
+   * editable one *Back* away.
+   *
+   * An **absent** account is not a failure: a source whose API has no "who am
+   * I" endpoint is a working source (`ConnectionInfo::account` is optional by
+   * design), and nothing here assumes it is present. Nor is a missing
+   * `username` property — an adapter that declares none simply gets no fill.
+   */
+  function fillIdentity(account: string | null) {
+    if (account === null || account === "") return;
+    const field = configFields.fields.find((f) => f.key === IDENTITY_FIELD);
+    // A text control, or there is nothing a plain account string can be put
+    // into: an adapter that typed `username` as, say, a number is not one this
+    // convention covers, and guessing at its shape would write a config value
+    // it never asked for.
+    if (!field || field.control.kind !== "text") return;
+    const current = configValues[IDENTITY_FIELD];
+    if (typeof current === "string" && current.trim() !== "") return;
+    configValues[IDENTITY_FIELD] = account;
+  }
+
   async function test() {
     if (!chosen || !authKind) return;
     testing = true;
@@ -185,6 +231,9 @@
         config: validated.config,
         secret: { value: secret },
       });
+      // A refused credential reports no account worth keeping, and a source
+      // that cannot be saved has no config to fill in either.
+      if (report.ok) fillIdentity(report.account);
     } catch (cause) {
       report = {
         ok: false,

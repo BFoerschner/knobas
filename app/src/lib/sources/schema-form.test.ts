@@ -145,6 +145,7 @@ describe("defaultValues", () => {
       project_ids: [],
       build_type_ids: [],
       builds_per_config: 100,
+      username: "",
     });
   });
 });
