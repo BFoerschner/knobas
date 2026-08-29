@@ -618,7 +618,13 @@ pub fn rule(category: Category) -> Option<&'static Rule> {
 }
 
 /// Which shelf a read wants.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Serialized snake_case because it crosses the IPC boundary as a command
+/// argument: the inbox view and the snoozed panel are one read with one
+/// predicate, and asking for the shelf by name is what keeps them from
+/// becoming two statements that can disagree about what "snoozed" means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Shelf {
     /// What needs you now. This is the inbox.
     Stream,

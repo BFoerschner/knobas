@@ -27,6 +27,7 @@
 pub mod backup;
 pub mod commands;
 mod error;
+pub mod inbox;
 mod profile;
 pub mod sources;
 pub mod start_work;
@@ -196,6 +197,10 @@ pub fn run() {
             commands::entity::start_work_amend,
             commands::entity::follow_merges,
             commands::entity::submit_write,
+            commands::entity::inbox_items,
+            commands::entity::inbox_count,
+            commands::entity::snooze_inbox_item,
+            commands::entity::complete_inbox_item,
             commands::search::search,
             commands::search::launcher_home,
             commands::search::smart_lists,

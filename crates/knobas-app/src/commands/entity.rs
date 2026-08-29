@@ -1299,6 +1299,191 @@ pub async fn follow_merges<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Resul
     .await
 }
 
+// -- the inbox (issue #45) --------------------------------------------------
+//
+// Four commands, all here in the existing `entity` module: inbox items are
+// derived from entities and its two write commands act on them, and the
+// `commands/` + `ipc/` module layout is frozen -- no new module on either
+// side. There is deliberately **no fifth command that acts on a source**: an
+// inbox action that changes something at a source is a `WriteOp` through
+// `submit_write` above, which is #43's command over #42's queue, and the inbox
+// introduces no write path of its own.
+
+/// The identity behind `@me`, loaded the way search loads it.
+///
+/// `knobas_search::Vocabulary` is where "who am I" lives -- the union of every
+/// enabled source's configured username -- and the inbox is an identity
+/// feature, so it reads that and not a second mechanism. The kind catalog is
+/// the default one because the identity is the only field wanted here; loading
+/// it costs the same single query every search already makes.
+async fn identity_of(pool: &PgPool) -> Result<Vec<String>, IpcError> {
+    Ok(
+        knobas_search::Vocabulary::load(pool, knobas_search::KindCatalog::default())
+            .await
+            .map_err(IpcError::internal)?
+            .identity,
+    )
+}
+
+/// [`inbox_items`], against a pool and a clock.
+///
+/// # Errors
+///
+/// `internal` if the derivation, the identity read or the source listing
+/// fails.
+pub async fn inbox_items_inner(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    now: DateTime<Utc>,
+    shelf: knobas_core::inbox::Shelf,
+) -> Result<Vec<crate::inbox::InboxEntry>, IpcError> {
+    let identity = identity_of(pool).await?;
+    crate::inbox::stream(pool, registry, &identity, now, shelf).await
+}
+
+/// The inbox: one actionable stream, newest first.
+///
+/// `shelf` is `stream` -- what needs you now -- or `snoozed`, what you
+/// deferred and when it comes back. Both are the same derivation with the same
+/// predicate, asked for one shelf or the other.
+///
+/// Every entry carries the actions its source can really perform: an op the
+/// adapter does not declare is absent rather than offered and failing.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the
+/// database or the sync engine is still coming up, `internal` for a read
+/// failure.
+#[tauri::command]
+pub async fn inbox_items<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    shelf: knobas_core::inbox::Shelf,
+) -> Result<Vec<crate::inbox::InboxEntry>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    inbox_items_inner(&state.pool, state.registry.as_ref(), Utc::now(), shelf).await
+}
+
+/// How many items need you now -- the number the top strip shows.
+///
+/// **Snoozed items are not in it**, because the number means "needs me now";
+/// neither are items marked done. It is the stream's own statement, counted,
+/// so the badge cannot disagree with the view it opens.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the
+/// database is still coming up, `internal` for a read failure.
+#[tauri::command]
+pub async fn inbox_count(lifecycle: State<'_, Lifecycle>) -> Result<i64, IpcError> {
+    let pool = lifecycle.pool()?;
+    inbox_count_inner(&pool, Utc::now()).await
+}
+
+/// [`inbox_count`], against a pool and a clock.
+///
+/// # Errors
+///
+/// `internal` if the count or the identity read fails.
+pub async fn inbox_count_inner(pool: &PgPool, now: DateTime<Utc>) -> Result<i64, IpcError> {
+    let identity = identity_of(pool).await?;
+    knobas_core::inbox::count(pool, &identity, now)
+        .await
+        .map_err(IpcError::internal)
+}
+
+/// [`snooze_inbox_item`], against a pool and a clock.
+///
+/// # Errors
+///
+/// As [`snooze_inbox_item`].
+pub async fn snooze_inbox_item_inner(
+    pool: &PgPool,
+    now: DateTime<Utc>,
+    item_key: &str,
+    until: DateTime<Utc>,
+) -> Result<ActivityRow, IpcError> {
+    let identity = identity_of(pool).await?;
+    crate::inbox::answer(
+        pool,
+        &identity,
+        now,
+        item_key,
+        crate::inbox::Answer::Snooze(until),
+    )
+    .await
+}
+
+/// Not now -- come back on this date (#45, stories 13-15).
+///
+/// `until` is an absolute moment, because the presets (*tomorrow*, *next
+/// Monday*, *after the credential expires*) are the caller's arithmetic and a
+/// date picker is the general case of the same argument. Snoozing something
+/// already snoozed moves its date.
+///
+/// Refuses an item that is on neither shelf: the key comes from a list the
+/// webview has been holding, and an answer to something since resolved at the
+/// source would write a durable row about work that no longer exists.
+///
+/// Writes one activity line and emits `activity:new`, because *every* inbox
+/// action is recorded.
+///
+/// # Errors
+///
+/// `not_found` for an item on neither shelf,
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// `internal` for a write failure.
+#[tauri::command]
+pub async fn snooze_inbox_item<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    item_key: String,
+    until: DateTime<Utc>,
+) -> Result<(), IpcError> {
+    let pool = lifecycle.pool()?;
+    let written = snooze_inbox_item_inner(&pool, Utc::now(), &item_key, until).await?;
+    announce(&app, written);
+    Ok(())
+}
+
+/// [`complete_inbox_item`], against a pool and a clock.
+///
+/// # Errors
+///
+/// As [`complete_inbox_item`].
+pub async fn complete_inbox_item_inner(
+    pool: &PgPool,
+    now: DateTime<Utc>,
+    item_key: &str,
+) -> Result<ActivityRow, IpcError> {
+    let identity = identity_of(pool).await?;
+    crate::inbox::answer(pool, &identity, now, item_key, crate::inbox::Answer::Done).await
+}
+
+/// I handled this (#45, story 16).
+///
+/// The item leaves the stream, and **comes back if its subject moves again** --
+/// *done* is stored as the moment it was answered and compared against the
+/// item's own, so marking a mention done hides it until somebody says
+/// something new rather than muting the ticket for ever.
+///
+/// Writes one activity line and emits `activity:new`.
+///
+/// # Errors
+///
+/// As [`snooze_inbox_item`].
+#[tauri::command]
+pub async fn complete_inbox_item<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    item_key: String,
+) -> Result<(), IpcError> {
+    let pool = lifecycle.pool()?;
+    let written = complete_inbox_item_inner(&pool, Utc::now(), &item_key).await?;
+    announce(&app, written);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
