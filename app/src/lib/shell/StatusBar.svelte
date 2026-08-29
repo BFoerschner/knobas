@@ -16,8 +16,11 @@
     earlier.
   * **Latest change** is seeded from `recentActivity(1)`, moved by
     `activity:new`, coalesced.
-  * **Pending writes** is a constant `0`, and honestly so: the write queue is
-    M2, so there is nothing that could be pending.
+  * **Pending writes** is the write queue (issue #42), and it is a *button*:
+    the number is the only place a held write announces itself, so it has to be
+    the way in. Two numbers, never one — "3 waiting" that quietly included a
+    write needing a decision would be the badge telling the reader that a
+    conflict resolves itself.
   * **The user** is omitted. There is no identity model until M2, and an
     invented username is worse than an empty slot.
 -->
@@ -32,6 +35,8 @@
   import type { Lifecycle } from "./lifecycle.svelte";
   import { createLatestChange } from "./latest-change.svelte";
   import { ago } from "./time";
+  import WriteQueue from "./WriteQueue.svelte";
+  import { createWriteQueue, decisionsIn } from "./write-queue.svelte";
 
   let {
     lifecycle,
@@ -43,6 +48,10 @@
   } = $props();
 
   const latest = createLatestChange();
+  const queue = createWriteQueue();
+
+  /** Whether the queue panel is open. */
+  let queueOpen = $state(false);
 
   // svelte-ignore state_referenced_locally
   // Read once: a fixed clock is a test's decision and never changes after
@@ -188,7 +197,13 @@
     // The listener first, then the seed: a line that arrives between the two
     // is then either delivered by the event or already in the seed, whereas
     // the other order has a window in which it is neither.
-    void listen<ActivityRow>(EVENTS.activityNew, (event) => latest.push(event.payload))
+    // The queue moves on exactly the same signal, because every one of its
+    // transitions writes an activity line -- which is why it needs no event of
+    // its own (`commands::sources::pending_writes` says so in place).
+    void listen<ActivityRow>(EVENTS.activityNew, (event) => {
+      latest.push(event.payload);
+      void queue.refresh();
+    })
       .then((unlisten) => {
         // Unmounted while `listen` was in flight: `listen` is itself an
         // `invoke`, so it resolves a tick or more later.
@@ -199,6 +214,8 @@
         // A failed subscription is not a failed window: the seed below still
         // renders, and the line simply stops moving.
       });
+
+    void queue.refresh();
 
     void recentActivity(1)
       .then((rows) => {
@@ -266,15 +283,29 @@
 
   <span class="spacer"></span>
   <!--
-    A real zero, not a placeholder: M1 has no write queue at all, so nothing
-    can be pending. It renders so the slot exists where M2 will put a number
-    that moves.
+    A button, because the badge is the only place a held write announces
+    itself and there has to be a way in from it. The decisions are a separate
+    span with its own colour rather than a larger total: story 18 is that a
+    write needing an answer is distinguishable *at a glance*, and one number
+    covering both is precisely the thing that hides it.
   -->
-  <span class="pend" title="Queued write-backs — the write queue arrives in M2">
-    pending writes 0
-  </span>
+  <button
+    class="pend"
+    class:on={decisionsIn(queue.counts) > 0}
+    onclick={() => (queueOpen = true)}
+    title="Writes knobas still owes a source. Open to see what is queued."
+  >
+    pending writes {queue.counts.pending}
+    {#if decisionsIn(queue.counts) > 0}
+      <span class="decide">· {decisionsIn(queue.counts)} need you</span>
+    {/if}
+  </button>
   <span>{clock}</span>
 </footer>
+
+{#if queueOpen}
+  <WriteQueue {queue} {now} onclose={() => (queueOpen = false)} />
+{/if}
 
 <style>
   .latest {
@@ -292,5 +323,20 @@
   .latest b {
     font-weight: 500;
     color: var(--muted);
+  }
+
+  /*
+    A button that reads as the rest of the bar: the status bar is a row of
+    readings, and one of them being a control must not make it look like a
+    toolbar. `app.css`'s own reset already gives a button `font: inherit`,
+    `color: inherit` and no border, so only the layout is set here -- and the
+    colour is left alone so that `.statusbar .pend.on`, the sheet's existing
+    amber state, is what lifts the whole reading when a decision is owed.
+  */
+  .pend {
+    display: inline-flex;
+    gap: 5px;
+    padding: 0;
+    cursor: pointer;
   }
 </style>

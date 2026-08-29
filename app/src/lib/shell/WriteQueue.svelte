@@ -1,0 +1,371 @@
+<!--
+  The write queue, and the conflict surface (issue #42, stories 3 and 10-18).
+
+  Two jobs, and the second is the reason the first exists.
+
+  **What knobas still owes.** A list, not a count: every write that has not
+  reached its source, what it is, what it targets, when it was made, and why it
+  has not gone.
+
+  **What needs an answer.** A write whose target changed after it was queued is
+  *held*, and knobas will not send it until the reader chooses. Those rows are
+  a separate section at the top with their own heading, their own colour and
+  their own verb — not a differently-shaded member of one list. Story 18 is
+  "distinguishable at a glance", and a badge on row nine of twelve is not that.
+
+  **There is no timeout and there is nothing here that could become one.** No
+  auto-apply, no bulk "send everything", no timer. *Flush now* asks the queue
+  to retry what is merely waiting; it cannot release a held write, and the
+  backend would not offer it one. `write-queue.test.svelte.ts` runs the clock
+  forward over a held row and asserts it is untouched.
+-->
+<script lang="ts">
+  import type { QueuedWrite } from "../ipc/sources";
+  import Modal from "./Modal.svelte";
+  import { ago } from "./time";
+  import {
+    demandOf,
+    editableBody,
+    readSnapshot,
+    withBody,
+    type WriteQueue,
+  } from "./write-queue.svelte";
+
+  let {
+    queue,
+    now = new Date(),
+    onclose,
+  }: {
+    queue: WriteQueue;
+    /** Injectable clock, so "3 minutes ago" is testable rather than waited for. */
+    now?: Date;
+    onclose: () => void;
+  } = $props();
+
+  /** The row whose edit box is open, if any. One at a time. */
+  let editing = $state<number | null>(null);
+  let draft = $state("");
+
+  const decisions = $derived(queue.rows.filter((row) => demandOf(row.state) === "decide"));
+  const waiting = $derived(queue.rows.filter((row) => demandOf(row.state) === "waiting"));
+
+  /** Why a pending write has not gone, in the reader's words rather than the wire's. */
+  function waitingBecause(row: QueuedWrite): string {
+    if (row.attempted_at === null) return "not tried yet";
+    switch (row.wait_reason) {
+      case "unauthorized":
+        return "the credential was rejected";
+      case "unreachable":
+        return "the server did not answer";
+      default:
+        return "waiting";
+    }
+  }
+
+  function openEditor(row: QueuedWrite) {
+    editing = row.id;
+    draft = editableBody(row.payload) ?? "";
+  }
+
+  async function save(row: QueuedWrite) {
+    const payload = withBody(row.payload, draft);
+    if (payload === null) return;
+    await queue.amend(row.id, payload);
+    editing = null;
+  }
+</script>
+
+<Modal
+  title="Pending writes"
+  subtitle={queue.rows.length === 0
+    ? "nothing owed"
+    : `${queue.counts.pending} waiting · ${queue.counts.held + queue.counts.refused} need you`}
+  wide
+  {onclose}
+>
+  {#snippet body()}
+    {#if queue.error}
+      <p class="wq-error" role="alert">{queue.error}</p>
+    {/if}
+
+    {#if queue.rows.length === 0}
+      <div class="empty">
+        Nothing is queued. Every edit you have made has reached its source.
+      </div>
+    {/if}
+
+    {#if decisions.length > 0}
+      <section class="wq-sec">
+        <h3 class="wq-h decide">
+          Needs your decision
+          <span class="lab">{decisions.length}</span>
+        </h3>
+        <p class="wq-note">
+          knobas is holding these. Nothing sends them, and nothing discards them, until you say
+          so.
+        </p>
+        {#each decisions as row (row.id)}
+          {@const before = readSnapshot(row.target_snapshot)}
+          {@const nowSide = readSnapshot(row.held_snapshot)}
+          {@const body = editableBody(row.payload)}
+          <article class="wq-row {row.state}">
+            <header class="wq-row-h">
+              <b class="wq-op">{row.op}</b>
+              <span class="wq-target">{row.entity_id}</span>
+              <span class="wq-when">queued {ago(row.queued_at, now)}</span>
+            </header>
+
+            {#if row.state === "held"}
+              <p class="wq-why">The target changed after you queued this.</p>
+              <div class="grid2">
+                <div>
+                  <span class="wq-side">When you queued it</span>
+                  {#if before.raw !== null}
+                    <pre class="log">{before.raw}</pre>
+                  {:else if before.live}
+                    <pre class="log">{before.text ?? ""}</pre>
+                  {:else}
+                    <p class="wq-gone">not in the mirror</p>
+                  {/if}
+                </div>
+                <div>
+                  <span class="wq-side">As it stands now</span>
+                  {#if nowSide.raw !== null}
+                    <pre class="log">{nowSide.raw}</pre>
+                  {:else if nowSide.live}
+                    <pre class="log">{nowSide.text ?? ""}</pre>
+                  {:else}
+                    <p class="wq-gone">the source withdrew it</p>
+                  {/if}
+                </div>
+              </div>
+            {:else}
+              <p class="wq-why">
+                The source refused this write. It will not be retried.
+              </p>
+              {#if row.detail}<pre class="log">{row.detail}</pre>{/if}
+            {/if}
+
+            {#if editing === row.id}
+              <div class="wq-edit">
+                <span class="lab" id="wq-edit-label-{row.id}">Your write</span>
+                <textarea
+                  class="inp"
+                  aria-labelledby="wq-edit-label-{row.id}"
+                  bind:value={draft}
+                  rows="4"
+                ></textarea>
+              </div>
+            {:else if body !== null}
+              <pre class="log wq-mine">{body}</pre>
+            {/if}
+
+            <footer class="wq-acts">
+              {#if editing === row.id}
+                <button class="btn pri" disabled={queue.busy} onclick={() => save(row)}>
+                  Send this instead
+                </button>
+                <button class="btn ghost" onclick={() => (editing = null)}>Cancel</button>
+              {:else}
+                {#if row.state === "held"}
+                  <button class="btn" disabled={queue.busy} onclick={() => queue.apply(row.id)}>
+                    Send mine anyway
+                  </button>
+                {/if}
+                {#if body !== null}
+                  <button class="btn" disabled={queue.busy} onclick={() => openEditor(row)}>
+                    Edit…
+                  </button>
+                {/if}
+                <button
+                  class="btn danger"
+                  disabled={queue.busy}
+                  onclick={() => queue.discard(row.id)}
+                >
+                  Discard
+                </button>
+              {/if}
+            </footer>
+          </article>
+        {/each}
+      </section>
+    {/if}
+
+    {#if waiting.length > 0}
+      <section class="wq-sec">
+        <h3 class="wq-h">
+          Waiting
+          <span class="lab">{waiting.length}</span>
+        </h3>
+        <p class="wq-note">These go on their own as soon as their source can take them.</p>
+        {#each waiting as row (row.id)}
+          {@const body = editableBody(row.payload)}
+          <article class="wq-row pending">
+            <header class="wq-row-h">
+              <b class="wq-op">{row.op}</b>
+              <span class="wq-target">{row.entity_id}</span>
+              <span class="wq-when">queued {ago(row.queued_at, now)}</span>
+            </header>
+            <p class="wq-why">{waitingBecause(row)}</p>
+            {#if body !== null}<pre class="log wq-mine">{body}</pre>{/if}
+            <footer class="wq-acts">
+              <button class="btn danger" disabled={queue.busy} onclick={() => queue.discard(row.id)}>
+                Cancel
+              </button>
+            </footer>
+          </article>
+        {/each}
+      </section>
+    {/if}
+  {/snippet}
+
+  {#snippet footer()}
+    <!--
+      *Flush now* is impatience, not a decision: the scheduler already retries
+      on its own tick. It is deliberately incapable of releasing a held write,
+      and the label says which rows it moves so that pressing it is never
+      mistaken for answering a conflict.
+    -->
+    <span class="lab">Retries the waiting writes. Held writes are untouched.</span>
+    <span class="spacer"></span>
+    <button class="btn" disabled={queue.busy} onclick={() => queue.flush(null)}>Flush now</button>
+    <button class="btn ghost" onclick={onclose}>Close</button>
+  {/snippet}
+</Modal>
+
+<style>
+  .wq-error {
+    margin-bottom: 10px;
+    color: var(--fail);
+    font-size: 12px;
+  }
+
+  .wq-sec + .wq-sec {
+    margin-top: 18px;
+  }
+
+  .wq-h {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font: 500 13px var(--sans);
+    color: var(--text);
+  }
+
+  /*
+    The decisions heading carries the colour, not just the rows under it: the
+    reader's eye reaches the heading first, and it is the heading that has to
+    say "this section is different in kind".
+  */
+  .wq-h.decide {
+    color: var(--amber);
+  }
+
+  .wq-note {
+    margin: 2px 0 8px;
+    color: var(--muted);
+    font-size: 11.5px;
+  }
+
+  .wq-row {
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    border: 1px solid var(--hair);
+    border-left-width: 3px;
+    border-radius: 2px;
+    background: var(--bg);
+  }
+
+  /*
+    Three states, three left edges. A held write and a merely pending one are
+    not the same thing waiting different lengths of time -- one needs the
+    reader and the other needs the network -- so they never share an edge.
+  */
+  .wq-row.held {
+    border-left-color: var(--amber);
+  }
+
+  .wq-row.refused {
+    border-left-color: var(--fail);
+  }
+
+  .wq-row.pending {
+    border-left-color: var(--hair2);
+  }
+
+  .wq-row-h {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 12px;
+  }
+
+  .wq-op {
+    font: 500 11px var(--mono);
+    color: var(--text);
+  }
+
+  .wq-target {
+    font: 400 11.5px var(--mono);
+    color: var(--link);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .wq-when {
+    margin-left: auto;
+    color: var(--faint);
+    font: 400 11px var(--mono);
+    white-space: nowrap;
+  }
+
+  .wq-why {
+    margin: 6px 0;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  /* `.grid2` is the sheet's own two-column pair; only the gap below it is ours. */
+  .grid2 {
+    margin-bottom: 8px;
+  }
+
+  .wq-side {
+    display: block;
+    margin-bottom: 3px;
+    color: var(--faint);
+    font: 400 11px var(--mono);
+  }
+
+  .wq-gone {
+    margin: 0;
+    padding: 8px 10px;
+    border: 1px dashed var(--hair2);
+    border-radius: 2px;
+    color: var(--faint);
+    font: 400 11.5px var(--mono);
+  }
+
+  .wq-mine {
+    border-color: var(--hair2);
+    color: var(--text);
+  }
+
+  .wq-edit {
+    display: block;
+    margin: 6px 0;
+  }
+
+  .wq-edit .lab {
+    display: block;
+    margin-bottom: 3px;
+  }
+
+  .wq-acts {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+  }
+</style>

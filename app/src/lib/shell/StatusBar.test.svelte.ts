@@ -37,12 +37,28 @@ let stats: DbStats | null = {
 };
 let statuses: SourceSyncStatus[] = [];
 
+/** The write queue the badge reads. */
+let queueCounts = { pending: 0, held: 0, refused: 0 };
+const queueCalls: string[] = [];
+
 vi.mock("../ipc/sources", () => ({
   dbStats: () => {
     statsCalls.push(1);
     return stats ? Promise.resolve(stats) : Promise.reject({ code: "not_ready", message: "starting", source_id: null });
   },
   syncStatus: () => Promise.resolve(statuses),
+  writeQueueCounts: () => {
+    queueCalls.push("write_queue_counts");
+    return Promise.resolve(queueCounts);
+  },
+  pendingWrites: () => {
+    queueCalls.push("pending_writes");
+    return Promise.resolve([]);
+  },
+  flushWrites: () => Promise.resolve(),
+  applyHeldWrite: () => Promise.resolve(),
+  discardWrite: () => Promise.resolve(),
+  amendWrite: () => Promise.resolve(),
 }));
 
 /** The `listen` subscriptions, and whether each was torn down. */
@@ -102,6 +118,8 @@ beforeEach(() => {
   resolveListen = [];
   activity = [];
   statuses = [];
+  queueCalls.length = 0;
+  queueCounts = { pending: 0, held: 0, refused: 0 };
   stats = {
     db_bytes: 222_298_112,
     entity_count: 128,
@@ -196,13 +214,18 @@ test("a live subscription is cancelled on teardown", async () => {
  * A `0` there would be a claim — "this knobas holds nothing" — that nobody
  * checked, and the reader has no way to tell it apart from a real zero.
  */
-test("readings it has not got yet are dashes, and pending writes is a real zero", () => {
+test("readings it has not got yet are dashes, and an empty queue is a real zero", () => {
   const screen = render(true);
 
   // Before `db_stats` answers. A `0` here would be a claim — "this knobas
   // holds nothing" — that nobody checked.
   expect(screen.text()).toContain("postgres knobas · —");
   expect(screen.text()).toContain("— entities · — items");
+  // ...but `pending writes 0` *is* a checked zero, and always was: the queue
+  // read answers from knobas' own database rather than from a source, so
+  // "nothing owed" is a fact rather than a question the bar has not asked. It
+  // was a hardcoded placeholder until issue #42; it is now the real count, and
+  // it still reads 0 because this fixture's queue is empty.
   expect(screen.text()).toContain("pending writes 0");
   // No identity model until M2, so no user slot at all.
   expect(screen.text()).not.toContain("mara");
@@ -321,5 +344,81 @@ test("an empty log leaves the latest-change slot out", async () => {
 
   expect(screen.target.querySelector(".latest")).toBeNull();
 
+  screen.done();
+});
+
+
+// -- the write queue badge (issue #42, stories 17 and 18) ---------------------
+
+/**
+ * The badge is the only place a held write announces itself, so it says the
+ * two numbers separately.
+ *
+ * A single total is the failure this test exists to prevent: "3 pending" that
+ * quietly included a write needing an answer tells the reader that a conflict
+ * is something which resolves itself. The word is deliberate too -- "need you"
+ * is a sentence about them, where a coloured dot is a decoration.
+ */
+test("the badge counts what needs a decision apart from what needs patience", async () => {
+  queueCounts = { pending: 2, held: 1, refused: 1 };
+  const screen = render(true);
+
+  await vi.waitFor(() => expect(screen.text()).toContain("need you"));
+  flushSync();
+  expect(screen.text()).toContain("pending writes 2");
+  expect(screen.text()).toContain("2 need you");
+
+  screen.done();
+});
+
+/** With nothing owed it is a plain reading again, with no decision to claim. */
+test("with nothing to decide the badge says only how many are waiting", async () => {
+  queueCounts = { pending: 1, held: 0, refused: 0 };
+  const screen = render(true);
+
+  await vi.waitFor(() => expect(screen.text()).toContain("pending writes 1"));
+  expect(screen.text()).not.toContain("need you");
+
+  screen.done();
+});
+
+/** Story 3's way in: the number is the door to the list. */
+test("the badge opens the queue panel", async () => {
+  queueCounts = { pending: 0, held: 1, refused: 0 };
+  const screen = render(true);
+  await vi.waitFor(() => expect(screen.text()).toContain("need you"));
+
+  const badge = [...screen.target.querySelectorAll("button")].find((node) =>
+    (node.textContent ?? "").includes("pending writes"),
+  );
+  expect(badge, "the count has to be reachable, or a held write is invisible").toBeDefined();
+  badge!.click();
+  flushSync();
+
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Pending writes");
+  screen.done();
+});
+
+/**
+ * The queue moves on `activity:new`, because every one of its transitions
+ * writes an activity line -- which is why it needs no event of its own.
+ */
+test("an activity line re-reads the queue", async () => {
+  const screen = render(true);
+  resolveListen.forEach((resolve) => resolve());
+  await vi.waitFor(() => expect(subscription("activity:new")).toBeDefined());
+  await vi.waitFor(() => expect(queueCalls).toContain("write_queue_counts"));
+  queueCalls.length = 0;
+
+  subscription("activity:new")?.deliver({
+    id: 11,
+    at: "2026-08-25T12:00:00Z",
+    actor: "user",
+    verb: "held",
+    entity_id: "mock:PAY-231",
+    detail: {},
+  });
+
+  await vi.waitFor(() => expect(queueCalls).toContain("write_queue_counts"));
   screen.done();
 });
