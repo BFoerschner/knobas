@@ -500,3 +500,109 @@ async fn a_kind_that_emitted_nothing_is_not_swept_even_when_another_kind_did() {
         assert_eq!(live_count(&pool, &id).await, 3, "round {round}");
     }
 }
+
+/// **A note is not swept, and this test is here to fail loudly if it ever is.**
+///
+/// The sweep is the one way notes could be destroyed wholesale, and they are
+/// the only content knobas holds that no source can hand back. ADR-0003's
+/// tombstone trap is the precedent: absence proves deletion only where the run
+/// really returns everything, and a kind that *no run emits at all* is absent
+/// from every one of them.
+///
+/// So "notes are not in the sweep's kind list" is not the guarantee. The
+/// guarantee is that the sweep cannot reach a note **at all**: its statement is
+/// driven from `sync.item`, and migration `0006`'s `item_entity_reserved_chk`
+/// forbids any `sync.item` row from naming an entity in the `note:` namespace.
+/// What a descriptor declares, what the kind list holds and what an adapter
+/// emits are all beside the point.
+///
+/// Non-vacuous by construction: the same run is asserted to have swept
+/// something. A sweep that did not fire would prove nothing about a note that
+/// survived it.
+#[tokio::test]
+async fn a_full_sync_that_sweeps_cannot_reach_a_note() {
+    let pool = pool().await;
+    let id = unique();
+    let (src, keys) = source(&id, &["A-1", "A-2"]);
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+
+    // A note about the item that is *about to be* tombstoned, so this covers
+    // the case that matters most: the note is not merely elsewhere, it is
+    // attached to the very row the sweep is reconciling.
+    let doomed = format!("{id}:A-2");
+    let note = knobas_core::note::create(
+        &pool,
+        "Retry runbook",
+        &format!("what to do about [[{doomed}]]"),
+        "user",
+    )
+    .await
+    .unwrap();
+    let note_id = knobas_core::entity::EntityRef::parse(&note.id).unwrap();
+    assert_eq!(
+        knobas_core::link::entries_of(&pool, &note_id).await.unwrap().len(),
+        1
+    );
+
+    // Upstream hard-deletes A-2.
+    *keys.lock().unwrap() = tickets(&["A-1"]);
+    a_moment_passes().await;
+    let second = knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    assert_eq!(
+        second.swept, 1,
+        "the sweep must actually have fired, or this test asserts nothing"
+    );
+    assert!(deleted_at(&pool, &doomed).await.is_some());
+
+    // The note itself: live address, body intact.
+    assert!(
+        deleted_at(&pool, &note.id).await.is_none(),
+        "a note is not the sweep's to tombstone"
+    );
+    assert_eq!(
+        knobas_core::note::get(&pool, &note_id)
+            .await
+            .unwrap()
+            .map(|row| row.body_md),
+        Some(format!("what to do about [[{doomed}]]"))
+    );
+
+    // And its `[[ref]]` still resolves -- to a target now marked withdrawn,
+    // which is the whole reason the resolution reads `knobas.entity` (§5a).
+    let refs = knobas_core::note::refs_of(&pool, &note_id).await.unwrap();
+    assert_eq!(refs.len(), 1);
+    let target = refs[0].target.as_ref().expect("a swept target still resolves");
+    assert!(target.deleted_at.is_some(), "and is marked withdrawn");
+}
+
+/// A kind knobas owns is not a source's to mirror, whatever its descriptor
+/// claims.
+///
+/// The refusal is the sibling of the namespace guard beside it, and it is a
+/// *second* check rather than a widening of that one: the namespace guard can
+/// only compare an item against the source id it was handed, so a source
+/// legitimately called `shrinking` passes it while emitting `shrinking:x` of
+/// kind `note`. Such a row is not a sweep hazard -- `0006` closes that on the
+/// id -- but it is a mirrored row sitting in the launcher's note group and in
+/// `type:note` that no note command can read, edit or delete.
+#[tokio::test]
+async fn a_source_may_not_mirror_a_kind_knobas_owns() {
+    let pool = pool().await;
+    let id = unique();
+    let (src, _keys) = source_of(&id, &[("note", true)], &[("note", "N-1")]);
+
+    let refused = knobas_sync::run_once(&pool, &src, None).await.unwrap_err();
+    let said = refused.to_string();
+    assert!(
+        said.contains("knobas owns"),
+        "the refusal has to say why: {said}"
+    );
+
+    // The run is rolled back whole, so nothing of it reached either table.
+    let (rows,): (i64,) = sqlx::query_as("select count(*) from knobas.entity where id = $1")
+        .bind(format!("{id}:N-1"))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 0);
+}

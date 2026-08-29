@@ -758,3 +758,189 @@ async fn the_write_queue_constrains_its_states_and_reasons() {
         "a held write may not also claim to be waiting on a source"
     );
 }
+
+/// The namespaces `item_entity_reserved_chk` (migration 0006) refuses.
+///
+/// Spelled out rather than read off `knobas_core::entity::RESERVED_NAMESPACES`,
+/// for the reason [`ORIGINS`] is: this crate is below that one, and the point
+/// of the pin is that widening the list takes a migration. The other half --
+/// the Rust list walked against the migration text -- is
+/// `knobas_core::entity`'s own test.
+const RESERVED_NAMESPACES: [&str; 5] = ["note", "ctx", "asset", "route", "monitor"];
+
+/// **The floor under "a note is never swept".**
+///
+/// The sweep tombstones `knobas.entity` rows *through* `sync.item`
+/// (`knobas_sync::SWEEP`: `update knobas.entity e ... from sync.item i where
+/// i.entity_id = e.id`). So the question "can a note be swept" reduces to "can
+/// a mirror row name a note", and this is where that is answered: it cannot,
+/// by a CHECK constraint, for every namespace knobas keeps for itself.
+///
+/// Enforced rather than merely written, and both directions: a `note:` id is
+/// refused and an ordinary source id is not, or the constraint could be
+/// refusing everything and every assertion above would still pass.
+#[tokio::test]
+async fn the_mirror_can_never_name_an_entity_knobas_owns() {
+    let pool = &knobas_db::test_util::test_pool().await;
+    migrate::run(pool).await.unwrap();
+    let run = uuid::Uuid::new_v4();
+
+    for namespace in RESERVED_NAMESPACES {
+        let id = format!("{namespace}:owned-{run}");
+        // The entity itself is knobas' to write -- that is what an owned kind
+        // *is*. Only the mirror row is refused.
+        sqlx::query("insert into knobas.entity (id, kind) values ($1, $2)")
+            .bind(&id)
+            .bind(namespace)
+            .execute(pool)
+            .await
+            .unwrap();
+
+        let refused = sqlx::query(
+            "insert into sync.item (entity_id, source_id, kind, payload)
+             values ($1, 'jira', 'ticket', '{}'::jsonb)",
+        )
+        .bind(&id)
+        .execute(pool)
+        .await
+        .unwrap_err();
+        assert_eq!(
+            refused.as_database_error().and_then(|e| e.code()).as_deref(),
+            Some("23514"),
+            "a mirror row naming {id} must be refused by the check constraint"
+        );
+
+        // Case-insensitively, because `is_reserved_namespace` is: an id
+        // written `NOTE:` addresses the same namespace to every human.
+        let shouting = format!("{}:owned-{run}", namespace.to_uppercase());
+        sqlx::query("insert into knobas.entity (id, kind) values ($1, $2)")
+            .bind(&shouting)
+            .bind(namespace)
+            .execute(pool)
+            .await
+            .unwrap();
+        let refused = sqlx::query(
+            "insert into sync.item (entity_id, source_id, kind, payload)
+             values ($1, 'jira', 'ticket', '{}'::jsonb)",
+        )
+        .bind(&shouting)
+        .execute(pool)
+        .await
+        .unwrap_err();
+        assert_eq!(
+            refused.as_database_error().and_then(|e| e.code()).as_deref(),
+            Some("23514"),
+            "{shouting} must be refused too"
+        );
+    }
+
+    // The other direction: an ordinary source's id is still perfectly writable,
+    // or the constraint would be refusing the mirror itself.
+    let ordinary = format!("jira:PAY-{run}");
+    sqlx::query("insert into knobas.entity (id, kind) values ($1, 'ticket')")
+        .bind(&ordinary)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, payload)
+         values ($1, 'jira', 'ticket', '{}'::jsonb)",
+    )
+    .bind(&ordinary)
+    .execute(pool)
+    .await
+    .unwrap();
+    // A namespace that merely *starts like* a reserved one is not reserved:
+    // `notebook:` is somebody's source, not knobas' notes.
+    let lookalike = format!("notebook:PAY-{run}");
+    sqlx::query("insert into knobas.entity (id, kind) values ($1, 'ticket')")
+        .bind(&lookalike)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, payload)
+         values ($1, 'notebook', 'ticket', '{}'::jsonb)",
+    )
+    .bind(&lookalike)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    // Read from the live catalog rather than from the migration file: what this
+    // database enforces is what an existing installation got.
+    let (definition,): (String,) = sqlx::query_as(
+        "select pg_get_constraintdef(oid) from pg_constraint
+          where conname = 'item_entity_reserved_chk'
+            and conrelid = 'sync.item'::regclass",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    for namespace in RESERVED_NAMESPACES {
+        assert!(
+            definition.contains(namespace),
+            "{namespace:?} missing from {definition}"
+        );
+    }
+}
+
+/// A note is an entity, and `0006` is what makes that a fact rather than a
+/// convention.
+///
+/// Both halves matter. The foreign key is what lets a `[[ref]]` be an ordinary
+/// link row -- `knobas.link`'s two endpoints reference `knobas.entity(id)`, so
+/// a note with no entity row is a note nothing can link to or from. The
+/// namespace CHECK is link 2 of the sweep-safety chain: it is what makes
+/// "a note's id starts with `note:`" true of every row rather than of every row
+/// the store happened to write.
+#[tokio::test]
+async fn a_note_row_needs_its_entity_and_lives_in_the_note_namespace() {
+    let pool = &knobas_db::test_util::test_pool().await;
+    migrate::run(pool).await.unwrap();
+    let run = uuid::Uuid::new_v4();
+
+    let orphan = format!("note:orphan-{run}");
+    let refused = sqlx::query("insert into knobas.note (id, title) values ($1, 'no entity')")
+        .bind(&orphan)
+        .execute(pool)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        refused.as_database_error().and_then(|e| e.code()).as_deref(),
+        Some("23503"),
+        "a note with no entity row is a note nothing can link to"
+    );
+
+    // An id outside the `note:` namespace is refused even with an entity row
+    // behind it -- the CHECK is on the note, not on what happens to exist.
+    let elsewhere = format!("jira:PAY-{run}");
+    sqlx::query("insert into knobas.entity (id, kind) values ($1, 'ticket')")
+        .bind(&elsewhere)
+        .execute(pool)
+        .await
+        .unwrap();
+    let refused = sqlx::query("insert into knobas.note (id, title) values ($1, 'misfiled')")
+        .bind(&elsewhere)
+        .execute(pool)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        refused.as_database_error().and_then(|e| e.code()).as_deref(),
+        Some("23514"),
+        "a note's id is in the namespace knobas keeps for notes"
+    );
+
+    // And the pair that is right goes in.
+    let good = format!("note:{run}");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'note', 'Runbook')")
+        .bind(&good)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("insert into knobas.note (id, title, body_md) values ($1, 'Runbook', 'body')")
+        .bind(&good)
+        .execute(pool)
+        .await
+        .unwrap();
+}
