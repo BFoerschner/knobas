@@ -148,9 +148,9 @@ async function drain() {
 
 /**
  * Every test in this file, not only the one that names it: a rejection nobody
- * caught fails the run without failing an assertion, so the run reports "21
- * passed" and exits 1. Asserting it here attributes it to the test that caused
- * it.
+ * caught fails the run without failing an assertion, so the run reports every
+ * test passing and exits 1 anyway. Asserting it here attributes it to the test
+ * that caused it.
  */
 afterEach(async () => {
   await drain();
@@ -199,7 +199,9 @@ test("a knobas that has never exported says so", async () => {
   await settle();
 
   expect(text()).toMatch(/no backup|never/i);
-  expect(text()).not.toContain("—  ·");
+  // Not a *Last export* line with nothing in it: an em dash where a file name
+  // belongs reads as a backup that happened and cannot be named.
+  expect(text()).not.toContain("Last export");
 });
 
 /**
