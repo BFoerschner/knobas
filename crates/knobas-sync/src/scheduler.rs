@@ -536,26 +536,6 @@ pub async fn settle(deps: &SchedulerDeps, source_id: &str, run_id: i64, result: 
     emit_state(deps, source_id).await;
 }
 
-/// Re-apply a deleted source's purge, now that the run which was in flight when
-/// it was deleted has committed (#127).
-///
-/// The same statement `delete_source`'s own purge runs -- [`config::purge_items`]
-/// is the one copy of it, so the two cannot drift apart on what a tombstone
-/// means.
-///
-/// Best-effort like everything else after a run's own transaction: a purge that
-/// fails is warned about rather than raised, because there is nobody left to
-/// raise it to. `delete_source` returned long ago. It is also not retried, so
-/// a failure here is the one way the guarantee `delete_source` documents can
-/// come up short; the log line is what a reader chasing that symptom finds.
-///
-/// **Not `sweep`**, though that is what #127's ruling calls it in prose: this
-/// crate already uses that word for the glossary's Sweep -- the reconcile pass
-/// that tombstones what a full sync no longer emitted (`SyncReport::swept`,
-/// `run_locked`'s `sweep_kinds`) -- and `CONTEXT.md`'s entry for it names
-/// "purge" as the word to avoid *for that concept*. Two meanings of `sweep` in
-/// one crate, one of them destructive, is the reading mistake worth spending a
-/// longer name to remove.
 /// Whether a source holds `source_id` **now**, as [`Scheduler::forget_source`]
 /// asks it immediately before arming or applying a purge (#154).
 ///
@@ -601,6 +581,26 @@ fn a_source_holds_the_id_again(found: &Result<bool, sqlx::Error>, source_id: &st
     }
 }
 
+/// Re-apply a deleted source's purge, now that the run which was in flight when
+/// it was deleted has committed (#127).
+///
+/// The same statement `delete_source`'s own purge runs -- [`config::purge_items`]
+/// is the one copy of it, so the two cannot drift apart on what a tombstone
+/// means.
+///
+/// Best-effort like everything else after a run's own transaction: a purge that
+/// fails is warned about rather than raised, because there is nobody left to
+/// raise it to. `delete_source` returned long ago. It is also not retried, so
+/// a failure here is the one way the guarantee `delete_source` documents can
+/// come up short; the log line is what a reader chasing that symptom finds.
+///
+/// **Not `sweep`**, though that is what #127's ruling calls it in prose: this
+/// crate already uses that word for the glossary's Sweep -- the reconcile pass
+/// that tombstones what a full sync no longer emitted (`SyncReport::swept`,
+/// `run_locked`'s `sweep_kinds`) -- and `CONTEXT.md`'s entry for it names
+/// "purge" as the word to avoid *for that concept*. Two meanings of `sweep` in
+/// one crate, one of them destructive, is the reading mistake worth spending a
+/// longer name to remove.
 async fn purge_again(deps: &SchedulerDeps, source_id: &str) {
     match config::purge_items(&deps.pool, source_id).await {
         Ok(()) => tracing::info!(

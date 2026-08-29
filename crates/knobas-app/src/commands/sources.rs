@@ -147,15 +147,16 @@ pub async fn update_source<R: tauri::Runtime>(
 /// and never retried, because by then there is nobody left to raise it to;
 /// a run whose task `shutdown` aborts *after* it committed never reaches
 /// the claim, so its write-back outlives the process; and -- the third, from
-/// the guard #154 added -- these three steps are not atomic together, so an
-/// `add_source` for the same id committing between them makes the scheduler
-/// skip the purge it was handed. That skip is the point: the source under the
-/// id is the one the user just created, and purging its mirror would be worse
-/// than leaving the old one's. It reverses only when the existence check
-/// *itself* fails, which purges as asked -- so a wrong purge now needs the
-/// re-add race **and** a database blip at that instant, rather than either
-/// alone. All three are recorded where they happen -- `Claims::pending_purges`,
-/// `Scheduler::forget_source`, and the scheduler's own log.
+/// the guard #154 added -- this command's own three steps are not atomic
+/// together, so an `add_source` for the same id committing between them makes
+/// the scheduler skip the purge it was handed. That skip is the point: the
+/// source under the id is the one the user just created, and purging its
+/// mirror would be worse than leaving the old one's. It reverses only when
+/// the existence check *itself* fails, which purges as asked -- so a wrong
+/// purge now needs the re-add race **and** a database blip at that instant,
+/// rather than either alone. All three are recorded where they happen --
+/// `Claims::pending_purges`, [`Scheduler::forget_source`], and the scheduler's
+/// own log.
 ///
 /// [`Scheduler::forget_source`]: knobas_sync::scheduler::Scheduler::forget_source
 #[tauri::command]
