@@ -240,15 +240,16 @@ demo: deps
 # Gitea and its seed only: `testenv/seed` also waits for uptime-kuma and mockd,
 # which this suite never touches. Both steps are idempotent, so re-running this
 # against an already-seeded environment just runs the tests. Serial, because the
-# suite opens a pull request through Gitea's own API and the runs share one
-# server.
+# suite opens branches and pull requests through Gitea's own API and the runs
+# share one server.
 #
-# **This recipe grows the fixture and nothing prunes it**: every run leaves two
-# new branches and a new pull request in `payout-service`, deliberately (the
-# suite header says why). Prune stray ones through Gitea's API -- `DELETE
-# /api/v1/repos/{owner}/{repo}/issues/{index}` for a pull request, `DELETE
-# .../branches/{name}` for a branch -- or, when the whole environment is
-# expendable, `testenv/reset` followed by `testenv/seed`.
+# **This recipe grows the fixture and nothing prunes it**: every run leaves
+# three new branches, two new pull requests and 51 comments in `payout-service`,
+# deliberately (the suite header says why). Prune stray ones through Gitea's API
+# -- `DELETE /api/v1/repos/{owner}/{repo}/issues/{index}` for a pull request,
+# which takes its discussion with it, and `DELETE .../branches/{name}` for a
+# branch -- or, when the whole environment is expendable, `testenv/reset`
+# followed by `testenv/seed`.
 gitea-live:
     #!/usr/bin/env bash
     set -euo pipefail

@@ -24,22 +24,25 @@
 //!
 //! # This suite grows the fixture, and nothing prunes it
 //!
-//! Two of these tests open a branch -- one of them a pull request too -- through
-//! Gitea's own API and leave them behind. That is the point: exit criterion B is
+//! Three of these tests open a branch through Gitea's own API and leave it
+//! behind; two of them open a pull request on it, and one of those two writes a
+//! discussion of `PAGE + 1` comments. That is the point: exit criterion B is
 //! about what the *real* server does with something it has just been told, so a
 //! test that deleted its own work would be certifying a corpus it had reset.
-//! The cost is that `payout-service` grows by **two branches and one pull
-//! request every run of this file**, and nothing takes them away again: thirty
-//! runs of each mutating test left it holding 32 pull requests against the
-//! seeded 2 (measured 2026-08-29). The walks under test are paged, so that
-//! grows without bound into a corpus the seed never described.
+//! The cost is that `payout-service` grows by **three branches, two pull
+//! requests and 51 comments every run of this file**, and nothing takes them
+//! away again: thirty runs of `a_pull_request_opened_...` alone left it holding
+//! 32 pull requests against the seeded 2 -- measured 2026-08-29, when this file
+//! opened one pull request per run rather than two, before the discussion test
+//! arrived with #131 and doubled the rate. The walks under test are paged, so
+//! that grows without bound into a corpus the seed never described.
 //!
 //! So prune deliberately. `DELETE /api/v1/repos/{owner}/{repo}/issues/{index}`
 //! closes a stray pull request out -- a pull request is the issue of the same
-//! index -- and `DELETE .../branches/{name}` its branch, leaving the rest of the
-//! environment alone. `testenv/reset` is the big lever: it destroys every
-//! testenv volume, Gitea's included, so `testenv/seed` has to run again after
-//! it.
+//! index, and its discussion goes with it -- and `DELETE .../branches/{name}`
+//! its branch, leaving the rest of the environment alone. `testenv/reset` is
+//! the big lever: it destroys every testenv volume, Gitea's included, so
+//! `testenv/seed` has to run again after it.
 //!
 //! # What this file does NOT certify
 //!
@@ -95,6 +98,27 @@ fn dead_url() -> String {
 /// supposed to mean "the fake is wrong" cannot afford to cry wolf, so what the
 /// two tests assert is what they are actually for: **the walk each one drives
 /// does not re-deliver what it just delivered.**
+///
+/// # What the exemption gives up
+///
+/// Stating it, because #140 asked for the choice rather than only its result: a
+/// repository entity re-delivered on *every* run now passes both tests
+/// unnoticed. Delete `after.repo_updated_at = updated_at` from
+/// `sync::repository` and that is exactly what happens -- this filter drops the
+/// item, and the cursor clause beside it only asks that a run which emitted
+/// something moved its position, which such a run does.
+///
+/// That property is certified where the timing does not move under it, and
+/// deliberately not here: docker-free by
+/// `tests/sync.rs::an_idle_run_emits_nothing_and_returns_the_same_bytes` and
+/// `::the_position_after_one_change_is_itself_idle_stable`, against a fake whose
+/// `updated_at` stands still unless the test moves it; and live by
+/// `passes_the_contract_battery_against_the_real_container`, whose clause 2
+/// asserts the whole run empty and exempts nothing. That live half is currently
+/// weaker than it looks -- the battery test flakes on this same mechanism, which
+/// is #146 -- so if #146 is ever closed by dropping the clause rather than
+/// narrowing the scope, this exemption loses its live cover and should be
+/// revisited.
 fn re_delivered<'a>(items: &'a [SyncItem], full_name: &str) -> Vec<(&'a str, &'a str)> {
     items
         .iter()
@@ -327,13 +351,21 @@ async fn pull_requests_come_back_newest_updated_first() {
 ///
 /// # What this still rests on
 ///
-/// One ordering fact, and it is the server's own guarantee rather than a race:
-/// a pull request Gitea's create call has answered is visible to the very next
-/// `?state=all&sort=recentupdate` listing. Everything else timed has been taken
-/// out. In particular the repository entity may ride along in **any** of the
-/// three runs, or in none of them, depending on when Gitea's bookkeeping lands
-/// (see `re_delivered`) -- this test deliberately says nothing about which, and
-/// saying something about it was #140.
+/// Two ordering facts, and both are the server's own guarantee rather than a
+/// race, because this run asserts that both arrive: a branch and a pull request
+/// Gitea's create calls have answered are visible to the very next `/branches`
+/// and `?state=all&sort=recentupdate` listings. Everything else timed has been
+/// taken out. In particular the repository entity may ride along in **any** of
+/// the three runs, or in none of them, depending on when Gitea's bookkeeping
+/// lands (see `re_delivered`) -- this test deliberately says nothing about
+/// which, and saying something about it was #140.
+///
+/// One wall-clock *name*, which is not a timing dependency but is the one thing
+/// that would make two of these collide: the branch is named from the epoch
+/// **second**. Two runs of this test starting inside the same second would ask
+/// Gitea for the same branch twice, and the second create would fail. Nothing
+/// runs this file concurrently -- `just gitea-live` is serial by recipe -- so a
+/// second is enough.
 ///
 /// It also leaves a branch and a pull request behind in the seeded repository,
 /// by design; see this file's header on pruning them.
@@ -456,9 +488,17 @@ async fn a_pull_request_opened_through_the_api_appears_in_the_next_incremental_r
 ///
 /// That Gitea's `since=` is second-resolution and inclusive, which is the whole
 /// point of `commits_at_watermark`; a second commit landing in the same second
-/// as this one would arrive with it, and this test pushes one. As above, the
-/// repository entity may ride along in any run and nothing here asserts it away
-/// (#140), and the branch this pushes onto is left behind -- see the header.
+/// as this one would arrive with it, and this test pushes one.
+///
+/// And that the `/branches` listing in run 2 already reports the head this push
+/// moved. `sync::commits` walks only the branches `sync::branches` handed it as
+/// moved, so a listing still serving the old head would leave the commit walk
+/// unentered -- which this test catches, because it asserts the commit arrives,
+/// not merely that nothing extra did.
+///
+/// As above, the repository entity may ride along in any run and nothing here
+/// asserts it away (#140); the branch name carries the same epoch-second
+/// caveat; and the branch this pushes onto is left behind -- see the header.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Gitea container"]
 async fn a_commit_pushed_through_the_api_arrives_once_and_only_once() {
@@ -542,6 +582,9 @@ async fn a_commit_pushed_through_the_api_arrives_once_and_only_once() {
         Vec::<(&str, &str)>::new(),
         "the run after the incremental one re-delivered what it had already sent"
     );
+    // Clause 2's cursor half as the equivalence, for the reason spelled out on
+    // the pull-request test above: byte-identical when the run emitted nothing,
+    // moved when the repository rode along, and neither half vacuous.
     assert_eq!(
         same == moved,
         idle.0.is_empty(),
