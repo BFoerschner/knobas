@@ -42,7 +42,7 @@
 //!   transport instead of through a cap -- and the worse one, because it
 //!   reports `Ok`. Issue #81, ruled 2026-08-29.
 //! * **A page cap that is reached ends the run with an error.** Returning `Ok`
-//!   after walking 950 of 1,400 repositories would report a complete mirror
+//!   after walking 1,050 of 1,400 repositories would report a complete mirror
 //!   of a corpus that was never walked.
 //! * **A repository skipped during a full sync is fatal too.** Ruling B4
 //!   grants skip-with-warning for a 403 or 404 on one repository, and that is
@@ -131,16 +131,27 @@ use crate::model;
 /// The runaway guard on the two exhaustive walks: at most this many requests
 /// each, whatever the server chooses to put on a page.
 ///
-/// A **request** budget rather than a record one, and since [`last_page`] the
-/// difference is visible: a walk spends its last request on the empty page that
-/// proves the listing ended, so 20 requests carry 19 pages of records. Against
-/// a server that serves the 50 asked for, that is 950 repositories and 950
-/// branches per repository, where terminating on a short page reached 999. Those
-/// 50 records are not worth trading for a walk with no bound at all against a
-/// server that ignores `page`, and a corpus past the guard fails loudly with the
-/// lever that fixes it ([`cap_reached`]) rather than being silently truncated.
-const MAX_LIST_PAGES: u32 = 20;
-const MAX_BRANCH_PAGES: u32 = 20;
+/// **A request budget, and the arithmetic that sizes it.** The target has
+/// always been a *record* count: this comment used to read "At 50 per page:
+/// 1,000 repositories, and 1,000 branches per repository", and 20 was that
+/// target divided by the 50 a request asks for. Since [`last_page`] a walk
+/// spends one further request on the empty page that proves the listing ended,
+/// so the same 1,000 costs 21 requests -- twenty pages of records, plus the one
+/// that ends them. Keeping 20 would have kept the arithmetic and quietly shrunk
+/// the target to 950; nobody ever chose 950. At 21 a corpus of exactly 1,000
+/// walks cleanly, which the short-page rule never managed either: a full page
+/// 20 was not proof there was no page 21, so 1,000 failed there too. Issue #81,
+/// ruled 2026-08-29.
+///
+/// **A literal, not `1_000 / PAGE_SIZE + 1`.** Deriving it would put the
+/// honoured-page-size assumption back into this file in executable form, which
+/// is exactly what [`last_page`] took out of it. The guard is sized under an
+/// assumption it does not depend on: against a server capping lower the real
+/// capacity is lower, and a corpus past the guard still fails loudly with an
+/// accurate count of what it walked ([`cap_reached`]) rather than being
+/// silently truncated.
+const MAX_LIST_PAGES: u32 = 21;
+const MAX_BRANCH_PAGES: u32 = 21;
 // The two budgeted walks' page caps. Both sit at 1,000 records, which is
 // exactly the largest `prs_per_repo`/`commits_per_repo` the config schema
 // allows (`config::config_schema`, `"maximum": 1000`). Sitting them *there* is
@@ -159,6 +170,8 @@ const MAX_BRANCH_PAGES: u32 = 20;
 // `last_page` costs these two nothing, unlike the exhaustive pair: a budget
 // of 1,000 is spent by the last record of page 20 and breaks the walk there,
 // before any request for the empty page that would have confirmed the end.
+// That is why these two stayed at 20 when `MAX_LIST_PAGES` and
+// `MAX_BRANCH_PAGES` went to 21: a 21st request is one they never make.
 /// Pull requests per repository, per run.
 const MAX_PR_PAGES: u32 = 20;
 /// Commits per *branch* per run. `commits_per_repo` is the whole-repository

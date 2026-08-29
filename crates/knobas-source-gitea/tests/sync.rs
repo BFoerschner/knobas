@@ -584,7 +584,7 @@ async fn branch_listings_are_paged() {
 #[tokio::test]
 async fn a_branch_listing_that_would_exceed_the_cap_fails_the_run() {
     let mut state = State::tidewater();
-    // One record past 20 pages of 50.
+    // One record past the 20 pages of 50 the cap's 21 requests can carry.
     let many: Vec<serde_json::Value> = (0..=20 * PAGE)
         .map(|i| {
             branch(
@@ -607,7 +607,7 @@ async fn a_branch_listing_that_would_exceed_the_cap_fails_the_run() {
     // message instead.
     assert!(
         matches!(error, SourceError::Protocol { message: ref m, .. }
-            if m.contains("1000 branches in one repository") && m.contains("never finished walking")),
+            if m.contains("1001 branches in one repository") && m.contains("never finished walking")),
         "{error:?}"
     );
 }
@@ -616,6 +616,7 @@ async fn a_branch_listing_that_would_exceed_the_cap_fails_the_run() {
 #[tokio::test]
 async fn a_repository_listing_that_would_exceed_the_cap_fails_the_run() {
     let mut state = State::tidewater();
+    // One record past the 20 pages of 50 the cap's 21 requests can carry.
     state.repos = (0..=20 * PAGE)
         .map(|i| {
             support::repo(
@@ -636,7 +637,7 @@ async fn a_repository_listing_that_would_exceed_the_cap_fails_the_run() {
     // it would pass on the branch cap's message too.
     assert!(
         matches!(error, SourceError::Protocol { message: ref m, .. }
-            if m.contains("1000 repositories") && m.contains("owners[]")),
+            if m.contains("1001 repositories") && m.contains("owners[]")),
         "{error:?}"
     );
 }
@@ -679,23 +680,23 @@ async fn branch_walk_of(count: usize) -> Result<Vec<SyncItem>, SourceError> {
 /// deliberate; what this pins is that the message says the same thing the code
 /// does, at the values where a user is most likely to check the arithmetic.
 ///
-/// **The boundary moved with issue #81**, and 950-clean/951-fatal is where a
-/// reader can see what that cost. The walks now end on an *empty* page rather
-/// than a short one, so the last of the cap's 20 requests is spent proving the
-/// listing ran out: 19 pages of records walk cleanly where 999 records used to.
-/// The 50 records of headroom bought back by leaving the caps alone is the
-/// deliberate trade -- the cap is a bound on requests, and paging until empty
-/// without one would be no bound at all.
+/// **The cap's request budget now includes the empty page that proves the
+/// end** (issue #81), so the record target costs one more request than it did
+/// and `MAX_BRANCH_PAGES` is 21 for a target of 1,000. `20 * PAGE` walks
+/// cleanly -- which the short-page rule never managed, because a full page 20
+/// could not prove there was no page 21 -- and one record past it is fatal, as
+/// is a corpus that fills every request the cap affords.
 #[tokio::test]
 async fn a_cap_fires_at_exactly_the_boundary_it_names() {
-    let clean = branch_walk_of(19 * PAGE)
+    let clean = branch_walk_of(20 * PAGE)
         .await
-        .expect("19 pages of records, and the 20th request proves the end");
-    assert_eq!(ids(&clean, "branch").len(), 19 * PAGE);
+        .expect("20 pages of records, and the 21st request proves the end");
+    assert_eq!(ids(&clean, "branch").len(), 20 * PAGE);
 
-    // One record more, and the 20th request comes back non-empty instead. The
-    // second case is the old boundary, still fatal and still accurate.
-    for count in [19 * PAGE + 1, 20 * PAGE] {
+    // One record more, and the 21st request comes back non-empty instead. The
+    // second case fills every request the cap affords, and is the value the
+    // message's arithmetic is easiest to check against.
+    for count in [20 * PAGE + 1, 21 * PAGE] {
         let error = branch_walk_of(count)
             .await
             .map(|items| format!("Ok({} branches)", ids(&items, "branch").len()))
