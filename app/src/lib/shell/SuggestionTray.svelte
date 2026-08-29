@@ -116,7 +116,11 @@
 
   async function answer(entry: SuggestionEntry, accept: boolean) {
     const id = entry.link.id;
-    if (busy.includes(id)) return;
+    // `busy` is what disables both buttons on this row, and that is the whole
+    // of the double-press guard: an early return here as well would be a second
+    // mechanism for one rule, and a dead one -- a disabled button does not
+    // dispatch. Found by mutating the early return away and watching every test
+    // stay green.
     busy = [...busy, id];
     try {
       await (accept ? acceptSuggestion(id) : dismissSuggestion(id));
