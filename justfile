@@ -243,3 +243,28 @@ gitea-live:
     cd ..
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-gitea --test live_gitea \
       -- --ignored --nocapture --test-threads=1
+
+# TeamCity's live certification: the adapter against a **real** TeamCity.
+#
+# The same contract as `gitea-live` -- the fake is wrong when it disagrees with
+# the server -- with one difference that changes what may be written and what
+# may be asserted: **there is no container here.** The instance `.env.example`
+# points at is JetBrains' public one, it is guest-readable, and it is *not
+# ours*. So the suite is strictly read-only, and every assertion in it is by
+# form: the corpus changes between one request and the next, so a fixed id, a
+# count or a title would be a test that fails for a reason nobody can act on.
+#
+# No docker and no seed, so this recipe is two lines: load `.env` and un-ignore
+# the tests. `.env` is optional -- with no `KNOBAS_TEAMCITY_URL` the suite
+# skips, naming the variable, rather than failing. `cp .env.example .env` is
+# enough to run it; the default URL needs no token.
+#
+# Serial and unparallelised on purpose. The rate limiter is per adapter
+# instance, so concurrent tests would not share one budget, and the server
+# whose budget it is belongs to somebody else.
+teamcity-live:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -f .env ]; then set -a; . ./.env; set +a; fi
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-teamcity --test live_teamcity \
+      -- --ignored --nocapture --test-threads=1
