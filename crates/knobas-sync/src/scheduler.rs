@@ -964,6 +964,19 @@ impl Scheduler {
         Ok(Scheduler { inner })
     }
 
+    /// What the scheduler was built with.
+    ///
+    /// The write queue's flush loop takes the same [`SchedulerDeps`] -- it
+    /// builds an adapter through the same seam and writes through the same
+    /// pool -- and the desktop shell holds a `Scheduler`, not the deps it was
+    /// handed. Exposing them is what lets a `#[tauri::command]` reach
+    /// [`crate::write_queue`] without `SourcesState` growing a second copy of
+    /// four fields that must not drift from these.
+    #[must_use]
+    pub fn deps(&self) -> &SchedulerDeps {
+        &self.inner.deps
+    }
+
     /// Start a run for one source and return its `sync_run.id` **immediately**
     /// (P3): the row exists before the task is spawned, so the caller has
     /// something to watch without waiting on the network.

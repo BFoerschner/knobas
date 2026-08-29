@@ -418,3 +418,168 @@ export function dbStats(): Promise<DbStats> {
 export function reindexFts(): Promise<void> {
   return invoke<void>("reindex_fts");
 }
+
+// -- The write queue (issue #42) ----------------------------------------------
+
+/**
+ * What the queue will do about a write next —
+ * `knobas_core::write_queue::WriteState`.
+ *
+ * The panel branches on this and so does the shell badge, so the three open
+ * states are three different sentences, not three shades of "waiting":
+ *
+ * - `pending` — needs **patience**. It goes on its own when the source can
+ *   take it.
+ * - `held` — needs a **decision**. Its target changed after it was queued, and
+ *   nothing moves it but the user. There is no timeout.
+ * - `refused` — needs a **decision**. The source rejected the operation, and
+ *   it is deliberately never retried.
+ * - `sent` / `discarded` — settled. These never appear in
+ *   {@link pendingWrites}.
+ */
+export type WriteState = "pending" | "held" | "refused" | "sent" | "discarded";
+
+/**
+ * Why a pending write has not gone yet —
+ * `knobas_core::write_queue::WaitReason`.
+ *
+ * Only the two faults that pass on their own or with a human's help. A refusal
+ * is not a reason to wait and has its own {@link WriteState}, so this is
+ * `null` on every row that is not `pending` — and on a pending one that has
+ * not been tried yet, which `attempted_at` is what distinguishes.
+ */
+export type WaitReason = "unreachable" | "unauthorized";
+
+/**
+ * The serialized `knobas_source::WriteOp` a queued write carries.
+ *
+ * Externally tagged, so the variant name is the object's one key. **It grows
+ * per milestone** (ADR-0006), and this union grows with it — which means a
+ * frontend written today will meet a payload it does not recognise. Handle
+ * that by narrowing on the key rather than assuming `Comment`: an unrecognised
+ * op can still be applied and discarded, and only *editing* needs to know
+ * where the words are.
+ */
+export type WriteOpPayload = { Comment: { entity: string; body: string } };
+
+/**
+ * One write knobas still owes a source —
+ * `knobas_core::write_queue::QueuedWrite`.
+ *
+ * `CONTEXT.md`'s vocabulary: a row in `pending` is a **pending write**, one in
+ * `held` is a **held write**.
+ */
+export interface QueuedWrite {
+  id: number;
+  source_id: string;
+  /** The target, as an entity id. */
+  entity_id: string;
+  /** The stable snake_case operation name — `"comment"`. */
+  op: string;
+  /** The serialized write op; hand it back to {@link amendWrite} edited. */
+  payload: WriteOpPayload;
+  /**
+   * The target as it stood when the write was queued.
+   *
+   * One half of the two versions a held write is shown with. Its shape is
+   * per-op (`knobas_core::write_queue::project`); for `"comment"` it carries
+   * `{op, live, text}`, where `text` is the item's indexed text — which every
+   * adapter builds from its title, description and comment bodies, so a new
+   * reply is exactly what changes it.
+   */
+  target_snapshot: unknown;
+  state: WriteState;
+  wait_reason: WaitReason | null;
+  /** What the source said, in its own words. Untrusted: render it as text. */
+  detail: string | null;
+  queued_at: string;
+  attempted_at: string | null;
+  attempts: number;
+  /**
+   * The target as it stood when the write was held — the other half of the two
+   * versions. `null` until a write is held; kept afterwards.
+   */
+  held_snapshot: unknown | null;
+  settled_at: string | null;
+}
+
+/**
+ * How many writes are in each open state —
+ * `knobas_core::write_queue::QueueCounts`.
+ *
+ * Three numbers rather than one, deliberately: a single total would let
+ * "3 waiting" absorb a write that needs a decision, which is the one thing the
+ * shell badge exists to prevent.
+ */
+export interface QueueCounts {
+  pending: number;
+  held: number;
+  refused: number;
+}
+
+/**
+ * Every write knobas still owes a source, newest first — pending, held and
+ * refused alike.
+ *
+ * The authoritative read. There is no `write:*` event: every queue transition
+ * already writes an activity line, so refresh on `EVENTS.activityNew` rather
+ * than waiting for a second channel that would say the same thing.
+ */
+export function pendingWrites(): Promise<QueuedWrite[]> {
+  return invoke<QueuedWrite[]>("pending_writes");
+}
+
+/** The counts the shell badge shows. */
+export function writeQueueCounts(): Promise<QueueCounts> {
+  return invoke<QueueCounts>("write_queue_counts");
+}
+
+/**
+ * Flush the queue now — one source, or every source when `sourceId` is `null`.
+ *
+ * Impatience rather than necessity: the scheduler's own tick already does
+ * this. It therefore does not fail for a source that is still down — the write
+ * stays queued with its reason updated.
+ *
+ * **It cannot release a held write.** A flush decides nothing on the user's
+ * behalf; {@link applyHeldWrite} is the only thing that moves one.
+ */
+export function flushWrites(sourceId: string | null): Promise<void> {
+  return invoke<void>("flush_writes", { sourceId });
+}
+
+/**
+ * *I know, and I still mean it*: release a held write and send it.
+ *
+ * The version the user was shown becomes the version the write is measured
+ * against. A change arriving **after** they looked holds it again — what they
+ * consented to overwrite is what they saw.
+ *
+ * Rejects with `conflict` if the write is no longer held.
+ */
+export function applyHeldWrite(id: number): Promise<void> {
+  return invoke<void>("apply_held_write", { id });
+}
+
+/**
+ * *Edit and send*: replace a held or refused write's payload with one the user
+ * has just written.
+ *
+ * `payload` is the row's own {@link QueuedWrite.payload}, edited. It may not
+ * name a different operation or a different target — that is a *new* write,
+ * because a queued one holds a place in its entity's queue and a snapshot of
+ * that entity. Both refusals arrive as `invalid`.
+ */
+export function amendWrite(id: number, payload: WriteOpPayload): Promise<void> {
+  return invoke<void>("amend_write", { id, payload });
+}
+
+/**
+ * Withdraw a write — cancelling a pending one and conceding a held one are the
+ * same act on the same row. The row is kept, tombstoned.
+ *
+ * Rejects with `conflict` if there was nothing open left to withdraw.
+ */
+export function discardWrite(id: number): Promise<void> {
+  return invoke<void>("discard_write", { id });
+}

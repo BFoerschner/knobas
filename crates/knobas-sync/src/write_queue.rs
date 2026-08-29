@@ -73,12 +73,18 @@ pub enum FlushError {
 
 /// The entity a write op targets.
 ///
+/// Public because the desktop shell needs it to hold an *edited* write to the
+/// target the original named: an amendment that repointed a queued comment at
+/// another ticket would inherit that ticket's place in the queue and the
+/// snapshot taken of the first one.
+///
 /// **No wildcard arm, deliberately** -- the same device, for the same reason,
 /// as `WriteOp::identifier`. `WriteOp` grows per milestone (ADR-0006), and a
 /// wildcard here would let a new variant reach the queue with no target: it
 /// would be ordered against nothing and hold against nothing, silently. The
 /// compiler is the reminder.
-fn target_id(op: &WriteOp) -> &str {
+#[must_use]
+pub fn target_entity(op: &WriteOp) -> &str {
     match op {
         WriteOp::Comment { entity, .. } => entity,
     }
@@ -135,7 +141,7 @@ pub async fn submit(
     source_id: &str,
     op: WriteOp,
 ) -> Result<QueuedWrite, FlushError> {
-    let entity = EntityRef::parse(target_id(&op)).map_err(|e| {
+    let entity = EntityRef::parse(target_entity(&op)).map_err(|e| {
         // An op whose target is not an entity id cannot be ordered or held
         // against anything. It is knobas' own bug, not a source fault.
         FlushError::NotConfigured(e.to_string())
@@ -311,8 +317,8 @@ pub async fn amend(
     id: i64,
     op: WriteOp,
 ) -> Result<Option<QueuedWrite>, FlushError> {
-    let entity =
-        EntityRef::parse(target_id(&op)).map_err(|e| FlushError::NotConfigured(e.to_string()))?;
+    let entity = EntityRef::parse(target_entity(&op))
+        .map_err(|e| FlushError::NotConfigured(e.to_string()))?;
     let target = store::target_of(&deps.pool, &entity).await?;
     let snapshot = store::project(op.identifier(), target.as_ref());
     let payload =

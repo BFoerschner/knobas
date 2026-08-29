@@ -9,6 +9,7 @@ pub mod crud;
 pub mod demo;
 pub mod progress;
 pub mod registry;
+pub mod write_queue;
 
 mod events;
 
