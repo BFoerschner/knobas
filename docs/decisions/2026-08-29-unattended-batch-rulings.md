@@ -92,3 +92,35 @@ Comment links: [#91](https://github.com/BFoerschner/knobas/issues/91#issuecommen
 **Also ruled on PR #108, both mine under the delegation:** `cap_reached` now reporting the walked count instead of `cap * PAGE_SIZE` is correct and stays (the old arithmetic assumed exactly what #81 removed, and would have told a user of a 10-capping server to narrow a 200-record source it called 1,000); and the implementer's refusal to add a null-tolerant decode for `/repos/search`'s `data` field is right (Go marshals a `make(...)`'d slice as `[]`, never `null`, and every live run now exercises the past-the-end request, so if that ever breaks, `just gitea-live` fails loudly and the tolerance change becomes evidence-backed instead of a guess that papers over the real "no data array" case).
 
 **If you disagree, the cost of reversing this is:** trivial before merge — two constants, the three numbers in `a_cap_fires_at_exactly_the_boundary_it_names`, and the doc comments naming 950. After merge it is the same edit plus a changed loud-failure boundary users may have seen. Full text with quotes: [PR #108 comment](https://github.com/BFoerschner/knobas/pull/108#issuecomment-5460443477).
+
+---
+
+## The second batch, later the same day — #105 and #106, the two triage questions from the TeamCity live session
+
+**Appended under the same delegation.** Both issues came out of the first real-server contact (the session that found #91 and #113) and both carried `needs-triage` because each poses a product question. Both rulings rest on read-only measurements I made today against `https://teamcity.jetbrains.com/guestAuth` (2026.2 EAP), quoted in full on the issues. Nothing in either touches a §10.8 frozen surface; the one option that would (in #106) is flagged for you instead of ruled. I may not change labels: my recommendation for both is `ready-for-agent`.
+
+## #105 — canceled TeamCity builds are permanently absent from the mirror
+
+**The fork:** mirror them; deliberately do not and say so; mirror-but-render-distinctly. The issue allows that exclusion "may well be *correct* product behaviour".
+
+**Ruling:** fork option 1, widened and narrowed. Canceled **and** failed-to-start builds enter the mirror; personal builds stay out. Mechanism: `canceled:any,failedToStart:any` on the two item-producing locators (per-configuration full sync and the incremental `since()`), not `defaultFilter:false`; probe and in-flight poll unchanged. And the wording I declined to rule this morning is now ruled, because the path becomes reachable: `UNKNOWN` never reaches a user — a canceled build's status element renders `finished canceled` (`statusText: "Canceled"` was already indexed, `payload` stays verbatim).
+
+**Reasoning:** the decisive argument was on nobody's fork: exclusion does not produce "a mirror of the server's default view", it produces permanent lies. Step 5 of `sync.rs` mirrors in-flight builds and `cursor::advance` clamps the watermark under them (`next.min(oldest_in_flight - 1)`); a mirrored running build that is then canceled is never overwritten — the finished queries hide it, the poll stops returning it, and "M1 has no deletion channel" (map.rs). It says "running" forever. The same strands a queued build that fails to start, which is why that class comes in too. Personal builds are the opposite case: the default filter hides them from the in-flight poll as well, so their absence is consistent and no row goes stale — and nobody decided a work cockpit should mirror other people's experiments. The mechanism choice is measured, not guessed: in one window, `canceled:any` re-included exactly the canceled build and nothing else, `defaultFilter:false` also admitted a `failedToStart` build (and opens the personal facet and every unenumerated one), and `canceled:any,failedToStart:any` admitted both decided classes and no personal builds. Healing is bounded, not total: pre-fix casualties below the watermark come back only as far as a full sync's window reaches — run one after the fix lands.
+
+**Escalation triggers left on the issue:** a personal build ever served by the in-flight poll; either dimension observed disabling more than its own facet; and fork option 3's distinct rendering, which is a UI layer on top of this and yours to want or not.
+
+**If you disagree, the cost of reversing this is:** moderate before implementation — one comment. After: the adapter and mockd changes revert mechanically (nothing frozen — neither crate is in §10.8's list, and the contract edit is an amendment entry beside #91's, superseding §4.2's locator row rather than editing it), but reverting re-opens the stale-running-row defect this closes, and canceled builds that entered users' mirrors in the meantime would need a decision of their own (tombstone or leave). The wording alone (`finished canceled`) is trivial to change at any time.
+
+## #106 — TeamCity items carry no author, so #39's author:/@ tokens do nothing for that source
+
+**The fork:** accept and document; fall back to the change's committer; make the emptiness visible in the search surface.
+
+**Ruling:** option 1 — accept and document, plus the AC's realistic fixture. `author` keeps contract §4.1's meaning ("the source's username string"): the person who deliberately triggered the build, sparse by nature. Option 2 rejected on measurement. Option 3 **not ruled — flagged for you**: it changes `SearchResponse`, which is IPC schema and §10.8-frozen; I think it is the right eventual answer to the silent-empty-result problem and should become its own issue if you want it.
+
+**Reasoning:** the issue's feasibility condition for option 2 holds and its payoff does not. One request with `changes(change(username,user(username)))` in `fields=` answered 100 builds in 9.8 KB — no per-build round trip — but 92/100 builds carried zero changes (87/100 were `snapshotDependency`-triggered; not one `vcsTrigger` in the window), and the 8 that had changes named committers as VCS display strings ("artem tikhomirov") with the TeamCity account (`change.user.username`) null throughout. So the fallback fills ~8% of builds, in a name-space that never matches `@me` (vocab.rs resolves identity from the config `username`, a TeamCity login), at the price of "author" meaning two different things per build. §4.1's own parenthesis — "display-name mapping is M2's people work" — is the schedule for revisiting this properly.
+
+**Escalation triggers left on the issue:** a corpus where `triggered.user` is dense (your own server would raise option 3's value); M2's people work landing, which legitimately re-opens committer authorship with the vocabulary problem actually solved.
+
+**If you disagree, the cost of reversing this is:** near zero — it is documentation and fixtures; no adapter, field, cursor, or schema change. Choosing option 2 later loses nothing done under option 1, and the fixtures it requires ("overwhelmingly null") are the ones option 2's tests would want anyway.
+
+Comment links: [#105](https://github.com/BFoerschner/knobas/issues/105#issuecomment-5460907220) · [#106](https://github.com/BFoerschner/knobas/issues/106#issuecomment-5460907457)
