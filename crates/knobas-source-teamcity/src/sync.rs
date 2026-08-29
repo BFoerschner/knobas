@@ -618,7 +618,7 @@ mod tests {
         }
 
         /// Pages come back in fixture order, however unordered that is.
-        fn as_given(mut self) -> Self {
+        fn fixture_order(mut self) -> Self {
             self.order = PageOrder::AsGiven;
             self
         }
@@ -1558,7 +1558,7 @@ mod tests {
         if let Some(id) = top {
             builds.push(build(id, "Payout_Build", "Payout", "finished"));
         }
-        FakeRest::new(vec![build_type("Payout_Build", "Payout")], builds).as_given()
+        FakeRest::new(vec![build_type("Payout_Build", "Payout")], builds).fixture_order()
     }
 
     /// The replaced server, still caught -- on the server's own answer about
@@ -1623,12 +1623,7 @@ mod tests {
     async fn a_watermark_the_pages_did_not_show_is_confirmed_by_id_and_the_run_proceeds() {
         let rest = a_page_that_cannot_reach_the_top(Some(5_000));
         let cursor_in = r#"{"v":1,"since_build_id":5000}"#.to_owned();
-        let (items, cursor) = run(
-            &rest,
-            &TeamCityConfig::default(),
-            Some(cursor_in.clone()),
-        )
-        .await;
+        let (items, cursor) = run(&rest, &TeamCityConfig::default(), Some(cursor_in.clone())).await;
         assert!(items.is_empty(), "nothing has finished since build 5000");
         assert_eq!(
             cursor, cursor_in,
