@@ -339,11 +339,17 @@ pub const PROJECTED_OPS: &[&str] = &[
 /// * `"transition"` is the conservative choice **and it was a choice**
 ///   (issue #43). What one would rather compare is the status alone, and there
 ///   is no adapter-independent way to read it: §4.1 guarantees `title`,
-///   `body_text`, `updated_at` and a verbatim `payload`, and the status lives
+///   `body_text`, `author`, `updated_at` and a verbatim `payload`, and the
+///   status lives
 ///   only in the last of those, under `fields.status.name` for Jira and `state`
 ///   for Gitea. Reading it here would mean this module -- which cannot see
 ///   `WriteOp` at all, let alone an adapter -- learning every source's payload
-///   shape, which is the coupling `SourceDescriptor` exists to avoid. The cost
+///   shape, which is the coupling `SourceDescriptor` exists to avoid. ADR-0007
+///   ratifies this refusal as the *write* direction's rule -- in a hold
+///   decision a payload read that misses is a missed hold, a wrong action --
+///   and it is not the blanket ban it may read as: a derivation whose miss
+///   costs only an absent item may read (`suggest`, `inbox`, under that ADR's
+///   three requirements). The cost
 ///   is noise on a busy ticket: a comment arriving while the source is down
 ///   holds a queued transition. The cost of the other direction is moving a
 ///   ticket somebody else already moved, silently, which is the one thing

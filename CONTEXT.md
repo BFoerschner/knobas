@@ -32,6 +32,16 @@ _Avoid_: cache, index
 **Item**:
 One mirrored record of a given kind.
 
+**Payload**:
+The raw source record an item carries verbatim — where everything not normalized (title, body text, author, updated time) lives, in the source's own shape.
+_Avoid_: raw data, blob
+
+**Payload read**:
+A read into source-shaped data outside the adapter that shaped it. Permitted only where it can [miss](#miss), in one named statement, with its failure direction pinned. (ADR-0007)
+
+**Miss**:
+A payload read finding no recognizable shape and contributing nothing — the one failure a payload read is allowed. Guessing is the forbidden alternative.
+
 **Upserted**:
 The items one run wrote, new or changed. A per-run delta, not the size of the mirror: a run that writes nothing over a full mirror upserted zero.
 _Avoid_: synced, mirrored (both name the corpus)

@@ -22,4 +22,5 @@ The forcing function that makes this safe is already in place and must not be so
 - Adding a write op is a deliberate, reviewed act with a paper trail, not a drive-by enum edit.
 - Adapters that do not accept a new op need no change: an adapter must reject every op it does not declare with `SourceError::Protocol`, and the battery holds it to its own descriptor.
 - The M2 growth lands as one package with the adapters that declare it, so no variant exists that nothing accepts and no descriptor names an op the SPI lacks — the battery would fail either way, which is the point.
+- The mechanism turned out not to be `WriteOp`-specific: ADR-0007 (2026-08-29) plans the first `SourceDescriptor` growth by the same route — a descriptor-declared per-op payload path, scheduled for M3 as a §10.8 ratified exception, retiring the interim payload-read discipline as it lands.
 - Nothing here authorises a *second* write path. Every outbound write, whatever its op, goes through the write queue (issue #42): the queue is what decides send, pend or hold, and `Source::write` is the choke point it wraps.

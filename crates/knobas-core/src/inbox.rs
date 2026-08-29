@@ -59,7 +59,9 @@
 //! `body_text`, `author` and `updated_at` and nothing else; a review request,
 //! a build's status and an assignee live only in the verbatim `payload`. The
 //! precedent is `suggest::RULES`' `source_recorded_relation`, which reads
-//! `payload->'fields'->'issuelinks'` for exactly this reason. Every such read
+//! `payload->'fields'->'issuelinks'` for exactly this reason, and ADR-0007
+//! has since ratified the pattern: miss, one named statement, a pinned
+//! failure direction. Every such read
 //! is written to **miss** rather than to guess when the shape is absent: a
 //! payload that does not carry the path contributes nothing, so a source whose
 //! records are shaped differently simply produces no items of that category

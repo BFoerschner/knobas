@@ -58,10 +58,12 @@ pub struct Merged {
 ///
 /// **`payload->>'merged'` is a source-shaped read outside an adapter.** There
 /// is no adapter-independent way to ask whether a pull request is merged: §4.1
-/// guarantees `title`, `body_text`, `updated_at` and a verbatim `payload`, and
-/// merged-ness lives only in the last of those. It is the same seam #43
-/// recorded for a ticket's status. Confined to this one statement, and written
-/// so a second spelling is one more `or` here and nothing else anywhere.
+/// guarantees `title`, `body_text`, `author`, `updated_at` and a verbatim
+/// `payload`, and merged-ness lives only in the last of those. It is the same
+/// seam #43 recorded for a ticket's status, since ratified as ADR-0007: miss,
+/// one named statement, a pinned failure direction. Confined to this one
+/// statement, and written so a second spelling is one more `or` here and
+/// nothing else anywhere.
 ///
 /// The `not exists` is [`ALREADY_FOLLOWED`]'s half of the same statement.
 const MERGED_AND_LINKED: &str = "
@@ -100,6 +102,8 @@ pub const ALREADY_FOLLOWED: &str = "a transition to this status is already in th
 /// Named so `plan`'s pin can assert the statement and the payload agree; a
 /// statement that quietly matched nothing would transition a ticket on every
 /// pass, which is the one failure this whole `not exists` exists to prevent.
+/// This read fails *open*, not toward absence, which is why ADR-0007 makes
+/// the pin a requirement rather than a habit.
 pub const MERGED_AND_LINKED_PATH: &str = "payload->'Transition'->>'status'";
 
 /// Follow every merged pull request knobas holds a link for.

@@ -333,6 +333,10 @@ const PAGE_TEXT_KEY: &str = detection!(concat!(
 /// `B` under the same type is `B -> A`. Storing the inward phrase instead would
 /// give one relationship two spellings and two panel groups.
 ///
+/// A source-shaped read outside an adapter (ADR-0007): the `jsonb_typeof`
+/// guard below is the miss -- an absent or differently-shaped `issuelinks`
+/// contributes nothing rather than guessing.
+///
 /// The other end is addressed in the **same source** (`source_id || ':' ||
 /// key`): two Jiras are two namespaces, and matching by bare key across them
 /// would join `jira:PAY-1` to `jira-eu:PAY-1`.
