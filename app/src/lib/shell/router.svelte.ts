@@ -8,6 +8,7 @@
  * | `#/<kind>/<entity_id>` | the detail slide-over over the current room      |
  * | `#/entity/<entity_id>` | kind-agnostic alias, resolved via `get_entity`   |
  * | `#/sources`            | the sources view                                 |
+ * | `#/settings`           | the settings view                                |
  * | `#/first-run`          | the §14a wizard                                  |
  *
  * **Deviation from the mockup, recorded here:** the mockup addressed
@@ -29,6 +30,7 @@ export type Route =
       detail: { kind: string | null; entityId: string } | null;
     }
   | { view: "sources" }
+  | { view: "settings" }
   | { view: "first-run" }
   | { view: "unknown"; hash: string };
 
@@ -38,14 +40,16 @@ export const DEFAULT_CTX = "all";
 /**
  * First segments that are *not* a kind.
  *
- * Two groups, and the distinction matters. `ctx`/`sources`/`first-run`/`entity`
- * are M1 views. The rest are addresses M2–M4 will claim; they are listed now
- * so that today they render "arrives in M<n>" instead of being taken for an
- * entity kind and sent to `get_entity`, which would 404 on a word.
+ * Two groups, and the distinction matters.
+ * `ctx`/`sources`/`settings`/`first-run`/`entity` are views that exist. The
+ * rest are addresses M2–M4 will claim; they are listed now so that today they
+ * render "arrives in M<n>" instead of being taken for an entity kind and sent
+ * to `get_entity`, which would 404 on a word.
  */
 const RESERVED = new Set([
   "ctx",
   "sources",
+  "settings",
   "first-run",
   "entity",
   // M2-M4, reserved so an open kind never collides with a view.
@@ -90,6 +94,7 @@ export function parseHash(hash: string, ctx: string = DEFAULT_CTX): Route {
   if (head === "") return { view: "room", ctx, detail: null };
   if (head === "ctx") return { view: "room", ctx: tail || DEFAULT_CTX, detail: null };
   if (head === "sources") return { view: "sources" };
+  if (head === "settings") return { view: "settings" };
   if (head === "first-run") return { view: "first-run" };
   if (head === "entity") {
     return { view: "room", ctx, detail: { kind: null, entityId: tail } };
@@ -127,6 +132,8 @@ export function hashFor(route: Route): string {
   switch (route.view) {
     case "sources":
       return "#/sources";
+    case "settings":
+      return "#/settings";
     case "first-run":
       return "#/first-run";
     case "unknown":

@@ -13,6 +13,7 @@
   import { lifecycle } from "./lib/shell/lifecycle.svelte";
   import { router } from "./lib/shell/router.svelte";
   import { push } from "./lib/shell/toasts.svelte";
+  import SettingsView from "./lib/settings/SettingsView.svelte";
   import FirstRun from "./lib/sources/FirstRun.svelte";
   import SourcesView from "./lib/sources/SourcesView.svelte";
   import { ipcErrorMessage } from "./lib/ipc";
@@ -225,6 +226,8 @@
         </div>
       {:else if router.route.view === "sources"}
         <SourcesView />
+      {:else if router.route.view === "settings"}
+        <SettingsView />
       {:else if router.route.view === "first-run"}
         <FirstRun demo={lifecycle.status?.demo ?? false} onfinish={onFirstRunDone} />
       {:else}

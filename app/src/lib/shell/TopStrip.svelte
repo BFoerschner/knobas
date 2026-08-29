@@ -3,7 +3,7 @@
 
   The context switcher and its tabs (one built-in room until task 18 can list
   the configured sources), the launcher field, the sync monograms (task 18; the group is empty
-  until there are sources to put in it), and the gear.
+  until there are sources to put in it), the gear, and settings.
 
   The timer, inbox, Assets and Today/Day buttons of spec §2 are M2/M3/M4 and
   are deliberately absent. Reserving a slot for a button that cannot work is
@@ -40,6 +40,12 @@
   } = $props();
 
   const onSources = $derived(router.route.view === "sources");
+  /**
+   * §14's settings surface (#69). A second labelled button rather than a menu
+   * behind the gear: there are two destinations, and a two-item menu costs a
+   * click to say what a second button says by being there.
+   */
+  const onSettings = $derived(router.route.view === "settings");
 
   /**
    * How each state reads in the cluster's tooltip.
@@ -127,6 +133,22 @@
       <path
         d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"
       />
+    </svg>
+  </button>
+
+  <!-- Sliders, not a second gear: two identical icons say the two surfaces are
+       the same place. -->
+  <button
+    class="tb-btn {onSettings ? 'on' : ''}"
+    aria-label="Settings"
+    aria-current={onSettings ? "page" : undefined}
+    onclick={() => router.go("#/settings")}
+  >
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M2 4.5h12M2 8h12M2 11.5h12" />
+      <circle cx="5.5" cy="4.5" r="1.6" />
+      <circle cx="10" cy="8" r="1.6" />
+      <circle cx="6.5" cy="11.5" r="1.6" />
     </svg>
   </button>
 </header>
