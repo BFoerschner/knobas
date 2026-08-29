@@ -37,6 +37,16 @@ export default defineConfig(({ mode }) => ({
     // function at run time.
     include: ["src/**/*.test.ts", "src/**/*.test.svelte.ts"],
     setupFiles: ["src/lib/shell/test-setup.ts"],
+    // Pinned, not inherited. `test-setup.ts`'s rejection guard is the *first*
+    // `afterEach` registered, and it only works because `"stack"` unwinds
+    // `afterEach` in reverse, so it runs after each file's own teardown --
+    // including the `vi.useRealTimers()` in `launcher/session` and
+    // `shell/toasts`. Under `"list"` it would run first, and its
+    // `setTimeout(0)` would wait on a clock those files still have frozen:
+    // measured, that is a 10 s hook timeout per test rather than a leak
+    // anyone can read. Relying on the default here means the guard's
+    // correctness is a Vitest release note away from changing.
+    sequence: { hooks: "stack" },
   },
   // Vitest must resolve Svelte's *browser* build, or `mount` runs the SSR
   // entry point and produces no DOM.

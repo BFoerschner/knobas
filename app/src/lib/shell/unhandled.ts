@@ -63,12 +63,21 @@ function onHandled(promise: Promise<unknown>) {
  * runs: a `await import()` at the top of a test file that rejects is exactly
  * the kind of leak this catches, and a `beforeAll` would not be installed yet.
  *
- * The stop matters as much as the start. Vitest's pool reuses one process for
- * many test files while resetting each file's module graph, so a listener
- * added per file and never removed accumulates until Node warns about a leak
- * of its own — and while ours is installed, Vitest's own unhandled-error
- * reporter stays quiet, so removing it at the end of a file hands the tail of
- * the run back to the reporter that would otherwise have covered it.
+ * The stop matters as much as the start, and for one measured reason: while
+ * *any* `unhandledRejection` listener is installed, Vitest's own unhandled-
+ * error reporting stays completely silent — a bare no-op listener in this
+ * setup file turns a leaking file from `1 passed / 1 error` into `1 passed`
+ * and exit 0. So the tail of a file, after the last hook this module can run,
+ * has to be handed back to the reporter that would otherwise have covered it.
+ *
+ * Listener accumulation is *not* the reason, though it is the one that first
+ * suggests itself. Vitest isolates by default, and this config takes that
+ * default: measured over the whole suite, 48 test files ran in 48 distinct
+ * pids, so a listener that outlives its file dies with its own fork. The one
+ * path that does strand a listener — a file that throws during collection,
+ * whose root `afterAll` never runs — is therefore harmless here, and that
+ * file is already failing. Set `isolate: false` and the removal stops being
+ * belt-and-braces and starts being load-bearing.
  */
 export function watchRejections(): () => void {
   process.on("unhandledRejection", onRejection);
