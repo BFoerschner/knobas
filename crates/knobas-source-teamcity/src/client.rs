@@ -23,6 +23,36 @@ pub(crate) struct Rec<T> {
     pub rec: T,
 }
 
+/// One answer to a collection request: the records, and whether the server
+/// said there are more of them.
+///
+/// **The second half is the whole point** (issue #114). A page's *length* says
+/// nothing on its own: `count:` is a request, a TeamCity may be configured to
+/// serve fewer entries per list than were asked for, and a loaded one may
+/// answer partially -- so a short page means "the query ran out" *or* "we were
+/// cut off", with nothing in the row count to say which. Reading it as the
+/// first is a run that reports success while its watermark advances past
+/// records it never saw, which is the failure class ADR-0003 and this crate's
+/// `sync` module exist to refuse, and it is the reading #81 removed from the
+/// Gitea adapter's four walks.
+///
+/// [`Page::more`] is TeamCity's own answer to that question
+/// ([`ListEnvelope::next_href`]), so the judgement moves off an assumption
+/// this client makes about the server and onto a statement the server makes
+/// about itself.
+#[derive(Debug, Clone)]
+pub(crate) struct Page<T> {
+    pub items: Vec<Rec<T>>,
+    /// Did the server report a page after this one?
+    ///
+    /// `nextHref`, reduced to the one bit this adapter reads. Nothing follows
+    /// the href: it is an offset walk, and `/app/rest/builds` grows at the
+    /// front, so an offset walked over it skips rows -- `sync::all_of` widens
+    /// `count:` and re-reads from the top instead. Reducing it here is what
+    /// keeps that structural rather than a habit.
+    pub more: bool,
+}
+
 /// What one sync run and one connection test need from TeamCity.
 #[async_trait::async_trait]
 pub(crate) trait Rest: Send + Sync {
@@ -30,8 +60,8 @@ pub(crate) trait Rest: Send + Sync {
     /// Whom this credential authenticates as. `None` when the server serves
     /// the endpoint but names nobody.
     async fn current_user(&self) -> Result<CurrentUser, SourceError>;
-    async fn build_types(&self) -> Result<Vec<Rec<BuildType>>, SourceError>;
-    async fn builds(&self, locator: &Locator) -> Result<Vec<Rec<Build>>, SourceError>;
+    async fn build_types(&self) -> Result<Page<BuildType>, SourceError>;
+    async fn builds(&self, locator: &Locator) -> Result<Page<Build>, SourceError>;
     /// Is there a build with this id on the server?
     ///
     /// `GET /app/rest/builds/id:{id}`, which interfaces §4.2 already lists.
@@ -87,11 +117,13 @@ impl HttpRest {
         self.client.get_json::<serde_json::Value>(path, query).await
     }
 
+    /// One collection request, decoded into its records **and** the server's
+    /// own statement about whether there are more of them ([`Page`]).
     async fn list<T: serde::de::DeserializeOwned>(
         &self,
         path: &str,
         query: &[(&str, &str)],
-    ) -> Result<Vec<Rec<T>>, SourceError> {
+    ) -> Result<Page<T>, SourceError> {
         let body = self.get_raw(path, query).await?;
         let envelope: ListEnvelope = serde_json::from_value(body).map_err(|e| {
             SourceError::protocol(format!(
@@ -99,7 +131,10 @@ impl HttpRest {
                  documents: {e}"
             ))
         })?;
-        envelope
+        // Read before the elements are consumed, and never inferred from their
+        // number: that inference is issue #114.
+        let more = envelope.next_href.is_some();
+        let items = envelope
             .items
             .into_iter()
             .map(|raw| {
@@ -107,7 +142,8 @@ impl HttpRest {
                     .map(|rec| Rec { raw, rec })
                     .map_err(|e| SourceError::protocol(format!("teamcity: {path}: {e}")))
             })
-            .collect()
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Page { items, more })
     }
 
     async fn one<T: serde::de::DeserializeOwned>(
@@ -133,12 +169,12 @@ impl Rest for HttpRest {
             .await
     }
 
-    async fn build_types(&self) -> Result<Vec<Rec<BuildType>>, SourceError> {
+    async fn build_types(&self) -> Result<Page<BuildType>, SourceError> {
         self.list("app/rest/buildTypes", &[("fields", BUILD_TYPE_FIELDS)])
             .await
     }
 
-    async fn builds(&self, locator: &Locator) -> Result<Vec<Rec<Build>>, SourceError> {
+    async fn builds(&self, locator: &Locator) -> Result<Page<Build>, SourceError> {
         let rendered = locator.render();
         self.list(
             "app/rest/builds",

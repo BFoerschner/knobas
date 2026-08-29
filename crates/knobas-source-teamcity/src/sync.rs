@@ -18,8 +18,12 @@
 //! query covers every configuration -- then narrows to the scope client-side.
 //!
 //! Neither query is allowed to come back truncated. Both widen `count:` until
-//! the page is short and **fail** at a ceiling rather than compute a watermark
-//! from a set the run knows is incomplete; see [`all_of`].
+//! the server itself says there is no page after the one it served, and
+//! **fail** at a ceiling rather than compute a watermark from a set the run
+//! knows is incomplete; see [`all_of`] and [`last_page`]. A page merely
+//! *shorter* than the `count:` a request named ends nothing on its own: that
+//! reading is true only of a server that served exactly what it was asked for
+//! (issue #114).
 //!
 //! Configurations are emitted for every configuration in scope on a full sync,
 //! and on an incremental run only for the configurations whose builds moved --
@@ -32,7 +36,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use knobas_source::{Cursor, Sink, SourceError, SyncItem};
 
-use crate::client::{Rec, Rest};
+use crate::client::{Page, Rec, Rest};
 use crate::config::TeamCityConfig;
 use crate::rest::{Build, BuildType, Locator, StateFilter};
 use crate::{cursor, map};
@@ -134,6 +138,13 @@ pub(crate) async fn execute(
             let ids: Vec<String> = configs.keys().cloned().collect();
             let mut out = Vec::new();
             for id in ids {
+                // The one query in the run that is a **window** rather than
+                // a set: `builds_per_config` is the newest N this full sync
+                // wants, so a page filled to it is the answer and a
+                // `nextHref` past it is the older history the descriptor
+                // already declares non-exhaustive. Nothing here reads
+                // `Page::more` for that reason -- see
+                // `descriptor_template`.
                 out.extend(
                     rest.builds(&Locator {
                         build_type_id: Some(id),
@@ -141,7 +152,8 @@ pub(crate) async fn execute(
                         count: cfg.builds_per_config,
                         ..Locator::default()
                     })
-                    .await?,
+                    .await?
+                    .items,
                 );
             }
             out
@@ -244,27 +256,73 @@ pub(crate) async fn execute(
     ))))
 }
 
-/// Every build matching `locator`, widening `count:` until the server stops
-/// filling the page. The locator's own `count` is ignored -- this owns that
-/// dimension.
+/// Whether a page just answered is the whole of its query.
 ///
-/// A *full* page means the server had more to give and the page boundary hid
-/// them, so asking again with a bigger `count` is the only way to see them.
-/// Widening re-reads from the top rather than paging by offset, which is what
-/// makes it safe under both orderings: real TeamCity answers newest-first and
-/// `knobas-mockd` answers ascending, and an offset walked over a list that
-/// grows at the front skips rows. `count` is an independent locator dimension,
-/// so widening adds no grammar the mock contract does not already allow.
+/// **Two signals, and both have to agree.** The obvious spelling --
+/// `page.items.len() < asked` -- reads a page shorter than the `count:` the
+/// request named as the end of the query, and that is sound only if the server
+/// served exactly what it was asked for. `count:` is a request: a TeamCity can
+/// be configured with its own ceiling on how many entries a REST list returns,
+/// and a loaded one can answer partially. Under either, the short-page rule
+/// hands a truncated set back as the complete answer, the watermark is computed
+/// from it, and every record after the cut is one `sinceBuild` will never offer
+/// again. That is the failure the module docs above are about, and it is the
+/// reading issue #81 removed from the Gitea adapter's four walks; #114 is the
+/// same reading, one crate over.
+///
+/// So the *positive* signal is TeamCity's own: [`Page::more`] is `nextHref`,
+/// which the server computes from the page it actually produced rather than
+/// from the `count:` it was asked for, and which is therefore present exactly
+/// when it truncated -- whether it truncated at our number or at its own. That
+/// moves the judgement off an assumption this adapter makes about the server
+/// and onto a statement the server makes about itself.
+///
+/// **The short page is kept as a second condition, deliberately.** `more` is a
+/// positive claim that there is another page; its *absence* is not a positive
+/// claim of exhaustion -- a reverse proxy, a TeamCity too old to send
+/// `nextHref`, or a `fields=` that stopped asking for it all produce the same
+/// absence. Ending on `!more` alone would truncate every walk at its first page
+/// under any of those, which is a worse regression than the one being removed
+/// here. Requiring the page to be short *as well* means the walk stops only
+/// when two independent things agree, and the one outcome that must never
+/// happen -- stopping on a page the server filled -- is unreachable. Against a
+/// server that omits `nextHref` this degrades to exactly the old behaviour
+/// rather than to something new.
+///
+/// **What is left, stated rather than guarded.** A server that both serves
+/// fewer rows than it was asked for *and* omits `nextHref` while doing it is
+/// indistinguishable from an exhausted query, from the client, on this
+/// endpoint: `/app/rest/builds` publishes no total, and the only other walk
+/// available is the offset one this adapter refuses (see [`Page::more`]). No
+/// such server is known -- JetBrains' public instance answers `nextHref` on
+/// every truncated page, measured 2026-08-29 -- and the residual is recorded
+/// here because that is where the next reader of this file will look.
+fn last_page(page: &Page<Build>, asked: u32) -> bool {
+    !page.more && page.items.len() < asked as usize
+}
+
+/// Every build matching `locator`, widening `count:` until the server says
+/// there is nothing after the page it just served. The locator's own `count` is
+/// ignored -- this owns that dimension.
+///
+/// A page the server did not end ([`last_page`]) means it had more to give and
+/// the page boundary hid them, so asking again with a bigger `count` is the
+/// only way to see them. Widening re-reads from the top rather than paging by
+/// offset, which is what makes it safe under both orderings: real TeamCity
+/// answers newest-first and `knobas-mockd` answers ascending, and an offset
+/// walked over a list that grows at the front skips rows. `count` is an
+/// independent locator dimension, so widening adds no grammar the mock contract
+/// does not already allow.
 ///
 /// # Errors
 ///
-/// [`SourceError::Protocol`], with the caller's message, once the page is
-/// still full at [`MAX_BUILDS_PER_QUERY`]. **This must never be `Ok`.** A
-/// truncated page silently returned is how a build becomes permanently
-/// unreachable: on the finished side the watermark advances past builds this
-/// run never emitted, and on the in-flight side it advances past builds that
-/// have not finished yet. Either way `sinceBuild` never offers them again, and
-/// a full sync is a window rather than the corpus (see
+/// [`SourceError::Protocol`], with the caller's message, once the server is
+/// still reporting more at [`MAX_BUILDS_PER_QUERY`]. **This must never be
+/// `Ok`.** A truncated page silently returned is how a build becomes
+/// permanently unreachable: on the finished side the watermark advances past
+/// builds this run never emitted, and on the in-flight side it advances past
+/// builds that have not finished yet. Either way `sinceBuild` never offers them
+/// again, and a full sync is a window rather than the corpus (see
 /// [`descriptor_template`](crate::descriptor_template)), so not even a cursor
 /// reset recovers them. A failed run, by contrast, leaves the cursor where it
 /// is and the scheduler retries.
@@ -272,6 +330,18 @@ pub(crate) async fn execute(
 /// The final probe deliberately asks for one *more* than the ceiling, so
 /// "exactly [`MAX_BUILDS_PER_QUERY`] builds" is a success rather than a
 /// spurious failure at the boundary.
+///
+/// **What a capping server costs, and why refusing is the whole of the
+/// remedy.** Widening is the only lever this query has. Against an instance
+/// whose own per-request ceiling sits below the number of builds one run needs
+/// to see, every widening comes back at that ceiling with more still reported,
+/// and the run ends here -- for as long as the query stays that big. That is a
+/// source which cannot sync until it is narrowed (`build_type_ids`,
+/// `project_ids`, a shorter interval) or until the ceiling is raised, and it is
+/// deliberately preferred to the alternative: mirroring the ceiling's worth of
+/// builds, advancing the watermark past the rest, and reporting success. The
+/// failure names the ceiling ([`capped_short`]) so nobody spends the outage
+/// narrowing a source that was never too big.
 async fn all_of(
     rest: &dyn Rest,
     locator: &Locator,
@@ -286,14 +356,49 @@ async fn all_of(
                 ..locator.clone()
             })
             .await?;
-        if page.len() < count as usize {
-            return Ok(page);
+        if last_page(&page, count) {
+            return Ok(page.items);
         }
         if count >= ceiling {
-            return Err(SourceError::protocol(overflowed()));
+            // The caller's message says the query is bigger than one run can
+            // carry, and against a capping server that is not what happened:
+            // it would send the user narrowing a source that already fits.
+            // `capped_short` replaces it rather than joining it.
+            return Err(SourceError::protocol(
+                capped_short(page.items.len(), count).unwrap_or_else(overflowed),
+            ));
         }
         count = count.saturating_mul(2).min(ceiling);
     }
+}
+
+/// The refusal for a server that stopped the page itself, in place of the
+/// caller's "this query is too big".
+///
+/// `None` when the last request came back filled: then the query really is
+/// bigger than one run can carry, and the caller's own message -- sync more
+/// often, narrow the configurations -- is the true one.
+///
+/// `Some` when it came back **short and the server still reported more**. That
+/// is a per-request ceiling on the instance rather than a large query, and the
+/// caller's advice is then actively misleading: a source of two hundred builds
+/// behind a fifty-row ceiling is not one narrowing helps, and a message naming
+/// [`MAX_BUILDS_PER_QUERY`] would send the user looking for a thousand builds
+/// that are not there. Naming the two numbers the server itself produced is
+/// what lets the two cases be told apart without reading this file.
+fn capped_short(served: usize, asked: u32) -> Option<String> {
+    (served < asked as usize).then(|| {
+        format!(
+            "teamcity: this server answered a request for {asked} builds with {served} of them \
+             and still reported a further page, so it puts its own ceiling on how many entries \
+             one REST list returns -- below what this run has to see in one query. Widening \
+             `count:` is the only lever this query has and it is spent. Carrying on would mean \
+             mirroring {served} builds and advancing the watermark past every one after them, \
+             which `sinceBuild` could never offer again. Raise the server's per-request limit, \
+             or narrow this source with build_type_ids/project_ids, or sync more often, so that \
+             one query needs fewer than {served} builds."
+        )
+    })
 }
 
 /// One page of builds, in whatever state and whatever order the server likes:
@@ -314,13 +419,22 @@ async fn all_of(
 ///
 /// No `state:` dimension: `state:` names a set of builds to fetch, and the
 /// question here is one number about *every* build whatever its state.
+///
+/// The page's own `nextHref` is dropped rather than acted on, and this is the
+/// one place in the run where that is right: there is always more of the id
+/// space than one page of it, and this asks for evidence rather than for a
+/// set. A server that serves fewer rows than [`CEILING_PROBE`] asked for makes
+/// the ceiling lower, which [`ceiling`] already records as the safe direction
+/// -- a re-fetch on a later run, never a build.
 async fn probe(rest: &dyn Rest) -> Result<Vec<Rec<Build>>, SourceError> {
-    rest.builds(&Locator {
-        default_filter: Some(false),
-        count: CEILING_PROBE,
-        ..Locator::default()
-    })
-    .await
+    Ok(rest
+        .builds(&Locator {
+            default_filter: Some(false),
+            count: CEILING_PROBE,
+            ..Locator::default()
+        })
+        .await?
+        .items)
 }
 
 /// The highest build id this run **witnessed** while opening, or `None` when
@@ -525,10 +639,41 @@ async fn in_flight(rest: &dyn Rest) -> Result<Vec<Rec<Build>>, SourceError> {
     .await
 }
 
+/// The build configurations in scope.
+///
+/// # Errors
+///
+/// [`SourceError::Protocol`] when the server reports a page after the one it
+/// answered with. This walk sends no `count:` at all -- interfaces §4.2 lists
+/// the endpoint as `GET /app/rest/buildTypes?fields=...` and nothing else --
+/// and a TeamCity serves the whole listing for that: 4,253 configurations in
+/// one answer with no `nextHref`, measured read-only against JetBrains' public
+/// instance on 2026-08-29.
+///
+/// An instance that pages it anyway would silently narrow the scope of every
+/// full sync, and the narrowing is invisible from here: the run would emit
+/// fewer `build_config` items and fetch builds for fewer configurations while
+/// reporting success, which is the same silent-truncation class as issue #114
+/// arriving through the one walk that never had a page size to be wrong about.
+/// Refusing is what makes it visible; the alternative -- adding `count:` and
+/// widening as [`all_of`] does -- is a locator on an endpoint the contract
+/// lists without one, and is the deliberate change to make when a server that
+/// pages this is actually met.
 async fn scope(rest: &dyn Rest, cfg: &TeamCityConfig) -> Result<Vec<Rec<BuildType>>, SourceError> {
-    Ok(rest
-        .build_types()
-        .await?
+    let page = rest.build_types().await?;
+    if page.more {
+        return Err(SourceError::protocol(format!(
+            "teamcity: `/app/rest/buildTypes` answered {} build configurations and reported a \
+             further page. This adapter asks that endpoint for the whole listing and has no \
+             second request to make for the rest, so carrying on would sync a silently narrowed \
+             scope -- fewer configurations, and only the builds belonging to them -- while \
+             reporting a complete run. Refusing instead; this needs a paged build-configuration \
+             walk, which no TeamCity has yet been seen to require.",
+            page.items.len()
+        )));
+    }
+    Ok(page
+        .items
         .into_iter()
         .filter(|t| in_scope_type(cfg, &t.rec))
         .collect())
@@ -577,6 +722,16 @@ mod tests {
         build_types: Vec<serde_json::Value>,
         builds: Vec<serde_json::Value>,
         order: PageOrder,
+        /// The most rows this server will put on a page, whatever `count:`
+        /// asked for -- see [`FakeRest::capped`]. `None` honours `count:`
+        /// exactly, which is what every other constructor here does.
+        cap: Option<usize>,
+        /// Does `/app/rest/buildTypes` report a page after the one it serves?
+        /// No TeamCity has been seen to; `scope` refuses one that does.
+        paged_build_types: bool,
+        /// A server that never sends `nextHref` at all -- see
+        /// [`FakeRest::silent`].
+        silent: bool,
         calls: Mutex<Vec<String>>,
     }
 
@@ -608,8 +763,60 @@ mod tests {
                 build_types,
                 builds,
                 order: PageOrder::NewestFirst,
+                cap: None,
+                paged_build_types: false,
+                silent: false,
                 calls: Mutex::new(Vec::new()),
             }
+        }
+
+        /// A server whose build-configuration listing is paged: it answers
+        /// with a `nextHref`, and this adapter has no second request to make
+        /// for the rest of it.
+        fn paged_build_types(mut self) -> Self {
+            self.paged_build_types = true;
+            self
+        }
+
+        /// A server that **ignores the `count:` this run asked for** and puts
+        /// at most `cap` rows on a page.
+        ///
+        /// Every other constructor here serves exactly what it was asked for,
+        /// so on them a page shorter than `count:` can only mean the query ran
+        /// out of matches. That is the one reading issue #114 is about, and a
+        /// fake that cannot express the other one cannot show the bug -- which
+        /// is why this was never caught. `count:` is a request, not a
+        /// guarantee: a TeamCity may be configured with a lower ceiling on how
+        /// many entries a REST list returns, and a loaded one may answer a
+        /// partial page.
+        ///
+        /// It reports the truncation the way a real TeamCity does, through
+        /// `nextHref` -- measured on JetBrains' public instance 2026-08-29,
+        /// where `count:42` over exactly 42 matches answered `nextHref:
+        /// …start:42` and `count:43` over the same 42 answered none. That is
+        /// the signal [`all_of`] ends a walk on; see [`Page::more`].
+        fn capped(mut self, cap: usize) -> Self {
+            assert!(
+                0 < cap && cap < PAGE as usize,
+                "a cap only says anything below the page size the run asks for"
+            );
+            self.cap = Some(cap);
+            self
+        }
+
+        /// A server that **never sends `nextHref`**, whatever it truncated:
+        /// a reverse proxy that strips it, a TeamCity too old to serve it, or
+        /// a `fields=` that stopped asking for it.
+        ///
+        /// The one that says whether [`last_page`]'s second condition earns
+        /// its keep. Ending a walk on `!more` alone would read every one of
+        /// this server's pages as the end of its query -- including the first,
+        /// full one -- which is a worse truncation than the short-page rule
+        /// #114 removed. Against this server the walk falls back to exactly
+        /// that older rule and still reaches the end.
+        fn silent(mut self) -> Self {
+            self.silent = true;
+            self
         }
 
         fn ascending(mut self) -> Self {
@@ -642,21 +849,28 @@ mod tests {
                 name: None,
             })
         }
-        async fn build_types(&self) -> Result<Vec<Rec<BuildType>>, SourceError> {
+        async fn build_types(&self) -> Result<Page<BuildType>, SourceError> {
             self.calls
                 .lock()
                 .expect("not poisoned")
                 .push("buildTypes".to_owned());
-            Ok(self
-                .build_types
-                .iter()
-                .map(|raw| Rec {
-                    raw: raw.clone(),
-                    rec: serde_json::from_value(raw.clone()).expect("fixture parses"),
-                })
-                .collect())
+            // The whole listing, and no `nextHref`: that is what a real
+            // TeamCity answers `/app/rest/buildTypes?fields=...` with, 4,253
+            // configurations deep. `FakeRest::paged_build_types` is the other
+            // one, and `scope` refuses it.
+            Ok(Page {
+                items: self
+                    .build_types
+                    .iter()
+                    .map(|raw| Rec {
+                        raw: raw.clone(),
+                        rec: serde_json::from_value(raw.clone()).expect("fixture parses"),
+                    })
+                    .collect(),
+                more: self.paged_build_types,
+            })
         }
-        async fn builds(&self, locator: &Locator) -> Result<Vec<Rec<Build>>, SourceError> {
+        async fn builds(&self, locator: &Locator) -> Result<Page<Build>, SourceError> {
             self.calls
                 .lock()
                 .expect("not poisoned")
@@ -699,8 +913,16 @@ mod tests {
                 // not its maximum.
                 PageOrder::AsGiven => {}
             }
-            out.truncate(locator.count as usize);
-            Ok(out)
+            // What the server puts on the page, and what it then says about
+            // the rest -- a real TeamCity computes `nextHref` from the page it
+            // produced, not from the `count:` it was asked for, so a capped
+            // page still reports the remainder. Measured on JetBrains' public
+            // instance 2026-08-29; see `FakeRest::capped`.
+            let asked = locator.count as usize;
+            let serves = self.cap.map_or(asked, |cap| cap.min(asked));
+            let more = !self.silent && out.len() > serves;
+            out.truncate(serves);
+            Ok(Page { items: out, more })
         }
         /// The by-id endpoint answers from the corpus, not from a page:
         /// `/app/rest/builds/id:{id}` takes no `count` and no ordering, which
@@ -1186,6 +1408,186 @@ mod tests {
         assert_eq!(cursor, r#"{"v":1,"since_build_id":250}"#);
     }
 
+    /// One incremental run from build 0 against a server that serves at most
+    /// `cap` rows per request, `total` finished builds deep.
+    async fn capped_run(
+        cap: usize,
+        total: i64,
+    ) -> (Result<Vec<SyncItem>, SourceError>, Vec<String>) {
+        let many: Vec<serde_json::Value> = (1..=total)
+            .map(|n| build(n, "Payout_Build", "Payout", "finished"))
+            .collect();
+        let rest = FakeRest::new(vec![build_type("Payout_Build", "Payout")], many).capped(cap);
+        let mut sink = VecSink(Vec::new());
+        let outcome = execute(
+            "teamcity",
+            &TeamCityConfig::default(),
+            &rest,
+            Some(r#"{"v":1,"since_build_id":0}"#.to_owned()),
+            &mut sink,
+        )
+        .await
+        .map(|_| sink.0);
+        let widened = rest
+            .calls()
+            .into_iter()
+            .filter(|c| c.contains("sinceBuild"))
+            .collect();
+        (outcome, widened)
+    }
+
+    /// Issue #114: a page shorter than the `count:` this run asked for is
+    /// **not** proof the query ran out of matches.
+    ///
+    /// `count:` is a request. A TeamCity may be configured to serve fewer
+    /// entries per REST list than were asked for, and a loaded one may answer
+    /// a partial page; under either, reading a short page as the end returns a
+    /// truncated set as the whole answer, `max_finished` is computed from it,
+    /// and the watermark advances past every build the run never emitted --
+    /// which `sinceBuild` can then never offer again. That is the silent,
+    /// watermark-advancing loss ADR-0003 and this whole module exist to
+    /// refuse, and it is the same reading #81 removed from Gitea's four walks
+    /// one crate over.
+    ///
+    /// Deliberately one test over the two halves of the decision, with an
+    /// uncapped control, so the assertions are about the cap and not about the
+    /// fixture:
+    ///
+    /// * **The cap bites.** 250 builds behind a 50-row ceiling cannot be seen
+    ///   in one query at all, so the run **fails** rather than mirroring 50 of
+    ///   them and moving the watermark to 250. Widening is the only lever this
+    ///   query has -- `/app/rest/builds` grows at the front, so an offset walk
+    ///   over it skips rows -- and against a server that will not widen there
+    ///   is nothing left but to refuse. That cost is stated in [`all_of`] and
+    ///   named in the message.
+    /// * **The cap does not bite.** 30 builds behind the same ceiling are all
+    ///   the query has, the server says so, and the run mirrors every one of
+    ///   them. Without this half, "make every capped server fail" would pass.
+    #[tokio::test]
+    async fn a_short_page_from_a_capping_server_is_not_read_as_the_end_of_the_query() {
+        let (truncated, widened) = capped_run(50, 250).await;
+        let error = truncated
+            .map(|items| format!("Ok({} items)", items.len()))
+            .expect_err(
+                "50 of 250 builds returned as the whole answer would advance the watermark to \
+                 250 and lose the other 200 for good",
+            );
+        assert!(
+            matches!(&error, SourceError::Protocol { message: m, .. }
+                if m.contains("answered a request for 1001 builds with 50 of them")
+                    && m.contains("still reported a further page")),
+            "the refusal has to name the server's own ceiling with the two numbers the server \
+             produced: {error:?}"
+        );
+        assert!(
+            matches!(&error, SourceError::Protocol { message: m, .. }
+                if !m.contains(&format!("more than {MAX_BUILDS_PER_QUERY}"))),
+            "and must NOT claim the query was too big -- there are 250 builds here, not more \
+             than 1000, and that advice would send the user narrowing a source that fits: \
+             {error:?}"
+        );
+        assert_eq!(
+            widened,
+            [
+                "state:finished,sinceBuild:(id:0),count:100",
+                "state:finished,sinceBuild:(id:0),count:200",
+                "state:finished,sinceBuild:(id:0),count:400",
+                "state:finished,sinceBuild:(id:0),count:800",
+                "state:finished,sinceBuild:(id:0),count:1001",
+            ],
+            "it widened rather than accepting the first short page"
+        );
+
+        // The same ceiling, over a query it can actually carry.
+        let (walked, widened) = capped_run(50, 30).await;
+        let items = walked.expect("30 builds fit inside a 50-row ceiling");
+        assert_eq!(
+            items.iter().filter(|i| i.kind == "build").count(),
+            30,
+            "every build, and no extra request spent proving it"
+        );
+        assert_eq!(
+            widened,
+            ["state:finished,sinceBuild:(id:0),count:100"],
+            "one request: the server answered short and said there was nothing after it"
+        );
+    }
+
+    /// [`last_page`]'s second condition, and the reason it is there: a walk
+    /// must not end on `!more` alone.
+    ///
+    /// `nextHref` is a *positive* claim that another page exists. Its absence
+    /// is not the opposite claim -- a reverse proxy that strips it, a TeamCity
+    /// too old to serve it, or a `fields=` that stopped asking for it all
+    /// produce the same absence over a server with plenty left. A walk that
+    /// ended on `!more` alone would stop at the first page against every one
+    /// of those, which is a *worse* truncation than the short-page reading
+    /// #114 removed, and no fixture written against a well-behaved fake would
+    /// have shown it.
+    ///
+    /// So this server truncates its pages and says nothing about it, and the
+    /// walk still reaches all 250 builds: the fix degrades to the rule it
+    /// replaced rather than to something new.
+    #[tokio::test]
+    async fn a_server_that_never_reports_a_next_page_is_still_walked_to_the_end() {
+        let many: Vec<serde_json::Value> = (1..=250)
+            .map(|n| build(n, "Payout_Build", "Payout", "finished"))
+            .collect();
+        let rest = FakeRest::new(vec![build_type("Payout_Build", "Payout")], many).silent();
+        let (items, cursor) = run(
+            &rest,
+            &TeamCityConfig::default(),
+            Some(r#"{"v":1,"since_build_id":0}"#.to_owned()),
+        )
+        .await;
+        assert_eq!(
+            items.iter().filter(|i| i.kind == "build").count(),
+            250,
+            "every build: a page of 100 out of 250 is full, and full is not the end whatever \
+             the server did or did not say about a next page"
+        );
+        assert_eq!(cursor, r#"{"v":1,"since_build_id":250}"#);
+    }
+
+    /// The one walk with no `count:` to widen: `/app/rest/buildTypes` is asked
+    /// for the whole listing, so a server that pages it has nothing this
+    /// adapter can ask next.
+    ///
+    /// Refusing is the visible outcome. Carrying on would sync a silently
+    /// narrowed scope -- fewer `build_config` items, and only the builds
+    /// belonging to the configurations that fitted on the page -- while
+    /// reporting a complete run, which is issue #114's failure class arriving
+    /// through the one walk that never had a page size to be wrong about.
+    #[tokio::test]
+    async fn a_paged_build_configuration_listing_is_refused_rather_than_narrowing_the_scope() {
+        let rest = tidewater().paged_build_types();
+        let mut sink = VecSink(Vec::new());
+        let error = execute(
+            "teamcity",
+            &TeamCityConfig::default(),
+            &rest,
+            None,
+            &mut sink,
+        )
+        .await
+        .expect_err("a partial build-configuration listing is not a scope");
+        assert!(
+            matches!(&error, SourceError::Protocol { message: m, .. }
+                if m.contains("buildTypes") && m.contains("further page")),
+            "{error:?}"
+        );
+        assert!(
+            sink.0.is_empty(),
+            "nothing is emitted from a run that cannot complete"
+        );
+
+        // The control: the same fixture from a server that serves the listing
+        // whole -- which is what a real TeamCity does, 4,253 configurations in
+        // one answer -- syncs.
+        let (items, _) = run(&tidewater(), &TeamCityConfig::default(), None).await;
+        assert!(items.iter().any(|i| i.kind == "build_config"));
+    }
+
     /// The in-flight poll is the only input to the watermark clamp, so a page
     /// it silently truncated is a permanently unreachable build.
     ///
@@ -1340,10 +1742,10 @@ mod tests {
         async fn current_user(&self) -> Result<crate::rest::CurrentUser, SourceError> {
             self.snapshot(&self.before).current_user().await
         }
-        async fn build_types(&self) -> Result<Vec<Rec<BuildType>>, SourceError> {
+        async fn build_types(&self) -> Result<Page<BuildType>, SourceError> {
             self.snapshot(&self.before).build_types().await
         }
-        async fn builds(&self, locator: &Locator) -> Result<Vec<Rec<Build>>, SourceError> {
+        async fn builds(&self, locator: &Locator) -> Result<Page<Build>, SourceError> {
             let at_t0 = {
                 let mut elapsed = self.elapsed.lock().expect("not poisoned");
                 if !is_ceiling_probe(locator) {
