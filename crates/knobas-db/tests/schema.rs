@@ -805,7 +805,10 @@ async fn the_mirror_can_never_name_an_entity_knobas_owns() {
         .await
         .unwrap_err();
         assert_eq!(
-            refused.as_database_error().and_then(|e| e.code()).as_deref(),
+            refused
+                .as_database_error()
+                .and_then(|e| e.code())
+                .as_deref(),
             Some("23514"),
             "a mirror row naming {id} must be refused by the check constraint"
         );
@@ -828,7 +831,10 @@ async fn the_mirror_can_never_name_an_entity_knobas_owns() {
         .await
         .unwrap_err();
         assert_eq!(
-            refused.as_database_error().and_then(|e| e.code()).as_deref(),
+            refused
+                .as_database_error()
+                .and_then(|e| e.code())
+                .as_deref(),
             Some("23514"),
             "{shouting} must be refused too"
         );
@@ -907,7 +913,10 @@ async fn a_note_row_needs_its_entity_and_lives_in_the_note_namespace() {
         .await
         .unwrap_err();
     assert_eq!(
-        refused.as_database_error().and_then(|e| e.code()).as_deref(),
+        refused
+            .as_database_error()
+            .and_then(|e| e.code())
+            .as_deref(),
         Some("23503"),
         "a note with no entity row is a note nothing can link to"
     );
@@ -926,7 +935,10 @@ async fn a_note_row_needs_its_entity_and_lives_in_the_note_namespace() {
         .await
         .unwrap_err();
     assert_eq!(
-        refused.as_database_error().and_then(|e| e.code()).as_deref(),
+        refused
+            .as_database_error()
+            .and_then(|e| e.code())
+            .as_deref(),
         Some("23514"),
         "a note's id is in the namespace knobas keeps for notes"
     );

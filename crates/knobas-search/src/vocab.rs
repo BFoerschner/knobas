@@ -635,8 +635,14 @@ mod tests {
         assert!(!catalog.is_declared("build_config") && !catalog.is_known("build_config"));
         // ...including while nothing has wired the registry through at all
         // (**E-Q2**), which is what the product ships with today.
-        assert!(KindCatalog::default().is_empty(), "no descriptor has spoken");
-        assert!(KindCatalog::default().is_known("note"), "and yet notes exist");
+        assert!(
+            KindCatalog::default().is_empty(),
+            "no descriptor has spoken"
+        );
+        assert!(
+            KindCatalog::default().is_known("note"),
+            "and yet notes exist"
+        );
     }
 
     /// A descriptor cannot take a kind knobas owns away from it.

@@ -1161,3 +1161,164 @@ async fn a_relations_case_does_not_split_its_group() {
         "folding must not merge distinct relations: {relations:?}"
     );
 }
+
+/// The whole note lifecycle over the command seam, in the order a person does
+/// it: *New note*, type, refer to something, look at it from the other end.
+///
+/// Written against `mock:PAY-231` -- a real row from the reference adapter's
+/// fixture -- so the ref has to resolve against the same mirror the launcher
+/// reads and not against a row this test invented.
+#[tokio::test]
+async fn a_note_written_over_the_seam_carries_its_refs_and_its_backlink() {
+    let pool = seeded().await;
+    use knobas_app::commands::entity::{create_note_inner, get_note_inner, save_note_inner};
+
+    // Story 2: *New note* writes the row before anything is typed into it.
+    let fresh = create_note_inner(&pool, None, None).await.unwrap();
+    assert_eq!(fresh.note.title, knobas_core::note::UNTITLED);
+    assert!(fresh.note.body_md.is_empty());
+    assert!(fresh.refs.is_empty() && fresh.links.is_empty());
+    let id = fresh.note.id.clone();
+
+    // Stories 1, 3, 5, 6, 7: a title, a body, and a ref to something real.
+    let saved = save_note_inner(
+        &pool,
+        &id,
+        "SEPA retry investigation",
+        "off-by-one in [[mock:PAY-231]], and [[mock:NOPE-1]] is a typo",
+    )
+    .await
+    .unwrap();
+    assert_eq!(saved.note.title, "SEPA retry investigation");
+
+    // Story 7: the chip has the target's kind and title to draw, not an id.
+    assert_eq!(
+        saved
+            .refs
+            .iter()
+            .map(|r| r.target_id.as_str())
+            .collect::<Vec<_>>(),
+        ["mock:PAY-231", "mock:NOPE-1"]
+    );
+    let resolved = saved.refs[0]
+        .target
+        .as_ref()
+        .expect("PAY-231 is in the mirror");
+    assert_eq!(resolved.kind, "ticket");
+    assert!(!resolved.title.is_empty());
+    // Story 10: the typo is a ref with nothing behind it, and it is *shown*.
+    assert!(saved.refs[1].target.is_none());
+
+    // Story 11: from the ticket, the note is a backlink -- the same panel #53
+    // built, filled by the same read.
+    let back = links_on(&pool, "mock:PAY-231").await;
+    let entry = back
+        .iter()
+        .find(|entry| entry.other.entity_id == id)
+        .expect("the ticket shows the note that names it");
+    assert_eq!(entry.other.kind, "note");
+    assert_eq!(entry.other.title, "SEPA retry investigation");
+    assert_eq!(entry.link.origin, knobas_core::link::Origin::Implied);
+    assert_eq!(entry.link.relation, knobas_core::note::REF_RELATION);
+    // ...and the note's own read shows the same link from its end.
+    let read = get_note_inner(&pool, &id).await.unwrap();
+    assert_eq!(read.note.body_md, saved.note.body_md);
+    assert!(
+        read.links
+            .iter()
+            .any(|entry| entry.other.entity_id == "mock:PAY-231")
+    );
+}
+
+/// Story 9 over the seam: a ref whose target the source withdrew stays
+/// visible and marked.
+///
+/// `mock:PAY-198` is the fixture's genuinely tombstoned row -- the same one
+/// #53 pinned its hydration against -- so this is the real state and not a
+/// `deleted_at` a test wrote by hand.
+#[tokio::test]
+async fn a_note_ref_to_a_withdrawn_ticket_resolves_and_is_marked() {
+    let pool = seeded().await;
+    use knobas_app::commands::entity::create_note_inner;
+
+    let detail = create_note_inner(&pool, Some("Runbook"), Some("superseded: [[mock:PAY-198]]"))
+        .await
+        .unwrap();
+
+    let target = detail.refs[0]
+        .target
+        .as_ref()
+        .expect("a withdrawn entity still resolves -- that is the point");
+    assert!(
+        target.deleted_at.is_some(),
+        "and the chip has what marks it withdrawn"
+    );
+    assert!(!target.title.is_empty(), "with its last-known title");
+}
+
+/// Story 4, and what happens to an editor that was open on the note.
+#[tokio::test]
+async fn deleting_a_note_over_the_seam_is_idempotent_and_a_stale_editor_is_told() {
+    let pool = seeded().await;
+    use knobas_app::commands::entity::{
+        create_note_inner, delete_note_inner, get_note_inner, save_note_inner,
+    };
+
+    let detail = create_note_inner(&pool, Some("Scratch"), Some("a thought"))
+        .await
+        .unwrap();
+    let id = detail.note.id.clone();
+
+    assert!(delete_note_inner(&pool, &id).await.unwrap());
+    assert!(
+        !delete_note_inner(&pool, &id).await.unwrap(),
+        "a second delete deleted nothing, and says so"
+    );
+
+    for err in [
+        get_note_inner(&pool, &id).await.unwrap_err(),
+        save_note_inner(&pool, &id, "back?", "").await.unwrap_err(),
+    ] {
+        assert_eq!(
+            err.code,
+            knobas_app::IpcErrorCode::NotFound,
+            "a deleted note is not resurrected by an editor that had not heard: {err}"
+        );
+    }
+}
+
+/// A bad address is a bad address here too, and not a 500.
+#[tokio::test]
+async fn a_malformed_note_id_is_invalid_and_an_unknown_one_is_not_found() {
+    let pool = seeded().await;
+    use knobas_app::commands::entity::{delete_note_inner, get_note_inner, save_note_inner};
+
+    for bad in ["no-colon-here", "", ":x", "note:"] {
+        assert_eq!(
+            get_note_inner(&pool, bad).await.unwrap_err().code,
+            knobas_app::IpcErrorCode::Invalid,
+            "{bad:?}"
+        );
+        assert_eq!(
+            save_note_inner(&pool, bad, "t", "b")
+                .await
+                .unwrap_err()
+                .code,
+            knobas_app::IpcErrorCode::Invalid,
+            "{bad:?}"
+        );
+        assert_eq!(
+            delete_note_inner(&pool, bad).await.unwrap_err().code,
+            knobas_app::IpcErrorCode::Invalid,
+            "{bad:?}"
+        );
+    }
+
+    let nobody = format!("note:{}", uuid::Uuid::new_v4());
+    assert_eq!(
+        get_note_inner(&pool, &nobody).await.unwrap_err().code,
+        knobas_app::IpcErrorCode::NotFound
+    );
+    // ...but deleting one that is not there is not an error at all.
+    assert!(!delete_note_inner(&pool, &nobody).await.unwrap());
+}

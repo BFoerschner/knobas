@@ -785,7 +785,10 @@ async fn a_note_is_found_by_the_same_search_that_finds_a_ticket() {
 
     // Story 13: the *body* is searchable, not just the title -- the phrase
     // below is in neither title.
-    let by_body = searcher(&pool).search(q(&format!("{t} counter"))).await.unwrap();
+    let by_body = searcher(&pool)
+        .search(q(&format!("{t} counter")))
+        .await
+        .unwrap();
     let found: Vec<&str> = by_body
         .groups
         .iter()
@@ -886,9 +889,8 @@ async fn a_notes_snippet_is_segments_of_the_markdown_the_user_typed() {
 
     // The ref sits *next to* the match, so it is inside whatever window
     // `ts_headline` chooses rather than left to luck.
-    let body = format!(
-        "## Runbook\n\nThe {t} escalation [[jira:PAY-231]] path is not the on-call rota."
-    );
+    let body =
+        format!("## Runbook\n\nThe {t} escalation [[jira:PAY-231]] path is not the on-call rota.");
     let note = knobas_core::note::create(&pool, &format!("{t} runbook"), &body, "user")
         .await
         .unwrap();

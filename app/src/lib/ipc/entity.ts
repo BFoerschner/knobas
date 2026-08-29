@@ -290,3 +290,111 @@ export function createLink(
 export function unlink(linkId: string): Promise<void> {
   return invoke<void>("unlink", { linkId });
 }
+
+/**
+ * One note — `knobas_core::note::NoteRow`.
+ *
+ * Notes are the first kind knobas *owns* rather than mirrors: nothing synced
+ * this and nothing can re-fetch it, which is why it is in the backup and never
+ * written to a source.
+ */
+export interface NoteRow {
+  /** `"note:<uuid>"` — also this note's entity id, so it links like anything else. */
+  id: string;
+  /** Never blank: a note the user has not named is "Untitled note". */
+  title: string;
+  /**
+   * The markdown the user typed.
+   *
+   * Untrusted text — render as text, never as markup (gotcha 7). It is the
+   * user's own rather than a source's, which changes who is at fault and
+   * nothing else. There is no `{@html}` anywhere in this app; a `[[ref]]`
+   * becomes a chip by parsing the body into tokens and drawing them, not by
+   * turning the string into HTML.
+   */
+  body_md: string;
+  /** RFC 3339. */
+  created_at: string;
+  /** RFC 3339. Moves on every save. */
+  updated_at: string;
+}
+
+/**
+ * One `[[ref]]` a note's body names — `knobas_core::note::NoteRef`.
+ *
+ * `target` is `null` for an **unresolved** ref: nothing carries that id, so it
+ * creates no link and is drawn as unresolved rather than as plain text — that
+ * is how a typo is discoverable. A `target` whose `deleted_at` is set is the
+ * other case entirely: the ref resolves, the link exists, and the chip is
+ * marked withdrawn.
+ */
+export interface NoteRef {
+  /** The text between the brackets, exactly as the body wrote it. */
+  target_id: string;
+  target: LinkEnd | null;
+}
+
+/**
+ * Everything the note view draws — `knobas_app::commands::entity::NoteDetail`.
+ *
+ * `refs` and `links` overlap on purpose and answer different questions.
+ * `refs` is the body's own list, in body order, including the ones that
+ * resolve to nothing. `links` is the same panel `getEntity` fills: every link
+ * the note takes part in, in either direction, so a note shows what points at
+ * it as well as what it points at.
+ */
+export interface NoteDetail {
+  note: NoteRow;
+  refs: NoteRef[];
+  links: LinkEntry[];
+}
+
+/**
+ * One note — `knobas_app::commands::entity::get_note`.
+ *
+ * Rejects with `invalid` for something that is not an entity id and
+ * `not_found` for a note that does not exist — including one deleted in
+ * another window.
+ */
+export function getNote(noteId: string): Promise<NoteDetail> {
+  return invoke<NoteDetail>("get_note", { noteId });
+}
+
+/**
+ * Write a new note — `knobas_app::commands::entity::create_note`.
+ *
+ * Both arguments are optional: *New note* creates the row before the first
+ * keystroke, so nothing typed into it can be lost to a closed window.
+ */
+export function createNote(title?: string, bodyMd?: string): Promise<NoteDetail> {
+  return invoke<NoteDetail>("create_note", { title, bodyMd });
+}
+
+/**
+ * Save a note — `knobas_app::commands::entity::save_note`.
+ *
+ * What the editor's autosave calls. The body is the source of truth for the
+ * note's `[[ref]]` links: this reconciles them, so adding a ref draws the link
+ * and removing it withdraws the link, and the answer carries the refs the
+ * editor redraws its chips from.
+ *
+ * Rejects with `invalid` for something that is not an entity id and
+ * `not_found` for a note that no longer exists — an editor open on a deleted
+ * note does not resurrect it.
+ */
+export function saveNote(noteId: string, title: string, bodyMd: string): Promise<NoteDetail> {
+  return invoke<NoteDetail>("save_note", { noteId, title, bodyMd });
+}
+
+/**
+ * Delete a note — `knobas_app::commands::entity::delete_note`.
+ *
+ * The body goes; the address stays, tombstoned, so a link somebody drew *to*
+ * the note stays visible and marked instead of dangling. Resolves `false` when
+ * there was nothing left to delete.
+ *
+ * Rejects with `invalid` for something that is not an entity id.
+ */
+export function deleteNote(noteId: string): Promise<boolean> {
+  return invoke<boolean>("delete_note", { noteId });
+}

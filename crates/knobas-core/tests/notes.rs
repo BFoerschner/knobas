@@ -58,7 +58,10 @@ async fn a_note_is_written_read_back_and_edited() {
 
     // Read back through the store, not through the row the write returned: the
     // point of the write returning one is that it is the *stored* row.
-    let read = note::get(&pool, &id).await.unwrap().expect("the note exists");
+    let read = note::get(&pool, &id)
+        .await
+        .unwrap()
+        .expect("the note exists");
     assert_eq!(read.title, "Standup");
     assert_eq!(read.body_md, "Blocker: none.");
     assert_eq!(read.created_at, written.created_at);
@@ -119,7 +122,9 @@ async fn a_note_is_an_entity_and_renaming_it_renames_that_entity() {
 #[tokio::test]
 async fn an_untitled_note_is_given_a_name_rather_than_none() {
     let pool = pool().await;
-    let written = note::create(&pool, "   ", "a thought", ACTOR).await.unwrap();
+    let written = note::create(&pool, "   ", "a thought", ACTOR)
+        .await
+        .unwrap();
     assert_eq!(written.title, note::UNTITLED);
 
     let id = EntityRef::parse(&written.id).unwrap();
@@ -170,7 +175,12 @@ async fn deleting_a_note_removes_its_body_and_tombstones_its_address() {
     assert!(!note::delete(&pool, &id).await.unwrap());
     // And editing a note that is gone is not the same as editing one that
     // never existed -- both answer `None` rather than writing a new note.
-    assert!(note::save(&pool, &id, "back?", "", ACTOR).await.unwrap().is_none());
+    assert!(
+        note::save(&pool, &id, "back?", "", ACTOR)
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 /// Reading or editing a note nobody wrote is an empty answer, not an error and
@@ -219,7 +229,11 @@ async fn adding_a_ref_draws_a_link_and_removing_it_withdraws_the_link() {
     .unwrap();
 
     let backlinks = link::entries_of(&pool, &ticket).await.unwrap();
-    assert_eq!(backlinks.len(), 1, "the ticket shows the note that names it");
+    assert_eq!(
+        backlinks.len(),
+        1,
+        "the ticket shows the note that names it"
+    );
     let entry = &backlinks[0];
     assert_eq!(entry.link.from_id, written.id);
     assert_eq!(entry.link.to_id, ticket.to_string());
@@ -249,7 +263,10 @@ async fn adding_a_ref_draws_a_link_and_removing_it_withdraws_the_link() {
     .unwrap();
     let again = link::entries_of(&pool, &ticket).await.unwrap();
     assert_eq!(again.len(), 1);
-    assert_eq!(again[0].link.id, entry.link.id, "the same link, not a new one");
+    assert_eq!(
+        again[0].link.id, entry.link.id,
+        "the same link, not a new one"
+    );
 
     // And taking the ref out of the body withdraws it.
     note::save(&pool, &id, "Investigation", "off-by-one somewhere", ACTOR)
@@ -261,12 +278,13 @@ async fn adding_a_ref_draws_a_link_and_removing_it_withdraws_the_link() {
         "the body no longer names it, so the link is withdrawn"
     );
     // Withdrawn, not erased: the tombstone is what an export and the log read.
-    let (rows,): (i64,) =
-        sqlx::query_as("select count(*) from knobas.link where from_id = $1 and deleted_at is not null")
-            .bind(&written.id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let (rows,): (i64,) = sqlx::query_as(
+        "select count(*) from knobas.link where from_id = $1 and deleted_at is not null",
+    )
+    .bind(&written.id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(rows, 1);
 }
 
@@ -292,31 +310,39 @@ async fn an_unresolved_ref_creates_no_link_and_says_it_is_unresolved() {
     .unwrap();
     let id = EntityRef::parse(&written.id).unwrap();
 
-    let (links,): (i64,) =
-        sqlx::query_as("select count(*) from knobas.link where from_id = $1 and deleted_at is null")
-            .bind(&written.id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let (links,): (i64,) = sqlx::query_as(
+        "select count(*) from knobas.link where from_id = $1 and deleted_at is null",
+    )
+    .bind(&written.id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(links, 1, "only the ref that resolves is a link");
 
     let refs = note::refs_of(&pool, &id).await.unwrap();
     assert_eq!(
-        refs.iter().map(|r| r.target_id.as_str()).collect::<Vec<_>>(),
+        refs.iter()
+            .map(|r| r.target_id.as_str())
+            .collect::<Vec<_>>(),
         [real.to_string().as_str(), typo.as_str(), "not an id"],
         "every ref the body names is shown back, in the order it wrote them"
     );
-    assert_eq!(refs[0].target.as_ref().map(|t| t.title.as_str()), Some("SEPA retry"));
+    assert_eq!(
+        refs[0].target.as_ref().map(|t| t.title.as_str()),
+        Some("SEPA retry")
+    );
     assert!(refs[1].target.is_none(), "a typo is unresolved, not silent");
     assert!(refs[2].target.is_none(), "and so is text that is not an id");
 
     // ...and the day the target exists, the same body resolves it. Nothing had
     // to be re-typed, because the body was always the truth.
-    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ticket', 'Arrived late')")
-        .bind(&typo)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "insert into knobas.entity (id, kind, title) values ($1, 'ticket', 'Arrived late')",
+    )
+    .bind(&typo)
+    .execute(&pool)
+    .await
+    .unwrap();
     note::save(
         &pool,
         &id,
@@ -332,12 +358,13 @@ async fn an_unresolved_ref_creates_no_link_and_says_it_is_unresolved() {
         refs[1].target.as_ref().map(|t| t.title.as_str()),
         Some("Arrived late")
     );
-    let (links,): (i64,) =
-        sqlx::query_as("select count(*) from knobas.link where from_id = $1 and deleted_at is null")
-            .bind(&written.id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let (links,): (i64,) = sqlx::query_as(
+        "select count(*) from knobas.link where from_id = $1 and deleted_at is null",
+    )
+    .bind(&written.id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(links, 2);
 }
 
@@ -359,9 +386,15 @@ async fn a_ref_to_a_withdrawn_entity_still_resolves_and_is_marked() {
 
     let refs = note::refs_of(&pool, &id).await.unwrap();
     assert_eq!(refs.len(), 1);
-    let target = refs[0].target.as_ref().expect("a withdrawn entity still resolves");
+    let target = refs[0]
+        .target
+        .as_ref()
+        .expect("a withdrawn entity still resolves");
     assert_eq!(target.title, "Legacy payout (withdrawn)");
-    assert!(target.deleted_at.is_some(), "and carries what marks it withdrawn");
+    assert!(
+        target.deleted_at.is_some(),
+        "and carries what marks it withdrawn"
+    );
 
     // From the other end, the backlink is there too: the withdrawn ticket is
     // still openable and still says what points at it.
@@ -417,5 +450,8 @@ async fn a_hand_drawn_link_out_of_a_note_survives_the_body_changing() {
         [manual.id],
         "the ref went with the text that made it; the hand-drawn link did not"
     );
-    assert_eq!(remaining[0].link.note.as_deref(), Some("drawn in the panel"));
+    assert_eq!(
+        remaining[0].link.note.as_deref(),
+        Some("drawn in the panel")
+    );
 }

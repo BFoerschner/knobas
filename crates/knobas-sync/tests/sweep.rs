@@ -540,7 +540,10 @@ async fn a_full_sync_that_sweeps_cannot_reach_a_note() {
     .unwrap();
     let note_id = knobas_core::entity::EntityRef::parse(&note.id).unwrap();
     assert_eq!(
-        knobas_core::link::entries_of(&pool, &note_id).await.unwrap().len(),
+        knobas_core::link::entries_of(&pool, &note_id)
+            .await
+            .unwrap()
+            .len(),
         1
     );
 
@@ -571,7 +574,10 @@ async fn a_full_sync_that_sweeps_cannot_reach_a_note() {
     // which is the whole reason the resolution reads `knobas.entity` (§5a).
     let refs = knobas_core::note::refs_of(&pool, &note_id).await.unwrap();
     assert_eq!(refs.len(), 1);
-    let target = refs[0].target.as_ref().expect("a swept target still resolves");
+    let target = refs[0]
+        .target
+        .as_ref()
+        .expect("a swept target still resolves");
     assert!(target.deleted_at.is_some(), "and is marked withdrawn");
 }
 

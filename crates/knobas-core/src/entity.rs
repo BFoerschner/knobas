@@ -220,7 +220,10 @@ mod tests {
     /// reserved namespace would inherit none of it, silently.
     #[test]
     fn every_owned_kind_is_addressed_in_a_reserved_namespace() {
-        assert!(!OWNED_KINDS.is_empty(), "the walk must have something to do");
+        assert!(
+            !OWNED_KINDS.is_empty(),
+            "the walk must have something to do"
+        );
         for owned in OWNED_KINDS {
             assert!(
                 is_reserved_namespace(owned.id),

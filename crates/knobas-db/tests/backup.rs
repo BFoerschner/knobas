@@ -49,6 +49,15 @@ async fn the_archive_carries_the_owned_schema_and_leaves_the_mirror_out() {
     // `knobas-app/tests/backup.rs`.
     let note_id = format!("note:{}", unique("scope"));
     let entity_id = format!("mock:{}", unique("scope"));
+    // A note is an entity (`0006`'s `note_entity_fk`), so its address goes in
+    // first. This crate is below `knobas-core`, so the two rows are written by
+    // hand rather than through the note store.
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'note', $2)")
+        .bind(&note_id)
+        .bind("a note that must survive")
+        .execute(&pool)
+        .await
+        .expect("seed a note's entity");
     sqlx::query("insert into knobas.note (id, title, body_md) values ($1, $2, $3)")
         .bind(&note_id)
         .bind("a note that must survive")

@@ -335,7 +335,11 @@ pub async fn refs_of(pool: &PgPool, id: &EntityRef) -> Result<Vec<NoteRef>, Core
 /// A title that is a name, not an absence.
 fn named(title: &str) -> &str {
     let trimmed = title.trim();
-    if trimmed.is_empty() { UNTITLED } else { trimmed }
+    if trimmed.is_empty() {
+        UNTITLED
+    } else {
+        trimmed
+    }
 }
 
 /// Make the note's `implied` links say exactly what its body says.
