@@ -696,3 +696,151 @@ export function startWorkAmend(stepId: number, payload: unknown): Promise<StartW
 export function followMerges(): Promise<number> {
   return invoke<number>("follow_merges");
 }
+
+// -- the inbox (issue #45) --------------------------------------------------
+//
+// Appended, never rewritten: this file is orchestrator-owned and append-only.
+// No new module on either side — inbox items are derived from entities and its
+// two write commands act on them, so they live in the existing `entity`
+// module and its mirror.
+
+/**
+ * Which kind of demand an item is — `knobas_core::inbox::Category`.
+ *
+ * A string union rather than a lookup table, and total on purpose: a category
+ * added on the Rust side has to fail `svelte-check` here rather than fall
+ * through to a label nobody notices.
+ */
+export type InboxCategory =
+  | "review_request"
+  | "mention"
+  | "failed_build"
+  | "new_assignment"
+  | "credential_expiry";
+
+/**
+ * Which shelf a read wants — `knobas_core::inbox::Shelf`.
+ *
+ * `"stream"` is what needs you now; `"snoozed"` is what you deferred. One
+ * derivation with one predicate, asked for one side or the other, so the two
+ * can never overlap or leave a gap.
+ */
+export type InboxShelf = "stream" | "snoozed";
+
+/**
+ * One line of the stream — `knobas_core::inbox::InboxItem`.
+ *
+ * **Derived, not stored.** There is no inbox table: every field here is
+ * computed from the mirror when the stream is read, which is why an item
+ * leaves on its own when the thing it was about is resolved at the source.
+ */
+export interface InboxItem {
+  /**
+   * `"<category>:<subject>"` — the durable name of this demand, and what
+   * {@link snoozeInboxItem} and {@link completeInboxItem} take.
+   *
+   * Stable across syncs: the category is a fixed word and the subject is an
+   * entity id (or a source id, for a credential expiry). Do not compose one
+   * here — hand back the string the backend gave you.
+   */
+  key: string;
+  category: InboxCategory;
+  /** The source that owes it. Also the entity namespace. */
+  source_id: string;
+  /**
+   * The entity to open, or `null` for a credential expiry — whose subject is
+   * a source and not an entity. An item with no entity has no *Open*, and
+   * that is honest rather than incomplete.
+   */
+  entity_id: string | null;
+  /** The entity's kind, for the monogram. `null` with `entity_id`. */
+  kind: string | null;
+  /** Raw source text. Render as text, never as markup (gotcha 7). */
+  title: string;
+  /** Why this is here, as a sentence the backend produced. Also raw text. */
+  reason: string;
+  /** RFC 3339. When the item last moved — the stream's ordering. */
+  occurred_at: string;
+  /** Where a human reads this in the source's own UI, when the mirror knows. */
+  web_url: string | null;
+  /** RFC 3339, on the snoozed shelf only: when it comes back. */
+  snoozed_until: string | null;
+}
+
+/**
+ * One entry of the stream — `knobas_app::inbox::InboxEntry`.
+ *
+ * **Nested, not flattened** (`{item, actions}`), which is #53's ratified shape
+ * for a record paired with an answer about it: the item is the derivation's
+ * and the actions are the app's, and a flattened bag would make a reader guess
+ * which half a field came from. A later tidy-up that flattens it is a bug, not
+ * a simplification.
+ */
+export interface InboxEntry {
+  item: InboxItem;
+  /**
+   * `knobas_source::WriteOp` identifiers this item's source really declares,
+   * best first — dispatch one with {@link submitWrite}.
+   *
+   * **Render exactly these and no others.** An op absent from this list is one
+   * the source cannot perform, and a button for it would fail on press. Empty
+   * is a real answer: a credential expiry has nothing to ask a source for.
+   * *Open*, *Snooze* and *Done* are knobas' own and are not in here.
+   */
+  actions: string[];
+}
+
+/**
+ * The inbox — `inbox_items`. One actionable stream, newest first.
+ *
+ * Both shelves are the same derivation with the same predicate: ask for
+ * `"snoozed"` to see what is deferred and when it returns.
+ *
+ * Rejects with `not_ready` while the database or the sync engine is still
+ * coming up.
+ */
+export function inboxItems(shelf: InboxShelf): Promise<InboxEntry[]> {
+  return invoke<InboxEntry[]>("inbox_items", { shelf });
+}
+
+/**
+ * How many items need you now — `inbox_count`. The number the top strip shows.
+ *
+ * **Snoozed items are not in it**, because the number means "needs me now";
+ * neither are items marked done. It is the stream's own statement counted, so
+ * the badge cannot disagree with the view it opens — do not recompute it from
+ * a filtered {@link inboxItems} result.
+ */
+export function inboxCount(): Promise<number> {
+  return invoke<number>("inbox_count");
+}
+
+/**
+ * Not now — `snooze_inbox_item`. The item leaves the stream and returns on
+ * `until`, without anything having to be scheduled.
+ *
+ * `until` is an absolute RFC 3339 moment: the presets (*tomorrow*, *next
+ * Monday*, *after the credential expires*) are this side's arithmetic.
+ * Snoozing something already snoozed moves its date.
+ *
+ * Rejects with `not_found` for an item on neither shelf — which is what a
+ * stale list in this webview looks like. Writes one activity line and emits
+ * `EVENTS.activityNew`.
+ */
+export function snoozeInboxItem(itemKey: string, until: string): Promise<void> {
+  return invoke<void>("snooze_inbox_item", { itemKey, until });
+}
+
+/**
+ * I handled this — `complete_inbox_item`.
+ *
+ * The item leaves, and **comes back if its subject moves again**: done is
+ * recorded as the moment it was answered, so marking a mention done hides it
+ * until somebody says something new rather than muting the ticket for ever.
+ *
+ * Rejects like {@link snoozeInboxItem}. Writes one activity line and emits
+ * `EVENTS.activityNew`.
+ */
+export function completeInboxItem(itemKey: string): Promise<void> {
+  return invoke<void>("complete_inbox_item", { itemKey });
+}

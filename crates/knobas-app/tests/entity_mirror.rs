@@ -708,3 +708,140 @@ fn the_start_work_vocabularies_match_their_typescript_mirror() {
         "an outcome the stepper cannot name is a step the reader misjudges",
     );
 }
+
+// -- the inbox (issue #45) --------------------------------------------------
+
+const INBOX_ITEM_FIELDS: &[&str] = &[
+    "category",
+    "entity_id",
+    "key",
+    "kind",
+    "occurred_at",
+    "reason",
+    "snoozed_until",
+    "source_id",
+    "title",
+    "web_url",
+];
+
+/// A credential expiry: the one item with **no entity behind it**, so every
+/// nullable field on this shape is exercised as `None` somewhere.
+///
+/// That matters more here than on most shapes. `entity_id` and `kind` are null
+/// for exactly one of the five categories, so a `skip_serializing_if` added to
+/// either would pass every test written against a review request and hand the
+/// inbox view `undefined` on the one row that needs the *Open* button hidden.
+fn inbox_expiry() -> knobas_core::inbox::InboxItem {
+    knobas_core::inbox::InboxItem {
+        key: "credential_expiry:jira".to_owned(),
+        category: knobas_core::inbox::Category::CredentialExpiry,
+        source_id: "jira".to_owned(),
+        entity_id: None,
+        kind: None,
+        title: "Tidewater Jira".to_owned(),
+        reason: "the Tidewater Jira credential expires on Friday 4 Sep 2026".to_owned(),
+        occurred_at: at(),
+        web_url: None,
+        snoozed_until: None,
+    }
+}
+
+/// A review request: the shape with everything filled in, and the one the
+/// action bar is drawn from.
+fn inbox_review() -> knobas_core::inbox::InboxItem {
+    knobas_core::inbox::InboxItem {
+        key: "review_request:gitea:acme/payouts#144".to_owned(),
+        category: knobas_core::inbox::Category::ReviewRequest,
+        source_id: "gitea".to_owned(),
+        entity_id: Some("gitea:acme/payouts#144".to_owned()),
+        kind: Some("pr".to_owned()),
+        title: "Add payout CSV export".to_owned(),
+        reason: "jonas.becker asked for your review".to_owned(),
+        occurred_at: at(),
+        web_url: Some("https://gitea.example/acme/payouts/pulls/144".to_owned()),
+        snoozed_until: Some(at()),
+    }
+}
+
+#[test]
+fn the_inbox_item_shape_matches_its_typescript_mirror() {
+    let filled = serde_json::to_value(inbox_review()).unwrap();
+    assert_shape("InboxItem", &filled, INBOX_ITEM_FIELDS);
+    assert_eq!(filled["category"], serde_json::json!("review_request"));
+
+    let empty = serde_json::to_value(inbox_expiry()).unwrap();
+    assert_shape("InboxItem", &empty, INBOX_ITEM_FIELDS);
+    for absent in ["entity_id", "kind", "web_url", "snoozed_until"] {
+        assert!(
+            empty[absent].is_null(),
+            "{absent} must keep its key as null, not vanish"
+        );
+    }
+}
+
+/// Nested, not flattened -- #53's ratified shape. A flattened bag would make a
+/// reader guess which half `actions` came from, and would put the derivation's
+/// fields and the app's answer in one namespace where a later collision is
+/// silent.
+#[test]
+fn the_inbox_entry_shape_matches_its_typescript_mirror() {
+    let entry = knobas_app::inbox::InboxEntry {
+        item: inbox_review(),
+        actions: vec!["approve".to_owned(), "comment".to_owned()],
+    };
+    let wire = serde_json::to_value(&entry).unwrap();
+    assert_shape("InboxEntry", &wire, &["actions", "item"]);
+    assert_shape("InboxItem", &wire["item"], INBOX_ITEM_FIELDS);
+    assert_eq!(wire["actions"], serde_json::json!(["approve", "comment"]));
+
+    let none = knobas_app::inbox::InboxEntry {
+        item: inbox_expiry(),
+        actions: Vec::new(),
+    };
+    assert_eq!(
+        serde_json::to_value(&none).unwrap()["actions"],
+        serde_json::json!([]),
+        "no actions is an empty list, never a missing key"
+    );
+}
+
+/// Every category, read off the enum rather than listed here: a hand-copied
+/// list is the remembered-list trap one level down, and would pass while both
+/// the union and the copy drifted from the Rust.
+///
+/// A category declared on one side only is a demand the interface cannot
+/// label -- and the label is the whole of how a reader tells a failed build
+/// from a mention at a glance.
+#[test]
+fn the_inbox_categories_match_their_typescript_mirror() {
+    let spellings: Vec<&str> = knobas_core::inbox::Category::ALL
+        .iter()
+        .map(|category| category.as_str())
+        .collect();
+    assert_same_members(
+        &spellings,
+        declared_union(MIRROR, "InboxCategory"),
+        "a category declared on one side only is a demand the interface \
+         cannot label",
+    );
+}
+
+/// The two shelves, which are one predicate asked from either side. A third
+/// member on one side would be a shelf the backend never fills.
+#[test]
+fn the_inbox_shelves_match_their_typescript_mirror() {
+    let spellings: Vec<serde_json::Value> =
+        [knobas_core::inbox::Shelf::Stream, knobas_core::inbox::Shelf::Snoozed]
+            .into_iter()
+            .map(|shelf| serde_json::to_value(shelf).unwrap())
+            .collect();
+    let spellings: Vec<&str> = spellings
+        .iter()
+        .map(|shelf| shelf.as_str().expect("a shelf serializes as a string"))
+        .collect();
+    assert_same_members(
+        &spellings,
+        declared_union(MIRROR, "InboxShelf"),
+        "a shelf declared on one side only is a read the backend never answers",
+    );
+}
