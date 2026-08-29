@@ -440,3 +440,78 @@ fn a_property_the_fixture_leaves_out_is_licensed_and_one_it_spells_differently_i
     assert_eq!(found.len(), 1, "{found:#?}");
     assert!(found[0].contains("properties.username"), "{found:#?}");
 }
+
+// -- the check itself ----------------------------------------------------------
+
+const FIXTURES: &str = include_str!("../../../app/src/lib/sources/fixtures.ts");
+
+/// Each fixture const and the adapter kind it transcribes.
+///
+/// The adapter side is looked up in `Registry::builtin()` rather than named
+/// here, so this table carries only the one fact it has to: which fixture is
+/// about which kind. A kind that is not compiled in fails the lookup.
+const MIRRORED: &[(&str, &str)] = &[
+    ("JIRA_SCHEMA", "jira"),
+    ("GITEA_SCHEMA", "gitea"),
+    ("TEAMCITY_SCHEMA", "teamcity"),
+    ("EMPTY_SCHEMA", "mock"),
+];
+
+fn adapter_schema(kind: &str) -> serde_json::Value {
+    use knobas_app::sources::Registry;
+    use knobas_sync::scheduler::AdapterRegistry;
+    Registry::builtin()
+        .descriptors()
+        .into_iter()
+        .find(|d| d.adapter_kind == kind)
+        .unwrap_or_else(|| panic!("no adapter of kind `{kind}` is compiled in"))
+        .config_schema
+}
+
+/// The transcription in `fixtures.ts` says what the adapters say.
+///
+/// This is the check #124 asked for and #133 could not build from inside
+/// `app/`: the adapter's schema here is the **value** the adapter really
+/// returns, so `"maximum": MAX_BUILDS_PER_CONFIG` arrives as `10000` with the
+/// constant already resolved, and the comparison is between two
+/// `serde_json::Value`s rather than between two pieces of text.
+///
+/// It therefore tells drift from a legitimate change, which a pinned number
+/// cannot: change an adapter's schema and update the fixture to match and this
+/// stays green; change one without the other and it goes red.
+#[test]
+fn every_fixture_schema_says_what_its_adapter_says() {
+    let mut failures = Vec::new();
+    for (name, kind) in MIRRORED {
+        let found = disagreements(&literal::as_const(FIXTURES, name), &adapter_schema(kind));
+        if !found.is_empty() {
+            failures.push(format!("{name} ({kind}):\n{}", found.join("\n")));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "app/src/lib/sources/fixtures.ts has drifted from the adapters it transcribes. The \
+         fixture is the Add-source form's whole idea of what a config schema looks like, so a \
+         disagreement here is a control rendered wrong in the window and right in every test \
+         (#82, #110, #124).\n\n{}",
+        failures.join("\n\n")
+    );
+}
+
+/// Every fixture in the file is compared -- none is merely exported.
+///
+/// A fixture added with no entry in [`MIRRORED`] would be a schema the form is
+/// developed and tested against that nothing pins, which is the state this
+/// whole file exists to end.
+#[test]
+fn every_exported_fixture_is_compared_against_an_adapter() {
+    let mut exported = literal::exported_const_names(FIXTURES);
+    exported.sort();
+    let mut compared: Vec<String> = MIRRORED.iter().map(|(name, _)| (*name).to_owned()).collect();
+    compared.sort();
+    assert_eq!(
+        exported, compared,
+        "app/src/lib/sources/fixtures.ts exports a schema this test does not compare against any \
+         adapter"
+    );
+}
