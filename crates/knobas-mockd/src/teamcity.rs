@@ -613,9 +613,7 @@ impl Facet {
             "any" => Ok(Self::Any),
             "true" => Ok(Self::Only),
             "false" => Ok(Self::Never),
-            other => Err(format!(
-                "{dimension}:{other} is not true, false or any"
-            )),
+            other => Err(format!("{dimension}:{other} is not true, false or any")),
         }
     }
 
@@ -745,20 +743,16 @@ impl Locator {
     /// for one, and nothing in knobas asks for them — so that facet of the
     /// real filter is a documented absence here rather than a rule.
     fn admits_facets(&self, b: &TcBuild) -> bool {
-        let canceled = self
-            .canceled
-            .unwrap_or(if self.default_filter {
-                Facet::Never
-            } else {
-                Facet::Any
-            });
-        let failed_to_start = self
-            .failed_to_start
-            .unwrap_or(if self.default_filter {
-                Facet::Never
-            } else {
-                Facet::Any
-            });
+        let canceled = self.canceled.unwrap_or(if self.default_filter {
+            Facet::Never
+        } else {
+            Facet::Any
+        });
+        let failed_to_start = self.failed_to_start.unwrap_or(if self.default_filter {
+            Facet::Never
+        } else {
+            Facet::Any
+        });
         canceled.admits(b.canceled) && failed_to_start.admits(b.failed_to_start)
     }
 

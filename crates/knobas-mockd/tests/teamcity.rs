@@ -982,7 +982,10 @@ async fn a_facet_dimension_re_opens_only_its_own_class() {
     };
 
     let plain = page("state:finished,count:100").await;
-    assert!(!plain.contains(&1187) && !plain.contains(&stillborn), "{plain:?}");
+    assert!(
+        !plain.contains(&1187) && !plain.contains(&stillborn),
+        "{plain:?}"
+    );
 
     let canceled_only = page("state:finished,canceled:any,count:100").await;
     assert!(canceled_only.contains(&1187), "{canceled_only:?}");
@@ -999,7 +1002,10 @@ async fn a_facet_dimension_re_opens_only_its_own_class() {
     );
 
     let both = page("state:finished,canceled:any,failedToStart:any,count:100").await;
-    assert!(both.contains(&1187) && both.contains(&stillborn), "{both:?}");
+    assert!(
+        both.contains(&1187) && both.contains(&stillborn),
+        "{both:?}"
+    );
     // The whole filter off, which is what the adapter's opening probe sends
     // and what its item-producing queries deliberately do not.
     let off = page("state:finished,defaultFilter:false,count:100").await;
@@ -1046,7 +1052,10 @@ async fn a_facet_dimension_reads_any_true_and_false_apart() {
         "/app/rest/builds?locator=state:finished,canceled:maybe,count:100&fields=count,build(id)",
     )
     .await;
-    assert_eq!(st, 400, "a value the dimension does not take is refused: {v}");
+    assert_eq!(
+        st, 400,
+        "a value the dimension does not take is refused: {v}"
+    );
     assert_eq!(
         s.violations()
             .iter()

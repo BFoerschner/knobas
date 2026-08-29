@@ -1732,7 +1732,10 @@ mod tests {
         let (outcome, widened) = capped_run(50, 49).await;
         let items = outcome.expect("49 builds behind a 50-row ceiling do not fill the page");
         assert_eq!(items.iter().filter(|i| i.kind == "build").count(), 49);
-        assert_eq!(widened, ["state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:100"]);
+        assert_eq!(
+            widened,
+            ["state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:100"]
+        );
     }
 
     /// [`last_page`]'s second condition, and the reason it is there: a walk
