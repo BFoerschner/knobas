@@ -830,6 +830,15 @@ struct Claims {
     /// [`Scheduler::source_added`] when the user puts a source back under that
     /// id -- their newest instruction about the id wins, and a sweep firing
     /// after a re-add would purge the *new* source's first mirror.
+    ///
+    /// **What is left behind, and why it is left:** a run whose task dies
+    /// without reaching the claim -- a panicking adapter, or the abort
+    /// `shutdown` falls back on -- leaves its intent here until the process
+    /// ends. That is one `String`, and on the path that produces it the run's
+    /// transaction went with the task, so there is nothing it would have swept.
+    /// The exception is a panic *after* the run committed and before the claim,
+    /// which is `settle` panicking; `settle` catches its own errors, so that is
+    /// a bug elsewhere and not a state to carry machinery for.
     pending_purges: HashSet<String>,
 }
 
