@@ -78,6 +78,10 @@ uuid.workspace = true
 async-trait.workspace = true
 # The scheduler tests inject an in-memory credential store.
 knobas-secrets = { path = "../knobas-secrets" }
+# The HTTP-level Jira mock `tests/adapter_to_mirror.rs` points the real adapter
+# at: in-process, no Docker, and therefore fit for `just check`. A
+# dev-dependency only -- nothing in the shipped binary knows mockd exists.
+knobas-mockd = { path = "../knobas-mockd" }
 # `knobas_sync::mirror`: the one TypeScript-mirror assertion, shared rather
 # than copied -- this crate's DTOs need the same check `knobas-sync`'s do.
 knobas-sync = { path = "../knobas-sync", features = ["test-util"] }

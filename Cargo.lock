@@ -2781,6 +2781,7 @@ dependencies = [
  "knobas-app",
  "knobas-core",
  "knobas-db",
+ "knobas-mockd",
  "knobas-search",
  "knobas-secrets",
  "knobas-source",
