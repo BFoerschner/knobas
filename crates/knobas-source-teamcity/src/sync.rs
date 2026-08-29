@@ -1448,6 +1448,77 @@ mod tests {
         );
     }
 
+    /// Issue #91, measured against JetBrains' public TeamCity (2026.2 EAP,
+    /// build 238763) and reproduced here: **row 0 of the probe page is not
+    /// its maximum**, and a ceiling read from row 0 wedges the source
+    /// permanently on its second run.
+    ///
+    /// The live numbers, all read-only `GET /app/rest/builds` against the
+    /// same server in the same minute:
+    ///
+    /// * `defaultFilter:false,count:2` answered `6518363, 6518362` --
+    ///   descending, so the ordering guard this crate used to carry passed.
+    /// * `defaultFilter:false,count:200` answered a page whose **row 0 was
+    ///   6518363 and whose maximum was 6520204**.
+    /// * `defaultFilter:false,count:20` answered `6518363, 6518362, 6466333,
+    ///   6466438, 6471105, ...` -- two newest-first rows and then an
+    ///   ascending run. The page is not ordered at all.
+    ///
+    /// So row 0 is neither the maximum nor stable between runs, and reading
+    /// it as "the newest build in existence" produced the failure this test
+    /// pins: one run sets the watermark from a high row 0, the next run's row
+    /// 0 comes back lower, and the run refuses as though the server had been
+    /// replaced. The remedy that refusal named -- reset the cursor -- only
+    /// restarted the loop.
+    ///
+    /// Both fixtures below are [`PageOrder::AsGiven`], which is the point:
+    /// this could not be written at all until the fake stopped sorting every
+    /// page it served, which is why a milestone of green tests never saw it.
+    #[tokio::test]
+    async fn a_page_whose_row_0_is_not_its_max_does_not_deadlock_the_source() {
+        let types = vec![build_type("Payout_Build", "Payout")];
+        let rest = FakeRest::new(
+            types.clone(),
+            vec![
+                build(6_518_363, "Payout_Build", "Payout", "finished"),
+                build(6_518_362, "Payout_Build", "Payout", "finished"),
+                build(6_466_333, "Payout_Build", "Payout", "finished"),
+                build(6_520_204, "Payout_Build", "Payout", "finished"),
+            ],
+        )
+        .fixture_order();
+        let cfg = TeamCityConfig::default();
+        let (_, first) = run(&rest, &cfg, None).await;
+        assert_eq!(
+            first, r#"{"v":1,"since_build_id":6520204}"#,
+            "the ceiling is the highest id the page witnessed, not the id that happened to be \
+             printed first"
+        );
+
+        // The same server one moment later: a newer build, and a page whose
+        // row 0 has dropped below both the previous watermark and the new
+        // build. Reading row 0 as the newest build in existence refuses here.
+        let rest = FakeRest::new(
+            types,
+            vec![
+                build(6_466_438, "Payout_Build", "Payout", "finished"),
+                build(6_520_300, "Payout_Build", "Payout", "finished"),
+                build(6_518_363, "Payout_Build", "Payout", "finished"),
+                build(6_518_362, "Payout_Build", "Payout", "finished"),
+                build(6_466_333, "Payout_Build", "Payout", "finished"),
+                build(6_520_204, "Payout_Build", "Payout", "finished"),
+            ],
+        )
+        .fixture_order();
+        let (items, second) = run(&rest, &cfg, Some(first)).await;
+        assert_eq!(
+            keys(&items),
+            ["buildType:Payout_Build", "build:6520300"],
+            "the run carries on and emits the new build rather than refusing"
+        );
+        assert_eq!(second, r#"{"v":1,"since_build_id":6520300}"#);
+    }
+
     /// The ordering guard is deleted, and this is the case it used to refuse.
     ///
     /// It read rows 0 and 1 of the opening page and failed the run if they
