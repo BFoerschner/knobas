@@ -193,6 +193,17 @@ async fn configure(pool: &PgPool, id: &str, base_url: &str) {
 /// Build the **real** Jira adapter the way the scheduler does: through
 /// `knobas-app`'s registry, from a configured instance and a credential.
 fn adapter(id: &str, base_url: &str) -> Box<dyn Source> {
+    configured(id, base_url, serde_json::json!({}))
+}
+
+/// The same, with an instance `config` of the caller's choosing: the shape
+/// `source_config.config` holds -- the column the Add-source dialog writes and
+/// the scheduler reads -- handed to the registry to parse into `JiraConfig`.
+/// The **parse** is the part of an operator's path this covers, and a test that
+/// hand-built a `JiraConfig` would skip it. The column *read* is not in this
+/// path; said plainly because this file's whole premise is not letting a reader
+/// assume the half that is missing.
+fn configured(id: &str, base_url: &str, config: Value) -> Box<dyn Source> {
     let instance = SourceInstance {
         id: id.to_owned(),
         kind: "jira".to_owned(),
@@ -200,7 +211,7 @@ fn adapter(id: &str, base_url: &str) -> Box<dyn Source> {
         base_url: base_url.to_owned(),
         auth: Some(AuthMethod::Pat),
         secret: Some(knobas_mockd::JIRA_TOKEN.to_owned()),
-        config: serde_json::json!({}),
+        config,
     };
     match Registry::builtin().build(instance) {
         Ok(source) => source,
@@ -391,5 +402,91 @@ async fn a_backfill_widens_the_stored_payload_of_an_issue_nobody_touched() {
 
     // Every request this test made is one the vendored WADL declares, so the
     // widened `fields=` is a query a real Jira DC would accept.
+    jira.assert_no_violations();
+}
+
+/// **The classic Data Center epic path, end to end (issue #125).**
+///
+/// `JiraConfig::epic_link_field` is the *only* way knobas can read epic
+/// membership out of a classic DC project — `fields.parent` is the next-gen
+/// spelling and a classic instance leaves it empty — and it is therefore the
+/// setting most likely to be in use against the self-hosted Jira this app is
+/// aimed at. Until #125 it was proven in halves that never met, exactly as #93
+/// found for the widened payload: `sync::tests` asserted the id reaches the
+/// `fields=` query string, and nothing anywhere ran that query. It could not
+/// be run — mockd served no `customfield_*`, so the round trip was a 400.
+///
+/// So this asserts on the **stored row**. Between the option and that column
+/// sit the config parse, the registry, the query, the response, the raw
+/// payload and the engine's write; a break in any of them is a mirror with no
+/// epic membership on a classic instance, and it would look exactly like a
+/// working sync.
+#[tokio::test]
+async fn a_classic_projects_epic_link_reaches_the_stored_payload() {
+    let field = knobas_mockd::jira::EPIC_LINK_FIELD;
+    let jira = spawn_mock_jira().await;
+    let pool = pool().await;
+    let mut conn = dedicated().await;
+
+    // A source configured the way an operator with a classic DC project
+    // configures one: the instance's Epic Link field id, through
+    // `source_config.config`.
+    let classic = unique_id();
+    configure(&pool, &classic, &jira.base_url()).await;
+    let run = knobas_sync::run_from_stored_cursor(
+        &mut conn,
+        &pool,
+        configured(
+            &classic,
+            &jira.base_url(),
+            serde_json::json!({ "epic_link_field": field }),
+        )
+        .as_ref(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(run.upserted as usize, FIXTURE_ISSUES);
+
+    let row = stored(&pool, &classic, UNTOUCHED).await;
+    assert_eq!(
+        row.payload["fields"][field], "PAY-200",
+        "{UNTOUCHED}'s epic membership must be in the column, not only in the query string"
+    );
+    assert_eq!(
+        row.payload["fields"]["parent"]["key"], "PAY-200",
+        "and the two spellings agree, which is what makes one a fallback for the other"
+    );
+    // The null branch is stored too, so a reader can tell "this issue has no
+    // epic" from "this mirror was synced without the option".
+    assert_eq!(
+        stored(&pool, &classic, "OPS-77").await.payload["fields"].get(field),
+        Some(&Value::Null),
+        "OPS-77 belongs to no epic, and that answer is part of the record"
+    );
+
+    // The control, and the reason the assertions above are not vacuous: the
+    // same adapter against the same mock, with the option left unset, stores
+    // no such key at all. Without this, a mock that leaked the field into every
+    // projection would satisfy the test while the option did nothing -- which
+    // is the failure mode #125 is a repeat of.
+    let default = unique_id();
+    configure(&pool, &default, &jira.base_url()).await;
+    knobas_sync::run_from_stored_cursor(
+        &mut conn,
+        &pool,
+        adapter(&default, &jira.base_url()).as_ref(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        stored(&pool, &default, UNTOUCHED).await.payload["fields"].get(field),
+        None,
+        "unconfigured, the field is never asked for and never stored -- so the option is what \
+         put it in the row above"
+    );
+
+    // Both queries are ones the vendored WADL declares: the configured
+    // `fields=` is not a 400 and not an `UnknownField` violation, which is the
+    // half that could not even be attempted before.
     jira.assert_no_violations();
 }

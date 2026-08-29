@@ -370,3 +370,78 @@ async fn widening_the_set_did_not_open_it() {
             .all(|v| v.kind == knobas_mockd::ViolationKind::UnknownField)
     );
 }
+
+// -- the classic Data Center epic link (issue #125) ---------------------------
+
+/// The *other* spelling of the same fixture relationship: a classic Data Center
+/// project keeps epic membership in a custom field, and
+/// `JiraConfig::epic_link_field` is the only way knobas can reach it. mockd
+/// served no `customfield_*` at all, so that whole configuration path answered
+/// 400 plus an `UnknownField` violation and could not be run against the mock
+/// -- the request was asserted in a unit test and the round trip never was.
+///
+/// The value is the epic's **key as a bare string**, which is what Greenhopper's
+/// Epic Link field carries; `parent` nests a whole abbreviated issue. Two
+/// spellings, one fixture `epic`, and no invention on either side.
+#[tokio::test]
+async fn the_epic_link_custom_field_carries_the_fixtures_epic_as_a_key() {
+    let s = spawn_mock_jira().await;
+    let field = knobas_mockd::jira::EPIC_LINK_FIELD;
+    let (st, child) = get(
+        &s.base_url(),
+        &format!("/rest/api/2/issue/PAY-231?fields={field}"),
+    )
+    .await;
+    assert_eq!(st, 200);
+    assert_eq!(
+        child["fields"][field], "PAY-200",
+        "the Epic Link custom field is the epic's key, not a nested issue: {child}"
+    );
+
+    // Where the fixture names no epic the key is present and `null`, which is
+    // how Jira serves a custom field with no value -- and the deliberate
+    // contrast with `parent`, which is omitted entirely.
+    for orphan in ["PAY-200", "OPS-77"] {
+        let (_, v) = get(
+            &s.base_url(),
+            &format!("/rest/api/2/issue/{orphan}?fields={field},parent"),
+        )
+        .await;
+        assert_eq!(
+            v["fields"].get(field),
+            Some(&serde_json::Value::Null),
+            "{orphan} has no epic, so the custom field is null rather than absent: {v}"
+        );
+        assert!(
+            v["fields"].get("parent").is_none(),
+            "{orphan}: `parent` is still omitted, which is the shape Jira serves: {v}"
+        );
+    }
+    s.assert_no_violations();
+}
+
+/// Opening the set by exactly one id is not opening it to a pattern. A
+/// `customfield_*` this instance does not have is still a 400 plus a recorded
+/// violation -- which is the whole point of deviation 5, and the reason a
+/// mistyped `epic_link_field` fails a test instead of silently syncing nothing.
+#[tokio::test]
+async fn another_instances_custom_field_is_still_refused() {
+    let s = spawn_mock_jira().await;
+    for unknown in ["customfield_10009", "customfield_99999", "customfield_"] {
+        let (st, _) = get(
+            &s.base_url(),
+            &format!("/rest/api/2/issue/PAY-231?fields={unknown}"),
+        )
+        .await;
+        assert_eq!(
+            st, 400,
+            "{unknown} is not this instance's Epic Link field and must not be served"
+        );
+    }
+    assert_eq!(s.violations().len(), 3);
+    assert!(
+        s.violations()
+            .iter()
+            .all(|v| v.kind == knobas_mockd::ViolationKind::UnknownField)
+    );
+}

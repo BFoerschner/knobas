@@ -1278,6 +1278,12 @@ mod tests {
     /// the whole of what the option does -- it preserves epic membership in
     /// `payload` for a classic DC project (gap 3). Dropped, the option is a
     /// form input that silently does nothing.
+    ///
+    /// This asserts the *query*. The round trip -- the response, and the value
+    /// landing in `sync.item.payload` -- is
+    /// `knobas-app/tests/adapter_to_mirror.rs`'s
+    /// `a_classic_projects_epic_link_reaches_the_stored_payload` (issue #125).
+    /// Both halves, because either alone is green while the join is broken.
     #[test]
     fn the_epic_link_field_is_appended_to_the_field_list() {
         let config = cfg(serde_json::json!({ "epic_link_field": "customfield_10008" }));

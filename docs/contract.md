@@ -996,6 +996,60 @@ locator or selector tables changes.
 
 ---
 
+### Amendments from the classic Data Center epic path (2026-08-29, binding) — issue #125
+
+Recorded here because §5 pins mockd's as-built behaviour and one of its numbered deviations
+changes. The precedent is the `nextHref` entry in the #114 amendment above and the `fields=`
+widening in the M2 Jira narrow-payload package, both of which amended §5 from inside a stream PR.
+This entry is appended in landing order, after #113's, rather than inserted next to the entry it
+cites -- #113's own preamble says the #114 amendment is "directly above" it, and that is a
+sentence a later insertion would quietly falsify.
+
+- **§5 mockd serves the classic Data Center spelling of epic membership**, as one named custom
+  field: `knobas_mockd::jira::EPIC_LINK_FIELD` = `customfield_10008`. It carries the epic's bare
+  **key** where `fields.parent` nests an abbreviated issue, and it is `null` rather than absent
+  where the fixture names no epic, because Jira always answers a custom field a request named.
+  Both spellings come from the one fixture relationship (`Ticket::epic`); nothing is invented on
+  either side, and the two therefore always agree.
+- **§5 mockd deviation 5's closed set gains exactly one custom field id, not a pattern.** Every
+  other `customfield_*` — a different instance's id, a typo, a bare `customfield_` — is still a
+  400 plus an `UnknownField` violation. A `customfield_\d+` pattern was the alternative and is
+  refused deliberately: it would accept an id this instance does not have, serve nothing under
+  it, and let a misconfigured `epic_link_field` read as a working setup, which is precisely the
+  class of bug deviation 5 exists to make loud. A per-test-configurable navigable set was the
+  other alternative, also refused: it would make the mock's fidelity a parameter of whichever
+  test is running, and mockd is one fake company with one answer.
+- **§5 mockd deviation 13 is rewritten, not renumbered.** Its old text said which spelling mockd
+  *prefers*; it did not say that the other configuration path could not be run against the mock
+  at all. `JiraConfig::epic_link_field` is the **only** way classic-DC epic membership is
+  reachable and is the setting most likely to be in use against a real self-hosted instance, and
+  a `fields=customfield_10008` request was a 400 — so the option was proven in halves that never
+  met, exactly as #93 found one layer up: `sync::tests` asserted the id reaches the query string,
+  and nothing anywhere ran that query. The entry now states what is and is not serveable, and
+  where mockd still deviates (a real project is *either* classic or next-gen and would serve one
+  of the two; a real instance's Epic Link id differs per instance; there is no
+  `GET /rest/api/2/field`, so the id cannot be discovered and a test names the constant).
+- **The seam harness gains a second test, not a framework** —
+  `crates/knobas-app/tests/adapter_to_mirror.rs`. That file's standing note is about a second
+  *adapter* ("one more test rather than a framework"); this is a second case for the adapter
+  already there, and it follows the same rule — one `#[tokio::test]`, sharing the binary's one
+  embedded PostgreSQL and its one mockd, with nothing generalised around it. The adapter is built
+  from an instance `config` carrying the mock's Epic Link id — the shape `source_config.config`
+  holds, parsed by the registry, though this test hands it to the registry directly rather than
+  reading the column — and the epic key is asserted on the `sync.item.payload` **column**. Its control is a second run of the same adapter against the same
+  mock with the option unset, which must store no such key: without it, a mock that leaked the
+  field into every projection would satisfy the test while the option did nothing. Measured cost
+  in `just check`: indistinguishable from noise — the binary's wall clock is 2.17 s median over
+  three runs with the pre-existing test alone and 2.20 s with both, because the two share the
+  binary's one embedded PostgreSQL and run concurrently.
+- **Frozen surfaces: none.** `crates/knobas-mockd/**`, `crates/knobas-source-jira/**` and
+  `crates/knobas-app/tests/**` are not in §10.8's list. `knobas-source-jira` carries **no
+  behaviour change**: two doc comments (`config.rs`, `sync.rs`) are the whole of its diff, because
+  the adapter already appended the configured id to `fields=` — what was missing was a server that
+  would answer it. No migration, no IPC change, no change to the `Source` trait.
+
+---
+
 ## 10. As built — the contract PR (2026-08-24)
 
 *The task brief called this section §9. §9 was taken by the plan-authoring amendments before this ran, so the as-built record is §10; "§9 of the interfaces doc" in `plan-02-contract` means this section.*
