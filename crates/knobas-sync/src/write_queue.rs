@@ -86,7 +86,14 @@ pub enum FlushError {
 #[must_use]
 pub fn target_entity(op: &WriteOp) -> &str {
     match op {
-        WriteOp::Comment { entity, .. } => entity,
+        WriteOp::Comment { entity, .. }
+        | WriteOp::Transition { entity, .. }
+        | WriteOp::CreateTicket { entity, .. }
+        | WriteOp::CreateBranch { entity, .. }
+        | WriteOp::CreatePullRequest { entity, .. }
+        | WriteOp::Approve { entity, .. }
+        | WriteOp::TriggerBuild { entity }
+        | WriteOp::RerunBuild { entity } => entity,
     }
 }
 
@@ -513,6 +520,81 @@ async fn refused(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every op's target is the field it says it is.
+    ///
+    /// The match in [`target_entity`] binds `entity` through an or-pattern, so
+    /// every arm reads the same name -- and a variant whose fields were
+    /// re-ordered or renamed into that binding would still compile while
+    /// pointing the queue at a branch name or a status. Ordering and hold
+    /// detection both key on the answer, so being wrong here is silent.
+    #[test]
+    fn every_op_points_at_the_entity_it_names() {
+        for (op, expected) in [
+            (
+                WriteOp::Comment {
+                    entity: "jira:PAY-231".to_owned(),
+                    body: "b".to_owned(),
+                },
+                "jira:PAY-231",
+            ),
+            (
+                WriteOp::Transition {
+                    entity: "jira:PAY-232".to_owned(),
+                    status: "Done".to_owned(),
+                },
+                "jira:PAY-232",
+            ),
+            (
+                WriteOp::CreateTicket {
+                    entity: "jira:PAY".to_owned(),
+                    title: "t".to_owned(),
+                    body: "b".to_owned(),
+                    ticket_type: "Task".to_owned(),
+                },
+                "jira:PAY",
+            ),
+            (
+                WriteOp::CreateBranch {
+                    entity: "gitea:tidewater/payout-service".to_owned(),
+                    name: "feature/x".to_owned(),
+                    from_ref: "main".to_owned(),
+                },
+                "gitea:tidewater/payout-service",
+            ),
+            (
+                WriteOp::CreatePullRequest {
+                    entity: "gitea:tidewater/ledger".to_owned(),
+                    title: "t".to_owned(),
+                    body: "b".to_owned(),
+                    head: "feature/x".to_owned(),
+                    base: "main".to_owned(),
+                },
+                "gitea:tidewater/ledger",
+            ),
+            (
+                WriteOp::Approve {
+                    entity: "gitea:tidewater/ledger#142".to_owned(),
+                    body: String::new(),
+                },
+                "gitea:tidewater/ledger#142",
+            ),
+            (
+                WriteOp::TriggerBuild {
+                    entity: "teamcity:buildType:Payout_Build".to_owned(),
+                },
+                "teamcity:buildType:Payout_Build",
+            ),
+            (
+                WriteOp::RerunBuild {
+                    entity: "teamcity:build:1187".to_owned(),
+                },
+                "teamcity:build:1187",
+            ),
+        ] {
+            assert_eq!(target_entity(&op), expected, "{op:?}");
+        }
+    }
 
     /// ADR-0004's distinction is the one this feature rests on, so it is
     /// pinned rather than left to the reader of a `match`: a credential and a

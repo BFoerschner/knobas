@@ -296,7 +296,16 @@ pub async fn target_of(pool: &PgPool, entity: &EntityRef) -> Result<Option<Targe
 ///
 /// It lives here rather than beside `WriteOp` because `knobas-source` depends
 /// on this crate, not the other way round.
-pub const PROJECTED_OPS: &[&str] = &["comment"];
+pub const PROJECTED_OPS: &[&str] = &[
+    "comment",
+    "transition",
+    "create_ticket",
+    "create_branch",
+    "create_pull_request",
+    "approve",
+    "trigger_build",
+    "rerun_build",
+];
 
 /// What `op` counts as its target having changed.
 ///
@@ -312,18 +321,64 @@ pub const PROJECTED_OPS: &[&str] = &["comment"];
 ///
 /// ## Per op
 ///
-/// * **`"comment"`** -- the target's **indexed text**. Contract §4.1 makes
-///   every adapter build `body_text` from the item's title, description and
-///   comment texts, so *a new reply necessarily changes it*: that is the
-///   "somebody replied to the thread I was answering" this op is holding
-///   against. An edit to the title or the description changes it too, which is
-///   a false hold rather than a missed one -- the safe direction, and the only
-///   one available without teaching this module every source's payload shape.
+/// Three shapes, and which one an op gets is a statement about what that op
+/// could *overwrite* -- never about how much work the comparison is.
 ///
-/// * **anything else** -- the whole mirrored record. Conservative by
-///   construction: any change to the target at all holds the write. This is
-///   the fallback, not a definition, and [`PROJECTED_OPS`] plus the test that
-///   walks it is what stops a new op resting on it by accident.
+/// **The indexed text** -- `"comment"`. Contract §4.1 makes every adapter build
+/// `body_text` from the item's title, description and comment texts, so *a new
+/// reply necessarily changes it*: that is the "somebody replied to the thread I
+/// was answering" this op is holding against. An edit to the title or the
+/// description changes it too, which is a false hold rather than a missed one
+/// -- the safe direction, and the only one available without teaching this
+/// module every source's payload shape.
+///
+/// **The whole mirrored record** -- `"transition"` and `"approve"`, the two ops
+/// that put a *judgement* onto a target whose current state is the whole reason
+/// for the judgement. Any change to the target at all holds the write.
+///
+/// * `"transition"` is the conservative choice **and it was a choice**
+///   (issue #43). What one would rather compare is the status alone, and there
+///   is no adapter-independent way to read it: §4.1 guarantees `title`,
+///   `body_text`, `updated_at` and a verbatim `payload`, and the status lives
+///   only in the last of those, under `fields.status.name` for Jira and `state`
+///   for Gitea. Reading it here would mean this module -- which cannot see
+///   `WriteOp` at all, let alone an adapter -- learning every source's payload
+///   shape, which is the coupling `SourceDescriptor` exists to avoid. The cost
+///   is noise on a busy ticket: a comment arriving while the source is down
+///   holds a queued transition. The cost of the other direction is moving a
+///   ticket somebody else already moved, silently, which is the one thing
+///   issue #42 exists to prevent. A false hold shows both versions side by side
+///   and is one *Apply anyway* away; a missed hold shows nothing.
+/// * `"approve"` for the sharper version of the same reason: an approval is a
+///   signature on a specific state of a pull request, and a force-push, a new
+///   commit and a new review comment are all reasons to look again before it
+///   lands.
+///
+/// **Liveness alone** -- `"create_ticket"`, `"create_branch"`,
+/// `"create_pull_request"`, `"trigger_build"`, `"rerun_build"`. These do not
+/// overwrite anything: they add a ticket, a branch, a pull request or a queued
+/// build *beside* whatever the container holds now, so a change to the
+/// container is not a change to what the write would replace -- there is
+/// nothing it would replace. Holding a create because someone renamed the
+/// repository would be a decision the user cannot act on and cannot learn
+/// anything from. What still holds them is the target **leaving the mirror**:
+/// a build configuration that is gone, a repository that was deleted, a build
+/// that was purged. And a duplicate -- the branch already exists, the pull
+/// request is already open -- is the source's answer to give, which arrives as
+/// a refusal carrying what it said (ADR-0004), not as a hold.
+///
+/// For a create the target is the **container**, and knobas does not mirror
+/// every container: there is no `jira:PAY` item. Such a target projects
+/// `{"live": false}` at queue time and again at flush time, which is equal, so
+/// it sends. That is the intended reading, not an accident of the lookup
+/// failing.
+///
+/// **There is no wildcard fallback in the sense of "and everything else is
+/// fine".** The `other` arm below is the whole-record shape, and
+/// [`PROJECTED_OPS`] plus `knobas-sync`'s
+/// `every_write_op_has_a_stated_projection` is what stops a new op resting on
+/// it silently: the op has to be listed, which means somebody wrote down which
+/// of the three shapes it gets and why.
 #[must_use]
 pub fn project(op: &str, target: Option<&Target>) -> serde_json::Value {
     let live = target.is_some();
@@ -332,6 +387,11 @@ pub fn project(op: &str, target: Option<&Target>) -> serde_json::Value {
             "op": "comment",
             "live": live,
             "text": target.map(|t| t.body_text.as_str()),
+        }),
+        "create_ticket" | "create_branch" | "create_pull_request" | "trigger_build"
+        | "rerun_build" => serde_json::json!({
+            "op": op,
+            "live": live,
         }),
         other => serde_json::json!({
             "op": other,
@@ -774,10 +834,9 @@ mod tests {
         );
     }
 
-    /// An op with no stated projection falls back to the whole record, so it
-    /// holds on any change at all rather than on nothing.
-    #[test]
-    fn an_unstated_op_holds_on_the_whole_record() {
+    /// A target that differs only in `payload`, which is where every source
+    /// keeps the field the op actually cares about.
+    fn payload_differs() -> (Target, Target) {
         let target = |payload: serde_json::Value| Target {
             entity_id: "jira:PAY-231".to_owned(),
             title: "a payout fails".to_owned(),
@@ -785,16 +844,120 @@ mod tests {
             item_updated_at: None,
             payload,
         };
-        assert!(!PROJECTED_OPS.contains(&"transition"));
+        (
+            target(serde_json::json!({"status": "open"})),
+            target(serde_json::json!({"status": "done"})),
+        )
+    }
+
+    /// An op with no stated projection at all falls back to the whole record,
+    /// so an op that reached the queue unlisted holds on any change rather than
+    /// on nothing. `PROJECTED_OPS` is what stops one getting there.
+    #[test]
+    fn an_unstated_op_holds_on_the_whole_record() {
+        let unlisted = "an_op_no_milestone_has_ratified";
+        assert!(!PROJECTED_OPS.contains(&unlisted));
+        let (before, after) = payload_differs();
         assert_ne!(
-            project(
-                "transition",
-                Some(&target(serde_json::json!({"status": "open"})))
-            ),
-            project(
-                "transition",
-                Some(&target(serde_json::json!({"status": "done"})))
-            ),
+            project(unlisted, Some(&before)),
+            project(unlisted, Some(&after)),
         );
+    }
+
+    /// Issue #43's decision, pinned rather than left in a doc comment: the two
+    /// ops that put a judgement onto a target hold on **anything** about that
+    /// target moving -- including a change only the raw payload can see, which
+    /// is where every source keeps the status a transition is about and the
+    /// head commit an approval is a signature on.
+    #[test]
+    fn a_judgement_op_holds_on_the_whole_record() {
+        let (before, after) = payload_differs();
+        for op in ["transition", "approve"] {
+            assert!(PROJECTED_OPS.contains(&op), "{op} must be stated");
+            assert_ne!(
+                project(op, Some(&before)),
+                project(op, Some(&after)),
+                "{op}: a payload-only change is exactly the change it is about"
+            );
+            assert_ne!(
+                project(op, Some(&before)),
+                project(op, None),
+                "{op}: a target that is gone has changed"
+            );
+        }
+    }
+
+    /// The other half of that decision: an op that *adds* something beside
+    /// what the container holds overwrites nothing, so it holds only when the
+    /// container has left the mirror. A create that held because someone
+    /// renamed the repository would ask the user a question they cannot answer.
+    #[test]
+    fn an_additive_op_holds_only_when_its_container_leaves_the_mirror() {
+        let (before, after) = payload_differs();
+        let renamed = Target {
+            title: "a payout fails, differently".to_owned(),
+            body_text: "it still does".to_owned(),
+            item_updated_at: Some(chrono::Utc::now()),
+            ..before.clone()
+        };
+        for op in [
+            "create_ticket",
+            "create_branch",
+            "create_pull_request",
+            "trigger_build",
+            "rerun_build",
+        ] {
+            assert!(PROJECTED_OPS.contains(&op), "{op} must be stated");
+            assert_eq!(
+                project(op, Some(&before)),
+                project(op, Some(&after)),
+                "{op}: a payload change is not something a create would overwrite"
+            );
+            assert_eq!(
+                project(op, Some(&before)),
+                project(op, Some(&renamed)),
+                "{op}: neither is a retitled or re-touched container"
+            );
+            assert_ne!(
+                project(op, Some(&before)),
+                project(op, None),
+                "{op}: a container that is gone must still hold the write"
+            );
+        }
+    }
+
+    /// A create's container need not be in the mirror at all -- `jira:PAY` is
+    /// not an item. Both projections then read `live: false`, they are equal,
+    /// and the write goes: an unmirrored container is not a hold, which is the
+    /// intended reading rather than a lookup quietly failing.
+    #[test]
+    fn a_create_into_an_unmirrored_container_is_not_held() {
+        assert_eq!(project("create_ticket", None), project("create_ticket", None));
+        assert_eq!(project("create_ticket", None)["live"], serde_json::json!(false));
+    }
+
+    /// Every op the SPI defines is projected as exactly one of the three
+    /// shapes, and no two shapes for one op. Reading the discriminating field
+    /// set is what catches an op added to `PROJECTED_OPS` and to no arm of
+    /// `project`, which would silently take the whole-record fallback while the
+    /// list claimed it was stated.
+    #[test]
+    fn every_projected_op_has_one_of_the_three_shapes() {
+        let (target, _) = payload_differs();
+        for op in PROJECTED_OPS {
+            let keys: std::collections::BTreeSet<String> = project(op, Some(&target))
+                .as_object()
+                .expect("a projection is an object")
+                .keys()
+                .cloned()
+                .collect();
+            let shape: Vec<&str> = keys.iter().map(String::as_str).collect();
+            assert!(
+                shape == ["live", "op", "text"]
+                    || shape == ["live", "op"]
+                    || shape == ["item_updated_at", "live", "op", "payload", "text", "title"],
+                "{op:?} projects an unrecognised shape: {shape:?}"
+            );
+        }
     }
 }

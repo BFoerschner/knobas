@@ -460,7 +460,30 @@ export type WaitReason = "unreachable" | "unauthorized";
  * op can still be applied and discarded, and only *editing* needs to know
  * where the words are.
  */
-export type WriteOpPayload = { Comment: { entity: string; body: string } };
+export type WriteOpPayload =
+  | { Comment: { entity: string; body: string } }
+  | { Transition: { entity: string; status: string } }
+  | {
+      CreateTicket: {
+        entity: string;
+        title: string;
+        body: string;
+        ticket_type: string;
+      };
+    }
+  | { CreateBranch: { entity: string; name: string; from_ref: string } }
+  | {
+      CreatePullRequest: {
+        entity: string;
+        title: string;
+        body: string;
+        head: string;
+        base: string;
+      };
+    }
+  | { Approve: { entity: string; body: string } }
+  | { TriggerBuild: { entity: string } }
+  | { RerunBuild: { entity: string } };
 
 /**
  * One write knobas still owes a source —

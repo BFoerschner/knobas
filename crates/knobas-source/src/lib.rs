@@ -304,18 +304,94 @@ impl SourceError {
 /// Each variant has a stable snake_case identifier that adapters list in
 /// [`SourceDescriptor::write_ops`] and the UI renders its action bar from:
 ///
-/// | variant | identifier |
-/// | --- | --- |
-/// | [`Comment`](Self::Comment) | `"comment"` |
+/// | variant | identifier | ratified for |
+/// | --- | --- | --- |
+/// | [`Comment`](Self::Comment) | `"comment"` | M1 (Jira, Gitea) |
+/// | [`Transition`](Self::Transition) | `"transition"` | M2 (Jira) |
+/// | [`CreateTicket`](Self::CreateTicket) | `"create_ticket"` | M2 (Jira) |
+/// | [`CreateBranch`](Self::CreateBranch) | `"create_branch"` | M2 (Gitea) |
+/// | [`CreatePullRequest`](Self::CreatePullRequest) | `"create_pull_request"` | M2 (Gitea) |
+/// | [`Approve`](Self::Approve) | `"approve"` | M2 (Gitea) |
+/// | [`TriggerBuild`](Self::TriggerBuild) | `"trigger_build"` | M2 (TeamCity) |
+/// | [`RerunBuild`](Self::RerunBuild) | `"rerun_build"` | M2 (TeamCity) |
 ///
-/// The enum grows per milestone; an adapter must reject every op it does not
-/// declare with [`SourceError::Protocol`].
+/// The enum grows per milestone and **each growth is a §10.8 ratified
+/// exception** (ADR-0006); an adapter must reject every op it does not declare
+/// with [`SourceError::Protocol`].
+///
+/// **One variant per operation, never per adapter** (ADR-0006). Two sources
+/// that do the same conceptual thing share a variant, and the adapter-specific
+/// spelling lives behind the adapter's own `write`. That is why `Comment` says
+/// nothing about issues or pull requests, and why `CreateTicket` is spelled in
+/// knobas' vocabulary (`CONTEXT.md`: a ticket) rather than in Jira's.
+///
+/// ## Every variant carries `entity`, and it is the same field everywhere
+///
+/// `entity` is an [`EntityRef`] in string form, and it is three things at once:
+/// the **target** the adapter resolves to an API path, the **ordering key** the
+/// write queue keeps per-entity order within, and the thing hold detection
+/// snapshots. `knobas_sync::write_queue::target_entity` reads it out of every
+/// variant with no wildcard arm, so a variant without one does not compile.
+///
+/// For an op that *creates* something, the entity is the **container** the new
+/// thing goes into -- the Jira project, the Gitea repository -- addressed in
+/// the source's own namespace (`jira:PAY`, `gitea:tidewater/payout-service`).
+/// A container knobas does not mirror is still a legal target: the queue has no
+/// foreign key on it, and hold detection reads "not in the mirror" as a fact
+/// rather than an error.
+///
+/// [`EntityRef`]: knobas_core::entity::EntityRef
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum WriteOp {
-    /// Identifier `"comment"`. `entity` is an [`EntityRef`] in string form.
-    ///
-    /// [`EntityRef`]: knobas_core::entity::EntityRef
+    /// Identifier `"comment"`. Reply on a ticket or a pull request.
     Comment { entity: String, body: String },
+    /// Identifier `"transition"`. Move a ticket to another status.
+    ///
+    /// `status` is the **status the user picked**, in the source's own
+    /// spelling (`"In Progress"`), not a transition id: which transition
+    /// reaches a status is workflow-dependent and per-instance, so resolving
+    /// the name against what the source says is available *right now* is the
+    /// adapter's job and is done on every write. An adapter that cannot reach
+    /// `status` from where the ticket stands refuses with
+    /// [`SourceError::Protocol`] naming what it could have reached.
+    Transition { entity: String, status: String },
+    /// Identifier `"create_ticket"`. `entity` is the **project** the ticket is
+    /// created in (`jira:PAY`), which is a container knobas does not mirror.
+    CreateTicket {
+        entity: String,
+        title: String,
+        body: String,
+        /// The source's own name for the kind of ticket (`"Task"`, `"Bug"`).
+        /// Required: Jira refuses a create without one and there is no
+        /// defensible default -- a project's issue types are configured.
+        ticket_type: String,
+    },
+    /// Identifier `"create_branch"`. `entity` is the **repository**.
+    CreateBranch {
+        entity: String,
+        name: String,
+        /// What the branch starts from -- a branch name, a tag or a commit.
+        from_ref: String,
+    },
+    /// Identifier `"create_pull_request"`. `entity` is the **repository**.
+    CreatePullRequest {
+        entity: String,
+        title: String,
+        body: String,
+        /// The branch carrying the change.
+        head: String,
+        /// The branch it is proposed into.
+        base: String,
+    },
+    /// Identifier `"approve"`. Sign off on a pull request.
+    ///
+    /// `body` may be empty -- an approval with no words is an approval.
+    Approve { entity: String, body: String },
+    /// Identifier `"trigger_build"`. `entity` is the **build configuration**.
+    TriggerBuild { entity: String },
+    /// Identifier `"rerun_build"`. `entity` is the **build** to run again; the
+    /// adapter asks the source which configuration it belonged to.
+    RerunBuild { entity: String },
 }
 
 impl WriteOp {
@@ -340,6 +416,13 @@ impl WriteOp {
     pub fn identifier(&self) -> &'static str {
         match self {
             WriteOp::Comment { .. } => "comment",
+            WriteOp::Transition { .. } => "transition",
+            WriteOp::CreateTicket { .. } => "create_ticket",
+            WriteOp::CreateBranch { .. } => "create_branch",
+            WriteOp::CreatePullRequest { .. } => "create_pull_request",
+            WriteOp::Approve { .. } => "approve",
+            WriteOp::TriggerBuild { .. } => "trigger_build",
+            WriteOp::RerunBuild { .. } => "rerun_build",
         }
     }
 }
@@ -553,17 +636,108 @@ mod tests {
         assert_eq!(back.to_string(), "protocol: boom");
     }
 
-    /// Write ops travel adapter-ward, so they round-trip in both directions.
+    /// One probe per variant. The match below has **no wildcard arm**, so a
+    /// new variant stops this module compiling until it is listed here -- the
+    /// same device as [`WriteOp::identifier`], for the same reason.
+    fn every_write_op() -> Vec<WriteOp> {
+        let probes = vec![
+            WriteOp::Comment {
+                entity: "jira:PAY-231".into(),
+                body: "on it".into(),
+            },
+            WriteOp::Transition {
+                entity: "jira:PAY-231".into(),
+                status: "In Progress".into(),
+            },
+            WriteOp::CreateTicket {
+                entity: "jira:PAY".into(),
+                title: "SEPA payout fails".into(),
+                body: "the batch job times out".into(),
+                ticket_type: "Bug".into(),
+            },
+            WriteOp::CreateBranch {
+                entity: "gitea:tidewater/payout-service".into(),
+                name: "feature/PAY-231-sepa-retry".into(),
+                from_ref: "main".into(),
+            },
+            WriteOp::CreatePullRequest {
+                entity: "gitea:tidewater/payout-service".into(),
+                title: "Retry SEPA payouts".into(),
+                body: "closes PAY-231".into(),
+                head: "feature/PAY-231-sepa-retry".into(),
+                base: "main".into(),
+            },
+            WriteOp::Approve {
+                entity: "gitea:tidewater/payout-service#142".into(),
+                body: "looks right".into(),
+            },
+            WriteOp::TriggerBuild {
+                entity: "teamcity:buildType:Payout_Build".into(),
+            },
+            WriteOp::RerunBuild {
+                entity: "teamcity:build:1187".into(),
+            },
+        ];
+        for op in &probes {
+            match op {
+                WriteOp::Comment { .. }
+                | WriteOp::Transition { .. }
+                | WriteOp::CreateTicket { .. }
+                | WriteOp::CreateBranch { .. }
+                | WriteOp::CreatePullRequest { .. }
+                | WriteOp::Approve { .. }
+                | WriteOp::TriggerBuild { .. }
+                | WriteOp::RerunBuild { .. } => {}
+            }
+        }
+        probes
+    }
+
+    /// Write ops travel adapter-ward, so they round-trip in both directions --
+    /// every variant, with every field, because a field dropped on the hop is
+    /// a write that arrives at the adapter missing what it needed.
     #[test]
     fn write_op_round_trips() {
+        for op in every_write_op() {
+            let json = serde_json::to_string(&op).unwrap();
+            let back: WriteOp = serde_json::from_str(&json).unwrap();
+            assert_eq!(
+                serde_json::to_value(&back).unwrap(),
+                serde_json::to_value(&op).unwrap(),
+                "{op:?} did not survive the hop"
+            );
+        }
+
         let op = WriteOp::Comment {
             entity: "jira:PAY-231".into(),
             body: "on it".into(),
         };
-        let json = serde_json::to_string(&op).unwrap();
-        let back: WriteOp = serde_json::from_str(&json).unwrap();
-        let WriteOp::Comment { entity, body } = back;
-        assert_eq!((entity.as_str(), body.as_str()), ("jira:PAY-231", "on it"));
+        assert_eq!(
+            serde_json::to_value(&op).unwrap(),
+            serde_json::json!({ "Comment": { "entity": "jira:PAY-231", "body": "on it" } }),
+            "the wire shape is externally tagged plain data (§3a), not Display text"
+        );
+    }
+
+    /// The identifier is what a descriptor lists, what the queue stores in its
+    /// `op` column and what hold detection dispatches on. Two variants sharing
+    /// one would make a descriptor's declaration ambiguous and a queued row
+    /// undecidable; a variant whose identifier is not snake_case would be a
+    /// spelling no descriptor could guess.
+    #[test]
+    fn every_op_has_its_own_snake_case_identifier() {
+        let mut seen = std::collections::HashSet::new();
+        for op in every_write_op() {
+            let id = op.identifier();
+            assert!(
+                id.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+                    && !id.is_empty(),
+                "{id:?} is not a snake_case identifier"
+            );
+            assert!(seen.insert(id), "two variants both call themselves {id:?}");
+        }
+        assert_eq!(seen.len(), 8, "a variant lost its probe in every_write_op");
     }
 
     /// ADR-0004: a failure that came from a response carries the **status** it
