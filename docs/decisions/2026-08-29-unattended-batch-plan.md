@@ -212,3 +212,36 @@ Six worktrees, 217 GiB free. Every `ready-for-agent` issue that was open when th
 either merged or has a PR.
 
 **The first thing to do on return is the billing settings**, because it unblocks everything else.
+
+## CI is disabled; the gate is local now (Björn, 2026-08-29)
+
+The billing block did not clear — a re-run of a blocked job still failed in one second with
+`steps: 0`. Björn's instruction: *"just run the ci locally instead then and disable it on GitHub"*.
+
+Done: `gh workflow disable check` and `gh workflow disable testenv`. Both now read
+`disabled_manually`. Reversible with `gh workflow enable <name>` whenever he wants them back.
+
+**This makes two statements in `docs/agents/working-model.md` false, and they should be amended
+by whoever owns that doctrine:**
+
+1. Under *Review economics*: **"The gate is CI's job, not the reviewer's. Reviewers check
+   `gh pr checks` and run targeted tests plus their own mutations, rather than re-running the whole
+   `just check`."** That rule assumed a CI that runs. Every merge-manager from here must run the
+   full `just check` itself, on the exact head it merges — which is what the two dispatched for
+   #158 and #159 were told, in those words.
+2. Under the branching model: **"GitHub Actions runs `just check` on every PR as the
+   machine-enforced backstop (plan 01 task 11), independent of anyone's worktree."** There is no
+   longer a backstop independent of anyone's worktree.
+
+**The consequence is worth stating plainly rather than leaving implied.** The backstop existed so a
+merge did not rest on one machine's word, and today's batch has three separate cases where CI
+caught something a local run did not: PR #126's merge-manager broke `tests/wiring.rs` in a way
+`cargo test -p knobas-app --lib` could not see, because that guard is an integration target;
+PR #142's manager could not run `svelte-check` or vitest at all in its scratch tree and said CI's
+`front` job was the only thing that had ever looked at its edit; and PR #155's manager hit a
+`-D warnings` failure on dead bindings only after a rebase. All three would now land on whoever
+runs the local gate, which is why the two dispatches say a manager that *cannot* run the frontend
+half must not merge.
+
+Not an argument against the decision — it is Björn's call and the block is real. An argument for
+the gate being run on the merged head rather than the reviewed one.
