@@ -3,6 +3,7 @@ pub mod entity;
 mod error;
 pub mod link;
 pub mod note;
+pub mod suggest;
 pub mod write_queue;
 
 pub use error::CoreError;
