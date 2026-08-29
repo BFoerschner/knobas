@@ -120,7 +120,7 @@ async function settle() {
   }
 }
 
-function render() {
+function render(saveAfterMs = 0) {
   const target = document.createElement("div");
   document.body.append(target);
   const onclose = vi.fn();
@@ -132,7 +132,7 @@ function render() {
       contextLabel: "All work",
       onclose,
       onnavigate,
-      saveAfterMs: 0,
+      saveAfterMs,
     },
   });
   flushSync();
@@ -296,6 +296,30 @@ test("the note draws its links panel from what the read returned", async () => {
 });
 
 /**
+ * Story 2's keyboard corner: Escape closes through the shell's `window`
+ * handler and unmounts the focused field, and the DOM fires no blur for an
+ * element that is removed -- so the pause that would have written never
+ * comes. The teardown flushes a pending timer instead of dropping it, or
+ * everything typed since the last flush would go with the window.
+ */
+test("closing while a pause is still pending writes what was typed", async () => {
+  const screen = render(60_000);
+  await settle();
+
+  await screen.type("the counter starts at zero, and the fix is [[mock:PAY-231]]");
+  expect(saves, "the pause has not elapsed yet").toEqual([]);
+
+  screen.done();
+  expect(saves).toEqual([
+    {
+      noteId: "note:7f2c",
+      title: "SEPA retry investigation",
+      bodyMd: "the counter starts at zero, and the fix is [[mock:PAY-231]]",
+    },
+  ]);
+});
+
+/**
  * A `[[ref]]` link is *derived*: unlinking one would be undone by the next
  * save, silently. The panel says where the link comes from instead.
  */
@@ -327,6 +351,81 @@ test("unlinking a reference is refused, with the reason", async () => {
 
   expect(unlinks).toEqual([]);
   expect(toasts.join(" ")).toContain("Remove the reference");
+  screen.done();
+});
+
+/**
+ * The corner the origin check alone misses: a link drawn *by hand* under the
+ * ref's own relation is the row the ref rides on (`reconcile_refs`'s
+ * `on conflict ... do nothing`), so while the body still names the target,
+ * unlinking it is the same silent undo one save later. A hand-drawn
+ * `references` link to something the body does not name is the user's own,
+ * and unlinks like any other.
+ */
+test("a hand-drawn link the body still names is refused; one it does not name unlinks", async () => {
+  const ridden: LinkEntry = {
+    link: {
+      id: "22222222-2222-4222-8222-222222222222",
+      from_id: "note:7f2c",
+      to_id: "mock:PAY-231",
+      relation: "references",
+      origin: "manual",
+      note: "drawn in the panel",
+      created_by: "user",
+      created_at: "2026-08-22T14:30:00Z",
+    },
+    other: {
+      entity_id: "mock:PAY-231",
+      kind: "ticket",
+      title: "Payments retry storm",
+      deleted_at: null,
+    },
+  };
+  const unridden: LinkEntry = {
+    link: {
+      id: "33333333-3333-4333-8333-333333333333",
+      from_id: "note:7f2c",
+      to_id: "mock:OTHER-9",
+      relation: "references",
+      origin: "manual",
+      note: null,
+      created_by: "user",
+      created_at: "2026-08-22T14:30:00Z",
+    },
+    other: {
+      entity_id: "mock:OTHER-9",
+      kind: "ticket",
+      title: "Unrelated ticket",
+      deleted_at: null,
+    },
+  };
+  stored = detail({
+    note: { ...detail().note, body_md: "see [[mock:PAY-231]]" },
+    refs: [
+      {
+        target_id: "mock:PAY-231",
+        target: { entity_id: "mock:PAY-231", kind: "ticket", title: "Payments retry storm", deleted_at: null },
+      },
+    ],
+    links: [ridden, unridden],
+  });
+  const screen = render();
+  await settle();
+
+  const buttons = [...screen.target.querySelectorAll<HTMLButtonElement>("button")].filter(
+    (button) => button.textContent?.trim() === "Unlink",
+  );
+  expect(buttons).toHaveLength(2);
+
+  buttons[0]!.click();
+  await settle();
+  expect(unlinks, "the ridden row was never tombstoned").toEqual([]);
+  expect(toasts.join(" ")).toContain("Remove the reference");
+
+  buttons[1]!.click();
+  await settle();
+  expect(unlinks).toEqual(["33333333-3333-4333-8333-333333333333"]);
+
   screen.done();
 });
 

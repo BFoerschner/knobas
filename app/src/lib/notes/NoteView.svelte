@@ -133,14 +133,21 @@
    * keystroke debounce (`shell/residue.test.svelte.ts` is the pin, and it is
    * the class of bug this project has already shipped three times).
    *
-   * The autosave timer is *dropped*, not flushed. A panel that wrote on its
-   * way out would write the body the user had when they navigated away, over
-   * whatever the note holds by the time the write lands -- and the last
-   * keystroke is already covered, because leaving the field blurs it and a
-   * blur flushes.
+   * A *pending* autosave timer is words not yet written, and it is flushed,
+   * not dropped. The mouse paths never get here with one pending -- clicking
+   * anywhere else blurs the field first, and a blur flushes -- but the
+   * keyboard path does: Escape closes through the shell's `window` handler
+   * (`shell/keys.ts`), the focused field is unmounted, and the DOM fires no
+   * blur for an element that is removed. Dropping the timer there loses
+   * everything typed since the last flush, which is exactly the loss story 2
+   * exists to rule out. `flush` captures the fields synchronously, so the
+   * write carries what the user last typed; the answer lands in a dead
+   * component, where its state writes are inert and the generation check has
+   * nothing left to guard. Delete is not this path: `remove()` clears the
+   * timer before it runs, so a deleted note is not saved on the way out.
    */
   $effect(() => () => {
-    if (timer !== null) clearTimeout(timer);
+    if (timer !== null) void flush();
     session.dispose();
   });
 
@@ -227,9 +234,22 @@
    * A `[[ref]]` link is *derived*: the body is the source of truth, so
    * unlinking one would be undone by the next save, silently. Saying where the
    * link comes from is the only honest answer the panel can give.
+   *
+   * Two shapes qualify, and the second is the corner the first misses: an
+   * `implied` link out of this note, and a link the user drew *by hand* under
+   * the ref's own relation to a target the body still names. The hand-drawn
+   * row is what the ref rides on (`note::reconcile_refs`'s `on conflict … do
+   * nothing`), so unlinking it while the body still says `[[target]]` is the
+   * same silent undo one save later — the row that came back would merely be
+   * `implied` instead of `manual`.
    */
   async function removeLink(entry: LinkEntry) {
-    if (entry.link.origin === "implied" && entry.link.from_id === entityId) {
+    const derived = entry.link.origin === "implied" && entry.link.from_id === entityId;
+    const ridden =
+      entry.link.from_id === entityId &&
+      entry.link.relation === "references" &&
+      (detail?.refs.some((ref) => ref.target?.entity_id === entry.other.entity_id) ?? false);
+    if (derived || ridden) {
       push({
         text: "This link comes from a [[reference]] in the note. Remove the reference to withdraw it.",
         tone: "plain",

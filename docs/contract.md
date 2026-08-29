@@ -1733,8 +1733,12 @@ From this commit on, each of the following requires an orchestrator decision **a
 
 - **Migration `0006` and the IPC schema, issue #46 (2026-08-29):** Notes v1 — the first kind
   knobas **owns** rather than mirrors. Granted by the **orchestrator under delegation while Björn
-  was away**, both halves at once, so the stream did not have to stop; **the merge is still
-  Björn's gate**, as it is for every change to a frozen surface.
+  was away**, both halves at once, so the stream did not have to stop. **The merge gate**: when
+  this entry was first written the merge was Björn's — the PR carries migration `0006` and this
+  grant, two frozen surfaces. On 2026-08-29 Björn delegated exactly those ("let Migration and ipc
+  additions be merged by fable too"), the same instruction the #42 entry above records, and the PR
+  was merged by its merge-manager under it. Milestone exits and the contract battery's clauses
+  were not delegated and remain his.
 
   **The migration.** `crates/knobas-db/migrations/0006_notes.sql`, allocated to this stream and to
   nothing else. `0005` belongs to the write queue (#42, PR #117), which was open and unmerged when
