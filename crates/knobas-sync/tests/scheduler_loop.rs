@@ -1468,3 +1468,152 @@ async fn a_run_whose_task_panics_still_gives_its_watchers_an_ending() {
     .unwrap();
     retire(&pool, &ids).await;
 }
+
+// -- #119: the entry's life ends with its source's -----------------------------
+
+/// Add a source back under an id that has just been deleted -- the user action
+/// #119 is about, and the one `sync_run`'s deliberate lack of a foreign key
+/// makes possible: the deleted source's runs are still in the log, under the
+/// same `source_id` the new source now has.
+///
+/// Disabled from the start, for the reason [`seed_quiet`] disables: no other
+/// test's ticker may adopt it.
+async fn re_add(pool: &PgPool, id: &str) {
+    config::insert(
+        pool,
+        &InsertConfig {
+            id: id.to_owned(),
+            adapter_kind: "slow".into(),
+            display_name: "Slow, the second".into(),
+            base_url: String::new(),
+            auth_kind: AuthKind::None,
+            config: serde_json::json!({}),
+            sync_interval_secs: 60,
+            enabled: false,
+        },
+    )
+    .await
+    .unwrap();
+}
+
+/// **A source that is deleted and added again under the same id is not served
+/// the deleted source's ending.**
+///
+/// `Inner::runs` holds an entry that deliberately outlives its run -- that is
+/// the mechanism serving a late caller its ending (ADR-0005). Nothing used to
+/// end that entry's life when the *source* went away, and `sync_run` rows
+/// outlive a source by design (no foreign key: "deleting a source must not
+/// rewrite its history"), so the first-run wizard for the *new* source could be
+/// handed the *old* source's run and the ending recorded for it -- knobas'
+/// first sentence about a brand-new source, describing a run that belongs to
+/// something the user deleted. The same defect ADR-0005 exists to remove,
+/// wearing a different hat.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_source_re_added_under_a_deleted_ones_id_is_not_served_the_deleted_ones_ending() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed_quiet(&pool, 1).await;
+    let id = ids[0].clone();
+    let (deps, _) = deps(sched_pool, Duration::from_millis(200)).await;
+    let scheduler = Scheduler::start(deps).await.unwrap();
+
+    // The first source's own first sync, run to completion. `Manual` with a
+    // sink is how the test knows it is *completely* over rather than merely
+    // logged -- `settle` writes `finished_at` before the run tells anybody --
+    // and it asks for work rather than for the first sync, so it leaves the
+    // `FirstRun` claim unspent, which is the state that makes the entry
+    // serveable to a later wizard.
+    let deleted_sources_run = scheduler
+        .trigger(&id, SyncTrigger::FirstRun, None)
+        .await
+        .unwrap();
+    let observer = Heard::new();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    scheduler
+        .trigger(&id, SyncTrigger::Manual, Some(observer.sink()))
+        .await
+        .unwrap();
+    await_ending(&observer).await;
+
+    // What `delete_source` does, and what it now tells the scheduler.
+    config::delete(&pool, &id, false).await.unwrap();
+    scheduler.forget_source(&id).await;
+    re_add(&pool, &id).await;
+
+    // The new source's wizard.
+    let wizard = Heard::new();
+    let handed = scheduler
+        .trigger(&id, SyncTrigger::FirstRun, Some(wizard.sink()))
+        .await
+        .unwrap();
+    let ending = await_ending(&wizard).await;
+    scheduler.shutdown().await;
+
+    assert_ne!(
+        handed, deleted_sources_run,
+        "the wizard for the new source was handed the deleted source's run"
+    );
+    assert_eq!(
+        ending.run_id, handed,
+        "and the ending it heard is the new run's"
+    );
+    let rows = run_log::list(&pool, Some(&id), 10).await.unwrap();
+    assert_eq!(
+        rows.len(),
+        2,
+        "the deleted source's run stays in the log, and the new source has one of its own: {rows:?}"
+    );
+    retire(&pool, &ids).await;
+}
+
+/// **Forgetting a source does not take an ending away from anybody already
+/// watching its run.**
+///
+/// The other half of #119, and the half that keeps ADR-0005 intact through the
+/// new operation. A source can be deleted while a run of it is still going, so
+/// forgetting has to be safe *mid-flight*: the run holds its own handle on its
+/// watchers, so a caller enrolled before the deletion is still told how that
+/// run ended. What forgetting removes is only the scheduler's claim on the
+/// *source id* -- so the next trigger, which belongs to whatever was added
+/// under that id afterwards, gets a run of its own rather than joining a run
+/// that is not about it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn forgetting_a_source_mid_run_still_gives_that_runs_watchers_their_ending() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed_quiet(&pool, 1).await;
+    let id = ids[0].clone();
+    let (deps, _) = deps(sched_pool, Duration::from_millis(400)).await;
+    let scheduler = Scheduler::start(deps).await.unwrap();
+
+    let watcher = Heard::new();
+    let in_flight = scheduler
+        .trigger(&id, SyncTrigger::FirstRun, Some(watcher.sink()))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Deleted mid-run, and added again straight away -- the impatient version
+    // of the same user action.
+    config::delete(&pool, &id, false).await.unwrap();
+    scheduler.forget_source(&id).await;
+    re_add(&pool, &id).await;
+
+    let wizard = Heard::new();
+    let handed = scheduler
+        .trigger(&id, SyncTrigger::FirstRun, Some(wizard.sink()))
+        .await
+        .unwrap();
+
+    // ADR-0005 for the caller that was already there: the run it was handed is
+    // one it can observe, deletion or no deletion.
+    let ending = await_ending(&watcher).await;
+    assert_eq!(ending.run_id, in_flight);
+    assert_ne!(
+        handed, in_flight,
+        "the new source's wizard joined a run belonging to the source that was deleted"
+    );
+    assert_eq!(await_ending(&wizard).await.run_id, handed);
+    scheduler.shutdown().await;
+    retire(&pool, &ids).await;
+}

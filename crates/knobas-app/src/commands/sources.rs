@@ -106,6 +106,18 @@ pub async fn update_source<R: tauri::Runtime>(
     Ok(summary)
 }
 
+/// Delete a source: its configuration row, its keychain item, and -- because
+/// this is the one place a source stops existing -- the scheduler's memory of
+/// it.
+///
+/// The scheduler keeps a run entry per source id that deliberately outlives the
+/// *run* (ADR-0005: it is what serves a late caller that run's ending). It must
+/// not outlive the *source*: `knobas.sync_run` has no foreign key to
+/// `source_config`, so a source added again under a deleted one's id inherits a
+/// readable run history that is not its own, and the first-run wizard for the
+/// new source could be handed the deleted source's ending. Told after the
+/// delete has committed, so a delete that failed leaves the scheduler's claim
+/// exactly as it was.
 #[tauri::command]
 pub async fn delete_source<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -115,7 +127,9 @@ pub async fn delete_source<R: tauri::Runtime>(
     let state = crate::sources::state(&app)?;
     crud::delete(&state.pool, &state.secrets, &id, purge_items)
         .await
-        .map_err(|error| to_ipc(&error, Some(&id)))
+        .map_err(|error| to_ipc(&error, Some(&id)))?;
+    state.scheduler.forget_source(&id).await;
+    Ok(())
 }
 
 /// Store a credential for a saved source and test it (interfaces §3,
@@ -439,6 +453,56 @@ mod tests {
             ),
             "the allowed state must not trip it"
         );
+    }
+
+    /// **`delete_source` tells the scheduler the source is gone** (#119).
+    ///
+    /// A source scan for the same reason as the one above: a
+    /// `#[tauri::command]` body cannot be called from a test, so the only place
+    /// this one line can be checked is here. It is worth checking because
+    /// losing it is silent -- everything still compiles, the delete still
+    /// works, and the cost only shows up when somebody adds a source back under
+    /// the deleted one's id and the first-run wizard describes a run that
+    /// belonged to the source they threw away. `Scheduler::forget_source` and
+    /// its own tests live in `knobas-sync`; this pins that it is *called*.
+    #[test]
+    fn deleting_a_source_tells_the_scheduler_to_forget_it() {
+        assert!(
+            body_of(include_str!("sources.rs"), "pub async fn delete_source")
+                .contains("scheduler.forget_source("),
+            "delete_source must tell the scheduler, or a source added again \
+             under this id inherits the deleted one's run entry -- and with it \
+             the ending the first-run wizard is served (#119, ADR-0005)"
+        );
+    }
+
+    /// The scan can tell a body that makes the call from one that does not.
+    #[test]
+    fn the_forget_scan_would_notice_the_call_going_missing() {
+        let with = "pub async fn delete_source() {\n  state.scheduler.forget_source(&id).await;\n}\npub async fn next() {}";
+        let without = "pub async fn delete_source() {\n  crud::delete().await\n}\npub async fn next() { state.scheduler.forget_source(&id).await; }";
+        assert!(body_of(with, "pub async fn delete_source").contains("scheduler.forget_source("));
+        assert!(
+            !body_of(without, "pub async fn delete_source").contains("scheduler.forget_source("),
+            "the scan must read this command's body, not the whole file -- \
+             another command making the call is not this one making it"
+        );
+    }
+
+    /// From a function's signature to the start of the next item, comments
+    /// stripped. Crude on purpose: it only has to be narrower than the file.
+    fn body_of(source: &str, signature: &str) -> String {
+        let code = strip_line_comments(source);
+        let at = code
+            .find(signature)
+            .unwrap_or_else(|| panic!("{signature} is not in this file any more"));
+        let rest = &code[at + signature.len()..];
+        let end = ["\npub ", "\n#["]
+            .iter()
+            .filter_map(|marker| rest.find(marker))
+            .min()
+            .unwrap_or(rest.len());
+        rest[..end].to_owned()
     }
 
     /// The scan itself, factored out so the test above can drive it over text

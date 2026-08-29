@@ -738,6 +738,17 @@ struct Inner {
     /// second sync over an already-mirrored corpus. It is replaced when a run
     /// starts and removed when one is found closed, so the map is bounded by
     /// the number of sources, not by the number of runs.
+    ///
+    /// **It does not outlive the source.** That is the one boundary the
+    /// outliving stops at, and it is not incidental: an entry is keyed by the
+    /// user's chosen source id, `knobas.sync_run` deliberately keeps no foreign
+    /// key to `source_config`, and a source deleted and added again under the
+    /// same id is therefore a *different* source wearing an id whose run
+    /// history is still readable. Left alone, the new source's first-run wizard
+    /// could be handed the deleted source's run -- knobas' first sentence about
+    /// a brand-new source describing something the user threw away.
+    /// [`Scheduler::forget_source`] is where that life ends, and `delete_source`
+    /// is what calls it.
     runs: Mutex<HashMap<String, RunEntry>>,
     /// Poked when something changed that might make a source due (a finished
     /// run, a new source, a re-entered credential), so the UI does not wait out
@@ -873,6 +884,30 @@ impl Scheduler {
             );
         }
         Ok(ids)
+    }
+
+    /// Drop everything this scheduler remembers about a source, because the
+    /// source is gone.
+    ///
+    /// **Where a [`RunEntry`]'s life ends.** The entry outliving its *run* is
+    /// deliberate ([`Inner::runs`]); outliving its *source* is not, and nothing
+    /// else would ever notice, because `knobas.sync_run` has no foreign key to
+    /// `source_config` on purpose -- deleting a source must not rewrite its
+    /// history -- so a run of the deleted source is still readable under an id
+    /// a *new* source may now hold. Without this, adding a source back under a
+    /// deleted one's id could hand the first-run wizard the earlier source's
+    /// run and the ending recorded for it.
+    ///
+    /// Called by `delete_source`, which is the only place a source is deleted.
+    ///
+    /// **It cancels nothing.** A run of the deleted source that is still in
+    /// flight keeps its own handle on its watchers and closes them itself, so a
+    /// caller enrolled before the deletion is still told how that run ended --
+    /// ADR-0005 is about the caller, not about the configuration row. What goes
+    /// is only this scheduler's claim on the *id*, so the next trigger for it
+    /// is about whatever holds that id now.
+    pub async fn forget_source(&self, source_id: &str) {
+        self.inner.runs.lock().await.remove(source_id);
     }
 
     /// Look for due sources now rather than at the next tick.
