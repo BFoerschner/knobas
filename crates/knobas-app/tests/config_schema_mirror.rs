@@ -406,7 +406,9 @@ fn an_object_literal_with_unquoted_keys_parses() {
 /// **The rule the fixture's own header states**, encoded: *a property that is
 /// here is verbatim; a property may be absent, and each absence is named.* So
 /// the licence to be absent is spent at exactly one level -- the `properties`
-/// map -- and nowhere else. Inside a property the fixture is compared whole:
+/// map -- and nowhere else, in **both** directions: a top-level key either
+/// side has and the other does not is a disagreement, and only a *property*
+/// may go missing. Inside a property the fixture is compared whole:
 /// `type`, `title`, `description`, `default`, bounds, `items`. A looser rule
 /// that compared only the keys a reader thought to list is what shipped #82,
 /// because `username`'s `type` was never the key anybody thought to list.
@@ -455,6 +457,23 @@ fn disagreements(fixture: &serde_json::Value, adapter: &serde_json::Value) -> Ve
             }
         }
     }
+    // The same rule read the other way. The licence to be absent is spent
+    // inside `properties`, so a *top-level* key the adapter declares and the
+    // fixture drops is not licensed: a fixture without the adapter's
+    // `additionalProperties: false` is a form model that believes an unknown
+    // key is accepted where the source rejects it. That is #82's direction
+    // mirrored -- the fixture looser than the source rather than stricter --
+    // and it is exactly as invisible, because the tests agree with the
+    // fixture.
+    for (key, theirs) in adapter {
+        if !fixture.contains_key(key) {
+            found.push(format!(
+                "`{key}` is in the adapter's schema and the fixture does not have it at all -- \
+                 the licence to be absent is spent inside `properties`, so a top-level key \
+                 dropped here is a form looser than the source\n  adapter: {theirs}"
+            ));
+        }
+    }
     found
 }
 
@@ -480,6 +499,7 @@ fn a_property_the_fixture_leaves_out_is_licensed_and_one_it_spells_differently_i
     // is over what is there.
     let faithful = serde_json::json!({
         "type": "object",
+        "additionalProperties": false,
         "properties": { "username": { "type": ["string", "null"], "title": "Username" } }
     });
     assert_eq!(disagreements(&faithful, &adapter), Vec::<String>::new());
@@ -487,11 +507,34 @@ fn a_property_the_fixture_leaves_out_is_licensed_and_one_it_spells_differently_i
     // The #82 drift: an optional string read as a plain one.
     let drifted = serde_json::json!({
         "type": "object",
+        "additionalProperties": false,
         "properties": { "username": { "type": "string", "title": "Username" } }
     });
     let found = disagreements(&drifted, &adapter);
     assert_eq!(found.len(), 1, "{found:#?}");
     assert!(found[0].contains("properties.username"), "{found:#?}");
+}
+
+/// A *property* may be absent; a top-level key may not.
+///
+/// The licence the fixture header grants is over the `properties` map, and it
+/// is spent there. `additionalProperties: false` dropped from a fixture would
+/// leave the form model believing an unknown key is accepted where the adapter
+/// rejects it -- #82's direction mirrored, and exactly as invisible, because
+/// every frontend test would go on agreeing with the fixture. This is the
+/// witness that the licence stops at the one level the doc comment says it
+/// does.
+#[test]
+fn a_top_level_key_the_fixture_drops_is_not_licensed() {
+    let adapter = serde_json::json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+    });
+    let dropped = serde_json::json!({ "type": "object", "properties": {} });
+    let found = disagreements(&dropped, &adapter);
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert!(found[0].contains("additionalProperties"), "{found:#?}");
 }
 
 // -- the check itself ----------------------------------------------------------
