@@ -23,7 +23,8 @@
 //! second full sort of every matching row, on the launcher's hot path. That is
 //! the M0 carry-over, and installing the builder here is what discharges it.
 //!
-//! The corpus is `sync.live_item` and nothing else: notes are M2 and asset
+//! The corpora are [`corpus::ALL`]: the mirror, and `knobas.note` since #46 --
+//! so one query answers over what knobas synced *and* what it owns. Asset
 //! ancestor paths are M4 (interfaces §2.4). A prefix whose corpus does not
 //! exist yet answers with *no rows* and still echoes what it understood --
 //! never invented ones.
@@ -174,7 +175,7 @@ impl Searcher {
         }
 
         let built = sql::search_sql(
-            &[&corpus::LIVE_ITEM],
+            corpus::ALL,
             text,
             parsed.prefix_last_term,
             &filters,
@@ -314,17 +315,22 @@ fn validate(mut query: SearchQuery) -> Result<SearchQuery, SearchError> {
     Ok(query)
 }
 
-/// Whether this prefix names a corpus M1 does not have.
+/// Whether this prefix names a corpus knobas does not have yet.
 ///
-/// Notes are M2, assets M4 (interfaces §2.4: *"the parser must simply return
-/// no `asset:` results rather than pretending"*), and `t `, `>` and `?` are
-/// not corpus searches at all -- worklogs, the command palette and help.
-/// Every one of them is still **parsed and echoed**, so the launcher greys the
-/// prefix out with a reason instead of showing tickets for `asset:`.
+/// Assets are M4 (interfaces §2.4: *"the parser must simply return no `asset:`
+/// results rather than pretending"*), and `t `, `>` and `?` are not corpus
+/// searches at all -- worklogs, the command palette and help. Every one of them
+/// is still **parsed and echoed**, so the launcher greys the prefix out with a
+/// reason instead of showing tickets for `asset:`.
+///
+/// `note:` was in this list until #46 and is not any more: notes have a corpus
+/// ([`corpus::NOTE`]) and a write path behind it. Removing it here is the whole
+/// of what turns the prefix on -- the parser already claimed it and already set
+/// `kinds = ["note"]`.
 fn empty_corpus(prefix: Option<Prefix>) -> bool {
     matches!(
         prefix,
-        Some(Prefix::Asset | Prefix::Note | Prefix::Time | Prefix::Action | Prefix::Help)
+        Some(Prefix::Asset | Prefix::Time | Prefix::Action | Prefix::Help)
     )
 }
 
@@ -446,16 +452,17 @@ mod tests {
     /// the ones whose corpus it does.
     #[test]
     fn only_the_absent_corpora_short_circuit() {
-        for absent in [
-            Prefix::Asset,
-            Prefix::Note,
-            Prefix::Time,
-            Prefix::Action,
-            Prefix::Help,
-        ] {
+        for absent in [Prefix::Asset, Prefix::Time, Prefix::Action, Prefix::Help] {
             assert!(empty_corpus(Some(absent)), "{absent:?}");
         }
-        for present in [Prefix::Ticket, Prefix::Person, Prefix::Source, Prefix::List] {
+        for present in [
+            Prefix::Ticket,
+            Prefix::Person,
+            Prefix::Source,
+            Prefix::List,
+            // #46: notes are knobas' own corpus, not a milestone away.
+            Prefix::Note,
+        ] {
             assert!(!empty_corpus(Some(present)), "{present:?}");
         }
         assert!(!empty_corpus(None));

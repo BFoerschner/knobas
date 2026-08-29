@@ -53,6 +53,12 @@ const RESERVED = new Set([
   "first-run",
   "entity",
   // M2-M4, reserved so an open kind never collides with a view.
+  //
+  // `note` was here until #46 and is not any more: notes are a kind now, so
+  // `#/note/note:<uuid>` has to reach `NoteView` the way `#/ticket/<id>`
+  // reaches `Detail`. It is the one word in this list that stopped being a
+  // *view* and became a kind, which is exactly what this list is arranged
+  // around -- so a later tidy-up that adds it back is a note nobody can open.
   "inbox",
   "time",
   "standup",
@@ -61,7 +67,6 @@ const RESERVED = new Set([
   "route",
   "monitor",
   "start-work",
-  "note",
 ]);
 
 /**

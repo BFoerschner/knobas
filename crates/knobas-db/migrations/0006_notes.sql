@@ -1,0 +1,92 @@
+-- 0006_notes.sql -- notes become entities, and the sweep is made structurally
+-- unable to reach one.
+--
+-- Single-writer (orchestrator), like every migration: a stream that needs more
+-- schema requests 0007 and never edits this file or its predecessors -- sqlx
+-- checksums applied migrations and an edit fails startup on every existing
+-- database. `0005` belongs to the write queue (#42, PR #117); this number was
+-- allocated to Notes v1 (#46) and to nothing else. Recorded as a ratified
+-- exception in `docs/contract.md` §10.8.
+--
+-- `knobas.note` itself has been in `0001` since M0 -- id, title, body_md, the
+-- two timestamps and a generated `fts`. Nothing wrote to it, because notes are
+-- M2. This migration adds the three constraints that make it safe to start.
+--
+-- ## What a note is
+--
+-- A note is an **entity** (`CONTEXT.md`: "anything with exactly one stable
+-- in-app address -- a synced item, a context, a note, an asset"), so it has a
+-- `knobas.entity` row like everything else, and `[[refs]]` out of it are rows
+-- in `knobas.link`, whose two endpoints reference `knobas.entity(id)`. Without
+-- the foreign key below, `knobas.note` was a table beside the address space
+-- rather than in it, and a note could be written that nothing could link to.
+--
+-- ## Why the sweep cannot reach a note, structurally
+--
+-- ADR-0003's sweep tombstones items of an *exhaustive* kind that a full sync no
+-- longer emitted. A note is emitted by no sync at all, so "notes are not in the
+-- sweep's kind list" would be true today and true only by accident: it holds
+-- for exactly as long as nobody adds a source that declares a kind called
+-- `note`, or emits an item under a note's id. This is the one way notes could
+-- be destroyed wholesale, and notes are the only content knobas cannot
+-- re-fetch from anywhere -- so it is made impossible rather than merely absent.
+--
+-- The chain is three links, and every one of them is enforced *here*, by the
+-- database, rather than by any Rust that a later refactor could move:
+--
+--   1. The sweep can only tombstone an entity that has a mirror row. Its
+--      statement (`knobas_sync::SWEEP`) is
+--      `update knobas.entity e ... from sync.item i where i.entity_id = e.id`
+--      -- an entity with no `sync.item` row is not in its result at all.
+--   2. `note_id_ns_chk` below: a note's id is in the `note:` namespace.
+--   3. `item_entity_reserved_chk` below: no `sync.item` row may ever name an
+--      entity in a namespace knobas keeps for itself.
+--
+-- 2 and 3 together say no mirror row can name a note; 1 says the sweep sees
+-- nothing else. It therefore does not matter what a descriptor declares, what
+-- the sweep's kind list holds, or what a future adapter emits.
+--
+-- The namespace list is `knobas_core::entity::RESERVED_NAMESPACES`, which the
+-- sync engine already refuses as a *source id* -- this is the same reservation
+-- viewed from the row instead of from the run, and it is what closes the gap
+-- between them: a source legitimately called `jira` could still, before this,
+-- write a mirror row whose `entity_id` was `note:7f2c`. The engine's own
+-- per-item namespace guard rejects that, but the engine is Rust and the sweep
+-- is not the only thing that would suffer -- a mirror row over a note's id
+-- would also put the note in `sync.live_item`, i.e. in the mirror's view of
+-- itself.
+--
+-- Case-insensitive (`!~*`) because `knobas_core::entity::is_reserved_namespace`
+-- is: `NOTE:7f2c` addresses the namespace `note:7f2c` addresses, to every human
+-- reading it, and a guard that disagreed would be trivially side-stepped.
+--
+-- Keep the namespaces on one line: the cross-check in
+-- `knobas_core::entity`'s tests reads this file and finds the vocabulary by the
+-- line that lists it, so neither list can grow without the other -- the same
+-- discipline `link_origin_chk` (0003) and the run log's vocabularies (0002,
+-- 0004) get, and for the same reason.
+--
+-- Additive and re-entrant: adding a CHECK validates the rows already there, and
+-- no source has ever been able to write an entity id outside its own namespace.
+
+-- 1. A note lives in the address space, so it can be linked to and from.
+--    `on delete cascade` rather than `restrict`: a note's entity row is the
+--    note's identity, and an identity that is gone cannot leave a body behind.
+--    Deleting a note does *not* travel this path -- `knobas_core::note::delete`
+--    tombstones the entity and removes the body, exactly as a withdrawn
+--    mirrored item keeps its entity row so that links to it stay visible and
+--    marked (§5a, #53). The cascade is the floor under that, not the route.
+alter table knobas.note
+  add constraint note_entity_fk foreign key (id) references knobas.entity (id) on delete cascade;
+
+-- 2. A note's id is in the namespace knobas keeps for notes. Link 2 of the
+--    chain above; also what makes `note:<uuid>` the only spelling, so the id in
+--    a `[[ref]]` and the id in the table are the same string.
+alter table knobas.note
+  add constraint note_id_ns_chk check (id ~* '^note:');
+
+-- 3. The mirror may never name an entity knobas owns. Link 3 of the chain
+--    above, and the load-bearing one: this is what a mutation test deletes to
+--    prove the sweep-safety tests are not vacuous.
+alter table sync.item
+  add constraint item_entity_reserved_chk check (entity_id !~* '^(note|ctx|asset|route|monitor):');

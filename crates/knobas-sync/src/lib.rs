@@ -790,6 +790,22 @@ impl<'t, 'c> PgSink<'t, 'c> {
                 self.source_id, item.kind
             )));
         }
+        // ...and a kind knobas *owns* is not a source's to emit whatever its
+        // descriptor claims. The sibling of the namespace guard above, and the
+        // reason it is a second check rather than a widening of that one: the
+        // namespace guard compares an item against the source id it was given,
+        // so a source legitimately called `jira` passes it while emitting
+        // `jira:x` of kind `note`. That is not a sweep hazard -- migration
+        // `0006` is what makes that impossible, and it works on the id -- but
+        // it is a mirrored row claiming to be the thing knobas owns, in the
+        // launcher's note group, in `type:note`, and unwritable through any
+        // note command.
+        if knobas_core::entity::is_owned_kind(&item.kind) {
+            return Err(SourceError::Sink(format!(
+                "source {:?} emitted {id} of kind {:?}, which knobas owns and no source mirrors",
+                self.source_id, item.kind
+            )));
+        }
         Ok(())
     }
 

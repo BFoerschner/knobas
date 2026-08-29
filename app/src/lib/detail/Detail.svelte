@@ -125,8 +125,22 @@
    *
    * No confirmation: re-linking the same pair is one action, so the removal is
    * cheap to reverse (§5a's partial unique index is what makes that true).
+   *
+   * Unless the link is `implied` — drawn by knobas from a `[[reference]]` in
+   * a note's body (#46). The body is the source of truth for those, so
+   * tombstoning the row here would be undone by that note's next autosave,
+   * silently; `NoteView` refuses the same unlink from the note's own end.
+   * The other end of an implied link is the note, so the refusal can say
+   * where to go.
    */
   async function removeLink(entry: LinkEntry) {
+    if (entry.link.origin === "implied") {
+      push({
+        text: `This link comes from a [[reference]] in “${entry.other.title || entry.other.entity_id}”. Remove the reference there to withdraw it.`,
+        tone: "plain",
+      });
+      return;
+    }
     try {
       await unlink(entry.link.id);
     } catch (rejection) {

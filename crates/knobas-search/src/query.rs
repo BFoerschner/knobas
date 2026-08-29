@@ -402,7 +402,7 @@ fn apply_key_value(
         "kind" | "type" => {
             if value.is_empty() {
                 parsed.unknown(token);
-            } else if key == "kind" || vocab.kinds.is_empty() || vocab.kinds.is_declared(value) {
+            } else if key == "kind" || vocab.kinds.is_empty() || vocab.kinds.is_known(value) {
                 push_unique(&mut parsed.query.filters.kinds, value);
             } else {
                 parsed.unknown(token);

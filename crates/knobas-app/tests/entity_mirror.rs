@@ -436,3 +436,82 @@ fn the_entity_detail_shape_matches_its_typescript_mirror() {
         assert_eq!(wire[field], serde_json::Value::Null, "{field} lost its key");
     }
 }
+
+fn note_row() -> knobas_core::note::NoteRow {
+    knobas_core::note::NoteRow {
+        id: "note:7f2cf0d4-1f1e-4b2f-9a4a-0d1c2e3f4a5b".to_owned(),
+        title: "SEPA retry investigation".to_owned(),
+        body_md: "The counter starts at zero — see [[mock:PAY-231]].".to_owned(),
+        created_at: at(),
+        updated_at: at(),
+    }
+}
+
+const NOTE_ROW_FIELDS: &[&str] = &["body_md", "created_at", "id", "title", "updated_at"];
+
+#[test]
+fn the_note_row_shape_matches_its_typescript_mirror() {
+    let wire = serde_json::to_value(note_row()).unwrap();
+    assert_shape("NoteRow", &wire, NOTE_ROW_FIELDS);
+}
+
+/// A ref carries what it named and what it found, and the *unresolved* case is
+/// exercised as `None` -- which is the case the whole DTO exists for.
+///
+/// `null` and not a missing key: the editor branches on it to draw a ref as
+/// unresolved, and `undefined` where it declared `null` is the failure this
+/// file's header describes.
+#[test]
+fn the_note_ref_shape_matches_its_typescript_mirror() {
+    let resolved = knobas_core::note::NoteRef {
+        target_id: "mock:PAY-231".to_owned(),
+        target: Some(link_end()),
+    };
+    let wire = serde_json::to_value(&resolved).unwrap();
+    assert_shape("NoteRef", &wire, &["target", "target_id"]);
+    assert_shape("LinkEnd", &wire["target"], LINK_END_FIELDS);
+
+    let unresolved = knobas_core::note::NoteRef {
+        target_id: "mock:NOSUCH-1".to_owned(),
+        target: None,
+    };
+    let wire = serde_json::to_value(&unresolved).unwrap();
+    assert_shape("NoteRef", &wire, &["target", "target_id"]);
+    assert!(
+        wire["target"].is_null(),
+        "an unresolved ref is a null target, not an absent key: {wire}"
+    );
+}
+
+/// The whole note view, including both of its lists at once.
+///
+/// The `refs`/`links` pair is the part a reader is most likely to "simplify"
+/// into one field, so the fixture carries a ref that resolves, a ref that does
+/// not, and a link -- and every nested shape is checked, because a field added
+/// to `LinkEntry` reaches this DTO without touching it.
+#[test]
+fn the_note_detail_shape_matches_its_typescript_mirror() {
+    let detail = knobas_app::commands::entity::NoteDetail {
+        note: note_row(),
+        refs: vec![
+            knobas_core::note::NoteRef {
+                target_id: "mock:PAY-231".to_owned(),
+                target: Some(link_end()),
+            },
+            knobas_core::note::NoteRef {
+                target_id: "mock:NOSUCH-1".to_owned(),
+                target: None,
+            },
+        ],
+        links: vec![link_entry()],
+    };
+    let wire = serde_json::to_value(&detail).unwrap();
+    assert_shape("NoteDetail", &wire, &["links", "note", "refs"]);
+    assert_shape("NoteRow", &wire["note"], NOTE_ROW_FIELDS);
+    assert_shape("NoteRef", &wire["refs"][0], &["target", "target_id"]);
+    assert_shape("LinkEnd", &wire["refs"][0]["target"], LINK_END_FIELDS);
+    assert!(wire["refs"][1]["target"].is_null());
+    assert_shape("LinkEntry", &wire["links"][0], &["link", "other"]);
+    assert_shape("LinkRow", &wire["links"][0]["link"], LINK_ROW_FIELDS);
+    assert_shape("LinkEnd", &wire["links"][0]["other"], LINK_END_FIELDS);
+}

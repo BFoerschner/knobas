@@ -143,20 +143,28 @@ pub const LIVE_ITEM: Corpus = Corpus {
     scope: None,
 };
 
-/// The M4 asset corpus in miniature: a second relation, wired for tests only.
+/// Notes: the corpus of the first kind knobas **owns** rather than mirrors.
 ///
-/// `knobas.note` is `0001`'s notes table -- empty in M1 by construction (notes
-/// are M2) and carrying its own generated `fts`. It stands in for M4's assets
+/// Written for M1 as the M4 asset corpus in miniature and shipped in M2 (#46)
+/// once there was a write path behind it. It stands in for M4's assets
 /// precisely because of what it is *not*: its `kind` and `source_id` are not
 /// columns but constants, its ids live in their own namespace, and its
 /// `headline_text` composes two columns that are not the row's title. A corpus
 /// that needed the builder to grow a branch would need it for one of exactly
-/// those reasons.
+/// those reasons -- and this one needed none, which is what
+/// `tests/corpus_seam.rs` runs rather than asserts.
 ///
-/// Test-only, and deliberately so: M1's corpus is `sync.live_item` and nothing
-/// else (interfaces §2.4), so shipping this in the product's corpus list would
-/// make `note:` answer with rows M1 does not have a write path for.
-#[cfg(any(test, feature = "test-util"))]
+/// **The excerpt is markdown source.** `body_md` is what the user typed,
+/// `[[refs]]` and `#` headings included, and [`crate::snippet`] hands it on as
+/// [`Segment`](crate::types::Segment) text with a `hit` flag. That is the
+/// standing rule, not a note-specific one: the renderer prints `segment.text`
+/// as text and never as markup (roadmap §4 gotcha 7). Notes make it harder to
+/// forget, because markdown in a search row *looks* like something to render.
+///
+/// No `scope`. A deleted note's `knobas.note` row is gone
+/// (`knobas_core::note::delete` removes the body and tombstones the entity), so
+/// there is nothing to filter out -- unlike the mirror, where the row survives
+/// its tombstone and `sync.live_item` is what hides it.
 pub const NOTE: Corpus = Corpus {
     relation: "knobas.note n",
     entity_id: "n.id",
@@ -174,3 +182,50 @@ pub const NOTE: Corpus = Corpus {
     synced_at: "n.updated_at",
     scope: None,
 };
+
+/// Every corpus the launcher searches.
+///
+/// One list, so a corpus cannot be added to the crate and forgotten by the
+/// query. Which rows each one contributes is decided by the *filters*, not by
+/// membership here: `note:` sets `kinds = ["note"]`, which the mirror's branch
+/// cannot match; a `source:` chip names configured sources, which
+/// [`NOTE`]'s constant `'note'` is not; and an author filter excludes a corpus
+/// with no author column outright. So the union is always both branches and the
+/// answer is always the right one.
+pub const ALL: &[&Corpus] = &[&LIVE_ITEM, &NOTE];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A kind knobas owns is searchable, or "notes are a first-class
+    /// searchable kind" is a claim with nothing behind it.
+    ///
+    /// This is also the half of the catalog seam that M4 will trip: adding
+    /// `asset` to `OWNED_KINDS` fails here until an asset corpus joins [`ALL`],
+    /// which is the reminder that a kind knobas owns and cannot search is a
+    /// kind the launcher lies about.
+    #[test]
+    fn every_kind_knobas_owns_has_a_corpus_to_search() {
+        for owned in knobas_core::entity::OWNED_KINDS {
+            let quoted = format!("'{}'", owned.id);
+            assert!(
+                ALL.iter().any(|corpus| corpus.kind == quoted),
+                "{:?} is a kind knobas owns with no corpus in ALL",
+                owned.id
+            );
+        }
+    }
+
+    /// The `fts` of a corpus is matched against and never selected: reading a
+    /// `tsvector` into a `FromRow` struct panics at run time (interfaces §1).
+    /// The builder is what enforces it; this is the reminder at the point a
+    /// corpus is written.
+    #[test]
+    fn no_corpus_selects_its_tsvector() {
+        for corpus in ALL {
+            assert!(!corpus.title.contains("fts"));
+            assert!(!corpus.headline_text.contains("fts"));
+        }
+    }
+}

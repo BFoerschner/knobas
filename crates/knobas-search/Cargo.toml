@@ -15,6 +15,10 @@ test-util = []
 # only. Stream E owns this crate from M1's contract PR onwards.
 [dependencies]
 chrono.workspace = true
+# For `OWNED_KINDS` only: the catalog carries the kinds knobas owns beside the
+# ones descriptors declare, and that list lives with the reserved namespaces it
+# is tied to (`knobas_core::entity`) rather than in a second copy here.
+knobas-core = { path = "../knobas-core" }
 # For `KindInfo`/`SourceDescriptor` only: the launcher labels a group from the
 # adapter's declared kind metadata (spec §3a), never from a hardcoded list.
 knobas-source = { path = "../knobas-source" }

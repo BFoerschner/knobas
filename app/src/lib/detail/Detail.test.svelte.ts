@@ -431,6 +431,7 @@ function link(over: {
   from?: string;
   to?: string;
   relation?: string;
+  origin?: LinkEntry["link"]["origin"];
   note?: string | null;
   otherKind?: string;
   otherTitle?: string;
@@ -444,7 +445,7 @@ function link(over: {
       from_id: from,
       to_id: to,
       relation: over.relation ?? "implements",
-      origin: "manual",
+      origin: over.origin ?? "manual",
       note: over.note ?? null,
       created_by: "mara",
       created_at: "2026-08-22T12:00:00Z",
@@ -590,6 +591,52 @@ test("unlinking removes the row without reopening the detail", async () => {
   expect(screen.onclose).not.toHaveBeenCalled();
 
   screen.done();
+});
+
+/**
+ * An `implied` link is drawn by knobas from a `[[reference]]` in a note's
+ * body (#46), so it is visible from *both* ends -- and from this end too,
+ * tombstoning it would be undone by that note's next autosave, silently.
+ * The refusal names the note, because the reference lives there and this
+ * panel cannot edit it.
+ */
+test("unlinking a note's reference from the target's end is refused, with the reason", async () => {
+  answer = () =>
+    Promise.resolve(
+      detail({
+        links: [
+          link({
+            id: "33333333-3333-3333-3333-333333333333",
+            from: "note:7f2c",
+            to: "mock:PAY-231",
+            relation: "references",
+            origin: "implied",
+            otherKind: "note",
+            otherTitle: "SEPA retry investigation",
+          }),
+        ],
+      }),
+    );
+
+  const screen = render();
+  await vi.waitFor(() => expect(screen.text()).toContain("SEPA retry investigation"));
+  flushSync();
+
+  [...screen.target.querySelectorAll<HTMLButtonElement>("button")]
+    .find((button) => button.textContent?.includes("Unlink"))!
+    .click();
+
+  await vi.waitFor(() =>
+    expect(toasts.items.map((toast) => toast.text).join(" ")).toMatch(/Remove the reference/),
+  );
+  flushSync();
+
+  expect(unlinked, "the row was never tombstoned").toEqual([]);
+  expect(screen.text()).toContain("SEPA retry investigation");
+  expect(calls, "nothing to re-read").toEqual(["mock:PAY-231"]);
+
+  screen.done();
+  toasts.items = [];
 });
 
 /** A refused unlink says so and leaves the row where it was. */

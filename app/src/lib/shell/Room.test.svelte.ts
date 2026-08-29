@@ -21,6 +21,9 @@ let answer: (filter: EntityFilter) => Promise<EntityPage> = () =>
  * inside Svelte's effect runner, several frames after the assertion it is
  * about.
  */
+/** Every note *New note* wrote. */
+const written: string[] = [];
+
 vi.mock("../ipc/entity", () => ({
   listEntities: (filter: EntityFilter, limit: number, offset: number) => {
     calls.push({ filter, limit, offset });
@@ -28,6 +31,36 @@ vi.mock("../ipc/entity", () => ({
   },
   getEntity: (entityId: string): Promise<EntityDetail> =>
     Promise.reject({ code: "not_found", message: `${entityId} is not in the local index`, source_id: null }),
+  createNote: () => {
+    written.push("note:new");
+    return Promise.resolve({
+      note: {
+        id: "note:new",
+        title: "Untitled note",
+        body_md: "",
+        created_at: "2026-08-22T14:30:00Z",
+        updated_at: "2026-08-22T14:30:00Z",
+      },
+      refs: [],
+      links: [],
+    });
+  },
+  // The note view reads once it is mounted, and the room is what mounts it.
+  getNote: () =>
+    Promise.resolve({
+      note: {
+        id: "note:new",
+        title: "Untitled note",
+        body_md: "",
+        created_at: "2026-08-22T14:30:00Z",
+        updated_at: "2026-08-22T14:30:00Z",
+      },
+      refs: [],
+      links: [],
+    }),
+  saveNote: () => Promise.reject(new Error("this test never saves")),
+  deleteNote: () => Promise.reject(new Error("this test never deletes")),
+  unlink: () => Promise.reject(new Error("this test never unlinks")),
 }));
 
 const { default: Room } = await import("./Room.svelte");
@@ -72,6 +105,14 @@ beforeEach(() => {
   calls.length = 0;
   answer = () => Promise.resolve({ rows: [], total: 0 });
 });
+
+/** Let every queued promise and the DOM catch up. */
+async function settle() {
+  for (let turn = 0; turn < 6; turn += 1) {
+    await Promise.resolve();
+    flushSync();
+  }
+}
 
 test("draws one tile per bucket present, and one per open kind", async () => {
   answer = (filter) =>
@@ -186,4 +227,50 @@ test("the tile grid sizes itself with a modifier class", async () => {
   expect(tiles?.getAttribute("style")).toBeNull();
 
   screen.done();
+});
+
+/**
+ * Story 2, from the affordance end: *New note* writes the row **before** the
+ * editor exists, and the address it navigates to is that note's.
+ *
+ * The order is the point. A *New note* that opened an empty editor and wrote
+ * on the first save would lose whatever was typed into a window that closed
+ * first, which is the story this whole feature is arranged around.
+ */
+test("New note writes the note first and opens it", async () => {
+  written.length = 0;
+  answer = () => Promise.resolve({ rows: [row("ticket", "PAY-1")], total: 1 });
+  const screen = render("#/ctx/all");
+  await settle();
+
+  const button = [...screen.target.querySelectorAll<HTMLButtonElement>("button")].find(
+    (node) => node.textContent?.trim() === "New note",
+  );
+  expect(button, "the room offers somewhere to start writing").toBeDefined();
+
+  button!.click();
+  await settle();
+
+  expect(written).toEqual(["note:new"]);
+  expect(location.hash).toBe("#/note/note:new");
+  screen.done();
+});
+
+/**
+ * A note opens in the note view and not in `Detail`.
+ *
+ * Decided on the id, so `#/entity/<note id>` -- which carries no kind -- lands
+ * in the same place. The tell is which read happened: `Detail` calls
+ * `get_entity`, which for a note is a `not_found` this file's mock produces on
+ * purpose, so a room that sent a note there would draw the not-found panel.
+ */
+test("a note address opens the note view rather than the mirror's detail", async () => {
+  answer = () => Promise.resolve({ rows: [], total: 0 });
+  for (const hash of ["#/note/note:new", "#/entity/note:new"]) {
+    const screen = render(hash);
+    await settle();
+    expect(screen.text(), hash).toContain("Untitled note");
+    expect(screen.text(), hash).not.toContain("is not in the local index");
+    screen.done();
+  }
 });

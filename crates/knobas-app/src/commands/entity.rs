@@ -723,6 +723,182 @@ pub async fn unlink<R: tauri::Runtime>(
     Ok(())
 }
 
+/// Everything the note view draws for one note (#46).
+///
+/// Deliberately **not** [`EntityDetail`], and the difference is not tidiness:
+/// that DTO is shaped around a mirrored item -- a source, a `payload`, a
+/// `web_url`, a `synced_at` -- and a note has none of those. Half of it would
+/// be filled in with placeholders that a reader could not tell from real ones.
+/// A note is an entity and shares the address space; it is not a mirror row.
+///
+/// `refs` and `links` overlap and both are here because they answer different
+/// questions. `refs` is *the body's own list*, in body order, including the
+/// ones that resolve to nothing -- which is what the editor draws chips from
+/// and what makes an unresolved ref visible (story 10). `links` is the panel
+/// #53 built: every link this note takes part in, in either direction, so the
+/// note shows what points at it as well as what it points at.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct NoteDetail {
+    pub note: knobas_core::note::NoteRow,
+    /// The `[[refs]]` the body names, in body order, resolved where they
+    /// resolve.
+    pub refs: Vec<knobas_core::note::NoteRef>,
+    /// Every link this note takes part in, each with its other end resolved --
+    /// the ref links it derived, plus anything drawn by hand from either side.
+    pub links: Vec<LinkEntry>,
+}
+
+/// The note at `note_id`, its refs and its links.
+///
+/// Three round trips, like [`get_entity_inner`]'s: the note, the refs, the
+/// links.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) if `note_id` is not an entity id,
+/// [`NotFound`](crate::IpcErrorCode::NotFound) if no note carries it,
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+pub async fn get_note_inner(pool: &PgPool, note_id: &str) -> Result<NoteDetail, IpcError> {
+    let id = EntityRef::parse(note_id).map_err(IpcError::invalid)?;
+    let note = knobas_core::note::get(pool, &id)
+        .await?
+        .ok_or_else(|| IpcError::not_found(format!("there is no note at {id}")))?;
+    Ok(NoteDetail {
+        note,
+        refs: knobas_core::note::refs_of(pool, &id).await?,
+        links: knobas_core::link::entries_of(pool, &id).await?,
+    })
+}
+
+/// Write a new note.
+///
+/// Both arguments are optional because the affordance is *"start writing"*: a
+/// note created from an empty editor has no title and no body yet, and it still
+/// has to exist -- story 2 is that a thought is never lost to a closed window,
+/// which needs the row to be there before the first keystroke settles.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) for a write failure.
+pub async fn create_note_inner(
+    pool: &PgPool,
+    title: Option<&str>,
+    body_md: Option<&str>,
+) -> Result<NoteDetail, IpcError> {
+    let note = knobas_core::note::create(
+        pool,
+        title.unwrap_or_default(),
+        body_md.unwrap_or_default(),
+        ACTOR,
+    )
+    .await?;
+    get_note_inner(pool, &note.id).await
+}
+
+/// Save a note's title and body, and bring its `[[refs]]` back into step.
+///
+/// This is what the editor's autosave calls, so it answers with the whole
+/// [`NoteDetail`]: the refs it just reconciled are what the editor redraws its
+/// chips from, and a second read to fetch them would race the next keystroke.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) if `note_id` is not an entity id,
+/// [`NotFound`](crate::IpcErrorCode::NotFound) if no note carries it -- an
+/// editor whose note was deleted elsewhere is told so rather than silently
+/// resurrecting it, [`Internal`](crate::IpcErrorCode::Internal) for a write
+/// failure.
+pub async fn save_note_inner(
+    pool: &PgPool,
+    note_id: &str,
+    title: &str,
+    body_md: &str,
+) -> Result<NoteDetail, IpcError> {
+    let id = EntityRef::parse(note_id).map_err(IpcError::invalid)?;
+    knobas_core::note::save(pool, &id, title, body_md, ACTOR)
+        .await?
+        .ok_or_else(|| IpcError::not_found(format!("there is no note at {id}")))?;
+    get_note_inner(pool, note_id).await
+}
+
+/// Delete a note: the body goes, the address stays, tombstoned.
+///
+/// `Ok(false)` when there was nothing to delete. Idempotent, like
+/// [`unlink_inner`]: a second *Delete* on a note already gone is not an error,
+/// and the caller can tell the two apart.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) if `note_id` is not an entity id,
+/// [`Internal`](crate::IpcErrorCode::Internal) for a write failure.
+pub async fn delete_note_inner(pool: &PgPool, note_id: &str) -> Result<bool, IpcError> {
+    let id = EntityRef::parse(note_id).map_err(IpcError::invalid)?;
+    Ok(knobas_core::note::delete(pool, &id).await?)
+}
+
+/// One note, with its refs and its links.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the database
+/// is still coming up, and whatever [`get_note_inner`] refuses with.
+#[tauri::command]
+pub async fn get_note(
+    lifecycle: State<'_, Lifecycle>,
+    note_id: String,
+) -> Result<NoteDetail, IpcError> {
+    let pool = lifecycle.pool()?;
+    get_note_inner(&pool, &note_id).await
+}
+
+/// Write a new note.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the database
+/// is still coming up, and whatever [`create_note_inner`] refuses with.
+#[tauri::command]
+pub async fn create_note(
+    lifecycle: State<'_, Lifecycle>,
+    title: Option<String>,
+    body_md: Option<String>,
+) -> Result<NoteDetail, IpcError> {
+    let pool = lifecycle.pool()?;
+    create_note_inner(&pool, title.as_deref(), body_md.as_deref()).await
+}
+
+/// Save a note, refs and all.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the database
+/// is still coming up, and whatever [`save_note_inner`] refuses with.
+#[tauri::command]
+pub async fn save_note(
+    lifecycle: State<'_, Lifecycle>,
+    note_id: String,
+    title: String,
+    body_md: String,
+) -> Result<NoteDetail, IpcError> {
+    let pool = lifecycle.pool()?;
+    save_note_inner(&pool, &note_id, &title, &body_md).await
+}
+
+/// Delete a note.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the database
+/// is still coming up, and whatever [`delete_note_inner`] refuses with.
+#[tauri::command]
+pub async fn delete_note(
+    lifecycle: State<'_, Lifecycle>,
+    note_id: String,
+) -> Result<bool, IpcError> {
+    let pool = lifecycle.pool()?;
+    delete_note_inner(&pool, &note_id).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
