@@ -663,6 +663,30 @@ test("a source whose test reports no account saves exactly as it does today", as
   expect(saved.length).toBe(1);
 });
 
+test("a report with no account leaves a typed username where it is", async () => {
+  // The absent-account path must not be a write of `null` dressed up as a
+  // no-op: that would empty a field the reader had filled in themselves.
+  report = { ...report, account: null };
+  render();
+  await settle();
+  button("Jira Data Center")!.click();
+  flushSync();
+  button("Next")!.click();
+  flushSync();
+  type("#add-url", "https://jira.tidewater.example");
+  type("#add-cfg-username", "m.lindqvist");
+  button("Next")!.click();
+  flushSync();
+  type("#add-secret", "s3cret");
+  button("Next")!.click();
+  flushSync();
+  button("Test connection")!.click();
+  await settle();
+  await saveFromTest();
+
+  expect(calls.addSource[0]!.config).toMatchObject({ username: "m.lindqvist" });
+});
+
 test("the fill is the property name, so an adapter this file never heard of gets it", async () => {
   adapters = [
     descriptor({
