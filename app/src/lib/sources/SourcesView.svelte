@@ -29,8 +29,17 @@
   rejected credential back over the green chip. Re-listing here is what makes
   that read stale, so its answer is dropped instead of applied (#144).
 
-  Nothing else in this view skips the re-list. Adding a path that changes a row
-  or the health store without one puts it back in the same race.
+  Every other path here that changes a row or the health store re-lists. The
+  *running* `sync:state` above reads like an exception and is not one: the
+  event carries the whole status, so that patch leaves nothing to read back.
+  Adding a path that changes a row or the health store without either
+  re-listing or carrying its own new state puts it back in the same race.
+
+  The store has one writer this view cannot see, and it is the exception worth
+  writing down: `createHealth` subscribes to `source:health`, so a reading the
+  scheduler discovers is patched in with no re-list behind it and the wholesale
+  replace below can still write over it — the same race in the other direction,
+  and #148's rather than this file's.
 -->
 <script lang="ts">
   import { listen } from "@tauri-apps/api/event";

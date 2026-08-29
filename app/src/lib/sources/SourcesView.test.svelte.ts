@@ -450,7 +450,10 @@ test("a credential fixed by hand is not reverted by a list_sources already in fl
   // Two reads, neither answered until this test says so. The first is the one
   // a finished run puts in flight, answered from the database as it stood
   // *before* the password below is typed — a stale reading, not a second
-  // opinion. The second is whatever the fix issues.
+  // opinion. The second is whatever the fix issues, and it carries an item
+  // count the fixture does not, so that "the fresh read landed" is a fact this
+  // test can see rather than one it infers from a value the patch also wrote
+  // (the same `240` the read-ordering test above distinguishes its reads by).
   let releaseStale: (() => void) | undefined;
   let releaseFresh: (() => void) | undefined;
   answerList = (call) =>
@@ -459,7 +462,7 @@ test("a credential fixed by hand is not reverted by a list_sources already in fl
           releaseStale = () => resolve([source({ health: rejected() })]);
         })
       : new Promise<SourceSummary[]>((resolve) => {
-          releaseFresh = () => resolve([source()]);
+          releaseFresh = () => resolve([source({ item_count: 240 })]);
         });
 
   emit("sync:state", {
@@ -503,6 +506,9 @@ test("a credential fixed by hand is not reverted by a list_sources already in fl
   await settle();
   expect(store.get("jira")!.state).toBe("ok");
   expect(button("Sync now", rowFor("jira")!)).toBeTruthy();
+  // …and it is *this* read's answer on screen, not the patch's value standing
+  // in for it: the count only the read the fix issued carries.
+  expect(rowFor("jira")!.textContent, "the read the fix issued did not land").toContain("240");
 });
 
 test("a source whose health is unauthorized offers Re-enter, not Sync now", async () => {
