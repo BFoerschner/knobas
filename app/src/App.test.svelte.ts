@@ -87,12 +87,26 @@ vi.mock("./lib/ipc/entity", () => ({
   recentActivity: () => Promise.resolve([]),
 }));
 
+/**
+ * How many subscriptions the shell has opened.
+ *
+ * The first `listen` is `health.start()`, which is the line immediately after
+ * the dev fixture's `await import()` in `onMount`. So a non-zero count here is
+ * the observable "bring-up got past the dynamic import" — the thing the
+ * fixed-tick `settle()` below used to guess at.
+ */
+let listenCalls = 0;
+
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: () => Promise.resolve(() => {}),
+  listen: () => {
+    listenCalls += 1;
+    return Promise.resolve(() => {});
+  },
 }));
 
 const { default: App } = await import("./App.svelte");
 const { health } = await import("./lib/shell/health.svelte");
+const { lifecycle } = await import("./lib/shell/lifecycle.svelte");
 
 function row(source_id: string, state: CredentialHealth["state"]): CredentialHealth {
   return { source_id, state, checked_at: null, detail: null, secret_expires_at: null };
@@ -104,6 +118,7 @@ let app: Record<string, unknown> | undefined;
 beforeEach(() => {
   healthRows = [];
   healthCalls = 0;
+  listenCalls = 0;
   dbReady = false;
   health.replace([]);
   target = document.createElement("div");
@@ -117,22 +132,50 @@ afterEach(() => {
 });
 
 /**
- * Let the mount's awaits land.
+ * Wait for the mount's awaits to reach a named point.
  *
- * A real `await import()` sits in there — the dev fixture — so this has to
- * yield to the macrotask queue, not just drain microtasks.
+ * This used to spin a fixed budget of twelve macrotask ticks. A real
+ * `await import()` sits in `onMount` — the dev fixture — and how long module
+ * resolution takes is a property of the machine, not of the number of
+ * macrotasks anyone spends waiting at it: on an idle box the seed lands on
+ * tick 0 and the whole budget is slack, under a parallel fan-out it does not,
+ * and the test failed 2 runs in 6 (#86). Worse than the re-run cost, it failed
+ * at `healthCalls > 0` — a message that reads as "credential health was never
+ * read", which is exactly the defect #73 fixed, so whoever hit it had to
+ * investigate before dismissing it.
+ *
+ * Waiting on the condition takes the machine out of the assertion. `flushSync`
+ * inside the poll is what lets a Svelte effect run between attempts —
+ * `vi.waitFor` only yields.
  */
-async function settle(): Promise<void> {
-  for (let i = 0; i < 12; i += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    flushSync();
-  }
+function until(condition: () => boolean, whatWasWaitedFor: string): Promise<void> {
+  return vi.waitFor(
+    () => {
+      flushSync();
+      if (!condition()) throw new Error(whatWasWaitedFor);
+    },
+    // Generous on purpose: this budget exists to absorb a loaded machine, and
+    // nothing here waits on it in the happy path. Deliberately *under*
+    // vitest's own 5 s test timeout, so a condition that never comes true
+    // fails saying which one — "the seed never reached the credential-health
+    // store" — rather than as a bare "test timed out", which is the same
+    // uninformative failure this issue was about.
+    { timeout: 3_000, interval: 5 },
+  );
 }
 
 test("credential health is not read while the database is still coming up", async () => {
   healthRows = [row("gitea", "unauthorized")];
   app = mount(App, { target, props: {} });
-  await settle();
+  // Bring-up has cleared the dynamic import (`health.start()` subscribed) and
+  // the lifecycle has had its first `app_status` back. That is the point by
+  // which a seed issued at mount — the bug this pins — would already have
+  // spent its one reading, so the count below is read after the race, not
+  // during it.
+  await until(
+    () => listenCalls > 0 && lifecycle.status !== null,
+    "the shell never finished bring-up",
+  );
 
   // `app_status` says `starting`, so the command that needs `AppState` has not
   // been called at all — rather than called, rejected and swallowed, which is
@@ -145,7 +188,13 @@ test("the seed lands the moment the lifecycle says ready", async () => {
   healthRows = [row("gitea", "unauthorized"), row("jira", "ok")];
   dbReady = true;
   app = mount(App, { target, props: {} });
-  await settle();
+  // The seed's own signal: `credential_health` asked, and its answer in the
+  // store. Both, because `reseed()` awaits the command and then replaces —
+  // waiting only on the call would assert against a store one tick early.
+  await until(
+    () => healthCalls > 0 && health.all.length > 0,
+    "the seed never reached the credential-health store",
+  );
 
   expect(healthCalls).toBeGreaterThan(0);
   expect(health.all.map((entry) => entry.source_id)).toEqual(["gitea", "jira"]);

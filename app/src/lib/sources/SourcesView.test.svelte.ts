@@ -27,10 +27,17 @@ const calls = {
 
 let sources: SourceSummary[] = [];
 let listFails: unknown = null;
+/**
+ * Answers `list_sources` per call, when a test needs two reads in flight at
+ * once. `sources` alone cannot express that: it is read at resolution time, so
+ * every pending read would answer with the same snapshot.
+ */
+let answerList: ((call: number) => Promise<SourceSummary[]>) | null = null;
 
 vi.mock("../ipc/sources", () => ({
   listSources: () => {
     calls.listSources += 1;
+    if (answerList) return answerList(calls.listSources);
     return listFails ? Promise.reject(listFails) : Promise.resolve(sources);
   },
   syncNow: (sourceId: string) => {
@@ -215,6 +222,7 @@ beforeEach(() => {
   listeners.clear();
   sources = [];
   listFails = null;
+  answerList = null;
   target = document.createElement("div");
   document.body.append(target);
 });
@@ -296,6 +304,107 @@ test("a sync:state event patches the matching row rather than re-listing", async
   // Re-listing on every transition would make a sync of five sources fetch the
   // whole view twenty times; the event carries the status it needs.
   expect(calls.listSources).toBe(listedOnce);
+});
+
+/**
+ * The row and the diagnostics are one view, and they have to agree.
+ *
+ * `sync:state` patches the row's *running* half, but "synced 10 min ago" and
+ * the item count come off `SourceSummary` — `last_run` and `item_count` —
+ * which only `list_sources` moves. A terminal transition bumped the
+ * diagnostics' `reloadKey` and nothing else, so the panel showed the run that
+ * had just finished while the row above it still showed the state before it
+ * (#83). A reader who came here *because* they suspect a source is not syncing
+ * then finds a stale timestamp, which is evidence for exactly the thing they
+ * came to check.
+ */
+test("a finished run refreshes the row's sync columns, not just the diagnostics", async () => {
+  sources = [source(), source({ id: "gitea", adapter_kind: "gitea", display_name: "G" })];
+  render();
+  await settle();
+  expect(rowFor("jira")!.textContent).toContain("10 min ago");
+  expect(rowFor("jira")!.textContent).toContain("213");
+
+  // What `list_sources` would answer after the run: a newer `last_run` and a
+  // bigger corpus. Only the row reads these — the event carries neither.
+  sources = [
+    source({ last_run: run({ finished_at: "2026-08-25T11:59:00Z" }), item_count: 240 }),
+    source({ id: "gitea", adapter_kind: "gitea", display_name: "G" }),
+  ];
+
+  emit("sync:state", {
+    source_id: "jira",
+    running: false,
+    run_id: 9,
+    started_at: "2026-08-25T11:58:00Z",
+    last_finished_at: "2026-08-25T11:59:00Z",
+    last_outcome: "ok",
+    next_run_at: null,
+    backoff_until: null,
+  });
+  await settle();
+
+  const row = rowFor("jira")!;
+  expect(row.textContent, "the row still shows the state before the run it just watched finish").toContain(
+    "1 min ago",
+  );
+  expect(row.textContent).toContain("240");
+  expect(row.textContent).not.toContain("10 min ago");
+});
+
+/**
+ * Two runs finishing together put two reads in flight, and they answer in
+ * whatever order they like.
+ *
+ * *Sync all* emits one terminal `sync:state` per source, so the fix above
+ * issues a `list_sources` per source with nothing sequencing them. If the
+ * first read answers last and its answer is kept, the view lands on the
+ * snapshot from *before* the run it just watched finish — which is #83 again,
+ * arriving through the fix for it.
+ */
+test("a list_sources overtaken by a later one does not write what it read", async () => {
+  const stale = () => [source(), source({ id: "gitea", adapter_kind: "gitea", display_name: "G" })];
+  const fresh = () => [
+    source({ last_run: run({ finished_at: "2026-08-25T11:59:00Z" }), item_count: 240 }),
+    source({ id: "gitea", adapter_kind: "gitea", display_name: "G" }),
+  ];
+  sources = stale();
+  render();
+  await settle();
+  const listedSoFar = calls.listSources;
+
+  // The first of the two reads is held open; the second answers straight away.
+  let release: (() => void) | undefined;
+  answerList = (call) =>
+    call === listedSoFar + 1
+      ? new Promise<SourceSummary[]>((resolve) => {
+          release = () => resolve(stale());
+        })
+      : Promise.resolve(fresh());
+
+  for (const source_id of ["jira", "gitea"]) {
+    emit("sync:state", {
+      source_id,
+      running: false,
+      run_id: 9,
+      started_at: "2026-08-25T11:58:00Z",
+      last_finished_at: "2026-08-25T11:59:00Z",
+      last_outcome: "ok",
+      next_run_at: null,
+      backoff_until: null,
+    });
+  }
+  await settle();
+  expect(calls.listSources, "both terminal events read the sources").toBe(listedSoFar + 2);
+
+  release!();
+  await settle();
+
+  const row = rowFor("jira")!;
+  expect(row.textContent, "the overtaken read wrote its stale snapshot over the newer one").toContain(
+    "1 min ago",
+  );
+  expect(row.textContent).toContain("240");
 });
 
 test("a source whose health is unauthorized offers Re-enter, not Sync now", async () => {

@@ -7,13 +7,20 @@
 
   ## What re-lists, and what does not
 
-  `sync:state` **patches** the matching row. The event carries a whole
-  `SourceSyncStatus` (contract §2.3), so re-listing on every transition would
-  make a five-source sync fetch this view twenty times to learn what the event
-  already said.
+  A **running** `sync:state` only patches the matching row. The event carries a
+  whole `SourceSyncStatus` (contract §2.3), so re-listing to learn what the
+  event already said would make a five-source sync fetch this view twice per
+  source for nothing.
 
-  A **mutation** re-lists, because add/delete change the row *set* and nothing
-  else tells the view about it.
+  A **terminal** `sync:state` re-lists, because the row's sync columns are the
+  half the event does *not* carry: "synced 10 min ago" and the item count come
+  off `SourceSummary` — `last_run` and `item_count` — and only `list_sources`
+  moves those. Refreshing the diagnostics and not the row left the view
+  disagreeing with itself, the panel showing the run that had just finished
+  above a row still showing the state before it (#83).
+
+  A **mutation** re-lists too, because add/delete change the row *set* and
+  nothing else tells the view about it.
 -->
 <script lang="ts">
   import { listen } from "@tauri-apps/api/event";
@@ -66,9 +73,24 @@
   let transitions = $state(0);
   let purge = $state(false);
 
+  /**
+   * Which read is the current one.
+   *
+   * A terminal `sync:state` arrives once per source, so a five-source *Sync
+   * all* now puts five `list_sources` in flight at once and nothing makes them
+   * answer in the order they were asked. Whichever landed last used to win, so
+   * a slow early read could write the snapshot from *before* the run that had
+   * just finished — #83's own symptom, arriving through the fix for it. A read
+   * that has been overtaken drops its answer instead, including its failure:
+   * a stale rejection must not blank a list that has since been read fine.
+   */
+  let reading = 0;
+
   async function load() {
+    const mine = (reading += 1);
     try {
       const rows = await listSources();
+      if (mine !== reading) return;
       sources = rows;
       error = null;
       // The rows carry health as of `list_sources`, and they are the whole set
@@ -78,6 +100,7 @@
       // monogram and its room tab until the window was restarted.
       health.replace(rows.map((row) => row.health));
     } catch (cause) {
+      if (mine !== reading) return;
       // Not a silent empty list: "No sources yet" is a claim about the
       // database, and the view does not have one to make — it knows only that
       // it could not ask.
@@ -95,7 +118,17 @@
       // A run that has *finished* is a new row in the sync log and new numbers
       // in the `.dbbar`. Counting transitions rather than re-fetching here
       // keeps the decision to re-read where the reading lives.
-      if (!event.payload.running) transitions += 1;
+      if (!event.payload.running) {
+        transitions += 1;
+        // …and it is also a new `last_run` and a new `item_count` on the row
+        // itself, which live on `SourceSummary` and arrive only from
+        // `list_sources`. One signal, both readings: the panel and the row
+        // above it are one view and a reader compares them (#83). The re-list
+        // carries the shell's credential health with it, because `load()`
+        // replaces that store from the same rows — a run that has just
+        // discovered a rejected credential says so in the top strip too.
+        void load();
+      }
     })
       .then((unlisten) => {
         // `listen` is itself an `invoke`, so it resolves a tick or more later —
