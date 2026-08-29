@@ -341,6 +341,304 @@ pub fn project(op: &str, target: Option<&Target>) -> serde_json::Value {
     }
 }
 
+/// Every write knobas still owes a source, newest first.
+///
+/// The three open states only: a sent or discarded write is history, and the
+/// list is "what knobas still owes", not an audit log. Unbounded on purpose --
+/// a queue you cannot see the end of is a count, which is the thing issue #42
+/// says this must not be.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the query fails.
+pub async fn open(pool: &PgPool) -> Result<Vec<QueuedWrite>, CoreError> {
+    let rows = sqlx::query_as::<_, QueuedWrite>(concat!(
+        "select ",
+        queue_columns!(),
+        " from knobas.write_queue
+           where state in ('pending','held','refused')
+           order by id desc"
+    ))
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// How many writes are in each open state.
+///
+/// One statement rather than three, and separate numbers rather than a total:
+/// the shell has to say that something needs a *decision* rather than
+/// patience, so "3 waiting" may never absorb a held write.
+#[derive(Clone, Copy, Debug, Default, Serialize, sqlx::FromRow)]
+pub struct QueueCounts {
+    pub pending: i64,
+    pub held: i64,
+    pub refused: i64,
+}
+
+/// The counts the shell shows.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the query fails.
+pub async fn counts(pool: &PgPool) -> Result<QueueCounts, CoreError> {
+    let counts = sqlx::query_as::<_, QueueCounts>(
+        "select count(*) filter (where state = 'pending') as pending,
+                count(*) filter (where state = 'held')    as held,
+                count(*) filter (where state = 'refused') as refused
+           from knobas.write_queue",
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(counts)
+}
+
+/// The writes a flush of `source_id` may attempt right now: **the oldest
+/// pending write of each entity, and no more than one per entity.**
+///
+/// That shape is the whole of the ordering guarantee. Order is promised within
+/// one entity (story 22) and nowhere else, so handing out one write per entity
+/// makes a stalled write block its own successors and *only* those: a second
+/// entity's queue, and every other source's, keep moving (story 21). A caller
+/// that flushed everything this returns in parallel would still be correct.
+///
+/// Held and refused writes are absent by construction -- they are not pending
+/// -- which is how "a held write never flushes on its own" is a property of
+/// the query rather than a rule the flush loop has to remember.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the query fails.
+pub async fn due(pool: &PgPool, source_id: &str) -> Result<Vec<QueuedWrite>, CoreError> {
+    let rows = sqlx::query_as::<_, QueuedWrite>(concat!(
+        "select distinct on (entity_id) ",
+        queue_columns!(),
+        " from knobas.write_queue
+           where source_id = $1 and state = 'pending'
+           order by entity_id, id"
+    ))
+    .bind(source_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// Every transition below is one `update ... where id = $1 and state in (..)`,
+/// returning the row it changed.
+///
+/// The state guard in the `where` clause is what makes each of these safe to
+/// call concurrently with the others: two flush loops that both decided to
+/// send the same write cannot both settle it, and `None` -- no row matched --
+/// is how the loser finds out. It is the same `Option` `link::unlink` returns
+/// and for the same reason: `Ok(())` alone would have a caller announce a
+/// transition that did not happen, and every one of these transitions writes
+/// an activity line.
+macro_rules! transition {
+    ($sql:expr) => {
+        concat!(
+            "update knobas.write_queue set ",
+            $sql,
+            " returning ",
+            queue_columns!()
+        )
+    };
+}
+
+/// Record a flush attempt that could not be delivered: the write stays
+/// pending and now says why it is waiting.
+///
+/// Only a *retryable* fault reaches here -- [`refuse`] is the other half, and
+/// ADR-0004's structured status on `SourceError` is what tells them apart.
+///
+/// `None` if the write is not pending: it was held, refused or settled while
+/// the attempt was in flight.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the statement fails.
+pub async fn wait(
+    pool: &PgPool,
+    id: i64,
+    reason: WaitReason,
+    detail: Option<&str>,
+) -> Result<Option<QueuedWrite>, CoreError> {
+    let row = sqlx::query_as::<_, QueuedWrite>(transition!(
+        "wait_reason = $2, detail = $3, attempted_at = now(), attempts = attempts + 1
+          where id = $1 and state = 'pending'"
+    ))
+    .bind(id)
+    .bind(reason.as_str())
+    .bind(detail)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
+}
+
+/// The source rejected the write outright: it stops being offered.
+///
+/// `detail` is what the source said, kept so a permanent failure is reportable
+/// rather than merely counted (story 19). The row stays open -- the user may
+/// still discard it or edit it and send again -- but nothing retries it.
+///
+/// `None` if the write is not pending.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the statement fails.
+pub async fn refuse(
+    pool: &PgPool,
+    id: i64,
+    detail: &str,
+) -> Result<Option<QueuedWrite>, CoreError> {
+    let row = sqlx::query_as::<_, QueuedWrite>(transition!(
+        "state = 'refused', wait_reason = null, detail = $2, \
+         attempted_at = now(), attempts = attempts + 1
+          where id = $1 and state = 'pending'"
+    ))
+    .bind(id)
+    .bind(detail)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
+}
+
+/// The target changed since the write was queued: hold it instead of sending
+/// it.
+///
+/// `current` is [`project`]'s reading of the target *now* -- the other half of
+/// "both versions side by side". It is stored rather than recomputed on read
+/// because what the user is asked about is the change that arose, not whatever
+/// the target happens to say by the time they look.
+///
+/// From here nothing but the user moves the row: [`apply_anyway`], [`discard`]
+/// or [`amend`]. There is no fourth exit and no timeout.
+///
+/// `None` if the write is not pending.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the statement fails.
+pub async fn hold(
+    pool: &PgPool,
+    id: i64,
+    current: serde_json::Value,
+) -> Result<Option<QueuedWrite>, CoreError> {
+    let row = sqlx::query_as::<_, QueuedWrite>(transition!(
+        "state = 'held', wait_reason = null, held_snapshot = $2, \
+         attempted_at = now(), attempts = attempts + 1
+          where id = $1 and state = 'pending'"
+    ))
+    .bind(id)
+    .bind(current)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
+}
+
+/// The source accepted the write. Terminal.
+///
+/// `None` if the write is not pending -- which is what stops a flush loop that
+/// raced with the user's *discard* from resurrecting a withdrawn write.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the statement fails.
+pub async fn sent(pool: &PgPool, id: i64) -> Result<Option<QueuedWrite>, CoreError> {
+    let row = sqlx::query_as::<_, QueuedWrite>(transition!(
+        "state = 'sent', wait_reason = null, settled_at = now(), \
+         attempted_at = now(), attempts = attempts + 1
+          where id = $1 and state = 'pending'"
+    ))
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
+}
+
+/// The user withdrew the write -- cancelling a pending one (story 7) or
+/// conceding a held one (story 14) are the same act on the same row.
+///
+/// The row stays, for the reason `knobas.link` keeps its tombstones: "it was
+/// discarded" and "it never existed" are different answers, and the activity
+/// stream refers to it.
+///
+/// `None` if there was nothing open left to withdraw, which is what makes
+/// discarding twice honest rather than merely harmless.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the statement fails.
+pub async fn discard(pool: &PgPool, id: i64) -> Result<Option<QueuedWrite>, CoreError> {
+    let row = sqlx::query_as::<_, QueuedWrite>(transition!(
+        "state = 'discarded', wait_reason = null, settled_at = now()
+          where id = $1 and state in ('pending','held','refused')"
+    ))
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
+}
+
+/// *I know, and I still mean it* (story 13): a held write returns to the queue.
+///
+/// The version the user was shown becomes the version the write is measured
+/// against -- `held_snapshot` is copied over `target_snapshot` -- so the flush
+/// that follows sends it rather than holding it on the same change again.
+///
+/// **A change arriving after the user looked holds it again**, deliberately.
+/// The alternative is a flag that makes the next flush skip hold detection,
+/// which is a door onto exactly the silent last-write-wins this feature
+/// exists to close: what the user consented to overwrite is what they saw.
+///
+/// `None` if the write is not held.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the statement fails.
+pub async fn apply_anyway(pool: &PgPool, id: i64) -> Result<Option<QueuedWrite>, CoreError> {
+    let row = sqlx::query_as::<_, QueuedWrite>(transition!(
+        "state = 'pending', target_snapshot = coalesce(held_snapshot, target_snapshot), \
+         wait_reason = null, detail = null
+          where id = $1 and state = 'held'"
+    ))
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
+}
+
+/// *Edit and send* (story 15): a new payload, measured against a target the
+/// user has just seen.
+///
+/// The way out of a refusal as well as out of a hold -- a source that rejected
+/// a comment for its content will reject it again unchanged, so "edit it" is
+/// the only exit other than conceding. `queued_at` is untouched: an amended
+/// write is still the edit the user made when they made it.
+///
+/// `None` if the write has already settled.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the statement fails.
+pub async fn amend(
+    pool: &PgPool,
+    id: i64,
+    payload: serde_json::Value,
+    target_snapshot: serde_json::Value,
+) -> Result<Option<QueuedWrite>, CoreError> {
+    let row = sqlx::query_as::<_, QueuedWrite>(transition!(
+        "state = 'pending', payload = $2, target_snapshot = $3, \
+         held_snapshot = null, wait_reason = null, detail = null
+          where id = $1 and state in ('pending','held','refused')"
+    ))
+    .bind(id)
+    .bind(payload)
+    .bind(target_snapshot)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -360,7 +658,10 @@ mod tests {
         for (marker, spellings, len) in [
             (
                 "check (state in (",
-                WriteState::ALL.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                WriteState::ALL
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>(),
                 WriteState::ALL.len(),
             ),
             (
@@ -465,7 +766,10 @@ mod tests {
         };
         assert!(!PROJECTED_OPS.contains(&"transition"));
         assert_ne!(
-            project("transition", Some(&target(serde_json::json!({"status": "open"})))),
+            project(
+                "transition",
+                Some(&target(serde_json::json!({"status": "open"})))
+            ),
             project(
                 "transition",
                 Some(&target(serde_json::json!({"status": "done"})))
