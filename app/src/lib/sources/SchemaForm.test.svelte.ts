@@ -76,7 +76,10 @@ test("renders a select, a list and a number from the real adapter schemas", () =
   expect(n.type).toBe("number");
   // The bounds are on the element too, so the browser and the validator agree.
   expect(n.min).toBe("1");
-  expect(n.max).toBe("500");
+  // The adapter's `MAX_BUILDS_PER_CONFIG`. This read "500" while the source
+  // allowed 10 000, so the browser refused a build budget the source would
+  // have taken (#124).
+  expect(n.max).toBe("10000");
   expect(n.value).toBe("100");
 });
 
@@ -105,9 +108,15 @@ test("a list control splits on newlines and drops blank lines", () => {
 });
 
 test("an invalid value shows its message next to its field, and says so accessibly", () => {
-  render(TEAMCITY_SCHEMA, { builds_per_config: "Builds per config must be at most 500." });
+  // The message is handed in as a prop: what is pinned here is that a message
+  // lands next to its own field and is named by the control, not what any
+  // particular bound is. It is spelled with the adapter's real maximum all the
+  // same, so a reader of this file is not taught a bound that does not exist.
+  render(TEAMCITY_SCHEMA, {
+    builds_per_config: "Builds kept per configuration must be at most 10000.",
+  });
   const row = field("builds_per_config")!;
-  expect(row.textContent).toContain("must be at most 500");
+  expect(row.textContent).toContain("must be at most 10000");
 
   const input = control<HTMLInputElement>("builds_per_config");
   expect(input.getAttribute("aria-invalid")).toBe("true");
@@ -123,11 +132,36 @@ test("help text is wired to its control, and required is reflected on the elemen
   const flavor = control<HTMLSelectElement>("flavor");
   const helpId = field("flavor")!.querySelector(".help")!.id;
   expect((flavor.getAttribute("aria-describedby") ?? "").split(/\s+/)).toContain(helpId);
-  expect(field("flavor")!.querySelector(".help")!.textContent).toContain("Data Center speaks REST v2");
-  // `required` on the element, so the browser and the assistive layer agree
-  // with `validate` rather than being told a different story.
-  expect(flavor.required).toBe(true);
+  expect(field("flavor")!.querySelector(".help")!.textContent).toContain(
+    "Data Center / Server speaks REST v2",
+  );
+  // Nothing in Jira is required, and the element says so: the fixture used to
+  // invent `required: ["flavor"]`, which drew a `<select>` the browser would
+  // block a submit on where the real form draws an optional one (#124).
+  expect(flavor.required).toBe(false);
   expect(control<HTMLInputElement>("jql_filter").required).toBe(false);
+});
+
+/**
+ * `required` reaches the element from the schema that declares it.
+ *
+ * Driven through a schema written here rather than through an adapter,
+ * because no shipped adapter declares `required` — and the fixture that
+ * pretended one did is what this file used to prove the rule against (#124).
+ * The property still matters: without it the browser and the assistive layer
+ * are told a different story from `validate`.
+ */
+test("a required property is reflected on its element", () => {
+  render({
+    type: "object",
+    required: ["region"],
+    properties: {
+      region: { type: "string", enum: ["eu", "us"], title: "Region" },
+      note: { type: "string", title: "Note" },
+    },
+  });
+  expect(control<HTMLSelectElement>("region").required).toBe(true);
+  expect(control<HTMLInputElement>("note").required).toBe(false);
 });
 
 test("every control has a label a pointer and a screen reader can both use", () => {

@@ -2,44 +2,85 @@
  * The config schemas of the adapters M1 ships, as JSON Schema.
  *
  * These are the shapes {@link ../sources/schema-form} has to render, so they
- * are the test corpus for it. They are transcribed from the contract's §4.2
- * config column rather than imported from the adapters, and that is
- * deliberate: an adapter's real `config_schema` reaches the frontend over IPC
- * as `unknown`, so the form model must be correct about the *wire* shape and
- * not about a Rust type it can never see. A transcription that drifts from an
- * adapter shows up as a form that renders the wrong control — which is
- * exactly the failure these fixtures exist to reproduce in a test rather than
- * in the window.
+ * are the test corpus for it. They are transcribed rather than imported: an
+ * adapter's real `config_schema` reaches the frontend over IPC as `unknown`,
+ * so the form model must be correct about the *wire* shape and not about a
+ * Rust type it can never see.
+ *
+ * ## The rule, because a transcription drifts
+ *
+ * > **A property that is here is verbatim. A property may be absent, and each
+ * > absence is named.**
+ *
+ * Verbatim means all of it — `type`, `title`, `description`, `default`,
+ * bounds, `items` — not just the parts a test happens to read. The looser
+ * version of this rule is what shipped a bug: the fixture spelled Jira's
+ * `username` as `{type: "string"}` while every adapter spells an optional
+ * string `{type: ["string", "null"]}`, so `controlFor` fell through to a JSON
+ * textarea and typing a username was a parse error unless you knew to quote
+ * it (#82, fixed in #110). It was invisible in tests, because the fixture
+ * disagreed with reality and the tests agreed with the fixture.
+ *
+ * Two more drifts of the same kind were found afterwards and are corrected
+ * here (#124). Both changed behaviour, and the first is the shape to watch
+ * for, because it made the fixture *stricter* than reality — a test can pass
+ * against an invented constraint while the real form accepts what the test
+ * believes is rejected:
+ *
+ * - Jira's fixture declared `required: ["flavor"]`; the adapter declares no
+ *   `required` at all, so `validate` emitted a required error the real form
+ *   never produces. `required` is still a shape this form model supports, and
+ *   it is exercised by a schema that says so about itself — see
+ *   `schema-form.test.ts` — rather than by a shipped adapter pretending to.
+ * - TeamCity's `builds_per_config` said `maximum: 500` against the adapter's
+ *   `MAX_BUILDS_PER_CONFIG = 10_000`, twenty times too low: a bound the form
+ *   enforced and the source did not.
+ *
+ * ## What is absent, and why
+ *
+ * The absences are named rather than counted, because a name is checkable and
+ * a count is one more thing to keep right. Every absent property is a bounded
+ * integer or a boolean whose control shape is already covered by a property
+ * that *is* here, so leaving them out costs the corpus no coverage — while
+ * putting all of them in would make this a second copy of three adapters,
+ * with three times the surface to keep verbatim.
+ *
+ * - Jira: `epic_link_field`, `page_size`, `rate_per_sec`, `rate_burst`,
+ *   `connect_timeout_secs`, `request_timeout_secs`.
+ * - Gitea: `commits_per_repo`, `prs_per_repo`, `include_pr_comments`,
+ *   `rate_limit_per_sec`.
+ * - TeamCity: `rate_limit_per_sec`.
  *
  * Not test-only. `Diagnostics`/`AddSource` never read them, but a QA fixture
  * does, and a `.test.ts` module cannot be imported from a `.svelte` one.
  */
 
-/** Jira Data Center — contract §4.2. */
+/** Jira Data Center — `knobas-source-jira`'s `descriptor::config_schema`. */
 export const JIRA_SCHEMA = {
   type: "object",
+  additionalProperties: false,
   properties: {
     flavor: {
       type: "string",
       enum: ["datacenter", "cloud"],
       default: "datacenter",
-      title: "Deployment flavor",
-      description: "Data Center speaks REST v2; Cloud is not supported yet.",
+      title: "Deployment",
+      description: "Data Center / Server speaks REST v2. Cloud is not supported yet.",
     },
-    projects: { type: "array", items: { type: "string" }, title: "Projects" },
-    // Nullable too, and transcribed as such: leaving it a plain `"string"`
-    // here while the adapter says otherwise is the drift the block below was
-    // just corrected for, one property earlier.
+    projects: {
+      type: "array",
+      default: [],
+      title: "Projects",
+      description:
+        "Project keys to sync, e.g. PAY. Leave empty to sync everything this account can see.",
+      items: { type: "string", pattern: "^[A-Z][A-Z0-9_]{0,31}$" },
+    },
     jql_filter: {
       type: ["string", "null"],
       default: null,
       title: "JQL filter",
       description: "Alternative to Projects: any JQL, without an ORDER BY.",
     },
-    // `["string", "null"]`, verbatim from the adapter: it is how every shipped
-    // adapter spells an optional string, and reading it as "not a string" is
-    // what drew this field as a JSON textarea. The description is the
-    // adapter's too — it is one half of #82 and worth having under a test.
     username: {
       type: ["string", "null"],
       default: null,
@@ -48,15 +89,29 @@ export const JIRA_SCHEMA = {
         "Your Jira account. Filled in by Test connection; used for @me and My items. Also the login name for user + password authentication.",
     },
   },
-  required: ["flavor"],
 } as const;
 
-/** Gitea — contract §4.2. */
+/** Gitea — `knobas-source-gitea`'s `config::config_schema`. */
 export const GITEA_SCHEMA = {
   type: "object",
+  additionalProperties: false,
   properties: {
-    owners: { type: "array", items: { type: "string" }, title: "Owners" },
-    repos: { type: "array", items: { type: "string" }, title: "Repositories" },
+    owners: {
+      type: "array",
+      items: { type: "string" },
+      default: [],
+      title: "Owners",
+      description:
+        "Only sync repositories under these owners. Empty syncs every repository the token can see.",
+    },
+    repos: {
+      type: "array",
+      items: { type: "string", pattern: "^[^/]+/[^/]+$" },
+      default: [],
+      title: "Repositories",
+      description:
+        "owner/name. When set, only these are synced and no repository listing is done.",
+    },
     username: {
       type: ["string", "null"],
       default: null,
@@ -66,18 +121,36 @@ export const GITEA_SCHEMA = {
   },
 } as const;
 
-/** TeamCity — contract §4.2. */
+/** TeamCity — `knobas-source-teamcity`'s `config::config_schema`. */
 export const TEAMCITY_SCHEMA = {
   type: "object",
+  additionalProperties: false,
   properties: {
-    project_ids: { type: "array", items: { type: "string" }, title: "Project ids" },
-    build_type_ids: { type: "array", items: { type: "string" }, title: "Build config ids" },
+    project_ids: {
+      type: "array",
+      items: { type: "string" },
+      title: "Projects",
+      description:
+        "TeamCity project ids to sync. Leave empty for every project this token can see.",
+    },
+    build_type_ids: {
+      type: "array",
+      items: { type: "string" },
+      title: "Build configurations",
+      description:
+        "Build configuration ids to sync. Leave empty for every configuration in the selected projects.",
+    },
+    // `maximum` is the adapter's `MAX_BUILDS_PER_CONFIG`, and it is the
+    // retained history rather than a page size — a full sync keeps the newest
+    // this many builds per configuration and mirrors nothing older.
     builds_per_config: {
       type: "integer",
       minimum: 1,
-      maximum: 500,
+      maximum: 10_000,
       default: 100,
-      title: "Builds per config",
+      title: "Builds kept per configuration",
+      description:
+        "How many finished builds a full sync fetches per configuration. Older builds are not mirrored.",
     },
     // A plain `"string"`, unlike the other two: the third spelling of the one
     // property the Add-source dialog fills in, so the fill is exercised

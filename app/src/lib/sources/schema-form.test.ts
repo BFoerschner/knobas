@@ -13,8 +13,12 @@ import { defaultValues, schemaFields, validate } from "./schema-form";
 describe("schemaFields", () => {
   test("an enum becomes a select with its default preselected", () => {
     const [flavor] = schemaFields(JIRA_SCHEMA);
-    expect(flavor).toMatchObject({ key: "flavor", label: "Deployment flavor", required: true });
-    expect(flavor?.help).toBe("Data Center speaks REST v2; Cloud is not supported yet.");
+    // Not `required`: Jira declares no `required` at all, and a fixture that
+    // invented one made this form stricter than the adapter it stands for
+    // (#124). `required` is pinned below against a schema that says so about
+    // itself.
+    expect(flavor).toMatchObject({ key: "flavor", label: "Deployment", required: false });
+    expect(flavor?.help).toBe("Data Center / Server speaks REST v2. Cloud is not supported yet.");
     expect(flavor?.control).toEqual({
       kind: "select",
       options: ["datacenter", "cloud"],
@@ -29,7 +33,10 @@ describe("schemaFields", () => {
 
   test("integer bounds survive", () => {
     const n = schemaFields(TEAMCITY_SCHEMA).find((f) => f.key === "builds_per_config");
-    expect(n?.control).toEqual({ kind: "number", integer: true, min: 1, max: 500, default: 100 });
+    // The adapter's `MAX_BUILDS_PER_CONFIG`, which is the retained build
+    // history rather than a page size. The fixture said 500 and the form
+    // refused a configuration the source would have accepted (#124).
+    expect(n?.control).toEqual({ kind: "number", integer: true, min: 1, max: 10_000, default: 100 });
   });
 
   test("a boolean becomes a toggle", () => {
@@ -151,11 +158,34 @@ describe("defaultValues", () => {
 });
 
 describe("validate", () => {
-  test("reports missing required fields by key and builds the config object", () => {
-    const fields = schemaFields(JIRA_SCHEMA);
-    const bad = validate(fields, { flavor: "", projects: ["PAY"], jql_filter: "", username: "" });
-    expect(bad.errors.flavor).toMatch(/required/i);
+  /**
+   * `required` is read from the schema that declares it, and no shipped
+   * adapter does.
+   *
+   * This used to be driven through Jira, whose fixture invented
+   * `required: ["flavor"]` — so the test proved a rule the real form does not
+   * enforce, which is the worse direction for a fixture to drift in: it passes
+   * while the form under test accepts what the test believes is rejected
+   * (#124). A schema written here to be required is the honest witness for a
+   * feature the form model has and the adapters do not yet use.
+   */
+  test("a required field with no value is reported by key", () => {
+    const fields = schemaFields({
+      type: "object",
+      required: ["region"],
+      properties: {
+        region: { type: "string", enum: ["eu", "us"], title: "Region" },
+        note: { type: "string", title: "Note" },
+      },
+    });
+    const bad = validate(fields, { region: "", note: "" });
+    expect(bad.errors.region).toMatch(/required/i);
+    expect(bad.errors, "an optional field with no value is not an error").not.toHaveProperty("note");
+    expect(validate(fields, { region: "eu", note: "" }).errors).toEqual({});
+  });
 
+  test("builds the config object from what the adapter really declares", () => {
+    const fields = schemaFields(JIRA_SCHEMA);
     const good = validate(fields, {
       flavor: "datacenter",
       projects: ["PAY", "OPS"],
@@ -166,13 +196,24 @@ describe("validate", () => {
     // Empty optional values are omitted, not sent as "" — the adapter's own
     // defaults must be able to apply.
     expect(good.config).toEqual({ flavor: "datacenter", projects: ["PAY", "OPS"], username: "mara" });
+    // …and nothing is required, so an untouched form is valid. That is the
+    // real Jira form's behaviour, which the invented `required` hid (#124).
+    expect(validate(fields, {}).errors).toEqual({});
   });
 
   test("rejects a value outside an enum and a number outside its bounds", () => {
     expect(validate(schemaFields(JIRA_SCHEMA), { flavor: "onprem" }).errors.flavor).toMatch(/one of/i);
+    // Over the adapter's own `MAX_BUILDS_PER_CONFIG`, and the message names
+    // the bound: against the old fixture's 500 this read `builds_per_config:
+    // 5000`, a value the real source accepts happily.
     expect(
-      validate(schemaFields(TEAMCITY_SCHEMA), { builds_per_config: 5000 }).errors.builds_per_config,
-    ).toMatch(/500/);
+      validate(schemaFields(TEAMCITY_SCHEMA), { builds_per_config: 10_001 }).errors
+        .builds_per_config,
+    ).toMatch(/10000/);
+    expect(
+      validate(schemaFields(TEAMCITY_SCHEMA), { builds_per_config: 10_000 }).errors,
+      "the bound itself is allowed",
+    ).toEqual({});
     expect(
       validate(schemaFields(TEAMCITY_SCHEMA), { builds_per_config: 0 }).errors.builds_per_config,
     ).toMatch(/1/);
@@ -215,8 +256,12 @@ describe("validate", () => {
   });
 
   test("a required field that was never touched is reported, not silently defaulted", () => {
-    const fields = schemaFields(JIRA_SCHEMA);
-    expect(validate(fields, {}).errors.flavor).toMatch(/required/i);
+    const fields = schemaFields({
+      type: "object",
+      required: ["region"],
+      properties: { region: { type: "string", enum: ["eu", "us"], title: "Region" } },
+    });
+    expect(validate(fields, {}).errors.region).toMatch(/required/i);
   });
 
   test("nothing outside the schema reaches the config object", () => {
