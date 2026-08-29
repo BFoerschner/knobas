@@ -41,6 +41,8 @@
 // whatever one of them happens not to call.
 #![allow(dead_code)]
 
+use std::time::Duration;
+
 use knobas_source::contract::VecSink;
 use knobas_source::instance::SourceInstance;
 use knobas_source::{AuthMethod, Source, SyncItem};
@@ -189,6 +191,10 @@ pub const LITTER: &str = "knobas-";
 ///    A panicking test unwinds through here exactly as a passing one returns
 ///    through it. What it cannot survive is a process that never unwinds --
 ///    a `SIGKILL`, or a Ctrl-C at the wrong moment -- which is what 3 is for.
+///    [`Drop`] does its work on a thread of its own and **waits at most
+///    [`CLEANUP_BUDGET`]** for it, so a server that stops answering ends the
+///    run with a sentence rather than a stall (issue #162); `reqwest` has no
+///    default timeout, so without the bound there is nothing else to end it.
 /// 3. **Every guard clears an earlier run's leftovers before it builds**
 ///    ([`Litter::clear_leftovers`]). Whatever a killed run left behind is
 ///    removed by the next run's first mutating test, so recovery is "run the
@@ -221,7 +227,25 @@ pub struct Litter {
     /// only one this guard ever touches.
     api: String,
     branches: Vec<String>,
+    /// How long [`Drop`] waits for the cleanup before it gives up and says so.
+    budget: Duration,
 }
+
+/// How long [`Drop`] gives the cleanup before reporting that it did not finish
+/// (issue #162).
+///
+/// **A bound, not a deadline.** Removing a handful of branches and pull
+/// requests from a container on the same machine is a second's work, so any run
+/// that reaches this number is a run that is not going to finish at all: a
+/// server that accepted the connection and then stopped answering, which
+/// `reqwest` waits on forever because it carries no default timeout. Before the
+/// bound that wedged `just gitea-live` with nothing on screen -- a `Drop` that
+/// has not returned has not reported anything either.
+///
+/// Generous on purpose. Its whole job is to turn "never" into a sentence
+/// somebody can read, and a tight budget would buy nothing for that while
+/// risking a false report on a slow machine.
+pub const CLEANUP_BUDGET: Duration = Duration::from_secs(60);
 
 impl Litter {
     /// A guard over the repository the mutating tests write to, with anything
@@ -232,9 +256,21 @@ impl Litter {
             auth: format!("token {}", env.token),
             api: format!("{}/api/v1/repos/{}", env.url, env.full_name()),
             branches: Vec::new(),
+            budget: CLEANUP_BUDGET,
         };
         litter.clear_leftovers().await;
         litter
+    }
+
+    /// Shorten [`CLEANUP_BUDGET`] for this guard.
+    ///
+    /// For the docker-free witness that the bound reports rather than stalls,
+    /// which would otherwise cost a minute of `just check` to prove something
+    /// that takes milliseconds. Nothing against the real container calls it:
+    /// the live suite wants the full budget, because there the number is the
+    /// only thing standing between a wedged server and a stalled run.
+    pub fn set_cleanup_budget(&mut self, budget: Duration) {
+        self.budget = budget;
     }
 
     /// Delete every [`LITTER`]-prefixed branch of this repository, and the pull
@@ -427,11 +463,15 @@ impl Drop for Litter {
         if branches.is_empty() {
             return;
         }
-        let (auth, api) = (self.auth.clone(), self.api.clone());
+        let (auth, api, budget) = (self.auth.clone(), self.api.clone(), self.budget);
+        // Kept back for the timeout's message: `branches` itself is moved into
+        // the thread, and a report that could not name what it abandoned would
+        // leave the reader with nothing to look for.
+        let abandoned = branches.clone();
         // `Drop` cannot await, and this one runs on a tokio worker thread, so
         // it cannot block on the current runtime either. A thread with a
-        // runtime of its own can do both; joining it keeps the cleanup ordered
-        // before the next test starts, which is what the next guard's
+        // runtime of its own can do both; waiting for it keeps the cleanup
+        // ordered before the next test starts, which is what the next guard's
         // `clear_leftovers` counts on.
         //
         // The client is **built inside that runtime** rather than cloned from
@@ -439,19 +479,43 @@ impl Drop for Litter {
         // reactor of whichever runtime created them, and driving one from a
         // second runtime hangs rather than failing (measured: the first test
         // never returned).
-        let outcome = std::thread::spawn(move || {
-            tokio::runtime::Builder::new_current_thread()
+        //
+        // **The wait is bounded** (issue #162), and it is a channel rather than
+        // a `join` because `JoinHandle` has no timed wait. The received value
+        // is sent after `remove` has returned, so the ordering above survives;
+        // what does not survive a timeout is the thread, which is left running
+        // rather than killed -- there is no way to cancel a blocked socket read
+        // from outside, and a leaked thread in a test process that is already
+        // failing costs nothing. See `CLEANUP_BUDGET` for why it is bounded at
+        // all.
+        let (done, waiting) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let failures = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .expect("a runtime for the cleanup")
                 .block_on(
                     async move { remove(&reqwest::Client::new(), &auth, &api, &branches).await },
-                )
-        })
-        .join();
-        let failures = match outcome {
+                );
+            // The receiver is gone only if the waiter already gave up.
+            let _ = done.send(failures);
+        });
+        let failures = match waiting.recv_timeout(budget) {
             Ok(failures) => failures,
-            Err(_) => vec!["the cleanup thread panicked".to_owned()],
+            // The sender is dropped without sending only by an unwind.
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                vec!["the cleanup thread panicked".to_owned()]
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => vec![format!(
+                "the cleanup did not finish within {budget:?} and was abandoned, so {:?} may \
+                 still be standing. The usual cause is a server that accepted the request and \
+                 then stopped answering: `reqwest` has no default timeout, so before issue #162 \
+                 that stalled the run with nothing on screen instead of saying so. Check the \
+                 container is alive, then re-run -- the next guard's leftover sweep removes \
+                 whatever is left. If a healthy container really needs longer, raise \
+                 live_env::CLEANUP_BUDGET.",
+                abandoned
+            )],
         };
         if failures.is_empty() {
             return;
