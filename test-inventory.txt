@@ -599,7 +599,7 @@ knobas-source-gitea	lib/knobas_source_gitea	source::tests::an_instance_describes
 knobas-source-gitea	lib/knobas_source_gitea	source::tests::an_unsupported_auth_method_is_refused_at_build_time
 knobas-source-gitea	lib/knobas_source_gitea	source::tests::an_unusable_instance_id_is_refused_at_build_time
 knobas-source-gitea	lib/knobas_source_gitea	source::tests::every_write_is_refused_without_reaching_the_network
-knobas-source-gitea	lib/knobas_source_gitea	sync::tests::a_reached_cap_names_the_limit_and_the_lever
+knobas-source-gitea	lib/knobas_source_gitea	sync::tests::a_reached_cap_names_what_it_walked_and_the_lever
 knobas-source-gitea	lib/knobas_source_gitea	sync::tests::a_refused_entry_is_carried_under_the_spelling_the_cursor_stores
 knobas-source-gitea	lib/knobas_source_gitea	sync::tests::only_a_repository_scoped_failure_becomes_a_skip
 knobas-source-gitea	lib/knobas_source_gitea	sync::tests::the_default_branch_gets_the_budget_first
@@ -646,6 +646,7 @@ knobas-source-gitea	test/sync	a_revoked_token_fails_the_run_rather_than_syncing_
 knobas-source-gitea	test/sync	a_run_holding_no_position_cannot_tombstone_a_deleted_branch
 knobas-source-gitea	test/sync	a_run_holding_no_position_is_a_full_sync_whatever_cursor_it_was_handed
 knobas-source-gitea	test/sync	a_second_instance_emits_into_its_own_namespace
+knobas-source-gitea	test/sync	a_server_that_caps_its_pages_short_is_still_walked_to_the_end
 knobas-source-gitea	test/sync	a_sink_failure_stops_the_run_where_it_happened
 knobas-source-gitea	test/sync	a_vanished_branch_is_tombstoned
 knobas-source-gitea	test/sync	an_explicit_repository_list_is_fetched_directly
