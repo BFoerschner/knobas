@@ -50,6 +50,8 @@ docker compose config -q 2>&1 \
   || { echo "check-ports: docker-compose.yml is not a valid compose file (default profile); fix that first" >&2; exit 1; }
 docker compose --profile seed --profile real-teamcity --profile real-atlassian config -q 2>&1 \
   || { echo "check-ports: docker-compose.yml is not a valid compose file (with all profiles enabled); fix that first" >&2; exit 1; }
+docker compose -f docker-compose.yml -f docker-compose.capped.yml config -q 2>&1 \
+  || { echo "check-ports: docker-compose.capped.yml does not overlay docker-compose.yml cleanly; fix that first" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
 # 1. The default `docker compose up` set. Anything opt-in that leaks into this
@@ -87,6 +89,18 @@ if [ "$actual_all" != "$expected_all" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# 2b. The capped-Gitea overlay (docker-compose.capped.yml). It changes one
+#     environment variable and must change nothing else -- an override file is
+#     a second, easily forgotten way for the §5 map to drift, and `config -q`
+#     above is happy with any port at all.
+# ---------------------------------------------------------------------------
+actual_capped=$(resolved -f docker-compose.yml -f docker-compose.capped.yml)
+if [ "$actual_capped" != "$expected_default" ]; then
+  note "the capped overlay changes the port map, which it must not:"
+  show_diff "$expected_default" "$actual_capped"
+fi
+
+# ---------------------------------------------------------------------------
 # 3. 8211 (Confluence DC mock, M3) and 8213 (Flowrun stub, M4) are RESERVED.
 #    Binding one now is how M3 discovers, months later, that its port is taken.
 #    Checked separately from the maps above so the failure says *why*.
@@ -111,4 +125,4 @@ if [ "$fail" -ne 0 ]; then
   echo "check-ports: FAILED" >&2
   exit 1
 fi
-echo "check-ports: ok -- default and opt-in port maps match interfaces §5, 8211/8213 unbound, all on 127.0.0.1"
+echo "check-ports: ok -- default, opt-in and capped-overlay port maps match interfaces §5, 8211/8213 unbound, all on 127.0.0.1"

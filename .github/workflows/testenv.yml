@@ -94,13 +94,14 @@ jobs:
       # broken `real-teamcity` service is invisible to a bare `config -q` --
       # and that profile is precisely the one nobody runs locally, because
       # running it means pulling ~10 GB.
-      - name: validate the compose file, default and opt-in profiles
+      - name: validate the compose file, default, opt-in profiles and the capped overlay
         working-directory: testenv
         run: |
           docker compose config -q
           docker compose --profile seed \
                          --profile real-teamcity \
                          --profile real-atlassian config -q
+          docker compose -f docker-compose.yml -f docker-compose.capped.yml config -q
 
       # The port map itself. `config -q` is happy with any port at all, so it
       # cannot see 8210 becoming 8299, a service published on 0.0.0.0 instead

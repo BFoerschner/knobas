@@ -228,6 +228,15 @@ demo: deps
 # Not part of `check`, which is why every test in that file is `#[ignore]`d;
 # this recipe is what un-ignores them.
 #
+# WHICH RECIPE CERTIFIES WHAT. This one runs the DEFAULT compose file, and
+# certifies the *shapes* interfaces §4.2 fixes: the key forms, the `{ok,data}`
+# envelope on `/repos/search`, `state=all`, the discussion living on the issue
+# of the same index, `sort=recentupdate` really ordering newest-first, `since=`
+# being server-side and inclusive, and a revoked token's 401. It cannot certify
+# what happens when the server answers FEWER records than the adapter asked for
+# -- every corpus the seed creates fits in one page of 50 here -- and that is
+# what `gitea-live-capped` below is for.
+#
 # Gitea and its seed only: `testenv/seed` also waits for uptime-kuma and mockd,
 # which this suite never touches. Both steps are idempotent, so re-running this
 # against an already-seeded environment just runs the tests. Serial, because the
@@ -242,6 +251,53 @@ gitea-live:
     eval "$(./seed --env)"
     cd ..
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-gitea --test live_gitea \
+      -- --ignored --nocapture --test-threads=1
+
+# The same real container, reconfigured to answer FEWER records than the adapter
+# asked for: `testenv/docker-compose.capped.yml` sets Gitea's
+# `[api] MAX_RESPONSE_ITEMS` to 1.
+#
+# WHICH RECIPE CERTIFIES WHAT. This one certifies exactly one property, and the
+# one `gitea-live` structurally cannot: that every paged walk survives a server
+# capping below the limit it requested (issue #81, live-certified by #115). Its
+# suite is `tests/live_gitea_capped.rs` and it is one test; `gitea-live` keeps
+# everything else.
+#
+# THE ORDER MATTERS. The seed runs FIRST, against the uncapped default file,
+# because `seed-gitea.sh` decides what already exists by reading listings with
+# `limit=50` and no paging -- capped to one record, `commit_exists` sees only a
+# branch's newest commit, judges the rest missing, re-POSTs a file that is
+# already there and dies on the 422. The overlay then recreates the same
+# container over the same volume, so the seeded corpus is still there; the trap
+# puts the uncapped container back afterwards, so a later `just gitea-live` is
+# not silently running against a capped server.
+#
+# `INT` and `TERM` as well as `EXIT`, the rule `inventory` above states and
+# `check-ports.sh` follows: bash need not run an `EXIT` trap when a signal it
+# has no handler for terminates the shell, and this recipe's slow live run is
+# one somebody will Ctrl-C. Each signal trap **clears the `EXIT` trap first**,
+# then restores, then re-raises -- so the container is uncapped exactly once and
+# the recipe still dies of the signal it was sent rather than reporting a tidy
+# exit 0. (`inventory` can let both fire because its handler is an idempotent
+# `rm -f`; this one is a `docker compose up`.) The trap is belt-and-braces
+# either way: the real containment is the `MAX_RESPONSE_ITEMS: "50"` pin in
+# docker-compose.yml, which uncaps on the next `docker compose up` whatever
+# happened to this shell.
+gitea-live-capped:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd testenv
+    testenv=$PWD
+    docker compose up -d --wait gitea
+    ./seed-gitea.sh
+    eval "$(./seed --env)"
+    uncap() { cd "$testenv" && docker compose up -d --wait gitea >/dev/null; }
+    trap 'uncap' EXIT
+    trap 'trap - EXIT INT; uncap; kill -INT $$' INT
+    trap 'trap - EXIT TERM; uncap; kill -TERM $$' TERM
+    docker compose -f docker-compose.yml -f docker-compose.capped.yml up -d --wait gitea
+    cd ..
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-gitea --test live_gitea_capped \
       -- --ignored --nocapture --test-threads=1
 
 # TeamCity's live certification: the adapter against a **real** TeamCity.

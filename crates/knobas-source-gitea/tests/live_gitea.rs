@@ -22,6 +22,17 @@
 //!
 //! or, in one step, `just gitea-live`.
 //!
+//! # What this file does NOT certify
+//!
+//! Every corpus `testenv/seed-gitea.sh` creates fits in one page of the 50 the
+//! adapter asks for, so against this compose file a page shorter than 50 and a
+//! listing that ran out are the same answer -- and the termination rule issue
+//! #81 removed (stop on a *short* page) agrees with the one that replaced it
+//! (stop on an *empty* page) on every request this suite makes. The property
+//! that separates them needs a server that caps its pages below the requested
+//! limit, and that is a different compose configuration: see
+//! `tests/live_gitea_capped.rs` and `just gitea-live-capped`.
+//!
 //! # What cannot be asserted here, and why
 //!
 //! Gitea numbers pull requests from a per-repository counter and git derives
@@ -31,67 +42,11 @@
 //! `seed-state.json`). These tests therefore assert the key *forms* interfaces
 //! §4.2 fixes and the seeded *titles*, never a literal id.
 
+mod live_env;
+
+use knobas_source::SourceError;
 use knobas_source::contract::{Fault, VecSink, battery};
-use knobas_source::instance::SourceInstance;
-use knobas_source::{AuthMethod, Source, SourceError, SyncItem};
-
-/// Where the seeded container is and what to read in it.
-///
-/// Read from the environment rather than hardcoded so whatever names testenv
-/// settles on work without a code change here; `testenv/seed --env` prints
-/// exactly these.
-struct Env {
-    url: String,
-    token: String,
-    owner: String,
-    repo: String,
-}
-
-fn env() -> Env {
-    let need = |key: &str| {
-        std::env::var(key).unwrap_or_else(|_| {
-            panic!(
-                "{key} is not set -- start testenv's Gitea and seed it first, \
-                 then `eval \"$(cd testenv && ./seed --env)\"` (or run `just gitea-live`)"
-            )
-        })
-    };
-    Env {
-        url: need("KNOBAS_GITEA_URL").trim_end_matches('/').to_owned(),
-        token: need("KNOBAS_GITEA_TOKEN"),
-        owner: std::env::var("KNOBAS_GITEA_OWNER").unwrap_or_else(|_| "tidewater".to_owned()),
-        repo: std::env::var("KNOBAS_GITEA_REPO").unwrap_or_else(|_| "payout-service".to_owned()),
-    }
-}
-
-impl Env {
-    fn full_name(&self) -> String {
-        format!("{}/{}", self.owner, self.repo)
-    }
-
-    /// An adapter over this container, configured as `config` says.
-    fn source(&self, config: serde_json::Value) -> Box<dyn Source> {
-        self.source_with(&self.token, config)
-    }
-
-    fn source_with(&self, token: &str, config: serde_json::Value) -> Box<dyn Source> {
-        knobas_source_gitea::build(SourceInstance {
-            id: "gitea".to_owned(),
-            kind: "gitea".to_owned(),
-            display_name: "Tidewater Git".to_owned(),
-            base_url: self.url.clone(),
-            auth: Some(AuthMethod::Pat),
-            secret: Some(token.to_owned()),
-            config,
-        })
-        .expect("the adapter builds")
-    }
-
-    /// Scoped to the one seeded repository these assertions are written for.
-    fn one_repo(&self) -> Box<dyn Source> {
-        self.source(serde_json::json!({ "repos": [self.full_name()] }))
-    }
-}
+use live_env::{Env, env, full, of_kind};
 
 /// A port nothing listens on: bound to learn the number, then dropped.
 fn dead_url() -> String {
@@ -99,19 +54,6 @@ fn dead_url() -> String {
     let port = listener.local_addr().unwrap().port();
     drop(listener);
     format!("http://127.0.0.1:{port}")
-}
-
-async fn full(source: &dyn Source) -> (Vec<SyncItem>, String) {
-    let mut sink = VecSink(Vec::new());
-    let cursor = source
-        .sync(None, &mut sink)
-        .await
-        .expect("full sync against the container");
-    (sink.0, cursor)
-}
-
-fn of_kind<'a>(items: &'a [SyncItem], kind: &str) -> Vec<&'a SyncItem> {
-    items.iter().filter(|i| i.kind == kind).collect()
 }
 
 /// A token that never existed. Salted with the process id so a run cannot

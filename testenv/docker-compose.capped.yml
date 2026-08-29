@@ -1,0 +1,59 @@
+# The capped-Gitea overlay: a real Gitea that answers FEWER records than the
+# `limit` the adapter asked for.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.capped.yml up -d gitea
+#
+# or, with its seed, its test suite and its cleanup, `just gitea-live-capped`.
+#
+# WHY THIS EXISTS. `crates/knobas-source-gitea` asks every listing for
+# `limit=50` and, since issue #81, ends a walk only on an **empty** page --
+# never on a short one, because a short page means "the collection ran out" *or*
+# "the server capped us" and nothing in the answer says which. Reading it as the
+# first is a run that reports success while its watermark advances past records
+# it never saw.
+#
+# That rule was certified against the crate's wiremock fake and nothing else:
+# every corpus in `tests/live_gitea.rs` fits in one page of 50, so against the
+# default profile a short first page and an exhausted listing are the same
+# answer, and both terminations agree. This overlay is what makes them disagree
+# on the REAL server -- the standing rule for this adapter being that when the
+# fake and the server disagree, the fake is what is wrong (#35 task 8).
+#
+# WHY 1 AND NOT 2. Issue #115 proposed 2. One record per page is what the
+# seeded corpus needs to exercise all four paged walks: `testenv/seed-gitea.sh`
+# puts three repositories in the org, four branches and TWO pull requests in
+# payout-service, and four commits on its `feature/PAY-231-sepa-retry`. At a cap
+# of 2 the pull-request listing answers both pull requests on page 1, so the old
+# short-page reading loses nothing there and the walk this overlay exists to
+# certify is the one walk it would not have covered. At 1 every listing with two
+# or more records needs a second page.
+#
+# THE CAP IS STICKY, AND THE DEFAULT FILE IS WHAT UNSTICKS IT. Gitea's
+# environment-to-ini only ever *writes* /data/gitea/conf/app.ini -- dropping the
+# variable does not remove the line it wrote. Measured on the pinned image: with
+# this overlay off, the container is recreated, `docker inspect` shows no
+# MAX_RESPONSE_ITEMS, and app.ini still reads `MAX_RESPONSE_ITEMS = 1`. So
+# docker-compose.yml pins the value to 50 -- Gitea's own default, and the
+# adapter's `client::PAGE_SIZE` -- rather than leaving it implicit, and coming
+# back to the default file puts the uncapped server back. Without that pin, one
+# `just gitea-live-capped` would silently make every later `just gitea-live` run
+# against a capped server.
+#
+# NOT THE DEFAULT, because the seed cannot run under it.
+# `testenv/seed-gitea.sh` decides what already exists by reading listings with
+# `limit=50` and no paging at all -- `commit_exists` is the load-bearing one: it
+# reads a branch's commits and looks for a message. Capped to one record it sees
+# only the newest commit, judges the other three missing, re-POSTs a file that
+# is already there and dies on the 422. Seed against the default file first;
+# this overlay recreates the same container over the same volume, so the seeded
+# corpus is still there.
+services:
+  gitea:
+    environment:
+      # Gitea's `[api] MAX_RESPONSE_ITEMS`, which is the ceiling on what any
+      # `limit=` may ask for. Verified on the pinned image (1.24.x): the
+      # variable lands in /data/gitea/conf/app.ini as `[api] MAX_RESPONSE_ITEMS
+      # = 1` and caps /repos/search, /branches, /pulls and /commits alike --
+      # including the `{ok,data}` envelope of /repos/search, whose page past the
+      # last one answers `{"ok":true,"data":[]}` rather than a bare `[]`.
+      GITEA__api__MAX_RESPONSE_ITEMS: "1"

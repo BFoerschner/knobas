@@ -118,6 +118,34 @@ Real Confluence is here in M1 although Confluence is M3's target, because
 Atlassian publishes **no machine-readable Confluence DC spec at all** — the
 running container is the only contract there will ever be.
 
+## The capped-Gitea overlay
+
+`docker-compose.capped.yml` recreates the Gitea service with
+`[api] MAX_RESPONSE_ITEMS = 1`, so every listing answers **fewer** records than
+the `limit=50` the Gitea adapter asks for. It exists for one test —
+`crates/knobas-source-gitea/tests/live_gitea_capped.rs`, run by
+`just gitea-live-capped` — which certifies that the adapter's paged walks end on
+an *empty* page and not on a *short* one (issue #81, live-certified by #115).
+The default compose file cannot certify that: every corpus the seed creates fits
+in one page of 50, so both terminations agree on every request.
+
+Two things about it are not obvious:
+
+- **Seed first, uncapped.** `seed-gitea.sh` decides what already exists by
+  reading listings with `limit=50` and no paging. Capped to one record,
+  `commit_exists` sees only a branch's newest commit, judges the rest missing,
+  re-POSTs a file that is already there and dies on the 422. `just
+  gitea-live-capped` seeds against the default file and applies the overlay
+  afterwards; the container is recreated over the same volume, so the corpus
+  survives.
+- **The cap is sticky, and the default file is what unsticks it.** Gitea's
+  `environment-to-ini` only ever *writes* `/data/gitea/conf/app.ini`; dropping
+  the variable does not remove the line, so a plain `docker compose up` after a
+  capped run comes back on a container with no such variable and a still-capped
+  server. That is why `docker-compose.yml` pins
+  `GITEA__api__MAX_RESPONSE_ITEMS: "50"` — Gitea's own default, and
+  `client::PAGE_SIZE` — explicitly rather than leaving it implicit.
+
 ## Image pinning
 
 No `:latest` anywhere in the compose file. `.env` holds one
@@ -176,7 +204,7 @@ history.
 | `./seed-gitea.sh` | Org, users, repos, branches, commits, PRs, comments, reviews. |
 | `./seed-kuma.sh` | Kuma admin account, monitors, API key. |
 | `./pin-images.sh` | Re-resolve image tags to digests into `.env`. |
-| `./check-ports.sh` | Assert the compose file against the §5 port table. Starts nothing. |
+| `./check-ports.sh` | Assert the compose file against the §5 port table, default profile, opt-in profiles and the capped overlay. Starts nothing. |
 | `./reset` | `down -v` every profile, and delete the seed's outputs. |
 
 ## mockd's documented deviations
