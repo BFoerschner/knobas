@@ -84,7 +84,14 @@ fn synthesized_branch_names(script: &str) -> Vec<String> {
 /// Every branch name `testenv/seed-gitea.sh` puts in the container, from the
 /// three places it takes them from: the fixture's own `branches[]`, the head
 /// branch each pull request names, and the two it synthesizes for the pull
-/// requests that name none. `main` comes from `auto_init`, not from a list.
+/// requests that name none. Those are the script's two `ensure_branch` call
+/// sites, and between them they are the only way a branch is created.
+///
+/// `main` comes from `auto_init`, not from a list. `repos[].default_branch` is
+/// read anyway, as the one over-inclusion here: the script hardcodes
+/// `default_branch:"main"` today rather than reading the field, so this covers
+/// the day it starts reading it. Being a superset only makes the check
+/// stricter, never blinder.
 fn seeded_branch_names() -> Vec<String> {
     let fixture = fixture();
     let named = |rows: &serde_json::Value, field: &str| -> Vec<String> {
