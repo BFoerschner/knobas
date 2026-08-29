@@ -88,11 +88,14 @@ pub fn router(state: Arc<MockState>) -> Router {
 /// **This used to be `text/plain`**, in the shape `Error has occurred during
 /// request processing (404).\n<message>\n`, on a comment asserting that a real
 /// TeamCity answers errors as plain text "even to a client that asked for
-/// JSON". It does not, and has not for a long time: with `Accept:
-/// application/json` -- which `knobas-http` sets on every request -- the body
-/// is the envelope above; with any other `Accept` the answer is a 406 whose
-/// body is *also* that envelope; with no `Accept` at all it is XML. The plain
-/// form reached nobody, and the TeamCity adapter's `http::error_message` was
+/// JSON". It does not, and has not for a long time. That server
+/// content-negotiates: with `Accept: application/json` -- which `knobas-http`
+/// sets on every request -- the body is the envelope above; with
+/// `application/xml`, with `*/*`, or with no `Accept` at all it is **XML**
+/// (which is deviation 1 below, and that comment is the accurate one); and
+/// only with an `Accept` the server cannot satisfy at all (`text/plain`,
+/// `text/html`) is the answer a **406**, whose body is itself the envelope.
+/// The plain-text form reached nobody either way, and `http::error_message` was
 /// written to require it, so it parsed no error the adapter would ever be
 /// handed and every failure rendered as a raw blob (issue #113).
 ///
@@ -134,10 +137,15 @@ pub(crate) fn tc_error(status: StatusCode, message: impl Into<String>) -> Respon
 
 /// The class name a real TeamCity puts in front of `additionalMessage`.
 ///
-/// Only the three this mock can actually produce are named; anything else gets
-/// the generic one rather than an invented class, on the same rule as the
-/// fixture's people: a name that is not a real TeamCity's is a name an adapter
-/// could come to depend on.
+/// `tc_error` is reached with seven statuses -- 404, 400 and 401 from the
+/// routes and guards, 406 from the `Accept` guard, 501 from the unimplemented
+/// fallback, and 500 and 429 from injected faults. Only the three whose real
+/// class name was transcribed from a live server are named here; every other
+/// status gets the generic `OperationException` rather than an invented class,
+/// on the same rule as the fixture's people: a name that is not a real
+/// TeamCity's is a name an adapter could come to depend on. The `FORBIDDEN`
+/// arm rides with `UNAUTHORIZED` because they are one refusal to this mock,
+/// which produces neither on its own.
 fn exception_for(status: StatusCode) -> &'static str {
     match status {
         StatusCode::NOT_FOUND => "NotFoundException",

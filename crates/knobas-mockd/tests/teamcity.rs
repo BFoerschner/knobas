@@ -406,10 +406,12 @@ async fn an_unknown_build_id_is_404() {
 /// request processing (404).\n<message>\n`, on a comment asserting that a real
 /// TeamCity answers errors as plain text even to a client that asked for JSON.
 /// Measured read-only against JetBrains' public instance (2026.2 EAP, build
-/// 238763) on 2026-08-29, it does not: with `Accept: application/json` the body
-/// is `{"errors":[{"message": …, "additionalMessage": …, "statusText": …,
-/// "stackTrace": null}]}`, with any other `Accept` the answer is a 406 whose
-/// body is *also* that envelope, and with no `Accept` at all it is XML.
+/// 238763) on 2026-08-29, it does not. That server content-negotiates: with
+/// `Accept: application/json` the body is `{"errors":[{"message": …,
+/// "additionalMessage": …, "statusText": …, "stackTrace": null}]}`; with
+/// `application/xml`, with `*/*`, or with no `Accept` at all the answer is
+/// **XML**; and only an `Accept` the server cannot satisfy (`text/plain`,
+/// `text/html`) draws a **406**, whose body is itself that envelope.
 ///
 /// The consequence of the fake teaching the other shape was not cosmetic: the
 /// TeamCity adapter's `http::error_message` was written to require it, so it
@@ -422,11 +424,15 @@ async fn an_unknown_build_id_is_404() {
 /// stated decision, so it cannot tell whether the fake regressed. Only the
 /// fake's own suite can hold the fake to the server.
 ///
-/// The four statuses are the four this mock produces: a 404 from the by-id
-/// route, a 400 from the locator validator, a 401 from the credential guard,
-/// and a 406 from the `Accept` guard -- so the shape is pinned on the
+/// The four probed here are the four a plain GET can reach: a 404 from the
+/// by-id route, a 400 from the locator validator, a 401 from the credential
+/// guard, and a 406 from the `Accept` guard -- so the shape is pinned on the
 /// deviation-1 path too, which is exactly where a real server was measured to
-/// keep it.
+/// keep it. `tc_error` serves three more that need setup rather than a request
+/// -- 500 and 429 from injected faults, 501 from the unimplemented fallback --
+/// and they take the same one code path; the 500 is pinned end to end from the
+/// adapter's side by
+/// `knobas-source-teamcity`'s `a_server_error_is_a_protocol_failure_and_says_what_the_server_said`.
 #[tokio::test]
 async fn every_error_is_the_json_envelope_a_real_teamcity_serves() {
     let s = spawn_mock_teamcity().await;

@@ -942,6 +942,60 @@ widenings in the M2 TeamCity package above.
 
 ---
 
+### Amendments from the TeamCity error-envelope fix (2026-08-29, binding) — issue #113
+
+Ruled by Fable under delegation while Björn was away, 2026-08-29, on issue #113; Björn can
+overturn it. Recorded here because §5 pins mockd's as-built behaviour and this replaces the
+body of every error it serves — the precedent is the `nextHref` bullet in the #114 amendment
+directly above and the `fields=` widenings in the M2 TeamCity package. Nothing in §4.2's
+locator or selector tables changes.
+
+- **§4.2 a TeamCity error body is a JSON envelope, and the adapter reads `errors[].message` out
+  of it.** `http::error_message` required a body whose first line read `Error has occurred
+  during request processing`, on a doc comment calling that "the shape a real TeamCity serves".
+  It is the shape 2026.2 serves nobody, so the function returned `None` on every error this
+  adapter can be handed and `knobas-http`'s excerpt fallback put a JSON blob on screen where a
+  sentence was meant. It now tries `{"errors":[{"message": …}]}` first and joins the sentences an
+  envelope names, falling back to the plain-text reading. **The fault class is untouched**: it
+  comes off the status in `knobas_http::status_error` before the hook is consulted, and for
+  `Unauthorized` the hook is not consulted at all. This is legibility, not retryability.
+- **§4.2 the plain-text reading is kept, by decision rather than by accident** — the ticket asked
+  for one or the other, stated. It runs only after the JSON attempt declines and only on a body
+  whose first line is literally that announcement, so no envelope, proxy page or empty body can
+  reach it; the hook sees every failing body this client is handed rather than only TeamCity's;
+  and the code was already there and already tested. A later PR that deletes it should say what
+  it measured, not merely that 2026.2 does not need it.
+- **§5 mockd's `tc_error` serves the JSON envelope, not `text/plain`.** `message`,
+  `additionalMessage` (the sentence behind the real Java class name, chosen per status),
+  `statusText`, and a `null` `stackTrace`, under `Content-Type: application/json` — transcribed
+  from JetBrains' public instance (2026.2 EAP, build 238763) read-only on 2026-08-29. It had been
+  serving the plain-text form on a comment asserting a real TeamCity answers errors as plain text
+  "even to a client that asked for JSON", which is how #113 survived a green suite for a
+  milestone: every adapter test that touched an error path was reading the fake's wrong shape.
+  The standing rule applies — **where the fake and the server disagree the fake is wrong.**
+- **§5 deviation 1 stands, and its wording was the accurate one.** A TeamCity request without
+  `Accept: application/json` still gets **406 + `X-Mockd-Hint`** from mockd where a real TeamCity
+  serves XML; only the body of that 406 changed. Measured the same day, the real server
+  *content-negotiates*: `application/xml`, `*/*` (reqwest's default) and no `Accept` at all are
+  all answered **200 XML**, and only an `Accept` it cannot satisfy at all (`text/plain`,
+  `text/html`) draws a 406 — whose body is itself the envelope, which is why mockd is now right
+  on that path too. An earlier draft of this fix recorded "any `Accept` other than JSON gets a
+  406"; that is wrong, and it is written down here because it contradicted deviation 1 while
+  claiming to correct it.
+- **§5 the guard belongs to mockd's own suite, not the adapter's.** Reverting `tc_error` to plain
+  text left every `knobas-source-teamcity` test green — the adapter accepts both forms by the
+  decision above, so it cannot tell that the fake regressed. That is #113's own blind spot one
+  layer up. `knobas-mockd`'s `every_error_is_the_json_envelope_a_real_teamcity_serves` pins the
+  content type, the four envelope keys and the absence of the old announcement line across the
+  four statuses a plain GET reaches, and it is the only test in the workspace that fails when the
+  fake drifts back.
+- **Frozen surfaces: none.** `crates/knobas-source-teamcity/**` and `crates/knobas-mockd/**` are
+  not in §10.8's list. `crates/knobas-http/**` **is**, and is untouched: the `BodyMessage` hook
+  ADR-0004 added is exactly the seam this needed, so the whole change is in what the adapter's
+  own hook returns. No migration, no IPC change.
+
+---
+
 ## 10. As built — the contract PR (2026-08-24)
 
 *The task brief called this section §9. §9 was taken by the plan-authoring amendments before this ran, so the as-built record is §10; "§9 of the interfaces doc" in `plan-02-contract` means this section.*

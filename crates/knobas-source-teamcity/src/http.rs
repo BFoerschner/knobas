@@ -169,10 +169,20 @@ pub(crate) fn client(
 ///
 /// This is what `error_message` used to require, on a doc comment asserting it
 /// was "the shape a real TeamCity serves". It is not the shape 2026.2 serves
-/// anyone: a client asking for JSON gets the envelope above, one asking for
-/// anything else gets a **406** (whose body is itself the JSON envelope), and
-/// one sending no `Accept` at all gets XML. So the requirement made this
-/// function return `None` on every real error -- issue #113.
+/// anyone. That server content-negotiates, measured read-only on 2026-08-29
+/// (2026.2 EAP, build 238763) over `/app/rest/server`:
+///
+/// | `Accept` | answer |
+/// |---|---|
+/// | `application/json` -- what `knobas-http` sends | JSON; errors are the envelope above |
+/// | `application/xml`, `*/*`, or no `Accept` at all | **XML** |
+/// | one the server cannot satisfy (`text/plain`, `text/html`) | **406**, whose body is itself the JSON envelope |
+///
+/// So the plain-text form below reaches nobody, and requiring it made this
+/// function return `None` on every real error -- issue #113. Note the middle
+/// row: `*/*` is what reqwest sends by default, which is why
+/// `knobas-mockd`'s deviation 1 refuses it, and why "any `Accept` other than
+/// JSON gets a 406" would be the wrong reading of the same measurement.
 ///
 /// It is kept anyway, deliberately, as a fallback **after** the JSON attempt:
 ///
@@ -190,10 +200,15 @@ pub(crate) fn client(
 /// # Neither shape
 ///
 /// `None`, which keeps `knobas-http`'s bounded excerpt of the raw body -- an
-/// HTML error page from a reverse proxy, an empty body, a JSON object that is
-/// somebody else's. A body this function did not understand is still the most
-/// informative thing knobas has, and lifting a line out of one that never
+/// HTML error page from a reverse proxy, an empty body, a JSON object shaped
+/// like nothing above. A body this function did not understand is still the
+/// most informative thing knobas has, and lifting a line out of one that never
 /// claimed to be TeamCity's would put `<html>` on screen in its place.
+///
+/// What it does *not* do is check who sent the envelope: any body shaped
+/// `{"errors":[{"message": …}]}` is read, whether a TeamCity wrote it or a
+/// gateway in front of one did. That is the intent -- see the second bullet
+/// above -- and not an accident to tighten later.
 fn error_message(body: &str) -> Option<String> {
     json_error_message(body).or_else(|| plaintext_error_message(body))
 }

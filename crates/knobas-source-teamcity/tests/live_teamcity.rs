@@ -913,8 +913,9 @@ async fn a_rest_error_is_a_json_envelope_the_adapter_can_read() {
     println!(
         "LIVE error: `http::error_message` reads all of these. It used to want a first line \
          reading `Error has occurred during request processing`, which this server sends to \
-         nobody -- a JSON-accepting client gets the envelope, any other Accept gets a 406 whose \
-         body is also the envelope, and no Accept at all gets XML."
+         nobody -- a JSON-accepting client gets the envelope, an XML-accepting one (and `*/*`, \
+         and no Accept at all) gets XML, and only an Accept the server cannot satisfy draws a \
+         406 whose body is also the envelope."
     );
 
     // **The end-to-end half.** Everything above reads the body with the test's
@@ -927,6 +928,24 @@ async fn a_rest_error_is_a_json_envelope_the_adapter_can_read() {
     // adapter sends is one it built itself out of a listing the server gave it.
     //
     // Before #113 the message here was the whole envelope printed at the user.
+    //
+    // **Read the printed line carefully before calling it a bug.** JAX-RS
+    // generates this particular 404 -- no TeamCity resource is reached at all
+    // -- so its `errors[0].message` is the generic sentence `HTTP 404 Not
+    // Found`, and the rendered message is therefore
+    // `"HTTP 404 Not Found: HTTP 404 Not Found"`: `knobas-http`'s own status
+    // prefix in front of a sentence that repeats it. That reads exactly like
+    // the excerpt fallback and is not -- which is why the assertion below is
+    // against the sentence the *same path* answers with, lifted by the test
+    // itself, rather than against a shape both readings would satisfy.
+    let nested_path = "app/rest/server/app/rest/server";
+    let (nested_status, nested_body) = live.get(nested_path).await;
+    assert_eq!(nested_status, 404, "{nested_path}: {nested_body}");
+    let sentence = nested_body["errors"][0]["message"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{nested_path} answers the envelope too: {nested_body}"))
+        .to_owned();
+
     let nested = live.source_at(
         &format!("{}/app/rest/server", live.url),
         serde_json::json!({}),
@@ -939,6 +958,15 @@ async fn a_rest_error_is_a_json_envelope_the_adapter_can_read() {
         panic!("a 404 is a protocol fault, not a credential one: {error:?}");
     };
     assert_eq!(*status, Some(404), "ADR-0004: the status rides along");
+    // The whole claim of issue #113 in one line: what the adapter puts in front
+    // of the user is `knobas-http`'s status prefix plus **the server's own
+    // `errors[0].message`**, and nothing else. Delete the envelope parsing and
+    // this is the raw body instead, which is what it used to be.
+    assert_eq!(
+        message,
+        &format!("HTTP 404 Not Found: {sentence}"),
+        "the user is shown the server's sentence, not the envelope around it"
+    );
     for envelope_key in [
         "errors",
         "additionalMessage",
@@ -952,11 +980,10 @@ async fn a_rest_error_is_a_json_envelope_the_adapter_can_read() {
              is in {message:?}"
         );
     }
-    assert!(
-        message.starts_with("HTTP 404 Not Found: ") && message.len() > "HTTP 404 Not Found: ".len(),
-        "and there is a sentence after the status `knobas-http` prefixes: {message:?}"
+    println!(
+        "LIVE error rendered through the adapter: {message:?} -- the server's own \
+         errors[0].message was {sentence:?}"
     );
-    println!("LIVE error rendered through the adapter: {message:?}");
 }
 
 /// Issue #114: `nextHref` is the server's own statement that a page is not the
