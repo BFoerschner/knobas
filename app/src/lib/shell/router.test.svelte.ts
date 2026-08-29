@@ -14,6 +14,7 @@ import { createRouter, hashFor, parseHash } from "./router.svelte";
 test("parses the M1 addresses", () => {
   expect(parseHash("#/ctx/all")).toEqual({ view: "room", ctx: "all", detail: null });
   expect(parseHash("#/sources")).toEqual({ view: "sources" });
+  expect(parseHash("#/settings")).toEqual({ view: "settings" });
   expect(parseHash("#/first-run")).toEqual({ view: "first-run" });
 });
 
@@ -64,6 +65,7 @@ test("round-trips every address it produces", () => {
     "#/ticket/mock:PAY-231",
     "#/entity/mock:PAY-231",
     "#/sources",
+    "#/settings",
     "#/first-run",
     "#/inbox",
   ]) {
@@ -154,6 +156,31 @@ test("visiting the sources view does not forget the room behind it", () => {
   const stop = router.start();
 
   router.go("#/sources");
+  expect(router.ctx).toBe("src:jira");
+  router.back();
+  expect(location.hash).toBe("#/ctx/src:jira");
+
+  stop();
+});
+
+/**
+ * An adapter is free to declare a kind called `settings` (§3a: kinds are
+ * open), and if it did, `#/settings/mock:s-1` would be an entity address —
+ * which is why the word is reserved as well as handled: the view owns it, and
+ * a kind by that name is unaddressable rather than ambiguous.
+ */
+test("settings is a view even with something after it, never a kind", () => {
+  expect(parseHash("#/settings/mock:s-1")).toEqual({ view: "settings" });
+});
+
+/** Settings is not a room either, so Esc returns where the reader came from. */
+test("visiting settings does not forget the room behind it", () => {
+  location.hash = "#/ctx/src:jira";
+  const router = createRouter();
+  const stop = router.start();
+
+  router.go("#/settings");
+  expect(router.route).toEqual({ view: "settings" });
   expect(router.ctx).toBe("src:jira");
   router.back();
   expect(location.hash).toBe("#/ctx/src:jira");
