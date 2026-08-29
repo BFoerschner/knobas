@@ -22,6 +22,26 @@
   So the phase that matters (`finished` / `failed`) arrives on the channel and
   nowhere else.
 
+  ## …and why there is no timeout
+
+  ADR-0005 — *a run id always comes with an ending* — is what makes waiting on
+  that channel safe: whether this wizard started the run, joined one already in
+  flight, or arrived after it was over, the ending arrives. So there is
+  deliberately **no** timeout here and no *taking longer than expected*
+  affordance. ADR-0005 records that as rejected, and says why: a long-but-working
+  first sync of a large Jira is indistinguishable from a hang by wall-clock, so
+  any threshold is either too short to be safe or too long to help — and if the
+  ending contract ever breaks, what is wanted is a red test, not a wizard that
+  quietly changes the subject.
+
+  ## What *mirrored N items* counts
+
+  The corpus, read from `SourceSummary.item_count` — never the run's `upserted`.
+  `CONTEXT.md` carries the distinction, and the reason it matters is the same
+  ADR: adding a source wakes the scheduler, so the run that mirrored everything
+  may be one this wizard only joined at its end. Reporting what *that* run wrote
+  put *knobas mirrored 0 items* over a full mirror.
+
   ## Progress without an inline style
 
   A native `<progress>`, and no `style="width: …"`. `style-src 'self'` drops an
@@ -38,6 +58,7 @@
   import { health as sharedHealth, type Health } from "../shell/health.svelte";
   import {
     demoLoad,
+    listSources,
     syncNowWithProgress,
     type SourceSummary,
     type SyncPhase,
@@ -74,6 +95,7 @@
 
   let phase = $state<SyncPhase | null>(null);
   let items = $state(0);
+  let corpus = $state<number | null>(null);
   let elapsed = $state(0);
   let failure = $state<string | null>(null);
   let starting = $state(false);
@@ -82,11 +104,47 @@
   const finished = $derived(phase === "finished");
   const failed = $derived(phase === "failed" || failure !== null);
 
+  /**
+   * The number the panel puts in front of a person.
+   *
+   * The corpus once it is known, and the run's own count until then. The two
+   * are different halves and `CONTEXT.md` names them: a *Mirror* count is a
+   * corpus, *Upserted* is what one run wrote, and *"a run that writes nothing
+   * over a full mirror upserted zero"*. While the bar is moving, the run's
+   * count is the only number that exists and it is the honest one — it is
+   * saying how far this run has got. The sentence at the end is about the
+   * mirror, and it has to be true whichever run this wizard ended up watching:
+   * adding a source wakes the scheduler, so the run that did the mirroring may
+   * be one this wizard only joined at its ending.
+   */
+  const mirrored = $derived(corpus ?? items);
+
+  /**
+   * Read the source's corpus off `SourceSummary.item_count`, which already
+   * carries it and already crosses the bridge.
+   *
+   * Deliberately not widened onto the progress channel: that channel reports
+   * one run's progress, and the corpus is not one run's to report.
+   */
+  async function readCorpus(id: string) {
+    try {
+      const rows = await listSources();
+      corpus = rows.find((row) => row.id === id)?.item_count ?? null;
+    } catch {
+      // The sync itself worked; a count that could not be re-read is not
+      // something to put a failure panel over. The reading falls back to what
+      // the run said, which is the only other number there is.
+      corpus = null;
+    }
+  }
+
   async function sync() {
     if (!source || starting) return;
+    const id = source.id;
     starting = true;
     phase = "started";
     items = 0;
+    corpus = null;
     failure = null;
 
     try {
@@ -99,6 +157,12 @@
         phase = message.phase;
         items = message.items;
         elapsed = message.elapsed_ms;
+        if (message.phase === "finished") {
+          // The run is over, so the mirror is whatever it now is — including
+          // when this wizard was handed a run that had already finished and
+          // this ending is the only message it ever received.
+          void readCorpus(id);
+        }
         if (message.phase === "failed") {
           // The message is a line an upstream server wrote, and it is
           // rendered as text. A failed phase with nothing to say still gets a
@@ -107,7 +171,7 @@
           failure = message.message ?? "The sync failed and said nothing about why.";
         }
       };
-      await syncNowWithProgress(source.id, channel);
+      await syncNowWithProgress(id, channel);
     } catch (cause) {
       // A rejection here means the run never started at all — a different
       // failure from one the channel reports, and swallowing it would leave
@@ -124,7 +188,11 @@
     failure = null;
     try {
       const report = await demoLoad();
+      // The fallback, for a corpus that cannot be re-read. `demo_load`
+      // registers *and* syncs the mock source in one call, so for this one path
+      // the two numbers coincide.
       items = report.upserted;
+      await readCorpus(report.source_id);
       phase = "finished";
       // `demo_load` registers the mock source and syncs it in one call, so
       // there is no separate sync step left to walk.
@@ -240,7 +308,7 @@
             <progress max={finished ? 1 : undefined} value={finished ? 1 : undefined}></progress>
             <p class="reading">
               <b>{failed ? "failed" : (phase ?? "starting")}</b>
-              · {items} items · {(elapsed / 1000).toFixed(1)} s
+              · {mirrored} items · {(elapsed / 1000).toFixed(1)} s
             </p>
           </div>
 
@@ -264,7 +332,7 @@
         {/if}
       {:else}
         <p class="lead">
-          knobas mirrored <b>{items}</b> items. Press <kbd>⌘K</kbd> to search everything you just
+          knobas mirrored <b>{mirrored}</b> items. Press <kbd>⌘K</kbd> to search everything you just
           synced.
         </p>
         <div class="acts">
