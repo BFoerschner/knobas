@@ -95,9 +95,22 @@ async fn a_queued_write_survives_a_restart() {
     assert_eq!(found.id, queued.id);
     assert_eq!(found.state, WriteState::Pending);
     assert_eq!(found.payload["Comment"]["body"], "on it");
-    // And the snapshot came back with it -- without that, hold detection has
-    // nothing to compare against after a restart.
+    // And the snapshot came back **carrying the target**, not merely matching
+    // whatever was stored. Asserting only that the two agree passes just as
+    // well when nothing is persisted at all -- and a queue that restarts with
+    // an empty snapshot compares against nothing, which is a silent
+    // last-write-wins waiting to happen.
     assert_eq!(found.target_snapshot, queued.target_snapshot);
+    assert_eq!(found.target_snapshot["op"], "comment");
+    assert_eq!(found.target_snapshot["text"], "a payout fails\n\nit does");
+    assert_eq!(
+        found.target_snapshot,
+        wq::project(
+            "comment",
+            wq::target_of(&restarted, &ticket).await.unwrap().as_ref()
+        ),
+        "and it is the target as the mirror still records it"
+    );
 }
 
 /// Story 22: writes against one entity flush in the order they were queued,
