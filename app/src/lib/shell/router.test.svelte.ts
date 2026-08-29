@@ -73,10 +73,10 @@ test("#/entity/<id> is a detail whose kind is not known yet", () => {
   });
 });
 
-/** M2–M4 addresses parse, so the shell can say "arrives in M<n>" rather than
- * rendering a blank screen or, worse, treating `inbox` as a kind. */
+/** M3–M4 addresses parse, so the shell can say "arrives in M<n>" rather than
+ * rendering a blank screen or, worse, treating `standup` as a kind. */
 test("a later milestone's address is known-unknown, not a kind", () => {
-  for (const hash of ["#/inbox", "#/time", "#/standup", "#/assets/board", "#/monitor/db-1"]) {
+  for (const hash of ["#/time", "#/standup", "#/assets/board", "#/monitor/db-1"]) {
     expect(parseHash(hash)).toEqual({ view: "unknown", hash });
   }
 });
@@ -94,6 +94,21 @@ test("the start-work address reaches its own view, carrying the ticket", () => {
   });
   // Bare, it names no ticket, so there is nothing for the stepper to be about.
   expect(parseHash("#/start-work")).toEqual({ view: "unknown", hash: "#/start-work" });
+});
+
+/**
+ * `#/inbox` was one of those until #45 and is a view now.
+ *
+ * The second assertion is the half graduating a word is exactly when somebody
+ * stops thinking about: `inbox` must still never be read as an entity *kind*.
+ * It reads as the view with its tail ignored, which is what `#/sources/x` and
+ * `#/settings/x` do — a head-only view owns its whole address — and the thing
+ * that must not happen is a detail slide-over over an entity called
+ * `mock:PAY-231` of kind `inbox`.
+ */
+test("the inbox has an address, and `inbox` is still not a kind", () => {
+  expect(parseHash("#/inbox")).toEqual({ view: "inbox" });
+  expect(parseHash("#/inbox/mock:PAY-231")).toEqual({ view: "inbox" });
 });
 
 test("round-trips every address it produces", () => {

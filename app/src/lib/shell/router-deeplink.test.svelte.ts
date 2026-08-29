@@ -184,8 +184,10 @@ const ADDRESSES = [
   // percent-encoded in the address and decoded back by the router.
   "#/pr/mock:payout-service%23142",
   "#/entity/mock:c90d11",
-  // M2-M4 addresses, reserved so an open kind never collides with a view.
+  // The inbox is a real view since #45; it is in this list because it has to
+  // render from a cold deep link like every other address.
   "#/inbox",
+  // M3-M4 addresses, reserved so an open kind never collides with a view.
   "#/time",
   "#/standup",
   "#/assets/board",
@@ -217,12 +219,12 @@ test("an address a later milestone owns says which, and offers the way back", as
   // what makes the assertion below about the ladder rather than about
   // whichever address ran last.
   await open("#/ctx/all");
-  location.hash = "#/inbox";
+  location.hash = "#/standup";
   window.dispatchEvent(new HashChangeEvent("hashchange"));
   flushSync();
 
   const text = (target.textContent ?? "").replace(/\s+/g, " ");
-  expect(text).toContain("#/inbox");
+  expect(text).toContain("#/standup");
   expect(text).toMatch(/milestone/i);
   const back = [...target.querySelectorAll<HTMLButtonElement>("button")].find(
     (button) => button.textContent?.trim() === "Back to the room",

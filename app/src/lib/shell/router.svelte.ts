@@ -7,6 +7,7 @@
  * | `#/ctx/<id>`           | a room. M1 ids: `all`, and `src:<source_id>`     |
  * | `#/<kind>/<entity_id>` | the detail slide-over over the current room      |
  * | `#/entity/<entity_id>` | kind-agnostic alias, resolved via `get_entity`   |
+ * | `#/inbox`              | the inbox — one actionable stream (#45)          |
  * | `#/sources`            | the sources view                                 |
  * | `#/settings`           | the settings view                                |
  * | `#/first-run`          | the §14a wizard                                  |
@@ -17,11 +18,12 @@
  * would otherwise collide on one key. `:` is legal in a URI fragment, so the
  * address stays readable.
  *
- * `#/inbox`, `#/time`, `#/standup`, `#/assets/*`, `#/route/*` and `#/monitor/*`
- * are M2–M4. They parse to `unknown` rather than being mistaken for kinds, so
- * the shell can say which milestone they arrive in. `#/start-work/*` was one of
+ * `#/time`, `#/standup`, `#/assets/*`, `#/route/*` and `#/monitor/*` are
+ * M2–M4. They parse to `unknown` rather than being mistaken for kinds, so the
+ * shell can say which milestone they arrive in. `#/start-work/*` was one of
  * them until #44 and is now a view of its own — it stays in `RESERVED` so that
  * an adapter declaring a `start-work` *kind* could never take the address.
+ * `#/inbox` graduated the same way with #45.
  */
 
 export type Route =
@@ -31,6 +33,7 @@ export type Route =
       /** `kind: null` is the `#/entity/<id>` alias: the kind is not known yet. */
       detail: { kind: string | null; entityId: string } | null;
     }
+  | { view: "inbox" }
   | { view: "sources" }
   | { view: "settings" }
   | { view: "first-run" }
@@ -60,6 +63,12 @@ const RESERVED = new Set([
   "settings",
   "first-run",
   "entity",
+  // The inbox is a view now (#45): `#/inbox` reaches `InboxView` rather than
+  // reading "arrives in a later milestone". It stays in this list because a
+  // *kind* called `inbox` must still never claim the address — the same
+  // reasoning the M2-M4 group below is here for, applied to a word that has
+  // stopped waiting.
+  "inbox",
   // M2-M4, reserved so an open kind never collides with a view.
   //
   // `note` was here until #46 and is not any more: notes are a kind now, so
@@ -67,7 +76,6 @@ const RESERVED = new Set([
   // reaches `Detail`. It is the one word in this list that stopped being a
   // *view* and became a kind, which is exactly what this list is arranged
   // around -- so a later tidy-up that adds it back is a note nobody can open.
-  "inbox",
   "time",
   "standup",
   "assets",
@@ -106,6 +114,7 @@ export function parseHash(hash: string, ctx: string = DEFAULT_CTX): Route {
 
   if (head === "") return { view: "room", ctx, detail: null };
   if (head === "ctx") return { view: "room", ctx: tail || DEFAULT_CTX, detail: null };
+  if (head === "inbox") return { view: "inbox" };
   if (head === "sources") return { view: "sources" };
   if (head === "settings") return { view: "settings" };
   if (head === "first-run") return { view: "first-run" };
@@ -149,6 +158,8 @@ function encodeId(id: string): string {
  */
 export function hashFor(route: Route): string {
   switch (route.view) {
+    case "inbox":
+      return "#/inbox";
     case "sources":
       return "#/sources";
     case "settings":

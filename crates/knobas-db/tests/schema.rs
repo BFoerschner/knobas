@@ -1244,3 +1244,56 @@ async fn zero_seven_backfills_every_existing_link_as_confirmed() {
     .await
     .unwrap();
 }
+
+/// The inbox stores one thing and only one: the user's own answer (`0009`).
+///
+/// Two halves, and the second is the one a later reader is likeliest to
+/// "simplify" away. The **row survives** whatever happens to the entity it is
+/// about -- there is deliberately no foreign key, the same decision
+/// `knobas.write_queue` records, and for a sharper reason here: one of the
+/// five categories is keyed on a source rather than on an entity, so the key
+/// is not an entity id at all. And a row that records **no decision** is
+/// refused, so "nothing has been answered about this item" has exactly one
+/// spelling -- no row -- rather than two that every reader would have to
+/// handle.
+#[tokio::test]
+async fn the_inbox_stores_a_decision_or_nothing() {
+    let pool = &knobas_db::test_util::test_pool().await;
+    migrate::run(pool).await.unwrap();
+    let run = uuid::Uuid::new_v4().simple().to_string();
+
+    // A key naming an entity nothing has ever mirrored: the derivation may
+    // produce an item for a source that was purged and re-added, and losing
+    // the snooze would be the decision destroyed by bookkeeping.
+    let key = format!("review_request:nosuchsource-{run}:acme/payouts#144");
+    sqlx::query("insert into knobas.inbox_state (item_key, snoozed_until) values ($1, now())")
+        .bind(&key)
+        .execute(pool)
+        .await
+        .expect("an answer outlives everything it refers to");
+
+    let empty = format!("mention:nosuchsource-{run}:PAY-1");
+    let refused = sqlx::query("insert into knobas.inbox_state (item_key) values ($1)")
+        .bind(&empty)
+        .execute(pool)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        refused
+            .as_database_error()
+            .and_then(|e| e.code())
+            .as_deref(),
+        Some("23514"),
+        "a row that is neither snoozed nor done says nothing its absence does not say"
+    );
+
+    // Marking done clears the snooze and vice versa, so the constraint can
+    // never be satisfied by a row holding two contradictory answers.
+    sqlx::query(
+        "update knobas.inbox_state set snoozed_until = null, done_at = now() where item_key = $1",
+    )
+    .bind(&key)
+    .execute(pool)
+    .await
+    .expect("done is as good an answer as snoozed");
+}
