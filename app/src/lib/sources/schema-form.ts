@@ -137,8 +137,31 @@ export function schemaFields(schema: unknown): SchemaField[] {
   });
 }
 
-function controlFor(property: Record<string, unknown>): Control {
+/**
+ * The type a property is drawn as, with an optional `null` member discarded.
+ *
+ * JSON Schema spells "an optional string" as `{"type": ["string", "null"]}`,
+ * and that is what every shipped adapter uses for a field it may not have —
+ * Jira's `username`, `jql_filter` and `epic_link_field`, Gitea's `username`.
+ * Compared against `"string"` directly, each of them is *not* a string and
+ * falls through to a JSON textarea, so typing a username into one is a parse
+ * error unless the reader knows to quote it.
+ *
+ * The `null` carries no drawing information the form does not already have:
+ * {@link validate} omits an empty optional value rather than sending `""`, so
+ * "unset" is already expressible in every control. A union that is not just
+ * "or null" *is* undrawable and keeps its JSON textarea — `null` alone is the
+ * one member this collapses.
+ */
+function typeOf(property: Record<string, unknown>): unknown {
   const { type } = property;
+  if (!Array.isArray(type)) return type;
+  const named = type.filter((member) => member !== "null");
+  return named.length === 1 ? named[0] : type;
+}
+
+function controlFor(property: Record<string, unknown>): Control {
+  const type = typeOf(property);
 
   if (Array.isArray(property.enum)) {
     const options = property.enum.filter((option): option is string => typeof option === "string");

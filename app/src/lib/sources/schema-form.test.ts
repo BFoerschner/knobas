@@ -53,6 +53,42 @@ describe("schemaFields", () => {
     expect(schemaFields(EMPTY_SCHEMA)).toEqual([]);
   });
 
+  /**
+   * `{"type": ["string", "null"]}` is how every shipped adapter spells an
+   * optional string — Jira's `username`, `jql_filter` and `epic_link_field`,
+   * Gitea's `username`. Read as "not a string", each of them draws a JSON
+   * textarea, so typing a username into it is a parse error unless the reader
+   * knows to quote it. The nullable member is the schema saying "unset is
+   * allowed", which this form already expresses by omitting an empty value.
+   */
+  test("a nullable string is a text field, not a JSON textarea", () => {
+    const f = schemaFields({
+      type: "object",
+      properties: { username: { type: ["string", "null"], default: null, title: "Username" } },
+    })[0];
+    expect(f?.control).toEqual({ kind: "text", default: "" });
+  });
+
+  test("nullability does not change what any other type draws", () => {
+    const fields = schemaFields({
+      type: "object",
+      properties: {
+        page_size: { type: ["integer", "null"], minimum: 1, maximum: 1000, default: 100 },
+        verify_tls: { type: ["boolean", "null"], default: true },
+        owners: { type: ["array", "null"], items: { type: "string" } },
+      },
+    });
+    expect(fields.map((f) => f.control.kind)).toEqual(["number", "toggle", "list"]);
+  });
+
+  test("a type union that is not just 'or null' still degrades to JSON", () => {
+    const f = schemaFields({
+      type: "object",
+      properties: { either: { type: ["string", "integer"] } },
+    })[0];
+    expect(f?.control.kind).toBe("json");
+  });
+
   test("a shape the subset does not cover degrades to a JSON control, never to a crash", () => {
     const f = schemaFields({
       type: "object",
