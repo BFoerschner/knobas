@@ -231,15 +231,44 @@ impl StateFilter {
 }
 
 /// A `/app/rest/builds` locator, restricted to the dimensions the contract
-/// defines: `buildType:`, `state:`, `sinceBuild:`, `defaultFilter:`,
-/// `count:`. Anything else -- `project:`, `affectedProject:` -- is recorded as
-/// a violation by the mock and must not be sent. Each dimension appears **at
-/// most once**; see [`StateFilter`].
+/// defines: `buildType:`, `state:`, `sinceBuild:`, `canceled:`,
+/// `failedToStart:`, `defaultFilter:`, `count:`. Anything else -- `project:`,
+/// `affectedProject:` -- is recorded as a violation by the mock and must not
+/// be sent. Each dimension appears **at most once**; see [`StateFilter`].
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Locator {
     pub build_type_id: Option<String>,
     pub state: Option<StateFilter>,
     pub since_build_id: Option<i64>,
+    /// Send `canceled:any`, which puts canceled builds back into a page
+    /// TeamCity's default filter would have hidden them from (issue #105).
+    ///
+    /// **`any`, not `true`.** `canceled:true` asks for canceled builds and
+    /// *only* those; `any` says the dimension does not narrow at all, so the
+    /// page carries both classes. The default -- the dimension absent -- is
+    /// the server's own filter, which is `canceled:false`.
+    ///
+    /// Deliberately **not** [`Self::default_filter`]`: Some(false)`. Measured
+    /// read-only against JetBrains' public instance on 2026-08-29, over one
+    /// window: `state:finished,canceled:any,count:100` re-opened its own facet
+    /// and nothing else -- one canceled build, no failed-to-start build, no
+    /// personal build -- while `state:finished,defaultFilter:false,count:100`
+    /// answered the same canceled build *plus* a failed-to-start one, and
+    /// disables the personal facet and every facet nobody has enumerated along
+    /// with it. Personal builds are the class this adapter deliberately keeps
+    /// out, so it names the two facets it wants rather than turning the whole
+    /// filter off.
+    pub canceled_any: bool,
+    /// Send `failedToStart:any`, the same widening for the other class the
+    /// default filter hides (issue #105).
+    ///
+    /// It travels with [`Self::canceled_any`] on both item-producing queries
+    /// for one reason: a queued build the in-flight poll already mirrored can
+    /// terminate as failed-to-start, and a build the mirror shows as queued
+    /// that no later query can ever return is a row that says "queued" for
+    /// ever. That is the same staleness the canceled class has, so ruling one
+    /// in and the other out would be incoherent.
+    pub failed_to_start_any: bool,
     /// TeamCity's default filter hides everything that is not a finished,
     /// non-personal, non-canceled build. `Some(false)` turns it off, which is
     /// the only way to ask a question about **every** build regardless of
@@ -268,6 +297,12 @@ impl Locator {
         }
         if let Some(id) = self.since_build_id {
             parts.push(format!("sinceBuild:(id:{id})"));
+        }
+        if self.canceled_any {
+            parts.push("canceled:any".to_owned());
+        }
+        if self.failed_to_start_any {
+            parts.push("failedToStart:any".to_owned());
         }
         if let Some(on) = self.default_filter {
             parts.push(format!("defaultFilter:{on}"));
@@ -482,6 +517,74 @@ mod tests {
             assert!(!rendered.contains("state:running"), "{rendered}");
             assert!(!rendered.contains("state:queued"), "{rendered}");
         }
+        // The two **item-producing** locators, and the one difference issue
+        // #105 makes to them: `canceled:any,failedToStart:any` re-opens the
+        // two facets TeamCity's default filter closes, so a canceled or
+        // failed-to-start build reaches the mirror instead of being hidden
+        // from every query that emits an item.
+        assert_eq!(
+            Locator {
+                build_type_id: Some("Payout_Build".to_owned()),
+                state: Some(StateFilter::Finished),
+                canceled_any: true,
+                failed_to_start_any: true,
+                count: 100,
+                ..Locator::default()
+            }
+            .render(),
+            "buildType:(id:Payout_Build),state:finished,canceled:any,failedToStart:any,count:100"
+        );
+        assert_eq!(
+            Locator {
+                state: Some(StateFilter::Finished),
+                since_build_id: Some(412),
+                canceled_any: true,
+                failed_to_start_any: true,
+                count: 100,
+                ..Locator::default()
+            }
+            .render(),
+            "state:finished,sinceBuild:(id:412),canceled:any,failedToStart:any,count:100"
+        );
+        // `any` and not `true`: the dimension re-**includes** its class
+        // alongside the ordinary builds, where `canceled:true` would return
+        // canceled builds and nothing else. And the two are independent
+        // dimensions, so one without the other renders alone -- which is what
+        // makes a mutation that drops either one visible in the wire string.
+        assert_eq!(
+            Locator {
+                state: Some(StateFilter::Finished),
+                canceled_any: true,
+                count: 100,
+                ..Locator::default()
+            }
+            .render(),
+            "state:finished,canceled:any,count:100"
+        );
+        assert_eq!(
+            Locator {
+                state: Some(StateFilter::Finished),
+                failed_to_start_any: true,
+                count: 100,
+                ..Locator::default()
+            }
+            .render(),
+            "state:finished,failedToStart:any,count:100"
+        );
+        // Neither is sent by default: `Locator::default()` takes the server's
+        // own filter, which is what the in-flight poll wants.
+        for absent in ["canceled:", "failedToStart:"] {
+            assert!(
+                !Locator {
+                    state: Some(StateFilter::InFlight),
+                    count: 100,
+                    ..Locator::default()
+                }
+                .render()
+                .contains(absent),
+                "{absent} must not be sent unless a locator asks for it"
+            );
+        }
         // The run's opening probe: no `state`, the default filter explicitly
         // off, one page. `state` would answer a different question -- see the
         // field's doc -- and the page is read for its maximum id rather than
@@ -502,6 +605,8 @@ mod tests {
             build_type_id: Some("Payout_Build".to_owned()),
             state: Some(StateFilter::InFlight),
             since_build_id: Some(9),
+            canceled_any: true,
+            failed_to_start_any: true,
             default_filter: Some(false),
             count: 100,
         }
@@ -510,6 +615,8 @@ mod tests {
             "buildType:",
             "state:",
             "sinceBuild:",
+            "canceled:",
+            "failedToStart:",
             "defaultFilter:",
             "count:",
         ] {
