@@ -287,9 +287,12 @@ pub async fn target_of(pool: &PgPool, entity: &EntityRef) -> Result<Option<Targe
 /// Hold detection is per-op, and a new `WriteOp` variant that reaches this
 /// module without an entry here would silently get the conservative fallback
 /// in [`project`] -- correct, but not *stated*, which is what issue #42 asks
-/// for. `knobas-sync`'s `every_write_op_has_a_stated_projection` walks
-/// `WriteOp` against this list, so adding a variant without deciding what
-/// changes it fails a test rather than passing quietly.
+/// for. `knobas-sync`'s `every_write_op_has_a_stated_projection` matches on
+/// `WriteOp` with no wildcard arm, so growing the enum stops that test
+/// compiling until someone edits it -- and its message says what to decide.
+/// The compiler puts the decision in front of the person growing the enum; it
+/// is ADR-0006's review of that growth that must insist the new arm arrives
+/// with a probe and a stated projection rather than a bare arm.
 ///
 /// It lives here rather than beside `WriteOp` because `knobas-source` depends
 /// on this crate, not the other way round.

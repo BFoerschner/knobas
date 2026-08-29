@@ -484,7 +484,16 @@ async fn waited(
     detail: &str,
 ) -> Result<(), FlushError> {
     if let Some(waiting) = store::wait(&deps.pool, write.id, reason, Some(detail)).await? {
-        announce(deps, "waiting", &waiting).await;
+        // The row always records the attempt (`attempted_at`, `attempts`,
+        // `detail`); the activity stream gets a line only when the *reason* is
+        // news. Story 20 promises a line per change, and the scheduler retries
+        // every tick, so announcing each attempt would bury the day's record
+        // under hundreds of identical lines an hour while a laptop is offline.
+        // `write` is the row before this attempt, so a first failure (no
+        // reason yet) and a change of fault both still announce.
+        if write.wait_reason != Some(reason) {
+            announce(deps, "waiting", &waiting).await;
+        }
     }
     Ok(())
 }

@@ -415,9 +415,12 @@ pub async fn reindex_fts<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<
 // frozen, and the queue exists because a *source* cannot accept a write. Its
 // reads and its three user decisions belong beside the source's own commands.
 //
-// Every body stays three lines, like the rest of this file: the store is
+// Every body forwards, like the rest of this file: the store is
 // `knobas_core::write_queue` and the flush loop is `knobas_sync::write_queue`,
-// both of which have their own batteries. Nothing is decided here.
+// both of which have their own batteries. The one real decision -- what an
+// amendment may change -- lives in `crate::sources::write_queue`, where a test
+// can reach it; the `Option -> conflict` mappings below only translate
+// "nothing matched" into the caller's vocabulary.
 
 /// Every write knobas still owes a source, newest first.
 ///
@@ -532,7 +535,8 @@ pub async fn apply_held_write<R: tauri::Runtime>(
 ///
 /// # Errors
 /// `invalid` if the payload is not a write op, or names a different op or
-/// target; `conflict` if the write has already settled.
+/// target; `not_found` if no write carries `id`; `conflict` if the write has
+/// already settled.
 #[tauri::command]
 pub async fn amend_write<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,

@@ -59,9 +59,9 @@ const BATTERY: &str = "knobas-source/src/contract.rs";
 ///
 /// The queue's own callers, in other words -- the opposite of a bypass. They
 /// are exempt from the "may not name `WriteOp`" rule and **not** from the rule
-/// underneath it: an entry here may not contain a `.write(` call of any kind,
-/// so an exemption granted for constructing an op cannot later carry a
-/// dispatch of one.
+/// underneath it: an entry here may not contain a `.write(` or `::write(`
+/// call of any kind, so an exemption granted for constructing an op cannot
+/// later carry a dispatch of one.
 ///
 /// Growing this list is allowed; doing it without noticing is not. Each entry
 /// is a decision a reviewer sees in a diff, which is the same treatment
@@ -74,9 +74,11 @@ const HANDS_TO_THE_QUEUE: &[&str] = &[
     "knobas-app/src/sources/write_queue.rs",
 ];
 
-/// A call spelled on a `Source`. Assembled so this file does not match itself.
+/// A call spelled on a `Source` -- method syntax or UFCS (`Source::write(..)`),
+/// so an exempt file cannot dodge the rule by fully qualifying the call.
+/// Assembled so this file does not match itself.
 fn dispatches_a_write(code: &str) -> bool {
-    code.contains(concat!(".write", "("))
+    code.contains(concat!(".write", "(")) || code.contains(concat!("::write", "("))
 }
 
 /// A file's code, with its comment lines removed.
@@ -224,6 +226,14 @@ fn the_rule_actually_rejects_a_second_call_site() {
     assert!(
         offends(allowed, calls_it, needle),
         "an exempt file that grows a dispatch is still a second write path"
+    );
+    assert!(
+        offends(
+            allowed,
+            "let op: WriteOp = decode()?; Source::write(source.as_ref(), op).await",
+            needle,
+        ),
+        "spelling the dispatch as UFCS does not take it out of the rule"
     );
     assert!(
         !offends(

@@ -25,6 +25,7 @@
  * clock forward over a held write and asserts it is still held.
  */
 import {
+  amendWrite,
   applyHeldWrite,
   discardWrite,
   flushWrites,
@@ -35,7 +36,6 @@ import {
   type WriteOpPayload,
   type WriteState,
 } from "../ipc/sources";
-import { amendWrite } from "../ipc/sources";
 
 /** Nothing owed, and nothing asked yet — the counts before the first read. */
 const NONE: QueueCounts = { pending: 0, held: 0, refused: 0 };
