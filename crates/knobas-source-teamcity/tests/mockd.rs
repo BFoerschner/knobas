@@ -823,3 +823,75 @@ async fn user_password_authentication_reaches_the_server() {
     source.test_connection().await.expect("connected as basic");
     server.assert_no_violations();
 }
+
+/// The wire half of issue #114: `/app/rest/builds` says whether it truncated,
+/// and it says so in `nextHref`.
+///
+/// The adapter ends a walk on that field (`sync::last_page`) rather than on a
+/// page's length, so mockd not serving it was not a cosmetic gap -- it was the
+/// fake teaching the reading the fix removes. Every page mockd answered
+/// carried `nextHref: null`, so *every* short page looked like an exhausted
+/// query and no fixture here could tell the two apart.
+///
+/// Asserted over raw HTTP rather than through a sync, because what is being
+/// pinned is the shape of the response and not what the run does with it; the
+/// run's side is `sync`'s own unit tests, against a fake that can cap.
+///
+/// The three cases are the ones the live server was measured on (2026-08-29):
+/// a `count:` under the number of matches carries the field, a `count:` over
+/// it does not, and -- the one that catches an off-by-one -- a `count:`
+/// *equal* to it still carries it, because a page filled to its limit is not
+/// proof there is nothing after it.
+#[tokio::test]
+async fn a_truncated_build_page_reports_the_next_one_and_an_exhausted_one_does_not() {
+    let server: MockServer = spawn_mock_teamcity().await;
+    let http = reqwest::Client::new();
+    let rows = |page: &serde_json::Value| -> usize { page["build"].as_array().map_or(0, Vec::len) };
+    // `defaultFilter:false`: the run's own opening-probe locator, and the one
+    // that puts every build in the fixture on the page rather than the two
+    // finished ones.
+    let ask = async |count: usize| -> serde_json::Value {
+        let url = format!(
+            "{}/app/rest/builds?locator=defaultFilter:false,count:{count}&fields=count,nextHref,build(id)",
+            server.base_url()
+        );
+        http.get(url)
+            .header("Accept", "application/json")
+            .bearer_auth(knobas_mockd::TEAMCITY_TOKEN)
+            .send()
+            .await
+            .expect("mockd answers")
+            .json()
+            .await
+            .expect("a JSON envelope")
+    };
+
+    // How many finished builds there are, from a page nothing could truncate.
+    let all = ask(1_000).await;
+    let total = rows(&all);
+    assert!(total >= 2, "the fixture needs more than one build: {total}");
+    assert!(
+        all["nextHref"].is_null(),
+        "a page wider than the query has nothing after it: {all}"
+    );
+
+    let short = ask(total - 1).await;
+    assert_eq!(rows(&short), total - 1);
+    assert!(
+        short["nextHref"]
+            .as_str()
+            .is_some_and(|h| h.contains("start:")),
+        "a truncated page has to say so, and say where the rest starts: {short}"
+    );
+
+    // Exactly the number of matches: still truncated as far as the server can
+    // tell, because a full page is not proof there is no page after it.
+    let exact = ask(total).await;
+    assert_eq!(rows(&exact), total);
+    assert!(
+        !exact["nextHref"].is_null(),
+        "a page filled to its limit is not an exhausted query: {exact}"
+    );
+
+    server.assert_no_violations();
+}

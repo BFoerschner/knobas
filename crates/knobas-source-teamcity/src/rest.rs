@@ -54,13 +54,13 @@ pub(crate) const BUILD_ID_FIELDS: &str = "id";
 /// real TeamCity answers a hyperlink stub (`id`, `href`) and mockd answers 400
 /// -- the parameter is mandatory on the collections.
 pub(crate) const BUILD_TYPE_FIELDS: &str =
-    "count,buildType(id,name,projectId,projectName,description,webUrl)";
+    "count,nextHref,buildType(id,name,projectId,projectName,description,webUrl)";
 
 /// What `/app/rest/builds` is asked for. The nested `buildType(...)` is what
 /// makes client-side project scoping possible: the locator grammar has no
 /// project dimension.
 pub(crate) const BUILD_FIELDS: &str = concat!(
-    "count,build(id,number,buildTypeId,state,status,statusText,branchName,webUrl,",
+    "count,nextHref,build(id,number,buildTypeId,state,status,statusText,branchName,webUrl,",
     "queuedDate,startDate,finishDate,",
     "buildType(id,name,projectId,projectName,webUrl),",
     "running-info(percentageComplete,currentStageText),",
@@ -73,6 +73,39 @@ pub(crate) const BUILD_FIELDS: &str = concat!(
 pub(crate) struct ListEnvelope {
     #[serde(default, rename = "build", alias = "buildType")]
     pub items: Vec<serde_json::Value>,
+    /// **The server's own statement that this page is not the whole answer**,
+    /// and the one thing in the response that says so (issue #114).
+    ///
+    /// TeamCity serves it exactly when the collection has more entries than
+    /// the page it just answered with, computed from the page it actually
+    /// produced rather than from the `count:` the request asked for -- so a
+    /// server that serves fewer rows than were asked for still says there is
+    /// more. Measured read-only against JetBrains' public instance
+    /// (2026-08-29): `sinceBuild` over 42 matches answered `count:41` and
+    /// `count:42` with a `nextHref`, and `count:43` with none. That is the
+    /// signal [`sync::all_of`](crate::sync) ends a walk on; a short page alone
+    /// is not one. Re-measured 2026-08-29 against a second, bounded query:
+    /// `buildType:(id:AndroidStudioReleasesList),state:finished` over exactly
+    /// 103 matches answered `count:102` and `count:103` with a `nextHref` and
+    /// `count:104` with none.
+    ///
+    /// **One measured exception, which this adapter never meets:** a
+    /// single-value locator resolves to one build and carries no `nextHref`
+    /// however small the `count:` -- `id:6520690,count:1` answers one row and
+    /// no such key. [`Locator`] has no `id` dimension, and the by-id request
+    /// this adapter does send goes to `/app/rest/builds/id:{id}`, which is one
+    /// record rather than a collection and never reaches this envelope.
+    ///
+    /// Absent unless `fields=` asks for it -- `count,build(id)` comes back
+    /// with no `nextHref` key whatever the server has left, which is why
+    /// [`BUILD_FIELDS`] and [`BUILD_TYPE_FIELDS`] both name it and
+    /// `the_field_selectors_cover_everything_the_mapping_reads` pins that.
+    ///
+    /// Kept as the href it is rather than parsed. Nothing here follows it:
+    /// it is an offset walk (`start:`), and `/app/rest/builds` grows at the
+    /// front, so walking one skips rows. Only its presence is read.
+    #[serde(default, rename = "nextHref")]
+    pub next_href: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -554,10 +587,24 @@ mod tests {
         }
         assert!(SERVER_FIELDS.contains("version"));
         assert!(USER_FIELDS.contains("username"));
-        // Every collection selector must ask for `count` too, or the envelope
-        // the parse reads back is not the one the server sent.
+        // Every collection selector must ask for `count` and `nextHref` too,
+        // or the envelope the parse reads back is not the one the server sent.
+        //
+        // `nextHref` is the one with teeth (issue #114). A real TeamCity
+        // serves it **only** when `fields=` names it -- `count,build(id)`
+        // comes back with no `nextHref` key whatever the server still has,
+        // measured on JetBrains' public instance 2026-08-29 -- and it is the
+        // signal `sync::last_page` ends a walk on. Dropping it from a
+        // selector would put every walk back on the page-length assumption
+        // alone, silently, with the suite still green because the fakes
+        // answer the field either way.
         for f in [BUILD_FIELDS, BUILD_TYPE_FIELDS] {
-            assert!(f.starts_with("count,"), "{f:?} must select the envelope");
+            assert!(
+                f.starts_with("count,nextHref,"),
+                "{f:?} must select the envelope, `nextHref` included: without it the server \
+                 never sends one and `sync::last_page` loses the only signal that tells a \
+                 capped page from an exhausted query"
+            );
         }
         // No whitespace: these go into a query string verbatim.
         for f in [BUILD_FIELDS, BUILD_TYPE_FIELDS, SERVER_FIELDS, USER_FIELDS] {

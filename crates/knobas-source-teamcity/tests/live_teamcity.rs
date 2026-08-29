@@ -113,7 +113,7 @@ macro_rules! live_or_skip {
         match live() {
             Some(live) => live,
             None => {
-                eprintln!(
+                println!(
                     "SKIP: KNOBAS_TEAMCITY_URL is not set, so there is no server to certify \
                      against. `cp .env.example .env` -- its default value is a public, \
                      guest-readable TeamCity and needs no token -- then `just teamcity-live`."
@@ -896,4 +896,127 @@ async fn a_rest_error_is_a_json_envelope_and_not_the_plaintext_the_fake_serves()
          reading `Error has occurred during request processing`, which this server sends only \
          to a client that did not ask for JSON. The fake serves that line; the server does not."
     );
+}
+
+/// Issue #114: `nextHref` is the server's own statement that a page is not the
+/// whole answer, and the one `sync::last_page` ends a walk on.
+///
+/// The adapter used to end a walk on `page.len() < count`, which is true only
+/// of a server that serves exactly the `count:` it was asked for. Nothing in
+/// `/app/rest/builds` promises that, and the field that does answer the
+/// question had never been asked for. This is the certification that it
+/// answers it -- and, more importantly, **that it has to be asked for at all**,
+/// which is the half no fake can teach because every fake here serves whatever
+/// field it is asked and mockd's projector drops the rest.
+///
+/// By form, as everything in this file is: the corpus behind the query changes
+/// between requests, so nothing below names an id or a count. What is pinned is
+/// which of the three answers carries the field.
+#[tokio::test]
+#[ignore = "needs a live TeamCity: `just teamcity-live`"]
+async fn a_page_says_for_itself_whether_the_collection_ran_out() {
+    let live = live_or_skip!();
+
+    // A selector that does not name `nextHref` never receives one, however
+    // much the server has left. That is why `BUILD_FIELDS` and
+    // `BUILD_TYPE_FIELDS` name it, and why dropping it from either would put
+    // every walk back on the page-length assumption in silence.
+    let (status, unasked) = live
+        .get("app/rest/builds?locator=defaultFilter:false,count:2&fields=count,build(id)")
+        .await;
+    assert_eq!(status, 200, "{unasked}");
+    assert_eq!(
+        unasked.get("nextHref"),
+        None,
+        "a `fields=` that does not ask for nextHref does not get one, whatever is left to \
+         serve -- so the field is not something an adapter can rely on arriving by default: \
+         {unasked}"
+    );
+
+    let asked = async |locator: &str| -> serde_json::Value {
+        let (status, body) = live
+            .get(&format!(
+                "app/rest/builds?locator={locator}&fields=count,nextHref,build(id)"
+            ))
+            .await;
+        assert_eq!(status, 200, "locator {locator:?} answered {body}");
+        body
+    };
+
+    // A page the server filled: it reports a further one. Two rows out of the
+    // whole build history is a page nothing could exhaust.
+    let filled = asked("defaultFilter:false,count:2").await;
+    assert_eq!(
+        filled["build"].as_array().map(Vec::len),
+        Some(2),
+        "{filled}"
+    );
+    assert!(
+        filled["nextHref"]
+            .as_str()
+            .is_some_and(|h| h.contains("start:")),
+        "a filled page has to say there is more, and where it resumes: {filled}"
+    );
+
+    // The other end: a query the server could not fill reports nothing after
+    // it.
+    //
+    // `id:` is the locator that makes that deterministic on a server whose
+    // corpus moves. It matches at most one build, so `count:100` over it is a
+    // page the server cannot fill however busy it is -- and non-empty, which
+    // an empty page would not be.
+    //
+    // **Not `sinceBuild:` past the id this run witnessed**, which is what
+    // stood here and is the #91 trap wearing a new hat: the opening page is
+    // unordered, so its maximum is an id known to *exist*, never the newest on
+    // the server. Measured on this instance 2026-08-29, that query came back
+    // with a full 100 rows and a `nextHref` -- more than a hundred builds had
+    // finished above the witnessed id -- so the assertion was about JetBrains'
+    // build throughput rather than about `nextHref`.
+    let one = id_of(
+        live.builds("defaultFilter:false,count:1", "id")
+            .await
+            .first()
+            .expect("the server has builds"),
+    );
+    let exhausted = asked(&format!("id:{one},count:100")).await;
+    let rows = exhausted["build"].as_array().map_or(0, Vec::len);
+    assert_eq!(
+        rows, 1,
+        "`id:` names one build, so a page of 100 over it is one the server cannot fill: \
+         {exhausted}"
+    );
+    assert!(
+        exhausted["nextHref"].is_null() || exhausted.get("nextHref").is_none(),
+        "a page the server could not fill is the end of its collection, and must not claim a \
+         successor -- ending a walk there is exactly what `sync::last_page` does: {exhausted}"
+    );
+    println!(
+        "LIVE nextHref: filled page -> {:?}; unfilled page ({rows} rows) -> {:?}; \
+         unasked -> absent",
+        filled["nextHref"].as_str().map(|_| "present"),
+        exhausted.get("nextHref"),
+    );
+
+    // The build-configuration listing, which this adapter asks for **whole**:
+    // no `count:`, and `sync::scope` refuses an answer that reports a further
+    // page. This is the certification that a real TeamCity does not page it.
+    let (status, types) = live
+        .get("app/rest/buildTypes?fields=count,nextHref,buildType(id)")
+        .await;
+    assert_eq!(status, 200, "{types}");
+    let listed = types["buildType"].as_array().map_or(0, Vec::len);
+    assert!(listed > 100, "this server has thousands of them: {listed}");
+    assert_eq!(
+        types["count"].as_u64(),
+        Some(listed as u64),
+        "the envelope counts the page it is: {types}"
+    );
+    assert!(
+        types["nextHref"].is_null() || types.get("nextHref").is_none(),
+        "`/app/rest/buildTypes` with no locator answers the whole listing -- {listed} of them \
+         here -- which is the assumption `sync::scope` is built on and refuses to sync \
+         without: {types}"
+    );
+    println!("LIVE buildTypes: {listed} configurations in one answer, no nextHref");
 }

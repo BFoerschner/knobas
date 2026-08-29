@@ -23,6 +23,36 @@ pub(crate) struct Rec<T> {
     pub rec: T,
 }
 
+/// One answer to a collection request: the records, and whether the server
+/// said there are more of them.
+///
+/// **The second half is the whole point** (issue #114). A page's *length* says
+/// nothing on its own: `count:` is a request, a TeamCity may be configured to
+/// serve fewer entries per list than were asked for, and a loaded one may
+/// answer partially -- so a short page means "the query ran out" *or* "we were
+/// cut off", with nothing in the row count to say which. Reading it as the
+/// first is a run that reports success while its watermark advances past
+/// records it never saw, which is the failure class ADR-0003 and this crate's
+/// `sync` module exist to refuse, and it is the reading #81 removed from the
+/// Gitea adapter's four walks.
+///
+/// [`Page::more`] is TeamCity's own answer to that question
+/// ([`ListEnvelope::next_href`]), so the judgement moves off an assumption
+/// this client makes about the server and onto a statement the server makes
+/// about itself.
+#[derive(Debug, Clone)]
+pub(crate) struct Page<T> {
+    pub items: Vec<Rec<T>>,
+    /// Did the server report a page after this one?
+    ///
+    /// `nextHref`, reduced to the one bit this adapter reads. Nothing follows
+    /// the href: it is an offset walk, and `/app/rest/builds` grows at the
+    /// front, so an offset walked over it skips rows -- `sync::all_of` widens
+    /// `count:` and re-reads from the top instead. Reducing it here is what
+    /// keeps that structural rather than a habit.
+    pub more: bool,
+}
+
 /// What one sync run and one connection test need from TeamCity.
 #[async_trait::async_trait]
 pub(crate) trait Rest: Send + Sync {
@@ -30,8 +60,8 @@ pub(crate) trait Rest: Send + Sync {
     /// Whom this credential authenticates as. `None` when the server serves
     /// the endpoint but names nobody.
     async fn current_user(&self) -> Result<CurrentUser, SourceError>;
-    async fn build_types(&self) -> Result<Vec<Rec<BuildType>>, SourceError>;
-    async fn builds(&self, locator: &Locator) -> Result<Vec<Rec<Build>>, SourceError>;
+    async fn build_types(&self) -> Result<Page<BuildType>, SourceError>;
+    async fn builds(&self, locator: &Locator) -> Result<Page<Build>, SourceError>;
     /// Is there a build with this id on the server?
     ///
     /// `GET /app/rest/builds/id:{id}`, which interfaces §4.2 already lists.
@@ -87,11 +117,13 @@ impl HttpRest {
         self.client.get_json::<serde_json::Value>(path, query).await
     }
 
+    /// One collection request, decoded into its records **and** the server's
+    /// own statement about whether there are more of them ([`Page`]).
     async fn list<T: serde::de::DeserializeOwned>(
         &self,
         path: &str,
         query: &[(&str, &str)],
-    ) -> Result<Vec<Rec<T>>, SourceError> {
+    ) -> Result<Page<T>, SourceError> {
         let body = self.get_raw(path, query).await?;
         let envelope: ListEnvelope = serde_json::from_value(body).map_err(|e| {
             SourceError::protocol(format!(
@@ -99,7 +131,10 @@ impl HttpRest {
                  documents: {e}"
             ))
         })?;
-        envelope
+        // Read before the elements are consumed, and never inferred from their
+        // number: that inference is issue #114.
+        let more = envelope.next_href.is_some();
+        let items = envelope
             .items
             .into_iter()
             .map(|raw| {
@@ -107,7 +142,8 @@ impl HttpRest {
                     .map(|rec| Rec { raw, rec })
                     .map_err(|e| SourceError::protocol(format!("teamcity: {path}: {e}")))
             })
-            .collect()
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Page { items, more })
     }
 
     async fn one<T: serde::de::DeserializeOwned>(
@@ -133,12 +169,12 @@ impl Rest for HttpRest {
             .await
     }
 
-    async fn build_types(&self) -> Result<Vec<Rec<BuildType>>, SourceError> {
+    async fn build_types(&self) -> Result<Page<BuildType>, SourceError> {
         self.list("app/rest/buildTypes", &[("fields", BUILD_TYPE_FIELDS)])
             .await
     }
 
-    async fn builds(&self, locator: &Locator) -> Result<Vec<Rec<Build>>, SourceError> {
+    async fn builds(&self, locator: &Locator) -> Result<Page<Build>, SourceError> {
         let rendered = locator.render();
         self.list(
             "app/rest/builds",
@@ -210,6 +246,78 @@ pub(crate) fn connection_info(server: &Server, user: Option<&CurrentUser>) -> Co
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The seam issue #114's fix hangs on: the server's own `nextHref` reaches
+    /// [`Page::more`], over HTTP, through the decode.
+    ///
+    /// Both halves of the new rule are pinned elsewhere and **neither crosses
+    /// this line**. `sync`'s unit tests hand a [`Page`] to `last_page` from a
+    /// fake that constructs `more` itself, and `tests/mockd.rs` reads
+    /// `nextHref` off the wire with a bare `reqwest`. Between them sit two
+    /// lines -- the `envelope.next_href.is_some()` in [`HttpRest::list`] and
+    /// [`ListEnvelope`]'s `nextHref` rename -- and deleting either puts every
+    /// walk back on the page-length assumption #114 removed, silently, with
+    /// the rest of the suite green. `BUILD_FIELDS` naming the field is pinned
+    /// as a string in `rest.rs`; that the answer to it is *read* is pinned
+    /// here.
+    ///
+    /// Against mockd, which answers the field the way a real TeamCity does:
+    /// present exactly when the page came back filled to the rows served.
+    #[tokio::test]
+    async fn the_next_href_a_server_sends_reaches_page_more() {
+        let mock = knobas_mockd::spawn_mock_teamcity().await;
+        let instance = SourceInstance {
+            id: "teamcity".to_owned(),
+            kind: crate::ADAPTER_KIND.to_owned(),
+            display_name: "Tidewater CI".to_owned(),
+            base_url: mock.base_url(),
+            auth: Some(knobas_source::AuthMethod::Pat),
+            secret: Some(knobas_mockd::TEAMCITY_TOKEN.to_owned()),
+            config: serde_json::json!({}),
+        };
+        let rest = HttpRest::new(&instance, &TeamCityConfig::default())
+            .expect("the adapter builds against mockd");
+        let page = async |count: u32| {
+            rest.builds(&Locator {
+                default_filter: Some(false),
+                count,
+                ..Locator::default()
+            })
+            .await
+            .expect("mockd answers")
+        };
+
+        // Wider than the corpus: the one answer that ends a collection.
+        let all = page(100).await;
+        let total = u32::try_from(all.items.len()).expect("a small fixture");
+        assert!(total >= 2, "the fixture needs more than one build: {total}");
+        assert!(
+            !all.more,
+            "a page the server could not fill is the end of its collection"
+        );
+
+        // Filled *exactly*, which is the case a page's own length cannot tell
+        // from an exhausted query -- and the reason `more` has to be read.
+        let exact = page(total).await;
+        assert_eq!(
+            u32::try_from(exact.items.len()).expect("a small page"),
+            total
+        );
+        assert!(
+            exact.more,
+            "a page filled to its limit is not proof it is the last, and `nextHref` is where \
+             the server says so"
+        );
+
+        let short = page(total - 1).await;
+        assert_eq!(
+            u32::try_from(short.items.len()).expect("a small page"),
+            total - 1
+        );
+        assert!(short.more, "a truncated page reports the rest");
+
+        mock.assert_no_violations();
+    }
 
     /// A 404 is the only answer read as "that build is not on this server",
     /// because `sync::refuse_a_replaced_server` reads that as a replaced

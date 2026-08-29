@@ -275,9 +275,11 @@ knobas-mockd	lib/knobas_mockd	tc_fields::tests::the_grammar_nests
 knobas-mockd	lib/knobas_mockd	tc_state::tests::durations_parse_or_refuse
 knobas-mockd	lib/knobas_mockd	tc_state::tests::percentages_come_from_the_step
 knobas-mockd	lib/knobas_mockd	teamcity::tests::a_false_flag_deselects
+knobas-mockd	lib/knobas_mockd	teamcity::tests::a_page_reports_a_next_one_when_it_came_back_filled
 knobas-mockd	lib/knobas_mockd	teamcity::tests::commas_inside_parentheses_do_not_split
 knobas-mockd	lib/knobas_mockd	teamcity::tests::the_default_locator_is_finished_only
 knobas-mockd	lib/knobas_mockd	teamcity::tests::the_nested_state_spelling_parses_and_the_repeated_one_does_not
+knobas-mockd	lib/knobas_mockd	teamcity::tests::the_next_page_a_filled_one_names_is_a_locator_this_server_accepts
 knobas-mockd	test/allowlist	a_known_path_with_the_wrong_verb_reports_what_is_allowed
 knobas-mockd	test/allowlist	a_literal_segment_wins_over_a_template_segment
 knobas-mockd	test/allowlist	response_schemas_are_present_for_every_endpoint_mockd_serves
@@ -801,6 +803,7 @@ knobas-source-mock	test/contract	the_tombstoning_mock_passes_the_contract_batter
 knobas-source-mock	test/contract	write_records_the_comment
 knobas-source-teamcity	lib/knobas_source_teamcity	client::tests::a_server_that_names_nobody_still_reports_a_connection
 knobas-source-teamcity	lib/knobas_source_teamcity	client::tests::only_a_404_is_read_as_absence
+knobas-source-teamcity	lib/knobas_source_teamcity	client::tests::the_next_href_a_server_sends_reaches_page_more
 knobas-source-teamcity	lib/knobas_source_teamcity	client::tests::the_server_and_user_records_become_a_connection_report
 knobas-source-teamcity	lib/knobas_source_teamcity	config::tests::an_empty_config_is_all_defaults
 knobas-source-teamcity	lib/knobas_source_teamcity	config::tests::an_unknown_key_is_rejected
@@ -864,9 +867,13 @@ knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_full_page_is_wi
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_full_sync_emits_every_configuration_and_its_builds
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_newly_finished_build_is_emitted_and_advances_the_watermark
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_page_whose_row_0_is_not_its_max_does_not_deadlock_the_source
+knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_paged_build_configuration_listing_is_refused_rather_than_narrowing_the_scope
+knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_query_that_exactly_fills_a_server_s_ceiling_is_refused_though_it_fitted
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_run_whose_pages_reach_the_watermark_asks_nothing_by_id
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_running_build_is_re_emitted_without_moving_the_cursor
+knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_server_that_never_reports_a_next_page_is_still_walked_to_the_end
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_server_with_a_single_build_syncs
+knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_short_page_from_a_capping_server_is_not_read_as_the_end_of_the_query
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_sink_failure_aborts_the_run
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_watermark_the_pages_did_not_show_is_confirmed_by_id_and_the_run_proceeds
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_watermark_whose_build_is_gone_is_refused_as_a_replaced_server
@@ -887,6 +894,7 @@ knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::the_mid_run_clock
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::the_scope_narrows_by_configuration_and_by_project
 knobas-source-teamcity	test/live_teamcity	a_build_answers_by_id_and_an_id_no_build_has_is_a_404
 knobas-source-teamcity	test/live_teamcity	a_canceled_build_is_status_unknown_and_the_adapter_s_locator_hides_it
+knobas-source-teamcity	test/live_teamcity	a_page_says_for_itself_whether_the_collection_ran_out
 knobas-source-teamcity	test/live_teamcity	a_rest_error_is_a_json_envelope_and_not_the_plaintext_the_fake_serves
 knobas-source-teamcity	test/live_teamcity	a_scoped_full_sync_lands_under_the_documented_key_forms
 knobas-source-teamcity	test/live_teamcity	a_watermark_at_the_top_of_a_page_does_not_wedge_the_next_run
@@ -907,6 +915,7 @@ knobas-source-teamcity	test/mockd	a_running_build_is_re_polled_without_moving_th
 knobas-source-teamcity	test/mockd	a_second_instance_namespaces_its_items_to_itself
 knobas-source-teamcity	test/mockd	a_server_error_is_a_protocol_failure
 knobas-source-teamcity	test/mockd	a_server_that_does_not_answer_is_unreachable
+knobas-source-teamcity	test/mockd	a_truncated_build_page_reports_the_next_one_and_an_exhausted_one_does_not
 knobas-source-teamcity	test/mockd	a_watermark_no_build_answers_to_is_refused_over_the_wire
 knobas-source-teamcity	test/mockd	passes_the_contract_battery
 knobas-source-teamcity	test/mockd	test_connection_reports_the_server_version_and_the_account
