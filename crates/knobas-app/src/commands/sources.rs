@@ -149,7 +149,7 @@ pub async fn delete_source<R: tauri::Runtime>(
     purge_items: bool,
 ) -> Result<(), IpcError> {
     let state = crate::sources::state(&app)?;
-    let purge = if purge_items { Purge::Items } else { Purge::Keep };
+    let purge = Purge::from(purge_items);
     crud::delete(&state.pool, &state.secrets, &id, purge_items)
         .await
         .map_err(|error| to_ipc(&error, Some(&id)))?;
@@ -510,9 +510,9 @@ mod tests {
              for ever (#127)"
         );
         assert!(
-            body.contains("purge_items { Purge::Items }"),
-            "...and the intent has to be *this* command's `purge_items`, not a \
-             constant that happens to type-check"
+            body.contains("Purge::from(purge_items)"),
+            "...and the intent has to be derived from *this* command's \
+             `purge_items`, not a constant that happens to type-check"
         );
     }
 

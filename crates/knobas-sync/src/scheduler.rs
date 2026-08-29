@@ -718,6 +718,20 @@ pub enum Purge {
     Keep,
 }
 
+impl From<bool> for Purge {
+    /// From `delete_source`'s own `purge_items` flag, and **derived rather than
+    /// passed alongside it**: the delete and the sweep that finishes it have to
+    /// mean the same thing, and a second `if` at the call site is where they
+    /// stop doing so. Same reasoning as `RunMode::from(SyncTrigger)`.
+    fn from(purge_items: bool) -> Purge {
+        if purge_items {
+            Purge::Items
+        } else {
+            Purge::Keep
+        }
+    }
+}
+
 /// Why a trigger did not start a run.
 #[derive(Debug, thiserror::Error)]
 pub enum TriggerError {
@@ -1056,7 +1070,12 @@ impl Scheduler {
     /// same shape the new source writes, and the new source's next full sync
     /// reconciles them.
     pub async fn source_added(&self, source_id: &str) {
-        self.inner.claims.lock().await.pending_purges.remove(source_id);
+        self.inner
+            .claims
+            .lock()
+            .await
+            .pending_purges
+            .remove(source_id);
     }
 
     /// Look for due sources now rather than at the next tick.
