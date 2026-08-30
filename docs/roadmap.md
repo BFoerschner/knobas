@@ -15,6 +15,7 @@ Björn's stated pain: **bad source-system search (JQL/Confluence) and credential
 That build is read-only toward the sources, has no links UI, no timer, no assets — and is already worth opening every morning. (Since no real Jira/Confluence/TeamCity instance is available during development, every milestone is developed and accepted against the local test environment — §3 — and "start using it daily" begins at the deferred real-system gate, the day real credentials exist.) Everything after M1 makes knobas *knobas* rather than a fast index:
 
 - **M2** is the identity release (links, suggestions, write-back, start-work, inbox).
+- **M2.5** delivers the mini board (the Tickets tile's status-grouped rendering, plus a status select in the ticket detail).
 - **M3** makes it the whole workday (time, standup, Confluence).
 - **M4** adds the estate (assets, monitoring, Flowrun, export/import).
 
@@ -55,6 +56,14 @@ A/B/C develop against the shared contract battery + `knobas-mockd` run **in-proc
 Links UI everywhere (panels, *Link to…*, Tab action chains, `[[refs]]`) over the one link table · suggestion engine (keys in commits/branches/build params/page text, FTS similarity, native source links; reasons; dismissals persisted) + room tray · write-back: Jira status/comment/create, Gitea branch/PR/comment/approve, TeamCity trigger/re-run · write queue with conflict UI (re-read before flush, ask with diff) · **start-work flow** + reverse (PR merged → In Review) · inbox v1 (mentions, review requests, failed builds, assignments, credential expiry; actions; snooze with date) · notes (markdown, `[[…]]` chips, backlinks) · contexts complete (promote ticket, ad-hoc, 1-hop membership, per-context inbox filter) · scheduled **backup export** (`pg_dump` of `knobas`).
 
 **Exit criteria:** ticket→branch→PR round-trip against the test environment (real-container Gitea; mockd Jira transitions); inbox populated and actionable end-to-end; links/suggestions working over the synced corpus; a nightly backup archive exists.
+
+### M2.5 — The mini board (serial, one stream; added 2026-08-30)
+
+The Tickets tile becomes the **mini board** the design doc promised (§2 Shell: "Tickets (mini board)"): status columns over the context's live ticket items, each column headed by its status name and count, cards showing key, priority, and title, clicking through to the ticket detail — plus a status select in the detail slide-over, enqueued as a transition through the existing write queue (optimistic; the source refuses illegal moves by name and the refusal surfaces in the pending/held-write UI). One additive IPC read command is the milestone's only frozen-surface touch (§10.8 entry). Vocabulary per ADR-0009: *mini board*, "board" never unqualified.
+
+**Gate:** opens only at M2 exit (Björn's gate); closes before M3 starts. Nothing in it is `ready-for-agent` before then.
+
+**Exit criteria (against the test environment):** the tile renders the mini board from the granted read, with the empty state; a status move round-trips through the write queue and an illegal move surfaces in the conflict UI; the paperwork is merged (design-doc addendum, this roadmap insertion, ADR-0009, the §10.8 entry). Spec: issue #175.
 
 ### M3 — Time & the daily flow (3–4 streams)
 
@@ -126,4 +135,4 @@ Moved to `docs/agents/working-model.md` (2026-08-28): the PR loop, concurrency l
 
 ## 6. Where task-level planning lives now
 
-The superpowers plan files were retired 2026-08-28 (mattpocock-skills flow only: grilling → spec → tickets). Task tracking is GitHub Issues, milestone **M2**. The executed M0/M1 plans and the M1 carry-over ledger remain readable in git history: `git show 736ac1f:docs/superpowers/plans/<file>`.
+The superpowers plan files were retired 2026-08-28 (mattpocock-skills flow only: grilling → spec → tickets). Task tracking is GitHub Issues, milestone **M2**, then **M2.5**. The executed M0/M1 plans and the M1 carry-over ledger remain readable in git history: `git show 736ac1f:docs/superpowers/plans/<file>`.
