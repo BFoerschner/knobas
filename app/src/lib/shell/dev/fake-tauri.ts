@@ -221,6 +221,11 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
         adapter_kind: String(input["adapter_kind"] ?? "mock"),
         display_name: String(input["display_name"] ?? "New source"),
         base_url: String(input["base_url"] ?? ""),
+        // Echoed, not inherited from the spread fixture: the form submits an
+        // `auth_kind` and the row it draws afterwards has to be the source the
+        // person just described, or the QA harness disagrees with itself one
+        // render apart.
+        auth_kind: input["auth_kind"] ?? null,
         item_count: 0,
         last_run: null,
       };
@@ -548,9 +553,9 @@ const KIND_INFO = [
 
 /** The three sources the sources view draws. */
 const FIXTURE_SOURCES = [
-  fixtureSource("mock", "mock", "Tidewater (mock)", "https://mock.tidewater.example", "ok", 21, 90),
+  fixtureSource("mock", "mock", "Tidewater (mock)", "https://mock.tidewater.example", "ok", 21, 90, null),
   {
-    ...fixtureSource("gitea", "gitea", "Tidewater Gitea", "https://git.tidewater.example", "unauthorized", 48, 91),
+    ...fixtureSource("gitea", "gitea", "Tidewater Gitea", "https://git.tidewater.example", "unauthorized", 48, 91, "Pat"),
     health: {
       source_id: "gitea",
       state: "unauthorized",
@@ -561,7 +566,7 @@ const FIXTURE_SOURCES = [
     next_run_at: null,
   },
   {
-    ...fixtureSource("jira", "jira", "Tidewater Jira", "https://jira.tidewater.example", "ok", 213, 92),
+    ...fixtureSource("jira", "jira", "Tidewater Jira", "https://jira.tidewater.example", "ok", 213, 92, "UserPassword"),
     health: {
       source_id: "jira",
       state: "ok",
@@ -597,6 +602,13 @@ function fixtureSource(
   state: string,
   itemCount: number,
   runId: number,
+  /**
+   * `null` is a source that needs no credential, which is the compiled-in mock
+   * and nothing else here. Spelled per fixture rather than defaulted, because a
+   * default would put one word in the credential column of every row and the
+   * column exists to tell them apart.
+   */
+  authKind: string | null,
 ) {
   return {
     id,
@@ -606,6 +618,7 @@ function fixtureSource(
     enabled: true,
     sync_interval_secs: 900,
     config: {},
+    auth_kind: authKind,
     health: {
       source_id: id,
       state,

@@ -189,6 +189,23 @@ pub struct SourceSummary {
     pub last_run: Option<knobas_sync::run_log::SyncRunRow>,
     pub next_run_at: Option<chrono::DateTime<chrono::Utc>>,
     pub item_count: i64,
+    /// Which kind of credential this source authenticates with, or `None`
+    /// when it needs none.
+    ///
+    /// The **same union** as [`NewSource::auth_kind`] and
+    /// [`SourceDraft::auth_kind`], widened by `None` rather than spelled a
+    /// second way: every source the Add-source form can create has an
+    /// `AuthMethod` by construction, but a *stored* row need not -- the
+    /// compiled-in mock reaches nothing and stores `auth_kind = 'none'`. That
+    /// is what `None` is here, and it is also what an `auth_kind` column
+    /// written by a newer knobas reads as, because
+    /// [`AuthKind::from_db`](knobas_sync::config::AuthKind::from_db) refuses to
+    /// guess. Both say the same thing to the sources view: there is no
+    /// credential kind to name.
+    ///
+    /// Carries no secret and cannot: it is the *kind*, and the value itself
+    /// lives in the OS keychain with no command that reads it back (§14).
+    pub auth_kind: Option<knobas_source::AuthMethod>,
     /// From the adapter's descriptor template, so the sources view labels a
     /// source's kinds without a hardcoded table (§3a).
     pub kinds: Vec<knobas_source::KindInfo>,

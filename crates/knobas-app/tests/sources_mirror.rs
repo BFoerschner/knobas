@@ -63,9 +63,9 @@ fn the_auth_state_union_matches_the_rust_enum() {
     );
 }
 
-#[test]
-fn the_source_summary_shape_matches_its_typescript_mirror() {
-    let summary = knobas_app::sources::SourceSummary {
+/// One filled-in summary, so the two tests below vary one field and not twelve.
+fn summary_fixture() -> knobas_app::sources::SourceSummary {
+    knobas_app::sources::SourceSummary {
         id: "jira".to_owned(),
         adapter_kind: "jira".to_owned(),
         display_name: "Tidewater Jira".to_owned(),
@@ -77,16 +77,22 @@ fn the_source_summary_shape_matches_its_typescript_mirror() {
         last_run: None,
         next_run_at: Some(chrono::Utc::now()),
         item_count: 12,
+        auth_kind: Some(knobas_source::AuthMethod::Pat),
         kinds: knobas_source::SourceDescriptor {
             ..knobas_source_mock::descriptor_template()
         }
         .entity_kinds,
-    };
+    }
+}
+
+#[test]
+fn the_source_summary_shape_matches_its_typescript_mirror() {
     assert_shape(
         "SourceSummary",
-        &serde_json::to_value(&summary).unwrap(),
+        &serde_json::to_value(summary_fixture()).unwrap(),
         &[
             "adapter_kind",
+            "auth_kind",
             "base_url",
             "config",
             "display_name",
@@ -99,6 +105,38 @@ fn the_source_summary_shape_matches_its_typescript_mirror() {
             "next_run_at",
             "sync_interval_secs",
         ],
+    );
+}
+
+/// `auth_kind` carries the **same spelling** as the two input DTOs' field of
+/// that name, and `null` where they cannot go.
+///
+/// `NewSource.auth_kind` and `SourceDraft.auth_kind` are a plain `AuthMethod`
+/// ("Pat"), because every source the Add-source form can create authenticates.
+/// A *stored* source need not -- the compiled-in mock reaches nothing -- so the
+/// summary's field is the same union widened by `null`, and not a fifth
+/// spelling of the same idea. A `Some` that serialized as `{"Method":"Pat"}`
+/// would still pass the shape test above, which only reads keys.
+#[test]
+fn the_summary_auth_kind_is_the_same_union_as_the_input_dtos() {
+    let wire = |kind| {
+        serde_json::to_value(knobas_app::sources::SourceSummary {
+            auth_kind: kind,
+            ..summary_fixture()
+        })
+        .unwrap()["auth_kind"]
+            .clone()
+    };
+    assert_eq!(
+        wire(Some(knobas_source::AuthMethod::Pat)),
+        serde_json::json!("Pat"),
+        "the summary must spell an auth method the way `NewSource` does"
+    );
+    assert_eq!(
+        wire(None),
+        serde_json::Value::Null,
+        "a source that needs no credential must say so as `null`, not as a word \
+         the `AuthMethod` union does not contain"
     );
 }
 
@@ -229,25 +267,65 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
     );
 }
 
-/// Every `AuthMethod` the mirror's union has to name.
+/// Every `AuthMethod` the mirror's union has to name, and no others.
 ///
 /// The *serialized* spelling, not the Rust identifier: `AuthMethod` is
 /// PascalCase on the wire while every other enum here is snake_case, and a
 /// mirror that guessed wrong would reject a saved source's auth method.
+///
+/// **Set equality against the declared union, over a list the compiler keeps
+/// honest.** This was a `contains` walk over a hand-written list of four, which
+/// is the shape that goes stale: a variant added to `AuthMethod` would simply
+/// not be in the list, and both suites would stay green while the sources view's
+/// `METHOD_WORD` -- a `Record<AuthMethod, string>` since #74 -- rendered the
+/// literal `undefined` at the reader. That is the drift #27 round 2 recorded and
+/// #37 asked to close, arriving through the first surface that makes this union
+/// drive a display table.
+///
+/// `AuthMethod` lives in `crates/knobas-source/src/**`, which §10.8 freezes, so
+/// it has no generated `ALL` to walk the way `AuthState` does. [`every_method`]
+/// gets the same guarantee from the type system instead: its `match` has no
+/// wildcard arm, so a fifth variant stops this file compiling until it has a
+/// spelling here -- and then `declared_union` fails until the mirror has one
+/// too, and only then does `svelte-check` demand the word `METHOD_WORD` renders.
 #[test]
 fn the_auth_methods_match_their_typescript_mirror() {
-    for method in [
-        knobas_source::AuthMethod::UserPassword,
-        knobas_source::AuthMethod::Pat,
-        knobas_source::AuthMethod::ApiToken,
-        knobas_source::AuthMethod::OAuth,
-    ] {
-        let wire = serde_json::to_string(&method).unwrap();
-        assert!(
-            MIRROR.contains(&wire),
-            "AuthMethod {wire} is missing from app/src/lib/ipc/sources.ts"
-        );
+    let mut wire: Vec<String> = every_method()
+        .iter()
+        .map(|method| {
+            serde_json::to_value(method)
+                .unwrap()
+                .as_str()
+                .expect("an AuthMethod serializes to a plain string")
+                .to_owned()
+        })
+        .collect();
+    wire.sort();
+    let mut declared = knobas_sync::mirror::declared_union(MIRROR, "AuthMethod");
+    declared.sort();
+    assert_eq!(
+        wire, declared,
+        "app/src/lib/ipc/sources.ts's `AuthMethod` union and `knobas_source::AuthMethod` \
+         disagree; the sources view builds a total `Record<AuthMethod, string>` over the \
+         union, so a method missing from it is a credential column that renders `undefined`"
+    );
+}
+
+/// Every `AuthMethod` variant, in a form a fifth variant breaks.
+///
+/// The array is what the test walks; the `match` is what makes the array
+/// trustworthy. Adding a variant makes that match non-exhaustive and this file
+/// stops compiling -- which is the guarantee `AuthState::ALL` gets from
+/// `closed_vocabulary!` and this enum cannot, its crate being frozen.
+fn every_method() -> [knobas_source::AuthMethod; 4] {
+    use knobas_source::AuthMethod::{ApiToken, OAuth, Pat, UserPassword};
+    let all = [UserPassword, Pat, ApiToken, OAuth];
+    for method in all {
+        match method {
+            UserPassword | Pat | ApiToken | OAuth => {}
+        }
     }
+    all
 }
 
 // -- the input side: what the form sends must decode ---------------------------

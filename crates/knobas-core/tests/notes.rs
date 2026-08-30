@@ -455,3 +455,120 @@ async fn a_hand_drawn_link_out_of_a_note_survives_the_body_changing() {
         Some("drawn in the panel")
     );
 }
+
+/// Two notes naming each other share one link row, and the note that still
+/// names the other keeps it when the first drops its ref.
+///
+/// Since #70 one pair carries one active link per relation whichever way round
+/// it was drawn, so `A [[B]]` and `B [[A]]` cannot each have a row: B's save
+/// finds A's row already there and writes nothing. Without the hand-over, A
+/// dropping its ref then withdrew the only row there was, and B's body said
+/// `[[A]]` with **no link behind it** and nothing to notice until B happened to
+/// be saved again -- the exact disagreement between body and links this module
+/// promises cannot happen.
+///
+/// Every step is asserted from `ticket`-free ends deliberately: this is about
+/// two *notes*, because a note is the only thing whose body can name back.
+#[tokio::test]
+async fn a_note_that_still_names_the_other_keeps_the_link_when_the_first_drops_its_ref() {
+    let pool = pool().await;
+    let a = note::create(&pool, "A", "nothing yet", ACTOR)
+        .await
+        .unwrap();
+    let b = note::create(&pool, "B", "nothing yet", ACTOR)
+        .await
+        .unwrap();
+    let a_id = EntityRef::parse(&a.id).unwrap();
+    let b_id = EntityRef::parse(&b.id).unwrap();
+
+    // A names B: A owns the row.
+    note::save(&pool, &a_id, "A", &format!("see [[{}]]", b.id), ACTOR)
+        .await
+        .unwrap()
+        .unwrap();
+    let owned = link::entries_of(&pool, &b_id).await.unwrap();
+    assert_eq!(owned.len(), 1);
+    assert_eq!(owned[0].link.from_id, a.id);
+
+    // B names A back. One edge, so nothing new is written -- and both panels
+    // already draw it, `entries_of` being undirected.
+    note::save(
+        &pool,
+        &b_id,
+        "B",
+        &format!("and back to [[{}]]", a.id),
+        ACTOR,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    for end in [&a_id, &b_id] {
+        assert_eq!(
+            link::entries_of(&pool, end).await.unwrap().len(),
+            1,
+            "a mutually-referencing pair is one edge, not two rows"
+        );
+    }
+
+    // A drops its ref. B still names A, so the row is handed over rather than
+    // withdrawn -- and it is the *same* row, not a replacement.
+    let row_before = owned[0].link.id;
+    note::save(&pool, &a_id, "A", "nothing yet", ACTOR)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let after = link::entries_of(&pool, &a_id).await.unwrap();
+    assert_eq!(
+        after.len(),
+        1,
+        "B's body still says [[A]]; withdrawing the only row would leave it \
+         saying so with no link behind it"
+    );
+    assert_eq!(after[0].link.id, row_before, "handed over, not re-drawn");
+    assert_eq!(
+        after[0].link.from_id, b.id,
+        "the row belongs to the note that still justifies it"
+    );
+    assert_eq!(after[0].link.to_id, a.id);
+
+    // And when B drops it too, there is nothing left to justify the row.
+    note::save(&pool, &b_id, "B", "nothing yet", ACTOR)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        link::entries_of(&pool, &a_id).await.unwrap().is_empty(),
+        "a row nobody names is withdrawn like any other"
+    );
+}
+
+/// The hand-over is scoped to a target that still names *this* note -- it is
+/// not "keep any ref link whose target is a note".
+#[tokio::test]
+async fn a_ref_to_a_note_that_does_not_name_back_is_withdrawn_as_usual() {
+    let pool = pool().await;
+    let a = note::create(&pool, "A", "nothing yet", ACTOR)
+        .await
+        .unwrap();
+    let b = note::create(&pool, "B", "B says nothing about A", ACTOR)
+        .await
+        .unwrap();
+    let a_id = EntityRef::parse(&a.id).unwrap();
+    let b_id = EntityRef::parse(&b.id).unwrap();
+
+    note::save(&pool, &a_id, "A", &format!("see [[{}]]", b.id), ACTOR)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(link::entries_of(&pool, &b_id).await.unwrap().len(), 1);
+
+    note::save(&pool, &a_id, "A", "nothing yet", ACTOR)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        link::entries_of(&pool, &b_id).await.unwrap().is_empty(),
+        "B never named A, so there is nothing to hand the row to"
+    );
+}

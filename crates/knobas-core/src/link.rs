@@ -6,10 +6,18 @@
 //! `deleted_at` is set -- so a link that was made and withdrawn stays visible
 //! to the activity log and to exports.
 //!
-//! Uniqueness is the database's: `link_active_idx`, a partial unique index on
-//! `(from_id, to_id, relation) where deleted_at is null`. Two entities may
-//! therefore carry several links as long as their relations differ, and a
-//! withdrawn link may be recreated.
+//! Uniqueness is the database's: `link_pair_active_idx`, a partial unique index
+//! on `(least(from_id, to_id), greatest(from_id, to_id), relation) where
+//! deleted_at is null`. Two entities may therefore carry several links as long
+//! as their relations differ, and a withdrawn link may be recreated -- but one
+//! *pair* carries one active link per relation, whichever way round it was
+//! drawn, which is the rule [`entries_of`]'s undirected read always assumed and
+//! `link_active_idx` did not state until migration `0011` (#70).
+//!
+//! **Unordered for uniqueness, ordered for storage.** Only the index expression
+//! normalises the pair; `from_id` and `to_id` keep what was written, because
+//! `blocks` and `blocked by` are the same row read from two ends and
+//! canonicalising the stored pair would lose which end is which.
 //!
 //! Since #41 the table holds two populations, told apart by
 //! [`LinkRow::confirmed_at`]: confirmed links, which are the graph, and
@@ -189,7 +197,8 @@ pub struct LinkRow {
 
 /// Link `from` to `to`, returning the row that was written.
 ///
-/// Links are directed as stated but read undirected by [`entries_of`].
+/// Links are directed as stated, and both read ([`entries_of`]) and made unique
+/// undirected.
 ///
 /// The whole row and not just the id, for the reason
 /// [`crate::activity::record`] hands its row back: `id` and `created_at` are
@@ -200,14 +209,15 @@ pub struct LinkRow {
 ///
 /// # Errors
 ///
-/// The uniqueness this rests on is **directed** -- `link_active_idx` is on
-/// `(from_id, to_id, relation)` while [`entries_of`] reads undirected, so the
-/// same pair linked the other way round is not a duplicate here and shows as a
-/// second row on both ends. Known, filed as **#70**; do not read the error
-/// below as "this pair is linked".
+/// The uniqueness this rests on is over the **unordered** pair --
+/// `link_pair_active_idx` (migration `0011`) normalises it with
+/// `least`/`greatest`, matching [`entries_of`]'s undirected read -- so the same
+/// pair linked the other way round *is* a duplicate here, and the error below
+/// means what it says. Ordered for storage all the same: the row keeps the ends
+/// it was written with, or `blocks` could not be told from `blocked by`.
 ///
-/// [`CoreError::Duplicate`] if an active link with the same
-/// `(from, to, relation)` already exists; [`CoreError::EndpointMissing`] if
+/// [`CoreError::Duplicate`] if an active link joins this pair under this
+/// relation, whichever way round it was drawn; [`CoreError::EndpointMissing`] if
 /// either endpoint has no `knobas.entity` row; [`CoreError::Db`] for anything
 /// else.
 pub async fn create(
@@ -219,6 +229,31 @@ pub async fn create(
     note: Option<&str>,
     created_by: &str,
 ) -> Result<LinkRow, CoreError> {
+    create_with(pool, from, to, relation, origin, note, created_by).await
+}
+
+/// [`create`], against an executor the caller chooses.
+///
+/// The one thing this adds is that the write can share a transaction with what
+/// made room for it: [`crate::suggest::resolve_edge`] withdrawing a reversed
+/// proposal is only half a mutation, and a tombstone committed without the link
+/// that replaced it would have thrown away a proposal for nothing.
+///
+/// # Errors
+///
+/// Exactly [`create`]'s.
+pub async fn create_with<'e, E>(
+    executor: E,
+    from: &EntityRef,
+    to: &EntityRef,
+    relation: &str,
+    origin: Origin,
+    note: Option<&str>,
+    created_by: &str,
+) -> Result<LinkRow, CoreError>
+where
+    E: sqlx::PgExecutor<'e>,
+{
     let row = sqlx::query_as::<_, LinkRow>(concat!(
         "insert into knobas.link (from_id, to_id, relation, origin, note, created_by)
          values ($1, $2, $3, $4, $5, $6)
@@ -231,7 +266,7 @@ pub async fn create(
     .bind(origin.as_str())
     .bind(note)
     .bind(created_by)
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await
     // Not a plain `?`: the crate-wide `From<sqlx::Error>` does not classify a
     // foreign-key violation, and an endpoint that has not synced yet would

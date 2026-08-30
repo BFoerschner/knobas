@@ -93,7 +93,7 @@ A source's authentication state as knobas last observed it, surfaced per source 
 ## Links and contexts
 
 **Link**:
-A knobas-owned, typed, bidirectional connection between two entities — one record shape for every pair. Links live locally and are never written to a source.
+A knobas-owned, typed, bidirectional connection between two entities — one record shape for every pair. Bidirectional all the way down: one *pair* carries one active link per relation, whichever way round it was drawn, and the stored direction is what tells `blocks` from `blocked by`. Links live locally and are never written to a source.
 _Avoid_: relation (that is a link's type), reference
 
 **Suggestion**:

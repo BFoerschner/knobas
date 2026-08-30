@@ -531,6 +531,13 @@ const ACTOR: &str = "user";
 pub struct LinkMutation {
     pub link: LinkRow,
     pub activity: ActivityRow,
+    /// The proposal this link displaced, when there was one (#70).
+    ///
+    /// Drawing the *reverse* of a live proposal withdraws it -- see
+    /// [`knobas_core::suggest::resolve_edge`] -- and a proposal leaving the tray
+    /// is a mutation, so it gets its own line rather than disappearing quietly.
+    /// `None` everywhere else, which is every other path in this module.
+    pub superseded: Option<ActivityRow>,
 }
 
 /// Text the user did not type is no text.
@@ -633,37 +640,68 @@ pub async fn create_link_inner(
     }
 
     let relation = relation_of(relation);
-    let link = match knobas_core::link::create(
-        pool,
-        &from,
-        &to,
-        &relation,
+
+    // The pair may already carry a *proposal*: `link_pair_active_idx` spans
+    // proposals and links alike (one active edge per pair per relation, whatever
+    // its state), so knobas suggesting this link is what would refuse it. The
+    // proposal is therefore answered *before* the insert rather than after it
+    // fails -- a unique violation aborts the transaction it happens in, and
+    // there would be nothing left to answer it with.
+    //
+    // One transaction, because `Superseded` is only half a mutation: the
+    // withdrawn proposal and the link that replaced it land together or not at
+    // all.
+    let mut tx = pool.begin().await.map_err(knobas_core::CoreError::from)?;
+    let answered = suggest::resolve_edge(&mut tx, &from, &to, &relation).await?;
+
+    let (link, superseded) = match answered {
+        // Drawing by hand the link knobas proposed is the same act as pressing
+        // *Accept*, and the alternative is telling the user "already linked"
+        // about a pair whose links panel is empty.
+        suggest::Edge::Promoted(link) => (link, None),
+        // The user drew the proposal's reverse, which contradicts its direction.
+        // The user wins: the proposal is withdrawn and the link they drew is
+        // written with the ends they gave it.
+        suggest::Edge::Superseded(proposal) => {
+            let line = record_link_activity_with(&mut tx, "dismissed", &proposal).await?;
+            let link = write_link(&mut tx, &from, &to, &relation, note).await?;
+            (link, Some(line))
+        }
+        // Nothing proposed for this pair. Whatever refuses the write now is a
+        // real link, which is what `conflict` has always meant here.
+        suggest::Edge::Open => (
+            write_link(&mut tx, &from, &to, &relation, note).await?,
+            None,
+        ),
+    };
+
+    let activity = record_link_activity_with(&mut tx, "linked", &link).await?;
+    tx.commit().await.map_err(knobas_core::CoreError::from)?;
+    Ok(LinkMutation {
+        link,
+        activity,
+        superseded,
+    })
+}
+
+/// The hand-drawn link itself, once the tray has been answered.
+async fn write_link(
+    conn: &mut sqlx::PgConnection,
+    from: &EntityRef,
+    to: &EntityRef,
+    relation: &str,
+    note: Option<&str>,
+) -> Result<LinkRow, IpcError> {
+    Ok(knobas_core::link::create_with(
+        conn,
+        from,
+        to,
+        relation,
         Origin::Manual,
         present(note),
         ACTOR,
     )
-    .await
-    {
-        Ok(link) => link,
-        // The pair may already carry a *proposal*: `link_active_idx` spans
-        // proposals and links alike (one active edge per triple, whatever its
-        // state), so knobas suggesting this link is what refused it. Drawing by
-        // hand the link knobas proposed is the same act as pressing *Accept*,
-        // and the alternative is telling the user "already linked" about a pair
-        // whose links panel is empty.
-        Err(knobas_core::CoreError::Duplicate) => {
-            match suggest::accept_edge(pool, &from, &to, &relation).await? {
-                Some(promoted) => promoted,
-                // Nothing to promote: the blocker is a real link, which is what
-                // `conflict` has always meant here.
-                None => return Err(knobas_core::CoreError::Duplicate.into()),
-            }
-        }
-        Err(other) => return Err(other.into()),
-    };
-
-    let activity = record_link_activity(pool, "linked", &link).await?;
-    Ok(LinkMutation { link, activity })
+    .await?)
 }
 
 /// Withdraw a link.
@@ -686,7 +724,11 @@ pub async fn unlink_inner(pool: &PgPool, link_id: &str) -> Result<Option<LinkMut
         return Ok(None);
     };
     let activity = record_link_activity(pool, "unlinked", &link).await?;
-    Ok(Some(LinkMutation { link, activity }))
+    Ok(Some(LinkMutation {
+        link,
+        activity,
+        superseded: None,
+    }))
 }
 
 /// One line, on the end the link was drawn from.
@@ -702,6 +744,20 @@ async fn record_link_activity(
 ) -> Result<ActivityRow, IpcError> {
     let from = EntityRef::parse(&link.from_id).map_err(IpcError::internal)?;
     Ok(knobas_core::activity::record(pool, ACTOR, verb, Some(&from), link_detail(link)).await?)
+}
+
+/// [`record_link_activity`], against an executor the caller chooses, so a line
+/// can be written inside the transaction that made the mutation it describes.
+async fn record_link_activity_with(
+    conn: &mut sqlx::PgConnection,
+    verb: &str,
+    link: &LinkRow,
+) -> Result<ActivityRow, IpcError> {
+    let from = EntityRef::parse(&link.from_id).map_err(IpcError::internal)?;
+    Ok(
+        knobas_core::activity::record_with(conn, ACTOR, verb, Some(&from), link_detail(link))
+            .await?,
+    )
 }
 
 /// Put an activity line on `activity:new`.
@@ -745,6 +801,11 @@ pub async fn create_link<R: tauri::Runtime>(
         note.as_deref(),
     )
     .await?;
+    // The displaced proposal first, so the strip reads in the order the two
+    // things happened rather than in the order this function holds them.
+    if let Some(line) = written.superseded {
+        announce(&app, line);
+    }
     announce(&app, written.activity);
     Ok(written.link)
 }
@@ -1079,7 +1140,11 @@ pub async fn accept_suggestion_inner(
         return Ok(None);
     };
     let activity = record_link_activity(pool, "accepted", &link).await?;
-    Ok(Some(LinkMutation { link, activity }))
+    Ok(Some(LinkMutation {
+        link,
+        activity,
+        superseded: None,
+    }))
 }
 
 /// Dismiss a proposal, and remember it.
@@ -1104,7 +1169,11 @@ pub async fn dismiss_suggestion_inner(
         return Ok(None);
     };
     let activity = record_link_activity(pool, "dismissed", &link).await?;
-    Ok(Some(LinkMutation { link, activity }))
+    Ok(Some(LinkMutation {
+        link,
+        activity,
+        superseded: None,
+    }))
 }
 
 /// A suggestion is addressed by its link id, because it is a link row.

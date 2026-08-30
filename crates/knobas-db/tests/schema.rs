@@ -1437,3 +1437,215 @@ async fn one_unarchived_context_per_anchor() {
             .expect("anchorless rows are outside the index");
     }
 }
+
+/// `link_pair_active_idx` (0011) is the directed rule replaced by an unordered
+/// one: the reverse of an active link is the *same* link, and refused.
+///
+/// The old `link_active_idx` allowed it, which is #70 -- the rule was directed
+/// while `entries_of` reads `from_id = $1 or to_id = $1`, so A->B and B->A both
+/// landed and both panels drew two rows for one relationship. All four of the
+/// new index's properties are exercised, because the migration replaces the one
+/// thing every link write rests on: the reverse is refused, the same pair under
+/// another relation is still its own link, a tombstone still does not block
+/// re-linking either way round, and the superseded index is gone.
+#[tokio::test]
+async fn zero_eleven_makes_the_active_link_rule_unordered() {
+    let pool = &knobas_db::test_util::test_pool().await;
+    migrate::run(pool).await.unwrap();
+
+    let run = uuid::Uuid::new_v4();
+    let from = format!("test:pair-{run}-a");
+    let to = format!("test:pair-{run}-b");
+    for id in [&from, &to] {
+        sqlx::query("insert into knobas.entity (id, kind) values ($1,'ticket')")
+            .bind(id)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    link(pool, &from, &to, "blocks").await.unwrap();
+
+    let reversed = link(pool, &to, &from, "blocks").await.unwrap_err();
+    assert_eq!(
+        reversed
+            .as_database_error()
+            .and_then(|e| e.code())
+            .as_deref(),
+        Some("23505"),
+        "the same pair linked the other way round is the same link, not a second one"
+    );
+
+    // Third index column, unchanged: the pair under another relation is its own
+    // link, from either end (#40 story 15).
+    link(pool, &to, &from, "documents").await.unwrap();
+
+    // Still partial: withdrawing frees the pair, and it frees it *both* ways.
+    //
+    // Keyed by this run's own endpoint, like every other write in this file: the
+    // database is shared by every test in the binary, and an unscoped
+    // `where relation = 'blocks'` tombstones whatever a test running beside this
+    // one just wrote.
+    sqlx::query(
+        "update knobas.link set deleted_at = now() where relation = 'blocks' and from_id = $1",
+    )
+    .bind(&from)
+    .execute(pool)
+    .await
+    .unwrap();
+    link(pool, &to, &from, "blocks")
+        .await
+        .expect("a tombstone must not block re-linking in the other direction");
+
+    // The directed rule is gone rather than left in force beside the new one.
+    let names: Vec<String> = sqlx::query_scalar(
+        "select indexname from pg_indexes
+          where schemaname = 'knobas' and indexname = any($1)",
+    )
+    .bind(vec![
+        "link_active_idx".to_owned(),
+        "link_pair_active_idx".to_owned(),
+    ])
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        names,
+        ["link_pair_active_idx"],
+        "0011 replaces link_active_idx; leaving it would keep the directed rule in force"
+    );
+}
+
+/// 0011 applied by the runner to a database that predates it **and already
+/// holds the rows it forbids** -- which is the case that actually happens,
+/// because the defect shipped.
+///
+/// `create unique index` fails on a table that violates it, `migrate::run` is on
+/// the boot path, and a migration that fails to apply is an app that no longer
+/// opens. So the migration resolves the collisions first, and this is the test
+/// that it does -- on a database wound back the way
+/// [`zero_three_applies_through_the_runner_to_a_database_that_predates_it`]
+/// winds one back, and its own, for the same reason: applying a migration takes
+/// an `ACCESS EXCLUSIVE` lock on `knobas.link`.
+///
+/// **Which row survives is the assertion with teeth.** A confirmed link
+/// outranks a proposal for the same pair, whatever their ages: that is #41's
+/// stranded-proposal symptom, and resolving it the other way would tombstone a
+/// link the user drew by hand in favour of a guess nobody accepted.
+#[tokio::test]
+async fn zero_eleven_resolves_the_reversed_pairs_a_shipped_defect_left_behind() {
+    let shared = knobas_db::test_util::test_pool().await;
+    let name = format!("knobas_0011_{}", uuid::Uuid::new_v4().simple());
+    sqlx::query(sqlx::AssertSqlSafe(format!(r#"create database "{name}""#)))
+        .execute(&shared)
+        .await
+        .unwrap();
+
+    let options = (*shared.connect_options()).clone().database(&name);
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(2)
+        .connect_with(options)
+        .await
+        .unwrap();
+
+    // Wind it back to an installation that predates 0011: the directed index
+    // restored, the unordered one gone, and the runner's record of 0011 with it.
+    migrate::run(&pool).await.unwrap();
+    for statement in [
+        "drop index knobas.link_pair_active_idx",
+        "create unique index link_active_idx on knobas.link (from_id, to_id, relation) \
+         where deleted_at is null",
+        "delete from public._sqlx_migrations where version = 11",
+    ] {
+        sqlx::query(statement).execute(&pool).await.unwrap();
+    }
+
+    for id in ["test:old-a", "test:old-b", "test:old-c", "test:old-d"] {
+        sqlx::query("insert into knobas.entity (id, kind) values ($1,'ticket')")
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    // What such an installation holds. Each row carries its `note` so the
+    // survivor can be named rather than counted.
+    //
+    // The proposal is written *first* and is therefore the older row: the
+    // survivor must still be the confirmed link, which is what proves the sort
+    // is by standing before age rather than by age alone.
+    for (from, to, relation, note, confirmed) in [
+        ("test:old-a", "test:old-b", "blocks", "proposal", false),
+        ("test:old-b", "test:old-a", "blocks", "hand-drawn", true),
+        // A pair with no collision at all: it must come through untouched.
+        ("test:old-c", "test:old-d", "blocks", "lonely", true),
+        // And one where both sides are confirmed, so age decides.
+        ("test:old-a", "test:old-c", "documents", "elder", true),
+        ("test:old-c", "test:old-a", "documents", "younger", true),
+    ] {
+        sqlx::query(
+            "insert into knobas.link
+                 (from_id, to_id, relation, origin, created_by, note,
+                  confirmed_at, rule, rule_class, reason)
+             values ($1, $2, $3, 'manual', 'user', $4,
+                     case when $5 then now() else null end,
+                     case when $5 then null else 'key' end,
+                     case when $5 then null else 'exact_key' end,
+                     case when $5 then null else 'a reason' end)",
+        )
+        .bind(from)
+        .bind(to)
+        .bind(relation)
+        .bind(note)
+        .bind(confirmed)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    // The boot path, on that database.
+    migrate::run(&pool)
+        .await
+        .expect("0011 must apply to a database that already holds reversed pairs");
+
+    let survivors: Vec<String> =
+        sqlx::query_scalar("select note from knobas.link where deleted_at is null order by note")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        survivors,
+        ["elder", "hand-drawn", "lonely"],
+        "the confirmed link must outrank the proposal, the older confirmed row must \
+         outrank the younger, and an uncontested pair must be left alone"
+    );
+
+    // Tombstoned, not deleted: the withdrawal memory is what stops the
+    // detector proposing the loser straight back.
+    let (total,): (i64,) = sqlx::query_as("select count(*) from knobas.link")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(total, 5, "the losers are tombstoned, never deleted");
+
+    // Applied, not merely recorded.
+    let refused = link(&pool, "test:old-d", "test:old-c", "blocks")
+        .await
+        .unwrap_err();
+    assert_eq!(
+        refused
+            .as_database_error()
+            .and_then(|e| e.code())
+            .as_deref(),
+        Some("23505"),
+        "the unordered index must be in force on the migrated database"
+    );
+
+    pool.close().await;
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        r#"drop database "{name}" with (force)"#
+    )))
+    .execute(&shared)
+    .await
+    .unwrap();
+}

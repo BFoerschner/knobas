@@ -731,15 +731,15 @@ async fn a_note_travels_from_the_write_to_the_entity_detail_read() {
 }
 
 /// Linking the same pair under the same relation twice is `conflict`, not a
-/// second row.
+/// second row -- **in either direction** (#70, migration `0011`).
 ///
-/// **In this direction.** The uniqueness rule is directed -- `link_active_idx`
-/// is on `(from_id, to_id, relation)` -- while `entries_of` reads undirected, so
-/// `B -> A` after `A -> B` still succeeds and both panels then show two rows
-/// for one relationship. That is **#70**: pre-existing store behaviour that
-/// #52 wired up, ruled 2026-08-28 to be its own sub-issue rather than this
-/// slice's to fix. So this test proves what it says and not #40's story 14
-/// ("the panel never shows duplicates") in full -- do not read it as that.
+/// The reverse used to succeed: the rule was directed (`link_active_idx` on
+/// `(from_id, to_id, relation)`) while `entries_of` reads undirected, so `B -> A`
+/// after `A -> B` landed and both panels then drew two rows for one
+/// relationship. This is #40's story 14 in full -- "a duplicate link attempt
+/// (same pair, same relation) reported as 'already linked', so that the panel
+/// never shows duplicates" -- and the reversed half is the assertion that was
+/// missing.
 #[tokio::test]
 async fn a_duplicate_pair_and_relation_is_a_conflict() {
     let pool = seeded().await;
@@ -748,24 +748,30 @@ async fn a_duplicate_pair_and_relation_is_a_conflict() {
     create_link_inner(&pool, &from, &to, Some("documents"), None)
         .await
         .unwrap();
-    let again = create_link_inner(&pool, &from, &to, Some("documents"), None)
-        .await
-        .unwrap_err();
-    assert_eq!(
-        again.code,
-        knobas_app::IpcErrorCode::Conflict,
-        "already linked is `conflict`, so the dialog can say so: {again}"
-    );
 
-    // Exactly one row survived the attempt.
-    assert_eq!(
-        links_on(&pool, &from)
+    for (a, b) in [(&from, &to), (&to, &from)] {
+        let again = create_link_inner(&pool, a, b, Some("documents"), None)
             .await
-            .iter()
-            .filter(|entry| entry.link.relation == "documents")
-            .count(),
-        1
-    );
+            .unwrap_err();
+        assert_eq!(
+            again.code,
+            knobas_app::IpcErrorCode::Conflict,
+            "already linked is `conflict`, so the dialog can say so: {again}"
+        );
+    }
+
+    // Exactly one row survived both attempts, and it is on both panels.
+    for end in [&from, &to] {
+        assert_eq!(
+            links_on(&pool, end)
+                .await
+                .iter()
+                .filter(|entry| entry.link.relation == "documents")
+                .count(),
+            1,
+            "the panel for {end} must show one row for one link"
+        );
+    }
 }
 
 /// An endpoint with no mirror row is `not_found` -- the user named an entity

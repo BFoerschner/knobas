@@ -9,15 +9,22 @@
 
   **Nothing here renders a secret.** There is no command that reads one back
   (contract §2.2) and no value on `SourceSummary` that carries one. The
-  credential column shows *state* and, when the server said so, the expiry
-  countdown.
+  credential column shows *state*, the *kind* of credential (`auth_kind`, #74)
+  and, when the server said so, the expiry countdown — three facts about a
+  secret, none of them the secret.
 -->
 <script lang="ts">
   import Monogram from "../shell/Monogram.svelte";
   import { sourceMonogram } from "../shell/monogram";
   import { expiryNote, isActionable } from "../shell/health.svelte";
   import { ago } from "../shell/time";
-  import type { AuthState, CredentialHealth, SourceSummary, SourceSyncStatus } from "../ipc/sources";
+  import type {
+    AuthMethod,
+    AuthState,
+    CredentialHealth,
+    SourceSummary,
+    SourceSyncStatus,
+  } from "../ipc/sources";
 
   let {
     source,
@@ -89,6 +96,34 @@
     unknown: "not checked yet",
   };
 
+  /**
+   * What *kind* of credential this source uses, in the reader's words.
+   *
+   * Total over `AuthMethod`, like `CREDENTIAL_WORD` above — and the chain that
+   * makes that mean something runs backwards from here: a method added to the
+   * Rust enum stops `sources_mirror.rs` compiling (its list has a wildcard-free
+   * `match` behind it), then fails `the_auth_methods_match_their_typescript_mirror`
+   * until the union names it, and only then does `svelte-check` demand a word
+   * for it here. Without the first two links this table would quietly render
+   * `undefined`, which is what the union driving a display table for the first
+   * time made reachable.
+   *
+   * `null` — a source that needs no credential, and equally an `auth_kind`
+   * column the backend could not read — gets its own sentence rather than a
+   * blank line, because a blank line in this column reads as a column that
+   * failed to load.
+   */
+  const METHOD_WORD: Record<AuthMethod, string> = {
+    UserPassword: "user + password",
+    Pat: "personal access token",
+    ApiToken: "API token",
+    OAuth: "OAuth",
+  };
+
+  const method = $derived(
+    source.auth_kind ? METHOD_WORD[source.auth_kind] : "no credential needed",
+  );
+
   const expiry = $derived(expiryNote(credential.secret_expires_at, now));
 
   const lastRun = $derived(source.last_run);
@@ -124,6 +159,7 @@
 
   <span>
     <span class="st">{CREDENTIAL_WORD[credential.state]}</span>
+    <span class="sub">{method}</span>
     {#if expiry}
       <span class="sub {expiry.tone}">{expiry.text}</span>
     {/if}
