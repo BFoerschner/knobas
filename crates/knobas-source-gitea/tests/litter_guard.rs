@@ -24,14 +24,17 @@
 //!   so the witness belongs here, against a stand-in whose state the test
 //!   dictates, where there is no retry to be green on.
 //!
-//! * **The cleanup is bounded, so a wedged server says so.** `Litter::drop`
-//!   waits on a thread that talks HTTP, and `reqwest` carries no default
-//!   timeout, so a container that accepted the connection and then went quiet
-//!   used to stall the run forever -- with nothing on screen, because a `Drop`
-//!   that has not returned has not reported anything either. `just check` is
-//!   the only gate now that CI is disabled, and a gate that hangs is the one
-//!   failure shape a reader cannot act on. [`live_env::CLEANUP_BUDGET`] is the
-//!   bound; the third test here is what proves it reports rather than stalls.
+//! * **A wedged server says so, on both of the paths that talk to it.**
+//!   `reqwest` carries no default timeout, so a container that accepted the
+//!   connection and then went quiet used to stall the run forever -- with
+//!   nothing on screen, because a `Drop` that has not returned has not
+//!   reported anything either. `just check` is the only gate now that CI is
+//!   disabled, and a gate that hangs is the one failure shape a reader cannot
+//!   act on. Two bounds cover it, and each has its witness here:
+//!   [`live_env::REQUEST_BUDGET`] bounds every request, proven where a test
+//!   body first touches the server (issue #170), and
+//!   [`live_env::CLEANUP_BUDGET`] bounds the whole `Drop`-side sequence on
+//!   top of its parts (issue #162).
 //!
 //! Both run in `just check`: no container, no token, no `#[ignore]`.
 //!
@@ -426,9 +429,17 @@ async fn a_guard_clears_what_a_killed_run_left_and_takes_nothing_else_with_it() 
 /// The first answer is what lets `Litter::new` finish: its leftover sweep reads
 /// the branch listing and stops at the first empty page. Every connection after
 /// that is **accepted and held open** -- not refused, which would come back as
-/// an error in milliseconds and prove nothing. This is the shape a container
-/// that has wedged presents to a client, and the only shape that makes
-/// [`Litter`]'s cleanup wait forever: `reqwest` has no default timeout.
+/// an error in milliseconds and prove nothing.
+///
+/// The answered first request used to be load-bearing for more than it is
+/// now: before issue #170 the sweep's path was *unbounded*, so the fake had
+/// to answer it or the witness for the `Drop` bound would itself have hung on
+/// the hole it did not cover. Today that path fails at
+/// [`live_env::REQUEST_BUDGET`] on its own (the test above is the proof),
+/// and answering the first request instead serves **isolation**: it puts the
+/// wedge on the `Drop` side, where the shortened cleanup budget -- well under
+/// the ten-second request budget -- is what fires, so the report being
+/// asserted on is `CLEANUP_BUDGET`'s and not a request timeout's.
 fn a_server_that_answers_once_then_goes_quiet() -> String {
     use std::io::{Read as _, Write as _};
 
@@ -468,6 +479,102 @@ fn a_server_that_answers_once_then_goes_quiet() -> String {
     format!("http://{address}")
 }
 
+/// A server that accepts every connection and never writes a byte back, as
+/// an address to point a guard at.
+///
+/// The shape a wedged container presents to its *first* caller -- unlike
+/// [`a_server_that_answers_once_then_goes_quiet`], which must let
+/// `Litter::new` finish so there is a guard left to drop. Refusing the
+/// connection would not do: that comes back as an error in milliseconds and
+/// proves nothing about a timeout.
+fn a_server_that_never_answers() -> String {
+    use std::io::Read as _;
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a free port");
+    let address = listener.local_addr().expect("the bound address");
+    std::thread::spawn(move || {
+        // Held rather than dropped: closing a connection answers with a
+        // hangup, which is the opposite of the silence this presents. The
+        // request is read out so the client is not blocked on *writing*,
+        // which would be a different (buffer-sized) accident of a stall.
+        let mut quiet = Vec::new();
+        for mut stream in listener.incoming().flatten() {
+            let mut request = Vec::new();
+            let mut byte = [0_u8; 1];
+            while !request.ends_with(b"\r\n\r\n") {
+                match stream.read(&mut byte) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => request.push(byte[0]),
+                }
+            }
+            quiet.push(stream);
+        }
+    });
+    format!("http://{address}")
+}
+
+/// **A test body against a wedged server fails with a message, instead of
+/// stalling** (issue #170).
+///
+/// Issue #162's bound covered exactly one caller: `Drop`. Everything a test
+/// body reaches the container through -- `Litter::new`'s leftover sweep,
+/// `branch_off_main`, every listing helper -- went through a client with no
+/// timeout at all, so a container that accepted the connection and then went
+/// quiet stalled the run before the first assertion, with nothing on screen.
+/// This drives the earliest of those paths, the sweep inside `Litter::new`,
+/// against a server that never answers: one client at one construction site
+/// serves every caller, so bounding the first bounds them all.
+///
+/// The budget is shortened through the same kind of seam the `Drop` witness
+/// uses, so the test costs milliseconds; what is being checked is that the
+/// bound exists and that the failure names what it was waiting for, not how
+/// long the number is.
+#[tokio::test]
+async fn a_test_body_whose_server_stops_answering_fails_rather_than_stalling() {
+    let url = a_server_that_never_answers();
+
+    let started = std::time::Instant::now();
+    let panicked: Result<Litter, tokio::task::JoinError> = tokio::spawn(async move {
+        let env = Env {
+            url,
+            token: TOKEN.to_owned(),
+            owner: OWNER.to_owned(),
+            repo: REPO.to_owned(),
+        };
+        Litter::with_request_budget(&env, std::time::Duration::from_millis(250)).await
+    })
+    .await;
+    let panicked = match panicked {
+        Ok(_) => {
+            panic!("a request the server never answers must fail the test, not hand out a guard")
+        }
+        Err(error) => error,
+    };
+
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "the guard took {:?} to give up on a server that never answers -- the request budget is \
+         not bounding anything",
+        started.elapsed()
+    );
+    assert!(
+        panicked.is_panic(),
+        "the failure must be a panic somebody can read"
+    );
+    let panicked = panicked.into_panic();
+    let report = panicked
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| panicked.downcast_ref::<&str>().copied())
+        .expect("the failure panics with a message")
+        .to_owned();
+    assert!(
+        report.contains("/branches"),
+        "the report must name what it was waiting for, so a reader knows which request wedged: \
+         {report}"
+    );
+}
+
 /// **The cleanup is bounded, so a server that stops answering produces a
 /// message instead of a stall** (issue #162).
 ///
@@ -481,7 +588,11 @@ fn a_server_that_answers_once_then_goes_quiet() -> String {
 ///
 /// The budget is shortened here so the test costs milliseconds; what is being
 /// checked is that the bound exists and that what it says is worth reading, not
-/// how long it is.
+/// how long it is. Shortened to well under [`live_env::REQUEST_BUDGET`], too,
+/// and that is load-bearing: the guard's requests carry the *full* request
+/// budget (the guard comes from `Litter::new`), so the cleanup budget is the
+/// bound that fires and the report is deterministically its
+/// what-was-abandoned sentence, not a request timeout's.
 #[tokio::test]
 async fn a_guard_whose_server_stops_answering_reports_rather_than_stalling() {
     let env = Env {
