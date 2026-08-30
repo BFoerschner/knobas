@@ -25,6 +25,10 @@ _Avoid_: integration, provider, connector
 The per-system implementation that speaks a source's API and emits its items.
 _Avoid_: plugin, client
 
+**Project**:
+A source's own grouping of its items, where the source has one — a Jira project, a TeamCity project. Per source and in the source's own word: Gitea has no such thing, and its repository is an entity kind rather than a grouping. Not a [Context](#context), which is a working set a person builds. (ADR-0010)
+_Avoid_: container, space, workspace, board (ADR-0009)
+
 **Mirror**:
 The local synced copy of every source's data, with provenance. Readers only ever see its live items. A count of the mirror is a corpus, never a run's [Upserted](#upserted).
 _Avoid_: cache, index
@@ -102,7 +106,7 @@ _Avoid_: recommendation
 
 **Context**:
 A working set of entities. Membership = explicit adds + direct links + one hop out; asset membership also counts through ancestors. The rule is fixed, not configurable — the operational reading (seed + direct + hop, computed over confirmed links only) is ADR-0008.
-_Avoid_: workspace, project, room (that is its view)
+_Avoid_: workspace, project, room (that is its view) — and `project` stays on this list now that [Project](#project) is a term of its own: a project is a source's grouping, a context is a working set, and neither is the other. (ADR-0010)
 
 **Member**:
 An entity the membership rule reaches for a given context — computed at read time, never stored. A proposal never makes a member.
