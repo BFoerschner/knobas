@@ -90,7 +90,18 @@ fn a_new_source(id: &str) -> NewSource {
         display_name: "Tidewater Jira".to_owned(),
         base_url: "https://jira.example.invalid".to_owned(),
         auth_kind: AuthMethod::Pat,
-        config: serde_json::json!({ "flavor": "datacenter" }),
+        // A key **this adapter's schema describes**. It was `{"flavor":
+        // "datacenter"}` -- a Jira-shaped blob on a mock source, which the
+        // Add-source form could never have produced, the mock declaring no
+        // config properties at all. Harmless while `knobas_source_mock::build`
+        // threw the config away; since #48 it reads it with
+        // `deny_unknown_fields`, like every real adapter, and every path here
+        // that *builds* the adapter refused the fixture.
+        //
+        // The store is still adapter-agnostic and this still proves it: nothing
+        // in `crud` parses the blob. What validates it is the adapter, at build
+        // time, which is where a configuration mistake is worth catching.
+        config: serde_json::json!({ "tombstone": false }),
         secret: SecretInput {
             value: "pat-one".to_owned(),
         },
@@ -112,7 +123,7 @@ async fn adding_a_source_writes_the_secret_first_and_returns_a_summary() {
     assert_eq!(summary.base_url, "https://jira.example.invalid");
     assert_eq!(summary.sync_interval_secs, 300);
     assert!(summary.enabled);
-    assert_eq!(summary.config["flavor"], "datacenter");
+    assert_eq!(summary.config["tombstone"], false);
     assert_eq!(
         summary.health.state,
         AuthState::Unknown,

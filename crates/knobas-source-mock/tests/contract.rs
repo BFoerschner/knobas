@@ -576,20 +576,49 @@ async fn build_honours_the_fault_and_tombstone_in_its_config() {
         "the tombstone knob must reach the items the sync emits"
     );
 
-    // And an absent config is the healthy default it has always been.
+    // And an absent config is the healthy default it has always been -- **both**
+    // knobs. Only the fault half was pinned at first, and flipping
+    // `tombstone`'s default to `true` left all twenty tests green: every mock
+    // the app's registry builds would then have reported PAY-198 as deleted on
+    // every full sync, tombstoning an entity nothing asked to be tombstoned.
+    // `full_sync_emits_every_work_item` cannot see it -- that one goes through
+    // `MockSource::new()`, not `build`.
     let plain = knobas_source_mock::build(configured(serde_json::json!({}))).expect("built");
     assert!(plain.test_connection().await.is_ok());
+    let mut untouched = VecSink(Vec::new());
+    plain.sync(None, &mut untouched).await.expect("full sync");
+    assert!(
+        !untouched.0.iter().any(|item| item.deleted),
+        "a source added through the form must not delete anything"
+    );
 }
 
 /// A config knobas cannot read is a configuration mistake, refused at build
 /// time like the two `build` already refuses -- not a source that silently
 /// builds healthy and syncs.
+///
+/// **The misspelled keys are the cases with teeth.** A key-by-key reader answers
+/// `None` for `faultt` exactly as it does for an absent `fault`, so a test author
+/// who typos one gets a green run against a *healthy* adapter -- which is the
+/// failure honouring the config exists to prevent, arriving through the door
+/// that was meant to close it. Same for a `config` that is not an object at all.
 #[tokio::test]
 async fn build_refuses_a_config_it_cannot_read() {
     for bad in [
+        // Values of the wrong shape.
         serde_json::json!({ "fault": "flaky" }),
         serde_json::json!({ "fault": 7 }),
         serde_json::json!({ "tombstone": "yes" }),
+        // Keys this adapter's schema does not describe -- including the two
+        // near-misses of the keys it does.
+        serde_json::json!({ "faultt": "unauthorized" }),
+        serde_json::json!({ "Fault": "unauthorized" }),
+        serde_json::json!({ "tombstoned": true }),
+        serde_json::json!({ "fault": "unauthorized", "flavor": "datacenter" }),
+        // Not an object.
+        serde_json::json!("unauthorized"),
+        serde_json::json!([{ "fault": "unauthorized" }]),
+        serde_json::json!(null),
     ] {
         assert!(
             knobas_source_mock::build(configured(bad.clone())).is_err(),

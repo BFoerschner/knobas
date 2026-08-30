@@ -741,11 +741,13 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// # Errors
 ///
 /// [`SourceError::Protocol`] if the instance is not this adapter's to build, if
-/// its id cannot be an entity namespace, or if `config` carries a key this
-/// cannot read. All three are configuration mistakes, and all three are worth
-/// catching before a sync writes rows under a namespace nothing can address --
-/// the third especially, since the alternative is a source that silently builds
-/// healthy and syncs when the caller asked for one that fails.
+/// its id cannot be an entity namespace, or if `config` is anything
+/// [`MockConfig`] cannot read -- an unknown key, a misspelled one, a value of
+/// the wrong type, or a blob that is not an object. All three are configuration
+/// mistakes, and all three are worth catching before a sync writes rows under a
+/// namespace nothing can address -- the third especially, since the alternative
+/// is a source that silently builds healthy and syncs when the caller asked for
+/// one that fails.
 pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
     if instance.kind != SOURCE_ID {
         return Err(SourceError::protocol(format!(
@@ -755,45 +757,73 @@ pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
     }
     knobas_source::instance::validate_instance_id(&instance.id)
         .map_err(|error| SourceError::protocol(error.to_string()))?;
-    // Both, independently: a faulted mock never reaches the tombstone and a
-    // healthy one always does, so picking one knob over the other would be a
-    // silent precedence rule where there is no reason for one.
+    // Both knobs, independently: a faulted mock never reaches the tombstone and
+    // a healthy one always does, so picking one over the other would be a silent
+    // precedence rule where there is no reason for one.
+    let config = MockConfig::from_json(&instance.config)?;
     Ok(Box::new(MockSource {
         id: instance.id,
-        tombstone: tombstone_of(&instance.config)?,
-        ..MockSource::with_fault(fault_of(&instance.config)?)
+        tombstone: config.tombstone,
+        ..MockSource::with_fault(config.fault.into())
     }))
 }
 
-/// `config.fault`, defaulting to the healthy fixture.
+/// The mock's `source_config.config`: the two knobs [`MockSource`] has.
 ///
-/// **No wildcard arm on the way in**: an unknown spelling is refused rather than
-/// read as [`Fault::None`], because a config asking for a failure and getting a
-/// healthy source is a test that passes for the wrong reason.
-fn fault_of(config: &serde_json::Value) -> Result<Fault, SourceError> {
-    match config.get("fault") {
-        None | Some(serde_json::Value::Null) => Ok(Fault::None),
-        Some(serde_json::Value::String(name)) => match name.as_str() {
-            "none" => Ok(Fault::None),
-            "unauthorized" => Ok(Fault::Unauthorized),
-            "unreachable" => Ok(Fault::Unreachable),
-            other => Err(SourceError::protocol(format!(
-                "knobas-source-mock: unknown fault {other:?}"
-            ))),
-        },
-        Some(other) => Err(SourceError::protocol(format!(
-            "knobas-source-mock: `fault` must be a string, not {other}"
-        ))),
+/// `deny_unknown_fields`, the same as every real adapter's config
+/// (`GiteaConfig`, `JiraConfig`, `TeamCityConfig`) and for a sharper reason
+/// here: a key-by-key reader accepts `{"faultt": "unauthorized"}` in silence and
+/// hands back a **healthy** source, which is a test passing for the wrong
+/// reason -- the exact failure honouring the config exists to prevent. It also
+/// closes the other half of that hole, a `config` that is not an object at all:
+/// `Value::get` answers `None` for a string or an array just as it does for an
+/// absent key.
+///
+/// `default` on both, so `{}` -- what the Add-source form generates, this
+/// adapter's `config_schema` declaring no properties -- is the healthy fixture
+/// it has always been. **The schema is deliberately not widened to declare
+/// these**: they drive tests and fixtures, and a form offering a person a
+/// *Simulate a 401* checkbox would be offering them a broken source.
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct MockConfig {
+    fault: ConfiguredFault,
+    /// Whether a full sync also reports [`TOMBSTONED_KEY`] as deleted.
+    tombstone: bool,
+}
+
+/// [`Fault`], as it is spelled in a config.
+///
+/// A mirror rather than a `Deserialize` on `Fault` itself: `Fault` lives in
+/// `knobas-source`, which §10.8 freezes, and it is a *battery* input with no
+/// business carrying a wire format. The `From` below has no wildcard arm, so a
+/// fault added there stops this file compiling until it has a spelling.
+#[derive(Debug, Default, Clone, Copy, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ConfiguredFault {
+    #[default]
+    None,
+    Unauthorized,
+    Unreachable,
+}
+
+impl From<ConfiguredFault> for Fault {
+    fn from(configured: ConfiguredFault) -> Self {
+        match configured {
+            ConfiguredFault::None => Fault::None,
+            ConfiguredFault::Unauthorized => Fault::Unauthorized,
+            ConfiguredFault::Unreachable => Fault::Unreachable,
+        }
     }
 }
 
-/// `config.tombstone`, defaulting to off.
-fn tombstone_of(config: &serde_json::Value) -> Result<bool, SourceError> {
-    match config.get("tombstone") {
-        None | Some(serde_json::Value::Null) => Ok(false),
-        Some(serde_json::Value::Bool(on)) => Ok(*on),
-        Some(other) => Err(SourceError::protocol(format!(
-            "knobas-source-mock: `tombstone` must be a boolean, not {other}"
-        ))),
+impl MockConfig {
+    /// Parse `source_config.config`, refusing anything this adapter's schema
+    /// does not describe -- the same door, and the same words, as
+    /// [`knobas_source_gitea::GiteaConfig::from_json`].
+    fn from_json(value: &serde_json::Value) -> Result<Self, SourceError> {
+        serde_json::from_value(value.clone()).map_err(|e| {
+            SourceError::protocol(format!("knobas-source-mock: invalid source config: {e}"))
+        })
     }
 }
