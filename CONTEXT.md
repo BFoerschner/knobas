@@ -145,5 +145,9 @@ _Avoid_: command palette, spotlight
 A context's hub view — tiles, activity, tray.
 _Avoid_: dashboard
 
+**Mini board**:
+The Tickets tile's status-grouped rendering — one column per status, in the source's own words as the mirror holds them. "Board" never stands alone: launcher board, assets board, mini board. (ADR-0009)
+_Avoid_: kanban, board (unqualified)
+
 **Tidewater**:
 The fictional company whose dataset seeds demos, fixtures, and the test environment.
