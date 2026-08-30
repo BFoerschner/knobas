@@ -1969,3 +1969,35 @@ fn announce_context<R: tauri::Runtime>(
         );
     }
 }
+
+// -- the mini board (#177) --------------------------------------------------
+//
+// In this module for the reason the contexts block above gives: §10.8 freezes
+// the `commands/` + `ipc/` layout, so a new read gets a section rather than a
+// file. It is a room read, and the shell reaches it from the room.
+
+/// The Tickets tile's mini board (ADR-0009, spec #175).
+///
+/// Scoped like every other tile in a room, by the same two dimensions the
+/// switcher's rooms carry: `ctx_id` is a stored room's context, `sources` a
+/// derived room's source list -- empty for *All work* -- and exactly one of
+/// them ever narrows. The grouping, the column order and the two payload reads
+/// all live in [`knobas_core::mini_board`]; there is nothing for this seam to
+/// add, so it adds nothing, the same as [`context_members`].
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the
+/// database is still coming up, [`Internal`](crate::IpcErrorCode::Internal)
+/// for a query failure. An unknown context is an empty board, not a
+/// `not_found`: the room's other tiles answer that way too, and a tile that
+/// errored would say "this broke" where the truth is "nothing here".
+#[tauri::command]
+pub async fn mini_board(
+    lifecycle: State<'_, Lifecycle>,
+    ctx_id: Option<String>,
+    sources: Vec<String>,
+) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
+    let pool = lifecycle.pool()?;
+    Ok(knobas_core::mini_board::read(&pool, ctx_id.as_deref(), &sources).await?)
+}
