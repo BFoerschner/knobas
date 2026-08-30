@@ -242,6 +242,78 @@ async fn linking_a_proposed_pair_by_hand_accepts_it_instead_of_refusing() {
     .await
     .unwrap_err();
     assert_eq!(refused.code, IpcErrorCode::Conflict);
+
+    assert!(
+        written.superseded.is_none(),
+        "a same-direction promotion displaces nothing"
+    );
+}
+
+/// Drawing the **reverse** of a proposal withdraws it and writes the link the
+/// user drew -- it does not strand the proposal in the tray (#70).
+///
+/// This is the second symptom recorded on #70, found by PR #132's merge-manager:
+/// the promotion path was direction-exact and the unique index was directed, so
+/// the two cancelled out and the reversed hand-drawn link simply *succeeded* --
+/// leaving a stale proposal sitting in the tray beside a confirmed link for one
+/// pair. Both halves are asserted here, because either alone still passes on a
+/// broken build: the tray has to empty **and** the link has to exist, pointing
+/// the way the user drew it.
+#[tokio::test]
+async fn drawing_the_reverse_of_a_proposal_empties_the_tray_row_and_keeps_the_users_direction() {
+    let pool = demo().await;
+    detect_suggestions_inner(&pool).await.unwrap();
+    let page = room_suggestions_inner(&pool, &[], None, 500).await.unwrap();
+    let entry = page
+        .rows
+        .iter()
+        .find(|e| e.link.relation == knobas_app::commands::entity::DEFAULT_RELATION)
+        .expect("the corpus proposes a plain related link");
+
+    // Reversed: the user draws the proposal's `to` end as the `from` end.
+    let written = create_link_inner(
+        &pool,
+        &entry.to.entity_id,
+        &entry.from.entity_id,
+        None,
+        None,
+    )
+    .await
+    .expect("the user's direction wins over a proposal's");
+
+    assert_ne!(
+        written.link.id, entry.link.id,
+        "the proposal is withdrawn, not confirmed -- confirming would store the \
+         opposite of what the user drew"
+    );
+    assert_eq!(written.link.from_id, entry.to.entity_id);
+    assert_eq!(written.link.to_id, entry.from.entity_id);
+    assert!(written.link.confirmed_at.is_some());
+    assert_eq!(written.activity.verb, "linked");
+
+    // The proposal leaving the tray is a mutation, so it gets its own line.
+    let dismissal = written
+        .superseded
+        .expect("the displaced proposal must be announced, not vanish quietly");
+    assert_eq!(dismissal.verb, "dismissed");
+
+    // Gone from the tray, and one link for the pair rather than two rows.
+    let after = room_suggestions_inner(&pool, &[], None, 500).await.unwrap();
+    assert!(
+        !after.rows.iter().any(|e| e.link.id == entry.link.id),
+        "the proposal must not be left standing beside the link that replaced it"
+    );
+
+    // And a third attempt, either way round, is the conflict it has always been.
+    for (a, b) in [
+        (&entry.from.entity_id, &entry.to.entity_id),
+        (&entry.to.entity_id, &entry.from.entity_id),
+    ] {
+        let refused = create_link_inner(&pool, a, b, None, None)
+            .await
+            .unwrap_err();
+        assert_eq!(refused.code, IpcErrorCode::Conflict);
+    }
 }
 
 /// The tray is scoped to the room, and the count is the room's.

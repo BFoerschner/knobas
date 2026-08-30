@@ -961,7 +961,7 @@ async fn accept_and_dismiss_report_whether_they_changed_anything() {
 /// than being refused as a duplicate.
 ///
 /// The unique index spans proposals and links alike, so without
-/// [`suggest::accept_edge`] the user is told "already linked" about a pair
+/// [`suggest::resolve_edge`] the user is told "already linked" about a pair
 /// whose links panel is empty.
 #[tokio::test]
 async fn drawing_a_proposed_link_by_hand_accepts_the_proposal() {
@@ -979,18 +979,132 @@ async fn drawing_a_proposed_link_by_hand_accepts_the_proposal() {
     let refused = link::create(&pool, &from, &to, "related", Origin::Manual, None, "user").await;
     assert!(matches!(refused, Err(CoreError::Duplicate)));
 
-    let promoted = suggest::accept_edge(&pool, &from, &to, "related")
+    let mut conn = pool.acquire().await.unwrap();
+    let promoted = match suggest::resolve_edge(&mut conn, &from, &to, "related")
         .await
         .unwrap()
-        .expect("the blocker was a proposal, so it is accepted instead");
+    {
+        suggest::Edge::Promoted(row) => row,
+        other => panic!("the blocker was a proposal, so it is accepted instead: {other:?}"),
+    };
     assert_eq!(promoted.id, proposal);
     assert!(promoted.confirmed_at.is_some());
     assert!(
-        suggest::accept_edge(&pool, &from, &to, "related")
-            .await
-            .unwrap()
-            .is_none(),
+        matches!(
+            suggest::resolve_edge(&mut conn, &from, &to, "related")
+                .await
+                .unwrap(),
+            suggest::Edge::Open
+        ),
         "a genuine duplicate is still a duplicate"
+    );
+}
+
+/// Drawing the **reverse** of a live proposal withdraws it and lets the user's
+/// link through -- the second symptom recorded on #70.
+///
+/// Before `0011` this pair was the hole where the directed index and the
+/// direction-exact promotion cancelled out: the reversed hand-drawn link
+/// bypassed both, so it simply *succeeded*, and left a stale proposal sitting
+/// in the tray beside a confirmed link for the same pair.
+///
+/// **Withdrawn, not confirmed**, and the direction is why. Confirming would
+/// store the opposite of what the user drew; story 7's inverse labels would then
+/// render it faithfully back at them as the opposite claim. The tombstone is the
+/// same one [`suggest::dismiss`] writes, so detection's undirected suppression
+/// will not propose it straight back either.
+#[tokio::test]
+async fn drawing_the_reverse_of_a_proposal_withdraws_it_and_keeps_the_users_direction() {
+    let pool = scratch().await;
+    let ticket = item(&pool, "ticket", "PAY-231", "Payout retry storm", "").await;
+    let branch = item(&pool, "branch", "b1", "feature/PAY-231-retry", "").await;
+    suggest::detect(&pool).await.unwrap();
+    let proposal = between(&tray(&pool).await, &branch, &ticket)
+        .expect("a proposal")
+        .link
+        .id;
+
+    // The proposal runs branch -> ticket; the user draws ticket -> branch.
+    let from = EntityRef::parse(&ticket).unwrap();
+    let to = EntityRef::parse(&branch).unwrap();
+
+    let mut conn = pool.acquire().await.unwrap();
+    let withdrawn = match suggest::resolve_edge(&mut conn, &from, &to, "related")
+        .await
+        .unwrap()
+    {
+        suggest::Edge::Superseded(row) => row,
+        other => panic!("the reversed proposal must be superseded, not {other:?}"),
+    };
+    assert_eq!(withdrawn.id, proposal);
+    assert!(
+        withdrawn.confirmed_at.is_none(),
+        "it must not be confirmed on the way out -- that would store the opposite \
+         of what the user drew"
+    );
+    // A tombstone, not a delete: `LinkRow` does not carry `deleted_at`, so the
+    // column is read where it lives.
+    let tombstoned: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("select deleted_at from knobas.link where id = $1")
+            .bind(proposal)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(
+        tombstoned.is_some(),
+        "withdrawn is a tombstone, never a delete"
+    );
+
+    // Out of the tray, and the pair is free for the link the user is drawing.
+    assert!(between(&tray(&pool).await, &branch, &ticket).is_none());
+    let drawn = link::create(&pool, &from, &to, "related", Origin::Manual, None, "user")
+        .await
+        .expect("the withdrawal makes room for the user's own link");
+    assert_eq!(
+        drawn.from_id, ticket,
+        "the user's direction is what is stored"
+    );
+    assert_eq!(drawn.to_id, branch);
+
+    // And the tombstone is the withdrawal memory: detection does not bring it
+    // back, in either direction.
+    suggest::detect(&pool).await.unwrap();
+    assert!(between(&tray(&pool).await, &branch, &ticket).is_none());
+    assert!(between(&tray(&pool).await, &ticket, &branch).is_none());
+}
+
+/// A **confirmed** link in the way is nobody's to supersede: `Open`, and the
+/// caller's insert is what reports the conflict.
+///
+/// `resolve_edge` may only ever touch a proposal. Widening it to a confirmed row
+/// would make hand-drawing a link a way to silently delete one.
+#[tokio::test]
+async fn a_confirmed_link_is_never_superseded_from_either_direction() {
+    let pool = scratch().await;
+    let ticket = item(&pool, "ticket", "PAY-999", "Unrelated", "").await;
+    let branch = item(&pool, "branch", "b9", "feature/none", "").await;
+    let from = EntityRef::parse(&ticket).unwrap();
+    let to = EntityRef::parse(&branch).unwrap();
+    link::create(&pool, &from, &to, "related", Origin::Manual, None, "user")
+        .await
+        .unwrap();
+
+    let mut conn = pool.acquire().await.unwrap();
+    for (a, b) in [(&from, &to), (&to, &from)] {
+        assert!(
+            matches!(
+                suggest::resolve_edge(&mut conn, a, b, "related")
+                    .await
+                    .unwrap(),
+                suggest::Edge::Open
+            ),
+            "{a} -> {b} must leave the confirmed link alone"
+        );
+    }
+    assert_eq!(
+        link::entries_of(&pool, &from).await.unwrap().len(),
+        1,
+        "the link is untouched"
     );
 }
 

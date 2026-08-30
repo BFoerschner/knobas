@@ -705,24 +705,67 @@ pub async fn accept(pool: &PgPool, id: Uuid) -> Result<Option<LinkRow>, CoreErro
     settle(pool, id, updated).await
 }
 
-/// Accept the live proposal for one exact edge, if there is one.
+/// What [`resolve_edge`] found standing in the way of a hand-drawn link.
+#[derive(Debug)]
+pub enum Edge {
+    /// A proposal for *exactly* this triple was confirmed. It is the link now,
+    /// and the caller writes nothing.
+    Promoted(LinkRow),
+    /// A proposal for the **reversed** triple was withdrawn to make room. The
+    /// caller writes the link the user actually drew, in the same transaction.
+    Superseded(LinkRow),
+    /// Nothing to answer: no live proposal for this pair and relation, either
+    /// way round. Whatever refuses the write now is a real link.
+    Open,
+}
+
+/// Answer the live proposal for a pair and relation, if there is one, so that a
+/// hand-drawn link can be written where one stands.
 ///
-/// The user drawing by hand the link knobas had already proposed is the same
-/// act as pressing *Accept*, and the alternative is worse than untidy: the
-/// unique index spans proposals and links alike, so without this the write is
-/// refused as a duplicate and the user is told "already linked" about a pair
-/// whose links panel is empty.
+/// The unique index spans proposals and links alike -- one active edge per pair
+/// per relation, whatever its state -- so without this a user drawing a link
+/// knobas had already proposed is told "already linked" about a pair whose links
+/// panel is empty.
+///
+/// ## Two answers, because the two cases are different acts
+///
+/// **Same direction: the user is pressing *Accept*.** Drawing by hand the link
+/// knobas proposed is that gesture spelled another way, so the proposal is
+/// confirmed and keeps its detector provenance -- `rule`, `rule_class` and the
+/// `reason` it was proposed with all still describe it truthfully.
+///
+/// **Reversed: the user is contradicting the proposal's direction**, and the
+/// user wins. The proposal is *withdrawn* rather than confirmed, because
+/// confirming it would store the opposite of what the user drew (`A blocks B`
+/// landing as `B blocks A`, which story 7's inverse labels would then faithfully
+/// render back at them as "A is blocked by B"), and reorienting it in place
+/// would leave a row whose stored `reason` describes ends it no longer has.
+/// Withdrawal is a tombstone -- the same mechanism as [`dismiss`], and therefore
+/// the same fact to detection's undirected suppression, so the proposal is not
+/// proposed straight back.
+///
+/// Before #70 the promotion was direction-exact while the index was directed,
+/// which cancelled out into a third outcome nobody chose: the reversed
+/// hand-drawn link *succeeded*, and left a stale proposal sitting in the tray
+/// beside a confirmed link for the same pair.
+///
+/// ## Why it takes an executor
+///
+/// [`Edge::Superseded`] is only half a mutation -- the caller's write is the
+/// other half -- so the two have to be able to share one transaction. A
+/// tombstone committed without the link that replaced it would have thrown away
+/// a proposal for nothing.
 ///
 /// # Errors
 ///
-/// [`CoreError::Db`] if the statement fails.
-pub async fn accept_edge(
-    pool: &PgPool,
+/// [`CoreError::Db`] if either statement fails.
+pub async fn resolve_edge(
+    conn: &mut sqlx::PgConnection,
     from: &crate::entity::EntityRef,
     to: &crate::entity::EntityRef,
     relation: &str,
-) -> Result<Option<LinkRow>, CoreError> {
-    let updated = sqlx::query_as::<_, LinkRow>(concat!(
+) -> Result<Edge, CoreError> {
+    let promoted = sqlx::query_as::<_, LinkRow>(concat!(
         "update knobas.link set confirmed_at = now()
           where from_id = $1 and to_id = $2 and relation = $3
             and deleted_at is null and confirmed_at is null
@@ -732,9 +775,31 @@ pub async fn accept_edge(
     .bind(from.to_string())
     .bind(to.to_string())
     .bind(relation)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *conn)
     .await?;
-    Ok(updated)
+    if let Some(row) = promoted {
+        return Ok(Edge::Promoted(row));
+    }
+
+    // The ends swapped, and nothing else: a proposal is what this withdraws, so
+    // `confirmed_at is null` is the clause that keeps a *link* out of reach. A
+    // confirmed link in the way is the caller's conflict to report.
+    let superseded = sqlx::query_as::<_, LinkRow>(concat!(
+        "update knobas.link set deleted_at = now()
+          where from_id = $2 and to_id = $1 and relation = $3
+            and deleted_at is null and confirmed_at is null
+         returning ",
+        link_columns!("")
+    ))
+    .bind(from.to_string())
+    .bind(to.to_string())
+    .bind(relation)
+    .fetch_optional(conn)
+    .await?;
+    Ok(match superseded {
+        Some(row) => Edge::Superseded(row),
+        None => Edge::Open,
+    })
 }
 
 /// Dismiss a proposal by tombstoning it -- the row stays, `deleted_at` is set.

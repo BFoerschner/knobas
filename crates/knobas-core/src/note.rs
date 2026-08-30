@@ -362,12 +362,28 @@ fn named(title: &str) -> &str {
 /// the two halves could not share the transaction the body is written in. The
 /// rows are ordinary link rows -- one link table, whatever wrote them.
 ///
-/// The `on conflict` does nothing where an **active** link with the same three
-/// columns already exists, which is the partial unique index `link_active_idx`
-/// read from the other side. That covers the same body saved twice, and it
-/// covers a link the user happened to draw by hand between the same pair under
-/// the same relation: the row that is there stays, with the origin it was made
-/// with.
+/// The `on conflict` does nothing where an **active** link for the same pair and
+/// relation already exists, which is the partial unique index
+/// `link_pair_active_idx` read from the other side. That covers the same body
+/// saved twice, and it covers a link the user happened to draw by hand between
+/// the same pair under the same relation: the row that is there stays, with the
+/// origin it was made with.
+///
+/// **Unarbitrated since #70**, and it has to be. The index is now on
+/// `(least(from_id, to_id), greatest(from_id, to_id), relation)`, so a conflict
+/// target naming the three columns infers no index at all and the statement
+/// fails outright; naming the expression instead would put the normalisation in
+/// two places, and the one here is the copy that would go stale. Nothing else on
+/// this table can raise a conflict for `do nothing` to swallow -- the endpoints
+/// come out of `knobas.entity` in the `select` itself, so neither foreign key
+/// can be the fault, and a foreign-key violation is not a conflict `do nothing`
+/// covers in any case.
+///
+/// A ref to an entity that already links *back* to this note under
+/// `REF_RELATION` is now skipped rather than written. That follows from the
+/// rule the migration states -- one active edge per unordered pair per relation
+/// -- and it is the better reading anyway: two rows for "these two reference
+/// each other" is the duplicate #40's story 14 exists to prevent.
 async fn reconcile_refs(
     tx: &mut Transaction<'_, Postgres>,
     note_id: &str,
@@ -382,7 +398,7 @@ async fn reconcile_refs(
          select $1, e.id, $2, $3, $4
            from knobas.entity e
           where e.id = any($5) and e.id <> $1
-         on conflict (from_id, to_id, relation) where deleted_at is null do nothing",
+         on conflict do nothing",
     )
     .bind(note_id)
     .bind(REF_RELATION)

@@ -46,7 +46,7 @@ pub enum CoreError {
 }
 
 /// SQLSTATE of a unique-violation, which is how the partial unique index
-/// `link_active_idx` reports a duplicate active link.
+/// `link_pair_active_idx` reports a duplicate active link.
 const UNIQUE_VIOLATION: &str = "23505";
 
 /// SQLSTATE of a foreign-key violation: how `link_from_id_fkey` and

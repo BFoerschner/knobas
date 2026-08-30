@@ -46,6 +46,28 @@ pub async fn record(
     entity: Option<&EntityRef>,
     detail: serde_json::Value,
 ) -> Result<ActivityRow, CoreError> {
+    record_with(pool, actor, verb, entity, detail).await
+}
+
+/// [`record`], against an executor the caller chooses.
+///
+/// The one thing this adds is that a line can be written inside the transaction
+/// that made the mutation it describes -- so a log line for a write that rolls
+/// back rolls back with it.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the insert fails.
+pub async fn record_with<'e, E>(
+    executor: E,
+    actor: &str,
+    verb: &str,
+    entity: Option<&EntityRef>,
+    detail: serde_json::Value,
+) -> Result<ActivityRow, CoreError>
+where
+    E: sqlx::PgExecutor<'e>,
+{
     let detail = match detail {
         serde_json::Value::Null => serde_json::Value::Object(serde_json::Map::new()),
         other => other,
@@ -59,7 +81,7 @@ pub async fn record(
     .bind(verb)
     .bind(entity.map(EntityRef::to_string))
     .bind(detail)
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await?;
     Ok(row)
 }
