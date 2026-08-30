@@ -392,7 +392,14 @@ test("no select where the source's corpus has shown no status at all", async () 
   screen.done();
 });
 
-/** Every other kind's detail is unchanged — the select is a ticket's. */
+/**
+ * Every other kind's detail is unchanged — the select is a ticket's.
+ *
+ * And unchanged means the read is not made either. The board read brings back
+ * the whole of a source's cards; a note or a page can never show a select, so
+ * making it there would be that cost paid for nothing, and an absence nobody
+ * asserted is one a later refactor restores without noticing.
+ */
 test("no select on a kind that is not a ticket", async () => {
   entity = () =>
     detail({
@@ -410,6 +417,7 @@ test("no select on a kind that is not a ticket", async () => {
   flushSync();
 
   expect(screen.select()).toBeNull();
+  expect(boardCalls, "a kind with no select must not read the board").toEqual([]);
 
   screen.done();
 });

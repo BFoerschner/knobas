@@ -60,6 +60,17 @@ const LEGAL: &str = "In Progress";
 /// ticket's workflow will not accept from where it stands.
 const ILLEGAL: &str = "Done";
 
+/// A status the workflow **does** offer from where the ticket stands once the
+/// legal move has landed (`MockState::jira_transitions`, from *In Progress*).
+///
+/// It is its own constant because it is what makes the refusal assertion below
+/// mean anything. The message's wording — "this workflow offers …" — is a
+/// format literal, so it survives an adapter that dropped the list entirely;
+/// only a status the list itself supplies can witness that the list is there.
+/// `LEGAL` cannot do that job: *In Progress* is where the ticket now **is**,
+/// and this workflow does not offer a move from a status to itself.
+const OFFERED_FROM_LEGAL: &str = "In Review";
+
 // -- the app, wired the way the app wires it ---------------------------------
 
 /// Connections a run gets: the scratch database's own, not the shared one's.
@@ -276,9 +287,10 @@ async fn a_legal_move_lands_and_an_illegal_one_is_refused_by_name() {
         "the refusal names the move that was asked for: {said}"
     );
     assert!(
-        said.contains(LEGAL) || said.contains("offers"),
+        said.contains(OFFERED_FROM_LEGAL),
         "and it carries the workflow's own offered list, which is what the \
-         reader learns their workflow from: {said}"
+         reader learns their workflow from — and which the word \"offers\" on \
+         its own does not witness: {said}"
     );
 
     // The mirror is untouched by a refused write, which is the other half of

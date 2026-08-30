@@ -230,6 +230,19 @@
   const sourceId = $derived(entityId.slice(0, entityId.indexOf(":")));
 
   /**
+   * Whether this panel is showing a ticket — the only kind that can move.
+   *
+   * A `$derived` and not the comparison written inline below, for two reasons.
+   * It changes only when the *answer* flips, so a `refresh()` that re-reads the
+   * same ticket does not re-issue the board read; and it is the effect's gate,
+   * so the read a note or a page can never use is never made. That read brings
+   * back the whole of a source's cards — the cost this select accepts to learn
+   * six statuses — and paying it on a kind with no select at all is paying it
+   * for nothing.
+   */
+  const isTicket = $derived(shownKind === "ticket");
+
+  /**
    * The granted read (#177), for this ticket's source.
    *
    * Both halves of the select come out of it and nothing else: `sources` is the
@@ -259,7 +272,7 @@
     const source = sourceId;
     const mine = ++boardToken;
     statusBoard = null;
-    if (!source) return;
+    if (!source || !isTicket) return;
     void miniBoard({ sources: [source], context: null })
       .then((board) => {
         if (mine !== boardToken) return;
@@ -289,7 +302,7 @@
    * least one status to move to.
    */
   const canTransition = $derived(
-    shownKind === "ticket" &&
+    isTicket &&
       kindRegistry.writeOps(detail?.source.adapter_kind ?? "").includes("transition") &&
       (statusBoard?.offered.length ?? 0) > 0,
   );
