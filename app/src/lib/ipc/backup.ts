@@ -8,8 +8,8 @@
  * A backup is everything in the `knobas` schema, notes included; the synced
  * mirror is left out because it re-syncs (design §16.12, ratified).
  *
- * Nothing calls these yet: the §14 settings surface is issue #69, blocked on
- * knobas having a settings view to hang it off.
+ * Called from the settings view's backup section (`#/settings`, issue #69,
+ * landed in PR #102).
  */
 import { invoke } from "@tauri-apps/api/core";
 
