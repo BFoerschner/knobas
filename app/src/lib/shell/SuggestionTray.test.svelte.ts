@@ -48,10 +48,24 @@ vi.mock("../ipc/entity", () => ({
   },
 }));
 
-/** No Tauri bridge in jsdom; the tray's sync listener must still install. */
+/**
+ * No Tauri bridge in jsdom, so the events the tray listens for are delivered by
+ * hand — a stub that only had to *install* could not show that a listener
+ * actually re-reads.
+ */
+const listeners: Record<string, ((event: { payload: unknown }) => void)[]> = {};
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: () => Promise.resolve(() => {}),
+  listen: (name: string, handler: (event: { payload: unknown }) => void) => {
+    (listeners[name] ??= []).push(handler);
+    return Promise.resolve(() => {
+      listeners[name] = (listeners[name] ?? []).filter((h) => h !== handler);
+    });
+  },
 }));
+
+function emit(name: string, payload: unknown) {
+  for (const handler of listeners[name] ?? []) handler({ payload });
+}
 
 const { default: SuggestionTray } = await import("./SuggestionTray.svelte");
 
@@ -116,6 +130,7 @@ beforeEach(() => {
   opened.length = 0;
   reads = [];
   answered = null;
+  for (const name of Object.keys(listeners)) delete listeners[name];
   document.body.innerHTML = "";
 });
 
@@ -327,6 +342,43 @@ test("a proposal cannot be answered twice while its write is in flight", async (
   expect(calls.filter((call) => call.startsWith("accept")).length).toBe(1);
   release();
   await settle();
+
+  unmount(app);
+  target.remove();
+});
+
+/**
+ * A link drawn anywhere else in the app re-reads the tray.
+ *
+ * Until #70 the tray listened for `sync:state` alone, so a proposal *withdrawn*
+ * by a hand-drawn reverse link stayed drawn here — and pressing *Accept* on it
+ * then resolved to nothing at all, visibly. A verb the tray does not care about
+ * must not re-read, or `activity:new` (every write-back and comment in the app)
+ * turns into a read per line.
+ */
+test("a link mutation elsewhere re-reads the tray; an unrelated line does not", async () => {
+  reads = [
+    () => Promise.resolve(page([entry()])),
+    () => Promise.resolve(page([])),
+  ];
+  const { target, app } = render();
+  await settle();
+  const readsSoFar = calls.filter((c) => c.startsWith("read")).length;
+
+  emit("activity:new", { verb: "commented", entity_id: "mock:PAY-231" });
+  await settle();
+  expect(
+    calls.filter((c) => c.startsWith("read")).length,
+    "a comment is not the tray's business",
+  ).toBe(readsSoFar);
+
+  emit("activity:new", { verb: "linked", entity_id: "mock:PAY-231" });
+  await settle();
+  expect(calls.filter((c) => c.startsWith("read")).length).toBe(readsSoFar + 1);
+  expect(
+    target.querySelector(".row.sug"),
+    "the withdrawn proposal must not still be drawn",
+  ).toBeNull();
 
   unmount(app);
   target.remove();

@@ -151,7 +151,7 @@ async fn several_relations_coexist_and_come_back_newest_first() {
     // flipped `order by` behind a passing name comparison.
     let ids: Vec<Uuid> = rows.iter().map(|row| row.link.id).collect();
     assert_eq!(ids, [blocks, documents]);
-    // The pair carries both relations: `link_active_idx` is three-column.
+    // The pair carries both relations: `link_pair_active_idx` is three-column.
     let relations: Vec<&str> = rows.iter().map(|row| row.link.relation.as_str()).collect();
     assert_eq!(relations, ["blocks", "documents"]);
 
@@ -166,6 +166,65 @@ async fn several_relations_coexist_and_come_back_newest_first() {
     }
     // ... and the two inserts, being separate transactions, are distinct.
     assert!(rows[0].link.created_at > rows[1].link.created_at);
+}
+
+/// The same pair linked the other way round is the **same** link (#70).
+///
+/// `link_pair_active_idx` (migration `0011`) normalises the pair with
+/// `least`/`greatest`, so the rule and `entries_of`'s undirected read finally
+/// agree. Before it, `A -> B` and `B -> A` both landed and both panels drew two
+/// rows for one relationship -- which is #40's story 14 read backwards.
+///
+/// Unordered for uniqueness, **ordered for storage**: the surviving row still
+/// says which end is which, or `blocks` could not be told from `blocked by`
+/// (story 7).
+#[tokio::test]
+async fn the_reverse_of_an_active_link_is_a_duplicate_and_the_stored_direction_survives() {
+    let (pool, t, n) = seeded_pool().await;
+
+    let drawn = link::create(&pool, &t, &n, "blocks", link::Origin::Manual, None, "mara")
+        .await
+        .unwrap();
+
+    let reversed = link::create(&pool, &n, &t, "blocks", link::Origin::Manual, None, "mara").await;
+    assert!(
+        matches!(reversed, Err(CoreError::Duplicate)),
+        "the reverse of an active link must be a duplicate, not a second row: {reversed:?}"
+    );
+
+    // One row, and it still points the way it was drawn.
+    let rows = link::entries_of(&pool, &n).await.unwrap();
+    let blocking: Vec<&link::LinkEntry> = rows
+        .iter()
+        .filter(|row| row.link.relation == "blocks")
+        .collect();
+    assert_eq!(
+        blocking.len(),
+        1,
+        "the panel must show one row for one link"
+    );
+    assert_eq!(blocking[0].link.from_id, t.to_string());
+    assert_eq!(blocking[0].link.to_id, n.to_string());
+    assert_eq!(blocking[0].link.id, drawn.id);
+
+    // Still per relation, and still from either end (story 15).
+    link::create(
+        &pool,
+        &n,
+        &t,
+        "documents",
+        link::Origin::Manual,
+        None,
+        "mara",
+    )
+    .await
+    .expect("the same pair under another relation is its own link");
+
+    // Still partial: withdrawing frees the pair the other way round too.
+    link::unlink(&pool, drawn.id).await.unwrap();
+    link::create(&pool, &n, &t, "blocks", link::Origin::Manual, None, "mara")
+        .await
+        .expect("a tombstone must not block re-linking in the other direction");
 }
 
 #[tokio::test]
