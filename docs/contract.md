@@ -2461,6 +2461,17 @@ From this commit on, each of the following requires an orchestrator decision **a
   `knobas.entity` in the `select` itself, so no foreign key can be the fault, and a foreign-key
   violation is not a conflict `do nothing` covers in any case.
 
+  It also gains a step, and this one is not cosmetic. Two notes naming each other now share
+  one row, so `A` dropping its `[[B]]` would withdraw the only row there was while `B`'s body
+  still said `[[A]]` — the exact body/links disagreement that module's header promises cannot
+  happen, and a state `0011` produces on upgrade for any database already holding mutual refs.
+  A ref link the *other* note still names is therefore **handed over** (its ends swapped)
+  rather than withdrawn, so the row belongs to whoever still justifies it. Display-neutral:
+  `refs_of` reads the body and backlinks read the pair undirected, so no panel changes.
+  It reads `knobas.confirmed_link` and not the base table (#161) — every ref link is confirmed
+  by the column default, and a machine proposal between two notes is the tray's to answer,
+  never a side effect of saving a body.
+
   **No IPC change.** `create_link` still returns `LinkRow`, no command, DTO field or event name
   is added or changes meaning, and neither barrel is touched. `LinkMutation` gains
   `superseded: Option<ActivityRow>` and is not a wire type — the displaced proposal is
