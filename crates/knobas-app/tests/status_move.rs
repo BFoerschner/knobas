@@ -192,6 +192,13 @@ async fn mirrored_status(state: &SourcesState) -> Option<String> {
 
 /// Queue a move the way the detail's select does — through the real command
 /// path, so a payload the shell could not actually send would fail here.
+///
+/// **This attempts the write, it does not merely enqueue it.**
+/// `knobas_sync::write_queue::submit` flushes the source before it returns
+/// ("try it now: a failure here is the queue working, not the call failing"),
+/// so what comes back below is already settled. An explicit `flush_source`
+/// after this would be a line no mutation could kill — which is how it was
+/// found.
 async fn queue_move(state: &SourcesState, status: &str) -> i64 {
     let queued = knobas_app::sources::write_queue::submit(
         state,
@@ -236,10 +243,6 @@ async fn a_legal_move_lands_and_an_illegal_one_is_refused_by_name() {
     //    round trip, not the dispatch. The board shows the new column because
     //    the source says so, never because knobas queued something.
     let legal = queue_move(&state, LEGAL).await;
-    knobas_sync::write_queue::flush_source(state.scheduler.deps(), JIRA)
-        .await
-        .expect("the queue flushes");
-
     let sent = in_queue(&state, legal).await;
     assert_eq!(sent.state, WriteState::Sent, "the move was delivered");
 
@@ -255,10 +258,6 @@ async fn a_legal_move_lands_and_an_illegal_one_is_refused_by_name() {
     //    Progress` in a single transition. The adapter is what discovers that,
     //    at write time, against the source's own answer.
     let illegal = queue_move(&state, ILLEGAL).await;
-    knobas_sync::write_queue::flush_source(state.scheduler.deps(), JIRA)
-        .await
-        .expect("the queue flushes");
-
     let refused = in_queue(&state, illegal).await;
     assert_eq!(
         refused.state,

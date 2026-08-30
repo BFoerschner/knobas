@@ -90,16 +90,17 @@ const { toasts } = await import("../shell/toasts.svelte");
 const { kindRegistry } = await import("../shell/kind-registry.svelte");
 
 /**
- * `PAY-231` sits *In Progress*; the corpus has been seen to use four statuses.
- * The board is the granted read's answer for the whole source, which is where
- * both halves of the select come from — the offer, and the mirrored status.
+ * `PAY-231` sits *In Progress*, and the board's **columns are narrower than the
+ * source's offer** — deliberately. That gap is the whole reason `sources` sits
+ * beside `columns` in the granted read (#177): a room where nothing is finished
+ * still has to be able to offer *Done*. A fixture where the two agreed would
+ * pass just as well against a select that read the offer off the columns, which
+ * would then be empty in exactly the room the user needs it in.
  */
 const BOARD: MiniBoard = {
   columns: [
     { status: "To Do", cards: [card("PAY-240")] },
     { status: "In Progress", cards: [card("PAY-231")] },
-    { status: "In Review", cards: [card("PAY-228")] },
-    { status: "Done", cards: [card("PAY-201")] },
   ],
   sources: [{ source_id: "mock", statuses: ["To Do", "In Progress", "In Review", "Done"] }],
 };
@@ -321,6 +322,49 @@ test("opening another ticket never leaves the previous one's status on screen", 
   });
   await vi.waitFor(() => expect(screen.select()).not.toBeNull());
   expect(screen.select()?.value).toBe("To Do");
+
+  screen.done();
+});
+
+/**
+ * The dropping half of the same guard: two reads in flight, answered
+ * **oldest last**. Without the generation check the first ticket's board would
+ * land on the second ticket's panel and offer a move against the wrong status.
+ */
+test("a slow board answer from the previous ticket is discarded, not shown", async () => {
+  let first!: (board: MiniBoard) => void;
+  board = () => new Promise<MiniBoard>((resolve) => (first = resolve));
+  const screen = render();
+  await vi.waitFor(() => expect(boardCalls).toHaveLength(1));
+
+  let second!: (board: MiniBoard) => void;
+  board = () => new Promise<MiniBoard>((resolve) => (second = resolve));
+  entity = () =>
+    detail({
+      row: {
+        entity_id: "mock:PAY-240",
+        kind: "ticket",
+        source_id: "mock",
+        title: "Payout dashboard latency",
+        updated_at: null,
+        synced_at: "2026-08-22T14:30:00Z",
+      },
+    });
+  screen.reopen("mock:PAY-240");
+  await vi.waitFor(() => expect(boardCalls).toHaveLength(2));
+
+  second({
+    columns: [{ status: "To Do", cards: [card("PAY-240")] }],
+    sources: [{ source_id: "mock", statuses: ["To Do", "In Progress"] }],
+  });
+  await vi.waitFor(() => expect(screen.select()?.value).toBe("To Do"));
+
+  // The ticket that is no longer on screen answers last, and loses.
+  first(BOARD);
+  await Promise.resolve();
+  flushSync();
+  expect(screen.select()?.value, "the previous ticket's board overwrote this one").toBe("To Do");
+  expect(screen.options()).toEqual(["To Do", "In Progress"]);
 
   screen.done();
 });
