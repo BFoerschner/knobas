@@ -193,8 +193,9 @@ pub const LITTER: &str = "knobas-";
 ///    a `SIGKILL`, or a Ctrl-C at the wrong moment -- which is what 3 is for.
 ///    [`Drop`] does its work on a thread of its own and **waits at most
 ///    [`CLEANUP_BUDGET`]** for it, so a server that stops answering ends the
-///    run with a sentence rather than a stall (issue #162); `reqwest` has no
-///    default timeout, so without the bound there is nothing else to end it.
+///    run with a sentence rather than a stall (issue #162). Every request also
+///    carries [`REQUEST_BUDGET`] (issue #170); see `CLEANUP_BUDGET` for why
+///    the sequence keeps a bound of its own on top of its parts'.
 /// 3. **Every guard clears an earlier run's leftovers before it builds**
 ///    ([`Litter::clear_leftovers`]). Whatever a killed run left behind is
 ///    removed by the next run's first mutating test, so recovery is "run the
@@ -229,34 +230,93 @@ pub struct Litter {
     branches: Vec<String>,
     /// How long [`Drop`] waits for the cleanup before it gives up and says so.
     budget: Duration,
+    /// What [`client`] was given, carried so [`Drop`]'s own client is bounded
+    /// the same way.
+    request_budget: Duration,
 }
 
-/// How long [`Drop`] gives the cleanup before reporting that it did not finish
-/// (issue #162).
+/// How long one HTTP exchange with the container may take before it fails
+/// with a message instead of waiting forever (issue #170).
 ///
-/// **A bound, not a deadline.** Removing a handful of branches and pull
-/// requests from a container on the same machine is a second's work, so any run
-/// that reaches this number is a run that is not going to finish at all: a
-/// server that accepted the connection and then stopped answering, which
-/// `reqwest` waits on forever because it carries no default timeout. Before the
-/// bound that wedged `just gitea-live` with nothing on screen -- a `Drop` that
-/// has not returned has not reported anything either.
+/// `reqwest` carries no default timeout, so before this every request this
+/// module sends -- [`Litter::new`]'s leftover sweep, [`Litter::branch_off_main`],
+/// every listing a test body reads -- would wait without end on a server that
+/// accepted the connection and then stopped answering. Issue #162 bounded
+/// exactly one caller, [`Drop`]; this bounds the client itself, at its one
+/// construction site ([`client`]), so every caller inherits it and a wedged
+/// container fails the test that touched it, named by URL, instead of
+/// stalling `just check` with nothing on screen.
 ///
-/// Generous on purpose. Its whole job is to turn "never" into a sentence
-/// somebody can read, and a tight budget would buy nothing for that while
-/// risking a false report on a slow machine.
+/// **Ten seconds, and not [`CLEANUP_BUDGET`]'s sixty, because they bound
+/// different things.** This bounds *one request* to a container on the same
+/// machine, where a healthy exchange is milliseconds -- ten seconds is two
+/// orders of magnitude of headroom, and any request that reaches it is never
+/// coming back. Sixty bounds a whole cleanup *sequence* (see below). Copying
+/// the larger number here would make a wedged test body take a minute per
+/// request to say so, for no protection a localhost container needs. It is
+/// also deliberately below `knobas-http`'s 30 s per-request bound: that
+/// client faces arbitrary remote servers, this one faces `testenv`'s
+/// container next door.
+pub const REQUEST_BUDGET: Duration = Duration::from_secs(10);
+
+/// The one place this module's `reqwest::Client` is built, and therefore the
+/// one place its timeout could be lost.
+///
+/// Everything here goes through a client from this function -- [`Litter::new`]
+/// via [`Litter::with_request_budget`], and [`Drop`]'s cleanup thread, which
+/// must build its own (see the comment there for why it cannot clone one).
+/// `tests/litter_guard.rs` is what notices if the `.timeout(..)` disappears.
+fn client(request_budget: Duration) -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(request_budget)
+        .build()
+        .expect("a client with a timeout")
+}
+
+/// How long [`Drop`] gives the whole cleanup before reporting that it did not
+/// finish (issue #162).
+///
+/// **A bound on the sequence, where [`REQUEST_BUDGET`] bounds a request --
+/// both earn their place, and neither implies the other.** The cleanup is a
+/// walk: paged listings of up to 64 pages, a delete per pull request and per
+/// branch, then the listings again. Every one of those requests can stay
+/// under ten seconds while the walk as a whole runs for many minutes -- a
+/// server dribbling one slow page after another -- and only this number ends
+/// that. It is also the only bound whose report can name **what was
+/// abandoned**: a request that times out names its URL, but only [`Drop`]
+/// knows which branches are now left standing for the next run to sweep.
+///
+/// Removing a handful of branches and pull requests from a container on the
+/// same machine is a second's work, so any run that reaches this number is a
+/// run that is not going to finish at all. Generous on purpose: its whole job
+/// is to turn "never" into a sentence somebody can read, and a tight budget
+/// would buy nothing for that while risking a false report on a slow machine.
 pub const CLEANUP_BUDGET: Duration = Duration::from_secs(60);
 
 impl Litter {
     /// A guard over the repository the mutating tests write to, with anything
     /// an earlier run left behind already gone.
     pub async fn new(env: &Env) -> Litter {
+        Self::with_request_budget(env, REQUEST_BUDGET).await
+    }
+
+    /// [`Litter::new`] with [`REQUEST_BUDGET`] shortened.
+    ///
+    /// For the docker-free witness that a wedged server fails a test body
+    /// rather than stalling it, which would otherwise cost ten idle seconds
+    /// of `just check` to prove something that takes milliseconds. Nothing
+    /// against the real container calls it: the live suite wants the full
+    /// budget. The counterpart of [`Litter::set_cleanup_budget`], as a
+    /// constructor because the first bounded request -- the leftover sweep's
+    /// -- goes out before `new` returns.
+    pub async fn with_request_budget(env: &Env, request_budget: Duration) -> Litter {
         let litter = Litter {
-            http: reqwest::Client::new(),
+            http: client(request_budget),
             auth: format!("token {}", env.token),
             api: format!("{}/api/v1/repos/{}", env.url, env.full_name()),
             branches: Vec::new(),
             budget: CLEANUP_BUDGET,
+            request_budget,
         };
         litter.clear_leftovers().await;
         litter
@@ -464,6 +524,7 @@ impl Drop for Litter {
             return;
         }
         let (auth, api, budget) = (self.auth.clone(), self.api.clone(), self.budget);
+        let request_budget = self.request_budget;
         // Kept back for the timeout's message: `branches` itself is moved into
         // the thread, and a report that could not name what it abandoned would
         // leave the reader with nothing to look for.
@@ -480,7 +541,9 @@ impl Drop for Litter {
         // second runtime hangs rather than failing (measured: the first test
         // never returned).
         //
-        // **The wait is bounded** (issue #162), and it is a channel rather than
+        // **The wait is bounded** (issue #162) even though every request the
+        // thread sends now is too (issue #170) -- one bounds a request, this
+        // bounds the sequence; see CLEANUP_BUDGET. It is a channel rather than
         // a `join` because `JoinHandle` has no timed wait. The received value
         // is sent after `remove` has returned, so the ordering above survives;
         // what does not survive a timeout is the thread, which is left running
@@ -495,24 +558,29 @@ impl Drop for Litter {
                 .build()
                 .expect("a runtime for the cleanup")
                 .block_on(
-                    async move { remove(&reqwest::Client::new(), &auth, &api, &branches).await },
+                    async move { remove(&client(request_budget), &auth, &api, &branches).await },
                 );
             // The receiver is gone only if the waiter already gave up.
             let _ = done.send(failures);
         });
         let failures = match waiting.recv_timeout(budget) {
             Ok(failures) => failures,
-            // The sender is dropped without sending only by an unwind.
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                vec!["the cleanup thread panicked".to_owned()]
-            }
+            // The sender is dropped without sending only by an unwind -- since
+            // issue #170 the usual one: a request that outlived REQUEST_BUDGET
+            // panics in the thread, naming its URL on stderr. Named here too,
+            // because only this side knows what is now left standing.
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => vec![format!(
+                "the cleanup thread panicked (its own message is on stderr, naming the request), \
+                 so {abandoned:?} may still be standing; the next guard's leftover sweep removes \
+                 whatever is left"
+            )],
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => vec![format!(
                 "the cleanup did not finish within {budget:?} and was abandoned, so {:?} may \
-                 still be standing. The usual cause is a server that accepted the request and \
-                 then stopped answering: `reqwest` has no default timeout, so before issue #162 \
-                 that stalled the run with nothing on screen instead of saying so. Check the \
-                 container is alive, then re-run -- the next guard's leftover sweep removes \
-                 whatever is left. If a healthy container really needs longer, raise \
+                 still be standing. Every request is individually bounded by \
+                 live_env::REQUEST_BUDGET (issue #170), so a whole cleanup reaching this number \
+                 means a long walk of slow-but-answering requests rather than one wedged one. \
+                 Check the container is healthy, then re-run -- the next guard's leftover sweep \
+                 removes whatever is left. If a healthy container really needs longer, raise \
                  live_env::CLEANUP_BUDGET.",
                 abandoned
             )],
