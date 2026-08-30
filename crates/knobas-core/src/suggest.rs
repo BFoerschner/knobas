@@ -158,14 +158,18 @@ macro_rules! driver_head {
 /// * a dismissed suggestion is never proposed again (story 7, 8),
 /// * a link the user unlinked is never proposed back (story 9).
 ///
-/// Undirected on purpose. The unique index is directed (#70) but the *fact*
-/// "these two are connected" is not, and a detector that re-proposed `B -> A`
+/// Undirected on purpose, and it was undirected *first*. The unique index used
+/// to be directed while this was not (#70), because the *fact* "these two are
+/// connected" is not a directed one and a detector that re-proposed `B -> A`
 /// after the user removed `A -> B` would be the silent resurrection the
-/// withdrawal memory exists to prevent.
+/// withdrawal memory exists to prevent. Migration `0011` made the index agree;
+/// this clause did not change.
 ///
 /// `distinct on` in the head plus this `order by` de-duplicates *within* one
 /// pass as well: `not exists` reads the snapshot the statement started from, so
 /// two candidate rows describing one undirected pair would both survive it.
+/// That is still needed after `0011` -- the index refuses the second row, and
+/// refusing it is a failed statement, not a skipped candidate.
 macro_rules! driver_tail {
     () => {
         ") as c(from_id, to_id, relation, reason)

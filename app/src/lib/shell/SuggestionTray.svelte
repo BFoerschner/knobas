@@ -34,6 +34,7 @@
     type SuggestionPage,
   } from "../ipc/entity";
   import type { SourceSyncStatus } from "../ipc/sources";
+  import type { ActivityRow } from "../ipc/entity";
   import { linkChanges } from "../detail/links.svelte";
   import Monogram from "./Monogram.svelte";
   import { kindMonogram, kindSingular } from "./kinds";
@@ -99,7 +100,17 @@
     void ctx;
     const mine = ++token;
     let dead = false;
-    let off: (() => void) | undefined;
+    const off: Array<() => void> = [];
+
+    /** Keep an `unlisten`, or run it if the effect already tore down. */
+    function hold(pending: Promise<() => void>) {
+      void pending
+        .then((unlisten) => {
+          if (dead) unlisten();
+          else off.push(unlisten);
+        })
+        .catch(() => {});
+    }
 
     page = null;
     error = null;
@@ -108,22 +119,46 @@
     // A run that just finished is new material. `running: false` is the
     // transition, and the payload is coarse by rule, so this is the only
     // signal there is that the mirror moved.
-    void listen<SourceSyncStatus>(EVENTS.syncState, (event) => {
-      if (dead || event.payload.running) return;
-      void refresh(true, mine);
-    })
-      .then((unlisten) => {
-        if (dead) unlisten();
-        else off = unlisten;
-      })
-      .catch(() => {});
+    hold(
+      listen<SourceSyncStatus>(EVENTS.syncState, (event) => {
+        if (dead || event.payload.running) return;
+        void refresh(true, mine);
+      }),
+    );
+
+    // A link mutation somewhere else in the app moves this list too, and until
+    // #70 nothing told the tray so: hand-drawing the reverse of a live proposal
+    // withdraws it, and the row stayed drawn here until something else happened
+    // to refresh — *Accept* on it then resolving to nothing at all, visibly.
+    //
+    // Filtered to the verbs that change what this list contains, because
+    // `activity:new` carries every write-back and comment in the app and a
+    // blanket refresh here would re-read the tray on all of them.
+    hold(
+      listen<ActivityRow>(EVENTS.activityNew, (event) => {
+        if (dead || !TRAY_VERBS.includes(event.payload.verb)) return;
+        void refresh(true, mine);
+      }),
+    );
 
     void room;
     return () => {
       dead = true;
-      off?.();
+      for (const unlisten of off) unlisten();
     };
   });
+
+  /**
+   * The activity verbs that change the proposal set.
+   *
+   * `linked` and `unlinked` because detection's suppression reads the pair in
+   * both directions with no filter, so drawing or withdrawing a link is what
+   * makes a proposal appear or stop being proposable; `accepted` and `dismissed`
+   * because a proposal answered anywhere leaves this list. Everything else
+   * `activity:new` carries — a comment, a queued write-back, a sync — reaches
+   * the tray through `sync:state` if it reaches it at all.
+   */
+  const TRAY_VERBS = ["linked", "unlinked", "accepted", "dismissed"];
 
   async function answer(entry: SuggestionEntry, accept: boolean) {
     const id = entry.link.id;

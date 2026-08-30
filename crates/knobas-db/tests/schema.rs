@@ -1481,10 +1481,18 @@ async fn zero_eleven_makes_the_active_link_rule_unordered() {
     link(pool, &to, &from, "documents").await.unwrap();
 
     // Still partial: withdrawing frees the pair, and it frees it *both* ways.
-    sqlx::query("update knobas.link set deleted_at = now() where relation = 'blocks'")
-        .execute(pool)
-        .await
-        .unwrap();
+    //
+    // Keyed by this run's own endpoint, like every other write in this file: the
+    // database is shared by every test in the binary, and an unscoped
+    // `where relation = 'blocks'` tombstones whatever a test running beside this
+    // one just wrote.
+    sqlx::query(
+        "update knobas.link set deleted_at = now() where relation = 'blocks' and from_id = $1",
+    )
+    .bind(&from)
+    .execute(pool)
+    .await
+    .unwrap();
     link(pool, &to, &from, "blocks")
         .await
         .expect("a tombstone must not block re-linking in the other direction");

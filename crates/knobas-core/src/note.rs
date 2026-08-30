@@ -35,6 +35,23 @@
 //! `implied`)`, so a link the user drew *by hand* out of a note is not governed
 //! by the note's text and does not vanish when the text changes.
 //!
+//! ## Two notes naming each other share one row
+//!
+//! Since #70 one *pair* carries one active link per relation whichever way round
+//! it was drawn, so `A` saying `[[B]]` and `B` saying `[[A]]` cannot each have a
+//! row of their own -- they are one edge, and the panels drew it as one already,
+//! `entries_of` being undirected. What that costs is a rule the reconciliation
+//! has to state: the row belongs to whichever note wrote it, and when *that*
+//! note drops its ref while the other still names it, the row is **handed over**
+//! rather than withdrawn ([`reconcile_refs`]). Withdrawing it would leave the
+//! second note's body saying `[[A]]` with no link behind it until that note
+//! happened to be saved again, which is exactly the disagreement this section
+//! promises cannot happen.
+//!
+//! Handing over is display-neutral: [`refs_of`] reads the *body*, and backlinks
+//! read the pair undirected, so no panel changes. Only the reconciliation cares
+//! which end owns the row.
+//!
 //! [entity]: crate::entity
 
 use chrono::{DateTime, Utc};
@@ -344,9 +361,11 @@ fn named(title: &str) -> &str {
 
 /// Make the note's `implied` links say exactly what its body says.
 ///
-/// Two statements, in this order, and both scoped to
+/// Three steps, in this order, all scoped to
 /// `(from_id, REF_RELATION, origin implied)`:
 ///
+/// 0. hand over every ref link whose target the body no longer names **but
+///    whose target is a note that names this one** -- see the module header;
 /// 1. withdraw every ref link whose target the body no longer names;
 /// 2. draw a link for every named target that has an entity row.
 ///
@@ -380,10 +399,11 @@ fn named(title: &str) -> &str {
 /// covers in any case.
 ///
 /// A ref to an entity that already links *back* to this note under
-/// `REF_RELATION` is now skipped rather than written. That follows from the
-/// rule the migration states -- one active edge per unordered pair per relation
-/// -- and it is the better reading anyway: two rows for "these two reference
-/// each other" is the duplicate #40's story 14 exists to prevent.
+/// `REF_RELATION` is skipped rather than written: one active edge per unordered
+/// pair per relation is the rule the migration states, and two rows for "these
+/// two reference each other" is the duplicate #40's story 14 exists to prevent.
+/// [`hand_over_refs_the_other_note_still_names`] is what keeps that from costing
+/// the second note its link when the first drops its ref.
 async fn reconcile_refs(
     tx: &mut Transaction<'_, Postgres>,
     note_id: &str,
@@ -391,6 +411,7 @@ async fn reconcile_refs(
     author: &str,
 ) -> Result<(), CoreError> {
     let named = parse_refs(body_md);
+    hand_over_refs_the_other_note_still_names(tx, note_id, &named).await?;
     withdraw_refs_other_than(tx, note_id, &named).await?;
 
     sqlx::query(
@@ -407,6 +428,62 @@ async fn reconcile_refs(
     .bind(&named)
     .execute(&mut **tx)
     .await?;
+    Ok(())
+}
+
+/// Re-point, rather than withdraw, the ref links the *other* note still names.
+///
+/// Runs before [`withdraw_refs_other_than`], which then does not see them: what
+/// this leaves behind is a row whose `from_id` is the note that still justifies
+/// it. See the module header for why one row is all a mutually-referencing pair
+/// gets since #70.
+///
+/// Scoped to targets that are **notes**, because a note is the only thing whose
+/// body can name anything back. The bodies are parsed here rather than matched
+/// in SQL: [`parse_refs`] is what decides what a ref *is* -- the length limit,
+/// the newline rule, the de-duplication -- and a `like` pattern beside it would
+/// be a second, looser answer to the same question.
+///
+/// The swap is one statement per handed-over row, and there is at most one per
+/// dropped ref. `set from_id = to_id, to_id = from_id` is a genuine swap:
+/// PostgreSQL evaluates every right-hand side against the row as it stood.
+///
+/// Reads `knobas.confirmed_link`, not the base table (#161): a ref link is
+/// written by [`reconcile_refs`] with no `confirmed_at`, which the column's
+/// default makes *now*, so every row this could hand over is a confirmed one --
+/// and a machine *proposal* between two notes is the suggestion tray's to answer,
+/// never a side effect of saving a body. The view's own predicate is also where
+/// the `deleted_at is null` clause went.
+async fn hand_over_refs_the_other_note_still_names(
+    tx: &mut Transaction<'_, Postgres>,
+    note_id: &str,
+    keep: &[String],
+) -> Result<(), CoreError> {
+    let candidates: Vec<(Uuid, String)> = sqlx::query_as(
+        "select l.id, n.body_md
+           from knobas.confirmed_link l
+           join knobas.note n on n.id = l.to_id
+          where l.from_id = $1
+            and l.relation = $2
+            and l.origin = $3
+            and not (l.to_id = any($4))",
+    )
+    .bind(note_id)
+    .bind(REF_RELATION)
+    .bind(Origin::Implied.as_str())
+    .bind(keep)
+    .fetch_all(&mut **tx)
+    .await?;
+
+    for (id, body_md) in candidates {
+        if !parse_refs(&body_md).iter().any(|named| named == note_id) {
+            continue;
+        }
+        sqlx::query("update knobas.link set from_id = to_id, to_id = from_id where id = $1")
+            .bind(id)
+            .execute(&mut **tx)
+            .await?;
+    }
     Ok(())
 }
 
