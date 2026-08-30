@@ -99,9 +99,14 @@
   /**
    * What *kind* of credential this source uses, in the reader's words.
    *
-   * Total over `AuthMethod`, like `CREDENTIAL_WORD` above: a method added on
-   * the Rust side must fail `svelte-check` here rather than reach the reader as
-   * its raw enum spelling.
+   * Total over `AuthMethod`, like `CREDENTIAL_WORD` above — and the chain that
+   * makes that mean something runs backwards from here: a method added to the
+   * Rust enum stops `sources_mirror.rs` compiling (its list has a wildcard-free
+   * `match` behind it), then fails `the_auth_methods_match_their_typescript_mirror`
+   * until the union names it, and only then does `svelte-check` demand a word
+   * for it here. Without the first two links this table would quietly render
+   * `undefined`, which is what the union driving a display table for the first
+   * time made reachable.
    *
    * `null` — a source that needs no credential, and equally an `auth_kind`
    * column the backend could not read — gets its own sentence rather than a
