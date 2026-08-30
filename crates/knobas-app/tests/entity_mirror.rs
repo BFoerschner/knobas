@@ -893,3 +893,61 @@ fn the_context_kinds_match_their_typescript_mirror() {
          draw",
     );
 }
+
+const MINI_BOARD_FIELDS: &[&str] = &["columns", "sources"];
+const MINI_BOARD_COLUMN_FIELDS: &[&str] = &["cards", "status"];
+const MINI_BOARD_CARD_FIELDS: &[&str] = &["entity_id", "key", "priority", "source_id", "title"];
+const SOURCE_STATUSES_FIELDS: &[&str] = &["source_id", "statuses"];
+
+/// The mini board's four shapes (#177), each against what `entity.ts`
+/// declares.
+///
+/// Both nullable fields are exercised as `None` in the fixture, per this
+/// file's rule: `MiniBoardColumn.status` -- which is the *terminal group*, the
+/// one column whose absence of a status is the whole point -- and
+/// `MiniBoardCard.priority`, whose miss is the other pinned direction. A
+/// `skip_serializing_if` on either would hand the tile `undefined` where the
+/// mirror declared `null`, and the tile branches on exactly that.
+#[test]
+fn the_mini_board_shapes_match_their_typescript_mirror() {
+    let board = knobas_core::mini_board::MiniBoard {
+        columns: vec![knobas_core::mini_board::MiniBoardColumn {
+            status: None,
+            cards: vec![knobas_core::mini_board::MiniBoardCard {
+                entity_id: "mock:PAY-231".to_owned(),
+                source_id: "mock".to_owned(),
+                key: "PAY-231".to_owned(),
+                title: "Retry failed SEPA payouts".to_owned(),
+                priority: None,
+            }],
+        }],
+        sources: vec![knobas_core::mini_board::SourceStatuses {
+            source_id: "mock".to_owned(),
+            statuses: vec!["In Progress".to_owned()],
+        }],
+    };
+    let wire = serde_json::to_value(&board).unwrap();
+
+    assert_shape("MiniBoard", &wire, MINI_BOARD_FIELDS);
+    assert_shape(
+        "MiniBoardColumn",
+        &wire["columns"][0],
+        MINI_BOARD_COLUMN_FIELDS,
+    );
+    assert_shape(
+        "MiniBoardCard",
+        &wire["columns"][0]["cards"][0],
+        MINI_BOARD_CARD_FIELDS,
+    );
+    assert_shape(
+        "SourceStatuses",
+        &wire["sources"][0],
+        SOURCE_STATUSES_FIELDS,
+    );
+
+    assert_eq!(wire["columns"][0]["status"], serde_json::Value::Null);
+    assert_eq!(
+        wire["columns"][0]["cards"][0]["priority"],
+        serde_json::Value::Null
+    );
+}

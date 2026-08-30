@@ -923,3 +923,71 @@ export function promoteContext(entityId: string): Promise<ContextRow> {
 export function contextMembers(ctxId: string): Promise<string[]> {
   return invoke<string[]>("context_members", { ctxId });
 }
+
+/** One ticket on the mini board — `MiniBoardCard` (#177). */
+export interface MiniBoardCard {
+  /** The ticket's stable in-app address; clicking a card opens it. */
+  entity_id: string;
+  /** Which source the ticket came from — the key into `MiniBoard.sources`. */
+  source_id: string;
+  /** The source's own key for it, e.g. `PAY-231`. */
+  key: string;
+  title: string;
+  /** `null` where the mirrored record carries no priority knobas can read —
+   * the card simply omits it rather than guessing (ADR-0007). */
+  priority: string | null;
+}
+
+/** One status column — `MiniBoardColumn` (#177). */
+export interface MiniBoardColumn {
+  /**
+   * The status in the source's own words, or `null` for the terminal group:
+   * tickets whose record carries no status the read recognizes. The words on
+   * screen for that group ("No status") are the shell's — what crosses the
+   * bridge is the absence.
+   */
+  status: string | null;
+  /** Newest first. The column header's count is `cards.length`. */
+  cards: MiniBoardCard[];
+}
+
+/** What one source's corpus shows — `SourceStatuses` (#177). */
+export interface SourceStatuses {
+  source_id: string;
+  /**
+   * Every status this source's live tickets carry, in the board's order.
+   * Never carries the terminal group: "no status" is somewhere a ticket can
+   * be, not somewhere it can be moved to.
+   */
+  statuses: string[];
+}
+
+/** A context's tickets as the mini board draws them — `MiniBoard` (#177). */
+export interface MiniBoard {
+  /**
+   * The observed status columns in display order: To Do, In Progress, In
+   * Review, Done first where the corpus shows them, every other observed
+   * status after them alphabetically, and the terminal group last.
+   */
+  columns: MiniBoardColumn[];
+  /**
+   * Per source that put a card on this board, the statuses its own corpus
+   * shows — what the ticket detail's status select offers (#179).
+   */
+  sources: SourceStatuses[];
+}
+
+/**
+ * The Tickets tile's mini board for a context — `mini_board` (ADR-0009, #177).
+ *
+ * Membership is the same fixed one-hop rule `contextMembers` answers with
+ * (§16.11, ADR-0008); of those members the board draws the live tickets, so a
+ * ticket the source deleted is off the board. Grouping and column order happen
+ * in the command, not here.
+ *
+ * An unknown context is an empty board rather than a rejection — the tile has
+ * to be able to say "nothing here" without saying "this broke".
+ */
+export function miniBoard(ctxId: string): Promise<MiniBoard> {
+  return invoke<MiniBoard>("mini_board", { ctxId });
+}

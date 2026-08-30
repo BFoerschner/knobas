@@ -4,6 +4,7 @@ pub mod entity;
 mod error;
 pub mod inbox;
 pub mod link;
+pub mod mini_board;
 pub mod note;
 pub mod start_work;
 pub mod suggest;

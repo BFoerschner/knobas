@@ -184,6 +184,7 @@ pub fn run() {
             commands::entity::create_context,
             commands::entity::promote_context,
             commands::entity::context_members,
+            commands::entity::mini_board,
             commands::entity::create_link,
             commands::entity::create_note,
             commands::entity::delete_note,
