@@ -123,6 +123,7 @@ function summary(id = "jira"): SourceSummary {
     enabled: true,
     sync_interval_secs: 900,
     config: {},
+    auth_kind: "Pat",
     health: { source_id: id, state: "ok", checked_at: null, detail: null, secret_expires_at: null },
     last_run: null,
     next_run_at: null,

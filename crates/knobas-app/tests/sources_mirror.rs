@@ -63,9 +63,9 @@ fn the_auth_state_union_matches_the_rust_enum() {
     );
 }
 
-#[test]
-fn the_source_summary_shape_matches_its_typescript_mirror() {
-    let summary = knobas_app::sources::SourceSummary {
+/// One filled-in summary, so the two tests below vary one field and not twelve.
+fn summary_fixture() -> knobas_app::sources::SourceSummary {
+    knobas_app::sources::SourceSummary {
         id: "jira".to_owned(),
         adapter_kind: "jira".to_owned(),
         display_name: "Tidewater Jira".to_owned(),
@@ -77,16 +77,22 @@ fn the_source_summary_shape_matches_its_typescript_mirror() {
         last_run: None,
         next_run_at: Some(chrono::Utc::now()),
         item_count: 12,
+        auth_kind: Some(knobas_source::AuthMethod::Pat),
         kinds: knobas_source::SourceDescriptor {
             ..knobas_source_mock::descriptor_template()
         }
         .entity_kinds,
-    };
+    }
+}
+
+#[test]
+fn the_source_summary_shape_matches_its_typescript_mirror() {
     assert_shape(
         "SourceSummary",
-        &serde_json::to_value(&summary).unwrap(),
+        &serde_json::to_value(summary_fixture()).unwrap(),
         &[
             "adapter_kind",
+            "auth_kind",
             "base_url",
             "config",
             "display_name",
@@ -99,6 +105,38 @@ fn the_source_summary_shape_matches_its_typescript_mirror() {
             "next_run_at",
             "sync_interval_secs",
         ],
+    );
+}
+
+/// `auth_kind` carries the **same spelling** as the two input DTOs' field of
+/// that name, and `null` where they cannot go.
+///
+/// `NewSource.auth_kind` and `SourceDraft.auth_kind` are a plain `AuthMethod`
+/// ("Pat"), because every source the Add-source form can create authenticates.
+/// A *stored* source need not -- the compiled-in mock reaches nothing -- so the
+/// summary's field is the same union widened by `null`, and not a fifth
+/// spelling of the same idea. A `Some` that serialized as `{"Method":"Pat"}`
+/// would still pass the shape test above, which only reads keys.
+#[test]
+fn the_summary_auth_kind_is_the_same_union_as_the_input_dtos() {
+    let wire = |kind| {
+        serde_json::to_value(knobas_app::sources::SourceSummary {
+            auth_kind: kind,
+            ..summary_fixture()
+        })
+        .unwrap()["auth_kind"]
+            .clone()
+    };
+    assert_eq!(
+        wire(Some(knobas_source::AuthMethod::Pat)),
+        serde_json::json!("Pat"),
+        "the summary must spell an auth method the way `NewSource` does"
+    );
+    assert_eq!(
+        wire(None),
+        serde_json::Value::Null,
+        "a source that needs no credential must say so as `null`, not as a word \
+         the `AuthMethod` union does not contain"
     );
 }
 
