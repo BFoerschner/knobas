@@ -464,9 +464,9 @@ pub struct Secret { pub kind: knobas_source::AuthMethod, pub value: String } // 
 | key form | issue key: `jira:PAY-231` | `gitea:owner/repo`, `gitea:owner/repo#142`, `gitea:owner/repo@<sha40>`, `gitea:owner/repo@refs/heads/<name>` | `teamcity:build:<buildId>`, `teamcity:buildType:<buildTypeId>` |
 | auth | Bearer PAT (DC ≥ 8.14) or Basic user+password | `Authorization: token <pat>` | Bearer token or Basic |
 | test_connection | `GET /rest/api/2/myself`, version from `/rest/api/2/serverInfo` | `GET /api/v1/user`, version `/api/v1/version` | `GET /app/rest/server` |
-| read endpoints (M1) | `GET /rest/api/2/search` (`jql`, `startAt`, `maxResults`, `fields`, `expand=renderedFields`) — classic `startAt`/`total` pagination, **never** Cloud's `/search/jql` (gotcha 4); `GET /rest/api/2/issue/{key}` incl. `comment`, `worklog` in `fields`/`expand` | `/api/v1/repos/search`, `/repos/{o}/{r}/branches`, `/repos/{o}/{r}/pulls?state=all&sort=recentupdate`, `/repos/{o}/{r}/commits?sha=&since=` | `GET /app/rest/buildTypes?fields=…`, `GET /app/rest/builds?locator=…&fields=…`, `GET /app/rest/builds/id:{id}` — **always** `Accept: application/json` (else XML) and always an explicit `fields=` |
+| read endpoints (M1) | `GET /rest/api/2/search` (`jql`, `startAt`, `maxResults`, `fields`, `expand=renderedFields`) — classic `startAt`/`total` pagination, **never** Cloud's `/search/jql` (gotcha 4); `GET /rest/api/2/issue/{key}` incl. `comment`, `worklog` in `fields`/`expand` | `/api/v1/repos/search`, `/repos/{o}/{r}/branches`, `/repos/{o}/{r}/pulls?state=all&sort=recentupdate`, `/repos/{o}/{r}/commits?sha=&since=`, `/repos/{o}/{r}/issues/{index}/comments` (fifth read, M2 ruling B1, config-gated; **not a paged listing** — `since`/`before` only, read whole in one request; see the #131 amendment) | `GET /app/rest/buildTypes?fields=…`, `GET /app/rest/builds?locator=…&fields=…`, `GET /app/rest/builds/id:{id}` — **always** `Accept: application/json` (else XML) and always an explicit `fields=` |
 | cursor | `{"v":1,"updated_to":"2026-08-24T09:14:00Z"}`; JQL `updated >= "<watermark − 2 min>" ORDER BY updated ASC`. The 2-minute overlap is mandatory: **JQL time resolution is one minute**, so an exact-boundary watermark drops items. Re-delivery is free — upserts are idempotent. | `{"v":1,"repos_listed_at":"…","repos":{"owner/repo":{"pulls_updated_to":"…","commits_since":"…","branches_hash":"…"}}}` — per-repo watermarks; a repo added upstream is picked up by the repo-list re-listing each run. ETags/`If-None-Match` are an **optimization to verify against the real container**, not a contract. | `{"v":1,"since_build_id":12345}`; finished builds via `locator=sinceBuild:(id:<n>),state:finished` (ids are monotonic), **plus an unconditional `state:running,state:queued` poll** each run — a running build mutates without a new id. |
-| config (`config_schema`) | `flavor` (`datacenter`\|`cloud`, default `datacenter`), `projects[]` or `jql_filter`, `username` (basic auth) | `owners[]`/`repos[]` allowlist, `username` | `project_ids[]`, `build_type_ids[]`, `builds_per_config` |
+| config (`config_schema`) | `flavor` (`datacenter`\|`cloud`, default `datacenter`), `projects[]` or `jql_filter`, `username` (identity — filled by *Test connection*, used for `@me`/My items; also the login for user + password auth) | `owners[]`/`repos[]` allowlist, `username` | `project_ids[]`, `build_type_ids[]`, `builds_per_config`, `username` (identity — filled by *Test connection*, used for `@me`/My items) |
 | contract source | `testenv/specs/jira-dc-rest.wadl` + `knobas-mockd` | the **real** pinned Gitea container (roadmap §3) | TeamCity swagger extracted per `testenv/specs/fetch.sh` + `knobas-mockd` |
 | client | hand-rolled reqwest (~5 endpoints) | hand-rolled reqwest; codegen from `/swagger.v1.json` is permitted by roadmap §4 but is stream B's internal call | hand-rolled reqwest |
 
@@ -1266,6 +1266,29 @@ instead of re-deriving it. No `BUILD_FIELDS` change, no locator change, no curso
   **Option 3** — a search surface saying which sources can answer an author query — changes
   `SearchResponse` and is therefore §10.8-frozen; Fable declined to rule it and escalated it to
   Björn. It is filed as issue #141, `ready-for-human`, and nothing here forecloses it.
+
+### Amendments from the §4.2 config-table correction (2026-08-31, binding) — issue #112
+
+**The convention, ruled by Björn (2026-08-31): a §4.2 row that was simply *wrong* — describing
+something that was never, or is no longer, true — is corrected in place; an amendment entry
+records that it happened and why. A row that was *superseded* by a later decision keeps the
+existing treatment: the old text stands and the amendment carries the new truth.** This entry is
+the precedent the next stale row follows.
+
+Three corrections applied in place, all in §4.2's per-source table, all found by implementers who
+correctly stopped rather than editing a frozen-record document unasked:
+
+- **Jira `username` is no longer "(basic auth)".** After #82 and PR #110 it is the identity
+  field: filled by *Test connection* from `ConnectionInfo.account`, used for `@me` and *My
+  items*, and *also* the login for user + password authentication. The old description was the
+  same contradiction #82 removed from the product, surviving in the document.
+- **TeamCity's `username` was absent from the config row entirely.** Present now, with the same
+  identity description — Jira's description and TeamCity's absence were one fact, not two.
+- **Gitea's read-endpoints row gains ruling B1's fifth endpoint**,
+  `/repos/{o}/{r}/issues/{index}/comments` (M2, config-gated). Its omission is half of why #131
+  was filed on a false premise: the table had nothing to check the paging inference against. The
+  endpoint's measured non-paging behaviour is recorded in the #131 amendment above; the row now
+  points at it.
 
 ---
 
