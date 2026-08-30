@@ -422,9 +422,12 @@ function mirrorRow(entry: (typeof CORPUS)[number]) {
 /**
  * `mini_board` (#177), over the fixture.
  *
- * A stand-in, not a second implementation of the rule: the real grouping and
- * column order are the command's, and this exists so the Tickets tile has a
- * board to draw under `just dev` and `just demo`. It reads the fixture's
+ * The dev bridge's own answer, so the Tickets tile has a board to draw under
+ * `just dev` and `just demo`. Like `listEntities` below, it *restates* the
+ * command's rule — the leading four, then the rest folded and alphabetical,
+ * then the statusless column last — and a restatement is a copy that can
+ * drift. The command is the authority; a divergence here is a bug in this
+ * file, never a second opinion about the order. It reads the fixture's
  * payloads the way the command's second `coalesce` arm reads the mock source's
  * — a flat `status` and `priority` — because that is the shape this corpus is
  * in.

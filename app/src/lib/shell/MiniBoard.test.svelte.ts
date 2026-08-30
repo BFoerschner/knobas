@@ -267,3 +267,43 @@ test("a slow room switch never paints the previous room's board", async () => {
 
   screen.done();
 });
+
+/**
+ * The other half of that guard, and the half a dropped late answer cannot
+ * prove: the switch **clears** the board it had.
+ *
+ * The test above never paints a first board — the read it supersedes is still
+ * in flight — so it pins only that the loser's answer is discarded. A tile
+ * that kept `board` across the switch would pass it while leaving the previous
+ * room's cards on screen for as long as the new read takes, which is the thing
+ * the ticket forbids. So: paint a room, leave it, and look at the tile while
+ * the next read is still in flight. It says it is reading — not that the new
+ * room is empty, which is a different sentence about a different fact.
+ */
+test("leaving a room takes its board off the screen while the next read is in flight", async () => {
+  const first = deferred<MiniBoard>();
+  answer = () => first.promise;
+  const screen = render([], "ctx:one");
+  await vi.waitFor(() => expect(calls).toHaveLength(1));
+  first.resolve({ columns: [column("To Do", card("STALE-1"))], sources: [] });
+  await vi.waitFor(() => expect(screen.cards()).toHaveLength(1));
+  expect(screen.text()).toContain("STALE-1");
+
+  const second = deferred<MiniBoard>();
+  answer = () => second.promise;
+  screen.props.ctx = "ctx:two";
+  flushSync();
+  await vi.waitFor(() => expect(calls).toHaveLength(2));
+
+  expect(screen.text()).not.toContain("STALE-1");
+  expect(screen.columns()).toEqual([]);
+  expect(screen.count()).toBe("");
+  expect(screen.text()).toContain("Reading…");
+  expect(screen.text()).not.toContain("No ticket in this room yet.");
+
+  second.resolve({ columns: [column("Done", card("FRESH-1"))], sources: [] });
+  await vi.waitFor(() => expect(screen.cards()).toHaveLength(1));
+  expect(screen.text()).toContain("FRESH-1");
+
+  screen.done();
+});
