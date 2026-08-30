@@ -441,7 +441,7 @@ async fn a_guard_clears_what_a_killed_run_left_and_takes_nothing_else_with_it() 
 /// the ten-second request budget -- is what fires, so the report being
 /// asserted on is `CLEANUP_BUDGET`'s and not a request timeout's.
 fn a_server_that_answers_once_then_goes_quiet() -> String {
-    use std::io::{Read as _, Write as _};
+    use std::io::Write as _;
 
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a free port");
     let address = listener.local_addr().expect("the bound address");
@@ -460,14 +460,7 @@ fn a_server_that_answers_once_then_goes_quiet() -> String {
             // Read the request out first. Answering a client that is still
             // writing and then closing both halves resets the connection, and
             // an error is not the empty listing `Litter::new` needs.
-            let mut request = Vec::new();
-            let mut byte = [0_u8; 1];
-            while !request.ends_with(b"\r\n\r\n") {
-                match stream.read(&mut byte) {
-                    Ok(0) | Err(_) => break,
-                    Ok(_) => request.push(byte[0]),
-                }
-            }
+            read_request_out(&mut stream);
             let _ = stream.write_all(
                 b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
                   Content-Length: 2\r\nConnection: close\r\n\r\n[]",
@@ -479,6 +472,33 @@ fn a_server_that_answers_once_then_goes_quiet() -> String {
     format!("http://{address}")
 }
 
+/// Read one HTTP request off `stream`, up to the header-terminating blank
+/// line, and discard it. Both quiet fakes do this before deciding whether to
+/// answer: a client still mid-write must not be the thing that blocks, or the
+/// stall being staged would be a buffer-sized accident of *writing* rather
+/// than the server's silence.
+fn read_request_out(stream: &mut std::net::TcpStream) {
+    use std::io::Read as _;
+    let mut request = Vec::new();
+    let mut byte = [0_u8; 1];
+    while !request.ends_with(b"\r\n\r\n") {
+        match stream.read(&mut byte) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => request.push(byte[0]),
+        }
+    }
+}
+
+/// The message a panic carried, whichever of the two shapes `panic!` gives it.
+fn panic_message(panicked: &(dyn std::any::Any + Send)) -> String {
+    panicked
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| panicked.downcast_ref::<&str>().copied())
+        .expect("a failure this suite stages panics with a message")
+        .to_owned()
+}
+
 /// A server that accepts every connection and never writes a byte back, as
 /// an address to point a guard at.
 ///
@@ -488,25 +508,14 @@ fn a_server_that_answers_once_then_goes_quiet() -> String {
 /// connection would not do: that comes back as an error in milliseconds and
 /// proves nothing about a timeout.
 fn a_server_that_never_answers() -> String {
-    use std::io::Read as _;
-
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a free port");
     let address = listener.local_addr().expect("the bound address");
     std::thread::spawn(move || {
         // Held rather than dropped: closing a connection answers with a
-        // hangup, which is the opposite of the silence this presents. The
-        // request is read out so the client is not blocked on *writing*,
-        // which would be a different (buffer-sized) accident of a stall.
+        // hangup, which is the opposite of the silence this presents.
         let mut quiet = Vec::new();
         for mut stream in listener.incoming().flatten() {
-            let mut request = Vec::new();
-            let mut byte = [0_u8; 1];
-            while !request.ends_with(b"\r\n\r\n") {
-                match stream.read(&mut byte) {
-                    Ok(0) | Err(_) => break,
-                    Ok(_) => request.push(byte[0]),
-                }
-            }
+            read_request_out(&mut stream);
             quiet.push(stream);
         }
     });
@@ -553,21 +562,15 @@ async fn a_test_body_whose_server_stops_answering_fails_rather_than_stalling() {
 
     assert!(
         started.elapsed() < std::time::Duration::from_secs(5),
-        "the guard took {:?} to give up on a server that never answers -- the request budget is \
-         not bounding anything",
+        "a test body took {:?} to fail against a server that never answers -- the request \
+         budget is not bounding anything",
         started.elapsed()
     );
     assert!(
         panicked.is_panic(),
         "the failure must be a panic somebody can read"
     );
-    let panicked = panicked.into_panic();
-    let report = panicked
-        .downcast_ref::<String>()
-        .map(String::as_str)
-        .or_else(|| panicked.downcast_ref::<&str>().copied())
-        .expect("the failure panics with a message")
-        .to_owned();
+    let report = panic_message(panicked.into_panic().as_ref());
     assert!(
         report.contains("/branches"),
         "the report must name what it was waiting for, so a reader knows which request wedged: \
@@ -609,12 +612,7 @@ async fn a_guard_whose_server_stops_answering_reports_rather_than_stalling() {
     let started = std::time::Instant::now();
     let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || drop(guard)))
         .expect_err("a cleanup that could not run must fail the test, not pass it quietly");
-    let report = panicked
-        .downcast_ref::<String>()
-        .map(String::as_str)
-        .or_else(|| panicked.downcast_ref::<&str>().copied())
-        .expect("the guard reports by panicking with a message")
-        .to_owned();
+    let report = panic_message(panicked.as_ref());
 
     assert!(
         started.elapsed() < std::time::Duration::from_secs(5),
