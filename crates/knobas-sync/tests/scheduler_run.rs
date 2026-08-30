@@ -28,10 +28,16 @@ struct MockRegistry {
     /// `a_healthy_run_is_logged_ok_...` cannot fail -- swapping the two
     /// bindings in `run_log::finish` left it green, because both were `0`.
     ///
-    /// `knobas_source_mock::build` cannot express this (it ignores
-    /// `instance.config` and hardcodes `MockSource::new()`), which is why the
-    /// harness builds the mock itself rather than going through the real
-    /// registry.
+    /// `knobas_source_mock::build` *can* express this since #48 -- it reads
+    /// `config.tombstone` and `config.fault`. This harness still builds its own
+    /// for one reason and one only: the cursor handle below, which a run that
+    /// builds and drops its own adapter offers no other way to obtain.
+    ///
+    /// **Not for the descriptor id.** `build` has honoured `instance.id` since
+    /// M0 -- it is what `build_honours_the_instance_id` asserts -- so
+    /// `Renamed`'s id override and its renaming sink are redundant scaffolding,
+    /// not load-bearing. Left in place rather than unwound here, which is a
+    /// change to this harness and not to what #48 asked for.
     tombstone: Mutex<bool>,
     /// Every cursor an adapter this registry built was handed, in order.
     ///
