@@ -1075,7 +1075,9 @@ knobas-source-jira	test/mockd	pages_across_more_than_one_response
 knobas-source-jira	test/mockd	passes_the_contract_battery
 knobas-source-jira	test/mockd	test_connection_reports_the_account_and_the_server
 knobas-source-mock	test/contract	a_build_item_names_its_triggerer_as_the_author
+knobas-source-mock	test/contract	build_honours_the_fault_and_tombstone_in_its_config
 knobas-source-mock	test/contract	build_honours_the_instance_id
+knobas-source-mock	test/contract	build_refuses_a_config_it_cannot_read
 knobas-source-mock	test/contract	build_refuses_an_unusable_instance_id
 knobas-source-mock	test/contract	descriptor_declares_write_only_and_five_kinds
 knobas-source-mock	test/contract	every_emitted_item_carries_a_web_url

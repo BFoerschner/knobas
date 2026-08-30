@@ -722,15 +722,30 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// one shape to call and something to exercise it against before a real
 /// adapter exists.
 ///
-/// The fixture is compiled in, so `base_url`, `auth`, `secret` and `config`
-/// are ignored -- every other adapter uses all four.
+/// The fixture is compiled in, so `base_url`, `auth` and `secret` are ignored --
+/// every other adapter uses all three. **`config` is not**: it carries the two
+/// knobs [`MockSource`] has, and carrying them is what lets a caller drive a
+/// *registry-built* adapter that fails. Until it did, the only faulted mock in
+/// existence was one a test constructed by hand, so nothing going through the
+/// real registry could be made to fail at all (the narrow remainder of PR #24's
+/// finding, carried on the M0/M1 ledger as #48).
+///
+/// ```json
+/// { "fault": "none" | "unauthorized" | "unreachable", "tombstone": true }
+/// ```
+///
+/// Both keys are optional and both default to the healthy fixture, so a source
+/// added through the Add-source form -- whose generated config carries neither
+/// -- is exactly the mock it has always been.
 ///
 /// # Errors
 ///
-/// [`SourceError::Protocol`] if the instance is not this adapter's to build,
-/// or if its id cannot be an entity namespace -- both are configuration
-/// mistakes, and both are worth catching before a sync writes rows under a
-/// namespace nothing can address.
+/// [`SourceError::Protocol`] if the instance is not this adapter's to build, if
+/// its id cannot be an entity namespace, or if `config` carries a key this
+/// cannot read. All three are configuration mistakes, and all three are worth
+/// catching before a sync writes rows under a namespace nothing can address --
+/// the third especially, since the alternative is a source that silently builds
+/// healthy and syncs when the caller asked for one that fails.
 pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
     if instance.kind != SOURCE_ID {
         return Err(SourceError::protocol(format!(
@@ -740,8 +755,45 @@ pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
     }
     knobas_source::instance::validate_instance_id(&instance.id)
         .map_err(|error| SourceError::protocol(error.to_string()))?;
+    // Both, independently: a faulted mock never reaches the tombstone and a
+    // healthy one always does, so picking one knob over the other would be a
+    // silent precedence rule where there is no reason for one.
     Ok(Box::new(MockSource {
         id: instance.id,
-        ..MockSource::new()
+        tombstone: tombstone_of(&instance.config)?,
+        ..MockSource::with_fault(fault_of(&instance.config)?)
     }))
+}
+
+/// `config.fault`, defaulting to the healthy fixture.
+///
+/// **No wildcard arm on the way in**: an unknown spelling is refused rather than
+/// read as [`Fault::None`], because a config asking for a failure and getting a
+/// healthy source is a test that passes for the wrong reason.
+fn fault_of(config: &serde_json::Value) -> Result<Fault, SourceError> {
+    match config.get("fault") {
+        None | Some(serde_json::Value::Null) => Ok(Fault::None),
+        Some(serde_json::Value::String(name)) => match name.as_str() {
+            "none" => Ok(Fault::None),
+            "unauthorized" => Ok(Fault::Unauthorized),
+            "unreachable" => Ok(Fault::Unreachable),
+            other => Err(SourceError::protocol(format!(
+                "knobas-source-mock: unknown fault {other:?}"
+            ))),
+        },
+        Some(other) => Err(SourceError::protocol(format!(
+            "knobas-source-mock: `fault` must be a string, not {other}"
+        ))),
+    }
+}
+
+/// `config.tombstone`, defaulting to off.
+fn tombstone_of(config: &serde_json::Value) -> Result<bool, SourceError> {
+    match config.get("tombstone") {
+        None | Some(serde_json::Value::Null) => Ok(false),
+        Some(serde_json::Value::Bool(on)) => Ok(*on),
+        Some(other) => Err(SourceError::protocol(format!(
+            "knobas-source-mock: `tombstone` must be a boolean, not {other}"
+        ))),
+    }
 }

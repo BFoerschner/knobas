@@ -28,10 +28,12 @@ struct MockRegistry {
     /// `a_healthy_run_is_logged_ok_...` cannot fail -- swapping the two
     /// bindings in `run_log::finish` left it green, because both were `0`.
     ///
-    /// `knobas_source_mock::build` cannot express this (it ignores
-    /// `instance.config` and hardcodes `MockSource::new()`), which is why the
-    /// harness builds the mock itself rather than going through the real
-    /// registry.
+    /// `knobas_source_mock::build` *can* express this since #48 -- it reads
+    /// `config.tombstone` and `config.fault`. This harness still builds its own
+    /// because it needs the two things the config cannot carry: a per-test
+    /// descriptor id (`Renamed`) and a handle on every cursor the adapter was
+    /// handed, which a run that builds and drops its own adapter offers no other
+    /// way to see.
     tombstone: Mutex<bool>,
     /// Every cursor an adapter this registry built was handed, in order.
     ///

@@ -524,3 +524,89 @@ async fn build_refuses_an_unusable_instance_id() {
         );
     }
 }
+
+/// `build` honours `instance.config`, which is what lets a test drive a
+/// **compiled-in** adapter that fails.
+///
+/// The registry hands out adapters by kind and hands `build` the stored config;
+/// with the config ignored, the only faulted mock in existence was one a test
+/// constructed by hand, so nothing that goes *through* the registry could be
+/// made to fail. That is the narrow remainder of PR #24's finding, carried on
+/// the M0/M1 ledger (#48).
+///
+/// Both knobs, because `MockSource` has exactly two and honouring one would be
+/// the same gap in a smaller shape. Every `Fault` is walked rather than one:
+/// the mapping is a match, and a spelling that fell through to `None` would be
+/// a config that silently produces a healthy source.
+#[tokio::test]
+async fn build_honours_the_fault_and_tombstone_in_its_config() {
+    for (spelling, fault) in [
+        ("none", Fault::None),
+        ("unauthorized", Fault::Unauthorized),
+        ("unreachable", Fault::Unreachable),
+    ] {
+        let source =
+            knobas_source_mock::build(configured(serde_json::json!({ "fault": spelling })))
+                .expect("a known fault spelling builds");
+
+        let reported = source.test_connection().await;
+        match fault {
+            Fault::None => assert!(reported.is_ok(), "{spelling} must build a healthy mock"),
+            Fault::Unauthorized => assert!(matches!(
+                reported,
+                Err(knobas_source::SourceError::Unauthorized { .. })
+            )),
+            Fault::Unreachable => assert!(matches!(
+                reported,
+                Err(knobas_source::SourceError::Unreachable(_))
+            )),
+        }
+    }
+
+    // The tombstone knob: a full sync that also reports one item as deleted,
+    // which is the only way to produce a run whose `deleted` differs from its
+    // `swept`.
+    let source = knobas_source_mock::build(configured(serde_json::json!({ "tombstone": true })))
+        .expect("built");
+    let mut sink = VecSink(Vec::new());
+    source.sync(None, &mut sink).await.expect("full sync");
+    assert!(
+        sink.0.iter().any(|item| item.deleted
+            && item.entity.to_string() == format!("mock:{}", knobas_source_mock::TOMBSTONED_KEY)),
+        "the tombstone knob must reach the items the sync emits"
+    );
+
+    // And an absent config is the healthy default it has always been.
+    let plain = knobas_source_mock::build(configured(serde_json::json!({}))).expect("built");
+    assert!(plain.test_connection().await.is_ok());
+}
+
+/// A config knobas cannot read is a configuration mistake, refused at build
+/// time like the two `build` already refuses -- not a source that silently
+/// builds healthy and syncs.
+#[tokio::test]
+async fn build_refuses_a_config_it_cannot_read() {
+    for bad in [
+        serde_json::json!({ "fault": "flaky" }),
+        serde_json::json!({ "fault": 7 }),
+        serde_json::json!({ "tombstone": "yes" }),
+    ] {
+        assert!(
+            knobas_source_mock::build(configured(bad.clone())).is_err(),
+            "{bad} must be refused"
+        );
+    }
+}
+
+/// One mock instance, configured.
+fn configured(config: serde_json::Value) -> knobas_source::instance::SourceInstance {
+    knobas_source::instance::SourceInstance {
+        id: "mock".to_owned(),
+        kind: "mock".to_owned(),
+        display_name: "Tidewater".to_owned(),
+        base_url: String::new(),
+        auth: None,
+        secret: None,
+        config,
+    }
+}
