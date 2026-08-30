@@ -10,7 +10,15 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage, isIpcError } from "../ipc";
-    import { getEntity, promoteContext, unlink, type EntityDetail, type LinkEntry } from "../ipc/entity";
+    import {
+    getEntity,
+    miniBoard,
+    promoteContext,
+    submitWrite,
+    unlink,
+    type EntityDetail,
+    type LinkEntry,
+  } from "../ipc/entity";
   import { openFreshContext } from "../shell/contexts.svelte";
   import Monogram from "../shell/Monogram.svelte";
   import { kindRegistry } from "../shell/kind-registry.svelte";
@@ -209,6 +217,128 @@
     }
   }
 
+  // -- the status select (#179) ----------------------------------------------
+  //
+  // Moving a ticket without leaving knobas. Optimistic by design: knobas has no
+  // read of which transitions this ticket's workflow actually offers from where
+  // it stands -- that seam is M3's descriptor growth (ADR-0007) -- so the select
+  // offers what the source's corpus has been *seen* to use, the adapter resolves
+  // the target at write time, and a move the workflow refuses comes back by name
+  // through the write queue's own pending/held UI.
+
+  /** The source half of the address is the source id (interfaces §4.1). */
+  const sourceId = $derived(entityId.slice(0, entityId.indexOf(":")));
+
+  /**
+   * Whether this panel is showing a ticket — the only kind that can move.
+   *
+   * A `$derived` and not the comparison written inline below, for two reasons.
+   * It changes only when the *answer* flips, so a `refresh()` that re-reads the
+   * same ticket does not re-issue the board read; and it is the effect's gate,
+   * so the read a note or a page can never use is never made. That read brings
+   * back the whole of a source's cards — the cost this select accepts to learn
+   * six statuses — and paying it on a kind with no select at all is paying it
+   * for nothing.
+   */
+  const isTicket = $derived(shownKind === "ticket");
+
+  /**
+   * The granted read (#177), for this ticket's source.
+   *
+   * Both halves of the select come out of it and nothing else: `sources` is the
+   * statuses that source's corpus shows -- the offer -- and the column this
+   * ticket's card sits in is its **mirrored** status. Reading the status out of
+   * `detail.payload` here instead would be a second payload read, in the shell,
+   * spelling `fields.status.name` a second time; ADR-0007 exists to stop
+   * exactly that, and the command already did the work.
+   */
+  let statusBoard = $state<{
+    offered: string[];
+    current: string | null;
+  } | null>(null);
+
+  /**
+   * The board read's own generation.
+   *
+   * **Not `token`.** That one belongs to `get_entity`, and bumping it here
+   * would make this effect invalidate the panel's own read: both effects run
+   * on mount, this one second, so the entity's answer would arrive stale and
+   * be dropped and the panel would say "Reading…" for ever.
+   */
+  let boardToken = 0;
+
+  $effect(() => {
+    const id = entityId;
+    const source = sourceId;
+    const mine = ++boardToken;
+    statusBoard = null;
+    if (!source || !isTicket) return;
+    void miniBoard({ sources: [source], context: null })
+      .then((board) => {
+        if (mine !== boardToken) return;
+        statusBoard = {
+          offered: board.sources.find((entry) => entry.source_id === source)?.statuses ?? [],
+          current:
+            board.columns.find((column) =>
+              column.cards.some((card) => card.entity_id === id),
+            )?.status ?? null,
+        };
+      })
+      .catch(() => {
+        // Swallowed on purpose, and the only swallowed read in this panel: the
+        // select is an extra a ticket detail can do without, and a toast about
+        // a board nobody asked to see would be noise over the item they did.
+        // A `null` board renders no select at all.
+      });
+  });
+
+  /**
+   * Whether this ticket can be moved from here.
+   *
+   * Three things have to be true, and each absence is honest rather than a
+   * disabled control: it is a ticket, its adapter declares the `transition`
+   * write op (`submit_write` refuses one that does not, and the surface that
+   * offered it is what is at fault), and the source's corpus has shown at
+   * least one status to move to.
+   */
+  const canTransition = $derived(
+    isTicket &&
+      kindRegistry.writeOps(detail?.source.adapter_kind ?? "").includes("transition") &&
+      (statusBoard?.offered.length ?? 0) > 0,
+  );
+
+  /** True while a move is being queued, so the select cannot double-fire. */
+  let moving = $state(false);
+
+  /**
+   * Queue a move.
+   *
+   * **Nothing here changes what the select shows.** The board reflects the
+   * mirror, so the ticket's status is still what the source last said until the
+   * write lands and a sync mirrors it; a select that jumped to the new value
+   * would be reporting a hope, and the queue may yet hold or refuse this. The
+   * `select` element is re-bound to the mirrored status for the same reason --
+   * see the `value` in the markup.
+   */
+  async function move(event: Event) {
+    const select = event.currentTarget;
+    if (!(select instanceof HTMLSelectElement)) return;
+    const status = select.value;
+    // Put the control back where the mirror has it, before the await: the
+    // reader must never be left looking at a status nothing has recorded.
+    select.value = statusBoard?.current ?? "";
+    if (!status || status === statusBoard?.current || moving) return;
+    moving = true;
+    try {
+      await submitWrite({ Transition: { entity: entityId, status } });
+      push({ text: `Move to ${status} queued for ${key}` });
+    } catch (rejection) {
+      push({ text: `Could not queue the move: ${ipcErrorMessage(rejection)}`, tone: "err" });
+    } finally {
+      moving = false;
+    }
+  }
+
   /** True while a promotion is in flight, so the button cannot double-fire. */
   let promoting = $state(false);
 
@@ -353,6 +483,39 @@
       </div>
 
       <div class="d-meta">
+        <!--
+          The mockup puts *Status* first in the meta grid, as a select
+          (`signal-miller.html:2586`). Absent rather than disabled where a move
+          is not possible, the rule *Start work* and *Open in browser* follow:
+          a disabled control claims there is something here to do.
+        -->
+        {#if canTransition && statusBoard}
+          <div>
+            <div class="l">Status</div>
+            <div class="v">
+              <select
+                class="sel-inline"
+                aria-label="Change status"
+                disabled={moving}
+                value={statusBoard.current ?? ""}
+                onchange={(event) => void move(event)}
+              >
+                <!--
+                  The terminal group, and only when the ticket is in it: the
+                  mirrored status has to be selectable for the control to show
+                  it, but "no status" is somewhere a ticket can be and not
+                  somewhere it can be moved to, so it cannot be chosen.
+                -->
+                {#if statusBoard.current === null}
+                  <option value="" disabled>No status</option>
+                {/if}
+                {#each statusBoard.offered as status (status)}
+                  <option value={status}>{status}</option>
+                {/each}
+              </select>
+            </div>
+          </div>
+        {/if}
         <div>
           <div class="l">Source</div>
           <div class="v">{detail.source.display_name}</div>

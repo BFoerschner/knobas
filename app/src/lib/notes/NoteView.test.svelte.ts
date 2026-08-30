@@ -36,6 +36,11 @@ function detail(over: Partial<NoteDetail> = {}): NoteDetail {
 }
 
 vi.mock("../ipc/entity", () => ({
+  // The ticket detail's status select (#179) reads the granted board and
+  // queues through the write queue. Not what this file is about, so both
+  // answer with nothing.
+  miniBoard: () => Promise.resolve({ columns: [], sources: [] }),
+  submitWrite: () => Promise.reject(new Error("no write in this test")),
   getNote: async () => stored,
   saveNote: async (noteId: string, title: string, bodyMd: string) => {
     saves.push({ noteId, title, bodyMd });

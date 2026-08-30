@@ -45,6 +45,18 @@ export interface KindRegistry {
   info(kind: string): KindInfo | null;
   /** What *this* adapter declares about this kind. */
   infoFor(adapterKind: string, kind: string): KindInfo | null;
+  /**
+   * The write-back ops this adapter declares (`SourceDescriptor.write_ops`),
+   * by their `knobas_source::WriteOp` identifiers — `"transition"`,
+   * `"comment"`, and so on.
+   *
+   * What an affordance that queues a write is drawn from (#179):
+   * `submit_write` rejects an op the source does not offer, and the surface
+   * that offered it is the thing at fault. An adapter the registry has not
+   * heard of declares nothing, so nothing is offered — the same direction
+   * every other read here fails in.
+   */
+  writeOps(adapterKind: string): string[];
   /** Read the registry. Idempotent after a success; retryable after a failure. */
   load(): Promise<void>;
 }
@@ -68,6 +80,10 @@ export function createKindRegistry(ports?: KindRegistryPorts): KindRegistry {
     infoFor(adapterKind: string, kind: string) {
       const adapter = state.adapters.find((entry) => entry.adapter_kind === adapterKind);
       return adapter?.entity_kinds.find((info) => info.id === kind) ?? null;
+    },
+    writeOps(adapterKind: string) {
+      const adapter = state.adapters.find((entry) => entry.adapter_kind === adapterKind);
+      return adapter?.write_ops ?? [];
     },
     load() {
       if (loaded) return Promise.resolve();

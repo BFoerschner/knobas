@@ -29,6 +29,11 @@ let reads: (() => Promise<SuggestionPage>)[] = [];
 let answered: (() => Promise<void>) | null = null;
 
 vi.mock("../ipc/entity", () => ({
+  // The ticket detail's status select (#179) reads the granted board and
+  // queues through the write queue. Not what this file is about, so both
+  // answer with nothing.
+  miniBoard: () => Promise.resolve({ columns: [], sources: [] }),
+  submitWrite: () => Promise.reject(new Error("no write in this test")),
   detectSuggestions: () => {
     calls.push("detect");
     return Promise.resolve(0);
