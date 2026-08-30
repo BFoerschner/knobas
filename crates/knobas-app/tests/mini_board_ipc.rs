@@ -261,15 +261,20 @@ async fn a_ticket_with_no_recognizable_priority_carries_none() {
     let source = format!("mbprio-{}", unique());
     let high = ticket(&pool, &source, "PAY-20", Some("To Do"), Some("High")).await;
     let absent = ticket(&pool, &source, "PAY-21", Some("To Do"), None).await;
+    // The path leads somewhere, but not to a string: the shape this read must
+    // not stringify onto a card as `{"id":3}`.
     let misshapen = item(
         &pool,
         &source,
         "ticket",
         "PAY-22",
-        serde_json::json!({ "fields": { "status": { "name": "To Do" }, "priority": [] } }),
+        serde_json::json!({
+            "fields": { "status": { "name": "To Do" }, "priority": { "name": { "id": 3 } } }
+        }),
     )
     .await;
-    let ctx = room(&pool, &[&high, &absent, &misshapen]).await;
+    let blank = ticket(&pool, &source, "PAY-23", Some("To Do"), Some("   ")).await;
+    let ctx = room(&pool, &[&high, &absent, &misshapen, &blank]).await;
 
     let board = mini_board_inner(&pool, &ctx).await.unwrap();
 
@@ -280,7 +285,12 @@ async fn a_ticket_with_no_recognizable_priority_carries_none() {
         .collect();
     assert_eq!(
         priorities,
-        BTreeMap::from([("PAY-20", Some("High")), ("PAY-21", None), ("PAY-22", None),])
+        BTreeMap::from([
+            ("PAY-20", Some("High")),
+            ("PAY-21", None),
+            ("PAY-22", None),
+            ("PAY-23", None),
+        ])
     );
 }
 
