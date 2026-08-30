@@ -119,6 +119,9 @@ vi.mock("../ipc/entity", () => ({
   createContext: () => Promise.reject(new Error("no context creation in this test")),
   promoteContext: () => Promise.reject(new Error("no promotion in this test")),
   listEntities: () => deferred(PAGE),
+  // The Tickets tile's read (#178). Deferred like the rest, so the tile is
+  // unmounted mid-flight by the test that checks it leaves nothing behind.
+  miniBoard: () => deferred({ columns: [], sources: [] }),
   getEntity: () => deferred(DETAIL),
   recentActivity: () => deferred([LINE]),
   getNote: () => deferred(NOTE),

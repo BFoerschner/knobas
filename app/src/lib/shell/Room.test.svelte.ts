@@ -31,6 +31,9 @@ vi.mock("../ipc/entity", () => ({
   contextMembers: () => Promise.resolve([]),
   createContext: () => Promise.reject(new Error("no context creation in this test")),
   promoteContext: () => Promise.reject(new Error("no promotion in this test")),
+  // The Tickets tile's read (#178): this file is about the room, not the
+  // board, so it answers with an empty one.
+  miniBoard: () => Promise.resolve({ columns: [], sources: [] }),
   listEntities: (filter: EntityFilter, limit: number, offset: number) => {
     calls.push({ filter, limit, offset });
     return answer(filter);
