@@ -106,6 +106,94 @@ pub struct SearchResponse {
     /// Matches across every kind, before `limit` was applied.
     pub total: u32,
     pub took_ms: u32,
+    /// Which sources could answer the filters this query narrowed by, for the
+    /// dimensions where "could not" is a thing that happens (issue #141).
+    ///
+    /// **Empty means there was nobody to report on**: no reportable dimension
+    /// was filtered on -- the ordinary case, and why an ordinary keystroke pays
+    /// nothing for this -- or no source put rows in this query's corpus, which
+    /// is a scope that matched nothing rather than a filter that could not be
+    /// answered. A dimension that *was* filtered on is here with **every**
+    /// contributing source listed, whatever each answered, so a reader can tell
+    /// "measured, and they all answered" from "not measured". A list pruned to
+    /// the failures could not.
+    ///
+    /// `#[serde(default)]` for the same reason [`SearchFilters::authors`]
+    /// carries it: this field was **added** to a frozen struct (§10.8), and a
+    /// peer that sends no `coverage` means "nothing to report" rather than a
+    /// response worth refusing. The mirror declares it required, so the backend
+    /// always sends it.
+    #[serde(default)]
+    pub coverage: Vec<FilterCoverage>,
+}
+
+/// What each source in a query's scope could do with **one** filter dimension.
+///
+/// One entry per *reported* dimension, and a dimension is reported only when
+/// the query actually filtered on it. Issue #141 scopes the behaviour to
+/// [`FilterDimension::Author`]; the list shape is what makes a second dimension
+/// an addition rather than a reshape.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct FilterCoverage {
+    pub dimension: FilterDimension,
+    /// Every source that put rows in this query's corpus, **ordered by id** --
+    /// the vocabulary's own order, which is the order the sources list shows.
+    ///
+    /// A configured source the query's `source:` or kind scope left with
+    /// nothing is **not** here, and that is not an omission: it contributed no
+    /// corpus, so this dimension is not why it is absent from the results.
+    pub sources: Vec<SourceAnswer>,
+}
+
+/// A filter dimension whose coverage is reported.
+///
+/// Deliberately an enum with one variant rather than a bare string: the wire
+/// vocabulary is closed, so a UI that branches on it cannot be handed a word
+/// nobody defined.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FilterDimension {
+    /// `@jonas`, `author:jonas`, an author chip, or `@me` -- everything that
+    /// ends up in the one `author = any(...)` predicate.
+    Author,
+}
+
+/// One source, and what it could do with the dimension it is listed under.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SourceAnswer {
+    /// The configured instance id, which is also `SearchHit.source_id`.
+    pub source_id: String,
+    /// The name the sources list shows. Carried rather than looked up: the
+    /// launcher has `CredentialHealth` per source and that DTO has no name in
+    /// it, so a UI that had to say *Buildserver* would otherwise print an id.
+    pub display_name: String,
+    pub answer: FilterAnswer,
+}
+
+/// Whether a source's corpus can answer a filter at all.
+///
+/// **These two are the whole of issue #141**: collapsing them is the defect
+/// this type exists to remove. An `author:` query that comes back empty is
+/// *honest* for an [`Answered`](FilterAnswer::Answered) source and
+/// *unanswerable* for a [`NoValues`](FilterAnswer::NoValues) one, and nothing
+/// on the wire said which until now.
+///
+/// There is deliberately **no third variant** for a source that contributed no
+/// rows to the query at all. Such a source is left out of
+/// [`FilterCoverage::sources`] instead: whatever it is missing from the
+/// results, the filter is not the reason, and a verdict on it would explain the
+/// wrong absence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FilterAnswer {
+    /// The source's corpus carries values this dimension matches on, so an
+    /// empty result for it means nobody matched.
+    Answered,
+    /// The source put rows in this query's corpus and **not one of them**
+    /// carries such a value. Measured on the corpus, not declared about the
+    /// source: this is why issue #141 was ruled onto the response rather than
+    /// onto the descriptor.
+    NoValues,
 }
 
 /// Results of one entity kind, with the display metadata the launcher renders
@@ -292,6 +380,18 @@ mod tests {
             }],
             total: 1,
             took_ms: 3,
+            // Populated rather than left empty, or the three shapes below are
+            // never on the wire for this test to slice against -- an empty
+            // `coverage` would let the whole #141 addition be deleted from the
+            // mirror with this assertion still green.
+            coverage: vec![FilterCoverage {
+                dimension: FilterDimension::Author,
+                sources: vec![SourceAnswer {
+                    source_id: "teamcity".to_owned(),
+                    display_name: "Buildserver".to_owned(),
+                    answer: FilterAnswer::NoValues,
+                }],
+            }],
         };
 
         let wire = serde_json::to_value(&response).expect("a response serializes");
@@ -314,6 +414,8 @@ mod tests {
             ("ParsedQuery", &wire["interpreted"]),
             ("SearchFilters", &wire["interpreted"]["filters"]),
             ("ResultGroup", &wire["groups"][0]),
+            ("FilterCoverage", &wire["coverage"][0]),
+            ("SourceAnswer", &wire["coverage"][0]["sources"][0]),
         ] {
             let body = interface_body(mirror, path);
             for key in value
@@ -347,5 +449,22 @@ mod tests {
                 "{wire} is missing from app/src/lib/ipc/search.ts"
             );
         }
+
+        // The two #141 vocabularies are TS unions for the same reason, and the
+        // one that matters is `FilterAnswer`: the UI branches on it, and a
+        // spelling only one side knows is a branch that never runs.
+        for answer in [FilterAnswer::Answered, FilterAnswer::NoValues] {
+            let wire = serde_json::to_string(&answer).expect("an answer serializes");
+            assert!(
+                mirror.contains(&wire),
+                "{wire} is missing from app/src/lib/ipc/search.ts"
+            );
+        }
+        let dimension =
+            serde_json::to_string(&FilterDimension::Author).expect("a dimension serializes");
+        assert!(
+            mirror.contains(&dimension),
+            "{dimension} is missing from app/src/lib/ipc/search.ts"
+        );
     }
 }

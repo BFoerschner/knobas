@@ -145,6 +145,10 @@ A curated export — links, assets, contexts, smart lists — with notes exclude
 The ⌘K box; one search over everything, under 100 ms.
 _Avoid_: command palette, spotlight
 
+**Coverage**:
+Per query, which sources could answer a filter and which have nothing it can match — measured on the [corpus](#mirror) each source contributed, never on what matched. A source that *answered* and found nobody is saying something different from one whose items never name a person, and coverage is the name for that difference. (#141)
+_Avoid_: capability (a source's `SourceDescriptor` declares those — a static claim about a source, where this is a measured one about a corpus, which is why #141 was ruled onto the response and not onto the descriptor), support
+
 **Room**:
 A context's hub view — tiles, activity, tray.
 _Avoid_: dashboard

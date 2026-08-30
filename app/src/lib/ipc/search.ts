@@ -85,11 +85,67 @@ export interface ResultGroup {
   hits: SearchHit[];
 }
 
+/**
+ * A filter dimension search reports coverage for — `knobas_search::FilterDimension`.
+ *
+ * One member today (issue #141 scopes the behaviour to authorship). The union
+ * is what makes a second dimension an addition rather than a reshape.
+ */
+export type FilterDimension = "author";
+
+/**
+ * What one source could do with a filter — `knobas_search::FilterAnswer`.
+ *
+ * The distinction issue #141 exists for: an empty `author:` result means
+ * *nobody by that name* for `answered` and *this source cannot be asked* for
+ * `no_values`, and nothing on the wire said which until this field.
+ *
+ * - `answered` — the source's corpus carries authors, so an empty result is a
+ *   real answer.
+ * - `no_values` — it put rows in this query's corpus and not one of them names
+ *   a person.
+ *
+ * A source that contributed no rows at all has no member here: it is left out
+ * of `FilterCoverage.sources` entirely, because the filter is not why it is
+ * missing from the results.
+ */
+export type FilterAnswer = "answered" | "no_values";
+
+/** One source's verdict — `knobas_search::SourceAnswer`. */
+export interface SourceAnswer {
+  source_id: string;
+  /** The name the sources list shows — `CredentialHealth` carries none. */
+  display_name: string;
+  answer: FilterAnswer;
+}
+
+/** What every scoped source could do with one filter — `knobas_search::FilterCoverage`. */
+export interface FilterCoverage {
+  dimension: FilterDimension;
+  /**
+   * Every source that put rows in this query's corpus, ordered by id.
+   *
+   * A configured source the query's `source:` or kind scope left with nothing
+   * is not here — it contributed no corpus, so this dimension is not why it is
+   * absent from the results.
+   */
+  sources: SourceAnswer[];
+}
+
 export interface SearchResponse {
   interpreted: ParsedQuery;
   groups: ResultGroup[];
   total: number;
   took_ms: number;
+  /**
+   * Which sources could answer the filters this query narrowed by (#141).
+   *
+   * Empty is the ordinary case and means *there was nobody to report on* — no
+   * reportable dimension was filtered on, or no source put rows in this query's
+   * corpus. A dimension that was filtered on lists every contributing source,
+   * whatever it answered, so "measured and they all answered" is legible.
+   */
+  coverage: FilterCoverage[];
 }
 
 /** No filters — what the box sends until the chips exist. */

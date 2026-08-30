@@ -46,6 +46,7 @@ function answer(raw: string, titles: string[] = ["one"]): SearchResponse {
     ],
     total: titles.length,
     took_ms: 1,
+    coverage: [],
   };
 }
 

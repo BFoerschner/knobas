@@ -282,6 +282,7 @@ const LAUNCHER_PORTS = {
       groups: [],
       total: 0,
       took_ms: 1,
+      coverage: [],
     }),
   launcherHome: () =>
     deferred({ smart_lists: [], recent: [], sources: [], pending_writes: 0 }),

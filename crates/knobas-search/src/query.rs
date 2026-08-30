@@ -112,6 +112,24 @@ impl EffectiveFilters {
         out
     }
 
+    /// Whether this query put anything into the author predicate.
+    ///
+    /// **Reads `mine` and the *named* people, never [`Self::identity_authors`]**,
+    /// and that is the load-bearing part: the resolved list is empty in exactly
+    /// the state the predicate has to survive -- an installation where no source
+    /// was configured with a username -- and a query that asks "mine" there is
+    /// still an author query.
+    ///
+    /// One spelling, two readers, and they must not drift: `sql::search_sql`
+    /// binds the predicate on it, and `coverage::author_coverage` decides
+    /// whether there is anything to report on it (issue #141). Two inline
+    /// copies would let coverage go on explaining a filter the statement had
+    /// stopped applying.
+    #[must_use]
+    pub fn filters_by_author(&self) -> bool {
+        self.mine || !self.named_authors.is_empty()
+    }
+
     /// Whether anything is actually being filtered on.
     ///
     /// The engine's reason for asking: a query with neither text nor a filter

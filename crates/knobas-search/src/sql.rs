@@ -151,7 +151,8 @@ pub fn search_sql(
     // Which is why the *decision* reads `mine` and the named people rather
     // than the resolved list: the list is empty in exactly the state the
     // predicate has to survive.
-    let authors = (filters.mine || !filters.named_authors.is_empty())
+    let authors = filters
+        .filters_by_author()
         .then(|| builder.param(Bind::Texts(filters.authors())));
     let per_group = builder.param(Bind::I64(i64::from(per_group)));
     let limit = builder.param(Bind::I64(i64::from(limit)));
