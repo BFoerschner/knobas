@@ -138,6 +138,7 @@ function source(over: Partial<SourceSummary> = {}): SourceSummary {
     last_run: run({ source_id: id }),
     next_run_at: "2026-08-25T12:05:00Z",
     item_count: 213,
+    auth_kind: "Pat",
     kinds: [{ id: "ticket", label: "Ticket", plural: "Tickets", monogram: "TK", full_sync_exhaustive: true }],
     ...over,
   };
@@ -264,6 +265,42 @@ test("renders one row per source with its health, item count and last run", asyn
   // appear with no table here (§3a).
   const caps = [...rowFor("gitea")!.querySelectorAll(".caps span")].map((c) => c.textContent);
   expect(caps).toEqual(["Pull requests", "Repositories"]);
+});
+
+/**
+ * The credential column names the *kind* of credential, not only its state.
+ *
+ * Ex-stream-D task 16 asked for this and #73 could not ship it: `SourceSummary`
+ * carried no `auth_kind`, so the column degraded to state plus a PAT countdown.
+ * Two sources with different methods, because a single-row fixture cannot tell
+ * the field being read from a word hardcoded in the component.
+ */
+test("the credential column names each source's auth method", async () => {
+  sources = [
+    source({ auth_kind: "Pat" }),
+    source({ id: "gitea", adapter_kind: "gitea", display_name: "G", auth_kind: "UserPassword" }),
+  ];
+  render();
+  await settle();
+
+  expect(rowFor("jira")!.textContent).toContain("personal access token");
+  expect(rowFor("gitea")!.textContent).toContain("user + password");
+  expect(rowFor("gitea")!.textContent).not.toContain("personal access token");
+});
+
+/**
+ * A source that needs no credential says so, rather than naming one.
+ *
+ * `auth_kind` is null for the compiled-in mock, and for a spelling the backend
+ * could not read. Rendering an empty line there would leave the column looking
+ * like it failed to load; naming a method would invent a credential.
+ */
+test("a source with no auth method says it needs none", async () => {
+  sources = [source({ auth_kind: null })];
+  render();
+  await settle();
+
+  expect(rowFor("jira")!.textContent).toContain("no credential needed");
 });
 
 test("Sync now calls syncNow with that source's id and shows the run as started", async () => {

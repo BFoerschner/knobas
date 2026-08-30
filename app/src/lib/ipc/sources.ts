@@ -192,6 +192,17 @@ export interface SourceSummary {
   /** null when the source is disabled, running, or needs a human. */
   next_run_at: string | null;
   item_count: number;
+  /**
+   * Which kind of credential this source authenticates with.
+   *
+   * `null` is a source that needs none — the compiled-in mock reaches nothing.
+   * The same union `NewSource.auth_kind` submits, widened by `null`: the
+   * backend's `AuthKind::None` and an `auth_kind` column this build cannot
+   * read both arrive as `null`, and both mean "no credential kind to name".
+   *
+   * Never a secret. No command reads one back (contract §2.2).
+   */
+  auth_kind: AuthMethod | null;
   /** From the adapter's descriptor, so the view needs no per-adapter table. */
   kinds: KindInfo[];
 }

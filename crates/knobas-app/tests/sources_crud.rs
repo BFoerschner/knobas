@@ -126,8 +126,87 @@ async fn adding_a_source_writes_the_secret_first_and_returns_a_summary() {
     );
     assert!(summary.next_run_at.is_some(), "a new enabled source is due");
 
+    assert_eq!(
+        summary.auth_kind,
+        Some(AuthMethod::Pat),
+        "the summary names the credential kind the form submitted"
+    );
+
     assert_eq!(f.secrets.get(&f.id).unwrap().unwrap().value, "pat-one");
     assert_eq!(f.secrets.get(&f.id).unwrap().unwrap().kind, AuthMethod::Pat);
+}
+
+/// `auth_kind` comes off the **row**, and `list` and `add` agree about it.
+///
+/// The two summaries are built by different functions (`crud::list`'s loop and
+/// `summarize`), so a field wired into one and forgotten in the other is a
+/// column that is right on the screen a user reaches by adding a source and
+/// wrong on the one they reach by reopening the view. Every method is walked
+/// rather than one: `AuthKind::from_db` maps everything it does not recognise
+/// to `None`, so a stored spelling that never round-trips would read as "needs
+/// no credential" instead of failing.
+#[tokio::test]
+async fn every_stored_auth_kind_reaches_the_summary_on_both_read_paths() {
+    let f = fixture().await;
+    for method in [
+        AuthMethod::UserPassword,
+        AuthMethod::Pat,
+        AuthMethod::ApiToken,
+        AuthMethod::OAuth,
+    ] {
+        let id = format!("crud-{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
+        let added = sources::crud::add(
+            &f.pool,
+            &f.secrets,
+            &f.registry,
+            NewSource {
+                id: id.clone(),
+                auth_kind: method,
+                ..a_new_source(&id)
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(added.auth_kind, Some(method), "add returned the wrong kind");
+
+        let listed = sources::crud::list(&f.pool, &f.registry).await.unwrap();
+        let mine = listed.iter().find(|s| s.id == id).unwrap();
+        assert_eq!(
+            mine.auth_kind,
+            Some(method),
+            "{method:?} did not survive the round trip through the column"
+        );
+    }
+}
+
+/// A source that needs no credential says `None`, not a method it does not use.
+///
+/// `AuthKind::None` is what the compiled-in mock stores, and the sources view
+/// has to be able to tell "authenticates with a PAT" from "authenticates with
+/// nothing" -- naming a method for the second would be a column that invents a
+/// credential.
+#[tokio::test]
+async fn a_source_that_needs_no_credential_names_no_auth_kind() {
+    let f = fixture().await;
+    knobas_sync::config::insert(
+        &f.pool,
+        &knobas_sync::config::InsertConfig {
+            id: f.id.clone(),
+            adapter_kind: "mock".to_owned(),
+            display_name: "no credential".to_owned(),
+            base_url: String::new(),
+            auth_kind: knobas_sync::config::AuthKind::None,
+            config: serde_json::json!({}),
+            sync_interval_secs: 300,
+            enabled: true,
+        },
+    )
+    .await
+    .unwrap();
+
+    let listed = sources::crud::list(&f.pool, &f.registry).await.unwrap();
+    let mine = listed.iter().find(|s| s.id == f.id).unwrap();
+    assert_eq!(mine.auth_kind, None);
 }
 
 /// interfaces §3, Create: `put` the secret, then insert. If the insert fails,
@@ -572,6 +651,7 @@ fn nothing_in_the_ipc_surface_reads_a_secret_back() {
         last_run: None,
         next_run_at: None,
         item_count: 0,
+        auth_kind: Some(AuthMethod::Pat),
         kinds: Vec::new(),
     })
     .unwrap();
