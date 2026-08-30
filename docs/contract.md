@@ -2528,11 +2528,25 @@ From this commit on, each of the following requires an orchestrator decision **a
   the *mini board*; "board" never stands alone):
 
   ```rust
-  #[tauri::command] pub async fn mini_board(.., ctx_id: String) -> Result<knobas_core::mini_board::MiniBoard, IpcError>;
+  #[tauri::command] pub async fn mini_board(.., ctx_id: Option<String>, sources: Vec<String>) -> Result<knobas_core::mini_board::MiniBoard, IpcError>;
   ```
 
+  **It takes the room's scope, not just a context, and that is the whole of why it takes two
+  arguments.** `app/src/lib/shell/contexts.ts` has two populations of room: a **stored** room is a
+  `knobas.context` row and narrows by `context`; a **derived** room — *All work*, plus one per
+  configured source — has no context row at all and narrows by `sources`. Exactly one of the two is
+  ever narrowing, and `Room.svelte` already hands every tile both (`sources={context.filter.sources}
+  ctx={context.filter.context}`). A command keyed on a context id alone would answer an empty board
+  in the room every session starts in, which would make #178's "the empty state says there is no
+  ticket in this room" a falsehood exactly where the user lands — so this is spec #175's story 10,
+  "the mini board filtered by the room's context like every other tile", read as the other tiles
+  implement it. Both narrowings are bound as **nullable parameters**, the discipline
+  `commands::entity`'s room statements already record: `Some` of no members is a stored room that is
+  honestly empty, `None` is a derived room that never asked.
+
   **The mirror**, appended to the existing `app/src/lib/ipc/entity.ts`: one function `miniBoard`
-  (`ctxId`) and four interfaces — `MiniBoard { columns, sources }`,
+  (taking `Pick<EntityFilter, "sources" | "context">` — the room's own filter object, so a caller
+  cannot narrow by one dimension and forget the other) and four interfaces — `MiniBoard { columns, sources }`,
   `MiniBoardColumn { status, cards }`, `MiniBoardCard { entity_id, source_id, key, title, priority }`
   and `SourceStatuses { source_id, statuses }`. All four are pinned by
   `the_mini_board_shapes_match_their_typescript_mirror` in `crates/knobas-app/tests/entity_mirror.rs`,
@@ -2563,20 +2577,25 @@ From this commit on, each of the following requires an orchestrator decision **a
   scoped to the sources that actually put a card on this board, and it never carries the terminal
   group: "no status" is somewhere a ticket can be, not somewhere it can be moved to.
 
-  **Three shape decisions a later reader might undo without realising what they were for**, in the
+  **Four shape decisions a later reader might undo without realising what they were for**, in the
   spirit of #53's "a later tidy-up that flattens it is a bug, not a simplification":
 
   - `MiniBoardColumn.status` is `Option<String>` and the terminal group is its `None`. The words on
     screen ("No status") are the shell's. A sentinel string would be a status the source never said,
     indistinguishable from a source that really spells one that way, and it would land in the
     select's offer.
+  - **There is no `_inner` behind the command.** Its body is `lifecycle.pool()?` and one call into
+    `knobas_core::mini_board::read`, so it takes `context_members`' shape rather than
+    `create_context_inner`'s, which wraps a body that does real work. The read's battery is
+    `crates/knobas-core/tests/mini_board.rs`, beside `contexts.rs`: the store owns the behaviour, so
+    the store's tests own the proof, and `knobas-app` keeps only the DTO mirror test.
   - **A column carries no count.** The header's count is `cards.len()`; a count beside the list it
     counts is a second copy of one fact, and only one of the two can be right.
   - **The grouping and the column order are the command's, not the client's.** Both consumers get
     the same board, and the order — To Do, In Progress, In Review, Done first where the corpus shows
     them (matched case-insensitively, displayed in the source's own spelling), every other observed
     status after them alphabetically, the terminal group last — is pinned by
-    `crates/knobas-app/tests/mini_board_ipc.rs` and `knobas_core::mini_board`'s own unit tests.
+    `crates/knobas-core/tests/mini_board.rs` and `knobas_core::mini_board`'s own unit tests.
 
   **The two payload reads are ADR-0007's, with their failure directions pinned.** Status and
   priority are not among §4.1's four normalized fields, so both come out of the payload: one
@@ -2586,7 +2605,9 @@ From this commit on, each of the following requires an orchestrator decision **a
   `{"id":3}`. Direction one: a ticket with no readable status lands in the visible terminal group,
   never dropped and never guessed into a column
   (`a_ticket_with_no_recognizable_status_lands_in_the_terminal_group`). Direction two: a card with no
-  readable priority omits it (`a_ticket_with_no_recognizable_priority_carries_none`). Both expire
+  readable priority omits it (`a_ticket_with_no_recognizable_priority_carries_none`). Both arms of
+  both `coalesce`s are witnessed — Jira's `fields.*.name` and the mock source's flat spelling, the
+  latter being what the demo profile's board is drawn from. Both expire
   into the descriptor-declared path ADR-0007 books for M3.
 
   **The start-work transitions widening is recorded here**, as #179's brief says it must be: the

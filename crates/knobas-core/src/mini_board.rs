@@ -1,15 +1,23 @@
-//! The Tickets tile's **mini board**: a context's live tickets, grouped into
-//! the status columns their own sources gave them (ADR-0009 names it; spec
-//! #175 asks for it; #177 is the one granted read behind it).
+//! The Tickets tile's **mini board**: a room's live tickets, grouped into the
+//! status columns their own sources gave them (ADR-0009 names it; spec #175
+//! asks for it; #177 is the one granted read behind it).
 //!
 //! # What this reads, and what it refuses to
 //!
-//! Membership is [`crate::context::member_ids`]' answer and nothing else --
-//! the fixed rule of §16.11 / ADR-0008, computed once and reused here rather
-//! than re-spelled, so the board can never disagree with the rest of the room
-//! about who is in it. Of those members, the board draws the ones that are
-//! **live tickets**: `sync.live_item` is the join that puts a ticket the
-//! source deleted off the board while it is still a member by the rule.
+//! It is scoped the way every other tile in a room is, and by the same two
+//! dimensions the room itself carries (`app/src/lib/shell/contexts.ts`): a
+//! **stored** room narrows by its context, a **derived** room -- *All work*,
+//! and one per source -- narrows by its sources, and exactly one of the two is
+//! ever narrowing. A board that took only a context would be empty in the room
+//! every session starts in.
+//!
+//! Where a context is given, membership is [`crate::context::member_ids`]'
+//! answer and nothing else -- the fixed rule of §16.11 / ADR-0008, computed
+//! once and reused here rather than re-spelled, so the board can never
+//! disagree with the rest of that room about who is in it. Of what the scope
+//! admits, the board draws the **live tickets**: `sync.live_item` is the join
+//! that puts a ticket the source deleted off the board while the rule still
+//! counts it a member.
 //!
 //! There is no normalized status model and no migration behind any of this.
 //! Contract §4.1 normalizes four fields and a status is not one of them, so a
@@ -24,7 +32,7 @@
 //!
 //! [`MiniBoard::columns`] is the tile's board. [`MiniBoard::sources`] is the
 //! ticket detail's status select (#179): the statuses each source's own
-//! *corpus* shows, which is deliberately wider than the room's columns -- a
+//! *corpus* shows, which is deliberately wider than the board's columns -- a
 //! room with nothing finished still has to be able to offer *Done*. Both come
 //! out of this one read.
 
@@ -74,7 +82,7 @@ macro_rules! string_at {
 /// group ([`MiniBoardColumn::status`] `= None`) instead of being dropped or
 /// sorted into a column somebody inferred. Pinned by
 /// `a_ticket_with_no_recognizable_status_lands_in_the_terminal_group` in
-/// `knobas-app/tests/mini_board_ipc.rs`.
+/// `knobas-core/tests/mini_board.rs`.
 macro_rules! status_read {
     () => {
         concat!(
@@ -94,7 +102,7 @@ macro_rules! status_read {
 /// record has no readable priority simply omits it, which is the whole of what
 /// story 8 asks for -- a board that never guesses at what a source did not
 /// say. Pinned by `a_ticket_with_no_recognizable_priority_carries_none` in
-/// `knobas-app/tests/mini_board_ipc.rs`.
+/// `knobas-core/tests/mini_board.rs`.
 macro_rules! priority_read {
     () => {
         concat!(
@@ -107,7 +115,14 @@ macro_rules! priority_read {
     };
 }
 
-/// The board's cards: the live tickets among a context's members.
+/// The board's cards: the live tickets the room's scope admits.
+///
+/// Both narrowings are **nullable parameters**, the discipline
+/// `commands::entity`'s room statements record: the SQL stays static and a
+/// scope that does not narrow binds `null` rather than growing a branch. The
+/// difference between `null` and an empty list is load-bearing on `$1` --
+/// `Some` of no members is a stored room that is honestly empty, `None` is a
+/// derived room that never asked about membership at all.
 ///
 /// `sync.live_item` rather than `sync.item`, which is what keeps a tombstoned
 /// ticket off the board (story 18). Newest first within the answer, so a
@@ -121,7 +136,8 @@ const CARDS: &str = concat!(
     " as priority
        from sync.live_item i
       where i.kind = 'ticket'
-        and i.entity_id = any($1)
+        and ($1::text[] is null or i.entity_id = any($1))
+        and ($2::text[] is null or i.source_id = any($2))
       order by coalesce(i.item_updated_at, i.synced_at) desc, i.entity_id"
 );
 
@@ -142,7 +158,7 @@ const OBSERVED_STATUSES: &str = concat!(
       where status is not null"
 );
 
-/// One context's tickets as the mini board draws them.
+/// One room's tickets as the mini board draws them.
 #[derive(Clone, Debug, Serialize)]
 pub struct MiniBoard {
     /// The observed status columns, in display order: the four of [`LEADING`]
@@ -227,7 +243,13 @@ fn column_rank(status: Option<&str>) -> (u8, usize, String, String) {
     }
 }
 
-/// The mini board for one context.
+/// The mini board for one room.
+///
+/// `ctx_id` is a **stored** room's context, whose members are the fixed
+/// one-hop rule's; `sources` is a **derived** room's source list, empty for
+/// *All work*. Exactly one of the two ever narrows, which is the invariant the
+/// switcher builds its rooms with; a caller that passed both would get their
+/// intersection, which is a coherent answer to an incoherent room.
 ///
 /// An unknown or empty context answers with an empty board rather than an
 /// error, for the reason [`crate::context::member_ids`] does: an address can
@@ -237,9 +259,21 @@ fn column_rank(status: Option<&str>) -> (u8, usize, String, String) {
 /// # Errors
 ///
 /// [`CoreError::Db`] if a query fails.
-pub async fn read(pool: &PgPool, ctx_id: &str) -> Result<MiniBoard, CoreError> {
-    let members = crate::context::member_ids(pool, ctx_id).await?;
-    let rows: Vec<CardRow> = sqlx::query_as(CARDS).bind(&members).fetch_all(pool).await?;
+pub async fn read(
+    pool: &PgPool,
+    ctx_id: Option<&str>,
+    sources: &[String],
+) -> Result<MiniBoard, CoreError> {
+    let members = match ctx_id {
+        Some(ctx) => Some(crate::context::member_ids(pool, ctx).await?),
+        None => None,
+    };
+    let scope = (!sources.is_empty()).then(|| sources.to_vec());
+    let rows: Vec<CardRow> = sqlx::query_as(CARDS)
+        .bind(&members)
+        .bind(&scope)
+        .fetch_all(pool)
+        .await?;
 
     // Grouped in the order the rows arrived, so the newest-first ordering the
     // statement asks for survives into each column; the columns themselves are

@@ -1974,40 +1974,30 @@ fn announce_context<R: tauri::Runtime>(
 //
 // In this module for the reason the contexts block above gives: §10.8 freezes
 // the `commands/` + `ipc/` layout, so a new read gets a section rather than a
-// file. It is a context read, and the shell reaches it from the room.
+// file. It is a room read, and the shell reaches it from the room.
 
-/// The Tickets tile's mini board for one context (ADR-0009, spec #175).
+/// The Tickets tile's mini board (ADR-0009, spec #175).
 ///
-/// A thin seam over [`knobas_core::mini_board::read`], which is where the
-/// grouping, the column order and the two payload reads live. It is `_inner`
-/// so `tests/mini_board_ipc.rs` can exercise the command's own body over a
-/// pool -- the same treatment the context writes get.
-///
-/// # Errors
-///
-/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure. An unknown
-/// context is an empty board, not a `not_found`: the room's other tiles answer
-/// that way too, and a tile that errored would say "this broke" where the
-/// truth is "nothing here".
-pub async fn mini_board_inner(
-    pool: &PgPool,
-    ctx_id: &str,
-) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
-    Ok(knobas_core::mini_board::read(pool, ctx_id).await?)
-}
-
-/// The Tickets tile's mini board for one context.
+/// Scoped like every other tile in a room, by the same two dimensions the
+/// switcher's rooms carry: `ctx_id` is a stored room's context, `sources` a
+/// derived room's source list -- empty for *All work* -- and exactly one of
+/// them ever narrows. The grouping, the column order and the two payload reads
+/// all live in [`knobas_core::mini_board`]; there is nothing for this seam to
+/// add, so it adds nothing, the same as [`context_members`].
 ///
 /// # Errors
 ///
 /// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the
-/// database is still coming up, and whatever [`mini_board_inner`] refuses
-/// with.
+/// database is still coming up, [`Internal`](crate::IpcErrorCode::Internal)
+/// for a query failure. An unknown context is an empty board, not a
+/// `not_found`: the room's other tiles answer that way too, and a tile that
+/// errored would say "this broke" where the truth is "nothing here".
 #[tauri::command]
 pub async fn mini_board(
     lifecycle: State<'_, Lifecycle>,
-    ctx_id: String,
+    ctx_id: Option<String>,
+    sources: Vec<String>,
 ) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
     let pool = lifecycle.pool()?;
-    mini_board_inner(&pool, &ctx_id).await
+    Ok(knobas_core::mini_board::read(&pool, ctx_id.as_deref(), &sources).await?)
 }

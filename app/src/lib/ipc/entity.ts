@@ -978,16 +978,18 @@ export interface MiniBoard {
 }
 
 /**
- * The Tickets tile's mini board for a context — `mini_board` (ADR-0009, #177).
+ * The Tickets tile's mini board — `mini_board` (ADR-0009, #177).
  *
- * Membership is the same fixed one-hop rule `contextMembers` answers with
- * (§16.11, ADR-0008); of those members the board draws the live tickets, so a
- * ticket the source deleted is off the board. Grouping and column order happen
- * in the command, not here.
+ * Takes the room's own filter, so the board is scoped exactly as every other
+ * tile in that room is: a stored room narrows by `context` — the fixed one-hop
+ * membership `contextMembers` answers with (§16.11, ADR-0008) — and a derived
+ * room by `sources`, which is empty in *All work*. Of what the scope admits the
+ * board draws the live tickets, so a ticket the source deleted is off it.
+ * Grouping and column order happen in the command, not here.
  *
  * An unknown context is an empty board rather than a rejection — the tile has
  * to be able to say "nothing here" without saying "this broke".
  */
-export function miniBoard(ctxId: string): Promise<MiniBoard> {
-  return invoke<MiniBoard>("mini_board", { ctxId });
+export function miniBoard(filter: Pick<EntityFilter, "sources" | "context">): Promise<MiniBoard> {
+  return invoke<MiniBoard>("mini_board", { ctxId: filter.context, sources: filter.sources });
 }
