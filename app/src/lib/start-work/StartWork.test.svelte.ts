@@ -36,10 +36,8 @@ function record<T>(command: string, args: unknown, value: T): Promise<T> {
 }
 
 vi.mock("../ipc/entity", () => ({
-  // The ticket detail's status select (#179) reads the granted board and
-  // queues through the write queue. Not what this file is about, so both
-  // answer with nothing.
-  miniBoard: () => Promise.resolve({ columns: [], sources: [] }),
+  // The write the ticket detail's status select queues (#179). Not what this
+  // file is about, so it refuses.
   submitWrite: () => Promise.reject(new Error("no write in this test")),
   getEntity: () =>
     record("get_entity", null, {
