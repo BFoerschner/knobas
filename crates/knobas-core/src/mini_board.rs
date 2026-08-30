@@ -222,24 +222,37 @@ struct CardRow {
     priority: Option<String>,
 }
 
+/// Which band of the board a column belongs to. **Declaration order is the
+/// board's order** -- that is what the derived `Ord` means here, so a fourth
+/// band would be placed by where it is written.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum Band {
+    /// One of [`LEADING`], however the source spelled it.
+    Leading,
+    /// Any other status the corpus showed.
+    Observed,
+    /// The terminal group: no status this read could recognize.
+    Terminal,
+}
+
 /// Where a column sits in the board's order.
 ///
-/// Four parts, each breaking the tie the one before it leaves: the class
-/// (leading, observed, terminal), the position within [`LEADING`], the status
-/// case-folded, and the status as spelled. The last is only ever reached by
-/// two sources spelling one status in different cases, and exists so the
-/// answer does not depend on which of them was written first.
-fn column_rank(status: Option<&str>) -> (u8, usize, String, String) {
+/// Four parts, each breaking the tie the one before it leaves: the band, the
+/// position within [`LEADING`], the status case-folded, and the status as
+/// spelled. The last is only ever reached by two sources spelling one status in
+/// different cases, and exists so the answer does not depend on which of them
+/// was written first.
+fn column_rank(status: Option<&str>) -> (Band, usize, String, String) {
     let Some(status) = status else {
-        return (2, 0, String::new(), String::new());
+        return (Band::Terminal, 0, String::new(), String::new());
     };
     let folded = status.to_lowercase();
     match LEADING
         .iter()
         .position(|leading| leading.eq_ignore_ascii_case(status))
     {
-        Some(at) => (0, at, folded, status.to_owned()),
-        None => (1, 0, folded, status.to_owned()),
+        Some(at) => (Band::Leading, at, folded, status.to_owned()),
+        None => (Band::Observed, 0, folded, status.to_owned()),
     }
 }
 
