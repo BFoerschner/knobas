@@ -158,7 +158,14 @@
     }
   }
 
-  function open(row: EntityRow) {
+  /**
+   * Opening an item from a tile.
+   *
+   * Takes only the two fields the address is built from: a mini-board card is
+   * not a mirror row and carries no timestamps, and a wider parameter would
+   * make the tile invent them (#178).
+   */
+  function open(row: Pick<EntityRow, "kind" | "entity_id">) {
     router.go(hashFor({ view: "room", ctx: context.id, detail: { kind: row.kind, entityId: row.entity_id } }));
   }
 </script>

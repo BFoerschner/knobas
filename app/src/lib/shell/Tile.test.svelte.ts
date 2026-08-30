@@ -1,6 +1,11 @@
 /**
  * A tile owns its read, and the three states of that read are the behaviour.
  *
+ * Over the **Docs** tile since #178, and that is the point of the choice: the
+ * Tickets tile is the mini board now, so a list tile is what stands for the
+ * four that are still lists. `MiniBoard.test.svelte.ts` puts the same three
+ * states, and the same stale-answer guard, over the board.
+ *
  * Rows on screen is the easy one. The two that matter are a *failed* read —
  * which must not look like an empty room — and a *superseded* one, where the
  * previous room's rows have to leave the screen the moment the room changes,
@@ -33,12 +38,12 @@ vi.mock("../ipc/entity", () => ({
 
 const { default: Tile } = await import("./Tile.svelte");
 
-const SPEC = { id: "tickets", label: "Tickets", kinds: ["ticket"] };
+const SPEC = { id: "docs", label: "Docs", kinds: ["page"] };
 
 function row(key: string): EntityRow {
   return {
     entity_id: `mock:${key}`,
-    kind: "ticket",
+    kind: "page",
     source_id: "mock",
     title: `Title of ${key}`,
     updated_at: "2026-08-22T11:48:00Z",
@@ -90,7 +95,7 @@ test("draws a row per item and the unpaged total in the header", async () => {
   expect(screen.text()).toContain("Title of PAY-2");
   expect(screen.count()).toBe("17");
   // The tile asked for its own kinds, and for the room's sources.
-  expect(calls[0]?.filter).toMatchObject({ kinds: ["ticket"], sources: [] });
+  expect(calls[0]?.filter).toMatchObject({ kinds: ["page"], sources: [] });
 
   screen.done();
 });
@@ -109,7 +114,7 @@ test("a rejected read renders its message rather than an empty tile", async () =
   flushSync();
 
   expect(screen.rows()).toHaveLength(0);
-  expect(screen.text()).not.toContain("No ticket in this room yet");
+  expect(screen.text()).not.toContain("No page in this room yet");
 
   screen.done();
 });
@@ -118,7 +123,7 @@ test("a rejected read renders its message rather than an empty tile", async () =
 test("an empty read gets the tile's own sentence", async () => {
   answer = () => Promise.resolve({ rows: [], total: 0 });
   const screen = render();
-  await vi.waitFor(() => expect(screen.text()).toContain("No ticket in this room yet"));
+  await vi.waitFor(() => expect(screen.text()).toContain("No page in this room yet"));
   screen.done();
 });
 
@@ -218,7 +223,7 @@ test("a key containing a colon is shown whole", async () => {
       rows: [
         {
           entity_id: "confluence:ENG:SEPA design",
-          kind: "ticket",
+          kind: "page",
           source_id: "confluence",
           title: "SEPA design",
           updated_at: "2026-08-22T11:48:00Z",

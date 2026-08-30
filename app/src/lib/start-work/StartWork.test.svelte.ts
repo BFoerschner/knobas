@@ -47,6 +47,9 @@ vi.mock("../ipc/entity", () => ({
         synced_at: "2026-08-29T09:00:00Z",
       },
     }),
+  // The Tickets tile's read (#178), reached through the room this flow
+  // opens over. Not what this file is about, so it answers with nothing.
+  miniBoard: () => Promise.resolve({ columns: [], sources: [] }),
   listEntities: () =>
     record("list_entities", null, {
       rows: [

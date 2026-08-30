@@ -157,6 +157,7 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     frontend_ready: () => null,
     retry_database: () => null,
     list_entities: (args) => listEntities(args),
+    mini_board: (args) => miniBoard(args),
     get_entity: (args) => getEntity(args),
     recent_activity: (args) => recentActivity(args),
 
@@ -415,6 +416,81 @@ function mirrorRow(entry: (typeof CORPUS)[number]) {
     title: entry.title,
     updated_at: entry.updated_at,
     synced_at: SYNCED_AT,
+  };
+}
+
+/**
+ * `mini_board` (#177), over the fixture.
+ *
+ * The dev bridge's own answer, so the Tickets tile has a board to draw under
+ * `just dev` and `just demo`. Like `listEntities` below, it *restates* the
+ * command's rule — the leading four, then the rest folded and alphabetical,
+ * then the statusless column last — and a restatement is a copy that can
+ * drift. The command is the authority; a divergence here is a bug in this
+ * file, never a second opinion about the order. It reads the fixture's
+ * payloads the way the command's second `coalesce` arm reads the mock source's
+ * — a flat `status` and `priority` — because that is the shape this corpus is
+ * in.
+ */
+function miniBoard(args: Record<string, unknown>) {
+  // The fixture has no link graph, so a stored context's membership is
+  // honestly empty — the same answer `context_members` and `list_entities`
+  // give.
+  if (args["ctxId"]) return { columns: [], sources: [] };
+
+  const sources = (args["sources"] as string[] | undefined) ?? [];
+  if (sources.length && !sources.includes("mock")) return { columns: [], sources: [] };
+
+  const text = (value: unknown) =>
+    typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+
+  const tickets = CORPUS.filter((entry) => entry.kind === "ticket" && entry.deleted_at === null)
+    .slice()
+    .sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? ""));
+
+  const columns: { status: string | null; cards: ReturnType<typeof boardCard>[] }[] = [];
+  for (const entry of tickets) {
+    const status = text(entry.payload["status"]);
+    const column = columns.find((candidate) => candidate.status === status);
+    if (column) column.cards.push(boardCard(entry));
+    else columns.push({ status, cards: [boardCard(entry)] });
+  }
+
+  const LEADING = ["To Do", "In Progress", "In Review", "Done"];
+  const rank = (status: string | null): [number, number, string] => {
+    if (status === null) return [2, 0, ""];
+    const at = LEADING.findIndex((leading) => leading.toLowerCase() === status.toLowerCase());
+    return at === -1 ? [1, 0, status.toLowerCase()] : [0, at, status.toLowerCase()];
+  };
+  columns.sort((a, b) => {
+    const [aClass, aAt, aFolded] = rank(a.status);
+    const [bClass, bAt, bFolded] = rank(b.status);
+    return aClass - bClass || aAt - bAt || aFolded.localeCompare(bFolded);
+  });
+
+  const observed = [...new Set(tickets.map((entry) => text(entry.payload["status"])))]
+    .filter((status): status is string => status !== null)
+    .sort((a, b) => {
+      const [aClass, aAt, aFolded] = rank(a);
+      const [bClass, bAt, bFolded] = rank(b);
+      return aClass - bClass || aAt - bAt || aFolded.localeCompare(bFolded);
+    });
+
+  return {
+    columns,
+    sources: columns.length ? [{ source_id: "mock", statuses: observed }] : [],
+  };
+}
+
+/** One card of the fixture's board. */
+function boardCard(entry: (typeof CORPUS)[number]) {
+  const priority = entry.payload["priority"];
+  return {
+    entity_id: entry.entity_id,
+    source_id: "mock",
+    key: entry.entity_id.slice(entry.entity_id.indexOf(":") + 1),
+    title: entry.title,
+    priority: typeof priority === "string" && priority.trim() !== "" ? priority.trim() : null,
   };
 }
 

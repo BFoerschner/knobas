@@ -51,6 +51,9 @@ vi.mock("../ipc/entity", () => ({
   contextMembers: () => Promise.resolve([]),
   createContext: () => Promise.reject(new Error("no context creation in this test")),
   promoteContext: () => Promise.reject(new Error("no promotion in this test")),
+  // The Tickets tile's read (#178); this file is about addresses, not the
+  // board.
+  miniBoard: () => Promise.resolve({ columns: [], sources: [] }),
   listEntities: () => Promise.resolve(PAGE),
   getEntity: () => Promise.resolve(DETAIL),
   recentActivity: () => Promise.resolve([]),
