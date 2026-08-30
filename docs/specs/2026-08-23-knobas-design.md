@@ -44,7 +44,7 @@ Principles that came out of the rounds:
 | Feature | Status | Notes |
 |---|---|---|
 | **Context switcher** in the top strip: tabs for recent contexts, dropdown with all + smart lists, *+ new* (ad-hoc label) | In mockup (R2 base, R3) | Contexts are epics, tickets, or ad-hoc labels ("Staging DB configuration"). |
-| **Room** per context: tiles Tickets (mini board) · Code (branches/PRs/commits) · Builds · Docs · Notes · Time-in-this-context · Assets | In mockup | Every tile is filtered by the context. Tile grid changed in every R2 way; R3 settles it. |
+| **Room** per context: tiles Tickets (mini board) · Code (branches/PRs/commits) · Builds · Docs · Notes · Time-in-this-context · Assets | In mockup | Every tile is filtered by the context. Tile grid changed in every R2 way; R3 settles it. The Tickets tile shipped in M1 as a flat recency list; the mini-board promise is fulfilled by milestone **M2.5** — see the §13 addendum (2026-08-30). |
 | **Persistent top strip**: search field (`⌘K`), timer with context + elapsed, inbox count, Assets with open-alert count, sync monograms (one per source, 401 highlighted), Today / Day buttons | In mockup | The amber **ticker** from Signal is **removed**. |
 | **Status bar**: DB size, FTS freshness, sync cadence, counts, pending writes, user, clock | In mockup | |
 | **Detail slide-over** (right half of the room) for any entity; `Esc` unwinds | In mockup | **Two detail idioms are intentional** (R3): slide-over for work items; assets use a fixed right pane inside the Miller view so the column path stays visible. **Rec 08-24: keep both.** |
@@ -277,6 +277,9 @@ Links are what knobas adds that no source system has. They are **local**: create
 
 **Pulled into v1** (no longer backlog):
 - Conflict resolution UI for queued writes — required by the §3 write-queue decision (ask-with-diff).
+
+**M2.5 — the mini board (addendum 2026-08-30):**
+- The Room's Tickets tile renders the **mini board** the §2 Shell table promised: status columns over the context's live ticket items, column names in the source's own words, plus a status select in the ticket detail round-tripped through the write queue. M1 shipped the tile as a flat recency list; the mini-board rendering is tiered as its own milestone, **M2.5**, which opens only at M2 exit (Björn's gate) and closes before M3 starts. Spec: GitHub issue #175. Vocabulary: ADR-0009 — the feature is the *mini board*; "board" never appears unqualified.
 
 **v1.5 — first releases after the MVP** (each is small and rides on existing plumbing):
 - Desktop notifications (build finished, monitor changed, PAT expiring) — Tauri notification plugin over the same events the inbox consumes.
