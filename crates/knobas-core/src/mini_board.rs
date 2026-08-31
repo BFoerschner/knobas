@@ -4,12 +4,13 @@
 //!
 //! # What this reads, and what it refuses to
 //!
-//! It is scoped the way every other tile in a room is, and by the same two
+//! It is scoped the way every other tile in a room is, and by the same
 //! dimensions the room itself carries (`app/src/lib/shell/contexts.ts`): a
 //! **stored** room narrows by its context, a **derived** room -- *All work*,
-//! and one per source -- narrows by its sources, and exactly one of the two is
-//! ever narrowing. A board that took only a context would be empty in the room
-//! every session starts in.
+//! and one per source -- narrows by its sources, and exactly one of that pair
+//! is ever narrowing. A board that took only a context would be empty in the
+//! room every session starts in. A **project** room (#208, ADR-0010) is a
+//! derived room that narrows once more, within its source: see [`read`].
 //!
 //! Where a context is given, membership is [`crate::context::member_ids`]'
 //! answer and nothing else -- the fixed rule of §16.11 / ADR-0008, computed
@@ -26,7 +27,10 @@
 //! adapter**, governed by ADR-0007. Hence [`status_read!`] and
 //! [`priority_read!`]: one macro each, so a second source's spelling is one
 //! more `coalesce` in one place and nothing anywhere else, and both failure
-//! directions are stated on the macros and pinned by tests named there.
+//! directions are stated on the macros and pinned by tests named there. The
+//! project this board narrows by is a third such read, and lives with the
+//! census that reports it ([`crate::project`]) rather than being re-spelled
+//! here.
 //!
 //! # Two consumers, one grant
 //!
@@ -106,9 +110,17 @@ macro_rules! priority_read {
 /// derived room that never asked about membership at all.
 ///
 /// `sync.live_item` rather than `sync.item`, which is what keeps a tombstoned
-/// ticket off the board (story 18). Newest first within the answer, so a
-/// column reads like the recency list the tile used to be; the grouping below
-/// preserves this order.
+/// ticket -- and, since migration `0012`, a disabled source's ticket -- off the
+/// board (story 18). Newest first within the answer, so a column reads like the
+/// recency list the tile used to be; the grouping below preserves this order.
+///
+/// `$3` is the project dimension (#208), which narrows **within** `$2` rather
+/// than beside it: a project key is unique only inside its own source, so a
+/// project room names both and a board that honoured only the key would draw
+/// two sources' `PAY` as one project. A record with no readable project misses
+/// the predicate rather than matching some other room's -- absence, never a
+/// wrong room, which is [`crate::project`]'s stated failure direction reaching
+/// the board.
 const CARDS: &str = concat!(
     "select i.entity_id, i.source_id, i.title, ",
     status_read!(),
@@ -119,6 +131,9 @@ const CARDS: &str = concat!(
       where i.kind = 'ticket'
         and ($1::text[] is null or i.entity_id = any($1))
         and ($2::text[] is null or i.source_id = any($2))
+        and ($3::text is null or ",
+    crate::project_key_read!(),
+    " = $3)
       order by coalesce(i.item_updated_at, i.synced_at) desc, i.entity_id"
 );
 
@@ -245,10 +260,16 @@ fn column_rank(status: Option<&str>) -> (Band, usize, String, String) {
 /// switcher builds its rooms with; a caller that passed both would get their
 /// intersection, which is a coherent answer to an incoherent room.
 ///
+/// `project` is the third dimension (#208) and is not one of that pair: it
+/// narrows **within** `sources` rather than instead of them, because a project
+/// key is unique only inside its own source. `None` is unscoped, the same
+/// "empty means unfiltered" the room filter's other fields have.
+///
 /// An unknown or empty context answers with an empty board rather than an
 /// error, for the reason [`crate::context::member_ids`] does: an address can
 /// outlive the thing it names, and "nothing here" is what the tile needs to be
-/// able to say.
+/// able to say. A project no record names answers the same way, for the same
+/// reason.
 ///
 /// # Errors
 ///
@@ -257,6 +278,7 @@ pub async fn read(
     pool: &PgPool,
     ctx_id: Option<&str>,
     sources: &[String],
+    project: Option<&str>,
 ) -> Result<MiniBoard, CoreError> {
     let members = match ctx_id {
         Some(ctx) => Some(crate::context::member_ids(pool, ctx).await?),
@@ -266,6 +288,7 @@ pub async fn read(
     let rows: Vec<CardRow> = sqlx::query_as(CARDS)
         .bind(&members)
         .bind(&scope)
+        .bind(project)
         .fetch_all(pool)
         .await?;
 

@@ -47,6 +47,14 @@ fn jira(status: Option<&str>, priority: Option<&str>) -> serde_json::Value {
     serde_json::json!({ "fields": serde_json::Value::Object(fields) })
 }
 
+/// A Jira issue carrying a status and a project, which is the pair a project
+/// room's board is drawn from.
+fn jira_in(status: &str, project: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "fields": { "status": { "name": status }, "project": project }
+    })
+}
+
 /// One live mirror item of the given kind, carrying the payload it is given.
 async fn item(
     pool: &PgPool,
@@ -133,7 +141,7 @@ async fn stored_room(pool: &PgPool, members: &[&str]) -> String {
 
 /// The board of a stored room.
 async fn board_of(pool: &PgPool, ctx: &str) -> MiniBoard {
-    mini_board::read(pool, Some(ctx), &[]).await.unwrap()
+    mini_board::read(pool, Some(ctx), &[], None).await.unwrap()
 }
 
 /// The columns as `(status, the keys in them)`, keys sorted: the spec pins the
@@ -362,7 +370,7 @@ async fn a_derived_room_scopes_by_its_sources_and_all_work_by_nothing() {
     // In no room's scope by kind, whichever way the room is narrowed.
     item(&pool, "gitea", "pr", "payout#9", jira(Some("Done"), None)).await;
 
-    let everything = mini_board::read(&pool, None, &[]).await.unwrap();
+    let everything = mini_board::read(&pool, None, &[], None).await.unwrap();
     assert_eq!(
         columns(&everything),
         vec![
@@ -372,7 +380,7 @@ async fn a_derived_room_scopes_by_its_sources_and_all_work_by_nothing() {
         "*All work* narrows by nothing at all"
     );
 
-    let one_source = mini_board::read(&pool, None, &["gitea".to_owned()])
+    let one_source = mini_board::read(&pool, None, &["gitea".to_owned()], None)
         .await
         .unwrap();
     assert_eq!(
@@ -505,4 +513,198 @@ async fn an_unknown_or_empty_context_is_an_empty_board() {
         );
         assert!(board.sources.is_empty(), "{ctx} has no source");
     }
+}
+
+/// A project room draws one project's work, and one project's only.
+///
+/// The room narrows **within** its sources: a project key is unique only
+/// inside its own source, so a project room names both and the board honours
+/// both.
+#[tokio::test]
+async fn a_project_room_draws_only_that_projects_tickets() {
+    let pool = scratch().await;
+    item(
+        &pool,
+        SOURCE,
+        "ticket",
+        "PAY-1",
+        jira_in("To Do", serde_json::json!({ "key": "PAY", "name": "Payout" })),
+    )
+    .await;
+    item(
+        &pool,
+        SOURCE,
+        "ticket",
+        "INT-1",
+        jira_in(
+            "In Progress",
+            serde_json::json!({ "key": "INT", "name": "Integrations" }),
+        ),
+    )
+    .await;
+    // Another source's `PAY`, which is another project entirely.
+    item(
+        &pool,
+        "jira-eu",
+        "ticket",
+        "PAY-1",
+        jira_in("Done", serde_json::json!({ "key": "PAY", "name": "Payments" })),
+    )
+    .await;
+
+    let board = mini_board::read(&pool, None, &[SOURCE.to_owned()], Some("PAY"))
+        .await
+        .unwrap();
+
+    assert_eq!(columns(&board), vec![(Some("To Do"), vec!["PAY-1"])]);
+}
+
+/// The failure direction, on the board: a ticket whose record carries no
+/// readable project is on **no** project room's board, and is still on the
+/// source room's and on *All work*'s.
+///
+/// Absence, never a wrong room -- and nothing is hidden, because two other
+/// rooms still hold it (ADR-0010, which is also why there is no "No project"
+/// room to draw).
+#[tokio::test]
+async fn a_ticket_with_no_readable_project_is_on_no_project_rooms_board() {
+    let pool = scratch().await;
+    item(
+        &pool,
+        SOURCE,
+        "ticket",
+        "PAY-1",
+        jira_in("To Do", serde_json::json!({ "key": "PAY", "name": "Payout" })),
+    )
+    .await;
+    // The path leads somewhere, but not to a string: the shape a room must not
+    // be headed by.
+    item(
+        &pool,
+        SOURCE,
+        "ticket",
+        "PAY-2",
+        jira_in("To Do", serde_json::json!({ "key": { "id": 3 } })),
+    )
+    .await;
+    item(&pool, SOURCE, "ticket", "PAY-3", jira(Some("To Do"), None)).await;
+
+    let project_room = mini_board::read(&pool, None, &[SOURCE.to_owned()], Some("PAY"))
+        .await
+        .unwrap();
+    assert_eq!(
+        columns(&project_room),
+        vec![(Some("To Do"), vec!["PAY-1"])],
+        "a record that names no project belongs to no project room"
+    );
+
+    let source_room = mini_board::read(&pool, None, &[SOURCE.to_owned()], None)
+        .await
+        .unwrap();
+    assert_eq!(
+        columns(&source_room),
+        vec![(Some("To Do"), vec!["PAY-1", "PAY-2", "PAY-3"])],
+        "and is still in its source's room"
+    );
+
+    let all_work = mini_board::read(&pool, None, &[], None).await.unwrap();
+    assert_eq!(
+        columns(&all_work),
+        vec![(Some("To Do"), vec!["PAY-1", "PAY-2", "PAY-3"])],
+        "and in *All work*"
+    );
+}
+
+/// A source the user turned off has its work off a project room's board, the
+/// way a tombstoned ticket does: the board reads `sync.live_item`, and since
+/// migration `0012` that view has two reasons to hide a row (#202).
+#[tokio::test]
+async fn a_disabled_sources_ticket_is_off_a_project_rooms_board() {
+    let pool = scratch().await;
+    item(
+        &pool,
+        SOURCE,
+        "ticket",
+        "PAY-1",
+        jira_in("To Do", serde_json::json!({ "key": "PAY", "name": "Payout" })),
+    )
+    .await;
+    let withdrawn = item(
+        &pool,
+        SOURCE,
+        "ticket",
+        "PAY-2",
+        jira_in(
+            "In Progress",
+            serde_json::json!({ "key": "PAY", "name": "Payout" }),
+        ),
+    )
+    .await;
+    tombstone(&pool, &withdrawn).await;
+    item(
+        &pool,
+        "jira-eu",
+        "ticket",
+        "PAY-9",
+        jira_in("Done", serde_json::json!({ "key": "PAY", "name": "Payout" })),
+    )
+    .await;
+    sqlx::query(
+        "insert into knobas.source_config
+             (id, kind, display_name, base_url, auth_kind, enabled)
+         values ('jira-eu', 'jira', 'Jira EU', 'http://localhost', 'pat', false)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let board = mini_board::read(&pool, None, &[], Some("PAY")).await.unwrap();
+
+    assert_eq!(
+        columns(&board),
+        vec![(Some("To Do"), vec!["PAY-1"])],
+        "neither the withdrawn ticket nor the disabled source's is on it"
+    );
+}
+
+/// The status select's offer is **not** narrowed by the project, and that is a
+/// decision rather than an omission.
+///
+/// `MiniBoard::sources` is the statuses a ticket's *source corpus* shows
+/// (#179): a project room with nothing finished still has to be able to offer
+/// *Done*, and narrowing the offer by the room would make the move available
+/// only where it had already been made.
+#[tokio::test]
+async fn the_status_select_still_offers_the_whole_sources_corpus() {
+    let pool = scratch().await;
+    item(
+        &pool,
+        SOURCE,
+        "ticket",
+        "PAY-1",
+        jira_in("To Do", serde_json::json!({ "key": "PAY", "name": "Payout" })),
+    )
+    .await;
+    item(
+        &pool,
+        SOURCE,
+        "ticket",
+        "INT-1",
+        jira_in(
+            "Done",
+            serde_json::json!({ "key": "INT", "name": "Integrations" }),
+        ),
+    )
+    .await;
+
+    let board = mini_board::read(&pool, None, &[SOURCE.to_owned()], Some("PAY"))
+        .await
+        .unwrap();
+
+    assert_eq!(columns(&board), vec![(Some("To Do"), vec!["PAY-1"])]);
+    assert_eq!(
+        offered(&board, SOURCE),
+        ["To Do", "Done"],
+        "a room with nothing finished can still move a ticket to Done"
+    );
 }
