@@ -90,20 +90,25 @@ const { builtinContexts } = await import("./contexts");
 const { createRouter } = await import("./router.svelte");
 
 /**
- * One source, and the two projects its corpus shows (#209).
+ * Two sources, and the projects their corpus shows (#209).
  *
  * `OPS` deliberately reports no name, so the rooms drawn here cover both
  * labellings — the source's own word where there is one, the key where there
- * is not.
+ * is not. TeamCity's `PAY` shares Jira's key on purpose: two sources, one
+ * key, and each room may draw only its own source's half.
  */
 const CONTEXTS = builtinContexts(
-  [{ id: "jira", label: "Tidewater Jira" }],
+  [
+    { id: "jira", label: "Tidewater Jira" },
+    { id: "teamcity", label: "TeamCity" },
+  ],
   [
     { source_id: "jira", key: "PAY", name: "Payments Platform" },
     { source_id: "jira", key: "OPS", name: null },
     // A project the census shows and this corpus has nothing in: a room exists
     // for a quiet project as well as a busy one.
     { source_id: "jira", key: "QUIET", name: "Quiet project" },
+    { source_id: "teamcity", key: "PAY", name: "Payments pipelines" },
   ],
 );
 
@@ -336,22 +341,32 @@ interface Item {
   kind: string;
   key: string;
   project: string | null;
+  source: string;
 }
 
+/**
+ * `PAY-9` is the **second source's** `PAY` — the corpus item that makes the
+ * source half of a project room's filter witnessable here: a room that
+ * narrowed by its key alone, or dropped `sources` on the way to a tile, would
+ * draw it into `proj:jira:PAY` and the counts and cards below would say so.
+ * Without it this corpus was single-source and that mutant rendered
+ * identically (the mutant-8 lesson, one dimension over).
+ */
 const CORPUS: Item[] = [
-  { kind: "ticket", key: "PAY-231", project: "PAY" },
-  { kind: "ticket", key: "PAY-236", project: null },
-  { kind: "ticket", key: "OPS-77", project: "OPS" },
-  { kind: "page", key: "ENG-1", project: "PAY" },
-  { kind: "page", key: "OPS-DOC", project: "OPS" },
-  { kind: "incident", key: "INC-1", project: "OPS" },
+  { kind: "ticket", key: "PAY-231", project: "PAY", source: "jira" },
+  { kind: "ticket", key: "PAY-236", project: null, source: "jira" },
+  { kind: "ticket", key: "OPS-77", project: "OPS", source: "jira" },
+  { kind: "page", key: "ENG-1", project: "PAY", source: "jira" },
+  { kind: "page", key: "OPS-DOC", project: "OPS", source: "jira" },
+  { kind: "incident", key: "INC-1", project: "OPS", source: "jira" },
+  { kind: "ticket", key: "PAY-9", project: "PAY", source: "teamcity" },
 ];
 
-/** Everything one source holds, narrowed the way the backend narrows it. */
+/** Everything the corpus holds, narrowed the way the backend narrows it. */
 function corpus(filter: Pick<EntityFilter, "sources" | "project"> & { kinds?: string[] }): Item[] {
   return CORPUS.filter(
     (item) =>
-      (filter.sources.length === 0 || filter.sources.includes("jira")) &&
+      (filter.sources.length === 0 || filter.sources.includes(item.source)) &&
       (filter.project === null || filter.project === item.project) &&
       ((filter.kinds ?? []).length === 0 || (filter.kinds ?? []).includes(item.kind)),
   );
@@ -419,6 +434,31 @@ test("a project room narrows every tile in it, its own count included", async ()
   expect(source.cards()).toEqual(["PAY-231", "PAY-236", "OPS-77"]);
   expect(source.rows()).toEqual(["Title of ENG-1", "Title of OPS-DOC", "Title of INC-1"]);
   source.done();
+});
+
+/**
+ * Criterion 4 at the rendered seam: one key in two sources is two rooms, and
+ * what each room **draws** is its own source's half only. The filter-level
+ * pin is `contexts.test.ts`'s; this is the room actually not painting the
+ * other source's `PAY-9` / `PAY-231`.
+ */
+test("two sources' rooms for one key each draw only their own source's work", async () => {
+  serveCorpus();
+
+  const jira = render("#/ctx/proj:jira:PAY");
+  await vi.waitFor(() => expect(jira.tiles().length).toBeGreaterThan(0));
+  await settle();
+  expect(jira.text()).toContain("2 items");
+  expect(jira.cards()).toEqual(["PAY-231"]);
+  jira.done();
+
+  const teamcity = render("#/ctx/proj:teamcity:PAY");
+  await vi.waitFor(() => expect(teamcity.tiles().length).toBeGreaterThan(0));
+  await settle();
+  expect(teamcity.text()).toContain("Payments pipelines");
+  expect(teamcity.text()).toContain("1 item");
+  expect(teamcity.cards()).toEqual(["PAY-9"]);
+  teamcity.done();
 });
 
 /**
