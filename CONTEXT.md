@@ -122,7 +122,7 @@ _Avoid_: filter, saved search
 An operation that changes data in a source (status, comment, approval, trigger). Links, contexts, notes, and time are never write-back.
 
 **Pending write**:
-An edit queued because its source cannot currently accept it. The queue is a visible, inspectable list, not a count.
+An edit queued because its source cannot currently accept it. The queue is a visible, inspectable list, not a count. Delivery is at least once — a write in flight when knobas stops may arrive twice; knobas re-sends rather than guess, and never merges or deduplicates what you wrote. (ADR-0012)
 
 **Held write**:
 A pending write knobas will not send until the user acts, for one of two stated reasons: its target changed after it was queued (resolved by choosing between the two versions, shown side by side — there is no silent last-write-wins), or its source was turned off (resolved by re-enabling the source). The surface always says which; the two are never collapsed. (#204)

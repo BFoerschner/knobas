@@ -400,6 +400,12 @@ async fn attempt(
     // The one call to `Source::write` in knobas. Everything above decides
     // whether it may happen; `tests/write_choke_point.rs` is what keeps this
     // the only place it does.
+    //
+    // Delivery is at-least-once, on purpose (ADR-0012): if knobas dies
+    // between this call returning and `sent` landing below, the row stays
+    // pending and the next flush re-sends a write that already arrived. No
+    // key rides on the call and no dedupe guards it -- the ADR records why,
+    // and what would reopen the question.
     // ---------------------------------------------------------------------
     match source.write(op).await {
         Ok(()) => {
