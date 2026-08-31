@@ -61,8 +61,20 @@ pin() {  # pin <VAR> <repo:tag>
   pin KUMA_IMAGE       louislam/uptime-kuma:2
   pin NODE_IMAGE       node:22-alpine
   pin TEAMCITY_IMAGE   jetbrains/teamcity-server:latest
-  pin JIRA_IMAGE       atlassian/jira-software:9.17
-  pin CONFLUENCE_IMAGE atlassian/confluence:latest
+  # The latest DC releases as of 2026-08-31 (issue #49: Björn ruled "just use
+  # the latest datacenter versions"), pinned by explicit version rather than
+  # by `:latest` so a bump is a reviewable diff here and not a silent jump on
+  # the next re-pin. `latest` resolved to exactly these two on that date.
+  #
+  # These deliberately do NOT match `specs/jira-dc-rest.wadl`, which is Jira
+  # 9.17.0. That is not drift: Atlassian stopped publishing the per-version
+  # WADL after 9.17.x -- 10.x and 11.x answer 404, and the `.../REST/latest/`
+  # URL still redirects to 9.17.0 (probed 2026-08-31). 9.17.0 remains the
+  # newest contract document that exists, so the container is the newer of the
+  # two on purpose, and catching what the older document cannot describe is
+  # precisely the job of the `real-atlassian` profile.
+  pin JIRA_IMAGE       atlassian/jira-software:11.3.10
+  pin CONFLUENCE_IMAGE atlassian/confluence:10.2.15
 } > .env
 
 echo "pin-images: wrote $(pwd)/.env"

@@ -124,8 +124,12 @@ An operation that changes data in a source (status, comment, approval, trigger).
 **Pending write**:
 An edit queued because its source cannot currently accept it. The queue is a visible, inspectable list, not a count. Delivery is at least once — a write in flight when knobas stops may arrive twice; knobas re-sends rather than guess, and never merges or deduplicates what you wrote. (ADR-0012)
 
+**The word has two senses and both are load-bearing.** *This glossary's* sense is the whole open queue — pending, held and refused together — which is why the command that lists it is `pending_writes` and not `open_writes` (`docs/contract.md`, "Write-back": the name follows the glossary rather than the state column). The *state machine's* sense is narrow: `pending`, `held` and `refused` are three disjoint states of `knobas.write_queue`, and `write_queue::counts().pending` counts only the first. Neither is wrong and neither is being migrated to the other; read which one a surface means before changing it.
+
+Which surface takes which: the write-queue **list** and its `pending_writes` command take the wide sense — they show everything knobas still owes. The launcher footer's *"N pending writes"* and `LauncherHome.pending_writes` take the narrow one (#212), because those are the writes that leave on their own, and a held or refused write is asking for a *decision* — which the status bar's badge, reading `write_queue_counts`, is where to ask for. Folding held into the footer would let it count down to zero with nothing sent.
+
 **Held write**:
-A pending write knobas will not send until the user acts, for one of two stated reasons: its target changed after it was queued (resolved by choosing between the two versions, shown side by side — there is no silent last-write-wins), or its source was turned off (resolved by re-enabling the source). The surface always says which; the two are never collapsed. (#204)
+A queued write knobas will not send until the user acts, for one of two stated reasons: its target changed after it was queued (resolved by choosing between the two versions, shown side by side — there is no silent last-write-wins), or its source was turned off (resolved by re-enabling the source). The surface always says which; the two are never collapsed. (#204) In the state machine it has *left* `pending`; in this glossary's wider sense it is still a pending write. See the two senses above.
 
 **Inbox**:
 The single actionable stream — mentions, review requests, failed builds, assignments, credential expiry — with actions and snooze.

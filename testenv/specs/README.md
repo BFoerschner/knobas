@@ -38,7 +38,7 @@ For two days TeamCity had golden-fixture validation only, because `teamcity.json
 
 Rules:
 - `SHA256SUMS` pins the exact documents. mockd mocks the **DC shapes** (Jira v2, Confluence v1) and validates its responses — and, via request-validation middleware, the adapters' requests — against the strongest available contract per API.
-- **Version alignment:** the Jira WADL is also published per-version (`docs.atlassian.com/software/jira/docs/api/REST/<version>/jira-rest-plugin.wadl`); once Björn's instance versions are known, re-pin the WADL and the container tags to exactly those versions.
+- **Version alignment — settled 2026-08-31 (#49), and the answer is that it cannot be had.** The per-version WADL (`docs.atlassian.com/software/jira/docs/api/REST/<version>/jira-rest-plugin.wadl`) stops at 9.17.x: `9.17.0` and `9.17.1` answer 200, `9.18.0` and every 10.x/11.x probed answer 404, and `.../REST/latest/` redirects to 9.17.0. So the vendored WADL is already the newest document Atlassian publishes, and the `real-atlassian` containers are pinned to the newest *releases* instead (Jira Software 11.3.10, Confluence 10.2.15). The gap between document and container is the thing those containers exist to measure.
 - Refresh deliberately via `fetch.sh`, review the diff, then update `SHA256SUMS` — never let a contract change slip in silently.
 - Flowrun is an internal system with no public spec: its stub in `knobas-mockd` *defines* the assumed contract, to be validated against the real instance when one becomes available.
 - The Jira Cloud `/search` removal (HTTP 410, Oct 2025) is **Cloud-only** — DC keeps `/rest/api/2/search`. Adapters must not confuse the two dialects; the source config carries a `flavor: datacenter | cloud` field.

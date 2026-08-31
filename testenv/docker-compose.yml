@@ -189,8 +189,10 @@ services:
   jira:
     # Wants ~4 GB of RAM and a developer/timebomb licence entered by hand.
     #   docker compose --profile real-atlassian up -d jira
-    # The tag is 9.17 to match the vendored WADL (Jira 9.17.0) so the real
-    # container and mockd speak the same version.
+    # The tag is the latest DC release (#49), which is deliberately *newer*
+    # than the vendored WADL (Jira 9.17.0): Atlassian publishes no WADL past
+    # 9.17.x, so the two cannot be aligned any more. pin-images.sh carries the
+    # evidence.
     image: ${JIRA_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
     profiles: ["real-atlassian"]
     container_name: knobas-jira

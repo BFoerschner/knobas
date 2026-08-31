@@ -318,7 +318,10 @@ pub struct Segment { pub text: String, pub hit: bool }       // carry-over D: st
 pub struct SmartListSummary { pub id: String, pub label: String, pub count: i64,
                               pub changed: bool, pub description: String }
 pub struct LauncherHome { pub smart_lists: Vec<SmartListSummary>, pub recent: Vec<EntityRow>,
-                          pub sources: Vec<CredentialHealth>, pub pending_writes: u32 } // 0 in M1
+                          pub sources: Vec<CredentialHealth>, pub pending_writes: u32 }
+// `pending_writes` was 0 by rule while M1 was read-only; since #212 it is
+// `write_queue::counts().pending` -- the narrow sense, not this command's
+// namesake. CONTEXT.md, "Pending write", carries the two senses.
 ```
 
 `snippet: Vec<Segment>` discharges the carry-over: `ts_headline` runs with **sentinel** selectors (`StartSel=E'\x01', StopSel=E'\x02'`), and Rust splits the string into segments. No markup ever crosses the bridge (gotcha 7: `ts_headline` output is not XSS-safe; the text inside a segment is still raw source text and must be rendered as text). Replacing M0's `search(q, limit) -> Vec<SearchHit>` is part of **P2**; its only consumer is `App.svelte`, which stream D rewrites anyway. *Fallback: land `launcher_search` beside the M0 command and delete the old one in the exit sweep.*
