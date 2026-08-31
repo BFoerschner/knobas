@@ -16,6 +16,7 @@ That build is read-only toward the sources, has no links UI, no timer, no assets
 
 - **M2** is the identity release (links, suggestions, write-back, start-work, inbox).
 - **M2.5** delivers the mini board (the Tickets tile's status-grouped rendering, plus a status select in the ticket detail).
+- **M2.6** adds project rooms and gives the mini board a second layout, so the room a person stands in decides both what its tiles hold and how its mini board is drawn.
 - **M3** makes it the whole workday (time, standup, Confluence).
 - **M4** adds the estate (assets, monitoring, Flowrun, export/import).
 
@@ -64,6 +65,14 @@ The Tickets tile becomes the **mini board** the design doc promised (§2 Shell: 
 **Gate:** opens only at M2 exit (Björn's gate); closes before M3 starts. Nothing in it is `ready-for-agent` before then.
 
 **Exit criteria (against the test environment):** the tile renders the mini board from the granted read, with the empty state; a status move round-trips through the write queue and an illegal move surfaces in the conflict UI; the paperwork is merged (design-doc addendum, this roadmap insertion, ADR-0009, the §10.8 entry). Spec: issue #175.
+
+### M2.6 — Project rooms and the mini board's two layouts (two streams, merged serially; added 2026-08-31)
+
+M2.5 leaves a multi-project Jira with one room for all of it, drawing a mini board that is the union of every workflow's statuses in a tile too narrow to hold it — the problem ADR-0010 states, and the one this milestone answers twice over. A **project** (`CONTEXT.md`, **Project**; ADR-0010) becomes a scoping dimension a room can be built on: the switcher grows a room for every project a source's corpus shows, listed under that source's own room, and standing in one narrows every tile in the room rather than the Tickets tile alone. And the **mini board** gains a second layout, chosen by the room: a bounded room (a project room, a stored context) keeps M2.5's column layout, a definitionally unbounded room (*All work*, a source room) draws the same status groups stacked one under another and scrolling down, and a demote-only backstop at six columns keeps a bounded room that turns out to span two workflows off a horizontal scrollbar. Two frozen-surface touches — a project dimension on the room filter, and an additive read reporting the projects a corpus shows — carry a §10.8 entry each, written with the changes that make them. Vocabulary per ADR-0009 and ADR-0010: *mini board*, "board" never unqualified; *project* per the glossary, never a synonym for *context*.
+
+**Gate:** opens only at M2.5 exit (Björn's gate); closes before M3 starts. Nothing in it is `ready-for-agent` before then.
+
+**Exit criteria (against the test environment, except where the demo profile is named):** under every source room whose corpus shows projects — mockd Jira and mockd TeamCity both do — the switcher lists a room per project, labelled by the project's own name, and by its key where the project reports no readable name; standing in one narrows every tile in the room, and its mini board draws that project's workflow alone in columns, demoting to the stacked layout where that workflow turns out to draw more than six; *All work* and a source room show the same statuses, in the same order, with the same counts and cards, stacked vertically, and the terminal "No status" group is last in both layouts; a ticket whose mirrored record carries no readable project is still reachable in *All work* and in its source's room, appears in no project room, and there is no "No project" room; a bookmarked address for a project the corpus no longer shows lands in *All work*; `just demo` shows project rooms over the Tidewater dataset with nothing configured; the paperwork is merged (design-doc addendum, this roadmap insertion, the two §10.8 entries). Spec: issue #188.
 
 ### M3 — Time & the daily flow (3–4 streams)
 
@@ -135,4 +144,4 @@ Moved to `docs/agents/working-model.md` (2026-08-28): the PR loop, concurrency l
 
 ## 6. Where task-level planning lives now
 
-The superpowers plan files were retired 2026-08-28 (mattpocock-skills flow only: grilling → spec → tickets). Task tracking is GitHub Issues, milestone **M2**, then **M2.5**. The executed M0/M1 plans and the M1 carry-over ledger remain readable in git history: `git show 736ac1f:docs/superpowers/plans/<file>`.
+The superpowers plan files were retired 2026-08-28 (mattpocock-skills flow only: grilling → spec → tickets). Task tracking is GitHub Issues, milestone **M2**, then **M2.5**, then **M2.6**. The executed M0/M1 plans and the M1 carry-over ledger remain readable in git history: `git show 736ac1f:docs/superpowers/plans/<file>`.
