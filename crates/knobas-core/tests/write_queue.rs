@@ -566,5 +566,8 @@ async fn an_unconfigured_sources_write_reads_enabled() {
         .into_iter()
         .find(|row| row.id == write.id)
         .expect("a fresh write is open");
-    assert!(listed.source_enabled, "the list read agrees with the insert");
+    assert!(
+        listed.source_enabled,
+        "the list read agrees with the insert"
+    );
 }
