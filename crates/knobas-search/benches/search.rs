@@ -18,8 +18,8 @@
 //!
 //! # The fixture, and the step that makes it measurable
 //!
-//! [`knobas_search::testing::seed_corpus`] -- deterministic, 25-word bodies
-//! over a 20-word vocabulary, and it **vacuums**. `ANALYZE` alone is not
+//! [`knobas_search::testing::seed_corpus`] -- deterministic, 20-word bodies
+//! over a 512-word filler vocabulary, and it **vacuums**. `ANALYZE` alone is not
 //! enough for a GIN index: `fastupdate` parks new entries in an unsorted
 //! pending list that every scan reads linearly, and this stream has measured
 //! that inflating the same statement by between 21× and 182×, with no size and
