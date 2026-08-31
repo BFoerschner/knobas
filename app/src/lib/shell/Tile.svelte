@@ -32,6 +32,7 @@
     spec,
     sources,
     ctx = null,
+    project = null,
     onopen,
   }: {
     spec: TileSpec;
@@ -39,6 +40,15 @@
     sources: string[];
     /** The stored context whose membership scopes this tile, or `null` (#47). */
     ctx?: string | null;
+    /**
+     * The project this room narrows to, or `null` for no scoping (#209).
+     *
+     * Narrows **within** `sources` and never instead of them: a project key is
+     * unique only inside its own source, so a project room supplies both and a
+     * tile that took only this one would draw another source's work under the
+     * same key.
+     */
+    project?: string | null;
     /**
      * Opening an item. Narrowed to the two fields the room's router needs: a
      * board card is not a mirror row and has no timestamps, and inventing them
@@ -83,16 +93,12 @@
 
   $effect(() => {
     const mine = ++token;
-    // `project: null` is *unscoped*, and it is a literal here rather than a
-    // prop because no room narrows by a project yet: the switcher grows those
-    // rooms in #209, and this tile then reads the dimension off the room's
-    // filter like every other one. The backend read honours it either way.
     const filter = {
       sources,
       kinds: spec.kinds,
       updated_within_days: null,
       context: ctx,
-      project: null,
+      project,
       order: "updated_desc" as const,
       include_deleted: false,
     };
@@ -102,11 +108,11 @@
     page = null;
     board = null;
     error = null;
-    // The board asks for the room's two narrowing dimensions and nothing else:
-    // it is tickets by construction, it is never paged, and its order is the
+    // The board asks for the room's narrowing dimensions and nothing else: it
+    // is tickets by construction, it is never paged, and its order is the
     // command's (#177).
     const read = isMiniBoard
-      ? miniBoard({ sources, context: ctx, project: null }).then((answer) => {
+      ? miniBoard({ sources, context: ctx, project }).then((answer) => {
           if (mine === token) board = answer;
         })
       : listEntities(filter, PAGE, 0).then((answer) => {

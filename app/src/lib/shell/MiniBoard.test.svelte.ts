@@ -63,11 +63,11 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function render(sources: string[] = [], ctx: string | null = null) {
+function render(sources: string[] = [], ctx: string | null = null, project: string | null = null) {
   const target = document.createElement("div");
   document.body.append(target);
   const onopen = vi.fn();
-  const props = $state({ spec: SPEC, sources, ctx, onopen });
+  const props = $state({ spec: SPEC, sources, ctx, project, onopen });
   const app = mount(Tile, { target, props });
   flushSync();
   return {
@@ -192,7 +192,7 @@ test("clicking a card opens that ticket at its stable address", async () => {
   screen.done();
 });
 
-test("the tile reads with the room's own filter, both dimensions of it", async () => {
+test("the tile reads with the room's own filter, every dimension of it", async () => {
   const screen = render(["jira"], null);
   await vi.waitFor(() => expect(calls).toHaveLength(1));
 
@@ -203,6 +203,15 @@ test("the tile reads with the room's own filter, both dimensions of it", async (
   flushSync();
   await vi.waitFor(() => expect(calls).toHaveLength(2));
   expect(calls[1]).toEqual({ sources: [], context: "ctx:5b1c", project: null });
+
+  // A project room's, which is the one that carries two at once: the key is
+  // unique only inside its own source, so the board is told both (#209).
+  screen.props.ctx = null;
+  screen.props.sources = ["jira"];
+  screen.props.project = "PAY";
+  flushSync();
+  await vi.waitFor(() => expect(calls).toHaveLength(3));
+  expect(calls[2]).toEqual({ sources: ["jira"], context: null, project: "PAY" });
 
   screen.done();
 });

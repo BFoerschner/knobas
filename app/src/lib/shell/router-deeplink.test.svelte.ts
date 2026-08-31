@@ -51,6 +51,9 @@ vi.mock("../ipc/entity", () => ({
   // Contexts (#47): the store imports these at module level, so every mock of
   // this module has to define them even where no context is ever made.
   listContexts: () => Promise.resolve([]),
+  // The project census the switcher's third derived population is built from
+  // (#209). Empty here: this file is not about which rooms exist.
+  listProjects: () => Promise.resolve([]),
   contextMembers: () => Promise.resolve([]),
   createContext: () => Promise.reject(new Error("no context creation in this test")),
   promoteContext: () => Promise.reject(new Error("no promotion in this test")),

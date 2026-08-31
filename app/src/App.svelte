@@ -15,6 +15,7 @@
   import { kindRegistry } from "./lib/shell/kind-registry.svelte";
   import { installKeys } from "./lib/shell/keys";
   import { lifecycle } from "./lib/shell/lifecycle.svelte";
+  import { projects } from "./lib/shell/projects.svelte";
   import { router } from "./lib/shell/router.svelte";
   import { push } from "./lib/shell/toasts.svelte";
   import SettingsView from "./lib/settings/SettingsView.svelte";
@@ -25,22 +26,29 @@
   import { linkTo } from "./lib/detail/links.svelte";
 
   /**
-   * The rooms the switcher offers: *All work*, the stored contexts (#47), and
-   * one room per configured source.
+   * The rooms the switcher offers: *All work*, the stored contexts (#47), one
+   * room per configured source, and one per project a corpus shows (#209).
    *
-   * Derived from the live `source:health` store rather than from a second
-   * `list_sources` call — the store already knows every source id, it is kept
-   * current by `source:health`, and one fact with one home is what keeps the
-   * tab strip from disagreeing with the sources view about which sources exist.
+   * The sources come from the live `source:health` store rather than from a
+   * second `list_sources` call — the store already knows every source id, it
+   * is kept current by `source:health`, and one fact with one home is what
+   * keeps the tab strip from disagreeing with the sources view about which
+   * sources exist. The projects come from their own store for the same reason,
+   * and from a census rather than from any room's read: a room's scan is a
+   * window over the newest items, so a quiet project would silently have no
+   * room.
    *
-   * The label is the source id. `display_name` lives on `SourceSummary`, which
-   * this store does not carry; a tab reading `jira-eu` is honest and is the
-   * word the address `#/ctx/src:jira-eu` uses.
+   * The source label is the source id. `display_name` lives on
+   * `SourceSummary`, which this store does not carry; a tab reading `jira-eu`
+   * is honest and is the word the address `#/ctx/src:jira-eu` uses. A project
+   * is labelled by the source's own name for it, and by its key where the
+   * source gave none knobas could read.
    */
   const contexts = $derived(
     switcherContexts(
       storedContexts.all,
       health.all.map((source) => ({ id: source.source_id, label: source.source_id })),
+      projects.all,
     ),
   );
 
@@ -88,6 +96,7 @@
     let stopMerges: (() => void) | undefined;
     let stopInbox: (() => void) | undefined;
     let stopContexts: (() => void) | undefined;
+    let stopProjects: (() => void) | undefined;
 
     void (async () => {
       // Dev only, and behind `import.meta.env.DEV` so Rollup folds the branch
@@ -128,6 +137,10 @@
       // The stored contexts (#47): same split as health — subscribe now,
       // seed once the database can answer.
       stopContexts = storedContexts.start();
+      // The projects a corpus shows (#209): the same split again. Its event is
+      // a sync run ending, because a project room appears when the first item
+      // carrying it syncs.
+      stopProjects = projects.start();
       // Once, at shell start: `list_adapters` is static per build and answers
       // before the database is up, so there is nothing to poll and nothing to
       // tear down.
@@ -145,6 +158,7 @@
       stopMerges?.();
       stopInbox?.();
       stopContexts?.();
+      stopProjects?.();
       stopKeys();
       stopRouter();
       lifecycle.stop();
@@ -197,6 +211,17 @@
   });
 
   /**
+   * Seed the project rooms the moment the database can answer — the same rule
+   * and the same shape as the three seeds above. `list_projects` rejects with
+   * `not_ready` for the whole of bring-up, and its event only fires when a
+   * sync run ends, so without this a session that syncs nothing new would show
+   * no project rooms for whatever is already mirrored.
+   */
+  $effect(() => {
+    if (lifecycle.ready) void projects.reseed();
+  });
+
+  /**
    * The top strip's search field, and `installKeys`' own ⌘K binding.
    *
    * The launcher binds ⌘K too — that is what makes mounting it the whole
@@ -224,6 +249,9 @@
     // configured. `Skip for now` is the path where nothing else would ever
     // tell it.
     void health.reseed();
+    // ...and `demo_load` has just written a corpus with projects in it (#207),
+    // which the seed above ran too early to see.
+    void projects.reseed();
     router.go("#/ctx/all");
     launcherOpen = true;
   }

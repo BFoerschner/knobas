@@ -4,7 +4,8 @@
  *
  * | Address                | Meaning                                          |
  * |------------------------|--------------------------------------------------|
- * | `#/ctx/<id>`           | a room. M1 ids: `all`, and `src:<source_id>`     |
+ * | `#/ctx/<id>`           | a room: `all`, `src:<id>`, `proj:<id>:<key>`,    |
+ * |                        | or a stored context's own id                     |
  * | `#/<kind>/<entity_id>` | the detail slide-over over the current room      |
  * | `#/entity/<entity_id>` | kind-agnostic alias, resolved via `get_entity`   |
  * | `#/inbox`              | the inbox — one actionable stream (#45)          |
