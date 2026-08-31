@@ -29,10 +29,10 @@ use crate::{IpcError, Lifecycle};
 ///
 /// **The one DTO in this stream that composes two streams' data**, which is
 /// why it lives in the command module rather than in `knobas-search`:
-/// `smart_lists` and `recent` are the search crate's [`LauncherBoard`], while
-/// `sources` is stream F's [`CredentialHealth`] and `pending_writes` counts a
-/// write queue that is stream G's and does not exist yet. `knobas-search`
-/// takes a `PgPool` and deliberately depends on neither of those crates.
+/// `smart_lists` and `recent` are the search crate's [`LauncherBoard`],
+/// `sources` is stream F's [`CredentialHealth`], and `pending_writes` counts
+/// stream G's write queue. `knobas-search` takes a `PgPool` and deliberately
+/// depends on none of those crates.
 ///
 /// [`LauncherBoard`]: knobas_search::LauncherBoard
 /// [`CredentialHealth`]: knobas_sync::CredentialHealth
@@ -45,15 +45,17 @@ pub struct LauncherHome {
     /// **E-Q5**, resolved: `knobas_sync::CredentialHealth` has merged, so the
     /// planned field-identical stand-in is not needed).
     pub sources: Vec<knobas_sync::CredentialHealth>,
-    /// Always 0 in M1: the offline write queue is M2 (interfaces §4.1). The
-    /// field is here because the launcher's footer reads *"local index · N
-    /// pending writes"* and a footer that appears in M2 is a layout change; a
-    /// zero is not.
+    /// What the launcher's footer counts in *"local index · N pending
+    /// writes"*: the writes knobas still owes a source and will send on its
+    /// own.
     ///
-    /// The M2 queue has since shipped (#42) and this still answers 0 -- the
-    /// footer under-reports a non-empty queue. Issue #212 tracks wiring it
-    /// (or retiring the field); until then the constant is the recorded M1
-    /// rule, not an accident.
+    /// [`QueueCounts::pending`] alone, never the sum of the three open states.
+    /// A pending write asks the user for patience; a held or refused one asks
+    /// for a *decision*, and the status bar's badge is where those are put
+    /// (`QueueCounts`: "3 waiting" may never absorb a held write). Folding
+    /// them in would let this number fall to zero with nothing sent.
+    ///
+    /// [`QueueCounts::pending`]: knobas_core::write_queue::QueueCounts::pending
     pub pending_writes: u32,
 }
 
@@ -158,9 +160,10 @@ pub async fn search_inner(
 
 /// [`launcher_home`], against a pool.
 ///
-/// Two reads, deliberately not one: the board is `knobas-search`'s and the
-/// health is stream F's, and neither crate may learn about the other to save a
-/// round trip that a local socket answers in microseconds.
+/// Three reads, deliberately not one: the board is `knobas-search`'s, the
+/// health is stream F's and the queue depth is `knobas-core`'s, and no one of
+/// those crates may learn about the others to save round trips that a local
+/// socket answers in microseconds.
 ///
 /// # Errors
 ///
@@ -173,11 +176,12 @@ pub async fn launcher_home_inner(pool: &PgPool) -> Result<LauncherHome, IpcError
         smart_lists: board.smart_lists,
         recent: board.recent,
         sources: knobas_sync::config::health_all(pool).await?,
-        // Not a placeholder for a count nobody wrote: M1 is read-only toward
-        // every source, so the number of queued writes is exactly zero.
-        // That premise expired when the M2 queue shipped (#42); issue #212
-        // tracks wiring this to `knobas_core::write_queue::counts`.
-        pending_writes: 0,
+        // Pending only -- see the field's own doc for why the other two open
+        // states stay with `write_queue_counts`. `count(*)` is an `i64` and
+        // the field is a `u32`: saturating, because a queue deep enough to
+        // overflow one is a footer nobody is reading a number off any more.
+        pending_writes: u32::try_from(knobas_core::write_queue::counts(pool).await?.pending)
+            .unwrap_or(u32::MAX),
     })
 }
 
