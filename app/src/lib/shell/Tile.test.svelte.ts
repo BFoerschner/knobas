@@ -65,7 +65,7 @@ function deferred<T>() {
 function render(sources: string[] = []) {
   const target = document.createElement("div");
   document.body.append(target);
-  const props = $state({ spec: SPEC, sources, onopen: vi.fn() });
+  const props = $state({ spec: SPEC, sources, miniBoardLayout: "columns" as const, onopen: vi.fn() });
   const app = mount(Tile, { target, props });
   flushSync();
   return {
