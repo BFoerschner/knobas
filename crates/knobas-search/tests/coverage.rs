@@ -594,3 +594,128 @@ async fn worst_of_ten(searcher: &Searcher, raw: &str) -> u128 {
     }
     max
 }
+
+/// **A source the user turned off still puts rows in the corpus, so it still
+/// gets a verdict** (issue #200).
+///
+/// Disabling is not deleting — *Remove source and its items* is the purge path,
+/// and it is a different thing. So a disabled source's rows stay in the mirror
+/// and stay searchable, which this test asserts first: without that, the rest
+/// would be asking for a verdict on a corpus nobody reads.
+///
+/// The vocabulary is enabled-only because the **grammar** needs it that way:
+/// `source:` cannot name a source the sources list no longer offers. Coverage
+/// asks a different question — *which sources put rows in what this query
+/// actually scanned* — and reusing the grammar's list to answer it left the
+/// build source contributing an unauthored row to every search and never being
+/// verdicted for it. That is #141's own silence, surviving in the disabled case.
+#[tokio::test]
+async fn a_disabled_sources_rows_are_searchable_so_it_is_still_verdicted() {
+    let pool = pool().await;
+    let t = token("disabled");
+    let jira = format!("jira-{t}");
+    let teamcity = format!("tc-{t}");
+    seed_source(&pool, &jira, "jira", "Jira", None).await;
+    seed_source(&pool, &teamcity, "teamcity", "Buildserver", None).await;
+    seed_item(
+        &pool,
+        &format!("{jira}:PAY-1"),
+        "ticket",
+        &jira,
+        &format!("{t} ledger"),
+        Some("jonas.k"),
+    )
+    .await;
+    seed_item(
+        &pool,
+        &format!("{teamcity}:99"),
+        "build",
+        &teamcity,
+        &format!("{t} deploy"),
+        None,
+    )
+    .await;
+    // Turned off the way the sources view turns one off.
+    sqlx::query("update knobas.source_config set enabled = false where id = $1")
+        .bind(&teamcity)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let s = searcher(&pool);
+
+    // First: its rows really are still in the corpus. If this ever stops being
+    // true the verdict below stops being owed, and the test should be revisited
+    // rather than made to pass.
+    let plain = s.search(q(&t)).await.unwrap();
+    assert!(
+        plain
+            .groups
+            .iter()
+            .flat_map(|group| &group.hits)
+            .any(|hit| hit.row.source_id == teamcity),
+        "a disabled source's rows left the mirror's search results: {:?}",
+        plain.groups
+    );
+
+    // Therefore: an author query over that corpus must explain it.
+    let authored = s
+        .search(q(&format!("{t} author:nobody.at.all")))
+        .await
+        .unwrap();
+    assert_eq!(
+        answer_for(&authored, &teamcity),
+        Some(FilterAnswer::NoValues),
+        "the disabled source put an unauthored row in this corpus and got no \
+         verdict for it — #141's silence, in the disabled case"
+    );
+    // The enabled one is unaffected, so this is not a blanket widening.
+    assert_eq!(answer_for(&authored, &jira), Some(FilterAnswer::Answered));
+}
+
+/// The grammar still cannot name a source the user turned off.
+///
+/// The other half of #200, and the one a careless widening breaks: coverage
+/// reads every configured source, but `source:` and `/alias` read the **enabled**
+/// ones. A disabled source resolving again would put it back in the chip row and
+/// let a query narrow to a source the sources list no longer offers.
+#[tokio::test]
+async fn a_disabled_source_is_still_unnameable_by_the_grammar() {
+    let pool = pool().await;
+    let t = token("unnameable");
+    let source = format!("gitea-{t}");
+    seed_source(&pool, &source, "gitea", "Gitea", None).await;
+    seed_item(
+        &pool,
+        &format!("{source}:11"),
+        "pr",
+        &source,
+        &format!("{t} backoff"),
+        Some("mara.lindqvist"),
+    )
+    .await;
+    sqlx::query("update knobas.source_config set enabled = false where id = $1")
+        .bind(&source)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let response = searcher(&pool)
+        .search(q(&format!("{t} source:{source}")))
+        .await
+        .unwrap();
+
+    assert!(
+        response
+            .interpreted
+            .unknown_tokens
+            .iter()
+            .any(|token| token == &format!("source:{source}")),
+        "a disabled source became nameable again: {:?}",
+        response.interpreted
+    );
+    assert!(
+        response.interpreted.filters.sources.is_empty(),
+        "a disabled source resolved into the chip row: {:?}",
+        response.interpreted.filters
+    );
+}
