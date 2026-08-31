@@ -15,7 +15,7 @@
 use std::path::{Path, PathBuf};
 
 /// The bundle identifier, which is also the keychain service's stem
-//  (interfaces §3). Pinned against `tauri.conf.json` by a test below.
+/// (interfaces §3). Pinned against `tauri.conf.json` by a test below.
 pub const APP_IDENTIFIER: &str = "dev.knobas.desktop";
 
 /// The flag that selects the demo profile.
