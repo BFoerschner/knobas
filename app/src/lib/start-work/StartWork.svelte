@@ -93,6 +93,7 @@
             kinds: ["repo"],
             updated_within_days: null,
             context: null,
+            project: null,
             order: "title_asc",
             include_deleted: false,
           },

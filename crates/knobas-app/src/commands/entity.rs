@@ -95,6 +95,23 @@ pub struct EntityFilter {
     /// membership is resolved server-side per read rather than shipped as an
     /// id list, so a page and its `total` always describe the same instant.
     pub context: Option<String>,
+    /// Only items carrying this project key, in the source's own word
+    /// (ADR-0010, issue #208). `None` is unscoped, the same "empty means
+    /// unfiltered" the two lists above have.
+    ///
+    /// It narrows **within** [`Self::sources`] and never instead of them: a
+    /// project key is unique only inside its own source, so a project room
+    /// sets both and a filter carrying the key alone would union two sources'
+    /// `PAY` into one room. Which paths a key is read from is
+    /// [`knobas_core::project_key_read!`]'s to say, and it is the same read
+    /// the census behind the switcher's project rooms takes -- one statement,
+    /// so a room can never disagree with the list of rooms about what a
+    /// project is.
+    ///
+    /// A record whose payload carries no readable project key matches no
+    /// value of this field, so it is in no project room and still in *All
+    /// work* and its source's room: absence, never a wrong room.
+    pub project: Option<String>,
     pub order: EntityOrder,
     /// Whether to reach past `sync.live_item` for entities withdrawn upstream
     /// (§5a: links and notes may point at them).
@@ -129,37 +146,48 @@ pub struct EntityPage {
 /// `count(*) over ()` is the unpaged total in the same round trip, and the
 /// window is evaluated before `limit`, so it describes the set rather than the
 /// page.
-const LIVE_UPDATED: &str = r#"
-select entity_id, source_id, kind, title, item_updated_at, synced_at,
+const LIVE_UPDATED: &str = concat!(
+    r#"
+select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at,
        count(*) over () as total
-  from sync.live_item
- where ($1::text[] is null or source_id = any($1))
-   and ($2::text[] is null or kind      = any($2))
-   and ($3::int    is null or item_updated_at >= now() - make_interval(days => $3))
-   and ($6::text[] is null or entity_id = any($6))
- order by item_updated_at desc nulls last, entity_id
+  from sync.live_item i
+ where ($1::text[] is null or i.source_id = any($1))
+   and ($2::text[] is null or i.kind      = any($2))
+   and ($3::int    is null or i.item_updated_at >= now() - make_interval(days => $3))
+   and ($6::text[] is null or i.entity_id = any($6))
+   and ($7::text   is null or "#,
+    knobas_core::project_key_read!(),
+    r#" = $7)
+ order by i.item_updated_at desc nulls last, i.entity_id
  limit $4 offset $5
-"#;
+"#
+);
 
 /// The live corpus, alphabetically. A second statement rather than an
 /// interpolated `order by`.
-const LIVE_TITLE: &str = r#"
-select entity_id, source_id, kind, title, item_updated_at, synced_at,
+const LIVE_TITLE: &str = concat!(
+    r#"
+select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at,
        count(*) over () as total
-  from sync.live_item
- where ($1::text[] is null or source_id = any($1))
-   and ($2::text[] is null or kind      = any($2))
-   and ($3::int    is null or item_updated_at >= now() - make_interval(days => $3))
-   and ($6::text[] is null or entity_id = any($6))
- order by title asc, entity_id
+  from sync.live_item i
+ where ($1::text[] is null or i.source_id = any($1))
+   and ($2::text[] is null or i.kind      = any($2))
+   and ($3::int    is null or i.item_updated_at >= now() - make_interval(days => $3))
+   and ($6::text[] is null or i.entity_id = any($6))
+   and ($7::text   is null or "#,
+    knobas_core::project_key_read!(),
+    r#" = $7)
+ order by i.title asc, i.entity_id
  limit $4 offset $5
-"#;
+"#
+);
 
 /// As [`LIVE_UPDATED`], reaching past the tombstone filter.
 ///
 /// The join is what `sync.live_item` is; dropping only its `deleted_at is
 /// null` is the whole difference.
-const ALL_UPDATED: &str = r#"
+const ALL_UPDATED: &str = concat!(
+    r#"
 select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at,
        count(*) over () as total
   from sync.item i
@@ -168,12 +196,17 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
    and ($2::text[] is null or i.kind      = any($2))
    and ($3::int    is null or i.item_updated_at >= now() - make_interval(days => $3))
    and ($6::text[] is null or i.entity_id = any($6))
+   and ($7::text   is null or "#,
+    knobas_core::project_key_read!(),
+    r#" = $7)
  order by i.item_updated_at desc nulls last, i.entity_id
  limit $4 offset $5
-"#;
+"#
+);
 
 /// As [`LIVE_TITLE`], reaching past the tombstone filter.
-const ALL_TITLE: &str = r#"
+const ALL_TITLE: &str = concat!(
+    r#"
 select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at,
        count(*) over () as total
   from sync.item i
@@ -182,9 +215,13 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
    and ($2::text[] is null or i.kind      = any($2))
    and ($3::int    is null or i.item_updated_at >= now() - make_interval(days => $3))
    and ($6::text[] is null or i.entity_id = any($6))
+   and ($7::text   is null or "#,
+    knobas_core::project_key_read!(),
+    r#" = $7)
  order by i.title asc, i.entity_id
  limit $4 offset $5
-"#;
+"#
+);
 
 /// The statement this filter reads through. Four constants, one `match`.
 fn statement(filter: &EntityFilter) -> &'static str {
@@ -243,6 +280,7 @@ pub async fn list_entities_inner(
         .bind(i64::from(limit))
         .bind(i64::from(offset))
         .bind(members)
+        .bind(filter.project.as_deref())
         .fetch_all(pool)
         .await?;
 
@@ -1779,6 +1817,7 @@ mod tests {
             kinds: Vec::new(),
             updated_within_days: None,
             context: None,
+            project: None,
             order,
             include_deleted,
         };
@@ -2017,7 +2056,49 @@ pub async fn mini_board(
     lifecycle: State<'_, Lifecycle>,
     ctx_id: Option<String>,
     sources: Vec<String>,
+    project: Option<String>,
 ) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
     let pool = lifecycle.pool()?;
-    Ok(knobas_core::mini_board::read(&pool, ctx_id.as_deref(), &sources).await?)
+    Ok(knobas_core::mini_board::read(
+        &pool,
+        ctx_id.as_deref(),
+        &sources,
+        project.as_deref(),
+    )
+    .await?)
+}
+
+// -- the projects a corpus shows (#208) -------------------------------------
+//
+// Here for the reason the two sections above give: §10.8 freezes the
+// `commands/` + `ipc/` layout, so an entity read gets a section rather than a
+// file. A project is a grouping of *entities*, read out of the same mirror
+// rows this module already lists.
+
+/// Every project the live corpus shows, ordered by source then key
+/// (ADR-0010, #208).
+///
+/// What the switcher builds its project rooms from. Flat rather than grouped
+/// per source, because the switcher wants a room list and grouping it here
+/// would only be ungrouped there. It cannot come from a room's own scan
+/// instead: that read is a window over the newest items and explicitly not a
+/// census, so a quiet project would silently have no room.
+///
+/// Unscoped, and answering for the **live** corpus -- so a source the user
+/// turned off reports no projects (migration `0012`), and its projects come
+/// back with it. Everything it decides lives in [`knobas_core::project`];
+/// there is nothing for this seam to add, so it adds nothing, the same as
+/// [`mini_board`] and [`context_members`].
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the
+/// database is still coming up, [`Internal`](crate::IpcErrorCode::Internal)
+/// for a query failure.
+#[tauri::command]
+pub async fn list_projects(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<Vec<knobas_core::project::Project>, IpcError> {
+    let pool = lifecycle.pool()?;
+    Ok(knobas_core::project::list(&pool).await?)
 }

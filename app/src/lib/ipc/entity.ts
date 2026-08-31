@@ -62,6 +62,17 @@ export interface EntityFilter {
    * the same instant.
    */
   context: string | null;
+  /**
+   * Only items carrying this project key, in the source's own word (ADR-0010,
+   * #208) — or `null` for no scoping.
+   *
+   * It narrows **within** `sources`, never instead of them: a project key is
+   * unique only inside its own source, so a project room sets both. An item
+   * whose mirrored record names no project knobas can read matches no value
+   * here — it is in no project room, and still in *All work* and its source's
+   * room.
+   */
+  project: string | null;
   /** Reach past the live-item view for entities withdrawn upstream (§5a). */
   include_deleted: boolean;
 }
@@ -1006,6 +1017,45 @@ export interface MiniBoard {
  * An unknown context is an empty board rather than a rejection — the tile has
  * to be able to say "nothing here" without saying "this broke".
  */
-export function miniBoard(filter: Pick<EntityFilter, "sources" | "context">): Promise<MiniBoard> {
-  return invoke<MiniBoard>("mini_board", { ctxId: filter.context, sources: filter.sources });
+export function miniBoard(
+  filter: Pick<EntityFilter, "sources" | "context" | "project">,
+): Promise<MiniBoard> {
+  return invoke<MiniBoard>("mini_board", {
+    ctxId: filter.context,
+    sources: filter.sources,
+    project: filter.project,
+  });
+}
+
+/** One project a source's live corpus shows — `Project` (ADR-0010, #208). */
+export interface Project {
+  /**
+   * Which source shows it. Half of the identity, not decoration: a project
+   * key is unique only inside its own source, so two sources using one key
+   * are two projects.
+   */
+  source_id: string;
+  /** The source's own key for it, e.g. `PAY`. */
+  key: string;
+  /**
+   * The source's own name for it, or `null` where the record carries none
+   * that knobas can read. A project with a key and no name is still a
+   * project; what to label it with is the shell's decision, and a name the
+   * backend invented would be indistinguishable from one the source said.
+   */
+  name: string | null;
+}
+
+/**
+ * Every project the live corpus shows — `list_projects`, ordered by source
+ * then key.
+ *
+ * What the switcher builds a room per project from. It is a **census** and
+ * deliberately not derived from a room's own read, which is a window over the
+ * newest items: a quiet project would otherwise silently have no room. A
+ * source the user turned off shows no projects, the same way its items leave
+ * every other reader.
+ */
+export function listProjects(): Promise<Project[]> {
+  return invoke<Project[]>("list_projects");
 }

@@ -199,6 +199,7 @@ fn the_entity_filter_shape_matches_its_typescript_mirror() {
         "updated_within_days": null,
         "order": "title_asc",
         "context": null,
+        "project": null,
         "include_deleted": true,
     });
     let decoded: EntityFilter =
@@ -213,6 +214,7 @@ fn the_entity_filter_shape_matches_its_typescript_mirror() {
             "include_deleted",
             "kinds",
             "order",
+            "project",
             "sources",
             "updated_within_days",
         ],
@@ -222,11 +224,34 @@ fn the_entity_filter_shape_matches_its_typescript_mirror() {
         "every value the frontend sent survived the decode unchanged"
     );
 
-    // The window is the one nullable field, and `null` there means *no window*
-    // rather than zero days -- a decode that defaulted it to `Some(0)` would
-    // silently empty every room.
+    // The window is one of the nullable fields, and `null` there means *no
+    // window* rather than zero days -- a decode that defaulted it to `Some(0)`
+    // would silently empty every room.
     assert_eq!(decoded.updated_within_days, None);
     assert_eq!(decoded.order, EntityOrder::TitleAsc);
+    // And `null` on the project dimension is *unscoped* rather than "the
+    // project spelled nothing", which is the same distinction (#208).
+    assert_eq!(decoded.project, None);
+}
+
+/// The projects read's one DTO (#208), against what `entity.ts` declares.
+///
+/// `name` is exercised as `None` per this file's rule, and it is the field
+/// whose absence the read exists to survive: a project with a key and no
+/// readable name is still a project, carried by its key, and a
+/// `skip_serializing_if` here would hand the switcher `undefined` where the
+/// mirror promised `string | null`.
+#[test]
+fn the_project_shape_matches_its_typescript_mirror() {
+    let project = knobas_core::project::Project {
+        source_id: "mock".to_owned(),
+        key: "PAY".to_owned(),
+        name: None,
+    };
+    let wire = serde_json::to_value(&project).unwrap();
+
+    assert_shape("Project", &wire, &["key", "name", "source_id"]);
+    assert_eq!(wire["name"], serde_json::Value::Null);
 }
 
 /// Both orderings, in the spelling the mirror's union declares.

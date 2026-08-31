@@ -63,6 +63,7 @@ fn all() -> EntityFilter {
         kinds: Vec::new(),
         updated_within_days: None,
         context: None,
+        project: None,
         order: EntityOrder::UpdatedDesc,
         include_deleted: false,
     }
@@ -301,6 +302,182 @@ async fn the_recency_window_is_bound_as_a_parameter() {
         .await
         .unwrap());
     assert!(wide.contains(&stale));
+}
+
+/// A project room's list read shows one project's work, within its source.
+///
+/// The room hands its filter to every tile, so this is the same narrowing the
+/// mini board does and the same one the room's own kinds-and-count read makes
+/// -- there is no per-tile special case, which is the whole of why the
+/// dimension is on the filter (#208).
+///
+/// Rows of this test's own in a source id nothing else uses, for the reason
+/// [`the_recency_window_is_bound_as_a_parameter`] seeds its own: the corpus is
+/// shared with every other test in this binary.
+#[tokio::test]
+async fn a_project_narrows_the_room_within_its_sources() {
+    let pool = seeded().await;
+    let source = format!("proj-{}", unique());
+    let elsewhere = format!("{source}-eu");
+
+    // (source, key, payload) -- one project, another project in the same
+    // source, the same project key in a *different* source, and a record whose
+    // project is unreadable.
+    let seed: [(&str, &str, serde_json::Value); 4] = [
+        (
+            source.as_str(),
+            "PAY-1",
+            serde_json::json!({ "fields": { "project": { "key": "PAY", "name": "Payout" } } }),
+        ),
+        (
+            source.as_str(),
+            "INT-1",
+            serde_json::json!({ "fields": { "project": { "key": "INT" } } }),
+        ),
+        (
+            elsewhere.as_str(),
+            "PAY-9",
+            serde_json::json!({ "fields": { "project": { "key": "PAY" } } }),
+        ),
+        (
+            source.as_str(),
+            "NOP-1",
+            serde_json::json!({ "fields": { "project": { "key": { "id": 3 } } } }),
+        ),
+    ];
+    for (source_id, key, payload) in &seed {
+        let id = format!("{source_id}:{key}");
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ticket', 'x')")
+            .bind(&id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+             values ($1, $2, 'ticket', 'x', '', $3)",
+        )
+        .bind(&id)
+        .bind(source_id)
+        .bind(payload)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let room = |sources: Vec<String>, project: Option<&str>| EntityFilter {
+        sources,
+        project: project.map(str::to_owned),
+        ..all()
+    };
+    let ids = |page: knobas_app::commands::entity::EntityPage| {
+        page.rows
+            .into_iter()
+            .map(|row| row.entity_id)
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+
+    let project_room = ids(
+        list_entities_inner(&pool, &room(vec![source.clone()], Some("PAY")), 500, 0)
+            .await
+            .unwrap(),
+    );
+    assert_eq!(
+        project_room,
+        std::collections::BTreeSet::from([format!("{source}:PAY-1")]),
+        "one project's work, within its own source"
+    );
+
+    // The dimension narrows within `sources`, so unscoped by source it reaches
+    // both `PAY` projects -- which is why a project room names both halves.
+    let both = ids(
+        list_entities_inner(&pool, &room(Vec::new(), Some("PAY")), 500, 0)
+            .await
+            .unwrap(),
+    );
+    assert!(both.contains(&format!("{source}:PAY-1")));
+    assert!(both.contains(&format!("{elsewhere}:PAY-9")));
+
+    // Absence, never a wrong room: the unreadable record is in no project
+    // room, and is still in its source's.
+    let source_room = ids(
+        list_entities_inner(&pool, &room(vec![source.clone()], None), 500, 0)
+            .await
+            .unwrap(),
+    );
+    assert!(source_room.contains(&format!("{source}:NOP-1")));
+    for project in ["PAY", "INT", "NOP"] {
+        let narrowed = ids(
+            list_entities_inner(&pool, &room(vec![source.clone()], Some(project)), 500, 0)
+                .await
+                .unwrap(),
+        );
+        assert!(
+            !narrowed.contains(&format!("{source}:NOP-1")),
+            "a record with no readable project is in no project room, {project} included"
+        );
+    }
+}
+
+/// A project room reaching past the tombstone filter is still that project's.
+///
+/// The `include_deleted` statements are the detail's way in (§5a) and narrow
+/// by the same dimensions the live ones do; a filter honoured by two of four
+/// statements is a room that changes meaning when a caller asks to see
+/// withdrawn work.
+#[tokio::test]
+async fn a_project_narrows_the_include_deleted_statements_too() {
+    let pool = seeded().await;
+    let source = format!("projdel-{}", unique());
+    let live = format!("{source}:PAY-1");
+    let gone = format!("{source}:PAY-2");
+    let other = format!("{source}:INT-1");
+
+    for (id, key) in [(&live, "PAY"), (&gone, "PAY"), (&other, "INT")] {
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ticket', 'x')")
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+             values ($1, $2, 'ticket', 'x', '', $3)",
+        )
+        .bind(id)
+        .bind(&source)
+        .bind(serde_json::json!({ "fields": { "project": { "key": key } } }))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(&gone)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    for order in [EntityOrder::UpdatedDesc, EntityOrder::TitleAsc] {
+        let page = list_entities_inner(
+            &pool,
+            &EntityFilter {
+                sources: vec![source.clone()],
+                project: Some("PAY".to_owned()),
+                include_deleted: true,
+                order,
+                ..all()
+            },
+            500,
+            0,
+        )
+        .await
+        .unwrap();
+        let ids: std::collections::BTreeSet<String> =
+            page.rows.into_iter().map(|row| row.entity_id).collect();
+        assert_eq!(
+            ids,
+            std::collections::BTreeSet::from([live.clone(), gone.clone()]),
+            "the withdrawn ticket is this project's too, and the other project's is not"
+        );
+    }
 }
 
 /// One source's room shows one source's work.

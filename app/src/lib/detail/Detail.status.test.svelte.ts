@@ -22,7 +22,7 @@ import type { SourceDescriptor } from "../ipc/sources";
 
 /** Plain functions, not `vi.fn` — see the note in `shell/Tile.test.svelte.ts`. */
 const queued: unknown[] = [];
-const boardCalls: { sources: string[]; context: string | null }[] = [];
+const boardCalls: { sources: string[]; context: string | null; project: string | null }[] = [];
 let board: () => Promise<MiniBoard> = () => Promise.resolve(BOARD);
 let submitFails = false;
 
@@ -34,7 +34,7 @@ vi.mock("../ipc/entity", () => ({
   getEntity: () => Promise.resolve(entity()),
   unlink: () => Promise.resolve(),
   createLink: () => Promise.resolve({}),
-  miniBoard: (filter: { sources: string[]; context: string | null }) => {
+  miniBoard: (filter: { sources: string[]; context: string | null; project: string | null }) => {
     boardCalls.push(filter);
     return board();
   },
@@ -196,8 +196,9 @@ test("offers the statuses that source's corpus shows, with the mirrored one sele
   expect(screen.options()).toEqual(["To Do", "In Progress", "In Review", "Done"]);
   expect(screen.select()?.value).toBe("In Progress");
   // The offer is the source's corpus, not the room's columns — so the read is
-  // scoped to the source and to no context (#177).
-  expect(boardCalls).toEqual([{ sources: ["mock"], context: null }]);
+  // scoped to the source and to no context (#177), and to no project either
+  // (#208): a project room with nothing finished still has to offer Done.
+  expect(boardCalls).toEqual([{ sources: ["mock"], context: null, project: null }]);
 
   screen.done();
 });
