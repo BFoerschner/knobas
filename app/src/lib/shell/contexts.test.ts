@@ -139,3 +139,143 @@ test("each project gets a room directly under its own source's", () => {
     "src:gitea",
   ]);
 });
+
+/**
+ * A project room's filter names **both** halves.
+ *
+ * The key alone is not an identity: it is unique only inside its own source,
+ * so a room that narrowed by `project` and left `sources` empty would draw
+ * another source's `PAY` work as well as its own.
+ */
+test("a project room narrows by its project within its own source", () => {
+  const cs = builtinContexts(
+    [{ id: "jira", label: "Tidewater Jira" }],
+    [{ source_id: "jira", key: "PAY", name: "Payments Platform" }],
+  );
+
+  expect(cs[2]?.filter).toEqual({ sources: ["jira"], context: null, project: "PAY" });
+  expect(cs[2]?.label).toBe("Payments Platform");
+  expect(cs[2]?.kindWord).toBe("project");
+});
+
+/**
+ * A key with no readable name is still reachable, labelled by its key.
+ *
+ * The fallback is the shell's on purpose: `Project.name` is `null` because the
+ * backend refuses to invent one (#208), and a room the switcher could not name
+ * would be a project nobody could stand in.
+ */
+test("a project with no readable name is labelled by its key", () => {
+  const cs = builtinContexts(
+    [{ id: "jira", label: "Tidewater Jira" }],
+    [{ source_id: "jira", key: "PAY", name: null }],
+  );
+
+  expect(cs[2]?.label).toBe("PAY");
+  expect(cs[2]?.id).toBe("proj:jira:PAY");
+});
+
+/**
+ * Two sources that happen to use one key are two projects, two rooms and two
+ * addresses — one source's work never leaks into the other's room.
+ */
+test("one key in two sources is two rooms with two addresses", () => {
+  const cs = builtinContexts(
+    [
+      { id: "jira", label: "Tidewater Jira" },
+      { id: "teamcity", label: "TeamCity" },
+    ],
+    [
+      { source_id: "jira", key: "PAY", name: "Payments Platform" },
+      { source_id: "teamcity", key: "PAY", name: "Payments pipelines" },
+    ],
+  );
+
+  expect(cs.map((c) => c.id)).toEqual([
+    "all",
+    "src:jira",
+    "proj:jira:PAY",
+    "src:teamcity",
+    "proj:teamcity:PAY",
+  ]);
+  expect(cs[2]?.filter.sources).toEqual(["jira"]);
+  expect(cs[4]?.filter.sources).toEqual(["teamcity"]);
+});
+
+/**
+ * A source whose corpus reports no projects — which is what a **disabled**
+ * source is, since migration `0012` took its items out of `sync.live_item`
+ * (#202, #203; pinned backend-side by `a_disabled_source_shows_no_projects`)
+ * — offers no project rooms, while its own room behaves as it always has.
+ *
+ * The switcher does not check for it: the census is the only thing that says
+ * which projects exist, so "no rows for that source" is the whole mechanism.
+ */
+test("a source the census reports no projects for offers no project rooms", () => {
+  const cs = builtinContexts(
+    [
+      { id: "jira", label: "Tidewater Jira" },
+      { id: "gitea", label: "Gitea" },
+    ],
+    [{ source_id: "jira", key: "PAY", name: "Payments Platform" }],
+  );
+
+  expect(cs.map((c) => c.id)).toEqual(["all", "src:jira", "proj:jira:PAY", "src:gitea"]);
+});
+
+/**
+ * ...and a project reported for a source that has no room here gets none
+ * either, rather than being appended somewhere arbitrary.
+ *
+ * "Immediately after its own source's room" has no answer when there is no
+ * such room, and a room under nothing is a room a reader cannot place.
+ */
+test("a project whose source has no room is not offered one", () => {
+  const cs = builtinContexts(
+    [{ id: "jira", label: "Tidewater Jira" }],
+    [
+      { source_id: "jira", key: "PAY", name: "Payments Platform" },
+      { source_id: "gone", key: "OLD", name: "Retired" },
+    ],
+  );
+
+  expect(cs.map((c) => c.id)).toEqual(["all", "src:jira", "proj:jira:PAY"]);
+});
+
+/**
+ * A bookmarked project address outlives the project: a room exists exactly as
+ * long as the corpus shows it, so the address for one it no longer shows lands
+ * in *All work* — **by identity**, the existing rule for the existing reason.
+ */
+test("an address for a project the corpus no longer shows lands in All work", () => {
+  const cs = builtinContexts(
+    [{ id: "jira", label: "Tidewater Jira" }],
+    [{ source_id: "jira", key: "PAY", name: "Payments Platform" }],
+  );
+
+  expect(contextById("proj:jira:PAY", cs).label).toBe("Payments Platform");
+  expect(contextById("proj:jira:OPS", cs).id).toBe("all");
+  // ...and not merely `cs[0]`: with *All work* moved off the front, a fallback
+  // by position would answer the first project room it happened to find.
+  expect(contextById("proj:jira:OPS", [...cs].reverse()).id).toBe("all");
+});
+
+/** The whole switcher: *All work*, the stored rooms, then sources with their projects. */
+test("stored contexts still sit between All work and the source rooms with projects", () => {
+  const cs = switcherContexts(
+    [
+      {
+        id: "ctx:a",
+        kind: "epic",
+        title: "SEPA payout retries",
+        anchor_id: "jira:EPIC-1",
+        created_at: "2026-08-28T12:00:00Z",
+        archived_at: null,
+      },
+    ],
+    [{ id: "jira", label: "Tidewater Jira" }],
+    [{ source_id: "jira", key: "PAY", name: "Payments Platform" }],
+  );
+
+  expect(cs.map((c) => c.id)).toEqual(["all", "ctx:a", "src:jira", "proj:jira:PAY"]);
+});
