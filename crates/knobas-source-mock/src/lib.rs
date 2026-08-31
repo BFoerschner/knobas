@@ -37,6 +37,9 @@
 //! * Values the dataset gives only as a date ("2026-08-18") become midnight
 //!   UTC. Values it does not give at all are `null`; nothing is invented to
 //!   fill a hole.
+//! * One hole is *made* rather than transcribed: [`UNPROJECTED_KEY`] carries no
+//!   project, so the miss direction every project read has to pin (ADR-0010:
+//!   absence, never a wrong room) is reachable from the demo profile.
 
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
@@ -140,6 +143,28 @@ pub struct Ticket {
     pub blocked_by: Vec<String>,
     pub comments: Vec<Comment>,
     pub worklogs: Vec<Worklog>,
+    /// The [`Project`] this ticket belongs to, where the dataset places it in
+    /// one -- and `None` for [`UNPROJECTED_KEY`], which it deliberately does
+    /// not.
+    ///
+    /// Serialized by [`ticket_payload`] rather than by this struct: a project
+    /// reaches the mirror where a *source* would have written it, which is not
+    /// where the transcription happens to keep it. See there.
+    #[serde(default, skip_serializing)]
+    pub project: Option<Project>,
+}
+
+/// A source's own grouping of its items (`CONTEXT.md`, **Project**; ADR-0010),
+/// in the source's own word: the dataset's `PAY` -- *Payments Platform* and
+/// `OPS` -- *Operations*.
+///
+/// Key and name both, because they answer different questions: the key is what
+/// a project is scoped by, the name is what a person reads.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Project {
+    pub key: String,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -460,6 +485,20 @@ const SOURCE_ID: &str = "mock";
 /// refers to by name.
 pub const TOMBSTONED_KEY: &str = "PAY-198";
 
+/// The one fixture ticket that names no [`Project`].
+///
+/// Every other ticket in the dataset carries one, so a corpus that syncs
+/// cleanly still contains the case ADR-0010 pins the project rooms on: a
+/// record with no readable project belongs to no project room and is still in
+/// *All work* and in its source's room. Without it the miss direction would be
+/// reachable only from a hand-written payload, and the demo profile could not
+/// show it at all.
+///
+/// A leaf story rather than the epic or the lone `OPS` ticket: removing either
+/// of those would take a whole project out of the dataset, and the two named
+/// projects are what make a project room worth drawing here.
+pub const UNPROJECTED_KEY: &str = "PAY-236";
+
 /// The tombstoned item itself: an entity that has been withdrawn upstream but
 /// whose title the UI still has to be able to show.
 fn tombstoned_item(source_id: &str) -> SyncItem {
@@ -480,6 +519,34 @@ fn tombstoned_item(source_id: &str) -> SyncItem {
     }
 }
 
+/// The payload the mirror stores for a ticket: the fixture record, with its
+/// project moved to **the place a source would have written it**.
+///
+/// A Jira Data Center issue carries its project at `fields.project`, key and
+/// name -- `knobas-source-jira` keeps the record verbatim and has requested
+/// `project` in its base field list since M1 (ADR-0010) -- so that is where
+/// this puts it. The demo profile then exercises the same payload read
+/// (ADR-0007) a real Jira corpus does, instead of a third spelling that exists
+/// nowhere but here. Nothing else about the record moves: everything the
+/// fixture transcribes stays flat, which is also where the mock's `status` and
+/// `priority` already are.
+///
+/// A ticket the fixture leaves outside every project contributes **no**
+/// `fields.project` -- not an empty object, not a key inferred from the issue
+/// key. Absence is the miss direction, and a value invented here would take it
+/// away from every reader downstream. Pinned by
+/// `a_demo_ticket_with_no_project_syncs_and_its_payload_names_none` in
+/// `knobas-app/tests/demo.rs`.
+fn ticket_payload(t: &Ticket) -> serde_json::Value {
+    let mut payload = serde_json::to_value(t).expect("a fixture record must serialize");
+    if let Some(project) = &t.project {
+        payload["fields"] = serde_json::json!({
+            "project": { "key": project.key, "name": project.name },
+        });
+    }
+    payload
+}
+
 /// Every work item in the fixture, in the order the mock emits them.
 fn items(source_id: &str) -> Vec<SyncItem> {
     let f = fixture();
@@ -498,7 +565,7 @@ fn items(source_id: &str) -> Vec<SyncItem> {
             ),
             t.assignee.clone(),
             t.updated,
-            t,
+            &ticket_payload(t),
             Some(format!("{MOCK_BASE}/browse/{}", t.key)),
         ));
     }

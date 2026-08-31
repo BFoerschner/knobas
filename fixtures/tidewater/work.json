@@ -11,6 +11,7 @@
     {
       "key": "PAY-200",
       "epic": null,
+      "project": { "key": "PAY", "name": "Payments Platform" },
       "summary": "Payout reliability",
       "type": "Epic",
       "status": "In Progress",
@@ -26,6 +27,7 @@
     {
       "key": "PAY-231",
       "epic": "PAY-200",
+      "project": { "key": "PAY", "name": "Payments Platform" },
       "summary": "Retry failed SEPA payouts",
       "type": "Story",
       "status": "In Progress",
@@ -46,6 +48,7 @@
     {
       "key": "PAY-228",
       "epic": "PAY-200",
+      "project": { "key": "PAY", "name": "Payments Platform" },
       "summary": "Ledger drift on partial refunds",
       "type": "Bug",
       "status": "In Review",
@@ -64,6 +67,7 @@
     {
       "key": "PAY-240",
       "epic": "PAY-200",
+      "project": { "key": "PAY", "name": "Payments Platform" },
       "summary": "Payout dashboard latency",
       "type": "Task",
       "status": "To Do",
@@ -80,6 +84,7 @@
     {
       "key": "PAY-219",
       "epic": "PAY-200",
+      "project": { "key": "PAY", "name": "Payments Platform" },
       "summary": "Rotate PSP credentials",
       "type": "Task",
       "status": "Done",
@@ -110,6 +115,7 @@
     {
       "key": "OPS-77",
       "epic": null,
+      "project": { "key": "OPS", "name": "Operations" },
       "summary": "On-call runbook outdated",
       "type": "Task",
       "status": "To Do",

@@ -269,9 +269,10 @@ async fn a_demo_ticket_with_no_project_syncs_and_its_payload_names_none() {
     knobas_db::migrate::run(&pool).await.unwrap();
     demo::demo_load_inner(&pool).await.unwrap();
 
-    let payload = mirrored_payload(&pool, "mock:PAY-236").await;
+    let key = knobas_source_mock::UNPROJECTED_KEY;
+    let payload = mirrored_payload(&pool, &format!("mock:{key}")).await;
     assert_eq!(
-        payload["key"], "PAY-236",
+        payload["key"], key,
         "the ticket itself must still be mirrored"
     );
     assert_eq!(
