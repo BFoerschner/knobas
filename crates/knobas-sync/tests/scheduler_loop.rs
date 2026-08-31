@@ -242,25 +242,44 @@ async fn seed(pool: &PgPool, n: usize) -> Vec<String> {
 ///
 /// The ADR-0005 tests below play the wizard and the wake against each other and
 /// count the runs that result; a third, uncontrolled actor starting runs of its
-/// own would make "exactly one run" a coin toss on a slow machine. Disabled
-/// rather than left enabled, because `config::due` skips a disabled source and
-/// [`Scheduler::trigger`] deliberately does not -- which is exactly the
-/// asymmetry these tests need.
+/// own would make "exactly one run" a coin toss on a slow machine. Held off the
+/// schedule rather than left free-running, because `config::due` respects
+/// `backoff_until` and [`Scheduler::trigger`] deliberately does not -- which is
+/// exactly the asymmetry these tests need. See [`retire`] for why that lever is
+/// the backoff and no longer `enabled`.
 async fn seed_quiet(pool: &PgPool, n: usize) -> Vec<String> {
     let ids = seed(pool, n).await;
     retire(pool, &ids).await;
     ids
 }
 
-/// Disable every source this test made, so the next test's ticker does not
-/// adopt them.
+/// Hold every source this test made off the schedule, so the next test's ticker
+/// does not adopt them.
+///
+/// **`backoff_until`, not `enabled = false`** (issue #202). This used to disable
+/// the source, which was a free lever while `enabled` meant only "the scheduler
+/// may sync this". Migration `0012` gave it a second meaning -- a disabled
+/// source's items leave `sync.live_item`, and therefore every reader -- so the
+/// old mechanism made the mirror *invisible* to tests whose subject is the
+/// purge, and four of them failed on an assertion about visibility they never
+/// meant to make.
+///
+/// `config::due` clamps the schedule up by `backoff_until`, and
+/// `Scheduler::trigger` consults neither it nor `enabled`, so this keeps
+/// exactly the asymmetry these tests need while leaving the source *normal*:
+/// enabled, mirrored, searchable. Nothing in this file asserts on
+/// `backoff_until`, which is what makes it free to borrow.
 async fn retire(pool: &PgPool, ids: &[String]) {
     for id in ids {
-        sqlx::query("update knobas.source_config set enabled = false where id = $1")
-            .bind(id)
-            .execute(pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "update knobas.source_config
+                set backoff_until = now() + interval '1 hour'
+              where id = $1",
+        )
+        .bind(id)
+        .execute(pool)
+        .await
+        .unwrap();
     }
 }
 
@@ -1592,11 +1611,18 @@ async fn re_add(pool: &PgPool, id: &str) {
             auth_kind: AuthKind::None,
             config: serde_json::json!({}),
             sync_interval_secs: 60,
-            enabled: false,
+            // **Enabled**, and held off the schedule by [`retire`] instead
+            // (issue #202). The callers assert on the re-added source's
+            // *mirror*, and since migration `0012` a disabled source's items
+            // are not in `sync.live_item` at all -- so inserting it disabled
+            // would make those assertions test visibility rather than the
+            // purge they are about.
+            enabled: true,
         },
     )
     .await
     .unwrap();
+    retire(pool, std::slice::from_ref(&id.to_owned())).await;
 }
 
 /// **A source that is deleted and added again under the same id is not served

@@ -595,22 +595,21 @@ async fn worst_of_ten(searcher: &Searcher, raw: &str) -> u128 {
     max
 }
 
-/// **A source the user turned off still puts rows in the corpus, so it still
-/// gets a verdict** (issue #200).
+/// **A source the user turned off leaves the corpus, so it gets no verdict**
+/// (issue #202, overturning #200's premise).
 ///
-/// Disabling is not deleting — *Remove source and its items* is the purge path,
-/// and it is a different thing. So a disabled source's rows stay in the mirror
-/// and stay searchable, which this test asserts first: without that, the rest
-/// would be asking for a verdict on a corpus nobody reads.
+/// #200 reasoned from "its rows are still searchable" to "it still owes a
+/// verdict". Björn ruled the antecedent away: a disabled source is invisible to
+/// every reader, and migration `0012` put that filter in `sync.live_item`. So
+/// the conclusion inverts — a verdict here would explain an absence authorship
+/// had nothing to do with, exactly like verdicting a source the kind scope
+/// excluded.
 ///
-/// The vocabulary is enabled-only because the **grammar** needs it that way:
-/// `source:` cannot name a source the sources list no longer offers. Coverage
-/// asks a different question — *which sources put rows in what this query
-/// actually scanned* — and reusing the grammar's list to answer it left the
-/// build source contributing an unauthored row to every search and never being
-/// verdicted for it. That is #141's own silence, surviving in the disabled case.
+/// The first assertion is the ruling itself and is what this test is really
+/// about; without it the second would pass for the wrong reason, since a source
+/// contributing no rows is omitted by the existing rule either way.
 #[tokio::test]
-async fn a_disabled_sources_rows_are_searchable_so_it_is_still_verdicted() {
+async fn a_disabled_sources_rows_leave_the_corpus_so_it_gets_no_verdict() {
     let pool = pool().await;
     let t = token("disabled");
     let jira = format!("jira-{t}");
@@ -635,40 +634,51 @@ async fn a_disabled_sources_rows_are_searchable_so_it_is_still_verdicted() {
         None,
     )
     .await;
-    // Turned off the way the sources view turns one off.
+    let s = searcher(&pool);
+
+    // Before: enabled, mirrored, and therefore verdicted -- so the change below
+    // is the disabling and nothing else.
+    let before = s.search(q(&t)).await.unwrap();
+    assert!(
+        before
+            .groups
+            .iter()
+            .flat_map(|group| &group.hits)
+            .any(|hit| hit.row.source_id == teamcity),
+        "the fixture never had the build in the corpus: {:?}",
+        before.groups
+    );
+
     sqlx::query("update knobas.source_config set enabled = false where id = $1")
         .bind(&teamcity)
         .execute(&pool)
         .await
         .unwrap();
-    let s = searcher(&pool);
 
-    // First: its rows really are still in the corpus. If this ever stops being
-    // true the verdict below stops being owed, and the test should be revisited
-    // rather than made to pass.
+    // The ruling: its rows leave every reader, search included.
     let plain = s.search(q(&t)).await.unwrap();
     assert!(
         plain
             .groups
             .iter()
             .flat_map(|group| &group.hits)
-            .any(|hit| hit.row.source_id == teamcity),
-        "a disabled source's rows left the mirror's search results: {:?}",
+            .all(|hit| hit.row.source_id != teamcity),
+        "a disabled source's rows are still searchable: {:?}",
         plain.groups
     );
 
-    // Therefore: an author query over that corpus must explain it.
+    // And therefore no verdict: it is absent from the results because it is
+    // off, not because it cannot answer an author query.
     let authored = s
         .search(q(&format!("{t} author:nobody.at.all")))
         .await
         .unwrap();
     assert_eq!(
         answer_for(&authored, &teamcity),
-        Some(FilterAnswer::NoValues),
-        "the disabled source put an unauthored row in this corpus and got no \
-         verdict for it — #141's silence, in the disabled case"
+        None,
+        "a source the user turned off was verdicted, explaining the wrong absence"
     );
-    // The enabled one is unaffected, so this is not a blanket widening.
+    // The enabled one still is, so this is not a blanket silencing.
     assert_eq!(answer_for(&authored, &jira), Some(FilterAnswer::Answered));
 }
 

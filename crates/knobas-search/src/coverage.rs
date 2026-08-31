@@ -182,26 +182,33 @@ pub(crate) async fn author_coverage(
     })
 }
 
-/// The configured sources this query is narrowed to, in vocabulary order.
+/// The **enabled** configured sources this query is narrowed to, in vocabulary
+/// order.
 ///
-/// No `source:` filter is **every configured source, disabled included** (issue
-/// #200). That is deliberately wider than the set the grammar can name: the
-/// question here is *which sources put rows in the corpus this query scanned*,
-/// and a source the user turned off keeps its rows in the mirror -- disabling
-/// is not deleting, *Remove source and its items* is the purge path. Those rows
-/// still come back from a plain search, so a filter they cannot answer still
-/// owes an explanation. Scoping this to the enabled ones is what left the
-/// disabled case silent until #200, which is #141's own defect in miniature.
+/// #200 widened this to include disabled sources, on the premise that their
+/// rows stayed searchable and therefore still owed an explanation. **Issue #202
+/// overturned that premise**: Björn ruled that a source the user turned off is
+/// invisible to every reader, and migration `0012` moved the filter into
+/// `sync.live_item` where it belongs. A disabled source now contributes nothing
+/// to any corpus, so a verdict on it would explain an absence authorship had
+/// nothing to do with -- the same error as verdicting a source the kind scope
+/// excluded, and the same reason the short-circuits report nothing for
+/// `asset:`.
+///
+/// So the population is the one the grammar can name, and the two questions
+/// #200 separated have converged on one answer again. The separation itself is
+/// kept, in [`Vocabulary::nameable`] and this filter, because they are still
+/// *different questions* -- they merely have the same answer now, and a later
+/// reader that needs the wider list can have it without another migration.
 ///
 /// A `source:` filter naming something the vocabulary does not have contributes
 /// nothing -- the parser already reports such a token as unknown, and inventing
-/// a coverage row for it would have the report claim a source exists. A
-/// disabled source is unnameable for exactly that reason, so it reaches this
-/// list only when no `source:` filter narrowed the query at all.
+/// a coverage row for it would have the report claim a source exists.
 fn in_scope<'a>(vocab: &'a Vocabulary, filters: &EffectiveFilters) -> Vec<&'a SourceVocab> {
     vocab
         .sources
         .iter()
+        .filter(|source| source.enabled)
         .filter(|source| filters.sources.is_empty() || filters.sources.contains(&source.id))
         .collect()
 }

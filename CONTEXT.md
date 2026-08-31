@@ -82,7 +82,7 @@ Marking an item deleted-at-source while keeping the row. Tombstoned items leave 
 _Avoid_: delete, remove
 
 **Live item**:
-An item that is not tombstoned — the only thing any reader reads.
+An item that is not tombstoned **and whose source is enabled** — the only thing any reader reads. Both halves are enforced by `sync.live_item`, never by a reader, so a reader cannot forget one. A source with no configuration row at all (`run_once` syncs unconfigured sources) is not "disabled": its items stay live. (#202)
 
 **Watermark**:
 A sync position that only advances as work completes. Its **ceiling** is the newest position the run *witnessed* at its start, which the watermark may never pass within that run. Witnessed, not the newest that exists: a ceiling too low costs a re-fetch, one too high loses work.

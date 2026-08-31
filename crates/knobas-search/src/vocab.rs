@@ -38,16 +38,24 @@ pub struct SourceVocab {
     pub username: Option<String>,
     /// Whether the user has this source turned on.
     ///
-    /// **A disabled source is in the vocabulary and is not nameable by the
-    /// grammar** (issue #200). Those are two different questions and this field
-    /// is what lets one list answer both:
+    /// **A disabled source is in this list and is nameable by nothing** (issues
+    /// #200 and #202). It is carried rather than filtered away in SQL because
+    /// "which sources exist" and "which sources may a reader see" are different
+    /// questions, and answering both from one query is what keeps
+    /// [`Vocabulary::load`] to the single round trip the hot path allows.
     ///
-    /// * [`Vocabulary::resolve_source`] skips it, so `source:` and `/alias`
-    ///   cannot narrow to a source the sources list no longer offers;
-    /// * `coverage::in_scope` does **not**, because disabling is not deleting
-    ///   (*Remove source and its items* is the purge path) -- the rows stay in
-    ///   the mirror, stay searchable, and therefore still owe an explanation
-    ///   when a filter cannot be answered over them.
+    /// Both consumers here skip a disabled source, and for *different* reasons
+    /// -- which is why the filter is written twice rather than once:
+    ///
+    /// * [`Vocabulary::resolve_source`] skips it because `source:` and `/alias`
+    ///   must not narrow to a source the sources list no longer offers;
+    /// * `coverage::in_scope` skips it because since migration `0012` its items
+    ///   are not in `sync.live_item` at all, so it contributes no corpus and a
+    ///   verdict on it would explain the wrong absence.
+    ///
+    /// #200 had the second one *not* skipping, on the premise that a disabled
+    /// source's rows stayed searchable. #202 ruled that premise away. The two
+    /// answers agree again today; the two questions have not merged.
     pub enabled: bool,
 }
 

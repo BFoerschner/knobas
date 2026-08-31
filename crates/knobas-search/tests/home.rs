@@ -347,3 +347,71 @@ async fn recency_reads_are_index_backed_per_kind() {
     let stamps: Vec<_> = board.recent.iter().map(|r| r.updated_at).collect();
     assert!(stamps.windows(2).all(|w| w[0] >= w[1]), "{stamps:?}");
 }
+
+/// **The board inherits the disabled-source filter too** (issue #202).
+///
+/// The ruling is "every reader", and the launcher's board is a *different
+/// statement* from the search — `home::recent` orders by recency and never
+/// touches the FTS index. So it is the one that shows the filter is inherited
+/// from `sync.live_item` rather than re-implemented per reader, which is the
+/// whole reason migration `0012` put it in the view.
+///
+/// Serialised and stamped newest like every test here: the board is a
+/// whole-corpus read, so the row has to be the newest one to be certain of a
+/// place on it.
+#[tokio::test]
+async fn the_board_drops_a_source_the_user_turned_off() {
+    let _serial = SERIAL.lock().await;
+    let pool = pool().await;
+    let t = token("off");
+    let source = format!("src-{t}");
+    sqlx::query(
+        "insert into knobas.source_config
+           (id, kind, display_name, base_url, auth_kind, config)
+         values ($1, 'test-kind', 'Test', 'http://x', 'Pat', '{}'::jsonb)",
+    )
+    .bind(&source)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let id = format!("{source}:PAY-1");
+    let newest = newest_base(&pool).await + Duration::seconds(60);
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'ticket',$2)")
+        .bind(&id)
+        .bind(&t)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item
+           (entity_id, source_id, kind, title, body_text, item_updated_at, synced_at, payload)
+         values ($1,$2,'ticket',$3,'body',$4, now(), '{}'::jsonb)",
+    )
+    .bind(&id)
+    .bind(&source)
+    .bind(&t)
+    .bind(newest)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let on = searcher(&pool).launcher_board().await.unwrap();
+    assert!(
+        on.recent.iter().any(|row| row.entity_id == id),
+        "the newest row is not on the board, so this test cannot show it leaving"
+    );
+
+    sqlx::query("update knobas.source_config set enabled = false where id = $1")
+        .bind(&source)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let off = searcher(&pool).launcher_board().await.unwrap();
+    assert!(
+        off.recent.iter().all(|row| row.entity_id != id),
+        "a source the user turned off is still on the board: {:?}",
+        off.recent.iter().map(|r| &r.entity_id).collect::<Vec<_>>()
+    );
+}
