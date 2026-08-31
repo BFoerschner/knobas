@@ -48,7 +48,6 @@ async fn link_lifecycle_with_tombstone() {
     .await
     .unwrap()
     .id;
-    // duplicate active link is rejected
     let dup = link::create(
         &pool,
         &t,
@@ -60,7 +59,6 @@ async fn link_lifecycle_with_tombstone() {
     )
     .await;
     assert!(matches!(dup, Err(CoreError::Duplicate)), "{dup:?}");
-    // visible from both ends
     assert_eq!(link::entries_of(&pool, &t).await.unwrap().len(), 1);
     assert_eq!(link::entries_of(&pool, &n).await.unwrap().len(), 1);
 
@@ -249,7 +247,6 @@ async fn unlink_is_idempotent_but_unknown_ids_are_reported() {
         Some(id),
         "the call that tombstoned the link hands back the row it tombstoned"
     );
-    // unlinking an already-tombstoned link changes nothing and is not an error
     assert_eq!(
         link::unlink(&pool, id).await.unwrap().map(|row| row.id),
         None,
