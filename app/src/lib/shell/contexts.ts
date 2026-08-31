@@ -1,20 +1,22 @@
 /**
  * The rooms the switcher offers.
  *
- * Two populations since #47. The **derived** rooms — one built-in *All work*,
- * plus one per configured source — exist as long as their source does and
- * filter by `sources`. The **stored** rooms are `knobas.context` rows (spec
- * §7: epic, ticket, ad-hoc), and filter by `context`: membership is the fixed
- * one-hop rule (§16.11, ADR-0008), resolved server-side, never a source list.
+ * Three populations. The **derived** rooms — one built-in *All work*, one per
+ * configured source, and since #209 one per project a source's corpus shows
+ * (ADR-0010) — exist as long as the thing they name does, and filter by
+ * `sources` and, for a project, by `project` within them. The **stored** rooms
+ * are `knobas.context` rows (spec §7: epic, ticket, ad-hoc), and filter by
+ * `context`: membership is the fixed one-hop rule (§16.11, ADR-0008),
+ * resolved server-side, never a source list.
  *
  * The address is the state (spec §2): a context is chosen by navigating to
  * `#/ctx/<id>`, never by a component-local `selected`.
  */
-import type { ContextRow, EntityFilter } from "../ipc/entity";
+import type { ContextRow, EntityFilter, Project } from "../ipc/entity";
 
 /** One room in the switcher. */
 export interface RoomContext {
-  /** `"all"`, or `"src:<source_id>"`. Matches `#/ctx/<id>`. */
+  /** `"all"`, `"src:<source_id>"`, or `"proj:<source_id>:<key>"`. Matches `#/ctx/<id>`. */
   id: string;
   /** The room's heading and its tab. */
   label: string;
@@ -24,11 +26,13 @@ export interface RoomContext {
    * What this room reads — the tiles supply `kinds` themselves, and the
    * remaining fields are the caller's.
    *
-   * Exactly one of the two is ever narrowing: a derived room scopes by
-   * `sources` and leaves `context` null; a stored room scopes by `context`
-   * and leaves `sources` empty.
+   * A derived room scopes by `sources` and leaves `context` null; a stored
+   * room scopes by `context` and leaves `sources` empty. `project` narrows
+   * **within** `sources` rather than instead of them (ADR-0010, #208): a
+   * project key is unique only inside its own source, so a project room is
+   * the one room that sets two of these at once.
    */
-  filter: Pick<EntityFilter, "sources" | "context">;
+  filter: Pick<EntityFilter, "sources" | "context" | "project">;
 }
 
 /** The id of the room every session starts in. Matches `router.DEFAULT_CTX`. */
@@ -46,19 +50,56 @@ export const ALL_CONTEXT: RoomContext = {
   id: ALL_CONTEXT_ID,
   label: "All work",
   kindWord: "everything synced",
-  filter: { sources: [], context: null },
+  filter: { sources: [], context: null, project: null },
 };
 
-/** *All work*, then one room per source, in the order given. */
-export function builtinContexts(sources: { id: string; label: string }[]): RoomContext[] {
+/**
+ * One project the corpus shows, as the switcher offers it (#209).
+ *
+ * The label falls back to the key, and the fallback lives here rather than in
+ * the census: `Project.name` is `null` where the source said no name knobas
+ * could read, and a name the backend invented would be indistinguishable on
+ * the wire from one the source really said. A project with a key is reachable
+ * either way — nameless is not the same as absent.
+ */
+function projectContext(project: Project): RoomContext {
+  return {
+    id: `proj:${project.source_id}:${project.key}`,
+    label: project.name ?? project.key,
+    kindWord: "project",
+    filter: { sources: [project.source_id], context: null, project: project.key },
+  };
+}
+
+/**
+ * *All work*, then each source followed by the projects inside it.
+ *
+ * A project room is listed under **its own** source's room, which is also why
+ * its id and its filter both name the source: a project key is unique only
+ * inside one source, so two sources using `PAY` are two projects, two rooms
+ * and two addresses.
+ *
+ * A project whose source has no room here is not offered one either. That is
+ * the same rule stated once rather than twice — "immediately after its own
+ * source's room" has no answer when there is no such room — and it is how a
+ * disabled or unconfigured source contributes nothing to the switcher rather
+ * than trailing rooms after the last one that does.
+ */
+export function builtinContexts(
+  sources: { id: string; label: string }[],
+  projects: Project[] = [],
+): RoomContext[] {
   return [
     ALL_CONTEXT,
-    ...sources.map((source) => ({
-      id: `src:${source.id}`,
-      label: source.label,
-      kindWord: "source",
-      filter: { sources: [source.id], context: null },
-    })),
+    ...sources.flatMap((source) => [
+      {
+        id: `src:${source.id}`,
+        label: source.label,
+        kindWord: "source",
+        filter: { sources: [source.id], context: null, project: null },
+      },
+      ...projects.filter((project) => project.source_id === source.id).map(projectContext),
+    ]),
   ];
 }
 
@@ -77,13 +118,13 @@ export function storedContext(row: ContextRow): RoomContext {
     id: row.id,
     label: row.title,
     kindWord: kindWordOf(row),
-    filter: { sources: [], context: row.id },
+    filter: { sources: [], context: row.id, project: null },
   };
 }
 
 /**
  * The whole switcher: *All work*, the stored contexts (newest first, as
- * `list_contexts` answers), then the derived source rooms.
+ * `list_contexts` answers), then each source room followed by its projects.
  *
  * Stored rooms before source rooms because they are the ones a person made on
  * purpose — a promoted epic is closer to "what am I working on" than the raw
@@ -92,8 +133,9 @@ export function storedContext(row: ContextRow): RoomContext {
 export function switcherContexts(
   stored: ContextRow[],
   sources: { id: string; label: string }[],
+  projects: Project[] = [],
 ): RoomContext[] {
-  const derived = builtinContexts(sources);
+  const derived = builtinContexts(sources, projects);
   return [derived[0]!, ...stored.map(storedContext), ...derived.slice(1)];
 }
 

@@ -48,7 +48,12 @@ test("an unknown context id falls back to All work rather than blanking the room
  */
 test("the fallback is All work by identity, not by position", () => {
   const cs = [
-    { id: "src:jira", label: "Jira", kindWord: "source", filter: { sources: ["jira"], context: null } },
+    {
+      id: "src:jira",
+      label: "Jira",
+      kindWord: "source",
+      filter: { sources: ["jira"], context: null, project: null },
+    },
     ALL_CONTEXT,
   ];
   expect(contextById("src:gone", cs).id).toBe("all");
@@ -91,7 +96,7 @@ test("stored contexts sit between All work and the source rooms", () => {
 
   expect(cs.map((c) => c.id)).toEqual(["all", "ctx:b", "ctx:a", "src:jira"]);
   // A stored room scopes by membership, never by source.
-  expect(cs[1]?.filter).toEqual({ sources: [], context: "ctx:b" });
+  expect(cs[1]?.filter).toEqual({ sources: [], context: "ctx:b", project: null });
   expect(cs[2]?.kindWord).toBe("epic");
 });
 
@@ -107,4 +112,30 @@ test("an ad-hoc context's chip says ad-hoc", () => {
   });
   expect(room.kindWord).toBe("ad-hoc");
   expect(room.label).toBe("x");
+});
+
+/**
+ * A project room sits **immediately after its own source's room** (#209), so
+ * the switcher reads as *All work*, the stored contexts, then each source
+ * followed by the projects inside it.
+ */
+test("each project gets a room directly under its own source's", () => {
+  const cs = builtinContexts(
+    [
+      { id: "jira", label: "Tidewater Jira" },
+      { id: "gitea", label: "Gitea" },
+    ],
+    [
+      { source_id: "jira", key: "OPS", name: "Operations" },
+      { source_id: "jira", key: "PAY", name: "Payments Platform" },
+    ],
+  );
+
+  expect(cs.map((c) => c.id)).toEqual([
+    "all",
+    "src:jira",
+    "proj:jira:OPS",
+    "proj:jira:PAY",
+    "src:gitea",
+  ]);
 });
