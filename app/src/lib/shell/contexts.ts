@@ -57,6 +57,33 @@ export interface RoomContext {
   miniBoardLayout: MiniBoardLayout;
 }
 
+/**
+ * The widest mini board the column layout is asked to hold.
+ *
+ * The tile is ~550px at the 1100px window floor and a column has a 150px
+ * minimum (`app.css`), so a board past this is a horizontal scrollbar however
+ * the room was meant to be read. One number, stated once, and not a setting:
+ * a per-room knob would make two rooms holding the same workflow look
+ * different for no reason a reader could see.
+ */
+const MAX_COLUMNS = 6;
+
+/**
+ * The layout a mini board of `columns` groups actually draws in a room that
+ * asked for `preferred` (#210).
+ *
+ * **Demote-only.** A bounded room that turns out to span two workflows falls
+ * back to stacked rather than to a sideways scrollbar, but a room that asked
+ * for stacked keeps it however few statuses it happens to show — an unbounded
+ * room showing three statuses today is still the room that holds whatever
+ * synced tomorrow. Running it both ways would make a room's shape a function
+ * of its current cards, so the layout would flip back and forth under the
+ * reader as tickets moved through the day.
+ */
+export function miniBoardLayoutFor(preferred: MiniBoardLayout, columns: number): MiniBoardLayout {
+  return preferred === "columns" && columns > MAX_COLUMNS ? "stacked" : preferred;
+}
+
 /** The id of the room every session starts in. Matches `router.DEFAULT_CTX`. */
 export const ALL_CONTEXT_ID = "all";
 
