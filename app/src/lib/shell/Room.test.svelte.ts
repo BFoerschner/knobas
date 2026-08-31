@@ -101,6 +101,9 @@ const CONTEXTS = builtinContexts(
   [
     { source_id: "jira", key: "PAY", name: "Payments Platform" },
     { source_id: "jira", key: "OPS", name: null },
+    // A project the census shows and this corpus has nothing in: a room exists
+    // for a quiet project as well as a busy one.
+    { source_id: "jira", key: "QUIET", name: "Quiet project" },
   ],
 );
 
@@ -488,4 +491,24 @@ test("a card opens at the same address from a project room as from All work", as
   }
 
   expect(addresses).toEqual(["#/ticket/mock:PAY-231", "#/ticket/mock:PAY-231"]);
+});
+
+/**
+ * A quiet project still gets a room, and an empty one reads as empty rather
+ * than as broken — the room says what is missing, and a failed read would say
+ * something else entirely.
+ */
+test("an empty project room says so, distinguishably from a broken one", async () => {
+  serveCorpus();
+
+  const screen = render("#/ctx/proj:jira:QUIET");
+  await vi.waitFor(() => expect(screen.text()).toContain("Nothing synced into this room yet"));
+  await settle();
+
+  expect(screen.text()).toContain("Quiet project");
+  expect(screen.text()).toContain("0 items");
+  expect(screen.text()).not.toContain("the database is still starting");
+  expect(screen.tiles()).toEqual([]);
+
+  screen.done();
 });
