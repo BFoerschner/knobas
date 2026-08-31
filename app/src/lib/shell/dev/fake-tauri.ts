@@ -238,6 +238,7 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     // *Promote* can be walked in QA; membership is empty because the fixture
     // has no link graph, and `list_entities` answers a context scope with an
     // empty page for the same reason.
+    list_projects: () => listProjects(),
     list_contexts: () => FAKE_CONTEXTS.slice(),
     context_members: () => [],
     create_context: (args) => {
@@ -302,6 +303,11 @@ const CORPUS: {
 }[] = [
   row("mock:PAY-231", "ticket", "Retry failed SEPA payouts", "2026-08-22T11:48:00Z", "mara", {
     key: "PAY-231",
+    // The shape a *source* writes a project in, not a shape of this file's
+    // choosing: the mock adapter puts it at `fields.project` because Jira does
+    // (#207), and `project_key_read!` reads it there. A flat `project` here
+    // would make the fixture's rooms disagree with the real backend's.
+    fields: { project: { key: "PAY", name: "Payments Platform" } },
     status: "In Progress",
     priority: "High",
     assignee: "mara",
@@ -311,6 +317,10 @@ const CORPUS: {
       "Payouts to two SEPA banks fail with a 409 on retry. The retry window has to be idempotent before we can turn the scheduler back on.",
     comments: [{ by: "mara" }, { by: "jonas" }],
   }),
+  // Deliberately in **no** project, key prefix notwithstanding: the miss
+  // direction ADR-0010 fixes, and the one a QA pass has to be able to see. It
+  // stays in *All work* and in the mock source's room, and appears in neither
+  // project room.
   row("mock:PAY-228", "ticket", "Idempotency key on the payout endpoint", "2026-08-21T16:05:00Z", "jonas", {
     key: "PAY-228",
     status: "In Review",
@@ -319,6 +329,7 @@ const CORPUS: {
   }),
   row("mock:OPS-77", "ticket", "Rotate the staging database credentials", "2026-08-19T09:00:00Z", "priya", {
     key: "OPS-77",
+    fields: { project: { key: "OPS", name: "Operations" } },
     status: "To Do",
     priority: "Low",
     assignee: null,
@@ -444,7 +455,10 @@ function miniBoard(args: Record<string, unknown>) {
   const text = (value: unknown) =>
     typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 
-  const tickets = CORPUS.filter((entry) => entry.kind === "ticket" && entry.deleted_at === null)
+  const project = args["project"] as string | null | undefined;
+  const tickets = CORPUS.filter(
+    (entry) => entry.kind === "ticket" && entry.deleted_at === null && inProject(entry, project),
+  )
     .slice()
     .sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? ""));
 
@@ -482,6 +496,41 @@ function miniBoard(args: Record<string, unknown>) {
   };
 }
 
+/**
+ * The project a fixture entry carries, at the path the real read looks at.
+ *
+ * A restatement of `project_key_read!`'s Jira arm and of its failure
+ * direction: absence, never a guess. An entry with no readable key belongs to
+ * no project room and stays in every other room it was in.
+ */
+function projectOf(entry: (typeof CORPUS)[number]): { key: string; name: string | null } | null {
+  const fields = entry.payload["fields"];
+  const project = (fields as Record<string, unknown> | undefined)?.["project"] as
+    | Record<string, unknown>
+    | undefined;
+  const text = (value: unknown) =>
+    typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+  const key = text(project?.["key"]);
+  return key === null ? null : { key, name: text(project?.["name"]) };
+}
+
+/** Whether an entry is admitted by a room's project scope. */
+function inProject(entry: (typeof CORPUS)[number], project: string | null | undefined): boolean {
+  return !project || projectOf(entry)?.key === project;
+}
+
+/** `list_projects` (#209): the projects the fixture's live corpus shows. */
+function listProjects() {
+  const seen = new Map<string, { source_id: string; key: string; name: string | null }>();
+  for (const entry of CORPUS) {
+    if (entry.deleted_at !== null) continue;
+    const project = projectOf(entry);
+    if (project === null || seen.has(project.key)) continue;
+    seen.set(project.key, { source_id: "mock", key: project.key, name: project.name });
+  }
+  return [...seen.values()].sort((a, b) => a.key.localeCompare(b.key));
+}
+
 /** One card of the fixture's board. */
 function boardCard(entry: (typeof CORPUS)[number]) {
   const priority = entry.payload["priority"];
@@ -501,6 +550,7 @@ function listEntities(args: Record<string, unknown>) {
     kinds?: string[];
     order?: string;
     context?: string | null;
+    project?: string | null;
     include_deleted?: boolean;
   };
   const limit = Number(args["limit"] ?? 50);
@@ -513,6 +563,7 @@ function listEntities(args: Record<string, unknown>) {
   let rows = CORPUS.filter((entry) => filter.include_deleted || entry.deleted_at === null);
   if (filter.sources?.length) rows = rows.filter(() => filter.sources?.includes("mock"));
   if (filter.kinds?.length) rows = rows.filter((entry) => filter.kinds?.includes(entry.kind));
+  rows = rows.filter((entry) => inProject(entry, filter.project));
 
   rows = [...rows].sort((a, b) =>
     filter.order === "title_asc"
