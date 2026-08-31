@@ -12,6 +12,7 @@
   import type { SearchResponse } from "../ipc";
   import type { CredentialHealth } from "../ipc/sources";
   import Row from "./Row.svelte";
+  import { authorGaps } from "./coverage";
   import type { LauncherRow } from "./rows";
 
   let {
@@ -43,7 +44,31 @@
     }
     return out;
   });
+
+  /**
+   * The sources this query's author filter could not be asked (#141).
+   *
+   * Drawn above the results rather than below them: an `author:` search that
+   * comes back empty is read at the top of an empty list, and an explanation
+   * under the fold explains nothing.
+   */
+  const gaps = $derived(authorGaps(response));
 </script>
+
+{#if gaps.length > 0}
+  <div class="gap">
+    <!-- Deliberately not "not every source": that is false in the case a
+         reader most needs this, `@jonas /tc`, where the one source in scope is
+         the one that cannot be asked. A heading that does not count is honest
+         at one source and at five. -->
+    <p class="gap-h">An author search cannot be answered by:</p>
+    <ul>
+      {#each gaps as gap (gap.sourceId)}
+        <li><span class="gap-s">{gap.name}</span> — {gap.reason}</li>
+      {/each}
+    </ul>
+  </div>
+{/if}
 
 {#each response.groups as group, g (group.kind)}
   <div class="secl">
@@ -112,5 +137,28 @@
     color: var(--muted);
     font-size: 12px;
     line-height: 1.5;
+  }
+  /* The #141 explanation. Amber-ruled rather than red: a source that cannot be
+     asked an author question is not a failure, it is a fact about the corpus,
+     and drawing it as an error would put a fault where there is none. */
+  .gap {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--hair);
+    box-shadow: inset 2px 0 0 var(--amber);
+    background: var(--panel);
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--muted);
+  }
+  .gap-h {
+    color: var(--text);
+  }
+  .gap ul {
+    margin: 2px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .gap-s {
+    color: var(--text);
   }
 </style>

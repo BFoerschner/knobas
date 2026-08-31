@@ -87,6 +87,7 @@ const ANSWER: SearchResponse = {
   ],
   total: 1,
   took_ms: 3,
+  coverage: [],
 };
 
 // `noFilters` is re-exported through the `../ipc` barrel and `Session` calls

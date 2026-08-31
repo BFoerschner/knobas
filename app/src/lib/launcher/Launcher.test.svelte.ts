@@ -85,6 +85,7 @@ function response(over: Partial<SearchResponse> = {}): SearchResponse {
     ],
     total: 44,
     took_ms: 7,
+    coverage: [],
     ...over,
   };
 }
@@ -918,4 +919,97 @@ test("`?` lists the syntax, and clicking a row inserts it", async () => {
   rows[1]!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   await settle();
   expect(target.querySelector("input")!.value).toBe("#");
+});
+
+/**
+ * **Issue #141, as the reader meets it.**
+ *
+ * An `author:` search over a corpus that includes a build source comes back
+ * empty, and until this the overlay said only *nothing matches* — which is
+ * exactly what a broken token would say. The explanation sits above the
+ * results, where the results would have been.
+ */
+test("an author search says which sources could not be asked", async () => {
+  open({
+    ports: {
+      launcherHome: async () => HOME,
+      search: async () =>
+        response({
+          interpreted: {
+            text: "",
+            prefix: "person",
+            filters: {
+              sources: [],
+              kinds: [],
+              updated_within_days: null,
+              mine: false,
+              authors: ["jonas"],
+            },
+            unknown_tokens: [],
+          },
+          groups: [],
+          total: 0,
+          coverage: [
+            {
+              dimension: "author",
+              sources: [
+                { source_id: "jira", display_name: "Jira", answer: "answered" },
+                { source_id: "teamcity", display_name: "Buildserver", answer: "no_values" },
+              ],
+            },
+          ],
+        }),
+    },
+  });
+  await settle();
+  target.querySelector("input")!.value = "@jonas";
+  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+
+  const gap = target.querySelector(".gap");
+  expect(gap?.textContent).toContain("An author search cannot be answered by:");
+  expect(gap?.textContent).toContain("Buildserver");
+  expect(gap?.textContent).toContain("nothing it has synced names a person");
+  // The source that *did* answer is not named: it has nothing to explain, and
+  // listing it would turn the explanation into a roll call.
+  expect(gap?.textContent).not.toContain("Jira");
+  // And the ordinary empty-result line is still there — the gap explains part
+  // of the emptiness, it does not replace the answer.
+  expect(target.querySelector(".none")).not.toBeNull();
+});
+
+/**
+ * The miss direction the ruling names: a corpus whose sources all answered
+ * yields no explanation.
+ *
+ * Without this, a component that drew the block unconditionally — or drew it
+ * from `coverage.length` rather than from the verdicts — would pass the test
+ * above and put "not every source can answer" on screen for a search where
+ * every source did.
+ */
+test("an author search every source could answer explains nothing", async () => {
+  open({
+    ports: {
+      launcherHome: async () => HOME,
+      search: async () =>
+        response({
+          coverage: [
+            {
+              dimension: "author",
+              sources: [{ source_id: "jira", display_name: "Jira", answer: "answered" }],
+            },
+          ],
+        }),
+    },
+  });
+  await settle();
+  target.querySelector("input")!.value = "@jonas sepa";
+  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+
+  // The results are there, so this is not green because nothing rendered.
+  expect(target.textContent).toContain("Retry failed SEPA payouts");
+  expect(target.querySelector(".gap")).toBeNull();
 });

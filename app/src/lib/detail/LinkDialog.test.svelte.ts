@@ -79,6 +79,7 @@ function response(hits: ReturnType<typeof hit>[]): SearchResponse {
         ],
     total: hits.length,
     took_ms: 3,
+    coverage: [],
   };
 }
 

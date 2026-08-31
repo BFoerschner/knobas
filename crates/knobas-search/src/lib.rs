@@ -35,6 +35,7 @@
 //! spells it out.
 
 pub mod corpus;
+pub(crate) mod coverage;
 pub mod group;
 pub mod home;
 pub mod lists;
@@ -56,8 +57,8 @@ pub use home::LauncherBoard;
 pub use lists::{BuiltinList, SmartListSummary};
 pub use query::{EffectiveFilters, Parsed, merge, parse};
 pub use types::{
-    EntityRow, ParsedQuery, Prefix, ResultGroup, SearchFilters, SearchHit, SearchQuery,
-    SearchResponse, Segment,
+    EntityRow, FilterAnswer, FilterCoverage, FilterDimension, ParsedQuery, Prefix, ResultGroup,
+    SearchFilters, SearchHit, SearchQuery, SearchResponse, Segment, SourceAnswer,
 };
 pub use vocab::{KindCatalog, SourceVocab, Vocabulary};
 
@@ -185,10 +186,18 @@ impl Searcher {
         let rows: Vec<RawHit> = sql::query_as_with(built).fetch_all(&self.pool).await?;
         let groups = group::group(rows, &vocab.kinds);
 
+        // A second round trip, and only for a query that filtered by author
+        // (issue #141). It answers a question the statement above structurally
+        // cannot: the match set says which rows came back, never whether a
+        // source *could have* contributed one -- and those two are what an
+        // empty `author:` result has to be told apart by.
+        let coverage = coverage::author_coverage(&self.pool, &vocab, &filters).await?;
+
         Ok(SearchResponse {
             interpreted,
             total: groups.iter().map(|g| g.total).sum(),
             groups,
+            coverage,
             took_ms: took_ms(started),
         })
     }
@@ -280,6 +289,11 @@ impl Searcher {
             interpreted,
             total: groups.iter().map(|g| g.total).sum(),
             groups,
+            // A built-in list is not a filter the user wrote, so there is no
+            // author question of theirs to report on -- `list:mine` narrows by
+            // the identity `lists::rows` resolves, and a coverage row for it
+            // would explain a query nobody typed.
+            coverage: Vec::new(),
             took_ms: took_ms(started),
         })
     }
@@ -335,11 +349,18 @@ fn empty_corpus(prefix: Option<Prefix>) -> bool {
 }
 
 /// A response that understood the query and found nothing.
+///
+/// No coverage, and it is not an omission: both callers are queries that never
+/// reached a corpus at all -- an empty box, or a prefix whose corpus this
+/// milestone does not have. `asset: @jonas` finds nothing because there are no
+/// assets, which the greyed-out prefix already says; adding "and Buildserver
+/// has no authors" would explain the wrong absence.
 fn empty(interpreted: ParsedQuery, started: Instant) -> SearchResponse {
     SearchResponse {
         interpreted,
         groups: Vec::new(),
         total: 0,
+        coverage: Vec::new(),
         took_ms: took_ms(started),
     }
 }
