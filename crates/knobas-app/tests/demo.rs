@@ -210,3 +210,85 @@ async fn the_loaded_fixture_is_searchable_the_way_the_readme_promises() {
             .collect::<Vec<_>>()
     );
 }
+
+/// What the mirror holds for one entity after a demo load, read through
+/// `sync.live_item` — the view every reader in the app goes through, so a row
+/// that came back from here is both mirrored and live.
+async fn mirrored_payload(pool: &sqlx::PgPool, entity_id: &str) -> serde_json::Value {
+    let (payload,): (serde_json::Value,) =
+        sqlx::query_as("select payload from sync.live_item where entity_id = $1")
+            .bind(entity_id)
+            .fetch_one(pool)
+            .await
+            .unwrap_or_else(|e| panic!("{entity_id} must be mirrored and live: {e}"));
+    payload
+}
+
+/// The demo corpus carries its projects into the **mirror**, in the shape a
+/// source would have written them: `fields.project`, with the source's own key
+/// and name, which is where `crates/knobas-source-jira` leaves a Jira Data
+/// Center issue's project and therefore the spelling a payload read outside an
+/// adapter (ADR-0007) already has an arm for.
+///
+/// Read out of `sync.live_item` rather than out of
+/// `knobas_source_mock::fixture()`: reading the fixture back would pin the
+/// transcription and nothing else, and it is the **adapter-to-mirror** seam --
+/// the fixture through `MockSource::sync` and the upsert -- that the rest of
+/// M2.6 reads. Both projects are asserted here because the dataset splitting
+/// its ticket families across two of them is what makes a project room
+/// something the demo profile can show at all.
+#[tokio::test]
+async fn a_demo_ticket_carries_its_project_into_the_mirrored_payload() {
+    let _guard = MOCK.lock().await;
+    let pool = knobas_db::test_util::test_pool().await;
+    knobas_db::migrate::run(&pool).await.unwrap();
+    demo::demo_load_inner(&pool).await.unwrap();
+
+    let payouts = mirrored_payload(&pool, "mock:PAY-231").await;
+    assert_eq!(payouts["fields"]["project"]["key"], "PAY");
+    assert_eq!(payouts["fields"]["project"]["name"], "Payments Platform");
+    assert_eq!(
+        payouts.pointer("/project"),
+        None,
+        "the project lives at fields.project only -- a flat duplicate would be \
+         a third spelling no real source writes: {payouts}"
+    );
+
+    let operations = mirrored_payload(&pool, "mock:OPS-77").await;
+    assert_eq!(operations["fields"]["project"]["key"], "OPS");
+    assert_eq!(operations["fields"]["project"]["name"], "Operations");
+}
+
+/// The miss direction, and the reason the fixture deliberately leaves one
+/// ticket outside every project: a record naming no project syncs like any
+/// other, and its mirrored payload carries **no** project rather than an empty
+/// string, a null, or a key somebody inferred from the issue key.
+///
+/// This is what the rest of M2.6 pins its own failure direction against
+/// (ADR-0010: absence, never a wrong room), so the demo profile has to be able
+/// to produce it -- and it is asserted on the mirrored payload, because an
+/// invented value is something the *emitting* step would add.
+#[tokio::test]
+async fn a_demo_ticket_with_no_project_syncs_and_its_payload_names_none() {
+    let _guard = MOCK.lock().await;
+    let pool = knobas_db::test_util::test_pool().await;
+    knobas_db::migrate::run(&pool).await.unwrap();
+    demo::demo_load_inner(&pool).await.unwrap();
+
+    let key = knobas_source_mock::UNPROJECTED_KEY;
+    let payload = mirrored_payload(&pool, &format!("mock:{key}")).await;
+    assert_eq!(
+        payload["key"], key,
+        "the ticket itself must still be mirrored"
+    );
+    assert_eq!(
+        payload.pointer("/fields/project"),
+        None,
+        "a ticket naming no project must carry none: {payload}"
+    );
+    assert_eq!(
+        payload.pointer("/project"),
+        None,
+        "and none under any other spelling either: {payload}"
+    );
+}
