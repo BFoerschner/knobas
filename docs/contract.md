@@ -2974,8 +2974,10 @@ From this commit on, each of the following requires an orchestrator decision **a
   **Because a room hands its filter to every tile, this is the whole of the narrowing.** The
   room's own kinds-and-count read, the mini board and everything else in the room scope the same
   way, with no per-tile special case — spec #188's story 2. The mini board takes it as a *third
-  nullable argument* rather than inside a filter object, because that command already takes its
-  two narrowings apart (#177's entry above, which this leaves otherwise untouched).
+  IPC argument, nullable* — the "fourth argument" this entry opens with counts the Rust
+  signature, whose first is the `State` handle — rather than inside a filter object, because
+  that command already takes its two narrowings apart (#177's entry above, which this leaves
+  otherwise untouched).
 
   **Two readers deliberately not narrowed, recorded so neither is discovered as a bug.**
   `MiniBoard::sources` — the ticket detail's status select (#179) — stays the statuses a ticket's
