@@ -129,6 +129,8 @@ function render(hash: string) {
     tiles: () => [...target.querySelectorAll<HTMLElement>(".tile .tile-h .lab")].map((l) => l.textContent),
     /** The key on each mini-board card, in the order drawn. */
     cards: () => [...target.querySelectorAll<HTMLElement>(".card .mono")].map((k) => k.textContent),
+    /** Every list tile's rows, by the title they show. */
+    rows: () => [...target.querySelectorAll<HTMLElement>(".row .t")].map((t) => t.textContent),
     text: () => target.textContent ?? "",
     done: () => {
       unmount(app);
@@ -338,6 +340,7 @@ const CORPUS: Item[] = [
   { kind: "ticket", key: "PAY-236", project: null },
   { kind: "ticket", key: "OPS-77", project: "OPS" },
   { kind: "page", key: "ENG-1", project: "PAY" },
+  { kind: "page", key: "OPS-DOC", project: "OPS" },
   { kind: "incident", key: "INC-1", project: "OPS" },
 ];
 
@@ -393,11 +396,14 @@ test("a project room narrows every tile in it, its own count included", async ()
 
   expect(project.text()).toContain("Payments Platform");
   expect(project.text()).toContain("project");
-  // Its own read: two of the five items this source holds are `PAY`.
+  // Its own read: two of the six items this source holds are `PAY`.
   expect(project.text()).toContain("2 items");
   // ...and the incident belongs to `OPS`, so the room has no tile for one.
   expect(project.tiles()).toEqual(["Tickets", "Docs"]);
+  // The board, and a list tile beside it: *every* tile in the room narrows,
+  // not only the one the room was designed around.
   expect(project.cards()).toEqual(["PAY-231"]);
+  expect(project.rows()).toEqual(["Title of ENG-1"]);
   project.done();
 
   // The same corpus, one room out: everything the project room narrowed away.
@@ -405,9 +411,10 @@ test("a project room narrows every tile in it, its own count included", async ()
   await vi.waitFor(() => expect(source.tiles().length).toBeGreaterThan(0));
   await settle();
 
-  expect(source.text()).toContain("5 items");
+  expect(source.text()).toContain("6 items");
   expect(source.tiles()).toEqual(["Tickets", "Docs", "Incidents"]);
   expect(source.cards()).toEqual(["PAY-231", "PAY-236", "OPS-77"]);
+  expect(source.rows()).toEqual(["Title of ENG-1", "Title of OPS-DOC", "Title of INC-1"]);
   source.done();
 });
 
@@ -451,9 +458,10 @@ test("a project room with no readable name is headed by its key", async () => {
   await settle();
 
   expect(screen.text()).toContain("OPS");
-  expect(screen.text()).toContain("2 items");
-  expect(screen.tiles()).toEqual(["Tickets", "Incidents"]);
+  expect(screen.text()).toContain("3 items");
+  expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents"]);
   expect(screen.cards()).toEqual(["OPS-77"]);
+  expect(screen.rows()).toEqual(["Title of OPS-DOC", "Title of INC-1"]);
 
   screen.done();
 });
