@@ -247,6 +247,12 @@ async fn a_demo_ticket_carries_its_project_into_the_mirrored_payload() {
     let payouts = mirrored_payload(&pool, "mock:PAY-231").await;
     assert_eq!(payouts["fields"]["project"]["key"], "PAY");
     assert_eq!(payouts["fields"]["project"]["name"], "Payments Platform");
+    assert_eq!(
+        payouts.pointer("/project"),
+        None,
+        "the project lives at fields.project only -- a flat duplicate would be \
+         a third spelling no real source writes: {payouts}"
+    );
 
     let operations = mirrored_payload(&pool, "mock:OPS-77").await;
     assert_eq!(operations["fields"]["project"]["key"], "OPS");

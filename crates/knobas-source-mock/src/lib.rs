@@ -540,9 +540,8 @@ fn tombstoned_item(source_id: &str) -> SyncItem {
 fn ticket_payload(t: &Ticket) -> serde_json::Value {
     let mut payload = serde_json::to_value(t).expect("a fixture record must serialize");
     if let Some(project) = &t.project {
-        payload["fields"] = serde_json::json!({
-            "project": { "key": project.key, "name": project.name },
-        });
+        payload["fields"]["project"] =
+            serde_json::to_value(project).expect("a project must serialize");
     }
     payload
 }
