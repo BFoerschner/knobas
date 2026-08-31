@@ -267,9 +267,12 @@ export interface EntityDetail {
   /**
    * The adapter's label and monogram for this kind, or `null`.
    *
-   * `null` throughout M1 phase 1 — resolving it needs the adapter registry
-   * (task 21). The header falls back to the title-cased kind, which is what
-   * §3a asks for when no adapter declares one anyway.
+   * Resolved from the adapter registry by the source's `adapter_kind` (it was
+   * `null` throughout M1 phase 1, before the registry existed). `null` for a
+   * kind the adapter does not declare, and for a source with no configuration
+   * row at all — which `run_once` produces. The header falls back to the
+   * title-cased kind, which is what §3a asks for when no adapter declares one
+   * anyway.
    */
   kind_info: KindInfo | null;
   /** Untrusted source text — render as text, never as markup (gotcha 7). */

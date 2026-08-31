@@ -178,8 +178,10 @@ export interface SmartListSummary {
  *
  * The one DTO here that is a composition: the lists and the recent rows come
  * from the search engine, `sources` is `CredentialHealth` (`./sources`), and
- * `pending_writes` counts an offline write queue that is M2 — it is 0 in M1,
- * by rule rather than by omission.
+ * `pending_writes` was reserved for the write queue — 0 throughout M1 by
+ * rule, and still hardcoded 0 on the backend although that queue now exists
+ * (#212), so the launcher footer disagrees with the status-bar badge until it
+ * is wired.
  */
 export interface LauncherHome {
   smart_lists: SmartListSummary[];

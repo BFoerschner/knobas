@@ -536,7 +536,10 @@ function getEntity(args: Record<string, unknown>) {
   return {
     row: mirrorRow(entry),
     source: { id: "mock", display_name: "Tidewater (mock)", adapter_kind: "mock", enabled: true },
-    // Null, exactly as the real command answers until task 21.
+    // Null, where the real command now resolves the adapter's KindInfo from
+    // the registry. Harmless divergence: the fallback path draws the same
+    // words — knobas' own vocabulary (`kinds.ts` layer 2) matches the mock's
+    // declared KindInfo for every kind in this corpus.
     kind_info: null,
     body_text: entry.body_text,
     author: entry.author,
