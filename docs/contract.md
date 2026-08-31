@@ -2830,6 +2830,16 @@ From this commit on, each of the following requires an orchestrator decision **a
   `knobas_app::start_work::queue`'s `BRANCH_BY_NAME` and `PULL_REQUEST_BY_HEAD` stop resolving for
   a disabled source, which is correct and is now the documented consequence.
 
+  **One reader that deliberately does not change, stated so nobody reads it as a miss.** The
+  entity detail (`knobas_app::commands::entity` — its `DETAIL` statement and the `include_deleted`
+  room reads) reaches past `sync.live_item` on purpose, per §5a: links and notes may point at
+  withdrawn entities, which must still open. That precedent carries over unchanged — a disabled
+  source's entity still opens by direct address, exactly as a tombstoned one does — but where a
+  tombstone has `deleted_at` for the banner to read, "source disabled" leaves no marker in the
+  detail row, and a room read with `include_deleted` now also lists a disabled source's rows.
+  Distinguishing "source disabled" in the detail is left open with the same status as the
+  `target_of` question above.
+
   Ratified by the orchestrator as issue #202 itself, whose ruling specifies the answer, the blast
   radius and this entry.
 

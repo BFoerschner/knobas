@@ -684,10 +684,11 @@ async fn a_disabled_sources_rows_leave_the_corpus_so_it_gets_no_verdict() {
 
 /// The grammar still cannot name a source the user turned off.
 ///
-/// The other half of #200, and the one a careless widening breaks: coverage
-/// reads every configured source, but `source:` and `/alias` read the **enabled**
-/// ones. A disabled source resolving again would put it back in the chip row and
-/// let a query narrow to a source the sources list no longer offers.
+/// The other half of #200, unchanged by #202: `source:` and `/alias` read the
+/// **enabled** sources, and since #202 `coverage::in_scope` does too -- the
+/// same answer to what are still different questions. A disabled source
+/// resolving again would put it back in the chip row and let a query narrow to
+/// a source the sources list no longer offers.
 #[tokio::test]
 async fn a_disabled_source_is_still_unnameable_by_the_grammar() {
     let pool = pool().await;

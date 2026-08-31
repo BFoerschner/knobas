@@ -149,12 +149,15 @@ impl Vocabulary {
     /// that has the registry (open question **E-Q2**).
     ///
     /// A **disabled** source is in the list and carries `enabled: false`
-    /// (issue #200). `/ji` still stops resolving to it and the token is still
-    /// reported as unknown -- [`Self::resolve_source`] is what enforces that --
-    /// but it is *present*, because its rows are still in the mirror and still
-    /// come back from a search, so a reader asking "which sources put rows in
-    /// this corpus" has to be able to see it. It was filtered out in SQL until
-    /// #200, which made that reader structurally unable to.
+    /// (issues #200, #202). `/ji` still stops resolving to it and the token is
+    /// still reported as unknown -- [`Self::resolve_source`] is what enforces
+    /// that -- but it is *present*, because "which sources exist" and "which
+    /// sources may a reader see" are different questions, and carrying the
+    /// flag answers both in the one round trip. It was filtered out in SQL
+    /// until #200; since #202 its rows are gone from `sync.live_item` too, so
+    /// every consumer of this list now skips it -- each for its own reason,
+    /// named on [`SourceVocab::enabled`] -- but the list itself still carries
+    /// it.
     ///
     /// # Errors
     ///

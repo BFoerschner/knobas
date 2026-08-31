@@ -113,20 +113,21 @@ async fn aliases_resolve_across_instances_and_identity_comes_from_the_configs() 
 
 /// A source the user switched off is **unnameable, and still present**.
 ///
-/// The guarantee is unchanged and is the first assertion: its rows are still in
-/// the mirror, so answering `/x` with "every instance of x" would narrow to a
-/// source the sources view shows as off, and the token must therefore be
-/// unresolvable for the parser to report.
+/// Unnameable because the sources view no longer offers it: answering `/x`
+/// with "every instance of x" would narrow a query to a source the user is
+/// shown as off, so the token must be unresolvable for the parser to report.
+/// `Vocabulary::resolve_source` is what enforces that (#200's mechanism
+/// change: the row used to be dropped in SQL, which made it invisible to
+/// every consumer at once).
 ///
-/// What changed in #200 is the *mechanism*, and this test used to pin the
-/// mechanism as if it were the guarantee. The row was dropped in SQL, which
-/// made the disabled source invisible to **every** consumer -- including
-/// `coverage::in_scope`, which asks a different question ("which sources put
-/// rows in the corpus this query scanned") and for which the honest answer
-/// includes it. So it is in the list now, flagged, and
-/// `Vocabulary::resolve_source` is what enforces the guarantee. Both halves are
-/// asserted, because a fix that made it present and *nameable* would satisfy
-/// the second alone.
+/// Present because "which sources exist" and "which sources may a reader see"
+/// are different questions, and the vocabulary answers the first. Since #202
+/// every consumer skips the disabled entry -- its rows left `sync.live_item`
+/// itself, so even `coverage::in_scope` has nothing to verdict -- but each
+/// consumer skips for its own stated reason (`SourceVocab::enabled` names
+/// them), and the list still carries the row. Both halves are asserted,
+/// because a fix that made it present and *nameable* would satisfy the second
+/// alone.
 #[tokio::test]
 async fn a_disabled_source_is_unnameable_but_still_in_the_vocabulary() {
     let pool = pool().await;
