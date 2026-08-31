@@ -186,6 +186,55 @@ services:
       - tc-data:/data/teamcity_server/datadir
       - tc-logs:/opt/teamcity/logs
 
+  # The two Atlassian products need a real database beside them: Jira 10.0
+  # removed the embedded H2 engine outright ("you'll no longer be able to
+  # evaluate Jira 10.0 using the H2 embedded database"), so without this the
+  # setup wizard stops at its database step and `real-atlassian` cannot be
+  # brought up at all -- by a script or by hand. One server per product rather
+  # than one shared: `down -v` on either has to be a clean slate for that
+  # product's re-setup, which a shared server would make a cross-product
+  # action.
+  # PostgreSQL 15 specifically: Atlassian's compatibility matrix supports 15
+  # for Jira 10.3, allows 16 only from 10.3.7, deprecates 12-14, and does
+  # **not** support 17 -- which is the version this machine happens to cache,
+  # which is why the choice is written down rather than left to whoever looks
+  # at `docker images` next.
+  jira-db:
+    image: ${ATLASSIAN_DB_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
+    profiles: ["real-atlassian"]
+    container_name: knobas-jira-db
+    environment:
+      POSTGRES_DB: jira
+      POSTGRES_USER: jira
+      POSTGRES_PASSWORD: jira
+      # Jira refuses a database whose collation is not C or POSIX-compatible;
+      # the alpine image's default locale would otherwise be inherited.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - jira-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jira"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  confluence-db:
+    image: ${ATLASSIAN_DB_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
+    profiles: ["real-atlassian"]
+    container_name: knobas-confluence-db
+    environment:
+      POSTGRES_DB: confluence
+      POSTGRES_USER: confluence
+      POSTGRES_PASSWORD: confluence
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - confluence-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U confluence"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
   jira:
     # Wants ~4 GB of RAM and a timebomb licence entered by hand.
     #   docker compose --profile real-atlassian up -d jira
@@ -200,8 +249,21 @@ services:
     container_name: knobas-jira
     ports:
       - "127.0.0.1:8080:8080"
+    environment:
+      # Writes dbconfig.xml before the first start, which is what lets
+      # `seed-jira.sh` skip the wizard's database step -- the one step of that
+      # wizard Atlassian gives a supported way past. `postgres72` is Jira's own
+      # spelling for every modern PostgreSQL, not a version claim.
+      ATL_JDBC_URL: jdbc:postgresql://jira-db:5432/jira
+      ATL_JDBC_USER: jira
+      ATL_JDBC_PASSWORD: jira
+      ATL_DB_TYPE: postgres72
+      ATL_DB_SCHEMA_NAME: public
     volumes:
       - jira-data:/var/atlassian/application-data/jira
+    depends_on:
+      jira-db:
+        condition: service_healthy
 
   confluence:
     # M3's target. Present now because Atlassian publishes no machine-readable
@@ -214,6 +276,12 @@ services:
     ports:
       - "127.0.0.1:8090:8090"
     environment:
+      # As for Jira: dbconfig written before first start, so the wizard's
+      # database step is already answered. Confluence spells the type plainly.
+      ATL_JDBC_URL: jdbc:postgresql://confluence-db:5432/confluence
+      ATL_JDBC_USER: confluence
+      ATL_JDBC_PASSWORD: confluence
+      ATL_DB_TYPE: postgresql
       # Confluence 7.9+ reads its licence here at FIRST-TIME setup and skips
       # the wizard's licence step -- the one half of `real-atlassian` that can
       # be automated (Jira has no equivalent). Export the timebomb key in your
@@ -228,6 +296,9 @@ services:
       ATL_FORCE_CFG_UPDATE: ${ATL_FORCE_CFG_UPDATE:-false}
     volumes:
       - confluence-data:/var/atlassian/application-data/confluence
+    depends_on:
+      confluence-db:
+        condition: service_healthy
 
 volumes:
   gitea-data:
@@ -236,3 +307,5 @@ volumes:
   tc-logs:
   jira-data:
   confluence-data:
+  jira-db-data:
+  confluence-db-data:
