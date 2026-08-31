@@ -58,11 +58,16 @@ use serde::{Deserialize, Serialize};
 /// app, neither of which can rely on a file being next to the binary.
 const FIXTURE_JSON: &str = include_str!("../../../fixtures/tidewater/work.json");
 
-/// The only cursor the mock ever hands out. The fixture is a frozen snapshot,
-/// so the position within it is a version, not an offset -- bump the suffix and
-/// every stored cursor stops matching, which is exactly the "re-sync from
-/// scratch" the new data would need.
-const CURSOR: &str = "tidewater-v1";
+/// The only cursor the mock ever hands out. The fixture is a snapshot, so the
+/// position within it is a version, not an offset -- bump the suffix and every
+/// stored cursor stops matching, which is exactly the "re-sync from scratch"
+/// the new data would need.
+///
+/// **Widening what the fixture emits obliges a bump.** #234 is the worked
+/// example: #230 gave the corpus its projects and left the suffix at `v1`, so
+/// every profile created before it kept a matching cursor, never refetched,
+/// and showed no project rooms with nothing in the app able to repair it.
+const CURSOR: &str = "tidewater-v2";
 
 /// Where the fictional company's systems live. Nothing is served from here --
 /// it exists so *Open in browser* has a shape to render and a stream building
