@@ -51,25 +51,6 @@ use crate::entity::EntityRef;
 /// list decides *order*, never wording.
 const LEADING: [&str; 4] = ["To Do", "In Progress", "In Review", "Done"];
 
-/// SQL for "the string this path leads to, or nothing".
-///
-/// `->>` yields an object's or an array's *text form* rather than nothing, so
-/// without the type check a source that spells its status some other way would
-/// arrive as a column headed `{"id":3}` -- a guess dressed as an observation.
-/// The `nullif(btrim(...))` is the same refusal for a status that is blank or
-/// only whitespace: unreadable, not a column.
-macro_rules! string_at {
-    ($path:literal) => {
-        concat!(
-            "(case when jsonb_typeof(",
-            $path,
-            ") = 'string' then nullif(btrim(",
-            $path,
-            " #>> '{}'), '') end)"
-        )
-    };
-}
-
 /// The one place a ticket's status is spelled (ADR-0007 requirement 2).
 ///
 /// Jira Data Center's `fields.status.name` first -- where every `ticket` in the
@@ -87,9 +68,9 @@ macro_rules! status_read {
     () => {
         concat!(
             "coalesce(",
-            string_at!("i.payload->'fields'->'status'->'name'"),
+            $crate::string_at!("i.payload->'fields'->'status'->'name'"),
             ", ",
-            string_at!("i.payload->'status'"),
+            $crate::string_at!("i.payload->'status'"),
             ")"
         )
     };
@@ -107,9 +88,9 @@ macro_rules! priority_read {
     () => {
         concat!(
             "coalesce(",
-            string_at!("i.payload->'fields'->'priority'->'name'"),
+            $crate::string_at!("i.payload->'fields'->'priority'->'name'"),
             ", ",
-            string_at!("i.payload->'priority'"),
+            $crate::string_at!("i.payload->'priority'"),
             ")"
         )
     };
