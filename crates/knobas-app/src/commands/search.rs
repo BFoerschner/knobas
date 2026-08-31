@@ -49,6 +49,11 @@ pub struct LauncherHome {
     /// field is here because the launcher's footer reads *"local index · N
     /// pending writes"* and a footer that appears in M2 is a layout change; a
     /// zero is not.
+    ///
+    /// The M2 queue has since shipped (#42) and this still answers 0 -- the
+    /// footer under-reports a non-empty queue. Issue #212 tracks wiring it
+    /// (or retiring the field); until then the constant is the recorded M1
+    /// rule, not an accident.
     pub pending_writes: u32,
 }
 
@@ -170,6 +175,8 @@ pub async fn launcher_home_inner(pool: &PgPool) -> Result<LauncherHome, IpcError
         sources: knobas_sync::config::health_all(pool).await?,
         // Not a placeholder for a count nobody wrote: M1 is read-only toward
         // every source, so the number of queued writes is exactly zero.
+        // That premise expired when the M2 queue shipped (#42); issue #212
+        // tracks wiring this to `knobas_core::write_queue::counts`.
         pending_writes: 0,
     })
 }
