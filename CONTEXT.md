@@ -158,7 +158,7 @@ A context's hub view — tiles, activity, tray.
 _Avoid_: dashboard
 
 **Mini board**:
-The Tickets tile's status-grouped rendering — one column per status, in the source's own words as the mirror holds them. "Board" never stands alone: launcher board, assets board, mini board. (ADR-0009)
+The Tickets tile's status-grouped rendering — one group per status, in the source's own words as the mirror holds them. Two layouts, and the room chooses: **columns** side by side for a bounded room (a project room, a stored context), **stacked** one under another for an unbounded one (*All work*, a source room), with a demote-only backstop past six columns. Same groups, same order, same counts in both — the layout is how they are arranged, never what they are. "Board" never stands alone: launcher board, assets board, mini board. (ADR-0009, #210)
 _Avoid_: kanban, board (unqualified)
 
 **Tidewater**:
