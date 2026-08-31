@@ -528,7 +528,10 @@ async fn a_project_room_draws_only_that_projects_tickets() {
         SOURCE,
         "ticket",
         "PAY-1",
-        jira_in("To Do", serde_json::json!({ "key": "PAY", "name": "Payout" })),
+        jira_in(
+            "To Do",
+            serde_json::json!({ "key": "PAY", "name": "Payout" }),
+        ),
     )
     .await;
     item(
@@ -548,7 +551,10 @@ async fn a_project_room_draws_only_that_projects_tickets() {
         "jira-eu",
         "ticket",
         "PAY-1",
-        jira_in("Done", serde_json::json!({ "key": "PAY", "name": "Payments" })),
+        jira_in(
+            "Done",
+            serde_json::json!({ "key": "PAY", "name": "Payments" }),
+        ),
     )
     .await;
 
@@ -574,7 +580,10 @@ async fn a_ticket_with_no_readable_project_is_on_no_project_rooms_board() {
         SOURCE,
         "ticket",
         "PAY-1",
-        jira_in("To Do", serde_json::json!({ "key": "PAY", "name": "Payout" })),
+        jira_in(
+            "To Do",
+            serde_json::json!({ "key": "PAY", "name": "Payout" }),
+        ),
     )
     .await;
     // The path leads somewhere, but not to a string: the shape a room must not
@@ -626,7 +635,10 @@ async fn a_disabled_sources_ticket_is_off_a_project_rooms_board() {
         SOURCE,
         "ticket",
         "PAY-1",
-        jira_in("To Do", serde_json::json!({ "key": "PAY", "name": "Payout" })),
+        jira_in(
+            "To Do",
+            serde_json::json!({ "key": "PAY", "name": "Payout" }),
+        ),
     )
     .await;
     let withdrawn = item(
@@ -646,7 +658,10 @@ async fn a_disabled_sources_ticket_is_off_a_project_rooms_board() {
         "jira-eu",
         "ticket",
         "PAY-9",
-        jira_in("Done", serde_json::json!({ "key": "PAY", "name": "Payout" })),
+        jira_in(
+            "Done",
+            serde_json::json!({ "key": "PAY", "name": "Payout" }),
+        ),
     )
     .await;
     sqlx::query(
@@ -658,7 +673,9 @@ async fn a_disabled_sources_ticket_is_off_a_project_rooms_board() {
     .await
     .unwrap();
 
-    let board = mini_board::read(&pool, None, &[], Some("PAY")).await.unwrap();
+    let board = mini_board::read(&pool, None, &[], Some("PAY"))
+        .await
+        .unwrap();
 
     assert_eq!(
         columns(&board),
@@ -682,7 +699,10 @@ async fn the_status_select_still_offers_the_whole_sources_corpus() {
         SOURCE,
         "ticket",
         "PAY-1",
-        jira_in("To Do", serde_json::json!({ "key": "PAY", "name": "Payout" })),
+        jira_in(
+            "To Do",
+            serde_json::json!({ "key": "PAY", "name": "Payout" }),
+        ),
     )
     .await;
     item(

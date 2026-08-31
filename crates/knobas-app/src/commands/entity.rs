@@ -2059,13 +2059,10 @@ pub async fn mini_board(
     project: Option<String>,
 ) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
     let pool = lifecycle.pool()?;
-    Ok(knobas_core::mini_board::read(
-        &pool,
-        ctx_id.as_deref(),
-        &sources,
-        project.as_deref(),
+    Ok(
+        knobas_core::mini_board::read(&pool, ctx_id.as_deref(), &sources, project.as_deref())
+            .await?,
     )
-    .await?)
 }
 
 // -- the projects a corpus shows (#208) -------------------------------------

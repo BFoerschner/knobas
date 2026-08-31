@@ -63,6 +63,7 @@ fn scoped_to(ctx: &str) -> EntityFilter {
         kinds: Vec::new(),
         updated_within_days: None,
         context: Some(ctx.to_owned()),
+        project: None,
         order: EntityOrder::UpdatedDesc,
         include_deleted: false,
     }

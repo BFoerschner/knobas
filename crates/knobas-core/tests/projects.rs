@@ -130,9 +130,24 @@ fn rows(projects: &[Project]) -> Vec<(&str, &str, Option<&str>)> {
 #[tokio::test]
 async fn every_project_the_corpus_shows_is_reported_once() {
     let pool = scratch().await;
-    ticket(&pool, "PAY-1", serde_json::json!({ "key": "PAY", "name": "Payout" })).await;
-    ticket(&pool, "PAY-2", serde_json::json!({ "key": "PAY", "name": "Payout" })).await;
-    ticket(&pool, "INT-1", serde_json::json!({ "key": "INT", "name": "Integrations" })).await;
+    ticket(
+        &pool,
+        "PAY-1",
+        serde_json::json!({ "key": "PAY", "name": "Payout" }),
+    )
+    .await;
+    ticket(
+        &pool,
+        "PAY-2",
+        serde_json::json!({ "key": "PAY", "name": "Payout" }),
+    )
+    .await;
+    ticket(
+        &pool,
+        "INT-1",
+        serde_json::json!({ "key": "INT", "name": "Integrations" }),
+    )
+    .await;
 
     let projects = project::list(&pool).await.unwrap();
 

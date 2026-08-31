@@ -376,11 +376,12 @@ async fn a_project_narrows_the_room_within_its_sources() {
             .collect::<std::collections::BTreeSet<_>>()
     };
 
-    let project_room = ids(
-        list_entities_inner(&pool, &room(vec![source.clone()], Some("PAY")), 500, 0)
-            .await
-            .unwrap(),
-    );
+    let project_room =
+        ids(
+            list_entities_inner(&pool, &room(vec![source.clone()], Some("PAY")), 500, 0)
+                .await
+                .unwrap(),
+        );
     assert_eq!(
         project_room,
         std::collections::BTreeSet::from([format!("{source}:PAY-1")]),
@@ -406,11 +407,12 @@ async fn a_project_narrows_the_room_within_its_sources() {
     );
     assert!(source_room.contains(&format!("{source}:NOP-1")));
     for project in ["PAY", "INT", "NOP"] {
-        let narrowed = ids(
-            list_entities_inner(&pool, &room(vec![source.clone()], Some(project)), 500, 0)
-                .await
-                .unwrap(),
-        );
+        let narrowed =
+            ids(
+                list_entities_inner(&pool, &room(vec![source.clone()], Some(project)), 500, 0)
+                    .await
+                    .unwrap(),
+            );
         assert!(
             !narrowed.contains(&format!("{source}:NOP-1")),
             "a record with no readable project is in no project room, {project} included"
