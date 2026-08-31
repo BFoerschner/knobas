@@ -376,17 +376,27 @@ async fn a_project_narrows_the_room_within_its_sources() {
             .collect::<std::collections::BTreeSet<_>>()
     };
 
-    let project_room =
-        ids(
-            list_entities_inner(&pool, &room(vec![source.clone()], Some("PAY")), 500, 0)
-                .await
-                .unwrap(),
+    // Over both orderings, the way the `include_deleted` test below runs: the
+    // two live statements are two constants, and a predicate honoured by one
+    // of them would be a room that changes meaning when the caller re-sorts.
+    for order in [EntityOrder::UpdatedDesc, EntityOrder::TitleAsc] {
+        let project_room = ids(list_entities_inner(
+            &pool,
+            &EntityFilter {
+                order,
+                ..room(vec![source.clone()], Some("PAY"))
+            },
+            500,
+            0,
+        )
+        .await
+        .unwrap());
+        assert_eq!(
+            project_room,
+            std::collections::BTreeSet::from([format!("{source}:PAY-1")]),
+            "one project's work, within its own source"
         );
-    assert_eq!(
-        project_room,
-        std::collections::BTreeSet::from([format!("{source}:PAY-1")]),
-        "one project's work, within its own source"
-    );
+    }
 
     // The dimension narrows within `sources`, so unscoped by source it reaches
     // both `PAY` projects -- which is why a project room names both halves.

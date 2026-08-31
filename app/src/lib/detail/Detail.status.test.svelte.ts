@@ -17,12 +17,12 @@
 import { flushSync, mount, unmount } from "svelte";
 import { beforeEach, expect, test, vi } from "vitest";
 
-import type { EntityDetail, MiniBoard } from "../ipc/entity";
+import type { EntityDetail, EntityFilter, MiniBoard } from "../ipc/entity";
 import type { SourceDescriptor } from "../ipc/sources";
 
 /** Plain functions, not `vi.fn` — see the note in `shell/Tile.test.svelte.ts`. */
 const queued: unknown[] = [];
-const boardCalls: { sources: string[]; context: string | null; project: string | null }[] = [];
+const boardCalls: Pick<EntityFilter, "sources" | "context" | "project">[] = [];
 let board: () => Promise<MiniBoard> = () => Promise.resolve(BOARD);
 let submitFails = false;
 
@@ -34,7 +34,7 @@ vi.mock("../ipc/entity", () => ({
   getEntity: () => Promise.resolve(entity()),
   unlink: () => Promise.resolve(),
   createLink: () => Promise.resolve({}),
-  miniBoard: (filter: { sources: string[]; context: string | null; project: string | null }) => {
+  miniBoard: (filter: Pick<EntityFilter, "sources" | "context" | "project">) => {
     boardCalls.push(filter);
     return board();
   },

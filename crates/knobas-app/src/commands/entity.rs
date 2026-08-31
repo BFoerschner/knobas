@@ -184,8 +184,10 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
 
 /// As [`LIVE_UPDATED`], reaching past the tombstone filter.
 ///
-/// The join is what `sync.live_item` is; dropping only its `deleted_at is
-/// null` is the whole difference.
+/// The join is `sync.live_item` without its hiding reasons — `deleted_at is
+/// null` and, since migration `0012`, the disabled-source filter. Both are
+/// dropped on purpose: an `include_deleted` read lists a disabled source's
+/// rows too, ratified in the #202 §10.8 entry.
 const ALL_UPDATED: &str = concat!(
     r#"
 select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at,

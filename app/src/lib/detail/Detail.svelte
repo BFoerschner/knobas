@@ -273,10 +273,10 @@
     const mine = ++boardToken;
     statusBoard = null;
     if (!source || !isTicket) return;
-    // Unscoped on both room dimensions and on the project: what this reads is
-    // `board.sources`, the statuses the ticket's own *source corpus* shows, and
-    // narrowing that by anything would offer a move only where it had already
-    // been made.
+    // Scoped to the ticket's own source and to nothing else — no context, no
+    // project (#177, #208): what this reads is `board.sources`, the statuses
+    // that *source corpus* shows, and narrowing it by the room would offer a
+    // move only where it had already been made.
     void miniBoard({ sources: [source], context: null, project: null })
       .then((board) => {
         if (mine !== boardToken) return;
