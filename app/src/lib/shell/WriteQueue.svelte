@@ -51,6 +51,11 @@
 
   /** Why a pending write has not gone, in the reader's words rather than the wire's. */
   function waitingBecause(row: QueuedWrite): string {
+    // Before the per-attempt reasons: the scheduler never flushes a disabled
+    // source, so whatever the last attempt said, nothing will move until the
+    // source is back on — and "not tried yet" forever would be this surface
+    // going silent about it (issue #204).
+    if (!row.source_enabled) return "its source is turned off — re-enable it in Sources to send this";
     if (row.attempted_at === null) return "not tried yet";
     switch (row.wait_reason) {
       case "unauthorized":
@@ -115,7 +120,22 @@
               <span class="wq-when">queued {ago(row.queued_at, now)}</span>
             </header>
 
-            {#if row.state === "held"}
+            {#if row.state === "held" && !row.source_enabled}
+              <!--
+                Held, but not because anything changed (issue #204): the user
+                turned the source off, its items left the mirror's view, and
+                the queue held the write it could no longer measure. The
+                two-versions comparison would show a target that did not
+                change, and *Send mine anyway* would park the write as
+                "waiting" forever — the scheduler never flushes a disabled
+                source. So neither is offered; the remedy is the source
+                toggle, and the row says so.
+              -->
+              <p class="wq-why">
+                knobas is holding this because its source is turned off. Re-enable it in Sources
+                to send it — or edit or discard it here.
+              </p>
+            {:else if row.state === "held"}
               <p class="wq-why">The target changed after you queued this.</p>
               <div class="grid2">
                 <div>
@@ -167,7 +187,7 @@
                 </button>
                 <button class="btn ghost" onclick={() => (editing = null)}>Cancel</button>
               {:else}
-                {#if row.state === "held"}
+                {#if row.state === "held" && row.source_enabled}
                   <button class="btn" disabled={queue.busy} onclick={() => queue.apply(row.id)}>
                     Send mine anyway
                   </button>

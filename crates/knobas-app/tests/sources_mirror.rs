@@ -422,6 +422,7 @@ fn queued_write() -> knobas_core::write_queue::QueuedWrite {
         attempts: 2,
         held_snapshot: Some(serde_json::json!({"op": "comment", "live": true, "text": "moved on"})),
         settled_at: None,
+        source_enabled: true,
     }
 }
 
@@ -441,6 +442,7 @@ fn the_queued_write_shape_matches_its_typescript_mirror() {
             "payload",
             "queued_at",
             "settled_at",
+            "source_enabled",
             "source_id",
             "state",
             "target_snapshot",

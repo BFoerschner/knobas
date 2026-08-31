@@ -346,6 +346,9 @@ async fn returns_the_row_its_source_and_the_raw_payload() {
         "the configured display name, not the id"
     );
     assert_eq!(d.source.adapter_kind, "mock");
+    // #204's miss direction: an entity from an enabled source carries no
+    // marker, or every ordinary detail would open with a false banner.
+    assert!(d.source.enabled);
     assert!(d.body_text.contains("SEPA"));
     assert_eq!(
         d.payload["key"], "PAY-231",
@@ -417,6 +420,71 @@ async fn a_tombstoned_entity_is_still_readable_and_says_so() {
         "the banner has nothing to say without this"
     );
     assert_eq!(d.row.title, "Legacy payout reconciliation (withdrawn)");
+    // Half of #204's three-state guarantee: withdrawn upstream is not "source
+    // turned off", and a tombstoned entity of an enabled source must not
+    // trip the second banner too.
+    assert!(
+        d.source.enabled,
+        "withdrawn upstream must not claim the source is off"
+    );
+}
+
+/// Issue #204's second surface: a disabled source's entity still opens by
+/// direct address (the `DETAIL` statement reaches past `sync.live_item` on
+/// purpose, per §5a), but where a tombstoned one carries `deleted_at` for the
+/// banner, "source turned off" carried nothing at all. `source.enabled` is
+/// that marker -- derived in the same statement as the row, never stored,
+/// which the re-read after the toggle proves: no re-sync, no write, only the
+/// answer changes.
+#[tokio::test]
+async fn a_disabled_sources_entity_opens_with_the_marker_until_reenabled() {
+    let pool = seeded().await;
+    let source = format!("dark-{}", unique());
+    let entity = format!("{source}:DK-1");
+
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ticket', 'In the dark')")
+        .bind(&entity)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+         values ($1, $2, 'ticket', 'In the dark', '', '{}'::jsonb)",
+    )
+    .bind(&entity)
+    .bind(&source)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, enabled)
+         values ($1, 'mock', 'Dark corner', '', 'none', false)",
+    )
+    .bind(&source)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let d = get_entity_inner(&pool, &entity).await.unwrap();
+    assert!(
+        !d.source.enabled,
+        "the banner has nothing to say without this"
+    );
+    assert!(
+        d.deleted_at.is_none(),
+        "turned off is not withdrawn: collapsing the two recreates #204"
+    );
+
+    sqlx::query("update knobas.source_config set enabled = true where id = $1")
+        .bind(&source)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let back = get_entity_inner(&pool, &entity).await.unwrap();
+    assert!(
+        back.source.enabled,
+        "re-enabling alone must clear the marker -- the proof nothing was stored"
+    );
 }
 
 #[tokio::test]
@@ -524,6 +592,10 @@ async fn an_entity_whose_source_was_never_configured_is_still_readable() {
         "no configuration row means no adapter to ask"
     );
     assert_eq!(d.source.adapter_kind, source);
+    // The coalesce direction #204 inherits from migration 0012: no
+    // configuration row is not a decision the user made, so it reads enabled
+    // rather than off.
+    assert!(d.source.enabled);
 }
 
 // -- the link commands ------------------------------------------------------

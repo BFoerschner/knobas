@@ -447,3 +447,124 @@ async fn a_write_survives_its_target_being_withdrawn() {
         "a target that vanished has changed, and must hold the write"
     );
 }
+
+// -- the disabled-source marker (issue #204) --------------------------------
+//
+// Migration `0012` gave `sync.live_item` a second reason to hide a row, so a
+// held write can now mean "the target changed" or "you turned the source
+// off". `source_enabled` is what tells a reader which -- derived in the same
+// statement as the row, never stored, so re-enabling clears it with no queue
+// edit.
+
+/// Give `id` a configuration row, or flip the one it has.
+async fn configure(pool: &sqlx::PgPool, id: &str, enabled: bool) {
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, enabled)
+         values ($1, 'mock', $1, '', 'none', $2)
+         on conflict (id) do update set enabled = excluded.enabled",
+    )
+    .bind(id)
+    .bind(enabled)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// The write held because its source is off says so -- and stops saying so
+/// the moment the source is back on, with the queue row untouched. The
+/// re-read after the toggle is #204's proof that nothing was stored: no
+/// re-sync ran, no queue edit happened, only the answer changed.
+#[tokio::test]
+async fn a_write_against_a_disabled_source_says_so_until_the_source_is_back() {
+    let (pool, ticket) = seeded_pool().await;
+    configure(&pool, &ticket.namespace, true).await;
+
+    let write = queue_comment(&pool, &ticket, "on it").await;
+    assert!(
+        write.source_enabled,
+        "an enabled source's write must not claim the source is off"
+    );
+
+    configure(&pool, &ticket.namespace, false).await;
+    // The hold arrives the way the flush loop produces it: the target leaves
+    // `sync.live_item` (migration 0012), so its projection reads not-live.
+    let gone = wq::target_of(&pool, &ticket).await.unwrap();
+    assert!(gone.is_none(), "a disabled source's target leaves the view");
+    wq::hold(&pool, write.id, wq::project("comment", None))
+        .await
+        .unwrap()
+        .unwrap();
+
+    let held = wq::get(&pool, write.id).await.unwrap().unwrap();
+    assert_eq!(held.state, WriteState::Held);
+    assert!(
+        !held.source_enabled,
+        "a write held while its source is off must say the source is off"
+    );
+
+    configure(&pool, &ticket.namespace, true).await;
+    let back = wq::get(&pool, write.id).await.unwrap().unwrap();
+    assert!(
+        back.source_enabled,
+        "re-enabling alone must clear the marker"
+    );
+    assert_eq!(
+        back.state,
+        WriteState::Held,
+        "the toggle changes the explanation, never the row"
+    );
+    assert_eq!(back.attempts, held.attempts, "no queue edit happened");
+}
+
+/// The miss direction #204 pins: a write held because its *target* changed,
+/// while its source is on, must not blame the source -- the remedies differ,
+/// and the wrong one sends the user to the Sources view for nothing.
+#[tokio::test]
+async fn a_write_held_for_a_changed_target_does_not_claim_the_source_is_off() {
+    let (pool, ticket) = seeded_pool().await;
+    configure(&pool, &ticket.namespace, true).await;
+
+    let write = queue_comment(&pool, &ticket, "answering").await;
+    mirror(
+        &pool,
+        &ticket,
+        "a payout fails",
+        "a payout fails\n\nit does\n\njonas: replied",
+    )
+    .await;
+    let moved = wq::project(
+        "comment",
+        wq::target_of(&pool, &ticket).await.unwrap().as_ref(),
+    );
+    assert_ne!(moved, write.target_snapshot);
+    wq::hold(&pool, write.id, moved).await.unwrap().unwrap();
+
+    let held = wq::get(&pool, write.id).await.unwrap().unwrap();
+    assert_eq!(held.state, WriteState::Held);
+    assert!(
+        held.source_enabled,
+        "held for a changed target: the source is on, and the row must say so"
+    );
+}
+
+/// A source with no configuration row at all reads *enabled* -- the same
+/// `coalesce(enabled, true)` direction as `sync.live_item` (migration 0012):
+/// the marker answers "did the user turn this source off", never "was this
+/// source ever configured". `run_once` syncs unconfigured sources, and their
+/// writes must not claim the user turned anything off.
+#[tokio::test]
+async fn an_unconfigured_sources_write_reads_enabled() {
+    let (pool, ticket) = seeded_pool().await;
+    // `seeded_pool` mints a namespace unique to this run and configures
+    // nothing, which is exactly the state under test.
+    let write = queue_comment(&pool, &ticket, "no config row").await;
+    assert!(write.source_enabled);
+
+    let listed = wq::open(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|row| row.id == write.id)
+        .expect("a fresh write is open");
+    assert!(listed.source_enabled, "the list read agrees with the insert");
+}

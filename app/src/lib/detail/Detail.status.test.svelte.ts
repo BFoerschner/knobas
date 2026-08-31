@@ -125,7 +125,7 @@ function detail(over: Partial<EntityDetail> = {}): EntityDetail {
       updated_at: "2026-08-22T11:48:00Z",
       synced_at: "2026-08-22T14:30:00Z",
     },
-    source: { id: "mock", display_name: "Tidewater (mock)", adapter_kind: "mock" },
+    source: { id: "mock", display_name: "Tidewater (mock)", adapter_kind: "mock", enabled: true },
     kind_info: null,
     body_text: "",
     author: "mara",

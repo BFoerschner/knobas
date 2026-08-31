@@ -472,6 +472,27 @@
         </div>
       {/if}
 
+      {#if !detail.source.enabled}
+        <!--
+          The other reason a reader hides an entity (issue #204): the user
+          turned the source off, so every list dropped its items — but the
+          detail reaches past that filter for the same §5a reason it reaches
+          past tombstones, and an item that opened looking entirely ordinary
+          would contradict every surface that says it does not exist. A
+          second, independent banner rather than a variant of the one above:
+          "withdrawn upstream" is the source's doing and permanent, this is
+          the user's own and one click away from undone — and when both facts
+          hold, both are true and both show.
+        -->
+        <div class="prompt">
+          <span class="pulse"></span>
+          <span>
+            Its source is turned off — {detail.source.display_name} is disabled, so this item
+            is hidden everywhere else. Re-enable the source to bring it back.
+          </span>
+        </div>
+      {/if}
+
       <div class="d-title">
         <div>
           <span class="k">

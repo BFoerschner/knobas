@@ -125,7 +125,7 @@ An operation that changes data in a source (status, comment, approval, trigger).
 An edit queued because its source cannot currently accept it. The queue is a visible, inspectable list, not a count.
 
 **Held write**:
-A pending write whose target changed after it was queued. It flushes only after the user chooses, both versions shown side by side — there is no silent last-write-wins.
+A pending write knobas will not send until the user acts, for one of two stated reasons: its target changed after it was queued (resolved by choosing between the two versions, shown side by side — there is no silent last-write-wins), or its source was turned off (resolved by re-enabling the source). The surface always says which; the two are never collapsed. (#204)
 
 **Inbox**:
 The single actionable stream — mentions, review requests, failed builds, assignments, credential expiry — with actions and snooze.

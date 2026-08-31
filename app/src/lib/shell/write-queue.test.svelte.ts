@@ -66,6 +66,7 @@ function write(over: Partial<QueuedWrite> = {}): QueuedWrite {
     attempts: 1,
     held_snapshot: null,
     settled_at: null,
+    source_enabled: true,
     ...over,
   };
 }
@@ -222,6 +223,64 @@ test("a target that vanished is shown as gone rather than as blank", async () =>
   counts = { pending: 0, held: 1, refused: 0 };
   const screen = await render();
   expect(screen.text()).toContain("the source withdrew it");
+  screen.done();
+});
+
+// -- the disabled-source reason (issue #204) ----------------------------------
+
+/**
+ * A write held because its source is off is a different fact with a different
+ * remedy: no target changed, so no two-versions comparison and no *Send mine
+ * anyway* — the source cannot take it, and offering the button would park the
+ * write as silently "waiting" forever. Re-enabling is the remedy, and the row
+ * says so.
+ */
+test("a write held while its source is off says so, not 'the target changed'", async () => {
+  rows = [
+    held({
+      source_enabled: false,
+      held_snapshot: { op: "comment", live: false, text: null },
+    }),
+  ];
+  counts = { pending: 0, held: 1, refused: 0 };
+  const screen = await render();
+
+  const text = screen.text();
+  expect(text).toContain("its source is turned off");
+  expect(text).not.toContain("The target changed");
+  expect(text).not.toContain("As it stands now");
+  expect(screen.button("Send mine anyway")).toBeUndefined();
+  // The exits that still work stay: the write can be edited or withdrawn.
+  expect(screen.button("Discard")).toBeDefined();
+  screen.done();
+});
+
+/**
+ * #204's miss direction: a write held because its *target* changed, while the
+ * source is on, must not blame the source — the wrong remedy sends the reader
+ * to the Sources view for nothing.
+ */
+test("a write held for a changed target does not claim the source is off", async () => {
+  rows = [held()];
+  counts = { pending: 0, held: 1, refused: 0 };
+  const screen = await render();
+
+  const text = screen.text();
+  expect(text).toContain("The target changed");
+  expect(text).not.toContain("turned off");
+  screen.done();
+});
+
+/**
+ * The same fact on a merely pending row: the scheduler never flushes a
+ * disabled source, so "waiting" with no reason would wait forever without
+ * saying why. The reason line carries the remedy instead.
+ */
+test("a pending write against a disabled source says why nothing moves", async () => {
+  rows = [write({ source_enabled: false })];
+  counts = { pending: 1, held: 0, refused: 0 };
+  const screen = await render();
+  expect(screen.text()).toContain("its source is turned off");
   screen.done();
 });
 
