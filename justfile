@@ -10,7 +10,7 @@
 # with `devUrl` set takes the empty default asset set and never looks at
 # `app/dist`. Nothing here may create that directory either: a missing one is
 # exactly how `tauri build` refuses to bundle an app with no frontend in it.
-check: fmt front clippy clippy-libs inventory test
+check: fmt front shell clippy clippy-libs inventory test
 
 # The test inventory: every test this workspace defines, by name, committed.
 #
@@ -148,6 +148,60 @@ _inventory-write FILE:
       | grep -vxF -f <(sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' test-inventory-conditional.txt) \
       | LC_ALL=C sort > "$tmp"
     mv "$tmp" "{{FILE}}"
+
+# shellcheck over every tracked script in testenv/.
+#
+# It lives here because the workflow that used to own it does not run. The
+# `testenv` workflow is disabled along with `check` (billing, 2026-08-29), so
+# from then until it is re-enabled nothing linted these scripts at all -- which
+# is how a `# shellcheck disable=SC2016` came to sit one line above the wrong
+# command for a whole commit. A gate nobody runs is not a gate.
+#
+# DISCOVERY IS BY SHEBANG, NOT BY GLOB, and the reasoning is the workflow's:
+# a glob cannot fail loudly when a new script stops matching it, it just
+# quietly checks less than you think. `git ls-files` rather than `find`, so a
+# seeded volume or a stray local script can never enter the set. Kept
+# deliberately parallel to `.github/workflows/testenv.yml`, which does the same
+# discovery and should keep agreeing with this.
+#
+# THE EMPTY GUARD IS THE POINT, not decoration. Bare `shellcheck` exits 3 with
+# "No files specified.", so a discovery that matched nothing would fail -- but
+# it would fail in a usage dump that reads as a broken recipe rather than as a
+# discovery that stopped matching. It also keeps the recipe off the exit code
+# of a tool whose "no arguments is an error" is a behaviour, not a promise.
+#
+# The container is pinned; a local binary is preferred when there is one, so
+# `just check` does not start requiring Docker of everyone. The two can differ
+# in version -- 0.11.0 here against the 0.9.0 that ubuntu-latest ships -- and a
+# stricter local gate is the right way round while local *is* the gate.
+shell:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    scripts=()
+    while IFS= read -r f; do
+        [ -f "$f" ] || continue
+        if head -n 1 -- "$f" | grep -qE '^#!.*\b(ba)?sh\b'; then
+            scripts+=("$f")
+        fi
+    done < <(git ls-files -- testenv)
+
+    if [ ${#scripts[@]} -eq 0 ]; then
+        echo "error: shebang discovery matched no scripts under testenv/ --" >&2
+        echo "  nothing was linted. Fix the discovery, do not delete this guard." >&2
+        exit 1
+    fi
+
+    echo "shellchecking ${#scripts[@]} scripts"
+    if command -v shellcheck >/dev/null; then
+        shellcheck "${scripts[@]}"
+    elif command -v docker >/dev/null; then
+        docker run --rm -v "$PWD:/mnt" -w /mnt \
+            koalaman/shellcheck:v0.11.0 "${scripts[@]}"
+    else
+        echo "error: neither shellcheck nor docker is available." >&2
+        echo "  brew install shellcheck (or start Docker)." >&2
+        exit 1
+    fi
 
 fmt:
     env -u RUSTUP_TOOLCHAIN cargo fmt --all --check

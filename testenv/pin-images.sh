@@ -36,9 +36,24 @@ pin() {  # pin <VAR> <repo:tag>
   printf '# %s\n%s=%s@%s\n' "$2" "$1" "${2%%:*}" "$digest"
 }
 
+# WRITE TO A TEMPORARY FILE, MOVE IT INTO PLACE ONLY ON SUCCESS. `> .env`
+# truncates the destination the instant the block starts, and every `pin` in it
+# is a network round trip that can fail -- a Docker Hub 429 mid-run (observed
+# 2026-08-31) therefore left a .env holding the header comment and none of the
+# seventeen digests, which `docker compose` reports as a missing-variable error
+# somewhere else entirely. Same reasoning as `just inventory`, which learned it
+# the same way.
+#
+tmp=$(mktemp "${TMPDIR:-/tmp}/knobas-env.XXXXXX")
+trap 'rm -f "$tmp"' EXIT
+
 # The heredoc-style block below writes .env. Its comment lines contain literal
 # backticks and $-free prose that must reach the file verbatim, so single
 # quotes are correct and SC2016's suggestion would break them.
+#
+# The directive has to sit immediately above the `{` it applies to -- putting
+# anything between them silently re-points it at that line instead, which the
+# `testenv` workflow's shellcheck would catch if it were enabled.
 # shellcheck disable=SC2016
 {
   echo '# Image digest pins for testenv/docker-compose.yml. Public digests only --'
@@ -92,8 +107,12 @@ pin() {  # pin <VAR> <repo:tag>
   # publishes no WADL past 9.17.x (9.18.0 and every 10.x/11.x probed answer
   # 404; `.../REST/latest/` redirects to 9.17.0). The container being newer
   # than its contract document is the gap `real-atlassian` exists to measure.
+  # One image for both Atlassian databases. Jira 10 removed embedded H2, so
+  # this is not optional scaffolding -- see docker-compose.yml.
+  pin ATLASSIAN_DB_IMAGE postgres:15-alpine
   pin JIRA_IMAGE       atlassian/jira-software:10.3.24
   pin CONFLUENCE_IMAGE atlassian/confluence:9.2.21
-} > .env
+} > "$tmp"
 
+mv "$tmp" .env
 echo "pin-images: wrote $(pwd)/.env"

@@ -2,8 +2,13 @@
 # Populate the running test environment with the Tidewater Freight content.
 # Idempotent: safe to re-run. Requires docker, curl, jq.
 #
-#   ./seed          seed Gitea and Uptime Kuma, then print the adapter env vars
-#   ./seed --env    print the env vars for an already-seeded environment
+#   ./seed             seed Gitea and Uptime Kuma, then print the adapter env vars
+#   ./seed --env       print the env vars for an already-seeded environment
+#   ./seed --atlassian set up the opt-in real Jira and Confluence containers
+#
+# `--atlassian` is separate rather than part of the default run because those
+# two live behind the `real-atlassian` profile, are not up unless you asked for
+# them, and run on 3-hour timebomb licences -- see seed-atlassian.sh.
 #
 # SEED_EXACT_PR_NUMBERS=0 skips the ~140 placeholder issues per repo that make
 # the fixture's pull request numbers come out exactly; see README.md.
@@ -26,10 +31,25 @@ print_env() {
   echo "export KNOBAS_MOCKD_JIRA_URL=http://127.0.0.1:8210"
   echo "export KNOBAS_MOCKD_TEAMCITY_URL=http://127.0.0.1:8212"
   echo "export KNOBAS_MOCKD_ADMIN_URL=http://127.0.0.1:8200"
+  # Only if ./seed --atlassian has run: these are the *real* products, and a
+  # suite pointed at them is answering a different question from one pointed
+  # at mockd.
+  if [ "$(jq -r 'has("jira")' "$STATE")" = "true" ]; then
+    echo "export KNOBAS_JIRA_URL=$(jq -r '.jira.url' "$STATE")"
+    echo "export KNOBAS_JIRA_USER=$(jq -r '.jira.user' "$STATE")"
+    echo "export KNOBAS_JIRA_PASSWORD=$(jq -r '.jira.password' "$STATE")"
+  fi
+  if [ "$(jq -r 'has("confluence")' "$STATE")" = "true" ]; then
+    echo "export KNOBAS_CONFLUENCE_URL=$(jq -r '.confluence.url' "$STATE")"
+    echo "export KNOBAS_CONFLUENCE_USER=$(jq -r '.confluence.user' "$STATE")"
+    echo "export KNOBAS_CONFLUENCE_PASSWORD=$(jq -r '.confluence.password' "$STATE")"
+  fi
 }
 
 if [ "${1:-}" = "--env" ]; then print_env; exit 0; fi
-[ $# -eq 0 ] || { echo "seed: unknown argument '$1'; usage: ./seed [--env]" >&2; exit 2; }
+if [ "${1:-}" = "--atlassian" ]; then exec ./seed-atlassian.sh; fi
+[ $# -eq 0 ] || {
+  echo "seed: unknown argument '$1'; usage: ./seed [--env|--atlassian]" >&2; exit 2; }
 
 for tool in docker curl jq; do
   command -v "$tool" >/dev/null || { echo "seed: $tool is required" >&2; exit 1; }
