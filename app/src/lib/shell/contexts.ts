@@ -79,11 +79,14 @@ function projectContext(project: Project): RoomContext {
  * inside one source, so two sources using `PAY` are two projects, two rooms
  * and two addresses.
  *
- * A project whose source has no room here is not offered one either. That is
- * the same rule stated once rather than twice — "immediately after its own
- * source's room" has no answer when there is no such room — and it is how a
- * disabled or unconfigured source contributes nothing to the switcher rather
- * than trailing rooms after the last one that does.
+ * A project whose source has no room here is not offered one either:
+ * "immediately after its own source's room" has no answer when there is no
+ * such room, and a room trailing after the last source is one a reader cannot
+ * place.
+ *
+ * A **disabled** source needs no rule of its own. Since migration `0012` its
+ * items are out of `sync.live_item` (#202, #203), so the census simply reports
+ * no projects for it, while its own room goes on behaving as it always has.
  */
 export function builtinContexts(
   sources: { id: string; label: string }[],
