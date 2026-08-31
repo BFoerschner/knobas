@@ -184,14 +184,20 @@ pub(crate) async fn author_coverage(
 
 /// The configured sources this query is narrowed to, in vocabulary order.
 ///
-/// No `source:` filter is every source in the vocabulary -- the enabled ones,
-/// the world the grammar can name. A **disabled** source's rows are still in
-/// the mirror and can still match a plain search, but `/alias` and `source:`
-/// stop resolving to it, and a verdict on a source the user turned off would
-/// accuse something the sources list no longer shows. A `source:` filter
-/// naming something the vocabulary does not have contributes nothing -- the
-/// parser already reports such a token as unknown, and inventing a coverage
-/// row for it would have the report claim a source exists.
+/// No `source:` filter is **every configured source, disabled included** (issue
+/// #200). That is deliberately wider than the set the grammar can name: the
+/// question here is *which sources put rows in the corpus this query scanned*,
+/// and a source the user turned off keeps its rows in the mirror -- disabling
+/// is not deleting, *Remove source and its items* is the purge path. Those rows
+/// still come back from a plain search, so a filter they cannot answer still
+/// owes an explanation. Scoping this to the enabled ones is what left the
+/// disabled case silent until #200, which is #141's own defect in miniature.
+///
+/// A `source:` filter naming something the vocabulary does not have contributes
+/// nothing -- the parser already reports such a token as unknown, and inventing
+/// a coverage row for it would have the report claim a source exists. A
+/// disabled source is unnameable for exactly that reason, so it reaches this
+/// list only when no `source:` filter narrowed the query at all.
 fn in_scope<'a>(vocab: &'a Vocabulary, filters: &EffectiveFilters) -> Vec<&'a SourceVocab> {
     vocab
         .sources

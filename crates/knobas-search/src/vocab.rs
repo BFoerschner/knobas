@@ -33,8 +33,22 @@ pub struct SourceVocab {
     /// The name shown in the sources list, matched as a typing prefix.
     pub display_name: String,
     /// The account this source was configured with, if it needed one. The
-    /// union of these is [`Vocabulary::identity`].
+    /// union of these -- **over the enabled sources only** -- is
+    /// [`Vocabulary::identity`].
     pub username: Option<String>,
+    /// Whether the user has this source turned on.
+    ///
+    /// **A disabled source is in the vocabulary and is not nameable by the
+    /// grammar** (issue #200). Those are two different questions and this field
+    /// is what lets one list answer both:
+    ///
+    /// * [`Vocabulary::resolve_source`] skips it, so `source:` and `/alias`
+    ///   cannot narrow to a source the sources list no longer offers;
+    /// * `coverage::in_scope` does **not**, because disabling is not deleting
+    ///   (*Remove source and its items* is the purge path) -- the rows stay in
+    ///   the mirror, stay searchable, and therefore still owe an explanation
+    ///   when a filter cannot be answered over them.
+    pub enabled: bool,
 }
 
 /// Everything one query's grammar is resolved against.
@@ -87,6 +101,9 @@ const SOURCE_ALIASES: &[(&str, &str)] = &[
 ///
 /// It stays **one** query on purpose: this runs on the hot path of every
 /// keystroke, and a second round trip per search costs more than the search.
+/// That is also why `enabled` is *selected* rather than filtered on (issue
+/// #200) -- two consumers need two different populations, and a second query
+/// to get the other one would be exactly the round trip this comment forbids.
 ///
 /// `kind` is `0001`'s column name for the *adapter* kind; interfaces §2.2 spells
 /// the DTO field `adapter_kind`. Renaming the column would be a migration, and
@@ -99,11 +116,11 @@ const SOURCE_VOCAB_SQL: &str = r"
 select id,
        kind                  as adapter_kind,
        display_name,
+       enabled,
        -- 'Who am I' is not a setting anyone should have to fill in twice: it
        -- is the username each source was configured with (interfaces §4.2).
        config ->> 'username' as username
   from knobas.source_config
- where enabled
  order by id
 ";
 
@@ -112,6 +129,7 @@ struct SourceConfigRow {
     id: String,
     adapter_kind: String,
     display_name: String,
+    enabled: bool,
     username: Option<String>,
 }
 
@@ -122,10 +140,13 @@ impl Vocabulary {
     /// compiled-in adapters, not from the database, and the caller is the one
     /// that has the registry (open question **E-Q2**).
     ///
-    /// A **disabled** source is not in the vocabulary at all, so `/ji` stops
-    /// resolving to it and the token is reported as unknown. That is the
-    /// truthful answer -- its rows are still in the mirror, but the user turned
-    /// the source off.
+    /// A **disabled** source is in the list and carries `enabled: false`
+    /// (issue #200). `/ji` still stops resolving to it and the token is still
+    /// reported as unknown -- [`Self::resolve_source`] is what enforces that --
+    /// but it is *present*, because its rows are still in the mirror and still
+    /// come back from a search, so a reader asking "which sources put rows in
+    /// this corpus" has to be able to see it. It was filtered out in SQL until
+    /// #200, which made that reader structurally unable to.
     ///
     /// # Errors
     ///
@@ -144,10 +165,21 @@ impl Vocabulary {
                 // which is nobody -- and an empty string in `identity` would
                 // make `@me` match every item with no author.
                 username: row.username.filter(|name| !name.trim().is_empty()),
+                enabled: row.enabled,
             })
             .collect();
 
-        let mut identity: Vec<String> = sources.iter().filter_map(|s| s.username.clone()).collect();
+        // **Enabled only, deliberately preserved** (issue #200). Widening the
+        // list must not quietly widen `@me`: what that filter matches is a
+        // product question -- a disabled source's username is still the user's,
+        // but the source is one they turned off -- and #200 is a consistency
+        // fix, not the place to answer it. Before #200 the SQL made this the
+        // only possible reading; now it is a choice, so it is written down.
+        let mut identity: Vec<String> = sources
+            .iter()
+            .filter(|source| source.enabled)
+            .filter_map(|s| s.username.clone())
+            .collect();
         identity.sort_unstable();
         identity.dedup();
 
@@ -174,6 +206,14 @@ impl Vocabulary {
     ///
     /// An empty result is reported to the user as an unknown token by the
     /// parser; it is never silently treated as "no filter".
+    ///
+    /// **Disabled sources are skipped at every step** (issue #200). The list
+    /// carries them so that coverage can see the rows they left behind; this is
+    /// the consumer for which they must not exist, because a query cannot be
+    /// narrowed to a source the sources list no longer offers. `nameable()` is
+    /// spelled once and used by all four steps -- a step that forgot it would
+    /// put a source the user turned off back in the chip row, and only for the
+    /// spelling that step handles.
     #[must_use]
     pub fn resolve_source(&self, token: &str) -> Vec<String> {
         let needle = token.trim().to_lowercase();
@@ -181,7 +221,7 @@ impl Vocabulary {
             return Vec::new();
         }
 
-        if let Some(exact) = self.sources.iter().find(|s| s.id.to_lowercase() == needle) {
+        if let Some(exact) = self.nameable().find(|s| s.id.to_lowercase() == needle) {
             return vec![exact.id.clone()];
         }
 
@@ -190,8 +230,7 @@ impl Vocabulary {
             .find(|(alias, _)| *alias == needle)
             .map_or(needle.as_str(), |(_, kind)| *kind);
         let by_kind: Vec<String> = self
-            .sources
-            .iter()
+            .nameable()
             .filter(|s| s.adapter_kind.to_lowercase() == adapter)
             .map(|s| s.id.clone())
             .collect();
@@ -200,8 +239,7 @@ impl Vocabulary {
         }
 
         let by_prefix: Vec<String> = self
-            .sources
-            .iter()
+            .nameable()
             .filter(|s| {
                 s.id.to_lowercase().starts_with(&needle)
                     || s.display_name.to_lowercase().starts_with(&needle)
@@ -215,6 +253,16 @@ impl Vocabulary {
         }
     }
 
+    /// The sources the **grammar** may resolve a token to: the enabled ones.
+    ///
+    /// Named rather than inlined so that "which sources can be typed" is one
+    /// statement with one place to change, and so the contrast with
+    /// [`Self::sources`] -- which is every configured source, disabled included
+    /// -- is legible at both call sites (issue #200).
+    fn nameable(&self) -> impl Iterator<Item = &SourceVocab> {
+        self.sources.iter().filter(|source| source.enabled)
+    }
+
     /// A vocabulary for tests: two Jiras (so `/ji` has something to be plural
     /// about), a Gitea, a TeamCity, one identity and five declared kinds.
     #[cfg(any(test, feature = "test-util"))]
@@ -226,6 +274,7 @@ impl Vocabulary {
                 adapter_kind: adapter_kind.to_owned(),
                 display_name: display_name.to_owned(),
                 username: username.map(str::to_owned),
+                enabled: true,
             }
         };
         Self {

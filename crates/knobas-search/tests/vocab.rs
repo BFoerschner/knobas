@@ -3,9 +3,11 @@
 //!
 //! Every test in this binary shares one database (`knobas_db::test_util`), so
 //! each seeds source ids unique to *itself* and nothing truncates. That matters
-//! more here than elsewhere: `Vocabulary::load` reads **every** enabled source,
-//! so a row another test in this run left behind is a row this one sees --
-//! which is also why the prefixes are per-test (`vta-`, `vtd-`, `vtb-`) rather
+//! more here than elsewhere: `Vocabulary::load` reads **every** configured
+//! source -- disabled ones included, since #200 -- so a row another test in
+//! this run left behind is a row this one sees, whether or not it turned it
+//! off. Which is also why the prefixes are per-test (`vta-`, `vtd-`, `vtb-`,
+//! `vti-`) rather
 //! than one shared `vt-`. The database itself is fresh per run:
 //! `test_util::run_nonce` is `{pid}-{nanos}`, so an earlier run's scratch
 //! directory can never match this process's stamp and is deleted.
@@ -109,21 +111,35 @@ async fn aliases_resolve_across_instances_and_identity_comes_from_the_configs() 
     assert_eq!(seeded, ["vta-gitea", "vta-jira", "vta-jira-eu"]);
 }
 
-/// A source the user switched off is not part of the vocabulary.
+/// A source the user switched off is **unnameable, and still present**.
 ///
-/// Its rows are still in the mirror, so answering `/x` with "every instance of
-/// x" would search a source the sources view shows as off. Dropping it from
-/// the vocabulary makes the token unresolvable, which the parser then reports.
+/// The guarantee is unchanged and is the first assertion: its rows are still in
+/// the mirror, so answering `/x` with "every instance of x" would narrow to a
+/// source the sources view shows as off, and the token must therefore be
+/// unresolvable for the parser to report.
+///
+/// What changed in #200 is the *mechanism*, and this test used to pin the
+/// mechanism as if it were the guarantee. The row was dropped in SQL, which
+/// made the disabled source invisible to **every** consumer -- including
+/// `coverage::in_scope`, which asks a different question ("which sources put
+/// rows in the corpus this query scanned") and for which the honest answer
+/// includes it. So it is in the list now, flagged, and
+/// `Vocabulary::resolve_source` is what enforces the guarantee. Both halves are
+/// asserted, because a fix that made it present and *nameable* would satisfy
+/// the second alone.
 #[tokio::test]
-async fn a_disabled_source_leaves_the_vocabulary() {
+async fn a_disabled_source_is_unnameable_but_still_in_the_vocabulary() {
     let pool = pool().await;
     seed_source(&pool, "vtd-off", "vtd-off-kind", "VTD Off", r"{}").await;
-    assert_eq!(
-        Vocabulary::load(&pool, KindCatalog::default())
-            .await
-            .unwrap()
-            .resolve_source("vtd-off"),
-        ["vtd-off"]
+    let before = Vocabulary::load(&pool, KindCatalog::default())
+        .await
+        .unwrap();
+    assert_eq!(before.resolve_source("vtd-off"), ["vtd-off"]);
+    assert!(
+        before
+            .sources
+            .iter()
+            .any(|s| s.id == "vtd-off" && s.enabled)
     );
 
     sqlx::query("update knobas.source_config set enabled = false where id = 'vtd-off'")
@@ -134,8 +150,65 @@ async fn a_disabled_source_leaves_the_vocabulary() {
     let vocab = Vocabulary::load(&pool, KindCatalog::default())
         .await
         .unwrap();
-    assert!(vocab.resolve_source("vtd-off").is_empty());
-    assert!(vocab.sources.iter().all(|s| s.id != "vtd-off"));
+    // The guarantee: the grammar cannot name it, by any of the four routes
+    // `resolve_source` offers -- exact id, alias, adapter kind, unique prefix.
+    for token in ["vtd-off", "vtd-off-kind", "vtd-o", "VTD Off"] {
+        assert!(
+            vocab.resolve_source(token).is_empty(),
+            "{token} resolved to a source the user turned off"
+        );
+    }
+    // The mechanism: present and flagged, so a reader that legitimately needs
+    // the wider population can have it.
+    assert!(
+        vocab
+            .sources
+            .iter()
+            .any(|s| s.id == "vtd-off" && !s.enabled),
+        "a disabled source left the vocabulary, so nothing can see the rows it \
+         left in the mirror"
+    );
+}
+
+/// Turning a source off does not change who `@me` is.
+///
+/// #200 widened `Vocabulary::sources` to carry disabled sources, and `identity`
+/// is derived from that list -- so without an explicit filter the widening
+/// would have silently changed what `@me` matches. Whether a disabled source's
+/// username should count is a product question that issue deliberately did not
+/// answer; this is what keeps it unanswered rather than answered by accident.
+#[tokio::test]
+async fn disabling_a_source_does_not_widen_the_identity_behind_me() {
+    let pool = pool().await;
+    seed_source(
+        &pool,
+        "vti-off",
+        "vti-off-kind",
+        "VTI Off",
+        r#"{"username":"vti.only.here"}"#,
+    )
+    .await;
+    let before = Vocabulary::load(&pool, KindCatalog::default())
+        .await
+        .unwrap();
+    assert!(before.identity.iter().any(|n| n == "vti.only.here"));
+
+    sqlx::query("update knobas.source_config set enabled = false where id = 'vti-off'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let vocab = Vocabulary::load(&pool, KindCatalog::default())
+        .await
+        .unwrap();
+    assert!(
+        !vocab.identity.iter().any(|n| n == "vti.only.here"),
+        "a disabled source's username leaked into @me: {:?}",
+        vocab.identity
+    );
+    // ...and it is still in the source list, or this test would pass for the
+    // wrong reason -- the pre-#200 behaviour satisfied the assertion above too.
+    assert!(vocab.sources.iter().any(|s| s.id == "vti-off"));
 }
 
 /// A configured source with no `username` contributes no identity -- and an
