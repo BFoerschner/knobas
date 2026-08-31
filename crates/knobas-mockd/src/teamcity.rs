@@ -861,7 +861,6 @@ fn parse_states(value: &str) -> Result<Vec<TcState>, String> {
         })
 }
 
-/// Splits on commas that are not inside parentheses.
 /// The locator a filled page's `nextHref` names: the request's own, with
 /// `start:` advanced past the rows just served.
 ///
@@ -885,6 +884,7 @@ fn continuation(raw_locator: &str, start: usize) -> String {
     }
 }
 
+/// Splits on commas that are not inside parentheses.
 fn split_top_level(raw: &str) -> Result<Vec<&str>, String> {
     let mut out = Vec::new();
     let mut depth = 0usize;

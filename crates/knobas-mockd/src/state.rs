@@ -26,7 +26,7 @@
 //! | `timeoriginalestimate` | `estimate_h * 3600`, `null` where the fixture records no estimate. |
 //! | `timespent` | the sum of the issue's worklog seconds, `null` where it has none. |
 //! | `labels` | always `[]`. The dataset names no labels and mockd will not invent any (the #28 ruling: an invented value reaches `SyncItem::payload` and is indexed as if the dataset had said it). |
-//! | clock | starts at `fixture().today` and advances **exactly one minute** per `touch_issue`/`add_comment` — JQL time resolution is one minute, so a smaller step would make two touches indistinguishable to the very query an adapter runs. |
+//! | clock | starts at `fixture().today` and advances **exactly one minute** per mutation (`touch_issue`, `add_comment`, `transition_issue`, `create_issue`, `queue_build`, and the build finishers) — JQL time resolution is one minute, so a smaller step would make two touches indistinguishable to the very query an adapter runs. |
 //!
 //! ## The server is deliberately not on UTC
 //!

@@ -2,10 +2,14 @@
 //!
 //! In-process, a test reaches [`MockState`] directly and never needs this. In
 //! **compose** mode there is no such handle: mockd is a container and the thing
-//! driving it is a shell script or another process entirely. Every mutator the
-//! typed API offers therefore has an HTTP twin here, and
+//! driving it is a shell script or another process entirely. The Jira-side
+//! mutators therefore have HTTP twins here (the write-backs — comment,
+//! transition, create — arrive through the product routes instead), and
 //! `GET /__mock/violations` is how a compose-mode end-to-end run asserts the
 //! same fidelity an in-process test gets from `assert_no_violations()`.
+//! The TeamCity build mutators (`finish_build`, `queue_build`, `cancel_build`,
+//! `fail_build_to_start`, `describe_build_type`) have **no** twins, so compose
+//! mode cannot drive TC build state — whether they should is issue #219.
 //!
 //! The admin router is **merged after** each product router's middleware layer,
 //! so `/__mock/*` needs no `Authorization` and no `Accept: application/json`,
