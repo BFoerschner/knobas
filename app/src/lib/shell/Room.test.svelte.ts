@@ -8,12 +8,20 @@
 import { flushSync, mount, unmount } from "svelte";
 import { beforeEach, expect, test, vi } from "vitest";
 
-import type { EntityDetail, EntityFilter, EntityPage, EntityRow } from "../ipc/entity";
+import type {
+  EntityDetail,
+  EntityFilter,
+  EntityPage,
+  EntityRow,
+  MiniBoard,
+} from "../ipc/entity";
 
 /** A plain function, not a `vi.fn` — see the note in `Tile.test.svelte.ts`. */
 const calls: { filter: EntityFilter; limit: number; offset: number }[] = [];
 let answer: (filter: EntityFilter) => Promise<EntityPage> = () =>
   Promise.resolve({ rows: [], total: 0 });
+let board: (filter: Pick<EntityFilter, "sources" | "context" | "project">) => Promise<MiniBoard> =
+  () => Promise.resolve({ columns: [], sources: [] });
 
 /**
  * `getEntity` too, because opening a row mounts the slide-over — which reads.
@@ -34,9 +42,11 @@ vi.mock("../ipc/entity", () => ({
   contextMembers: () => Promise.resolve([]),
   createContext: () => Promise.reject(new Error("no context creation in this test")),
   promoteContext: () => Promise.reject(new Error("no promotion in this test")),
-  // The Tickets tile's read (#178): this file is about the room, not the
-  // board, so it answers with an empty one.
-  miniBoard: () => Promise.resolve({ columns: [], sources: [] }),
+  // The Tickets tile's read (#178). Empty by default -- this file is about
+  // the room, not the board -- but answerable, because a project room's
+  // narrowing is only observable through what its tiles draw, and the Tickets
+  // tile is a board rather than a list of rows.
+  miniBoard: (filter: Pick<EntityFilter, "sources" | "context" | "project">) => board(filter),
   listEntities: (filter: EntityFilter, limit: number, offset: number) => {
     calls.push({ filter, limit, offset });
     return answer(filter);
@@ -79,7 +89,20 @@ const { default: Room } = await import("./Room.svelte");
 const { builtinContexts } = await import("./contexts");
 const { createRouter } = await import("./router.svelte");
 
-const CONTEXTS = builtinContexts([{ id: "jira", label: "Tidewater Jira" }]);
+/**
+ * One source, and the two projects its corpus shows (#209).
+ *
+ * `OPS` deliberately reports no name, so the rooms drawn here cover both
+ * labellings — the source's own word where there is one, the key where there
+ * is not.
+ */
+const CONTEXTS = builtinContexts(
+  [{ id: "jira", label: "Tidewater Jira" }],
+  [
+    { source_id: "jira", key: "PAY", name: "Payments Platform" },
+    { source_id: "jira", key: "OPS", name: null },
+  ],
+);
 
 function row(kind: string, key: string): EntityRow {
   return {
@@ -104,6 +127,8 @@ function render(hash: string) {
     target,
     router,
     tiles: () => [...target.querySelectorAll<HTMLElement>(".tile .tile-h .lab")].map((l) => l.textContent),
+    /** The key on each mini-board card, in the order drawn. */
+    cards: () => [...target.querySelectorAll<HTMLElement>(".card .mono")].map((k) => k.textContent),
     text: () => target.textContent ?? "",
     done: () => {
       unmount(app);
@@ -116,6 +141,7 @@ function render(hash: string) {
 beforeEach(() => {
   calls.length = 0;
   answer = () => Promise.resolve({ rows: [], total: 0 });
+  board = () => Promise.resolve({ columns: [], sources: [] });
 });
 
 /** Let every queued promise and the DOM catch up. */
@@ -285,4 +311,173 @@ test("a note address opens the note view rather than the mirror's detail", async
     expect(screen.text(), hash).not.toContain("is not in the local index");
     screen.done();
   }
+});
+
+/**
+ * A corpus with a project dimension in it, answered by both reads.
+ *
+ * The mocks **honour** the filter rather than recording it, and that is the
+ * point of this fixture: a project room narrows because the filter it hands
+ * every tile says so, so the only way to see the narrowing is through what the
+ * tiles then draw. A test that asserted on the filter object would pass just
+ * as well against a room that passed the right filter to a tile which ignored
+ * it.
+ *
+ * `PAY-236` carries the `PAY` prefix in its key and **no project**, which is
+ * the demo corpus' own miss case (#207) and the trap a room keying off the
+ * ticket key rather than the record's project would fall into.
+ */
+interface Item {
+  kind: string;
+  key: string;
+  project: string | null;
+}
+
+const CORPUS: Item[] = [
+  { kind: "ticket", key: "PAY-231", project: "PAY" },
+  { kind: "ticket", key: "PAY-236", project: null },
+  { kind: "ticket", key: "OPS-77", project: "OPS" },
+  { kind: "page", key: "ENG-1", project: "PAY" },
+  { kind: "incident", key: "INC-1", project: "OPS" },
+];
+
+/** Everything one source holds, narrowed the way the backend narrows it. */
+function corpus(filter: Pick<EntityFilter, "sources" | "project"> & { kinds?: string[] }): Item[] {
+  return CORPUS.filter(
+    (item) =>
+      (filter.sources.length === 0 || filter.sources.includes("jira")) &&
+      (filter.project === null || filter.project === item.project) &&
+      ((filter.kinds ?? []).length === 0 || (filter.kinds ?? []).includes(item.kind)),
+  );
+}
+
+/** Point both of the room's reads at {@link CORPUS}. */
+function serveCorpus() {
+  answer = (filter) => {
+    const items = corpus(filter);
+    return Promise.resolve({
+      rows: items.map((item) => row(item.kind, item.key)),
+      total: items.length,
+    });
+  };
+  board = (filter) => {
+    const cards = corpus({ ...filter, kinds: ["ticket"] }).map((item) => ({
+      entity_id: `mock:${item.key}`,
+      source_id: "mock",
+      key: item.key,
+      title: item.key,
+      priority: null,
+    }));
+    return Promise.resolve({
+      columns: cards.length === 0 ? [] : [{ status: "To Do", cards }],
+      sources: [],
+    });
+  };
+}
+
+/**
+ * Story 2: a project room narrows **every** tile in it, its own kinds-and-count
+ * read included.
+ *
+ * Read through what the room draws, never through the filter it passes: the
+ * heading's count, which tiles exist at all, and which cards the mini board
+ * puts on screen are three independent readers of one filter, and all three
+ * have to be that project's.
+ */
+test("a project room narrows every tile in it, its own count included", async () => {
+  serveCorpus();
+
+  const project = render("#/ctx/proj:jira:PAY");
+  await vi.waitFor(() => expect(project.tiles().length).toBeGreaterThan(0));
+  await settle();
+
+  expect(project.text()).toContain("Payments Platform");
+  expect(project.text()).toContain("project");
+  // Its own read: two of the five items this source holds are `PAY`.
+  expect(project.text()).toContain("2 items");
+  // ...and the incident belongs to `OPS`, so the room has no tile for one.
+  expect(project.tiles()).toEqual(["Tickets", "Docs"]);
+  expect(project.cards()).toEqual(["PAY-231"]);
+  project.done();
+
+  // The same corpus, one room out: everything the project room narrowed away.
+  const source = render("#/ctx/src:jira");
+  await vi.waitFor(() => expect(source.tiles().length).toBeGreaterThan(0));
+  await settle();
+
+  expect(source.text()).toContain("5 items");
+  expect(source.tiles()).toEqual(["Tickets", "Docs", "Incidents"]);
+  expect(source.cards()).toEqual(["PAY-231", "PAY-236", "OPS-77"]);
+  source.done();
+});
+
+/**
+ * The failure direction, from the reader's end (ADR-0007 requirement 3,
+ * ADR-0010): absence, never a wrong room.
+ *
+ * A ticket whose record carries no readable project is in *All work* and in
+ * its source's room, and in no project room — nothing is hidden by a dimension
+ * the record does not carry, and there is no "No project" room to put it in.
+ */
+test("a ticket with no readable project is in All work and its source's room, and in no project room", async () => {
+  serveCorpus();
+
+  for (const hash of ["#/ctx/all", "#/ctx/src:jira"]) {
+    const screen = render(hash);
+    await vi.waitFor(() => expect(screen.cards().length).toBeGreaterThan(0));
+    await settle();
+    expect(screen.cards(), hash).toContain("PAY-236");
+    screen.done();
+  }
+
+  for (const hash of ["#/ctx/proj:jira:PAY", "#/ctx/proj:jira:OPS"]) {
+    const screen = render(hash);
+    await vi.waitFor(() => expect(screen.cards().length).toBeGreaterThan(0));
+    await settle();
+    expect(screen.cards(), hash).not.toContain("PAY-236");
+    screen.done();
+  }
+
+  // ...and the switcher offers nowhere else it could have gone.
+  expect(CONTEXTS.map((context) => context.label)).not.toContain("No project");
+});
+
+/** A project the source named nothing readable is still a room, headed by its key. */
+test("a project room with no readable name is headed by its key", async () => {
+  serveCorpus();
+
+  const screen = render("#/ctx/proj:jira:OPS");
+  await vi.waitFor(() => expect(screen.tiles().length).toBeGreaterThan(0));
+  await settle();
+
+  expect(screen.text()).toContain("OPS");
+  expect(screen.text()).toContain("2 items");
+  expect(screen.tiles()).toEqual(["Tickets", "Incidents"]);
+  expect(screen.cards()).toEqual(["OPS-77"]);
+
+  screen.done();
+});
+
+/**
+ * A project room is a way *into* the work, not a separate world: the card
+ * opens the same ticket at the same address it opens at from anywhere else,
+ * and `Esc` still returns to the room it was opened over.
+ */
+test("a card opens at the same address from a project room as from All work", async () => {
+  serveCorpus();
+
+  const addresses: string[] = [];
+  for (const hash of ["#/ctx/all", "#/ctx/proj:jira:PAY"]) {
+    const screen = render(hash);
+    await vi.waitFor(() => expect(screen.cards().length).toBeGreaterThan(0));
+    await settle();
+
+    screen.target.querySelector<HTMLButtonElement>(".card")?.click();
+    flushSync();
+    addresses.push(location.hash);
+    expect(screen.router.ctx).toBe(hash.slice("#/ctx/".length));
+    screen.done();
+  }
+
+  expect(addresses).toEqual(["#/ticket/mock:PAY-231", "#/ticket/mock:PAY-231"]);
 });

@@ -6,6 +6,11 @@
   a room only draws tiles it has something to put in (§3a open kinds) — and how
   many items the room holds, which is the heading's count. Every tile then
   fetches its own page.
+
+  It reads with the **room's own filter**, exactly as every tile in it does,
+  which is the whole of a project room's narrowing (#209): there is no
+  per-tile special case, and the count in the heading cannot disagree with the
+  tiles under it about which room this is.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../ipc";
@@ -46,7 +51,7 @@
   let token = 0;
 
   $effect(() => {
-    const { sources, context: ctx } = context.filter;
+    const { sources, context: ctx, project } = context.filter;
     const mine = ++token;
     kinds = null;
     total = null;
@@ -57,9 +62,7 @@
         kinds: [],
         updated_within_days: null,
         context: ctx,
-        // Unscoped, for the reason `Tile.svelte` states: no room narrows by a
-        // project until #209 adds the rooms that do.
-        project: null,
+        project,
         order: "updated_desc",
         include_deleted: false,
       },
@@ -192,7 +195,13 @@
   {:else}
     <div class="tiles rows-{rows} {tiles.length === 1 ? 'one' : ''}">
       {#each tiles as spec (spec.id)}
-        <Tile {spec} sources={context.filter.sources} ctx={context.filter.context} onopen={open} />
+        <Tile
+          {spec}
+          sources={context.filter.sources}
+          ctx={context.filter.context}
+          project={context.filter.project}
+          onopen={open}
+        />
       {/each}
     </div>
   {/if}
