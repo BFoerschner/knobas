@@ -32,11 +32,12 @@ const ORIGINS: [&str; 5] = ["manual", "suggested", "imported", "source", "implie
 /// `knobas_core::context`'s own test.
 const CONTEXT_KINDS: [&str; 3] = ["epic", "ticket", "adhoc"];
 
-/// `link_active_idx` is what the link commands built on this schema rest on,
-/// in all three of its parts: a second *active* link over the same
-/// `(from, to, relation)` fails with SQLSTATE 23505; a different `relation`
-/// over the same pair is a distinct link and must be allowed; and the index
-/// being partial means a tombstone never blocks re-linking.
+/// `link_pair_active_idx` (0011's unordered successor to `link_active_idx`)
+/// is what the link commands built on this schema rest on, in all three of
+/// its parts: a second *active* link over the same `(from, to, relation)`
+/// fails with SQLSTATE 23505; a different `relation` over the same pair is a
+/// distinct link and must be allowed; and the index being partial means a
+/// tombstone never blocks re-linking.
 #[tokio::test]
 async fn active_links_are_unique_per_relation_and_tombstones_do_not_block() {
     let pool = &knobas_db::test_util::test_pool().await;
@@ -509,7 +510,7 @@ async fn the_link_origin_vocabulary_is_closed() {
     }
 
     // Every spelling `Origin` can produce is storable. One relation each:
-    // `link_active_idx` would otherwise refuse the second link of the pair.
+    // `link_pair_active_idx` would otherwise refuse the second link of the pair.
     for origin in ORIGINS {
         sqlx::query(
             "insert into knobas.link (from_id, to_id, relation, origin, created_by)
