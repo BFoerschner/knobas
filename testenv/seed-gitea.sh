@@ -435,10 +435,17 @@ done
 PR_JSON=$(printf '%s' "$PR_MAP" | jq -R -s 'split("\n") | map(select(length>0) | split("=")
           | {fixture_number: (.[0]|tonumber), real_index: (.[1]|tonumber)})')
 
+# MERGED INTO the state file, not written over it: `seed-atlassian.sh` keeps
+# its own `jira` and `confluence` blocks in the same file, and a plain `>` here
+# deleted them -- so seeding Gitea after Atlassian silently dropped the real
+# instances back out of `./seed --env`. Only the keys below are this script's
+# to replace.
+OLD='{}'
+[ -s "$STATE" ] && OLD=$(cat "$STATE")
 jq -n --arg url "$GITEA_URL" --arg token "$TOKEN" --arg org "$ORG" \
       --argjson commits "$RESOLVED" --argjson prs "$PR_JSON" \
-      --arg exact "$SEED_EXACT_PR_NUMBERS" \
-  '{
+      --arg exact "$SEED_EXACT_PR_NUMBERS" --argjson old "$OLD" \
+  '$old + {
      _comment: "Written by testenv/seed-gitea.sh. The bridge between fixtures/tidewater/work.json and what Gitea and git actually assigned. Git chooses commit shas and Gitea chooses pull request indices; neither can be dictated, so live assertions go by form and title and look literal ids up here.",
      gitea: { url: $url, org: $org, admin_user: "knobas", token: $token },
      exact_pr_numbers: ($exact == "1"),
@@ -450,7 +457,8 @@ jq -n --arg url "$GITEA_URL" --arg token "$TOKEN" --arg org "$ORG" \
      ],
      commits: $commits,
      pull_requests: $prs
-   }' > "$STATE"
+   }' > "$STATE.tmp"
+mv "$STATE.tmp" "$STATE"
 
 say "wrote $STATE"
 say "done"
