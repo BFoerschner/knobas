@@ -1649,3 +1649,99 @@ async fn zero_eleven_resolves_the_reversed_pairs_a_shipped_defect_left_behind() 
     .await
     .unwrap();
 }
+
+/// `sync.live_item` also hides what the **user** switched off (migration
+/// `0012`, issue #202) — and, just as load-bearing, what was never configured
+/// at all.
+///
+/// Ruled by Björn 2026-08-31, asked explicitly about blast radius: a source the
+/// user has turned off is invisible to *every* reader, not merely absent from
+/// search. Putting that in the view rather than in each reader is the same
+/// decision `0002` made for the tombstone filter, for the same reason — a
+/// reader cannot forget a join it does not write.
+///
+/// **The three-way split is the test.** `sync.item.source_id` has no foreign
+/// key to `source_config`, deliberately: `run_once` syncs unconfigured sources
+/// (tests, ad-hoc imports). So the view uses `left join … coalesce(s.enabled,
+/// true)`, and an inner join — the obvious way to write this — would silently
+/// hide the third row below. That is not hypothetical: `knobas-search`'s own
+/// suite seeds items for `teamcity` and `confluence` while registering only
+/// `jira` and `gitea`.
+#[tokio::test]
+async fn live_item_hides_a_disabled_source_but_not_an_unconfigured_one() {
+    let pool = &knobas_db::test_util::test_pool().await;
+    migrate::run(pool).await.unwrap();
+
+    let run = uuid::Uuid::new_v4().simple().to_string();
+    let on = format!("src-on-{run}");
+    let off = format!("src-off-{run}");
+    // Never inserted into `knobas.source_config` at all.
+    let unconfigured = format!("src-none-{run}");
+
+    for (source, enabled) in [(&on, true), (&off, false)] {
+        sqlx::query(
+            "insert into knobas.source_config
+               (id, kind, display_name, base_url, auth_kind, config, enabled)
+             values ($1, 'test-kind', 'Test', 'http://x', 'Pat', '{}'::jsonb, $2)",
+        )
+        .bind(source)
+        .bind(enabled)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    let mut ids = Vec::new();
+    for source in [&on, &off, &unconfigured] {
+        let id = format!("{source}:item");
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'ticket','x')")
+            .bind(&id)
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+             values ($1, $2, 'ticket', 'x', 'x', '{}'::jsonb)",
+        )
+        .bind(&id)
+        .bind(source)
+        .execute(pool)
+        .await
+        .unwrap();
+        ids.push(id);
+    }
+
+    let visible: Vec<String> = sqlx::query_scalar(
+        "select entity_id from sync.live_item where entity_id = any($1) order by entity_id",
+    )
+    .bind(ids.clone())
+    .fetch_all(pool)
+    .await
+    .unwrap();
+
+    let mut expected = vec![format!("{on}:item"), format!("{unconfigured}:item")];
+    expected.sort();
+    assert_eq!(
+        visible, expected,
+        "the view must hide the disabled source's item, keep the enabled one, \
+         and — the trap an inner join falls into — keep the item whose source \
+         was never configured"
+    );
+
+    // The row is hidden, not gone: disabling is not deleting, and re-enabling
+    // must bring it straight back with no re-sync.
+    sqlx::query("update knobas.source_config set enabled = true where id = $1")
+        .bind(&off)
+        .execute(pool)
+        .await
+        .unwrap();
+    let back: i64 = sqlx::query_scalar("select count(*) from sync.live_item where entity_id = $1")
+        .bind(format!("{off}:item"))
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        back, 1,
+        "re-enabling a source must restore its items as they were"
+    );
+}

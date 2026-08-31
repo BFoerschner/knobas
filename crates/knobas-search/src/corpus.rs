@@ -128,7 +128,9 @@ pub struct Corpus {
 /// **`sync.live_item`, never `sync.item`.** Migration `0002` made the tombstone
 /// filter structural precisely so that no query has to remember the join to
 /// `knobas.entity`; reading the base table would put items a source deleted
-/// back in the launcher.
+/// back in the launcher. Migration `0012` put the *disabled-source* filter in
+/// the same place for the same reason (issue #202), so reading the base table
+/// now also puts back items from a source the user switched off.
 pub const LIVE_ITEM: Corpus = Corpus {
     relation: "sync.live_item i",
     entity_id: "i.entity_id",
