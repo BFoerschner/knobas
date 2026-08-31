@@ -31,7 +31,7 @@
 //! `delete from knobas.link` does match, because the two words the needle wants
 //! are adjacent there too, and the message it would print names the wrong
 //! reason. Nothing in the tree hits it: a link is removed by a tombstone
-//! (`link::remove` writes `update knobas.link set deleted_at = now()`), and a
+//! (`link::unlink` writes `update knobas.link set deleted_at = now()`), and a
 //! hard delete would want an argument of its own anyway. Whoever writes the
 //! first one gets a report about seeing both populations and should read this
 //! paragraph instead.
@@ -80,7 +80,7 @@
 //! Both are in `knobas-core`, both read the base table on purpose, and both say
 //! why in place:
 //!
-//! * [`LINK`] -- `link::remove` re-reads the row by id to tell "already gone"
+//! * [`LINK`] -- `link::unlink` re-reads the row by id to tell "already gone"
 //!   from "never existed", a question about the row rather than about which
 //!   population it is in.
 //! * [`SUGGEST`] -- detection's suppression reads the pair in both directions
@@ -103,7 +103,7 @@
 
 use std::path::{Path, PathBuf};
 
-/// `link::remove`'s existence probe, relative to `crates/`.
+/// `link::unlink`'s existence probe, relative to `crates/`.
 const LINK: &str = "knobas-core/src/link.rs";
 
 /// Detection's unfiltered, both-directions suppression, relative to `crates/`.

@@ -636,8 +636,9 @@ async fn a_link_the_user_unlinked_is_never_proposed_back() {
 
 /// The suppression is undirected: removing `A -> B` also suppresses `B -> A`.
 ///
-/// The unique index is directed (#70) but the *fact* "these two are connected"
-/// is not, and a detector that re-proposed the mirror image of a link the user
+/// The unique index was directed until migration `0011` made it agree (#70),
+/// but the *fact* "these two are connected" never was, and a detector that
+/// re-proposed the mirror image of a link the user
 /// removed would be exactly the silent resurrection the withdrawal memory
 /// exists to prevent.
 #[tokio::test]
