@@ -22,8 +22,10 @@ use quick_xml::events::{BytesStart, Event};
 
 const WADL: &str = "../../testenv/specs/jira-dc-rest.wadl";
 
-/// The endpoints mockd actually serves. Only their schemas are embedded — all
-/// 259 would be ~1 MB of `&'static str` for no benefit.
+/// The GET endpoints mockd serves — the ones with a 200 schema worth pinning
+/// (the M2 write-backs answer 201/204, so there is no 200 response to pin).
+/// Only these schemas are embedded — all 259 would be ~1 MB of `&'static str`
+/// for no benefit.
 const SERVED: &[(&str, &str)] = &[
     ("GET", "api/2/search"),
     ("GET", "api/2/serverInfo"),
