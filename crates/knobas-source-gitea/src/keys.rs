@@ -55,9 +55,10 @@ pub fn branch_key(owner: &str, repo: &str, branch: &str) -> String {
 
 /// One parsed key, the inverse of the four constructors above.
 ///
-/// Nothing in M1 needs to go backwards -- but the forms are only unambiguous
+/// Nothing in M1 needed to go backwards -- but the forms are only unambiguous
 /// if something can actually tell them apart, and this is what proves it (and
-/// what M2's write-back will resolve an entity id to an API path with).
+/// what M2's write-back resolves an entity id to an API path with:
+/// `source::GiteaSource::key_of` dispatches every write through `parse_key`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GiteaKey {
     Repo {

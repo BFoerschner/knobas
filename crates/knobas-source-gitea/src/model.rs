@@ -204,11 +204,12 @@ mod tests {
         assert_eq!(commit.happened_at(), None);
     }
 
-    /// The three fields nothing reads yet are still parsed, because the passes
-    /// that will read them are what the shapes were chosen for: `empty` and
-    /// `default_branch` steer Task 7's commit walk away from the 409 an empty
-    /// repository answers, and `comments` is the count that saves Task 6 a
-    /// request per pull request that has no discussion.
+    /// The three steering fields parse from minimal records: `empty` and
+    /// `default_branch` steer the commit walk (`sync::commits` avoids the 409
+    /// an empty repository answers, and `sync::walk_order` spends the budget
+    /// on the default branch first), and `comments` is the count that saves
+    /// `sync::fetch_comments` a request per pull request that has no
+    /// discussion.
     #[test]
     fn the_fields_the_later_passes_steer_on_are_parsed_now() {
         let repo: Repo = serde_json::from_value(serde_json::json!({
