@@ -251,6 +251,7 @@ mod tests {
             attempts: 0,
             held_snapshot: None,
             settled_at: None,
+            source_enabled: true,
         }
     }
 

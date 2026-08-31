@@ -47,6 +47,12 @@ crate::closed_vocabulary! {
         Pending => "pending",
         /// The target changed after the write was queued. Waits for the user
         /// and for nothing else: no timeout, no auto-apply, no auto-discard.
+        ///
+        /// Since migration `0012` a target also leaves the view when the user
+        /// turns its source off, and that write holds by the same mechanism.
+        /// [`QueuedWrite::source_enabled`] is what tells the two apart -- the
+        /// state stays one word because the queue's answer is the same
+        /// (nothing sends until someone acts); only the explanation differs.
         Held => "held",
         /// The source rejected the write outright. Not retried -- a refusal is
         /// a decision, not a blip (ADR-0004 is what tells the two apart).
@@ -140,16 +146,31 @@ pub struct UnknownValue(pub String);
 text_codec!(WriteState);
 text_codec!(WaitReason);
 
-/// Every column of `knobas.write_queue` that leaves this module, in one place.
+/// Every column of `knobas.write_queue` that leaves this module, in one place
+/// -- plus the one *derived* column, `source_enabled`, which is not a column
+/// of the table at all.
 ///
 /// The same device, for the same reason, as `link_columns!`: [`QueuedWrite`]
 /// is a `FromRow`, so a column this list forgets is a decode failure at run
 /// time rather than a compile error. Naming them once is what stops the
 /// `returning` clauses of eight statements from drifting apart.
+///
+/// `source_enabled` is computed here, in the same statement as the row,
+/// rather than stored or joined by a caller: whether a source is on changes
+/// with a click, so a stored value is stale the moment the user re-enables,
+/// and a second fetch a caller correlates can describe a different instant
+/// than the row it decorates (issue #204). A scalar subquery instead of a
+/// join because half these statements are `returning` clauses, which can
+/// carry an expression but not a join. `coalesce(.., true)` is migration
+/// `0012`'s own direction: no configuration row answers "did the user turn
+/// this source off" with no -- `run_once` queues writes for unconfigured
+/// sources, and those must not claim the user turned anything off.
 macro_rules! queue_columns {
     () => {
         "id, source_id, entity_id, op, payload, target_snapshot, state, wait_reason, \
-         detail, queued_at, attempted_at, attempts, held_snapshot, settled_at"
+         detail, queued_at, attempted_at, attempts, held_snapshot, settled_at, \
+         coalesce((select s.enabled from knobas.source_config s where s.id = source_id), true) \
+           as source_enabled"
     };
 }
 
@@ -183,6 +204,23 @@ pub struct QueuedWrite {
     /// "both versions side by side".
     pub held_snapshot: Option<serde_json::Value>,
     pub settled_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Whether the user has this write's source turned on, **as of this read**
+    /// -- derived by [`queue_columns!`], never stored (issue #204).
+    ///
+    /// Since migration `0012` a disabled source's items leave
+    /// `sync.live_item`, so its queued writes go [held](WriteState::Held) by
+    /// the same mechanism as a withdrawn target's -- [`target_of`] reads
+    /// `None` either way. The two are not the same fact: one is upstream's
+    /// doing and resolved by choosing a version, the other is the user's own
+    /// and undone by re-enabling the source. This flag is what keeps them
+    /// distinguishable downstream; storing it instead would leave the wrong
+    /// answer standing after the click that re-enables.
+    ///
+    /// `false` only when a configuration row exists and says off. A source
+    /// with no row at all reads `true`, matching `0012`'s
+    /// `coalesce(enabled, true)`: absence of configuration is not a decision
+    /// the user made.
+    pub source_enabled: bool,
 }
 
 /// Queue one write, returning the row that was written.

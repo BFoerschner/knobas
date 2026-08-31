@@ -124,6 +124,19 @@ export interface SourceRef {
   display_name: string;
   /** The *adapter* kind (`jira`, `mock`), not the instance id. */
   adapter_kind: string;
+  /**
+   * Whether the user has this source turned on, as of this read — derived by
+   * the backend, never stored (issue #204).
+   *
+   * The detail opens entities every other reader hides, and there are two
+   * reasons a reader hides one: `deleted_at` marks "withdrawn upstream",
+   * `enabled: false` marks "you turned the source off". Draw a banner for
+   * each — they are different facts with different remedies (nothing undoes
+   * a withdrawal; re-enabling the source undoes a disable, and this flag
+   * flips on the next read with no re-sync). A source that was never
+   * configured reads `true`: absence of configuration is not a decision.
+   */
+  enabled: boolean;
 }
 
 /**

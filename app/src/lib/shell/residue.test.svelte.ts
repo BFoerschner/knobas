@@ -79,7 +79,7 @@ const PAGE: EntityPage = { rows: [ROW], total: 1 };
 
 const DETAIL: EntityDetail = {
   row: ROW,
-  source: { id: "mock", display_name: "Tidewater (mock)", adapter_kind: "mock" },
+  source: { id: "mock", display_name: "Tidewater (mock)", adapter_kind: "mock", enabled: true },
   kind_info: null,
   body_text: "body",
   author: "mara",

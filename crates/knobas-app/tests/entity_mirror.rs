@@ -79,6 +79,7 @@ fn source_ref() -> SourceRef {
         id: "mock".to_owned(),
         display_name: "Tidewater Mock".to_owned(),
         adapter_kind: "mock".to_owned(),
+        enabled: true,
     }
 }
 
@@ -143,7 +144,7 @@ fn proposal_row() -> LinkRow {
 }
 
 const ACTIVITY_ROW_FIELDS: &[&str] = &["actor", "at", "detail", "entity_id", "id", "verb"];
-const SOURCE_REF_FIELDS: &[&str] = &["adapter_kind", "display_name", "id"];
+const SOURCE_REF_FIELDS: &[&str] = &["adapter_kind", "display_name", "enabled", "id"];
 const KIND_INFO_FIELDS: &[&str] = &["full_sync_exhaustive", "id", "label", "monogram", "plural"];
 
 const ENTITY_ROW_FIELDS: &[&str] = &[

@@ -105,7 +105,7 @@ function detail(over: Partial<EntityDetail> = {}): EntityDetail {
       updated_at: "2026-08-22T11:48:00Z",
       synced_at: "2026-08-22T14:30:00Z",
     },
-    source: { id: "mock", display_name: "Tidewater (mock)", adapter_kind: "mock" },
+    source: { id: "mock", display_name: "Tidewater (mock)", adapter_kind: "mock", enabled: true },
     kind_info: null,
     body_text: "Payouts to two SEPA banks fail with a 409 on retry.",
     author: "mara",
@@ -432,6 +432,72 @@ test("a live entity has no withdrawn banner", async () => {
 
   expect(screen.target.querySelector(".prompt")).toBeNull();
   expect(screen.text()).not.toContain("Withdrawn upstream");
+
+  screen.done();
+});
+
+/**
+ * Issue #204: the other reason a reader hides an entity. A disabled source's
+ * item opens by direct address exactly as a tombstoned one does, and gets the
+ * same treatment — a banner naming the fact and the remedy. Without it the
+ * item opens looking entirely ordinary while every list pretends it does not
+ * exist.
+ */
+test("a disabled source's entity opens with a banner naming the remedy", async () => {
+  answer = () =>
+    Promise.resolve(
+      detail({
+        source: { id: "mock", display_name: "Tidewater (mock)", adapter_kind: "mock", enabled: false },
+      }),
+    );
+
+  const screen = render();
+  await vi.waitFor(() => expect(screen.text()).toContain("source is turned off"));
+  flushSync();
+
+  expect(screen.text()).toContain("Tidewater (mock)");
+  expect(screen.text()).toContain("Re-enable");
+  // Turned off is not withdrawn — the two banners never borrow each other's
+  // words, or the reader is told upstream did something the user did.
+  expect(screen.text()).not.toContain("Withdrawn upstream");
+  // ...and it is still a readable item, not just a banner.
+  expect(screen.text()).toContain("Retry failed SEPA payouts");
+
+  screen.done();
+});
+
+/**
+ * #204's miss direction, from the ruling's own tests clause: an entity from
+ * an enabled source must carry no marker.
+ */
+test("an enabled source's entity has no turned-off banner", async () => {
+  const screen = render();
+  await vi.waitFor(() => expect(screen.text()).toContain("Retry failed SEPA payouts"));
+  flushSync();
+
+  expect(screen.text()).not.toContain("source is turned off");
+
+  screen.done();
+});
+
+/**
+ * The three states stay three: a withdrawn entity of an *enabled* source
+ * shows the withdrawal alone. (When both facts hold, both banners show —
+ * they are independent facts with independent remedies.)
+ */
+test("a withdrawn entity of an enabled source does not claim the source is off", async () => {
+  answer = () =>
+    Promise.resolve(
+      detail({
+        deleted_at: "2026-08-22T12:00:00Z",
+      }),
+    );
+
+  const screen = render();
+  await vi.waitFor(() => expect(screen.text()).toContain("Withdrawn upstream"));
+  flushSync();
+
+  expect(screen.text()).not.toContain("source is turned off");
 
   screen.done();
 });

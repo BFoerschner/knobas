@@ -535,6 +535,19 @@ export interface QueuedWrite {
    */
   held_snapshot: unknown | null;
   settled_at: string | null;
+  /**
+   * Whether the user has this write's source turned on, as of this read —
+   * derived by the backend, never stored (issue #204).
+   *
+   * A disabled source's items leave `sync.live_item` (migration 0012), so its
+   * writes go `held` by the same mechanism as a withdrawn target's. The facts
+   * are different and so are the remedies: a target that changed wants the
+   * two-versions choice, a source that is off wants re-enabling — say which,
+   * and never offer *Send mine anyway* for a source that cannot take it.
+   * Flips on the next read once the source is back on; `true` for a source
+   * that was never configured.
+   */
+  source_enabled: boolean;
 }
 
 /**

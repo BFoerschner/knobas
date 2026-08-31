@@ -300,6 +300,21 @@ pub struct SourceRef {
     pub display_name: String,
     /// The *adapter* kind (`jira`, `mock`), not the instance id.
     pub adapter_kind: String,
+    /// Whether the user has this source turned on, **as of this read** --
+    /// derived in the [`DETAIL`] statement, never stored (issue #204).
+    ///
+    /// The detail reaches past `sync.live_item` on purpose (§5a), so it opens
+    /// entities every other reader hides -- and since migration `0012` there
+    /// are two reasons a reader hides one. `deleted_at` marks the first
+    /// (withdrawn upstream); this marks the second (turned off by the user),
+    /// and the banner needs both because the remedies differ: nothing undoes
+    /// a withdrawal, one click undoes a disable -- which is also why it is
+    /// derived: a stored marker would still say "off" after that click.
+    ///
+    /// `true` for a source with no configuration row, matching `0012`'s
+    /// `coalesce(enabled, true)`: absence of configuration is not a decision
+    /// the user made.
+    pub enabled: bool,
 }
 
 /// Everything the slide-over draws for one entity (interfaces §2.5).
@@ -348,15 +363,19 @@ const DETAIL_ACTIVITY: i64 = 20;
 
 /// One entity, deleted or not.
 ///
-/// The join is `sync.live_item`'s minus its tombstone filter, deliberately:
-/// §5a says a withdrawn entity must still open, and `e.deleted_at` is what the
-/// banner reads. `source_config` is a **left** join because `run_once` syncs
-/// unconfigured sources.
+/// The join is `sync.live_item`'s minus **both** of its filters, deliberately:
+/// §5a says a withdrawn entity must still open, and since migration `0012` a
+/// disabled source's must too -- links and notes point at either. Each dropped
+/// filter leaves its marker instead: `e.deleted_at` for the withdrawn banner,
+/// `coalesce(c.enabled, true)` for the turned-off one (issue #204).
+/// `source_config` is a **left** join because `run_once` syncs unconfigured
+/// sources.
 const DETAIL: &str = r#"
 select i.entity_id, i.source_id, i.kind, i.title, i.body_text, i.author,
        i.item_updated_at, i.synced_at, i.payload, i.web_url,
        e.deleted_at,
-       c.display_name, c.kind as adapter_kind
+       c.display_name, c.kind as adapter_kind,
+       coalesce(c.enabled, true) as source_enabled
   from sync.item i
   join knobas.entity e on e.id = i.entity_id
   left join knobas.source_config c on c.id = i.source_id
@@ -402,6 +421,7 @@ pub async fn get_entity_inner(pool: &PgPool, entity_id: &str) -> Result<EntityDe
             display_name: display_name.unwrap_or_else(|| source_id.clone()),
             adapter_kind: adapter_kind.unwrap_or_else(|| source_id.clone()),
             id: source_id,
+            enabled: row.get("source_enabled"),
         },
         kind_info,
         body_text: row.get("body_text"),

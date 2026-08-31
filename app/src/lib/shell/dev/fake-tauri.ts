@@ -535,7 +535,7 @@ function getEntity(args: Record<string, unknown>) {
   }
   return {
     row: mirrorRow(entry),
-    source: { id: "mock", display_name: "Tidewater (mock)", adapter_kind: "mock" },
+    source: { id: "mock", display_name: "Tidewater (mock)", adapter_kind: "mock", enabled: true },
     // Null, exactly as the real command answers until task 21.
     kind_info: null,
     body_text: entry.body_text,
@@ -799,6 +799,7 @@ const FIXTURE_QUEUE = [
         "\n\njonas.weiss: already on it — it is the idempotency key.",
     },
     settled_at: null,
+    source_enabled: true,
   },
   {
     id: 30,
@@ -815,6 +816,7 @@ const FIXTURE_QUEUE = [
     attempts: 1,
     held_snapshot: null,
     settled_at: null,
+    source_enabled: true,
   },
   {
     id: 29,
@@ -831,6 +833,7 @@ const FIXTURE_QUEUE = [
     attempts: 3,
     held_snapshot: null,
     settled_at: null,
+    source_enabled: true,
   },
 ];
 

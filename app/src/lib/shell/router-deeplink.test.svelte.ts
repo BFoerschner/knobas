@@ -33,7 +33,7 @@ const PAGE: EntityPage = {
 
 const DETAIL: EntityDetail = {
   row: PAGE.rows[0]!,
-  source: { id: "mock", display_name: "Mock", adapter_kind: "mock" },
+  source: { id: "mock", display_name: "Mock", adapter_kind: "mock", enabled: true },
   kind_info: null,
   body_text: "the SEPA batch",
   author: null,
