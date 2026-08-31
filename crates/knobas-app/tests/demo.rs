@@ -285,10 +285,12 @@ async fn a_profile_stored_at_an_older_fixture_version_re_syncs_and_gains_the_pro
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::query("update sync.item set payload = payload - 'fields' where entity_id = 'mock:PAY-231'")
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "update sync.item set payload = payload - 'fields' where entity_id = 'mock:PAY-231'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     assert_eq!(
         mirrored_payload(&pool, "mock:PAY-231")
             .await
