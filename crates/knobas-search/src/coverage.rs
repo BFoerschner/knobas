@@ -184,11 +184,14 @@ pub(crate) async fn author_coverage(
 
 /// The configured sources this query is narrowed to, in vocabulary order.
 ///
-/// No `source:` filter is every configured source, because that is what the
-/// query searched. A `source:` filter naming something the vocabulary does not
-/// have contributes nothing -- the parser already reports such a token as
-/// unknown, and inventing a coverage row for it would have the report claim a
-/// source exists.
+/// No `source:` filter is every source in the vocabulary -- the enabled ones,
+/// the world the grammar can name. A **disabled** source's rows are still in
+/// the mirror and can still match a plain search, but `/alias` and `source:`
+/// stop resolving to it, and a verdict on a source the user turned off would
+/// accuse something the sources list no longer shows. A `source:` filter
+/// naming something the vocabulary does not have contributes nothing -- the
+/// parser already reports such a token as unknown, and inventing a coverage
+/// row for it would have the report claim a source exists.
 fn in_scope<'a>(vocab: &'a Vocabulary, filters: &EffectiveFilters) -> Vec<&'a SourceVocab> {
     vocab
         .sources

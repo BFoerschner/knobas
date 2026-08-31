@@ -142,6 +142,10 @@ pub struct FilterCoverage {
     /// A configured source the query's `source:` or kind scope left with
     /// nothing is **not** here, and that is not an omission: it contributed no
     /// corpus, so this dimension is not why it is absent from the results.
+    /// Neither is a **disabled** source — the report's scope is the
+    /// vocabulary's, which reads enabled sources only. Its still-mirrored rows
+    /// can match a plain search, but the grammar cannot name a source the user
+    /// turned off, and this report does not verdict it either.
     pub sources: Vec<SourceAnswer>,
 }
 

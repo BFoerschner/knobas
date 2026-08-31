@@ -2705,7 +2705,10 @@ From this commit on, each of the following requires an orchestrator decision **a
   - **A source that contributed no rows gets no verdict at all**, rather than a third variant. Its
     absence from the results has nothing to do with authorship — a `source:` or kind scope excluded
     it, or it has synced nothing — and any verdict on it would explain the wrong absence. It is left
-    out of `sources`, and when that empties the list the whole dimension is dropped.
+    out of `sources`, and when that empties the list the whole dimension is dropped. The report's
+    scope is the **vocabulary's**, which reads enabled sources only: a source the user has disabled
+    keeps its rows in the mirror and they still match a plain search, but the grammar cannot name it
+    (`/alias` and `source:` stop resolving to it) and this report does not verdict it either.
   - **`display_name` is carried rather than looked up.** The launcher's per-source DTO is
     `CredentialHealth`, which has no name in it, so a UI that had to say *Buildserver* would
     otherwise print an id.

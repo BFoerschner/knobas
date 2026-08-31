@@ -127,7 +127,9 @@ export interface FilterCoverage {
    *
    * A configured source the query's `source:` or kind scope left with nothing
    * is not here — it contributed no corpus, so this dimension is not why it is
-   * absent from the results.
+   * absent from the results. Neither is a disabled source: the report's scope
+   * is the vocabulary's (enabled sources only), so a source the user turned
+   * off is never verdicted even where its still-mirrored rows match a search.
    */
   sources: SourceAnswer[];
 }
