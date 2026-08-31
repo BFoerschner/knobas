@@ -209,9 +209,11 @@ async fn errors_carry_a_code_the_frontend_can_branch_on() {
 /// `LauncherHome` is the one DTO in this stream that composes two streams'
 /// data: the lists and the recent rows are `knobas-search`'s, `sources` is
 /// stream F's `CredentialHealth`, and `pending_writes` is stream G's write
-/// queue, which does not exist in M1 and is 0 by rule. The queue has since
-/// shipped (#42) and the command still answers the M1 constant; issue #212
-/// tracks wiring the count, and this assertion pins the constant until it is.
+/// queue. What is asserted here is that all four halves arrive and are shaped
+/// as the mirror declares them; the *value* of the count belongs to
+/// `launcher_home_counts_the_pending_writes`, which is the only test in this
+/// binary that queues anything and therefore the only one that may say a
+/// number out loud about a table the whole binary shares.
 #[tokio::test]
 async fn launcher_home_reports_source_health_beside_the_lists() {
     let pool = pool().await;
@@ -223,7 +225,10 @@ async fn launcher_home_reports_source_health_beside_the_lists() {
     for field in ["smart_lists", "recent", "sources", "pending_writes"] {
         assert!(!v[field].is_null(), "{field} missing: {v}");
     }
-    assert_eq!(v["pending_writes"], 0, "the write queue is M2: {v}");
+    assert!(
+        v["pending_writes"].is_u64(),
+        "the footer renders this as a number: {v}"
+    );
 
     // §2.2's `CredentialHealth` shape, taken from stream F's own type rather
     // than from a second copy of it -- and `unknown` because nothing has
@@ -255,6 +260,49 @@ async fn launcher_home_reports_source_health_beside_the_lists() {
     }
     assert!(!home.recent.is_empty(), "this test seeded two items");
     assert!(v["recent"][0]["synced_at"].is_string(), "{v}");
+}
+
+/// The footer's number is the write queue's *pending* rows (issue #212).
+///
+/// A delta rather than an absolute, for the reason this file's header gives:
+/// the binary shares one database and `write_queue::counts` is global, so what
+/// can be pinned is the movement. Both directions are asserted, because the
+/// direction is the decision: queueing a write raises the count, and *holding*
+/// that same write lowers it again -- "N pending writes" says be patient, and a
+/// held write is asking for a decision instead (`QueueCounts`' own rule that
+/// "3 waiting" may never absorb a held write).
+#[tokio::test]
+async fn launcher_home_counts_the_pending_writes() {
+    let pool = pool().await;
+    let entity = knobas_core::entity::EntityRef::new("jira", &token("wq"));
+
+    let before = launcher_home_inner(&pool).await.unwrap().pending_writes;
+
+    let queued = knobas_core::write_queue::queue(
+        &pool,
+        "jira",
+        &entity,
+        "comment",
+        serde_json::json!({ "text": "queued" }),
+        serde_json::json!({}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        launcher_home_inner(&pool).await.unwrap().pending_writes,
+        before + 1,
+        "a queued write is one the launcher still owes a source"
+    );
+
+    knobas_core::write_queue::hold(&pool, queued.id, serde_json::json!({}))
+        .await
+        .unwrap()
+        .expect("the write was pending, so it can be held");
+    assert_eq!(
+        launcher_home_inner(&pool).await.unwrap().pending_writes,
+        before,
+        "a held write waits for the user, not for the network"
+    );
 }
 
 /// `smart_lists` answers the same summaries the board embeds.

@@ -203,6 +203,7 @@ knobas-app	test/ipc	the_two_argument_shapes_decode_as_the_split_needs
 knobas-app	test/ipc	unlinking_announces_its_line_and_an_already_withdrawn_link_announces_nothing
 knobas-app	test/search_ipc	a_smart_list_answers_in_the_search_shape
 knobas-app	test/search_ipc	errors_carry_a_code_the_frontend_can_branch_on
+knobas-app	test/search_ipc	launcher_home_counts_the_pending_writes
 knobas-app	test/search_ipc	launcher_home_reports_source_health_beside_the_lists
 knobas-app	test/search_ipc	no_markup_reaches_the_wire_in_a_snippet
 knobas-app	test/search_ipc	the_rail_and_the_board_report_the_same_lists
@@ -1164,7 +1165,7 @@ knobas-source-teamcity	lib/knobas_source_teamcity	cursor::tests::the_watermark_n
 knobas-source-teamcity	lib/knobas_source_teamcity	cursor::tests::the_watermark_stands_still_when_nothing_finished
 knobas-source-teamcity	lib/knobas_source_teamcity	cursor::tests::the_watermark_stays_below_the_oldest_build_still_in_flight
 knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::the_full_sync_is_declared_a_window_not_the_corpus
-knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::the_template_declares_two_kinds_and_no_writes
+knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::the_template_declares_two_kinds_and_two_write_ops
 knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::the_template_survives_the_ipc_hop
 knobas-source-teamcity	lib/knobas_source_teamcity	http::tests::a_base_url_that_is_not_a_url_is_refused_at_build_time
 knobas-source-teamcity	lib/knobas_source_teamcity	http::tests::a_misconfigured_source_is_not_reported_as_a_missing_secret

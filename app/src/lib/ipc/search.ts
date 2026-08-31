@@ -178,10 +178,7 @@ export interface SmartListSummary {
  *
  * The one DTO here that is a composition: the lists and the recent rows come
  * from the search engine, `sources` is `CredentialHealth` (`./sources`), and
- * `pending_writes` was reserved for the write queue — 0 throughout M1 by
- * rule, and still hardcoded 0 on the backend although that queue now exists
- * (#212), so the launcher footer disagrees with the status-bar badge until it
- * is wired.
+ * `pending_writes` is the write queue's depth.
  */
 export interface LauncherHome {
   smart_lists: SmartListSummary[];
@@ -193,6 +190,13 @@ export interface LauncherHome {
    */
   recent: EntityRow[];
   sources: CredentialHealth[];
+  /**
+   * The footer's *"N pending writes"* — `QueueCounts.pending` (`./sources`)
+   * and nothing else. Held and refused writes are decisions the user owes,
+   * and the status bar's badge is where they are asked for; counting them
+   * here would make the two surfaces disagree about the same queue in the
+   * other direction.
+   */
   pending_writes: number;
 }
 
