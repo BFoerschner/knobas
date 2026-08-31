@@ -83,11 +83,16 @@
 
   $effect(() => {
     const mine = ++token;
+    // `project: null` is *unscoped*, and it is a literal here rather than a
+    // prop because no room narrows by a project yet: the switcher grows those
+    // rooms in #209, and this tile then reads the dimension off the room's
+    // filter like every other one. The backend read honours it either way.
     const filter = {
       sources,
       kinds: spec.kinds,
       updated_within_days: null,
       context: ctx,
+      project: null,
       order: "updated_desc" as const,
       include_deleted: false,
     };
@@ -101,7 +106,7 @@
     // it is tickets by construction, it is never paged, and its order is the
     // command's (#177).
     const read = isMiniBoard
-      ? miniBoard({ sources, context: ctx }).then((answer) => {
+      ? miniBoard({ sources, context: ctx, project: null }).then((answer) => {
           if (mine === token) board = answer;
         })
       : listEntities(filter, PAGE, 0).then((answer) => {

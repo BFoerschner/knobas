@@ -209,6 +209,7 @@ pub fn run() {
             commands::entity::inbox_count,
             commands::entity::snooze_inbox_item,
             commands::entity::complete_inbox_item,
+            commands::entity::list_projects,
             commands::search::search,
             commands::search::launcher_home,
             commands::search::smart_lists,

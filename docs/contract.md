@@ -2938,6 +2938,182 @@ From this commit on, each of the following requires an orchestrator decision **a
   Ratified by the orchestrator as issue #204 itself, whose ruling specifies the defect, the
   bounds, the acceptance criteria and this entry.
 
+- **The IPC command schema, issue #208 (2026-09-01):** `EntityFilter` gains `project:
+  Option<String>`, and `mini_board` gains a fourth argument carrying it — the first of M2.6's
+  **two** frozen-surface touches, both ratified in advance by the spec (#188) Björn approved:
+  "Two §10.8 entries follow: the room filter grows a project dimension, and an additive command
+  reports the projects a source's corpus shows" (ADR-0010's own closing consequence). Written
+  with the implementing PR per the #175/#177 pattern.
+
+  **The exact shape**, on the existing input DTO and the existing command:
+
+  ```rust
+  // knobas_app::commands::entity
+  pub struct EntityFilter { /* … */ pub project: Option<String> }
+  #[tauri::command] pub async fn mini_board(.., ctx_id: Option<String>, sources: Vec<String>,
+                                            project: Option<String>) -> Result<MiniBoard, IpcError>;
+  ```
+
+  **It narrows *within* `sources`, and that is the whole of why it is a second dimension rather
+  than a replacement for the first.** A project key is unique only inside its own source, so two
+  sources against two Jira instances can both show a `PAY`; a filter carrying the key alone would
+  union them into one room and leak one source's work into another's. A project room therefore
+  sets both (`{sources: [source_id], project: key, context: null}`), and `None` is unscoped in the
+  same "empty means unfiltered" sense `sources`, `kinds` and `context` already have — bound as a
+  **nullable parameter** (`$7::text is null or …`), the discipline this module's room statements
+  record, so the SQL stays static and nothing concatenates a value into it.
+
+  **All four room statements honour it, including the two that reach past the tombstone filter.**
+  `LIVE_UPDATED`, `LIVE_TITLE`, `ALL_UPDATED` and `ALL_TITLE` take the same predicate: a filter
+  honoured by two of the four would be a room that changes meaning the moment a caller asks to see
+  withdrawn work (§5a), which is a difference no reader could attribute. The two live statements
+  gained the `i` alias the two `include_deleted` ones already had; no column, ordering, parameter
+  or `count(*) over ()` changed, and `every_statement_names_its_columns_and_no_two_are_the_same`
+  still holds.
+
+  **Because a room hands its filter to every tile, this is the whole of the narrowing.** The
+  room's own kinds-and-count read, the mini board and everything else in the room scope the same
+  way, with no per-tile special case — spec #188's story 2. The mini board takes it as a *third
+  IPC argument, nullable* — the "fourth argument" this entry opens with counts the Rust
+  signature, whose first is the `State` handle — rather than inside a filter object, because
+  that command already takes its two narrowings apart (#177's entry above, which this leaves
+  otherwise untouched).
+
+  **Two readers deliberately not narrowed, recorded so neither is discovered as a bug.**
+  `MiniBoard::sources` — the ticket detail's status select (#179) — stays the statuses a ticket's
+  whole *source corpus* shows: a project room with nothing finished still has to be able to offer
+  *Done*, and narrowing the offer by the room would make a move available only where it had
+  already been made. The **suggestion tray** is likewise unnarrowed, per spec #188: its read is
+  keyed on sources and context and a proposal belongs to a room when *either* end does, which for
+  projects is genuinely ambiguous — a suggestion linking an `INT` ticket to an `ERP` one belongs
+  to both project rooms or to neither. A project room shows its source's tray.
+
+  **The value is a payload read outside an adapter (ADR-0007), and its failure direction is
+  stated where the read is.** `knobas_core::project_key_read!` is the one statement — Jira's
+  `fields.project.key` and TeamCity's `buildType.projectId`, both at a *type-checked* path, so a
+  record spelled some other way misses rather than opening a room headed `{"id":3}`. Direction: a
+  record with no readable project key belongs to **no** project room and is still in *All work*
+  and its source's room — absence, never a wrong room, and no "No project" room, which ADR-0010
+  refuses because nothing is hidden when two other rooms still hold the item. Four tests, one per
+  way to miss (absent, blank, whitespace-only, not-a-string), plus the board's own
+  `a_ticket_with_no_readable_project_is_on_no_project_rooms_board`, which asserts both halves of
+  that sentence.
+
+  **The mirror**, appended to the existing `app/src/lib/ipc/entity.ts`: `EntityFilter.project:
+  string | null`, and `miniBoard` widened to `Pick<EntityFilter, "sources" | "context" |
+  "project">` — the room's own filter object, so a caller cannot narrow by one dimension and
+  forget another. Both are pinned by `the_entity_filter_shape_matches_its_typescript_mirror` in
+  `crates/knobas-app/tests/entity_mirror.rs`, whose fixture exercises `project` as `null` per that
+  file's rule, and whose round trip is what makes a Rust-only field visible.
+
+  **Which barrels were appended: neither, and that is correct.** `list_entities` and `mini_board`
+  were already registered in `crates/knobas-app/src/lib.rs`'s `generate_handler!` list, and
+  `app/src/lib/ipc/index.ts` already re-exports `./entity` wholesale, so a widened DTO and a
+  widened argument list reach the frontend without either barrel being touched. The append is the
+  second entry's.
+
+  **What did not change.** **No migration — `0013` is still the next free number** — and no
+  normalized project model: contract §4.1's four-field normalization stands, and the value has
+  been arriving in the payload since M1 because the Jira sync has requested `project` in its base
+  field list from the start. No new module on either side of the bridge: the filter field and the
+  predicate are in `commands/entity.rs`, the reads are `knobas_core::{mini_board, project}`, and
+  `knobas-core` is not in the frozen list. Nothing under `crates/knobas-source/src/**` — the
+  Source SPI, its DTOs and the contract battery are untouched, so ADR-0006 stands, and no adapter
+  declares a thing. No new event (`contexts:changed` is what already says the switcher's rooms
+  moved). `crates/knobas-http/**` and `crates/knobas-app/src/{error,profile}.rs` are untouched.
+  No **existing** field changes meaning: `EntityFilter.project` is additive and `None`-by-absence,
+  and every caller that shipped before this passes `null`.
+
+  Ratified by the orchestrator as spec #188 and issue #208, whose acceptance criteria specify the
+  dimension, its tests and this entry.
+
+- **The IPC command schema and both append-only barrels, issue #208 (2026-09-01):** one new
+  additive read command, `list_projects` (no arguments → `Vec<knobas_core::project::Project>`),
+  with `listProjects` in `app/src/lib/ipc/entity.ts`. M2.6's **second** frozen-surface touch, the
+  other half of the grant the entry above cites.
+
+  **The exact signature**, in the **existing** `entity` command module:
+
+  ```rust
+  #[tauri::command] pub async fn list_projects(..) -> Result<Vec<knobas_core::project::Project>, IpcError>;
+  pub struct Project { pub source_id: String, pub key: String, pub name: Option<String> }
+  ```
+
+  **A census, and that is why it cannot be derived from a room's own read.** `Room.svelte` scans
+  the newest 200 items and says so in place — "a window, not a census" — so a project whose work
+  is quiet would silently have no room, and the room list would change as tickets aged. This reads
+  the whole live corpus instead.
+
+  **Flat, and carrying `source_id` rather than being grouped under it.** The switcher wants a room
+  list; grouping here would only be ungrouped there. `source_id` is half the *identity* rather
+  than decoration — a key is unique only inside its own source, which is what keeps two sources'
+  `PAY` two projects, two rooms and two addresses (`one_key_in_two_sources_is_two_projects`).
+
+  **It reads `sync.live_item`, never `sync.item`**, so a tombstoned item vouches for nothing and —
+  since migration `0012` — neither does any item of a source the user turned off: a disabled
+  source offers no project rooms, and offers them again the moment it is re-enabled, with no
+  re-sync and no stored state to go stale. Pinned as two tests beside each other
+  (`a_tombstoned_item_contributes_no_project`, `a_disabled_source_shows_no_projects`), which is
+  #202's blast radius arriving where it was meant to.
+
+  **Three shape decisions a later reader might undo without realising what they were for**, in the
+  spirit of #53's, #177's and #204's:
+
+  - **`Project.name` is `Option<String>`, and a nameless project is still reported.** A project
+    whose records carry a key and no readable name is reachable *by its key* (spec #188 story 6);
+    dropping it would make a project unreachable because of a field nobody navigates by, and
+    filling `name` with the key on the backend would be indistinguishable on the wire from a
+    source that really named it that. The words on screen are the shell's, exactly as
+    `MiniBoardColumn.status`'s terminal group is.
+  - **One project is one row, whatever its items disagree about.** `distinct on (source_id, key)`
+    and not a `group by` over all three columns: a project renamed upstream leaves older items
+    carrying the older name, and an item may carry the key with no name at all — either would
+    otherwise split one project into two rooms holding the same work. The `order by` decides which
+    name wins: a readable one over none, then the newest, so a rename shows the new name and a
+    nameless item erases nothing (`a_renamed_project_stays_one_project_under_its_newest_name`).
+  - **There is no `_inner` behind the command**, and no argument on it. Its body is
+    `lifecycle.pool()?` and one call into `knobas_core::project::list`, so it takes
+    `context_members`' and `mini_board`'s shape; the store owns the behaviour, so
+    `crates/knobas-core/tests/projects.rs` owns the proof and `knobas-app` keeps only the DTO
+    mirror test. Unscoped because the caller is the switcher, which asks for every source's
+    projects at once; a per-source read would be one round trip per source to assemble the same
+    list.
+
+  **The payload read is the entry above's**, not a second one: `list_projects` and the room's
+  project predicate go through `knobas_core::project_key_read!` together, which is the whole point
+  of ADR-0007 requirement 2 — a third source's spelling is one more `coalesce` arm in one place,
+  and the census can never disagree with a room about what a project is. `project_name_read!` is
+  deliberately **not** exported: a room narrows by the key, which is its identity, and a reader
+  narrowing by a name would be narrowing by a label the source may rewrite. One spelling a source
+  writes is knowingly absent and is recorded on the macro: a TeamCity **build configuration**'s
+  record is the `buildType` object itself, so it names its project at the top level and
+  contributes none today — an absence the failure direction permits, and one more arm when it is
+  wanted.
+
+  **Which barrels were appended**: one line in `crates/knobas-app/src/lib.rs`'s `generate_handler!`
+  list, at the foot of the existing `commands::entity::` group after `complete_inbox_item`; and
+  the function plus one interface at the foot of `app/src/lib/ipc/entity.ts`, which
+  `app/src/lib/ipc/index.ts` already re-exports wholesale (`export * from "./entity"`) — so the
+  TypeScript barrel grows by that export and its own text is untouched. Neither barrel is
+  rewritten. `Project` is pinned by `the_project_shape_matches_its_typescript_mirror` in
+  `crates/knobas-app/tests/entity_mirror.rs`, with its nullable field exercised as `None`.
+
+  **What did not change.** **No migration — `0013` is still the next free number** — and no
+  normalized project model or project table: a project is read out of the payload the mirror
+  already holds. No existing command, DTO field or event name changes meaning, and no new event: a
+  read command has nothing of its own to announce, and `contexts:changed` plus `sync:state` are
+  what already tell the switcher to re-list. No new module on either side of the bridge — the
+  command is a section of `commands/entity.rs` and the store is
+  `crates/knobas-core/src/project.rs`, and `knobas-core` is not in the frozen list. Nothing under
+  `crates/knobas-source/src/**`: a project is deliberately *not* a descriptor capability, which is
+  the option ADR-0010 declined when it refused one generic container concept.
+  `crates/knobas-http/**` and `crates/knobas-app/src/{error,profile}.rs` are untouched — the
+  command's only failure is a query failure, which the existing `From<CoreError> for IpcError`
+  already maps.
+
+  Ratified by the orchestrator as spec #188 and issue #208, whose acceptance criteria specify the
+  command, its tests and this entry.
+
 **`crates/knobas-sync/**` is NOT frozen — and stream F is expected to restructure it.**
 
 Spelled out because the list above is short and the omission would otherwise be read as an oversight. `knobas_sync::run` and `run_once` are a *starting point*, not a contract: F owns the scheduler, the cursor lifecycle, backoff, the sweep, and — explicitly — **`run_once`'s transaction boundary**, which §10.6(c) says has to move so a run's HTTP work stops happening inside an advisory-locked transaction.

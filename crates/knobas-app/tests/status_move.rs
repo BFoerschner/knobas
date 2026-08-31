@@ -190,7 +190,7 @@ impl knobas_sync::progress::ProgressSink for Ending {
 /// command reads it — through the granted read (#177), so this asserts the
 /// thing the board would actually draw rather than a payload path of its own.
 async fn mirrored_status(state: &SourcesState) -> Option<String> {
-    let board = knobas_core::mini_board::read(&state.pool, None, &[JIRA.to_owned()])
+    let board = knobas_core::mini_board::read(&state.pool, None, &[JIRA.to_owned()], None)
         .await
         .expect("the mini board reads");
     let id = format!("{JIRA}:{KEY}");

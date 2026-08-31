@@ -6,6 +6,7 @@ pub mod inbox;
 pub mod link;
 pub mod mini_board;
 pub mod note;
+pub mod project;
 pub mod start_work;
 pub mod suggest;
 pub mod write_queue;
@@ -68,5 +69,38 @@ macro_rules! closed_vocabulary {
                 match self { $( $name::$variant => $wire ),+ }
             }
         }
+    };
+}
+
+/// SQL for "the string this JSON path leads to, or nothing" -- the shape every
+/// **payload read outside an adapter** (ADR-0007) takes here.
+///
+/// `->>` yields an object's or an array's *text form* rather than nothing, so
+/// without the type check a source that spells a field some other way would
+/// arrive as a value like `{"id":3}` -- a guess dressed as an observation. The
+/// `nullif(btrim(...))` is the same refusal for a value that is blank or only
+/// whitespace: unreadable, not a value.
+///
+/// It lives here rather than in the one module that first needed it, for the
+/// reason [`closed_vocabulary!`] does: both sides of the bridge read payloads
+/// now. The mini board's status and priority reads are in this crate; the
+/// room's own list statements are in `knobas_app::commands::entity`, and a
+/// second copy of this guard is how one of them quietly starts stringifying
+/// objects while the other does not. Exported, so a caller outside this crate
+/// gets the same three refusals rather than its own two.
+///
+/// `$path` is a literal because that is what `concat!` can fold: every
+/// statement built with this is a `&'static str`, so nothing here can
+/// concatenate a value into SQL.
+#[macro_export]
+macro_rules! string_at {
+    ($path:literal) => {
+        concat!(
+            "(case when jsonb_typeof(",
+            $path,
+            ") = 'string' then nullif(btrim(",
+            $path,
+            " #>> '{}'), '') end)"
+        )
     };
 }

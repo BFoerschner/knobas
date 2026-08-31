@@ -23,11 +23,11 @@ import type { EntityFilter, MiniBoard, MiniBoardCard, MiniBoardColumn } from "..
  * it, and the run then fails with an "Unknown Error" that looks exactly like
  * the product bug the failed-read test exists to catch.
  */
-const calls: Pick<EntityFilter, "sources" | "context">[] = [];
+const calls: Pick<EntityFilter, "sources" | "context" | "project">[] = [];
 let answer: () => Promise<MiniBoard> = () => Promise.resolve({ columns: [], sources: [] });
 
 vi.mock("../ipc/entity", () => ({
-  miniBoard: (filter: Pick<EntityFilter, "sources" | "context">) => {
+  miniBoard: (filter: Pick<EntityFilter, "sources" | "context" | "project">) => {
     calls.push(filter);
     return answer();
   },
@@ -196,13 +196,13 @@ test("the tile reads with the room's own filter, both dimensions of it", async (
   const screen = render(["jira"], null);
   await vi.waitFor(() => expect(calls).toHaveLength(1));
 
-  expect(calls[0]).toEqual({ sources: ["jira"], context: null });
+  expect(calls[0]).toEqual({ sources: ["jira"], context: null, project: null });
 
   screen.props.ctx = "ctx:5b1c";
   screen.props.sources = [];
   flushSync();
   await vi.waitFor(() => expect(calls).toHaveLength(2));
-  expect(calls[1]).toEqual({ sources: [], context: "ctx:5b1c" });
+  expect(calls[1]).toEqual({ sources: [], context: "ctx:5b1c", project: null });
 
   screen.done();
 });

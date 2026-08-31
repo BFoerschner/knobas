@@ -57,6 +57,9 @@
         kinds: [],
         updated_within_days: null,
         context: ctx,
+        // Unscoped, for the reason `Tile.svelte` states: no room narrows by a
+        // project until #209 adds the rooms that do.
+        project: null,
         order: "updated_desc",
         include_deleted: false,
       },
