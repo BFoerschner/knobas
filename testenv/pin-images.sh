@@ -44,12 +44,17 @@ pin() {  # pin <VAR> <repo:tag>
 # somewhere else entirely. Same reasoning as `just inventory`, which learned it
 # the same way.
 #
+tmp=$(mktemp "${TMPDIR:-/tmp}/knobas-env.XXXXXX")
+trap 'rm -f "$tmp"' EXIT
+
 # The heredoc-style block below writes .env. Its comment lines contain literal
 # backticks and $-free prose that must reach the file verbatim, so single
 # quotes are correct and SC2016's suggestion would break them.
+#
+# The directive has to sit immediately above the `{` it applies to -- putting
+# anything between them silently re-points it at that line instead, which the
+# `testenv` workflow's shellcheck would catch if it were enabled.
 # shellcheck disable=SC2016
-tmp=$(mktemp "${TMPDIR:-/tmp}/knobas-env.XXXXXX")
-trap 'rm -f "$tmp"' EXIT
 {
   echo '# Image digest pins for testenv/docker-compose.yml. Public digests only --'
   echo '# no secrets live here. Regenerate with ./pin-images.sh, review the diff.'

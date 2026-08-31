@@ -135,17 +135,51 @@ Off by default because they are expensive. Approximate costs are in `.env`.
 
 ```sh
 docker compose --profile real-teamcity  up -d teamcity     # ~2.5 GB pull, ~10 GB on disk
-docker compose --profile real-atlassian up -d jira         # ~700 MB, wants ~4 GB RAM
-docker compose --profile real-atlassian up -d confluence   # ~800 MB
+docker compose --profile real-atlassian up -d jira-db jira confluence-db confluence
 ```
 
 - **TeamCity** first start is a browser wizard — database choice, licence
   agreement, administrator account — that no script can drive. It is also the
   only way to obtain `/app/rest/swagger.json`; see `specs/README.md`'s blocker
   and `specs/fetch.sh --teamcity`.
-- **Jira / Confluence** need a developer or timebomb licence entered by hand.
-  The Jira tag is `9.17` to match the vendored WADL (Jira 9.17.0), so the real
-  container and mockd speak the same version.
+
+### Jira and Confluence, end to end
+
+Two containers plus a PostgreSQL each (~700 MB / ~800 MB, and Jira wants ~4 GB
+of RAM). **The databases are not optional**: Jira 10 removed the embedded H2
+engine, so without them the setup wizard stops at its database step.
+
+Both are then set up unattended, in about three minutes from empty volumes:
+
+```sh
+# 10-user, 3-hour Data Center keys, free and needing no my.atlassian.com
+# account. Atlassian ended self-service 30-day DC trials on 2026-03-30, so
+# these are the only free licences left:
+#   https://developer.atlassian.com/platform/marketplace/timebomb-licenses-for-testing-server-apps/
+export JIRA_LICENSE_KEY='AAAB...' CONFLUENCE_LICENSE_KEY='AAAB...'
+
+docker compose --profile real-atlassian up -d jira-db jira confluence-db confluence
+./seed --atlassian          # or ./seed-atlassian.sh jira|confluence
+eval "$(./seed --env)"      # adds KNOBAS_JIRA_* and KNOBAS_CONFLUENCE_*
+```
+
+The admin account is `knobas` / `knobas-dev` on both, and re-running the seed
+against a set-up instance is a no-op.
+
+Put the keys in your **shell**, not in `.env` — that file is tracked.
+`CONFLUENCE_LICENSE_KEY` must be set when the container *first starts*, since
+Confluence reads it at first-time setup; Jira's goes in through the wizard and
+can be exported later.
+
+**Three hours is the shape of this environment.** The licence expires three
+hours after it is applied, and restarting the container does not reset it. So
+this is stand up → run what needs a real instance → `docker compose
+--profile real-atlassian down -v`, not a long-lived environment like Gitea's.
+
+The versions are pinned to what a timebomb key actually starts rather than to
+the newest release — Jira 11.x is reported to reject it. `seed-atlassian.sh`
+refuses to run against any other image digest, because the wizard endpoints it
+drives are not an API and change between versions.
 
 Real Confluence is here in M1 although Confluence is M3's target, because
 Atlassian publishes **no machine-readable Confluence DC spec at all** — the

@@ -259,6 +259,12 @@ services:
       ATL_JDBC_PASSWORD: jira
       ATL_DB_TYPE: postgres72
       ATL_DB_SCHEMA_NAME: public
+      # Required, and its absence is silent: the image's dbconfig template
+      # writes `<driver-class></driver-class>` when it is unset, and Jira then
+      # answers the setup wizard's database step instead of skipping it -- with
+      # a correct-looking dbconfig.xml sitting right there. Confluence infers
+      # its driver from ATL_DB_TYPE and needs no equivalent.
+      ATL_DB_DRIVER: org.postgresql.Driver
     volumes:
       - jira-data:/var/atlassian/application-data/jira
     depends_on:
