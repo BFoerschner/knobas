@@ -739,9 +739,10 @@ impl Source for MockSource {
         if let Some(err) = self.fault_error() {
             return Err(err);
         }
-        // The fixture is frozen, so a caller already at the current version has
-        // nothing to fetch. Any other cursor is from an older fixture and gets
-        // a full sync -- which is the point of versioning the cursor.
+        // A caller already at the current version has nothing to fetch. Any
+        // other cursor is from an older fixture and gets a full sync -- which
+        // is the point of versioning the cursor (the bump rule is on
+        // [`CURSOR`] itself).
         if cursor.as_deref() == Some(CURSOR) {
             return Ok(CURSOR.to_owned());
         }
