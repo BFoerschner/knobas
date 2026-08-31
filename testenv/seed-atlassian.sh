@@ -89,16 +89,16 @@ guard_image() {  # guard_image <container> <expected digest> <product>
 # --------------------------------------------------------------------------
 # One wizard-walking helper for both products, because the machinery is
 # identical and it is the part most likely to rot: a cookie jar for the
-# session, the XSRF token scraped from whatever page we are on, and a retry.
-#
-# THE RETRY IS NOT PADDING. Both products answer `/status` -- and render the
-# wizard's first page -- minutes before they can *process* a POST to it;
-# Confluence fails that window with a 500 whose body says "Spring Application
-# context has not been set". There is no readiness endpoint that distinguishes
-# the two states, so the honest check is the POST itself.
+# session, the XSRF token scraped from whatever page we are on, and a retry
+# (the retry's why sits on `wizard_post` below, where it fires).
 JAR=
 
-wizard_begin() { JAR=$(mktemp "${TMPDIR:-/tmp}/knobas-wizard.XXXXXX"); }
+# The trap is for the `die` paths: every wizard failure exits mid-walk, and
+# without it each such exit leaves a session cookie jar in $TMPDIR.
+wizard_begin() {
+  JAR=$(mktemp "${TMPDIR:-/tmp}/knobas-wizard.XXXXXX")
+  trap '[ -z "$JAR" ] || rm -f "$JAR" "$JAR.body"' EXIT
+}
 wizard_end()   { [ -n "$JAR" ] && rm -f "$JAR" "$JAR.body"; JAR=; }
 
 # Read a wizard page into $PAGE, and pull out the form action it is showing
@@ -133,7 +133,10 @@ wizard_read() {  # wizard_read <url>
 # Confluence fails that window with a 500 whose body says "Spring Application
 # context has not been set". No readiness endpoint distinguishes the two
 # states, so the honest check is the POST itself. Retrying is safe only
-# because a 500 there means the step was refused, not half-applied.
+# because a 500 there means the step was refused, not half-applied -- and if
+# that ever stops holding, the step-change check below and the final REST
+# probe still refuse to report success; the cost is a worse message, not a
+# silent half-setup.
 wizard_post() {  # wizard_post <url> <curl --data args...>
   _url=$1; shift
   _was=$STEP
