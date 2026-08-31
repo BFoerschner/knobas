@@ -735,7 +735,7 @@ async fn a_submitted_write_is_queued_delivered_and_followed_by_a_re_read() {
 }
 
 // ---------------------------------------------------------------------------
-// 5. The window can now call before the database is up (carry-over §10.6(a)).
+// 6. The window can now call before the database is up (carry-over §10.6(a)).
 // ---------------------------------------------------------------------------
 
 /// A command that needs the pool, called during bring-up, answers `not_ready`.

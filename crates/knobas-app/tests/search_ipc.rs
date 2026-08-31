@@ -209,7 +209,9 @@ async fn errors_carry_a_code_the_frontend_can_branch_on() {
 /// `LauncherHome` is the one DTO in this stream that composes two streams'
 /// data: the lists and the recent rows are `knobas-search`'s, `sources` is
 /// stream F's `CredentialHealth`, and `pending_writes` is stream G's write
-/// queue, which does not exist in M1 and is 0 by rule.
+/// queue, which does not exist in M1 and is 0 by rule. The queue has since
+/// shipped (#42) and the command still answers the M1 constant; issue #212
+/// tracks wiring the count, and this assertion pins the constant until it is.
 #[tokio::test]
 async fn launcher_home_reports_source_health_beside_the_lists() {
     let pool = pool().await;
