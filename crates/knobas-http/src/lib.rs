@@ -440,9 +440,10 @@ impl HttpClient {
 /// would be found in review or not at all. Wrapping the builder makes
 /// [`HttpClient::send`] the only door.
 ///
-/// The builder surface is deliberately narrow: what a read-only M1 adapter
-/// needs on a GET, and nothing that could carry a write. Anything more routes
-/// through the orchestrator (P8: this crate is read-only for M1).
+/// The builder surface is deliberately narrow: what an adapter needs on a
+/// GET, plus [`Request::json`] for M2's ratified write set (issue #43) --
+/// nothing else that could carry a write. Anything more routes through the
+/// orchestrator (P8).
 pub struct Request {
     inner: reqwest::RequestBuilder,
 }

@@ -1,9 +1,11 @@
 //! Which failures are worth trying again, and how long to wait.
 //!
-//! Roadmap §4: three attempts, exponential, **429/502/503/504 and connect
-//! errors only**. Not 500 (a deterministic server bug repeated three times is
-//! three times the load and the same answer), not 4xx (the request is wrong),
-//! and never a write -- M1 issues none.
+//! Roadmap §4: three attempts, exponential, **429/502/503/504, connect errors
+//! and timeouts only**. Not 500 (a deterministic server bug repeated three
+//! times is three times the load and the same answer), and not 4xx (the
+//! request is wrong). Writes retry too, since M2's write-backs (issue #43):
+//! [`Request::json`](crate::Request::json) buffers its body, so a retry
+//! re-sends the same bytes.
 //!
 //! These are plain predicates rather than a `reqwest_retry` policy on purpose.
 //! The retry loop lives in [`HttpClient::send`](crate::HttpClient::send)
