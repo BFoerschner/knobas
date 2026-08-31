@@ -14,6 +14,16 @@
  */
 import type { ContextRow, EntityFilter, Project } from "../ipc/entity";
 
+/**
+ * How a room's mini board arranges its status groups (#210, ADR-0009).
+ *
+ * `columns` is side by side, scrolling sideways; `stacked` is one group under
+ * another, scrolling down. Both draw the same groups, in the same order, with
+ * the same counts and cards — the layout is how they are arranged, never what
+ * they are.
+ */
+export type MiniBoardLayout = "columns" | "stacked";
+
 /** One room in the switcher. */
 export interface RoomContext {
   /** `"all"`, `"src:<source_id>"`, or `"proj:<source_id>:<key>"`. Matches `#/ctx/<id>`. */
@@ -33,6 +43,18 @@ export interface RoomContext {
    * the one room that sets two of these at once.
    */
   filter: Pick<EntityFilter, "sources" | "context" | "project">;
+  /**
+   * Which layout this room's mini board draws (#210).
+   *
+   * A property of the **room**, because the thing that decides is whether the
+   * room is bounded: *All work* and a source room hold whatever synced, so
+   * they hold whatever workflows synced and their statuses have no ceiling; a
+   * project room is one workflow and a stored context is what somebody put in
+   * it. The board is told the answer rather than working it out, so a room
+   * kind's shape is settled in one place instead of inferred from a card
+   * count that changes through the day.
+   */
+  miniBoardLayout: MiniBoardLayout;
 }
 
 /** The id of the room every session starts in. Matches `router.DEFAULT_CTX`. */
@@ -51,6 +73,7 @@ export const ALL_CONTEXT: RoomContext = {
   label: "All work",
   kindWord: "everything synced",
   filter: { sources: [], context: null, project: null },
+  miniBoardLayout: "stacked",
 };
 
 /**
@@ -68,6 +91,7 @@ function projectContext(project: Project): RoomContext {
     label: project.name ?? project.key,
     kindWord: "project",
     filter: { sources: [project.source_id], context: null, project: project.key },
+    miniBoardLayout: "columns",
   };
 }
 
@@ -100,6 +124,7 @@ export function builtinContexts(
         label: source.label,
         kindWord: "source",
         filter: { sources: [source.id], context: null, project: null },
+        miniBoardLayout: "stacked" as const,
       },
       ...projects.filter((project) => project.source_id === source.id).map(projectContext),
     ]),
@@ -122,6 +147,7 @@ export function storedContext(row: ContextRow): RoomContext {
     label: row.title,
     kindWord: kindWordOf(row),
     filter: { sources: [], context: row.id, project: null },
+    miniBoardLayout: "columns",
   };
 }
 
