@@ -259,6 +259,79 @@ async fn a_demo_ticket_carries_its_project_into_the_mirrored_payload() {
     assert_eq!(operations["fields"]["project"]["name"], "Operations");
 }
 
+/// The upgrade path (#234): a profile that has been syncing since **before**
+/// the fixture gained projects repairs itself on its next scheduled run.
+///
+/// The precondition is reconstructed rather than assumed -- the stored cursor
+/// put back to `"tidewater-v1"`, the value the mock handed out until #234, and
+/// the mirrored payload stripped of `fields`, which is byte-for-byte the shape
+/// `ticket_payload` produced before #230 added the only key under it. Without
+/// both halves the test would witness nothing: a run over an already-correct
+/// mirror cannot tell a repair from a no-op.
+///
+/// Driven through `run_from_stored_cursor`, the entry point the **scheduler**
+/// uses, because the criterion is that an existing profile heals on its own
+/// next tick. Nothing here asks for a backfill and nothing clears a cursor by
+/// hand -- that hand-clearing was the workaround this defect forced, and it is
+/// precisely what must stop being necessary.
+#[tokio::test]
+async fn a_profile_stored_at_an_older_fixture_version_re_syncs_and_gains_the_project() {
+    let _guard = MOCK.lock().await;
+    let pool = knobas_db::test_util::test_pool().await;
+    knobas_db::migrate::run(&pool).await.unwrap();
+    demo::demo_load_inner(&pool).await.unwrap();
+
+    sqlx::query("update knobas.source_config set cursor = 'tidewater-v1' where id = 'mock'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("update sync.item set payload = payload - 'fields' where entity_id = 'mock:PAY-231'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        mirrored_payload(&pool, "mock:PAY-231")
+            .await
+            .pointer("/fields/project"),
+        None,
+        "the precondition itself has to hold, or the assertion below is vacuous"
+    );
+
+    let mut conn = knobas_db::test_util::test_connector()
+        .await
+        .connect()
+        .await
+        .unwrap();
+    let report = knobas_sync::run_from_stored_cursor(
+        &mut conn,
+        &pool,
+        &knobas_source_mock::MockSource::new(),
+    )
+    .await
+    .unwrap();
+    assert!(
+        report.upserted > 10,
+        "a stale cursor must be re-sent the whole corpus, got {} item(s)",
+        report.upserted
+    );
+
+    let payload = mirrored_payload(&pool, "mock:PAY-231").await;
+    assert_eq!(payload["fields"]["project"]["key"], "PAY");
+    assert_eq!(payload["fields"]["project"]["name"], "Payments Platform");
+
+    let (stored,): (Option<String>,) =
+        sqlx::query_as("select cursor from knobas.source_config where id = 'mock'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        stored.as_deref(),
+        Some(report.cursor.as_str()),
+        "and the repaired profile has to be left at the new position -- a run \
+         that repairs but does not advance repeats the full corpus for ever"
+    );
+}
+
 /// The miss direction, and the reason the fixture deliberately leaves one
 /// ticket outside every project: a record naming no project syncs like any
 /// other, and its mirrored payload carries **no** project rather than an empty
