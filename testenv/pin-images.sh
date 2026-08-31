@@ -61,20 +61,39 @@ pin() {  # pin <VAR> <repo:tag>
   pin KUMA_IMAGE       louislam/uptime-kuma:2
   pin NODE_IMAGE       node:22-alpine
   pin TEAMCITY_IMAGE   jetbrains/teamcity-server:latest
-  # The latest DC releases as of 2026-08-31 (issue #49: Björn ruled "just use
-  # the latest datacenter versions"), pinned by explicit version rather than
-  # by `:latest` so a bump is a reviewable diff here and not a silent jump on
-  # the next re-pin. `latest` resolved to exactly these two on that date.
+  # These two are pinned to what a **timebomb licence actually starts**, not
+  # to the newest release (#49, revised 2026-08-31). The distinction is the
+  # whole reason they are here: an image that cannot be licensed cannot be
+  # booted, and an unbootable container checks nothing.
   #
-  # These deliberately do NOT match `specs/jira-dc-rest.wadl`, which is Jira
-  # 9.17.0. That is not drift: Atlassian stopped publishing the per-version
-  # WADL after 9.17.x -- 10.x and 11.x answer 404, and the `.../REST/latest/`
-  # URL still redirects to 9.17.0 (probed 2026-08-31). 9.17.0 remains the
-  # newest contract document that exists, so the container is the newer of the
-  # two on purpose, and catching what the older document cannot describe is
-  # precisely the job of the `real-atlassian` profile.
-  pin JIRA_IMAGE       atlassian/jira-software:11.3.10
-  pin CONFLUENCE_IMAGE atlassian/confluence:10.2.15
+  # The only free door left. Atlassian stopped self-service DC trials on
+  # 2026-03-30 ("From March 30, 2026, you won't be able to generate trial
+  # licences for Atlassian-owned Data Center products") and stopped selling DC
+  # to new customers the same day, so the published **timebomb** keys -- 10
+  # user, valid 3 hours from when applied, no my.atlassian.com account -- are
+  # what these containers run on:
+  #   developer.atlassian.com/platform/marketplace/timebomb-licenses-for-testing-server-apps/
+  #
+  # Why these versions and not the newest:
+  #   * Jira 11.x is reported to REJECT the timebomb key outright ("This
+  #     license is invalid", Jira Software DC 11.0.0, developer community
+  #     thread 102402, 2026-08-31; Atlassian's reply offered an ECOHELP
+  #     vendor-only route rather than a fix). We were briefly pinned to
+  #     11.3.10 and moved off it on that evidence.
+  #   * 10.3 and 9.2 are the LTS lines that `sooperset/mcp-atlassian`'s e2e
+  #     Docker harness runs its timebomb licences against (`JIRA_VERSION`
+  #     defaults to 10.3-jdk17, `CONFLUENCE_VERSION` to 9.2-jdk17), with
+  #     confluence:9.2.21 verified explicitly on 2026-06-18.
+  #   * atlassian/jira-software:10.3.24, :10.3, :10.3-jdk17 and :10.3.24-jdk17
+  #     are one and the same digest, so the explicit patch costs nothing.
+  #
+  # Side benefit: 10.3 is two majors CLOSER to `specs/jira-dc-rest.wadl` (Jira
+  # 9.17.0) than 11.3 was. It still is not aligned, and cannot be -- Atlassian
+  # publishes no WADL past 9.17.x (9.18.0 and every 10.x/11.x probed answer
+  # 404; `.../REST/latest/` redirects to 9.17.0). The container being newer
+  # than its contract document is the gap `real-atlassian` exists to measure.
+  pin JIRA_IMAGE       atlassian/jira-software:10.3.24
+  pin CONFLUENCE_IMAGE atlassian/confluence:9.2.21
 } > .env
 
 echo "pin-images: wrote $(pwd)/.env"

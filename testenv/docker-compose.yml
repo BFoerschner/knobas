@@ -187,12 +187,14 @@ services:
       - tc-logs:/opt/teamcity/logs
 
   jira:
-    # Wants ~4 GB of RAM and a developer/timebomb licence entered by hand.
+    # Wants ~4 GB of RAM and a timebomb licence entered by hand.
     #   docker compose --profile real-atlassian up -d jira
-    # The tag is the latest DC release (#49), which is deliberately *newer*
-    # than the vendored WADL (Jira 9.17.0): Atlassian publishes no WADL past
-    # 9.17.x, so the two cannot be aligned any more. pin-images.sh carries the
-    # evidence.
+    # Jira has NO licence environment variable: paste the *Jira Software Data
+    # Center* timebomb key (10 user, 3 hours) into the setup wizard. When it
+    # expires, re-paste at Administration > System > License
+    # (/secure/admin/ViewLicense.jspa) -- no restart, no account.
+    # The tag is 10.3 LTS rather than the newest release because 11.x is
+    # reported to reject that key; pin-images.sh carries the evidence.
     image: ${JIRA_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
     profiles: ["real-atlassian"]
     container_name: knobas-jira
@@ -211,6 +213,19 @@ services:
     container_name: knobas-confluence
     ports:
       - "127.0.0.1:8090:8090"
+    environment:
+      # Confluence 7.9+ reads its licence here at FIRST-TIME setup and skips
+      # the wizard's licence step -- the one half of `real-atlassian` that can
+      # be automated (Jira has no equivalent). Export the timebomb key in your
+      # shell; do NOT put it in testenv/.env, which is a tracked file:
+      #   export CONFLUENCE_LICENSE_KEY='AAAB...'
+      # Unset is the default and changes nothing.
+      ATL_LICENSE_KEY: ${CONFLUENCE_LICENSE_KEY:-}
+      # The key is written to confluence.cfg.xml on the persisted volume and is
+      # NOT re-read on restart, so restarting does not reset the 3-hour timer.
+      # After expiry, either `docker compose down -v` for a clean re-setup, or:
+      #   ATL_FORCE_CFG_UPDATE=true docker compose --profile real-atlassian up -d confluence
+      ATL_FORCE_CFG_UPDATE: ${ATL_FORCE_CFG_UPDATE:-false}
     volumes:
       - confluence-data:/var/atlassian/application-data/confluence
 
