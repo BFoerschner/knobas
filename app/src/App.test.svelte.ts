@@ -22,16 +22,28 @@
  * ready" is the whole of what was wrong. The mocks answer immediately for
  * those two; the assertions are about ordering, not timing.
  *
- * The exception is the last test, and it is an exception on purpose: #148 is a
- * race *inside* the seed's own duration, so `answerHealth` holds
- * `credential_health` open while the event lands. A read that answered
+ * The exception is the health file's last test, and it is an exception on
+ * purpose: #148 is a race *inside* the seed's own duration, so `answerHealth`
+ * holds `credential_health` open while the event lands. A read that answered
  * immediately could not express it — the two would be a sequence, and a
  * sequence is fine in either order.
+ *
+ * The project rooms (#209) join them for the same reason and after the same
+ * kind of miss: the shell carries the census into the switcher on one line,
+ * subscribes for it on another and reseeds it on two more, and every one of
+ * those four was a wire nothing here could see. Every test in this file
+ * answered `list_projects` with an empty list, and a census that is always
+ * empty cannot witness a room appearing — so the whole of the milestone's
+ * headline feature could be deleted from this component without failing a
+ * test (#238). The three tests at the bottom are that fixture put right, and
+ * they assert the **rendered tab strip**: what was missing was never the
+ * argument, it was the room.
  */
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { AppStatus } from "./lib/ipc/app";
+import type { Project } from "./lib/ipc/entity";
 import type { CredentialHealth } from "./lib/ipc/sources";
 
 /** Readings `credential_health` hands back, and how many times it was asked. */
@@ -47,12 +59,31 @@ let answerHealth: (() => Promise<CredentialHealth[]>) | null = null;
 /** What `app_status` says the database is doing. Flipped by a test mid-run. */
 let dbReady = false;
 
+/**
+ * The census `list_projects` answers, and how many times it was asked.
+ *
+ * Mutable rather than a constant because the projects a corpus shows change
+ * *during* a session -- a sync run mirrors the first item of a project that
+ * had none -- and a fixture that could only ever answer one list could not
+ * witness a room appearing.
+ */
+let projectRows: Project[] = [];
+let projectCalls = 0;
+
+/**
+ * Whether this profile has never been set up, and whether it is the `--demo`
+ * one -- the two flags that decide whether the shell hands the whole window to
+ * the §14a wizard, and whether the wizard offers the Tidewater fixture.
+ */
+let firstRun = false;
+let demoProfile = false;
+
 function status(): AppStatus {
   return {
     db: dbReady ? { state: "ready", detail: null } : { state: "starting", detail: null },
     app_version: "0.0.0-test",
-    demo: false,
-    first_run: false,
+    demo: demoProfile,
+    first_run: firstRun,
   } as AppStatus;
 }
 
@@ -99,8 +130,12 @@ vi.mock("./lib/ipc/entity", () => ({
   // this module has to define them even where no context is ever made.
   listContexts: () => Promise.resolve([]),
   // The project census the switcher's third derived population is built from
-  // (#209). Empty here: this file is not about which rooms exist.
-  listProjects: () => Promise.resolve([]),
+  // (#209). Answers `projectRows`, so a test can hand the shell a corpus with
+  // projects in it and read the rooms back off the rendered tab strip.
+  listProjects: () => {
+    projectCalls += 1;
+    return Promise.resolve(projectRows);
+  },
   contextMembers: () => Promise.resolve([]),
   createContext: () => Promise.reject(new Error("no context creation in this test")),
   promoteContext: () => Promise.reject(new Error("no promotion in this test")),
@@ -142,7 +177,51 @@ function emit(event: string, payload: unknown) {
   flushSync();
 }
 
+/**
+ * The switcher's tab strip, as a reader sees it.
+ *
+ * The rendered labels rather than the array handed to `switcherContexts`: what
+ * this file is pinning is that a project the census reports becomes a *room*,
+ * and an assertion about the argument would measure a representation of that
+ * instead of the thing itself -- which is exactly how the census-to-switcher
+ * wire came to be unwitnessed in the first place (#238).
+ *
+ * `.new` is excluded: the trailing `+ new` button sits in the same strip and is
+ * the control that *makes* an ad-hoc context, not a room the switcher offers.
+ */
+function tabLabels(): string[] {
+  return [...target.querySelectorAll(".tabs .tab:not(.new)")].map(
+    (tab) => tab.textContent?.trim() ?? "",
+  );
+}
+
+/**
+ * Press the button whose label reads exactly this.
+ *
+ * The wizard's module buttons carry a second line under their name, so a
+ * button's own name (`.nm`) counts as its label too -- matching on a prefix
+ * instead would let *Next* select a button reading *Next steps*.
+ */
+function press(label: string): void {
+  const buttons = [...target.querySelectorAll("button")];
+  const button = buttons.find(
+    (candidate) =>
+      candidate.textContent?.trim() === label ||
+      candidate.querySelector(".nm")?.textContent?.trim() === label,
+  );
+  if (!button) {
+    throw new Error(
+      `no button reading ${label}; the window offers ${buttons
+        .map((candidate) => candidate.textContent?.trim())
+        .join(" | ")}`,
+    );
+  }
+  button.click();
+  flushSync();
+}
+
 const { default: App } = await import("./App.svelte");
+const { EVENTS } = await import("./lib/ipc");
 const { health } = await import("./lib/shell/health.svelte");
 const { lifecycle } = await import("./lib/shell/lifecycle.svelte");
 
@@ -164,6 +243,10 @@ beforeEach(() => {
   listenCalls = 0;
   listeners.clear();
   dbReady = false;
+  firstRun = false;
+  demoProfile = false;
+  projectRows = [];
+  projectCalls = 0;
   health.replace([]);
   target = document.createElement("div");
   document.body.append(target);
@@ -304,4 +387,138 @@ test("a rejection landing while the boot seed is in flight is not written back t
   expect(health.unauthorized, "the top strip's 401 reading went quiet on a live rejection").toBe(
     true,
   );
+});
+
+/**
+ * The project rooms (#209), end to end through the shell -- the wire #238 found
+ * unwitnessed.
+ *
+ * `App.svelte` passes `projects.all` into `switcherContexts` on one line, and
+ * that line is the whole path from the census to the switcher. Deleting it
+ * removed every project room from the app and failed nothing: both endpoints
+ * are well tested on their own, `switcherContexts` defaulted the argument away,
+ * and every test that mounted this component answered `list_projects` with an
+ * empty list -- a fixture that cannot witness a room appearing.
+ *
+ * A source room is fixtured too, and has to be: a project is offered a room
+ * only under its own source's room (`contexts.ts`), so a census with no
+ * matching source would witness nothing either.
+ */
+test("a project the census reports gets a room in the switcher", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  projectRows = [{ source_id: "mock", key: "PAY", name: "Payments Platform" }];
+
+  app = mount(App, { target, props: {} });
+  await until(
+    () => tabLabels().includes("mock"),
+    "the shell never drew the source room the project hangs under",
+  );
+
+  expect(
+    tabLabels(),
+    "the census reported a project and the switcher offered no room for it",
+  ).toContain("Payments Platform");
+  // Under its own source's room, which is the order `builtinContexts` promises
+  // and the reason the room is placeable at all.
+  expect(tabLabels()).toEqual(["All work", "mock", "Payments Platform"]);
+});
+
+/**
+ * The subscription behind the project rooms (`projects.start()`), which is
+ * what keeps them current *within* a session.
+ *
+ * A project room appears when the first item carrying that project syncs, and
+ * a sync run ending is the only event that says the mirror moved. So the
+ * seed alone would leave a reader looking at the rooms their corpus had when
+ * the window opened -- the news that `OPS-77` arrived would wait for a
+ * restart.
+ *
+ * The census answers differently before and after the run, which is the whole
+ * fixture: a list that could only ever say one thing cannot tell a
+ * subscription that fired from one that never did.
+ */
+test("a project that first appears mid-session gets its room without a reload", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  // Nothing of OPS is mirrored yet -- the state a corpus is in before the run
+  // that brings the project in.
+  projectRows = [];
+
+  app = mount(App, { target, props: {} });
+  await until(() => tabLabels().includes("mock"), "the shell never drew the source room");
+  await until(() => projectCalls > 0, "the shell never read the census at all");
+  expect(
+    tabLabels(),
+    "the fixture has to start without the room, or the assertion below is vacuous",
+  ).toEqual(["All work", "mock"]);
+
+  projectRows = [{ source_id: "mock", key: "OPS", name: "Operations" }];
+  emit(EVENTS.syncState, {
+    source_id: "mock",
+    running: false,
+    run_id: 1,
+    started_at: null,
+    last_finished_at: "2026-09-01T09:00:00Z",
+    last_outcome: null,
+    next_run_at: null,
+    backoff_until: null,
+  });
+
+  await until(
+    () => tabLabels().includes("Operations"),
+    "the sync run that mirrored the project never reached the switcher",
+  );
+  expect(tabLabels()).toEqual(["All work", "mock", "Operations"]);
+});
+
+/**
+ * The wizard's handoff (#207 into #209): a demo load writes a corpus with
+ * projects in it, and the shell it lands on has to know about them.
+ *
+ * `onFirstRunDone` reseeds both stores by hand, and it has to: the boot seeds
+ * ran against a database with no sources and no items in it, `demo_load` emits
+ * neither `source:health` nor a sync-run ending, and nothing else in the
+ * session would ever say otherwise. Without the project half a person taking
+ * the demo path -- the one path the fixture's two projects exist for -- lands
+ * in a switcher with no project rooms at all and no way to get them but a
+ * restart.
+ *
+ * The census is empty at mount and non-empty by the time the wizard finishes,
+ * which is the load-bearing half of the fixture: it is what makes this a
+ * witness of the reseed rather than of the boot seed that had already run.
+ */
+test("finishing the wizard shows the rooms the demo corpus just wrote", async () => {
+  dbReady = true;
+  firstRun = true;
+  demoProfile = true;
+  // A profile nothing has been configured in yet, which is what a first run is.
+  healthRows = [];
+  projectRows = [];
+
+  app = mount(App, { target, props: {} });
+  await until(
+    () => target.querySelector(".firstrun") !== null && projectCalls > 0,
+    "the wizard never rendered over a booted shell",
+  );
+  expect(tabLabels(), "the wizard takes the whole window; there is no strip yet").toEqual([]);
+
+  // `demo_load` registers `mock` and syncs the Tidewater fixture in one call,
+  // so both reads answer differently from here on.
+  healthRows = [row("mock", "ok")];
+  projectRows = [{ source_id: "mock", key: "PAY", name: "Payments Platform" }];
+
+  press("Next");
+  press("Load the Tidewater dataset");
+  await until(
+    () => [...target.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Finish"),
+    "the demo load never reached the wizard's last panel",
+  );
+  press("Finish");
+
+  await until(
+    () => tabLabels().includes("Payments Platform"),
+    "the corpus the wizard just loaded never reached the switcher",
+  );
+  expect(tabLabels()).toEqual(["All work", "mock", "Payments Platform"]);
 });
