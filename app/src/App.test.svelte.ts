@@ -22,11 +22,22 @@
  * ready" is the whole of what was wrong. The mocks answer immediately for
  * those two; the assertions are about ordering, not timing.
  *
- * The exception is the last test, and it is an exception on purpose: #148 is a
- * race *inside* the seed's own duration, so `answerHealth` holds
- * `credential_health` open while the event lands. A read that answered
+ * The exception is the health file's last test, and it is an exception on
+ * purpose: #148 is a race *inside* the seed's own duration, so `answerHealth`
+ * holds `credential_health` open while the event lands. A read that answered
  * immediately could not express it — the two would be a sequence, and a
  * sequence is fine in either order.
+ *
+ * The project rooms (#209) join them for the same reason and after the same
+ * kind of miss: the shell carries the census into the switcher on one line,
+ * subscribes for it on another and reseeds it on two more, and every one of
+ * those four was a wire nothing here could see. Every test in this file
+ * answered `list_projects` with an empty list, and a census that is always
+ * empty cannot witness a room appearing — so the whole of the milestone's
+ * headline feature could be deleted from this component without failing a
+ * test (#238). The three tests at the bottom are that fixture put right, and
+ * they assert the **rendered tab strip**: what was missing was never the
+ * argument, it was the room.
  */
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
