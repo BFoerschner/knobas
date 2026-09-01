@@ -177,6 +177,7 @@ function tabLabels(): string[] {
 }
 
 const { default: App } = await import("./App.svelte");
+const { EVENTS } = await import("./lib/ipc");
 const { health } = await import("./lib/shell/health.svelte");
 const { lifecycle } = await import("./lib/shell/lifecycle.svelte");
 
@@ -375,4 +376,52 @@ test("a project the census reports gets a room in the switcher", async () => {
   // Under its own source's room, which is the order `builtinContexts` promises
   // and the reason the room is placeable at all.
   expect(tabLabels()).toEqual(["All work", "mock", "Payments Platform"]);
+});
+
+/**
+ * The subscription behind the project rooms (`projects.start()`), which is
+ * what keeps them current *within* a session.
+ *
+ * A project room appears when the first item carrying that project syncs, and
+ * a sync run ending is the only event that says the mirror moved. So the
+ * seed alone would leave a reader looking at the rooms their corpus had when
+ * the window opened -- the news that `OPS-77` arrived would wait for a
+ * restart.
+ *
+ * The census answers differently before and after the run, which is the whole
+ * fixture: a list that could only ever say one thing cannot tell a
+ * subscription that fired from one that never did.
+ */
+test("a project that first appears mid-session gets its room without a reload", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  // Nothing of OPS is mirrored yet -- the state a corpus is in before the run
+  // that brings the project in.
+  projectRows = [];
+
+  app = mount(App, { target, props: {} });
+  await until(() => tabLabels().includes("mock"), "the shell never drew the source room");
+  await until(() => projectCalls > 0, "the shell never read the census at all");
+  expect(
+    tabLabels(),
+    "the fixture has to start without the room, or the assertion below is vacuous",
+  ).toEqual(["All work", "mock"]);
+
+  projectRows = [{ source_id: "mock", key: "OPS", name: "Operations" }];
+  emit(EVENTS.syncState, {
+    source_id: "mock",
+    running: false,
+    run_id: 1,
+    started_at: null,
+    last_finished_at: "2026-09-01T09:00:00Z",
+    last_outcome: null,
+    next_run_at: null,
+    backoff_until: null,
+  });
+
+  await until(
+    () => tabLabels().includes("Operations"),
+    "the sync run that mirrored the project never reached the switcher",
+  );
+  expect(tabLabels()).toEqual(["All work", "mock", "Operations"]);
 });
