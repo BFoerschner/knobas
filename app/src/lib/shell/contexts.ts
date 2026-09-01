@@ -185,11 +185,25 @@ export function storedContext(row: ContextRow): RoomContext {
  * Stored rooms before source rooms because they are the ones a person made on
  * purpose — a promoted epic is closer to "what am I working on" than the raw
  * feed of one source.
+ *
+ * `projects` is **required**, and deliberately unlike `builtinContexts`'
+ * defaulted one below. This is the shell's call site — one line in
+ * `App.svelte` carrying the whole census into the switcher — and while it
+ * defaulted, dropping that argument removed every project room from the app,
+ * type-checked clean, and failed none of 743 tests (#238). `Tile.svelte`
+ * states the rule this restores: "the compiler is the cheapest place to notice
+ * that", which is how #210 settled `miniBoardLayout`. A caller with no census
+ * to give says so by passing `[]`.
+ *
+ * `builtinContexts` keeps its default because its callers are different in
+ * kind: two component props whose default means *no rooms were supplied*, and
+ * the one pass-through below, which is a line under its own signature and is
+ * already witnessed by this file's own tests.
  */
 export function switcherContexts(
   stored: ContextRow[],
   sources: { id: string; label: string }[],
-  projects: Project[] = [],
+  projects: Project[],
 ): RoomContext[] {
   const derived = builtinContexts(sources, projects);
   return [derived[0]!, ...stored.map(storedContext), ...derived.slice(1)];

@@ -93,6 +93,9 @@ test("stored contexts sit between All work and the source rooms", () => {
       },
     ],
     [{ id: "jira", label: "Tidewater Jira" }],
+    // No census: this test is about where the stored rooms sit, and an empty
+    // list is how a caller says so now that the argument is required (#238).
+    [],
   );
 
   expect(cs.map((c) => c.id)).toEqual(["all", "ctx:b", "ctx:a", "src:jira"]);
