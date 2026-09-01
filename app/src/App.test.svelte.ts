@@ -59,12 +59,20 @@ let dbReady = false;
 let projectRows: Project[] = [];
 let projectCalls = 0;
 
+/**
+ * Whether this profile has never been set up, and whether it is the `--demo`
+ * one -- the two flags that decide whether the shell hands the whole window to
+ * the §14a wizard, and whether the wizard offers the Tidewater fixture.
+ */
+let firstRun = false;
+let demoProfile = false;
+
 function status(): AppStatus {
   return {
     db: dbReady ? { state: "ready", detail: null } : { state: "starting", detail: null },
     app_version: "0.0.0-test",
-    demo: false,
-    first_run: false,
+    demo: demoProfile,
+    first_run: firstRun,
   } as AppStatus;
 }
 
@@ -176,6 +184,31 @@ function tabLabels(): string[] {
   );
 }
 
+/**
+ * Press the button whose label reads exactly this.
+ *
+ * The wizard's module buttons carry a second line under their name, so a
+ * button's own name (`.nm`) counts as its label too -- matching on a prefix
+ * instead would let *Next* select a button reading *Next steps*.
+ */
+function press(label: string): void {
+  const buttons = [...target.querySelectorAll("button")];
+  const button = buttons.find(
+    (candidate) =>
+      candidate.textContent?.trim() === label ||
+      candidate.querySelector(".nm")?.textContent?.trim() === label,
+  );
+  if (!button) {
+    throw new Error(
+      `no button reading ${label}; the window offers ${buttons
+        .map((candidate) => candidate.textContent?.trim())
+        .join(" | ")}`,
+    );
+  }
+  button.click();
+  flushSync();
+}
+
 const { default: App } = await import("./App.svelte");
 const { EVENTS } = await import("./lib/ipc");
 const { health } = await import("./lib/shell/health.svelte");
@@ -199,6 +232,8 @@ beforeEach(() => {
   listenCalls = 0;
   listeners.clear();
   dbReady = false;
+  firstRun = false;
+  demoProfile = false;
   projectRows = [];
   projectCalls = 0;
   health.replace([]);
@@ -424,4 +459,55 @@ test("a project that first appears mid-session gets its room without a reload", 
     "the sync run that mirrored the project never reached the switcher",
   );
   expect(tabLabels()).toEqual(["All work", "mock", "Operations"]);
+});
+
+/**
+ * The wizard's handoff (#207 into #209): a demo load writes a corpus with
+ * projects in it, and the shell it lands on has to know about them.
+ *
+ * `onFirstRunDone` reseeds both stores by hand, and it has to: the boot seeds
+ * ran against a database with no sources and no items in it, `demo_load` emits
+ * neither `source:health` nor a sync-run ending, and nothing else in the
+ * session would ever say otherwise. Without the project half a person taking
+ * the demo path -- the one path the fixture's two projects exist for -- lands
+ * in a switcher with no project rooms at all and no way to get them but a
+ * restart.
+ *
+ * The census is empty at mount and non-empty by the time the wizard finishes,
+ * which is the load-bearing half of the fixture: it is what makes this a
+ * witness of the reseed rather than of the boot seed that had already run.
+ */
+test("finishing the wizard shows the rooms the demo corpus just wrote", async () => {
+  dbReady = true;
+  firstRun = true;
+  demoProfile = true;
+  // A profile nothing has been configured in yet, which is what a first run is.
+  healthRows = [];
+  projectRows = [];
+
+  app = mount(App, { target, props: {} });
+  await until(
+    () => target.querySelector(".firstrun") !== null && projectCalls > 0,
+    "the wizard never rendered over a booted shell",
+  );
+  expect(tabLabels(), "the wizard takes the whole window; there is no strip yet").toEqual([]);
+
+  // `demo_load` registers `mock` and syncs the Tidewater fixture in one call,
+  // so both reads answer differently from here on.
+  healthRows = [row("mock", "ok")];
+  projectRows = [{ source_id: "mock", key: "PAY", name: "Payments Platform" }];
+
+  press("Next");
+  press("Load the Tidewater dataset");
+  await until(
+    () => [...target.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Finish"),
+    "the demo load never reached the wizard's last panel",
+  );
+  press("Finish");
+
+  await until(
+    () => tabLabels().includes("Payments Platform"),
+    "the corpus the wizard just loaded never reached the switcher",
+  );
+  expect(tabLabels()).toEqual(["All work", "mock", "Payments Platform"]);
 });
