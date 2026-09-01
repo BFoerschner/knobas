@@ -32,6 +32,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { AppStatus } from "./lib/ipc/app";
+import type { Project } from "./lib/ipc/entity";
 import type { CredentialHealth } from "./lib/ipc/sources";
 
 /** Readings `credential_health` hands back, and how many times it was asked. */
@@ -46,6 +47,17 @@ let answerHealth: (() => Promise<CredentialHealth[]>) | null = null;
 
 /** What `app_status` says the database is doing. Flipped by a test mid-run. */
 let dbReady = false;
+
+/**
+ * The census `list_projects` answers, and how many times it was asked.
+ *
+ * Mutable rather than a constant because the projects a corpus shows change
+ * *during* a session -- a sync run mirrors the first item of a project that
+ * had none -- and a fixture that could only ever answer one list could not
+ * witness a room appearing.
+ */
+let projectRows: Project[] = [];
+let projectCalls = 0;
 
 function status(): AppStatus {
   return {
@@ -99,8 +111,12 @@ vi.mock("./lib/ipc/entity", () => ({
   // this module has to define them even where no context is ever made.
   listContexts: () => Promise.resolve([]),
   // The project census the switcher's third derived population is built from
-  // (#209). Empty here: this file is not about which rooms exist.
-  listProjects: () => Promise.resolve([]),
+  // (#209). Answers `projectRows`, so a test can hand the shell a corpus with
+  // projects in it and read the rooms back off the rendered tab strip.
+  listProjects: () => {
+    projectCalls += 1;
+    return Promise.resolve(projectRows);
+  },
   contextMembers: () => Promise.resolve([]),
   createContext: () => Promise.reject(new Error("no context creation in this test")),
   promoteContext: () => Promise.reject(new Error("no promotion in this test")),
@@ -142,6 +158,24 @@ function emit(event: string, payload: unknown) {
   flushSync();
 }
 
+/**
+ * The switcher's tab strip, as a reader sees it.
+ *
+ * The rendered labels rather than the array handed to `switcherContexts`: what
+ * this file is pinning is that a project the census reports becomes a *room*,
+ * and an assertion about the argument would measure a representation of that
+ * instead of the thing itself -- which is exactly how the census-to-switcher
+ * wire came to be unwitnessed in the first place (#238).
+ *
+ * `.new` is excluded: the trailing `+ new` button sits in the same strip and is
+ * the control that *makes* an ad-hoc context, not a room the switcher offers.
+ */
+function tabLabels(): string[] {
+  return [...target.querySelectorAll(".tabs .tab:not(.new)")].map(
+    (tab) => tab.textContent?.trim() ?? "",
+  );
+}
+
 const { default: App } = await import("./App.svelte");
 const { health } = await import("./lib/shell/health.svelte");
 const { lifecycle } = await import("./lib/shell/lifecycle.svelte");
@@ -164,6 +198,8 @@ beforeEach(() => {
   listenCalls = 0;
   listeners.clear();
   dbReady = false;
+  projectRows = [];
+  projectCalls = 0;
   health.replace([]);
   target = document.createElement("div");
   document.body.append(target);
@@ -304,4 +340,39 @@ test("a rejection landing while the boot seed is in flight is not written back t
   expect(health.unauthorized, "the top strip's 401 reading went quiet on a live rejection").toBe(
     true,
   );
+});
+
+/**
+ * The project rooms (#209), end to end through the shell -- the wire #238 found
+ * unwitnessed.
+ *
+ * `App.svelte` passes `projects.all` into `switcherContexts` on one line, and
+ * that line is the whole path from the census to the switcher. Deleting it
+ * removed every project room from the app and failed nothing: both endpoints
+ * are well tested on their own, `switcherContexts` defaulted the argument away,
+ * and every test that mounted this component answered `list_projects` with an
+ * empty list -- a fixture that cannot witness a room appearing.
+ *
+ * A source room is fixtured too, and has to be: a project is offered a room
+ * only under its own source's room (`contexts.ts`), so a census with no
+ * matching source would witness nothing either.
+ */
+test("a project the census reports gets a room in the switcher", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  projectRows = [{ source_id: "mock", key: "PAY", name: "Payments Platform" }];
+
+  app = mount(App, { target, props: {} });
+  await until(
+    () => tabLabels().includes("mock"),
+    "the shell never drew the source room the project hangs under",
+  );
+
+  expect(
+    tabLabels(),
+    "the census reported a project and the switcher offered no room for it",
+  ).toContain("Payments Platform");
+  // Under its own source's room, which is the order `builtinContexts` promises
+  // and the reason the room is placeable at all.
+  expect(tabLabels()).toEqual(["All work", "mock", "Payments Platform"]);
 });
