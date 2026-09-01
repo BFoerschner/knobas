@@ -200,6 +200,7 @@
           sources={context.filter.sources}
           ctx={context.filter.context}
           project={context.filter.project}
+          miniBoardLayout={context.miniBoardLayout}
           onopen={open}
         />
       {/each}

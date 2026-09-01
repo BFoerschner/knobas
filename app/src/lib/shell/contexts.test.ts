@@ -53,6 +53,7 @@ test("the fallback is All work by identity, not by position", () => {
       label: "Jira",
       kindWord: "source",
       filter: { sources: ["jira"], context: null, project: null },
+      miniBoardLayout: "stacked" as const,
     },
     ALL_CONTEXT,
   ];
@@ -278,4 +279,37 @@ test("stored contexts still sit between All work and the source rooms with proje
   );
 
   expect(cs.map((c) => c.id)).toEqual(["all", "ctx:a", "src:jira", "proj:jira:PAY"]);
+});
+
+/**
+ * Which layout a room's mini board draws, per room kind (#210).
+ *
+ * The distinction is boundedness, not size: *All work* and a source room hold
+ * whatever synced, so they hold whatever workflows synced, and a horizontal
+ * strip of columns is the wrong shape for them however few statuses they show
+ * today. A project room and a stored context are bounded, so they keep the
+ * column layout the tile was designed for.
+ */
+test("the unbounded rooms draw stacked and the bounded ones draw columns", () => {
+  const cs = switcherContexts(
+    [
+      {
+        id: "ctx:a",
+        kind: "epic",
+        title: "SEPA payout retries",
+        anchor_id: "jira:EPIC-1",
+        created_at: "2026-08-28T12:00:00Z",
+        archived_at: null,
+      },
+    ],
+    [{ id: "jira", label: "Tidewater Jira" }],
+    [{ source_id: "jira", key: "PAY", name: "Payments Platform" }],
+  );
+
+  expect(cs.map((c) => [c.id, c.miniBoardLayout])).toEqual([
+    ["all", "stacked"],
+    ["ctx:a", "columns"],
+    ["src:jira", "stacked"],
+    ["proj:jira:PAY", "columns"],
+  ]);
 });

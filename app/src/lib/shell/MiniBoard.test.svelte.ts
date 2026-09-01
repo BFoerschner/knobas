@@ -16,6 +16,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import type { EntityFilter, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../ipc/entity";
+import type { MiniBoardLayout } from "./contexts";
 
 /**
  * Plain functions rather than `vi.fn`, for the reason `Tile.test.svelte.ts`
@@ -63,11 +64,16 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function render(sources: string[] = [], ctx: string | null = null, project: string | null = null) {
+function render(
+  sources: string[] = [],
+  ctx: string | null = null,
+  project: string | null = null,
+  miniBoardLayout: MiniBoardLayout = "columns",
+) {
   const target = document.createElement("div");
   document.body.append(target);
   const onopen = vi.fn();
-  const props = $state({ spec: SPEC, sources, ctx, project, onopen });
+  const props = $state({ spec: SPEC, sources, ctx, project, miniBoardLayout, onopen });
   const app = mount(Tile, { target, props });
   flushSync();
   return {
@@ -80,6 +86,20 @@ function render(sources: string[] = [], ctx: string | null = null, project: stri
         [...col.querySelectorAll(".col-h span")].map((span) => span.textContent ?? ""),
       ),
     cards: () => [...target.querySelectorAll<HTMLButtonElement>(".card")],
+    /**
+     * The layout actually drawn, off the board's own class.
+     *
+     * The two layouts differ in one thing — how the same groups are arranged —
+     * and arrangement is `app.css`'s job, because a computed
+     * `grid-template`/`overflow` would be the inline style `style-src 'self'`
+     * drops in a bundle. So the class *is* the rendered decision, and
+     * `app-css.test.ts` pins that each class still carries its axis.
+     */
+    layout: () => {
+      const board = target.querySelector(".board");
+      if (!board) return null;
+      return [...board.classList].find((name) => name !== "board") ?? null;
+    },
     text: () => target.textContent ?? "",
     count: () => target.querySelector(".tile-h .cnt")?.textContent ?? "",
     label: () => target.querySelector(".tile-h .lab")?.textContent ?? "",
@@ -315,4 +335,147 @@ test("leaving a room takes its board off the screen while the next read is in fl
   expect(screen.text()).toContain("FRESH-1");
 
   screen.done();
+});
+
+/** The four statuses of one workflow, scrambled, plus the terminal group. */
+function workflow(): MiniBoardColumn[] {
+  return [
+    column("To Do", card("PAY-240"), card("PAY-236")),
+    column("In Progress", card("PAY-231")),
+    column("Done", card("PAY-201")),
+    column(null, card("PAY-9")),
+  ];
+}
+
+/** What both layouts have to agree about: the groups, their order, their counts. */
+const WORKFLOW_COLUMNS = [
+  ["To Do", "2"],
+  ["In Progress", "1"],
+  ["Done", "1"],
+  ["No status", "1"],
+];
+
+/**
+ * The board is **told** which layout to draw (#210).
+ *
+ * Both cases render the same four columns, so nothing here can be satisfied by
+ * a board that inferred its own layout from what it happened to hold: the
+ * fixture is identical and only the room's answer differs.
+ */
+test("draws the layout the room told it to, over one and the same board", async () => {
+  answer = () => Promise.resolve({ columns: workflow(), sources: [] });
+
+  const stacked = render([], null, null, "stacked");
+  await vi.waitFor(() => expect(stacked.columns()).toHaveLength(4));
+  flushSync();
+  expect(stacked.layout()).toBe("stacked");
+  expect(stacked.columns()).toEqual(WORKFLOW_COLUMNS);
+  stacked.done();
+
+  const columns = render([], null, null, "columns");
+  await vi.waitFor(() => expect(columns.columns()).toHaveLength(4));
+  flushSync();
+  expect(columns.layout()).toBe("columns");
+  expect(columns.columns()).toEqual(WORKFLOW_COLUMNS);
+  columns.done();
+});
+
+/**
+ * ...down to the cards and the addresses they open.
+ *
+ * The layout is how the groups are arranged, never what they are, so a card
+ * carries the same key, priority and title in either and clicks through to the
+ * same entity.
+ */
+test("a card reads the same and opens the same address in either layout", async () => {
+  answer = () =>
+    Promise.resolve({ columns: [column("To Do", card("PAY-240", "Medium"))], sources: [] });
+
+  for (const layout of ["columns", "stacked"] as const) {
+    const screen = render([], null, null, layout);
+    await vi.waitFor(() => expect(screen.cards()).toHaveLength(1));
+    flushSync();
+
+    const [only] = screen.cards();
+    expect(only?.querySelector(".k .mono")?.textContent).toBe("PAY-240");
+    expect(only?.querySelector(".k .pr")?.textContent).toBe("Medium");
+    expect(only?.querySelector(".s")?.textContent).toBe("Title of PAY-240");
+
+    only?.click();
+    flushSync();
+    expect(screen.onopen).toHaveBeenCalledWith({ kind: "ticket", entity_id: "mock:PAY-240" });
+
+    screen.done();
+  }
+});
+
+/** An empty room reads as empty in either layout, rather than as a bare frame. */
+test("an empty board still says there is no ticket here in either layout", async () => {
+  for (const layout of ["columns", "stacked"] as const) {
+    const screen = render([], null, null, layout);
+    await vi.waitFor(() => expect(screen.text()).toContain("No ticket in this room yet."));
+    flushSync();
+    expect(screen.layout()).toBeNull();
+    screen.done();
+  }
+});
+
+/** A board of `n` distinct statuses, one card each. */
+function statuses(n: number): MiniBoardColumn[] {
+  return Array.from({ length: n }, (_, at) => column(`S${at + 1}`, card(`PAY-${at + 1}`)));
+}
+
+/**
+ * The backstop, at the boundary rather than near it.
+ *
+ * A bounded room is bounded by what it *should* hold, not by what it turns out
+ * to hold: a project room whose tickets span two workflows would otherwise
+ * ship the horizontal scrollbar the layout exists to avoid. Six columns is
+ * still the room's own layout; the seventh is what tips it.
+ */
+test("a columns room demotes to stacked past six columns, and not at six", async () => {
+  answer = () => Promise.resolve({ columns: statuses(6), sources: [] });
+  const six = render([], null, null, "columns");
+  await vi.waitFor(() => expect(six.columns()).toHaveLength(6));
+  flushSync();
+  expect(six.layout()).toBe("columns");
+  six.done();
+
+  answer = () => Promise.resolve({ columns: statuses(7), sources: [] });
+  const seven = render([], null, null, "columns");
+  await vi.waitFor(() => expect(seven.columns()).toHaveLength(7));
+  flushSync();
+  expect(seven.layout()).toBe("stacked");
+  // The demotion is an arrangement and nothing else: every status the read
+  // gave is still drawn, in the read's own order, with its own count.
+  expect(seven.columns().map(([status]) => status)).toEqual([
+    "S1",
+    "S2",
+    "S3",
+    "S4",
+    "S5",
+    "S6",
+    "S7",
+  ]);
+  seven.done();
+});
+
+/**
+ * ...and it runs one way only.
+ *
+ * This is the test the ticket asks for by name. A backstop that also promoted
+ * — stacked below the threshold, columns above it — would make a room's layout
+ * a function of what its board happens to hold this minute, so a room would
+ * change shape under the reader as tickets moved through the day. An unbounded
+ * room showing one status today is still the room that holds whatever synced.
+ */
+test("a stacked room stays stacked however few columns it draws", async () => {
+  for (const count of [1, 6]) {
+    answer = () => Promise.resolve({ columns: statuses(count), sources: [] });
+    const screen = render([], null, null, "stacked");
+    await vi.waitFor(() => expect(screen.columns()).toHaveLength(count));
+    flushSync();
+    expect(screen.layout()).toBe("stacked");
+    screen.done();
+  }
 });

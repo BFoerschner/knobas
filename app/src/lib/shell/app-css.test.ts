@@ -155,3 +155,32 @@ test("the four rules that put faint text on a hover surface are lifted", () => {
     expect(css, `${selector} is no longer lifted off --faint`).toContain(selector);
   }
 });
+
+/**
+ * The mini board's two layouts differ in exactly one thing — the axis (#210) —
+ * and that thing lives here rather than in the component, because a computed
+ * `grid-template` or `overflow` would be the inline style `style-src 'self'`
+ * drops in a bundle. So the class the board carries is only a decision; this
+ * is what makes it a rendering.
+ *
+ * The stacked layout's `overflow-x:hidden` is pinned by name: the room that
+ * draws it is the unbounded one, so it is precisely the room that would
+ * otherwise hang a horizontal scrollbar under an unknown number of workflows.
+ */
+test("the mini board's layouts each scroll on their own axis", () => {
+  const rule = (selector: string) => {
+    const match = new RegExp(`\\${selector}\\s*\\{([^}]*)\\}`).exec(css);
+    expect(match, `${selector} declares nothing in app.css`).toBeTruthy();
+    return match![1]!;
+  };
+
+  const columns = rule(".board.columns");
+  expect(columns).toContain("grid-auto-flow:column");
+  expect(columns).toContain("overflow-x:auto");
+
+  const stacked = rule(".board.stacked");
+  expect(stacked).toContain("flex-direction:column");
+  expect(stacked).toContain("overflow-y:auto");
+  expect(stacked).toContain("overflow-x:hidden");
+  expect(stacked).not.toContain("grid-auto-flow:column");
+});

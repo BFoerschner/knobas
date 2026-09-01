@@ -1,7 +1,8 @@
 <!--
   The Tickets tile's body: the mini board (`signal-miller.html:2383-2388`).
 
-  Columns over a room's live tickets, one per status the source gave them.
+  A group over a room's live tickets, one per status the source gave them,
+  arranged either as columns side by side or stacked one under another.
   ADR-0009 names it the *mini board* — "board" never stands alone, and this is
   not the launcher's board or the assets one.
 
@@ -10,15 +11,26 @@
   a client that re-sorted here would be a second opinion about the same
   question, and the two would drift. What this file decides is what the reader
   *sees*: the words over the terminal group, and what a card shows.
+
+  **Nor does it choose its layout** (#210). The room does, because the thing
+  that decides is whether the room is bounded, which is a fact about the room
+  and not about the cards that happen to be on the board today. One markup for
+  both, one class apart: the groups, their order and their counts are the same
+  either way, so a second template would be two places to keep telling the
+  same truth.
 -->
 <script lang="ts">
   import type { EntityRow, MiniBoard } from "../ipc/entity";
+  import type { MiniBoardLayout } from "./contexts";
 
   let {
     board,
+    layout,
     onopen,
   }: {
     board: MiniBoard;
+    /** How to arrange the groups — the room's answer, never this file's. */
+    layout: MiniBoardLayout;
     onopen: (row: Pick<EntityRow, "kind" | "entity_id">) => void;
   } = $props();
 
@@ -43,7 +55,7 @@
   const KIND = "ticket";
 </script>
 
-<div class="board">
+<div class="board {layout}">
   {#each board.columns as column (column.status ?? "")}
     <div class="col">
       <div class="col-h">

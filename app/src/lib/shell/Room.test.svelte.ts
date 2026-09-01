@@ -552,3 +552,53 @@ test("an empty project room says so, distinguishably from a broken one", async (
 
   screen.done();
 });
+
+/**
+ * The room's layout answer actually reaches the board it is about (#210).
+ *
+ * Pinned here because nowhere else can see it. `contexts.ts` knows which
+ * layout each room kind carries and the mini board knows how to draw the one
+ * it is handed, and both are tested where they live — but a room that dropped
+ * the answer on the way to the tile, or hardcoded one, satisfies both of those
+ * and still draws every room the same. So: one board fixture, two rooms, and
+ * the difference has to come from the rooms.
+ */
+test("a room hands its own layout to the mini board it draws", async () => {
+  const STATUSES = ["To Do", "In Progress", "Done"];
+  answer = (filter) =>
+    Promise.resolve(
+      filter.kinds.length === 0 || filter.kinds.includes("ticket")
+        ? { rows: [row("ticket", "PAY-231")], total: 1 }
+        : { rows: [], total: 0 },
+    );
+  board = () =>
+    Promise.resolve({
+      columns: STATUSES.map((status) => ({
+        status,
+        cards: [
+          {
+            entity_id: `mock:${status}`,
+            source_id: "mock",
+            key: status,
+            title: status,
+            priority: null,
+          },
+        ],
+      })),
+      sources: [],
+    });
+
+  const drawn: Record<string, string | undefined> = {};
+  for (const hash of ["#/ctx/src:jira", "#/ctx/proj:jira:PAY"]) {
+    const screen = render(hash);
+    await vi.waitFor(() => expect(screen.cards()).toHaveLength(3));
+    await settle();
+    drawn[hash] = screen.target.querySelector(".board")?.className;
+    screen.done();
+  }
+
+  expect(drawn).toEqual({
+    "#/ctx/src:jira": "board stacked",
+    "#/ctx/proj:jira:PAY": "board columns",
+  });
+});

@@ -367,6 +367,7 @@ const CASES: Case[] = [
         props: {
           spec: { id: "tickets", label: "Tickets", kinds: ["ticket"] },
           sources: [],
+          miniBoardLayout: "columns" as const,
           onopen: () => {},
         },
       }),

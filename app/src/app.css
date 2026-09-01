@@ -168,7 +168,8 @@ a{color:var(--link);text-decoration:none}
 .row svg,.card svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round;vertical-align:-2px}
 
 /* board */
-.board{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(150px,1fr);gap:1px;background:var(--hair);height:100%;overflow-x:auto}
+.board{gap:1px;background:var(--hair);height:100%}
+.board.columns{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(150px,1fr);overflow-x:auto}
 .col{background:var(--bg);min-width:0;display:flex;flex-direction:column}
 .col-h{display:flex;justify-content:space-between;align-items:center;height:22px;padding:0 8px;font:500 10px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--faint);border-bottom:1px solid var(--hair)}
 .card{display:block;width:100%;text-align:left;padding:6px 8px;border-bottom:1px solid var(--hair);cursor:pointer;font-size:12px}
@@ -469,3 +470,20 @@ kbd{font:400 10px var(--mono);color:var(--faint);border:1px solid var(--hair);bo
 .pop .it.on small,
 .mod:hover .sub,
 .card.sel .k .pr{color:var(--muted)}
+
+/* The mini board's stacked layout (#210): the same status groups one under
+   another, the tile scrolling down instead of sideways.
+
+   `overflow-x:hidden` is the point of the layout rather than a tidy-up — the
+   room drawing this one is unbounded, so it is the one that would otherwise
+   put a horizontal scrollbar under an unknown number of workflows. The
+   columns layout keeps its own `overflow-x:auto`; both are declared on their
+   own class, because the axis is the whole difference between them. */
+.board.stacked{display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden}
+/* Each group is as tall as its own cards: the board scrolls as one, rather
+   than becoming a stack of little scroll regions the reader has to find. */
+.board.stacked .col{flex:none}
+
+/* A group's heading stays put while its own cards scroll past it, so the
+   status a card belongs to is readable anywhere down a long room. */
+.board.stacked .col-h{position:sticky;top:0;background:var(--bg);z-index:1}

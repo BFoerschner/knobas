@@ -26,6 +26,7 @@
   } from "../ipc/entity";
   import EntityLine from "./EntityLine.svelte";
   import MiniBoardBody from "./MiniBoard.svelte";
+  import { miniBoardLayoutFor, type MiniBoardLayout } from "./contexts";
   import type { TileSpec } from "./kinds";
 
   let {
@@ -33,6 +34,7 @@
     sources,
     ctx = null,
     project = null,
+    miniBoardLayout,
     onopen,
   }: {
     spec: TileSpec;
@@ -49,6 +51,15 @@
      * same key.
      */
     project?: string | null;
+    /**
+     * The layout this room's mini board draws (#210), before the backstop.
+     *
+     * Required rather than defaulted, and carried by every tile though only
+     * the Tickets one draws a board: a default would let a room that forgot to
+     * say quietly render as though it had said "columns", and the compiler is
+     * the cheapest place to notice that.
+     */
+    miniBoardLayout: MiniBoardLayout;
     /**
      * Opening an item. Narrowed to the two fields the room's router needs: a
      * board card is not a mirror row and has no timestamps, and inventing them
@@ -127,6 +138,19 @@
   });
 
   /**
+   * The layout actually drawn.
+   *
+   * The room's answer is the input; the backstop over it needs the column
+   * count, which exists only once the read has landed — so the two meet here,
+   * where the board and the room's answer are both already in hand, and the
+   * body below is told the result rather than working any of it out. Before
+   * the read there is no board to demote.
+   */
+  const layout = $derived(
+    board ? miniBoardLayoutFor(miniBoardLayout, board.columns.length) : miniBoardLayout,
+  );
+
+  /**
    * The header's count.
    *
    * For a list it is the whole filtered set, which is wider than the page on
@@ -178,7 +202,7 @@
     {:else if nothing}
       <div class="empty"><p>{empty}</p></div>
     {:else if board}
-      <MiniBoardBody {board} {onopen} />
+      <MiniBoardBody {board} {layout} {onopen} />
     {:else if page}
       {#each page.rows as row (row.entity_id)}
         <EntityLine {row} {onopen} />
