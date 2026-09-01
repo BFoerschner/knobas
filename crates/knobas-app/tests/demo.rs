@@ -367,3 +367,55 @@ async fn a_demo_ticket_with_no_project_syncs_and_its_payload_names_none() {
         "and none under any other spelling either: {payload}"
     );
 }
+
+/// The census over the **mock's own corpus**: the demo profile shows exactly
+/// the two projects the Tidewater dataset names, and shows them under the
+/// source's own names for them.
+///
+/// The seam this closes is the one between the two halves already covered.
+/// `a_demo_ticket_carries_its_project_into_the_mirrored_payload` above pins the
+/// *payload* the fixture produces, and `knobas-core/tests/projects.rs` pins the
+/// census over payloads written by hand -- so between them the fixture could
+/// move its project (or the read could move its path) and both would still
+/// pass while the demo profile showed no project rooms at all. That is not
+/// hypothetical: #234 was this defect reaching a person's window by a different
+/// route, and the repair had to be found from the outside.
+///
+/// Read through `project::list`, which is what `list_projects` answers with and
+/// therefore what the switcher's project rooms are built from (#209) -- the
+/// whole chain from `fixtures/tidewater/work.json` through `MockSource::sync`
+/// and the upsert to the room a reader sees.
+///
+/// Scoped to `mock` because this binary shares one database: another test in it
+/// mirrors items under a `jira` id, and the census is a pass over the whole live
+/// corpus. `mock` is the demo dataset, so the scoping loses nothing the
+/// assertion is about.
+#[tokio::test]
+async fn the_demo_corpus_shows_exactly_the_two_projects_its_fixture_names() {
+    let _guard = MOCK.lock().await;
+    let pool = knobas_db::test_util::test_pool().await;
+    knobas_db::migrate::run(&pool).await.unwrap();
+    demo::demo_load_inner(&pool).await.unwrap();
+
+    let census = knobas_core::project::list(&pool)
+        .await
+        .expect("the census the switcher's project rooms are built from");
+    let shown: Vec<(String, Option<String>)> = census
+        .into_iter()
+        .filter(|project| project.source_id == "mock")
+        .map(|project| (project.key, project.name))
+        .collect();
+
+    // Ordered by key, which is the order `project::list` promises and the order
+    // the switcher offers the rooms in. Both, and exactly both: a dataset that
+    // lost one of them would still draw *a* project room, which is why this is
+    // an equality and not a pair of `contains`.
+    assert_eq!(
+        shown,
+        vec![
+            ("OPS".to_owned(), Some("Operations".to_owned())),
+            ("PAY".to_owned(), Some("Payments Platform".to_owned())),
+        ],
+        "the demo profile has to show a room for each project its fixture names"
+    );
+}
