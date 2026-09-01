@@ -2979,6 +2979,13 @@ From this commit on, each of the following requires an orchestrator decision **a
   that command already takes its two narrowings apart (#177's entry above, which this leaves
   otherwise untouched).
 
+  **This supersedes one sentence of the #177 entry above** — "`app/src/lib/shell/contexts.ts` has
+  two populations of room" — true when written: since #209 the derived population also holds one
+  room per project the census shows, narrowing by `sources` *and* `project` at once. That entry's
+  "exactly one of the two is ever narrowing" still holds of the two it names — `context` joins
+  neither. The old entry is left as history rather than rewritten, the same treatment #53's entry
+  gives the two #52 sentences it supersedes.
+
   **Two readers deliberately not narrowed, recorded so neither is discovered as a bug.**
   `MiniBoard::sources` — the ticket detail's status select (#179) — stays the statuses a ticket's
   whole *source corpus* shows: a project room with nothing finished still has to be able to offer

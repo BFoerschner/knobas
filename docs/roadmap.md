@@ -1,6 +1,6 @@
 # knobas — roadmap: MVP, milestones, parallel workstreams
 
-**Status:** proposed 2026-08-24 (Claude), for Björn's review. Everything here follows from the revised design doc (`docs/specs/2026-08-23-knobas-design.md`) and the 2026-08 technology research (summarized in §Stack below). Nothing is implemented yet.
+**Status:** proposed 2026-08-24 (Claude), adopted, and amended per milestone since (M2.5 added 2026-08-30, M2.6 2026-08-31). Everything here follows from the revised design doc (`docs/specs/2026-08-23-knobas-design.md`) and the 2026-08 technology research (summarized in §Stack below). M0 through M2.5 have shipped, M2.6 is at its exit sweep as of 2026-09-01, and the GitHub milestones carry the live state.
 
 This is the decomposition document: the project is too large for one plan, so it is cut into milestones. Since 2026-08-28, task-level planning runs the mattpocock-skills flow (grilling → spec → tickets in GitHub Issues); the executed superpowers-era plan files (M0/M1) remain in git history — see §6.
 

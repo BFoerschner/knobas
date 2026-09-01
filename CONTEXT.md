@@ -29,6 +29,9 @@ _Avoid_: plugin, client
 A source's own grouping of its items, where the source has one — a Jira project, a TeamCity project. Per source and in the source's own word: Gitea has no such thing, and its repository is an entity kind rather than a grouping. Not a [Context](#context), which is a working set a person builds. (ADR-0010)
 _Avoid_: container, space, workspace, board (ADR-0009)
 
+**Census**:
+The whole-corpus report of every [project](#project) a source's live items show (`list_projects`), which is what the switcher builds project rooms from. Deliberately not a room's own read — that scans the newest 200 items and is a window, not a census, so a quiet project would silently lose its room. (#208)
+
 **Mirror**:
 The local synced copy of every source's data, with provenance. Readers only ever see its live items. A count of the mirror is a corpus, never a run's [Upserted](#upserted).
 _Avoid_: cache, index
@@ -154,7 +157,7 @@ Per query, which sources could answer a filter and which have nothing it can mat
 _Avoid_: capability (a source's `SourceDescriptor` declares those — a static claim about a source, where this is a measured one about a corpus, which is why #141 was ruled onto the response and not onto the descriptor), support
 
 **Room**:
-A context's hub view — tiles, activity, tray.
+The hub view a switcher entry opens — tiles, activity, tray — every tile handed the room's whole filter, of which context is one nullable dimension. A **stored** room is a [context](#context)'s view and narrows by it; a **derived** room — *All work*, one per [source](#source), and from M2.6 one per [project](#project) the [census](#census) shows — has no context at all, and narrows by nothing, by its source, or by source plus project respectively. (#209, ADR-0010)
 _Avoid_: dashboard
 
 **Mini board**:
