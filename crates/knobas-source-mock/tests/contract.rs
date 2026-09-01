@@ -225,7 +225,7 @@ async fn full_sync_emits_every_work_item() {
     let s = MockSource::new();
     let mut sink = VecSink(Vec::new());
     let cursor = s.sync(None, &mut sink).await.expect("full sync");
-    assert_eq!(cursor, "tidewater-v1");
+    assert_eq!(cursor, "tidewater-v2");
     assert_eq!(
         sink.0.len(),
         f.tickets.len() + f.prs.len() + f.builds.len() + f.pages.len() + f.commits.len()
@@ -269,18 +269,76 @@ async fn full_sync_emits_every_work_item() {
     assert!(build.body_text.contains("gives_up_after_max_attempts"));
 }
 
-/// The fixture never changes, so an incremental sync has nothing to say -- and
-/// must say so without re-emitting 21 items on every 5-minute tick.
+/// A caller already at the current version has nothing to fetch -- and must say
+/// so without re-emitting 21 items on every 5-minute tick.
+///
+/// Corrected rather than deleted (ADR-0011: verify, then correct): this said
+/// "the fixture never changes", which the repo's own history falsifies --
+/// `fixtures/tidewater/work.json` was edited in `06cc066` and again in
+/// `1d45f74`. The *behaviour* below is still right, because the emptiness
+/// turns on the cursor matching [`CURSOR`], not on the fixture being frozen;
+/// the pair of it is
+/// `a_cursor_from_an_older_fixture_re_syncs_the_whole_corpus`, and an edit
+/// that widens the fixture is obliged to bump the suffix so that a stored
+/// cursor lands there instead of here.
 #[tokio::test]
 async fn incremental_sync_is_empty_and_keeps_the_cursor() {
     let s = MockSource::new();
     let mut sink = VecSink(Vec::new());
     let cursor = s
-        .sync(Some("tidewater-v1".into()), &mut sink)
+        .sync(Some("tidewater-v2".into()), &mut sink)
         .await
         .expect("incremental sync");
     assert!(sink.0.is_empty());
-    assert_eq!(cursor, "tidewater-v1");
+    assert_eq!(cursor, "tidewater-v2");
+}
+
+/// The upgrade path the cursor's versioning exists to provide (#234): a
+/// profile still holding the position an *older* fixture handed out is re-sent
+/// the whole corpus, new fields and all, and then settles.
+///
+/// `"tidewater-v1"` is not an invented string -- it is the cursor every demo
+/// profile created before the fixture gained projects (#230) actually has
+/// stored. Asserting the corpus rather than the constant is the point: that a
+/// re-sync *happens* is the behaviour, and a test reading `CURSOR` back would
+/// pass just as happily while every such profile refetched nothing for ever.
+#[tokio::test]
+async fn a_cursor_from_an_older_fixture_re_syncs_the_whole_corpus() {
+    let f = knobas_source_mock::fixture();
+    let s = MockSource::new();
+    let mut sink = VecSink(Vec::new());
+    let cursor = s
+        .sync(Some("tidewater-v1".into()), &mut sink)
+        .await
+        .expect("a sync from a stale cursor");
+    assert_eq!(
+        sink.0.len(),
+        f.tickets.len() + f.prs.len() + f.builds.len() + f.pages.len() + f.commits.len(),
+        "a profile stored at an older fixture version must be re-sent everything"
+    );
+    // ...carrying what the older fixture had no way to send. Widening the
+    // fixture without moving the cursor is exactly the defect #234 fixes, and
+    // it is invisible to a length assertion alone: the corpus was already 21
+    // items before the project existed.
+    let ticket = sink
+        .0
+        .iter()
+        .find(|i| i.entity.key == "PAY-231")
+        .expect("PAY-231 re-emitted");
+    assert_eq!(ticket.payload["fields"]["project"]["key"], "PAY");
+
+    assert_ne!(
+        cursor, "tidewater-v1",
+        "a re-sync that hands the stale position back would repeat for ever"
+    );
+    let mut settled = VecSink(Vec::new());
+    s.sync(Some(cursor), &mut settled)
+        .await
+        .expect("the next tick");
+    assert!(
+        settled.0.is_empty(),
+        "one full re-sync must be enough -- the upgrade settles, it does not loop"
+    );
 }
 
 /// Writes are recorded rather than performed, which is how later milestones
