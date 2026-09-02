@@ -278,7 +278,9 @@ EOF
   # The message the page encrypts: the bytes, then one byte with the length
   # (pkcs1pad2 in /js/crypt/rsa.js: `ba[--n] = s.length`, then the characters).
   printf '%s' "$2" > "$WORK/msg"
-  printf "\\$(printf '%03o' "${#2}")" >> "$WORK/msg"
+  # `%b` decodes a `\0ddd` octal escape in its argument: one arbitrary byte,
+  # written from sh without a variable in the format string.
+  printf '%b' "\\0$(printf '%03o' "${#2}")" >> "$WORK/msg"
   openssl pkeyutl -encrypt -pubin -keyform DER -inkey "$WORK/pub.der" \
       -pkeyopt rsa_padding_mode:pkcs1 -in "$WORK/msg" 2>/dev/null \
     | od -An -tx1 -v | tr -d ' \n'
