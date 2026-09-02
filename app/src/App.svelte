@@ -122,6 +122,17 @@
   let launcherOpen = $state(false);
 
   /**
+   * The mounted room, for Escape's rung 4 (#250).
+   *
+   * The maximised tile is the room's own state and stays there; the ladder in
+   * `keys.ts` needs one question answered, and `bind:this` is the handle for
+   * asking it. `null` whenever no room is mounted -- a non-room view, the
+   * wizard -- and then there is nothing to restore, which is the honest
+   * answer: rung 3 has already taken the key by then anyway.
+   */
+  let room = $state<ReturnType<typeof Room> | null>(null);
+
+  /**
    * The entity the slide-over has open, as the launcher's `Tab` chain names it.
    *
    * Read off the address rather than off the detail component: the address is
@@ -210,7 +221,10 @@
     })();
 
     const stopRouter = router.start();
-    const stopKeys = installKeys(router, { openLauncher });
+    const stopKeys = installKeys(router, {
+      openLauncher,
+      restoreTile: () => room?.restoreTile() ?? false,
+    });
 
     return () => {
       disposed = true;
@@ -395,7 +409,7 @@
           />
         {/key}
       {:else}
-        <Room {router} {contexts} />
+        <Room bind:this={room} {router} {contexts} />
       {/if}
     {/snippet}
   </Shell>

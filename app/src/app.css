@@ -446,6 +446,12 @@ kbd{font:400 10px var(--mono);color:var(--faint);border:1px solid var(--hair);bo
 /* A room with a single tile is a list, not a two-column board. */
 .tiles.one{grid-template-columns:1fr}
 
+/* One tile maximised (#250): the grid is that tile, both columns and every
+   row. After the `rows-*` rules so it wins on order at equal specificity. The
+   tile scrolls inside itself as it always has (`.tile-b`), and the tray under
+   the grid keeps its place. */
+.tiles.max{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr)}
+
 /* The detail header's action area, between the crumb and the close button.
    `.d-h .x` already claims `margin-left:auto`, so this only needs its own
    spacing -- the mockup put the same rule in an inline style, which the CSP

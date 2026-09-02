@@ -165,6 +165,26 @@ function render(hash: string, overrides = createMiniBoardOverrides()) {
       flushSync();
     },
     tiles: () => [...target.querySelectorAll<HTMLElement>(".tile .tile-h .lab")].map((l) => l.textContent),
+    /** The grid's modifier classes (#250): `max` while a tile is maximised. */
+    grid: () => [...(target.querySelector(".tiles")?.classList ?? [])].filter((name) => name !== "tiles"),
+    /** The maximise control of the tile labelled `label`, by the word it reads. */
+    maxButton: (label: string) => {
+      const tile = [...target.querySelectorAll<HTMLElement>(".tile")].find(
+        (node) => node.querySelector(".tile-h .lab")?.textContent === label,
+      );
+      return tile?.querySelector<HTMLButtonElement>(".tile-h .acts .tile-max") ?? null;
+    },
+    /** Press the maximise control of the tile labelled `label`. */
+    maximise: (label: string) => {
+      const button = [...target.querySelectorAll<HTMLElement>(".tile")]
+        .find((node) => node.querySelector(".tile-h .lab")?.textContent === label)
+        ?.querySelector<HTMLButtonElement>(".tile-h .acts .tile-max");
+      expect(button, `the ${label} tile is drawn and offers a maximise control`).toBeDefined();
+      button!.click();
+      flushSync();
+    },
+    /** Escape's rung 4, as `App.svelte` reaches it through `installKeys` (#250). */
+    restoreTile: () => app.restoreTile(),
     /** The key on each mini-board card, in the order drawn. */
     cards: () => [...target.querySelectorAll<HTMLElement>(".card .mono")].map((k) => k.textContent),
     /** Every list tile's rows, by the title they show. */
@@ -425,6 +445,134 @@ function serveCorpus() {
     });
   };
 }
+
+/**
+ * Per-tile maximise (#250), through what the room draws.
+ *
+ * Three tiles on purpose: a room of one could not witness "the others are
+ * not drawn", and a room of two could not tell "the others" from "the other".
+ * The grid's class is asserted beside the tile count because the two are
+ * different rules -- the `each` decides what is drawn, the stylesheet decides
+ * how much of the grid it gets -- and either could be dropped alone.
+ */
+test("maximising a tile draws it alone and Restore draws the grid again", async () => {
+  serveCorpus();
+  const screen = render("#/ctx/src:jira");
+  await vi.waitFor(() => expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents"]));
+  await settle();
+  expect(screen.grid()).toEqual(["rows-2"]);
+  expect(screen.maxButton("Docs")?.textContent?.trim()).toBe("Maximise");
+
+  screen.maximise("Docs");
+  expect(screen.tiles()).toEqual(["Docs"]);
+  expect(screen.grid()).toEqual(["rows-2", "max"]);
+  expect(screen.maxButton("Docs")?.textContent?.trim()).toBe("Restore");
+  // The tile kept its own read; the tray under the grid kept its place.
+  expect(screen.rows()).toEqual(["Title of ENG-1", "Title of OPS-DOC"]);
+  expect(screen.target.querySelector(".tray"), "the tray stays under a maximised tile").not.toBeNull();
+
+  screen.maximise("Docs");
+  await settle();
+  expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents"]);
+  expect(screen.grid()).toEqual(["rows-2"]);
+  expect(screen.maxButton("Docs")?.textContent?.trim()).toBe("Maximise");
+
+  // One at a time: the next choice is the whole of the choice, and the
+  // previous one has no say in what is drawn.
+  screen.maximise("Tickets");
+  expect(screen.tiles()).toEqual(["Tickets"]);
+  expect(screen.cards()).toEqual(["PAY-231", "PAY-236", "OPS-77"]);
+
+  screen.done();
+});
+
+/**
+ * Decision 1: a maximised tile is a viewing gesture of *this visit*. Walking
+ * to another room draws that room's grid, and walking back finds the grid
+ * too -- nothing waited. The second room holds a Docs tile on purpose: a
+ * choice keyed by nothing would carry `Docs` into it and draw that one tile,
+ * where a room without Docs would draw nothing and blur the two failures.
+ */
+test("walking to another room restores the grid, and walking back finds it restored", async () => {
+  serveCorpus();
+  const screen = render("#/ctx/src:jira");
+  await vi.waitFor(() => expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents"]));
+  await settle();
+  screen.maximise("Docs");
+  expect(screen.tiles()).toEqual(["Docs"]);
+
+  screen.router.go("#/ctx/proj:jira:PAY");
+  await settle();
+  await vi.waitFor(() => expect(screen.tiles()).toEqual(["Tickets", "Docs"]));
+  expect(screen.grid()).toEqual(["rows-1"]);
+
+  screen.router.go("#/ctx/src:jira");
+  await settle();
+  await vi.waitFor(() => expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents"]));
+  expect(screen.grid()).toEqual(["rows-2"]);
+
+  screen.done();
+});
+
+/**
+ * The detail over a maximised tile (decisions 1 and 4): opening an item from
+ * the maximised tile opens the slide-over as it does from the grid, and
+ * neither opening nor closing it touches the tile. Escape's *order* is the
+ * ladder's and pinned in `keys.test.svelte.ts`; what the room owns is that
+ * the state survives the detail's round trip, and that `restoreTile` -- the
+ * rung's handle -- says whether it had anything to do.
+ */
+test("a detail opens over the maximised tile and leaves it maximised; restoreTile answers honestly", async () => {
+  serveCorpus();
+  const screen = render("#/ctx/src:jira");
+  await vi.waitFor(() => expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents"]));
+  await settle();
+
+  expect(screen.restoreTile(), "nothing to restore in a plain room").toBe(false);
+  screen.maximise("Docs");
+
+  screen.target.querySelector<HTMLButtonElement>(".row")?.click();
+  await settle();
+  expect(location.hash).toBe("#/page/mock:ENG-1");
+  expect(screen.target.querySelector(".detail"), "the slide-over opened").not.toBeNull();
+  expect(screen.tiles()).toEqual(["Docs"]);
+
+  screen.router.back();
+  await settle();
+  expect(screen.target.querySelector(".detail")).toBeNull();
+  expect(screen.tiles()).toEqual(["Docs"]);
+
+  expect(screen.restoreTile()).toBe(true);
+  flushSync();
+  await settle();
+  expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents"]);
+  expect(screen.restoreTile(), "a second press has nothing left to restore").toBe(false);
+
+  screen.done();
+});
+
+/**
+ * Decision 5: the mini board's layout rule does not know about maximise. A
+ * stacked-default room past the backstop is drawn stacked in the maximised
+ * Tickets tile too, with columns refused for the same reason.
+ */
+test("a maximised Tickets tile follows the unchanged layout rule", async () => {
+  ticketsEverywhere();
+  board = () => Promise.resolve(statusBoard(7));
+  const screen = render("#/ctx/src:jira");
+  await vi.waitFor(() => expect(screen.cards()).toHaveLength(7));
+  await settle();
+
+  screen.maximise("Tickets");
+  expect(screen.tiles()).toEqual(["Tickets"]);
+  expect(screen.layout()).toBe("stacked");
+  expect(screen.control()).toEqual([
+    ["columns", false, true, "7 statuses; columns holds 6"],
+    ["stacked", true, false, null],
+  ]);
+
+  screen.done();
+});
 
 /**
  * Story 2: a project room narrows **every** tile in it, its own kinds-and-count
