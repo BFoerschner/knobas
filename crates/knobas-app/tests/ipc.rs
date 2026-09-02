@@ -565,7 +565,9 @@ async fn demo_load_ends_with_a_terminal_sync_state_for_the_mock() {
         });
     assert_eq!(terminal["source_id"], serde_json::json!("mock"));
     assert_eq!(
-        seen.iter().filter(|s| s["running"] == serde_json::json!(true)).count(),
+        seen.iter()
+            .filter(|s| s["running"] == serde_json::json!(true))
+            .count(),
         0,
         "the demo load has no open run row, so it must not claim to be running: {seen:?}"
     );
