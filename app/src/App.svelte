@@ -250,7 +250,13 @@
     // tell it.
     void health.reseed();
     // ...and `demo_load` has just written a corpus with projects in it (#207),
-    // which the seed above ran too early to see.
+    // which the seed above ran too early to see. Since #240 the demo load
+    // ends with the `sync:state` its run owes, and the projects store
+    // re-lists on that, so this is no longer the only thing standing between
+    // a demo load and the project rooms -- the wizard's route form can be
+    // left by a room tab, the launcher or an address bar without ever coming
+    // through here. Kept because the *Finish* path needs no event to be
+    // right, and because the health half above still has no event behind it.
     void projects.reseed();
     router.go("#/ctx/all");
     launcherOpen = true;

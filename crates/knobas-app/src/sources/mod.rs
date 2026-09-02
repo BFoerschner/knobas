@@ -11,7 +11,10 @@ pub mod progress;
 pub mod registry;
 pub mod write_queue;
 
-mod events;
+// `pub(crate)`: the demo load command builds a `TauriEvents` of its own to
+// announce its run's ending (#240); everything else reaches the adapter
+// through the scheduler.
+pub(crate) mod events;
 
 pub use registry::Registry;
 

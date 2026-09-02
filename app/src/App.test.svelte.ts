@@ -224,6 +224,7 @@ const { default: App } = await import("./App.svelte");
 const { EVENTS } = await import("./lib/ipc");
 const { health } = await import("./lib/shell/health.svelte");
 const { lifecycle } = await import("./lib/shell/lifecycle.svelte");
+const { router } = await import("./lib/shell/router.svelte");
 
 function row(
   source_id: string,
@@ -256,6 +257,10 @@ afterEach(() => {
   if (app) unmount(app);
   app = undefined;
   target.remove();
+  // The router is the window's one instance over `location.hash`, which
+  // outlives a test; a test that walked to the wizard must not leave the next
+  // one starting there.
+  router.go("#/ctx/all");
 });
 
 /**
@@ -478,11 +483,12 @@ test("a project that first appears mid-session gets its room without a reload", 
  *
  * `onFirstRunDone` reseeds both stores by hand, and it has to: the boot seeds
  * ran against a database with no sources and no items in it, `demo_load` emits
- * neither `source:health` nor a sync-run ending, and nothing else in the
- * session would ever say otherwise. Without the project half a person taking
- * the demo path -- the one path the fixture's two projects exist for -- lands
- * in a switcher with no project rooms at all and no way to get them but a
- * restart.
+ * no `source:health` (and until #240 no sync-run ending either), and nothing
+ * else in the session would ever say otherwise. Without the project half a
+ * person taking the demo path -- the one path the fixture's two projects exist
+ * for -- lands in a switcher with no project rooms at all and no way to get
+ * them but a restart. The test after this one covers the exit that never
+ * presses *Finish*.
  *
  * The census is empty at mount and non-empty by the time the wizard finishes,
  * which is the load-bearing half of the fixture: it is what makes this a
@@ -519,6 +525,94 @@ test("finishing the wizard shows the rooms the demo corpus just wrote", async ()
   await until(
     () => tabLabels().includes("Payments Platform"),
     "the corpus the wizard just loaded never reached the switcher",
+  );
+  expect(tabLabels()).toEqual(["All work", "mock", "Payments Platform"]);
+});
+
+/**
+ * The wizard's other exits (#240). The route form of the wizard renders
+ * *inside* the shell -- a session whose first run is already complete walks
+ * to `#/first-run` on purpose -- so a room tab, the launcher, the top strip
+ * and an address bar are all ways out of it that never press *Finish*, and
+ * `onFirstRunDone`'s reseeds never run. What tells the census then is the
+ * terminal `sync:state` the backend emits once the demo load's run ends,
+ * which the projects store already re-lists on. The fake bridge's
+ * `demo_load` answers synchronously and fires nothing, so this test fires
+ * the event the backend now sends (pinned in `crates/knobas-app/tests/ipc.rs`).
+ *
+ * The fixture starts with the source room and an empty census, as the
+ * mid-session test does: the switcher nests a project room under its source
+ * room, and the source room's own appearance is the health reseed's job,
+ * which this issue leaves to *Finish*. The absence assertion before the event
+ * is what makes the event the witnessed cause -- a test that passed off the
+ * *Finish* reseed would pass without the backend change at all.
+ */
+test("leaving the wizard by a room tab still gets the demo corpus its project rooms", async () => {
+  dbReady = true;
+  demoProfile = true;
+  // A first run already complete -- a skipped wizard, or a second session --
+  // which is what makes `#/first-run` a route inside the shell rather than
+  // the whole window.
+  firstRun = false;
+  healthRows = [row("mock", "ok")];
+  projectRows = [];
+
+  app = mount(App, { target, props: {} });
+  await until(
+    () => tabLabels().includes("mock") && projectCalls > 0,
+    "the shell never drew the source room",
+  );
+  expect(tabLabels()).toEqual(["All work", "mock"]);
+
+  router.go("#/first-run");
+  await until(
+    () => target.querySelector(".firstrun") !== null,
+    "the wizard's route form never rendered inside the shell",
+  );
+  expect(tabLabels(), "the route form keeps the shell around it").toEqual(["All work", "mock"]);
+
+  // From here on the corpus has projects in it.
+  projectRows = [{ source_id: "mock", key: "PAY", name: "Payments Platform" }];
+  press("Next");
+  press("Load the Tidewater dataset");
+  await until(
+    () => [...target.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Finish"),
+    "the demo load never reached the wizard's last panel",
+  );
+
+  // Out by a room tab, never by *Finish*. The tab itself, not `press`: the
+  // switcher's trigger button carries the current room's label too, and
+  // pressing that opens the popover rather than leaving the wizard.
+  const tab = [...target.querySelectorAll(".tabs .tab:not(.new)")].find(
+    (candidate) => candidate.textContent?.trim() === "All work",
+  );
+  if (!(tab instanceof HTMLButtonElement)) throw new Error("no *All work* tab in the strip");
+  tab.click();
+  flushSync();
+  await until(
+    () => target.querySelector(".firstrun") === null,
+    "the room tab never left the wizard",
+  );
+  expect(router.route.view).toBe("room");
+  expect(
+    tabLabels(),
+    "nothing has told the census yet; the reseed behind *Finish* did not run",
+  ).toEqual(["All work", "mock"]);
+
+  emit(EVENTS.syncState, {
+    source_id: "mock",
+    running: false,
+    run_id: null,
+    started_at: null,
+    last_finished_at: null,
+    last_outcome: null,
+    next_run_at: null,
+    backoff_until: null,
+  });
+
+  await until(
+    () => tabLabels().includes("Payments Platform"),
+    "the demo load's terminal sync:state never reached the switcher",
   );
   expect(tabLabels()).toEqual(["All work", "mock", "Payments Platform"]);
 });
