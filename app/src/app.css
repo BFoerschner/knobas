@@ -144,7 +144,13 @@ a{color:var(--link);text-decoration:none}
 .prompt{display:flex;align-items:center;gap:10px;padding:6px 14px;border-bottom:1px solid var(--hair);background:var(--panel);font-size:12px}
 .prompt .pulse{width:7px;height:7px;border-radius:50%;background:var(--amber)}
 .tiles{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(3,minmax(0,1fr)) minmax(0,1.2fr);gap:1px;background:var(--hair);min-height:0;flex:1 1 auto}
-.tile{background:var(--bg);display:flex;flex-direction:column;min-height:0;min-width:0}
+/* `isolation:isolate` makes every tile its own stacking context (#262), so a
+   `z-index` inside a tile -- the stacked mini board's sticky group headers --
+   competes only with that tile's own content. Without it a positive level
+   inside a tile outranks the detail slide-over, which is `position:absolute`
+   at level 0 and drawn later in the tree; the grid hid that because no tile
+   reached under the panel until #250 let one span the whole room. */
+.tile{background:var(--bg);display:flex;flex-direction:column;min-height:0;min-width:0;isolation:isolate}
 .tile-h{display:flex;align-items:center;gap:8px;height:28px;padding:0 12px;border-bottom:1px solid var(--hair);flex:none}
 .tile-h .cnt{font:500 11px var(--mono);color:var(--faint)}
 .tile-h .acts{margin-left:auto;display:flex;gap:2px}
