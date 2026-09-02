@@ -275,9 +275,9 @@ create_admin() {
     *'action="/createAdminSubmit.html"'*) ;;
     *) return 1 ;;   # no create form: an administrator already exists
   esac
-  case "$ADMIN_PASS" in
-    *[!\ -~]*) die "the administrator password must be ASCII: the page encrypts non-ASCII text differently, and this script does not reproduce that path" ;;
-  esac
+  if printf '%s' "$ADMIN_PASS" | LC_ALL=C grep -q '[^ -~]'; then
+    die "the administrator password must be printable ASCII: the page encrypts non-ASCII text differently, and this script does not reproduce that path"
+  fi
   [ "${#ADMIN_PASS}" -le 116 ] || die "the administrator password must be at most 116 characters (the page's RSA chunk size)"
   _pk=$(printf '%s' "$PAGE" | grep -o 'name="publicKey" value="[^"]*"' | head -1 | sed 's/.*value="//; s/"$//')
   [ -n "$_pk" ] || die "/setupAdmin.html shows the create form but no publicKey"

@@ -50,6 +50,8 @@ protecting, and a seed that prompts is a seed nobody runs.
 | Gitea admin | `knobas` | `knobas-dev` |
 | Gitea people (`mara.lindqvist`, …) | fixture username | `tidewater-dev` |
 | Uptime Kuma admin | `knobas` | `knobas-dev` |
+| TeamCity admin (`--profile real-teamcity`) | `knobas` | `knobas-dev` |
+| Jira / Confluence admin (`--profile real-atlassian`) | `knobas` | `knobas-dev` |
 | mockd | any non-empty `Bearer`/`Basic` token | — |
 
 `./seed` writes two files, both git-ignored:
@@ -134,14 +136,43 @@ Nothing in the §4.2 key forms depends on the fixture's abbreviations.
 Off by default because they are expensive. Approximate costs are in `.env`.
 
 ```sh
-docker compose --profile real-teamcity  up -d teamcity     # ~2.5 GB pull, ~10 GB on disk
+docker compose --profile real-teamcity  up -d teamcity teamcity-agent   # ~3.5 GB pull, ~10 GB on disk
 docker compose --profile real-atlassian up -d jira-db jira confluence-db confluence
 ```
 
-- **TeamCity** first start is a browser wizard — database choice, licence
-  agreement, administrator account — that no script can drive. It is also the
-  only way to obtain `/app/rest/swagger.json`; see `specs/README.md`'s blocker
-  and `specs/fetch.sh --teamcity`.
+### TeamCity, with one build agent
+
+The server and one agent (`jetbrains/teamcity-agent`, no published port,
+`SERVER_URL=http://teamcity:8111`). The first start is a browser wizard —
+data directory, database choice, licence agreement, administrator account —
+and until #264 the README said no script could drive it. `seed-teamcity.sh`
+drives it now, the way `seed-atlassian.sh` drives Jira's: through the
+wizard's own `/mnt/do/*` commands and `createAdminSubmit.html`, which are not
+an API, so the script **refuses any image digest it was not derived on** and
+the fix for that refusal is to re-derive the sequence (the recipe is in the
+script's header). About two minutes from empty volumes, unattended:
+
+```sh
+docker compose --profile real-teamcity up -d teamcity teamcity-agent
+./seed --teamcity           # or ./seed-teamcity.sh
+eval "$(./seed --env)"      # adds KNOBAS_TEAMCITY_URL and KNOBAS_TEAMCITY_TOKEN
+```
+
+The database is the internal HSQLDB (evaluation-grade, and this environment's
+lifetime is `down -v`, so that is the right grade), the administrator is
+`knobas` / `knobas-dev`, the access token `knobas-seed` goes to
+`seed-state.json` and is reused while it authenticates, and the agent
+`knobas-agent` is authorised over REST. Re-running against a set-up server is
+a no-op. `openssl` is needed besides docker, curl and jq: the wizard's
+administrator form RSA-encrypts the password in the browser, and the script
+does the same with openssl.
+
+Note that the repo-root `.env.example` points `just teamcity-live` at
+JetBrains' public guest instance; `./seed --env` printing `KNOBAS_TEAMCITY_*`
+does not change that default.
+
+A running server is also the only way to obtain `/app/rest/swagger.json`; see
+`specs/README.md`'s blocker and `specs/fetch.sh --teamcity`.
 
 ### Jira and Confluence, end to end
 
@@ -270,6 +301,8 @@ history.
 | `./seed` | Everything below, in order. Idempotent — re-running is a no-op that exits 0. |
 | `./seed-gitea.sh` | Org, users, repos, branches, commits, PRs, comments, reviews. |
 | `./seed-kuma.sh` | Kuma admin account, monitors, API key. |
+| `./seed-atlassian.sh` | The real Jira and Confluence containers' setup wizards, unattended (`--profile real-atlassian`). |
+| `./seed-teamcity.sh` | The real TeamCity container's first start, an access token and one authorised agent (`--profile real-teamcity`). |
 | `./pin-images.sh` | Re-resolve image tags to digests into `.env`. |
 | `./check-ports.sh` | Assert the compose file against the §5 port table, default profile, opt-in profiles and the capped overlay. Starts nothing. |
 | `./reset` | `down -v` every profile, and delete the seed's outputs. |

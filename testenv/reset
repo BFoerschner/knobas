@@ -15,5 +15,5 @@ docker compose --profile '*' down -v --remove-orphans
 rm -f kuma-api-key seed-state.json
 
 echo "reset: containers, networks and volumes destroyed (gitea-data, kuma-data,"
-echo "reset: tc-data, tc-logs, jira-data, confluence-data), and the seed outputs"
+echo "reset: tc-data, tc-logs, tc-agent-conf, jira-data, confluence-data), and the seed outputs"
 echo "reset: kuma-api-key and seed-state.json removed. Re-run ./seed after up."
