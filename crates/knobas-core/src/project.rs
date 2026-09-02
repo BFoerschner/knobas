@@ -78,7 +78,11 @@ use crate::CoreError;
 /// this macro selects from a `sync.item` or `sync.live_item` alias `i`, and
 /// both carry `kind`. Pinned by
 /// `a_top_level_project_id_on_any_other_kind_contributes_nothing`, which
-/// fails the moment the guard goes.
+/// fails the moment the guard goes; and the literal here is held to the
+/// adapter's constant by
+/// `a_teamcity_project_survives_its_builds_through_its_configurations` in
+/// `knobas-app/tests/adapter_to_mirror.rs`, the one test that syncs the real
+/// adapter into a database and reads the census back.
 #[macro_export]
 macro_rules! project_key_read {
     () => {
