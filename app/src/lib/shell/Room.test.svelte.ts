@@ -149,7 +149,7 @@ function render(hash: string, overrides = createMiniBoardOverrides()) {
       ),
     /** The Tickets tile's layout control: `[word, pressed, refused, reason]` per option. */
     control: () =>
-      [...target.querySelectorAll<HTMLButtonElement>(".tile-h .acts button")].map((option) => [
+      [...target.querySelectorAll<HTMLButtonElement>(".tile-h .acts .seg button")].map((option) => [
         option.textContent?.trim() ?? "",
         option.getAttribute("aria-pressed") === "true",
         option.getAttribute("aria-disabled") === "true",
@@ -157,7 +157,7 @@ function render(hash: string, overrides = createMiniBoardOverrides()) {
       ]),
     /** Press the layout option that carries `label`. */
     press: (label: string) => {
-      const option = [...target.querySelectorAll<HTMLButtonElement>(".tile-h .acts button")].find(
+      const option = [...target.querySelectorAll<HTMLButtonElement>(".tile-h .acts .seg button")].find(
         (node) => node.textContent?.trim() === label,
       );
       expect(option, `the Tickets tile offers ${label}`).toBeDefined();

@@ -162,6 +162,10 @@ a{color:var(--link);text-decoration:none}
 /* The control clips its corners, so the global ring at +1px would be cut off;
    drawn inside the button instead, refused option included. */
 .seg-b:focus-visible{outline-offset:-2px}
+/* The maximise control (#250), beside the layout control on the Tickets tile
+   and alone everywhere else: a ghost button at the segmented control's height
+   and type, so the two read as one row of header actions. */
+.tile-max{font:500 10px var(--mono);text-transform:uppercase;letter-spacing:.06em}
 .tile-b{overflow:auto;flex:1;min-height:0}
 .empty{padding:14px 12px;color:var(--muted);font-size:12px;line-height:1.5}
 .empty .btn{margin-top:8px}

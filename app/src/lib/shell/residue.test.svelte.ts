@@ -370,6 +370,7 @@ const CASES: Case[] = [
           miniBoardLayout: "columns" as const,
           onopen: () => {},
           onlayout: () => {},
+          onmaximise: () => {},
         },
       }),
     }),

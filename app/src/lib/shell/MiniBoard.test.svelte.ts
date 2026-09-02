@@ -84,6 +84,7 @@ function render(
     miniBoardOverride,
     onopen,
     onlayout,
+    onmaximise: vi.fn(),
   });
   const app = mount(Tile, { target, props });
   flushSync();
@@ -98,7 +99,7 @@ function render(
      * refused and, if so, why.
      */
     control: () =>
-      [...target.querySelectorAll<HTMLButtonElement>(".tile-h .acts button")].map((option) => ({
+      [...target.querySelectorAll<HTMLButtonElement>(".tile-h .acts .seg button")].map((option) => ({
         label: option.textContent?.trim() ?? "",
         on: option.getAttribute("aria-pressed") === "true",
         refused: option.getAttribute("aria-disabled") === "true",
@@ -106,7 +107,7 @@ function render(
       })),
     /** Press the option that carries `label`. */
     press: (label: string) => {
-      const option = [...target.querySelectorAll<HTMLButtonElement>(".tile-h .acts button")].find(
+      const option = [...target.querySelectorAll<HTMLButtonElement>(".tile-h .acts .seg button")].find(
         (node) => node.textContent?.trim() === label,
       );
       expect(option, `the control offers ${label}`).toBeDefined();
@@ -594,7 +595,7 @@ test("columns is refused with a reason past six statuses, and stays reachable", 
     { label: "columns", on: false, refused: true, reason: "7 statuses; columns holds 6" },
     { label: "stacked", on: true, refused: false, reason: null },
   ]);
-  const refused = screen.target.querySelector<HTMLButtonElement>(".tile-h .acts button");
+  const refused = screen.target.querySelector<HTMLButtonElement>(".tile-h .acts .seg button");
   expect(refused?.disabled, "a disabled button leaves the tab order").toBe(false);
   expect(refused?.tabIndex).toBe(0);
 
