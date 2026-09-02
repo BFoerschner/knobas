@@ -318,7 +318,7 @@ async fn a_queued_build_has_no_number_and_no_status() {
     assert!(b.get("status").is_none(), "{b}");
     assert_eq!(
         b["defaultBranch"], true,
-        "queued without a branch: the default one"
+        "queued on the default branch by name"
     );
 
     s.state().finish_build(id, knobas_mockd::TcStatus::Success);

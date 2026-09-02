@@ -387,22 +387,42 @@ impl Seeded {
     }
 }
 
-/// One build's `state`, or `None` when the server no longer answers for it
-/// -- a delete whose answer was lost, or a build that never existed.
-async fn state_of(http: &reqwest::Client, url: &str, token: &str, id: i64) -> Option<String> {
+/// One build's `state`: `Ok(None)` when the server **says** it has no such
+/// build (a 404 -- a delete that went through, or a build that never
+/// existed), `Err` when the server did not answer or answered something
+/// else. The two are kept apart because the cleanup's "really gone" check is
+/// only a check while they are: a container that stopped answering mid-run
+/// must not read as a build removed.
+async fn state_of(
+    http: &reqwest::Client,
+    url: &str,
+    token: &str,
+    id: i64,
+) -> Result<Option<String>, String> {
     let response = http
         .get(format!("{url}/app/rest/builds/id:{id}?fields=state"))
         .header("Accept", "application/json")
         .bearer_auth(token)
         .send()
         .await
-        .ok()?;
-    if response.status().as_u16() != 200 {
-        return None;
+        .map_err(|e| format!("GET build {id}: {e}"))?;
+    match response.status().as_u16() {
+        404 => Ok(None),
+        200 => {
+            let body: serde_json::Value = response
+                .json()
+                .await
+                .map_err(|e| format!("GET build {id}: unreadable body: {e}"))?;
+            body["state"]
+                .as_str()
+                .map(|state| Some(state.to_owned()))
+                .ok_or_else(|| format!("GET build {id}: no state on {body}"))
+        }
+        other => Err(format!(
+            "GET build {id} -> {other}: {}",
+            response.text().await.unwrap_or_default()
+        )),
     }
-    response.json::<serde_json::Value>().await.ok()?["state"]
-        .as_str()
-        .map(str::to_owned)
 }
 
 /// Cancel (if still in flight) and delete every build in `ids`, and say which
@@ -411,9 +431,14 @@ async fn state_of(http: &reqwest::Client, url: &str, token: &str, id: i64) -> Op
 async fn remove(http: &reqwest::Client, url: &str, token: &str, ids: &[i64]) -> Vec<String> {
     let mut failures = Vec::new();
     for &id in ids {
-        let Some(mut state) = state_of(http, url, token, id).await else {
-            // Already gone. Nothing to remove.
-            continue;
+        let mut state = match state_of(http, url, token, id).await {
+            Ok(Some(state)) => state,
+            // The server itself says it has no such build.
+            Ok(None) => continue,
+            Err(e) => {
+                failures.push(e);
+                continue;
+            }
         };
         if state != "finished" {
             // A build in flight cannot be deleted; cancel it first and wait
@@ -453,8 +478,12 @@ async fn remove(http: &reqwest::Client, url: &str, token: &str, ids: &[i64]) -> 
             loop {
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 match state_of(http, url, token, id).await {
-                    Some(s) => state = s,
-                    None => break,
+                    Ok(Some(s)) => state = s,
+                    Ok(None) => break,
+                    Err(e) => {
+                        failures.push(format!("while waiting for build {id} to stop: {e}"));
+                        break;
+                    }
                 }
                 if state == "finished" {
                     break;
@@ -482,9 +511,16 @@ async fn remove(http: &reqwest::Client, url: &str, token: &str, ids: &[i64]) -> 
             )),
             Err(e) => failures.push(format!("DELETE build {id}: {e}")),
         }
-        // Checked, not hoped for: the build must really be gone.
-        if state_of(http, url, token, id).await.is_some() {
-            failures.push(format!("build {id} still answers after its delete"));
+        // Checked, not hoped for: the build must really be gone, and "gone"
+        // is the server's 404, not a request that never came back.
+        match state_of(http, url, token, id).await {
+            Ok(None) => {}
+            Ok(Some(state)) => {
+                failures.push(format!(
+                    "build {id} still answers ({state}) after its delete"
+                ));
+            }
+            Err(e) => failures.push(format!("build {id} was not confirmed gone: {e}")),
         }
     }
     failures
@@ -661,6 +697,19 @@ fn dead_url() -> String {
 /// accidentally collide with a real one.
 fn revoked() -> String {
     format!("revoked-{}", std::process::id())
+}
+
+/// The cleanup's "really gone" check is a check only if a server that does
+/// not answer reads as a failure rather than as a build removed. Witnessed on
+/// a port nothing listens on: [`remove`] reports the build it could not reach
+/// instead of returning clean. Needs no container, but lives in this file
+/// because [`remove`] does.
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn the_cleanup_reports_a_server_it_cannot_reach_rather_than_calling_the_build_gone() {
+    let failures = remove(&client(), &dead_url(), &revoked(), &[1]).await;
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert!(failures[0].starts_with("GET build 1: "), "{failures:?}");
 }
 
 /// *Test connection* against the server the seed set up: the version the seed

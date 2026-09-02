@@ -335,11 +335,11 @@ while the build with the fixture's number does not exist. Before any test
 that asserts an exact set, the suite **clears what a killed run left**: every
 build whose id is not in `seed-state.json` is canceled if in flight and
 deleted, so recovery from a run that died mid-way is "run the suite again",
-never `testenv/reset`. After a green run the server holds exactly the two
-seeded builds again.
+never `testenv/reset`. After a green run the server holds exactly the seeded
+builds again.
 
 **One owner at a time**, exactly as for the Gitea suites (see *One
-environment, one owner at a time*): the sweep cannot tell a sibling's build
+environment, one owner at a time*): the leftover clearing cannot tell a sibling's build
 from a corpse, and the battery's clause 2 needs a server where nothing is
 running. `./seed --teamcity --running` and this suite are therefore mutually
 exclusive on one environment: the suite refuses to start while a seeded build
