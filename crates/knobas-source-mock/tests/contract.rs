@@ -1,5 +1,6 @@
 //! The mock adapter proves it honours the SPI by running the shared contract
-//! battery against itself, exactly as every real adapter will.
+//! battery against itself, exactly as every real adapter does in its own
+//! tests.
 //!
 //! The fixture assertions are deliberately literal: `fixtures/tidewater/work.json`
 //! is the dataset every mockup was drawn against, so a silent edit to it would
@@ -408,9 +409,9 @@ fn is_mapped(fault: Fault, err: &SourceError) -> bool {
 /// at all from the plain mock.
 ///
 /// This is the only way the deletion channel is reachable from the reference
-/// adapter -- a real one reports deletions from its remote system, and until
-/// there is one, anything exercising tombstones end to end has to have this to
-/// sync.
+/// adapter. A real one reports deletions from its remote system (Gitea's
+/// `branch_tombstone` does), which needs that system running; anything
+/// exercising tombstones against the demo profile has only this to sync.
 #[tokio::test]
 async fn the_opt_in_tombstone_reports_one_deterministic_deletion() {
     let s = MockSource::with_tombstone();
