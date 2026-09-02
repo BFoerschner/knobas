@@ -267,6 +267,7 @@ add_step() {  # add_step <build type id> <step name> <script>
 add_running_steps() {
   for _n in 1 2 3 4 5; do
     if [ "$_n" = "3" ]; then
+      # shellcheck disable=SC2016  # the backticks are literal text in the build's own script
       add_step Payout_Build 'cargo test' '# Seeded by testenv/seed-teamcity-builds.sh: the fixture holds Payout_Build at "step 3/5 `cargo test`".
 echo "cargo test: this is the fixture'"'"'s running build, and it stays here (four hours at most)."
 sleep 14400'
