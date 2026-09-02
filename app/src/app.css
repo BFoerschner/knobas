@@ -144,13 +144,7 @@ a{color:var(--link);text-decoration:none}
 .prompt{display:flex;align-items:center;gap:10px;padding:6px 14px;border-bottom:1px solid var(--hair);background:var(--panel);font-size:12px}
 .prompt .pulse{width:7px;height:7px;border-radius:50%;background:var(--amber)}
 .tiles{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(3,minmax(0,1fr)) minmax(0,1.2fr);gap:1px;background:var(--hair);min-height:0;flex:1 1 auto}
-/* `isolation:isolate` makes every tile its own stacking context (#262), so a
-   `z-index` inside a tile -- the stacked mini board's sticky group headers --
-   competes only with that tile's own content. Without it a positive level
-   inside a tile outranks the detail slide-over, which is `position:absolute`
-   at level 0 and drawn later in the tree; the grid hid that because no tile
-   reached under the panel until #250 let one span the whole room. */
-.tile{background:var(--bg);display:flex;flex-direction:column;min-height:0;min-width:0;isolation:isolate}
+.tile{background:var(--bg);display:flex;flex-direction:column;min-height:0;min-width:0}
 .tile-h{display:flex;align-items:center;gap:8px;height:28px;padding:0 12px;border-bottom:1px solid var(--hair);flex:none}
 .tile-h .cnt{font:500 11px var(--mono);color:var(--faint)}
 .tile-h .acts{margin-left:auto;display:flex;gap:2px}
@@ -520,6 +514,17 @@ kbd{font:400 10px var(--mono);color:var(--faint);border:1px solid var(--hair);bo
 /* A group's heading stays put while its own cards scroll past it, so the
    status a card belongs to is readable anywhere down a long room. */
 .board.stacked .col-h{position:sticky;top:0;background:var(--bg);z-index:1}
+
+/* Every tile is its own stacking context (#262), so a `z-index` inside a tile
+   -- the group heading above -- competes only with that tile's own content.
+   Without it the heading's positive level outranks the detail slide-over,
+   which is `position:absolute` at level 0 and drawn later in the tree, and
+   its bars paint through the panel. The two-column grid hid that: the
+   Tickets tile is the left column and the panel covers the right, so only a
+   one-tile room (`.tiles.one`) or a maximised tile (#250) puts the mini board
+   under it. `isolation` touches painting alone -- the heading still sticks
+   inside its scroll container, and the tile's layout is unchanged. */
+.tile{isolation:isolate}
 
 /* Visually hidden, present to the accessibility tree (#258). A utility, not
    a component's: text that exists to be referenced and has no place on
