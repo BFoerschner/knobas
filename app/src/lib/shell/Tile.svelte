@@ -201,9 +201,16 @@
    * so a reader who cannot see why the board is stacked can still find out.
    * A `disabled` button would leave the tab order and the reason with it.
    * One question, `refusalFor`, decides both the badge and the guard.
+   *
+   * The reason is carried twice, on purpose (#258): `title` reaches a
+   * pointer on hover and nobody else, so the same string also sits in a
+   * visually hidden element the refused option is `aria-describedby`. The
+   * id is the tile's, not a counter: one tile draws the control, but the id
+   * has to be unique in the document, and the spec id already is.
    */
   const LAYOUTS: readonly MiniBoardLayout[] = ["columns", "stacked"];
   const refusal = $derived(columnsRefusal(columns));
+  const refusalId = $derived(`tile-${spec.id}-columns-refusal`);
   function refusalFor(option: MiniBoardLayout): string | null {
     return option === "columns" ? refusal : null;
   }
@@ -270,12 +277,22 @@
               class:on={layout === option}
               aria-pressed={layout === option}
               aria-disabled={refused !== null}
+              aria-describedby={refused === null ? undefined : refusalId}
               title={refused ?? undefined}
               onclick={() => choose(option)}
             >
               {option}
             </button>
           {/each}
+          <!--
+            After the buttons, not between them: `.seg-b + .seg-b` draws the
+            divider, and a span in the middle would take it with it. Absent
+            when nothing is refused, so nothing points at it and nothing is
+            left in the tree for a reader to find.
+          -->
+          {#if refusal !== null}
+            <span class="vh" id={refusalId}>{refusal}</span>
+          {/if}
         </span>
       {/if}
       <!--

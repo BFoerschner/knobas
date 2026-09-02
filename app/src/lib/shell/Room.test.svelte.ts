@@ -147,6 +147,14 @@ function render(hash: string, overrides = createMiniBoardOverrides()) {
     },
   });
   flushSync();
+  /** The Tickets tile's layout control (#245): the `.seg` in its header's `.acts` slot. */
+  const SEG = ".tile-h .acts .seg";
+  /** The Tickets tile's layout option that reads `label` (#245), or undefined where none does. */
+  function layoutOption(label: string): HTMLButtonElement | undefined {
+    return [...target.querySelectorAll<HTMLButtonElement>(`${SEG} button`)].find(
+      (node) => node.textContent?.trim() === label,
+    );
+  }
   /** The maximise control (#250) of the tile labelled `label`, or null where no such tile is drawn. */
   function maxButton(label: string): HTMLButtonElement | null {
     const tile = [...target.querySelectorAll<HTMLElement>(".tile")].find(
@@ -171,17 +179,29 @@ function render(hash: string, overrides = createMiniBoardOverrides()) {
       ),
     /** The Tickets tile's layout control: `[word, pressed, refused, reason]` per option. */
     control: () =>
-      [...target.querySelectorAll<HTMLButtonElement>(".tile-h .acts .seg button")].map((option) => [
+      [...target.querySelectorAll<HTMLButtonElement>(`${SEG} button`)].map((option) => [
         option.textContent?.trim() ?? "",
         option.getAttribute("aria-pressed") === "true",
         option.getAttribute("aria-disabled") === "true",
         option.getAttribute("title"),
       ]),
+    /**
+     * What the layout option `label` is described by (#258). A dangling
+     * `aria-describedby` is no description to assistive technology, and
+     * `getElementById` gives it back as the same null (the precedent is
+     * `Modal.test.svelte.ts`).
+     */
+    describedBy: (label: string) => {
+      const id = layoutOption(label)?.getAttribute("aria-describedby");
+      if (!id) return null;
+      return document.getElementById(id)?.textContent?.trim() ?? null;
+    },
+    /** The visually hidden reasons the layout control carries, in the order drawn. */
+    hiddenReasons: () =>
+      [...target.querySelectorAll<HTMLElement>(`${SEG} .vh`)].map((node) => node.textContent?.trim() ?? ""),
     /** Press the layout option that carries `label`. */
     press: (label: string) => {
-      const option = [...target.querySelectorAll<HTMLButtonElement>(".tile-h .acts .seg button")].find(
-        (node) => node.textContent?.trim() === label,
-      );
+      const option = layoutOption(label);
       expect(option, `the Tickets tile offers ${label}`).toBeDefined();
       option!.click();
       flushSync();
@@ -936,6 +956,10 @@ test("a reader's override redraws the mini board, sticks to its room, and clears
  * leaked through would choose the room's own default, which clears, and the
  * store would look untouched either way; here the leak would record
  * `columns`, and the last assertion is what sees it.
+ *
+ * The reason reaches readers who cannot hover (#258): the refused option's
+ * accessible description resolves to the same string its `title` carries,
+ * and the option that is not refused describes itself with nothing.
  */
 test("a room past six statuses refuses columns with its reason, and records no override", async () => {
   ticketsEverywhere();
@@ -950,6 +974,9 @@ test("a room past six statuses refuses columns with its reason, and records no o
     ["columns", false, true, "7 statuses; columns holds 6"],
     ["stacked", true, false, null],
   ]);
+  expect(screen.describedBy("columns")).toBe("7 statuses; columns holds 6");
+  expect(screen.describedBy("stacked")).toBeNull();
+  expect(screen.hiddenReasons()).toEqual(["7 statuses; columns holds 6"]);
 
   screen.press("columns");
   expect(screen.layout()).toBe("stacked");
@@ -1008,6 +1035,11 @@ test("pressing the effective default on a demoted override clears it, seen once 
     ["columns", false, false],
     ["stacked", true, false],
   ]);
+  // Allowed again, so no reason to give (#258): no description on either
+  // option, and no hidden element left behind for a reader to stumble on.
+  expect(screen.describedBy("columns")).toBeNull();
+  expect(screen.describedBy("stacked")).toBeNull();
+  expect(screen.hiddenReasons()).toEqual([]);
 
   screen.done();
 });
