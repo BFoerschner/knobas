@@ -47,21 +47,26 @@ export default defineConfig(({ mode }) => ({
     // anyone can read. Relying on the default here means the guard's
     // correctness is a Vitest release note away from changing.
     sequence: { hooks: "stack" },
-    // Four forks, not the eleven Vitest picks on its own. Its non-watch
-    // default is `os.availableParallelism() - 1` (`getDefaultThreadsCount`),
-    // each fork boots its own jsdom, and that is the whole box. The gate never
-    // has the whole box: the working model's concurrency section budgets a
-    // neighbour's `cargo test --workspace` at ~4.7 cores and allows two of
-    // them, and eleven jsdoms on top of that is how a fork times out before it
-    // starts -- `Failed to start forks worker`, `Timeout waiting for worker to
-    // respond`, and a red gate with zero assertion failures (#249). Measured
-    // idle on the 12-core box (load 2-4): 11 forks 7.3-9.0 s wall, 6 forks
-    // 9.5 s, 4 forks 12.0-12.3 s, 3 forks 15.5 s. Four costs 3-5 s and leaves
-    // seven cores for whoever else is building. A number rather than a
-    // percentage because the thing that has to fit beside this pool is an
-    // absolute cost (one cargo build is ~4.7 cores on any machine), so the
-    // cap is cores minus neighbours, not a share of cores; `"33%"` lands on 4
-    // here only because `Math.round(0.33 * 12)` happens to.
+    // Four forks, not the eleven Vitest picks on its own: `resolveMaxWorkers`
+    // is `os.availableParallelism() - 1` outside watch mode, each fork boots
+    // its own jsdom, and that is the whole box. The gate never has the whole
+    // box. `front` runs before the cargo half of `just check`, so the build
+    // beside these forks is always a neighbour's, and the working model's
+    // concurrency section measures one `cargo test --workspace` at ~4.7
+    // cores; eleven jsdoms beside that is how a fork times out before it
+    // starts -- `Failed to start forks worker`, `Timeout waiting for worker
+    // to respond`, a red gate with zero assertion failures (#249). Measured
+    // on the otherwise idle 12-core box (baseline load 2-4, OrbStack):
+    // 11 forks 7.3-9.0 s wall, 6 forks 9.5 s, 4 forks 12.0-12.3 s, 3 forks
+    // 15.5 s. Four costs 3-5 s, and four forks plus the main process leave
+    // seven cores, which is one cargo build with margin; six would leave
+    // five, less than the build. Measured under that load (a cold `cargo
+    // test --workspace` in another target dir, load 6-19): three full
+    // `just check` runs, zero worker-start failures, vitest 12-22 s. A
+    // number rather than a percentage because what has to fit beside this
+    // pool is an absolute cost (a cargo build is ~4.7 cores on any machine),
+    // so the cap is cores minus a neighbour, not a share of cores; `"33%"`
+    // lands on 4 here only because `Math.round(0.33 * 12)` happens to.
     maxWorkers: 4,
   },
   // Vitest must resolve Svelte's *browser* build, or `mount` runs the SSR
