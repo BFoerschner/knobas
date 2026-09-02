@@ -59,14 +59,16 @@ export default defineConfig(({ mode }) => ({
     // on the otherwise idle 12-core box (baseline load 2-4, OrbStack):
     // 11 forks 7.3-9.0 s wall, 6 forks 9.5 s, 4 forks 12.0-12.3 s, 3 forks
     // 15.5 s. Four costs 3-5 s, and four forks plus the main process leave
-    // seven cores, which is one cargo build with margin; six would leave
-    // five, less than the build. Measured under that load (a cold `cargo
-    // test --workspace` in another target dir, load 6-19): three full
-    // `just check` runs, zero worker-start failures, vitest 12-22 s. A
-    // number rather than a percentage because what has to fit beside this
-    // pool is an absolute cost (a cargo build is ~4.7 cores on any machine),
-    // so the cap is cores minus a neighbour, not a share of cores; `"33%"`
-    // lands on 4 here only because `Math.round(0.33 * 12)` happens to.
+    // seven cores, the ~4.7-core build with the baseline load of 2-4 beside
+    // it; six would leave five, the build alone with nothing over for that
+    // baseline. Measured under that load (a cold `cargo test --workspace`
+    // in another target dir, load 6-19): three full `just check` runs, zero
+    // worker-start failures, vitest 12-22 s. A number rather than a
+    // percentage because the budget it has to fit is stated in absolute
+    // cores (the working model's ~4.7 for a build on this box, and the
+    // baseline measured above), so the cap is cores minus a neighbour, not
+    // a share of cores; `"33%"` lands on 4 here only because
+    // `Math.round(0.33 * 12)` happens to.
     maxWorkers: 4,
   },
   // Vitest must resolve Svelte's *browser* build, or `mount` runs the SSR
