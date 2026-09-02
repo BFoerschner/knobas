@@ -529,8 +529,19 @@ fn demo_load_passes_the_guard_in_the_demo_profile() {
 /// row (out of scope by ruling), and the store only needs `running: false`.
 #[tokio::test(flavor = "multi_thread")]
 async fn demo_load_ends_with_a_terminal_sync_state_for_the_mock() {
-    let pool = knobas_db::test_util::test_pool().await;
-    knobas_db::migrate::run(&pool).await.unwrap();
+    // A database of its own, not the binary's shared one: `sync_now_answers_..`
+    // opens a real `mock` run on the shared database, and `status_for` reads
+    // whatever run is open for the source -- so on the shared database this
+    // emit came back `running: true, run_id: <the sibling's run>` in one gate
+    // run out of three, which is the packaged-app edge the PR records (the
+    // scheduler's own run open while the demo's is in flight), reproduced by
+    // a neighbour. The isolation keeps the assertion about *this* command's
+    // emit rather than about which test won a race.
+    let pool = knobas_db::test_util::scratch_database("demo_load_sync_state")
+        .await
+        .pool(4)
+        .await
+        .expect("a pool onto this test's own database");
     let demo = knobas_app::Profile::from_args(
         vec![knobas_app::DEMO_FLAG.to_owned()],
         std::path::Path::new("/tmp/knobas-test"),
