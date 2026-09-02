@@ -63,7 +63,8 @@ trap 'rm -f "$tmp"' EXIT
   echo '# profiles): gitea ~110 MB, uptime-kuma ~250 MB, node:22-alpine ~60 MB --'
   echo '# the default `docker compose up` set, well under 1 GB. teamcity-server'
   echo '# ~2.5 GB compressed and ~10 GB on disk once its data directory exists;'
-  echo '# jira-software ~700 MB; confluence ~800 MB.'
+  echo '# teamcity-agent ~1 GB compressed (its own JDK and toolchain), behind the'
+  echo '# same profile; jira-software ~700 MB; confluence ~800 MB.'
   echo '#'
   echo '# The two build stages of mockd.Dockerfile are pinned for the same reason'
   echo '# the services are: an unpinned `rust:1-slim` makes the mockd container'
@@ -76,6 +77,13 @@ trap 'rm -f "$tmp"' EXIT
   pin KUMA_IMAGE       louislam/uptime-kuma:2
   pin NODE_IMAGE       node:22-alpine
   pin TEAMCITY_IMAGE   jetbrains/teamcity-server:latest
+  # The build agent beside it (#264). Same `latest` line as the server on
+  # purpose: an agent whose version is ahead of the server's is refused at
+  # registration, and pinning both from one tag at one moment keeps them a
+  # pair. `seed-teamcity.sh` guards on the SERVER digest only -- the wizard it
+  # drives is the server's; the agent registers through the supported
+  # `SERVER_URL` protocol and needs no such guard.
+  pin TEAMCITY_AGENT_IMAGE jetbrains/teamcity-agent:latest
   # These two are pinned to what a **timebomb licence actually starts**, not
   # to the newest release (#49, revised 2026-08-31). The distinction is the
   # whole reason they are here: an image that cannot be licensed cannot be

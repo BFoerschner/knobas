@@ -171,12 +171,18 @@ services:
 
   # ------------------------------------------------------ opt-in: real -----
   teamcity:
-    # ~2.5 GB to pull, ~10 GB on disk with its data directory, and its first
-    # start is a browser wizard (database, licence, admin account) that no
-    # script can drive. Off by default for all three reasons; this is also the
-    # container `testenv/specs/fetch.sh --teamcity` needs to extract
+    # ~2.5 GB to pull, ~10 GB on disk with its data directory. Off by default
+    # for that reason. Its first start is a browser wizard (database, licence,
+    # administrator account); `seed-teamcity.sh` walks that wizard's own form
+    # endpoints unattended, the way `seed-atlassian.sh` walks Jira's, and like
+    # that script it refuses any image digest it was not derived on -- the
+    # forms are not an API. The internal HSQLDB is the database: this is a test
+    # environment, and the one thing a real database would buy (durability
+    # across upgrades) is nothing `down -v` does not throw away anyway. This is
+    # also the container `testenv/specs/fetch.sh --teamcity` needs to extract
     # /app/rest/swagger.json (see specs/README.md's blocker).
-    #   docker compose --profile real-teamcity up -d teamcity
+    #   docker compose --profile real-teamcity up -d teamcity teamcity-agent
+    #   ./seed --teamcity
     image: ${TEAMCITY_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
     profiles: ["real-teamcity"]
     container_name: knobas-teamcity
@@ -185,6 +191,27 @@ services:
     volumes:
       - tc-data:/data/teamcity_server/datadir
       - tc-logs:/opt/teamcity/logs
+
+  teamcity-agent:
+    # One build agent, because a server with none runs nothing (#264). It
+    # registers with the server over the compose network and shows up
+    # unauthorised; `seed-teamcity.sh` authorises it through the REST API.
+    # NO published port: the agent has nothing to listen for from the host
+    # and check-ports.sh's §5 map does not know it. The name is fixed so the
+    # seed can address it (`name:knobas-agent`) instead of guessing from a
+    # container id, and the conf volume keeps the agent's identity across
+    # restarts so the server does not see a second, unauthorised agent after
+    # every `up`.
+    image: ${TEAMCITY_AGENT_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
+    profiles: ["real-teamcity"]
+    container_name: knobas-teamcity-agent
+    environment:
+      SERVER_URL: http://teamcity:8111
+      AGENT_NAME: knobas-agent
+    volumes:
+      - tc-agent-conf:/data/teamcity_agent/conf
+    depends_on:
+      - teamcity
 
   # The two Atlassian products need a real database beside them: Jira 10.0
   # removed the embedded H2 engine outright ("you'll no longer be able to
@@ -311,6 +338,7 @@ volumes:
   kuma-data:
   tc-data:
   tc-logs:
+  tc-agent-conf:
   jira-data:
   confluence-data:
   jira-db-data:
