@@ -1084,3 +1084,37 @@ test("returning from the sources view to a different room that exists is silent 
   expect(location.hash).toBe("#/ctx/src:gitea");
   expect(roomName()).toBe("gitea");
 });
+
+/**
+ * The memory names the room the reader *left*, and only that room's going is
+ * news. A stale link into a room that vanished along with it -- one the
+ * reader never stood in -- is a dead address opened cold, and keeps #209's
+ * silent fallback. Without the `before.ctx !== ctx` clause this would
+ * announce `mock` going while the address bar named `gitea`.
+ */
+test("a dead address for a room the reader never stood in stays silent even though the left room vanished too", async () => {
+  dbReady = true;
+  healthRows = [row("gitea", "ok"), row("mock", "ok")];
+  sourceRows = [summary("mock"), summary("gitea")];
+  location.hash = "#/ctx/src:mock";
+
+  app = mount(App, { target, props: {} });
+  await until(() => tabLabels().includes("mock"), "the shell never drew the source room");
+
+  router.go("#/sources");
+  await until(
+    () => [...target.querySelectorAll("button")].filter((b) => b.textContent?.trim() === "Delete").length === 2,
+    "the sources view never listed its rows",
+  );
+  sourceRows = [];
+  press("Delete");
+  press("Delete source");
+  await until(() => tabLabels().length === 1, "the removals never reached the switcher");
+  toasts.items = [];
+
+  router.go("#/ctx/src:gitea");
+  flushSync();
+  expect(toasts.items, "nothing the reader stood in went under them").toEqual([]);
+  expect(location.hash, "a dead address opened cold keeps its address").toBe("#/ctx/src:gitea");
+  expect(roomName()).toBe("All work");
+});
