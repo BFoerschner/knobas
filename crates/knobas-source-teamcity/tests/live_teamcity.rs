@@ -40,12 +40,25 @@
 //!
 //! # Why the contract battery is not run here
 //!
-//! It is, against `knobas-mockd` (`tests/mockd.rs`). Clause 2 -- an
-//! incremental run after no changes emits nothing and hands back the same
+//! It is, against `knobas-mockd` (`tests/mockd.rs`) and, since issue #266,
+//! against a TeamCity we own (`tests/live_teamcity_seeded.rs`). Clause 2 --
+//! an incremental run after no changes emits nothing and hands back the same
 //! cursor -- is not a property any public build server can be held to: builds
 //! finish between two runs, and a running build in scope is re-emitted by
 //! design. Running it here would produce a flake whose failures mean nothing,
 //! which is worse than not running it.
+//!
+//! # What this file could not see, and where it is certified
+//!
+//! Asserting by form has a blind spot: it can say a page is well-shaped, never
+//! that a build which *should* be on it is missing. That is how the default
+//! filter's **branch facet** survived every run of this suite -- a locator
+//! whose state set includes `finished` answers only the default branch of a
+//! branched configuration, so the adapter's two item-producing queries never
+//! returned a feature-branch build -- and it was found the first hour a corpus
+//! we own was queried (#266). The sibling suite holds that, and everything
+//! else that needs a known corpus: `tests/live_teamcity_seeded.rs`, `just
+//! teamcity-live-seeded`.
 
 use knobas_source::contract::VecSink;
 use knobas_source::instance::SourceInstance;
@@ -717,12 +730,15 @@ async fn a_canceled_build_is_status_unknown_and_the_adapter_s_locator_serves_it(
          {sample}"
     );
 
-    // The locator `sync::execute`'s full sync actually sends.
+    // The locator `sync::execute`'s full sync actually sends -- with the
+    // branch dimension #266 added, which on the sample's own configuration
+    // widens the page to every branch and leaves the canceled facet the only
+    // difference between the two pages below.
     let adapters_own: Vec<i64> = live
         .builds(
             &format!(
                 "buildType:(id:{build_type}),state:finished,canceled:any,failedToStart:any,\
-                 count:100"
+                 branch:default:any,count:100"
             ),
             "id",
         )
@@ -742,12 +758,14 @@ async fn a_canceled_build_is_status_unknown_and_the_adapter_s_locator_serves_it(
         return;
     }
 
-    // ...and the same locator without the dimension, which is what the adapter
-    // sent before #105. The build must be missing from it, or the dimension is
-    // not what put it in the page above.
+    // ...and the same locator without the canceled dimension, which is what
+    // the adapter sent before #105 (the branch dimension stays, so the
+    // canceled facet is the only thing between the two pages). The build must
+    // be missing from it, or the dimension is not what put it in the page
+    // above.
     let without: Vec<i64> = live
         .builds(
-            &format!("buildType:(id:{build_type}),state:finished,count:100"),
+            &format!("buildType:(id:{build_type}),state:finished,branch:default:any,count:100"),
             "id",
         )
         .await
@@ -768,16 +786,16 @@ async fn a_canceled_build_is_status_unknown_and_the_adapter_s_locator_serves_it(
     );
 }
 
-/// **Fable's observation trigger, made a test**: either new dimension
+/// **Fable's observation trigger, made a test**: any of the named dimensions
 /// disabling more than its own facet sends issue #105 back to Björn.
 ///
-/// The whole reason the widening is `canceled:any,failedToStart:any` and not
-/// `defaultFilter:false` is that the two named dimensions re-open one facet
-/// each, where `defaultFilter:false` also opens the personal facet — and any
-/// facet nobody has enumerated. Personal builds are the class this adapter
-/// deliberately keeps out: nobody has decided that a work cockpit should
-/// mirror other people's experiments, and their absence is only defensible
-/// while it is *consistent*.
+/// The whole reason the widening is `canceled:any,failedToStart:any` -- and,
+/// since #266, `branch:default:any` -- and not `defaultFilter:false` is that
+/// the named dimensions re-open one facet each, where `defaultFilter:false`
+/// also opens the personal facet -- and any facet nobody has enumerated.
+/// Personal builds are the class this adapter deliberately keeps out: nobody
+/// has decided that a work cockpit should mirror other people's experiments,
+/// and their absence is only defensible while it is *consistent*.
 ///
 /// That claim is about somebody else's server and can only be held there. If a
 /// future TeamCity widens what these dimensions do, this fails with the
@@ -811,22 +829,24 @@ async fn the_two_facet_dimensions_do_not_open_the_personal_facet() {
 
     let narrow = live
         .builds(
-            "state:finished,canceled:any,failedToStart:any,count:100",
+            "state:finished,canceled:any,failedToStart:any,branch:default:any,count:100",
             "id,personal",
         )
         .await;
     let leaked: Vec<i64> = narrow.iter().filter(|b| personal(b)).map(id_of).collect();
     println!(
-        "LIVE facets: canceled:any,failedToStart:any answered {}/{} personal builds",
+        "LIVE facets: canceled:any,failedToStart:any,branch:default:any answered {}/{} \
+         personal builds",
         leaked.len(),
         narrow.len()
     );
     assert!(
         leaked.is_empty(),
-        "`canceled:any,failedToStart:any` served personal builds {leaked:?}. Either dimension \
-         disabling more than its own facet is one of issue #105's stated triggers for sending \
-         the decision back to Björn: the widening was chosen over `defaultFilter:false` \
-         precisely because it does not mirror other people's personal builds."
+        "`canceled:any,failedToStart:any,branch:default:any` served personal builds {leaked:?}. \
+         Any of the dimensions disabling more than its own facet is one of issue #105's stated \
+         triggers for sending the decision back to Björn: the widening was chosen over \
+         `defaultFilter:false` precisely because it does not mirror other people's personal \
+         builds."
     );
 }
 

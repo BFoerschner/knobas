@@ -20,6 +20,10 @@
 #   build type name      the rest of the `cfg`, `_` as space
 #   build number         the fixture's `num`, by setting the configuration's
 #                        build number counter before its first build
+#   branch               the fixture's `branch`; `main` is the VCS root's
+#                        default branch and is queued as `<default>` (no
+#                        branchName), so the server marks the build
+#                        `defaultBranch: true` -- see queue_build
 #   description          none -- the dataset describes no configuration, and
 #                        this script invents no prose either
 #
@@ -89,6 +93,9 @@ FIXTURE=${FIXTURE:-../fixtures/tidewater/work.json}
 # the host-side 127.0.0.1:3000 means nothing to either container.
 GITEA_INTERNAL_URL=http://gitea:3000
 GITEA_ORG=tidewater
+# The default branch of every seeded repository and so of every VCS root.
+# A build on it is queued with no branchName at all -- see queue_build.
+DEFAULT_BRANCH=main
 # How long one build may take from queue to finish before this script gives
 # up on it. Both finished shapes took well under a minute here; the first
 # build of a configuration also fetches the repository.
@@ -249,10 +256,11 @@ ensure_vcs_root() {  # ensure_vcs_root <project id>
   _body=$(jq -n --arg i "$_id" --arg p "$_proj" --arg r "$_repo" \
                --arg url "$GITEA_INTERNAL_URL/$GITEA_ORG/$_repo.git" \
                --arg spec "$(branch_spec "$_repo")" --arg tok "$GITEA_TOKEN" \
+               --arg default "$DEFAULT_BRANCH" \
     '{id:$i, name:($p + " / " + $r), vcsName:"jetbrains.git", project:{id:$p},
       properties:{property:[
         {name:"url", value:$url},
-        {name:"branch", value:"refs/heads/main"},
+        {name:"branch", value:("refs/heads/" + $default)},
         {name:"teamcity:branchSpec", value:$spec},
         {name:"authMethod", value:"PASSWORD"},
         {name:"username", value:"knobas"},
@@ -356,10 +364,26 @@ ensure_counter() {  # ensure_counter <build type id> <number>
 }
 
 # Queue a build on the fixture's branch. Prints the new build's id.
+#
+# The default branch is queued WITHOUT a branchName. The VCS root's branch
+# specification names `main` as well as the feature branches (every branch
+# the Gitea seed created), and TeamCity resolves an explicit
+# `branchName: main` against that specification to a logical branch called
+# `main` that is a different branch from `<default>` -- the build then comes
+# out `defaultBranch: false`, and every REST listing under the server's
+# default filter hides it. Measured on 2026-09-02 (issue #266): queued with no
+# branch, a build is `<default>` while it waits and `main` with
+# `defaultBranch: true` once it runs, which is the branch the fixture means.
 queue_build() {  # queue_build <build type id> <branch> <number>
-  rest POST /app/rest/buildQueue "$(jq -n --arg b "$1" --arg br "$2" --arg n "$3" \
-      '{buildType:{id:$b}, branchName:$br,
-        comment:{text:("testenv/seed-teamcity-builds.sh: fixture build " + $n)}}')"
+  if [ "$2" = "$DEFAULT_BRANCH" ]; then
+    rest POST /app/rest/buildQueue "$(jq -n --arg b "$1" --arg n "$3" \
+        '{buildType:{id:$b},
+          comment:{text:("testenv/seed-teamcity-builds.sh: fixture build " + $n)}}')"
+  else
+    rest POST /app/rest/buildQueue "$(jq -n --arg b "$1" --arg br "$2" --arg n "$3" \
+        '{buildType:{id:$b}, branchName:$br,
+          comment:{text:("testenv/seed-teamcity-builds.sh: fixture build " + $n)}}')"
+  fi
   expect "queue a build of $1 on $2" 200
   printf '%s' "$REST_BODY" | jq -r '.id'
 }
