@@ -44,7 +44,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { AppStatus } from "./lib/ipc/app";
 import type { ContextRow, EntityRow, Project } from "./lib/ipc/entity";
-import type { CredentialHealth } from "./lib/ipc/sources";
+import type { CredentialHealth, SourceSummary } from "./lib/ipc/sources";
 
 /** Readings `credential_health` hands back, and how many times it was asked. */
 let healthRows: CredentialHealth[] = [];
@@ -55,6 +55,14 @@ let healthCalls = 0;
  * resolution time, and the mock below resolves at once.
  */
 let answerHealth: (() => Promise<CredentialHealth[]>) | null = null;
+
+/**
+ * The rows `list_sources` answers. The sources view re-lists on every mount
+ * and after every removal, and hands the whole set to `health.replace` --
+ * so a test that walks through that view has to keep this list honest, or
+ * merely opening the view forgets every source the shell knows (#257).
+ */
+let sourceRows: SourceSummary[] = [];
 
 /** What `app_status` says the database is doing. Flipped by a test mid-run. */
 let dbReady = false;
@@ -115,7 +123,7 @@ vi.mock("./lib/ipc/sources", () => ({
     if (answerHealth) return answerHealth();
     return Promise.resolve(healthRows);
   },
-  listSources: () => Promise.resolve([]),
+  listSources: () => Promise.resolve(sourceRows),
   listAdapters: () => Promise.resolve([]),
   syncStatus: () => Promise.resolve([]),
   listSyncRuns: () => Promise.resolve([]),
@@ -262,6 +270,16 @@ function press(label: string): void {
   flushSync();
 }
 
+/**
+ * How many source rows the sources view has drawn, counted by their *Delete*
+ * buttons -- the one control every row carries whatever its state.
+ */
+function deleteButtons(): number {
+  return [...target.querySelectorAll("button")].filter(
+    (button) => button.textContent?.trim() === "Delete",
+  ).length;
+}
+
 const { default: App } = await import("./App.svelte");
 const { EVENTS } = await import("./lib/ipc");
 const { health } = await import("./lib/shell/health.svelte");
@@ -275,6 +293,25 @@ function row(
   checked_at: string | null = null,
 ): CredentialHealth {
   return { source_id, state, checked_at, detail: null, secret_expires_at: null };
+}
+
+/** A configured source as `list_sources` reports it, healthy and never run. */
+function summary(source_id: string): SourceSummary {
+  return {
+    id: source_id,
+    adapter_kind: source_id,
+    display_name: source_id,
+    base_url: `https://tidewater.example/${source_id}`,
+    enabled: true,
+    sync_interval_secs: 900,
+    config: {},
+    health: row(source_id, "ok"),
+    last_run: null,
+    next_run_at: null,
+    item_count: 0,
+    auth_kind: null,
+    kinds: [],
+  };
 }
 
 let target: HTMLDivElement;
@@ -293,6 +330,7 @@ beforeEach(() => {
   projectCalls = 0;
   contextRows = [];
   entityRows = [];
+  sourceRows = [];
   health.replace([]);
   toasts.items = [];
   target = document.createElement("div");
@@ -946,4 +984,140 @@ test("a non-room view and back finds the grid, not the maximised tile", async ()
 
   location.hash = "#/ctx/all";
   await until(() => tileLabels().length === 2, "the room never drew its grid again");
+});
+
+/**
+ * The room can also stop existing while the reader is *elsewhere* (#257).
+ *
+ * #241's memory was cleared on every non-room view, so a source removed from
+ * the sources view had no previous resolution to compare with when the reader
+ * came back: *Back* went to the dead address, the fallback ran by identity,
+ * and nothing said so -- the same acceptance line #241 closed, reachable in
+ * one click. The memory now survives the detour, and the return is the
+ * transition the effect already knows how to announce.
+ *
+ * The removal goes through the view's own *Delete* button, because that is
+ * the click the ticket describes: `confirmDelete` re-lists, and the re-list
+ * lands as `health.replace`. The router's remembered room is asserted
+ * *before* the return, since `back()` is defined as going there.
+ */
+test("returning to a source room that vanished while the reader was in the sources view is announced and lands on All work", async () => {
+  dbReady = true;
+  healthRows = [row("gitea", "ok"), row("mock", "ok")];
+  sourceRows = [summary("gitea"), summary("mock")];
+  location.hash = "#/ctx/src:gitea";
+
+  app = mount(App, { target, props: {} });
+  await until(() => tabLabels().includes("gitea"), "the shell never drew the source room");
+
+  router.go("#/sources");
+  await until(() => deleteButtons() === 2, "the sources view never listed its rows");
+  expect(tabLabels(), "opening the view is not a removal").toEqual(["All work", "gitea", "mock"]);
+  expect(router.ctx, "the room the reader left is what back() goes to").toBe("src:gitea");
+
+  // gitea is removed here; the view's re-list no longer carries it.
+  sourceRows = [summary("mock")];
+  press("Delete");
+  press("Delete source");
+  await until(() => !tabLabels().includes("gitea"), "the removal never reached the switcher");
+  expect(toasts.items.map((toast) => toast.text), "the view's own toast, and nothing about a room").toEqual([
+    "gitea removed.",
+  ]);
+  expect(location.hash, "nobody is standing in the room, so nothing moves yet").toBe("#/sources");
+  expect(router.ctx, "the dead room is still the one back() goes to").toBe("src:gitea");
+
+  router.back();
+  flushSync();
+  expect(toasts.items.map((toast) => toast.text)).toEqual([
+    "gitea removed.",
+    "gitea is no longer a room. Showing All work.",
+  ]);
+  expect(location.hash, "the address bar must not name the vanished room").toBe("#/ctx/all");
+  expect(router.ctx).toBe("all");
+  expect(roomName()).toBe("All work");
+});
+
+/** The detour alone is not the transition: a room that is still there on return is silent. */
+test("returning to a source room that still exists after a detour through the sources view is silent", async () => {
+  dbReady = true;
+  healthRows = [row("gitea", "ok"), row("mock", "ok")];
+  sourceRows = [summary("gitea"), summary("mock")];
+  location.hash = "#/ctx/src:gitea";
+
+  app = mount(App, { target, props: {} });
+  await until(() => tabLabels().includes("gitea"), "the shell never drew the source room");
+
+  router.go("#/sources");
+  await until(() => deleteButtons() === 2, "the sources view never listed its rows");
+
+  router.back();
+  flushSync();
+  expect(toasts.items).toEqual([]);
+  expect(location.hash).toBe("#/ctx/src:gitea");
+  expect(roomName()).toBe("gitea");
+});
+
+/**
+ * Nor is arriving somewhere else: the memory names the room the reader
+ * *left*, and a different room resolving on return is that room's own
+ * business. `mock` goes while the reader is away, and the reader comes back
+ * to *All work* rather than to `mock`'s room.
+ */
+test("returning from the sources view to a different room that exists is silent even though the left room vanished", async () => {
+  dbReady = true;
+  healthRows = [row("gitea", "ok"), row("mock", "ok")];
+  sourceRows = [summary("mock"), summary("gitea")];
+  location.hash = "#/ctx/src:mock";
+
+  app = mount(App, { target, props: {} });
+  await until(() => tabLabels().includes("mock"), "the shell never drew the source room");
+
+  router.go("#/sources");
+  await until(() => deleteButtons() === 2, "the sources view never listed its rows");
+  sourceRows = [summary("gitea")];
+  press("Delete");
+  press("Delete source");
+  await until(() => !tabLabels().includes("mock"), "the removal never reached the switcher");
+
+  router.go("#/ctx/src:gitea");
+  flushSync();
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["mock removed."]);
+  expect(location.hash).toBe("#/ctx/src:gitea");
+  expect(roomName()).toBe("gitea");
+});
+
+/**
+ * The memory names the room the reader *left*, and only that room's going is
+ * news. A stale link into a room that vanished along with it -- one the
+ * reader never stood in -- is a dead address opened cold, and keeps #209's
+ * silent fallback. Without the `before.ctx !== ctx` clause this would
+ * announce `mock` going while the address bar named `gitea`.
+ */
+test("a dead address for a room the reader never stood in stays silent even though the left room vanished too", async () => {
+  dbReady = true;
+  healthRows = [row("gitea", "ok"), row("mock", "ok")];
+  sourceRows = [summary("mock"), summary("gitea")];
+  location.hash = "#/ctx/src:mock";
+
+  app = mount(App, { target, props: {} });
+  await until(() => tabLabels().includes("mock"), "the shell never drew the source room");
+
+  router.go("#/sources");
+  await until(() => deleteButtons() === 2, "the sources view never listed its rows");
+  // One removal, and a re-list that carries neither: the authoritative set
+  // is what forgets, so `gitea` leaves with `mock` without its own Delete.
+  sourceRows = [];
+  press("Delete");
+  press("Delete source");
+  await until(() => tabLabels().length === 1, "the emptied re-list never reached the switcher");
+  expect(toasts.items.map((toast) => toast.text), "the button removed the room the reader left").toEqual([
+    "mock removed.",
+  ]);
+  toasts.items = [];
+
+  router.go("#/ctx/src:gitea");
+  flushSync();
+  expect(toasts.items, "nothing the reader stood in went under them").toEqual([]);
+  expect(location.hash, "a dead address opened cold keeps its address").toBe("#/ctx/src:gitea");
+  expect(roomName()).toBe("All work");
 });

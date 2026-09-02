@@ -53,9 +53,15 @@
   );
 
   /**
-   * The room the reader is standing in, as the switcher's list last resolved
+   * The room the reader last stood in, as the switcher's list last resolved
    * it (#241): the address, and the room it named on that list, or `null`
-   * where it named none. `null` as a whole while the view is not a room.
+   * where it named none. `null` as a whole only until the first room view.
+   *
+   * It survives a non-room view on purpose (#257): the sources view is where
+   * a source is removed from, and the reader who removes one comes *back* --
+   * `back()` goes to the room they left. A memory cleared on the way out has
+   * nothing to compare that return against, and the dead address would be
+   * arrived at silently, by identity, as if opened cold.
    *
    * Plain state rather than a rune, on purpose: it is the effect below's
    * memory of its own previous run, and a rune here would make that run
@@ -73,10 +79,19 @@
    * list rather than a check in the room view and another in the tab strip.
    *
    * The trigger is the **transition**, not the state: the address resolved on
-   * the previous list and falls back on this one. A dead address opened cold
-   * never resolved, so it keeps #209's silent fallback by identity; a stored
-   * context just made, or a project appearing mid-session, resolves *after*
-   * a moment of not resolving, which is the other direction and no news.
+   * the previous room view and falls back on this one. A dead address opened
+   * cold never resolved, so it keeps #209's silent fallback by identity; a
+   * stored context just made, or a project appearing mid-session, resolves
+   * *after* a moment of not resolving, which is the other direction and no
+   * news.
+   *
+   * "Previous room view", not "previous run": a non-room view returns early
+   * and leaves the memory as it was, so the room can also vanish while the
+   * reader is elsewhere and be announced on their return (#257). The guard
+   * keeps the rest silent -- a different room on return (`before.ctx !==
+   * ctx`), the same room still there (`room !== null`), one that never
+   * resolved (`before.room === null`), and nothing to return to (`before ===
+   * null`).
    *
    * The address is replaced, not pushed: the dead one must not be one step
    * back. A detail open over the vanished room stays open -- the route keeps
@@ -95,10 +110,7 @@
    */
   $effect.pre(() => {
     const route = router.route;
-    if (route.view !== "room") {
-      standing = null;
-      return;
-    }
+    if (route.view !== "room") return;
     const ctx = route.ctx;
     const room = contexts.find((candidate) => candidate.id === ctx) ?? null;
     const before = standing;
