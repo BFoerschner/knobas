@@ -758,3 +758,57 @@ test("a room past six statuses refuses columns with its reason, and records no o
 
   screen.done();
 });
+
+/**
+ * Where decision 7 meets decision 8 (#245). A reader chose `columns` on a
+ * stacked-default room and the board then grew past six: the override is
+ * kept, stacked is drawn, and the control shows `stacked` pressed with
+ * `columns` refused. Pressing the pressed `stacked` is the reader asking for
+ * the room's own default, and the default clears — so once the board fits
+ * six again the room draws stacked, where a kept override would have drawn
+ * columns. The return trip is what lets the board, not only the store,
+ * witness the clear.
+ *
+ * The store is seeded before the mount because the override predates this
+ * visit: it is what a walk back into the room finds.
+ */
+test("pressing the effective default on a demoted override clears it, seen once the board fits", async () => {
+  ticketsEverywhere();
+  board = () => Promise.resolve(statusBoard(7));
+  const overrides = createMiniBoardOverrides();
+  const source = CONTEXTS.find((context) => context.id === "src:jira")!;
+  expect(source.miniBoardLayout).toBe("stacked");
+  overrides.choose(source, "columns");
+
+  const screen = render("#/ctx/src:jira", overrides);
+  await vi.waitFor(() => expect(screen.cards()).toHaveLength(7));
+  await settle();
+  expect(screen.layout()).toBe("stacked");
+  expect(screen.control()).toEqual([
+    ["columns", false, true, "7 statuses; columns holds 6"],
+    ["stacked", true, false, null],
+  ]);
+
+  screen.press("stacked");
+  expect(screen.layout()).toBe("stacked");
+  expect(overrides.overrideFor("src:jira")).toBeUndefined();
+
+  // Away, and back to a board that fits: the room's default draws, not the
+  // columns the override once asked for.
+  board = () => Promise.resolve(statusBoard(5));
+  screen.router.go("#/ctx/proj:jira:PAY");
+  await settle();
+  await vi.waitFor(() => expect(screen.cards()).toHaveLength(5));
+  board = () => Promise.resolve(statusBoard(6));
+  screen.router.go("#/ctx/src:jira");
+  await settle();
+  await vi.waitFor(() => expect(screen.cards()).toHaveLength(6));
+  await settle();
+  expect(screen.layout()).toBe("stacked");
+  expect(screen.control().map(([word, on, refused]) => [word, on, refused])).toEqual([
+    ["columns", false, false],
+    ["stacked", true, false],
+  ]);
+
+  screen.done();
+});

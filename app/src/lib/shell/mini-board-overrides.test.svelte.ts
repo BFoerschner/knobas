@@ -50,7 +50,6 @@ test("choosing the room's default clears its override", () => {
   expect(overrides.overrideFor(EPIC.id)).toBeUndefined();
 });
 
-/** ...and choosing the default on a room with no override records nothing. */
 test("choosing the default where nothing was overridden records nothing", () => {
   const overrides = createMiniBoardOverrides();
   overrides.choose(ALL_CONTEXT, ALL_CONTEXT.miniBoardLayout);
