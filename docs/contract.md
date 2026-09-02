@@ -3092,10 +3092,17 @@ From this commit on, each of the following requires an orchestrator decision **a
   and the census can never disagree with a room about what a project is. `project_name_read!` is
   deliberately **not** exported: a room narrows by the key, which is its identity, and a reader
   narrowing by a name would be narrowing by a label the source may rewrite. One spelling a source
-  writes is knowingly absent and is recorded on the macro: a TeamCity **build configuration**'s
-  record is the `buildType` object itself, so it names its project at the top level and
-  contributes none today — an absence the failure direction permits, and one more arm when it is
-  wanted.
+  writes was knowingly absent when this entry was written, and recorded on the macro: a TeamCity
+  **build configuration**'s record is the `buildType` object itself, so it names its project at
+  the top level and contributed none — an absence the failure direction permits. **Covered as of
+  #232 (2026-09-02)**, as the third arm of each macro, **kind-scoped**: it reads the top-level
+  `projectId`/`projectName` only where `i.kind = 'build_config'`, the kind the TeamCity adapter
+  declares for a configuration. Ruled at triage by the maintainer, over a plain unscoped arm,
+  because a top-level path is less distinctive than the two container-scoped ones and the guard
+  keeps a future adapter's incidental top-level `projectId` from silently opening a room — the
+  risk this entry named when it deferred the spelling. A record update under the maintainer's
+  delegation and not a frozen-surface change: knobas-core is not in this section's list, and
+  #232 adds no migration, no command and no trait method.
 
   **Which barrels were appended**: one line in `crates/knobas-app/src/lib.rs`'s `generate_handler!`
   list, at the foot of the existing `commands::entity::` group after `complete_inbox_item`; and

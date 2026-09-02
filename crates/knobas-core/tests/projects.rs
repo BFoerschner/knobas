@@ -35,6 +35,19 @@ fn teamcity(project: serde_json::Value) -> serde_json::Value {
     serde_json::json!({ "buildType": project })
 }
 
+/// A TeamCity build configuration's shape: the record *is* the `buildType`
+/// object (`knobas_source_teamcity::map::build_config_item` stores it
+/// verbatim), so it spells the project at the top level, in the same two
+/// words a build spells one level down. The caller hands the project half;
+/// the identity half is fixed so a fixture cannot mistake one for the other.
+fn build_config(project: serde_json::Value) -> serde_json::Value {
+    let mut raw = serde_json::json!({ "id": "Payout_Build", "name": "Build" });
+    if let (Some(raw), Some(project)) = (raw.as_object_mut(), project.as_object()) {
+        raw.extend(project.iter().map(|(k, v)| (k.clone(), v.clone())));
+    }
+    raw
+}
+
 /// One live mirror item of the given kind, carrying the payload it is given.
 async fn item(
     pool: &PgPool,
@@ -69,6 +82,13 @@ async fn item(
 /// A live Jira ticket carrying a project container.
 async fn ticket(pool: &PgPool, key: &str, project: serde_json::Value) -> String {
     item(pool, "jira", "ticket", key, jira(project)).await
+}
+
+/// A live TeamCity build configuration, under the kind name the adapter
+/// declares for one (`KIND_BUILD_CONFIG`), carrying the project half of its
+/// own record.
+async fn configuration(pool: &PgPool, key: &str, project: serde_json::Value) -> String {
+    item(pool, "teamcity", "build_config", key, build_config(project)).await
 }
 
 /// Mark an entity deleted at its source -- what a sweep or a purge does.
@@ -197,6 +217,197 @@ async fn teamcitys_own_two_words_read_as_well_as_jiras() {
             ("jira", "PAY", Some("Payout")),
             ("teamcity", "Payout", Some("Payout pipeline")),
         ]
+    );
+}
+
+/// The third spelling, kind-scoped (#232): a build configuration's record is
+/// the `buildType` object itself, so it names its project at the top level,
+/// and a project whose configurations have no synced build is reported
+/// through them rather than through nothing. Before this arm such a project
+/// had no room and no census line -- the absence #208 recorded as bounded.
+#[tokio::test]
+async fn a_build_configurations_own_top_level_words_are_read_for_its_kind() {
+    let pool = scratch().await;
+    ticket(
+        &pool,
+        "PAY-1",
+        serde_json::json!({ "key": "PAY", "name": "Payout" }),
+    )
+    .await;
+    configuration(
+        &pool,
+        "buildType:Payout_Build",
+        serde_json::json!({ "projectId": "Payout", "projectName": "Payout pipeline" }),
+    )
+    .await;
+
+    let projects = project::list(&pool).await.unwrap();
+
+    assert_eq!(
+        rows(&projects),
+        vec![
+            ("jira", "PAY", Some("Payout")),
+            ("teamcity", "Payout", Some("Payout pipeline")),
+        ],
+        "a configuration-only project is a project"
+    );
+}
+
+/// Miss direction, for the third arm: a configuration whose top-level
+/// `projectId` is absent, blank, whitespace-only or not a string contributes
+/// no project -- the same four refusals the Jira path is pinned by above,
+/// all through the one `string_at!`, so the new path cannot be laxer than
+/// the old ones.
+#[tokio::test]
+async fn a_build_configuration_with_no_readable_project_contributes_nothing() {
+    let pool = scratch().await;
+    configuration(
+        &pool,
+        "buildType:Bare",
+        serde_json::json!({ "projectName": "Payout pipeline" }),
+    )
+    .await;
+    configuration(
+        &pool,
+        "buildType:Blank",
+        serde_json::json!({ "projectId": "", "projectName": "Payout pipeline" }),
+    )
+    .await;
+    configuration(
+        &pool,
+        "buildType:Spaces",
+        serde_json::json!({ "projectId": "   ", "projectName": "Payout pipeline" }),
+    )
+    .await;
+    configuration(
+        &pool,
+        "buildType:Object",
+        serde_json::json!({ "projectId": { "id": "Payout" }, "projectName": "Payout pipeline" }),
+    )
+    .await;
+    configuration(
+        &pool,
+        "buildType:Array",
+        serde_json::json!({ "projectId": ["Payout"], "projectName": "Payout pipeline" }),
+    )
+    .await;
+
+    let projects = project::list(&pool).await.unwrap();
+
+    assert_eq!(rows(&projects), vec![], "none of the five is a project");
+}
+
+/// A configuration with a readable key and no readable name is reported by
+/// its key, with the name `None` on the wire -- the same carriage the Jira
+/// case has. A real server may send a `buildType` with no `projectName` at
+/// all (`a_bare_build_configuration_still_maps` in the adapter).
+#[tokio::test]
+async fn a_build_configuration_with_no_readable_name_is_reported_by_its_key() {
+    let pool = scratch().await;
+    configuration(
+        &pool,
+        "buildType:Payout_Build",
+        serde_json::json!({ "projectId": "Payout" }),
+    )
+    .await;
+    configuration(
+        &pool,
+        "buildType:Ledger_Deploy",
+        serde_json::json!({ "projectId": "Ledger", "projectName": { "id": 3 } }),
+    )
+    .await;
+    configuration(
+        &pool,
+        "buildType:Erp_Build",
+        serde_json::json!({ "projectId": "Erp", "projectName": "   " }),
+    )
+    .await;
+
+    let projects = project::list(&pool).await.unwrap();
+
+    assert_eq!(
+        rows(&projects),
+        vec![
+            ("teamcity", "Erp", None),
+            ("teamcity", "Ledger", None),
+            ("teamcity", "Payout", None),
+        ]
+    );
+}
+
+/// A build and a configuration of the same project are one project, not two:
+/// the two arms spell one fact in two places, and the census keys on the
+/// value, not on which arm read it. The name is the configuration's here
+/// because a configuration carries no date and the build is dated older, so
+/// the newest readable name wins the way the rename test says it does.
+#[tokio::test]
+async fn a_build_and_its_configuration_are_one_project() {
+    let pool = scratch().await;
+    let build = item(
+        &pool,
+        "teamcity",
+        "build",
+        "build:1188",
+        teamcity(serde_json::json!({
+            "id": "Payout_Build",
+            "projectId": "Payout",
+            "projectName": "Payout",
+        })),
+    )
+    .await;
+    configuration(
+        &pool,
+        "buildType:Payout_Build",
+        serde_json::json!({ "projectId": "Payout", "projectName": "Payout pipeline" }),
+    )
+    .await;
+    touched(&pool, &build, "2026-08-01T09:00:00Z").await;
+
+    let projects = project::list(&pool).await.unwrap();
+
+    assert_eq!(
+        rows(&projects),
+        vec![("teamcity", "Payout", Some("Payout pipeline"))],
+        "one project however many of its records spell it"
+    );
+}
+
+/// The third arm is scoped to the one kind whose record spells the project
+/// at the top level, and no other kind reaches it (#232, ruled at triage).
+///
+/// A top-level `projectId` is a less distinctive path than the two
+/// container-scoped ones, and a future adapter's incidental top-level
+/// `projectId` must not silently open a room -- the risk #208 named when it
+/// deferred the arm. So a *build* carrying the words at the top level, and a
+/// record of some other source altogether, both contribute nothing; only a
+/// `build_config` does. This is the test that pins the guard: with the guard
+/// removed both rows below become projects.
+#[tokio::test]
+async fn a_top_level_project_id_on_any_other_kind_contributes_nothing() {
+    let pool = scratch().await;
+    item(
+        &pool,
+        "teamcity",
+        "build",
+        "build:1188",
+        serde_json::json!({ "id": 1188, "projectId": "Payout", "projectName": "Payout pipeline" }),
+    )
+    .await;
+    item(
+        &pool,
+        "gitea",
+        "pr",
+        "tidewater/payout-service#142",
+        serde_json::json!({ "number": 142, "projectId": "tidewater", "projectName": "Tidewater" }),
+    )
+    .await;
+
+    let projects = project::list(&pool).await.unwrap();
+
+    assert_eq!(
+        rows(&projects),
+        vec![],
+        "the top-level words are read for a build configuration and for nothing else"
     );
 }
 
