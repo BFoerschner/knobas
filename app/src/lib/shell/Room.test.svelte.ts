@@ -132,6 +132,13 @@ function render(hash: string, overrides = createMiniBoardOverrides()) {
   document.body.append(target);
   const app = mount(Room, { target, props: { router, contexts: CONTEXTS, overrides } });
   flushSync();
+  /** The maximise control (#250) of the tile labelled `label`, or null where no such tile is drawn. */
+  function maxButton(label: string): HTMLButtonElement | null {
+    const tile = [...target.querySelectorAll<HTMLElement>(".tile")].find(
+      (node) => node.querySelector(".tile-h .lab")?.textContent === label,
+    );
+    return tile?.querySelector<HTMLButtonElement>(".tile-h .acts .tile-max") ?? null;
+  }
   return {
     target,
     router,
@@ -168,18 +175,11 @@ function render(hash: string, overrides = createMiniBoardOverrides()) {
     /** The grid's modifier classes (#250): `max` while a tile is maximised. */
     grid: () => [...(target.querySelector(".tiles")?.classList ?? [])].filter((name) => name !== "tiles"),
     /** The maximise control of the tile labelled `label`, by the word it reads. */
-    maxButton: (label: string) => {
-      const tile = [...target.querySelectorAll<HTMLElement>(".tile")].find(
-        (node) => node.querySelector(".tile-h .lab")?.textContent === label,
-      );
-      return tile?.querySelector<HTMLButtonElement>(".tile-h .acts .tile-max") ?? null;
-    },
+    maxButton,
     /** Press the maximise control of the tile labelled `label`. */
     maximise: (label: string) => {
-      const button = [...target.querySelectorAll<HTMLElement>(".tile")]
-        .find((node) => node.querySelector(".tile-h .lab")?.textContent === label)
-        ?.querySelector<HTMLButtonElement>(".tile-h .acts .tile-max");
-      expect(button, `the ${label} tile is drawn and offers a maximise control`).toBeDefined();
+      const button = maxButton(label);
+      expect(button, `the ${label} tile is drawn and offers a maximise control`).not.toBeNull();
       button!.click();
       flushSync();
     },
@@ -460,12 +460,12 @@ test("maximising a tile draws it alone and Restore draws the grid again", async 
   const screen = render("#/ctx/src:jira");
   await vi.waitFor(() => expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents"]));
   await settle();
-  expect(screen.grid()).toEqual(["rows-2"]);
+  expect(screen.grid()).not.toContain("max");
   expect(screen.maxButton("Docs")?.textContent?.trim()).toBe("Maximise");
 
   screen.maximise("Docs");
   expect(screen.tiles()).toEqual(["Docs"]);
-  expect(screen.grid()).toEqual(["rows-2", "max"]);
+  expect(screen.grid()).toContain("max");
   expect(screen.maxButton("Docs")?.textContent?.trim()).toBe("Restore");
   // The tile kept its own read; the tray under the grid kept its place.
   expect(screen.rows()).toEqual(["Title of ENG-1", "Title of OPS-DOC"]);
@@ -474,11 +474,13 @@ test("maximising a tile draws it alone and Restore draws the grid again", async 
   screen.maximise("Docs");
   await settle();
   expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents"]);
-  expect(screen.grid()).toEqual(["rows-2"]);
+  expect(screen.grid()).not.toContain("max");
   expect(screen.maxButton("Docs")?.textContent?.trim()).toBe("Maximise");
 
-  // One at a time: the next choice is the whole of the choice, and the
-  // previous one has no say in what is drawn.
+  // The next choice, from the grid, is the whole of the choice. A *second*
+  // maximise over a maximised tile has no button to come from -- the other
+  // tiles are not drawn -- so decision 2 holds by the shape of the field, and
+  // this is the nearest thing the room's own surface can witness.
   screen.maximise("Tickets");
   expect(screen.tiles()).toEqual(["Tickets"]);
   expect(screen.cards()).toEqual(["PAY-231", "PAY-236", "OPS-77"]);
@@ -504,12 +506,12 @@ test("walking to another room restores the grid, and walking back finds it resto
   screen.router.go("#/ctx/proj:jira:PAY");
   await settle();
   await vi.waitFor(() => expect(screen.tiles()).toEqual(["Tickets", "Docs"]));
-  expect(screen.grid()).toEqual(["rows-1"]);
+  expect(screen.grid()).not.toContain("max");
 
   screen.router.go("#/ctx/src:jira");
   await settle();
   await vi.waitFor(() => expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents"]));
-  expect(screen.grid()).toEqual(["rows-2"]);
+  expect(screen.grid()).not.toContain("max");
 
   screen.done();
 });

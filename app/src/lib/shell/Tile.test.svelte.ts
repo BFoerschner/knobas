@@ -79,11 +79,8 @@ function render(sources: string[] = []) {
   return {
     target,
     props,
-    /** The header's maximise control (#250), by the name a screen reader gives it. */
-    maximise: () =>
-      [...target.querySelectorAll<HTMLButtonElement>(".tile-h .acts button")].find(
-        (button) => !button.closest(".seg"),
-      ) ?? null,
+    /** The header's maximise control (#250). */
+    maximise: () => target.querySelector<HTMLButtonElement>(".tile-h .acts .tile-max"),
     rows: () => [...target.querySelectorAll(".row")],
     text: () => target.textContent ?? "",
     count: () => target.querySelector(".tile-h .cnt")?.textContent ?? "",
