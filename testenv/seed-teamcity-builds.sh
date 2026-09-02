@@ -60,8 +60,14 @@
 #
 # The build log is `/downloadBuildLog.html?buildId=<id>` -- not /app/rest at
 # all (the spec's `/app/rest/builds/<locator>/log` is POST-only, for ADDING a
-# message). It is the URL behind the build log page's "Download" link, and it
-# answers a bearer token like the REST paths do.
+# message). It is the URL behind the build log page's "Download" link
+# (buildLog/buildLog.jsp in the same webapp), and it answers a bearer token
+# like the REST paths do.
+#
+# The image all of that was read off is the one seed-teamcity.sh pins in
+# VERIFIED_TEAMCITY_IMAGE and refuses to run against a substitute for. Through
+# `./seed --teamcity` this script runs after that guard; a standalone run
+# trusts that the container is still that image.
 #
 # WHAT THIS CANNOT REPRODUCE -- see README.md, "TeamCity, end to end": the
 # server assigns build ids and timestamps, a build takes as long as it takes,
@@ -112,9 +118,10 @@ GITEA_TOKEN=$(jq -r '.gitea.token // empty' "$STATE")
 jqf() { jq -r "$1" "$FIXTURE"; }
 
 # --------------------------------------------------------------------------
-# HTTP. As seed-teamcity.sh's `rest`, always as the bearer of the token, with
-# an optional JSON body; never exits on an HTTP error, because 404 is the
-# normal answer to "is it there yet". --max-time for the same reason as there.
+# HTTP. seed-gitea.sh's `api` shape (an optional JSON body as the last
+# argument), always as the bearer of the token; never exits on an HTTP error,
+# because 404 is the normal answer to "is it there yet". --max-time for the
+# reason seed-teamcity.sh gives.
 REST_STATUS=0
 REST_BODY=''
 rest() {  # rest <METHOD> <path> [<json body>]
@@ -133,8 +140,10 @@ rest() {  # rest <METHOD> <path> [<json body>]
   REST_BODY=$(printf '%s' "$_raw" | sed '$d')
 }
 
-# The text/plain resources (a setting's value). Prints the body; the status
-# goes to REST_STATUS.
+# The text/plain resources (a setting's value). Sets REST_STATUS and
+# REST_BODY exactly as `rest` does, and deliberately does not print the body
+# instead: a caller wrapping it in `$(...)` would run it in a subshell, and
+# the status it set there would never reach the caller's check.
 rest_text() {  # rest_text <METHOD> <path> [<text body>]
   _m=$1; _p=$2
   if [ "$#" -gt 2 ]; then
@@ -148,7 +157,7 @@ rest_text() {  # rest_text <METHOD> <path> [<text body>]
 000'
   fi
   REST_STATUS=$(printf '%s' "$_raw" | tail -n 1)
-  printf '%s' "$_raw" | sed '$d'
+  REST_BODY=$(printf '%s' "$_raw" | sed '$d')
 }
 
 expect() {  # expect <what> <status>...
@@ -314,11 +323,20 @@ ensure_build_type() {  # ensure_build_type <id>
   fi
 }
 
-# The build by its fixture number, if the server has one in any state.
+# The build by its fixture number, if the server has one in any state -- and
+# failing that, a QUEUED build of the configuration. A build takes its number
+# when it starts, so a queued one has none yet and no `number:` locator can
+# find it (a queued build answers no `number` field at all, 2026-09-02); this
+# script queues at most one build per configuration, so a queued one is what
+# an interrupted run left behind, and it is waited for rather than doubled.
 # Sets FOUND_ID, FOUND_STATE, FOUND_STATUS (empty when none).
 find_build() {  # find_build <build type id> <number>
-  rest GET "/app/rest/builds?locator=buildType:(id:$1),number:$2,defaultFilter:false,state:any&fields=build(id,state,status)"
+  rest GET "/app/rest/builds?locator=buildType:(id:$1),number:$2,defaultFilter:false,state:any&fields=count,build(id,state,status)"
   expect "look for build $2 of $1" 200
+  if [ "$(printf '%s' "$REST_BODY" | jq '.count // 0')" = "0" ]; then
+    rest GET "/app/rest/builds?locator=buildType:(id:$1),defaultFilter:false,state:queued&fields=count,build(id,state,status)"
+    expect "look for a queued build of $1" 200
+  fi
   FOUND_ID=$(printf '%s' "$REST_BODY" | jq -r '.build[0].id // empty')
   FOUND_STATE=$(printf '%s' "$REST_BODY" | jq -r '.build[0].state // empty')
   FOUND_STATUS=$(printf '%s' "$REST_BODY" | jq -r '.build[0].status // empty')
@@ -327,12 +345,13 @@ find_build() {  # find_build <build type id> <number>
 # The counter is what makes the fixture's number come out; set only while
 # the build with that number does not exist yet, and only when it differs.
 ensure_counter() {  # ensure_counter <build type id> <number>
-  _cur=$(rest_text GET "/app/rest/buildTypes/id:$1/settings/buildNumberCounter")
+  rest_text GET "/app/rest/buildTypes/id:$1/settings/buildNumberCounter"
   [ "$REST_STATUS" = "200" ] || die "reading the build number counter of $1 answered $REST_STATUS"
+  _cur=$REST_BODY
   [ "$_cur" = "$2" ] && return 0
-  _new=$(rest_text PUT "/app/rest/buildTypes/id:$1/settings/buildNumberCounter" "$2")
-  [ "$REST_STATUS" = "200" ] && [ "$_new" = "$2" ] \
-    || die "setting the build number counter of $1 to $2 answered $REST_STATUS '$_new'"
+  rest_text PUT "/app/rest/buildTypes/id:$1/settings/buildNumberCounter" "$2"
+  [ "$REST_STATUS" = "200" ] && [ "$REST_BODY" = "$2" ] \
+    || die "setting the build number counter of $1 to $2 answered $REST_STATUS '$REST_BODY'"
   say "build number counter of $1: $_cur -> $2"
 }
 
@@ -406,6 +425,9 @@ done
 # 2. The finished shapes, always: 412 on Ledger_Deploy_Staging (success) and
 #    1187 on Payout_IntegrationTests (failure). Queued together -- the one
 #    agent takes them in turn -- then each waited for and checked.
+# Lines split on whitespace and fields on `|`, which is safe because a git
+# refname cannot contain a space and a TeamCity id is [A-Za-z0-9_]: nothing
+# the fixture can put in a field carries a separator.
 BUILD_MAP=''   # "<fixture num> <build type> <real id>" lines, for seed-state.json
 QUEUED=''      # "<fixture num>|<build type>|<branch>|<status>|<real id>" lines to wait for
 for num in $(jqf '.builds[] | select(.status != "running") | .num'); do
@@ -421,6 +443,9 @@ for num in $(jqf '.builds[] | select(.status != "running") | .num'); do
   fi
   if [ -n "$FOUND_ID" ]; then
     say "build $num of $cfg is already $FOUND_STATE as id $FOUND_ID (an earlier run); waiting for it"
+    # A queued build takes its number when it starts, so the counter still
+    # decides what it comes out as; a running one has its number already.
+    [ "$FOUND_STATE" = "queued" ] && ensure_counter "$cfg" "$num"
     bid=$FOUND_ID
   else
     ensure_counter "$cfg" "$num"
@@ -453,6 +478,14 @@ for num in $(jqf '.builds[] | select(.status == "running") | .num'); do
   if [ -n "$FOUND_ID" ]; then
     case "$FOUND_STATE" in
       finished) say "build $num of $cfg already exists as id $FOUND_ID (finished, $FOUND_STATUS); delete it for --running to start it again: curl -X DELETE -H 'Authorization: Bearer \$KNOBAS_TEAMCITY_TOKEN' $TC_URL/app/rest/builds/id:$FOUND_ID" ;;
+      queued)
+        # An interrupted run left it in the queue. The agent is free now that
+        # the finished shapes are done, so it starts within seconds.
+        say "build $num of $cfg is queued as id $FOUND_ID (an earlier run); waiting for it to start"
+        ensure_counter "$cfg" "$num"
+        wait_for_state "$FOUND_ID" running finished
+        FOUND_STATE=$(printf '%s' "$REST_BODY" | jq -r .state)
+        say "build $num of $cfg is $FOUND_STATE as id $FOUND_ID" ;;
       *) say "build $num of $cfg is $FOUND_STATE as id $FOUND_ID" ;;
     esac
     BUILD_MAP="$BUILD_MAP$num $cfg $FOUND_ID

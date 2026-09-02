@@ -255,16 +255,25 @@ curl -X POST -H "Authorization: Bearer $KNOBAS_TEAMCITY_TOKEN" -H 'Content-Type:
 ```
 
 A cancelled build finishes with status `UNKNOWN`, which is TeamCity's own
-shape for one (mockd transcribes it the same way). A finished 1188 is left
-alone by later runs, `--running` or not; `DELETE /app/rest/builds/id:<id>`
-and re-run with `--running` to have it start again, and the counter is reset
-so it comes out as 1188 once more.
+shape for one (mockd transcribes it the same way); the agent takes a few
+seconds to kill the step, so `state` still reads `running` right after the
+POST. A finished 1188 is left alone by later runs, `--running` or not. To put
+the server back in the plain-seed state -- the two finished builds and
+nothing else, which is what a live suite should find -- delete it:
 
-**Idempotent, like the Gitea seed.** Every project, VCS root, configuration,
-step and build is read before it is created; a finished build by number on
-its configuration is never re-triggered, a queued or running one from an
-interrupted run is waited for. A second `./seed --teamcity` creates nothing
-and exits 0. Build **numbers** come out as the fixture's because the seed
+```sh
+curl -X DELETE -H "Authorization: Bearer $KNOBAS_TEAMCITY_TOKEN" "$KNOBAS_TEAMCITY_URL/app/rest/builds/id:$id"
+```
+
+The next `./seed --teamcity` then rewrites `teamcity.builds` without 1188,
+and `--running` starts it again with the counter reset, so it comes out as
+1188 once more.
+
+**Idempotent, like the Gitea seed.** Every project, VCS root, configuration
+and build is read before it is created, and a configuration gets its steps
+only while it has none; a finished build by number on its configuration is
+never re-triggered, a queued or running one from an interrupted run is
+waited for. A second `./seed --teamcity` creates nothing and exits 0. Build **numbers** come out as the fixture's because the seed
 sets each configuration's build number counter before its first build --
 the `SEED_EXACT_PR_NUMBERS` idea, without the burning. Build **ids**,
 timestamps and the triggerer are the server's; *What the seed cannot
