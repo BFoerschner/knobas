@@ -177,6 +177,25 @@ function render(hash: string, overrides = createMiniBoardOverrides()) {
         option.getAttribute("aria-disabled") === "true",
         option.getAttribute("title"),
       ]),
+    /**
+     * What the layout option `label` is described by (#258): the text of the
+     * element its `aria-describedby` names, or null where it names nothing
+     * or names an id nothing carries. Resolved by walking the ids rather
+     * than `getElementById`, so a dangling reference reads as the absence
+     * it is to assistive technology.
+     */
+    describedBy: (label: string) => {
+      const option = [...target.querySelectorAll<HTMLButtonElement>(".tile-h .acts .seg button")].find(
+        (node) => node.textContent?.trim() === label,
+      );
+      const id = option?.getAttribute("aria-describedby");
+      if (!id) return null;
+      const named = [...target.querySelectorAll<HTMLElement>("[id]")].find((node) => node.id === id);
+      return named?.textContent?.trim() ?? null;
+    },
+    /** The visually hidden reasons the layout control carries, in the order drawn. */
+    hiddenReasons: () =>
+      [...target.querySelectorAll<HTMLElement>(".tile-h .acts .seg .vh")].map((node) => node.textContent?.trim() ?? ""),
     /** Press the layout option that carries `label`. */
     press: (label: string) => {
       const option = [...target.querySelectorAll<HTMLButtonElement>(".tile-h .acts .seg button")].find(
@@ -936,6 +955,10 @@ test("a reader's override redraws the mini board, sticks to its room, and clears
  * leaked through would choose the room's own default, which clears, and the
  * store would look untouched either way; here the leak would record
  * `columns`, and the last assertion is what sees it.
+ *
+ * The reason reaches readers who cannot hover (#258): the refused option's
+ * accessible description resolves to the same string its `title` carries,
+ * and the option that is not refused describes itself with nothing.
  */
 test("a room past six statuses refuses columns with its reason, and records no override", async () => {
   ticketsEverywhere();
@@ -950,6 +973,9 @@ test("a room past six statuses refuses columns with its reason, and records no o
     ["columns", false, true, "7 statuses; columns holds 6"],
     ["stacked", true, false, null],
   ]);
+  expect(screen.describedBy("columns")).toBe("7 statuses; columns holds 6");
+  expect(screen.describedBy("stacked")).toBeNull();
+  expect(screen.hiddenReasons()).toEqual(["7 statuses; columns holds 6"]);
 
   screen.press("columns");
   expect(screen.layout()).toBe("stacked");
@@ -1008,6 +1034,11 @@ test("pressing the effective default on a demoted override clears it, seen once 
     ["columns", false, false],
     ["stacked", true, false],
   ]);
+  // Allowed again, so no reason to give (#258): no description on either
+  // option, and no hidden element left behind for a reader to stumble on.
+  expect(screen.describedBy("columns")).toBeNull();
+  expect(screen.describedBy("stacked")).toBeNull();
+  expect(screen.hiddenReasons()).toEqual([]);
 
   screen.done();
 });
