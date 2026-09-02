@@ -435,6 +435,22 @@ instead would cost ~13 GB, most of it the TeamCity image that the whole point of
 `profiles:` is to keep off the disk. The two agree: for a multi-arch tag both
 report the digest of the manifest index.
 
+Three pins are **guarded**: the Jira and Confluence images (`seed-atlassian.sh`)
+and the TeamCity server image (`seed-teamcity.sh`) are the ones a seed walks a
+first-start wizard on, and each seed refuses any digest but the one its form
+fields were read off (`VERIFIED_*_IMAGE` in the seed script). For those,
+`pin-images.sh` writes the seed's digest and, when the tag has moved on (even a
+patch tag does: `confluence:9.2.21` was retagged upstream in 2026-09), prints
+the drift with both digests and the guarding seed, exit 0 — the file is right
+for the seeds as they are. `./pin-images.sh --move CONFLUENCE_IMAGE` takes the
+new digest for that one variable; the seed then refuses its container until
+its wizard walk is re-derived and its `VERIFIED_*_IMAGE` updated. The guard
+values are read out of the seed scripts, not copied into `pin-images.sh`, so
+the two cannot disagree. Everything else (Gitea, Kuma, node, the build images,
+the TeamCity agent) resolves fresh on every run; the agent is pinned by the
+server's version tag rather than `latest`, because an agent ahead of the server
+is refused at registration. `--out PATH` writes elsewhere, to compare.
+
 The two build stages of `mockd.Dockerfile` are pinned the same way — an
 unpinned `rust:1-slim` would make the mockd container unreproducible.
 `rust-toolchain.toml` still decides the compiler.
@@ -476,7 +492,7 @@ history.
 | `./seed-atlassian.sh` | The real Jira and Confluence containers' setup wizards, unattended (`--profile real-atlassian`). |
 | `./seed-teamcity.sh` | The real TeamCity container's first start, an access token and one authorised agent (`--profile real-teamcity`); then runs the script below. |
 | `./seed-teamcity-builds.sh` | The Tidewater projects, build configurations, VCS roots and builds in the real TeamCity; `--running` for the fixture's running build. |
-| `./pin-images.sh` | Re-resolve image tags to digests into `.env`. |
+| `./pin-images.sh` | Re-resolve image tags to digests into `.env`; guarded pins are held, `--move VAR` takes a new one. |
 | `./check-ports.sh` | Assert the compose file against the §5 port table, default profile, opt-in profiles and the capped overlay. Starts nothing. |
 | `./reset` | `down -v` every profile, and delete the seed's outputs. |
 
