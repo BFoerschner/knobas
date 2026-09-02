@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
 
   import InboxView from "./lib/inbox/InboxView.svelte";
   import { inbox } from "./lib/inbox/inbox.svelte";
@@ -81,6 +81,12 @@
    * The address is replaced, not pushed: the dead one must not be one step
    * back. A detail open over the vanished room stays open -- the route keeps
    * its detail and only the room moves.
+   *
+   * The two side effects run untracked so this depends on exactly the three
+   * things it reads above. `push` reads the toast stack's length before it
+   * writes (that is what `Array.prototype.push` on a `$state` proxy does),
+   * and a tracked read there makes every toast -- and every toast's dismissal
+   * six seconds later -- a reason to run this again.
    */
   $effect.pre(() => {
     const route = router.route;
@@ -94,8 +100,11 @@
     standing = { ctx, room };
     if (before === null || before.ctx !== ctx || before.room === null || room !== null) return;
 
-    push({ text: `${before.room.label} is no longer a room. Showing ${ALL_CONTEXT.label}.` });
-    router.replace({ ...route, ctx: ALL_CONTEXT.id });
+    const gone = before.room;
+    untrack(() => {
+      push({ text: `${gone.label} is no longer a room. Showing ${ALL_CONTEXT.label}.` });
+      router.replace({ ...route, ctx: ALL_CONTEXT.id });
+    });
   });
 
   /**
