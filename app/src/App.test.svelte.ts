@@ -225,6 +225,7 @@ const { EVENTS } = await import("./lib/ipc");
 const { health } = await import("./lib/shell/health.svelte");
 const { lifecycle } = await import("./lib/shell/lifecycle.svelte");
 const { router } = await import("./lib/shell/router.svelte");
+const { toasts } = await import("./lib/shell/toasts.svelte");
 
 function row(
   source_id: string,
@@ -249,6 +250,10 @@ beforeEach(() => {
   projectRows = [];
   projectCalls = 0;
   health.replace([]);
+  toasts.items = [];
+  // The router is the window's one instance and the address outlives a test,
+  // so each starts from the room every session starts in.
+  location.hash = "#/ctx/all";
   target = document.createElement("div");
   document.body.append(target);
 });
@@ -615,4 +620,63 @@ test("leaving the wizard by a room tab still gets the demo corpus its project ro
     "the demo load's terminal sync:state never reached the switcher",
   );
   expect(tabLabels()).toEqual(["All work", "mock", "Payments Platform"]);
+/** A finished sync run for `mock` -- the event that makes the projects store re-list. */
+function syncEnded(): void {
+  emit(EVENTS.syncState, {
+    source_id: "mock",
+    running: false,
+    run_id: 1,
+    started_at: null,
+    last_finished_at: "2026-09-01T09:00:00Z",
+    last_outcome: null,
+    next_run_at: null,
+    backoff_until: null,
+  });
+}
+
+/**
+ * A room that stops existing under a standing reader says so (#241).
+ *
+ * Before this the substitution was silent: the room view and the tab strip
+ * both fell back to *All work* by identity (#209), the address bar kept
+ * naming the vanished room, `back()` went to that dead id, and the tab
+ * highlight and the address disagreed until the reader clicked a tab.
+ *
+ * The fixture has the reader standing in the project room *before* the
+ * census drops it -- the room has to have resolved on the previous list, or
+ * the test would be exercising the boot fallback rather than the transition.
+ */
+test("a project room that vanishes under the reader is announced and hands the address to All work", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  projectRows = [{ source_id: "mock", key: "PAY", name: "Payments Platform" }];
+  location.hash = "#/ctx/proj:mock:PAY";
+
+  app = mount(App, { target, props: {} });
+  await until(
+    () => tabLabels().includes("Payments Platform"),
+    "the shell never drew the project room the reader is standing in",
+  );
+  expect(toasts.items, "arriving in a room is not news").toEqual([]);
+  expect(location.hash).toBe("#/ctx/proj:mock:PAY");
+  const entries = history.length;
+
+  // The last item carrying PAY is tombstoned; the census no longer shows it.
+  projectRows = [];
+  syncEnded();
+
+  await until(() => toasts.items.length > 0, "the vanished room was never announced");
+  expect(toasts.items.map((toast) => toast.text)).toEqual([
+    "Payments Platform is no longer a room. Showing All work.",
+  ]);
+  expect(toasts.items[0]?.tone ?? "plain", "this is news, not an error").toBe("plain");
+  expect(tabLabels()).toEqual(["All work", "mock"]);
+  expect(location.hash, "the address bar must stop naming the vanished room").toBe("#/ctx/all");
+  expect(router.ctx).toBe("all");
+  expect(history.length, "replace, not push: the dead address is not one step back").toBe(entries);
+
+  router.back();
+  flushSync();
+  expect(location.hash, "back() must not land on the dead id").toBe("#/ctx/all");
+  expect(toasts.items, "one toast, not one per re-render").toHaveLength(1);
 });
