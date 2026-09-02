@@ -99,6 +99,7 @@ const router = {
   go(hash: string) {
     this.hash = hash;
   },
+  replace() {},
   back() {},
   start: () => () => {},
 };
