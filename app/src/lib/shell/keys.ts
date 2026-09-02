@@ -10,11 +10,18 @@
  *    `stopPropagation`, so this handler never sees the key at all;
  * 2. the detail slide-over is open → back to the room it was opened over;
  * 3. a non-room view is open       → back to the room;
- * 4. otherwise                     → nothing.
+ * 4. a tile is maximised (#250)    → the room draws its grid again;
+ * 5. otherwise                     → nothing.
  *
- * Rung 4 is a rule, not an omission: `Esc` must never exit the app, quit a
+ * Rung 5 is a rule, not an omission: `Esc` must never exit the app, quit a
  * context, or discard anything. A key that sometimes does nothing is what
- * makes the other three safe to press.
+ * makes the other four safe to press.
+ *
+ * Rung 4 is the one rung the address cannot answer: a maximised tile is a
+ * viewing gesture the room keeps to itself, so the ladder asks through
+ * `restoreTile` and the answer says whether the press counted. It sits below
+ * the detail on purpose -- a detail open over a maximised tile closes first,
+ * and the tile is still there for the next press.
  *
  * `⌘T` is M3's timer and is deliberately **not** bound — binding it now would
  * train a habit the app cannot honour.
@@ -45,6 +52,17 @@ export interface KeyHandlers {
    *   component toggles it, and both land on "open" from a closed box.
    */
   openLauncher: () => void;
+  /**
+   * Rung 4: restore the grid if a tile is maximised (#250).
+   *
+   * Returns whether it did anything. The room owns the state and the redraw;
+   * this handler is the shell reaching it, the way `openLauncher` reaches the
+   * launcher, so the ladder stays router-driven and asks only when every
+   * rung above has passed. `false` is what lets the key fall through to
+   * rung 5 -- a press that restored nothing must not be `preventDefault`ed
+   * as though it had.
+   */
+  restoreTile: () => boolean;
 }
 
 /**
@@ -74,8 +92,14 @@ export function installKeys(router: Router, handlers: KeyHandlers): () => void {
     if (route.view !== "room") {
       event.preventDefault();
       router.back();
+      return;
     }
-    // Rung 4: in a room with nothing open, Esc does nothing at all.
+    // Rung 4: a maximised tile, which only the room knows about.
+    if (handlers.restoreTile()) {
+      event.preventDefault();
+      return;
+    }
+    // Rung 5: in a room with nothing open, Esc does nothing at all.
   }
 
   window.addEventListener("keydown", onkeydown);
