@@ -113,7 +113,11 @@ const SERVED: &[Served] = &[
         declared_by: "/app/rest/buildTypes",
     },
     Served {
-        request: "/app/rest/builds?locator=state:any,count:100&fields=$long",
+        // `defaultFilter:false`: the default filter narrows a listing to the
+        // default branch (issue #266), and two of the fixture's three builds
+        // ran on a feature branch. This is the request that snapshots all of
+        // them.
+        request: "/app/rest/builds?locator=defaultFilter:false,count:100&fields=$long",
         golden: "builds_all",
         schema: "builds",
         declared_by: "/app/rest/builds",

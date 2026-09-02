@@ -71,7 +71,12 @@ export KNOBAS_GITEA_OWNER=tidewater
 export KNOBAS_GITEA_REPO=payout-service
 ```
 
-`eval "$(./seed --env)"` re-prints them without re-seeding.
+`eval "$(./seed --env)"` re-prints them without re-seeding. Once `./seed
+--teamcity` has run it also prints `KNOBAS_TEAMCITY_URL` and
+`KNOBAS_TEAMCITY_TOKEN`; the seeded TeamCity suite additionally reads
+`seed-state.json` for the fixture-number-to-id map, from
+`testenv/seed-state.json` relative to the crate unless
+`KNOBAS_TEAMCITY_SEED_STATE` names another path.
 
 ## One environment, one owner at a time
 
@@ -221,6 +226,17 @@ the adapter's tests and the project census already expect:
 No configuration has a description: the fixture gives none, and the seed
 invents none, exactly as mockd does.
 
+**The default branch is queued as `<default>`.** The VCS root's branch
+specification names `main` along with the feature branches, and a build
+queued with an explicit `branchName: main` resolves against that
+specification to a *logical* branch called `main` that is a different branch
+from `<default>`: the server marks it `defaultBranch: false` and every REST
+listing under its default filter hides it (found by #266's first hour against
+this server). So a build whose fixture branch is `main` is queued with no
+branch name at all; TeamCity shows it as `<default>` while it waits and as
+`main` with `defaultBranch: true` once it runs, which is the branch the
+fixture means. 1187 and 1188 are queued on their feature branch by name.
+
 **The builds are real and VCS-backed.** Each project has one Git VCS root
 (`Payout_PayoutService`, `Ledger_LedgerApi`) pointing at the seeded Gitea over
 the compose network (`http://gitea:3000/tidewater/<repo>.git`, authenticated
@@ -291,6 +307,44 @@ the vendored `specs/teamcity.json` for every `/app/rest` call, and the
 server's own forms for the three things that swagger does not enumerate
 (the Git root's property names, the command-line runner's, and the
 `settings/buildNumberCounter` resource).
+
+#### The seeded live suite
+
+`crates/knobas-source-teamcity/tests/live_teamcity_seeded.rs` is the
+adapter's certification against this server, the way `live_gitea.rs` is
+against the seeded Gitea: it asserts the seeded content by id, number, status
+and branch (reading `seed-state.json` for the number-to-id map), runs the
+contract battery over it -- clause 2 included, which the public instance
+cannot be held to -- and watches the `sinceBuild` watermark move on a build it
+queues and stand still afterwards. With the environment up and seeded as
+above:
+
+```sh
+just teamcity-live-seeded      # evals ./seed --env, then the suite, serially
+```
+
+**It writes, and it takes it away again.** One test queues one build of
+`Ledger_Deploy_Staging` through `POST /app/rest/buildQueue` (on
+`fix/PAY-228-partial-refund-drift`, so the incremental query is witnessed on a
+feature branch), waits for the agent to finish it, and then **deletes** it
+(`DELETE /app/rest/builds/id:<id>`) when the test ends, passing or panicking
+alike; the deletion is checked, not hoped for. That build takes the
+configuration's next number -- 413 after a fresh seed -- and the number
+counter is not wound back, which is harmless: the seed only sets a counter
+while the build with the fixture's number does not exist. Before any test
+that asserts an exact set, the suite **clears what a killed run left**: every
+build whose id is not in `seed-state.json` is canceled if in flight and
+deleted, so recovery from a run that died mid-way is "run the suite again",
+never `testenv/reset`. After a green run the server holds exactly the seeded
+builds again.
+
+**One owner at a time**, exactly as for the Gitea suites (see *One
+environment, one owner at a time*): the leftover clearing cannot tell a sibling's build
+from a corpse, and the battery's clause 2 needs a server where nothing is
+running. `./seed --teamcity --running` and this suite are therefore mutually
+exclusive on one environment: the suite refuses to start while a seeded build
+is in flight and says how to release it, and a build somebody else queues
+mid-run is the one case no check can catch.
 
 ### Jira and Confluence, end to end
 

@@ -1305,6 +1305,118 @@ correctly stopped rather than editing a frozen-record document unasked:
 
 ---
 
+### Amendments from the seeded-server certification (2026-09-02, binding) — issue #266
+
+Ruled by Fable under delegation at triage, 2026-09-02, on issue #266; Björn can overturn it.
+Recorded here because §4.2 pins TeamCity's locators and §5 pins mockd's as-built locator subset
+and serialisers, and both change — the precedent is the #105 amendment (the canceled facet) and
+the `nextHref` bullet in #114's. **It narrows the first bullet of the #105 amendment**: the two
+item-producing locators carry three named dimensions, not two. Every measurement below is from
+the seeded, self-hosted TeamCity 2026.1.3 (build 222742) `testenv/seed --teamcity` sets up, on
+2026-09-02, unless it says "public instance". This is the first TeamCity amendment measured on a
+corpus we own, and the difference is the finding: a public instance can only be asserted by form,
+and a form assertion cannot say that a build which *should* be on a page is missing.
+
+- **§4.2 the two item-producing locators carry `branch:default:any`.** TeamCity's default filter
+  has a third facet the public-instance suite could not see: in a branched configuration it
+  answers only the **default branch**, and it does so on every locator whose state set includes
+  `finished`. Measured: the adapter's own per-configuration locator,
+  `buildType:(id:Payout_IntegrationTests),state:finished,canceled:any,failedToStart:any,count:100`,
+  answered `count: 0` over a server holding the fixture's failed build 1187 on
+  `feature/PAY-231-sepa-retry`; the incremental
+  `state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:100` answered only the
+  default-branch build; `state:any,count:100`, `count:100` and
+  `state:(queued:true,running:true,finished:true),count:100` hid a queued non-default-branch build
+  the same way. With `branch:default:any` every one of them answered the hidden builds. The vendored
+  `testenv/specs/teamcity.json` says so in prose ("When looking for builds, TeamCity processes only
+  builds for the default branch. Add the `branch:<any>` dimension to process all builds instead")
+  and on `Branch.default` ("add the *branch(default:any)* locator to get builds from all existing
+  branches"). So until this landed **no feature-branch build ever entered the mirror from a real
+  TeamCity**, for the same permanent reason as #105's canceled builds — `sinceBuild` is exclusive
+  and the watermark moves past them — and the fixture's own story, a failed integration-test run on
+  a feature branch, could not be told from a real server at all.
+- **§4.2 the in-flight poll is unchanged, on measurement.** `state:(queued:true,running:true)`,
+  `state:queued` and `state:running` each answered a non-default-branch build without any branch
+  dimension — a queued one (agent disabled to hold it there) and a running one (`Payout_Build` held
+  at its sleeping third step) — so the poll carries none of the three dimensions, as before, and
+  the personal facet still applies to it.
+- **§4.2 `branch:default:any` and not `defaultFilter:false`**, for #105's reason: the named
+  dimension re-opens one facet, `defaultFilter:false` opens every facet including the personal one.
+  Re-measured read-only on the public instance (2026.2, build 238909) the same day through
+  `the_two_facet_dimensions_do_not_open_the_personal_facet`: the three-dimension locator answered
+  0/100 personal builds, as did `defaultFilter:false` in the same window — an empty window, recorded
+  by form. `#105`'s reasoning about the two costs (overflow on the incremental query, eviction in
+  the per-configuration window) applies to the third dimension unchanged: a feature-branch build
+  now occupies a slot in the newest-N window and counts toward `MAX_BUILDS_PER_QUERY`, which on a
+  server that builds every branch is most of its builds. `builds_per_config` and the scope remain
+  the levers, and "sync more often" the remedy.
+- **§4.2 the contract battery's clause 2 and the `sinceBuild` watermark are now certified on a real
+  server.** `crates/knobas-source-teamcity/tests/live_teamcity_seeded.rs` (`just
+  teamcity-live-seeded`) runs the battery over the two configurations the seed always finishes; runs
+  full → idle → one build queued through `POST /app/rest/buildQueue` on a feature branch → the next
+  run returns exactly that build and its configuration and moves the position to it → idle again;
+  then deletes the build and certifies the #91 replaced-server refusal on the real 404 that
+  `GET /app/rest/builds/id:{id}` answers. Green three runs of three at this PR. The public suite's
+  read-only, by-form rules stand where they were; its header now says what it cannot see.
+- **§5 mockd's default filter narrows to the default branch, and the locator subset gains
+  `branch:`** — `branch:default:any|true|false` and `branch:(default:…)`, the two spellings the real
+  server takes; a branch *name* is refused, because nothing in knobas asks by name and a fake that
+  resolved one would be guessing at TeamCity's logical-branch rules. The facet applies exactly as
+  measured: to a locator whose state set includes `finished`, not to one restricted to
+  `queued`/`running`, and not under `defaultFilter:false`. `TcBuild` gains `default_branch`, served
+  as `defaultBranch` (a real field on the record), transcribed from the fixture's `branch` — `main`
+  is the default branch of every configuration, as the seeded VCS roots say, so 412 is a
+  default-branch build and 1187/1188 are not. mockd served 1187 to every locator until this landed,
+  which is how the adapter shipped without the dimension: the same shape as #105's and #113's, one
+  facet over. `knobas-mockd`'s
+  `the_default_filter_narrows_to_the_default_branch_and_branch_default_any_reopens_it` is the guard
+  that goes red if the fake drifts back, and the adapter's own `tests/mockd.rs` goes red if the
+  dimension is dropped (verified by reverting it: the full-sync test loses build 1187).
+- **§5 a queued build is served without `number` and without `status`.** Measured: a build on the
+  queue carries neither key — the number is assigned when an agent takes it, and a build that has
+  not run reports nothing — and a build canceled while still queued finishes with `number: "N/A"`.
+  mockd used to serve both from the moment `queue_build` ran; it now omits them while the build is
+  queued and serves them from `finish_build` onwards. The adapter already handled the absence
+  (`map::build_item` titles such a build by its id and renders the bare state); what changes is that
+  the path is now exercised by the fake.
+- **§5 mockd's `webUrl` shapes are the ones a 2026.1 server serves**:
+  `/buildConfiguration/<buildTypeId>/<id>` for a build that has run, `/build/<id>` while it is
+  queued, and `/buildConfiguration/<buildTypeId>?mode=builds` for a configuration. The
+  `viewLog.html?buildId=` / `viewType.html?buildTypeId=` forms mockd served are an older UI's; the
+  real server still resolves them but no longer emits them, and the adapter passes the field through
+  untouched (P5). The host in a real `webUrl` is the server's configured root URL
+  (`http://localhost:8111` on the seeded server) and not the one the request went to; mockd uses
+  its own bound address, and nothing in knobas depends on either.
+- **Compared and found in agreement, so nothing changed**: the JSON error envelope (#113) on 400
+  and 404; `nextHref` absent on an unfilled page and absent when `fields=` does not ask (#114);
+  `/app/rest/buildTypes` answered whole with no `nextHref`; `description` omitted rather than null on
+  every seeded configuration; `paused: false` served; timestamps in `yyyyMMdd'T'HHmmssZ`; the
+  `state`/`status` vocabulary; `sinceBuild` exclusive; ids monotonic and never reused (the deleted
+  ids 2–7 and 9–12 were not reissued); `DELETE /app/rest/builds/id:{id}` answering 204 and the id
+  404 afterwards; `POST /app/rest/buildQueue` answering 200 with the queued build in full.
+- **Compared and classified as fixture narrative rather than disagreement**: mockd's `statusText`
+  for 1187 is the fixture log's first line, where the real server composes
+  `Exit code 1 (Step: IntegrationTests (Command Line)) (new)` from the failing step — the log is not
+  on the REST record and no TeamCity lifts a line of it into `statusText`. Kept, and recorded on
+  the transcription table in `tc_state.rs`: the line is what the dataset's story shows on a build
+  tile, and nothing reads `statusText` for anything but display and search. Likewise every seeded
+  build's `triggered.user` is `knobas`, the seed's own account, where mockd serves the fixture's
+  `mara`/VCS split (deviation 12) — testenv/README.md already records that the seed cannot
+  reproduce the triggerer.
+- **The seed queues a default-branch build without a `branchName`.** #265's script sent
+  `branchName: main`, and TeamCity resolved that against a branch specification that also lists
+  `main` to a *logical* branch distinct from `<default>` — so 412 came out `defaultBranch: false`
+  and the server's own default filter hid it. `testenv/seed-teamcity-builds.sh` now omits the branch
+  for the VCS root's default and the README says why; 412 was re-seeded under this PR and is a
+  default-branch build (id 8 on this environment; `seed-state.json` carries the map).
+- **Frozen surfaces: none.** `crates/knobas-source-teamcity/**` and `crates/knobas-mockd/**` are not
+  in §10.8's list, the `Rest` trait is crate-private, and `knobas-http` is untouched. `branch` is a
+  dimension of the `/app/rest/builds` locator §4.2 already lists — the live server enumerates it in
+  its own 400 message — so this is a value change inside a parameter the contract already defines,
+  exactly as #105's was. No migration, no IPC change.
+
+---
+
 ## 10. As built — the contract PR (2026-08-24)
 
 *The task brief called this section §9. §9 was taken by the plan-authoring amendments before this ran, so the as-built record is §10; "§9 of the interfaces doc" in `plan-02-contract` means this section.*

@@ -232,7 +232,7 @@ impl StateFilter {
 
 /// A `/app/rest/builds` locator, restricted to the dimensions the contract
 /// defines: `buildType:`, `state:`, `sinceBuild:`, `canceled:`,
-/// `failedToStart:`, `defaultFilter:`, `count:`. Anything else -- `project:`,
+/// `failedToStart:`, `branch:`, `defaultFilter:`, `count:`. Anything else -- `project:`,
 /// `affectedProject:` -- is recorded as a violation by the mock and must not
 /// be sent. Each dimension appears **at most once**; see [`StateFilter`].
 #[derive(Debug, Clone, Default)]
@@ -269,6 +269,28 @@ pub(crate) struct Locator {
     /// ever. That is the same staleness the canceled class has, so ruling one
     /// in and the other out would be incoherent.
     pub failed_to_start_any: bool,
+    /// Send `branch:default:any`, which puts the builds of every branch back
+    /// into a page TeamCity's default filter would have narrowed to the
+    /// **default branch** (issue #266).
+    ///
+    /// The third facet of the default filter, and the one the public-instance
+    /// suite could not see: measured on the seeded TeamCity 2026.1.3 in
+    /// `testenv` on 2026-09-02, every locator whose state set includes
+    /// `finished` -- `state:finished`, `state:any`, no `state:` at all --
+    /// answers only the default branch of a branched configuration, so the
+    /// fixture's failed build 1187 on `feature/PAY-231-sepa-retry` came back
+    /// from **neither** item-producing query and was never mirrored. The
+    /// vendored `testenv/specs/teamcity.json` says the same in prose: "When
+    /// looking for builds, TeamCity processes only builds for the default
+    /// branch. Add the `branch:<any>` dimension to process all builds
+    /// instead." Same shape as [`Self::canceled_any`]: `any`, not a name, and
+    /// the dimension re-opens its own facet only -- personal builds stay out.
+    ///
+    /// **Not on the in-flight poll.** Measured the same day: a locator
+    /// restricted to `queued`/`running` answered a non-default-branch build
+    /// in both states without the dimension, so the poll takes the server's
+    /// filter unchanged, as it does for the other two facets.
+    pub branch_any: bool,
     /// TeamCity's default filter hides everything that is not a finished,
     /// non-personal, non-canceled, non-failed-to-start build on the default
     /// branch. `Some(false)` turns it off **whole**, which is the only way to
@@ -310,6 +332,9 @@ impl Locator {
         }
         if self.failed_to_start_any {
             parts.push("failedToStart:any".to_owned());
+        }
+        if self.branch_any {
+            parts.push("branch:default:any".to_owned());
         }
         if let Some(on) = self.default_filter {
             parts.push(format!("defaultFilter:{on}"));
@@ -529,17 +554,25 @@ mod tests {
         // two facets TeamCity's default filter closes, so a canceled or
         // failed-to-start build reaches the mirror instead of being hidden
         // from every query that emits an item.
+        // ...and the third facet the same filter closes, measured on a
+        // TeamCity we own (issue #266): every locator whose state set includes
+        // `finished` answers only the **default branch** of a branched
+        // configuration, and `branch:default:any` is the dimension that
+        // re-opens exactly that facet. The two item-producing locators carry
+        // all three.
         assert_eq!(
             Locator {
                 build_type_id: Some("Payout_Build".to_owned()),
                 state: Some(StateFilter::Finished),
                 canceled_any: true,
                 failed_to_start_any: true,
+                branch_any: true,
                 count: 100,
                 ..Locator::default()
             }
             .render(),
-            "buildType:(id:Payout_Build),state:finished,canceled:any,failedToStart:any,count:100"
+            "buildType:(id:Payout_Build),state:finished,canceled:any,failedToStart:any,\
+             branch:default:any,count:100"
         );
         assert_eq!(
             Locator {
@@ -547,11 +580,25 @@ mod tests {
                 since_build_id: Some(412),
                 canceled_any: true,
                 failed_to_start_any: true,
+                branch_any: true,
                 count: 100,
                 ..Locator::default()
             }
             .render(),
-            "state:finished,sinceBuild:(id:412),canceled:any,failedToStart:any,count:100"
+            "state:finished,sinceBuild:(id:412),canceled:any,failedToStart:any,\
+             branch:default:any,count:100"
+        );
+        // The branch dimension is independent of the other two, so it renders
+        // alone -- which is what makes dropping it visible in the wire string.
+        assert_eq!(
+            Locator {
+                state: Some(StateFilter::Finished),
+                branch_any: true,
+                count: 100,
+                ..Locator::default()
+            }
+            .render(),
+            "state:finished,branch:default:any,count:100"
         );
         // `any` and not `true`: the dimension re-**includes** its class
         // alongside the ordinary builds, where `canceled:true` would return
@@ -580,7 +627,7 @@ mod tests {
         );
         // Neither is sent by default: `Locator::default()` takes the server's
         // own filter, which is what the in-flight poll wants.
-        for absent in ["canceled:", "failedToStart:"] {
+        for absent in ["canceled:", "failedToStart:", "branch:"] {
             assert!(
                 !Locator {
                     state: Some(StateFilter::InFlight),
@@ -614,6 +661,7 @@ mod tests {
             since_build_id: Some(9),
             canceled_any: true,
             failed_to_start_any: true,
+            branch_any: true,
             default_filter: Some(false),
             count: 100,
         }
@@ -624,6 +672,7 @@ mod tests {
             "sinceBuild:",
             "canceled:",
             "failedToStart:",
+            "branch:",
             "defaultFilter:",
             "count:",
         ] {

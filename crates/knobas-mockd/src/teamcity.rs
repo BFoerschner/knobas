@@ -340,7 +340,10 @@ fn build_type_json(bt: &TcBuildType, base: &str) -> Value {
         "projectName": bt.project_name,
         "projectId": bt.project_id,
         "href": format!("/app/rest/buildTypes/id:{}", bt.id),
-        "webUrl": format!("{base}/viewType.html?buildTypeId={}", bt.id),
+        // The shape a TeamCity 2026.1 serves, read off the seeded server
+        // (issue #266); the older `viewType.html?buildTypeId=` form still
+        // resolves there but is no longer what the record carries.
+        "webUrl": format!("{base}/buildConfiguration/{}?mode=builds", bt.id),
         // No fixture configuration has prose, so `description` is normally the
         // null that means "known name, absent here";
         // `MockState::describe_build_type` is what puts one there. `paused` is
@@ -368,14 +371,30 @@ fn build_json(b: &TcBuild, base: &str, s: &MockState, types: &[TcBuildType]) -> 
     json!({
         "id": b.id,
         "buildTypeId": b.build_type_id,
-        "number": b.number,
-        "status": b.status.as_str(),
+        // Neither a number nor a status until an agent takes the build: a
+        // queued build's record carries no such keys on a real server
+        // (measured on the seeded one, issue #266). The number is assigned at
+        // start, so a build that finishes without ever running is `N/A`
+        // there; mockd has no start transition and serves the number it will
+        // have from `finish_build` onwards.
+        "number": (!queued).then(|| b.number.clone()),
+        "status": (!queued).then(|| b.status.as_str()),
         "state": b.state.as_str(),
         "running": running.then_some(true),
         "percentageComplete": running.then_some(b.percentage_complete).flatten(),
         "branchName": b.branch_name,
+        // What the default filter's branch facet reads, and a real field on
+        // the record (issue #266).
+        "defaultBranch": b.default_branch,
         "href": format!("/app/rest/builds/id:{}", b.id),
-        "webUrl": format!("{base}/viewLog.html?buildId={}&buildTypeId={}", b.id, b.build_type_id),
+        // The two shapes a TeamCity 2026.1 serves, read off the seeded
+        // server: `/build/<id>` while the build is on the queue and
+        // `/buildConfiguration/<buildTypeId>/<id>` once it has run.
+        "webUrl": if queued {
+            format!("{base}/build/{}", b.id)
+        } else {
+            format!("{base}/buildConfiguration/{}/{}", b.build_type_id, b.id)
+        },
         "statusText": b.status_text,
         "queuedDate": tc_date(b.start_date),
         "startDate": (!queued).then(|| tc_date(b.start_date)),
@@ -593,6 +612,11 @@ struct Locator {
     canceled: Option<Facet>,
     /// `failedToStart:`, same rule.
     failed_to_start: Option<Facet>,
+    /// `branch:default:any|true|false`, `None` when the locator did not name
+    /// it -- which leaves the default filter's **branch** facet in charge
+    /// (issue #266). `Only` is `default:true` (default-branch builds and
+    /// nothing else), `Never` is `default:false`.
+    branch: Option<Facet>,
 }
 
 /// What a facet dimension (`canceled:`, `failedToStart:`) asks for.
@@ -633,7 +657,8 @@ impl Facet {
 const SUPPORTED: &str = "sinceBuild:(id:N), state:queued|running|finished|any, \
      state:(queued:true,running:true,finished:true), buildType:X, buildType:(id:X), \
      count:N, start:N, defaultFilter:false, canceled:any|true|false, \
-     failedToStart:any|true|false";
+     failedToStart:any|true|false, branch:default:any|true|false, \
+     branch:(default:any|true|false)";
 
 impl Locator {
     fn parse(raw: &str) -> Result<Self, String> {
@@ -646,6 +671,7 @@ impl Locator {
             default_filter: true,
             canceled: None,
             failed_to_start: None,
+            branch: None,
         };
         let mut seen: Vec<&str> = Vec::new();
         for item in split_top_level(raw)? {
@@ -713,6 +739,24 @@ impl Locator {
                 "failedToStart" => {
                     out.failed_to_start = Some(Facet::parse("failedToStart", value)?);
                 }
+                "branch" => {
+                    // `branch:default:any` and `branch:(default:any)` are the
+                    // two spellings a real server takes for "every branch";
+                    // a branch *name* is refused, because nothing in knobas
+                    // asks by name and a fake that matched one would be
+                    // guessing at TeamCity's logical-branch resolution.
+                    let inner = value
+                        .strip_prefix('(')
+                        .and_then(|v| v.strip_suffix(')'))
+                        .unwrap_or(value);
+                    let flag = inner.strip_prefix("default:").ok_or_else(|| {
+                        format!(
+                            "branch:{value} is not supported; mockd serves \
+                             branch:default:any|true|false and branch:(default:any|true|false)"
+                        )
+                    })?;
+                    out.branch = Some(Facet::parse("branch:default", flag)?);
+                }
                 other => {
                     return Err(format!(
                         "locator dimension {other:?} is not one mockd supports. Supported: \
@@ -757,6 +801,31 @@ impl Locator {
             Facet::Any
         });
         canceled.admits(b.canceled) && failed_to_start.admits(b.failed_to_start)
+    }
+
+    /// Does this locator admit `b`'s **branch**?
+    ///
+    /// The third facet of the default filter, and the one no public instance
+    /// could show because only an owned corpus says which builds a locator
+    /// should have answered. Measured on the seeded TeamCity 2026.1.3 in
+    /// `testenv` on 2026-09-02 (issue #266): a locator whose state set
+    /// includes `finished` -- `state:finished`, `state:any`, no `state:` at
+    /// all -- answers only the default branch of a branched configuration,
+    /// while one restricted to `queued`/`running` answers every branch without
+    /// being asked. `branch:default:any` re-opens the facet on its own, and
+    /// `defaultFilter:false` opens it with the rest. The fixture's failed
+    /// build 1187 is on a feature branch, so until this landed mockd served it
+    /// to a locator a real server answers empty -- which is how the adapter
+    /// shipped without the dimension.
+    fn admits_branch(&self, b: &TcBuild) -> bool {
+        let facet = self.branch.unwrap_or({
+            if self.default_filter && self.states().contains(&TcState::Finished) {
+                Facet::Only
+            } else {
+                Facet::Any
+            }
+        });
+        facet.admits(b.default_branch)
     }
 
     /// The states this locator selects.
@@ -808,6 +877,7 @@ impl Locator {
             .into_iter()
             .filter(|b| states.contains(&b.state))
             .filter(|b| self.admits_facets(b))
+            .filter(|b| self.admits_branch(b))
             .filter(|b| {
                 self.build_type
                     .as_ref()
@@ -958,11 +1028,13 @@ async fn queue_build(State(s): State<Arc<MockState>>, req: Request) -> Response 
     // `branchName` is optional and TeamCity builds the default branch without
     // one -- which is what an adapter that does not model branches must be
     // able to rely on.
+    // A real server shows such a build as `<default>` while it is queued and
+    // as the branch's own name once it runs; mockd serves the name throughout.
     let branch = parsed
         .get("branchName")
         .and_then(Value::as_str)
         .filter(|b| !b.trim().is_empty())
-        .unwrap_or("refs/heads/main");
+        .unwrap_or(crate::tc_state::DEFAULT_BRANCH);
 
     let id = s.queue_build(build_type_id, branch);
     let queued = s.build(id).expect("the build was just queued");
@@ -991,10 +1063,10 @@ mod tests {
         // not one is there. That second half is not mockd being lazy -- it is
         // what a real TeamCity answers, measured over a query with exactly 42
         // matches, where `count:42` still carried a `nextHref`.
-        let (rows, more) = page(&format!("state:any,count:{}", total - 1));
+        let (rows, more) = page(&format!("defaultFilter:false,count:{}", total - 1));
         assert_eq!(rows.len(), total - 1);
         assert!(more, "a page that could not fit the rest reports the rest");
-        let (rows, more) = page(&format!("state:any,count:{total}"));
+        let (rows, more) = page(&format!("defaultFilter:false,count:{total}"));
         assert_eq!(rows.len(), total);
         assert!(
             more,
@@ -1002,19 +1074,19 @@ mod tests {
         );
 
         // Not filled: the one answer that ends a collection.
-        let (rows, more) = page(&format!("state:any,count:{}", total + 1));
+        let (rows, more) = page(&format!("defaultFilter:false,count:{}", total + 1));
         assert_eq!(rows.len(), total);
         assert!(!more, "a page the server could not fill is the end");
 
         // ...and `start:` pages over the same order, so the continuation the
         // `nextHref` names actually leads somewhere.
-        let (rows, more) = page(&format!("state:any,count:1,start:{}", total - 1));
+        let (rows, more) = page(&format!("defaultFilter:false,count:1,start:{}", total - 1));
         assert_eq!(rows.len(), 1);
         assert!(
             more,
             "TeamCity reports a next page off the page being filled, not off what remains"
         );
-        let (rows, more) = page(&format!("state:any,count:2,start:{}", total - 1));
+        let (rows, more) = page(&format!("defaultFilter:false,count:2,start:{}", total - 1));
         assert_eq!(rows.len(), 1, "one row left after skipping the rest");
         assert!(!more);
     }
@@ -1035,7 +1107,7 @@ mod tests {
 
         // Walk the whole collection one row at a time, following only what the
         // `nextHref` names, and never parse a locator this server would refuse.
-        let mut locator = "state:any,count:1".to_owned();
+        let mut locator = "defaultFilter:false,count:1".to_owned();
         let mut seen = Vec::new();
         for _ in 0..total {
             let parsed = Locator::parse(&locator)

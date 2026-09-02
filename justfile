@@ -415,3 +415,39 @@ teamcity-live:
     if [ -f .env ]; then set -a; . ./.env; set +a; fi
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-teamcity --test live_teamcity \
       -- --ignored --nocapture --test-threads=1
+
+# The TeamCity adapter against the **seeded, self-hosted** TeamCity from
+# `./seed --teamcity` (issue #266) -- the sibling `teamcity-live` cannot be:
+# a corpus we own, so the suite asserts the seeded content by id, number,
+# status and branch, runs the contract battery (clause 2 included), and
+# queues one build through REST to watch the `sinceBuild` watermark move and
+# then stand still. It deletes what it queued, and clears what a killed run
+# left. The header of `tests/live_teamcity_seeded.rs` states the whole
+# contract, including what it writes.
+#
+# The environment is assumed up and seeded, exactly as `gitea-live` obtains
+# its variables: `./seed --env` prints KNOBAS_TEAMCITY_URL and
+# KNOBAS_TEAMCITY_TOKEN once `./seed --teamcity` has run. It is deliberately
+# not brought up here -- the TeamCity profile is opt-in and its seed depends
+# on the Gitea seed for its VCS roots -- so a missing token stops with the
+# three commands to run. testenv/README.md, "TeamCity, end to end".
+#
+# Serial and unparallelised for the same reason as `gitea-live`: one server,
+# and one test that mutates it. One owner at a time: testenv/README.md, "One
+# environment, one owner at a time".
+teamcity-live-seeded:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd testenv
+    eval "$(./seed --env)"
+    if [ -z "${KNOBAS_TEAMCITY_TOKEN:-}" ]; then
+      echo "teamcity-live-seeded: no KNOBAS_TEAMCITY_TOKEN in seed-state.json -- the real" >&2
+      echo "  TeamCity is not seeded from this tree. From testenv/:" >&2
+      echo "    docker compose --profile real-teamcity up -d teamcity teamcity-agent" >&2
+      echo "    ./seed            # Gitea first: the VCS roots point at it" >&2
+      echo "    ./seed --teamcity" >&2
+      exit 1
+    fi
+    cd ..
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-teamcity --test live_teamcity_seeded \
+      -- --ignored --nocapture --test-threads=1

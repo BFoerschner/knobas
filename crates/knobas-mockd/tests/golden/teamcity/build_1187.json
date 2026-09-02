@@ -7,9 +7,10 @@
     "paused": false,
     "projectId": "Payout",
     "projectName": "Payout",
-    "webUrl": "http://mockd.test/viewType.html?buildTypeId=Payout_IntegrationTests"
+    "webUrl": "http://mockd.test/buildConfiguration/Payout_IntegrationTests?mode=builds"
   },
   "buildTypeId": "Payout_IntegrationTests",
+  "defaultBranch": false,
   "finishDate": "20260822T101412+0000",
   "href": "/app/rest/builds/id:1187",
   "id": 1187,
@@ -23,5 +24,5 @@
     "date": "20260822T101000+0000",
     "type": "vcs"
   },
-  "webUrl": "http://mockd.test/viewLog.html?buildId=1187&buildTypeId=Payout_IntegrationTests"
+  "webUrl": "http://mockd.test/buildConfiguration/Payout_IntegrationTests/1187"
 }
