@@ -44,6 +44,7 @@
  * **This checks layout and interaction, not the bridge.** The real end-to-end
  * check is `just dev` (Tauri + embedded PostgreSQL) or `just demo`.
  */
+import type { LinkEnd, LinkRow, SuggestionEntry, SuggestionPage } from "../../ipc/entity";
 import { JIRA_SCHEMA } from "../../sources/fixtures";
 
 /** One fake command. Arguments arrive camelCased, exactly as Tauri sends them. */
@@ -116,6 +117,23 @@ export function installFakeTauri(handlers: Record<string, Handler>): FakeBridge 
 
   Object.defineProperty(window, "__TAURI_INTERNALS__", {
     value: internals,
+    configurable: true,
+    writable: true,
+  });
+
+  // `unlisten()` is not only the `plugin:event|unlisten` command: since
+  // `@tauri-apps/api` 2.x it first calls this second internals object to drop
+  // the listener on the JS side, and reaches the command only afterwards. A
+  // fake that defined `invoke` alone made every listener teardown -- every
+  // room switch, once the tray held a subscription -- reject with a
+  // `TypeError` nothing awaited. Found by mounting the real tray over this
+  // bridge under the rejection guard every suite runs (#237).
+  Object.defineProperty(window, "__TAURI_EVENT_PLUGIN_INTERNALS__", {
+    value: {
+      unregisterListener(_event: string, eventId: number) {
+        listeners.delete(eventId);
+      },
+    },
     configurable: true,
     writable: true,
   });
@@ -258,6 +276,25 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
       FAKE_CONTEXTS.unshift(row);
       return row;
     },
+
+    // Suggestions (#237). The tray awaits `detect_suggestions` and then
+    // `room_suggestions` on every room, and it renders a rejection rather than
+    // an empty state -- so a table without these keys was a standing red line
+    // on every room under `?fake-ipc`. Stateful within the session like the
+    // contexts above: a row answered here leaves every later read for as long
+    // as the page lives. No event is emitted: the real command emits
+    // `activity:new`, but the tray re-reads on its own after answering, and
+    // the fixture emits nothing at all.
+    //
+    // A pass over an unchanged mirror writes nothing, and this mirror never
+    // changes, so 0 is the honest constant. The tray discards the number.
+    detect_suggestions: () => 0,
+    room_suggestions: (args) => roomSuggestions(args),
+    // Answered, never performed: there is no link graph to accept into and no
+    // tombstone to remember a dismissal by. The two are one thing here -- the
+    // row stops being listed -- because that is all a QA pass can witness.
+    accept_suggestion: (args) => answerSuggestion(args),
+    dismiss_suggestion: (args) => answerSuggestion(args),
   };
 }
 
@@ -340,16 +377,21 @@ const CORPUS: {
     state: "open",
     approvals: "1/2",
   }),
+  // The commit and the build carry the ticket's key -- in the branch name and
+  // in the message body -- because that is the evidence `FAKE_SUGGESTIONS`
+  // below cites, and a proposal whose reason the corpus cannot bear out is a
+  // fixture lying about the one thing the tray exists to show.
   row("mock:9f2c1ab", "commit", "payout: key the retry on the mandate id", "2026-08-22T09:40:00Z", "mara", {
     sha: "9f2c1ab",
     repo: "payout-service",
-    branch: "feat/idempotent-retry",
+    branch: "feat/PAY-231-idempotent-retry",
+    description: "A replayed payout with the same mandate id is now a no-op.\n\nRefs PAY-231.",
   }),
   row("mock:payout-service#318", "build", "payout-service #318", "2026-08-22T10:20:00Z", null, {
     cfg: "payout-service",
     num: 318,
     status: "failed",
-    branch: "feat/idempotent-retry",
+    branch: "feat/PAY-231-idempotent-retry",
   }),
   row("mock:ENG-SEPA", "page", "SEPA retry design", "2026-08-20T15:30:00Z", "priya", {
     space: "ENG",
@@ -393,6 +435,100 @@ function row(
     deleted_at: null as string | null,
     payload,
   };
+}
+
+/**
+ * What a detection pass would propose over this corpus, in the detector's own
+ * words (`knobas_core::suggest::RULES`), so the tray reads under `?fake-ipc`
+ * as it reads over a real mirror.
+ *
+ * Both classes, because the badge exists to tell them apart (#41 story 16):
+ * two `exact_key` rows from the records that carry PAY-231's key, and one
+ * `similarity` guess from the page that shares the ticket's vocabulary. The
+ * similarity row runs page → ticket because `similar_text` orders a pair by
+ * entity id, and `ENG-SEPA` sorts before `PAY-231`. Every end is an entity the
+ * corpus holds, so each is openable -- `linkEnd` throws otherwise, at read
+ * time, which is where a dangling fixture row would be noticed.
+ *
+ * `total` is the count before `limit`, never `rows.length`: it is the number
+ * the tray's heading shows.
+ */
+const FAKE_SUGGESTIONS: LinkRow[] = [
+  proposal(1, "mock:payout-service#318", "mock:PAY-231", "build_parameter_key", "exact_key",
+    "this build's parameters name PAY-231", "2026-08-22T14:30:03Z"),
+  proposal(2, "mock:9f2c1ab", "mock:PAY-231", "commit_message_key", "exact_key",
+    "the commit message mentions PAY-231", "2026-08-22T14:30:02Z"),
+  proposal(3, "mock:ENG-SEPA", "mock:PAY-231", "similar_text", "similarity",
+    "both mention retry, sepa", "2026-08-22T14:30:01Z"),
+];
+
+/** The proposals answered this session, by link id. Accepted or dismissed is
+ * one fact to the fixture, because leaving the list is all either does here. */
+const ANSWERED = new Set<string>();
+
+/** One unconfirmed link, as the detector writes one. */
+function proposal(
+  n: number,
+  from_id: string,
+  to_id: string,
+  rule: string,
+  rule_class: "exact_key" | "similarity",
+  reason: string,
+  created_at: string,
+): LinkRow {
+  return {
+    id: `link:fake-${n}`,
+    from_id,
+    to_id,
+    relation: "related",
+    origin: "suggested",
+    note: null,
+    created_by: "knobas",
+    created_at,
+    confirmed_at: null,
+    rule,
+    rule_class,
+    reason,
+  };
+}
+
+/** The end of a proposal, hydrated from the corpus the way the real read joins it. */
+function linkEnd(entity_id: string): LinkEnd {
+  const entry = CORPUS.find((candidate) => candidate.entity_id === entity_id);
+  if (!entry) throw new Error(`fake-tauri: a proposal names ${entity_id}, which the corpus does not hold`);
+  return { entity_id, kind: entry.kind, title: entry.title, deleted_at: entry.deleted_at };
+}
+
+/** `room_suggestions`: the proposals still waiting, newest first, scoped like `list_entities`. */
+function roomSuggestions(args: Record<string, unknown>): SuggestionPage {
+  // The fixture has no link graph, so a stored context's room has nothing to
+  // propose -- the same answer `context_members` and `list_entities` give.
+  if (args["ctx"]) return { rows: [], total: 0 };
+  const sources = (args["sources"] as string[] | undefined) ?? [];
+  if (sources.length && !sources.includes("mock")) return { rows: [], total: 0 };
+  const limit = Number(args["limit"] ?? 50);
+
+  const waiting = FAKE_SUGGESTIONS.filter((link) => !ANSWERED.has(link.id)).sort((a, b) =>
+    b.created_at.localeCompare(a.created_at),
+  );
+  const rows: SuggestionEntry[] = waiting
+    .slice(0, limit)
+    .map((link) => ({ link, from: linkEnd(link.from_id), to: linkEnd(link.to_id) }));
+  return { rows, total: waiting.length };
+}
+
+/**
+ * `accept_suggestion` and `dismiss_suggestion`. Idempotent, as the real ones
+ * are: answering a row twice resolves and changes nothing. An id no proposal
+ * carries is refused the way the real command refuses it.
+ */
+function answerSuggestion(args: Record<string, unknown>): null {
+  const id = String(args["linkId"] ?? "");
+  if (!FAKE_SUGGESTIONS.some((link) => link.id === id)) {
+    throw { code: "not_found", message: `${id} is not a link`, source_id: null };
+  }
+  ANSWERED.add(id);
+  return null;
 }
 
 /** The stored contexts the fixture session holds. Starts empty on purpose:
