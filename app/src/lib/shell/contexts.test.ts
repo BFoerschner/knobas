@@ -8,7 +8,15 @@
  */
 import { expect, test } from "vitest";
 
-import { ALL_CONTEXT, builtinContexts, contextById, storedContext, switcherContexts } from "./contexts";
+import {
+  ALL_CONTEXT,
+  builtinContexts,
+  columnsRefusal,
+  contextById,
+  effectiveMiniBoardLayout,
+  storedContext,
+  switcherContexts,
+} from "./contexts";
 
 test("always offers All work first, then one room per source", () => {
   const cs = builtinContexts([
@@ -315,4 +323,33 @@ test("the unbounded rooms draw stacked and the bounded ones draw columns", () =>
     ["src:jira", "stacked"],
     ["proj:jira:PAY", "columns"],
   ]);
+});
+
+/**
+ * A reader's override is a second input to the one layout rule, not a second
+ * rule (#245): the room's default is what an override departs from, and the
+ * backstop is applied over whichever of the two is in force.
+ */
+test("an override beats the room's default, and the backstop beats the override", () => {
+  expect(effectiveMiniBoardLayout("columns", undefined, 3)).toBe("columns");
+  expect(effectiveMiniBoardLayout("columns", "stacked", 3)).toBe("stacked");
+  expect(effectiveMiniBoardLayout("stacked", "columns", 6)).toBe("columns");
+  // Seven statuses: the override asked for columns and the backstop refuses.
+  expect(effectiveMiniBoardLayout("stacked", "columns", 7)).toBe("stacked");
+});
+
+/**
+ * A demoted override is kept, not dropped: the same override on a board that
+ * fits again draws columns without the reader choosing twice.
+ */
+test("a kept override returns to columns when the board fits six again", () => {
+  const override = "columns";
+  expect(effectiveMiniBoardLayout("stacked", override, 9)).toBe("stacked");
+  expect(effectiveMiniBoardLayout("stacked", override, 6)).toBe("columns");
+});
+
+/** The reason the control shows when columns is refused, and none when it is not. */
+test("columns is refused with a reason past six statuses, and not at six", () => {
+  expect(columnsRefusal(6)).toBeNull();
+  expect(columnsRefusal(9)).toBe("9 statuses; columns holds 6");
 });

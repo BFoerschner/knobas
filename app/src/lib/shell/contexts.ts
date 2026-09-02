@@ -81,7 +81,44 @@ const MAX_COLUMNS = 6;
  * reader as tickets moved through the day.
  */
 export function miniBoardLayoutFor(preferred: MiniBoardLayout, columns: number): MiniBoardLayout {
-  return preferred === "columns" && columns > MAX_COLUMNS ? "stacked" : preferred;
+  return preferred === "columns" && !holdsColumns(columns) ? "stacked" : preferred;
+}
+
+/** Whether a board of `columns` groups fits the column layout at all. */
+function holdsColumns(columns: number): boolean {
+  return columns <= MAX_COLUMNS;
+}
+
+/**
+ * The layout a room's mini board draws once a reader's override is counted
+ * (#245): the room chooses the **default**, the reader may **override** it
+ * for the session, and the backstop is applied over whichever is in force.
+ *
+ * One rule with a second input, not a second rule: an override is what
+ * `miniBoardLayoutFor` is asked about instead of the room's own answer, so
+ * the backstop cannot be bypassed by choosing columns on a board it refuses.
+ * The override is not consumed by the refusal either — the caller keeps it,
+ * and the same call returns columns the moment the board fits again.
+ */
+export function effectiveMiniBoardLayout(
+  roomDefault: MiniBoardLayout,
+  override: MiniBoardLayout | undefined,
+  columns: number,
+): MiniBoardLayout {
+  return miniBoardLayoutFor(override ?? roomDefault, columns);
+}
+
+/**
+ * Why the column layout cannot be chosen for a board of `columns` groups, or
+ * `null` when it can (#245).
+ *
+ * The control's reason, stated where the threshold lives so the text and the
+ * demotion cannot disagree about where six ends. "Statuses" rather than
+ * "columns" because that is what the reader counts on screen: the groups are
+ * the source's statuses however they are arranged.
+ */
+export function columnsRefusal(columns: number): string | null {
+  return holdsColumns(columns) ? null : `${columns} statuses; columns holds ${MAX_COLUMNS}`;
 }
 
 /** The id of the room every session starts in. Matches `router.DEFAULT_CTX`. */
