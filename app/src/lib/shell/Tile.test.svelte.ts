@@ -80,7 +80,7 @@ function render(sources: string[] = []) {
     target,
     props,
     /** The header's maximise control (#250). */
-    maximise: () => target.querySelector<HTMLButtonElement>(".tile-h .acts .tile-max"),
+    maxButton: () => target.querySelector<HTMLButtonElement>(".tile-h .acts .tile-max"),
     rows: () => [...target.querySelectorAll(".row")],
     text: () => target.textContent ?? "",
     count: () => target.querySelector(".tile-h .cnt")?.textContent ?? "",
@@ -280,7 +280,7 @@ test("a list tile's header carries no layout control", async () => {
   // ...and the slot holds the maximise control alone (#250): one button, not
   // a layout word that lost its group.
   expect(screen.target.querySelectorAll(".tile-h .acts button")).toHaveLength(1);
-  expect(screen.maximise()).not.toBeNull();
+  expect(screen.maxButton()).not.toBeNull();
 
   screen.done();
 });
@@ -298,7 +298,7 @@ test("the header offers Maximise, asks the room, and reads Restore once maximise
   await vi.waitFor(() => expect(screen.rows()).toHaveLength(1));
   flushSync();
 
-  const button = screen.maximise();
+  const button = screen.maxButton();
   expect(button, "the tile header carries a maximise control").not.toBeNull();
   expect(button!.textContent?.trim()).toBe("Maximise");
   expect(button!.getAttribute("aria-label")).toBeNull();
@@ -306,11 +306,11 @@ test("the header offers Maximise, asks the room, and reads Restore once maximise
   button!.click();
   expect(screen.props.onmaximise).toHaveBeenCalledTimes(1);
   // Asking is not deciding: the tile did not flip itself.
-  expect(screen.maximise()?.textContent?.trim()).toBe("Maximise");
+  expect(screen.maxButton()?.textContent?.trim()).toBe("Maximise");
 
   screen.props.maximised = true;
   flushSync();
-  expect(screen.maximise()?.textContent?.trim()).toBe("Restore");
+  expect(screen.maxButton()?.textContent?.trim()).toBe("Restore");
   // ...and the rows under it are still the tile's own.
   expect(screen.rows()).toHaveLength(1);
 

@@ -922,3 +922,28 @@ test("Escape in a room restores the maximised tile", async () => {
   await until(() => tileLabels().length === 2, "Escape never reached the room");
   expect(location.hash, "restoring a tile is not a navigation").toBe("#/ctx/all");
 });
+
+/**
+ * Decision 1's other exit (#250): a view other than the room restores the
+ * grid too. That holds because `App.svelte` unmounts `<Room>` for the
+ * Sources view and the choice dies with it -- which is a fact about this
+ * component's `{:else}` and the one direction the room's own tests cannot
+ * reach, since a mounted room never sees itself unmounted.
+ */
+test("a non-room view and back finds the grid, not the maximised tile", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  entityRows = [entity("page", "ENG-1"), entity("build", "b-1")];
+
+  app = mount(App, { target, props: {} });
+  await until(() => tileLabels().length === 2, "the room never drew its two tiles");
+
+  press("Maximise");
+  expect(tileLabels()).toHaveLength(1);
+
+  location.hash = "#/sources";
+  await until(() => tileLabels().length === 0, "the Sources view never replaced the room");
+
+  location.hash = "#/ctx/all";
+  await until(() => tileLabels().length === 2, "the room never drew its grid again");
+});

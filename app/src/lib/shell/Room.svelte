@@ -165,7 +165,10 @@
    * *room* and not on a fresh object for the same one. `App.svelte` derives
    * the switcher's list afresh after every census (a sync run ending, a
    * source's health moving), and `context` is a new object each time; a
-   * derived string is equal to itself and propagates nothing.
+   * derived string is equal to itself and propagates nothing. The reads
+   * above still re-run on that fresh object, on purpose: a census may have
+   * changed what the room holds, and a re-read costs nothing the reader can
+   * see, where a reset would.
    */
   const roomId = $derived(context.id);
   $effect(() => {
@@ -176,8 +179,8 @@
   });
 
   /** The header's button: *Maximise* on a grid tile, *Restore* on the maximised one. */
-  function toggleMaximise(tile: string) {
-    maximised = maximised === tile ? null : tile;
+  function toggleMaximise(tileId: string) {
+    maximised = maximised === tileId ? null : tileId;
   }
 
   /**
