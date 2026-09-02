@@ -1,9 +1,14 @@
 #!/bin/sh
 # Set up the real TeamCity container end to end, unattended: first-start
-# wizard, administrator, access token, one authorised build agent.
+# wizard, administrator, access token, one authorised build agent -- and then
+# the Tidewater build content, which is seed-teamcity-builds.sh's job and
+# runs at the end of this script.
 #
 #   docker compose --profile real-teamcity up -d teamcity teamcity-agent
-#   ./seed-teamcity.sh          # or ./seed --teamcity
+#   ./seed-teamcity.sh [--running]   # or ./seed --teamcity [--running]
+#
+# `--running` is passed through to seed-teamcity-builds.sh and is the switch
+# for the fixture's running build; see that script's header.
 #
 # WHAT THIS IS AND WHY IT IS NOT LIKE seed-gitea.sh
 #
@@ -93,6 +98,13 @@ VERIFIED_TEAMCITY_IMAGE=sha256:30267c7f633a7973af1551e6f7f7683f49029ee81145b4710
 
 say() { echo "seed-teamcity: $*"; }
 die() { echo "seed-teamcity: $*" >&2; exit 1; }
+
+for arg in "$@"; do
+  case "$arg" in
+    --running) ;;
+    *) echo "seed-teamcity: unknown argument '$arg'; usage: ./seed-teamcity.sh [--running]" >&2; exit 2 ;;
+  esac
+done
 
 for tool in docker curl jq openssl; do
   command -v "$tool" >/dev/null || die "$tool is required"
@@ -465,12 +477,20 @@ done
 echo " ok ($(printf '%s' "$REST_BODY" | jq -r .count) connected, authorised agent(s))"
 
 # Still as the bearer of $TOKEN: this is the version the token can see.
+# Merged over the block's existing keys rather than replacing it, because
+# seed-teamcity-builds.sh keeps `teamcity.builds` in the same block.
 rest GET /app/rest/server
 _v=$(printf '%s' "$REST_BODY" | jq -r '.version // "unknown"')
+_have='{}'
+[ -r "$STATE" ] && _have=$(jq '.teamcity // {}' "$STATE" 2>/dev/null || echo '{}')
 record teamcity "$(jq -n --arg u "$TC_URL" --arg n "$ADMIN_USER" --arg p "$ADMIN_PASS" --arg t "$TOKEN" --arg v "$_v" \
-  '{url:$u, user:$n, password:$p, token:$t, version:$v}')"
+  --argjson have "$_have" '$have + {url:$u, user:$n, password:$p, token:$t, version:$v}')"
 say "wrote $STATE"
 say "done"
+
+# Phase two: the fixture's projects, configurations and builds, as the bearer
+# of the token just recorded.
+./seed-teamcity-builds.sh "$@"
 echo
 echo "# Environment for the TeamCity adapter's live suite -- eval \"\$(./seed --env)\" prints these too"
 echo "export KNOBAS_TEAMCITY_URL=$TC_URL"
