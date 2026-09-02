@@ -82,11 +82,16 @@
    * back. A detail open over the vanished room stays open -- the route keeps
    * its detail and only the room moves.
    *
-   * The two side effects run untracked so this depends on exactly the three
-   * things it reads above. `push` reads the toast stack's length before it
-   * writes (that is what `Array.prototype.push` on a `$state` proxy does),
-   * and a tracked read there makes every toast -- and every toast's dismissal
-   * six seconds later -- a reason to run this again.
+   * `$effect.pre` rather than `$effect`: the rewrite then lands before the
+   * frame is drawn, so the list changing and the address moving are one
+   * paint rather than a fallback frame followed by a corrected one.
+   *
+   * The two side effects run untracked so this depends on exactly the two
+   * things it reads above, the route and the list. `push` reads the toast
+   * stack's length before it writes (that is what `Array.prototype.push` on
+   * a `$state` proxy does), and a tracked read there makes every toast --
+   * and every toast's dismissal six seconds later -- a reason to run this
+   * again.
    */
   $effect.pre(() => {
     const route = router.route;
@@ -94,7 +99,7 @@
       standing = null;
       return;
     }
-    const ctx = router.ctx;
+    const ctx = route.ctx;
     const room = contexts.find((candidate) => candidate.id === ctx) ?? null;
     const before = standing;
     standing = { ctx, room };

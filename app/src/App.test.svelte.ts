@@ -474,16 +474,7 @@ test("a project that first appears mid-session gets its room without a reload", 
   ).toEqual(["All work", "mock"]);
 
   projectRows = [{ source_id: "mock", key: "OPS", name: "Operations" }];
-  emit(EVENTS.syncState, {
-    source_id: "mock",
-    running: false,
-    run_id: 1,
-    started_at: null,
-    last_finished_at: "2026-09-01T09:00:00Z",
-    last_outcome: null,
-    next_run_at: null,
-    backoff_until: null,
-  });
+  syncEnded();
 
   await until(
     () => tabLabels().includes("Operations"),
@@ -843,4 +834,30 @@ test("a detail open over a vanished room stays open while the room under it move
   router.back();
   flushSync();
   expect(location.hash).toBe("#/ctx/all");
+});
+
+/**
+ * The census re-listing is not the room going: a sync run ends several times
+ * an hour, and every one of them makes the projects store re-list. Only a
+ * list the room is *missing from* is news -- which holds because the store
+ * assigns its rows whole rather than clearing and refilling, so there is no
+ * empty list in between for the detection to see.
+ */
+test("a sync run ending with the room still in the census is not announced", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  projectRows = [{ source_id: "mock", key: "PAY", name: "Payments Platform" }];
+  location.hash = "#/ctx/proj:mock:PAY";
+
+  app = mount(App, { target, props: {} });
+  await until(() => tabLabels().includes("Payments Platform"), "the shell never drew the project room");
+  const census = projectCalls;
+
+  syncEnded();
+  await until(() => projectCalls > census, "the run ending never made the store re-list");
+  await until(() => tabLabels().includes("Payments Platform"), "the re-list never landed");
+
+  expect(toasts.items).toEqual([]);
+  expect(location.hash).toBe("#/ctx/proj:mock:PAY");
+  expect(roomName()).toBe("Payments Platform");
 });
