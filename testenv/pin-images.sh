@@ -37,7 +37,7 @@ usage() {
   echo "  --out PATH   write PATH instead of testenv/.env"
 }
 
-out=.env
+out=
 move=
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -47,10 +47,13 @@ while [ $# -gt 0 ]; do
     *) echo "pin-images: unknown argument '$1'" >&2; usage >&2; exit 2 ;;
   esac
 done
-# A relative --out is relative to where the caller stands, not to testenv/.
-case "$out" in /*) ;; *) out="$PWD/$out" ;; esac
+# A relative --out is relative to where the caller stands, so it is resolved
+# before the cd; the default is testenv/.env itself, so that one is resolved
+# after it.
+case "$out" in ''|/*) ;; *) out="$PWD/$out" ;; esac
 
 cd "$(dirname "$0")"
+[ -n "$out" ] || out="$PWD/.env"
 
 command -v docker >/dev/null || { echo "pin-images: docker is required" >&2; exit 1; }
 docker buildx version >/dev/null 2>&1 || {
@@ -87,7 +90,8 @@ pin() {  # pin <VAR> <repo:tag>  -- unguarded: whatever the tag resolves to now
 # duplicated, or the digest malformed -- is a stop, because a guard this
 # script cannot read is a guard it would silently pin past.
 guarded_digest() {  # guarded_digest <seed script> <PRODUCT>  -> digest on stdout
-  _g=$(sed -n "s/^VERIFIED_$2_IMAGE=\(sha256:[0-9a-f]\{64\}\)$/\1/p" "$1" 2>/dev/null)
+  [ -f "$1" ] || { echo "pin-images: no seed script $1 beside this script" >&2; return 1; }
+  _g=$(sed -n "s/^VERIFIED_$2_IMAGE=\(sha256:[0-9a-f]\{64\}\)$/\1/p" "$1")
   # 7 for `sha256:` + 64 hex: one match exactly. Two matches would be 143 long.
   [ "${#_g}" -eq 71 ] || {
     echo "pin-images: cannot read VERIFIED_$2_IMAGE=sha256:<64 hex> from $1" >&2
@@ -104,16 +108,18 @@ moving() {  # moving <VAR>  -> true when --move VAR was given
 
 held=0
 guarded_vars=
-# pin_guarded <VAR> <repo:tag> <seed script> <PRODUCT> [note printed on --move]
+# pin_guarded <VAR> <repo:tag> <seed script> [note printed on --move]
 #
 # Writes the seed's guarded digest. If the tag has moved on, says so with both
 # digests -- to stderr, because stdout inside the block below IS the .env
 # file. With `--move VAR` the fresh digest is written instead and the owed
-# re-derivation is named.
+# re-derivation is named. The seed's variable is VERIFIED_<VAR minus _IMAGE>_IMAGE:
+# CONFLUENCE_IMAGE here is VERIFIED_CONFLUENCE_IMAGE there.
 pin_guarded() {
   guarded_vars="$guarded_vars $1"
+  product=${1%_IMAGE}
   fresh=$(resolve "$2") || exit 1
-  guarded=$(guarded_digest "$3" "$4") || exit 1
+  guarded=$(guarded_digest "$3" "$product") || exit 1
   if moving "$1"; then
     _rest=
     for _m in $move; do [ "$_m" = "$1" ] || _rest="$_rest $_m"; done
@@ -123,10 +129,10 @@ pin_guarded() {
     else
       echo "pin-images: MOVED $1 off the digest $3 guards on." >&2
       echo "  written:  $fresh" >&2
-      echo "  guarded:  $guarded  (VERIFIED_$4_IMAGE)" >&2
+      echo "  guarded:  $guarded  (VERIFIED_${product}_IMAGE)" >&2
       echo "  $3 will refuse the new container until its wizard walk is re-derived" >&2
-      echo "  against the new image and VERIFIED_$4_IMAGE is set to the written digest." >&2
-      [ -z "${5:-}" ] || echo "  $5" >&2
+      echo "  against the new image and VERIFIED_${product}_IMAGE is set to the written digest." >&2
+      [ -z "${4:-}" ] || echo "  $4" >&2
     fi
     line "$1" "$2" "$fresh"
   else
@@ -134,7 +140,7 @@ pin_guarded() {
       held=$((held + 1))
       echo "pin-images: HOLDING $1 at the digest $3 guards on." >&2
       echo "  $2 now resolves to: $fresh" >&2
-      echo "  $3 guards on:       $guarded  (VERIFIED_$4_IMAGE)" >&2
+      echo "  $3 guards on:       $guarded  (VERIFIED_${product}_IMAGE)" >&2
       echo "  Pinning the new digest would make the seed refuse its own container; its" >&2
       echo "  wizard walk has to be re-derived first. To take it anyway:" >&2
       echo "    ./pin-images.sh --move $1" >&2
@@ -186,7 +192,7 @@ trap 'rm -f "$tmp"' EXIT
   # Guarded: `seed-teamcity.sh` drives the server's first-start wizard, whose
   # endpoints were read off this digest. `latest` left it on 2026-09-02
   # (2026.1.3 -> 2026.2), so a plain run holds and reports (#268).
-  pin_guarded TEAMCITY_IMAGE jetbrains/teamcity-server:latest seed-teamcity.sh TEAMCITY \
+  pin_guarded TEAMCITY_IMAGE jetbrains/teamcity-server:latest seed-teamcity.sh \
     'TEAMCITY_AGENT_IMAGE below is pinned by version tag to stay on the server line; bump that tag too.'
   # The build agent beside it (#264), unguarded: it registers through the
   # supported `SERVER_URL` protocol, no wizard. But it must not be AHEAD of the
@@ -233,8 +239,8 @@ trap 'rm -f "$tmp"' EXIT
   # Guarded, both: `seed-atlassian.sh` walks each product's wizard. Even a
   # patch tag moves -- confluence:9.2.21 was retagged upstream between
   # 2026-08-31 and 2026-09-02 -- and the seed refuses the retag.
-  pin_guarded JIRA_IMAGE       atlassian/jira-software:10.3.24 seed-atlassian.sh JIRA
-  pin_guarded CONFLUENCE_IMAGE atlassian/confluence:9.2.21     seed-atlassian.sh CONFLUENCE
+  pin_guarded JIRA_IMAGE       atlassian/jira-software:10.3.24 seed-atlassian.sh
+  pin_guarded CONFLUENCE_IMAGE atlassian/confluence:9.2.21     seed-atlassian.sh
 } > "$tmp"
 
 # A --move that named no guarded pin is a typo, and a typo must not pass as a
@@ -249,5 +255,6 @@ mv "$tmp" "$out"
 echo "pin-images: wrote $out"
 # Drift is information, not an error: the file just written is the right one
 # for the seeds as they are, and an exit 1 here would fail every routine re-pin
-# from the day upstream retags until someone re-derives a wizard walk.
-[ "$held" -eq 0 ] || echo "pin-images: $held guarded pin(s) held at the seed's digest; see above for --move."
+# from the day upstream retags until someone re-derives a wizard walk. The
+# count goes where the detail went, so `2>/dev/null` hides both or neither.
+[ "$held" -eq 0 ] || echo "pin-images: $held guarded pin(s) held at the seed's digest; see above for --move." >&2
