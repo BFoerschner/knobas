@@ -234,12 +234,13 @@ async fn a_mirrored_build_carries_what_the_ui_and_the_index_read() {
         "the branch is what a build is looked up by: {:?}",
         it.body_text
     );
-    // P5: *Open in browser* renders from this alone.
+    // P5: *Open in browser* renders from this alone. The shape is the one a
+    // TeamCity 2026.1 serves (issue #266): `/buildConfiguration/<cfg>/<id>`.
     assert!(
         it.web_url
             .as_deref()
             .expect("the adapter can say where a human reads this")
-            .contains(&format!("buildId={}", failed.num)),
+            .ends_with(&format!("/buildConfiguration/{}/{}", failed.cfg, failed.num)),
         "{:?}",
         it.web_url
     );

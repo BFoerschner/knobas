@@ -29,9 +29,25 @@
 //! | buildType `description` | `None`: the dataset describes no configuration, and mockd does not invent prose any more than it invents a triggerer. `MockState::describe_build_type` is how a test that needs one gets one. |
 //! | `triggered` | the fixture's `triggered_by` resolved through `fixture().person`: `type: "user"` with that person's `username`/`name`, or `type: "vcs"` and no `user` where the fixture names nobody. |
 //! | `canceled` / `failedToStart` | `false`: the dataset has no vocabulary for either, and a mock that invented one would put a cancellation into every test that reads the fixture. [`MockState::cancel_build`](crate::state::MockState::cancel_build) and [`MockState::fail_build_to_start`](crate::state::MockState::fail_build_to_start) are how a test gets one. |
+//! | `defaultBranch` | [`is_default_branch`] of the fixture's `branch`: `main` is the default branch of every configuration (the VCS roots `testenv/seed-teamcity-builds.sh` creates say `refs/heads/main`), so 412 is a default-branch build and 1187/1188 on `feature/PAY-231-sepa-retry` are not. What TeamCity's default filter reads (issue #266). |
 
 use chrono::{DateTime, Duration, Utc};
 use knobas_source_mock::fixture;
+
+/// The default branch of every fixture configuration, as the seeded VCS roots
+/// spell it without the `refs/heads/` prefix.
+pub const DEFAULT_BRANCH: &str = "main";
+
+/// Is `name` the default branch, in any of the spellings a caller may use?
+///
+/// `main`, `refs/heads/main`, and TeamCity's own `<default>` -- the name a
+/// real server shows for a build queued with no branch at all -- are one
+/// branch. Everything else is a feature branch the default filter hides
+/// (issue #266).
+pub fn is_default_branch(name: &str) -> bool {
+    let name = name.strip_prefix("refs/heads/").unwrap_or(name);
+    name == DEFAULT_BRANCH || name == "<default>"
+}
 
 /// TeamCity timestamps are `20260822T114500+0000` — compact, no separators.
 pub const TC_DATE_FMT: &str = "%Y%m%dT%H%M%S%z";
@@ -129,6 +145,12 @@ pub struct TcBuild {
     /// `failedToStart: true`, and its default filter hides it exactly as it
     /// hides a canceled build.
     pub failed_to_start: bool,
+    /// Did this build run on its configuration's default branch? Served as
+    /// `defaultBranch`, and what the default filter's third facet reads: a
+    /// locator whose state set includes `finished` answers only default-branch
+    /// builds unless `branch:default:any` (or `defaultFilter:false`) is on it
+    /// -- measured on a TeamCity we own, 2026-09-02 (issue #266).
+    pub default_branch: bool,
 }
 
 /// The build configurations the fixture's builds refer to, ascending by id.
@@ -204,6 +226,7 @@ fn transcribe(b: &knobas_source_mock::Build) -> TcBuild {
         // into every test that reads the dataset.
         canceled: false,
         failed_to_start: false,
+        default_branch: is_default_branch(&b.branch),
     }
 }
 
@@ -240,6 +263,17 @@ fn percentage(step: Option<&str>) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_default_branch_is_main_in_every_spelling() {
+        assert!(is_default_branch("main"));
+        assert!(is_default_branch("refs/heads/main"));
+        assert!(is_default_branch("<default>"));
+        assert!(!is_default_branch("feature/PAY-231-sepa-retry"));
+        assert!(!is_default_branch("refs/heads/fix/PAY-228-partial-refund-drift"));
+        let flags: Vec<(u64, bool)> = builds().iter().map(|b| (b.id, b.default_branch)).collect();
+        assert_eq!(flags, [(412, true), (1187, false), (1188, false)]);
+    }
 
     #[test]
     fn durations_parse_or_refuse() {

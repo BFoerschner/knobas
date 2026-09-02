@@ -7,7 +7,7 @@
       "paused": false,
       "projectId": "Ledger",
       "projectName": "Ledger",
-      "webUrl": "http://mockd.test/viewType.html?buildTypeId=Ledger_Deploy_Staging"
+      "webUrl": "http://mockd.test/buildConfiguration/Ledger_Deploy_Staging?mode=builds"
     },
     {
       "href": "/app/rest/buildTypes/id:Payout_Build",
@@ -16,7 +16,7 @@
       "paused": false,
       "projectId": "Payout",
       "projectName": "Payout",
-      "webUrl": "http://mockd.test/viewType.html?buildTypeId=Payout_Build"
+      "webUrl": "http://mockd.test/buildConfiguration/Payout_Build?mode=builds"
     },
     {
       "href": "/app/rest/buildTypes/id:Payout_IntegrationTests",
@@ -25,7 +25,7 @@
       "paused": false,
       "projectId": "Payout",
       "projectName": "Payout",
-      "webUrl": "http://mockd.test/viewType.html?buildTypeId=Payout_IntegrationTests"
+      "webUrl": "http://mockd.test/buildConfiguration/Payout_IntegrationTests?mode=builds"
     }
   ],
   "count": 3,

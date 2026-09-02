@@ -522,6 +522,7 @@ impl MockState {
             triggered_by: None,
             canceled: false,
             failed_to_start: false,
+            default_branch: crate::tc_state::is_default_branch(branch),
         });
         id
     }

@@ -137,9 +137,11 @@ async fn the_build_ids_and_numbers_are_the_fixture_nums() {
     // The other half of the cross-stream identity contract: `build.id` is an
     // integer and `build.number` is the same value as a string.
     let s = spawn_mock_teamcity().await;
+    // `defaultFilter:false`: two of the three fixture builds ran on a feature
+    // branch, which the default filter narrows away (issue #266).
     let (_, v) = tc(
         &s.base_url(),
-        "/app/rest/builds?locator=state:any,count:100&fields=count,build(id,number,buildTypeId)",
+        "/app/rest/builds?locator=defaultFilter:false,count:100&fields=count,build(id,number,buildTypeId)",
     )
     .await;
     let got: Vec<(u64, &str, &str)> = v["build"]
@@ -167,7 +169,7 @@ async fn the_build_ids_and_numbers_are_the_fixture_nums() {
 }
 
 #[tokio::test]
-async fn the_default_locator_hides_the_running_build() {
+async fn the_default_locator_hides_the_running_build_and_the_feature_branch_ones() {
     let s = spawn_mock_teamcity().await;
     let (_, v) = tc(
         &s.base_url(),
@@ -176,9 +178,164 @@ async fn the_default_locator_hides_the_running_build() {
     .await;
     assert_eq!(
         ids(&v),
-        vec![1187, 412],
-        "1188 is running and must be filtered by default"
+        vec![412],
+        "1188 is running and 1187 ran on a feature branch; the default filter hides both"
     );
+    s.assert_no_violations();
+}
+
+/// **The branch facet of the default filter, as a real TeamCity applies it**
+/// (issue #266). Measured on the seeded 2026.1.3 server in `testenv` on
+/// 2026-09-02 rather than on JetBrains' public instance, because only a corpus
+/// we own can say which builds a locator *should* have answered:
+///
+/// * every locator whose state set includes `finished` -- `state:finished`,
+///   `state:any`, no `state:` at all -- answers only the default branch of a
+///   branched configuration, and `branch:default:any` re-opens the facet;
+/// * a locator restricted to `queued`/`running` answers every branch without
+///   being asked, so the adapter's in-flight poll carries no dimension;
+/// * `defaultFilter:false` opens this facet with the rest.
+///
+/// Both ends are asserted -- the dimension returns the build **and** the same
+/// locator without it does not -- which is what makes the dimension the
+/// difference rather than a no-op, the same shape `canceled:any` is pinned
+/// in. This is the fake's guard: mockd served 1187 to every locator until
+/// this landed, and that is how the adapter shipped without the dimension.
+#[tokio::test]
+async fn the_default_filter_narrows_to_the_default_branch_and_branch_default_any_reopens_it() {
+    let s = spawn_mock_teamcity().await;
+    let ask = async |locator: &str| -> Vec<u64> {
+        let (st, v) = tc(
+            &s.base_url(),
+            &format!("/app/rest/builds?locator={locator}&fields=count,build(id,branchName,defaultBranch)"),
+        )
+        .await;
+        assert_eq!(st, 200, "{locator}: {v}");
+        ids(&v)
+    };
+    // The finished-state locators, both item-producing shapes the adapter sends.
+    assert_eq!(ask("state:finished,count:100").await, vec![412]);
+    assert_eq!(
+        ask("state:finished,branch:default:any,count:100").await,
+        vec![1187, 412]
+    );
+    assert_eq!(
+        ask("buildType:(id:Payout_IntegrationTests),state:finished,canceled:any,failedToStart:any,count:100")
+            .await,
+        Vec::<u64>::new(),
+        "the adapter's per-configuration locator before #266: the fixture's failed build is \
+         on a feature branch and the default filter hides it"
+    );
+    assert_eq!(
+        ask("buildType:(id:Payout_IntegrationTests),state:finished,canceled:any,failedToStart:any,branch:default:any,count:100")
+            .await,
+        vec![1187]
+    );
+    assert_eq!(
+        ask("state:finished,sinceBuild:(id:412),canceled:any,failedToStart:any,count:100").await,
+        Vec::<u64>::new()
+    );
+    assert_eq!(
+        ask("state:finished,sinceBuild:(id:412),canceled:any,failedToStart:any,branch:default:any,count:100")
+            .await,
+        vec![1187]
+    );
+    // `state:any` takes the facet too: it includes `finished`.
+    assert_eq!(ask("state:any,count:100").await, vec![412]);
+    assert_eq!(
+        ask("state:any,branch:default:any,count:100").await,
+        vec![1188, 1187, 412]
+    );
+    // The in-flight shapes answer every branch unasked: 1188 runs on the
+    // feature branch and comes back without a dimension.
+    assert_eq!(ask("state:(queued:true,running:true),count:100").await, vec![1188]);
+    assert_eq!(ask("state:running,count:100").await, vec![1188]);
+    assert_eq!(
+        ask("state:(queued:true,running:true),branch:default:any,count:100").await,
+        vec![1188]
+    );
+    // `defaultFilter:false` opens everything, this facet included.
+    assert_eq!(ask("defaultFilter:false,count:100").await, vec![1188, 1187, 412]);
+    // The other spellings TeamCity accepts, and the narrowing ones.
+    assert_eq!(
+        ask("state:finished,branch:(default:any),count:100").await,
+        vec![1187, 412]
+    );
+    assert_eq!(ask("state:finished,branch:default:true,count:100").await, vec![412]);
+    assert_eq!(
+        ask("state:finished,branch:default:false,count:100").await,
+        vec![1187]
+    );
+    // And the record says which it is, as a real server does.
+    let (_, v) = tc(
+        &s.base_url(),
+        "/app/rest/builds?locator=defaultFilter:false,count:100&fields=count,build(id,defaultBranch)",
+    )
+    .await;
+    let flags: Vec<(u64, bool)> = v["build"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| (b["id"].as_u64().unwrap(), b["defaultBranch"].as_bool().unwrap()))
+        .collect();
+    assert_eq!(flags, [(1188, false), (1187, false), (412, true)]);
+    s.assert_no_violations();
+}
+
+/// A build **on the queue** has no number and no status yet -- TeamCity
+/// assigns the number when an agent takes the build, and a build that has not
+/// run has nothing to report -- so both keys are absent from the record,
+/// measured on the seeded server (issue #266). The adapter titles such a build
+/// by its id and renders the bare state, and a fake that served a number would
+/// let that path go untested.
+#[tokio::test]
+async fn a_queued_build_has_no_number_and_no_status() {
+    let s = spawn_mock_teamcity().await;
+    let id = s.state().queue_build("Payout_Build", "main");
+    let (_, b) = tc(
+        &s.base_url(),
+        &format!("/app/rest/builds/id:{id}?fields=$long"),
+    )
+    .await;
+    assert_eq!(b["state"], "queued");
+    assert!(b.get("number").is_none(), "{b}");
+    assert!(b.get("status").is_none(), "{b}");
+    assert_eq!(b["defaultBranch"], true, "queued without a branch: the default one");
+
+    s.state()
+        .finish_build(id, knobas_mockd::TcStatus::Success);
+    let (_, after) = tc(
+        &s.base_url(),
+        &format!("/app/rest/builds/id:{id}?fields=$long"),
+    )
+    .await;
+    assert!(after["number"].is_string(), "{after}");
+    assert_eq!(after["status"], "SUCCESS");
+    s.assert_no_violations();
+}
+
+/// The `webUrl` shapes a TeamCity 2026.1 serves, read off the seeded server
+/// (issue #266): a build's is `/buildConfiguration/<buildTypeId>/<id>` once it
+/// has run and `/build/<id>` while it is on the queue; a configuration's is
+/// `/buildConfiguration/<buildTypeId>?mode=builds`. mockd used to serve the
+/// `viewLog.html?buildId=` form of an older UI, which the real server no
+/// longer emits.
+#[tokio::test]
+async fn web_urls_take_the_build_configuration_shape() {
+    let s = spawn_mock_teamcity().await;
+    let base = s.base_url();
+    let (_, b) = tc(&base, "/app/rest/builds/id:1187?fields=webUrl,buildType(webUrl)").await;
+    assert_eq!(
+        b["webUrl"],
+        format!("{base}/buildConfiguration/Payout_IntegrationTests/1187")
+    );
+    assert_eq!(
+        b["buildType"]["webUrl"],
+        format!("{base}/buildConfiguration/Payout_IntegrationTests?mode=builds")
+    );
+    let id = s.state().queue_build("Payout_Build", "main");
+    let (_, q) = tc(&base, &format!("/app/rest/builds/id:{id}?fields=webUrl")).await;
+    assert_eq!(q["webUrl"], format!("{base}/build/{id}"));
     s.assert_no_violations();
 }
 
@@ -260,7 +417,7 @@ async fn the_build_type_locator_filters() {
         let (_, v) = tc(
             &s.base_url(),
             &format!(
-                "/app/rest/builds?locator={spelling},state:any,count:100&fields=count,build(id)"
+                "/app/rest/builds?locator={spelling},state:any,branch:default:any,count:100&fields=count,build(id)"
             ),
         )
         .await;
@@ -274,7 +431,7 @@ async fn count_and_start_page_the_result() {
     let s = spawn_mock_teamcity().await;
     let (_, v) = tc(
         &s.base_url(),
-        "/app/rest/builds?locator=state:any,count:2&fields=count,build(id)",
+        "/app/rest/builds?locator=defaultFilter:false,count:2&fields=count,build(id)",
     )
     .await;
     assert_eq!(
@@ -285,7 +442,7 @@ async fn count_and_start_page_the_result() {
     assert_eq!(v["count"], 2, "count is the size of this page");
     let (_, v) = tc(
         &s.base_url(),
-        "/app/rest/builds?locator=state:any,start:2,count:100&fields=count,build(id)",
+        "/app/rest/builds?locator=defaultFilter:false,start:2,count:100&fields=count,build(id)",
     )
     .await;
     assert_eq!(ids(&v), vec![412], "...and `start:` skips from that end");
@@ -295,8 +452,12 @@ async fn count_and_start_page_the_result() {
 #[tokio::test]
 async fn since_build_advances_only_past_finished_builds() {
     let s = spawn_mock_teamcity().await;
+    // `branch:default:any`, as the adapter's incremental query sends it: two
+    // of the fixture's builds are on a feature branch (issue #266).
     let q = |n: u64| {
-        format!("/app/rest/builds?locator=sinceBuild:(id:{n}),count:100&fields=count,build(id)")
+        format!(
+            "/app/rest/builds?locator=sinceBuild:(id:{n}),branch:default:any,count:100&fields=count,build(id)"
+        )
     };
     let (_, v) = tc(&s.base_url(), &q(0)).await;
     assert_eq!(ids(&v), vec![1187, 412]);
@@ -323,7 +484,7 @@ async fn a_build_queued_after_the_cursor_arrives_once_it_finishes() {
     let s = spawn_mock_teamcity().await;
     let q = |n: u64| {
         format!(
-            "/app/rest/builds?locator=sinceBuild:(id:{n}),count:100&fields=count,build(id,state)"
+            "/app/rest/builds?locator=sinceBuild:(id:{n}),branch:default:any,count:100&fields=count,build(id,state)"
         )
     };
 
@@ -375,7 +536,12 @@ async fn a_build_reads_by_its_path_locator() {
     assert_eq!(b["status"], "FAILURE");
     assert_eq!(b["state"], "finished");
     assert_eq!(b["branchName"], "feature/PAY-231-sepa-retry");
-    assert!(b["webUrl"].as_str().unwrap().contains("buildId=1187"));
+    assert!(
+        b["webUrl"]
+            .as_str()
+            .unwrap()
+            .ends_with("/buildConfiguration/Payout_IntegrationTests/1187")
+    );
     // Compact TeamCity timestamps, and `4 m 12 s` after the start.
     assert_eq!(b["startDate"], "20260822T101000+0000");
     assert_eq!(b["finishDate"], "20260822T101412+0000");
@@ -703,7 +869,7 @@ async fn a_build_names_the_person_the_fixture_says_triggered_it() {
     let s = spawn_mock_teamcity().await;
     let (st, v) = tc(
         &s.base_url(),
-        "/app/rest/builds?locator=state:any,count:100\
+        "/app/rest/builds?locator=defaultFilter:false,count:100\
          &fields=count,build(id,queuedDate,triggered(type,date,user(username,name)))",
     )
     .await;
@@ -814,7 +980,7 @@ async fn the_new_names_are_still_a_closed_set() {
     ] {
         let (st, v) = tc(
             &s.base_url(),
-            &format!("/app/rest/builds?locator=state:any,count:100&fields={bad}"),
+            &format!("/app/rest/builds?locator=defaultFilter:false,count:100&fields={bad}"),
         )
         .await;
         assert_eq!(st, 400, "fields={bad} must be refused: {v}");
@@ -833,7 +999,7 @@ async fn the_new_names_are_still_a_closed_set() {
     // could only be accepted.
     let (st, v) = tc(
         &s.base_url(),
-        "/app/rest/builds?locator=state:any,count:100\
+        "/app/rest/builds?locator=defaultFilter:false,count:100\
          &fields=count,build(id,triggered(user(nosuchfield)))",
     )
     .await;
@@ -921,6 +1087,9 @@ async fn builds_come_back_newest_first_so_count_1_is_the_newest_build() {
 /// is wrong.
 #[tokio::test]
 async fn the_default_filter_hides_a_canceled_build_from_a_query_that_names_a_state() {
+    // 1187 ran on a feature branch, so every locator below carries
+    // `branch:default:any` (issue #266): the canceled facet is then the only
+    // thing between the two pages, which is what this test is about.
     let s = spawn_mock_teamcity().await;
     s.state().cancel_build(1187);
 
@@ -932,7 +1101,7 @@ async fn the_default_filter_hides_a_canceled_build_from_a_query_that_names_a_sta
 
     let (_, v) = tc(
         &s.base_url(),
-        "/app/rest/builds?locator=state:finished,count:100&fields=count,build(id,status)",
+        "/app/rest/builds?locator=state:finished,branch:default:any,count:100&fields=count,build(id,status)",
     )
     .await;
     assert!(
@@ -940,7 +1109,7 @@ async fn the_default_filter_hides_a_canceled_build_from_a_query_that_names_a_sta
         "the default filter hides a canceled build even under `state:finished`: {v}"
     );
 
-    let v = page("state:finished,canceled:any,count:100").await;
+    let v = page("state:finished,branch:default:any,canceled:any,count:100").await;
     assert!(
         ids(&v).contains(&1187),
         "`canceled:any` is what puts it back: {v}"
@@ -970,6 +1139,8 @@ async fn the_default_filter_hides_a_canceled_build_from_a_query_that_names_a_sta
 /// adapter swap one for the other without a test noticing.
 #[tokio::test]
 async fn a_facet_dimension_re_opens_only_its_own_class() {
+    // `branch:default:any` on every locator, for the reason given on the
+    // test above; the branch facet has its own test.
     let s = spawn_mock_teamcity().await;
     s.state().cancel_build(1187);
     let stillborn = s.state().queue_build("Payout_Build", "main");
@@ -981,34 +1152,34 @@ async fn a_facet_dimension_re_opens_only_its_own_class() {
         async move { ids(&tc(&base, &path).await.1) }
     };
 
-    let plain = page("state:finished,count:100").await;
+    let plain = page("state:finished,branch:default:any,count:100").await;
     assert!(
         !plain.contains(&1187) && !plain.contains(&stillborn),
         "{plain:?}"
     );
 
-    let canceled_only = page("state:finished,canceled:any,count:100").await;
+    let canceled_only = page("state:finished,branch:default:any,canceled:any,count:100").await;
     assert!(canceled_only.contains(&1187), "{canceled_only:?}");
     assert!(
         !canceled_only.contains(&stillborn),
         "`canceled:any` must not open the failed-to-start facet: {canceled_only:?}"
     );
 
-    let failed_only = page("state:finished,failedToStart:any,count:100").await;
+    let failed_only = page("state:finished,branch:default:any,failedToStart:any,count:100").await;
     assert!(failed_only.contains(&stillborn), "{failed_only:?}");
     assert!(
         !failed_only.contains(&1187),
         "`failedToStart:any` must not open the canceled facet: {failed_only:?}"
     );
 
-    let both = page("state:finished,canceled:any,failedToStart:any,count:100").await;
+    let both = page("state:finished,branch:default:any,canceled:any,failedToStart:any,count:100").await;
     assert!(
         both.contains(&1187) && both.contains(&stillborn),
         "{both:?}"
     );
     // The whole filter off, which is what the adapter's opening probe sends
     // and what its item-producing queries deliberately do not.
-    let off = page("state:finished,defaultFilter:false,count:100").await;
+    let off = page("state:finished,branch:default:any,defaultFilter:false,count:100").await;
     assert!(off.contains(&1187) && off.contains(&stillborn), "{off:?}");
     s.assert_no_violations();
 }
@@ -1021,6 +1192,8 @@ async fn a_facet_dimension_re_opens_only_its_own_class() {
 /// every build, and the adapter would look correct.
 #[tokio::test]
 async fn a_facet_dimension_reads_any_true_and_false_apart() {
+    // `branch:default:any` on every locator, for the reason given two tests
+    // above.
     let s = spawn_mock_teamcity().await;
     s.state().cancel_build(1187);
 
@@ -1030,17 +1203,17 @@ async fn a_facet_dimension_reads_any_true_and_false_apart() {
         async move { ids(&tc(&base, &path).await.1) }
     };
     assert_eq!(
-        page("state:finished,canceled:true,count:100").await,
+        page("state:finished,branch:default:any,canceled:true,count:100").await,
         vec![1187],
         "`true` narrows to the class"
     );
-    let any = page("state:finished,canceled:any,count:100").await;
+    let any = page("state:finished,branch:default:any,canceled:any,count:100").await;
     assert!(
         any.len() > 1 && any.contains(&1187),
         "`any` does not narrow at all: {any:?}"
     );
     assert!(
-        !page("state:finished,canceled:false,count:100")
+        !page("state:finished,branch:default:any,canceled:false,count:100")
             .await
             .contains(&1187),
         "`false` excludes it, which is what the default already does"

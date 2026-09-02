@@ -18,14 +18,16 @@
 //! query covers every configuration -- then narrows to the scope client-side.
 //!
 //! Those two are the run's **item-producing** queries, and both carry
-//! `canceled:any,failedToStart:any` (issue #105). TeamCity's default filter
-//! hides canceled, failed-to-start and personal builds even when `state:` is
-//! set, and a build that never enters the mirror can never be corrected
-//! later: the mirror shows in-flight builds, has no deletion channel, and
-//! `sinceBuild` is exclusive, so a build shown as running and then canceled
-//! would say `running` for ever. The two named dimensions re-open exactly
-//! their own facets; personal builds stay out, which `defaultFilter:false`
-//! would not have allowed. See [`since`].
+//! `canceled:any,failedToStart:any` (issue #105) and `branch:default:any`
+//! (issue #266). TeamCity's default filter hides canceled, failed-to-start
+//! and personal builds, and narrows a branched configuration to its default
+//! branch, even when `state:` is set -- and a build that never enters the
+//! mirror can never be corrected later: the mirror shows in-flight builds,
+//! has no deletion channel, and `sinceBuild` is exclusive, so a build shown
+//! as running and then canceled would say `running` for ever, and a
+//! feature-branch build was never shown at all. The three named dimensions
+//! re-open exactly their own facets; personal builds stay out, which
+//! `defaultFilter:false` would not have allowed. See [`since`].
 //!
 //! Neither query is allowed to come back truncated. Both widen `count:` until
 //! the server itself says there is no page after the one it served, and
@@ -174,6 +176,13 @@ pub(crate) async fn execute(
                         // `builds_per_config` is the lever.
                         canceled_any: true,
                         failed_to_start_any: true,
+                        // And the branch facet, the third one the same
+                        // filter closes -- the fixture's failed build on
+                        // `feature/PAY-231-sepa-retry` came back from
+                        // neither item-producing query on a real server
+                        // until this was measured (issue #266). See
+                        // [`since`].
+                        branch_any: true,
                         count: cfg.builds_per_config,
                         ..Locator::default()
                     })
@@ -639,7 +648,25 @@ async fn refuse_a_replaced_server(
 }
 
 /// Every finished build newer than `since_build_id` -- **canceled and
-/// failed-to-start ones included** (issue #105).
+/// failed-to-start ones included** (issue #105), **on every branch** (issue
+/// #266).
+///
+/// # The branch facet, measured on a server we own
+///
+/// TeamCity's default filter has a third facet the public-instance suite
+/// could not see: in a branched configuration it answers only the **default
+/// branch**, and it does so on every locator whose state set includes
+/// `finished`. Measured on the seeded TeamCity 2026.1.3 in `testenv` on
+/// 2026-09-02: this query and the per-configuration one in [`execute`] step
+/// 4 both answered `count: 0` over a server holding the fixture's failed
+/// build 1187 on `feature/PAY-231-sepa-retry`, and `branch:default:any`
+/// answered it. The vendored swagger says the same in prose. So until #266
+/// no feature-branch build ever entered the mirror, for the same permanent
+/// reason as the canceled ones below -- and the fixture's own story, a
+/// failed integration-test run on a feature branch, could not be told from
+/// a real TeamCity at all. The in-flight poll is **not** widened: a locator
+/// restricted to `queued`/`running` was measured to answer every branch
+/// unasked, so [`in_flight`] carries none of the three dimensions, as before.
 ///
 /// # Why the two dimensions are here and not left to the server's default
 ///
@@ -690,6 +717,7 @@ async fn since(rest: &dyn Rest, since_build_id: i64) -> Result<Vec<Rec<Build>>, 
             since_build_id: Some(since_build_id),
             canceled_any: true,
             failed_to_start_any: true,
+            branch_any: true,
             ..Locator::default()
         },
         || {
@@ -1030,6 +1058,25 @@ mod tests {
                         && (locator.failed_to_start_any || !flagged(&r.raw, "failedToStart"))
                         && !flagged(&r.raw, "personal")
                 })
+                // ...and the **branch** facet, the third one, measured on a
+                // TeamCity we own rather than on JetBrains' (issue #266).
+                // The default filter narrows a branched configuration to its
+                // default branch, and it does so on every locator whose
+                // state set includes `finished` -- `state:finished`,
+                // `state:any`, no `state:` at all -- while a locator
+                // restricted to `queued`/`running` answers every branch
+                // without being asked. `branch:default:any` re-opens the
+                // facet on its own, and `defaultFilter:false` (returned
+                // above) opens it with the rest. A record that says nothing
+                // about its branch is an unbranched configuration's, which
+                // the facet does not touch.
+                .filter(|r| {
+                    locator.branch_any
+                        || locator.default_filter == Some(false)
+                        || locator.state == Some(StateFilter::InFlight)
+                        || r.raw.get("defaultBranch").and_then(serde_json::Value::as_bool)
+                            != Some(false)
+                })
                 .filter(|r| {
                     locator
                         .build_type_id
@@ -1134,6 +1181,18 @@ mod tests {
         b
     }
 
+    /// A build on a branch that is not its configuration's default. The
+    /// class the default filter hides on every finished-state locator, and
+    /// the one the fixture's own failed build belongs to: 1187 ran on
+    /// `feature/PAY-231-sepa-retry`. `branch:default:any` is what puts it
+    /// back on the two item-producing queries (issue #266).
+    fn feature_branch_build(id: i64, type_id: &str, project: &str, state: &str) -> serde_json::Value {
+        let mut b = build(id, type_id, project, state);
+        b["branchName"] = serde_json::json!("feature/PAY-231-sepa-retry");
+        b["defaultBranch"] = serde_json::json!(false);
+        b
+    }
+
     /// Somebody else's experiment. The third class the default filter hides,
     /// and the one this adapter deliberately leaves hidden: only
     /// `defaultFilter:false` -- which no item-producing query sends -- would
@@ -1218,30 +1277,33 @@ mod tests {
                 "buildTypes",
                 concat!(
                     "buildType:(id:Ledger_Deploy_Staging),state:finished,",
-                    "canceled:any,failedToStart:any,count:100"
+                    "canceled:any,failedToStart:any,branch:default:any,count:100"
                 ),
                 concat!(
                     "buildType:(id:Payout_Build),state:finished,",
-                    "canceled:any,failedToStart:any,count:100"
+                    "canceled:any,failedToStart:any,branch:default:any,count:100"
                 ),
                 concat!(
                     "buildType:(id:Payout_IntegrationTests),state:finished,",
-                    "canceled:any,failedToStart:any,count:100"
+                    "canceled:any,failedToStart:any,branch:default:any,count:100"
                 ),
             ]
         );
-        // The **in-flight poll carries neither dimension**, and that is the
-        // half of the decision that keeps personal builds out: `state:` names
-        // queued and running, and the rest of TeamCity's default filter -- the
-        // personal facet included -- still applies to it. A run that widened
-        // this query too would start mirroring other people's experiments the
-        // moment one was running.
+        // The **in-flight poll carries none of the dimensions**, and that is
+        // the half of the decision that keeps personal builds out: `state:`
+        // names queued and running, and the rest of TeamCity's default filter
+        // -- the personal facet included -- still applies to it. A run that
+        // widened this query too would start mirroring other people's
+        // experiments the moment one was running. The branch facet is the
+        // measured exception: a queued/running-only locator already answers
+        // every branch (issue #266), so there is nothing for `branch:` to
+        // re-open there.
         let poll = rest
             .calls()
             .into_iter()
             .find(|c| c.contains("queued:true"))
             .expect("the in-flight poll");
-        for dimension in ["canceled:", "failedToStart:", "defaultFilter:"] {
+        for dimension in ["canceled:", "failedToStart:", "branch:", "defaultFilter:"] {
             assert!(
                 !poll.contains(dimension),
                 "the in-flight poll must not carry {dimension}: {poll}"
@@ -1271,7 +1333,7 @@ mod tests {
             [
                 "defaultFilter:false,count:100",
                 "state:(queued:true,running:true),count:100",
-                "state:finished,sinceBuild:(id:412),canceled:any,failedToStart:any,count:100",
+                "state:finished,sinceBuild:(id:412),canceled:any,failedToStart:any,branch:default:any,count:100",
             ]
         );
     }
@@ -1556,11 +1618,11 @@ mod tests {
         assert_eq!(
             widened,
             [
-                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:100",
-                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:200",
-                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:400",
-                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:800",
-                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:1001",
+                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,branch:default:any,count:100",
+                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,branch:default:any,count:200",
+                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,branch:default:any,count:400",
+                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,branch:default:any,count:800",
+                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,branch:default:any,count:1001",
             ]
         );
     }
@@ -1687,11 +1749,11 @@ mod tests {
         assert_eq!(
             widened,
             [
-                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:100",
-                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:200",
-                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:400",
-                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:800",
-                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:1001",
+                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,branch:default:any,count:100",
+                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,branch:default:any,count:200",
+                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,branch:default:any,count:400",
+                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,branch:default:any,count:800",
+                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,branch:default:any,count:1001",
             ],
             "it widened rather than accepting the first short page"
         );
@@ -1706,7 +1768,7 @@ mod tests {
         );
         assert_eq!(
             widened,
-            ["state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:100"],
+            ["state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,branch:default:any,count:100"],
             "one request: the server answered short and said there was nothing after it"
         );
     }
@@ -1743,7 +1805,7 @@ mod tests {
         assert_eq!(items.iter().filter(|i| i.kind == "build").count(), 49);
         assert_eq!(
             widened,
-            ["state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,count:100"]
+            ["state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,branch:default:any,count:100"]
         );
     }
 
@@ -2685,6 +2747,111 @@ mod tests {
                 .any(|i| i.body_text.contains("finished canceled")),
             "{items:?}"
         );
+    }
+
+    /// **The fixture's own failed build was never mirrored on a real server**
+    /// (issue #266): 1187 ran on `feature/PAY-231-sepa-retry`, and the
+    /// per-configuration query took TeamCity's default filter, which narrows
+    /// a branched configuration to its default branch. Measured on the seeded
+    /// TeamCity 2026.1.3 in `testenv` on 2026-09-02, the adapter's own locator
+    /// answered `count: 0` for that configuration, and `branch:default:any`
+    /// answered the build. Every fake here served it regardless, which is how
+    /// the gap survived every docker-free suite.
+    ///
+    /// The other direction is pinned too: the fake hides the build from the
+    /// locator without the dimension, so this test is red against an adapter
+    /// that does not send it -- and the wire string is asserted, because a
+    /// fake that opened the facet for free would let the dimension disappear
+    /// again in silence.
+    #[tokio::test]
+    async fn a_full_sync_mirrors_a_feature_branch_build_in_a_configuration() {
+        let rest = FakeRest::new(
+            vec![build_type("Payout_IntegrationTests", "Payout")],
+            vec![
+                build(400, "Payout_IntegrationTests", "Payout", "finished"),
+                feature_branch_build(1187, "Payout_IntegrationTests", "Payout", "finished"),
+            ],
+        );
+        let (items, cursor) = run(&rest, &TeamCityConfig::default(), None).await;
+        assert_eq!(
+            keys(&items),
+            ["buildType:Payout_IntegrationTests", "build:400", "build:1187"],
+            "a finished build on a feature branch is mirrored like one on the default branch"
+        );
+        assert_eq!(cursor, r#"{"v":1,"since_build_id":1187}"#);
+        assert!(
+            rest.calls().iter().any(|c| c.starts_with("buildType:(id:Payout_IntegrationTests)")
+                && c.contains("branch:default:any")),
+            "the per-configuration query carries branch:default:any: {:?}",
+            rest.calls()
+        );
+    }
+
+    /// The same facet on the **incremental** query, which is the one that
+    /// would have lost the build for good: `sinceBuild` is exclusive, so a
+    /// feature-branch build that finished while the watermark moved over it
+    /// was missing permanently rather than late.
+    #[tokio::test]
+    async fn an_incremental_run_mirrors_a_feature_branch_build_that_finished() {
+        let cfg = TeamCityConfig::default();
+        let before = FakeRest::new(
+            vec![build_type("Payout_IntegrationTests", "Payout")],
+            vec![build(400, "Payout_IntegrationTests", "Payout", "finished")],
+        );
+        let (_, cursor) = run(&before, &cfg, None).await;
+        assert_eq!(cursor, r#"{"v":1,"since_build_id":400}"#);
+
+        let after = FakeRest::new(
+            vec![build_type("Payout_IntegrationTests", "Payout")],
+            vec![
+                build(400, "Payout_IntegrationTests", "Payout", "finished"),
+                feature_branch_build(401, "Payout_IntegrationTests", "Payout", "finished"),
+            ],
+        );
+        let (items, moved) = run(&after, &cfg, Some(cursor)).await;
+        assert_eq!(
+            keys(&items),
+            ["buildType:Payout_IntegrationTests", "build:401"],
+            "the feature-branch build that finished since the last run"
+        );
+        assert_eq!(moved, r#"{"v":1,"since_build_id":401}"#);
+        assert!(
+            after
+                .calls()
+                .iter()
+                .any(|c| c.contains("sinceBuild:(id:400)") && c.contains("branch:default:any")),
+            "the incremental query carries branch:default:any: {:?}",
+            after.calls()
+        );
+    }
+
+    /// The in-flight poll needs no branch dimension, and sends none: measured
+    /// on the seeded server, `state:(queued:true,running:true)` answered a
+    /// queued and then a running build on a non-default branch without being
+    /// asked. The fake reproduces that, so this pins both halves -- the
+    /// running feature-branch build is mirrored and clamps the watermark, and
+    /// the poll's wire string is unchanged.
+    #[tokio::test]
+    async fn a_running_feature_branch_build_is_seen_by_the_in_flight_poll_unasked() {
+        let rest = FakeRest::new(
+            vec![build_type("Payout_Build", "Payout")],
+            vec![
+                build(400, "Payout_Build", "Payout", "finished"),
+                feature_branch_build(1188, "Payout_Build", "Payout", "running"),
+            ],
+        );
+        let (items, cursor) = run(&rest, &TeamCityConfig::default(), None).await;
+        assert_eq!(keys(&items), ["buildType:Payout_Build", "build:400", "build:1188"]);
+        assert_eq!(
+            cursor, r#"{"v":1,"since_build_id":400}"#,
+            "the running build holds the watermark below itself"
+        );
+        let poll = rest
+            .calls()
+            .into_iter()
+            .find(|c| c.contains("queued:true"))
+            .expect("the in-flight poll");
+        assert!(!poll.contains("branch:"), "{poll}");
     }
 
     /// **Personal builds stay out**, and this is what says the widening was
