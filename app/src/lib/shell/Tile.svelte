@@ -171,18 +171,22 @@
   const layout = $derived(effectiveMiniBoardLayout(miniBoardLayout, miniBoardOverride, columns));
 
   /**
-   * The header's layout control (#245): the two layouts, in the order the
-   * stylesheet declares them, with the effective one pressed.
+   * The header's layout control (#245): the two layouts, columns first as
+   * the one the tile was designed for, with the effective one pressed.
    *
    * Columns past the backstop is **refused rather than removed**: the option
    * stays in the tab order, carries its reason, and pressing it does nothing,
    * so a reader who cannot see why the board is stacked can still find out.
    * A `disabled` button would leave the tab order and the reason with it.
+   * One question, `refusalFor`, decides both the badge and the guard.
    */
   const LAYOUTS: readonly MiniBoardLayout[] = ["columns", "stacked"];
   const refusal = $derived(columnsRefusal(columns));
+  function refusalFor(option: MiniBoardLayout): string | null {
+    return option === "columns" ? refusal : null;
+  }
   function choose(option: MiniBoardLayout) {
-    if (option === "columns" && refusal !== null) return;
+    if (refusalFor(option) !== null) return;
     onlayout(option);
   }
 
@@ -229,14 +233,16 @@
     <span class="cnt">{count ?? ""}</span>
     <span class="acts">
       <!--
-        Only the tile that draws a mini board has a layout to choose. The slot
-        stays a flex row rather than becoming the control: #250's maximise
-        button lands beside it.
+        Only the tile that draws a mini board has a layout to choose, and it
+        has one whether or not the read has landed: before it there is no
+        count and so nothing to refuse, and a choice made while reading is
+        kept the same way any other is. The slot stays a flex row rather than
+        becoming the control: #250's maximise button lands beside it.
       -->
-      {#if isMiniBoard && board}
+      {#if isMiniBoard}
         <span class="seg" role="group" aria-label="Mini board layout">
           {#each LAYOUTS as option (option)}
-            {@const refused = option === "columns" ? refusal : null}
+            {@const refused = refusalFor(option)}
             <button
               class="seg-b"
               class:on={layout === option}

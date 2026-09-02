@@ -158,6 +158,9 @@ a{color:var(--link);text-decoration:none}
 .seg-b:hover{color:var(--text);background:var(--raised)}
 .seg-b.on{color:var(--text);background:var(--raised)}
 .seg-b[aria-disabled="true"]{opacity:.4;cursor:default}
+/* The control clips its corners, so the global ring at +1px would be cut off;
+   drawn inside the button instead, refused option included. */
+.seg-b:focus-visible{outline-offset:-2px}
 .seg-b[aria-disabled="true"]:hover{color:var(--faint);background:transparent}
 .tile-b{overflow:auto;flex:1;min-height:0}
 .empty{padding:14px 12px;color:var(--muted);font-size:12px;line-height:1.5}

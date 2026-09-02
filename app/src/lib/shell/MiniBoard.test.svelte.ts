@@ -638,3 +638,33 @@ test("a kept override returns to columns when the board fits six again", async (
 
   screen.done();
 });
+
+/**
+ * The control is the Tickets tile's, not the board's: it is there while the
+ * read is still in flight and after one that failed, showing the room's
+ * default, so every room with a Tickets tile shows it (#245).
+ */
+test("the control is in the header before the read lands and after one that failed", async () => {
+  const pending = deferred<MiniBoard>();
+  answer = () => pending.promise;
+  const reading = render([], null, null, "stacked");
+  await vi.waitFor(() => expect(calls).toHaveLength(1));
+  expect(reading.text()).toContain("Reading…");
+  expect(reading.control().map((option) => [option.label, option.on, option.refused])).toEqual([
+    ["columns", false, false],
+    ["stacked", true, false],
+  ]);
+  pending.resolve({ columns: [], sources: [] });
+  await vi.waitFor(() => expect(reading.text()).toContain("No ticket in this room yet."));
+  reading.done();
+
+  answer = () => Promise.reject({ code: "internal", message: "the mirror is unreadable" });
+  const failed = render([], null, null, "columns");
+  await vi.waitFor(() => expect(failed.text()).toContain("the mirror is unreadable"));
+  flushSync();
+  expect(failed.control().map((option) => [option.label, option.on])).toEqual([
+    ["columns", true],
+    ["stacked", false],
+  ]);
+  failed.done();
+});

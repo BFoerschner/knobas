@@ -80,11 +80,10 @@ const MAX_COLUMNS = 6;
  * of its current cards, so the layout would flip back and forth under the
  * reader as tickets moved through the day.
  */
-export function miniBoardLayoutFor(preferred: MiniBoardLayout, columns: number): MiniBoardLayout {
+function miniBoardLayoutFor(preferred: MiniBoardLayout, columns: number): MiniBoardLayout {
   return preferred === "columns" && !holdsColumns(columns) ? "stacked" : preferred;
 }
 
-/** Whether a board of `columns` groups fits the column layout at all. */
 function holdsColumns(columns: number): boolean {
   return columns <= MAX_COLUMNS;
 }
