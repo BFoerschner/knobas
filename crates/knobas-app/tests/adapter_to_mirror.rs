@@ -45,15 +45,16 @@
 //! two green halves stays open. The cost is one PostgreSQL and one mockd for
 //! this binary, paid once and shared by every test in it.
 //!
-//! **One adapter: Jira.** It is the adapter whose acceptance criterion exposed
-//! the gap. TeamCity is a follow-up, and a second adapter here should be one
+//! **Jira first, TeamCity as one more test.** Jira is the adapter whose
+//! acceptance criterion exposed the gap. TeamCity joined with #232, for the
+//! join that ticket's guard depends on (the last test in this file), as one
 //! more test rather than a framework. Gitea is deliberately *not* here: mockd
 //! serves no Gitea by standing decision, and Gitea's equivalent join belongs
 //! to the docker-gated container layer.
 
 use async_trait::async_trait;
 use knobas_app::sources::Registry;
-use knobas_mockd::spawn_mock_jira;
+use knobas_mockd::{spawn_mock_jira, spawn_mock_teamcity};
 use knobas_source::contract::VecSink;
 use knobas_source::instance::SourceInstance;
 use knobas_source::{
@@ -177,13 +178,16 @@ fn unique_id() -> String {
 }
 
 /// The row the sources view would have written, so the engine has somewhere to
-/// store the position a run comes back with.
-async fn configure(pool: &PgPool, id: &str, base_url: &str) {
+/// store the position a run comes back with. `kind` is the registry's word
+/// for the adapter (`jira`, `teamcity`).
+async fn configure(pool: &PgPool, id: &str, kind: &str, base_url: &str) {
     sqlx::query(
         "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
-         values ($1, 'jira', 'Tidewater Jira', $2, 'pat')",
+         values ($1, $2, $3, $4, 'pat')",
     )
     .bind(id)
+    .bind(kind)
+    .bind(format!("Tidewater {kind}"))
     .bind(base_url)
     .execute(pool)
     .await
@@ -217,6 +221,25 @@ fn configured(id: &str, base_url: &str, config: Value) -> Box<dyn Source> {
         Ok(source) => source,
         // `Box<dyn Source>` is not `Debug`, so `expect` is unavailable.
         Err(e) => panic!("the registry must build a jira instance: {e:?}"),
+    }
+}
+
+/// The **real** TeamCity adapter, the same way: through the registry, with
+/// the default instance `config` -- every project and every configuration
+/// mockd serves.
+fn teamcity_adapter(id: &str, base_url: &str) -> Box<dyn Source> {
+    let instance = SourceInstance {
+        id: id.to_owned(),
+        kind: "teamcity".to_owned(),
+        display_name: "Tidewater CI".to_owned(),
+        base_url: base_url.to_owned(),
+        auth: Some(AuthMethod::Pat),
+        secret: Some(knobas_mockd::TEAMCITY_TOKEN.to_owned()),
+        config: serde_json::json!({}),
+    };
+    match Registry::builtin().build(instance) {
+        Ok(source) => source,
+        Err(e) => panic!("the registry must build a teamcity instance: {e:?}"),
     }
 }
 
@@ -275,7 +298,7 @@ async fn a_backfill_widens_the_stored_payload_of_an_issue_nobody_touched() {
     let jira = spawn_mock_jira().await;
     let pool = pool().await;
     let id = unique_id();
-    configure(&pool, &id, &jira.base_url()).await;
+    configure(&pool, &id, "jira", &jira.base_url()).await;
     let real = adapter(&id, &jira.base_url());
     let mut conn = dedicated().await;
 
@@ -432,7 +455,7 @@ async fn a_classic_projects_epic_link_reaches_the_stored_payload() {
     // configures one: the instance's Epic Link field id, through
     // `source_config.config`.
     let classic = unique_id();
-    configure(&pool, &classic, &jira.base_url()).await;
+    configure(&pool, &classic, "jira", &jira.base_url()).await;
     let run = knobas_sync::run_from_stored_cursor(
         &mut conn,
         &pool,
@@ -470,7 +493,7 @@ async fn a_classic_projects_epic_link_reaches_the_stored_payload() {
     // projection would satisfy the test while the option did nothing -- which
     // is the failure mode #125 is a repeat of.
     let default = unique_id();
-    configure(&pool, &default, &jira.base_url()).await;
+    configure(&pool, &default, "jira", &jira.base_url()).await;
     knobas_sync::run_from_stored_cursor(
         &mut conn,
         &pool,
@@ -489,4 +512,100 @@ async fn a_classic_projects_epic_link_reaches_the_stored_payload() {
     // `fields=` is not a 400 and not an `UnknownField` violation, which is the
     // half that could not even be attempted before.
     jira.assert_no_violations();
+}
+
+/// **The wire between the adapter's kind name and the census's guard (#232).**
+///
+/// `knobas_core::project_key_read!`'s third arm reads a TeamCity build
+/// configuration's top-level `projectId` only where `i.kind = 'build_config'`
+/// -- a literal in `knobas-core`, which cannot import the adapter's
+/// `KIND_BUILD_CONFIG`. `knobas-core/tests/projects.rs` pins that arm with
+/// hand-written rows that spell the kind the same way, so those tests and the
+/// macro agree by construction; the adapter's own tests pin the kind on a
+/// parsed `SyncItem` and reach no database. Between them the literal and the
+/// constant could drift apart with every test green. So this is the join: the
+/// real adapter, over mockd, through the engine, into the mirror, and then the
+/// census -- with every *build* tombstoned first, so the configuration rows
+/// are the only ones left to spell the project. Rename the kind on either
+/// side, or move where the adapter stores the project, and the census below
+/// loses the source.
+///
+/// The reference is the census *before* the tombstoning, which the builds'
+/// `buildType.projectId` arm carries; the two arms spell one fact, and
+/// `a_build_and_its_configuration_are_one_project` says so on hand-written
+/// rows. Nothing here rederives how mockd names a project from a fixture
+/// configuration id.
+#[tokio::test]
+async fn a_teamcity_project_survives_its_builds_through_its_configurations() {
+    let teamcity = spawn_mock_teamcity().await;
+    let pool = pool().await;
+    let id = unique_id();
+    configure(&pool, &id, "teamcity", &teamcity.base_url()).await;
+    let real = teamcity_adapter(&id, &teamcity.base_url());
+    let mut conn = dedicated().await;
+
+    let run = knobas_sync::run_from_stored_cursor(&mut conn, &pool, real.as_ref())
+        .await
+        .unwrap();
+    assert!(run.upserted > 0, "the fixture reached the mirror");
+
+    // The kinds the adapter emits, from the adapter rather than from this
+    // test's memory of it: the tombstoning below names one of them, and a
+    // renamed kind must fail here by name instead of leaving the builds live
+    // and the assertion at the end vacuous.
+    let mut parsed = VecSink(Vec::new());
+    real.sync(None, &mut parsed).await.unwrap();
+    let kinds: std::collections::BTreeSet<&str> =
+        parsed.0.iter().map(|item| item.kind.as_str()).collect();
+    assert_eq!(
+        kinds,
+        std::collections::BTreeSet::from(["build", "build_config"]),
+        "the adapter's two kinds -- a rename must reach the census's guard too"
+    );
+
+    let census = || async {
+        knobas_core::project::list(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|project| project.source_id == id)
+            .map(|project| project.key)
+            .collect::<std::collections::BTreeSet<String>>()
+    };
+    let through_builds = census().await;
+    assert!(
+        !through_builds.is_empty(),
+        "the fixture's builds name their projects, so the census has something to lose"
+    );
+
+    // Every build of this source is tombstoned; the configurations stay, and
+    // now they are the only live rows that spell a project for it.
+    sqlx::query(
+        "update knobas.entity e set deleted_at = now()
+           from sync.item i
+          where i.entity_id = e.id and i.source_id = $1 and i.kind = 'build'",
+    )
+    .bind(&id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let live: Vec<String> =
+        sqlx::query_scalar("select distinct kind from sync.live_item where source_id = $1")
+            .bind(&id)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        live,
+        vec!["build_config"],
+        "only the configurations are left to vouch for a project"
+    );
+
+    assert_eq!(
+        census().await,
+        through_builds,
+        "a project whose builds are gone is still reported, through its configurations: the \
+         kind the adapter stores is the kind the census's third arm reads"
+    );
+    teamcity.assert_no_violations();
 }

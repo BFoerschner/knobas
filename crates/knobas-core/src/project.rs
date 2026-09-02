@@ -30,7 +30,11 @@
 //! `a_whitespace_only_project_key_contributes_nothing`,
 //! `a_record_with_no_project_at_all_contributes_nothing` and
 //! `a_project_with_no_readable_name_is_reported_by_its_key` in
-//! `knobas-core/tests/projects.rs`.
+//! `knobas-core/tests/projects.rs`; and again for the build configuration's
+//! own spelling (#232) by
+//! `a_build_configuration_with_no_readable_project_contributes_nothing`,
+//! `a_build_configuration_with_no_readable_name_is_reported_by_its_key` and
+//! `a_top_level_project_id_on_any_other_kind_contributes_nothing` beside them.
 //!
 //! # Why a census rather than a room's own scan
 //!
@@ -51,23 +55,34 @@ use crate::CoreError;
 /// the mirror comes from today, and present since M1 because the sync has
 /// asked for `project` in its base field list from the start -- then
 /// TeamCity's `buildType.projectId`, which is what a build's record names its
-/// project on. Both are read at a *type-checked* path (see
+/// project on, then the top-level `projectId` a TeamCity *build
+/// configuration*'s record carries, because that record is the `buildType`
+/// object itself. All three are read at a *type-checked* path (see
 /// [`string_at!`](crate::string_at)): a path landing on an object or an array
 /// misses rather than being stringified into a room headed `{"id":3}`.
 ///
 /// Exported, because narrowing by a project happens in the statements that
 /// draw a room -- [`crate::mini_board`]'s here and
 /// `knobas_app::commands::entity`'s across the bridge -- and a second copy of
-/// these two arms is how one of them starts disagreeing with the census about
+/// these arms is how one of them starts disagreeing with the census about
 /// what a project is.
 ///
-/// **Not every spelling a source writes is here yet, and that is a bounded
-/// absence rather than an oversight.** A TeamCity *build configuration*'s
-/// record is the `buildType` object itself, so it spells the same fact at the
-/// top level (`projectId`, `projectName`) and contributes no project today; a
-/// build does, so the project is still reported. Adding it is one more arm in
-/// this macro and nothing else, which is the property ADR-0007 requirement 2
-/// exists to preserve.
+/// **The third arm is kind-scoped** (#232, ruled at triage 2026-09-02, over
+/// a plain unscoped arm): it reads the top-level word only where
+/// `i.kind = 'build_config'`, the kind name `knobas_source_teamcity` declares
+/// for a configuration (`KIND_BUILD_CONFIG`). A top-level `projectId` is a
+/// less distinctive path than the two container-scoped ones, and the guard
+/// is what keeps a future adapter's incidental top-level `projectId` from
+/// silently opening a room -- the risk #208 named when it deferred this
+/// spelling. The guard costs its callers nothing: every statement expanding
+/// this macro selects from a `sync.item` or `sync.live_item` alias `i`, and
+/// both carry `kind`. Pinned by
+/// `a_top_level_project_id_on_any_other_kind_contributes_nothing`, which
+/// fails the moment the guard goes; and the literal here is held to the
+/// adapter's constant by
+/// `a_teamcity_project_survives_its_builds_through_its_configurations` in
+/// `knobas-app/tests/adapter_to_mirror.rs`, the one test that syncs the real
+/// adapter into a database and reads the census back.
 #[macro_export]
 macro_rules! project_key_read {
     () => {
@@ -76,13 +91,15 @@ macro_rules! project_key_read {
             $crate::string_at!("i.payload->'fields'->'project'->'key'"),
             ", ",
             $crate::string_at!("i.payload->'buildType'->'projectId'"),
-            ")"
+            ", (case when i.kind = 'build_config' then ",
+            $crate::string_at!("i.payload->'projectId'"),
+            " end))"
         )
     };
 }
 
-/// The one place a record's project **name** is spelled, the same two shapes
-/// as [`project_key_read!`].
+/// The one place a record's project **name** is spelled, the same three
+/// shapes -- and the same kind guard on the third -- as [`project_key_read!`].
 ///
 /// Not exported: a room narrows by the *key*, which is its identity, and the
 /// name is only ever read here, where the census is taken. A reader that
@@ -94,7 +111,9 @@ macro_rules! project_name_read {
             $crate::string_at!("i.payload->'fields'->'project'->'name'"),
             ", ",
             $crate::string_at!("i.payload->'buildType'->'projectName'"),
-            ")"
+            ", (case when i.kind = 'build_config' then ",
+            $crate::string_at!("i.payload->'projectName'"),
+            " end))"
         )
     };
 }

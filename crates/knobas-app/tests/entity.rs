@@ -430,6 +430,85 @@ async fn a_project_narrows_the_room_within_its_sources() {
     }
 }
 
+/// A project room built from a configuration-only project shows that
+/// configuration (#232).
+///
+/// The room's predicate and the census are one macro, so this is the room
+/// half of what `knobas-core/tests/projects.rs` pins for the census: a
+/// TeamCity project whose configurations have no synced build has a room,
+/// and the room holds the configuration. The `build_config` record spells its
+/// project at the top level -- the shape the adapter stores verbatim -- and
+/// the ticket beside it is the same source's other project, so the room is
+/// narrowed rather than merely non-empty. Over both orderings for the reason
+/// [`a_project_narrows_the_room_within_its_sources`] is.
+#[tokio::test]
+async fn a_project_room_shows_a_configuration_only_project() {
+    let pool = seeded().await;
+    let source = format!("projcfg-{}", unique());
+    let configuration = format!("{source}:buildType:Payout_Build");
+    let other = format!("{source}:INT-1");
+
+    let seed: [(&str, &str, serde_json::Value); 2] = [
+        (
+            configuration.as_str(),
+            "build_config",
+            serde_json::json!({
+                "id": "Payout_Build",
+                "name": "Build",
+                "projectId": "Payout",
+                "projectName": "Payout pipeline",
+            }),
+        ),
+        (
+            other.as_str(),
+            "ticket",
+            serde_json::json!({ "fields": { "project": { "key": "INT" } } }),
+        ),
+    ];
+    for (id, kind, payload) in &seed {
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1, $2, 'x')")
+            .bind(id)
+            .bind(kind)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+             values ($1, $2, $3, 'x', '', $4)",
+        )
+        .bind(id)
+        .bind(&source)
+        .bind(kind)
+        .bind(payload)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    for order in [EntityOrder::UpdatedDesc, EntityOrder::TitleAsc] {
+        let page = list_entities_inner(
+            &pool,
+            &EntityFilter {
+                sources: vec![source.clone()],
+                project: Some("Payout".to_owned()),
+                order,
+                ..all()
+            },
+            500,
+            0,
+        )
+        .await
+        .unwrap();
+        let ids: std::collections::BTreeSet<String> =
+            page.rows.into_iter().map(|row| row.entity_id).collect();
+        assert_eq!(
+            ids,
+            std::collections::BTreeSet::from([configuration.clone()]),
+            "the configuration is the project's work, and the other project's ticket is not"
+        );
+    }
+}
+
 /// A project room reaching past the tombstone filter is still that project's.
 ///
 /// The `include_deleted` statements are the detail's way in (§5a) and narrow
