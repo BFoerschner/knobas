@@ -71,7 +71,8 @@ const CURSOR: &str = "tidewater-v2";
 
 /// Where the fictional company's systems live. Nothing is served from here --
 /// it exists so *Open in browser* has a shape to render and a stream building
-/// the detail view can see the button (interfaces §8 P5).
+/// the detail view can see the button (P5, `docs/contract.md` §8 -- the M1
+/// interfaces document, re-homed there in `06ed97f`).
 const MOCK_BASE: &str = "https://tidewater.example";
 
 // -- the fixture ------------------------------------------------------------
@@ -79,8 +80,10 @@ const MOCK_BASE: &str = "https://tidewater.example";
 /// The Tidewater Freight dataset: `mockups/shared/dataset.md`, machine-readable.
 ///
 /// Every field is transcribed; nothing is generated. The structs
-/// `deny_unknown_fields` so that a key renamed in the JSON fails the build
-/// instead of silently reading back as `None`.
+/// `deny_unknown_fields` so that a key renamed in the JSON fails the parse --
+/// loudly, in [`fixture()`], on first use -- instead of silently reading back
+/// as `None`. Not the build: `include_str!` embeds the bytes and nothing
+/// reads them until then.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Fixture {
@@ -332,8 +335,9 @@ pub struct Repo {
 
 /// The parsed dataset, shared by every caller.
 ///
-/// Parsed once and leaked into a [`OnceLock`] because the fixture is immutable
-/// and every test in the workspace wants the same copy of it.
+/// Parsed once into a [`OnceLock`]: nothing mutates a parsed fixture -- every
+/// caller gets `&'static` -- and every test in the workspace wants the same
+/// copy of it. (The *file* is versioned, not frozen; see [`CURSOR`].)
 ///
 /// # Panics
 ///
@@ -397,8 +401,9 @@ impl MockSource {
     /// of the sync contract the fixture cannot express: `SyncItem::deleted`,
     /// which tombstones the entity while leaving its mirror row (and therefore
     /// its last-known title) in place. Without it, the deletion channel is
-    /// reachable only from a test-local adapter -- and a real adapter has
-    /// nothing to copy.
+    /// reachable only from a test-local adapter or from a real one with a live
+    /// server behind it (Gitea's `branch_tombstone` emits them) -- neither of
+    /// which a demo load or a credential-free test has.
     ///
     /// Deterministic: the same key, title and body on every run and every
     /// sync, so re-syncing is idempotent and the tombstone can be asserted on
@@ -450,8 +455,9 @@ fn body_text(parts: impl IntoIterator<Item = String>) -> String {
 /// One [`SyncItem`], with `payload` carrying the fixture record verbatim so a
 /// later milestone can re-map it without re-reading the fixture.
 // One positional argument per `SyncItem` field the fixture fills, which is the
-// point: adding a field to the SPI must not compile until all five call sites
-// below have decided what to put in it. A parameter struct would take a
+// point: adding a field to the SPI must not compile until all six call sites
+// below -- the five kinds in `items` and the tombstone in `tombstoned_item`
+// -- have decided what to put in it. A parameter struct would take a
 // `..Default::default()` instead and let one kind silently keep the old value.
 #[allow(clippy::too_many_arguments)]
 fn item(
@@ -714,10 +720,11 @@ impl Source for MockSource {
         if let Some(err) = self.fault_error() {
             return Err(err);
         }
-        // The mock authenticates nothing, but stream D develops the whole
-        // Add-source flow against it (roadmap §3: "the mock source is the
-        // frontend's backend"), so it reports what a real source would: the
-        // fixture's owner, and its own version as the server's.
+        // The mock authenticates nothing, but the Add-source flow (M1 stream
+        // D) was built against it -- "the mock source is the frontend's
+        // backend", `docs/agents/working-model.md`, extracted from roadmap §3
+        // -- so it reports what a real source would: the fixture's owner, and
+        // its own version as the server's.
         Ok(ConnectionInfo {
             account: Some(
                 fixture()
