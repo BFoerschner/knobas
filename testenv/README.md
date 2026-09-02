@@ -150,7 +150,7 @@ drives it now, the way `seed-atlassian.sh` drives Jira's: through the
 wizard's own `/mnt/do/*` commands and `createAdminSubmit.html`, which are not
 an API, so the script **refuses any image digest it was not derived on** and
 the fix for that refusal is to re-derive the sequence (the recipe is in the
-script's header). About two minutes from empty volumes, unattended:
+script's header). About forty seconds from empty volumes, unattended:
 
 ```sh
 docker compose --profile real-teamcity up -d teamcity teamcity-agent

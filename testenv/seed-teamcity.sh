@@ -464,7 +464,9 @@ while :; do
 done
 echo " ok ($(printf '%s' "$REST_BODY" | jq -r .count) connected, authorised agent(s))"
 
-_v=$(curl -sS --max-time 60 -H "Authorization: Bearer $TOKEN" -H 'Accept: application/json' "$TC_URL/app/rest/server" | jq -r '.version // "unknown"')
+# Still as the bearer of $TOKEN: this is the version the token can see.
+rest GET /app/rest/server
+_v=$(printf '%s' "$REST_BODY" | jq -r '.version // "unknown"')
 record teamcity "$(jq -n --arg u "$TC_URL" --arg n "$ADMIN_USER" --arg p "$ADMIN_PASS" --arg t "$TOKEN" --arg v "$_v" \
   '{url:$u, user:$n, password:$p, token:$t, version:$v}')"
 say "wrote $STATE"
