@@ -515,6 +515,17 @@ kbd{font:400 10px var(--mono);color:var(--faint);border:1px solid var(--hair);bo
    status a card belongs to is readable anywhere down a long room. */
 .board.stacked .col-h{position:sticky;top:0;background:var(--bg);z-index:1}
 
+/* Every tile is its own stacking context (#262), so a `z-index` inside a tile
+   -- the group heading above -- competes only with that tile's own content.
+   Without it the heading's positive level outranks the detail slide-over,
+   which is `position:absolute` at level 0 and drawn later in the tree, and
+   its bars paint through the panel. The two-column grid hid that: the
+   Tickets tile is the left column and the panel covers the right, so only a
+   one-tile room (`.tiles.one`) or a maximised tile (#250) puts the mini board
+   under it. `isolation` touches painting alone -- the heading still sticks
+   inside its scroll container, and the tile's layout is unchanged. */
+.tile{isolation:isolate}
+
 /* Visually hidden, present to the accessibility tree (#258). A utility, not
    a component's: text that exists to be referenced and has no place on
    screen. Clipped to nothing rather than `display:none` or
