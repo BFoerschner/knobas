@@ -8,9 +8,11 @@
 //! the engine as frozen ends the milestone with two sync paths, and two is how
 //! a fix lands in one of them.
 //!
-//! The entry point is a plain `pool` function, not a command: the Tauri layer
-//! above it adds nothing but argument decoding, and a `#[tauri::command]`
-//! cannot be called from a test.
+//! The entry points are plain functions, not commands: the Tauri layer above
+//! them adds nothing but argument decoding, and a `#[tauri::command]` cannot
+//! be called from a test. [`demo_load_inner`] is the load over a pool alone;
+//! [`demo_load_announced`] is the same load followed by the `sync:state` its
+//! run owes (#240), for a caller that has a window to tell.
 
 use knobas_source::{Source, SourceDescriptor};
 use knobas_source_mock::MockSource;
