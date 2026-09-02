@@ -228,14 +228,19 @@ with the seed's Gitea token from `seed-state.json`), with a branch
 specification naming every branch the Gitea seed created in that repository.
 The agent clones the repository and runs a command-line step, and the
 server reports the fixture's branch as the build's `branchName`. Nothing
-here fell back to a parameter-only build.
+here fell back to a parameter-only build. #265's brief said "a VCS root per
+configuration"; the two Payout configurations build the same repository, so
+the root is per project and attached to both -- one object to keep in step
+with Gitea instead of two identical ones.
 
 **The steps reproduce the fixture's outcome and nothing more.**
 `Ledger_Deploy_Staging` prints one line and exits 0; `Payout_IntegrationTests`
-prints the fixture's `log` and exits 1; `Payout_Build` has five steps, the
-third named `cargo test`, which sleeps -- the fixture says the build is at
-"step 3/5 `cargo test`" and names no other step, so the others are `step 1`
-.. `step 5`.
+prints the fixture's `log` and exits 1. `Payout_Build` is the one place the
+seed departs from the brief's "one command-line step per configuration": it
+has five, the third named `cargo test`, which sleeps -- the fixture holds
+the build at "step 3/5 `cargo test`", and five real steps are what make the
+server say `Step 3/5` itself rather than a single step pretending to. The
+fixture names no other step, so the others are `step 1` .. `step 5`.
 
 **The running build is opt-in.** A build server cannot hold a build running
 forever on one agent, so the seed always makes the two finished shapes and
