@@ -245,8 +245,20 @@
       on its own tick. It is deliberately incapable of releasing a held write,
       and the label says which rows it moves so that pressing it is never
       mistaken for answering a conflict.
+
+      Beneath it, the guarantee knobas cannot keep, in ADR-0012's words: no
+      transaction spans the send and the settle, so a write in flight when
+      knobas stopped goes again. It sits by the retry control because this is
+      where a re-send is contemplated, and it is unconditional because it is
+      true of the queue, not of any row in it.
     -->
-    <span class="lab">Retries the waiting writes. Held writes are untouched.</span>
+    <div class="wq-foot">
+      <span class="lab">Retries the waiting writes. Held writes are untouched.</span>
+      <p class="wq-guarantee">
+        A write knobas was sending when it stopped may arrive twice. knobas re-sends rather than
+        guess; it never merges or drops what you wrote.
+      </p>
+    </div>
     <span class="spacer"></span>
     <button class="btn" disabled={queue.busy} onclick={() => queue.flush(null)}>Flush now</button>
     <button class="btn ghost" onclick={onclose}>Close</button>
@@ -387,5 +399,23 @@
     display: flex;
     gap: 6px;
     margin-top: 8px;
+  }
+
+  /*
+    The footer is one flex row, and its only text was the uppercase label.
+    Two prose sentences do not survive that treatment, so the label and the
+    guarantee stack in a column of their own and the buttons keep the row.
+  */
+  .wq-foot {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .wq-guarantee {
+    margin: 0;
+    color: var(--muted);
+    font-size: 11.5px;
   }
 </style>
