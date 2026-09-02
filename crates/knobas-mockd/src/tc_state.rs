@@ -24,7 +24,7 @@
 //! | `state` | `running` ⇒ `running`; `failed`/`success` ⇒ `finished`. |
 //! | `status` | `failed` ⇒ `FAILURE`; `success` and `running` ⇒ `SUCCESS` (a running build reports the status *so far*). |
 //! | `startDate` | the fixture's `when`. `finishDate` = `when + duration` (`"4 m 12 s"` parsed) or `when + 60 s` when the fixture gives none; absent while running. |
-//! | `statusText` | the first line of `log` where the fixture has one, else `"Success"` / `"Running"`. |
+//! | `statusText` | the first line of `log` where the fixture has one, else `"Success"` / `"Running"`. A **narrative** rule, not a wire one (issue #266): a real TeamCity composes `statusText` from the failing step -- the seeded 1187 reads `Exit code 1 (Step: IntegrationTests (Command Line))` -- and never lifts a log line into it; the log is not on the REST record at all. Kept because the fixture's line is what the dataset's story shows on a build tile, and nothing in knobas reads `statusText` for anything but display and search. |
 //! | `running-info` | `percentageComplete` from the fixture's `step` (`step 3/5 …` ⇒ 60), `currentStageText` = the step verbatim. |
 //! | buildType `description` | `None`: the dataset describes no configuration, and mockd does not invent prose any more than it invents a triggerer. `MockState::describe_build_type` is how a test that needs one gets one. |
 //! | `triggered` | the fixture's `triggered_by` resolved through `fixture().person`: `type: "user"` with that person's `username`/`name`, or `type: "vcs"` and no `user` where the fixture names nobody. |
