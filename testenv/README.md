@@ -131,6 +131,27 @@ Consequences for a live test suite:
 
 Nothing in the §4.2 key forms depends on the fixture's abbreviations.
 
+The real TeamCity (`./seed --teamcity`) has the same class of gap, in its own
+places:
+
+- **Build ids are the server's.** The fixture (and mockd) spell build id and
+  build number as the same value, `412`; a real server numbers builds by a
+  per-configuration counter the seed sets, so the **numbers** come out as the
+  fixture's, but the **ids** are 1, 2, 3 … in the order the builds were
+  queued. `seed-state.json` maps fixture number to real id under
+  `teamcity.builds`. Assert `number`, look `id` up.
+- **Timestamps are when the build actually ran.** The fixture's `when`
+  (`2026-08-22T10:10:00Z`) and `duration` (`4 m 12 s`) cannot be set on a
+  real build: `startDate` is the moment the agent took it and the failing
+  integration-test build finishes in seconds. Assert that a finished build
+  has a `finishDate` after its `startDate`, never a particular value.
+- **The triggerer is `knobas`.** Every seeded build is queued through the
+  seed's token, so `triggered.type` is `user` and the user is the seed's
+  administrator -- not the fixture's `mara` for 1188 and not a VCS trigger for
+  the two the fixture attributes to nobody.
+- **The running build is not running unless you asked.** One agent cannot hold
+  `Payout_Build` 1188 at step 3/5 forever; see *TeamCity, end to end*.
+
 ## Opt-in profiles
 
 Off by default because they are expensive. Approximate costs are in `.env`.
@@ -173,6 +194,103 @@ does not change that default.
 
 A running server is also the only way to obtain `/app/rest/swagger.json`; see
 `specs/README.md`'s blocker and `specs/fetch.sh --teamcity`.
+
+### TeamCity, end to end
+
+`./seed --teamcity` does not stop at a set-up server: `seed-teamcity-builds.sh`
+runs at its end and puts the fixture's build content in, so the real server
+tells the story mockd and the demo profile tell.
+
+```sh
+docker compose --profile real-teamcity up -d teamcity teamcity-agent
+./seed                       # Gitea first: the VCS roots point at it
+./seed --teamcity            # wizard, token, agent, then the Tidewater builds
+./seed --teamcity --running  # ... and hold Payout_Build 1188 at step 3/5
+```
+
+**What it creates**, derived from `fixtures/tidewater/work.json`'s `builds`
+by the rules of `crates/knobas-mockd/src/tc_state.rs`, so the ids are the ones
+the adapter's tests and the project census already expect:
+
+| Fixture `cfg` | Project (id = name) | Build configuration name | Build | Outcome |
+|---|---|---|---|---|
+| `Ledger_Deploy_Staging` | `Ledger` | `Deploy Staging` | `412` on `main` | SUCCESS |
+| `Payout_IntegrationTests` | `Payout` | `IntegrationTests` | `1187` on `feature/PAY-231-sepa-retry` | FAILURE, the fixture's `log` in the build log |
+| `Payout_Build` | `Payout` | `Build` | `1188` on `feature/PAY-231-sepa-retry`, `--running` only | running, held at step 3/5 `cargo test` |
+
+No configuration has a description: the fixture gives none, and the seed
+invents none, exactly as mockd does.
+
+**The builds are real and VCS-backed.** Each project has one Git VCS root
+(`Payout_PayoutService`, `Ledger_LedgerApi`) pointing at the seeded Gitea over
+the compose network (`http://gitea:3000/tidewater/<repo>.git`, authenticated
+with the seed's Gitea token from `seed-state.json`), with a branch
+specification naming every branch the Gitea seed created in that repository.
+The agent clones the repository and runs a command-line step, and the
+server reports the fixture's branch as the build's `branchName`. Nothing
+here fell back to a parameter-only build. #265's brief said "a VCS root per
+configuration"; the two Payout configurations build the same repository, so
+the root is per project and attached to both -- one object to keep in step
+with Gitea instead of two identical ones.
+
+**The steps reproduce the fixture's outcome and nothing more.**
+`Ledger_Deploy_Staging` prints one line and exits 0; `Payout_IntegrationTests`
+prints the fixture's `log` and exits 1. `Payout_Build` is the one place the
+seed departs from the brief's "one command-line step per configuration": it
+has five, the third named `cargo test`, which sleeps -- the fixture holds
+the build at "step 3/5 `cargo test`", and five real steps are what make the
+server say `Step 3/5` itself rather than a single step pretending to. The
+fixture names no other step, so the others are `step 1` .. `step 5`.
+
+**The running build is opt-in.** A build server cannot hold a build running
+forever on one agent, so the seed always makes the two finished shapes and
+starts `Payout_Build` 1188 only with `--running`. It then holds the agent for
+up to four hours (the `cargo test` step's sleep). To end it sooner:
+
+```sh
+eval "$(./seed --env)"
+id=$(jq -r '.teamcity.builds[] | select(.fixture_number==1188) | .real_id' seed-state.json)
+curl -X POST -H "Authorization: Bearer $KNOBAS_TEAMCITY_TOKEN" -H 'Content-Type: application/json' \
+     -d '{"comment":"released by hand","readdIntoQueue":false}' "$KNOBAS_TEAMCITY_URL/app/rest/builds/id:$id"
+```
+
+A cancelled build finishes with status `UNKNOWN`, which is TeamCity's own
+shape for one (mockd transcribes it the same way); the agent takes a few
+seconds to kill the step, so `state` still reads `running` right after the
+POST. A finished 1188 is left alone by later runs, `--running` or not. To put
+the server back in the plain-seed state -- the two finished builds and
+nothing else, which is what a live suite should find -- delete it:
+
+```sh
+curl -X DELETE -H "Authorization: Bearer $KNOBAS_TEAMCITY_TOKEN" "$KNOBAS_TEAMCITY_URL/app/rest/builds/id:$id"
+```
+
+The next `./seed --teamcity` then rewrites `teamcity.builds` without 1188,
+and `--running` starts it again with the counter reset, so it comes out as
+1188 once more.
+
+**Idempotent, like the Gitea seed.** Every project, VCS root, configuration
+and build is read before it is created, and a configuration gets its steps
+only while it has none; a finished build by number on its configuration is
+never re-triggered, a queued or running one from an interrupted run is
+waited for. A second `./seed --teamcity` creates nothing and exits 0. Build **numbers** come out as the fixture's because the seed
+sets each configuration's build number counter before its first build --
+the `SEED_EXACT_PR_NUMBERS` idea, without the burning. Build **ids**,
+timestamps and the triggerer are the server's; *What the seed cannot
+reproduce* above says what to assert instead, and `seed-state.json` carries
+the number-to-id map:
+
+```json
+"teamcity": { "...": "...", "builds": [
+  { "fixture_number": 412,  "build_type": "Ledger_Deploy_Staging",   "real_id": 2 },
+  { "fixture_number": 1187, "build_type": "Payout_IntegrationTests", "real_id": 1 } ] }
+```
+
+Where the endpoints and field names came from is in the script's header:
+the vendored `specs/teamcity.json` for every `/app/rest` call, and the
+server's own forms for the three things that swagger does not enumerate
+(the Git root's property names, the command-line runner's, and the
+`settings/buildNumberCounter` resource).
 
 ### Jira and Confluence, end to end
 
@@ -302,7 +420,8 @@ history.
 | `./seed-gitea.sh` | Org, users, repos, branches, commits, PRs, comments, reviews. |
 | `./seed-kuma.sh` | Kuma admin account, monitors, API key. |
 | `./seed-atlassian.sh` | The real Jira and Confluence containers' setup wizards, unattended (`--profile real-atlassian`). |
-| `./seed-teamcity.sh` | The real TeamCity container's first start, an access token and one authorised agent (`--profile real-teamcity`). |
+| `./seed-teamcity.sh` | The real TeamCity container's first start, an access token and one authorised agent (`--profile real-teamcity`); then runs the script below. |
+| `./seed-teamcity-builds.sh` | The Tidewater projects, build configurations, VCS roots and builds in the real TeamCity; `--running` for the fixture's running build. |
 | `./pin-images.sh` | Re-resolve image tags to digests into `.env`. |
 | `./check-ports.sh` | Assert the compose file against the §5 port table, default profile, opt-in profiles and the capped overlay. Starts nothing. |
 | `./reset` | `down -v` every profile, and delete the seed's outputs. |
