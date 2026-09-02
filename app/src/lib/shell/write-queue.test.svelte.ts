@@ -435,6 +435,30 @@ test("flush now retries the waiting writes and releases nothing", async () => {
 });
 
 /**
+ * The guarantee the queue cannot keep, said where a re-send is contemplated
+ * (ADR-0012, issue #224). No transaction spans the send and the settle, so a
+ * write in flight when knobas stopped may arrive twice. The sentence is the
+ * ADR's own, verbatim, and it is not tied to a row: it holds whether the
+ * queue is empty or full, so both are rendered.
+ */
+test("the panel states that a write may arrive twice, whatever it holds", async () => {
+  const sentence =
+    "A write knobas was sending when it stopped may arrive twice. " +
+    "knobas re-sends rather than guess; it never merges or drops what you wrote.";
+
+  const empty = await render();
+  expect(empty.text()).toContain("Nothing is queued");
+  expect(empty.text()).toContain(sentence);
+  empty.done();
+
+  rows = [held(), write()];
+  counts = { pending: 1, held: 1, refused: 0 };
+  const full = await render();
+  expect(full.text()).toContain(sentence);
+  full.done();
+});
+
+/**
  * A failed read leaves the counts where they were.
  *
  * A badge that blinked to zero during a hiccup is a held write the reader
