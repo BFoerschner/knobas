@@ -686,7 +686,6 @@ async fn build_refuses_a_config_it_cannot_read() {
     }
 }
 
-/// One mock instance, configured.
 fn configured(config: serde_json::Value) -> knobas_source::instance::SourceInstance {
     knobas_source::instance::SourceInstance {
         id: "mock".to_owned(),
