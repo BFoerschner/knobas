@@ -166,7 +166,6 @@ _Avoid_: kanban, board (unqualified)
 
 **Maximised tile**:
 A viewing gesture on a [room](#room): one tile fills the tile grid for this visit, restored by its own button or by Escape, and never persisted — a room switch or a restart brings the grid back. (#250)
-_Avoid_: fullscreen, zoomed, focused tile
 
 **Tidewater**:
 The fictional company whose dataset seeds demos, fixtures, and the test environment.

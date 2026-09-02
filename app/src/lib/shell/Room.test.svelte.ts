@@ -147,9 +147,11 @@ function render(hash: string, overrides = createMiniBoardOverrides()) {
     },
   });
   flushSync();
+  /** The Tickets tile's layout control (#245): the `.seg` in its header's `.acts` slot. */
+  const SEG = ".tile-h .acts .seg";
   /** The Tickets tile's layout option that reads `label` (#245), or undefined where none does. */
   function layoutOption(label: string): HTMLButtonElement | undefined {
-    return [...target.querySelectorAll<HTMLButtonElement>(".tile-h .acts .seg button")].find(
+    return [...target.querySelectorAll<HTMLButtonElement>(`${SEG} button`)].find(
       (node) => node.textContent?.trim() === label,
     );
   }
@@ -177,18 +179,17 @@ function render(hash: string, overrides = createMiniBoardOverrides()) {
       ),
     /** The Tickets tile's layout control: `[word, pressed, refused, reason]` per option. */
     control: () =>
-      [...target.querySelectorAll<HTMLButtonElement>(".tile-h .acts .seg button")].map((option) => [
+      [...target.querySelectorAll<HTMLButtonElement>(`${SEG} button`)].map((option) => [
         option.textContent?.trim() ?? "",
         option.getAttribute("aria-pressed") === "true",
         option.getAttribute("aria-disabled") === "true",
         option.getAttribute("title"),
       ]),
     /**
-     * What the layout option `label` is described by (#258): the text of the
-     * element its `aria-describedby` names, or null where it names nothing
-     * or names an id nothing carries -- a dangling reference is no
-     * description to assistive technology, and `getElementById` gives it
-     * back as the same null (the precedent is `Modal.test.svelte.ts`).
+     * What the layout option `label` is described by (#258). A dangling
+     * `aria-describedby` is no description to assistive technology, and
+     * `getElementById` gives it back as the same null (the precedent is
+     * `Modal.test.svelte.ts`).
      */
     describedBy: (label: string) => {
       const id = layoutOption(label)?.getAttribute("aria-describedby");
@@ -197,7 +198,7 @@ function render(hash: string, overrides = createMiniBoardOverrides()) {
     },
     /** The visually hidden reasons the layout control carries, in the order drawn. */
     hiddenReasons: () =>
-      [...target.querySelectorAll<HTMLElement>(".tile-h .acts .seg .vh")].map((node) => node.textContent?.trim() ?? ""),
+      [...target.querySelectorAll<HTMLElement>(`${SEG} .vh`)].map((node) => node.textContent?.trim() ?? ""),
     /** Press the layout option that carries `label`. */
     press: (label: string) => {
       const option = layoutOption(label);
