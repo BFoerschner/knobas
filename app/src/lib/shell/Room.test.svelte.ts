@@ -729,15 +729,20 @@ test("a reader's override redraws the mini board, sticks to its room, and clears
 });
 
 /**
- * The backstop through the room: a project room whose board draws seven
- * statuses is stacked whatever the reader presses, the control says why, and
- * a refused press reaches the store no more than it reaches the board.
+ * The backstop through the room: a room whose board draws seven statuses is
+ * stacked whatever the reader presses, the control says why, and a refused
+ * press reaches the store no more than it reaches the board.
+ *
+ * A **stacked-default** room on purpose. On a columns room a press that
+ * leaked through would choose the room's own default, which clears, and the
+ * store would look untouched either way; here the leak would record
+ * `columns`, and the last assertion is what sees it.
  */
 test("a room past six statuses refuses columns with its reason, and records no override", async () => {
   ticketsEverywhere();
   board = () => Promise.resolve(statusBoard(7));
 
-  const screen = render("#/ctx/proj:jira:PAY");
+  const screen = render("#/ctx/src:jira");
   await vi.waitFor(() => expect(screen.cards()).toHaveLength(7));
   await settle();
 
@@ -749,7 +754,7 @@ test("a room past six statuses refuses columns with its reason, and records no o
 
   screen.press("columns");
   expect(screen.layout()).toBe("stacked");
-  expect(screen.overrides.overrideFor("proj:jira:PAY")).toBeUndefined();
+  expect(screen.overrides.overrideFor("src:jira")).toBeUndefined();
 
   screen.done();
 });
