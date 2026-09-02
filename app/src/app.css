@@ -148,6 +148,17 @@ a{color:var(--link);text-decoration:none}
 .tile-h{display:flex;align-items:center;gap:8px;height:28px;padding:0 12px;border-bottom:1px solid var(--hair);flex:none}
 .tile-h .cnt{font:500 11px var(--mono);color:var(--faint)}
 .tile-h .acts{margin-left:auto;display:flex;gap:2px}
+/* The Tickets tile's layout control (#245): a two-way segmented control in
+   the header's `.acts` slot, one button per layout word. A refused option is
+   `aria-disabled`, never `disabled` -- it stays in the tab order and keeps its
+   `title`, which is where the reason lives. */
+.seg{display:inline-flex;height:20px;border:1px solid var(--hair2);border-radius:2px;overflow:hidden}
+.seg-b{height:100%;padding:0 6px;font:500 10px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--faint);cursor:pointer}
+.seg-b+.seg-b{border-left:1px solid var(--hair2)}
+.seg-b:hover{color:var(--text);background:var(--raised)}
+.seg-b.on{color:var(--text);background:var(--raised)}
+.seg-b[aria-disabled="true"]{opacity:.4;cursor:default}
+.seg-b[aria-disabled="true"]:hover{color:var(--faint);background:transparent}
 .tile-b{overflow:auto;flex:1;min-height:0}
 .empty{padding:14px 12px;color:var(--muted);font-size:12px;line-height:1.5}
 .empty .btn{margin-top:8px}

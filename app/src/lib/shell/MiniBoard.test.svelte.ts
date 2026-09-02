@@ -69,17 +69,50 @@ function render(
   ctx: string | null = null,
   project: string | null = null,
   miniBoardLayout: MiniBoardLayout = "columns",
+  miniBoardOverride: MiniBoardLayout | undefined = undefined,
 ) {
   const target = document.createElement("div");
   document.body.append(target);
   const onopen = vi.fn();
-  const props = $state({ spec: SPEC, sources, ctx, project, miniBoardLayout, onopen });
+  const onlayout = vi.fn();
+  const props = $state({
+    spec: SPEC,
+    sources,
+    ctx,
+    project,
+    miniBoardLayout,
+    miniBoardOverride,
+    onopen,
+    onlayout,
+  });
   const app = mount(Tile, { target, props });
   flushSync();
   return {
     target,
     props,
     onopen,
+    onlayout,
+    /**
+     * The layout control in the header, one entry per option as the reader
+     * meets it: its word, whether it is the effective layout, whether it is
+     * refused and, if so, why.
+     */
+    control: () =>
+      [...target.querySelectorAll<HTMLButtonElement>(".tile-h .acts button")].map((option) => ({
+        label: option.textContent?.trim() ?? "",
+        on: option.getAttribute("aria-pressed") === "true",
+        refused: option.getAttribute("aria-disabled") === "true",
+        reason: option.getAttribute("title"),
+      })),
+    /** Press the option that carries `label`. */
+    press: (label: string) => {
+      const option = [...target.querySelectorAll<HTMLButtonElement>(".tile-h .acts button")].find(
+        (node) => node.textContent?.trim() === label,
+      );
+      expect(option, `the control offers ${label}`).toBeDefined();
+      option!.click();
+      flushSync();
+    },
     /** Each column as `[heading, count]`, in the order drawn. */
     columns: () =>
       [...target.querySelectorAll(".col")].map((col) =>
@@ -478,4 +511,130 @@ test("a stacked room stays stacked however few columns it draws", async () => {
     expect(screen.layout()).toBe("stacked");
     screen.done();
   }
+});
+
+/**
+ * The header's control shows the room's default as the effective layout
+ * until a reader changes it (#245): the room chooses the default, and the
+ * control says which of the two it is.
+ */
+test("the header's control shows the room's default selected, both options open", async () => {
+  answer = () => Promise.resolve({ columns: workflow(), sources: [] });
+
+  const columns = render([], null, null, "columns");
+  await vi.waitFor(() => expect(columns.columns()).toHaveLength(4));
+  flushSync();
+  expect(columns.control()).toEqual([
+    { label: "columns", on: true, refused: false, reason: null },
+    { label: "stacked", on: false, refused: false, reason: null },
+  ]);
+  columns.done();
+
+  const stacked = render([], null, null, "stacked");
+  await vi.waitFor(() => expect(stacked.columns()).toHaveLength(4));
+  flushSync();
+  expect(stacked.control().map((option) => [option.label, option.on])).toEqual([
+    ["columns", false],
+    ["stacked", true],
+  ]);
+  stacked.done();
+});
+
+/**
+ * Pressing the other option is a request to the room, and the override the
+ * room then hands back redraws the board: same groups, same order, same
+ * counts, arranged the other way (ADR-0009).
+ *
+ * The fixture is the scrambled workflow, so a board that re-sorted or
+ * regrouped on the way to the other layout would fail `WORKFLOW_COLUMNS`.
+ */
+test("choosing the other layout redraws the same groups in it", async () => {
+  answer = () => Promise.resolve({ columns: workflow(), sources: [] });
+  const screen = render([], null, null, "columns");
+  await vi.waitFor(() => expect(screen.columns()).toHaveLength(4));
+  flushSync();
+  expect(screen.layout()).toBe("columns");
+
+  screen.press("stacked");
+  expect(screen.onlayout).toHaveBeenCalledWith("stacked");
+  // The tile does not hold the choice: until the room answers, nothing moved.
+  expect(screen.layout()).toBe("columns");
+
+  screen.props.miniBoardOverride = "stacked";
+  flushSync();
+  expect(screen.layout()).toBe("stacked");
+  expect(screen.columns()).toEqual(WORKFLOW_COLUMNS);
+  expect(screen.control().map((option) => [option.label, option.on])).toEqual([
+    ["columns", false],
+    ["stacked", true],
+  ]);
+  // No second read: the layout is how the same board is arranged.
+  expect(calls).toHaveLength(1);
+
+  screen.done();
+});
+
+/**
+ * The backstop wins over the reader (#245, decision 4). Seven statuses is
+ * the first count it refuses, so a fixture of seven is the smallest that can
+ * witness the refusal at all — a board of one column cannot.
+ *
+ * Refused, not removed: the option stays in the tab order and carries its
+ * reason, so a keyboard reader learns why rather than finding a control
+ * that skips a step.
+ */
+test("columns is refused with a reason past six statuses, and stays reachable", async () => {
+  answer = () => Promise.resolve({ columns: statuses(7), sources: [] });
+  const screen = render([], null, null, "columns");
+  await vi.waitFor(() => expect(screen.columns()).toHaveLength(7));
+  flushSync();
+
+  expect(screen.layout()).toBe("stacked");
+  expect(screen.control()).toEqual([
+    { label: "columns", on: false, refused: true, reason: "7 statuses; columns holds 6" },
+    { label: "stacked", on: true, refused: false, reason: null },
+  ]);
+  const refused = screen.target.querySelector<HTMLButtonElement>(".tile-h .acts button");
+  expect(refused?.disabled, "a disabled button leaves the tab order").toBe(false);
+  expect(refused?.tabIndex).toBe(0);
+
+  screen.press("columns");
+  expect(screen.onlayout).not.toHaveBeenCalled();
+
+  screen.done();
+});
+
+/**
+ * A demoted override is kept, not dropped (#245, decision 7). The reader
+ * chose columns on a room whose board then grew past six; stacked is drawn
+ * meanwhile, and the same override draws columns again once the board fits.
+ *
+ * The override prop is never touched between the two reads — the return has
+ * to come from the rule, not from the reader choosing twice.
+ */
+test("a kept override returns to columns when the board fits six again", async () => {
+  answer = () => Promise.resolve({ columns: statuses(7), sources: [] });
+  const screen = render([], "ctx:one", null, "stacked", "columns");
+  await vi.waitFor(() => expect(screen.columns()).toHaveLength(7));
+  flushSync();
+  expect(screen.layout()).toBe("stacked");
+  expect(screen.control().map((option) => [option.label, option.on, option.refused])).toEqual([
+    ["columns", false, true],
+    ["stacked", true, false],
+  ]);
+
+  answer = () => Promise.resolve({ columns: statuses(6), sources: [] });
+  screen.props.ctx = "ctx:two";
+  flushSync();
+  await vi.waitFor(() => expect(screen.columns()).toHaveLength(6));
+  flushSync();
+
+  expect(screen.props.miniBoardOverride).toBe("columns");
+  expect(screen.layout()).toBe("columns");
+  expect(screen.control().map((option) => [option.label, option.on, option.refused])).toEqual([
+    ["columns", true, false],
+    ["stacked", false, false],
+  ]);
+
+  screen.done();
 });
