@@ -160,10 +160,18 @@
    * at a time is the shape of the field: a single id, not a set.
    */
   let maximised = $state<string | null>(null);
+  /**
+   * The room's id as its own signal, so the reset below fires on a change of
+   * *room* and not on a fresh object for the same one. `App.svelte` derives
+   * the switcher's list afresh after every census (a sync run ending, a
+   * source's health moving), and `context` is a new object each time; a
+   * derived string is equal to itself and propagates nothing.
+   */
+  const roomId = $derived(context.id);
   $effect(() => {
     // Reads the room id and nothing else, so the effect runs when the room
     // changes and not when the choice does.
-    void context.id;
+    void roomId;
     maximised = null;
   });
 

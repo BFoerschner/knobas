@@ -277,6 +277,10 @@ test("a list tile's header carries no layout control", async () => {
   flushSync();
 
   expect(screen.target.querySelector(".tile-h .acts .seg")).toBeNull();
+  // ...and the slot holds the maximise control alone (#250): one button, not
+  // a layout word that lost its group.
+  expect(screen.target.querySelectorAll(".tile-h .acts button")).toHaveLength(1);
+  expect(screen.maximise()).not.toBeNull();
 
   screen.done();
 });

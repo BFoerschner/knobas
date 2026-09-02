@@ -130,7 +130,22 @@ function render(hash: string, overrides = createMiniBoardOverrides()) {
   const stop = router.start();
   const target = document.createElement("div");
   document.body.append(target);
-  const app = mount(Room, { target, props: { router, contexts: CONTEXTS, overrides } });
+  /**
+   * The switcher's list, reassignable: `App.svelte` derives it afresh after
+   * every census, so a mounted room is handed a new list of the same rooms
+   * several times a session (#250).
+   */
+  let list = $state.raw(CONTEXTS);
+  const app = mount(Room, {
+    target,
+    props: {
+      router,
+      get contexts() {
+        return list;
+      },
+      overrides,
+    },
+  });
   flushSync();
   /** The maximise control (#250) of the tile labelled `label`, or null where no such tile is drawn. */
   function maxButton(label: string): HTMLButtonElement | null {
@@ -185,6 +200,11 @@ function render(hash: string, overrides = createMiniBoardOverrides()) {
     },
     /** Escape's rung 4, as `App.svelte` reaches it through `installKeys` (#250). */
     restoreTile: () => app.restoreTile(),
+    /** Hand the room a fresh list, as the shell does after a census (#250). */
+    relist: (next: typeof CONTEXTS) => {
+      list = next;
+      flushSync();
+    },
     /** The key on each mini-board card, in the order drawn. */
     cards: () => [...target.querySelectorAll<HTMLElement>(".card .mono")].map((k) => k.textContent),
     /** Every list tile's rows, by the title they show. */
@@ -512,6 +532,35 @@ test("walking to another room restores the grid, and walking back finds it resto
   await settle();
   await vi.waitFor(() => expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents"]));
   expect(screen.grid()).not.toContain("max");
+
+  screen.done();
+});
+
+/**
+ * Decision 1, the other way round: the room's *id* is what resets the choice,
+ * not the object that carries it. `App.svelte` derives the switcher's list
+ * afresh after every census -- `projects.reseed()` on each `sync:state` that
+ * ends a run, `health.replace()` on each `source:health` -- so a mounted room
+ * is handed a new `RoomContext` for the same id several times a session. A
+ * reset keyed on the object would draw the grid under the reader every time
+ * a sync finished. The copies are new objects with the same ids, which is
+ * exactly what `switcherContexts` hands down.
+ */
+test("a fresh list of the same rooms leaves the tile maximised", async () => {
+  serveCorpus();
+  const screen = render("#/ctx/src:jira");
+  await vi.waitFor(() => expect(screen.tiles()).toEqual(["Tickets", "Docs", "Incidents"]));
+  await settle();
+  screen.maximise("Docs");
+  expect(screen.tiles()).toEqual(["Docs"]);
+
+  screen.relist(CONTEXTS.map((context) => ({ ...context, filter: { ...context.filter } })));
+  // The room re-reads its kinds for the new object; wait for that read to land.
+  await settle();
+  await vi.waitFor(() => expect(screen.tiles()).not.toEqual([]));
+  expect(screen.tiles()).toEqual(["Docs"]);
+  expect(screen.grid()).toContain("max");
+  expect(screen.maxButton("Docs")?.textContent?.trim()).toBe("Restore");
 
   screen.done();
 });
