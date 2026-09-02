@@ -440,7 +440,8 @@ and the TeamCity server image (`seed-teamcity.sh`) are the ones a seed walks a
 first-start wizard on, and each seed refuses any digest but the one its form
 fields were read off (`VERIFIED_*_IMAGE` in the seed script). For those,
 `pin-images.sh` writes the seed's digest and, when the tag has moved on (even a
-patch tag does: `confluence:9.2.21` was retagged upstream in 2026-09), prints
+patch tag does: `confluence:9.2.21` was retagged upstream between 2026-08-31
+and 2026-09-02), prints
 the drift with both digests and the guarding seed, exit 0 — the file is right
 for the seeds as they are. `./pin-images.sh --move CONFLUENCE_IMAGE` takes the
 new digest for that one variable; the seed then refuses its container until
@@ -449,7 +450,11 @@ values are read out of the seed scripts, not copied into `pin-images.sh`, so
 the two cannot disagree. Everything else (Gitea, Kuma, node, the build images,
 the TeamCity agent) resolves fresh on every run; the agent is pinned by the
 server's version tag rather than `latest`, because an agent ahead of the server
-is refused at registration. `--out PATH` writes elsewhere, to compare.
+is refused at registration (#267's finding, not re-run since). That tag is a
+hand-kept copy of the server's version, the one duplicate here that nothing
+reads for you; `--move TEAMCITY_IMAGE` names it as the thing to bump in the
+same change. A held pin says so on its own comment line in `.env`. `--out PATH`
+writes elsewhere, to compare.
 
 The two build stages of `mockd.Dockerfile` are pinned the same way — an
 unpinned `rust:1-slim` would make the mockd container unreproducible.

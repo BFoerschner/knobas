@@ -75,8 +75,11 @@ resolve() {  # resolve <repo:tag>  -> the tag's current digest on stdout
   esac
 }
 
-line() {  # line <VAR> <repo:tag> <digest>  -> the two .env lines for one image
-  printf '# %s\n%s=%s@%s\n' "$2" "$1" "${2%%:*}" "$3"
+line() {  # line <VAR> <repo:tag> <digest> [note]  -> the two .env lines for one image
+  # The note rides on the comment line, so a held pin says so in .env itself:
+  # `# repo:tag` alone above a digest the tag no longer resolves to would be
+  # a stale claim in a tracked file.
+  printf '# %s%s\n%s=%s@%s\n' "$2" "${4:+ ($4)}" "$1" "${2%%:*}" "$3"
 }
 
 pin() {  # pin <VAR> <repo:tag>  -- unguarded: whatever the tag resolves to now
@@ -144,8 +147,10 @@ pin_guarded() {
       echo "  Pinning the new digest would make the seed refuse its own container; its" >&2
       echo "  wizard walk has to be re-derived first. To take it anyway:" >&2
       echo "    ./pin-images.sh --move $1" >&2
+      line "$1" "$2" "$guarded" "held: the tag has moved on; $3 guards on this digest"
+    else
+      line "$1" "$2" "$guarded"
     fi
-    line "$1" "$2" "$guarded"
   fi
 }
 
@@ -196,9 +201,10 @@ trap 'rm -f "$tmp"' EXIT
     'TEAMCITY_AGENT_IMAGE below is pinned by version tag to stay on the server line; bump that tag too.'
   # The build agent beside it (#264), unguarded: it registers through the
   # supported `SERVER_URL` protocol, no wizard. But it must not be AHEAD of the
-  # server -- an agent newer than the server is refused at registration -- and
-  # `latest` is a 2026.2 agent while the guarded server is 2026.1.3. So the
-  # agent's tag is the server's version, spelled out, and moves with it: after
+  # server -- an agent newer than the server is refused at registration (#267's
+  # finding; not re-run since) -- and on 2026-09-02 `latest` was already a
+  # 2026.2 agent against the guarded 2026.1.3 server. So the agent's tag is the
+  # server's version, spelled out by hand, and moves with it: after
   # `--move TEAMCITY_IMAGE` and the re-derivation it names, set this tag to
   # the new server's version in the same change.
   pin TEAMCITY_AGENT_IMAGE jetbrains/teamcity-agent:2026.1.3
