@@ -893,6 +893,7 @@ test("a sync run ending with the room still in the census is not announced", asy
   expect(toasts.items).toEqual([]);
   expect(location.hash).toBe("#/ctx/proj:mock:PAY");
   expect(roomName()).toBe("Payments Platform");
+});
 
 /**
  * Escape's rung 4, end to end (#250): the key on the window reaches
