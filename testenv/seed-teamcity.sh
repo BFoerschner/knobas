@@ -159,10 +159,23 @@ wizard_end() { [ -n "$WORK" ] && rm -rf "$WORK"; WORK=; }
 # token ($CSRF), the maintenance stage it reports ($STAGE, empty once the
 # server has left maintenance and /mnt redirects away), and whether that stage
 # is one the server is working through on its own ($ACTIVE=true, the page's
-# `BS.Maintenance.activeStage`) or one waiting for a button.
+# `BS.Maintenance.activeStage`) or one waiting for a button. $WIZARD_CODE is
+# the HTTP status, which is how "no stage" is told apart: a 3xx is the
+# redirect out of maintenance, anything else is a page to keep polling.
+#
+# A refused or dropped connection is retried here, not reported: the server
+# restarts its web application between stages (and OrbStack accepts the TCP
+# connection before Tomcat listens, answering nothing), and the page comes
+# back a few seconds later. Sixty seconds of nothing at all is the failure.
 wizard_read() {  # wizard_read <path>
-  PAGE=$(curl -sS --max-time 60 -c "$WORK/jar" -b "$WORK/jar" "$TC_URL$1" | tr '\n' ' ') \
-    || die "GET $1 failed"
+  _i=0
+  until WIZARD_CODE=$(curl -sS --max-time 60 -c "$WORK/jar" -b "$WORK/jar" \
+                           -o "$WORK/page" -w '%{http_code}' "$TC_URL$1" 2>/dev/null); do
+    _i=$((_i + 1))
+    [ "$_i" -lt 12 ] || die "GET $1 answered nothing for 60s"
+    sleep 5
+  done
+  PAGE=$(tr '\n' ' ' < "$WORK/page")
   CSRF=$(printf '%s' "$PAGE" | grep -o 'name="tc-csrf-token" content="[^"]*"' \
          | head -1 | sed 's/.*content="//; s/"$//')
   STAGE=$(printf '%s' "$PAGE" | grep -o 'Stage: [A-Z_]*' | head -1 | sed 's/^Stage: //')
@@ -211,15 +224,17 @@ walk_wizard() {
   _waiting=0
   while :; do
     _n=$((_n + 1))
-    [ "$_n" -le 120 ] || die "still in maintenance stage '$STAGE' after 600s"
+    [ "$_n" -le 120 ] || die "still in maintenance (stage '$STAGE', HTTP $WIZARD_CODE) after 600s"
     wizard_read /mnt
-    if [ "$ACTIVE" = "true" ]; then
-      # The server is working (CREATE_NEW_DB, APPLICATION_STARTING, ...).
+    if [ "$ACTIVE" = "true" ] || { [ -z "$STAGE" ] && [ "${WIZARD_CODE%??}" != "3" ]; }; then
+      # The server is working (CREATE_NEW_DB, APPLICATION_STARTING, ...), or
+      # answered a page with no stage that is not the redirect out -- a 503
+      # from a web application that is still coming up.
       [ "$_waiting" -eq 1 ] || { printf 'seed-teamcity: the server is working '; _waiting=1; }
-      printf '[%s] ' "$STAGE"; sleep 5; continue
+      printf '[%s] ' "${STAGE:-HTTP $WIZARD_CODE}"; sleep 5; continue
     fi
     [ "$_waiting" -eq 0 ] || { echo; _waiting=0; }
-    if [ -z "$STAGE" ]; then break; fi
+    if [ -z "$STAGE" ]; then break; fi   # 3xx: redirected out of maintenance
     case "$STAGE" in
       FIRST_START_SCREEN)
         say "first start: proceed with a new installation in /data/teamcity_server/datadir"
@@ -321,10 +336,14 @@ record() {  # record <key> <json>
 guard_image knobas-teamcity "$VERIFIED_TEAMCITY_IMAGE" TEAMCITY
 
 # Any HTTP answer at all: the first one on a fresh volume is a 503 carrying
-# the first-start page, and that is the state the wizard is driven from.
+# the first-start page, and that is the state the wizard is driven from. curl
+# prints 000 through -w when the connection was accepted and then dropped,
+# which is what the port does for the seconds between the container starting
+# and Tomcat listening; that is not an answer.
 printf 'seed-teamcity: waiting for teamcity '
 _i=0
-until [ "$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' "$TC_URL/" 2>/dev/null || echo 000)" != "000" ]; do
+until _code=$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' "$TC_URL/" 2>/dev/null) \
+      && [ "$_code" != "000" ]; do
   _i=$((_i + 1))
   [ "$_i" -lt 120 ] || { echo; die "teamcity never answered on 8111 (600s) -- is 'docker compose --profile real-teamcity up -d teamcity teamcity-agent' running?"; }
   printf '.'; sleep 5
