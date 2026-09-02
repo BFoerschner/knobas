@@ -261,9 +261,6 @@ beforeEach(() => {
   contextRows = [];
   health.replace([]);
   toasts.items = [];
-  // The router is the window's one instance and the address outlives a test,
-  // so each starts from the room every session starts in.
-  location.hash = "#/ctx/all";
   target = document.createElement("div");
   document.body.append(target);
 });
@@ -621,6 +618,8 @@ test("leaving the wizard by a room tab still gets the demo corpus its project ro
     "the demo load's terminal sync:state never reached the switcher",
   );
   expect(tabLabels()).toEqual(["All work", "mock", "Payments Platform"]);
+});
+
 /** A finished sync run for `mock` -- the event that makes the projects store re-list. */
 function syncEnded(): void {
   emit(EVENTS.syncState, {
