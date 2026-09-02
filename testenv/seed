@@ -5,10 +5,12 @@
 #   ./seed             seed Gitea and Uptime Kuma, then print the adapter env vars
 #   ./seed --env       print the env vars for an already-seeded environment
 #   ./seed --atlassian set up the opt-in real Jira and Confluence containers
+#   ./seed --teamcity  set up the opt-in real TeamCity server and its agent
 #
-# `--atlassian` is separate rather than part of the default run because those
-# two live behind the `real-atlassian` profile, are not up unless you asked for
-# them, and run on 3-hour timebomb licences -- see seed-atlassian.sh.
+# `--atlassian` and `--teamcity` are separate rather than part of the default
+# run because those products live behind opt-in profiles and are not up unless
+# you asked for them; the Atlassian pair also runs on 3-hour timebomb licences
+# -- see seed-atlassian.sh and seed-teamcity.sh.
 #
 # SEED_EXACT_PR_NUMBERS=0 skips the ~140 placeholder issues per repo that make
 # the fixture's pull request numbers come out exactly; see README.md.
@@ -44,12 +46,21 @@ print_env() {
     echo "export KNOBAS_CONFLUENCE_USER=$(jq -r '.confluence.user' "$STATE")"
     echo "export KNOBAS_CONFLUENCE_PASSWORD=$(jq -r '.confluence.password' "$STATE")"
   fi
+  # Only if ./seed --teamcity has run. These are the variables `just
+  # teamcity-live` reads, which the repo-root .env.example points at JetBrains'
+  # public guest instance by default; printing them here does not change that
+  # default, it only makes the local server reachable the same way.
+  if [ "$(jq -r 'has("teamcity")' "$STATE")" = "true" ]; then
+    echo "export KNOBAS_TEAMCITY_URL=$(jq -r '.teamcity.url' "$STATE")"
+    echo "export KNOBAS_TEAMCITY_TOKEN=$(jq -r '.teamcity.token' "$STATE")"
+  fi
 }
 
 if [ "${1:-}" = "--env" ]; then print_env; exit 0; fi
 if [ "${1:-}" = "--atlassian" ]; then exec ./seed-atlassian.sh; fi
+if [ "${1:-}" = "--teamcity" ]; then exec ./seed-teamcity.sh; fi
 [ $# -eq 0 ] || {
-  echo "seed: unknown argument '$1'; usage: ./seed [--env|--atlassian]" >&2; exit 2; }
+  echo "seed: unknown argument '$1'; usage: ./seed [--env|--atlassian|--teamcity]" >&2; exit 2; }
 
 for tool in docker curl jq; do
   command -v "$tool" >/dev/null || { echo "seed: $tool is required" >&2; exit 1; }
