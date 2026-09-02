@@ -270,7 +270,9 @@ mod tests {
         assert!(is_default_branch("refs/heads/main"));
         assert!(is_default_branch("<default>"));
         assert!(!is_default_branch("feature/PAY-231-sepa-retry"));
-        assert!(!is_default_branch("refs/heads/fix/PAY-228-partial-refund-drift"));
+        assert!(!is_default_branch(
+            "refs/heads/fix/PAY-228-partial-refund-drift"
+        ));
         let flags: Vec<(u64, bool)> = builds().iter().map(|b| (b.id, b.default_branch)).collect();
         assert_eq!(flags, [(412, true), (1187, false), (1188, false)]);
     }

@@ -1074,7 +1074,9 @@ mod tests {
                     locator.branch_any
                         || locator.default_filter == Some(false)
                         || locator.state == Some(StateFilter::InFlight)
-                        || r.raw.get("defaultBranch").and_then(serde_json::Value::as_bool)
+                        || r.raw
+                            .get("defaultBranch")
+                            .and_then(serde_json::Value::as_bool)
                             != Some(false)
                 })
                 .filter(|r| {
@@ -1186,7 +1188,12 @@ mod tests {
     /// the one the fixture's own failed build belongs to: 1187 ran on
     /// `feature/PAY-231-sepa-retry`. `branch:default:any` is what puts it
     /// back on the two item-producing queries (issue #266).
-    fn feature_branch_build(id: i64, type_id: &str, project: &str, state: &str) -> serde_json::Value {
+    fn feature_branch_build(
+        id: i64,
+        type_id: &str,
+        project: &str,
+        state: &str,
+    ) -> serde_json::Value {
         let mut b = build(id, type_id, project, state);
         b["branchName"] = serde_json::json!("feature/PAY-231-sepa-retry");
         b["defaultBranch"] = serde_json::json!(false);
@@ -1768,7 +1775,9 @@ mod tests {
         );
         assert_eq!(
             widened,
-            ["state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,branch:default:any,count:100"],
+            [
+                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,branch:default:any,count:100"
+            ],
             "one request: the server answered short and said there was nothing after it"
         );
     }
@@ -1805,7 +1814,9 @@ mod tests {
         assert_eq!(items.iter().filter(|i| i.kind == "build").count(), 49);
         assert_eq!(
             widened,
-            ["state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,branch:default:any,count:100"]
+            [
+                "state:finished,sinceBuild:(id:0),canceled:any,failedToStart:any,branch:default:any,count:100"
+            ]
         );
     }
 
@@ -2775,13 +2786,19 @@ mod tests {
         let (items, cursor) = run(&rest, &TeamCityConfig::default(), None).await;
         assert_eq!(
             keys(&items),
-            ["buildType:Payout_IntegrationTests", "build:400", "build:1187"],
+            [
+                "buildType:Payout_IntegrationTests",
+                "build:400",
+                "build:1187"
+            ],
             "a finished build on a feature branch is mirrored like one on the default branch"
         );
         assert_eq!(cursor, r#"{"v":1,"since_build_id":1187}"#);
         assert!(
-            rest.calls().iter().any(|c| c.starts_with("buildType:(id:Payout_IntegrationTests)")
-                && c.contains("branch:default:any")),
+            rest.calls()
+                .iter()
+                .any(|c| c.starts_with("buildType:(id:Payout_IntegrationTests)")
+                    && c.contains("branch:default:any")),
             "the per-configuration query carries branch:default:any: {:?}",
             rest.calls()
         );
@@ -2841,7 +2858,10 @@ mod tests {
             ],
         );
         let (items, cursor) = run(&rest, &TeamCityConfig::default(), None).await;
-        assert_eq!(keys(&items), ["buildType:Payout_Build", "build:400", "build:1188"]);
+        assert_eq!(
+            keys(&items),
+            ["buildType:Payout_Build", "build:400", "build:1188"]
+        );
         assert_eq!(
             cursor, r#"{"v":1,"since_build_id":400}"#,
             "the running build holds the watermark below itself"

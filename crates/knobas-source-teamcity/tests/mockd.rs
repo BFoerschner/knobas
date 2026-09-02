@@ -240,7 +240,10 @@ async fn a_mirrored_build_carries_what_the_ui_and_the_index_read() {
         it.web_url
             .as_deref()
             .expect("the adapter can say where a human reads this")
-            .ends_with(&format!("/buildConfiguration/{}/{}", failed.cfg, failed.num)),
+            .ends_with(&format!(
+                "/buildConfiguration/{}/{}",
+                failed.cfg, failed.num
+            )),
         "{:?}",
         it.web_url
     );

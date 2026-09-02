@@ -207,7 +207,9 @@ async fn the_default_filter_narrows_to_the_default_branch_and_branch_default_any
     let ask = async |locator: &str| -> Vec<u64> {
         let (st, v) = tc(
             &s.base_url(),
-            &format!("/app/rest/builds?locator={locator}&fields=count,build(id,branchName,defaultBranch)"),
+            &format!(
+                "/app/rest/builds?locator={locator}&fields=count,build(id,branchName,defaultBranch)"
+            ),
         )
         .await;
         assert_eq!(st, 200, "{locator}: {v}");
@@ -248,20 +250,29 @@ async fn the_default_filter_narrows_to_the_default_branch_and_branch_default_any
     );
     // The in-flight shapes answer every branch unasked: 1188 runs on the
     // feature branch and comes back without a dimension.
-    assert_eq!(ask("state:(queued:true,running:true),count:100").await, vec![1188]);
+    assert_eq!(
+        ask("state:(queued:true,running:true),count:100").await,
+        vec![1188]
+    );
     assert_eq!(ask("state:running,count:100").await, vec![1188]);
     assert_eq!(
         ask("state:(queued:true,running:true),branch:default:any,count:100").await,
         vec![1188]
     );
     // `defaultFilter:false` opens everything, this facet included.
-    assert_eq!(ask("defaultFilter:false,count:100").await, vec![1188, 1187, 412]);
+    assert_eq!(
+        ask("defaultFilter:false,count:100").await,
+        vec![1188, 1187, 412]
+    );
     // The other spellings TeamCity accepts, and the narrowing ones.
     assert_eq!(
         ask("state:finished,branch:(default:any),count:100").await,
         vec![1187, 412]
     );
-    assert_eq!(ask("state:finished,branch:default:true,count:100").await, vec![412]);
+    assert_eq!(
+        ask("state:finished,branch:default:true,count:100").await,
+        vec![412]
+    );
     assert_eq!(
         ask("state:finished,branch:default:false,count:100").await,
         vec![1187]
@@ -276,7 +287,12 @@ async fn the_default_filter_narrows_to_the_default_branch_and_branch_default_any
         .as_array()
         .unwrap()
         .iter()
-        .map(|b| (b["id"].as_u64().unwrap(), b["defaultBranch"].as_bool().unwrap()))
+        .map(|b| {
+            (
+                b["id"].as_u64().unwrap(),
+                b["defaultBranch"].as_bool().unwrap(),
+            )
+        })
         .collect();
     assert_eq!(flags, [(1188, false), (1187, false), (412, true)]);
     s.assert_no_violations();
@@ -300,10 +316,12 @@ async fn a_queued_build_has_no_number_and_no_status() {
     assert_eq!(b["state"], "queued");
     assert!(b.get("number").is_none(), "{b}");
     assert!(b.get("status").is_none(), "{b}");
-    assert_eq!(b["defaultBranch"], true, "queued without a branch: the default one");
+    assert_eq!(
+        b["defaultBranch"], true,
+        "queued without a branch: the default one"
+    );
 
-    s.state()
-        .finish_build(id, knobas_mockd::TcStatus::Success);
+    s.state().finish_build(id, knobas_mockd::TcStatus::Success);
     let (_, after) = tc(
         &s.base_url(),
         &format!("/app/rest/builds/id:{id}?fields=$long"),
@@ -324,7 +342,11 @@ async fn a_queued_build_has_no_number_and_no_status() {
 async fn web_urls_take_the_build_configuration_shape() {
     let s = spawn_mock_teamcity().await;
     let base = s.base_url();
-    let (_, b) = tc(&base, "/app/rest/builds/id:1187?fields=webUrl,buildType(webUrl)").await;
+    let (_, b) = tc(
+        &base,
+        "/app/rest/builds/id:1187?fields=webUrl,buildType(webUrl)",
+    )
+    .await;
     assert_eq!(
         b["webUrl"],
         format!("{base}/buildConfiguration/Payout_IntegrationTests/1187")
@@ -1172,7 +1194,8 @@ async fn a_facet_dimension_re_opens_only_its_own_class() {
         "`failedToStart:any` must not open the canceled facet: {failed_only:?}"
     );
 
-    let both = page("state:finished,branch:default:any,canceled:any,failedToStart:any,count:100").await;
+    let both =
+        page("state:finished,branch:default:any,canceled:any,failedToStart:any,count:100").await;
     assert!(
         both.contains(&1187) && both.contains(&stillborn),
         "{both:?}"
