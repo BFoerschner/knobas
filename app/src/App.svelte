@@ -89,8 +89,9 @@
    * and leaves the memory as it was, so the room can also vanish while the
    * reader is elsewhere and be announced on their return (#257). The guard
    * keeps the rest silent -- a different room on return (`before.ctx !==
-   * ctx`), the same room still there (`room !== null`), and nothing to
-   * return to (`before === null`).
+   * ctx`), the same room still there (`room !== null`), one that never
+   * resolved (`before.room === null`), and nothing to return to (`before ===
+   * null`).
    *
    * The address is replaced, not pushed: the dead one must not be one step
    * back. A detail open over the vanished room stays open -- the route keeps

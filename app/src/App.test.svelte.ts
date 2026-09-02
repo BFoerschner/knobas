@@ -270,6 +270,16 @@ function press(label: string): void {
   flushSync();
 }
 
+/**
+ * How many source rows the sources view has drawn, counted by their *Delete*
+ * buttons -- the one control every row carries whatever its state.
+ */
+function deleteButtons(): number {
+  return [...target.querySelectorAll("button")].filter(
+    (button) => button.textContent?.trim() === "Delete",
+  ).length;
+}
+
 const { default: App } = await import("./App.svelte");
 const { EVENTS } = await import("./lib/ipc");
 const { health } = await import("./lib/shell/health.svelte");
@@ -1001,10 +1011,7 @@ test("returning to a source room that vanished while the reader was in the sourc
   await until(() => tabLabels().includes("gitea"), "the shell never drew the source room");
 
   router.go("#/sources");
-  await until(
-    () => [...target.querySelectorAll("button")].filter((b) => b.textContent?.trim() === "Delete").length === 2,
-    "the sources view never listed its rows",
-  );
+  await until(() => deleteButtons() === 2, "the sources view never listed its rows");
   expect(tabLabels(), "opening the view is not a removal").toEqual(["All work", "gitea", "mock"]);
   expect(router.ctx, "the room the reader left is what back() goes to").toBe("src:gitea");
 
@@ -1041,10 +1048,7 @@ test("returning to a source room that still exists after a detour through the so
   await until(() => tabLabels().includes("gitea"), "the shell never drew the source room");
 
   router.go("#/sources");
-  await until(
-    () => [...target.querySelectorAll("button")].filter((b) => b.textContent?.trim() === "Delete").length === 2,
-    "the sources view never listed its rows",
-  );
+  await until(() => deleteButtons() === 2, "the sources view never listed its rows");
 
   router.back();
   flushSync();
@@ -1069,10 +1073,7 @@ test("returning from the sources view to a different room that exists is silent 
   await until(() => tabLabels().includes("mock"), "the shell never drew the source room");
 
   router.go("#/sources");
-  await until(
-    () => [...target.querySelectorAll("button")].filter((b) => b.textContent?.trim() === "Delete").length === 2,
-    "the sources view never listed its rows",
-  );
+  await until(() => deleteButtons() === 2, "the sources view never listed its rows");
   sourceRows = [summary("gitea")];
   press("Delete");
   press("Delete source");
@@ -1102,14 +1103,16 @@ test("a dead address for a room the reader never stood in stays silent even thou
   await until(() => tabLabels().includes("mock"), "the shell never drew the source room");
 
   router.go("#/sources");
-  await until(
-    () => [...target.querySelectorAll("button")].filter((b) => b.textContent?.trim() === "Delete").length === 2,
-    "the sources view never listed its rows",
-  );
+  await until(() => deleteButtons() === 2, "the sources view never listed its rows");
+  // One removal, and a re-list that carries neither: the authoritative set
+  // is what forgets, so `gitea` leaves with `mock` without its own Delete.
   sourceRows = [];
   press("Delete");
   press("Delete source");
-  await until(() => tabLabels().length === 1, "the removals never reached the switcher");
+  await until(() => tabLabels().length === 1, "the emptied re-list never reached the switcher");
+  expect(toasts.items.map((toast) => toast.text), "the button removed the room the reader left").toEqual([
+    "mock removed.",
+  ]);
   toasts.items = [];
 
   router.go("#/ctx/src:gitea");
