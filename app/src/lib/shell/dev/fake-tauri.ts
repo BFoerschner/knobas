@@ -460,9 +460,6 @@ function row(
  * as the stems the rule actually emits. Every end is an entity the
  * corpus holds, so each is openable -- `linkEnd` throws otherwise, at read
  * time, which is where a dangling fixture row would be noticed.
- *
- * `total` is the count before `limit`, never `rows.length`: it is the number
- * the tray's heading shows.
  */
 const FAKE_SUGGESTIONS: LinkRow[] = [
   proposal(1, "mock:payout-service#318", "mock:PAY-231", "build_parameter_key", "exact_key",
@@ -510,7 +507,11 @@ function linkEnd(entity_id: string): LinkEnd {
   return { entity_id, kind: entry.kind, title: entry.title, deleted_at: entry.deleted_at };
 }
 
-/** `room_suggestions`: the proposals still waiting, newest first, scoped like `list_entities`. */
+/**
+ * `room_suggestions`: the proposals still waiting, newest first, scoped like
+ * `list_entities`. `total` is the count before `limit`, never `rows.length`:
+ * it is the number the tray's heading shows.
+ */
 function roomSuggestions(args: Record<string, unknown>): SuggestionPage {
   // The fixture has no link graph, so a stored context's room has nothing to
   // propose -- the same answer `context_members` and `list_entities` give.

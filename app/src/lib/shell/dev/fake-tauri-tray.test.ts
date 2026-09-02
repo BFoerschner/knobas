@@ -33,12 +33,23 @@ function render() {
   return { target, app };
 }
 
-/** Wait for the tray's heading to read `text`, flushing Svelte each poll. */
+/**
+ * Wait for the tray's heading to read `text`, flushing Svelte each poll.
+ *
+ * The budget is the one `App.test.svelte.ts`'s `until` carries, for its
+ * reason (#86): how long the fixture's promise chain takes to settle is a
+ * property of the machine, and this one runs parallel cargo builds. Under
+ * vitest's own 5 s test timeout on purpose, so a heading that never arrives
+ * fails naming the text it waited for rather than as a bare timeout.
+ */
 async function heading(target: HTMLElement, text: string) {
-  await vi.waitFor(() => {
-    flushSync();
-    expect(target.querySelector(".cnt")?.textContent).toBe(text);
-  });
+  await vi.waitFor(
+    () => {
+      flushSync();
+      expect(target.querySelector(".cnt")?.textContent).toBe(text);
+    },
+    { timeout: 3_000, interval: 5 },
+  );
 }
 
 test("a room under ?fake-ipc draws proposals, not a red line, and answering one drops the count", async () => {
