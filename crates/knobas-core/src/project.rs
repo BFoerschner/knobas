@@ -30,8 +30,11 @@
 //! `a_whitespace_only_project_key_contributes_nothing`,
 //! `a_record_with_no_project_at_all_contributes_nothing` and
 //! `a_project_with_no_readable_name_is_reported_by_its_key` in
-//! `knobas-core/tests/projects.rs`, and again for the build configuration's
-//! own spelling (#232) by the `build_configuration` tests beside them.
+//! `knobas-core/tests/projects.rs`; and again for the build configuration's
+//! own spelling (#232) by
+//! `a_build_configuration_with_no_readable_project_contributes_nothing`,
+//! `a_build_configuration_with_no_readable_name_is_reported_by_its_key` and
+//! `a_top_level_project_id_on_any_other_kind_contributes_nothing` beside them.
 //!
 //! # Why a census rather than a room's own scan
 //!

@@ -42,9 +42,12 @@ fn teamcity(project: serde_json::Value) -> serde_json::Value {
 /// the identity half is fixed so a fixture cannot mistake one for the other.
 fn build_config(project: serde_json::Value) -> serde_json::Value {
     let mut raw = serde_json::json!({ "id": "Payout_Build", "name": "Build" });
-    if let (Some(raw), Some(project)) = (raw.as_object_mut(), project.as_object()) {
-        raw.extend(project.iter().map(|(k, v)| (k.clone(), v.clone())));
-    }
+    let project = project
+        .as_object()
+        .expect("the project half of a configuration is an object");
+    raw.as_object_mut()
+        .expect("the identity half is an object")
+        .extend(project.iter().map(|(k, v)| (k.clone(), v.clone())));
     raw
 }
 
@@ -255,7 +258,7 @@ async fn a_build_configurations_own_top_level_words_are_read_for_its_kind() {
 
 /// Miss direction, for the third arm: a configuration whose top-level
 /// `projectId` is absent, blank, whitespace-only or not a string contributes
-/// no project -- the same four refusals the Jira path is pinned by above,
+/// no project -- the same four refusals the Jira path is pinned by below,
 /// all through the one `string_at!`, so the new path cannot be laxer than
 /// the old ones.
 #[tokio::test]
@@ -338,8 +341,10 @@ async fn a_build_configuration_with_no_readable_name_is_reported_by_its_key() {
 /// A build and a configuration of the same project are one project, not two:
 /// the two arms spell one fact in two places, and the census keys on the
 /// value, not on which arm read it. The name is the configuration's here
-/// because a configuration carries no date and the build is dated older, so
-/// the newest readable name wins the way the rename test says it does.
+/// because a configuration carries no date, so its `synced_at` stands in,
+/// and the build is touched older -- so the newest readable name wins, the
+/// way `a_renamed_project_stays_one_project_under_its_newest_name` says it
+/// does.
 #[tokio::test]
 async fn a_build_and_its_configuration_are_one_project() {
     let pool = scratch().await;
