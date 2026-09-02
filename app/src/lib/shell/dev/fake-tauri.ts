@@ -392,11 +392,20 @@ const CORPUS: {
     num: 318,
     status: "failed",
     branch: "feat/PAY-231-idempotent-retry",
+    // The build's parameters as a build source mirrors them into `body_text`
+    // (`knobas_source_teamcity::map::build_item`): the branch, the status, the
+    // trigger. That blob is what `build_parameter_key` reads.
+    description: "branch feat/PAY-231-idempotent-retry, status failed, triggered by a push",
   }),
+  // The page shares enough of PAY-231's vocabulary to clear `similar_text`'s
+  // floor of five stems, so the `similarity` proposal below is one the real
+  // detector would make of this pair rather than a badge painted on for QA.
   row("mock:ENG-SEPA", "page", "SEPA retry design", "2026-08-20T15:30:00Z", "priya", {
     space: "ENG",
     id: "ENG-SEPA",
     section: "Payments",
+    description:
+      "How the payout scheduler retries failed SEPA payouts: the retry window, the 409 on a replayed payout, and the mandate id as the idempotency key.",
   }),
   // The §3a case: no adapter declares this kind, and it still has to work.
   row("mock:INC-1", "incident", "Payout queue backed up for 40 minutes", "2026-08-22T08:05:00Z", "priya", {
@@ -446,7 +455,9 @@ function row(
  * two `exact_key` rows from the records that carry PAY-231's key, and one
  * `similarity` guess from the page that shares the ticket's vocabulary. The
  * similarity row runs page → ticket because `similar_text` orders a pair by
- * entity id, and `ENG-SEPA` sorts before `PAY-231`. Every end is an entity the
+ * entity id, and `ENG-SEPA` sorts before `PAY-231`; its reason names the
+ * first four shared words the way the rule does, as words here rather than
+ * as the stems the rule actually emits. Every end is an entity the
  * corpus holds, so each is openable -- `linkEnd` throws otherwise, at read
  * time, which is where a dangling fixture row would be noticed.
  *
@@ -459,7 +470,7 @@ const FAKE_SUGGESTIONS: LinkRow[] = [
   proposal(2, "mock:9f2c1ab", "mock:PAY-231", "commit_message_key", "exact_key",
     "the commit message mentions PAY-231", "2026-08-22T14:30:02Z"),
   proposal(3, "mock:ENG-SEPA", "mock:PAY-231", "similar_text", "similarity",
-    "both mention retry, sepa", "2026-08-22T14:30:01Z"),
+    "both mention 409, fail, idempotent, payout", "2026-08-22T14:30:01Z"),
 ];
 
 /** The proposals answered this session, by link id. Accepted or dismissed is
@@ -472,7 +483,7 @@ function proposal(
   from_id: string,
   to_id: string,
   rule: string,
-  rule_class: "exact_key" | "similarity",
+  rule_class: Exclude<LinkRow["rule_class"], "source_relation" | null>,
   reason: string,
   created_at: string,
 ): LinkRow {
