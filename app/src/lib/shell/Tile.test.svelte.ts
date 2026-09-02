@@ -65,7 +65,13 @@ function deferred<T>() {
 function render(sources: string[] = []) {
   const target = document.createElement("div");
   document.body.append(target);
-  const props = $state({ spec: SPEC, sources, miniBoardLayout: "columns" as const, onopen: vi.fn() });
+  const props = $state({
+    spec: SPEC,
+    sources,
+    miniBoardLayout: "columns" as const,
+    onopen: vi.fn(),
+    onlayout: vi.fn(),
+  });
   const app = mount(Tile, { target, props });
   flushSync();
   return {
@@ -252,6 +258,21 @@ test("a row reports which entity was opened", async () => {
   expect(screen.props.onopen).toHaveBeenCalledWith(
     expect.objectContaining({ entity_id: "mock:PAY-1" }),
   );
+
+  screen.done();
+});
+
+/**
+ * The layout control is the mini board's, and only the Tickets tile draws a
+ * mini board (#245): a list tile's header offers no layout to choose.
+ */
+test("a list tile's header carries no layout control", async () => {
+  answer = () => Promise.resolve({ rows: [row("PAY-1")], total: 1 });
+  const screen = render();
+  await vi.waitFor(() => expect(screen.rows()).toHaveLength(1));
+  flushSync();
+
+  expect(screen.target.querySelectorAll(".tile-h .acts button")).toHaveLength(0);
 
   screen.done();
 });

@@ -24,11 +24,25 @@
   import SuggestionTray from "./SuggestionTray.svelte";
   import Tile from "./Tile.svelte";
   import { contextById, type RoomContext } from "./contexts";
+  import { miniBoardOverrides, type MiniBoardOverrides } from "./mini-board-overrides.svelte";
   import { kindRegistry } from "./kind-registry.svelte";
   import { tilesFor } from "./kinds";
   import { hashFor, type Router } from "./router.svelte";
 
-  let { router, contexts }: { router: Router; contexts: RoomContext[] } = $props();
+  let {
+    router,
+    contexts,
+    overrides = miniBoardOverrides,
+  }: {
+    router: Router;
+    contexts: RoomContext[];
+    /**
+     * The reader's mini board layout overrides, per room, for the session
+     * (#245). The window's store by default; a test builds its own, as the
+     * other stores' tests do, so nothing leaks between rooms it never drew.
+     */
+    overrides?: MiniBoardOverrides;
+  } = $props();
 
   /**
    * How deep the room looks to find out which kinds it holds.
@@ -42,6 +56,13 @@
   const SCAN = 200;
 
   const context = $derived(contextById(router.ctx, contexts));
+  /**
+   * This room's override of its mini board default, if any (#245).
+   *
+   * Read here and handed down, never by the tile: the store is keyed by the
+   * room, and the room is the one thing that knows which room this is.
+   */
+  const miniBoardOverride = $derived(overrides.overrideFor(context.id));
   /** The entity the address has open over this room, if any. */
   const detail = $derived(router.route.view === "room" ? router.route.detail : null);
 
@@ -201,7 +222,9 @@
           ctx={context.filter.context}
           project={context.filter.project}
           miniBoardLayout={context.miniBoardLayout}
+          {miniBoardOverride}
           onopen={open}
+          onlayout={(layout) => overrides.choose(context, layout)}
         />
       {/each}
     </div>

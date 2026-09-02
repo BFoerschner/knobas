@@ -88,6 +88,7 @@ vi.mock("../ipc/entity", () => ({
 const { default: Room } = await import("./Room.svelte");
 const { builtinContexts } = await import("./contexts");
 const { createRouter } = await import("./router.svelte");
+const { createMiniBoardOverrides } = await import("./mini-board-overrides.svelte");
 
 /**
  * Two sources, and the projects their corpus shows (#209).
@@ -123,17 +124,46 @@ function row(kind: string, key: string): EntityRow {
   };
 }
 
-function render(hash: string) {
+function render(hash: string, overrides = createMiniBoardOverrides()) {
   location.hash = hash;
   const router = createRouter();
   const stop = router.start();
   const target = document.createElement("div");
   document.body.append(target);
-  const app = mount(Room, { target, props: { router, contexts: CONTEXTS } });
+  const app = mount(Room, { target, props: { router, contexts: CONTEXTS, overrides } });
   flushSync();
   return {
     target,
     router,
+    overrides,
+    /** The mini board's layout, off its own class (see `MiniBoard.test.svelte.ts`). */
+    layout: () => {
+      const board = target.querySelector(".board");
+      if (!board) return null;
+      return [...board.classList].find((name) => name !== "board") ?? null;
+    },
+    /** Each mini board group as `[heading, count]`, in the order drawn. */
+    groups: () =>
+      [...target.querySelectorAll(".col")].map((col) =>
+        [...col.querySelectorAll(".col-h span")].map((span) => span.textContent ?? ""),
+      ),
+    /** The Tickets tile's layout control: `[word, pressed, refused, reason]` per option. */
+    control: () =>
+      [...target.querySelectorAll<HTMLButtonElement>(".tile-h .acts button")].map((option) => [
+        option.textContent?.trim() ?? "",
+        option.getAttribute("aria-pressed") === "true",
+        option.getAttribute("aria-disabled") === "true",
+        option.getAttribute("title"),
+      ]),
+    /** Press the layout option that carries `label`. */
+    press: (label: string) => {
+      const option = [...target.querySelectorAll<HTMLButtonElement>(".tile-h .acts button")].find(
+        (node) => node.textContent?.trim() === label,
+      );
+      expect(option, `the Tickets tile offers ${label}`).toBeDefined();
+      option!.click();
+      flushSync();
+    },
     tiles: () => [...target.querySelectorAll<HTMLElement>(".tile .tile-h .lab")].map((l) => l.textContent),
     /** The key on each mini-board card, in the order drawn. */
     cards: () => [...target.querySelectorAll<HTMLElement>(".card .mono")].map((k) => k.textContent),
@@ -601,4 +631,184 @@ test("a room hands its own layout to the mini board it draws", async () => {
     "#/ctx/src:jira": "board stacked",
     "#/ctx/proj:jira:PAY": "board columns",
   });
+});
+
+/** A board of `n` distinct statuses, one card each, as the read would give it. */
+function statusBoard(n: number): MiniBoard {
+  return {
+    columns: Array.from({ length: n }, (_, at) => ({
+      status: `S${at + 1}`,
+      cards: [
+        { entity_id: `mock:S${at + 1}`, source_id: "mock", key: `PAY-${at + 1}`, title: `S${at + 1}`, priority: null },
+      ],
+    })),
+    sources: [],
+  };
+}
+
+/** Every room holds a ticket, so every room draws a Tickets tile. */
+function ticketsEverywhere() {
+  answer = (filter) =>
+    Promise.resolve(
+      filter.kinds.length === 0 || filter.kinds.includes("ticket")
+        ? { rows: [row("ticket", "PAY-231")], total: 1 }
+        : { rows: [], total: 0 },
+    );
+}
+
+/**
+ * The wire from the control to the store and back to the board (#245):
+ * pressing the other layout redraws this room's mini board in it, the choice
+ * is the **room's** — walking to another room finds that room's default, and
+ * walking back finds the override still in force — and pressing the room's
+ * own default clears it rather than recording it.
+ *
+ * Both endpoints are tested where they live (`mini-board-overrides`,
+ * `MiniBoard.test.svelte.ts`); what only a mounted room can witness is that
+ * the room keys the store by its own id and hands the answer to its tile. The
+ * second room is a *columns* room on purpose: a store keyed by anything
+ * constant would carry `stacked` into it, and a stacked second room could not
+ * tell.
+ */
+test("a reader's override redraws the mini board, sticks to its room, and clears on the default", async () => {
+  const STATUSES = ["Done", "To Do", "In Progress"];
+  ticketsEverywhere();
+  board = () =>
+    Promise.resolve({
+      columns: STATUSES.map((status) => ({
+        status,
+        cards: [{ entity_id: `mock:${status}`, source_id: "mock", key: status, title: status, priority: null }],
+      })),
+      sources: [],
+    });
+  const GROUPS = [
+    ["Done", "1"],
+    ["To Do", "1"],
+    ["In Progress", "1"],
+  ];
+
+  const screen = render("#/ctx/proj:jira:PAY");
+  await vi.waitFor(() => expect(screen.cards()).toHaveLength(3));
+  await settle();
+  expect(screen.layout()).toBe("columns");
+  expect(screen.control()).toEqual([
+    ["columns", true, false, null],
+    ["stacked", false, false, null],
+  ]);
+
+  screen.press("stacked");
+  expect(screen.layout()).toBe("stacked");
+  expect(screen.groups()).toEqual(GROUPS);
+  expect(screen.control().map(([word, on]) => [word, on])).toEqual([
+    ["columns", false],
+    ["stacked", true],
+  ]);
+
+  // Another columns room: its own default, not this room's override.
+  screen.router.go("#/ctx/proj:jira:OPS");
+  await settle();
+  await vi.waitFor(() => expect(screen.cards()).toHaveLength(3));
+  await settle();
+  expect(screen.layout()).toBe("columns");
+
+  // ...and back: the override waited here.
+  screen.router.go("#/ctx/proj:jira:PAY");
+  await settle();
+  await vi.waitFor(() => expect(screen.cards()).toHaveLength(3));
+  await settle();
+  expect(screen.layout()).toBe("stacked");
+  expect(screen.groups()).toEqual(GROUPS);
+
+  // The room's own default clears the override; nothing is recorded.
+  screen.press("columns");
+  expect(screen.layout()).toBe("columns");
+  expect(screen.groups()).toEqual(GROUPS);
+  expect(screen.overrides.overrideFor("proj:jira:PAY")).toBeUndefined();
+
+  screen.done();
+});
+
+/**
+ * The backstop through the room: a room whose board draws seven statuses is
+ * stacked whatever the reader presses, the control says why, and a refused
+ * press reaches the store no more than it reaches the board.
+ *
+ * A **stacked-default** room on purpose. On a columns room a press that
+ * leaked through would choose the room's own default, which clears, and the
+ * store would look untouched either way; here the leak would record
+ * `columns`, and the last assertion is what sees it.
+ */
+test("a room past six statuses refuses columns with its reason, and records no override", async () => {
+  ticketsEverywhere();
+  board = () => Promise.resolve(statusBoard(7));
+
+  const screen = render("#/ctx/src:jira");
+  await vi.waitFor(() => expect(screen.cards()).toHaveLength(7));
+  await settle();
+
+  expect(screen.layout()).toBe("stacked");
+  expect(screen.control()).toEqual([
+    ["columns", false, true, "7 statuses; columns holds 6"],
+    ["stacked", true, false, null],
+  ]);
+
+  screen.press("columns");
+  expect(screen.layout()).toBe("stacked");
+  expect(screen.overrides.overrideFor("src:jira")).toBeUndefined();
+
+  screen.done();
+});
+
+/**
+ * Where decision 7 meets decision 8 (#245). A reader chose `columns` on a
+ * stacked-default room and the board then grew past six: the override is
+ * kept, stacked is drawn, and the control shows `stacked` pressed with
+ * `columns` refused. Pressing the pressed `stacked` is the reader asking for
+ * the room's own default, and the default clears — so once the board fits
+ * six again the room draws stacked, where a kept override would have drawn
+ * columns. The return trip is what lets the board, not only the store,
+ * witness the clear.
+ *
+ * The store is seeded before the mount because the override predates this
+ * visit: it is what a walk back into the room finds.
+ */
+test("pressing the effective default on a demoted override clears it, seen once the board fits", async () => {
+  ticketsEverywhere();
+  board = () => Promise.resolve(statusBoard(7));
+  const overrides = createMiniBoardOverrides();
+  const source = CONTEXTS.find((context) => context.id === "src:jira")!;
+  expect(source.miniBoardLayout).toBe("stacked");
+  overrides.choose(source, "columns");
+
+  const screen = render("#/ctx/src:jira", overrides);
+  await vi.waitFor(() => expect(screen.cards()).toHaveLength(7));
+  await settle();
+  expect(screen.layout()).toBe("stacked");
+  expect(screen.control()).toEqual([
+    ["columns", false, true, "7 statuses; columns holds 6"],
+    ["stacked", true, false, null],
+  ]);
+
+  screen.press("stacked");
+  expect(screen.layout()).toBe("stacked");
+  expect(overrides.overrideFor("src:jira")).toBeUndefined();
+
+  // Away, and back to a board that fits: the room's default draws, not the
+  // columns the override once asked for.
+  board = () => Promise.resolve(statusBoard(5));
+  screen.router.go("#/ctx/proj:jira:PAY");
+  await settle();
+  await vi.waitFor(() => expect(screen.cards()).toHaveLength(5));
+  board = () => Promise.resolve(statusBoard(6));
+  screen.router.go("#/ctx/src:jira");
+  await settle();
+  await vi.waitFor(() => expect(screen.cards()).toHaveLength(6));
+  await settle();
+  expect(screen.layout()).toBe("stacked");
+  expect(screen.control().map(([word, on, refused]) => [word, on, refused])).toEqual([
+    ["columns", false, false],
+    ["stacked", true, false],
+  ]);
+
+  screen.done();
 });

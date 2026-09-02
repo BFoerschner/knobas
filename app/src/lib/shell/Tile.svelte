@@ -26,7 +26,7 @@
   } from "../ipc/entity";
   import EntityLine from "./EntityLine.svelte";
   import MiniBoardBody from "./MiniBoard.svelte";
-  import { miniBoardLayoutFor, type MiniBoardLayout } from "./contexts";
+  import { columnsRefusal, effectiveMiniBoardLayout, type MiniBoardLayout } from "./contexts";
   import type { TileSpec } from "./kinds";
 
   let {
@@ -35,7 +35,9 @@
     ctx = null,
     project = null,
     miniBoardLayout,
+    miniBoardOverride = undefined,
     onopen,
+    onlayout,
   }: {
     spec: TileSpec;
     /** The room's source filter; `[]` is every source. */
@@ -61,11 +63,29 @@
      */
     miniBoardLayout: MiniBoardLayout;
     /**
+     * The reader's override of that default for this room, if any (#245).
+     *
+     * `undefined` is the ordinary case — a room with no override draws its
+     * default — so this one *is* defaulted, unlike the default itself: a
+     * room that forgot to say has said "no override", which is true.
+     */
+    miniBoardOverride?: MiniBoardLayout | undefined;
+    /**
      * Opening an item. Narrowed to the two fields the room's router needs: a
      * board card is not a mirror row and has no timestamps, and inventing them
      * to satisfy a wider type would be worse than asking for less.
      */
     onopen: (row: Pick<EntityRow, "kind" | "entity_id">) => void;
+    /**
+     * The reader chose a layout from the header's control (#245).
+     *
+     * The tile asks and the room answers, through `miniBoardOverride`: the
+     * choice lives in a store above the room, keyed by room id, and a tile
+     * that kept its own copy would be a second opinion about it. Required
+     * for the same reason `miniBoardLayout` is — a Tickets tile whose control
+     * reached nothing would look right until pressed.
+     */
+    onlayout: (layout: MiniBoardLayout) => void;
   } = $props();
 
   /**
@@ -140,15 +160,35 @@
   /**
    * The layout actually drawn.
    *
-   * The room's answer is the input; the backstop over it needs the column
-   * count, which exists only once the read has landed — so the two meet here,
-   * where the board and the room's answer are both already in hand, and the
-   * body below is told the result rather than working any of it out. Before
-   * the read there is no board to demote.
+   * The room's default and the reader's override are the inputs; the backstop
+   * over them needs the column count, which exists only once the read has
+   * landed — so the three meet here, where the board and both answers are
+   * already in hand, and the body below is told the result rather than
+   * working any of it out. Before the read there is no board to demote, and
+   * a count of none is exactly that.
    */
-  const layout = $derived(
-    board ? miniBoardLayoutFor(miniBoardLayout, board.columns.length) : miniBoardLayout,
-  );
+  const columns = $derived(board ? board.columns.length : 0);
+  const layout = $derived(effectiveMiniBoardLayout(miniBoardLayout, miniBoardOverride, columns));
+
+  /**
+   * The header's layout control (#245): the two layouts, columns first as
+   * the one the tile was designed for, with the effective one pressed.
+   *
+   * Columns past the backstop is **refused rather than removed**: the option
+   * stays in the tab order, carries its reason, and pressing it does nothing,
+   * so a reader who cannot see why the board is stacked can still find out.
+   * A `disabled` button would leave the tab order and the reason with it.
+   * One question, `refusalFor`, decides both the badge and the guard.
+   */
+  const LAYOUTS: readonly MiniBoardLayout[] = ["columns", "stacked"];
+  const refusal = $derived(columnsRefusal(columns));
+  function refusalFor(option: MiniBoardLayout): string | null {
+    return option === "columns" ? refusal : null;
+  }
+  function choose(option: MiniBoardLayout) {
+    if (refusalFor(option) !== null) return;
+    onlayout(option);
+  }
 
   /**
    * The header's count.
@@ -191,7 +231,32 @@
   <div class="tile-h">
     <span class="lab">{spec.label}</span>
     <span class="cnt">{count ?? ""}</span>
-    <span class="acts"></span>
+    <span class="acts">
+      <!--
+        Only the tile that draws a mini board has a layout to choose, and it
+        has one whether or not the read has landed: before it there is no
+        count and so nothing to refuse, and a choice made while reading is
+        kept the same way any other is. The slot stays a flex row rather than
+        becoming the control: #250's maximise button lands beside it.
+      -->
+      {#if isMiniBoard}
+        <span class="seg" role="group" aria-label="Mini board layout">
+          {#each LAYOUTS as option (option)}
+            {@const refused = refusalFor(option)}
+            <button
+              class="seg-b"
+              class:on={layout === option}
+              aria-pressed={layout === option}
+              aria-disabled={refused !== null}
+              title={refused ?? undefined}
+              onclick={() => choose(option)}
+            >
+              {option}
+            </button>
+          {/each}
+        </span>
+      {/if}
+    </span>
   </div>
   <div class="tile-b">
     {#if error}

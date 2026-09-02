@@ -161,7 +161,7 @@ The hub view a switcher entry opens — tiles, activity, tray — every tile han
 _Avoid_: dashboard
 
 **Mini board**:
-The Tickets tile's status-grouped rendering — one group per status, in the source's own words as the mirror holds them. Two layouts, and the room chooses: **columns** side by side for a bounded room (a project room, a stored context), **stacked** one under another for an unbounded one (*All work*, a source room), with a demote-only backstop past six columns. Same groups, same order, same counts in both — the layout is how they are arranged, never what they are. "Board" never stands alone: launcher board, assets board, mini board. (ADR-0009, #210)
+The Tickets tile's status-grouped rendering — one group per status, in the source's own words as the mirror holds them. Two layouts, and the room chooses the **default**: **columns** side by side for a bounded room (a project room, a stored context), **stacked** one under another for an unbounded one (*All work*, a source room). A reader can **override** the default from the tile's header, per room, for the session — the choice sticks to the room until the app restarts, and choosing the room's default again clears it (#245). The demote-only backstop past six columns is unchanged and wins over both: columns is refused with a reason, and an override it demotes is kept for the moment the board fits again. Same groups, same order, same counts in both — the layout is how they are arranged, never what they are. "Board" never stands alone: launcher board, assets board, mini board. (ADR-0009, #210, #245)
 _Avoid_: kanban, board (unqualified)
 
 **Tidewater**:
