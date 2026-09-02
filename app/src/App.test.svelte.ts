@@ -43,7 +43,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { AppStatus } from "./lib/ipc/app";
-import type { Project } from "./lib/ipc/entity";
+import type { ContextRow, Project } from "./lib/ipc/entity";
 import type { CredentialHealth } from "./lib/ipc/sources";
 
 /** Readings `credential_health` hands back, and how many times it was asked. */
@@ -69,6 +69,12 @@ let dbReady = false;
  */
 let projectRows: Project[] = [];
 let projectCalls = 0;
+
+/**
+ * The stored contexts `list_contexts` answers. Mutable for the same reason:
+ * a context made mid-session is a tab that was not there a moment ago.
+ */
+let contextRows: ContextRow[] = [];
 
 /**
  * Whether this profile has never been set up, and whether it is the `--demo`
@@ -128,7 +134,7 @@ vi.mock("./lib/ipc/sources", () => ({
 vi.mock("./lib/ipc/entity", () => ({
   // Contexts (#47): the store imports these at module level, so every mock of
   // this module has to define them even where no context is ever made.
-  listContexts: () => Promise.resolve([]),
+  listContexts: () => Promise.resolve(contextRows),
   // The project census the switcher's third derived population is built from
   // (#209). Answers `projectRows`, so a test can hand the shell a corpus with
   // projects in it and read the rooms back off the rendered tab strip.
@@ -142,6 +148,9 @@ vi.mock("./lib/ipc/entity", () => ({
   listEntities: () => Promise.resolve({ rows: [], total: 0 }),
   getEntity: () => Promise.resolve(null),
   recentActivity: () => Promise.resolve([]),
+  // The detail slide-over reads the board for its status select (#179); an
+  // empty board is what a room with nothing in it answers.
+  miniBoard: () => Promise.resolve({ columns: [], sources: [] }),
 }));
 
 /**
@@ -225,6 +234,7 @@ const { EVENTS } = await import("./lib/ipc");
 const { health } = await import("./lib/shell/health.svelte");
 const { lifecycle } = await import("./lib/shell/lifecycle.svelte");
 const { router } = await import("./lib/shell/router.svelte");
+const { toasts } = await import("./lib/shell/toasts.svelte");
 
 function row(
   source_id: string,
@@ -248,7 +258,9 @@ beforeEach(() => {
   demoProfile = false;
   projectRows = [];
   projectCalls = 0;
+  contextRows = [];
   health.replace([]);
+  toasts.items = [];
   target = document.createElement("div");
   document.body.append(target);
 });
@@ -459,16 +471,7 @@ test("a project that first appears mid-session gets its room without a reload", 
   ).toEqual(["All work", "mock"]);
 
   projectRows = [{ source_id: "mock", key: "OPS", name: "Operations" }];
-  emit(EVENTS.syncState, {
-    source_id: "mock",
-    running: false,
-    run_id: 1,
-    started_at: null,
-    last_finished_at: "2026-09-01T09:00:00Z",
-    last_outcome: null,
-    next_run_at: null,
-    backoff_until: null,
-  });
+  syncEnded();
 
   await until(
     () => tabLabels().includes("Operations"),
@@ -615,4 +618,245 @@ test("leaving the wizard by a room tab still gets the demo corpus its project ro
     "the demo load's terminal sync:state never reached the switcher",
   );
   expect(tabLabels()).toEqual(["All work", "mock", "Payments Platform"]);
+});
+
+/** A finished sync run for `mock` -- the event that makes the projects store re-list. */
+function syncEnded(): void {
+  emit(EVENTS.syncState, {
+    source_id: "mock",
+    running: false,
+    run_id: 1,
+    started_at: null,
+    last_finished_at: "2026-09-01T09:00:00Z",
+    last_outcome: null,
+    next_run_at: null,
+    backoff_until: null,
+  });
+}
+
+/**
+ * A room that stops existing under a standing reader says so (#241).
+ *
+ * Before this the substitution was silent: the room view and the tab strip
+ * both fell back to *All work* by identity (#209), the address bar kept
+ * naming the vanished room, `back()` went to that dead id, and the tab
+ * highlight and the address disagreed until the reader clicked a tab.
+ *
+ * The fixture has the reader standing in the project room *before* the
+ * census drops it -- the room has to have resolved on the previous list, or
+ * the test would be exercising the boot fallback rather than the transition.
+ */
+test("a project room that vanishes under the reader is announced and hands the address to All work", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  projectRows = [{ source_id: "mock", key: "PAY", name: "Payments Platform" }];
+  location.hash = "#/ctx/proj:mock:PAY";
+
+  app = mount(App, { target, props: {} });
+  await until(
+    () => tabLabels().includes("Payments Platform"),
+    "the shell never drew the project room the reader is standing in",
+  );
+  expect(toasts.items, "arriving in a room is not news").toEqual([]);
+  expect(location.hash).toBe("#/ctx/proj:mock:PAY");
+  const entries = history.length;
+
+  // The last item carrying PAY is tombstoned; the census no longer shows it.
+  projectRows = [];
+  syncEnded();
+
+  await until(() => toasts.items.length > 0, "the vanished room was never announced");
+  expect(toasts.items.map((toast) => toast.text)).toEqual([
+    "Payments Platform is no longer a room. Showing All work.",
+  ]);
+  expect(toasts.items[0]?.tone ?? "plain", "this is news, not an error").toBe("plain");
+  expect(tabLabels()).toEqual(["All work", "mock"]);
+  expect(location.hash, "the address bar must stop naming the vanished room").toBe("#/ctx/all");
+  expect(router.ctx).toBe("all");
+  expect(history.length, "replace, not push: the dead address is not one step back").toBe(entries);
+
+  router.back();
+  flushSync();
+  expect(location.hash, "back() must not land on the dead id").toBe("#/ctx/all");
+  expect(toasts.items, "one toast, not one per re-render").toHaveLength(1);
+});
+
+/**
+ * The other derived population, through the same detection site: a source
+ * room goes when the authoritative health list no longer carries the source
+ * (`health.replace`, which is how a delete and the boot seed both land). The
+ * sources view already toasts the removal; this is the reader who was
+ * standing in the room instead.
+ */
+test("a source room that vanishes under the reader is announced too", async () => {
+  dbReady = true;
+  healthRows = [row("gitea", "ok"), row("mock", "ok")];
+  location.hash = "#/ctx/src:gitea";
+
+  app = mount(App, { target, props: {} });
+  await until(() => tabLabels().includes("gitea"), "the shell never drew the source room");
+  expect(toasts.items).toEqual([]);
+  const entries = history.length;
+
+  health.replace([row("mock", "ok")]);
+  flushSync();
+
+  expect(toasts.items.map((toast) => toast.text)).toEqual([
+    "gitea is no longer a room. Showing All work.",
+  ]);
+  expect(tabLabels()).toEqual(["All work", "mock"]);
+  expect(location.hash).toBe("#/ctx/all");
+  expect(history.length).toBe(entries);
+  router.back();
+  flushSync();
+  expect(location.hash).toBe("#/ctx/all");
+});
+
+/** The switcher's own name for the room the reader is in. */
+function roomName(): string {
+  return target.querySelector(".ctx-name .nm")?.textContent?.trim() ?? "";
+}
+
+/**
+ * The trigger is the transition, not the state (#241): a dead address opened
+ * cold never resolved on any list, so nothing was under the reader when it
+ * fell back. #209's rule stands unchanged -- *All work* by identity, and
+ * silently -- and the address is left as it was, since there is no moment
+ * at which the reader was told where they went.
+ *
+ * The census carries another project, so the list this address fails to
+ * resolve on is a full one rather than the empty list every boot starts from.
+ */
+test("a dead address at boot falls back to All work silently and keeps its address", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  projectRows = [{ source_id: "mock", key: "PAY", name: "Payments Platform" }];
+  location.hash = "#/ctx/proj:mock:OPS";
+
+  app = mount(App, { target, props: {} });
+  await until(() => tabLabels().includes("Payments Platform"), "the census never reached the switcher");
+
+  expect(roomName()).toBe("All work");
+  expect(toasts.items, "nothing was under the reader, so there is nothing to announce").toEqual([]);
+  expect(location.hash).toBe("#/ctx/proj:mock:OPS");
+  expect(router.ctx).toBe("proj:mock:OPS");
+});
+
+/**
+ * The other direction of the same transition: a room that has not *arrived*
+ * yet. `openFreshContext` reseeds before it navigates so the tab is normally
+ * there first; this fixture navigates first on purpose, so the moment in
+ * which the address resolves to nothing is the moment under test. An
+ * announcement here would tell the reader their brand-new context is gone.
+ */
+test("a stored context navigated to before its tab arrives is not announced", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  location.hash = "#/ctx/all";
+
+  app = mount(App, { target, props: {} });
+  await until(() => tabLabels().includes("mock"), "the shell never drew the source room");
+
+  router.go("#/ctx/ctx:fresh");
+  flushSync();
+  expect(roomName(), "the fallback flash the reseed-first rule exists for").toBe("All work");
+  expect(toasts.items).toEqual([]);
+  expect(location.hash, "the address must not be rewritten under a room still arriving").toBe(
+    "#/ctx/ctx:fresh",
+  );
+
+  const fresh: ContextRow = {
+    id: "ctx:fresh",
+    kind: "adhoc",
+    title: "Thursday triage",
+    anchor_id: null,
+    created_at: "2026-09-02T09:00:00Z",
+    archived_at: null,
+  };
+  contextRows = [fresh];
+  emit(EVENTS.contextsChanged, fresh);
+  await until(() => tabLabels().includes("Thursday triage"), "the new context never reached the switcher");
+
+  expect(roomName()).toBe("Thursday triage");
+  expect(toasts.items).toEqual([]);
+  expect(location.hash).toBe("#/ctx/ctx:fresh");
+});
+
+/** Rooms that appear are not news either -- only the one the reader is in going. */
+test("a project appearing mid-session while standing in All work is not announced", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  projectRows = [];
+  location.hash = "#/ctx/all";
+
+  app = mount(App, { target, props: {} });
+  await until(() => tabLabels().includes("mock") && projectCalls > 0, "the shell never booted");
+
+  projectRows = [{ source_id: "mock", key: "OPS", name: "Operations" }];
+  syncEnded();
+  await until(() => tabLabels().includes("Operations"), "the new project never reached the switcher");
+
+  expect(toasts.items).toEqual([]);
+  expect(location.hash).toBe("#/ctx/all");
+});
+
+/**
+ * A detail open over the vanished room stays open. The detail's address does
+ * not name the room, so the rewrite has nothing to change in the address bar
+ * and everything to change in what the router remembers: `Esc` now unwinds
+ * to *All work* instead of to the dead id.
+ */
+test("a detail open over a vanished room stays open while the room under it moves to All work", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  projectRows = [{ source_id: "mock", key: "PAY", name: "Payments Platform" }];
+  location.hash = "#/ctx/proj:mock:PAY";
+
+  app = mount(App, { target, props: {} });
+  await until(() => tabLabels().includes("Payments Platform"), "the shell never drew the project room");
+  router.go("#/ticket/mock:PAY-231");
+  flushSync();
+  expect(target.querySelector("aside.detail"), "the fixture needs the slide-over open").not.toBeNull();
+  const entries = history.length;
+
+  projectRows = [];
+  syncEnded();
+  await until(() => toasts.items.length > 0, "the vanished room was never announced");
+
+  expect(toasts.items.map((toast) => toast.text)).toEqual([
+    "Payments Platform is no longer a room. Showing All work.",
+  ]);
+  expect(location.hash, "the detail segment is kept").toBe("#/ticket/mock:PAY-231");
+  expect(target.querySelector("aside.detail"), "the slide-over must survive the room going").not.toBeNull();
+  expect(router.ctx).toBe("all");
+  expect(history.length).toBe(entries);
+  router.back();
+  flushSync();
+  expect(location.hash).toBe("#/ctx/all");
+});
+
+/**
+ * The census re-listing is not the room going: a sync run ends several times
+ * an hour, and every one of them makes the projects store re-list. Only a
+ * list the room is *missing from* is news -- which holds because the store
+ * assigns its rows whole rather than clearing and refilling, so there is no
+ * empty list in between for the detection to see.
+ */
+test("a sync run ending with the room still in the census is not announced", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  projectRows = [{ source_id: "mock", key: "PAY", name: "Payments Platform" }];
+  location.hash = "#/ctx/proj:mock:PAY";
+
+  app = mount(App, { target, props: {} });
+  await until(() => tabLabels().includes("Payments Platform"), "the shell never drew the project room");
+  const census = projectCalls;
+
+  syncEnded();
+  await until(() => projectCalls > census, "the run ending never made the store re-list");
+  await until(() => tabLabels().includes("Payments Platform"), "the re-list never landed");
+
+  expect(toasts.items).toEqual([]);
+  expect(location.hash).toBe("#/ctx/proj:mock:PAY");
+  expect(roomName()).toBe("Payments Platform");
 });

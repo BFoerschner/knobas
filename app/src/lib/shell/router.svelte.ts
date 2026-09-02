@@ -195,8 +195,20 @@ export interface Router {
   readonly route: Route;
   /** The room a detail is drawn over — what `Esc` returns to. */
   readonly ctx: string;
-  /** Navigate. The only navigator: nothing else writes `location.hash`. */
+  /** Navigate. With {@link replace}, the only navigator: nothing else writes `location.hash`. */
   go(hash: string): void;
+  /**
+   * Navigate **in place**: the entry the reader is on is rewritten rather
+   * than a new one pushed, so the address being left is not one step back in
+   * history (#241).
+   *
+   * A `Route` rather than a hash, and the difference is the room: a detail
+   * address does not carry the room it is drawn over, so the only way to hand
+   * an open slide-over to another room is to say which. The address bar then
+   * shows the same detail address it did, and `back()` lands in the room the
+   * route names.
+   */
+  replace(route: Route): void;
   /** One rung of the unwind ladder: back to the room. */
   back(): void;
   /** Install the `hashchange` listener. Returns its teardown. */
@@ -235,6 +247,15 @@ export function createRouter(): Router {
       // repeated navigation would never render. The listener below is for the
       // changes this method did not make — back, forward, a typed address —
       // and `read()` is idempotent, so the duplicate is free.
+      read();
+    },
+    replace(route: Route) {
+      const hash = hashFor(route);
+      if (location.hash !== hash) location.replace(hash);
+      // Set before `read()` rather than left to it: the hash may be the same
+      // detail address as before, which `read()` parses against whatever room
+      // is remembered.
+      if (route.view === "room") state.ctx = route.ctx;
       read();
     },
     back() {

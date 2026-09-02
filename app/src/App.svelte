@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
 
   import InboxView from "./lib/inbox/InboxView.svelte";
   import { inbox } from "./lib/inbox/inbox.svelte";
@@ -8,7 +8,7 @@
   import Room from "./lib/shell/Room.svelte";
   import Shell from "./lib/shell/Shell.svelte";
   import Toast from "./lib/shell/Toast.svelte";
-  import { switcherContexts } from "./lib/shell/contexts";
+  import { ALL_CONTEXT, switcherContexts, type RoomContext } from "./lib/shell/contexts";
   import { contexts as storedContexts } from "./lib/shell/contexts.svelte";
   import { startFollowingMerges } from "./lib/shell/follow-merges";
   import { health } from "./lib/shell/health.svelte";
@@ -51,6 +51,66 @@
       projects.all,
     ),
   );
+
+  /**
+   * The room the reader is standing in, as the switcher's list last resolved
+   * it (#241): the address, and the room it named on that list, or `null`
+   * where it named none. `null` as a whole while the view is not a room.
+   *
+   * Plain state rather than a rune, on purpose: it is the effect below's
+   * memory of its own previous run, and a rune here would make that run
+   * depend on itself.
+   */
+  let standing: { ctx: string; room: RoomContext | null } | null = null;
+
+  /**
+   * A room that stops existing under the reader says so, and hands the
+   * address to *All work* (#241).
+   *
+   * Only derived rooms can vanish -- a source removed or disabled, a project
+   * the census stopped showing -- and both arrive here through the same list
+   * rebuild, which is why the detection is this one effect over the assembled
+   * list rather than a check in the room view and another in the tab strip.
+   *
+   * The trigger is the **transition**, not the state: the address resolved on
+   * the previous list and falls back on this one. A dead address opened cold
+   * never resolved, so it keeps #209's silent fallback by identity; a stored
+   * context just made, or a project appearing mid-session, resolves *after*
+   * a moment of not resolving, which is the other direction and no news.
+   *
+   * The address is replaced, not pushed: the dead one must not be one step
+   * back. A detail open over the vanished room stays open -- the route keeps
+   * its detail and only the room moves.
+   *
+   * `$effect.pre` rather than `$effect`: the rewrite then lands before the
+   * frame is drawn, so the list changing and the address moving are one
+   * paint rather than a fallback frame followed by a corrected one.
+   *
+   * The two side effects run untracked so this depends on exactly the two
+   * things it reads above, the route and the list. `push` reads the toast
+   * stack's length before it writes (that is what `Array.prototype.push` on
+   * a `$state` proxy does), and a tracked read there makes every toast --
+   * and every toast's dismissal six seconds later -- a reason to run this
+   * again.
+   */
+  $effect.pre(() => {
+    const route = router.route;
+    if (route.view !== "room") {
+      standing = null;
+      return;
+    }
+    const ctx = route.ctx;
+    const room = contexts.find((candidate) => candidate.id === ctx) ?? null;
+    const before = standing;
+    standing = { ctx, room };
+    if (before === null || before.ctx !== ctx || before.room === null || room !== null) return;
+
+    const gone = before.room;
+    untrack(() => {
+      push({ text: `${gone.label} is no longer a room. Showing ${ALL_CONTEXT.label}.` });
+      router.replace({ ...route, ctx: ALL_CONTEXT.id });
+    });
+  });
 
   /**
    * Whether the ⌘K overlay is up.

@@ -254,3 +254,64 @@ test("visiting settings does not forget the room behind it", () => {
 
   stop();
 });
+
+/**
+ * `replace` is the navigation for a room that stopped existing under the
+ * reader (#241): the address it leaves is *All work*'s, and the dead one is
+ * not one step back in history — a `back` that landed on it would only fall
+ * through to *All work* again, with the address bar naming a room that is
+ * gone.
+ *
+ * jsdom grows `history.length` on a fragment navigation and leaves it alone
+ * on `location.replace`, which is what lets the second assertion tell the two
+ * apart.
+ */
+test("replace rewrites the address without leaving the old one in history", () => {
+  location.hash = "#/ctx/proj:mock:PAY";
+  const router = createRouter();
+  const stop = router.start();
+  const entries = history.length;
+
+  router.replace({ view: "room", ctx: "all", detail: null });
+
+  expect(location.hash).toBe("#/ctx/all");
+  expect(router.ctx).toBe("all");
+  expect(history.length, "the dead address must not be one step back").toBe(entries);
+  router.back();
+  expect(location.hash).toBe("#/ctx/all");
+
+  stop();
+});
+
+/**
+ * A detail address does not carry its room, so handing the room to *All
+ * work* under an open slide-over changes what the router remembers and
+ * nothing the address bar shows: the detail stays open, and `Esc` now lands
+ * in *All work* rather than on the dead id.
+ */
+test("replace under an open detail keeps the detail and moves the remembered room", () => {
+  location.hash = "#/ctx/proj:mock:PAY";
+  const router = createRouter();
+  const stop = router.start();
+  router.go("#/ticket/mock:PAY-231");
+  const entries = history.length;
+
+  router.replace({
+    view: "room",
+    ctx: "all",
+    detail: { kind: "ticket", entityId: "mock:PAY-231" },
+  });
+
+  expect(location.hash).toBe("#/ticket/mock:PAY-231");
+  expect(router.ctx).toBe("all");
+  expect(router.route).toEqual({
+    view: "room",
+    ctx: "all",
+    detail: { kind: "ticket", entityId: "mock:PAY-231" },
+  });
+  expect(history.length).toBe(entries);
+  router.back();
+  expect(location.hash).toBe("#/ctx/all");
+
+  stop();
+});
