@@ -61,12 +61,14 @@
 //! seed) and the counter is not wound back; that is harmless, because the seed
 //! sets a counter only while the build with the fixture's number is absent.
 //!
-//! **One owner at a time.** The sweep cannot tell a sibling's build from a
-//! corpse, and clause 2 needs a server on which nothing of ours is running:
-//! testenv/README.md, *One environment, one owner at a time*. The battery is
-//! scoped to the two configurations the seed always finishes, so a
-//! `--running` 1188 held on `Payout_Build` does not break it; a build somebody
-//! else queues mid-run does.
+//! **One owner at a time.** The leftover clearing cannot tell a sibling's
+//! build from a corpse, and clause 2 needs a server on which nothing is running:
+//! testenv/README.md, *One environment, one owner at a time*. `./seed
+//! --teamcity --running` and this suite are therefore mutually exclusive on
+//! one environment, and the suite **refuses to start** while a seeded build is
+//! in flight ([`Seeded::clear_leftovers`]) rather than failing three tests on
+//! diffs that would not name the cause. A build somebody else queues mid-run
+//! is the case no check can catch.
 //!
 //! # A red run here is never answered by running it again
 //!
@@ -110,11 +112,12 @@ const BUILD_BUDGET: Duration = Duration::from_secs(180);
 /// did not finish rather than stalling the run.
 const CLEANUP_BUDGET: Duration = Duration::from_secs(90);
 
-/// The configurations the seed always leaves with a **finished** build, and
-/// nothing in flight: the scope for every assertion whose antecedent is "when
-/// nothing changed". `Payout_Build` is left out because `./seed --teamcity
-/// --running` holds its 1188 at step 3/5, and a running build is re-emitted
-/// on every run by design.
+/// The configurations the seed always leaves with a **finished** build: the
+/// scope of the battery and of the incremental run from below everything.
+/// `Payout_Build` is left out because the seed makes a build in it only under
+/// `--running`, so its contents are not the plain seed's -- and the plain seed
+/// is what this suite certifies ([`Seeded::clear_leftovers`] refuses anything
+/// else).
 const QUIET_CONFIGURATIONS: [&str; 2] = ["Ledger_Deploy_Staging", "Payout_IntegrationTests"];
 
 /// The configuration the mutating test queues on. It prints one line and
@@ -287,8 +290,15 @@ impl Seeded {
         ids
     }
 
+    /// The same ids as `/app/rest/builds` lists them: newest first.
+    fn seeded_ids_newest_first(&self) -> Vec<i64> {
+        let mut ids = self.seeded_ids();
+        ids.reverse();
+        ids
+    }
+
     /// The seed's record for the fixture build with this number.
-    fn seeded(&self, fixture_number: u32) -> &SeededBuild {
+    fn fixture_build(&self, fixture_number: u32) -> &SeededBuild {
         self.seed
             .builds
             .iter()
@@ -303,20 +313,56 @@ impl Seeded {
 
     /// Remove every build the seed did not make -- what a run that was
     /// **killed** rather than failed left behind, since only a process that
-    /// unwinds reaches [`Queued`]'s `Drop`.
+    /// unwinds reaches [`Queued`]'s `Drop` -- and refuse to go on while a
+    /// build the seed *did* make is still in flight.
     ///
     /// Scoped by `seed-state.json` rather than by anything a run remembers,
     /// which is the only way to reach the leftovers of a run that is gone. It
     /// runs *before* a test takes its baseline, so the corpus it measures is
     /// already clean. Read-only in the ordinary case: a clean server costs one
-    /// listing.
+    /// listing -- `defaultFilter:false` with no `state:`, which lists queued
+    /// and running builds along with the finished ones (measured 2026-09-02
+    /// with two builds held on the queue: both on the page, `state: queued`).
+    ///
+    /// Not "sweep": CONTEXT.md spends that word on the engine pass that
+    /// tombstones what a full sync no longer emitted.
+    ///
+    /// The refusal is the one-owner rule made a check: `./seed --teamcity
+    /// --running` holds 1188 on `Payout_Build`, a running build is re-emitted
+    /// on every run by design, and the exact-set assertions here (and clause
+    /// 2 beside it) mean nothing while one is up. Refusing names the build and
+    /// the remedy rather than failing three tests on unrelated-looking diffs.
     async fn clear_leftovers(&self) {
         let seeded = self.seeded_ids();
-        let left: Vec<i64> = self
-            .build_ids("defaultFilter:false,count:100")
-            .await
-            .into_iter()
-            .filter(|id| !seeded.contains(id))
+        let (status, body) = self
+            .get("app/rest/builds?locator=defaultFilter:false,count:100&fields=count,build(id,state)")
+            .await;
+        assert_eq!(status, 200, "{body}");
+        let rows: Vec<(i64, String)> = body["build"]
+            .as_array()
+            .map(|rows| {
+                rows.iter()
+                    .map(|b| (id_of(b), b["state"].as_str().unwrap_or_default().to_owned()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let held: Vec<i64> = rows
+            .iter()
+            .filter(|(id, state)| seeded.contains(id) && state != "finished")
+            .map(|(id, _)| *id)
+            .collect();
+        assert!(
+            held.is_empty(),
+            "seeded build(s) {held:?} are still in flight -- `./seed --teamcity --running` and \
+             this suite are mutually exclusive on one environment: a running build is re-emitted \
+             on every run by design, so nothing here that asserts an exact set or an idle run \
+             can be measured beside it. Cancel it (testenv/README.md, *The running build is \
+             opt-in*) or wait for it to finish, then run the suite again."
+        );
+        let left: Vec<i64> = rows
+            .iter()
+            .filter(|(id, _)| !seeded.contains(id))
+            .map(|(id, _)| *id)
             .collect();
         if left.is_empty() {
             return;
@@ -335,12 +381,8 @@ impl Seeded {
         );
         assert_eq!(
             self.build_ids("defaultFilter:false,count:100").await,
-            {
-                let mut newest_first = seeded.clone();
-                newest_first.reverse();
-                newest_first
-            },
-            "after the sweep the server holds exactly the seeded builds"
+            self.seeded_ids_newest_first(),
+            "after the leftovers are cleared the server holds exactly the seeded builds"
         );
     }
 }
@@ -365,7 +407,7 @@ async fn state_of(http: &reqwest::Client, url: &str, token: &str, id: i64) -> Op
 
 /// Cancel (if still in flight) and delete every build in `ids`, and say which
 /// could not be. The one place the suite deletes anything, used by the
-/// leftover sweep and by [`Queued`]'s `Drop` alike.
+/// leftover clearing and by [`Queued`]'s `Drop` alike.
 async fn remove(http: &reqwest::Client, url: &str, token: &str, ids: &[i64]) -> Vec<String> {
     let mut failures = Vec::new();
     for &id in ids {
@@ -374,8 +416,14 @@ async fn remove(http: &reqwest::Client, url: &str, token: &str, ids: &[i64]) -> 
             continue;
         };
         if state != "finished" {
-            // A running build cannot be deleted; cancel it first and wait for
-            // the agent to let go of it.
+            // A build in flight cannot be deleted; cancel it first and wait
+            // for the agent to let go of it. `POST /app/rest/builds/id:{id}`
+            // with `readdIntoQueue: false` cancels a **queued** build as well
+            // as a running one -- measured 2026-09-02 on two builds held on
+            // the queue with the agent disabled, which finished
+            // `UNKNOWN`/`Canceled` -- and is the request testenv/README.md
+            // gives for releasing a held 1188. A refusal is reported here,
+            // not after the wait below runs out.
             let canceled = http
                 .post(format!("{url}/app/rest/builds/id:{id}"))
                 .header("Accept", "application/json")
@@ -386,9 +434,20 @@ async fn remove(http: &reqwest::Client, url: &str, token: &str, ids: &[i64]) -> 
                 }))
                 .send()
                 .await;
-            if let Err(e) = canceled {
-                failures.push(format!("cancel build {id}: {e}"));
-                continue;
+            match canceled {
+                Ok(r) if r.status().is_success() => {}
+                Ok(r) => {
+                    failures.push(format!(
+                        "cancel build {id} -> {}: {}",
+                        r.status(),
+                        r.text().await.unwrap_or_default()
+                    ));
+                    continue;
+                }
+                Err(e) => {
+                    failures.push(format!("cancel build {id}: {e}"));
+                    continue;
+                }
             }
             let deadline = std::time::Instant::now() + BUILD_BUDGET;
             loop {
@@ -454,8 +513,15 @@ impl Queued {
     }
 
     /// `POST /app/rest/buildQueue` for one build of `build_type` on `branch`,
-    /// and own its removal from this line onwards. Answers the new id.
-    async fn queue(&mut self, seeded: &Seeded, build_type: &str, branch: &str) -> i64 {
+    /// and own its removal from this line onwards. Answers the record the
+    /// server queued, in full -- what it says about a build on the queue is
+    /// the test's to assert, not the guard's.
+    async fn queue(
+        &mut self,
+        seeded: &Seeded,
+        build_type: &str,
+        branch: &str,
+    ) -> serde_json::Value {
         assert!(self.id.is_none(), "this guard owns exactly one build");
         let response = seeded
             .http
@@ -473,22 +539,14 @@ impl Queued {
         let status = response.status();
         let body: serde_json::Value = response.json().await.unwrap_or_default();
         assert!(status.is_success(), "POST buildQueue -> {status}: {body}");
-        let id = id_of(&body);
-        self.id = Some(id);
-        assert_eq!(
-            body["state"], "queued",
-            "a real server answers the queued build in full: {body}"
-        );
-        assert!(
-            body.get("number").is_none() && body.get("status").is_none(),
-            "a build on the queue has neither a number nor a status yet -- the adapter titles \
-             it by id and renders the bare state, and mockd serves the same shape: {body}"
-        );
-        id
+        self.id = Some(id_of(&body));
+        body
     }
 
-    /// Poll the build until it is finished, or fail after [`BUILD_BUDGET`].
-    async fn wait_finished(&self, seeded: &Seeded, id: i64) -> serde_json::Value {
+    /// Poll the guard's build until it is finished, or fail after
+    /// [`BUILD_BUDGET`].
+    async fn wait_finished(&self, seeded: &Seeded) -> serde_json::Value {
+        let id = self.id.expect("a build was queued");
         let deadline = std::time::Instant::now() + BUILD_BUDGET;
         loop {
             let record = seeded.build(id).await;
@@ -530,12 +588,12 @@ impl Drop for Queued {
             Ok(failures) => failures,
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => vec![format!(
                 "the cleanup thread panicked (its own message is on stderr), so build {id} may \
-                 still be standing; the next run's leftover sweep removes it"
+                 still be standing; the next run's leftover clearing removes it"
             )],
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => vec![format!(
                 "the cleanup did not finish within {CLEANUP_BUDGET:?} and was abandoned, so \
                  build {id} may still be standing; check the container is healthy, then re-run \
-                 -- the next run's leftover sweep removes it"
+                 -- the next run's leftover clearing removes it"
             )],
         };
         if failures.is_empty() {
@@ -710,8 +768,8 @@ async fn the_seeded_builds_land_by_number_state_status_and_branch() {
     let (items, cursor) = full(&*seeded.source(serde_json::json!({}))).await;
     let builds = of_kind(&items, "build");
 
-    let success = seeded.seeded(412);
-    let failure = seeded.seeded(1187);
+    let success = seeded.fixture_build(412);
+    let failure = seeded.fixture_build(1187);
     assert_eq!(success.build_type, "Ledger_Deploy_Staging");
     assert_eq!(failure.build_type, "Payout_IntegrationTests");
 
@@ -839,8 +897,8 @@ async fn the_seeded_builds_land_by_number_state_status_and_branch() {
 async fn the_feature_branch_build_is_served_by_both_item_producing_locators() {
     let seeded = seeded();
     seeded.clear_leftovers().await;
-    let on_main = seeded.seeded(412).real_id;
-    let on_feature = seeded.seeded(1187).real_id;
+    let on_main = seeded.fixture_build(412).real_id;
+    let on_feature = seeded.fixture_build(1187).real_id;
 
     // The per-configuration full-sync locator, as `sync::execute` sends it.
     let per_config = "buildType:(id:Payout_IntegrationTests),state:finished,canceled:any,\
@@ -959,7 +1017,7 @@ async fn a_build_queued_through_rest_moves_the_watermark_and_the_next_run_stands
     let seeded = seeded();
     let mut guard = Queued::new(&seeded).await;
     let source = seeded.scoped_to(&[QUICK_CONFIGURATION]);
-    let baseline = seeded.seeded(412).real_id;
+    let baseline = seeded.fixture_build(412).real_id;
 
     let (_, cursor) = full(&*source).await;
     assert_eq!(
@@ -971,11 +1029,21 @@ async fn a_build_queued_through_rest_moves_the_watermark_and_the_next_run_stands
     assert!(idle.is_empty(), "nothing changed: {:?}", keys(&idle));
     assert_eq!(same, cursor, "byte-identical");
 
-    let id = guard
+    let queued = guard
         .queue(&seeded, QUICK_CONFIGURATION, FEATURE_BRANCH)
         .await;
+    let id = id_of(&queued);
     assert!(id > baseline, "ids are monotonic: {id} after {baseline}");
-    let record = guard.wait_finished(&seeded, id).await;
+    assert_eq!(
+        queued["state"], "queued",
+        "a real server answers the queued build in full: {queued}"
+    );
+    assert!(
+        queued.get("number").is_none() && queued.get("status").is_none(),
+        "a build on the queue has neither a number nor a status yet -- the adapter titles it by \
+         id and renders the bare state, and mockd serves the same shape: {queued}"
+    );
+    let record = guard.wait_finished(&seeded).await;
     let number: u32 = record["number"]
         .as_str()
         .and_then(|n| n.parse().ok())
@@ -1031,11 +1099,7 @@ async fn a_build_queued_through_rest_moves_the_watermark_and_the_next_run_stands
     assert_eq!(status, 404, "the deleted build is gone by id");
     assert_eq!(
         seeded.build_ids("defaultFilter:false,count:100").await,
-        {
-            let mut newest_first = seeded.seeded_ids();
-            newest_first.reverse();
-            newest_first
-        },
+        seeded.seeded_ids_newest_first(),
         "the server is back in the plain-seed state"
     );
 

@@ -71,7 +71,12 @@ export KNOBAS_GITEA_OWNER=tidewater
 export KNOBAS_GITEA_REPO=payout-service
 ```
 
-`eval "$(./seed --env)"` re-prints them without re-seeding.
+`eval "$(./seed --env)"` re-prints them without re-seeding. Once `./seed
+--teamcity` has run it also prints `KNOBAS_TEAMCITY_URL` and
+`KNOBAS_TEAMCITY_TOKEN`; the seeded TeamCity suite additionally reads
+`seed-state.json` for the fixture-number-to-id map, from
+`testenv/seed-state.json` relative to the crate unless
+`KNOBAS_TEAMCITY_SEED_STATE` names another path.
 
 ## One environment, one owner at a time
 
@@ -337,9 +342,9 @@ seeded builds again.
 environment, one owner at a time*): the sweep cannot tell a sibling's build
 from a corpse, and the battery's clause 2 needs a server where nothing is
 running. `./seed --teamcity --running` and this suite are therefore mutually
-exclusive on one environment -- the battery is scoped to the two
-configurations the seed always finishes, so a held 1188 does not break it, but
-a build somebody else queues mid-run does.
+exclusive on one environment: the suite refuses to start while a seeded build
+is in flight and says how to release it, and a build somebody else queues
+mid-run is the one case no check can catch.
 
 ### Jira and Confluence, end to end
 
