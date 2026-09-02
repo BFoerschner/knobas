@@ -14,6 +14,7 @@
 
 use knobas_source::{Source, SourceDescriptor};
 use knobas_source_mock::MockSource;
+use knobas_sync::scheduler::{SyncEvents, status_for};
 use knobas_sync::{SyncError, SyncReport};
 use sqlx::PgPool;
 
@@ -81,6 +82,56 @@ pub async fn demo_load_inner(pool: &PgPool) -> Result<SyncReport, DemoError> {
             source_id: source.descriptor().id,
             error,
         })
+}
+
+/// [`demo_load_inner`], followed by the `sync:state` its run owes (#240).
+///
+/// The contract's event table says `sync:state` fires on every run transition
+/// and P3 was granted as "all runs emit coarse `sync:state`". The scheduler
+/// keeps that promise for every scheduled and manual run; the demo load syncs
+/// through the bare [`knobas_sync::run_once`], which emits nothing, so it was
+/// the one run whose ending the window could not hear -- and the projects
+/// store re-lists the census on a terminal `sync:state` and on nothing else.
+/// Ruled at triage (2026-09-02) over a second frontend patch and over routing
+/// the load through the scheduler: this is compliance with the existing rule,
+/// not a new event, and the scheduler route would change what the command
+/// returns.
+///
+/// Two functions rather than a parameter on one: the demo test binary drives
+/// [`demo_load_inner`] against a scratch database with nothing listening, and
+/// the command is the caller that has a window to tell.
+///
+/// The status is read back through [`status_for`], the way the scheduler's
+/// own emit reads it, not hand-built. The registration wrote the
+/// `source_config` row the query is keyed on, so the read answers for the mock
+/// even though the load logs no `sync_run` row (out of scope by ruling): the
+/// status is terminal (`running: false`, no `run_id`), which is all the store
+/// asks of it. A failed read is logged and not raised, as in the scheduler --
+/// the corpus already landed, and an event the window missed is not a reason
+/// to report the load as failed.
+///
+/// # Errors
+///
+/// [`demo_load_inner`]'s.
+pub async fn demo_load_announced(
+    pool: &PgPool,
+    events: &dyn SyncEvents,
+) -> Result<SyncReport, DemoError> {
+    let result = demo_load_inner(pool).await;
+    // A `Db` error is the registration failing, so there was no run to
+    // announce; a `Sync` error is a run that ended, and its ending is a
+    // transition too.
+    if !matches!(result, Err(DemoError::Db(_))) {
+        let source_id = MockSource::new().descriptor().id;
+        match status_for(pool, &source_id).await {
+            Ok(Some(status)) => events.sync_state(status),
+            Ok(None) => tracing::warn!(source_id, "the demo source has no status row to announce"),
+            Err(error) => {
+                tracing::warn!(source_id, %error, "reading sync status for the event failed");
+            }
+        }
+    }
+    result
 }
 
 /// Write the source's configuration row, refreshing the columns the descriptor

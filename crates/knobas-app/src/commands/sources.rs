@@ -36,8 +36,13 @@ use crate::{IpcError, Lifecycle};
 /// twenty-one items of fiction, and a corpus that mixes it with real work is
 /// one nobody can search again. The refusal comes before the first query, so
 /// the wrong profile writes nothing at all.
+///
+/// Ends with a `sync:state` for the mock source (#240), the way every other
+/// run's ending does: the app handle is what the emit needs, Tauri injects it,
+/// and the wire call is unchanged.
 #[tauri::command]
-pub async fn demo_load(
+pub async fn demo_load<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     lifecycle: State<'_, Lifecycle>,
     profile: State<'_, crate::Profile>,
 ) -> Result<knobas_sync::SyncReport, IpcError> {
@@ -51,7 +56,8 @@ pub async fn demo_load(
         )));
     }
     let pool = lifecycle.pool()?;
-    Ok(crate::sources::demo::demo_load_inner(&pool).await?)
+    let events = crate::sources::events::TauriEvents::new(app);
+    Ok(crate::sources::demo::demo_load_announced(&pool, &events).await?)
 }
 
 // -- §2.2: sources, secrets, credential health --------------------------------

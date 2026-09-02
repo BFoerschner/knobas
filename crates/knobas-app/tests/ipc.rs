@@ -513,6 +513,64 @@ fn demo_load_passes_the_guard_in_the_demo_profile() {
     );
 }
 
+/// A demo load ends with the terminal `sync:state` its run owes (#240).
+///
+/// The contract's event table says `sync:state` fires on every run transition
+/// and P3 was granted as "all runs emit coarse `sync:state`". The demo load
+/// syncs through the bare `run_once`, which emits nothing, so it was the one
+/// run whose ending nothing in the window could hear -- and the projects
+/// store, which re-lists the census only on a terminal `sync:state`, never
+/// learned about the two projects the fixture exists for unless *Finish* was
+/// pressed. This pins the command end to end: the real handler, the real
+/// `TauriEvents`, the real event name, listened for the way the window does.
+///
+/// The command awaits its run, so the event is already there when it returns;
+/// no polling. `run_id` is null because the demo load writes no `sync_run`
+/// row (out of scope by ruling), and the store only needs `running: false`.
+#[tokio::test(flavor = "multi_thread")]
+async fn demo_load_ends_with_a_terminal_sync_state_for_the_mock() {
+    let pool = knobas_db::test_util::test_pool().await;
+    knobas_db::migrate::run(&pool).await.unwrap();
+    let demo = knobas_app::Profile::from_args(
+        vec![knobas_app::DEMO_FLAG.to_owned()],
+        std::path::Path::new("/tmp/knobas-test"),
+    );
+
+    let seen: std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>> = Default::default();
+    let recorder = std::sync::Arc::clone(&seen);
+
+    let report = invoke_managing("demo_load", serde_json::json!({}), move |app| {
+        app.manage(demo);
+        app.manage(ready_over(pool));
+        app.listen("sync:state", move |event| {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(event.payload()) {
+                recorder.lock().unwrap().push(value);
+            }
+        });
+    })
+    .expect("the demo profile loads its fixture")
+    .deserialize::<serde_json::Value>()
+    .expect("a report came back");
+    assert_eq!(report["source_id"], serde_json::json!("mock"));
+
+    let seen = seen.lock().unwrap();
+    let terminal = seen
+        .iter()
+        .find(|status| status["running"] == serde_json::json!(false))
+        .unwrap_or_else(|| {
+            panic!(
+                "a demo load must end with a terminal sync:state -- the projects store \
+                 re-lists the census on nothing else; saw {seen:?}"
+            )
+        });
+    assert_eq!(terminal["source_id"], serde_json::json!("mock"));
+    assert_eq!(
+        seen.iter().filter(|s| s["running"] == serde_json::json!(true)).count(),
+        0,
+        "the demo load has no open run row, so it must not claim to be running: {seen:?}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // 5. `sync_now` answers before the run does, and says so on `sync:state`.
 // ---------------------------------------------------------------------------
