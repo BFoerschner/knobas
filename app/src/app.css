@@ -151,15 +151,9 @@ a{color:var(--link);text-decoration:none}
 /* The Tickets tile's layout control (#245): a two-way segmented control in
    the header's `.acts` slot, one button per layout word. A refused option is
    `aria-disabled`, never `disabled` -- it stays in the tab order and keeps its
-   reason, in `title` for hover and in a `.vh` element for `aria-describedby`
-   (#258). */
+   reason, in `title` for hover and in a `.vh` element (end of this file) for
+   `aria-describedby` (#258). */
 .seg{display:inline-flex;height:20px;border:1px solid var(--hair2);border-radius:2px;overflow:hidden}
-/* Visually hidden, present to the accessibility tree (#258): text that
-   exists to be referenced -- the refused layout option's reason -- and has
-   no place on screen. Clipped to nothing rather than `display:none` or
-   `visibility:hidden`, which drop the element from the tree and turn the
-   description that names it into no description at all. */
-.vh{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap}
 .seg-b{height:100%;padding:0 6px;font:500 10px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--faint);cursor:pointer}
 .seg-b+.seg-b{border-left:1px solid var(--hair2)}
 .seg-b:hover{color:var(--text);background:var(--raised)}
@@ -520,3 +514,12 @@ kbd{font:400 10px var(--mono);color:var(--faint);border:1px solid var(--hair);bo
 /* A group's heading stays put while its own cards scroll past it, so the
    status a card belongs to is readable anywhere down a long room. */
 .board.stacked .col-h{position:sticky;top:0;background:var(--bg);z-index:1}
+
+/* Visually hidden, present to the accessibility tree (#258). A utility, not
+   a component's: text that exists to be referenced and has no place on
+   screen. Its one user so far is the Tickets tile's refused layout option,
+   whose reason `.seg-b` carries in `title` for hover and here for
+   `aria-describedby`. Clipped to nothing rather than `display:none` or
+   `visibility:hidden`, which drop the element from the tree and turn the
+   description that names it into no description at all. */
+.vh{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap}

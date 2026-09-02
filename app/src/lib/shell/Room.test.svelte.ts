@@ -147,6 +147,12 @@ function render(hash: string, overrides = createMiniBoardOverrides()) {
     },
   });
   flushSync();
+  /** The Tickets tile's layout option that reads `label` (#245), or undefined where none does. */
+  function layoutOption(label: string): HTMLButtonElement | undefined {
+    return [...target.querySelectorAll<HTMLButtonElement>(".tile-h .acts .seg button")].find(
+      (node) => node.textContent?.trim() === label,
+    );
+  }
   /** The maximise control (#250) of the tile labelled `label`, or null where no such tile is drawn. */
   function maxButton(label: string): HTMLButtonElement | null {
     const tile = [...target.querySelectorAll<HTMLElement>(".tile")].find(
@@ -180,27 +186,21 @@ function render(hash: string, overrides = createMiniBoardOverrides()) {
     /**
      * What the layout option `label` is described by (#258): the text of the
      * element its `aria-describedby` names, or null where it names nothing
-     * or names an id nothing carries. Resolved by walking the ids rather
-     * than `getElementById`, so a dangling reference reads as the absence
-     * it is to assistive technology.
+     * or names an id nothing carries -- a dangling reference is no
+     * description to assistive technology, and `getElementById` gives it
+     * back as the same null (the precedent is `Modal.test.svelte.ts`).
      */
     describedBy: (label: string) => {
-      const option = [...target.querySelectorAll<HTMLButtonElement>(".tile-h .acts .seg button")].find(
-        (node) => node.textContent?.trim() === label,
-      );
-      const id = option?.getAttribute("aria-describedby");
+      const id = layoutOption(label)?.getAttribute("aria-describedby");
       if (!id) return null;
-      const named = [...target.querySelectorAll<HTMLElement>("[id]")].find((node) => node.id === id);
-      return named?.textContent?.trim() ?? null;
+      return document.getElementById(id)?.textContent?.trim() ?? null;
     },
     /** The visually hidden reasons the layout control carries, in the order drawn. */
     hiddenReasons: () =>
       [...target.querySelectorAll<HTMLElement>(".tile-h .acts .seg .vh")].map((node) => node.textContent?.trim() ?? ""),
     /** Press the layout option that carries `label`. */
     press: (label: string) => {
-      const option = [...target.querySelectorAll<HTMLButtonElement>(".tile-h .acts .seg button")].find(
-        (node) => node.textContent?.trim() === label,
-      );
+      const option = layoutOption(label);
       expect(option, `the Tickets tile offers ${label}`).toBeDefined();
       option!.click();
       flushSync();
