@@ -162,6 +162,12 @@ a{color:var(--link);text-decoration:none}
 /* The control clips its corners, so the global ring at +1px would be cut off;
    drawn inside the button instead, refused option included. */
 .seg-b:focus-visible{outline-offset:-2px}
+/* The maximise control (#250), beside the layout control on the Tickets tile
+   and alone everywhere else: a ghost button in the segmented control's type
+   and colour, so the two read as one row of header actions. Three classes
+   deep on purpose -- `.btn.sm` sets 11px at two, and a bare `.tile-max` would
+   lose to it. Hover is `.btn.ghost`'s, which is also `.seg-b`'s. */
+.tile-h .acts .tile-max{font:500 10px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--faint)}
 .tile-b{overflow:auto;flex:1;min-height:0}
 .empty{padding:14px 12px;color:var(--muted);font-size:12px;line-height:1.5}
 .empty .btn{margin-top:8px}
@@ -441,6 +447,12 @@ kbd{font:400 10px var(--mono);color:var(--faint);border:1px solid var(--hair);bo
 
 /* A room with a single tile is a list, not a two-column board. */
 .tiles.one{grid-template-columns:1fr}
+
+/* One tile maximised (#250): the grid is that tile, both columns and every
+   row. After the `rows-*` rules so it wins on order at equal specificity. The
+   tile scrolls inside itself as it always has (`.tile-b`), and the tray under
+   the grid keeps its place. */
+.tiles.max{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr)}
 
 /* The detail header's action area, between the crumb and the close button.
    `.d-h .x` already claims `margin-left:auto`, so this only needs its own

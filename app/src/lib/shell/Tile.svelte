@@ -36,8 +36,10 @@
     project = null,
     miniBoardLayout,
     miniBoardOverride = undefined,
+    maximised = false,
     onopen,
     onlayout,
+    onmaximise,
   }: {
     spec: TileSpec;
     /** The room's source filter; `[]` is every source. */
@@ -71,6 +73,15 @@
      */
     miniBoardOverride?: MiniBoardLayout | undefined;
     /**
+     * Whether this tile is the one the room has maximised (#250).
+     *
+     * Defaulted, like `miniBoardOverride`: a tile nobody told is in the grid,
+     * which is true. The room decides -- one tile at a time, reset when the
+     * room changes -- and the tile only draws the answer, so the header's
+     * word flips on this prop and never on its own press.
+     */
+    maximised?: boolean;
+    /**
      * Opening an item. Narrowed to the two fields the room's router needs: a
      * board card is not a mirror row and has no timestamps, and inventing them
      * to satisfy a wider type would be worse than asking for less.
@@ -86,6 +97,17 @@
      * reached nothing would look right until pressed.
      */
     onlayout: (layout: MiniBoardLayout) => void;
+    /**
+     * The reader pressed the header's *Maximise* or *Restore* (#250).
+     *
+     * One callback for both words, because the tile does not know which it
+     * is asking for: whether the press maximises or restores is the room's
+     * reading of `maximised`, and a tile that sent two different messages
+     * would be keeping a second copy of that answer. Required for the reason
+     * `onlayout` is -- a button that reached nothing would look right until
+     * pressed.
+     */
+    onmaximise: () => void;
   } = $props();
 
   /**
@@ -237,7 +259,7 @@
         has one whether or not the read has landed: before it there is no
         count and so nothing to refuse, and a choice made while reading is
         kept the same way any other is. The slot stays a flex row rather than
-        becoming the control: #250's maximise button lands beside it.
+        becoming the control: the maximise button (#250) sits beside it.
       -->
       {#if isMiniBoard}
         <span class="seg" role="group" aria-label="Mini board layout">
@@ -256,6 +278,14 @@
           {/each}
         </span>
       {/if}
+      <!--
+        Every tile, every state of its read. The visible word is the
+        accessible name -- there is no icon to name separately -- and it is
+        the room's word, not the tile's: `maximised` is what flips it.
+      -->
+      <button class="btn sm ghost tile-max" onclick={onmaximise}>
+        {maximised ? "Restore" : "Maximise"}
+      </button>
     </span>
   </div>
   <div class="tile-b">

@@ -69,14 +69,18 @@ function render(sources: string[] = []) {
     spec: SPEC,
     sources,
     miniBoardLayout: "columns" as const,
+    maximised: false,
     onopen: vi.fn(),
     onlayout: vi.fn(),
+    onmaximise: vi.fn(),
   });
   const app = mount(Tile, { target, props });
   flushSync();
   return {
     target,
     props,
+    /** The header's maximise control (#250). */
+    maxButton: () => target.querySelector<HTMLButtonElement>(".tile-h .acts .tile-max"),
     rows: () => [...target.querySelectorAll(".row")],
     text: () => target.textContent ?? "",
     count: () => target.querySelector(".tile-h .cnt")?.textContent ?? "",
@@ -272,7 +276,43 @@ test("a list tile's header carries no layout control", async () => {
   await vi.waitFor(() => expect(screen.rows()).toHaveLength(1));
   flushSync();
 
-  expect(screen.target.querySelectorAll(".tile-h .acts button")).toHaveLength(0);
+  expect(screen.target.querySelector(".tile-h .acts .seg")).toBeNull();
+  // ...and the slot holds the maximise control alone (#250): one button, not
+  // a layout word that lost its group.
+  expect(screen.target.querySelectorAll(".tile-h .acts button")).toHaveLength(1);
+  expect(screen.maxButton()).not.toBeNull();
+
+  screen.done();
+});
+
+/**
+ * The maximise control (#250) is on every tile, and it only asks: the room
+ * decides, and tells the tile through `maximised`, so a tile with the prop
+ * flipped reads *Restore* whether or not it was the one pressed. The name is
+ * the visible word either way -- what a screen reader announces and what the
+ * label reads are one string, so neither can drift from the other.
+ */
+test("the header offers Maximise, asks the room, and reads Restore once maximised", async () => {
+  answer = () => Promise.resolve({ rows: [row("PAY-1")], total: 1 });
+  const screen = render();
+  await vi.waitFor(() => expect(screen.rows()).toHaveLength(1));
+  flushSync();
+
+  const button = screen.maxButton();
+  expect(button, "the tile header carries a maximise control").not.toBeNull();
+  expect(button!.textContent?.trim()).toBe("Maximise");
+  expect(button!.getAttribute("aria-label")).toBeNull();
+
+  button!.click();
+  expect(screen.props.onmaximise).toHaveBeenCalledTimes(1);
+  // Asking is not deciding: the tile did not flip itself.
+  expect(screen.maxButton()?.textContent?.trim()).toBe("Maximise");
+
+  screen.props.maximised = true;
+  flushSync();
+  expect(screen.maxButton()?.textContent?.trim()).toBe("Restore");
+  // ...and the rows under it are still the tile's own.
+  expect(screen.rows()).toHaveLength(1);
 
   screen.done();
 });

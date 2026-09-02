@@ -150,6 +150,52 @@
   const rows = $derived(Math.min(4, Math.max(1, Math.ceil(tiles.length / 2))));
 
   /**
+   * The tile the reader maximised, or null for the grid (#250).
+   *
+   * Per visit: a new room is a fresh grid, whatever the last room had, and
+   * walking *back* finds the grid too -- nothing waits under a room's id, which
+   * is why this is a reset on the room and not a choice remembered per room.
+   * Opening a detail over the room changes the address and not `context.id`,
+   * so the tile stays maximised under the slide-over (decision 1). One tile
+   * at a time is the shape of the field: a single id, not a set.
+   */
+  let maximised = $state<string | null>(null);
+  /**
+   * The room's id as its own signal, so the reset below fires on a change of
+   * *room* and not on a fresh object for the same one. `App.svelte` derives
+   * the switcher's list afresh after every census (a sync run ending, a
+   * source's health moving), and `context` is a new object each time; a
+   * derived string is equal to itself and propagates nothing. The reads
+   * above still re-run on that fresh object, on purpose: a census may have
+   * changed what the room holds, and a re-read costs nothing the reader can
+   * see, where a reset would.
+   */
+  const roomId = $derived(context.id);
+  $effect(() => {
+    // Reads the room id and nothing else, so the effect runs when the room
+    // changes and not when the choice does.
+    void roomId;
+    maximised = null;
+  });
+
+  /** The header's button: *Maximise* on a grid tile, *Restore* on the maximised one. */
+  function toggleMaximise(tileId: string) {
+    maximised = maximised === tileId ? null : tileId;
+  }
+
+  /**
+   * Escape's rung 4 (`keys.ts`), reached through `bind:this` in `App.svelte`.
+   *
+   * Says whether it did anything, so the ladder can fall through to "nothing"
+   * when the grid is already drawn.
+   */
+  export function restoreTile(): boolean {
+    if (maximised === null) return false;
+    maximised = null;
+    return true;
+  }
+
+  /**
    * Whether this address is a note.
    *
    * The **id** decides, and the kind word is only a fallback for the moment
@@ -214,18 +260,29 @@
       </p>
     </div>
   {:else}
-    <div class="tiles rows-{rows} {tiles.length === 1 ? 'one' : ''}">
+    <!--
+      A maximised tile (#250) is the only one drawn, and `.max` gives it the
+      whole grid. Not drawn rather than hidden: a tile that is not on screen
+      is not in this room's view, the way a kind the corpus lacks is not.
+      Restoring mounts the others again and they read again, as they do on
+      any room switch.
+    -->
+    <div class="tiles rows-{rows}" class:one={tiles.length === 1} class:max={maximised !== null}>
       {#each tiles as spec (spec.id)}
-        <Tile
-          {spec}
-          sources={context.filter.sources}
-          ctx={context.filter.context}
-          project={context.filter.project}
-          miniBoardLayout={context.miniBoardLayout}
-          {miniBoardOverride}
-          onopen={open}
-          onlayout={(layout) => overrides.choose(context, layout)}
-        />
+        {#if maximised === null || maximised === spec.id}
+          <Tile
+            {spec}
+            sources={context.filter.sources}
+            ctx={context.filter.context}
+            project={context.filter.project}
+            miniBoardLayout={context.miniBoardLayout}
+            {miniBoardOverride}
+            maximised={maximised === spec.id}
+            onopen={open}
+            onlayout={(layout) => overrides.choose(context, layout)}
+            onmaximise={() => toggleMaximise(spec.id)}
+          />
+        {/if}
       {/each}
     </div>
   {/if}

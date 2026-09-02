@@ -13,13 +13,18 @@ import { createRouter } from "./router.svelte";
 let teardown: (() => void) | undefined;
 let routerTeardown: (() => void) | undefined;
 
-function at(hash: string) {
+/**
+ * `restoreTile` answers whether a tile was maximised (#250): `false` is the
+ * ordinary room, and a test that wants rung 4 to have something to do says so.
+ */
+function at(hash: string, maximised = false) {
   location.hash = hash;
   const router = createRouter();
   routerTeardown = router.start();
   const openLauncher = vi.fn();
-  teardown = installKeys(router, { openLauncher });
-  return { router, openLauncher };
+  const restoreTile = vi.fn(() => maximised);
+  teardown = installKeys(router, { openLauncher, restoreTile });
+  return { router, openLauncher, restoreTile };
 }
 
 function press(key: string, options: KeyboardEventInit = {}) {
@@ -80,12 +85,61 @@ test("Esc leaves an M2+ view too, rather than stranding the reader on it", () =>
  * to press when there is nothing to close.
  */
 test("Esc in a plain room does nothing at all", () => {
-  at("#/ctx/src:jira");
+  const { restoreTile } = at("#/ctx/src:jira");
   const before = location.hash;
 
   const event = press("Escape");
   expect(location.hash).toBe(before);
   expect(event.defaultPrevented).toBe(false);
+  // Asked, and there was nothing to restore: that is what makes rung 5 the
+  // rung it reached rather than one it skipped.
+  expect(restoreTile).toHaveBeenCalledTimes(1);
+});
+
+/**
+ * Rung 4 (#250): a maximised tile is the one thing left to unwind in a room
+ * with no detail over it. The room does the restoring; what the ladder owns
+ * is that the key reached it, that the press counted, and that the address
+ * did not move -- restoring a tile is not a navigation.
+ */
+test("Esc restores a maximised tile when nothing else is open", () => {
+  const { restoreTile } = at("#/ctx/src:jira", true);
+  const before = location.hash;
+
+  const event = press("Escape");
+  expect(restoreTile).toHaveBeenCalledTimes(1);
+  expect(location.hash).toBe(before);
+  expect(event.defaultPrevented).toBe(true);
+});
+
+/**
+ * The order of rungs 2 and 4: a detail open over a maximised tile closes
+ * first, and the tile stays maximised for the next press. One keystroke, one
+ * rung -- a ladder that restored the tile *and* closed the detail, or
+ * restored the tile from under an open detail, would be unwinding two things
+ * or the wrong one.
+ */
+test("Esc closes the detail before it restores the tile under it", () => {
+  const { router, restoreTile } = at("#/ctx/src:jira", true);
+  router.go("#/ticket/mock:PAY-231");
+
+  press("Escape");
+  expect(location.hash).toBe("#/ctx/src:jira");
+  expect(restoreTile).not.toHaveBeenCalled();
+
+  press("Escape");
+  expect(restoreTile).toHaveBeenCalledTimes(1);
+  expect(location.hash).toBe("#/ctx/src:jira");
+});
+
+/** ...and a non-room view is rung 3, which a tile in no room can sit above. */
+test("Esc leaves a non-room view without asking about tiles", () => {
+  const { router, restoreTile } = at("#/ctx/all", true);
+  router.go("#/sources");
+
+  press("Escape");
+  expect(location.hash).toBe("#/ctx/all");
+  expect(restoreTile).not.toHaveBeenCalled();
 });
 
 /**

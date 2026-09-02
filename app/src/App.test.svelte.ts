@@ -43,7 +43,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { AppStatus } from "./lib/ipc/app";
-import type { ContextRow, Project } from "./lib/ipc/entity";
+import type { ContextRow, EntityRow, Project } from "./lib/ipc/entity";
 import type { CredentialHealth } from "./lib/ipc/sources";
 
 /** Readings `credential_health` hands back, and how many times it was asked. */
@@ -75,6 +75,14 @@ let projectCalls = 0;
  * a context made mid-session is a tab that was not there a moment ago.
  */
 let contextRows: ContextRow[] = [];
+
+/**
+ * The corpus `list_entities` answers, narrowed by kind where the filter names
+ * any -- the room's own scan asks for every kind, and each tile then asks for
+ * its own. Empty by default; the one test that needs a room with tiles in it
+ * (#250) fills it.
+ */
+let entityRows: EntityRow[] = [];
 
 /**
  * Whether this profile has never been set up, and whether it is the `--demo`
@@ -145,7 +153,13 @@ vi.mock("./lib/ipc/entity", () => ({
   contextMembers: () => Promise.resolve([]),
   createContext: () => Promise.reject(new Error("no context creation in this test")),
   promoteContext: () => Promise.reject(new Error("no promotion in this test")),
-  listEntities: () => Promise.resolve({ rows: [], total: 0 }),
+  listEntities: (filter: { kinds: string[] }) => {
+    const rows =
+      filter.kinds.length === 0
+        ? entityRows
+        : entityRows.filter((candidate) => filter.kinds.includes(candidate.kind));
+    return Promise.resolve({ rows, total: rows.length });
+  },
   getEntity: () => Promise.resolve(null),
   recentActivity: () => Promise.resolve([]),
   // The detail slide-over reads the board for its status select (#179); an
@@ -204,6 +218,25 @@ function tabLabels(): string[] {
   );
 }
 
+/** The room's tiles, by the label each header reads. */
+function tileLabels(): string[] {
+  return [...target.querySelectorAll(".tile .tile-h .lab")].map(
+    (label) => label.textContent?.trim() ?? "",
+  );
+}
+
+/** A mirrored item of `kind`, for the corpus `entityRows` answers. */
+function entity(kind: string, key: string): EntityRow {
+  return {
+    entity_id: `mock:${key}`,
+    kind,
+    source_id: "mock",
+    title: `Title of ${key}`,
+    updated_at: "2026-08-22T11:48:00Z",
+    synced_at: "2026-08-22T14:30:00Z",
+  };
+}
+
 /**
  * Press the button whose label reads exactly this.
  *
@@ -259,6 +292,7 @@ beforeEach(() => {
   projectRows = [];
   projectCalls = 0;
   contextRows = [];
+  entityRows = [];
   health.replace([]);
   toasts.items = [];
   target = document.createElement("div");
@@ -859,4 +893,57 @@ test("a sync run ending with the room still in the census is not announced", asy
   expect(toasts.items).toEqual([]);
   expect(location.hash).toBe("#/ctx/proj:mock:PAY");
   expect(roomName()).toBe("Payments Platform");
+});
+
+/**
+ * Escape's rung 4, end to end (#250): the key on the window reaches
+ * `installKeys`, whose `restoreTile` reaches the mounted room through
+ * `bind:this`, and the room draws its grid again. Both ends are tested where
+ * they live (`keys.test.svelte.ts`, `Room.test.svelte.ts`); the wire between
+ * them is a few lines of this component and, like the census wire before it
+ * (#238), nothing else could see it missing. Two tiles, because a room of one
+ * cannot tell a maximised tile from a grid.
+ */
+test("Escape in a room restores the maximised tile", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  entityRows = [entity("page", "ENG-1"), entity("build", "b-1")];
+
+  app = mount(App, { target, props: {} });
+  await until(() => tileLabels().length === 2, "the room never drew its two tiles");
+  const [first] = tileLabels();
+
+  press("Maximise");
+  expect(tileLabels()).toEqual([first]);
+
+  window.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+  );
+  await until(() => tileLabels().length === 2, "Escape never reached the room");
+  expect(location.hash, "restoring a tile is not a navigation").toBe("#/ctx/all");
+});
+
+/**
+ * Decision 1's other exit (#250): a view other than the room restores the
+ * grid too. That holds because `App.svelte` unmounts `<Room>` for the
+ * Sources view and the choice dies with it -- which is a fact about this
+ * component's `{:else}` and the one direction the room's own tests cannot
+ * reach, since a mounted room never sees itself unmounted.
+ */
+test("a non-room view and back finds the grid, not the maximised tile", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  entityRows = [entity("page", "ENG-1"), entity("build", "b-1")];
+
+  app = mount(App, { target, props: {} });
+  await until(() => tileLabels().length === 2, "the room never drew its two tiles");
+
+  press("Maximise");
+  expect(tileLabels()).toHaveLength(1);
+
+  location.hash = "#/sources";
+  await until(() => tileLabels().length === 0, "the Sources view never replaced the room");
+
+  location.hash = "#/ctx/all";
+  await until(() => tileLabels().length === 2, "the room never drew its grid again");
 });
