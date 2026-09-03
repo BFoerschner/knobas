@@ -605,10 +605,14 @@ async fn the_days_blocks_come_back_in_time_order_with_the_titles_the_mirror_hold
     let day = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
     let at = |h, m| day + Duration::hours(h) + Duration::minutes(m);
 
-    // Written out of order on purpose: "in time order" has to be the read's
-    // doing, not the insert's.
-    block_at(&pool, at(13, 0), at(14, 30), &on(TICKET)).await;
+    // Written out of order on purpose, and out of *both* orders: three blocks
+    // whose insertion order is neither the time order nor its reverse, so
+    // "ordered by id" and "ordered by id backwards" are each wrong here. A
+    // two-block fixture cannot separate those -- the reverse of a two-item
+    // list written backwards is the right answer by accident.
+    block_at(&pool, at(11, 0), at(12, 0), &on(TICKET)).await;
     block_at(&pool, at(9, 0), at(10, 0), &labelled(LABEL)).await;
+    block_at(&pool, at(13, 0), at(14, 30), &on(TICKET)).await;
 
     let listed = time::day::list(&pool, day, day + Duration::days(1))
         .await
@@ -616,11 +620,12 @@ async fn the_days_blocks_come_back_in_time_order_with_the_titles_the_mirror_hold
 
     assert_eq!(
         listed.iter().map(|d| d.block.started_at).collect::<Vec<_>>(),
-        vec![at(9, 0), at(13, 0)],
+        vec![at(9, 0), at(11, 0), at(13, 0)],
         "the day review draws its strip in the order this list comes in"
     );
     assert_eq!(listed[0].title, None, "a label block has no entity to title");
     assert_eq!(listed[1].title, None, "the mirror has never heard of PAY-231");
+    assert_eq!(listed[2].title, None);
 }
 
 /// Put a row in the mirror, so a block's target has a name.
