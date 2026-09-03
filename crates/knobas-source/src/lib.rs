@@ -74,7 +74,47 @@ pub struct SourceDescriptor {
     /// OS keychain, keyed by the chosen [`AuthMethod`]. M0: the mock declares
     /// an empty object schema.
     pub config_schema: serde_json::Value,
+    /// Where this adapter's records keep the things knobas reads but §4.1 does
+    /// not normalize: a status, a priority, an assignee, requested reviewers,
+    /// a merged flag, a project key and name -- and which of its status names
+    /// mean blocked. One entry per entity kind that has any of them.
+    ///
+    /// **This is the self-describing property applied to payloads** (M3.1,
+    /// issue #277, ADR-0007's recorded destination). Until it existed, every
+    /// reader outside an adapter held a little table of per-source spellings:
+    /// `coalesce(fields.status.name, status)` in the mini board, three arms
+    /// for a project key in the census, two assignee spellings in the inbox --
+    /// the same coupling [`Self::entity_kinds`] and [`Self::write_ops`] exist
+    /// to prevent, in the one place §4.1 left knobas nothing normalized to
+    /// read. A third source's spelling is now one declaration here rather than
+    /// one more arm in four statements.
+    ///
+    /// The rules a declaration is bound by, all enforced by
+    /// [`contract::battery`]:
+    ///
+    /// * every [`KindPaths::kind`] names one of [`Self::entity_kinds`] -- an
+    ///   adapter cannot declare paths for a kind it does not emit;
+    /// * a declared path lands on a value of its type on this adapter's own
+    ///   items, or the source says nothing there. A path into an object the
+    ///   source really wrote, naming a key that object does not have, is the
+    ///   adapter pointing at a field its records lack;
+    /// * a field a kind does not declare is a **miss** for every reader --
+    ///   never a guess, never a knobas-side fallback.
+    ///
+    /// `#[serde(default)]`: a descriptor from a peer built before this grew --
+    /// an out-of-process adapter, a stored blob -- decodes as an adapter that
+    /// declares nothing, which every reader already handles.
+    ///
+    /// [`KindPaths::kind`]: knobas_core::payload::KindPaths::kind
+    #[serde(default)]
+    pub payload_paths: Vec<knobas_core::payload::KindPaths>,
 }
+
+// The declaration types themselves live in `knobas-core`, not here: the
+// adapters that write them depend on this crate, and the readers that resolve
+// them are in `knobas-core`, which may not depend on the SPI. Re-exported so
+// an adapter needs one `use`.
+pub use knobas_core::payload::{KindPaths, ListPath, PayloadPath};
 
 /// What a successful [`Source::test_connection`] learned about the far end.
 ///
@@ -499,6 +539,11 @@ mod tests {
                 full_sync_exhaustive: true,
             }],
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
+            payload_paths: vec![KindPaths {
+                kind: "ticket".into(),
+                status_name: vec![PayloadPath::of(["fields", "status", "name"])],
+                ..KindPaths::default()
+            }],
         }
     }
 

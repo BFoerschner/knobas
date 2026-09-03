@@ -85,6 +85,7 @@ function descriptor(over: Partial<SourceDescriptor> = {}): SourceDescriptor {
       { id: "ticket", label: "Ticket", plural: "Tickets", monogram: "TK", full_sync_exhaustive: false },
     ],
     config_schema: JIRA_SCHEMA,
+    payload_paths: [],
     ...over,
   };
 }

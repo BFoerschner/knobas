@@ -651,6 +651,46 @@ fn items(source_id: &str) -> Vec<SyncItem> {
     out
 }
 
+/// Where the fixture's records keep what knobas reads (#277).
+///
+/// Only what the transcription really carries, in the spelling
+/// [`ticket_payload`] leaves it in: a ticket's `status` and `priority` are
+/// flat, because that is where the dataset has them, and its project is at
+/// `fields.project` because that is where a source would have written it.
+///
+/// **Three fields are deliberately not declared**, and each absence is the
+/// same judgement: a declaration says where a fact *is*, and the mock does not
+/// have these facts in the shape the reader wants.
+///
+/// * `assignee` and `reviewers` — the fixture records a [`Person::id`]
+///   (`mara`), not the username the inbox matches against
+///   ([`Person::username`]). Declaring them would point the inbox's rules at a
+///   value that can never equal an identity, which is a rule that looks wired
+///   and never fires.
+/// * `merged` — [`PullRequest::merged`] is a *timestamp*, present when the
+///   pull request was merged. A merged flag is a boolean (see
+///   [`knobas_source::KindPaths::merged`]); a timestamp is a different fact
+///   with a different absence, and the start-work merge pass has never matched
+///   this source's pull requests.
+///
+/// So the demo profile reads exactly what it read before this landed, which is
+/// the point: the growth moves where a spelling is written down, not what any
+/// corpus says.
+///
+/// [`Person::id`]: Person::id
+/// [`Person::username`]: Person::username
+fn payload_paths() -> Vec<knobas_source::KindPaths> {
+    use knobas_source::{KindPaths, PayloadPath};
+    vec![KindPaths {
+        kind: "ticket".to_owned(),
+        status_name: vec![PayloadPath::of(["status"])],
+        priority: vec![PayloadPath::of(["priority"])],
+        project_key: vec![PayloadPath::of(["fields", "project", "key"])],
+        project_name: vec![PayloadPath::of(["fields", "project", "name"])],
+        ..KindPaths::default()
+    }]
+}
+
 #[async_trait::async_trait]
 impl Source for MockSource {
     fn descriptor(&self) -> SourceDescriptor {
@@ -713,6 +753,7 @@ impl Source for MockSource {
             // emits all of it and the engine's sweep is safe for each kind.
             // Nothing to configure, so the Add-source form for the mock is empty.
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
+            payload_paths: payload_paths(),
         }
     }
 

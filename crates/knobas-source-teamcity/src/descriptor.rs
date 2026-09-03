@@ -58,7 +58,47 @@ pub fn descriptor_template() -> SourceDescriptor {
         // therefore `false`; ADR-0003 moved the claim onto the kind and left
         // TeamCity's answer unchanged.
         config_schema: config_schema(),
+        payload_paths: payload_paths(),
     }
+}
+
+/// Where a TeamCity record keeps what knobas reads (#277, ADR-0007).
+///
+/// **The project, twice, because a build and a configuration name it in two
+/// places.** A build's record carries the `buildType` it ran, and names the
+/// project on that; a build *configuration*'s record **is** that `buildType`
+/// object, so it names the project at the top level, in the same two words one
+/// level up. That difference used to be a `case when i.kind = 'build_config'`
+/// guard inside knobas' own SQL (#232, ruled at triage because a top-level
+/// `projectId` is a less distinctive path than a container-scoped one and a
+/// future adapter's incidental one must not silently open a room). It is two
+/// declarations now, and the guard is the declaration being **per kind**: no
+/// other adapter's records can reach these paths, because no other adapter
+/// declares them.
+///
+/// **No status.** A build has an *outcome* -- `SUCCESS`, `FAILURE` -- and a
+/// `state`, and neither is the status a ticket stands in: the mini board's
+/// columns are a workflow's statuses and a build has no workflow. The inbox's
+/// failed-build rule reads the outcome directly and is not one of the reads
+/// this declaration serves. Declaring the outcome as a `status_name` would put
+/// `FAILURE` on the mini board as a column, which is not a thing anybody can
+/// move a build to.
+fn payload_paths() -> Vec<knobas_source::KindPaths> {
+    use knobas_source::{KindPaths, PayloadPath};
+    vec![
+        KindPaths {
+            kind: KIND_BUILD.to_owned(),
+            project_key: vec![PayloadPath::of(["buildType", "projectId"])],
+            project_name: vec![PayloadPath::of(["buildType", "projectName"])],
+            ..KindPaths::default()
+        },
+        KindPaths {
+            kind: KIND_BUILD_CONFIG.to_owned(),
+            project_key: vec![PayloadPath::of(["projectId"])],
+            project_name: vec![PayloadPath::of(["projectName"])],
+            ..KindPaths::default()
+        },
+    ]
 }
 
 #[cfg(test)]

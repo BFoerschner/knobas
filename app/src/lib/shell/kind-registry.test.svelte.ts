@@ -23,6 +23,7 @@ function descriptor(adapterKind: string, kinds: SourceDescriptor["entity_kinds"]
     adapter_version: "0.1.0",
     auth_methods: [],
     write_ops: [],
+    payload_paths: [],
     entity_kinds: kinds,
     config_schema: { type: "object", properties: {} },
   };

@@ -78,6 +78,7 @@ vi.mock("../ipc/sources", () => ({
           return writeOps;
         },
         entity_kinds: [],
+        payload_paths: [],
         config_schema: {},
       },
     ]),

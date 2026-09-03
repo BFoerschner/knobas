@@ -82,7 +82,8 @@ pub async fn stream(
     now: DateTime<Utc>,
     shelf: Shelf,
 ) -> Result<Vec<InboxEntry>, IpcError> {
-    let items = inbox::items(pool, identity, now, shelf)
+    let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
+    let items = inbox::items(pool, identity, now, shelf, &declarations)
         .await
         .map_err(IpcError::internal)?;
     let declared = declared_ops(pool, registry).await?;
@@ -197,8 +198,9 @@ pub async fn answer(
     now: DateTime<Utc>,
     item_key: &str,
     answer: Answer,
+    declarations: &knobas_core::payload::Declarations,
 ) -> Result<ActivityRow, IpcError> {
-    let item = find(pool, identity, now, item_key).await?;
+    let item = find(pool, identity, now, item_key, declarations).await?;
 
     match answer {
         Answer::Snooze(until) => inbox::snooze(pool, item_key, until).await,
@@ -232,9 +234,10 @@ async fn find(
     identity: &[String],
     now: DateTime<Utc>,
     item_key: &str,
+    declarations: &knobas_core::payload::Declarations,
 ) -> Result<InboxItem, IpcError> {
     for shelf in [Shelf::Stream, Shelf::Snoozed] {
-        let items = inbox::items(pool, identity, now, shelf)
+        let items = inbox::items(pool, identity, now, shelf, declarations)
             .await
             .map_err(IpcError::internal)?;
         if let Some(item) = items.into_iter().find(|item| item.key == item_key) {

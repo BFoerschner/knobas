@@ -254,6 +254,7 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
             "entity_kinds",
             "id",
             "name",
+            "payload_paths",
             "write_ops",
         ],
     );
@@ -265,6 +266,42 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
         &wire["entity_kinds"][0],
         &["full_sync_exhaustive", "id", "label", "monogram", "plural"],
     );
+    // So does the declaration of where this source's payloads keep what
+    // knobas reads (#277) -- and the frontend reads it: an adapter's
+    // declaration is what the sources view can show and what a later reader
+    // resolves, so a Rust field with no counterpart here is the same silent
+    // drift `KindInfo` records.
+    assert_shape(
+        "KindPaths",
+        &wire["payload_paths"][0],
+        &[
+            "assignee",
+            "blocked_statuses",
+            "kind",
+            "merged",
+            "priority",
+            "project_key",
+            "project_name",
+            "reviewers",
+            "status_name",
+        ],
+    );
+}
+
+/// `ListPath` rides inside a `KindPaths` and no template the mock serves
+/// carries one, so it is checked against an adapter that declares reviewers --
+/// Gitea, whose pull requests are the only place a requested reviewer lives.
+#[test]
+fn the_list_path_shape_matches_its_typescript_mirror() {
+    let wire = serde_json::to_value(knobas_source_gitea::descriptor_template()).unwrap();
+    let reviewers = wire["payload_paths"]
+        .as_array()
+        .expect("payload_paths is an array")
+        .iter()
+        .find_map(|kind| kind["reviewers"].as_array()?.first())
+        .expect("the Gitea adapter declares where a requested reviewer lives")
+        .clone();
+    assert_shape("ListPath", &reviewers, &["at", "entry"]);
 }
 
 /// Every `AuthMethod` the mirror's union has to name, and no others.

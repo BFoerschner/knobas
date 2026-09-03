@@ -75,6 +75,9 @@ impl Source for Flood {
                 full_sync_exhaustive: true,
             }],
             config_schema: serde_json::json!({ "type": "object", "properties": {} }),
+            // Nothing declared: this stand-in has no payload shapes to
+            // read, so every path-driven read misses on it (#277).
+            payload_paths: Vec::new(),
         }
     }
     async fn test_connection(&self) -> Result<ConnectionInfo, SourceError> {

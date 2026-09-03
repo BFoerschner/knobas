@@ -15,11 +15,44 @@ use std::collections::BTreeMap;
 use knobas_core::entity::EntityRef;
 use knobas_core::link::Origin;
 use knobas_core::mini_board::{self, MiniBoard};
+use knobas_core::payload::{Declarations, KindPaths, PayloadPath};
 use knobas_core::{context, link};
 use sqlx::PgPool;
 
 /// The source most fixtures below are synced under.
 const SOURCE: &str = "jira";
+
+/// What the sources in this file declare about where they keep a status and a
+/// priority (#277) -- the read is path-driven now, so a fixture's source has
+/// to have said where its own spellings are, the way its adapter's descriptor
+/// does.
+///
+/// `jira` and `gitea` in Jira Data Center's shape, which is what the fixtures
+/// below are written in; `mock` in the Tidewater fixture's flat shape, which
+/// is `knobas_source_mock`'s own declaration. Two spellings, so the tests that
+/// exercise each are exercising a real difference rather than one statement
+/// twice.
+fn declarations() -> Declarations {
+    let nested = |kind: &str| KindPaths {
+        kind: kind.to_owned(),
+        status_name: vec![PayloadPath::of(["fields", "status", "name"])],
+        priority: vec![PayloadPath::of(["fields", "priority", "name"])],
+        project_key: vec![PayloadPath::of(["fields", "project", "key"])],
+        ..KindPaths::default()
+    };
+    Declarations::empty()
+        .with(SOURCE, vec![nested("ticket")])
+        .with("gitea", vec![nested("ticket"), nested("pr")])
+        .with(
+            "mock",
+            vec![KindPaths {
+                kind: "ticket".to_owned(),
+                status_name: vec![PayloadPath::of(["status"])],
+                priority: vec![PayloadPath::of(["priority"])],
+                ..KindPaths::default()
+            }],
+        )
+}
 
 /// A migrated, empty database of this test's own.
 async fn scratch() -> PgPool {
@@ -141,7 +174,9 @@ async fn stored_room(pool: &PgPool, members: &[&str]) -> String {
 
 /// The board of a stored room.
 async fn board_of(pool: &PgPool, ctx: &str) -> MiniBoard {
-    mini_board::read(pool, Some(ctx), &[], None).await.unwrap()
+    mini_board::read(pool, Some(ctx), &[], None, &declarations())
+        .await
+        .unwrap()
 }
 
 /// The columns as `(status, the keys in them)`, keys sorted: the spec pins the
@@ -370,7 +405,9 @@ async fn a_derived_room_scopes_by_its_sources_and_all_work_by_nothing() {
     // In no room's scope by kind, whichever way the room is narrowed.
     item(&pool, "gitea", "pr", "payout#9", jira(Some("Done"), None)).await;
 
-    let everything = mini_board::read(&pool, None, &[], None).await.unwrap();
+    let everything = mini_board::read(&pool, None, &[], None, &declarations())
+        .await
+        .unwrap();
     assert_eq!(
         columns(&everything),
         vec![
@@ -380,7 +417,7 @@ async fn a_derived_room_scopes_by_its_sources_and_all_work_by_nothing() {
         "*All work* narrows by nothing at all"
     );
 
-    let one_source = mini_board::read(&pool, None, &["gitea".to_owned()], None)
+    let one_source = mini_board::read(&pool, None, &["gitea".to_owned()], None, &declarations())
         .await
         .unwrap();
     assert_eq!(
@@ -558,9 +595,15 @@ async fn a_project_room_draws_only_that_projects_tickets() {
     )
     .await;
 
-    let board = mini_board::read(&pool, None, &[SOURCE.to_owned()], Some("PAY"))
-        .await
-        .unwrap();
+    let board = mini_board::read(
+        &pool,
+        None,
+        &[SOURCE.to_owned()],
+        Some("PAY"),
+        &declarations(),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(columns(&board), vec![(Some("To Do"), vec!["PAY-1"])]);
 }
@@ -598,16 +641,22 @@ async fn a_ticket_with_no_readable_project_is_on_no_project_rooms_board() {
     .await;
     item(&pool, SOURCE, "ticket", "PAY-3", jira(Some("To Do"), None)).await;
 
-    let project_room = mini_board::read(&pool, None, &[SOURCE.to_owned()], Some("PAY"))
-        .await
-        .unwrap();
+    let project_room = mini_board::read(
+        &pool,
+        None,
+        &[SOURCE.to_owned()],
+        Some("PAY"),
+        &declarations(),
+    )
+    .await
+    .unwrap();
     assert_eq!(
         columns(&project_room),
         vec![(Some("To Do"), vec!["PAY-1"])],
         "a record that names no project belongs to no project room"
     );
 
-    let source_room = mini_board::read(&pool, None, &[SOURCE.to_owned()], None)
+    let source_room = mini_board::read(&pool, None, &[SOURCE.to_owned()], None, &declarations())
         .await
         .unwrap();
     assert_eq!(
@@ -616,7 +665,9 @@ async fn a_ticket_with_no_readable_project_is_on_no_project_rooms_board() {
         "and is still in its source's room"
     );
 
-    let all_work = mini_board::read(&pool, None, &[], None).await.unwrap();
+    let all_work = mini_board::read(&pool, None, &[], None, &declarations())
+        .await
+        .unwrap();
     assert_eq!(
         columns(&all_work),
         vec![(Some("To Do"), vec!["PAY-1", "PAY-2", "PAY-3"])],
@@ -673,7 +724,7 @@ async fn a_disabled_sources_ticket_is_off_a_project_rooms_board() {
     .await
     .unwrap();
 
-    let board = mini_board::read(&pool, None, &[], Some("PAY"))
+    let board = mini_board::read(&pool, None, &[], Some("PAY"), &declarations())
         .await
         .unwrap();
 
@@ -717,9 +768,15 @@ async fn the_status_select_still_offers_the_whole_sources_corpus() {
     )
     .await;
 
-    let board = mini_board::read(&pool, None, &[SOURCE.to_owned()], Some("PAY"))
-        .await
-        .unwrap();
+    let board = mini_board::read(
+        &pool,
+        None,
+        &[SOURCE.to_owned()],
+        Some("PAY"),
+        &declarations(),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(columns(&board), vec![(Some("To Do"), vec!["PAY-1"])]);
     assert_eq!(

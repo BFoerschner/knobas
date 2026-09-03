@@ -107,6 +107,21 @@ fn descriptor(id: &str, kind: &str, write_ops: &[String]) -> SourceDescriptor {
             full_sync_exhaustive: true,
         }],
         config_schema: serde_json::json!({"type": "object", "properties": {}}),
+        // Where this stand-in keeps what the inbox reads (#277). Gitea's
+        // spellings, because the fixtures below are Gitea-shaped pull
+        // requests: an inbox rule reads through the declaration now, so a
+        // source that declares nothing produces no review requests and no
+        // assignments -- which is what
+        // `a_source_that_declares_no_paths_produces_no_assignments_and_no_review_requests`
+        // asserts in `knobas-core/tests/inbox.rs`.
+        payload_paths: vec![knobas_source::KindPaths {
+            kind: "pr".to_owned(),
+            reviewers: vec![knobas_source::ListPath {
+                at: knobas_source::PayloadPath::of(["requested_reviewers"]),
+                entry: knobas_source::PayloadPath::of(["login"]),
+            }],
+            ..knobas_source::KindPaths::default()
+        }],
     }
 }
 
@@ -424,7 +439,7 @@ async fn snoozing_records_one_line_naming_the_item_and_its_date() {
     let key = format!("review_request:{pr}");
     let until = now() + Duration::days(2);
 
-    snooze_inbox_item_inner(h.pool(), now(), &key, until)
+    snooze_inbox_item_inner(h.pool(), h.registry.as_ref(), now(), &key, until)
         .await
         .expect("the item is on the stream");
 
@@ -445,7 +460,9 @@ async fn snoozing_records_one_line_naming_the_item_and_its_date() {
     );
 
     assert_eq!(
-        inbox_count_inner(h.pool(), now()).await.unwrap(),
+        inbox_count_inner(h.pool(), h.registry.as_ref(), now())
+            .await
+            .unwrap(),
         0,
         "and the number the top strip shows is what needs me now"
     );
@@ -458,9 +475,14 @@ async fn marking_an_item_done_records_one_line_and_clears_the_count() {
     h.source("forge", "forge", ME).await;
     let pr = h.review_request("forge", "acme/payouts#144").await;
     let key = format!("review_request:{pr}");
-    assert_eq!(inbox_count_inner(h.pool(), now()).await.unwrap(), 1);
+    assert_eq!(
+        inbox_count_inner(h.pool(), h.registry.as_ref(), now())
+            .await
+            .unwrap(),
+        1
+    );
 
-    complete_inbox_item_inner(h.pool(), now(), &key)
+    complete_inbox_item_inner(h.pool(), h.registry.as_ref(), now(), &key)
         .await
         .expect("the item is on the stream");
 
@@ -472,7 +494,12 @@ async fn marking_an_item_done_records_one_line_and_clears_the_count() {
         "done has no return date: {}",
         rows[0].detail
     );
-    assert_eq!(inbox_count_inner(h.pool(), now()).await.unwrap(), 0);
+    assert_eq!(
+        inbox_count_inner(h.pool(), h.registry.as_ref(), now())
+            .await
+            .unwrap(),
+        0
+    );
 }
 
 /// An answer to an item that is no longer derived is refused, and **nothing is
@@ -484,9 +511,14 @@ async fn answering_an_item_that_is_no_longer_there_is_refused_and_records_nothin
     let h = harness().await;
     h.source("forge", "forge", ME).await;
 
-    let error = complete_inbox_item_inner(h.pool(), now(), "review_request:forge:acme/gone#1")
-        .await
-        .expect_err("no such item");
+    let error = complete_inbox_item_inner(
+        h.pool(),
+        h.registry.as_ref(),
+        now(),
+        "review_request:forge:acme/gone#1",
+    )
+    .await
+    .expect_err("no such item");
     assert_eq!(error.code, knobas_app::IpcErrorCode::NotFound);
     assert!(error.message.contains("acme/gone#1"), "{}", error.message);
     assert!(
@@ -505,10 +537,16 @@ async fn an_item_on_the_snoozed_shelf_can_still_be_answered() {
     let pr = h.review_request("forge", "acme/payouts#144").await;
     let key = format!("review_request:{pr}");
 
-    snooze_inbox_item_inner(h.pool(), now(), &key, now() + Duration::days(2))
-        .await
-        .unwrap();
-    complete_inbox_item_inner(h.pool(), now(), &key)
+    snooze_inbox_item_inner(
+        h.pool(),
+        h.registry.as_ref(),
+        now(),
+        &key,
+        now() + Duration::days(2),
+    )
+    .await
+    .unwrap();
+    complete_inbox_item_inner(h.pool(), h.registry.as_ref(), now(), &key)
         .await
         .expect("a snoozed item is still an item I can finish");
 

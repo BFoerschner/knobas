@@ -264,12 +264,276 @@ where
              SourceError::Protocol, got {refused:?}"
         );
     }
-    // 6. A sink failure aborts the sync instead of being swallowed.
+    // 6. Declared payload paths (#277): the adapter says where its status,
+    //    priority, assignee, reviewers, merged flag and project live, and this
+    //    is what holds the declaration to the adapter's own corpus.
+    check_payload_paths(&d, &sink.0);
+    // 7. A sink failure aborts the sync instead of being swallowed.
     let aborted = s.sync(None, &mut FailingSink).await;
     assert!(
         matches!(aborted, Err(crate::SourceError::Sink(_))),
         "a sink error must be propagated out of sync as SourceError::Sink, got {aborted:?}"
     );
+}
+
+/// Clause 6: an adapter's declared payload paths against its own corpus.
+///
+/// Four things, and each of them is a way a declaration could be a lie the
+/// readers would carry in silence -- a path-driven read that misses looks
+/// exactly like a source that says nothing, so nothing downstream can tell the
+/// two apart. This is where they are told apart, once, against the items the
+/// adapter itself just emitted.
+///
+/// 1. **Every declared kind is a kind this adapter emits**, and no kind is
+///    declared twice. Checked against `entity_kinds` rather than against the
+///    corpus: a kind can be legitimately empty in one instance's data, but a
+///    kind the descriptor does not name at all is a declaration nothing will
+///    ever read.
+/// 2. **No declared path leads to a value of the wrong type.** A status
+///    declared one segment short reaches the `{"name": …}` object, and `->>`
+///    would stringify that into a column headed `{"name":"In Progress"}` --
+///    a guess dressed as an observation.
+/// 3. **Where nothing of a kind resolved a declared field, no record of that
+///    kind may show the path naming a key it does not have.** This is the
+///    misspelling check, and it is asked of the corpus rather than of a record
+///    on purpose. One record cannot answer it: a key absent from one issue is
+///    also what a field the source omits when empty looks like, and an
+///    unassigned issue must not fail a declaration -- the property that makes
+///    this clause safe to run against a live instance. A corpus can: one item
+///    carrying the value settles the question for the whole kind, and where
+///    *no* item does, a record whose object simply lacks the key is the
+///    adapter having named a key its own records do not have. See
+///    [`names_a_missing_key`](knobas_core::payload::names_a_missing_key).
+/// 4. **A field a kind does not declare resolves to nothing.** Narrow and
+///    worth having: it says nothing about the *declaration*, but it is what a
+///    resolver that grew a knobas-side fallback for an undeclared field dies
+///    on, and such a resolver would pass every other clause here while quietly
+///    putting a value on screen that no source said.
+///
+/// # What this cannot see, and why neither is fixable here
+///
+/// A corpus-shaped question is answered by the corpus, so two declarations
+/// pass without being asked anything. Both are recorded rather than left for
+/// the next reader to discover as a hole:
+///
+/// * **A kind the corpus never populates.** The evidence below is gathered
+///   inside the walk over `items`, so a kind with no items contributes no
+///   evidence and clauses 2, 3 and 4 say nothing about it: a wholly wrong
+///   declaration for it is silent here. The alternative -- demanding that
+///   every declared kind be populated -- would fail a battery run against any
+///   instance that happens to have no build configurations, which is the same
+///   move clause 3 refuses for an unassigned issue. Clause 1 is what still
+///   holds for such a kind: it must at least be one the adapter emits.
+/// * **A candidate an earlier candidate resolves for.** The scalars share one
+///   evidence slot across a field's candidate list, so `fields.assignee.keyy`
+///   after a working `fields.assignee.name` passes. That is the price of a
+///   candidate list being a list: two candidates are *one adapter's*
+///   alternative spellings, and an instance uses one of them -- per-candidate
+///   evidence would fail the second spelling on every instance that does not
+///   use it, which is the case the list exists for. So a candidate list is
+///   certified as a whole, and the first candidate is the one this clause
+///   really pins. `reviewers` is not an exception to that: the array path gets
+///   its own slot only so a resolving *array* cannot excuse a wrong key
+///   *inside* its elements, which is a different question from one candidate
+///   excusing another.
+fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
+    use knobas_core::payload::{
+        KindPaths, PayloadPath, at, field, names_a_missing_key, resolve_flag, resolve_list,
+        resolve_string,
+    };
+
+    let kinds: std::collections::HashSet<&str> =
+        d.entity_kinds.iter().map(|k| k.id.as_str()).collect();
+    let mut declared_for: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for paths in &d.payload_paths {
+        assert!(
+            kinds.contains(paths.kind.as_str()),
+            "descriptor.payload_paths declares paths for kind {:?}, which is not one of \
+             descriptor.entity_kinds {:?} -- nothing will ever read a declaration for a kind \
+             this adapter does not emit",
+            paths.kind,
+            kinds
+        );
+        assert!(
+            declared_for.insert(paths.kind.as_str()),
+            "descriptor.payload_paths declares kind {:?} twice; readers take the first entry, \
+             so the second is a declaration that silently does nothing",
+            paths.kind
+        );
+    }
+
+    /// What a declared field must lead to.
+    #[derive(Clone, Copy)]
+    enum Wanted {
+        /// A status, a priority, an assignee, a project key or name.
+        Text,
+        /// A merged flag.
+        Flag,
+        /// The array a list path opens.
+        List,
+    }
+
+    impl Wanted {
+        fn matches(self, value: &serde_json::Value) -> bool {
+            match self {
+                Wanted::Text => value.is_string(),
+                Wanted::Flag => value.is_boolean(),
+                Wanted::List => value.is_array(),
+            }
+        }
+
+        fn word(self) -> &'static str {
+            match self {
+                Wanted::Text => "string",
+                Wanted::Flag => "boolean",
+                Wanted::List => "array",
+            }
+        }
+    }
+
+    /// What one (kind, field) pair's paths showed across the whole corpus.
+    #[derive(Default)]
+    struct Evidence {
+        /// Some item of this kind resolved the field.
+        resolved: bool,
+        /// Some item of this kind has an object where the path's next key
+        /// would sit, and does not have that key.
+        names_a_missing_key: bool,
+    }
+
+    let nothing = KindPaths::default();
+    // (kind, field) -> what the corpus showed. Ordered, so a failure names the
+    // same field on every run.
+    let mut evidence: std::collections::BTreeMap<(&str, &str), Evidence> =
+        std::collections::BTreeMap::new();
+
+    for item in items {
+        let paths = d
+            .payload_paths
+            .iter()
+            .find(|p| p.kind == item.kind)
+            .unwrap_or(&nothing);
+        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 6] = [
+            (field::STATUS_NAME, &paths.status_name, Wanted::Text),
+            (field::PRIORITY, &paths.priority, Wanted::Text),
+            (field::ASSIGNEE, &paths.assignee, Wanted::Text),
+            (field::PROJECT_KEY, &paths.project_key, Wanted::Text),
+            (field::PROJECT_NAME, &paths.project_name, Wanted::Text),
+            (field::MERGED, &paths.merged, Wanted::Flag),
+        ];
+
+        // Clause 2 for one path on one item, and the evidence clause 3 wants
+        // from it.
+        let weigh = |seen: &mut Evidence,
+                     name: &str,
+                     payload: &serde_json::Value,
+                     path: &PayloadPath,
+                     wanted: Wanted,
+                     within: &str| {
+            if let Some(value) = at(payload, path) {
+                assert!(
+                    wanted.matches(value),
+                    "descriptor.payload_paths declares {name} of kind {:?} at {:?}, which leads \
+                     to {} {within} this adapter's own item {} -- a declared path must lead to a \
+                     {} or to nothing at all, or every reader of it gets a value no source meant. \
+                     Payload: {}",
+                    item.kind,
+                    path.segments(),
+                    match value {
+                        serde_json::Value::Object(_) => "an object",
+                        serde_json::Value::Array(_) => "an array",
+                        serde_json::Value::Number(_) => "a number",
+                        serde_json::Value::Bool(_) => "a boolean",
+                        _ => "a string",
+                    },
+                    item.entity,
+                    wanted.word(),
+                    item.payload
+                );
+                seen.resolved = true;
+            }
+            seen.names_a_missing_key |= names_a_missing_key(payload, path);
+        };
+
+        for (name, candidates, wanted) in scalars {
+            let seen = evidence.entry((&item.kind, name)).or_default();
+            for path in candidates {
+                weigh(seen, name, &item.payload, path, wanted, "on");
+            }
+        }
+        for candidate in &paths.reviewers {
+            let seen = evidence.entry((&item.kind, field::REVIEWERS)).or_default();
+            // The array itself is weighed against its own evidence slot, so a
+            // list whose array is there and whose entry key is wrong is not
+            // excused by the array having resolved.
+            let mut array = Evidence::default();
+            weigh(
+                &mut array,
+                field::REVIEWERS,
+                &item.payload,
+                &candidate.at,
+                Wanted::List,
+                "on",
+            );
+            seen.names_a_missing_key |= array.names_a_missing_key;
+            for element in at(&item.payload, &candidate.at)
+                .and_then(serde_json::Value::as_array)
+                .map_or(&[][..], Vec::as_slice)
+            {
+                weigh(
+                    seen,
+                    field::REVIEWERS,
+                    element,
+                    &candidate.entry,
+                    Wanted::Text,
+                    "in an element of",
+                );
+            }
+        }
+
+        // Clause 4: what this kind does not declare, no reader may produce --
+        // including for a kind that declares nothing at all, which is most of
+        // a corpus and the place a knobas-side fallback would show up first.
+        for (name, candidates, _) in scalars {
+            if candidates.is_empty() && name != field::MERGED {
+                assert_eq!(
+                    resolve_string(&item.payload, candidates),
+                    None,
+                    "kind {:?} declares no {name}, so every reader must miss on item {} -- a \
+                     value here is knobas guessing at a shape no adapter claimed",
+                    item.kind,
+                    item.entity
+                );
+            }
+        }
+        if paths.merged.is_empty() {
+            assert_eq!(
+                resolve_flag(&item.payload, &paths.merged),
+                None,
+                "kind {:?} declares no merged flag, so every reader must miss on item {}",
+                item.kind,
+                item.entity
+            );
+        }
+        if paths.reviewers.is_empty() {
+            assert!(
+                resolve_list(&item.payload, &paths.reviewers).is_empty(),
+                "kind {:?} declares no reviewers, so every reader must miss on item {}",
+                item.kind,
+                item.entity
+            );
+        }
+    }
+
+    for ((kind, name), seen) in evidence {
+        assert!(
+            seen.resolved || !seen.names_a_missing_key,
+            "descriptor.payload_paths declares {name} of kind {kind:?} at a path no item of that \
+             kind resolves, and some of those items carry an object the path's next key is simply \
+             not in -- so it names a key this adapter's own records do not have, and every reader \
+             of it misses for ever while looking exactly like a source that says nothing"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -338,6 +602,26 @@ mod tests {
         AcceptsUndeclaredWrite,
         /// Swallows the sink's error and reports a successful sync.
         SwallowsSinkError,
+        /// Declares payload paths for a kind absent from `entity_kinds`.
+        PayloadPathsForAKindItDoesNotEmit,
+        /// Declares the same kind's payload paths twice, so the second entry
+        /// is a declaration nothing reads.
+        PayloadPathsForOneKindTwice,
+        /// Declares a status one key off in its **last** segment
+        /// (`fields.status.nam`), which its own items do not carry -- a read
+        /// that misses for ever and looks exactly like a source that says
+        /// nothing.
+        MisspelledPayloadPath,
+        /// The same typo one segment **earlier** (`fieldz.status.name`), where
+        /// the walk stops at the payload root rather than deep inside it.
+        /// Structurally the harder of the two to catch, and the reason clause
+        /// 3 asks about a missing key rather than about a container.
+        MisspelledPayloadPathAtTheRoot,
+        /// Declares a status at `fields.status`, which lands on the object
+        /// rather than on a string.
+        PayloadPathOntoAnObject,
+        /// Declares reviewers whose entry key its own elements do not carry.
+        MisspelledReviewerEntry,
     }
 
     struct TestSource {
@@ -404,6 +688,48 @@ mod tests {
                     full_sync_exhaustive: true,
                 }],
                 config_schema: serde_json::json!({ "type": "object", "properties": {} }),
+                // The conforming adapter declares a status and an assignee,
+                // and its items carry a status and an explicit `null`
+                // assignee -- so the happy path exercises both halves of the
+                // clause: a path that lands, and a source saying "nothing
+                // here", which is what keeps this safe to run against a live
+                // instance whose issues are unassigned.
+                payload_paths: {
+                    use crate::{KindPaths, ListPath, PayloadPath};
+                    let ticket = |status: PayloadPath| KindPaths {
+                        kind: "ticket".to_owned(),
+                        status_name: vec![status],
+                        assignee: vec![PayloadPath::of(["fields", "assignee", "name"])],
+                        ..KindPaths::default()
+                    };
+                    let good = ticket(PayloadPath::of(["fields", "status", "name"]));
+                    match self.behavior {
+                        Behavior::PayloadPathsForAKindItDoesNotEmit => vec![KindPaths {
+                            kind: "gadget".to_owned(),
+                            ..good
+                        }],
+                        Behavior::PayloadPathsForOneKindTwice => {
+                            vec![good.clone(), good]
+                        }
+                        Behavior::MisspelledPayloadPath => {
+                            vec![ticket(PayloadPath::of(["fields", "status", "nam"]))]
+                        }
+                        Behavior::MisspelledPayloadPathAtTheRoot => {
+                            vec![ticket(PayloadPath::of(["fieldz", "status", "name"]))]
+                        }
+                        Behavior::PayloadPathOntoAnObject => {
+                            vec![ticket(PayloadPath::of(["fields", "status"]))]
+                        }
+                        Behavior::MisspelledReviewerEntry => vec![KindPaths {
+                            reviewers: vec![ListPath {
+                                at: PayloadPath::of(["reviewers"]),
+                                entry: PayloadPath::of(["user"]),
+                            }],
+                            ..good
+                        }],
+                        _ => vec![good],
+                    }
+                },
             }
         }
 
@@ -471,7 +797,17 @@ mod tests {
                     body_text: "the first item".into(),
                     author: None,
                     updated_at: None,
-                    payload: serde_json::json!({}),
+                    // Jira Data Center's shape, because that is what the
+                    // declarations above address: a status the paths reach,
+                    // and an assignee the source explicitly says nothing
+                    // about.
+                    payload: serde_json::json!({
+                        "fields": {
+                            "status": { "name": "In Progress" },
+                            "assignee": serde_json::Value::Null
+                        },
+                        "reviewers": [{ "login": "mara.lindqvist" }]
+                    }),
                     web_url: None,
                     deleted: false,
                 })
@@ -711,7 +1047,80 @@ mod tests {
         .await;
     }
 
-    // -- clause 6: sink failures ---------------------------------------------
+    // -- clause 6: declared payload paths (#277) ------------------------------
+
+    /// A declaration for a kind the adapter does not emit is a declaration
+    /// nothing will ever read: no item carries that kind, so no reader ever
+    /// looks it up, and the field it names silently misses for ever.
+    #[tokio::test]
+    async fn rejects_payload_paths_for_a_kind_the_adapter_does_not_emit() {
+        rejects(
+            Behavior::PayloadPathsForAKindItDoesNotEmit,
+            "which is not one of descriptor.entity_kinds",
+        )
+        .await;
+    }
+
+    /// Readers take the first entry for a kind, so a second one is a
+    /// declaration that does nothing -- and the two can disagree.
+    #[tokio::test]
+    async fn rejects_one_kinds_payload_paths_declared_twice() {
+        rejects(Behavior::PayloadPathsForOneKindTwice, "declares kind").await;
+    }
+
+    /// The typo case, and the reason this clause exists at all. A path one key
+    /// off resolves to nothing on every record for ever, and a path-driven
+    /// read that misses is indistinguishable downstream from a source that
+    /// says nothing -- so if the adapter's own corpus does not catch it here,
+    /// nothing catches it.
+    #[tokio::test]
+    async fn rejects_a_path_into_an_object_that_does_not_have_that_key() {
+        rejects(
+            Behavior::MisspelledPayloadPath,
+            "at a path no item of that kind resolves",
+        )
+        .await;
+    }
+
+    /// The same typo one segment earlier, which has no container anywhere in
+    /// the corpus and would pass a clause that asked "does the object this key
+    /// would sit in exist?" -- it does not, because the *previous* key is the
+    /// wrong one. Asking instead "does some record show this path naming a key
+    /// it does not have?" catches both, and a null still excuses neither the
+    /// declaration nor a reader.
+    #[tokio::test]
+    async fn rejects_a_path_misspelled_before_its_last_segment() {
+        rejects(
+            Behavior::MisspelledPayloadPathAtTheRoot,
+            "at a path no item of that kind resolves",
+        )
+        .await;
+    }
+
+    /// A path that stops one segment short lands on the object. `->>` would
+    /// stringify it into a status called `{"name":"In Progress"}` -- a guess
+    /// dressed as an observation, which is what the type checks refuse.
+    #[tokio::test]
+    async fn rejects_a_path_that_lands_on_an_object() {
+        rejects(
+            Behavior::PayloadPathOntoAnObject,
+            "which leads to an object on this adapter's own item",
+        )
+        .await;
+    }
+
+    /// The same for a list: the array is found and the key inside its elements
+    /// is not, so the rule that walks it finds nobody, for ever.
+    #[tokio::test]
+    async fn rejects_a_reviewer_entry_key_the_elements_do_not_carry() {
+        rejects(
+            Behavior::MisspelledReviewerEntry,
+            "declares reviewers of kind \"ticket\" at a path no item of that kind resolves",
+        )
+        .await;
+    }
+
+    // -- clause 7: sink failures ---------------------------------------------
 
     #[tokio::test]
     async fn rejects_an_adapter_that_swallows_a_sink_error() {

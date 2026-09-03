@@ -190,9 +190,18 @@ impl knobas_sync::progress::ProgressSink for Ending {
 /// command reads it — through the granted read (#177), so this asserts the
 /// thing the board would actually draw rather than a payload path of its own.
 async fn mirrored_status(state: &SourcesState) -> Option<String> {
-    let board = knobas_core::mini_board::read(&state.pool, None, &[JIRA.to_owned()], None)
-        .await
-        .expect("the mini board reads");
+    // The declarations the running binary's adapters make, resolved against
+    // the configured rows -- which is exactly what the `mini_board` command
+    // does (#277). So the status this reads back is the one the real Jira
+    // adapter says where to find, not a path this file spells.
+    let declarations =
+        knobas_app::sources::paths::declared_paths(&state.pool, state.registry.as_ref())
+            .await
+            .expect("what the configured sources declare");
+    let board =
+        knobas_core::mini_board::read(&state.pool, None, &[JIRA.to_owned()], None, &declarations)
+            .await
+            .expect("the mini board reads");
     let id = format!("{JIRA}:{KEY}");
     board
         .columns

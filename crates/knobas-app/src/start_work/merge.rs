@@ -56,30 +56,47 @@ pub struct Merged {
 /// Read undirected -- `entries_of` is undirected and so is the panel, so which
 /// end the user happened to draw from is not a fact this may depend on.
 ///
-/// **`payload->>'merged'` is a source-shaped read outside an adapter.** There
-/// is no adapter-independent way to ask whether a pull request is merged: §4.1
+/// **Merged-ness is a source-shaped read outside an adapter.** There is no
+/// adapter-independent way to ask whether a pull request is merged: §4.1
 /// guarantees `title`, `body_text`, `author`, `updated_at` and a verbatim
 /// `payload`, and merged-ness lives only in the last of those. It is the same
-/// seam #43 recorded for a ticket's status, since ratified as ADR-0007: miss,
-/// one named statement, a pinned failure direction. Confined to this one
-/// statement, and written so a second spelling is one more `or` here and
-/// nothing else anywhere.
+/// seam #43 recorded for a ticket's status, since ratified as ADR-0007 and, as
+/// of #277, read at the path **the source declares**: Gitea says its pull
+/// requests carry a boolean `merged`, and a source that says nothing moves no
+/// ticket. That is the miss direction this read has always had -- a pull
+/// request knobas cannot tell is merged moves nothing -- and it is unchanged;
+/// what changed is that a second forge is a line on its own descriptor rather
+/// than one more `or` here.
+///
+/// A **boolean**, deliberately, and narrower than the `->>'merged' = 'true'`
+/// this replaces: a source whose merge is a nullable *timestamp* declares no
+/// flag rather than pointing one at it, because "merged at 3pm" and "merged"
+/// are different facts with different absences.
+///
+/// **The pull request is aliased `i`**, which is what a declared read requires
+/// of the statement it sits in: the macros address `i.payload`, `i.source_id`
+/// and `i.kind`, so the row whose declaration is being resolved carries that
+/// name. The ticket keeps `t`.
 ///
 /// The `not exists` is [`ALREADY_FOLLOWED`]'s half of the same statement.
-const MERGED_AND_LINKED: &str = "
-select distinct pr.entity_id as pr_id, t.entity_id as ticket_id
+const MERGED_AND_LINKED: &str = concat!(
+    "
+select distinct i.entity_id as pr_id, t.entity_id as ticket_id
   from knobas.confirmed_link l
-  join sync.live_item pr
-    on pr.entity_id in (l.from_id, l.to_id) and pr.kind = $1
+  join sync.live_item i
+    on i.entity_id in (l.from_id, l.to_id) and i.kind = $1
   join sync.live_item t
     on t.entity_id in (l.from_id, l.to_id) and t.kind = $2
- where (pr.payload->>'merged')::text = 'true'
+ where ",
+    knobas_core::declared_flag!("$4", "merged"),
+    " is true
    and not exists (
          select 1 from knobas.write_queue w
           where w.entity_id = t.entity_id
             and w.op = 'transition'
             and w.payload->'Transition'->>'status' = $3)
- order by ticket_id, pr_id";
+ order by ticket_id, pr_id"
+);
 
 /// Why the `not exists` above is the whole memory this feature needs.
 ///
@@ -125,9 +142,10 @@ pub async fn follow_merges(
     pool: &PgPool,
     steps: &dyn Steps,
     status: &str,
+    declarations: &knobas_core::payload::Declarations,
 ) -> Result<u32, IpcError> {
     let mut moved = 0;
-    for pair in due(pool, status).await? {
+    for pair in due(pool, status, declarations).await? {
         let Ok(ticket) = EntityRef::parse(&pair.ticket_id) else {
             continue;
         };
@@ -186,11 +204,16 @@ pub async fn follow_merges(
 /// # Errors
 ///
 /// [`Internal`](crate::IpcErrorCode::Internal) if the query fails.
-pub async fn due(pool: &PgPool, status: &str) -> Result<Vec<Merged>, IpcError> {
+pub async fn due(
+    pool: &PgPool,
+    status: &str,
+    declarations: &knobas_core::payload::Declarations,
+) -> Result<Vec<Merged>, IpcError> {
     sqlx::query_as::<_, Merged>(MERGED_AND_LINKED)
         .bind(KIND_PR)
         .bind(KIND_TICKET)
         .bind(status)
+        .bind(declarations.as_param())
         .fetch_all(pool)
         .await
         .map_err(IpcError::internal)

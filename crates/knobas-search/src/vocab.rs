@@ -799,6 +799,9 @@ mod tests {
             write_ops: Vec::new(),
             entity_kinds: kinds.to_vec(),
             config_schema: serde_json::Value::Object(serde_json::Map::new()),
+            // Nothing declared: this stand-in has no payload shapes to
+            // read, so every path-driven read misses on it (#277).
+            payload_paths: Vec::new(),
         }
     }
 }

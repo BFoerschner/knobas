@@ -756,6 +756,22 @@ async fn an_edited_proposal_is_what_gets_dispatched() {
 
 // -- the reverse direction -------------------------------------------------
 
+/// What the pull request's source declares about where it keeps its merged
+/// flag (#277). Gitea's boolean `merged`, which is `knobas_source_gitea`'s own
+/// declaration -- the pass reads through it now, so a fixture's source has to
+/// have said where its own spelling is.
+fn declarations() -> knobas_core::payload::Declarations {
+    use knobas_core::payload::{Declarations, KindPaths, PayloadPath};
+    Declarations::empty().with(
+        "gitea",
+        vec![KindPaths {
+            kind: "pr".to_owned(),
+            merged: vec![PayloadPath::of(["merged"])],
+            ..KindPaths::default()
+        }],
+    )
+}
+
 /// **Story 17.** A merged pull request moves the ticket a knobas link joins it
 /// to.
 #[tokio::test]
@@ -774,7 +790,7 @@ async fn a_merged_pull_request_moves_the_ticket_it_is_linked_to() {
         .unwrap();
     let fake = Fake::new();
 
-    let moved = start_work::merge::follow_merges(&pool, &fake, "In Review")
+    let moved = start_work::merge::follow_merges(&pool, &fake, "In Review", &declarations())
         .await
         .unwrap();
 
@@ -798,7 +814,7 @@ async fn a_merged_pull_request_nobody_linked_moves_nothing() {
     .await;
     let fake = Fake::new();
 
-    let moved = start_work::merge::follow_merges(&pool, &fake, "In Review")
+    let moved = start_work::merge::follow_merges(&pool, &fake, "In Review", &declarations())
         .await
         .unwrap();
 
@@ -827,7 +843,7 @@ async fn an_open_pull_request_moves_nothing() {
     let fake = Fake::new();
 
     assert_eq!(
-        start_work::merge::follow_merges(&pool, &fake, "In Review")
+        start_work::merge::follow_merges(&pool, &fake, "In Review", &declarations())
             .await
             .unwrap(),
         0
@@ -857,7 +873,7 @@ async fn a_merge_already_followed_is_not_followed_twice() {
         .unwrap();
 
     assert_eq!(
-        start_work::merge::due(&pool, "In Review")
+        start_work::merge::due(&pool, "In Review", &declarations())
             .await
             .unwrap()
             .len(),
@@ -883,7 +899,7 @@ async fn a_merge_already_followed_is_not_followed_twice() {
         .unwrap();
 
     assert!(
-        start_work::merge::due(&pool, "In Review")
+        start_work::merge::due(&pool, "In Review", &declarations())
             .await
             .unwrap()
             .is_empty(),
@@ -953,7 +969,7 @@ async fn the_reverse_direction_names_its_pull_request_in_the_activity_stream() {
         .await
         .unwrap();
 
-    let moved = start_work::merge::follow_merges(&pool, &Fake::new(), "In Review")
+    let moved = start_work::merge::follow_merges(&pool, &Fake::new(), "In Review", &declarations())
         .await
         .unwrap();
     assert_eq!(moved, 1);

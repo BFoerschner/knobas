@@ -102,11 +102,11 @@ pub struct EntityFilter {
     /// It narrows **within** [`Self::sources`] and never instead of them: a
     /// project key is unique only inside its own source, so a project room
     /// sets both and a filter carrying the key alone would union two sources'
-    /// `PAY` into one room. Which paths a key is read from is
-    /// [`knobas_core::project_key_read!`]'s to say, and it is the same read
-    /// the census behind the switcher's project rooms takes -- one statement,
-    /// so a room can never disagree with the list of rooms about what a
-    /// project is.
+    /// `PAY` into one room. Where a key is read from is the **source's** to
+    /// say since #277, and it is the same read the census behind the
+    /// switcher's project rooms takes -- one macro over one declaration, so a
+    /// room can never disagree with the list of rooms about what a project
+    /// is.
     ///
     /// A record whose payload carries no readable project key matches no
     /// value of this field, so it is in no project room and still in *All
@@ -156,7 +156,7 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
    and ($3::int    is null or i.item_updated_at >= now() - make_interval(days => $3))
    and ($6::text[] is null or i.entity_id = any($6))
    and ($7::text   is null or "#,
-    knobas_core::project_key_read!(),
+    knobas_core::project_key_read!("$8"),
     r#" = $7)
  order by i.item_updated_at desc nulls last, i.entity_id
  limit $4 offset $5
@@ -175,7 +175,7 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
    and ($3::int    is null or i.item_updated_at >= now() - make_interval(days => $3))
    and ($6::text[] is null or i.entity_id = any($6))
    and ($7::text   is null or "#,
-    knobas_core::project_key_read!(),
+    knobas_core::project_key_read!("$8"),
     r#" = $7)
  order by i.title asc, i.entity_id
  limit $4 offset $5
@@ -199,7 +199,7 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
    and ($3::int    is null or i.item_updated_at >= now() - make_interval(days => $3))
    and ($6::text[] is null or i.entity_id = any($6))
    and ($7::text   is null or "#,
-    knobas_core::project_key_read!(),
+    knobas_core::project_key_read!("$8"),
     r#" = $7)
  order by i.item_updated_at desc nulls last, i.entity_id
  limit $4 offset $5
@@ -218,7 +218,7 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
    and ($3::int    is null or i.item_updated_at >= now() - make_interval(days => $3))
    and ($6::text[] is null or i.entity_id = any($6))
    and ($7::text   is null or "#,
-    knobas_core::project_key_read!(),
+    knobas_core::project_key_read!("$8"),
     r#" = $7)
  order by i.title asc, i.entity_id
  limit $4 offset $5
@@ -254,6 +254,7 @@ pub async fn list_entities_inner(
     filter: &EntityFilter,
     limit: u32,
     offset: u32,
+    declarations: &knobas_core::payload::Declarations,
 ) -> Result<EntityPage, IpcError> {
     // `u32 -> i32` and not `as`: `updated_within_days` past `i32::MAX` is a
     // caller error, and silently wrapping it into a negative interval would
@@ -283,6 +284,7 @@ pub async fn list_entities_inner(
         .bind(i64::from(offset))
         .bind(members)
         .bind(filter.project.as_deref())
+        .bind(declarations.as_param())
         .fetch_all(pool)
         .await?;
 
@@ -324,7 +326,27 @@ pub async fn list_entities(
     offset: u32,
 ) -> Result<EntityPage, IpcError> {
     let pool = lifecycle.pool()?;
-    list_entities_inner(&pool, &filter, limit, offset).await
+    let declarations = declared_paths(&pool).await?;
+    list_entities_inner(&pool, &filter, limit, offset, &declarations).await
+}
+
+/// Every configured source's declared payload paths (#277).
+///
+/// **`Registry::builtin()` rather than `SourcesState`'s trait object**, for the
+/// reason `Registry::templates` exists as an inherent method at all: a
+/// declaration is a property of the adapter *kind*, held in a `const` table
+/// compiled into this binary, so a read that wants one has nothing to wait for.
+/// Reaching through `SourcesState` would make a room's list, the mini board and
+/// the project census answer `not_ready` until the scheduler is up, which is
+/// later than the pool -- a widening of `not_ready` bought for nothing. The
+/// reads that already hold a `SourcesState` (the inbox, the merge pass) pass
+/// its registry instead, so the injected one is still what a test drives.
+///
+/// # Errors
+///
+/// `internal` if the source listing fails.
+async fn declared_paths(pool: &PgPool) -> Result<knobas_core::payload::Declarations, IpcError> {
+    crate::sources::paths::declared_paths(pool, &crate::sources::Registry::builtin()).await
 }
 
 // -- the detail view --------------------------------------------------------
@@ -1457,10 +1479,13 @@ pub async fn start_work_amend(
 #[tauri::command]
 pub async fn follow_merges<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<u32, IpcError> {
     let state = crate::sources::state(&app)?;
+    let declarations =
+        crate::sources::paths::declared_paths(&state.pool, state.registry.as_ref()).await?;
     crate::start_work::merge::follow_merges(
         &state.pool,
         &crate::start_work::queue::Queue { state: &state },
         crate::start_work::plan::IN_REVIEW,
+        &declarations,
     )
     .await
 }
@@ -1543,7 +1568,7 @@ pub async fn inbox_items<R: tauri::Runtime>(
 #[tauri::command]
 pub async fn inbox_count(lifecycle: State<'_, Lifecycle>) -> Result<i64, IpcError> {
     let pool = lifecycle.pool()?;
-    inbox_count_inner(&pool, Utc::now()).await
+    inbox_count_inner(&pool, &crate::sources::Registry::builtin(), Utc::now()).await
 }
 
 /// [`inbox_count`], against a pool and a clock.
@@ -1551,9 +1576,14 @@ pub async fn inbox_count(lifecycle: State<'_, Lifecycle>) -> Result<i64, IpcErro
 /// # Errors
 ///
 /// `internal` if the count or the identity read fails.
-pub async fn inbox_count_inner(pool: &PgPool, now: DateTime<Utc>) -> Result<i64, IpcError> {
+pub async fn inbox_count_inner(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    now: DateTime<Utc>,
+) -> Result<i64, IpcError> {
     let identity = identity_of(pool).await?;
-    knobas_core::inbox::count(pool, &identity, now)
+    let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
+    knobas_core::inbox::count(pool, &identity, now, &declarations)
         .await
         .map_err(IpcError::internal)
 }
@@ -1565,17 +1595,20 @@ pub async fn inbox_count_inner(pool: &PgPool, now: DateTime<Utc>) -> Result<i64,
 /// As [`snooze_inbox_item`].
 pub async fn snooze_inbox_item_inner(
     pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     now: DateTime<Utc>,
     item_key: &str,
     until: DateTime<Utc>,
 ) -> Result<ActivityRow, IpcError> {
     let identity = identity_of(pool).await?;
+    let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
     crate::inbox::answer(
         pool,
         &identity,
         now,
         item_key,
         crate::inbox::Answer::Snooze(until),
+        &declarations,
     )
     .await
 }
@@ -1607,7 +1640,14 @@ pub async fn snooze_inbox_item<R: tauri::Runtime>(
     until: DateTime<Utc>,
 ) -> Result<(), IpcError> {
     let pool = lifecycle.pool()?;
-    let written = snooze_inbox_item_inner(&pool, Utc::now(), &item_key, until).await?;
+    let written = snooze_inbox_item_inner(
+        &pool,
+        &crate::sources::Registry::builtin(),
+        Utc::now(),
+        &item_key,
+        until,
+    )
+    .await?;
     announce(&app, written);
     Ok(())
 }
@@ -1619,11 +1659,21 @@ pub async fn snooze_inbox_item<R: tauri::Runtime>(
 /// As [`complete_inbox_item`].
 pub async fn complete_inbox_item_inner(
     pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     now: DateTime<Utc>,
     item_key: &str,
 ) -> Result<ActivityRow, IpcError> {
     let identity = identity_of(pool).await?;
-    crate::inbox::answer(pool, &identity, now, item_key, crate::inbox::Answer::Done).await
+    let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
+    crate::inbox::answer(
+        pool,
+        &identity,
+        now,
+        item_key,
+        crate::inbox::Answer::Done,
+        &declarations,
+    )
+    .await
 }
 
 /// I handled this (#45, story 16).
@@ -1645,7 +1695,13 @@ pub async fn complete_inbox_item<R: tauri::Runtime>(
     item_key: String,
 ) -> Result<(), IpcError> {
     let pool = lifecycle.pool()?;
-    let written = complete_inbox_item_inner(&pool, Utc::now(), &item_key).await?;
+    let written = complete_inbox_item_inner(
+        &pool,
+        &crate::sources::Registry::builtin(),
+        Utc::now(),
+        &item_key,
+    )
+    .await?;
     announce(&app, written);
     Ok(())
 }
@@ -2061,10 +2117,15 @@ pub async fn mini_board(
     project: Option<String>,
 ) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
     let pool = lifecycle.pool()?;
-    Ok(
-        knobas_core::mini_board::read(&pool, ctx_id.as_deref(), &sources, project.as_deref())
-            .await?,
+    let declarations = declared_paths(&pool).await?;
+    Ok(knobas_core::mini_board::read(
+        &pool,
+        ctx_id.as_deref(),
+        &sources,
+        project.as_deref(),
+        &declarations,
     )
+    .await?)
 }
 
 // -- the projects a corpus shows (#208) -------------------------------------
@@ -2099,5 +2160,6 @@ pub async fn list_projects(
     lifecycle: State<'_, Lifecycle>,
 ) -> Result<Vec<knobas_core::project::Project>, IpcError> {
     let pool = lifecycle.pool()?;
-    Ok(knobas_core::project::list(&pool).await?)
+    let declarations = declared_paths(&pool).await?;
+    Ok(knobas_core::project::list(&pool, &declarations).await?)
 }

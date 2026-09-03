@@ -51,7 +51,55 @@ pub fn descriptor_template() -> SourceDescriptor {
             full_sync_exhaustive: true,
         }],
         config_schema: config_schema(),
+        payload_paths: payload_paths(),
     }
+}
+
+/// Where a Jira Data Center issue keeps what knobas reads (#277, ADR-0007).
+///
+/// Every path here is one this adapter's own reads already relied on -- the
+/// sync has requested `status`, `priority`, `assignee` and `project` in its
+/// base field list since M1, and the record reaches the mirror verbatim -- so
+/// this writes down what was already true, in the one place a reader now asks.
+///
+/// **`assignee` declares two paths, in this order.** `fields.assignee.name` is
+/// the username on a Data Center instance; `fields.assignee.key` is the same
+/// identity on instances that still key on it. Two spellings of *one adapter's
+/// own field*, which is what a candidate list is for -- not knobas guessing at
+/// a source it has not met. Cloud's `accountId` is deliberately absent: this
+/// adapter is Data Center only (`config_schema`'s `flavor`), and an
+/// `accountId` is not a username, so a reader matching it against the
+/// configured identity would never fire.
+///
+/// **No reviewers and no merged flag**: a Jira issue has neither. A kind that
+/// declares no path for a field is a miss, which is what those readers did
+/// against Jira before this existed.
+///
+/// **The blocked-like set is this adapter's claim about Jira workflows**, not
+/// about one instance: the three names below are Jira's own conventional
+/// spellings of "stuck", matched case-insensitively by their reader. An
+/// instance whose workflow spells it otherwise contributes no blocker by
+/// status -- absence, never a wrong one -- and a per-instance list is a
+/// configuration key the day one is asked for, not a guess made here.
+fn payload_paths() -> Vec<knobas_source::KindPaths> {
+    use knobas_source::{KindPaths, PayloadPath};
+    vec![KindPaths {
+        kind: crate::KIND_TICKET.to_owned(),
+        status_name: vec![PayloadPath::of(["fields", "status", "name"])],
+        priority: vec![PayloadPath::of(["fields", "priority", "name"])],
+        assignee: vec![
+            PayloadPath::of(["fields", "assignee", "name"]),
+            PayloadPath::of(["fields", "assignee", "key"]),
+        ],
+        project_key: vec![PayloadPath::of(["fields", "project", "key"])],
+        project_name: vec![PayloadPath::of(["fields", "project", "name"])],
+        blocked_statuses: vec![
+            "Blocked".to_owned(),
+            "On Hold".to_owned(),
+            "Impediment".to_owned(),
+        ],
+        ..KindPaths::default()
+    }]
 }
 
 /// The JSON Schema the Add-source form is generated from.

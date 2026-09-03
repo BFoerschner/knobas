@@ -406,7 +406,16 @@ async fn the_demo_corpus_shows_exactly_the_two_projects_its_fixture_names() {
     knobas_db::migrate::run(&pool).await.unwrap();
     demo::demo_load_inner(&pool).await.unwrap();
 
-    let census = knobas_core::project::list(&pool)
+    // Through the declarations the running binary's adapters make (#277): the
+    // demo source is `knobas_source_mock`, and where its records keep a
+    // project is that adapter's own declaration, not a path this file spells.
+    let declarations = knobas_app::sources::paths::declared_paths(
+        &pool,
+        &knobas_app::sources::Registry::builtin(),
+    )
+    .await
+    .expect("what the configured sources declare");
+    let census = knobas_core::project::list(&pool, &declarations)
         .await
         .expect("the census the switcher's project rooms are built from");
     let shown: Vec<(String, Option<String>)> = census

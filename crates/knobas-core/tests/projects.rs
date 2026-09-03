@@ -11,8 +11,55 @@
 //! shared database would let one test's fixture decide another's answer.
 
 use knobas_core::entity::EntityRef;
+use knobas_core::payload::{Declarations, KindPaths, PayloadPath};
 use knobas_core::project::{self, Project};
 use sqlx::PgPool;
+
+/// What the two sources in this file declare about where they keep a project
+/// (#277) -- the census is path-driven now, so a fixture's source has to have
+/// said where its own spelling is, the way its adapter's descriptor does.
+///
+/// Jira's `fields.project`, and TeamCity's two: a **build** names its project
+/// on the `buildType` it ran, and a build **configuration**'s record *is* that
+/// `buildType`, so it names it at the top level. The kind guard #232 spelled
+/// as `case when i.kind = 'build_config'` is exactly this -- two per-kind
+/// declarations, and no other kind can reach the top-level path.
+///
+/// **Per instance, not per adapter kind**: `jira` and `jira-eu` are two
+/// configured Jiras, and each declares its own, because a declaration is
+/// keyed by the source id that is also the entity namespace. That is what
+/// `knobas_app::sources::declared_paths` does with one adapter template and
+/// two rows of `knobas.source_config`.
+fn declarations() -> Declarations {
+    let jira = || {
+        vec![KindPaths {
+            kind: "ticket".to_owned(),
+            project_key: vec![PayloadPath::of(["fields", "project", "key"])],
+            project_name: vec![PayloadPath::of(["fields", "project", "name"])],
+            ..KindPaths::default()
+        }]
+    };
+    Declarations::empty()
+        .with("jira", jira())
+        .with("jira-eu", jira())
+        .with(
+            "teamcity",
+            vec![
+                KindPaths {
+                    kind: "build".to_owned(),
+                    project_key: vec![PayloadPath::of(["buildType", "projectId"])],
+                    project_name: vec![PayloadPath::of(["buildType", "projectName"])],
+                    ..KindPaths::default()
+                },
+                KindPaths {
+                    kind: "build_config".to_owned(),
+                    project_key: vec![PayloadPath::of(["projectId"])],
+                    project_name: vec![PayloadPath::of(["projectName"])],
+                    ..KindPaths::default()
+                },
+            ],
+        )
+}
 
 /// A migrated, empty database of this test's own.
 async fn scratch() -> PgPool {
@@ -172,7 +219,7 @@ async fn every_project_the_corpus_shows_is_reported_once() {
     )
     .await;
 
-    let projects = project::list(&pool).await.unwrap();
+    let projects = project::list(&pool, &declarations()).await.unwrap();
 
     assert_eq!(
         rows(&projects),
@@ -184,10 +231,10 @@ async fn every_project_the_corpus_shows_is_reported_once() {
     );
 }
 
-/// A source that spells it differently is one more `coalesce` arm in one place
-/// (ADR-0007 requirement 2), and nothing anywhere else. TeamCity names the
-/// project on the `buildType` a build ran, in its own two words; without this
-/// the second arm would be untested code.
+/// A source that spells it differently is one declaration of its own (#277),
+/// and nothing anywhere else. TeamCity names the project on the `buildType` a
+/// build ran, in its own two words; without this that declaration would be
+/// untested.
 #[tokio::test]
 async fn teamcitys_own_two_words_read_as_well_as_jiras() {
     let pool = scratch().await;
@@ -212,7 +259,7 @@ async fn teamcitys_own_two_words_read_as_well_as_jiras() {
     )
     .await;
 
-    let projects = project::list(&pool).await.unwrap();
+    let projects = project::list(&pool, &declarations()).await.unwrap();
 
     assert_eq!(
         rows(&projects),
@@ -244,7 +291,7 @@ async fn a_build_configurations_own_top_level_words_are_read_for_its_kind() {
     )
     .await;
 
-    let projects = project::list(&pool).await.unwrap();
+    let projects = project::list(&pool, &declarations()).await.unwrap();
 
     assert_eq!(
         rows(&projects),
@@ -256,11 +303,11 @@ async fn a_build_configurations_own_top_level_words_are_read_for_its_kind() {
     );
 }
 
-/// Miss direction, for the third arm: a configuration whose top-level
-/// `projectId` is absent, blank, whitespace-only or not a string contributes
-/// no project -- the same four refusals the Jira path is pinned by below,
-/// all through the one `string_at!`, so the new path cannot be laxer than
-/// the old ones.
+/// Miss direction, for the build configuration's own declaration: a record
+/// whose top-level `projectId` is absent, blank, whitespace-only or not a
+/// string contributes no project -- the same four refusals the Jira path is
+/// pinned by below, all through the one declared read, so no declared path can
+/// be laxer than another.
 #[tokio::test]
 async fn a_build_configuration_with_no_readable_project_contributes_nothing() {
     let pool = scratch().await;
@@ -295,7 +342,7 @@ async fn a_build_configuration_with_no_readable_project_contributes_nothing() {
     )
     .await;
 
-    let projects = project::list(&pool).await.unwrap();
+    let projects = project::list(&pool, &declarations()).await.unwrap();
 
     assert_eq!(rows(&projects), vec![], "none of the five is a project");
 }
@@ -326,7 +373,7 @@ async fn a_build_configuration_with_no_readable_name_is_reported_by_its_key() {
     )
     .await;
 
-    let projects = project::list(&pool).await.unwrap();
+    let projects = project::list(&pool, &declarations()).await.unwrap();
 
     assert_eq!(
         rows(&projects),
@@ -368,7 +415,7 @@ async fn a_build_and_its_configuration_are_one_project() {
     .await;
     touched(&pool, &build, "2026-08-01T09:00:00Z").await;
 
-    let projects = project::list(&pool).await.unwrap();
+    let projects = project::list(&pool, &declarations()).await.unwrap();
 
     assert_eq!(
         rows(&projects),
@@ -407,7 +454,7 @@ async fn a_top_level_project_id_on_any_other_kind_contributes_nothing() {
     )
     .await;
 
-    let projects = project::list(&pool).await.unwrap();
+    let projects = project::list(&pool, &declarations()).await.unwrap();
 
     assert_eq!(
         rows(&projects),
@@ -439,7 +486,7 @@ async fn a_project_key_that_is_not_a_string_contributes_nothing() {
     )
     .await;
 
-    let projects = project::list(&pool).await.unwrap();
+    let projects = project::list(&pool, &declarations()).await.unwrap();
 
     assert_eq!(rows(&projects), vec![], "neither shape is a project");
 }
@@ -472,7 +519,7 @@ async fn a_renamed_project_stays_one_project_under_its_newest_name() {
     touched(&pool, &new, "2026-08-15T09:00:00Z").await;
     touched(&pool, &nameless, "2026-08-30T09:00:00Z").await;
 
-    let projects = project::list(&pool).await.unwrap();
+    let projects = project::list(&pool, &declarations()).await.unwrap();
 
     assert_eq!(rows(&projects), vec![("jira", "PAY", Some("Payouts"))]);
 }
@@ -492,7 +539,7 @@ async fn a_blank_project_key_contributes_nothing() {
     )
     .await;
 
-    let projects = project::list(&pool).await.unwrap();
+    let projects = project::list(&pool, &declarations()).await.unwrap();
 
     assert_eq!(rows(&projects), vec![]);
 }
@@ -513,7 +560,7 @@ async fn a_whitespace_only_project_key_contributes_nothing() {
     )
     .await;
 
-    let projects = project::list(&pool).await.unwrap();
+    let projects = project::list(&pool, &declarations()).await.unwrap();
 
     assert_eq!(rows(&projects), vec![]);
 }
@@ -543,7 +590,7 @@ async fn a_record_with_no_project_at_all_contributes_nothing() {
     )
     .await;
 
-    let projects = project::list(&pool).await.unwrap();
+    let projects = project::list(&pool, &declarations()).await.unwrap();
 
     assert_eq!(
         rows(&projects),
@@ -575,7 +622,7 @@ async fn a_project_with_no_readable_name_is_reported_by_its_key() {
     )
     .await;
 
-    let projects = project::list(&pool).await.unwrap();
+    let projects = project::list(&pool, &declarations()).await.unwrap();
 
     assert_eq!(
         rows(&projects),
@@ -607,7 +654,7 @@ async fn a_tombstoned_item_contributes_no_project() {
     .await;
     tombstone(&pool, &withdrawn).await;
 
-    let projects = project::list(&pool).await.unwrap();
+    let projects = project::list(&pool, &declarations()).await.unwrap();
 
     assert_eq!(rows(&projects), vec![("jira", "PAY", Some("Payout"))]);
 }
@@ -638,7 +685,7 @@ async fn a_disabled_source_shows_no_projects() {
     .await;
     configure(&pool, "teamcity", false).await;
 
-    let projects = project::list(&pool).await.unwrap();
+    let projects = project::list(&pool, &declarations()).await.unwrap();
 
     assert_eq!(rows(&projects), vec![("jira", "PAY", Some("Payout"))]);
 
@@ -646,7 +693,7 @@ async fn a_disabled_source_shows_no_projects() {
         .execute(&pool)
         .await
         .unwrap();
-    let projects = project::list(&pool).await.unwrap();
+    let projects = project::list(&pool, &declarations()).await.unwrap();
     assert_eq!(
         rows(&projects),
         vec![
@@ -679,7 +726,7 @@ async fn one_key_in_two_sources_is_two_projects() {
     )
     .await;
 
-    let projects = project::list(&pool).await.unwrap();
+    let projects = project::list(&pool, &declarations()).await.unwrap();
 
     assert_eq!(
         rows(&projects),
