@@ -929,6 +929,8 @@ knobas-secrets	lib/knobas_secrets	tests::the_spawn_helpers_reach_the_store
 knobas-secrets	test/keyring_local	the_keyring_store_honours_the_store_contract
 knobas-source	lib/knobas_source	contract::tests::accepts_a_conforming_adapter
 knobas-source	lib/knobas_source	contract::tests::accepts_a_declared_write_op_without_calling_write
+knobas-source	lib/knobas_source	contract::tests::accepts_a_later_candidate_an_earlier_one_resolves_for
+knobas-source	lib/knobas_source	contract::tests::accepts_a_wrong_declaration_for_a_kind_the_corpus_never_populates
 knobas-source	lib/knobas_source	contract::tests::rejects_a_blank_source_id
 knobas-source	lib/knobas_source	contract::tests::rejects_a_connectivity_failure_misclassified_by_sync
 knobas-source	lib/knobas_source	contract::tests::rejects_a_connectivity_failure_misclassified_by_test_connection

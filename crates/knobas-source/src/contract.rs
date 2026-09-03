@@ -314,7 +314,10 @@ where
 ///
 /// A corpus-shaped question is answered by the corpus, so two declarations
 /// pass without being asked anything. Both are recorded rather than left for
-/// the next reader to discover as a hole:
+/// the next reader to discover as a hole, and both are pinned by a test that
+/// goes red on a tightening (#301):
+/// `accepts_a_wrong_declaration_for_a_kind_the_corpus_never_populates` and
+/// `accepts_a_later_candidate_an_earlier_one_resolves_for`.
 ///
 /// * **A kind the corpus never populates.** The evidence below is gathered
 ///   inside the walk over `items`, so a kind with no items contributes no
@@ -622,6 +625,18 @@ mod tests {
         PayloadPathOntoAnObject,
         /// Declares reviewers whose entry key its own elements do not carry.
         MisspelledReviewerEntry,
+        /// Emits `ticket` correctly while also declaring a second kind,
+        /// `gadget`, whose declaration is wholly wrong -- and emits no
+        /// `gadget`. The corpus never populates that kind, so the clause
+        /// gathers no evidence about it and accepts. Tolerance, not a bug:
+        /// see `accepts_a_wrong_declaration_for_a_kind_the_corpus_never_populates`.
+        WrongPathsForAKindTheCorpusNeverPopulates,
+        /// Declares two status candidates: the first resolves on every item,
+        /// the second names a key those items do not have. The candidates
+        /// pool one evidence slot, so the first excuses the second and the
+        /// clause accepts. Tolerance, not a bug: see
+        /// `accepts_a_later_candidate_an_earlier_one_resolves_for`.
+        ASecondCandidateNoItemResolves,
     }
 
     struct TestSource {
@@ -680,13 +695,24 @@ mod tests {
                     }
                     _ => Vec::new(),
                 },
-                entity_kinds: vec![KindInfo {
-                    id: "ticket".into(),
-                    label: "Ticket".into(),
-                    plural: "Tickets".into(),
-                    monogram: "TE".into(),
-                    full_sync_exhaustive: true,
-                }],
+                entity_kinds: {
+                    let kind = |id: &str, label: &str, monogram: &str| KindInfo {
+                        id: id.to_owned(),
+                        label: label.to_owned(),
+                        plural: format!("{label}s"),
+                        monogram: monogram.to_owned(),
+                        full_sync_exhaustive: true,
+                    };
+                    let mut kinds = vec![kind("ticket", "Ticket", "TE")];
+                    // The second kind exists only for the tolerance case, and
+                    // only in `entity_kinds`: clause 1 wants a declared kind
+                    // to be one the adapter emits, and nothing anywhere wants
+                    // it to be one the adapter's corpus happens to contain.
+                    if self.behavior == Behavior::WrongPathsForAKindTheCorpusNeverPopulates {
+                        kinds.push(kind("gadget", "Gadget", "GA"));
+                    }
+                    kinds
+                },
                 config_schema: serde_json::json!({ "type": "object", "properties": {} }),
                 // The conforming adapter declares a status and an assignee,
                 // and its items carry a status and an explicit `null`
@@ -725,6 +751,30 @@ mod tests {
                                 at: PayloadPath::of(["reviewers"]),
                                 entry: PayloadPath::of(["user"]),
                             }],
+                            ..good
+                        }],
+                        // Every path here is wrong in a way the corpus would
+                        // catch on a populated kind -- the status is
+                        // misspelled at the root, the assignee names a key
+                        // `fields` does not have -- and none of it is asked,
+                        // because no item is of this kind.
+                        Behavior::WrongPathsForAKindTheCorpusNeverPopulates => vec![
+                            good,
+                            KindPaths {
+                                kind: "gadget".to_owned(),
+                                status_name: vec![PayloadPath::of(["fieldz", "status", "name"])],
+                                assignee: vec![PayloadPath::of(["fields", "assignerr"])],
+                                ..KindPaths::default()
+                            },
+                        ],
+                        // Two spellings of one field, in the shape a candidate
+                        // list exists for. The first lands on every item; the
+                        // second names a key `fields.status` does not have.
+                        Behavior::ASecondCandidateNoItemResolves => vec![KindPaths {
+                            status_name: vec![
+                                PayloadPath::of(["fields", "status", "name"]),
+                                PayloadPath::of(["fields", "status", "nam"]),
+                            ],
                             ..good
                         }],
                         _ => vec![good],
@@ -1118,6 +1168,69 @@ mod tests {
             "declares reviewers of kind \"ticket\" at a path no item of that kind resolves",
         )
         .await;
+    }
+
+    // -- clause 6's two tolerances (#301) -------------------------------------
+    //
+    // Both are deliberate, both are documented on `check_payload_paths` and in
+    // the §10.8 #277 entry, and until now neither was pinned. A tightening of
+    // either would pass every other test in this module and fail only against a
+    // live instance with the shape the tolerance exists for, which is the
+    // unwitnessed-wire class. These two say out loud that the acceptance is the
+    // contract: changing it is a decision, not a refactor.
+
+    /// Tolerance 1 of clause 6, reproduced and documented by #301's merge
+    /// review: **a kind the corpus never populates is asked nothing.**
+    ///
+    /// This adapter declares `gadget` in `entity_kinds` and gives it a
+    /// declaration that is wrong in both of the ways clause 3 catches on a
+    /// populated kind -- and emits no `gadget` item. The evidence clause 6
+    /// weighs is gathered inside the walk over the corpus, so a kind with no
+    /// items contributes none and nothing is asked of its declaration.
+    ///
+    /// Demanding instead that every declared kind be populated would fail a
+    /// battery run against any instance that happens to have no build
+    /// configurations -- the same move clause 3 refuses for an unassigned
+    /// issue, and the property that makes this clause safe against a live
+    /// instance. Clause 1 is what still holds here: `gadget` must at least be
+    /// a kind the adapter declares it emits.
+    #[tokio::test]
+    async fn accepts_a_wrong_declaration_for_a_kind_the_corpus_never_populates() {
+        run(Behavior::WrongPathsForAKindTheCorpusNeverPopulates)
+            .await
+            .expect(
+                "a kind with no items in the corpus must be asked nothing about its declared \
+                 paths -- an instance with none of that kind must certify",
+            );
+    }
+
+    /// Tolerance 2 of clause 6, reproduced and documented by #301's merge
+    /// review: **a candidate an earlier candidate resolves for is excused.**
+    ///
+    /// The candidates of one field share a single evidence slot across the
+    /// corpus, so a second spelling that names a key no item has passes once
+    /// the first has landed anywhere. Here that is `fields.status.nam` behind a
+    /// working `fields.status.name`.
+    ///
+    /// The documented example is `fields.assignee.keyy` behind
+    /// `fields.assignee.name`, and it is deliberately *not* what this fixture
+    /// uses: its items leave `fields.assignee` explicitly null, so both
+    /// candidates stop at that null and read as a source saying nothing --
+    /// neither resolves, neither names a missing key, and per-candidate
+    /// evidence would accept them too. That pair witnesses nothing here. The
+    /// tolerance needs a field this corpus really resolves, and `status_name`
+    /// is the one it has.
+    ///
+    /// Per-candidate evidence would fail the *second* spelling on every
+    /// instance that uses the first, which is precisely the case a candidate
+    /// list exists for. So a candidate list is certified as a whole, and the
+    /// first candidate is the one clause 3 really pins.
+    #[tokio::test]
+    async fn accepts_a_later_candidate_an_earlier_one_resolves_for() {
+        run(Behavior::ASecondCandidateNoItemResolves).await.expect(
+            "a field's candidates are one adapter's alternative spellings and share one \
+                 evidence slot -- a spelling this instance does not use must not fail it",
+        );
     }
 
     // -- clause 7: sink failures ---------------------------------------------
