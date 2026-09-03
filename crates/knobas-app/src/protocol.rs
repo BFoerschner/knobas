@@ -507,7 +507,24 @@ pub async fn publication_of(
     pool: &PgPool,
     day: NaiveDate,
 ) -> Result<Option<Publication>, IpcError> {
-    let row: Option<(i64, String, WriteState, Option<String>, Option<String>)> = sqlx::query_as(
+    /// The five columns a publication is read out of.
+    ///
+    /// A `FromRow` rather than a tuple, because a five-place tuple of two
+    /// `Option<String>`s is a shape a reader has to count their way through --
+    /// and `remote_id` and `detail` are exactly the two a mix-up would swap
+    /// silently. `QueuedWrite` is not used here for the reason its own column
+    /// list gives: it does not carry `remote_id`, and putting it there would
+    /// be an IPC schema change for a column no caller on the wire wants.
+    #[derive(sqlx::FromRow)]
+    struct PublicationRow {
+        id: i64,
+        source_id: String,
+        state: WriteState,
+        detail: Option<String>,
+        remote_id: Option<String>,
+    }
+
+    let row: Option<PublicationRow> = sqlx::query_as(
         "select id, source_id, state, detail, remote_id
            from knobas.write_queue
           where op = $1
@@ -523,18 +540,20 @@ pub async fn publication_of(
     .await
     .map_err(IpcError::internal)?;
 
-    let Some((write_id, source_id, state, detail, remote_id)) = row else {
+    let Some(row) = row else {
         return Ok(None);
     };
     // The id the source gave the page, in knobas' address space. §4.1 makes
     // the instance id and the entity namespace one string, so the source id on
     // the queue row is the namespace -- read from the row rather than from the
     // setting, because the setting may have moved since the write was queued.
-    let page_entity_id = remote_id.map(|id| EntityRef::new(&source_id, &id).to_string());
+    let page_entity_id = row
+        .remote_id
+        .map(|id| EntityRef::new(&row.source_id, &id).to_string());
     Ok(Some(Publication {
-        write_id,
-        state,
-        detail,
+        write_id: row.id,
+        state: row.state,
+        detail: row.detail,
         page_entity_id,
         linked: false,
     }))

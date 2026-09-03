@@ -2979,7 +2979,7 @@ async fn a_protocol_is_published_under_standup_protocols_and_reads_back() {
     .fetch_all(&state.pool)
     .await
     .expect("the page's links read");
-    assert_eq!(from_the_page, [opened.note_id.clone()]);
+    assert_eq!(from_the_page, std::slice::from_ref(&opened.note_id));
 
     // 5. The page, read back from Confluence itself.
     let (status, body) = wiki

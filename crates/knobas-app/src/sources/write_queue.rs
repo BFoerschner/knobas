@@ -273,6 +273,68 @@ fn check(existing: &knobas_core::write_queue::QueuedWrite, op: &WriteOp) -> Resu
     Ok(())
 }
 
+/// Re-read a source and **wait for the run to end** (issue #289).
+///
+/// [`refresh`] triggers and moves on, which is right for the write that has
+/// just landed: nothing is waiting on the mirror, and story 15 only asks that
+/// the app stop disagreeing with itself within the second.
+///
+/// A caller that is about to *look for what its write created* needs the other
+/// behaviour, and the reason is `start_work::queue::Queue::refresh`'s in as
+/// many words: `Source::write` answers no address for a created page or
+/// ticket, so the only way to name one is to read the mirror, and reading it
+/// before the run that fetches it has finished is reading it too early.
+///
+/// ADR-0005 guarantees a run id always comes with an ending -- including when
+/// the id handed back belongs to a run already in flight, which is exactly
+/// what happens here, since [`submit`] has usually triggered one already. So
+/// this cannot wait for something that will never speak.
+///
+/// A failure to trigger, or to wait, is **not** an error: it leaves a mirror
+/// that may be behind, which every caller of this already has to handle --
+/// there is no link yet, and the next read draws it.
+pub(crate) async fn resync(state: &crate::sources::SourcesState, source_id: &str) {
+    let (done, wait) = tokio::sync::oneshot::channel();
+    let sink = std::sync::Arc::new(RunEnded {
+        done: std::sync::Mutex::new(Some(done)),
+    });
+    if state
+        .scheduler
+        .trigger(source_id, knobas_sync::SyncTrigger::Manual, Some(sink))
+        .await
+        .is_err()
+    {
+        return;
+    }
+    let _ = wait.await;
+}
+
+/// A progress sink that resolves when its run ends.
+///
+/// The `Option` makes a second terminal message -- which ADR-0005 says cannot
+/// happen, and which this must survive if it ever did -- a no-op rather than a
+/// panic inside a sink the sync crate would have to catch.
+struct RunEnded {
+    done: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+}
+
+impl knobas_sync::progress::ProgressSink for RunEnded {
+    fn report(&self, progress: knobas_sync::progress::SyncProgress) {
+        use knobas_sync::progress::SyncPhase;
+        if !matches!(progress.phase, SyncPhase::Finished | SyncPhase::Failed) {
+            return;
+        }
+        let sender = self
+            .done
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(sender) = sender {
+            let _ = sender.send(());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -485,67 +547,5 @@ mod tests {
             "the refusal must say what the source does offer: {}",
             error.message
         );
-    }
-}
-
-/// Re-read a source and **wait for the run to end** (issue #289).
-///
-/// [`refresh`] triggers and moves on, which is right for the write that has
-/// just landed: nothing is waiting on the mirror, and story 15 only asks that
-/// the app stop disagreeing with itself within the second.
-///
-/// A caller that is about to *look for what its write created* needs the other
-/// behaviour, and the reason is `start_work::queue::Queue::refresh`'s in as
-/// many words: `Source::write` answers no address for a created page or
-/// ticket, so the only way to name one is to read the mirror, and reading it
-/// before the run that fetches it has finished is reading it too early.
-///
-/// ADR-0005 guarantees a run id always comes with an ending -- including when
-/// the id handed back belongs to a run already in flight, which is exactly
-/// what happens here, since [`submit`] has usually triggered one already. So
-/// this cannot wait for something that will never speak.
-///
-/// A failure to trigger, or to wait, is **not** an error: it leaves a mirror
-/// that may be behind, which every caller of this already has to handle --
-/// there is no link yet, and the next read draws it.
-pub(crate) async fn resync(state: &crate::sources::SourcesState, source_id: &str) {
-    let (done, wait) = tokio::sync::oneshot::channel();
-    let sink = std::sync::Arc::new(RunEnded {
-        done: std::sync::Mutex::new(Some(done)),
-    });
-    if state
-        .scheduler
-        .trigger(source_id, knobas_sync::SyncTrigger::Manual, Some(sink))
-        .await
-        .is_err()
-    {
-        return;
-    }
-    let _ = wait.await;
-}
-
-/// A progress sink that resolves when its run ends.
-///
-/// The `Option` makes a second terminal message -- which ADR-0005 says cannot
-/// happen, and which this must survive if it ever did -- a no-op rather than a
-/// panic inside a sink the sync crate would have to catch.
-struct RunEnded {
-    done: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
-}
-
-impl knobas_sync::progress::ProgressSink for RunEnded {
-    fn report(&self, progress: knobas_sync::progress::SyncProgress) {
-        use knobas_sync::progress::SyncPhase;
-        if !matches!(progress.phase, SyncPhase::Finished | SyncPhase::Failed) {
-            return;
-        }
-        let sender = self
-            .done
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
-        if let Some(sender) = sender {
-            let _ = sender.send(());
-        }
     }
 }
