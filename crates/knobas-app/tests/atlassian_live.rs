@@ -1569,25 +1569,51 @@ async fn a_seeded_days_work_is_what_the_digest_lists_under_yesterday() {
         TRANSITIONED,
     )
     .await;
-    // The assignment and the comment both moved `updated`, so this sync is
-    // what puts today's date on the mirror row as well as the account.
-    sync(&state).await;
-
-    // The mirror's own answer, before the digest is asked about it. Without
-    // this the failure downstream is "no attributed line", which names the
-    // symptom and not which of the two steps -- the index catching up, or the
-    // sync reading it -- did not happen.
-    let attributed_to: Option<String> =
-        sqlx::query_scalar("select author from sync.live_item where entity_id = $1")
-            .bind(&borrowed)
-            .fetch_one(&state.pool)
-            .await
-            .expect("the borrowed ticket is mirrored");
+    // -- and now wait for the *mirror* to have caught up ---------------------
+    //
+    // The precondition the digest's mirror half needs is "`sync.live_item`
+    // holds this ticket as the suite's", and one `sync` call is not a promise
+    // of it. Three things sit between the PUT and that row, and each of them
+    // takes its own time: Jira's search index (waited for above -- the adapter
+    // enumerates through Lucene, not the database), the incremental run's own
+    // watermark, and the scheduler, which may hand back a run that was already
+    // in flight when the write queue flushed a moment earlier.
+    //
+    // Asserting after exactly one sync makes the test a race against all
+    // three, and it lost: the first live run reported two of the three
+    // producers with the mirror's missing, and the second reported the mirror
+    // still holding `mara.lindqvist` with the index already agreeing. So this
+    // *converges* on the precondition instead of assuming it, and fails
+    // loudly with what the mirror actually held if it never arrives. What is
+    // under test is what the digest makes of the mirror, not how promptly a
+    // sync reaches it.
+    let mut attributed_to = None;
+    for attempt in 0..6 {
+        sync(&state).await;
+        attributed_to = sqlx::query_scalar::<_, Option<String>>(
+            "select author from sync.live_item where entity_id = $1",
+        )
+        .bind(&borrowed)
+        .fetch_one(&state.pool)
+        .await
+        .expect("the borrowed ticket is mirrored");
+        if attributed_to.as_deref() == Some(env.user.as_str()) {
+            if attempt > 0 {
+                println!(
+                    "SEEDED mirror caught up with the assignment on sync {}",
+                    attempt + 1
+                );
+            }
+            break;
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
     assert_eq!(
         attributed_to.as_deref(),
         Some(env.user.as_str()),
-        "the mirror has to hold {TRANSITIONED} as the suite's before the digest can attribute \
-         it; the old assignee here means the sync read a stale search index"
+        "six syncs and the mirror still does not hold {TRANSITIONED} as the suite's, so the \
+         digest cannot attribute it; the write itself landed (its 204 is asserted above) and \
+         the search index agreed (the wait above returned)"
     );
 
     // -- and what the digest makes of it ------------------------------------
