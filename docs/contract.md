@@ -3671,9 +3671,11 @@ From this commit on, each of the following requires an orchestrator decision **a
   wildcard.
 
   **Declared by the Jira adapter alone** (`descriptor.rs`), and the battery's clause 5 is what
-  proves Gitea, TeamCity and the mock refuse it — each gained the identifier in the arm that
-  already refuses what it does not declare, so the refusal is by descriptor rather than by a
-  comment saying it would be. `project`'s reading for `log_work` is **liveness alone**, stated in
+  proves Gitea, TeamCity, Confluence (#284, which landed while this was open) and the mock refuse
+  it — each gained the identifier in the arm that already refuses what it does not declare, so the
+  refusal is by descriptor rather than by a comment saying it would be. Those matches carry no
+  wildcard, which is why a fifth adapter arriving mid-flight stopped compiling rather than
+  silently accepting an op nobody had decided about. `project`'s reading for `log_work` is **liveness alone**, stated in
   that function's own docs: a worklog is a statement about hours somebody worked and nothing that
   can happen to the ticket makes those hours wrong, so a colleague's reply must not hold it; the
   ticket leaving the mirror still does.
