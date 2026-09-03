@@ -188,6 +188,8 @@ vi.mock("./lib/ipc/entity", () => ({
  * the class this whole file was written for.
  */
 let timerStarts: unknown[] = [];
+/** The room each of those starts carried (#281). */
+let timerRooms: (string | null)[] = [];
 let timerStops = 0;
 /** What `currentTimer` answers on bring-up — set by a test that needs one running. */
 let timerRunning: unknown = null;
@@ -195,11 +197,19 @@ let timerRunning: unknown = null;
 let timerClosed: unknown = null;
 /** Every `worklog_draft` the shell asked for, in order (#280). */
 let draftAsks: { entityId: string; day: string; offsetMinutes: number }[] = [];
+/** Every `ad_hoc_block` the shell asked for, in order (#281). */
+let adHocAsks: { blockId: number; day: string; offsetMinutes: number }[] = [];
+/**
+ * What `ad_hoc_block` answers. `null` is the ordinary answer and means *this
+ * block is on a ticket*, which is what routes a stop to the worklog draft.
+ */
+let adHocOffer: unknown = null;
 
 vi.mock("./lib/ipc/time", () => ({
   currentTimer: () => Promise.resolve(timerRunning),
-  startTimer: (target: unknown) => {
+  startTimer: (target: unknown, inRoom: string | null) => {
     timerStarts.push(target);
+    timerRooms.push(inRoom);
     return Promise.resolve({
       target,
       started_at: "2026-09-03T09:00:00Z",
@@ -222,6 +232,10 @@ vi.mock("./lib/ipc/time", () => ({
   worklogDraft: (entityId: string, when: { day: string; offsetMinutes: number }) => {
     draftAsks.push({ entityId, ...when });
     return Promise.resolve(null);
+  },
+  adHocBlock: (blockId: number, when: { day: string; offsetMinutes: number }) => {
+    adHocAsks.push({ blockId, ...when });
+    return Promise.resolve(adHocOffer);
   },
 }));
 
@@ -380,11 +394,14 @@ beforeEach(() => {
   projectRows = [];
   projectCalls = 0;
   timerStarts = [];
+  timerRooms = [];
   timerStops = 0;
   timerRunning = null;
   timerClosed = null;
   draftAsks = [];
   contextRows = [];
+  adHocAsks = [];
+  adHocOffer = null;
   entityRows = [];
   sourceRows = [];
   health.replace([]);
@@ -1393,8 +1410,9 @@ test("stopping a timer that crossed midnight drafts the day the work began on", 
 
 /**
  * A stop on an **ad-hoc label** opens no draft: a label has nowhere to write
- * back to, and #281's ad-hoc dialog is what that stop eventually gets. The
- * direction that keeps the rule above from reading "every stop asks".
+ * back to, and #281's ad-hoc dialog is what that stop gets instead (the test
+ * after next). The direction that keeps the rule above from reading "every
+ * stop asks".
  */
 test("stopping a timer on an ad-hoc label asks for no draft", async () => {
   dbReady = true;
@@ -1430,6 +1448,150 @@ test("stopping a timer on an ad-hoc label asks for no draft", async () => {
   flushSync();
 
   expect(draftAsks, "a label has nowhere to log to, so nothing may be drafted").toEqual([]);
+});
+
+/**
+ * **Which dialog a stop opens is the backend's answer, not a list of kinds
+ * here** (#281).
+ *
+ * The wire this file exists for: `ad_hoc_block` is asked first, and its `null`
+ * — the answer for a block that is *on a ticket* — is what sends the stop on to
+ * the worklog draft. A shell that decided for itself would need a table of
+ * which kinds take worklogs, which is the per-adapter table §3a forbids and
+ * which goes wrong silently the day an adapter starts taking them.
+ *
+ * Both halves are here, because either alone passes with the other broken.
+ */
+test("a stop whose block is not on a ticket opens the ad-hoc dialog, not the draft", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  location.hash = "#/ctx/all";
+
+  const page = { kind: "entity", entity_id: "mock:ENG:SEPA design" };
+  timerRunning = {
+    target: page,
+    started_at: "2026-09-03T09:00:00Z",
+    last_heartbeat: "2026-09-03T10:30:00Z",
+  };
+  timerClosed = {
+    id: 9,
+    started_at: "2026-09-03T09:00:00Z",
+    ended_at: "2026-09-03T10:30:00Z",
+    target: page,
+    kind: "manual",
+    ended_by_relaunch: false,
+    worklog_id: null,
+  };
+  adHocOffer = {
+    block_id: 9,
+    suggestion: {
+      entity_id: "mock:PAY-231",
+      title: "Retry failed SEPA payouts",
+      rule: "linked_to_target",
+    },
+  };
+
+  app = mount(App, { target, props: {} });
+  await until(() => tabLabels().includes("All work"), "the shell never drew a room");
+
+  pressTimerKey();
+  await until(
+    () => target.textContent?.includes("Log an ad-hoc block") ?? false,
+    "the stop never opened the ad-hoc dialog",
+  );
+
+  // Asked about the block that just closed, under the day it started on --
+  // the same rule the draft is asked under.
+  expect(adHocAsks).toEqual([
+    { blockId: 9, day: "2026-09-03", offsetMinutes: offsetMinutes() },
+  ]);
+  expect(draftAsks, "the ad-hoc dialog is the answer, so no draft was asked for").toEqual(
+    [],
+  );
+  expect(target.textContent).toContain("PAY-231");
+});
+
+/**
+ * ...and the other half: the offer's `null` sends the stop to the draft, and
+ * the ad-hoc dialog stays shut.
+ *
+ * The midnight test above already witnesses *which day* the draft is asked
+ * under; what this adds is that the ad-hoc read is what decided it.
+ */
+test("a stop whose block is on a ticket falls through to the worklog draft", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  location.hash = "#/ctx/all";
+
+  const ticket = { kind: "entity", entity_id: "mock:PAY-231" };
+  timerRunning = {
+    target: ticket,
+    started_at: "2026-09-03T09:00:00Z",
+    last_heartbeat: "2026-09-03T10:30:00Z",
+  };
+  timerClosed = {
+    id: 10,
+    started_at: "2026-09-03T09:00:00Z",
+    ended_at: "2026-09-03T10:30:00Z",
+    target: ticket,
+    kind: "manual",
+    ended_by_relaunch: false,
+    worklog_id: null,
+  };
+  adHocOffer = null;
+
+  app = mount(App, { target, props: {} });
+  await until(() => tabLabels().includes("All work"), "the shell never drew a room");
+
+  pressTimerKey();
+  await until(() => draftAsks.length > 0, "the stop never asked for a draft");
+  flushSync();
+
+  expect(adHocAsks.map((ask) => ask.blockId)).toEqual([10]);
+  expect(target.textContent, "the ad-hoc dialog opened over a ticket").not.toContain(
+    "Log an ad-hoc block",
+  );
+});
+
+/**
+ * **The room a start records is the stored context the reader is standing in**
+ * (#281) — `filter.context`, which is `null` for every derived room.
+ *
+ * The wire nothing else can witness: the store hands the room on, the backend
+ * writes it, and this is the one place that decides *which* value it is. A
+ * shell passing the room's own id would send `all` or `src:mock`, which the
+ * backend refuses; a shell passing the anchor would file the block under a
+ * ticket instead of a room. Both halves run here, off one address change.
+ */
+test("a start records the stored room the reader is in, and nothing for a derived one", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  contextRows = [PROMOTED];
+  location.hash = "#/ctx/ctx:pay";
+
+  app = mount(App, { target, props: {} });
+  await until(() => roomName() === "SEPA migration", "the stored room never arrived");
+
+  pressTimerKey();
+  await until(() => timerStarts.length > 0, "⌘T never reached the timer");
+  expect(timerRooms).toEqual(["ctx:pay"]);
+
+  // Stop it again -- ⌘T is one key with three meanings, and a second press
+  // over a running timer is the stop.
+  pressTimerKey();
+  await until(() => timerStops > 0, "the timer never stopped");
+
+  // ...and out into *All work*, which is a derived room with no `ctx:` row.
+  // A detail is opened there because that room has no anchor either, and ⌘T
+  // with nothing in front of the reader opens the picker instead of starting.
+  router.go("#/ctx/all");
+  flushSync();
+  router.go("#/ticket/mock:PAY-231");
+  flushSync();
+  pressTimerKey();
+  await until(() => timerStarts.length > 1, "the second ⌘T never reached the timer");
+
+  expect(timerRooms, "a derived room is not a stored context").toEqual(["ctx:pay", null]);
 });
 
 /**
