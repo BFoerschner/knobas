@@ -24,7 +24,7 @@
   refusal is what a reader hits, the sentence it came with is shown here rather
   than swallowed — "nothing happened" is not something anybody can act on.
 
-  **Passive blocks arrive with #281.** The kind switch below is here now with
+  **Passive blocks arrive with #282.** The kind switch below is here now with
   one arm that acts, because story 22 is that the two are *distinguishable* on
   one strip, and a switch added later would be a rendering rule discovered
   after the strip already existed.

@@ -129,6 +129,11 @@ function segmentText(index: number): string {
   return (segment?.textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
+/** The room-bar heading: the day it names, and how much of it is on the strip. */
+function heading(): string {
+  return (target.querySelector("h1")?.textContent ?? "").replace(/\s+/g, " ").trim();
+}
+
 /** A button anywhere in the view, by the words on it. */
 function button(label: string): HTMLButtonElement | undefined {
   return [...target.querySelectorAll<HTMLButtonElement>("button")].find(
@@ -229,6 +234,30 @@ test("a gap is a gap, and a block of no length is not one", async () => {
   // covers said in words.
   expect(segmentText(2)).toContain("40 min unaccounted");
   expect(segmentText(2)).not.toContain("a moment");
+});
+
+/**
+ * The heading's reading is the **blocks'** total, never the day around them.
+ * An hour, a forty-minute hole and twenty minutes is 1 h 20 min tracked, where
+ * a heading measuring first start to last end would say 2 h — so the gap the
+ * strip exists to show is the one thing this number must not absorb.
+ *
+ * It moves with the strip too: a total computed once at mount would go on
+ * claiming time for a block the reader has since deleted.
+ */
+test("the heading totals the blocks on the strip and not the day around them", async () => {
+  const { deletes } = render([block(1, at(9), at(10)), block(2, at(10, 40), at(11))]);
+  await vi.waitFor(() => expect(strip()).toEqual(["block", "gap", "block"]));
+
+  expect(heading()).toContain("1 h 20 min tracked");
+
+  // The first *Delete* on the strip belongs to the first block.
+  button("Delete")!.click();
+  await vi.waitFor(() => expect(deletes).toEqual([1]));
+  await vi.waitFor(() => {
+    flushSync();
+    expect(heading()).toContain("20 min tracked");
+  });
 });
 
 /**
