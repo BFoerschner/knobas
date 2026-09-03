@@ -389,8 +389,11 @@ The admin account is `knobas` / `knobas-dev` on both, and re-running the seed
 against a set-up instance is a no-op.
 
 **What the waits print.** Jira's post-wizard wait for `RUNNING` is capped at
-900 s and the wizard-ready wait, on both products, at 600 s; both print the
-state the product is reporting and how far into the cap they are, every 30 s.
+900 s, and at 600 s each: the wait for a product to answer `/status` with a
+state its wizard can be driven from, and — Jira only — the wait for it to
+actually *serve* that wizard, which is a separate question and lands about a
+minute later. All three print the state or the form the product is showing,
+and how far into the cap they are, every 30 s.
 A state that climbs is a slow start, one state repeated to the cap is a hang,
 and `UNREACHABLE` throughout is a container to read `docker logs` for. A cap
 that fires is a statement about the machine.
@@ -444,9 +447,10 @@ services, from a trap, so the teardown runs when a step fails and on Ctrl-C.
 starting together on the 8 GB VM is what made Jira's wait too tight under load
 (#314), and Confluence's container is not created until Jira is `RUNNING` with
 its REST answering. The recipe's header carries the measured wall clock of a
-full run and where a new live suite's line goes:
-<FILL:314 the sequenced measurement, from the live run>. The three-hour window
-holds with hours of margin.
+full run and where a new live suite's line goes: measured 2026-09-03, a full
+run from empty volumes is **392 s** — 317 of them the two wizard walks and the
+content seed, 14 the three live suites once compiled, the rest the teardown.
+The three-hour window holds with hours of margin.
 
 **The suite gated on `KNOBAS_CONFLUENCE_URL`** (issue #284) is
 `crates/knobas-source-confluence/tests/live_confluence_seeded.rs`, and it is

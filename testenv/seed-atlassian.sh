@@ -76,23 +76,32 @@ VERIFIED_CONFLUENCE_IMAGE=sha256:d15c23a1dfea0d390536115003cd732c9b404571f85bc08
 # post-wizard restart, which is the slow one: Jira writes its schema and
 # re-initialises the whole plugin system before /status says RUNNING.
 #
-# MEASURED, on this machine -- 12 cores, an 8 GB Docker VM, images already
-# pulled, volumes empty, and Jira starting alone:
-#   <FILL:314 the idle post-wizard restart, from the live run>
-# Under load it is far worse. On 2026-09-03, with seven agents working and
-# Confluence's JVM starting beside it, that restart did NOT finish inside the
-# old 300 s cap -- twice, at this same line, each time killing a whole
-# `just atlassian-live` window before a single suite ran (#313 -> #314). 300 s
-# was the cap and not a measurement, so the slowest start under that load is
-# unknown and above it.
+# MEASURED on this machine -- 12 cores, an 8 GB Docker VM, images already
+# pulled, volumes empty, TeamCity stopped, and Jira starting ALONE
+# (`just atlassian-live`, 2026-09-03): jira reached FIRST_RUN 56 s after `up`,
+# served its first wizard step 53 s after that, and the post-wizard wait this
+# cap bounds returned in **0 s** -- the walk's last step does not answer until
+# Jira has restarted, so by the time the wait begins /status already says
+# RUNNING. On a VM Jira has to itself, this wait is not a wait.
 #
-# Two things came out of that. `just atlassian-live` now starts and seeds Jira
-# with the box to itself, before Confluence exists at all (see the recipe's
-# header), and this cap is 900 s. The cap costs a working run nothing -- the
-# loop breaks the moment /status says RUNNING -- so all it decides is how long
-# a run that is going to fail takes to say so, and the three-hour licence
-# window has ample room for that. A cap that fires here is a report about the
-# machine, not a flake to widen again.
+# Under load it is a different measurement entirely. On 2026-09-03, with seven
+# agents working and Confluence's JVM starting beside it, that same restart did
+# NOT finish inside the old 300 s cap -- twice, at this same line, each time
+# killing a whole `just atlassian-live` window before a suite ran (#313 -> #314).
+# 300 s was the cap and not a measurement, so the slowest start under that load
+# is unknown and above it.
+#
+# WHICH MAKES 900 s INSURANCE, NOT A FIX. The fix is the sequencing: Jira starts
+# and is seeded with the VM to itself, before Confluence exists (see the
+# recipe's header), and every recipe run since -- 292 s, 399 s, 480 s, and the
+# 392 s one that measured the numbers above -- has been nowhere near even the
+# old cap. What kept 300 s survivable this long is the recipe's refusal to run
+# while TeamCity is up; the pair sharing the VM with a third JVM is the case
+# nobody has measured, and 900 s is the margin for it. The cap costs a working
+# run nothing -- the loop breaks the moment /status says RUNNING -- so all it
+# decides is how long a run that is going to fail takes to say so, and the
+# three-hour licence window has ample room for that. A cap that fires here is a
+# report about the machine, not a flake to widen again.
 #
 # All four are seconds of WALL CLOCK, not counts of anything.
 FIRST_RUN_CAP_S=600

@@ -475,11 +475,25 @@ teamcity-live-seeded:
 #     the shape that died twice under seven-agent load, on Jira's post-wizard
 #     start, before a suite ran (#313).
 #
-#   <FILL:314 2026-09-03, one product at a time as below>
+#   2026-09-03, one product at a time as below: **392 s in all**, with TeamCity
+#     stopped and the machine otherwise busy. Seeded and verified at 317 s, of
+#     which Jira's half is about 160 (56 s to FIRST_RUN, 53 s more before it
+#     served its first wizard step, four POSTs, and a post-wizard restart that
+#     had already finished by the time the wait for it began), Confluence's
+#     about 40 (FIRST_RUN 9 s after `up`, on a VM Jira had just stopped
+#     competing for), and the content seed the rest. The three suites, 26 tests,
+#     ran in 14 s once compiled; the teardown took the balance.
 #
 # The suites are seconds, not hours, so the three-hour window holds with well
 # over two and a half hours of margin either way; the number to re-measure is
 # the one in this header, whenever a suite is added below or the order changes.
+#
+# THE SEQUENCING IS THE FIX; THE WIDER CAP IN seed-atlassian.sh IS INSURANCE.
+# No run since has come near even the old 300 s cap -- 292 s, 399 s, 480 s and
+# this 392 s one, all with TeamCity stopped -- and what has kept that cap
+# survivable is the refusal below to start while TeamCity is up. The pair
+# sharing the 8 GB VM with a third JVM is the case that killed #313 and the
+# case nobody has measured.
 #
 # WHERE THE LIVE SUITES GO. One line per suite in the block marked below, each
 # a `cargo test -p <crate> --test <live suite> -- --ignored --nocapture
