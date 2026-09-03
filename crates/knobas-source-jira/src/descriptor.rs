@@ -138,7 +138,7 @@ fn config_schema() -> serde_json::Value {
             },
             "epic_link_field": {
                 "type": ["string", "null"], "default": null, "title": "Epic Link field id",
-                "description": "e.g. customfield_10008. Only for classic projects: epic membership on a next-gen project is synced already, via fields.parent."
+                "description": "Where a classic project keeps epic membership. Filled in by Test connection: the id is different on every Jira, so one copied from another instance reads the wrong field rather than failing. Leave it empty for a next-gen project, whose epic membership is synced already via fields.parent."
             },
             "page_size": {
                 "type": "integer", "minimum": 1, "maximum": 1000, "default": 100,
@@ -302,6 +302,32 @@ mod tests {
         let json = serde_json::to_string(&descriptor_template()).unwrap();
         let back: knobas_source::SourceDescriptor = serde_json::from_str(&json).unwrap();
         assert_eq!(back.adapter_kind, crate::ADAPTER_KIND);
+    }
+
+    /// **No example field id in the help text** (#297).
+    ///
+    /// The Epic Link id is minted per instance -- three seeds of one script
+    /// gave `customfield_10101`, `customfield_10109` and `customfield_10101`,
+    /// and on one of them `customfield_10102` was *Epic Status*. So an example
+    /// is not a harmless illustration: a reader who types it gets a source
+    /// that syncs a field which is not the epic relation, silently, with no
+    /// error anywhere. The help text says where the value comes from instead,
+    /// and *Test connection* puts it there.
+    ///
+    /// Pinned as "no `customfield_` anywhere in this property", not as the
+    /// exact sentence: what must not come back is the *shape* of the mistake.
+    #[test]
+    fn the_epic_link_help_text_offers_no_example_id() {
+        let prop = &descriptor_template().config_schema["properties"]["epic_link_field"];
+        let text = serde_json::to_string(prop).unwrap();
+        assert!(
+            !text.contains("customfield"),
+            "an example id is a value somebody will type: {text}"
+        );
+        assert!(
+            text.contains("Test connection"),
+            "the help text has to say where the value does come from: {text}"
+        );
     }
 
     /// A schema property that named a password would put a secret in the DB.

@@ -231,6 +231,9 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
       error: null,
       code: null,
       elapsed_ms: 214,
+      // What a real Jira reports about itself (#297): the Epic Link custom
+      // field id, which the Add-source dialog puts in the empty field.
+      discovered: { epic_link_field: "customfield_10101" },
     }),
     add_source: (args) => {
       const input = (args["input"] ?? {}) as Record<string, unknown>;

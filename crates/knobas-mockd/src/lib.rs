@@ -161,6 +161,11 @@
 //!     instance's Epic Link id differs per instance — mockd has one id because
 //!     it is one instance. It also has no `GET /rest/api/2/field`, so nothing
 //!     here can be discovered; a test names [`jira::EPIC_LINK_FIELD`].
+//!     Since #297 the adapter's `test_connection` **probes** that path, and
+//!     the WADL declares it, so every probe against mockd records one
+//!     `Unimplemented` violation. No route is added — this crate is frozen —
+//!     and `knobas-source-jira/tests/mockd.rs` asserts that violation and no
+//!     other instead.
 //!
 //!     **Measured against the real product** (issue #276, Jira 10.3.24 seeded
 //!     from `testenv/seed-atlassian-content.sh`, 2026-09-03): the seeded `PAY`

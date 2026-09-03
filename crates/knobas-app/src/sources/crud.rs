@@ -482,6 +482,7 @@ pub async fn test(
             error: None,
             code: None,
             elapsed_ms,
+            discovered: info.discovered,
         },
         Err(error) => ConnectionReport {
             ok: false,
@@ -491,6 +492,8 @@ pub async fn test(
             error: Some(error.to_string()),
             code: Some(crate::IpcError::from_source_error(&error, draft.source_id.as_deref()).code),
             elapsed_ms,
+            // A test that failed learned nothing worth filling a form with.
+            discovered: std::collections::BTreeMap::new(),
         },
     })
 }

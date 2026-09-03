@@ -313,6 +313,17 @@ export interface ConnectionReport {
   /** The class to branch on: `unauthorized` turns *Test* into *Re-enter*. */
   code: IpcErrorCode | null;
   elapsed_ms: number;
+  /**
+   * Config values the adapter learned from the far end, keyed by the
+   * `config_schema` property each belongs in — Jira's Epic Link custom field
+   * id, whose value is different on every instance (#297).
+   *
+   * `AddSource` puts one into the matching form field when the reader left it
+   * empty, the same rule it applies to `username` and {@link account} (#82).
+   * Empty when the test failed, and empty for an adapter that discovers
+   * nothing.
+   */
+  discovered: Record<string, string>;
 }
 
 /** `knobas_sync::stats::SourceCount`. */

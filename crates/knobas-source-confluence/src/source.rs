@@ -98,6 +98,10 @@ impl Source for ConfluenceSource {
                 (Some(name), None) => format!("Confluence Data Center -- {name}"),
                 _ => "Confluence Data Center".to_owned(),
             }),
+            // Nothing per-instance for the dialog to fill: this adapter's
+            // config keys are spaces and tuning, all of them the reader's own
+            // choices rather than ids the server mints (#297).
+            discovered: std::collections::BTreeMap::new(),
         })
     }
 

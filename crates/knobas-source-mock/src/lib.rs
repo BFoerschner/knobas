@@ -776,6 +776,7 @@ impl Source for MockSource {
             // Nothing to expire: the fixture is compiled in.
             secret_expires_at: None,
             detail: Some("compiled-in fixture; nothing was contacted".to_owned()),
+            discovered: std::collections::BTreeMap::new(),
         })
     }
 

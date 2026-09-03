@@ -31,6 +31,7 @@ let report: ConnectionReport = {
   error: null,
   code: null,
   elapsed_ms: 214,
+  discovered: {},
 };
 let addFails: unknown = null;
 
@@ -175,6 +176,7 @@ beforeEach(() => {
     error: null,
     code: null,
     elapsed_ms: 214,
+    discovered: {},
   };
   target = document.createElement("div");
   document.body.append(target);
@@ -300,7 +302,7 @@ test("Test connection shows account, server version and elapsed time on success"
 });
 
 test("the three optional readings are simply absent when the server does not say", async () => {
-  report = { ok: true, account: null, server_version: null, secret_expires_at: null, error: null, code: null, elapsed_ms: 88 };
+  report = { ok: true, account: null, server_version: null, secret_expires_at: null, error: null, code: null, elapsed_ms: 88, discovered: {} };
   await toAuth();
   type("#add-secret", "s3cret");
   button("Next")!.click();
@@ -326,6 +328,7 @@ test("a failed test shows the error and leaves Next disabled", async () => {
     error: "401 Unauthorized from /rest/api/2/myself",
     code: "unauthorized",
     elapsed_ms: 190,
+    discovered: {},
   };
   await toAuth();
   type("#add-secret", "wrong");
@@ -351,6 +354,7 @@ test("a test error from a source system is text, never markup", async () => {
     error: '<img src=x onerror="alert(1)">',
     code: "internal",
     elapsed_ms: 12,
+    discovered: {},
   };
   await toAuth();
   type("#add-secret", "x");
@@ -798,4 +802,110 @@ test("a failed test fills nothing, even if the report carries an account", async
   button("Back")!.click();
   flushSync();
   expect(input("#add-cfg-username").value).toBe("");
+});
+
+/*
+ * The per-instance ids a source discovers about *itself* (#297).
+ *
+ * Same rule as the identity fill above and the same reason: a value the far
+ * end owns and the reader cannot know. Jira's Epic Link custom field id is
+ * minted per instance — three seeds of one script gave `customfield_10101`,
+ * `customfield_10109` and `customfield_10101`, and on one of them
+ * `customfield_10102` was *Epic Status* — so an id copied off another server
+ * does not fail, it silently syncs the wrong field. A classic Jira project
+ * keeps epic membership nowhere else, so a source saved without it mirrors
+ * none and nothing says why.
+ *
+ * The fill is keyed on the property name the report itself supplies, so this
+ * dialog holds no per-adapter table and the next adapter that discovers
+ * something needs no change here.
+ */
+
+const EPIC = { epic_link_field: "customfield_10101" };
+
+test("a successful test fills the epic link field the reader could not know", async () => {
+  report = { ...report, discovered: EPIC };
+  await toTested();
+  await saveFromTest();
+  expect(calls.addSource[0]!.config).toMatchObject({ epic_link_field: "customfield_10101" });
+});
+
+test("the discovered id is on screen and editable, not a hidden value", async () => {
+  report = { ...report, discovered: EPIC };
+  await toTested();
+  button("Back")!.click();
+  flushSync();
+  button("Back")!.click();
+  flushSync();
+  expect(step()).toBe("Connection");
+  expect(input("#add-cfg-epic_link_field").value).toBe("customfield_10101");
+  type("#add-cfg-epic_link_field", "customfield_10999");
+  expect(input("#add-cfg-epic_link_field").value).toBe("customfield_10999");
+});
+
+test("an id the reader typed is never overwritten by a later test", async () => {
+  // The one direction that costs data: a reader who pasted the id off their
+  // own instance meant it, and a probe that disagreed must not win.
+  report = { ...report, discovered: EPIC };
+  render();
+  await settle();
+  button("Jira Data Center")!.click();
+  flushSync();
+  button("Next")!.click();
+  flushSync();
+  type("#add-url", "https://jira.tidewater.example");
+  type("#add-cfg-epic_link_field", "customfield_10008");
+  button("Next")!.click();
+  flushSync();
+  type("#add-secret", "s3cret");
+  button("Next")!.click();
+  flushSync();
+  button("Test connection")!.click();
+  await settle();
+  await saveFromTest();
+
+  expect(calls.addSource[0]!.config).toMatchObject({ epic_link_field: "customfield_10008" });
+});
+
+test("a source that discovers nothing saves exactly as it does today", async () => {
+  // A Jira with no Epic Link field — no Jira Software, or the field table
+  // behind a proxy — is a working source, and the empty map must not reach
+  // the config as an empty string either: the adapter's own default has to be
+  // able to apply.
+  report = { ...report, discovered: {} };
+  await toTested();
+  await saveFromTest();
+  expect(calls.addSource[0]!.config).not.toHaveProperty("epic_link_field");
+  expect(saved.length).toBe(1);
+});
+
+test("a failed test fills nothing, so one server's ids cannot land on another", async () => {
+  report = {
+    ok: false,
+    account: null,
+    server_version: null,
+    secret_expires_at: null,
+    error: "the credential was refused",
+    code: "unauthorized",
+    elapsed_ms: 12,
+    // A backend that answered this on a failure would be wrong; the dialog
+    // does not depend on it being right.
+    discovered: EPIC,
+  };
+  await toTested();
+  button("Back")!.click();
+  flushSync();
+  button("Back")!.click();
+  flushSync();
+  expect(input("#add-cfg-epic_link_field").value).toBe("");
+});
+
+test("a discovered key naming a property this adapter does not declare fills nothing", async () => {
+  // The report is the adapter's claim about its own schema; a key that names
+  // nothing must not invent a config value the form never drew.
+  report = { ...report, discovered: { not_a_property: "x", ...EPIC } };
+  await toTested();
+  await saveFromTest();
+  expect(calls.addSource[0]!.config).toMatchObject({ epic_link_field: "customfield_10101" });
+  expect(calls.addSource[0]!.config).not.toHaveProperty("not_a_property");
 });

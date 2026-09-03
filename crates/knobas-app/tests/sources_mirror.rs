@@ -150,6 +150,10 @@ fn the_connection_report_shape_matches_its_typescript_mirror() {
         error: Some("the credential was refused".to_owned()),
         code: Some(knobas_app::IpcErrorCode::Unauthorized),
         elapsed_ms: 42,
+        discovered: std::collections::BTreeMap::from([(
+            "epic_link_field".to_owned(),
+            "customfield_10101".to_owned(),
+        )]),
     };
     let wire = serde_json::to_value(&report).unwrap();
     assert_shape(
@@ -158,12 +162,19 @@ fn the_connection_report_shape_matches_its_typescript_mirror() {
         &[
             "account",
             "code",
+            "discovered",
             "elapsed_ms",
             "error",
             "ok",
             "secret_expires_at",
             "server_version",
         ],
+    );
+    // A map on the wire, not a list of pairs and not a second named field per
+    // adapter: the dialog looks a config property up by name in it (#297).
+    assert_eq!(
+        wire["discovered"],
+        serde_json::json!({ "epic_link_field": "customfield_10101" })
     );
     // The one field the UI branches on, in the spelling the mirror's union
     // declares -- `unauthorized` is what turns *Test* into *Re-enter*.

@@ -16,6 +16,7 @@
 //! |---|---|---|---|
 //! | [`server_info`](JiraApi::server_info) | `api/2/serverInfo` | `doHealthCheck` | *(none)* |
 //! | [`myself`](JiraApi::myself) | `api/2/myself` | *(none)* | *(none)* |
+//! | [`fields`](JiraApi::fields) | `api/2/field` | *(none)* | *(none)* |
 //! | [`search`](JiraApi::search) | `api/2/search` | `jql`, `startAt`, `maxResults`, `validateQuery`, `fields`, `expand` | `jql`, `startAt`, `maxResults`, `fields` |
 //! | [`comments`](JiraApi::comments) | `api/2/issue/{key}/comment` | `startAt`, `maxResults`, `orderBy`, `expand` | `startAt`, `maxResults` |
 //! | [`worklogs`](JiraApi::worklogs) | `api/2/issue/{key}/worklog` | **none at all** | *(none)* |
@@ -31,10 +32,16 @@
 //! * **`GET /rest/api/2/issue/{key}` is not called.** `/search` already
 //!   returns `fields`, so a per-issue GET would be an N+1 for nothing. It
 //!   stays in mockd's set for M2's write-back re-read.
+//! * **`api/2/field` is read by `test_connection` and by nothing else** (#297).
+//!   It is the whole field table of the instance, which is a big answer to a
+//!   small question, and the question is asked once per *Test connection* --
+//!   never per sync run, never per issue. `knobas-mockd` does not serve it
+//!   (its deviation 13), so the endpoint's witness is
+//!   `tests/live_jira_seeded.rs` against the real product.
 
 use knobas_source::SourceError;
 
-use crate::model::{CommentPage, Myself, SearchPage, ServerInfo, WorklogPage};
+use crate::model::{CommentPage, FieldMeta, Myself, SearchPage, ServerInfo, WorklogPage};
 
 #[async_trait::async_trait]
 pub(crate) trait JiraApi: Send + Sync {
@@ -43,6 +50,11 @@ pub(crate) trait JiraApi: Send + Sync {
     async fn server_info(&self) -> Result<ServerInfo, SourceError>;
     /// `GET /rest/api/2/myself` -- who the credential is.
     async fn myself(&self) -> Result<Myself, SourceError>;
+    /// `GET /rest/api/2/field` -- every field this instance has, so that
+    /// [`crate::discover`] can name the Epic Link one (#297).
+    ///
+    /// Called by `test_connection` only; a sync run never asks.
+    async fn fields(&self) -> Result<Vec<FieldMeta>, SourceError>;
     /// `GET /rest/api/2/search` -- the classic `startAt`/`total` page.
     async fn search(
         &self,
@@ -80,6 +92,12 @@ impl JiraApi for crate::http::JiraHttp {
 
     async fn myself(&self) -> Result<Myself, SourceError> {
         self.get_json("rest/api/2/myself", &[]).await
+    }
+
+    async fn fields(&self) -> Result<Vec<FieldMeta>, SourceError> {
+        // No parameters: the WADL declares none on this resource, and the
+        // answer is the whole table either way.
+        self.get_json("rest/api/2/field", &[]).await
     }
 
     async fn search(
@@ -143,6 +161,16 @@ mod tests {
     /// pinned by nothing but the fake, which answers whatever it is asked. This
     /// test calls all five directly, so an invented path or an undeclared query
     /// parameter on any of them is a recorded violation here.
+    ///
+    /// **[`JiraApi::fields`] is the sixth call and is deliberately not among
+    /// them.** mockd serves no `api/2/field` handler (its deviation 13), so
+    /// asking it over the wire records an `Unimplemented` violation about
+    /// *mockd* and certifies nothing about the adapter. mockd is frozen
+    /// (ADR-0013), so the route is not added. What is left is the question
+    /// this test really asks -- is the path one the contract declares? -- and
+    /// [`the_field_table_is_a_path_the_wadl_declares`] asks it of the WADL
+    /// tables directly. The behaviour over a socket is certified against the
+    /// real product in `tests/live_jira_seeded.rs`.
     #[tokio::test]
     async fn every_call_is_one_the_wadl_declares() {
         let jira = knobas_mockd::spawn_mock_jira().await;
@@ -193,5 +221,27 @@ mod tests {
         assert_eq!(worklogs.worklogs.len(), 1);
 
         jira.assert_no_violations();
+    }
+
+    /// The sixth call's path and its (empty) parameter set, against the same
+    /// document the test above validates the other five against.
+    ///
+    /// Read off `knobas_mockd::allowlist` -- which `build.rs` generates from
+    /// the pinned `testenv/specs/jira-dc-rest.wadl` -- rather than over a
+    /// socket, because mockd has no handler for this path and would answer a
+    /// 501 that says nothing about whether the path is in the contract.
+    #[test]
+    fn the_field_table_is_a_path_the_wadl_declares() {
+        let knobas_mockd::allowlist::Lookup::Allowed { query } =
+            knobas_mockd::allowlist::lookup("GET", "api/2/field")
+        else {
+            panic!(
+                "GET api/2/field is not in testenv/specs/jira-dc-rest.wadl; this adapter must                  not send a path the contract does not declare"
+            )
+        };
+        assert!(
+            query.is_empty(),
+            "the WADL declares no query parameter on api/2/field, and the adapter sends none:              {query:?}"
+        );
     }
 }

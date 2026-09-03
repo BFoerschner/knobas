@@ -239,3 +239,37 @@ pub(crate) struct Myself {
     pub name: Option<String>,
     pub display_name: Option<String>,
 }
+
+/// One entry of `GET /rest/api/2/field` -- every field this instance has,
+/// system and custom alike.
+///
+/// Read for exactly one thing (#297): the id of the **Epic Link** custom
+/// field, which is where a classic Data Center project keeps epic membership
+/// and whose id differs on every instance. [`crate::discover`] does the
+/// picking; this only models what picking it needs.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct FieldMeta {
+    /// `"customfield_10101"` for a custom field, `"summary"` for a system one.
+    /// This is the spelling that goes into `fields=`, which is why it is the
+    /// one thing here that is not optional.
+    pub id: String,
+    /// The field's display name on *this* instance. Renameable by an
+    /// administrator, which is why it is the fallback and not the test.
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub custom: bool,
+    #[serde(default)]
+    pub schema: Option<FieldSchema>,
+}
+
+/// The `schema` object on a [`FieldMeta`].
+///
+/// Only `custom` is modelled: it is the plugin key that names *which* custom
+/// field this is (`com.pyxis.greenhopper.jira:gh-epic-link`), and it is the
+/// one property of a field that an administrator cannot rename.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct FieldSchema {
+    #[serde(default)]
+    pub custom: Option<String>,
+}

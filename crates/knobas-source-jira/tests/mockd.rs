@@ -17,7 +17,7 @@
 //!   that zone. Every incremental test below is therefore also a test that the
 //!   watermark is rendered in the server's zone.
 
-use knobas_mockd::{MockFault, spawn_mock_jira};
+use knobas_mockd::{MockFault, MockServer, ViolationKind, spawn_mock_jira};
 use knobas_source::contract::{Fault, VecSink, battery};
 use knobas_source::instance::SourceInstance;
 use knobas_source::{AuthMethod, Source, SourceError, WriteOp};
@@ -48,6 +48,44 @@ fn source_named(id: &str, base_url: &str, config: serde_json::Value) -> Box<dyn 
     }
 }
 
+/// `assert_no_violations`, minus the one violation mockd cannot help
+/// recording: the Epic Link discovery probe (#297).
+///
+/// `test_connection` reads `GET /rest/api/2/field` to find this instance's
+/// Epic Link custom field id. The WADL declares that path, so mockd's
+/// allowlist lets it through and its own fallback then records
+/// [`ViolationKind::Unimplemented`] -- *"the contract defines this endpoint;
+/// mockd has no handler for it"*. That is a statement about mockd, which is
+/// deprecated and frozen (ADR-0013) and gains no new routes; the adapter
+/// treats the 501 exactly as it treats the 404 a Jira Core answers, so the
+/// discovery reports nothing and the connection is still reported as good.
+///
+/// Asserting *that* violation and no other, rather than dropping the check:
+/// what the check is for is an invented path, verb or query parameter, and
+/// every one of those would still fail here.
+fn assert_only_the_field_probe(jira: &MockServer) {
+    let unexpected: Vec<String> = jira
+        .violations()
+        .into_iter()
+        .filter(|v| {
+            !(v.kind == ViolationKind::Unimplemented
+                && v.method == "GET"
+                && v.path == "/rest/api/2/field")
+        })
+        .map(|v| {
+            format!(
+                "{:?} {} {}{}: {}",
+                v.kind, v.method, v.path, v.query, v.detail
+            )
+        })
+        .collect();
+    assert!(
+        unexpected.is_empty(),
+        "jira: contract violation(s) beyond the field-table probe:\n  {}",
+        unexpected.join("\n  ")
+    );
+}
+
 async fn sync_all(source: &dyn Source, cursor: Option<String>) -> (Vec<String>, String) {
     let mut sink = VecSink(Vec::new());
     let next = source.sync(cursor, &mut sink).await.expect("sync succeeds");
@@ -75,8 +113,10 @@ async fn passes_the_contract_battery() {
         Fault::Unreachable => source(&dead, serde_json::json!({})),
     })
     .await;
-    jira.assert_no_violations();
-    denied.assert_no_violations();
+    // The battery calls `test_connection`, which probes the field table; see
+    // `assert_only_the_field_probe`.
+    assert_only_the_field_probe(&jira);
+    assert_only_the_field_probe(&denied);
 }
 
 #[tokio::test]
@@ -254,7 +294,7 @@ async fn a_rejected_credential_is_unauthorized_from_both_entry_points() {
         matches!(synced, Err(SourceError::Unauthorized { .. })),
         "{synced:?}"
     );
-    jira.assert_no_violations();
+    assert_only_the_field_probe(&jira);
 }
 
 /// Exit criterion: timeout ⇒ `Unreachable`. A one-second request timeout, so
@@ -593,10 +633,42 @@ async fn test_connection_reports_the_account_and_the_server() {
     let info = source.test_connection().await.unwrap();
     assert_eq!(info.account.as_deref(), Some("mara.lindqvist"), "{info:?}");
     assert_eq!(info.server_version.as_deref(), Some("9.17.0"), "{info:?}");
-    assert_eq!(info.detail.as_deref(), Some("Server 9.17.0"), "{info:?}");
+    // mockd serves no field table (its deviation 13), so nothing is discovered
+    // -- and the detail says the consequence rather than staying silent about
+    // it: against a classic project, a source with no Epic Link id mirrors no
+    // epic membership at all (#297). The real product's answer is certified in
+    // `tests/live_jira_seeded.rs`.
+    assert_eq!(
+        info.detail.as_deref(),
+        Some(
+            "Server 9.17.0 \u{b7} no Epic Link field: a classic project's epic membership is not mirrored"
+        ),
+        "{info:?}"
+    );
+    assert!(
+        info.discovered.is_empty(),
+        "nothing to discover here: {info:?}"
+    );
     // PAT expiry needs /rest/pat/latest/tokens, which is outside M1's endpoints.
     assert!(info.secret_expires_at.is_none());
-    jira.assert_no_violations();
+    assert_only_the_field_probe(&jira);
+}
+
+/// A source that already names the field says so, and never re-reads it: the
+/// id the reader saved is the one the sync uses, whatever a probe would have
+/// found.
+#[tokio::test]
+async fn a_configured_epic_link_field_is_what_the_connection_reports() {
+    let jira = spawn_mock_jira().await;
+    let source = source(
+        &jira.base_url(),
+        serde_json::json!({ "epic_link_field": knobas_mockd::jira::EPIC_LINK_FIELD }),
+    );
+    let info = source.test_connection().await.unwrap();
+    let expected =
+        "Server 9.17.0 \u{b7} Epic Link ".to_owned() + knobas_mockd::jira::EPIC_LINK_FIELD;
+    assert_eq!(info.detail.as_deref(), Some(expected.as_str()), "{info:?}");
+    assert_only_the_field_probe(&jira);
 }
 
 /// P10: the `EntityRef` namespace is the **instance** id, not the adapter kind.

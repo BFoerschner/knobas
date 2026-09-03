@@ -73,6 +73,7 @@ impl Source for Recording {
             server_version: None,
             secret_expires_at: None,
             detail: None,
+            discovered: std::collections::BTreeMap::new(),
         })
     }
 

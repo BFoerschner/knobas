@@ -297,6 +297,9 @@ pub(crate) fn connection_info(server: &Server, user: Option<&CurrentUser>) -> Co
         // health strip shows no countdown for this source.
         secret_expires_at: None,
         detail: server.build_number.as_ref().map(|b| format!("build {b}")),
+        // Nothing per-instance for the dialog to fill: TeamCity's ids are the
+        // locators the config already spells out.
+        discovered: std::collections::BTreeMap::new(),
     }
 }
 

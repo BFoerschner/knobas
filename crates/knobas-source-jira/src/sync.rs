@@ -401,6 +401,16 @@ mod tests {
             Ok(serde_json::from_value(serde_json::json!({ "name": "mara.lindqvist" })).unwrap())
         }
 
+        /// A sync run never asks for the field table -- discovery is
+        /// `test_connection`'s, once per *Test connection*. An empty answer
+        /// here is therefore not a fixture gap: a fake that returned fields
+        /// would be describing a call these tests would never see made, and
+        /// `calls` (which every assertion below reads) records nothing for it.
+        async fn fields(&self) -> Result<Vec<crate::model::FieldMeta>, SourceError> {
+            self.calls.lock().unwrap().push("field".to_owned());
+            Ok(Vec::new())
+        }
+
         async fn search(
             &self,
             jql: &str,

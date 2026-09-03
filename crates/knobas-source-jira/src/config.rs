@@ -39,11 +39,19 @@ pub struct JiraConfig {
     /// authenticate, which is why this once said the field was unused for a
     /// PAT -- and why a PAT user was then told to fill it in anyway (#82).
     pub username: Option<String>,
-    /// The instance's Epic Link custom field (`customfield_10008` on many DC
-    /// instances). Naming it adds it to the requested `fields=` list, so epic
-    /// membership survives in `payload` for M2's link work. Discovering the id
-    /// automatically needs `GET /rest/api/2/field`, which is outside M1's
-    /// endpoint set.
+    /// The instance's Epic Link custom field. Naming it adds it to the
+    /// requested `fields=` list, so epic membership survives in `payload` for
+    /// M2's link work.
+    ///
+    /// **Filled in by *Test connection*, not typed** (#297): the id is minted
+    /// per instance -- three seeds of one script gave `customfield_10101`,
+    /// `customfield_10109` and `customfield_10101`, and on one of them
+    /// `customfield_10102` was *Epic Status* -- so a copied id reads the wrong
+    /// field rather than failing. `test_connection` reads
+    /// `GET /rest/api/2/field` and reports what it found as
+    /// `ConnectionInfo::discovered["epic_link_field"]`; the Add-source dialog
+    /// puts that in this field when the reader left it empty. An id typed by
+    /// hand is still honoured, and is never overwritten.
     ///
     /// Still needed after #32 widened `BASE_FIELDS` to include `parent`, and
     /// not made redundant by it: the two spellings belong to different kinds
@@ -138,7 +146,7 @@ impl JiraConfig {
             }
         }
         if let Some(field) = &self.epic_link_field
-            && (field.is_empty() || !field.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+            && !is_field_id(field)
         {
             return bad(format!(
                 "{field:?} is not a bare Jira field id (letters, digits and _), and it is \
@@ -163,6 +171,18 @@ impl JiraConfig {
         }
         Ok(())
     }
+}
+
+/// Whether `s` is a bare Jira field id: letters, digits and `_`, non-empty.
+///
+/// Shared with [`crate::discover`] rather than copied, because the two must
+/// agree: a value the field table hands back and this refuses would be a
+/// *discovered* id the Add-source form then rejects on save, which is a dead
+/// end with nobody to blame. The rule is narrow because the id is pasted into
+/// the `fields=` query parameter, where a comma is a second field and a `*` is
+/// every field.
+pub(crate) fn is_field_id(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// Whether `filter` carries an `ORDER BY` **clause**.

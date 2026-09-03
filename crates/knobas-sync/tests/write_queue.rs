@@ -77,6 +77,7 @@ impl Source for Fake {
             server_version: None,
             secret_expires_at: None,
             detail: None,
+            discovered: std::collections::BTreeMap::new(),
         })
     }
 

@@ -81,6 +81,54 @@ impl JiraSource {
         }
         Ok(key)
     }
+
+    /// This instance's Epic Link custom field id, or `None` where the instance
+    /// has none to find.
+    ///
+    /// **A 404 is an answer, not a failure.** `GET /rest/api/2/field` is a
+    /// Jira Software endpoint; a Jira Core, a reverse proxy that only exposes
+    /// the paths knobas' M1 set named, or a future Data Center that moved it
+    /// answers 404, and none of those is a connection that failed. The rest of
+    /// the report -- the account, the version, the credential's health -- is
+    /// what *Test connection* is for, and losing all of it because an
+    /// **optional** convenience could not be looked up would turn a working
+    /// source into an unsaveable one. So the discovery is best-effort in
+    /// exactly one direction: 404 (and 501, which is what a mock that declares
+    /// the path without serving it answers) reads as "no field table here".
+    ///
+    /// Every other failure still propagates. A 401 is the credential, and
+    /// swallowing it here would report a refused credential as a healthy
+    /// connection missing one convenience; a 500 is a Jira in trouble and the
+    /// user should hear about it.
+    async fn discover_epic_link_field(&self) -> Result<Option<String>, SourceError> {
+        match self.http.fields().await {
+            Ok(fields) => Ok(crate::discover::epic_link_field(&fields)),
+            Err(error) if matches!(error.status(), Some(404 | 501)) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+}
+
+/// What the connection detail says about epic membership, in one clause.
+///
+/// Three states, and the third is the one the user has to be told about: a
+/// classic Data Center project keeps epic membership **only** in this field
+/// (#276), so a source with no id for it mirrors none at all -- silently,
+/// today, discoverable only by noticing an empty Contexts view weeks later.
+/// The sources view renders this detail beside the credential's health, which
+/// is where a source's standing gaps belong.
+fn epic_link_note(configured: Option<&str>, discovered: Option<&str>) -> String {
+    match (configured, discovered) {
+        // Already named. Whether the discovery agreed is not this line's
+        // business: an id typed by hand is the reader's decision, and the
+        // dialog does not overwrite it.
+        (Some(field), _) => format!(" \u{b7} Epic Link {field}"),
+        (None, Some(field)) => format!(" \u{b7} Epic Link {field} (found)"),
+        (None, None) => {
+            " \u{b7} no Epic Link field: a classic project's epic membership is not mirrored"
+                .to_owned()
+        }
+    }
 }
 
 /// The base URL as `SyncItem::web_url` is built from it: trimmed of
@@ -137,6 +185,11 @@ impl Source for JiraSource {
         let me = self.http.myself().await?;
         let server = self.http.server_info().await?;
         let version = server.version.clone();
+        let epic_link = self.discover_epic_link_field().await?;
+        let mut discovered = std::collections::BTreeMap::new();
+        if let Some(id) = &epic_link {
+            discovered.insert("epic_link_field".to_owned(), id.clone());
+        }
         Ok(ConnectionInfo {
             account: me.name.or(me.display_name),
             server_version: version.clone(),
@@ -146,10 +199,12 @@ impl Source for JiraSource {
             // the countdown as soon as that endpoint is added.
             secret_expires_at: None,
             detail: Some(format!(
-                "{} {}",
+                "{} {}{}",
                 server.deployment_type.unwrap_or_else(|| "Jira".to_owned()),
-                version.unwrap_or_else(|| "(unknown version)".to_owned())
+                version.unwrap_or_else(|| "(unknown version)".to_owned()),
+                epic_link_note(self.cfg.epic_link_field.as_deref(), epic_link.as_deref())
             )),
+            discovered,
         })
     }
 

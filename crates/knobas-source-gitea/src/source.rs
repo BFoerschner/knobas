@@ -153,6 +153,9 @@ impl Source for GiteaSource {
             // that lists them needs basic auth, which this adapter does not
             // use -- so there is no countdown to report (spec §3).
             secret_expires_at: None,
+            // Nothing per-instance for the dialog to fill: every Gitea config key
+            // is one the reader chooses, not one the server owns.
+            discovered: std::collections::BTreeMap::new(),
         })
     }
 
