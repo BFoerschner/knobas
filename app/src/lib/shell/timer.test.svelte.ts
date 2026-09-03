@@ -42,6 +42,7 @@ function block(): Block {
 function bench(overrides: Partial<TimerPorts> = {}) {
   const calls = {
     started: [] as TimerTarget[],
+    rooms: [] as (string | null)[],
     stopped: 0,
     beats: [] as (TimerTarget | null)[],
     reads: 0,
@@ -55,8 +56,9 @@ function bench(overrides: Partial<TimerPorts> = {}) {
       calls.reads += 1;
       return Promise.resolve(null);
     },
-    startTimer: (target) => {
+    startTimer: (target, inRoom) => {
       calls.started.push(target);
+      calls.rooms.push(inRoom);
       return Promise.resolve(running(target));
     },
     stopTimer: () => {
@@ -352,4 +354,46 @@ test("a failed read leaves the last known timer alone", async () => {
 
   await belt.timer.refresh();
   expect(belt.timer.current?.target).toEqual(TICKET);
+});
+
+/**
+ * **Every start carries the room the reader is standing in** (#281), including
+ * the two that were never given a target by their caller: ⌘T reads the
+ * foreground, and *Start timer* switches.
+ *
+ * The room is what the ad-hoc dialog's second rule reads off the block, and a
+ * start that dropped it would record the afternoon as having run nowhere —
+ * green everywhere, and the rule silently never firing. So the assertion is on
+ * every path, not on `start` alone.
+ */
+test("a start records the room the reader is standing in, on all three paths", async () => {
+  const belt = bench();
+  belt.timer.roomContext = "ctx:sepa";
+
+  await belt.timer.start(TICKET);
+  await belt.timer.switchTo(LABEL);
+
+  belt.timer.roomContext = "ctx:mandates";
+  belt.timer.foreground = TICKET;
+  await belt.timer.stop();
+  await belt.timer.press();
+
+  expect(belt.calls.rooms).toEqual(["ctx:sepa", "ctx:sepa", "ctx:mandates"]);
+});
+
+/**
+ * ...and a derived room — *All work*, a source, a project — is `null` rather
+ * than a made-up id. The store starts there, and the shell writes `null` back
+ * whenever the reader leaves a stored room.
+ */
+test("a start outside a stored room carries no room at all", async () => {
+  const belt = bench();
+  belt.timer.roomContext = "ctx:sepa";
+  await belt.timer.start(TICKET);
+
+  belt.timer.roomContext = null;
+  await belt.timer.stop();
+  await belt.timer.start(LABEL);
+
+  expect(belt.calls.rooms).toEqual(["ctx:sepa", null]);
 });

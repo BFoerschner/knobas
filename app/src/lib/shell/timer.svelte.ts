@@ -57,7 +57,7 @@ const TICK_MS = 1000;
 /** The bridge this store needs, injectable so a test needs no Tauri. */
 export interface TimerPorts {
   currentTimer: () => Promise<RunningTimer | null>;
-  startTimer: (target: TimerTarget) => Promise<RunningTimer>;
+  startTimer: (target: TimerTarget, inRoom: string | null) => Promise<RunningTimer>;
   stopTimer: () => Promise<Block | null>;
   timerHeartbeat: (foreground: TimerTarget | null) => Promise<RunningTimer | null>;
   listen: typeof tauriListen;
@@ -92,6 +92,22 @@ export interface Timer {
    * observation and not a missing one.
    */
   foreground: TimerTarget | null;
+  /**
+   * **The stored context the reader is standing in**, which every start
+   * records on the block it opens (#281).
+   *
+   * Ambient rather than an argument, for the reason {@link foreground} is: ⌘T
+   * and the launcher's *Start timer* row both start a timer without knowing
+   * about rooms, and a parameter would be one every future caller had to
+   * remember to fill in — a start that forgot it would record the afternoon as
+   * having run nowhere, and the ad-hoc dialog's second rule would quietly stop
+   * firing.
+   *
+   * `null` for a derived room — *All work*, a source, a project — which is not
+   * a stored context. The shell writes it from the resolved room's
+   * `filter.context`.
+   */
+  roomContext: string | null;
   /** Re-read the timer from the backend. */
   refresh(): Promise<void>;
   /** Start on `target`. Rejects the way `start_timer` does. */
@@ -158,10 +174,16 @@ export function createTimer(ports?: Partial<TimerPorts>): Timer {
    * closure cannot reassign a `let` its caller holds, and the getters below
    * read through something stable — the shape `latest-change.svelte.ts` uses.
    */
-  const state = $state<{ current: RunningTimer | null; now: Date; foreground: TimerTarget | null }>({
+  const state = $state<{
+    current: RunningTimer | null;
+    now: Date;
+    foreground: TimerTarget | null;
+    roomContext: string | null;
+  }>({
     current: null,
     now: io.now(),
     foreground: null,
+    roomContext: null,
   });
 
   async function refresh(): Promise<void> {
@@ -191,12 +213,18 @@ export function createTimer(ports?: Partial<TimerPorts>): Timer {
     set foreground(target: TimerTarget | null) {
       state.foreground = target;
     },
+    get roomContext() {
+      return state.roomContext;
+    },
+    set roomContext(context: string | null) {
+      state.roomContext = context;
+    },
     refresh,
     async start(target: TimerTarget) {
       // The answer is used directly rather than followed by a read: `start_timer`
       // returns the row it wrote, and a re-read would be a second round trip
       // that can only agree or race.
-      state.current = await io.startTimer(target);
+      state.current = await io.startTimer(target, state.roomContext);
     },
     async stop() {
       const closed = await io.stopTimer();
