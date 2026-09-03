@@ -167,6 +167,10 @@ _Avoid_: report, summary, standup (that is the whole flow)
 A [note](#note) — one per date, opened by its own address — holding attendees, per-person notes and action items. *Publish* creates a Confluence page from it under a configured parent and links note and page; the note stays the editable original. Not a kind of its own.
 _Avoid_: minutes, protocol page (that is the published copy)
 
+**Timesheet**:
+The week under the day strip, Monday to Sunday with empty weekends collapsed: a row per [timer target](#timer-target) plus one for focused time no [block](#block) covers, and per day the time **tracked** (that day's manual blocks), **offered** (its passive ones, counted beside tracked and never inside it), **logged** ([worklogs](#worklog) whose write is pending or sent, since the number is about what you did rather than about sync timing) and **unlogged** (the difference). A worklog whose write is waiting on a person shows as **held**, never as logged and never as unlogged. Minute granularity and **no rounding**: knobas must never invent a rounding policy your Jira may not have. *Log all* makes one worklog per day and ticket from that day's unlogged manual blocks, and never touches a passive or ad-hoc-label one. (M3 grilling 2026-09-02, spec #272; built in #283)
+_Avoid_: report, timecard, week view
+
 **Passive attribution**:
 The opt-in recording of which entity was in the foreground — the open detail, else the room's anchor entity, else nothing — while the app window is focused, as passive [blocks](#block). A gap stays a gap until a person assigns it; nothing recorded this way reaches a source on its own.
 _Avoid_: automatic tracking, activity tracking (that is the activity stream's word)

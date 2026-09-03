@@ -26,9 +26,9 @@
  * to Monday is `(getDay() + 6) % 7` rather than `getDay() - 1`, which is off
  * by seven days on every Sunday.
  */
-import type { DayWindow, Week } from "../ipc/time";
+import type { DayWindow, Week, WeekCell } from "../ipc/time";
 
-import { dayBounds, dayKey, shiftDay } from "./day";
+import { MONTHS, dayBounds, shiftDay } from "./day";
 
 /** How many days a week has. Named because it is also an index bound. */
 export const DAYS = 7;
@@ -69,35 +69,60 @@ export function isWeekend(index: number): boolean {
 }
 
 /**
- * Whether a column has nothing on it at all.
+ * Whether a cell says nothing at all.
  *
- * Every number, not just *tracked*: a Saturday whose only content is a held
- * worklog is a Saturday a person needs to see, and a column collapsed on
- * `tracked === 0` would hide exactly the day that needs acting on.
+ * **Every number, not just *tracked***: a Saturday whose only content is a
+ * held worklog is a Saturday a person needs to see, and a cell judged empty on
+ * `tracked === 0` would hide exactly the day that needs acting on. The same
+ * holds for a passive block knobas is offering — it is on the strip above, so
+ * it is not nothing.
+ *
+ * `unlogged_seconds` is deliberately absent: it is derived from the other
+ * three, so a cell where it is the only non-zero number cannot exist, and
+ * naming it here would suggest it could.
+ *
+ * One predicate, exported, because the timesheet asks this question twice —
+ * {@link dayIsEmpty} for the weekend collapse, and the view for the em dash it
+ * draws in a cell with nothing in it.
  */
+export function cellIsEmpty(cell: WeekCell | undefined): boolean {
+  return (
+    cell === undefined ||
+    (cell.tracked_seconds === 0 &&
+      cell.offered_seconds === 0 &&
+      cell.logged_seconds === 0 &&
+      cell.held_seconds === 0)
+  );
+}
+
+/** Whether a column has nothing on it at all. */
 export function dayIsEmpty(week: Week, index: number): boolean {
-  return week.rows.every((row) => {
-    const cell = row.cells[index];
-    return (
-      cell === undefined ||
-      (cell.tracked_seconds === 0 && cell.logged_seconds === 0 && cell.held_seconds === 0)
-    );
-  });
+  return week.rows.every((row) => cellIsEmpty(row.cells[index]));
 }
 
 /**
- * The columns to draw: every weekday, and a weekend day only when it has
- * something on it.
+ * The columns to draw: every weekday, a weekend day with something on it, and
+ * — whatever else is true of it — **the day the strip is standing on**.
  *
  * **Weekdays are never collapsed, empty or not.** An empty Wednesday is a fact
  * about the week — the gap a person is looking for — while an empty Saturday
  * is the ordinary case and a column of dashes for it is noise. That asymmetry
  * is the whole of "empty weekends collapsed".
+ *
+ * **`current` is the exception that keeps the highlight honest.** The strip's
+ * date drives the highlighted column; a reader who steps the strip onto an
+ * empty Saturday would otherwise be looking at a week with the one day they
+ * are on missing from it, and nothing highlighted. So that column stays,
+ * empty or not, for exactly as long as the strip is on it. Omitting `current`
+ * asks the plain question, which is what a test of the collapse rule wants.
  */
-export function visibleColumns(week: Week): number[] {
+export function visibleColumns(week: Week, current?: string): number[] {
   return week.days
     .map((_, index) => index)
-    .filter((index) => !isWeekend(index) || !dayIsEmpty(week, index));
+    .filter(
+      (index) =>
+        week.days[index] === current || !isWeekend(index) || !dayIsEmpty(week, index),
+    );
 }
 
 /**
@@ -133,20 +158,6 @@ export function weekLabel(days: string[]): string {
   const first = days[0];
   const last = days[days.length - 1];
   if (first === undefined || last === undefined) return "";
-  const MONTHS = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-  ];
   const [fromYear, fromMonth, fromDay] = first.split("-").map(Number);
   const [toYear, toMonth, toDay] = last.split("-").map(Number);
   const fromName = MONTHS[(fromMonth ?? 1) - 1];
@@ -158,9 +169,4 @@ export function weekLabel(days: string[]): string {
     return `${fromDay} ${fromName} – ${toDay} ${toName} ${toYear}`;
   }
   return `${fromDay}–${toDay} ${fromName} ${fromYear}`;
-}
-
-/** Today's key, so the view has one place asking the clock. */
-export function todayKey(now: Date): string {
-  return dayKey(now);
 }

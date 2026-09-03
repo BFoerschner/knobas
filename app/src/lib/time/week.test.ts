@@ -25,6 +25,7 @@ import {
 function cell(over: Partial<WeekCell> = {}): WeekCell {
   return {
     tracked_seconds: 0,
+    offered_seconds: 0,
     logged_seconds: 0,
     held_seconds: 0,
     unlogged_seconds: 0,
@@ -115,6 +116,34 @@ test("an empty weekend collapses and a worked one does not", () => {
     6: cell({ tracked_seconds: 900 }),
   });
   expect(visibleColumns(both)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+});
+
+/**
+ * **The day the strip is standing on is always drawn**, even when it is an
+ * empty Saturday — otherwise the highlighted column is the one column the week
+ * does not have, and a reader stepping onto a quiet weekend loses the day they
+ * are on.
+ */
+test("the day the strip is on is drawn even when it is an empty weekend", () => {
+  const quiet = weekWith({ 0: cell({ tracked_seconds: 3600 }) });
+
+  expect(visibleColumns(quiet)).toEqual([0, 1, 2, 3, 4]);
+  expect(visibleColumns(quiet, "2026-08-29")).toEqual([0, 1, 2, 3, 4, 5]);
+  expect(visibleColumns(quiet, "2026-08-30")).toEqual([0, 1, 2, 3, 4, 6]);
+  // ...and standing on a weekday changes nothing: that column was never at
+  // risk, and the exception must not quietly expand the weekend as well.
+  expect(visibleColumns(quiet, "2026-08-26")).toEqual([0, 1, 2, 3, 4]);
+});
+
+/**
+ * A weekend whose only content is knobas' own guess is still a weekend a
+ * person needs to see: the day strip above draws those blocks and offers
+ * *Assign…* on them, and a week that hid the column would hide the offer.
+ */
+test("a weekend carrying only offered time is not empty", () => {
+  const week = weekWith({ 5: cell({ offered_seconds: 3600 }) });
+  expect(dayIsEmpty(week, 5)).toBe(false);
+  expect(visibleColumns(week)).toContain(5);
 });
 
 test("a weekday is never collapsed, empty or not", () => {

@@ -272,6 +272,20 @@
   let adHoc = $state<{ block: Block; offer: AdHocBlock } | null>(null);
 
   /**
+   * Bumped whenever the time view writes anything (#283).
+   *
+   * The day strip and the week timesheet share one address and one screen, and
+   * an edit on either changes what the other draws — assigning a block moves
+   * the week's unlogged total, and *Log all* makes the strip's blocks
+   * read-only. Neither owns the other, and the time commands deliberately
+   * write no activity line, so the shell holds one counter between them: each
+   * view calls `onchanged` after a successful write and re-reads when the
+   * counter moves. Spec #272 story 44 is the reason: "assigning a block and
+   * watching the week's unlogged total change is one glance".
+   */
+  let timeRevision = $state(0);
+
+  /**
    * **Every stop on an entity asks for a draft, and `null` is the ordinary
    * answer** (#280).
    *
@@ -702,14 +716,26 @@
           the view resolves against its own clock -- `parseHash` is pure and
           must not read one.
         -->
-        <DayReview {router} day={router.route.day} />
         <!--
-          ...and the week under it (#283). One address for both, which is what
-          makes assigning a block and watching the week's unlogged total change
-          one glance (spec #272 story 44): the strip's date drives the
-          highlighted column rather than opening a second view.
+          The day strip and the week under it (#279, #283) — one address, and
+          one counter between them. Story 44 wants assigning a block and
+          watching the week's unlogged total change to be *one glance*: each
+          view bumps `timeRevision` when it writes, and each re-reads when it
+          moves. The shell holds the counter because the two are siblings and
+          neither owns the other; the time commands deliberately write no
+          activity line of their own, so there is no signal to listen to.
         -->
-        <WeekTimesheet day={router.route.day} />
+        <DayReview
+          {router}
+          day={router.route.day}
+          revision={timeRevision}
+          onchanged={() => (timeRevision += 1)}
+        />
+        <WeekTimesheet
+          day={router.route.day}
+          revision={timeRevision}
+          onchanged={() => (timeRevision += 1)}
+        />
       {:else if router.route.view === "first-run"}
         <FirstRun demo={lifecycle.status?.demo ?? false} onfinish={onFirstRunDone} />
       {:else if router.route.view === "start-work"}

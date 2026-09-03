@@ -504,6 +504,16 @@ export interface WeekCell {
    */
   tracked_seconds: number;
   /**
+   * The day's **passive** blocks on this target — what knobas is offering.
+   *
+   * Beside {@link tracked_seconds} rather than inside it, and present rather
+   * than dropped: the day strip above draws these blocks and says "*N*
+   * offered" beside its own tracked total, so a week that left them out would
+   * disagree with it about the same afternoon. Nothing logs one until a person
+   * assigns it, so it pays into no other number here.
+   */
+  offered_seconds: number;
+  /**
    * Worklog seconds whose write is `pending` or `sent`.
    *
    * **A pending worklog counts as logged** (spec #272 story 39): the number is
@@ -587,7 +597,7 @@ export function weekTimesheet(days: DayWindow[]): Promise<Week> {
  * read is not something to discover afterwards.
  */
 export function logAllPreview(days: DayWindow[]): Promise<PlannedWorklog[]> {
-  return invoke<PlannedWorklog[]>("plan_log_all", { days });
+  return invoke<PlannedWorklog[]>("log_all_preview", { days });
 }
 
 /**

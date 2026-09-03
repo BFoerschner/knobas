@@ -43,7 +43,15 @@
   import { latestRead } from "../shell/latest-read";
   import { targetReading } from "../shell/timer";
   import { dayKey, durationReading } from "./day";
-  import { columnHeading, minutesOf, mondayOf, visibleColumns, weekLabel, weekWindows } from "./week";
+  import {
+    cellIsEmpty,
+    columnHeading,
+    minutesOf,
+    mondayOf,
+    visibleColumns,
+    weekLabel,
+    weekWindows,
+  } from "./week";
 
   /** The bridge this view needs, injectable so a test needs no Tauri. */
   interface WeekPorts {
@@ -54,11 +62,28 @@
 
   let {
     day = null,
+    revision = 0,
+    onchanged,
     ports,
     now = () => new Date(),
   }: {
     /** The day from the address, or `null` for today — `DayReview`'s prop. */
     day?: string | null;
+    /**
+     * Bumped by whatever else on this screen changed the week (#283, story
+     * 44: "assigning a block and watching the week's unlogged total change is
+     * one glance").
+     *
+     * A number rather than an event, because the shell owns the screen: the
+     * day strip and this table are siblings, `update_block` deliberately
+     * writes no activity line (`commands::time`'s `update_block` records why),
+     * and a component reaching for its sibling's reads would be the coupling
+     * the port objects exist to avoid. The parent bumps one counter and both
+     * views re-read.
+     */
+    revision?: number;
+    /** Called after this view writes, so the strip above re-reads too. */
+    onchanged?: (() => void) | undefined;
     ports?: Partial<WeekPorts>;
     now?: () => Date;
   } = $props();
@@ -93,20 +118,31 @@
   /** A write is in flight; both buttons are held until it lands. */
   let sending = $state(false);
 
-  const columns = $derived(week === null ? [] : visibleColumns(week));
+  // `key` is passed so the column the strip is standing on is drawn even when
+  // it is an empty weekend day — otherwise the reader steps onto a quiet
+  // Saturday and the week loses the one column they are on.
+  const columns = $derived(week === null ? [] : visibleColumns(week, key));
   /** The highlighted column, or -1 when the strip's day is in another week. */
   const highlighted = $derived(week === null ? -1 : week.days.indexOf(key));
 
-  /** The whole week's unlogged time, which is the number *Log all* is about. */
-  const unlogged = $derived(
-    week === null
-      ? 0
-      : week.rows.reduce(
-          (total, row) =>
-            total + row.cells.reduce((sum, cell) => sum + cell.unlogged_seconds, 0),
-          0,
-        ),
-  );
+  /** Unlogged seconds over the rows a predicate keeps. */
+  function unloggedOver(keep: (row: WeekRow) => boolean): number {
+    if (week === null) return 0;
+    return week.rows
+      .filter(keep)
+      .reduce((total, row) => total + row.cells.reduce((sum, c) => sum + c.unlogged_seconds, 0), 0);
+  }
+
+  /**
+   * The week's unlogged time, and how much of it has nowhere to go.
+   *
+   * Two numbers rather than one, and they sit beside the *Log all…* button:
+   * the total is what story 41 calls an honest week, but *Log all* can only
+   * touch the part with a target on it, and one number next to that button
+   * would read as a promise about all of it.
+   */
+  const unlogged = $derived(unloggedOver(() => true));
+  const unloggedWithNoTarget = $derived(unloggedOver((row) => row.target === null));
 
   /**
    * Read the week whenever the address names another one.
@@ -117,6 +153,10 @@
    */
   const readWeek = latestRead<Week>();
   $effect(() => {
+    // `revision` is read for its own sake: an edit on the strip above changes
+    // this week without changing its address, and story 44 asks for the
+    // change to be one glance rather than a reload.
+    revision;
     void load(monday);
   });
 
@@ -142,7 +182,11 @@
     }
   }
 
-  /** Send it, then re-read: every cell in the week has just changed. */
+  /**
+   * Send it, then re-read: every cell in the week has just changed — and so
+   * has the strip above, whose blocks have just become read-only, which is
+   * what `onchanged` is for.
+   */
   async function send() {
     sending = true;
     try {
@@ -154,6 +198,7 @@
       sending = false;
     }
     await load(monday);
+    onchanged?.();
   }
 
   /** What a row is called: the mirror's title, else the id, else the label. */
@@ -171,7 +216,14 @@
 <section class="week" aria-label="The week">
   <div class="head">
     <h2>{week === null ? "" : weekLabel(week.days)}</h2>
-    <span class="k">{durationReading(minutesOf(unlogged))} unlogged this week</span>
+    <span class="k">
+      {durationReading(minutesOf(unlogged))} unlogged this week{#if unloggedWithNoTarget > 0},
+        <!--
+          Named separately because *Log all* cannot touch it: it has no target.
+          One number beside that button would read as a promise about all of
+          it.
+        -->{durationReading(minutesOf(unloggedWithNoTarget))} of it with no target{/if}
+    </span>
     <button class="btn sm" onclick={() => void preview()} disabled={sending}>Log all…</button>
   </div>
 
@@ -261,11 +313,19 @@
             {#each columns as index (index)}
               {@const cell = row.cells[index]}
               <td class={index === highlighted ? "on" : ""}>
-                {#if cell === undefined || (cell.tracked_seconds === 0 && cell.logged_seconds === 0 && cell.held_seconds === 0)}
+                {#if cellIsEmpty(cell)}
                   <span class="none">—</span>
-                {:else}
+                {:else if cell !== undefined}
                   {#if reading(cell.tracked_seconds)}
                     <span class="tracked">{reading(cell.tracked_seconds)}</span>
+                  {/if}
+                  {#if reading(cell.offered_seconds)}
+                    <!--
+                      knobas' own guess, in the day strip's own word and never
+                      inside the tracked total — the arrangement `DayReview`'s
+                      heading already uses on the same screen.
+                    -->
+                    <span class="offered">{reading(cell.offered_seconds)} offered</span>
                   {/if}
                   {#if reading(cell.logged_seconds)}
                     <span class="logged">{reading(cell.logged_seconds)} logged</span>
@@ -394,6 +454,7 @@
   }
 
   .tracked,
+  .offered,
   .logged,
   .held,
   .unlogged,
@@ -410,6 +471,7 @@
     color: var(--faint);
   }
 
+  .offered,
   .held {
     color: var(--amber);
   }

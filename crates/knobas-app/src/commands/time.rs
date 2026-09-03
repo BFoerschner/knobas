@@ -450,7 +450,7 @@ pub async fn week_timesheet(
 /// [`Invalid`](crate::IpcErrorCode::Invalid) for a day list the timesheet
 /// would refuse.
 #[tauri::command]
-pub async fn plan_log_all<R: tauri::Runtime>(
+pub async fn log_all_preview<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     days: Vec<time::week::DayWindow>,
 ) -> Result<Vec<time::week::PlannedWorklog>, IpcError> {
@@ -674,7 +674,7 @@ mod tests {
             "log_work",
             "ad_hoc_block",
             "week_timesheet",
-            "plan_log_all",
+            "log_all_preview",
             "log_all",
         ] {
             assert!(
@@ -732,7 +732,7 @@ mod tests {
             // renames the argument and leaves the fields inside it alone, so
             // `days` here and `day`, `from`, `to` inside each entry.
             ("week_timesheet", "days"),
-            ("plan_log_all", "days"),
+            ("log_all_preview", "days"),
             ("log_all", "days"),
         ] {
             let at = MIRROR
@@ -1063,6 +1063,7 @@ mod tests {
     fn the_week_cell_matches_its_typescript_mirror() {
         let cell = crate::time::week::WeekCell {
             tracked_seconds: 5_400,
+            offered_seconds: 900,
             logged_seconds: 3_600,
             held_seconds: 0,
             unlogged_seconds: 1_800,
@@ -1073,6 +1074,7 @@ mod tests {
             &serde_json::to_value(cell).unwrap(),
             &[
                 "tracked_seconds",
+                "offered_seconds",
                 "logged_seconds",
                 "held_seconds",
                 "unlogged_seconds",

@@ -30,6 +30,7 @@ const DAYS = [
 function cell(over: Partial<WeekCell> = {}): WeekCell {
   return {
     tracked_seconds: 0,
+    offered_seconds: 0,
     logged_seconds: 0,
     held_seconds: 0,
     unlogged_seconds: 0,
@@ -53,7 +54,10 @@ function weekOf(rows: WeekRow[]): Week {
 let target: HTMLDivElement;
 let app: Record<string, unknown> | undefined;
 
-function render(week: Week, over: { planned?: PlannedWorklog[]; day?: string } = {}) {
+function render(
+  week: Week,
+  over: { planned?: PlannedWorklog[]; day?: string; onchanged?: () => void } = {},
+) {
   const asked: DayWindow[][] = [];
   const previews: DayWindow[][] = [];
   const logged: DayWindow[][] = [];
@@ -62,6 +66,7 @@ function render(week: Week, over: { planned?: PlannedWorklog[]; day?: string } =
     target,
     props: {
       day: over.day ?? "2026-08-26",
+      onchanged: over.onchanged,
       ports: {
         weekTimesheet: (days: DayWindow[]) => {
           asked.push(days);
@@ -298,6 +303,106 @@ test("cancelling the confirmation sends nothing", async () => {
 
   expect(logged).toHaveLength(0);
   expect(text()).not.toContain("This will send");
+});
+
+/**
+ * **The strip's day is never the column that is missing.** Standing on an
+ * empty Saturday, the highlight has to land somewhere — a week that collapsed
+ * it would leave the reader on a day the table does not draw.
+ */
+test("the strip's day is drawn and highlighted even on an empty weekend", async () => {
+  render(
+    weekOf([
+      row({
+        cells: DAYS.map((_, index) => (index === 0 ? cell({ tracked_seconds: 3600 }) : cell())),
+      }),
+    ]),
+    { day: "2026-08-29" },
+  );
+  await vi.waitFor(() => expect(headings()).toHaveLength(6));
+
+  expect(headings()).toContain("Sat 29");
+  const marked = [...target.querySelectorAll("thead th.on")].map((th) =>
+    (th.textContent ?? "").trim(),
+  );
+  expect(marked).toEqual(["Sat 29"]);
+});
+
+/**
+ * Passive time is **offered**, in the day strip's own word, beside tracked and
+ * never inside it — so a week does not silently lose an afternoon the strip
+ * directly above it is drawing.
+ */
+test("a passive block reads as offered and is not tracked", async () => {
+  render(
+    weekOf([
+      row({
+        cells: DAYS.map((_, index) =>
+          index === 0 ? cell({ offered_seconds: 3600 }) : cell(),
+        ),
+      }),
+    ]),
+  );
+  await vi.waitFor(() => expect(text()).toContain("1 h offered"));
+
+  // Nothing claims it was tracked, logged or unlogged: it is knobas' guess
+  // until a person assigns it.
+  expect(text()).not.toContain("1 h unlogged");
+});
+
+/**
+ * **The number beside *Log all…* must not promise time *Log all* cannot
+ * touch.** The no-target row is focused time with nowhere to go, so the header
+ * says how much of the week's unlogged total that is.
+ */
+test("the header says how much of the unlogged week has no target", async () => {
+  render(
+    weekOf([
+      row({
+        cells: DAYS.map((_, index) =>
+          index === 0 ? cell({ tracked_seconds: 3600, unlogged_seconds: 3600 }) : cell(),
+        ),
+      }),
+      row({
+        target: null,
+        title: null,
+        cells: DAYS.map((_, index) =>
+          index === 0 ? cell({ tracked_seconds: 1800, unlogged_seconds: 1800 }) : cell(),
+        ),
+      }),
+    ]),
+  );
+  await vi.waitFor(() => expect(text()).toContain("1 h 30 min unlogged this week"));
+  expect(text()).toContain("30 min of it with no target");
+});
+
+/**
+ * Story 44: the strip above and this table are one screen, so a write here
+ * tells the shell — which is what re-reads the strip whose blocks have just
+ * become read-only.
+ */
+test("Log all tells the shell the screen changed", async () => {
+  let changed = 0;
+  render(weekOf([row()]), {
+    onchanged: () => (changed += 1),
+    planned: [
+      {
+        day: "2026-08-24",
+        entity_id: "jira:PAY-231",
+        title: null,
+        started_at: new Date(2026, 7, 24, 9).toISOString(),
+        seconds: 3_600,
+        blocks: 1,
+      },
+    ],
+  });
+  await vi.waitFor(() => expect(button("Log all…")).toBeDefined());
+  button("Log all…")!.click();
+  await vi.waitFor(() => expect(button("Send 1")).toBeDefined());
+  expect(changed, "drawing the confirmation changes nothing").toBe(0);
+
+  button("Send 1")!.click();
+  await vi.waitFor(() => expect(changed).toBe(1));
 });
 
 /** Nothing to log is a sentence, not a button that appears to do nothing. */

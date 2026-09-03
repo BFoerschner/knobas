@@ -462,7 +462,16 @@ async fn a_cell_counts_pending_as_logged_held_as_held_and_a_guess_as_neither() {
         "a passive block is knobas' guess at what was open, and tracked time \
          is what the reader said their day was"
     );
-    assert_eq!(friday_cell.unlogged_seconds, 0);
+    assert_eq!(
+        friday_cell.offered_seconds, 3_600,
+        "...but it is counted beside it rather than dropped, the arrangement \
+         the day strip on the same screen already uses -- a week that lost it \
+         would disagree with the strip about the same afternoon"
+    );
+    assert_eq!(
+        friday_cell.unlogged_seconds, 0,
+        "a guess nobody has vouched for is not time somebody failed to log"
+    );
 
     state.scheduler.shutdown().await;
 }

@@ -10,11 +10,13 @@
 //!
 //! # The four numbers, and where each comes from
 //!
-//! **Tracked** is knobas' own record: the day's *manual* blocks. Passive
-//! blocks are not in it, because a passive block is knobas' guess at what was
-//! open and the day review already says so in as many words -- "tracked time
-//! is manual time, and passive time is counted beside it". A week that added
-//! the guess to the total would contradict the strip above it.
+//! **Tracked** is knobas' own record: the day's *manual* blocks. **Offered**
+//! is the day's *passive* ones, counted beside it and never inside it -- the
+//! day review's own arrangement, in its own word: "tracked time is manual
+//! time, and passive time is counted beside it". A week that added the guess
+//! to the tracked total would contradict the strip above it; a week that
+//! dropped the guess altogether would lose an afternoon the strip is drawing,
+//! and story 41 asks for a total that is honest.
 //!
 //! **Logged** and **held** come from the local worklog copy joined to the
 //! write queue's state, and **never from the mirror** (spec #272, "the
@@ -100,6 +102,15 @@ pub struct WeekCell {
     /// The day's manual blocks on this target, added up. On the "no target"
     /// row, the focused time no block covered.
     pub tracked_seconds: i64,
+    /// The day's **passive** blocks on this target -- what knobas is offering,
+    /// which is never tracked and never logged.
+    ///
+    /// Beside `tracked_seconds` rather than inside it, and present rather than
+    /// dropped: the strip above this draws these blocks, and a week in which
+    /// they were simply absent would disagree with it about the same
+    /// afternoon. Nothing logs one until a person assigns it, which is why it
+    /// pays into no other column here.
+    pub offered_seconds: i64,
     /// Worklog seconds whose write is `pending` or `sent`.
     pub logged_seconds: i64,
     /// Worklog seconds whose write is waiting on a person.
@@ -134,7 +145,10 @@ impl WeekRow {
     /// Whether this row says anything at all.
     fn is_empty(&self) -> bool {
         self.cells.iter().all(|cell| {
-            cell.tracked_seconds == 0 && cell.logged_seconds == 0 && cell.held_seconds == 0
+            cell.tracked_seconds == 0
+                && cell.offered_seconds == 0
+                && cell.logged_seconds == 0
+                && cell.held_seconds == 0
         })
     }
 }
@@ -213,12 +227,11 @@ struct Stretch {
     title: Option<String>,
 }
 
-/// How a row is keyed while the week is being added up.
+/// What a row is keyed by while the week is being added up: its target, or
+/// `None` for the row that has none.
 ///
-/// The `TimerTarget` itself, which is `Eq` and `Hash`-free -- a `Vec` scan
-/// rather than a map, because a week has a handful of targets in it and the
-/// order of first appearance is not the order the answer is sorted into
-/// anyway.
+/// The same shape [`WeekRow::target`] carries, so "which row is this" and
+/// "what does this row say it is" cannot come apart.
 type Key = Option<TimerTarget>;
 
 /// Refuse a day list that is not a week the reader could have meant.
@@ -331,23 +344,28 @@ pub async fn read(pool: &PgPool, days: &[DayWindow]) -> Result<Week, IpcError> {
     let from = days[0].from;
     let to = days[days.len() - 1].to;
 
-    let mut rows: Vec<(Key, Option<String>, Vec<WeekCell>)> = Vec::new();
-    let cells_for = |rows: &mut Vec<(Key, Option<String>, Vec<WeekCell>)>,
-                     key: Key,
-                     title: Option<String>|
-     -> usize {
-        match rows.iter().position(|(existing, _, _)| *existing == key) {
+    // The answer, built in place. A `Vec<WeekRow>` and a linear scan rather
+    // than a map keyed on the target: a week has a handful of targets in it,
+    // and the order they first appear in is not the order the answer is sorted
+    // into anyway -- so a map would buy nothing and cost the row its shape.
+    let mut rows: Vec<WeekRow> = Vec::new();
+    let row_for = |rows: &mut Vec<WeekRow>, target: Key, title: Option<String>| -> usize {
+        match rows.iter().position(|row| row.target == target) {
             Some(at) => {
                 // The first title that is not blank wins, so a row does not
                 // lose its name to a block whose entity the mirror has since
                 // purged.
-                if rows[at].1.is_none() {
-                    rows[at].1 = title;
+                if rows[at].title.is_none() {
+                    rows[at].title = title;
                 }
                 at
             }
             None => {
-                rows.push((key, title, vec![WeekCell::default(); days.len()]));
+                rows.push(WeekRow {
+                    target,
+                    title,
+                    cells: vec![WeekCell::default(); days.len()],
+                });
                 rows.len() - 1
             }
         }
@@ -372,15 +390,18 @@ pub async fn read(pool: &PgPool, days: &[DayWindow]) -> Result<Week, IpcError> {
         let Some(index) = column(days, stretch.started_at) else {
             continue;
         };
-        if stretch.kind != BlockKind::Manual {
-            continue;
-        }
-        let at = cells_for(
+        let at = row_for(
             &mut rows,
             Some(stretch.target.clone()),
             stretch.title.clone(),
         );
-        rows[at].2[index].tracked_seconds += (stretch.ended_at - stretch.started_at).num_seconds();
+        let seconds = (stretch.ended_at - stretch.started_at).num_seconds();
+        // The one place the two kinds part company, and they part into two
+        // columns rather than into "counted" and "gone".
+        match stretch.kind {
+            BlockKind::Manual => rows[at].cells[index].tracked_seconds += seconds,
+            BlockKind::Passive => rows[at].cells[index].offered_seconds += seconds,
+        }
     }
 
     // Logged and held.
@@ -397,11 +418,11 @@ pub async fn read(pool: &PgPool, days: &[DayWindow]) -> Result<Week, IpcError> {
         let Some(index) = column(days, started_at) else {
             continue;
         };
-        let at = cells_for(&mut rows, Some(TimerTarget::Entity { entity_id }), None);
+        let at = row_for(&mut rows, Some(TimerTarget::Entity { entity_id }), None);
         if is_logged(state.as_deref()) {
-            rows[at].2[index].logged_seconds += seconds;
+            rows[at].cells[index].logged_seconds += seconds;
         } else {
-            rows[at].2[index].held_seconds += seconds;
+            rows[at].cells[index].held_seconds += seconds;
         }
     }
 
@@ -432,6 +453,7 @@ pub async fn read(pool: &PgPool, days: &[DayWindow]) -> Result<Week, IpcError> {
             .sum();
         open[index] = WeekCell {
             tracked_seconds: seconds,
+            offered_seconds: 0,
             logged_seconds: 0,
             held_seconds: 0,
             // Time with nowhere to go is time that has not been logged, and
@@ -442,20 +464,16 @@ pub async fn read(pool: &PgPool, days: &[DayWindow]) -> Result<Week, IpcError> {
         };
     }
 
-    let mut out: Vec<WeekRow> = rows
-        .into_iter()
-        .map(|(target, title, mut cells)| {
-            for cell in &mut cells {
-                cell.unlogged_seconds =
-                    (cell.tracked_seconds - cell.logged_seconds - cell.held_seconds).max(0);
-            }
-            WeekRow {
-                target,
-                title,
-                cells,
-            }
-        })
-        .collect();
+    // Unlogged last, because it is the difference of three numbers that were
+    // still being added to a statement ago. **Offered is not in it**: knobas'
+    // own guess is not time a person has failed to log.
+    let mut out = rows;
+    for row in &mut out {
+        for cell in &mut row.cells {
+            cell.unlogged_seconds =
+                (cell.tracked_seconds - cell.logged_seconds - cell.held_seconds).max(0);
+        }
+    }
     out.sort_by_key(sort_key);
 
     let open = WeekRow {
@@ -534,7 +552,7 @@ pub async fn plan(
     let mut out = Vec::new();
     for window in days {
         for (entity_id, title) in loggable(pool, registry, window).await? {
-            let spans = worklog::unlogged_spans(pool, &entity_id, window.from, window.to).await?;
+            let spans = worklog::unlogged(pool, &entity_id, window.from, window.to).await?;
             let Some((started_at, _, seconds)) = worklog::concatenate(&spans) else {
                 continue;
             };

@@ -4186,7 +4186,7 @@ From this commit on, each of the following requires an orchestrator decision **a
 - **The IPC surface, issue #283 (2026-09-03): three commands on the ratified `time` module pair —
   the week timesheet, *Log all*'s plan, and *Log all*.** The pair itself is #278's ratified
   exception; this is the entry each command addition owes it. `week_timesheet`,
-  `plan_log_all` and `log_all` are appended to the foot of the `commands::time::` group in
+  `log_all_preview` and `log_all` are appended to the foot of the `commands::time::` group in
   `crates/knobas-app/src/lib.rs`'s `generate_handler!` list and to the foot of
   `app/src/lib/ipc/time.ts`. Neither barrel is rewritten, and no existing command, DTO field or
   event name changes meaning.
@@ -4227,9 +4227,13 @@ From this commit on, each of the following requires an orchestrator decision **a
   tidiness, it is that the draft's interval and seconds are the reader's own and may exceed the
   blocks they were made of.
 
-  **Tracked is manual time.** A passive block is not in it, which is the same sentence the day
-  review's heading already says on the same screen — a week that added knobas' own guess to the
-  total would contradict the strip above it.
+  **Tracked is manual time; offered is the guess, counted beside it.** A passive block is not in
+  the tracked total, which is the same sentence the day review's heading already says on the same
+  screen. It is not *dropped* either: `WeekCell::offered_seconds` carries it in the strip's own
+  word, because a week that lost an afternoon the strip directly above it is drawing would be two
+  surfaces disagreeing about one day, and story 41 asks for a total that is honest. Offered pays
+  into no other column — it is not tracked, it is never logged, and it is not time somebody failed
+  to log — so *unlogged* stays `tracked - logged - held`.
 
   **The "no target, app open" row, and the one thing it cannot say.** It is focused time no block
   covers, measured by `time::passive::focused_spans` — extracted from `derive`'s cap loop by this
@@ -4245,7 +4249,24 @@ From this commit on, each of the following requires an orchestrator decision **a
   `time::day::list` makes and for the same reason: the derivation's cap is a rule about a day, and
   these seven windows are the only place the reader's midnights are known.
 
-  ***Log all* is a plan and then a write, and the gap is the point.** `plan_log_all` lists one line
+  **One counter holds the screen together.** The day strip and the week share one address, and an
+  edit on either changes what the other draws: assigning a block moves the week's unlogged total,
+  and *Log all* makes the strip's blocks read-only. Neither view owns the other, and the time
+  commands deliberately write **no activity line** (#278's entry gives the reason for the timer's
+  reads; `update_block` and `create_block` carry their own), so there is no signal to listen to and
+  inventing one would be a second thing to keep in step with the first. `App.svelte` therefore
+  holds a `timeRevision` counter: each view calls `onchanged` after a **successful** write and
+  re-reads when the counter moves. That is spec #272 story 44 — "assigning a block and watching the
+  week's unlogged total change is one glance" — and a refusal deliberately does not bump it,
+  because nothing was written. This is shell state, not a frozen surface: no event name, no DTO
+  field, no command.
+
+  **The column the strip stands on is never collapsed.** The weekend rule and the highlight rule
+  meet on an empty Saturday, and the naive composition loses: the highlighted column would be the
+  one column the table does not draw. `visibleColumns(week, current)` keeps that column for exactly
+  as long as the strip is on it.
+
+  ***Log all* is a plan and then a write, and the gap is the point.** `log_all_preview` lists one line
   per (day, ticket) and queues nothing; `log_all` **re-derives** its own work rather than being
   handed that plan back, the reason `log_work` does not take block ids — a caller that could name
   the blocks could name another ticket's, and a timer that stopped while the confirmation was on

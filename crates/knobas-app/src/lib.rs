@@ -252,7 +252,7 @@ pub fn run() {
             commands::time::log_work,
             commands::time::ad_hoc_block,
             commands::time::week_timesheet,
-            commands::time::plan_log_all,
+            commands::time::log_all_preview,
             commands::time::log_all,
         ])
         .build(tauri::generate_context!())

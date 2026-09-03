@@ -233,6 +233,22 @@ pub(super) fn day_bounds(
 ///
 /// `false` for a source that is not configured, which is what a stop on an
 /// entity whose source has since been removed reads as.
+async fn takes_a_worklog(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    namespace: &str,
+) -> Result<bool, IpcError> {
+    let Some(source) = knobas_sync::config::get(pool, namespace)
+        .await
+        .map_err(IpcError::internal)?
+    else {
+        return Ok(false);
+    };
+    Ok(registry.descriptors().into_iter().any(|d| {
+        d.adapter_kind == source.adapter_kind && d.write_ops.iter().any(|op| op == LOG_WORK)
+    }))
+}
+
 /// The same question asked of a whole entity id, for callers that have one
 /// rather than a namespace -- #283's *Log all*, which walks a day's targets.
 ///
@@ -248,22 +264,6 @@ pub(super) async fn takes_a_worklog_for(
         return Ok(false);
     };
     takes_a_worklog(pool, registry, &entity.namespace).await
-}
-
-async fn takes_a_worklog(
-    pool: &PgPool,
-    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
-    namespace: &str,
-) -> Result<bool, IpcError> {
-    let Some(source) = knobas_sync::config::get(pool, namespace)
-        .await
-        .map_err(IpcError::internal)?
-    else {
-        return Ok(false);
-    };
-    Ok(registry.descriptors().into_iter().any(|d| {
-        d.adapter_kind == source.adapter_kind && d.write_ops.iter().any(|op| op == LOG_WORK)
-    }))
 }
 
 /// The blocks of one local day on one entity that have not been logged yet.
@@ -319,20 +319,12 @@ pub(super) struct Span {
     pub ended_at: DateTime<Utc>,
 }
 
-/// [`unlogged`], for the sibling module that needs the same list.
+/// The unlogged manual blocks on one entity inside an interval.
 ///
-/// One name for one rule: *Log all* must offer exactly the blocks the draft
-/// would, or the two surfaces disagree about what has been logged.
-pub(super) async fn unlogged_spans(
-    pool: &PgPool,
-    entity_id: &str,
-    from: DateTime<Utc>,
-    to: DateTime<Utc>,
-) -> Result<Vec<Span>, IpcError> {
-    unlogged(pool, entity_id, from, to).await
-}
-
-async fn unlogged(
+/// `pub(super)` rather than private, and that visibility is the rule: *Log
+/// all* (#283) must offer exactly the blocks a draft would, so it asks this
+/// question rather than writing the predicate out a second time.
+pub(super) async fn unlogged(
     pool: &PgPool,
     entity_id: &str,
     from: DateTime<Utc>,
