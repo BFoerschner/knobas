@@ -69,6 +69,35 @@ STATE=seed-state.json
 VERIFIED_JIRA_IMAGE=sha256:64e139808556925e87a63db57455764519ceb8d213a11c9af106e525836a3114
 VERIFIED_CONFLUENCE_IMAGE=sha256:d15c23a1dfea0d390536115003cd732c9b404571f85bc081f9ae507e51feeafd
 
+# THE WAIT CAPS, AND WHY THE SECOND ONE IS FIFTEEN MINUTES.
+#
+# FIRST_RUN_CAP_S bounds the wait for a container to answer /status with a
+# state a wizard can be driven from. JIRA_RUNNING_CAP_S bounds Jira's
+# post-wizard restart, which is the slow one: Jira writes its schema and
+# re-initialises the whole plugin system before /status says RUNNING.
+#
+# MEASURED, on this machine -- 12 cores, an 8 GB Docker VM, images already
+# pulled, volumes empty:
+#   MEASURED_IDLE
+# Under load it is far worse. On 2026-09-03, with seven agents working and
+# Confluence's JVM starting beside it, that restart did NOT finish inside the
+# old 300 s cap -- twice, at this same line, each time killing a whole
+# `just atlassian-live` window before a single suite ran (#313 -> #314). 300 s
+# was the cap and not a measurement, so the slowest start under that load is
+# unknown and above it.
+#
+# Two things came out of that. `just atlassian-live` now starts and seeds Jira
+# with the box to itself, before Confluence exists at all (see the recipe's
+# header), and this cap is 900 s. The cap costs a working run nothing -- the
+# loop breaks the moment /status says RUNNING -- so all it decides is how long
+# a run that is going to fail takes to say so, and the three-hour licence
+# window has ample room for that. A cap that fires here is a report about the
+# machine, not a flake to widen again.
+FIRST_RUN_CAP_S=600
+JIRA_RUNNING_CAP_S=900
+POLL_S=5
+PROGRESS_EVERY_S=30
+
 say() { echo "seed-atlassian: $*"; }
 die() { echo "seed-atlassian: $*" >&2; exit 1; }
 
@@ -222,21 +251,61 @@ state_of() {  # state_of <url>
   printf '%s' "$_s"
 }
 
+# Progress that tells a slow start apart from a hung one, which is the whole
+# job of this line: every 30 s, the state the product is reporting and how far
+# into the cap we are. #313's failed run printed 59 anonymous dots, off which
+# you could read neither how much of the cap was left nor whether anything was
+# moving. A state that climbs -- UNREACHABLE, then FIRST_RUN or STARTING, then
+# RUNNING -- is a slow start; one state repeated to the cap is a hang; and
+# UNREACHABLE all the way is a container that never bound its port, or died,
+# which is a `docker logs` question and not a waiting question.
+progress() {  # progress <seconds waited> <cap> <name> <state>
+  [ $(($1 % PROGRESS_EVERY_S)) -eq 0 ] || return 0
+  say "  $3 is $4 -- ${1}s of ${2}s"
+}
+
 # Waits for a state the wizard can be driven from, named positively: the
 # earlier spelling ("not UNREACHABLE and not STARTING") accepted the empty
 # answer of a container still binding its port.
-wait_for_first_run() {  # wait_for_first_run <name> <url>
-  printf 'seed-atlassian: waiting for %s ' "$1"
-  _i=0
+#
+# The cap is a parameter rather than read from the globals so that the two
+# waits below read as two policies, and so the seconds in the failure message
+# cannot drift from the seconds actually waited -- the earlier spelling counted
+# 120 five-second sleeps and said "600s" in a separate literal.
+wait_for_first_run() {  # wait_for_first_run <name> <url> <cap seconds>
+  say "waiting for $1 to reach a state its wizard can be driven from (cap ${3}s)"
+  _waited=0
   while :; do
-    case "$(state_of "$2")" in
+    _st=$(state_of "$2")
+    case "$_st" in
       FIRST_RUN|RUNNING) break ;;
     esac
-    _i=$((_i + 1))
-    [ "$_i" -lt 120 ] || { echo; die "$1 never reached FIRST_RUN or RUNNING (600s)"; }
-    printf '.'; sleep 5
+    [ "$_waited" -lt "$3" ] \
+      || die "$1 never reached FIRST_RUN or RUNNING (${3}s; last answer: $_st)"
+    sleep "$POLL_S"; _waited=$((_waited + POLL_S))
+    progress "$_waited" "$3" "$1" "$_st"
   done
-  echo " $(state_of "$2")"
+  say "$1 is $_st after ${_waited}s"
+}
+
+# And the other wait: RUNNING, and nothing short of it, for a product whose
+# wizard has been walked and which is restarting into service.
+wait_for_running() {  # wait_for_running <name> <url> <cap seconds>
+  say "waiting for $1 to finish starting (cap ${3}s)"
+  _waited=0
+  while :; do
+    _st=$(state_of "$2")
+    [ "$_st" = RUNNING ] && break
+    [ "$_waited" -lt "$3" ] || die "$1 never reached RUNNING (${3}s; last answer: $_st).
+  A start this slow is the machine and not the product -- ${3}s is many times
+  the idle measurement at the top of this script. Something else was starting
+  beside it (another JVM is what made 300s too tight, #314), or the container
+  is not alive at all:
+    docker logs --tail 50 knobas-$1"
+    sleep "$POLL_S"; _waited=$((_waited + POLL_S))
+    progress "$_waited" "$3" "$1" "$_st"
+  done
+  say "$1 finished starting after ${_waited}s"
 }
 
 # Merge one product's block into seed-state.json rather than rewriting it:
@@ -253,7 +322,7 @@ record() {  # record <key> <json>
 # by ATL_LICENSE_KEY and ATL_JDBC_*, so the wizard opens on the cluster choice.
 setup_confluence() {
   guard_image knobas-confluence "$VERIFIED_CONFLUENCE_IMAGE" CONFLUENCE
-  wait_for_first_run confluence "$CONFLUENCE_URL"
+  wait_for_first_run confluence "$CONFLUENCE_URL" "$FIRST_RUN_CAP_S"
 
   if [ "$(state_of "$CONFLUENCE_URL")" = "RUNNING" ]; then
     say "confluence is already set up"
@@ -338,7 +407,7 @@ setup_confluence() {
 # variable for it.
 setup_jira() {
   guard_image knobas-jira "$VERIFIED_JIRA_IMAGE" JIRA
-  wait_for_first_run jira "$JIRA_URL"
+  wait_for_first_run jira "$JIRA_URL" "$FIRST_RUN_CAP_S"
 
   if [ "$(state_of "$JIRA_URL")" = "RUNNING" ]; then
     say "jira is already set up"
@@ -403,14 +472,7 @@ setup_jira() {
   done
   wizard_end
 
-  printf 'seed-atlassian: waiting for jira to finish starting '
-  _i=0
-  until [ "$(state_of "$JIRA_URL")" = "RUNNING" ]; do
-    _i=$((_i + 1))
-    [ "$_i" -lt 60 ] || { echo; die "jira never reached RUNNING (300s)"; }
-    printf '.'; sleep 5
-  done
-  echo ' ok'
+  wait_for_running jira "$JIRA_URL" "$JIRA_RUNNING_CAP_S"
 
   _code=$(curl -sS -o /dev/null -w '%{http_code}' -u "$ADMIN_USER:$ADMIN_PASS" \
                "$JIRA_URL/rest/api/2/myself")
@@ -421,11 +483,21 @@ setup_jira() {
     '{url:$u, user:$n, password:$p, version:$v}')"
 }
 
+# JIRA FIRST in `both`, so this mode agrees with the order `just atlassian-live`
+# drives one product per invocation in, and for the same reason: Jira's
+# post-wizard restart is the long pole and it wants the VM to itself. `both`
+# can only reduce the overlap and not remove it -- by the time it runs, the
+# caller has started both containers and the two JVMs are already up -- so on a
+# loaded machine prefer the recipe's shape: up and seed Jira, then up and seed
+# Confluence.
 case "${1:-both}" in
-  both)       setup_confluence; setup_jira ;;
+  both)       setup_jira; setup_confluence ;;
   jira)       setup_jira ;;
   confluence) setup_confluence ;;
   *) die "usage: ./seed-atlassian.sh [both|jira|confluence]" ;;
 esac
 
-say "done -- both licences expire 3 hours after they were applied"
+# Named per invocation, because one product at a time is now the normal call:
+# saying "both licences" after `./seed-atlassian.sh jira` was a small lie about
+# which timebomb had started ticking.
+say "done -- ${1:-both}: a timebomb licence expires 3 hours after it is applied"
