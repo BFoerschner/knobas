@@ -63,9 +63,17 @@ export type SectionRefusal =
    */
   | "macro"
   /**
-   * The section holds a table. Rows and cells have no line-oriented text form
-   * either, and a table flattened into paragraphs is not a table that can be
-   * put back.
+   * The section holds a table -- or *is inside one*. Rows and cells have no
+   * line-oriented text form either, and a table flattened into paragraphs is
+   * not a table that can be put back.
+   *
+   * The second half is why {@link TABLE} is a family and not the one tag. A
+   * heading in a table cell whose section ends at a heading in the *next* cell
+   * has no `<table>` in its own slice -- only a `</td><td>` crossing -- and
+   * that crossing is inside the range {@link replaceSectionBody} replaces, so
+   * an edit offered there would delete the cell boundary and merge two cells
+   * into one. A closing tag whose opening is outside the section is the signal
+   * that the section is not a whole element's worth of anything.
    */
   | "table";
 
@@ -121,6 +129,28 @@ const BLOCK: ReadonlySet<string> = new Set([
   "pre",
   "tr",
   "table",
+]);
+
+/**
+ * Every tag that only ever appears inside a table.
+ *
+ * The whole family and not `table` alone, because a section's slice is what
+ * the refusal reads and a slice can hold a cell without holding the table it
+ * belongs to -- see {@link SectionRefusal}'s `"table"`. A `</td>` in a section
+ * is a table the section is *in*, which is the same answer as a table the
+ * section holds: not an edit knobas makes.
+ */
+const TABLE: ReadonlySet<string> = new Set([
+  "table",
+  "thead",
+  "tbody",
+  "tfoot",
+  "tr",
+  "td",
+  "th",
+  "caption",
+  "colgroup",
+  "col",
 ]);
 
 /** What {@link toStorage} can put back: a paragraph and a line break. */
@@ -299,7 +329,7 @@ function refusalIn(slice: string): SectionRefusal | null {
     // reader can act on least: `Open in browser` either way, but the sentence
     // names what is actually there first.
     if (tag.name.startsWith("ac:")) return "macro";
-    if (tag.name === "table") return "table";
+    if (TABLE.has(tag.name)) return "table";
   }
   return null;
 }

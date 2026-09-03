@@ -137,6 +137,30 @@ describe("the refusal rule", () => {
   });
 
   /**
+   * The case the one-cell test above passes by luck: with a *second* heading
+   * in the next cell, the first section's slice stops before the table's own
+   * close tag and holds only a `</td><td>` crossing. Refusing on the whole
+   * table family rather than on `<table>` alone is what catches it -- and it
+   * has to be caught, because that crossing is inside the range
+   * `replaceSectionBody` replaces, so an edit offered here would delete the
+   * cell boundary and merge two cells into one. A reader who edited one column
+   * of a two-column table would lose the other.
+   */
+  it("refuses a heading in a cell whose section ends in the next cell", () => {
+    const storage =
+      "<table><tbody><tr>" +
+      "<td><h2>Left</h2><p>one.</p></td><td><h2>Right</h2><p>two.</p></td>" +
+      "</tr></tbody></table>";
+    const sections = pageSections(storage);
+    expect(sections.map((s) => s.heading)).toEqual(["Left", "Right"]);
+    expect(sections.map((s) => s.refusal)).toEqual(["table", "table"]);
+    // What the refusal is protecting: the section's own range holds markup
+    // belonging to the table around it, so replacing that range is not a
+    // replacement of the section's prose.
+    expect(storage.slice(sections[0]!.bodyStart, sections[0]!.end)).toContain("</td><td>");
+  });
+
+  /**
    * Not a refusal, a label: a list survives being read but not being written
    * back, and the surface has to be able to say so *before* the reader
    * commits.

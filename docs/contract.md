@@ -4407,7 +4407,8 @@ From this commit on, each of the following requires an orchestrator decision **a
 
   **The section rule is a pure function and lives on the frontend**, `app/src/lib/detail/
   page-sections.ts`: a section is a heading of level one to three and everything until the next
-  heading of the same or higher level, refused when it holds any `ac:` element or a table. It
+  heading of the same or higher level, refused when it holds any `ac:` element or a table — or
+  when it sits inside one, which a cell tag in its own slice is the signal for. It
   re-uses #285's parser for a tag's extent and for a body's words, and scans for **offsets** itself
   — a `StorageNode` carries no index, and re-assembling the whole body means copying everything
   outside the edited section byte for byte.
