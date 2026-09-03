@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 // write-back is an operation on an entity, which is why `submitWrite` is here;
 // what it hands over and what comes back are the queue's, and a second
 // declaration of either would be two shapes for one wire format.
-import type { QueuedWrite, WriteOpPayload } from "./sources";
+import type { QueuedWrite, WriteOpPayload, WriteState } from "./sources";
 // A day is a day wherever it is asked for: the digest takes the same
 // `DayWindow` the timesheet does rather than declaring a second shape for one
 // wire format, which is the rule the import above follows for the queue's.
@@ -1207,4 +1207,145 @@ export function standupDigest(
   earlier: DayWindow[],
 ): Promise<StandupDigest> {
   return invoke<StandupDigest>("standup_digest", { today, earlier });
+}
+
+/**
+ * Where standup protocols are published —
+ * `knobas_app::protocol::PublishTarget` (#289, spec #272 stories 67-68).
+ *
+ * Both halves, because neither is enough on its own: with two Confluence
+ * sources configured a parent id alone names a page in an instance nobody
+ * chose. The space key is deliberately **not** here — it is read off the
+ * parent's own record when the op is composed, so the two cannot disagree
+ * about which space the parent is in.
+ */
+export interface PublishTarget {
+  /** The Confluence source's instance id, which is also the id namespace. */
+  source_id: string;
+  /** The parent page, as an entity id (`confluence:98400`). */
+  parent: string;
+}
+
+/**
+ * What became of publishing a protocol —
+ * `knobas_app::protocol::Publication`.
+ */
+export interface Publication {
+  /** The write queue row carrying it. */
+  write_id: number;
+  /** Where the write stands, in the queue's own vocabulary. */
+  state: WriteState;
+  /** The source's sentence, when it had one. Untrusted source text. */
+  detail: string | null;
+  /**
+   * The page, as an entity id, once the source has named it.
+   *
+   * `null` while the write is in flight — and not the same fact as
+   * {@link linked} being false, which additionally means the mirror has not
+   * caught up with the page yet.
+   */
+  page_entity_id: string | null;
+  /** Whether note and page are linked. */
+  linked: boolean;
+}
+
+/**
+ * A date's standup protocol — `knobas_app::protocol::Protocol`.
+ *
+ * `CONTEXT.md`'s **standup protocol**: a note, one per date, holding
+ * attendees, per-person notes and action items. Not a kind of its own, which
+ * is why this carries a `note_id` and everything else about it is read through
+ * {@link getNote} like any other note.
+ */
+export interface Protocol {
+  /** The date, `YYYY-MM-DD`. */
+  day: string;
+  /** The note holding it. */
+  note_id: string;
+  /** What the published page is titled — what a second publish would collide with. */
+  page_title: string;
+  /** The publication, when there has been one. */
+  publication: Publication | null;
+}
+
+/**
+ * The protocol for a date, made from the template if it is not there yet —
+ * `standup_protocol` (#289, story 64).
+ *
+ * **Get-or-create**: opening a date twice lands in the same note. It is also
+ * where a publication that settled while nobody was looking catches up — the
+ * page id comes off the write queue row, which outlives the process that first
+ * received it.
+ */
+export function standupProtocol(day: string): Promise<Protocol> {
+  return invoke<Protocol>("standup_protocol", { day });
+}
+
+/**
+ * Publish a date's protocol to Confluence — `publish_standup_protocol`
+ * (stories 65-68).
+ *
+ * `target` is the first publish's dialog answer; omit it to use the stored
+ * one, and a missing stored one is a refusal rather than a guess. **A second
+ * publish for one date queues nothing** and answers with the publication
+ * already on the queue.
+ */
+export function publishStandupProtocol(
+  day: string,
+  target?: PublishTarget,
+): Promise<Protocol> {
+  return invoke<Protocol>("publish_standup_protocol", { day, target: target ?? null });
+}
+
+/** Where protocols are published, or `null` until somebody has said. */
+export function standupPublishTarget(): Promise<PublishTarget | null> {
+  return invoke<PublishTarget | null>("standup_publish_target");
+}
+
+/** Change where protocols are published — settings' half of story 67. */
+export function setStandupPublishTarget(target: PublishTarget): Promise<PublishTarget> {
+  return invoke<PublishTarget>("set_standup_publish_target", { target });
+}
+
+/**
+ * What became of filing a ticket from an action item —
+ * `knobas_app::commands::entity::ActionItemTicket`.
+ */
+export interface ActionItemTicket {
+  /** The write queue row carrying the create. */
+  write_id: number;
+  /**
+   * The ticket, as an entity id, once the mirror has it.
+   *
+   * `null` for a create still on the queue, and for one that landed at a
+   * source whose re-read has not brought the ticket back. Both are "not yet",
+   * and the note is unlinked in both — there is nothing to link to.
+   */
+  ticket_entity_id: string | null;
+  /** Whether the protocol and the ticket are linked. */
+  linked: boolean;
+}
+
+/**
+ * File a ticket from an action item and link it to the protocol —
+ * `create_action_item_ticket` (story 69).
+ *
+ * The **existing** create-ticket op, carried by the write queue like any other
+ * write; `project` is the project's entity id, which is what {@link
+ * listProjects} hands the picker.
+ */
+export function createActionItemTicket(
+  noteId: string,
+  project: string,
+  ticketType: string,
+  title: string,
+  body: string,
+): Promise<ActionItemTicket> {
+  return invoke<ActionItemTicket>("create_action_item_ticket", {
+    noteId,
+    project,
+    ticketType,
+    title,
+    body,
+  });
 }

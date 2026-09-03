@@ -1086,3 +1086,105 @@ fn the_standup_digest_shape_matches_its_typescript_mirror() {
         );
     }
 }
+
+/// The standup protocol's three shapes (#289).
+///
+/// `publication` and `page_entity_id` are exercised **as `None`** as well as
+/// filled, for this file's standing reason: a protocol nobody has published is
+/// the ordinary case, and the panel branches on the key being `null` rather
+/// than on it being absent.
+#[test]
+fn the_standup_protocol_shape_matches_its_typescript_mirror() {
+    use knobas_app::protocol::{Protocol, Publication, PublishTarget};
+
+    let published = Protocol {
+        day: chrono::NaiveDate::from_ymd_opt(2026, 9, 3).expect("a date"),
+        note_id: "note:6f1e".to_owned(),
+        page_title: "2026-09-03".to_owned(),
+        publication: Some(Publication {
+            write_id: 12,
+            state: knobas_core::write_queue::WriteState::Sent,
+            detail: None,
+            page_entity_id: Some("confluence:98411".to_owned()),
+            linked: true,
+        }),
+    };
+    let wire = serde_json::to_value(&published).unwrap();
+    assert_shape(
+        "Protocol",
+        &wire,
+        &["day", "note_id", "page_title", "publication"],
+    );
+    assert_eq!(
+        wire["day"],
+        serde_json::json!("2026-09-03"),
+        "a `NaiveDate` crosses as the `YYYY-MM-DD` the address and the title use"
+    );
+    assert_shape(
+        "Publication",
+        &wire["publication"],
+        &["write_id", "state", "detail", "page_entity_id", "linked"],
+    );
+    assert_eq!(
+        wire["publication"]["state"],
+        serde_json::json!("sent"),
+        "the queue's own vocabulary, which `sources.ts`'s WriteState already declares"
+    );
+
+    let unpublished = Protocol {
+        publication: None,
+        ..published
+    };
+    let wire = serde_json::to_value(&unpublished).unwrap();
+    assert!(
+        wire["publication"].is_null(),
+        "an unpublished protocol keeps the key as null -- the panel branches on it"
+    );
+
+    let waiting = Publication {
+        write_id: 12,
+        state: knobas_core::write_queue::WriteState::Pending,
+        detail: Some("the wiki did not answer".to_owned()),
+        page_entity_id: None,
+        linked: false,
+    };
+    let wire = serde_json::to_value(&waiting).unwrap();
+    assert!(wire["page_entity_id"].is_null());
+
+    let target = PublishTarget {
+        source_id: "confluence".to_owned(),
+        parent: "confluence:98400".to_owned(),
+    };
+    assert_shape(
+        "PublishTarget",
+        &serde_json::to_value(&target).unwrap(),
+        &["source_id", "parent"],
+    );
+}
+
+/// What filing a ticket from an action item answers with (#289, story 69).
+///
+/// The `None` case is the one worth pinning: a create still on the queue has
+/// no ticket to name, and the panel says so rather than reading `undefined`.
+#[test]
+fn the_action_item_ticket_shape_matches_its_typescript_mirror() {
+    use knobas_app::commands::entity::ActionItemTicket;
+
+    let filed = ActionItemTicket {
+        write_id: 31,
+        ticket_entity_id: Some("jira:PAY-999".to_owned()),
+        linked: true,
+    };
+    assert_shape(
+        "ActionItemTicket",
+        &serde_json::to_value(&filed).unwrap(),
+        &["write_id", "ticket_entity_id", "linked"],
+    );
+
+    let queued = ActionItemTicket {
+        write_id: 31,
+        ticket_entity_id: None,
+        linked: false,
+    };
+    assert!(serde_json::to_value(&queued).unwrap()["ticket_entity_id"].is_null());
+}
