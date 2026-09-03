@@ -42,11 +42,14 @@
  * a count is one more thing to keep right. They are absent because putting all
  * of them in would make this a second copy of three adapters, with three times
  * the surface to keep verbatim — and all but one draw a control this corpus
- * already exercises: `epic_link_field` is a nullable string like `jql_filter`,
- * and the rest are integers like `builds_per_config`.
+ * already exercises: the rest are integers like `builds_per_config`.
  *
- * - Jira: `epic_link_field`, `page_size`, `rate_per_sec`, `rate_burst`,
- *   `connect_timeout_secs`, `request_timeout_secs`.
+ * `epic_link_field` was on this list until #297 and is now transcribed: it is
+ * the one property *Test connection* fills from the report's `discovered` map,
+ * so with it absent the fill had no shipped adapter to run against.
+ *
+ * - Jira: `page_size`, `rate_per_sec`, `rate_burst`, `connect_timeout_secs`,
+ *   `request_timeout_secs`.
  * - Gitea: `commits_per_repo`, `prs_per_repo`, `include_pr_comments`,
  *   `rate_limit_per_sec`.
  * - TeamCity: `rate_limit_per_sec`.
@@ -92,6 +95,13 @@ export const JIRA_SCHEMA = {
       title: "Username",
       description:
         "Your Jira account. Filled in by Test connection; used for @me and My items. Also the login name for user + password authentication.",
+    },
+    epic_link_field: {
+      type: ["string", "null"],
+      default: null,
+      title: "Epic Link field id",
+      description:
+        "Where a classic project keeps epic membership. Filled in by Test connection: the id is different on every Jira, so one copied from another instance reads the wrong field rather than failing. Leave it empty for a next-gen project, whose epic membership is synced already via fields.parent.",
     },
   },
 } as const;

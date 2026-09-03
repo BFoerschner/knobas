@@ -138,6 +138,24 @@ pub struct ConnectionInfo {
     pub secret_expires_at: Option<chrono::DateTime<chrono::Utc>>,
     /// Anything else worth putting on screen in one line.
     pub detail: Option<String>,
+    /// Configuration values the adapter *learned* from the far end, keyed by
+    /// the `config_schema` property they belong in.
+    ///
+    /// The Add-source dialog fills an empty field of that name with what is
+    /// here, the way it already fills `username` from [`Self::account`] (#82).
+    /// It is a map rather than a second named field per fact because the facts
+    /// are per-adapter: Jira's is the Epic Link custom field id, whose value
+    /// differs on every instance and which no user can be expected to type
+    /// (#297), and the next adapter with a per-instance id of its own adds a
+    /// key here rather than another field on this frozen struct.
+    ///
+    /// **A key is a promise about the adapter's own schema**, not about
+    /// knobas': a key naming a property the adapter does not declare fills
+    /// nothing, and an adapter that discovers nothing sends an empty map.
+    /// Nothing here is a secret -- it crosses to the form and into
+    /// `source_config.config`, which is Postgres (spec §14).
+    #[serde(default)]
+    pub discovered: std::collections::BTreeMap<String, String>,
 }
 
 /// Display metadata for one entity kind an adapter emits, and whether a full

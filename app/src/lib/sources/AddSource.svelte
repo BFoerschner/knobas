@@ -204,16 +204,48 @@
    * `username` property — an adapter that declares none simply gets no fill.
    */
   function fillIdentity(account: string | null) {
-    if (account === null || account === "") return;
-    const field = configFields.fields.find((f) => f.key === IDENTITY_FIELD);
-    // A text control, or there is nothing a plain account string can be put
-    // into: an adapter that typed `username` as, say, a number is not one this
-    // convention covers, and guessing at its shape would write a config value
-    // it never asked for.
-    if (!field || field.control.kind !== "text") return;
-    const current = configValues[IDENTITY_FIELD];
-    if (typeof current === "string" && current.trim() !== "") return;
-    configValues[IDENTITY_FIELD] = account;
+    if (account === null) return;
+    // The identity is the same shape of fact as anything else the source
+    // reports about itself, so it takes the same path rather than a second
+    // copy of it: find the field by key, require a text control (an adapter
+    // that typed `username` as, say, a number is not one this convention
+    // covers), and never overwrite what somebody typed.
+    fillDiscovered({ [IDENTITY_FIELD]: account });
+  }
+
+  /**
+   * Put the values the source *discovered about itself* into the fields they
+   * belong in.
+   *
+   * The one fill, which {@link fillIdentity} also goes through: the identity
+   * and a discovered id are the same shape of fact — a value the far end owns
+   * and the reader cannot know — so there is one rule and not two. Jira's Epic
+   * Link custom field id is minted per instance — three seeds of one script
+   * produced `customfield_10101`, `customfield_10109` and `customfield_10101`,
+   * and on one of them `customfield_10102` was *Epic Status* — so an id copied
+   * off another server does not fail, it silently syncs the wrong field
+   * (#297). A classic Jira project keeps epic membership nowhere else, so
+   * without this the Contexts view is simply empty and nothing says why.
+   *
+   * **Keyed on the property name, like the identity fill.** The report says
+   * which config key each value belongs in; this dialog holds no table of what
+   * an adapter's keys mean, so the next adapter that discovers something about
+   * itself needs no change here.
+   *
+   * **Only when the field is empty**, and only a text control — a value the
+   * reader typed was typed by somebody who meant it, and a *Test connection*
+   * afterwards must not quietly replace it. A key naming a property this
+   * adapter does not declare fills nothing.
+   */
+  function fillDiscovered(discovered: Record<string, string>) {
+    for (const [key, value] of Object.entries(discovered ?? {})) {
+      if (typeof value !== "string" || value === "") continue;
+      const field = configFields.fields.find((f) => f.key === key);
+      if (!field || field.control.kind !== "text") continue;
+      const current = configValues[key];
+      if (typeof current === "string" && current.trim() !== "") continue;
+      configValues[key] = value;
+    }
   }
 
   async function test() {
@@ -233,7 +265,10 @@
       });
       // A refused credential reports no account worth keeping, and a source
       // that cannot be saved has no config to fill in either.
-      if (report.ok) fillIdentity(report.account);
+      if (report.ok) {
+        fillIdentity(report.account);
+        fillDiscovered(report.discovered);
+      }
     } catch (cause) {
       report = {
         ok: false,
@@ -243,6 +278,7 @@
         error: ipcErrorMessage(cause),
         code: null,
         elapsed_ms: 0,
+        discovered: {},
       };
     } finally {
       testing = false;

@@ -182,7 +182,7 @@ vi.mock("../ipc/sources", () => ({
     }),
   listAdapters: () => deferred([]),
   addSource: () => deferred(undefined),
-  testSource: () => deferred({ ok: true, account: null, server_version: null, secret_expires_at: null, error: null, code: null, elapsed_ms: 1 }),
+  testSource: () => deferred({ ok: true, account: null, server_version: null, secret_expires_at: null, error: null, code: null, elapsed_ms: 1, discovered: {} }),
   reindexFts: () => deferred(undefined),
 }));
 

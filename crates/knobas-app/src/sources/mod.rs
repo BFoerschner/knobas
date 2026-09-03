@@ -236,6 +236,20 @@ pub struct ConnectionReport {
     /// into *Re-enter*, and a message is not something to branch on.
     pub code: Option<crate::IpcErrorCode>,
     pub elapsed_ms: u32,
+    /// Config values the adapter learned from the far end
+    /// ([`knobas_source::ConnectionInfo::discovered`]), keyed by the
+    /// `config_schema` property each belongs in.
+    ///
+    /// Carried through verbatim, and **acted on by the dialog, not here**:
+    /// `AddSource.svelte` puts a value into the matching form field when the
+    /// reader left it empty, the same way it fills `username` from
+    /// [`Self::account`] (#82). Nothing on this side writes a config -- *Test
+    /// connection* writes nothing at all, which is the property this whole
+    /// command is built around.
+    ///
+    /// Empty on a failed test: an adapter that could not connect learned
+    /// nothing, and a stale map would fill the form with another server's ids.
+    pub discovered: std::collections::BTreeMap<String, String>,
 }
 
 /// Why a sources operation did not happen.

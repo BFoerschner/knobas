@@ -55,6 +55,11 @@
 //!   the Epic Link custom field, whose id is this instance's own, and *not*
 //!   `fields.parent`, which is absent from every issue in the corpus. mockd
 //!   serves both spellings, which is what hid this.
+//! * **That the adapter can find that id by itself** (#297): `test_connection`
+//!   reads `GET /rest/api/2/field` and reports the same id the seed recorded,
+//!   and a source configured from *that* answer -- never from
+//!   `seed-state.json` -- mirrors PAY-219's membership of PAY-200. mockd
+//!   serves no field table at all, so this endpoint has no other witness.
 //!
 //! Every divergence from mockd that this file found is written down in
 //! `knobas-mockd`'s *Documented deviations* list, where the next reader of
@@ -1145,6 +1150,73 @@ async fn an_incremental_run_after_one_edit_returns_that_issue_and_moves_the_wate
     );
     assert_eq!(still, moved, "byte-identical");
     println!("SEEDED cursor after the edit to {EDITED}: {moved}");
+}
+
+/// **The adapter finds this instance's Epic Link field id by itself, and the
+/// id it finds is the one that works** (#297).
+///
+/// Both halves in one test, because either alone proves nothing worth having.
+/// That the discovery *agrees with the seed* would be satisfied by a lookup
+/// that returned the right string and was then dropped on the floor; that a
+/// configured source mirrors epic membership is already
+/// [`epic_membership_lives_in_the_epic_link_field_and_parent_is_absent`]'s
+/// claim, and that test reads the id out of `seed-state.json`. What is new
+/// here is the **round trip**: the id comes from the server's own answer to
+/// the adapter, goes into a `JiraConfig` as the Add-source dialog would put
+/// it there, and comes back as `PAY-200` on the payload of an issue in the
+/// mirror.
+///
+/// The seed's record is the control. It is written by
+/// `seed-atlassian-content.sh`, which finds the field its own way -- a
+/// separate reading of the same server -- so an adapter that discovered
+/// `customfield_10102` (*Epic Status* on one of the three seeds) fails here
+/// rather than syncing a workflow state as though it were an epic.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
+async fn test_connection_discovers_the_epic_link_field_and_that_id_is_the_one_that_works() {
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+
+    let info = seeded
+        .source(serde_json::json!({}))
+        .test_connection()
+        .await
+        .expect("the seeded server answers the field table");
+    let found = info
+        .discovered
+        .get("epic_link_field")
+        .unwrap_or_else(|| {
+            panic!(
+                "test_connection discovered no Epic Link field on an instance that has \
+                 one ({}): {info:?}",
+                seeded.seed.epic_link_field
+            )
+        })
+        .clone();
+    assert_eq!(
+        found, seeded.seed.epic_link_field,
+        "the adapter and `seed-atlassian-content.sh` read the same server and must name \
+         the same field; this instance's siblings sit one id along and Epic Status is one \
+         of them"
+    );
+    assert!(
+        info.detail
+            .as_deref()
+            .is_some_and(|d| d.contains(&format!("Epic Link {found}"))),
+        "the connection detail names what was found, which is what the sources view \
+         shows: {info:?}"
+    );
+
+    // The round trip: configured from the *discovered* id, not from the seed's
+    // record, so the value under test is the one a reader would have been
+    // handed by the dialog.
+    let (items, _) = full(&*seeded.source(serde_json::json!({ "epic_link_field": found }))).await;
+    assert_eq!(
+        item(&items, "PAY-219").payload["fields"][&found],
+        serde_json::json!("PAY-200"),
+        "an epic child synced through the discovered id must carry its epic"
+    );
+    println!("SEEDED discovery: test_connection found {found}, and PAY-219 -> PAY-200 through it");
 }
 
 /// **Epic membership lives in the Epic Link custom field, and `fields.parent`

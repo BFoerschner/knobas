@@ -66,6 +66,63 @@ impl Source for Refusing {
     }
 }
 
+/// An adapter that *discovers* something about its instance, so the pass-through
+/// from `ConnectionInfo` to `ConnectionReport` has a witness (#297).
+///
+/// No shipped adapter can play this part in `just check`: Jira's discovery
+/// needs a Jira answering `GET /rest/api/2/field`, and the compiled-in mock
+/// reaches nothing and therefore learns nothing. Without this fake the map's
+/// journey across the IPC boundary is asserted by the live suite alone, and a
+/// `crud::test` that computed it and dropped it would pass the whole offline
+/// gate.
+struct DiscoveringRegistry;
+
+impl AdapterRegistry for DiscoveringRegistry {
+    fn descriptors(&self) -> Vec<SourceDescriptor> {
+        Registry::builtin().descriptors()
+    }
+    fn build(&self, instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
+        Ok(Box::new(Discovering { id: instance.id }))
+    }
+}
+
+struct Discovering {
+    id: String,
+}
+
+#[async_trait::async_trait]
+impl Source for Discovering {
+    fn descriptor(&self) -> SourceDescriptor {
+        SourceDescriptor {
+            id: self.id.clone(),
+            ..knobas_source_mock::descriptor_template()
+        }
+    }
+    async fn test_connection(&self) -> Result<knobas_source::ConnectionInfo, SourceError> {
+        Ok(knobas_source::ConnectionInfo {
+            account: Some("mara".to_owned()),
+            discovered: std::collections::BTreeMap::from([(
+                "epic_link_field".to_owned(),
+                "customfield_10101".to_owned(),
+            )]),
+            ..knobas_source::ConnectionInfo::default()
+        })
+    }
+    async fn sync(
+        &self,
+        _cursor: Option<knobas_source::Cursor>,
+        _sink: &mut (dyn knobas_source::Sink + Send),
+    ) -> Result<knobas_source::Cursor, SourceError> {
+        Err(SourceError::protocol("not a syncing fake"))
+    }
+    async fn write(
+        &self,
+        _op: knobas_source::WriteOp,
+    ) -> Result<knobas_source::WriteReceipt, SourceError> {
+        Err(SourceError::protocol("read-only"))
+    }
+}
+
 struct Fixture {
     pool: PgPool,
     secrets: Arc<dyn SecretStore>,
@@ -834,4 +891,73 @@ async fn testing_a_saved_source_uses_its_stored_configuration() {
         matches!(&err, sources::SourcesError::NotFound(id) if *id == gone),
         "{err:?}"
     );
+}
+
+/// What an adapter learned about its own instance reaches the form (#297).
+///
+/// `ConnectionInfo::discovered` -> `ConnectionReport::discovered`, unchanged
+/// and unfiltered: this layer does not know what any key means, and the
+/// dialog is what acts on it.
+///
+/// That *Test connection* writes nothing is
+/// [`testing_a_draft_writes_nothing_at_all`]'s claim and is not restated
+/// here: this fixture shares its database with every other test in the
+/// binary, so "no source rows exist" is a claim about the neighbours rather
+/// than about this call -- which is the shape #300 had just finished fixing
+/// elsewhere. Nothing in the discovery path writes, and the code that would
+/// is the same code that test already covers.
+#[tokio::test]
+async fn a_discovered_config_value_reaches_the_report() {
+    let f = fixture().await;
+    let report = sources::crud::test(
+        &f.pool,
+        &f.secrets,
+        &DiscoveringRegistry,
+        SourceDraft {
+            source_id: None,
+            adapter_kind: "mock".into(),
+            base_url: "https://jira.example.invalid".into(),
+            auth_kind: AuthMethod::Pat,
+            config: serde_json::json!({}),
+            secret: Some(SecretInput {
+                value: "typed-but-not-saved".into(),
+            }),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert!(report.ok, "{report:?}");
+    assert_eq!(
+        report.discovered.get("epic_link_field").map(String::as_str),
+        Some("customfield_10101"),
+        "what the adapter learned must reach the dialog: {report:?}"
+    );
+}
+
+/// …and a test that **failed** reports an empty map, so one server's ids can
+/// never be offered for another.
+#[tokio::test]
+async fn a_failed_test_discovers_nothing() {
+    let f = fixture().await;
+    let report = sources::crud::test(
+        &f.pool,
+        &f.secrets,
+        &RefusingRegistry(SourceError::unauthorized),
+        SourceDraft {
+            source_id: None,
+            adapter_kind: "mock".into(),
+            base_url: "https://jira.example.invalid".into(),
+            auth_kind: AuthMethod::Pat,
+            config: serde_json::json!({}),
+            secret: Some(SecretInput {
+                value: "refused".into(),
+            }),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert!(!report.ok, "{report:?}");
+    assert!(report.discovered.is_empty(), "{report:?}");
 }

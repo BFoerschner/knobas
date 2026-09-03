@@ -47,10 +47,9 @@ const TRANSCRIBED = [
   {
     name: "JIRA_SCHEMA",
     schema: JIRA_SCHEMA as unknown,
-    present: ["flavor", "projects", "jql_filter", "username"],
+    present: ["flavor", "projects", "jql_filter", "username", "epic_link_field"],
     usernameType: ["string", "null"],
     absent: [
-      "epic_link_field",
       "page_size",
       "rate_per_sec",
       "rate_burst",
