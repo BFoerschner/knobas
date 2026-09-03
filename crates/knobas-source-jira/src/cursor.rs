@@ -510,7 +510,12 @@ mod tests {
             for second in [0, 1, 17, 30, 59] {
                 let watermark = t(&format!("2026-08-22T11:48:{second:02}.000+0000"));
                 let delivered: Vec<(String, DateTime<Utc>, String)> = (0..150)
-                    .map(|i| saw(&format!("PAY-{i}"), watermark - chrono::Duration::seconds(i)))
+                    .map(|i| {
+                        saw(
+                            &format!("PAY-{i}"),
+                            watermark - chrono::Duration::seconds(i),
+                        )
+                    })
                     .collect();
                 let c = JiraCursor::advanced(watermark, offset, &delivered);
                 let floor = query_floor(&c, offset);
