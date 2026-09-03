@@ -619,12 +619,21 @@ async fn the_days_blocks_come_back_in_time_order_with_the_titles_the_mirror_hold
         .expect("the day is readable");
 
     assert_eq!(
-        listed.iter().map(|d| d.block.started_at).collect::<Vec<_>>(),
+        listed
+            .iter()
+            .map(|d| d.block.started_at)
+            .collect::<Vec<_>>(),
         vec![at(9, 0), at(11, 0), at(13, 0)],
         "the day review draws its strip in the order this list comes in"
     );
-    assert_eq!(listed[0].title, None, "a label block has no entity to title");
-    assert_eq!(listed[1].title, None, "the mirror has never heard of PAY-231");
+    assert_eq!(
+        listed[0].title, None,
+        "a label block has no entity to title"
+    );
+    assert_eq!(
+        listed[1].title, None,
+        "the mirror has never heard of PAY-231"
+    );
     assert_eq!(listed[2].title, None);
 }
 
@@ -805,7 +814,13 @@ async fn extending_a_relaunch_ended_block_moves_its_end_and_drops_the_marker() {
 async fn an_end_before_its_start_is_refused_in_words_the_reader_can_act_on() {
     let pool = scratch("time-day-backwards").await;
     let day = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
-    let id = block_at(&pool, day + Duration::hours(9), day + Duration::hours(10), &on(TICKET)).await;
+    let id = block_at(
+        &pool,
+        day + Duration::hours(9),
+        day + Duration::hours(10),
+        &on(TICKET),
+    )
+    .await;
 
     let refusal = time::day::update(
         &pool,
@@ -842,7 +857,13 @@ async fn a_block_cannot_be_retargeted_onto_a_stored_context() {
     let context = knobas_core::context::create_adhoc(&pool, "SEPA migration")
         .await
         .expect("a stored context");
-    let id = block_at(&pool, day + Duration::hours(9), day + Duration::hours(10), &on(TICKET)).await;
+    let id = block_at(
+        &pool,
+        day + Duration::hours(9),
+        day + Duration::hours(10),
+        &on(TICKET),
+    )
+    .await;
 
     let refusal = time::day::update(
         &pool,
@@ -861,7 +882,13 @@ async fn a_block_cannot_be_retargeted_onto_a_stored_context() {
 async fn a_block_can_be_deleted_and_the_day_stops_listing_it() {
     let pool = scratch("time-day-delete").await;
     let day = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
-    let kept = block_at(&pool, day + Duration::hours(9), day + Duration::hours(10), &on(TICKET)).await;
+    let kept = block_at(
+        &pool,
+        day + Duration::hours(9),
+        day + Duration::hours(10),
+        &on(TICKET),
+    )
+    .await;
     let gone = block_at(
         &pool,
         day + Duration::hours(11),
@@ -913,7 +940,13 @@ async fn editing_or_deleting_a_block_that_is_not_there_says_so() {
 async fn a_logged_block_refuses_both_edits_and_says_why() {
     let pool = scratch("time-day-logged").await;
     let day = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
-    let id = block_at(&pool, day + Duration::hours(9), day + Duration::hours(10), &on(TICKET)).await;
+    let id = block_at(
+        &pool,
+        day + Duration::hours(9),
+        day + Duration::hours(10),
+        &on(TICKET),
+    )
+    .await;
     logged_into(&pool, id, 77).await;
 
     let refusal = time::day::update(
@@ -963,7 +996,13 @@ async fn a_logged_block_refuses_both_edits_and_says_why() {
 async fn an_unlogged_block_beside_a_logged_one_is_still_editable() {
     let pool = scratch("time-day-unlogged").await;
     let day = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
-    let locked = block_at(&pool, day + Duration::hours(9), day + Duration::hours(10), &on(TICKET)).await;
+    let locked = block_at(
+        &pool,
+        day + Duration::hours(9),
+        day + Duration::hours(10),
+        &on(TICKET),
+    )
+    .await;
     logged_into(&pool, locked, 77).await;
     let free = block_at(
         &pool,
