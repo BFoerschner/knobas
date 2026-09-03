@@ -4163,8 +4163,13 @@ From this commit on, each of the following requires an orchestrator decision **a
   the dialog still holds no table of what an adapter's config keys mean. *Test connection* writes
   nothing, which is the property that command is built around and which this does not relax.
 
-  Ratified by the orchestrator as issue #297, whose acceptance criteria specify the endpoint, the
-  report field, the dialog fill, the help text and this entry.
+  **What the issue asked for, and what was widened.** Issue #297's acceptance criteria specify the
+  endpoint (and say in as many words that *that* is a §4.2 row and "not a §10.8 surface"), the
+  dialog fill, the help text and the live test; on the report they say only "reported on the
+  `ConnectionReport` the way the account name is", which read literally is a **named** field.
+  The map is the wider shape, directed when the issue was dispatched so that the next adapter with
+  a per-instance id of its own needs no second touch of this frozen crate. That widening is what
+  this entry exists to put in front of a ratifier: the endpoint needed no entry, the map does.
 
 **`crates/knobas-sync/**` is NOT frozen — and stream F is expected to restructure it.**
 

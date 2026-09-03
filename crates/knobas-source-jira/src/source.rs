@@ -111,19 +111,30 @@ impl JiraSource {
 
 /// What the connection detail says about epic membership, in one clause.
 ///
-/// Three states, and the third is the one the user has to be told about: a
-/// classic Data Center project keeps epic membership **only** in this field
-/// (#276), so a source with no id for it mirrors none at all -- silently,
-/// today, discoverable only by noticing an empty Contexts view weeks later.
-/// The sources view renders this detail beside the credential's health, which
-/// is where a source's standing gaps belong.
+/// Three states, and **two of them are the gap**: a classic Data Center
+/// project keeps epic membership *only* in this field (#276), so a source with
+/// no id configured for it mirrors none at all -- silently, today,
+/// discoverable only by noticing an empty Contexts view weeks later. What
+/// decides whether membership is mirrored is the **configured** id and nothing
+/// else; a discovered one that is not in the config has not been applied to
+/// anything, and saying "found" and stopping there would read as though it
+/// had. That is the shape this says out loud, because the sources view renders
+/// this detail beside the credential's health, which is where a source's
+/// standing gaps belong.
+///
+/// A saved source reaches the second arm whenever the reader never filled the
+/// field in: the Add-source dialog fills it for a source being *created*, and
+/// discovering it for one already saved is a later ticket (#297's *Out of
+/// scope*). Until then this line is what tells them.
 fn epic_link_note(configured: Option<&str>, discovered: Option<&str>) -> String {
     match (configured, discovered) {
         // Already named. Whether the discovery agreed is not this line's
         // business: an id typed by hand is the reader's decision, and the
         // dialog does not overwrite it.
         (Some(field), _) => format!(" \u{b7} Epic Link {field}"),
-        (None, Some(field)) => format!(" \u{b7} Epic Link {field} (found)"),
+        (None, Some(field)) => format!(
+            " \u{b7} Epic Link {field} found but not configured: epic membership is not mirrored"
+        ),
         (None, None) => {
             " \u{b7} no Epic Link field: a classic project's epic membership is not mirrored"
                 .to_owned()

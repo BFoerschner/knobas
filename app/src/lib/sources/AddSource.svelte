@@ -204,24 +204,22 @@
    * `username` property — an adapter that declares none simply gets no fill.
    */
   function fillIdentity(account: string | null) {
-    if (account === null || account === "") return;
-    const field = configFields.fields.find((f) => f.key === IDENTITY_FIELD);
-    // A text control, or there is nothing a plain account string can be put
-    // into: an adapter that typed `username` as, say, a number is not one this
-    // convention covers, and guessing at its shape would write a config value
-    // it never asked for.
-    if (!field || field.control.kind !== "text") return;
-    const current = configValues[IDENTITY_FIELD];
-    if (typeof current === "string" && current.trim() !== "") return;
-    configValues[IDENTITY_FIELD] = account;
+    if (account === null) return;
+    // The identity is the same shape of fact as anything else the source
+    // reports about itself, so it takes the same path rather than a second
+    // copy of it: find the field by key, require a text control (an adapter
+    // that typed `username` as, say, a number is not one this convention
+    // covers), and never overwrite what somebody typed.
+    fillDiscovered({ [IDENTITY_FIELD]: account });
   }
 
   /**
    * Put the values the source *discovered about itself* into the fields they
    * belong in.
    *
-   * Same rule as {@link fillIdentity}, generalised, because the reason is the
-   * same one: a value the far end owns and the reader cannot know. Jira's Epic
+   * The one fill, which {@link fillIdentity} also goes through: the identity
+   * and a discovered id are the same shape of fact — a value the far end owns
+   * and the reader cannot know — so there is one rule and not two. Jira's Epic
    * Link custom field id is minted per instance — three seeds of one script
    * produced `customfield_10101`, `customfield_10109` and `customfield_10101`,
    * and on one of them `customfield_10102` was *Epic Status* — so an id copied

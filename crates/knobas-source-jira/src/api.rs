@@ -236,12 +236,14 @@ mod tests {
             knobas_mockd::allowlist::lookup("GET", "api/2/field")
         else {
             panic!(
-                "GET api/2/field is not in testenv/specs/jira-dc-rest.wadl; this adapter must                  not send a path the contract does not declare"
+                "GET api/2/field is not in testenv/specs/jira-dc-rest.wadl; this adapter must not \
+                 send a path the contract does not declare"
             )
         };
         assert!(
             query.is_empty(),
-            "the WADL declares no query parameter on api/2/field, and the adapter sends none:              {query:?}"
+            "the WADL declares no query parameter on api/2/field, and the adapter sends \
+             none: {query:?}"
         );
     }
 }

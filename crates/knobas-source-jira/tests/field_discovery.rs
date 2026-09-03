@@ -129,12 +129,16 @@ async fn a_field_table_puts_the_epic_link_id_on_the_connection_report() {
         "the discovered id must reach the report under the config property it fills: {info:?}"
     );
     // Not Epic Status, which sits one id along and would mirror a workflow
-    // state as though it were the epic.
-    assert!(
-        info.detail
-            .as_deref()
-            .is_some_and(|d| d.contains("Epic Link customfield_10101")),
-        "the connection detail names what was found: {info:?}"
+    // state as though it were the epic. And the detail is honest about what
+    // *finding* it does and does not do: nothing is mirrored until the id is
+    // in the configuration, which for a saved source is a later ticket.
+    assert_eq!(
+        info.detail.as_deref(),
+        Some(
+            "Server 10.3.24 \u{b7} Epic Link customfield_10101 found but not configured: \
+             epic membership is not mirrored"
+        ),
+        "{info:?}"
     );
     // And the value is one the form will accept back, which is what makes the
     // fill a working configuration rather than a value that fails on save.

@@ -894,9 +894,15 @@ async fn testing_a_saved_source_uses_its_stored_configuration() {
 ///
 /// `ConnectionInfo::discovered` -> `ConnectionReport::discovered`, unchanged
 /// and unfiltered: this layer does not know what any key means, and the
-/// dialog is what acts on it. Writing nothing is still the rule -- the draft
-/// below is never saved, and the assertion afterwards is that no source row
-/// exists.
+/// dialog is what acts on it.
+///
+/// That *Test connection* writes nothing is
+/// [`testing_a_draft_writes_nothing_at_all`]'s claim and is not restated
+/// here: this fixture shares its database with every other test in the
+/// binary, so "no source rows exist" is a claim about the neighbours rather
+/// than about this call -- which is the shape #300 had just finished fixing
+/// elsewhere. Nothing in the discovery path writes, and the code that would
+/// is the same code that test already covers.
 #[tokio::test]
 async fn a_discovered_config_value_reaches_the_report() {
     let f = fixture().await;
@@ -923,13 +929,6 @@ async fn a_discovered_config_value_reaches_the_report() {
         report.discovered.get("epic_link_field").map(String::as_str),
         Some("customfield_10101"),
         "what the adapter learned must reach the dialog: {report:?}"
-    );
-    assert!(
-        sources::crud::list(&f.pool, &f.registry)
-            .await
-            .unwrap()
-            .is_empty(),
-        "Test connection writes nothing, discovery included"
     );
 }
 

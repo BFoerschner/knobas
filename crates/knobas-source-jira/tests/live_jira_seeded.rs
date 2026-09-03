@@ -1194,7 +1194,9 @@ async fn test_connection_discovers_the_epic_link_field_and_that_id_is_the_one_th
         .clone();
     assert_eq!(
         found, seeded.seed.epic_link_field,
-        "the adapter and `seed-atlassian-content.sh` read the same server and must name the          same field; this instance's siblings sit one id along and Epic Status is one of them"
+        "the adapter and `seed-atlassian-content.sh` read the same server and must name \
+         the same field; this instance's siblings sit one id along and Epic Status is one \
+         of them"
     );
     assert!(
         info.detail
