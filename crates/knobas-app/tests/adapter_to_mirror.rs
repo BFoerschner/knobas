@@ -564,7 +564,13 @@ async fn a_teamcity_project_survives_its_builds_through_its_configurations() {
     );
 
     let census = || async {
-        knobas_core::project::list(&pool)
+        let declarations = knobas_app::sources::paths::declared_paths(
+            &pool,
+            &knobas_app::sources::Registry::builtin(),
+        )
+        .await
+        .expect("what the configured sources declare");
+        knobas_core::project::list(&pool, &declarations)
             .await
             .unwrap()
             .into_iter()

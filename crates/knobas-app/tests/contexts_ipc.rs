@@ -117,9 +117,15 @@ async fn a_stored_context_scopes_the_page_and_its_total() {
 
     let ctx = promote_context_inner(&pool, &ticket).await.unwrap().context;
 
-    let listed = list_entities_inner(&pool, &scoped_to(&ctx.id), 50, 0)
-        .await
-        .unwrap();
+    let listed = list_entities_inner(
+        &pool,
+        &scoped_to(&ctx.id),
+        50,
+        0,
+        &knobas_core::payload::Declarations::empty(),
+    )
+    .await
+    .unwrap();
     let ids: Vec<&str> = listed
         .rows
         .iter()
@@ -142,9 +148,15 @@ async fn an_unknown_context_is_an_empty_page_not_the_corpus() {
     let source = format!("ctxsrc-{}", unique());
     item(&pool, &source, "ticket", "PAY-9").await;
 
-    let listed = list_entities_inner(&pool, &scoped_to("ctx:gone"), 50, 0)
-        .await
-        .unwrap();
+    let listed = list_entities_inner(
+        &pool,
+        &scoped_to("ctx:gone"),
+        50,
+        0,
+        &knobas_core::payload::Declarations::empty(),
+    )
+    .await
+    .unwrap();
     assert_eq!(listed.total, 0);
     assert!(listed.rows.is_empty());
 }

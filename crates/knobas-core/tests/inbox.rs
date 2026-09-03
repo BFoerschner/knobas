@@ -72,6 +72,42 @@ struct Mirrored<'a> {
 }
 
 /// One live mirror item: both halves, because every rule reads
+/// What the sources in this file declare about where they keep a requested
+/// reviewer and an assignee (#277) -- both rules read through the declaration
+/// now, so a fixture's source has to have said where its own spellings are,
+/// the way its adapter's descriptor does.
+///
+/// Gitea's `requested_reviewers[].login` and Jira Data Center's
+/// `fields.assignee.name`, which are the shapes the fixtures below are written
+/// in. `teamcity` declares nothing: a build has neither, and the failed-build
+/// rule reads an outcome rather than a declared field.
+fn declarations() -> knobas_core::payload::Declarations {
+    use knobas_core::payload::{Declarations, KindPaths, ListPath, PayloadPath};
+    Declarations::empty()
+        .with(
+            "gitea",
+            vec![KindPaths {
+                kind: "pr".to_owned(),
+                reviewers: vec![ListPath {
+                    at: PayloadPath::of(["requested_reviewers"]),
+                    entry: PayloadPath::of(["login"]),
+                }],
+                ..KindPaths::default()
+            }],
+        )
+        .with(
+            "jira",
+            vec![KindPaths {
+                kind: "ticket".to_owned(),
+                assignee: vec![
+                    PayloadPath::of(["fields", "assignee", "name"]),
+                    PayloadPath::of(["fields", "assignee", "key"]),
+                ],
+                ..KindPaths::default()
+            }],
+        )
+}
+
 /// `sync.live_item`, which is the join of the two.
 async fn item(pool: &PgPool, row: Mirrored<'_>) -> String {
     let id = EntityRef::new(row.source, row.key).to_string();
@@ -216,14 +252,16 @@ async fn link(pool: &PgPool, from: &str, to: &str, confirmed: bool) {
 
 /// The stream, as the reader sees it.
 async fn stream(pool: &PgPool) -> Vec<inbox::InboxItem> {
-    inbox::items(pool, &me(), now(), Shelf::Stream)
+    inbox::items(pool, &me(), now(), Shelf::Stream, &declarations())
         .await
         .unwrap()
 }
 
 /// The stream at another moment -- what a snooze test moves.
 async fn stream_at(pool: &PgPool, at: DateTime<Utc>) -> Vec<inbox::InboxItem> {
-    inbox::items(pool, &me(), at, Shelf::Stream).await.unwrap()
+    inbox::items(pool, &me(), at, Shelf::Stream, &declarations())
+        .await
+        .unwrap()
 }
 
 /// Every key on the stream, so an assertion can read as a set.
@@ -350,9 +388,15 @@ async fn a_mention_of_a_longer_name_is_not_a_mention_of_its_prefix() {
     .await;
     let exact = ticket(pool, "PAY-2", Some(THEM), None, "@mara ping?", days_ago(1)).await;
 
-    let items = inbox::items(pool, &["mara".to_owned()], now(), Shelf::Stream)
-        .await
-        .unwrap();
+    let items = inbox::items(
+        pool,
+        &["mara".to_owned()],
+        now(),
+        Shelf::Stream,
+        &declarations(),
+    )
+    .await
+    .unwrap();
     let keys = keys(&items);
     assert!(keys.contains(&format!("mention:{exact}")), "{keys:?}");
     assert!(
@@ -547,6 +591,100 @@ async fn a_ticket_assigned_to_me_arrives_unless_i_raised_it_or_it_is_old() {
     );
 }
 
+/// The miss direction of the growth (#277), for both declared rules: a source
+/// that has not said where its assignee or its requested reviewers live
+/// produces **no** items of those categories, however Jira- or Gitea-shaped
+/// its records happen to be.
+///
+/// This is the clause that makes "a kind that declares no path is a miss,
+/// never a guess" visible from the outside. The two fixtures below are the
+/// same rows the two positive tests above use -- an assignment and a review
+/// request that both fire -- read against a declaration that names neither, so
+/// what changes between the two answers is the declaration and nothing else.
+/// A reader that fell back on a shape it recognised would keep producing them.
+#[tokio::test]
+async fn a_source_that_declares_no_paths_produces_no_assignments_and_no_review_requests() {
+    let pool = &scratch().await;
+    let assigned = ticket(pool, "PAY-250", Some(THEM), Some(ME), "", days_ago(1)).await;
+    let review = pull_request(pool, "payout-service#7", &[ME], "open").await;
+
+    let declared = keys(
+        &inbox::items(pool, &me(), now(), Shelf::Stream, &declarations())
+            .await
+            .unwrap(),
+    );
+    assert!(
+        declared.contains(&format!("new_assignment:{assigned}"))
+            && declared.contains(&format!("review_request:{review}")),
+        "the fixture has to produce both, or the silence below proves nothing: {declared:?}"
+    );
+
+    let silent = keys(
+        &inbox::items(
+            pool,
+            &me(),
+            now(),
+            Shelf::Stream,
+            &knobas_core::payload::Declarations::empty(),
+        )
+        .await
+        .unwrap(),
+    );
+    assert!(
+        !silent
+            .iter()
+            .any(|key| key.starts_with("new_assignment:") || key.starts_with("review_request:")),
+        "a source that declares nothing has no assignee and no reviewers to read, whatever its \
+         records look like: {silent:?}"
+    );
+}
+
+/// An assignee at a path the declaration does not reach contributes nothing --
+/// the failure direction ADR-0007 requires pinned, now that the path is the
+/// source's to name. Jira Data Center's own second candidate, `assignee.key`,
+/// is the control: it is declared, so it fires, which is what makes the first
+/// half a statement about the *path* rather than about the shape.
+#[tokio::test]
+async fn an_assignee_the_declaration_does_not_reach_contributes_nothing() {
+    let pool = &scratch().await;
+    let elsewhere = item(
+        pool,
+        Mirrored {
+            source: "jira",
+            kind: "ticket",
+            key: "PAY-260",
+            author: Some(THEM),
+            body: "",
+            payload: serde_json::json!({ "fields": { "assignee": { "displayName": ME } } }),
+            updated: days_ago(1),
+        },
+    )
+    .await;
+    let by_key = item(
+        pool,
+        Mirrored {
+            source: "jira",
+            kind: "ticket",
+            key: "PAY-261",
+            author: Some(THEM),
+            body: "",
+            payload: serde_json::json!({ "fields": { "assignee": { "key": ME } } }),
+            updated: days_ago(1),
+        },
+    )
+    .await;
+
+    let keys = keys(&stream(pool).await);
+    assert!(
+        !keys.contains(&format!("new_assignment:{elsewhere}")),
+        "an account spelled at a path nothing declares is not an assignment: {keys:?}"
+    );
+    assert!(
+        keys.contains(&format!("new_assignment:{by_key}")),
+        "the declaration's second candidate is a path, so it fires: {keys:?}"
+    );
+}
+
 /// Story 6. The negative controls are an expiry far enough out that it is not
 /// yet news, and a source the user switched off.
 #[tokio::test]
@@ -583,7 +721,7 @@ async fn a_snoozed_item_is_absent_before_its_date_and_present_after() {
         !keys(&stream(pool).await).contains(&key),
         "a snoozed item is not on the stream"
     );
-    let shelf = inbox::items(pool, &me(), now(), Shelf::Snoozed)
+    let shelf = inbox::items(pool, &me(), now(), Shelf::Snoozed, &declarations())
         .await
         .unwrap();
     assert_eq!(
@@ -631,7 +769,12 @@ async fn the_count_excludes_snoozed_items() {
     let pool = &scratch().await;
     let a = pull_request(pool, "acme/payouts#144", &[ME], "open").await;
     pull_request(pool, "acme/payouts#145", &[ME], "open").await;
-    assert_eq!(inbox::count(pool, &me(), now()).await.unwrap(), 2);
+    assert_eq!(
+        inbox::count(pool, &me(), now(), &declarations())
+            .await
+            .unwrap(),
+        2
+    );
 
     inbox::snooze(
         pool,
@@ -641,12 +784,16 @@ async fn the_count_excludes_snoozed_items() {
     .await
     .unwrap();
     assert_eq!(
-        inbox::count(pool, &me(), now()).await.unwrap(),
+        inbox::count(pool, &me(), now(), &declarations())
+            .await
+            .unwrap(),
         1,
         "a snoozed item is not something that needs me now"
     );
     assert_eq!(
-        inbox::count(pool, &me(), now()).await.unwrap() as usize,
+        inbox::count(pool, &me(), now(), &declarations())
+            .await
+            .unwrap() as usize,
         stream(pool).await.len(),
         "the count and the stream are one predicate, so they cannot disagree"
     );
@@ -752,7 +899,9 @@ async fn with_no_identity_only_the_rule_that_needs_none_produces_anything() {
     )
     .await;
 
-    let items = inbox::items(pool, &[], now(), Shelf::Stream).await.unwrap();
+    let items = inbox::items(pool, &[], now(), Shelf::Stream, &declarations())
+        .await
+        .unwrap();
     assert_eq!(keys(&items), vec!["credential_expiry:jira".to_owned()]);
 }
 
@@ -810,7 +959,7 @@ async fn one_rule_sees_only_its_own_category() {
     .await;
 
     let rule = inbox::rule(Category::Mention).expect("a rule for mentions");
-    let items = inbox::items_from(pool, rule, &me(), now(), Shelf::Stream)
+    let items = inbox::items_from(pool, rule, &me(), now(), Shelf::Stream, &declarations())
         .await
         .unwrap();
     assert_eq!(items.len(), 1);

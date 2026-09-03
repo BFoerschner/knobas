@@ -296,6 +296,15 @@ async fn app(env: &Env, jira_url: &str) -> SourcesState {
     }
 }
 
+/// What the configured sources declare about their own payloads (#277) --
+/// resolved from the running binary's registry, so the merged flag this pass
+/// reads is at the path `knobas_source_gitea` says it is.
+async fn declared_paths(state: &SourcesState) -> knobas_core::payload::Declarations {
+    knobas_app::sources::paths::declared_paths(&state.pool, state.registry.as_ref())
+        .await
+        .expect("what the configured sources declare")
+}
+
 /// Sync one source and wait for the run to end.
 async fn sync(state: &SourcesState, source: &str) {
     let (done, wait) = tokio::sync::oneshot::channel();
@@ -557,9 +566,14 @@ async fn a_ticket_becomes_a_branch_a_pull_request_and_a_status_and_comes_back() 
     // 8. An ordinary sync is the trigger -- the mirror learns it is merged, and
     //    the pass reads the mirror rather than polling Gitea.
     sync(&state, GITEA).await;
-    let moved = start_work::merge::follow_merges(&state.pool, &steps, start_work::plan::IN_REVIEW)
-        .await
-        .expect("the pass runs");
+    let moved = start_work::merge::follow_merges(
+        &state.pool,
+        &steps,
+        start_work::plan::IN_REVIEW,
+        &declared_paths(&state).await,
+    )
+    .await
+    .expect("the pass runs");
     assert_eq!(moved, 1, "the merged pull request's ticket did not move");
     assert_eq!(
         status_at_jira(&jira_url).await,
@@ -571,9 +585,14 @@ async fn a_ticket_becomes_a_branch_a_pull_request_and_a_status_and_comes_back() 
     //    find nothing to do, or the ticket would be re-transitioned for as long
     //    as it stayed merged -- which is for ever.
     assert_eq!(
-        start_work::merge::follow_merges(&state.pool, &steps, start_work::plan::IN_REVIEW)
-            .await
-            .expect("the second pass runs"),
+        start_work::merge::follow_merges(
+            &state.pool,
+            &steps,
+            start_work::plan::IN_REVIEW,
+            &declared_paths(&state).await,
+        )
+        .await
+        .expect("the second pass runs"),
         0,
         "the same merge was followed twice"
     );

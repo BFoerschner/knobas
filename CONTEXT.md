@@ -46,6 +46,9 @@ _Avoid_: raw data, blob
 **Payload read**:
 A read into source-shaped data outside the adapter that shaped it. Permitted only where it can [miss](#miss), in one named statement, with its failure direction pinned. (ADR-0007)
 
+**Declared path**:
+Where an adapter says one of those things lives in its own payloads — a status, a priority, an assignee, requested reviewers, a merged flag, a project — carried per entity kind on its descriptor. A reader resolves the declaration; a kind that declares none [misses](#miss). (§10.8, issue #277)
+
 **Miss**:
 A payload read finding no recognizable shape and contributing nothing — the one failure a payload read is allowed. Guessing is the forbidden alternative.
 

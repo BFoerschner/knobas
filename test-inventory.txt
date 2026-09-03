@@ -69,6 +69,7 @@ knobas-app	lib/knobas_app	sources::crud::tests::only_a_unique_violation_reads_as
 knobas-app	lib/knobas_app	sources::crud::tests::only_a_working_credential_releases_the_backoff
 knobas-app	lib/knobas_app	sources::crud::tests::the_conflict_branch_keeps_the_winners_secret
 knobas-app	lib/knobas_app	sources::demo::tests::re_registering_refreshes_the_descriptor_columns_and_keeps_the_cursor
+knobas-app	lib/knobas_app	sources::paths::tests::every_configured_instance_gets_its_kinds_declaration
 knobas-app	lib/knobas_app	sources::write_queue::tests::a_payload_that_is_not_a_write_op_is_refused_before_anything_is_queued
 knobas-app	lib/knobas_app	sources::write_queue::tests::a_target_naming_no_configured_source_is_not_found_rather_than_queued
 knobas-app	lib/knobas_app	sources::write_queue::tests::a_target_that_is_not_an_entity_id_is_refused
@@ -419,8 +420,10 @@ knobas-core	test/inbox	a_review_request_names_me_and_not_merely_somebody
 knobas-core	test/inbox	a_review_request_on_a_closed_pull_request_has_left_the_stream
 knobas-core	test/inbox	a_snooze_survives_the_database_being_reopened
 knobas-core	test/inbox	a_snoozed_item_is_absent_before_its_date_and_present_after
+knobas-core	test/inbox	a_source_that_declares_no_paths_produces_no_assignments_and_no_review_requests
 knobas-core	test/inbox	a_source_whose_credential_is_rejected_does_not_empty_the_stream
 knobas-core	test/inbox	a_ticket_assigned_to_me_arrives_unless_i_raised_it_or_it_is_old
+knobas-core	test/inbox	an_assignee_the_declaration_does_not_reach_contributes_nothing
 knobas-core	test/inbox	an_item_leaves_when_its_entity_is_tombstoned_at_the_source
 knobas-core	test/inbox	an_item_marked_done_leaves_and_returns_when_its_subject_moves
 knobas-core	test/inbox	an_item_says_where_it_came_from_and_what_it_is_about

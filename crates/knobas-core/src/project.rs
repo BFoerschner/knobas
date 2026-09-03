@@ -12,9 +12,10 @@
 //! Contract §4.1 normalizes four fields and a project is not one of them, so
 //! the value can only come out of the payload in the source's own shape --
 //! which makes this a **payload read outside an adapter**, governed by
-//! ADR-0007. Hence [`project_key_read!`] and [`project_name_read!`]: one
-//! statement each, so a third source's spelling is one more `coalesce` arm in
-//! one place and nothing anywhere else.
+//! ADR-0007. Since #277 it is a **declared** read: the source says where its
+//! project key and name live ([`crate::payload`]), per entity kind, and
+//! [`project_key_read!`] and [`project_name_read!`] resolve the declaration.
+//! A third source's spelling is one entry on that source's descriptor.
 //!
 //! **Failure direction (ADR-0007 requirement 3): absence, never a wrong
 //! room.** A record carrying no readable project *key* belongs to no project
@@ -48,73 +49,45 @@ use sqlx::PgPool;
 
 use crate::CoreError;
 
-/// The one place a record's project **key** is spelled (ADR-0007
-/// requirement 2).
-///
-/// Jira Data Center's `fields.project.key` first -- where every `ticket` in
-/// the mirror comes from today, and present since M1 because the sync has
-/// asked for `project` in its base field list from the start -- then
-/// TeamCity's `buildType.projectId`, which is what a build's record names its
-/// project on, then the top-level `projectId` a TeamCity *build
-/// configuration*'s record carries, because that record is the `buildType`
-/// object itself. All three are read at a *type-checked* path (see
-/// [`string_at!`](crate::string_at)): a path landing on an object or an array
-/// misses rather than being stringified into a room headed `{"id":3}`.
+/// A record's project **key**, at the path its own source declares for its
+/// kind (#277).
 ///
 /// Exported, because narrowing by a project happens in the statements that
 /// draw a room -- [`crate::mini_board`]'s here and
 /// `knobas_app::commands::entity`'s across the bridge -- and a second copy of
-/// these arms is how one of them starts disagreeing with the census about
-/// what a project is.
+/// this read is how one of them starts disagreeing with the census about what
+/// a project is. `$decl` is where the calling statement binds the
+/// declarations.
 ///
-/// **The third arm is kind-scoped** (#232, ruled at triage 2026-09-02, over
-/// a plain unscoped arm): it reads the top-level word only where
-/// `i.kind = 'build_config'`, the kind name `knobas_source_teamcity` declares
-/// for a configuration (`KIND_BUILD_CONFIG`). A top-level `projectId` is a
-/// less distinctive path than the two container-scoped ones, and the guard
-/// is what keeps a future adapter's incidental top-level `projectId` from
-/// silently opening a room -- the risk #208 named when it deferred this
-/// spelling. The guard costs its callers nothing: every statement expanding
-/// this macro selects from a `sync.item` or `sync.live_item` alias `i`, and
-/// both carry `kind`. Pinned by
-/// `a_top_level_project_id_on_any_other_kind_contributes_nothing`, which
-/// fails the moment the guard goes; and the literal here is held to the
-/// adapter's constant by
-/// `a_teamcity_project_survives_its_builds_through_its_configurations` in
-/// `knobas-app/tests/adapter_to_mirror.rs`, the one test that syncs the real
-/// adapter into a database and reads the census back.
+/// **The kind guard is now the declaration itself.** A TeamCity build names
+/// its project on the `buildType` it ran; a build *configuration*'s record
+/// **is** that `buildType` object and names it at the top level. That used to
+/// be a `case when i.kind = 'build_config'` arm here (#232, ruled at triage
+/// because a top-level `projectId` is a less distinctive path than a
+/// container-scoped one, and a future adapter's incidental one must not
+/// silently open a room). It is two per-kind declarations on the TeamCity
+/// descriptor now, and the guard is stronger than the arm it replaces: no
+/// adapter's records can reach a path no adapter declared.
+///
+/// **Failure direction (ADR-0007 requirement 3), unchanged:** a record whose
+/// declared key resolves to nothing -- an absent path, a non-string, a blank
+/// -- belongs to no project room, and is still in *All work* and in its
+/// source's room. Pinned by the tests named in this module's header.
 #[macro_export]
 macro_rules! project_key_read {
-    () => {
-        concat!(
-            "coalesce(",
-            $crate::string_at!("i.payload->'fields'->'project'->'key'"),
-            ", ",
-            $crate::string_at!("i.payload->'buildType'->'projectId'"),
-            ", (case when i.kind = 'build_config' then ",
-            $crate::string_at!("i.payload->'projectId'"),
-            " end))"
-        )
+    ($decl:literal) => {
+        $crate::declared_string!($decl, "project_key")
     };
 }
 
-/// The one place a record's project **name** is spelled, the same three
-/// shapes -- and the same kind guard on the third -- as [`project_key_read!`].
+/// A record's project **name**, at the path its own source declares.
 ///
 /// Not exported: a room narrows by the *key*, which is its identity, and the
 /// name is only ever read here, where the census is taken. A reader that
 /// narrowed by a name would be narrowing by a label the source may rewrite.
 macro_rules! project_name_read {
-    () => {
-        concat!(
-            "coalesce(",
-            $crate::string_at!("i.payload->'fields'->'project'->'name'"),
-            ", ",
-            $crate::string_at!("i.payload->'buildType'->'projectName'"),
-            ", (case when i.kind = 'build_config' then ",
-            $crate::string_at!("i.payload->'projectName'"),
-            " end))"
-        )
+    ($decl:literal) => {
+        $crate::declared_string!($decl, "project_name")
     };
 }
 
@@ -161,9 +134,9 @@ const PROJECTS: &str = concat!(
     "select distinct on (observed.source_id, observed.key)
              observed.source_id, observed.key, observed.name
        from (select i.source_id as source_id, ",
-    project_key_read!(),
+    project_key_read!("$1"),
     " as key, ",
-    project_name_read!(),
+    project_name_read!("$1"),
     " as name,
                     coalesce(i.item_updated_at, i.synced_at) as at
                from sync.live_item i) observed
@@ -178,12 +151,23 @@ const PROJECTS: &str = concat!(
 /// every project every source shows, and a per-source read would be one round
 /// trip per source to assemble the same list.
 ///
+/// `declarations` is what every configured source says about where it keeps a
+/// project (#277), assembled by `knobas_app::sources::declared_paths`. A
+/// source that declares nothing shows no projects, which is this read's stated
+/// failure direction reaching the one case where knobas knows nothing about a
+/// source at all.
+///
 /// # Errors
 ///
 /// [`CoreError::Db`] if the query fails.
-pub async fn list(pool: &PgPool) -> Result<Vec<Project>, CoreError> {
-    let rows: Vec<(String, String, Option<String>)> =
-        sqlx::query_as(PROJECTS).fetch_all(pool).await?;
+pub async fn list(
+    pool: &PgPool,
+    declarations: &crate::payload::Declarations,
+) -> Result<Vec<Project>, CoreError> {
+    let rows: Vec<(String, String, Option<String>)> = sqlx::query_as(PROJECTS)
+        .bind(sqlx::types::Json(declarations.as_json()))
+        .fetch_all(pool)
+        .await?;
     Ok(rows
         .into_iter()
         .map(|(source_id, key, name)| Project {

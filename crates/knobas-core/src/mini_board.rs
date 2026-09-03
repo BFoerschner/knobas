@@ -24,11 +24,19 @@
 //! Contract §4.1 normalizes four fields and a status is not one of them, so a
 //! status and a priority can only come out of the [payload][crate], in the
 //! source's own shape -- which makes both of them **payload reads outside an
-//! adapter**, governed by ADR-0007. Hence [`status_read!`] and
-//! [`priority_read!`]: one macro each, so a second source's spelling is one
-//! more `coalesce` in one place and nothing anywhere else, and both failure
-//! directions are stated on the macros and pinned by tests named there. The
-//! project this board narrows by is a third such read, and lives with the
+//! adapter**, governed by ADR-0007.
+//!
+//! Since #277 they are **declared** reads: the source says where its status
+//! and its priority live ([`crate::payload`]) and this statement resolves the
+//! declaration, so a third source's spelling is one entry on that source's
+//! descriptor rather than one more `coalesce` arm here. What did not change is
+//! either failure direction, and both are still pinned by the tests named on
+//! the reads below: a ticket whose declared status resolves to nothing lands
+//! in the terminal group, and a card whose priority resolves to nothing simply
+//! omits it. A source that declares no status path is one whose tickets are
+//! all in the terminal group -- a miss, visibly, never a guess.
+//!
+//! The project this board narrows by is a third such read, and lives with the
 //! census that reports it ([`crate::project`]) rather than being re-spelled
 //! here.
 //!
@@ -55,48 +63,34 @@ use crate::entity::EntityRef;
 /// list decides *order*, never wording.
 const LEADING: [&str; 4] = ["To Do", "In Progress", "In Review", "Done"];
 
-/// The one place a ticket's status is spelled (ADR-0007 requirement 2).
+/// A ticket's status, at the path its own source declares (#277).
 ///
-/// Jira Data Center's `fields.status.name` first -- where every `ticket` in the
-/// mirror comes from today -- then the flat `status` the mock source emits,
-/// which is what the demo profile's board is drawn from. A record carrying
-/// neither contributes no status.
-///
-/// **Failure direction (requirement 3): a miss is visible, never a guess.** A
-/// ticket whose record has no readable status lands in the board's terminal
-/// group ([`MiniBoardColumn::status`] `= None`) instead of being dropped or
-/// sorted into a column somebody inferred. Pinned by
+/// **Failure direction (ADR-0007 requirement 3, unchanged by the growth): a
+/// miss is visible, never a guess.** A ticket whose source declares no status
+/// path, or whose record does not carry the declared one, lands in the board's
+/// terminal group ([`MiniBoardColumn::status`] `= None`) instead of being
+/// dropped or sorted into a column somebody inferred. Pinned by
 /// `a_ticket_with_no_recognizable_status_lands_in_the_terminal_group` in
 /// `knobas-core/tests/mini_board.rs`.
+///
+/// `$decl` is where the calling statement binds the declarations; each
+/// statement here binds them at the end of its own parameter list.
 macro_rules! status_read {
-    () => {
-        concat!(
-            "coalesce(",
-            $crate::string_at!("i.payload->'fields'->'status'->'name'"),
-            ", ",
-            $crate::string_at!("i.payload->'status'"),
-            ")"
-        )
+    ($decl:literal) => {
+        $crate::declared_string!($decl, "status_name")
     };
 }
 
-/// The one place a ticket's priority is spelled (ADR-0007 requirement 2), the
-/// same two shapes as [`status_read!`].
+/// A ticket's priority, at the path its own source declares.
 ///
-/// **Failure direction (requirement 3): a miss renders nothing.** A card whose
-/// record has no readable priority simply omits it, which is the whole of what
-/// story 8 asks for -- a board that never guesses at what a source did not
-/// say. Pinned by `a_ticket_with_no_recognizable_priority_carries_none` in
+/// **Failure direction: a miss renders nothing.** A card whose priority
+/// resolves to nothing simply omits it, which is the whole of what story 8
+/// asks for -- a board that never guesses at what a source did not say. Pinned
+/// by `a_ticket_with_no_recognizable_priority_carries_none` in
 /// `knobas-core/tests/mini_board.rs`.
 macro_rules! priority_read {
-    () => {
-        concat!(
-            "coalesce(",
-            $crate::string_at!("i.payload->'fields'->'priority'->'name'"),
-            ", ",
-            $crate::string_at!("i.payload->'priority'"),
-            ")"
-        )
+    ($decl:literal) => {
+        $crate::declared_string!($decl, "priority")
     };
 }
 
@@ -123,16 +117,16 @@ macro_rules! priority_read {
 /// the board.
 const CARDS: &str = concat!(
     "select i.entity_id, i.source_id, i.title, ",
-    status_read!(),
+    status_read!("$4"),
     " as status, ",
-    priority_read!(),
+    priority_read!("$4"),
     " as priority
        from sync.live_item i
       where i.kind = 'ticket'
         and ($1::text[] is null or i.entity_id = any($1))
         and ($2::text[] is null or i.source_id = any($2))
         and ($3::text is null or ",
-    crate::project_key_read!(),
+    crate::project_key_read!("$4"),
     " = $3)
       order by coalesce(i.item_updated_at, i.synced_at) desc, i.entity_id"
 );
@@ -146,7 +140,7 @@ const CARDS: &str = concat!(
 const OBSERVED_STATUSES: &str = concat!(
     "select distinct source_id, status
        from (select i.source_id as source_id, ",
-    status_read!(),
+    status_read!("$2"),
     " as status
                from sync.live_item i
               where i.kind = 'ticket'
@@ -279,16 +273,19 @@ pub async fn read(
     ctx_id: Option<&str>,
     sources: &[String],
     project: Option<&str>,
+    declarations: &crate::payload::Declarations,
 ) -> Result<MiniBoard, CoreError> {
     let members = match ctx_id {
         Some(ctx) => Some(crate::context::member_ids(pool, ctx).await?),
         None => None,
     };
     let scope = (!sources.is_empty()).then(|| sources.to_vec());
+    let declared = sqlx::types::Json(declarations.as_json());
     let rows: Vec<CardRow> = sqlx::query_as(CARDS)
         .bind(&members)
         .bind(&scope)
         .bind(project)
+        .bind(&declared)
         .fetch_all(pool)
         .await?;
 
@@ -323,7 +320,7 @@ pub async fn read(
     columns.sort_by_key(|column| column_rank(column.status.as_deref()));
 
     Ok(MiniBoard {
-        sources: observed_statuses(pool, &sources).await?,
+        sources: observed_statuses(pool, &sources, declarations).await?,
         columns,
     })
 }
@@ -332,6 +329,7 @@ pub async fn read(
 async fn observed_statuses(
     pool: &PgPool,
     sources: &BTreeSet<String>,
+    declarations: &crate::payload::Declarations,
 ) -> Result<Vec<SourceStatuses>, CoreError> {
     if sources.is_empty() {
         return Ok(Vec::new());
@@ -339,6 +337,7 @@ async fn observed_statuses(
     let ids: Vec<String> = sources.iter().cloned().collect();
     let rows: Vec<(String, String)> = sqlx::query_as(OBSERVED_STATUSES)
         .bind(&ids)
+        .bind(sqlx::types::Json(declarations.as_json()))
         .fetch_all(pool)
         .await?;
 

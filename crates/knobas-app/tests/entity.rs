@@ -12,6 +12,46 @@ use knobas_app::commands::entity::{
 use knobas_source_mock::MockSource;
 use sqlx::PgPool;
 
+/// What a source declares about where it keeps a project (#277).
+///
+/// Built per source id, because the fixtures below name their sources at run
+/// time and a declaration is keyed by the id that is also the entity
+/// namespace -- which is what `knobas_app::sources::declared_paths` produces
+/// from one adapter template and the configured rows.
+///
+/// Jira's `fields.project` for a ticket and TeamCity's top-level
+/// `projectId`/`projectName` for a build configuration, which are the two
+/// shapes these rooms are narrowed over.
+fn declared_for(sources: &[&str]) -> knobas_core::payload::Declarations {
+    use knobas_core::payload::{Declarations, KindPaths, PayloadPath};
+    sources.iter().fold(Declarations::empty(), |declared, id| {
+        declared.with(
+            (*id).to_owned(),
+            vec![
+                KindPaths {
+                    kind: "ticket".to_owned(),
+                    project_key: vec![PayloadPath::of(["fields", "project", "key"])],
+                    project_name: vec![PayloadPath::of(["fields", "project", "name"])],
+                    ..KindPaths::default()
+                },
+                KindPaths {
+                    kind: "build_config".to_owned(),
+                    project_key: vec![PayloadPath::of(["projectId"])],
+                    project_name: vec![PayloadPath::of(["projectName"])],
+                    ..KindPaths::default()
+                },
+            ],
+        )
+    })
+}
+
+/// No source declares anything, which is all a list that does not narrow by
+/// project needs -- and is the honest fixture for one: these rooms are scoped
+/// by source, kind, context and recency, none of which is a payload read.
+fn no_paths() -> knobas_core::payload::Declarations {
+    knobas_core::payload::Declarations::empty()
+}
+
 /// The corpus every test reads: the demo load, plus the one tombstone the
 /// fixture does not otherwise contain.
 ///
@@ -104,7 +144,9 @@ async fn lists_the_newest_first_and_reports_the_unpaged_total() {
         kinds: vec!["ticket".to_owned()],
         ..all()
     };
-    let page = list_entities_inner(&pool, &filter, 2, 0).await.unwrap();
+    let page = list_entities_inner(&pool, &filter, 2, 0, &no_paths())
+        .await
+        .unwrap();
 
     assert_eq!(page.rows.len(), 2, "limit is honoured");
     assert!(
@@ -125,7 +167,9 @@ async fn lists_the_newest_first_and_reports_the_unpaged_total() {
 #[tokio::test]
 async fn an_empty_filter_list_means_unfiltered_not_empty() {
     let pool = seeded().await;
-    let page = list_entities_inner(&pool, &all(), 5, 0).await.unwrap();
+    let page = list_entities_inner(&pool, &all(), 5, 0, &no_paths())
+        .await
+        .unwrap();
 
     assert_eq!(page.rows.len(), 5);
     assert!(page.total > 5, "the whole corpus, not one kind of it");
@@ -154,8 +198,12 @@ async fn offset_walks_the_same_ordering_and_total_does_not_move() {
         sources: vec!["mock".to_owned()],
         ..all()
     };
-    let first = list_entities_inner(&pool, &mine, 3, 0).await.unwrap();
-    let second = list_entities_inner(&pool, &mine, 3, 3).await.unwrap();
+    let first = list_entities_inner(&pool, &mine, 3, 0, &no_paths())
+        .await
+        .unwrap();
+    let second = list_entities_inner(&pool, &mine, 3, 3, &no_paths())
+        .await
+        .unwrap();
 
     assert_eq!(
         first.total, second.total,
@@ -169,7 +217,9 @@ async fn offset_walks_the_same_ordering_and_total_does_not_move() {
     assert_eq!(overlap, 0, "offset skipped nothing");
 
     // Past the end: no rows, and the total still describes the set.
-    let beyond = list_entities_inner(&pool, &mine, 3, 100_000).await.unwrap();
+    let beyond = list_entities_inner(&pool, &mine, 3, 100_000, &no_paths())
+        .await
+        .unwrap();
     assert!(beyond.rows.is_empty());
     assert_eq!(beyond.total, 0, "an empty page reports 0, not a guess");
 }
@@ -177,7 +227,9 @@ async fn offset_walks_the_same_ordering_and_total_does_not_move() {
 #[tokio::test]
 async fn a_tombstoned_entity_is_absent_unless_asked_for() {
     let pool = seeded().await;
-    let live = list_entities_inner(&pool, &all(), 500, 0).await.unwrap();
+    let live = list_entities_inner(&pool, &all(), 500, 0, &no_paths())
+        .await
+        .unwrap();
     assert!(
         !live.rows.iter().any(|r| r.entity_id == "mock:PAY-198"),
         "a withdrawn entity is not part of the room"
@@ -187,7 +239,7 @@ async fn a_tombstoned_entity_is_absent_unless_asked_for() {
         include_deleted: true,
         ..all()
     };
-    let dead = list_entities_inner(&pool, &with_dead, 500, 0)
+    let dead = list_entities_inner(&pool, &with_dead, 500, 0, &no_paths())
         .await
         .unwrap();
     assert!(
@@ -209,7 +261,9 @@ async fn title_order_is_a_second_statement_not_string_interpolation() {
         order: EntityOrder::TitleAsc,
         ..all()
     };
-    let page = list_entities_inner(&pool, &filter, 500, 0).await.unwrap();
+    let page = list_entities_inner(&pool, &filter, 500, 0, &no_paths())
+        .await
+        .unwrap();
 
     let titles = page
         .rows
@@ -222,7 +276,9 @@ async fn title_order_is_a_second_statement_not_string_interpolation() {
 
     // ...and it is a different order from the default, or the assertion above
     // would hold for a `match` that returned the same statement twice.
-    let by_date = list_entities_inner(&pool, &all(), 500, 0).await.unwrap();
+    let by_date = list_entities_inner(&pool, &all(), 500, 0, &no_paths())
+        .await
+        .unwrap();
     assert_ne!(
         by_date
             .rows
@@ -282,25 +338,31 @@ async fn the_recency_window_is_bound_as_a_parameter() {
 
     // Both directions, so a predicate that is simply ignored fails: the narrow
     // window drops the stale row, the absent window keeps it.
-    let narrow = ids(list_entities_inner(&pool, &within(Some(1)), 500, 0)
-        .await
-        .unwrap());
+    let narrow = ids(
+        list_entities_inner(&pool, &within(Some(1)), 500, 0, &no_paths())
+            .await
+            .unwrap(),
+    );
     assert!(
         narrow.contains(&fresh),
         "the fresh row is inside a one-day window"
     );
     assert!(!narrow.contains(&stale), "the stale row is not");
 
-    let unfiltered = ids(list_entities_inner(&pool, &within(None), 500, 0)
-        .await
-        .unwrap());
+    let unfiltered = ids(
+        list_entities_inner(&pool, &within(None), 500, 0, &no_paths())
+            .await
+            .unwrap(),
+    );
     assert!(unfiltered.contains(&fresh));
     assert!(unfiltered.contains(&stale));
 
     // ...and a window wide enough to reach past it takes it back.
-    let wide = ids(list_entities_inner(&pool, &within(Some(365)), 500, 0)
-        .await
-        .unwrap());
+    let wide = ids(
+        list_entities_inner(&pool, &within(Some(365)), 500, 0, &no_paths())
+            .await
+            .unwrap(),
+    );
     assert!(wide.contains(&stale));
 }
 
@@ -319,6 +381,7 @@ async fn a_project_narrows_the_room_within_its_sources() {
     let pool = seeded().await;
     let source = format!("proj-{}", unique());
     let elsewhere = format!("{source}-eu");
+    let declarations = declared_for(&[source.as_str(), elsewhere.as_str()]);
 
     // (source, key, payload) -- one project, another project in the same
     // source, the same project key in a *different* source, and a record whose
@@ -388,6 +451,7 @@ async fn a_project_narrows_the_room_within_its_sources() {
             },
             500,
             0,
+            &declarations,
         )
         .await
         .unwrap());
@@ -400,29 +464,37 @@ async fn a_project_narrows_the_room_within_its_sources() {
 
     // The dimension narrows within `sources`, so unscoped by source it reaches
     // both `PAY` projects -- which is why a project room names both halves.
-    let both = ids(
-        list_entities_inner(&pool, &room(Vec::new(), Some("PAY")), 500, 0)
-            .await
-            .unwrap(),
-    );
+    let both =
+        ids(
+            list_entities_inner(&pool, &room(Vec::new(), Some("PAY")), 500, 0, &declarations)
+                .await
+                .unwrap(),
+        );
     assert!(both.contains(&format!("{source}:PAY-1")));
     assert!(both.contains(&format!("{elsewhere}:PAY-9")));
 
     // Absence, never a wrong room: the unreadable record is in no project
     // room, and is still in its source's.
-    let source_room = ids(
-        list_entities_inner(&pool, &room(vec![source.clone()], None), 500, 0)
-            .await
-            .unwrap(),
-    );
+    let source_room = ids(list_entities_inner(
+        &pool,
+        &room(vec![source.clone()], None),
+        500,
+        0,
+        &declarations,
+    )
+    .await
+    .unwrap());
     assert!(source_room.contains(&format!("{source}:NOP-1")));
     for project in ["PAY", "INT", "NOP"] {
-        let narrowed =
-            ids(
-                list_entities_inner(&pool, &room(vec![source.clone()], Some(project)), 500, 0)
-                    .await
-                    .unwrap(),
-            );
+        let narrowed = ids(list_entities_inner(
+            &pool,
+            &room(vec![source.clone()], Some(project)),
+            500,
+            0,
+            &declarations,
+        )
+        .await
+        .unwrap());
         assert!(
             !narrowed.contains(&format!("{source}:NOP-1")),
             "a record with no readable project is in no project room, {project} included"
@@ -445,6 +517,7 @@ async fn a_project_narrows_the_room_within_its_sources() {
 async fn a_project_room_shows_a_configuration_only_project() {
     let pool = seeded().await;
     let source = format!("projcfg-{}", unique());
+    let declarations = declared_for(&[source.as_str()]);
     let configuration = format!("{source}:buildType:Payout_Build");
     let other = format!("{source}:INT-1");
 
@@ -496,6 +569,7 @@ async fn a_project_room_shows_a_configuration_only_project() {
             },
             500,
             0,
+            &declarations,
         )
         .await
         .unwrap();
@@ -519,6 +593,7 @@ async fn a_project_room_shows_a_configuration_only_project() {
 async fn a_project_narrows_the_include_deleted_statements_too() {
     let pool = seeded().await;
     let source = format!("projdel-{}", unique());
+    let declarations = declared_for(&[source.as_str()]);
     let live = format!("{source}:PAY-1");
     let gone = format!("{source}:PAY-2");
     let other = format!("{source}:INT-1");
@@ -558,6 +633,7 @@ async fn a_project_narrows_the_include_deleted_statements_too() {
             },
             500,
             0,
+            &declarations,
         )
         .await
         .unwrap();
@@ -584,14 +660,14 @@ async fn the_source_filter_selects_a_room() {
         ..all()
     };
     assert!(
-        list_entities_inner(&pool, &mine, 500, 0)
+        list_entities_inner(&pool, &mine, 500, 0, &no_paths())
             .await
             .unwrap()
             .total
             > 0
     );
     assert_eq!(
-        list_entities_inner(&pool, &nobody, 500, 0)
+        list_entities_inner(&pool, &nobody, 500, 0, &no_paths())
             .await
             .unwrap()
             .total,

@@ -7,6 +7,7 @@
 
 pub mod crud;
 pub mod demo;
+pub mod paths;
 pub mod progress;
 pub mod registry;
 pub mod write_queue;

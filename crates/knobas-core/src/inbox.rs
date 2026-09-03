@@ -57,15 +57,25 @@
 //! Four of the five read a payload path, and that is a deliberate and narrow
 //! coupling rather than an oversight. Interfaces §4.1 normalizes `title`,
 //! `body_text`, `author` and `updated_at` and nothing else; a review request,
-//! a build's status and an assignee live only in the verbatim `payload`. The
-//! precedent is `suggest::RULES`' `source_recorded_relation`, which reads
-//! `payload->'fields'->'issuelinks'` for exactly this reason, and ADR-0007
-//! has since ratified the pattern: miss, one named statement, a pinned
-//! failure direction. Every such read
-//! is written to **miss** rather than to guess when the shape is absent: a
-//! payload that does not carry the path contributes nothing, so a source whose
-//! records are shaped differently simply produces no items of that category
-//! instead of producing wrong ones.
+//! a build's status and an assignee live only in the verbatim `payload`.
+//! ADR-0007 ratified the pattern -- miss, one named statement, a pinned
+//! failure direction -- and #277 finished it for two of the four: the review
+//! request's reviewers and the assignment's assignee are read at the paths
+//! **the source declares** ([`crate::payload`]), so a source that spells them
+//! otherwise is one descriptor entry rather than one more arm here. A source
+//! that declares neither produces no items of those two categories, which is
+//! the same absence a source shaped differently produced before.
+//!
+//! The other two are unchanged and still spelled here: the mention rule reads
+//! `body_text`, which §4.1 normalizes, and the failed-build rule reads a
+//! build's *outcome* and its configuration -- a different fact from any of the
+//! declared fields, and one no reader outside this rule wants. They are a
+//! later ticket's to expire, if ever.
+//!
+//! Every such read is written to **miss** rather than to guess when the shape
+//! is absent: a payload that does not carry the path contributes nothing, so a
+//! source whose records are shaped differently simply produces no items of
+//! that category instead of producing wrong ones.
 //!
 //! # Actions
 //!
@@ -255,27 +265,6 @@ macro_rules! window_days {
 /// credential expiry is raised. See [`window_days!`].
 pub const WINDOW_DAYS: i64 = 14;
 
-/// Read a jsonb value as an array, or as an empty one.
-///
-/// `jsonb_array_elements` **raises** on a scalar or an object rather than
-/// returning no rows, and a payload is a verbatim source record: the day a
-/// source spells `requested_reviewers` as an object, an unguarded rule would
-/// not miss those items, it would fail the whole read for every source. So
-/// every array walk below goes through this, and the failure mode of an
-/// unexpected shape is "this rule finds nothing here", which is the only
-/// failure mode a derivation over other people's data may have.
-macro_rules! json_array {
-    ($expr:literal) => {
-        concat!(
-            "(case when jsonb_typeof(",
-            $expr,
-            ") = 'array' then ",
-            $expr,
-            " else '[]'::jsonb end)"
-        )
-    };
-}
-
 /// The columns every rule produces, in order, so the union type-checks.
 ///
 /// `occurred_at` is `coalesce(item_updated_at, synced_at)` for every
@@ -297,11 +286,11 @@ macro_rules! review_request {
                     coalesce(i.item_updated_at, i.synced_at)           as occurred_at,
                     i.web_url                            as web_url
                from sync.live_item i
-               cross join lateral jsonb_array_elements(",
-            json_array!("i.payload->'requested_reviewers'"),
-            ") as r
+               cross join lateral ",
+            $crate::declared_list!("$4", "reviewers"),
+            " as r
               where i.kind = 'pr'
-                and r->>'login' = any($1)
+                and r.value = any($1)
                 and coalesce(i.payload->>'state', 'open') = 'open'"
         )
     };
@@ -431,11 +420,14 @@ macro_rules! failed_build {
 /// acknowledged", so the corpus alone cannot tell a fresh assignment from a
 /// two-year-old one, and *done* is what carries the acknowledgement afterwards.
 ///
-/// The assignee paths are Jira Data Center's, which is where every `ticket` in
-/// the mirror comes from today: `fields.assignee.name` is the username, and
-/// `fields.assignee.key` is the same identity on instances that still key on
-/// it. The list grows with the sources that have assignees; a record carrying
-/// neither path contributes nothing.
+/// The assignee is read at the path the **source declares** (#277), which for
+/// Jira Data Center is `fields.assignee.name` with `fields.assignee.key` as
+/// its second candidate -- the username, and the same identity on instances
+/// that still key on it. A source that declares no assignee, or a record that
+/// does not carry the declared one, contributes nothing: the miss direction,
+/// unchanged, and pinned by
+/// `an_assignee_the_declaration_does_not_reach_contributes_nothing` in
+/// `knobas-core/tests/inbox.rs`.
 macro_rules! new_assignment {
     () => {
         concat!(
@@ -444,8 +436,9 @@ macro_rules! new_assignment {
                     coalesce(i.item_updated_at, i.synced_at), i.web_url
                from sync.live_item i
               where i.kind = 'ticket'
-                and coalesce(i.payload->'fields'->'assignee'->>'name',
-                             i.payload->'fields'->'assignee'->>'key') = any($1)
+                and ",
+            $crate::declared_string!("$4", "assignee"),
+            " = any($1)
                 and coalesce(i.author, '') <> all($1)
                 and coalesce(i.item_updated_at, i.synced_at)
                       >= $2 - make_interval(days => ",
@@ -668,11 +661,13 @@ pub async fn items(
     identity: &[String],
     now: DateTime<Utc>,
     shelf: Shelf,
+    declarations: &crate::payload::Declarations,
 ) -> Result<Vec<InboxItem>, CoreError> {
     Ok(sqlx::query_as::<_, InboxItem>(ALL_RULES)
         .bind(identity)
         .bind(now)
         .bind(shelf.snoozed())
+        .bind(sqlx::types::Json(declarations.as_json()))
         .fetch_all(pool)
         .await?)
 }
@@ -688,11 +683,13 @@ pub async fn items_from(
     identity: &[String],
     now: DateTime<Utc>,
     shelf: Shelf,
+    declarations: &crate::payload::Declarations,
 ) -> Result<Vec<InboxItem>, CoreError> {
     Ok(sqlx::query_as::<_, InboxItem>(rule.sql)
         .bind(identity)
         .bind(now)
         .bind(shelf.snoozed())
+        .bind(sqlx::types::Json(declarations.as_json()))
         .fetch_all(pool)
         .await?)
 }
@@ -709,11 +706,13 @@ pub async fn count(
     pool: &PgPool,
     identity: &[String],
     now: DateTime<Utc>,
+    declarations: &crate::payload::Declarations,
 ) -> Result<i64, CoreError> {
     let (n,): (i64,) = sqlx::query_as(COUNT_ALL)
         .bind(identity)
         .bind(now)
         .bind(Shelf::Stream.snoozed())
+        .bind(sqlx::types::Json(declarations.as_json()))
         .fetch_one(pool)
         .await?;
     Ok(n)
