@@ -181,7 +181,11 @@ impl Harness {
             .iter()
             .map(|op| match op {
                 WriteOp::Comment { body, .. } => body.clone(),
-                other => panic!("this harness only ever queues comments, got {other:?}"),
+                // The body a page edit carried, which is the thing worth
+                // reading back: it is the *whole* re-assembled page, and a
+                // queue that sent a fragment would show it here (#286).
+                WriteOp::UpdatePage { body, .. } => body.clone(),
+                other => panic!("this harness queues comments and page edits, got {other:?}"),
             })
             .collect()
     }
@@ -227,6 +231,61 @@ impl Harness {
             &self.source,
             WriteOp::Comment {
                 entity: entity.to_string(),
+                body: body.to_owned(),
+            },
+        )
+        .await
+        .unwrap()
+    }
+
+    /// A Confluence page in the mirror, at `version`, with `body` as its
+    /// storage format -- the payload shape `update_page` holds against.
+    ///
+    /// `body_text` is the stripped body, the way the adapter builds it, so the
+    /// two halves of the record move together the way a real edit moves them.
+    async fn mirror_page(&self, id: &str, body: &str, version: i64) -> EntityRef {
+        let entity = EntityRef::new(&self.source, id);
+        sqlx::query(
+            "insert into knobas.entity (id, kind, title) values ($1,'page','a page')
+             on conflict (id) do nothing",
+        )
+        .bind(entity.to_string())
+        .execute(self.pool())
+        .await
+        .unwrap();
+        sqlx::query(
+            "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+             values ($1,$2,'page','a page',$3,$4)
+             on conflict (entity_id) do update
+                set body_text = excluded.body_text, payload = excluded.payload",
+        )
+        .bind(entity.to_string())
+        .bind(&self.source)
+        .bind(body)
+        .bind(serde_json::json!({
+            "id": id,
+            "body": { "storage": { "value": format!("<h2>H</h2><p>{body}</p>") } },
+            "version": { "number": version },
+        }))
+        .execute(self.pool())
+        .await
+        .unwrap();
+        entity
+    }
+
+    /// Queue a whole-body page edit made against `base_version`.
+    async fn edit_page(
+        &self,
+        entity: &EntityRef,
+        base_version: i64,
+        body: &str,
+    ) -> store::QueuedWrite {
+        flusher::submit(
+            &self.deps,
+            &self.source,
+            WriteOp::UpdatePage {
+                entity: entity.to_string(),
+                base_version,
                 body: body.to_owned(),
             },
         )
@@ -404,6 +463,64 @@ async fn a_target_that_changed_holds_the_write_and_one_that_did_not_does_not() {
         held.held_snapshot.as_ref().unwrap()["text"],
         "a payout fails\n\njonas: already on it"
     );
+    assert!(h.verbs().contains(&"held".to_owned()));
+}
+
+/// M3.2's version hold (#286): a page whose version moved past the one the
+/// edit was made against is held, with both versions in the record.
+///
+/// No separate version check does this. `update_page` takes the whole-record
+/// projection, which carries the mirrored payload verbatim, and a Confluence
+/// page keeps `version.number` in that payload -- so the ordinary "snapshot at
+/// queue time, snapshot at flush time" comparison *is* the version comparison.
+/// `base_version` is the same number by construction: the detail reads it off
+/// the mirror the reader is looking at.
+///
+/// The control is the page that did not move. Without it this test would pass
+/// against a queue that held every `update_page`, which would be a feature
+/// nobody could use.
+#[tokio::test]
+async fn a_page_whose_version_moved_past_the_edit_holds_it_with_both_versions() {
+    let h = harness().await;
+    let untouched = h.mirror_page("98307", "base 30 s.", 3).await;
+    let overtaken = h.mirror_page("98311", "base 30 s.", 3).await;
+
+    h.answer(Answer::Unreachable);
+    let control = h
+        .edit_page(&untouched, 3, "<h2>H</h2><p>base 45 s.</p>")
+        .await;
+    let conflicted = h
+        .edit_page(&overtaken, 3, "<h2>H</h2><p>base 45 s.</p>")
+        .await;
+
+    // Somebody edits the page in Confluence and a sync mirrors it: version 4.
+    h.mirror_page("98311", "base 60 s.", 4).await;
+
+    h.answer(Answer::Accept);
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+
+    assert_eq!(
+        h.delivered(),
+        vec!["<h2>H</h2><p>base 45 s.</p>".to_owned()],
+        "only the page nobody touched was written"
+    );
+    assert_eq!(h.reload(control.id).await.state, WriteState::Sent);
+
+    let held = h.reload(conflicted.id).await;
+    assert_eq!(held.state, WriteState::Held);
+    // The two versions, side by side -- and they are versions, not merely two
+    // texts: the number the edit was made against is on one side and the one
+    // the mirror now holds is on the other.
+    assert_eq!(held.target_snapshot["payload"]["version"]["number"], 3);
+    assert_eq!(
+        held.held_snapshot.as_ref().unwrap()["payload"]["version"]["number"],
+        4
+    );
+    assert_eq!(held.target_snapshot["text"], "base 30 s.");
+    assert_eq!(held.held_snapshot.as_ref().unwrap()["text"], "base 60 s.");
+    // The held reason is the target's, and it is not the disabled-source one:
+    // the source is on, and #204 forbids collapsing the two explanations.
+    assert!(held.source_enabled, "the source is on; this is a target hold");
     assert!(h.verbs().contains(&"held".to_owned()));
 }
 

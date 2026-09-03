@@ -166,12 +166,12 @@ fn the_registry_declares_exactly_the_ratified_write_set() {
             vec!["create_branch", "create_pull_request", "comment", "approve"],
         ),
         ("teamcity", vec!["trigger_build", "rerun_build"]),
-        // Confluence (#284) reads and does not write. Its three ops --
-        // `CreatePage`, `UpdatePage` and a reused `Comment` -- are spec #272's
-        // and are each an ADR-0006 growth of `WriteOp` plus a §10.8 entry, so
-        // the empty list here is the assertion that none of that has happened
-        // yet rather than an omission.
-        ("confluence", vec![]),
+        // Confluence's three (#286): `create_page` and `update_page` are
+        // M3.2's ADR-0006 growth, and `comment` is the SPI's existing op
+        // re-used with the **page** as its container -- a reply on a page is
+        // the same act as a reply on a ticket, so it is the same op rather
+        // than an adapter-shaped variant of one.
+        ("confluence", vec!["comment", "update_page", "create_page"]),
     ]
     .into_iter()
     .collect();

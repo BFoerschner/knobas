@@ -1089,7 +1089,14 @@ mod tests {
     #[test]
     fn a_judgement_op_holds_on_the_whole_record() {
         let (before, after) = payload_differs();
-        for op in ["transition", "approve"] {
+        // `update_page` is here and not with the creates, and the difference is
+        // the sharpest of the three shapes: this op *replaces a page's body*,
+        // so anything at all that happened to the page since the reader
+        // started typing is something their re-assembled body would delete.
+        // The payload the shape carries is where a Confluence page keeps
+        // `version.number`, which is why "the mirror's version has passed the
+        // one the edit was made against" needs no separate check (#286).
+        for op in ["transition", "approve", "update_page"] {
             assert!(PROJECTED_OPS.contains(&op), "{op} must be stated");
             assert_ne!(
                 project(op, Some(&before)),
@@ -1123,6 +1130,11 @@ mod tests {
             "create_pull_request",
             "trigger_build",
             "rerun_build",
+            // A new page goes *beside* whatever else sits under its parent, so
+            // a parent that was retitled or replied to is not a parent this
+            // write would overwrite -- but a parent that left the mirror is a
+            // page nobody would find the new one under (#286).
+            "create_page",
         ] {
             assert!(PROJECTED_OPS.contains(&op), "{op} must be stated");
             assert_eq!(
