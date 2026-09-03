@@ -535,11 +535,11 @@ async fn a_restored_backup_brings_back_the_timer_its_blocks_and_its_worklogs() {
             .expect("the setting reads"),
         "the time settings are knobas' own and belong in a backup"
     );
-    let beats: i64 = sqlx::query_scalar("select count(*) from knobas.heartbeat")
+    let observations: i64 = sqlx::query_scalar("select count(*) from knobas.heartbeat")
         .fetch_one(&into)
         .await
         .unwrap();
-    assert_eq!(beats, 1, "the observations came back too");
+    assert_eq!(observations, 1, "the observations came back too");
 }
 
 /// A moment on the fixture's Monday, in UTC.

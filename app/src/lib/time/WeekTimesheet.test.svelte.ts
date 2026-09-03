@@ -431,14 +431,13 @@ test("a week with nothing to log says so rather than offering a send", async () 
  * shared rather than restated — and against the days it must *not* name, which
  * is the half a view that simply said "this week" would fail.
  */
-test("a week straddling the horizon names the days it has no beats for", async () => {
+test("a week straddling the horizon names the days it has no observations for", async () => {
   render(weekOf([], [true, true, true, false, false, false, false]));
 
-  await vi.waitFor(() => expect(text()).toContain("no longer has the beats"));
-  expect(text()).toContain(horizonNote("Mon 24, Tue 25, Wed 26"));
+  await vi.waitFor(() => expect(text()).toContain(horizonNote("Mon 24, Tue 25, Wed 26")));
   expect(
     text(),
-    "Thursday's beats are all still there and the note claimed otherwise",
+    "Thursday's observations are all still there and the note claimed otherwise",
   ).not.toContain("Thu 27");
   expect(
     text(),
@@ -456,19 +455,18 @@ test("a week straddling the horizon names the days it has no beats for", async (
 test("a collapsed weekend day past the horizon is still named", async () => {
   render(weekOf([], [false, false, false, false, false, true, false]));
 
-  await vi.waitFor(() => expect(text()).toContain("no longer has the beats"));
+  await vi.waitFor(() => expect(text()).toContain(horizonNote("Sat 29")));
   expect(headings(), "the empty Saturday is collapsed, as it always was").not.toContain("Sat 29");
-  expect(text()).toContain(horizonNote("Sat 29"));
 });
 
-test("a week knobas still has every beat for says nothing about the horizon", async () => {
+test("a week knobas still has every observation for says nothing about the horizon", async () => {
   render(weekOf([]));
 
   await vi.waitFor(() => expect(text()).toContain("Nothing tracked this week"));
   expect(
     text(),
     "a week inside the horizon was drawn as one knobas has forgotten",
-  ).not.toContain("no longer has the beats");
+  ).not.toContain("keeps a month of observations");
 });
 
 /**

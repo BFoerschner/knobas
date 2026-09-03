@@ -21,6 +21,7 @@ import {
   dayKey,
   dayLabel,
   durationReading,
+  horizonNote,
   segmentsOf,
   shiftDay,
 } from "./day";
@@ -193,4 +194,37 @@ test("blocks that overlap leave no gap between them", () => {
 
 test("an empty day is an empty strip, not a strip of one long gap", () => {
   expect(segmentsOf([])).toEqual([]);
+});
+
+/**
+ * The horizon note's actual words, pinned.
+ *
+ * Every other assertion of this sentence — the strip's, the timesheet's three
+ * — compares the rendered text against `horizonNote`'s own return value, on
+ * purpose: what those tests are about is that both surfaces say the *same*
+ * thing. That makes them blind to what the sentence says, so all four would
+ * follow the words anywhere. This is the one place the wording is a fact.
+ *
+ * Two things are being held down, both of them nits #343's review accepted
+ * rather than churned on:
+ *
+ * * **One word for the thing.** The sentence used to name it twice, as
+ *   *observations* and then as *beats*, which reads as two things a reader is
+ *   being told about rather than one. `CONTEXT.md` now settles which word
+ *   that is.
+ * * **"has none", never "no longer has".** A day past the horizon on which
+ *   nobody had the app open never had an observation to lose, and knobas
+ *   cannot tell that day from one whose observations a sweep took — the
+ *   stamp says when it swept, not what it found. The old wording asserted a
+ *   past knobas does not have.
+ */
+test("the horizon note says knobas has no observations, never that it lost them", () => {
+  expect(horizonNote("this day")).toBe(
+    "knobas keeps a month of observations and has none for this day: " +
+      "what was open is absent, not zero.",
+  );
+  expect(horizonNote("Mon 24, Tue 25, Wed 26")).toBe(
+    "knobas keeps a month of observations and has none for Mon 24, Tue 25, Wed 26: " +
+      "what was open is absent, not zero.",
+  );
 });

@@ -126,7 +126,7 @@
   /** The highlighted column, or -1 when the strip's day is in another week. */
   const highlighted = $derived(week === null ? -1 : week.days.indexOf(key));
   /**
-   * The headings of this week's days knobas no longer has the beats for
+   * The headings of this week's days past the observation horizon
    * (#337).
    *
    * Every one of them, not only the drawn columns: a collapsed weekend day is
