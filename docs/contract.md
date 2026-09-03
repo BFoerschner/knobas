@@ -3446,11 +3446,11 @@ From this commit on, each of the following requires an orchestrator decision **a
 
   **The contract battery grows clause 6**, which is what holds a declaration to the adapter's own
   corpus: every declared kind is one of `entity_kinds` and is declared once; no declared path leads
-  to a value of the wrong type; a field the corpus carries *containers* for resolves on some item
-  of that kind (the misspelling check, asked of the corpus rather than of a record, so an
-  unassigned issue cannot fail a declaration and the clause is safe against a live instance); and a
-  field a kind does not declare resolves to nothing, which is the clause a knobas-side fallback
-  would die on.
+  to a value of the wrong type; where nothing of a kind resolved a declared field, no record of
+  that kind may show the path naming a key it does not have (the misspelling check, asked of the
+  corpus rather than of a record, so an unassigned issue — whose walk stops at a `null` — cannot
+  fail a declaration, and the clause is safe to run against a live instance); and a field a kind
+  does not declare resolves to nothing, which is the clause a knobas-side fallback would die on.
 
   **The reads that expired**, all of them payload reads ADR-0007 governs, and **none of them
   changed its failure direction** — each is still pinned by the test named on it:

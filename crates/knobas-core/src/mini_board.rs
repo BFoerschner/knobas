@@ -280,7 +280,7 @@ pub async fn read(
         None => None,
     };
     let scope = (!sources.is_empty()).then(|| sources.to_vec());
-    let declared = sqlx::types::Json(declarations.as_json());
+    let declared = declarations.as_param();
     let rows: Vec<CardRow> = sqlx::query_as(CARDS)
         .bind(&members)
         .bind(&scope)
@@ -337,7 +337,7 @@ async fn observed_statuses(
     let ids: Vec<String> = sources.iter().cloned().collect();
     let rows: Vec<(String, String)> = sqlx::query_as(OBSERVED_STATUSES)
         .bind(&ids)
-        .bind(sqlx::types::Json(declarations.as_json()))
+        .bind(declarations.as_param())
         .fetch_all(pool)
         .await?;
 

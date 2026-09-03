@@ -667,7 +667,7 @@ pub async fn items(
         .bind(identity)
         .bind(now)
         .bind(shelf.snoozed())
-        .bind(sqlx::types::Json(declarations.as_json()))
+        .bind(declarations.as_param())
         .fetch_all(pool)
         .await?)
 }
@@ -689,7 +689,7 @@ pub async fn items_from(
         .bind(identity)
         .bind(now)
         .bind(shelf.snoozed())
-        .bind(sqlx::types::Json(declarations.as_json()))
+        .bind(declarations.as_param())
         .fetch_all(pool)
         .await?)
 }
@@ -712,7 +712,7 @@ pub async fn count(
         .bind(identity)
         .bind(now)
         .bind(Shelf::Stream.snoozed())
-        .bind(sqlx::types::Json(declarations.as_json()))
+        .bind(declarations.as_param())
         .fetch_one(pool)
         .await?;
     Ok(n)

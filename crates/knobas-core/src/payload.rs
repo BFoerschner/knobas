@@ -247,6 +247,18 @@ impl Declarations {
     /// narrows over many sources at once (the project census is a pass over the
     /// entire live corpus), so the statement has to be able to look the
     /// declaration up per row.
+    ///
+    /// Wrapped here rather than at each `.bind` because there are eight of
+    /// them across two crates, and a `bind` that forgot the `Json` wrapper
+    /// would bind a JSON *string* -- which `#>` reads as no declaration at
+    /// all, so every path-driven read would quietly miss.
+    #[must_use]
+    pub fn as_param(&self) -> sqlx::types::Json<serde_json::Value> {
+        sqlx::types::Json(self.as_json())
+    }
+
+    /// The same declaration as plain JSON, for a caller that is not binding it
+    /// to a statement.
     #[must_use]
     pub fn as_json(&self) -> serde_json::Value {
         serde_json::to_value(self).unwrap_or_else(|_| serde_json::json!({}))
@@ -261,9 +273,9 @@ impl Declarations {
 /// requirement 1 -- so this answers with the value or with nothing.
 ///
 /// The **contract battery** asks one thing more, and asks it of the corpus
-/// rather than of a record: if the container a declared key would live in
-/// exists on some item, the declaration has to resolve on some item. See
-/// [`container_of`], which is how it asks.
+/// rather than of a record: where nothing of a kind resolved a declared path,
+/// no record of that kind may show the path naming a key it does not have. See
+/// [`names_a_missing_key`], which is how it asks.
 #[must_use]
 pub fn at<'a>(payload: &'a serde_json::Value, path: &PayloadPath) -> Option<&'a serde_json::Value> {
     let mut at = payload;
@@ -276,32 +288,46 @@ pub fn at<'a>(payload: &'a serde_json::Value, path: &PayloadPath) -> Option<&'a 
     Some(at)
 }
 
-/// The object a path's last key would sit in, if the source wrote one.
+/// Whether this path names a key that an object the source really wrote does
+/// not have.
 ///
 /// The contract battery's question, and the reason it is asked this way. A
 /// declared path that resolves nowhere is either a source that carries no such
 /// value -- an unassigned issue, a pull request nobody was asked to review --
-/// or an adapter naming a key its own records do not have, and a reader cannot
-/// tell those apart afterwards. Neither can a single record: `fields.assignee`
-/// being null says nothing about whether `name` would be the right key inside
-/// it.
+/// or an adapter naming a key its own records lack, and a reader cannot tell
+/// those apart afterwards. This is what tells them apart:
 ///
-/// The **corpus** can. If some item of the kind carries the container -- a
-/// `fields.status` object, a payload root, a reviewer element -- then some
-/// item of the kind must resolve the path, or the last key is one no record of
-/// this adapter has. That is the check, and it is what makes a misspelled
-/// `fields.status.nam` a red test instead of a read that misses for ever.
+/// * the walk stops at a **null**, or at something that is not an object: the
+///   source wrote the container and said there is nothing in it, or wrote a
+///   different shape entirely. Not the declaration's fault. `false`.
+/// * the walk reaches an object the source really wrote and the next key is
+///   **not in it**: the declaration names a key these records do not have.
+///   `true` -- and that is as true of `fieldz.status.name`, which stops at the
+///   payload root, as of `fields.status.nam`, which stops one level deeper.
 ///
-/// `None` for the empty path, which addresses the payload itself and has no
-/// last key.
+/// One record cannot be judged on this alone: a key absent from every record
+/// of a corpus is also what a field the source omits when empty looks like.
+/// The battery therefore asks it of the **corpus**, and only where nothing
+/// resolved -- so one item carrying the value settles the question for the
+/// whole kind.
+///
+/// `false` for the empty path, which addresses the payload itself and names no
+/// key.
 #[must_use]
-pub fn container_of<'a>(
-    payload: &'a serde_json::Value,
-    path: &PayloadPath,
-) -> Option<&'a serde_json::Map<String, serde_json::Value>> {
-    let (_, parents) = path.segments().split_last()?;
-    let container = at(payload, &PayloadPath(parents.to_vec()))?;
-    container.as_object()
+pub fn names_a_missing_key(payload: &serde_json::Value, path: &PayloadPath) -> bool {
+    let mut at = payload;
+    for segment in path.segments() {
+        let Some(fields) = at.as_object() else {
+            // A null, or a scalar where this expected a container: the source
+            // is saying there is nothing down here.
+            return false;
+        };
+        match fields.get(segment) {
+            Some(next) => at = next,
+            None => return true,
+        }
+    }
+    false
 }
 
 /// The first candidate that lands on a usable string.
@@ -628,35 +654,40 @@ mod tests {
     /// that cannot answer it alone: `fields.assignee` being null says nothing
     /// about whether `name` is the right key inside one.
     #[test]
-    fn a_container_is_only_reported_where_the_source_wrote_one() {
+    fn a_key_an_object_lacks_is_named_and_a_null_is_not() {
         let issue = jira_issue();
         assert!(
-            container_of(&issue, &PayloadPath::of(["fields", "status", "name"])).is_some(),
-            "the object a status name would sit in is on this record, so some record of this \
-             kind has to resolve the path"
+            names_a_missing_key(&issue, &PayloadPath::of(["fields", "status", "nam"])),
+            "the object a status name would sit in is on this record and has no `nam` in it"
         );
         assert!(
-            container_of(&issue, &PayloadPath::of(["fields", "status", "nam"])).is_some(),
-            "and the misspelling names the same container, which is what makes it findable"
-        );
-        assert_eq!(
-            container_of(&issue, &PayloadPath::of(["fields", "priority", "name"])),
-            None,
-            "an unset Jira field is null: this record carries no container, so it demands \
-             nothing of the declaration"
-        );
-        assert_eq!(
-            container_of(&issue, &PayloadPath::of(["fields", "nothing", "here"])),
-            None
+            names_a_missing_key(&issue, &PayloadPath::of(["fieldz", "status", "name"])),
+            "a typo in any segment is a key missing from an object the source wrote -- the \
+             payload root, here"
         );
         assert!(
-            container_of(&issue, &PayloadPath::of(["status"])).is_some(),
-            "a one-segment path sits in the payload itself"
+            names_a_missing_key(&issue, &PayloadPath::of(["statuss"])),
+            "and so is a one-segment path, which sits in the payload itself"
         );
-        assert_eq!(
-            container_of(&issue, &PayloadPath::of([] as [&str; 0])),
-            None
+        assert!(
+            !names_a_missing_key(&issue, &PayloadPath::of(["fields", "priority", "name"])),
+            "an unset Jira field is null: this record demands nothing of the declaration"
         );
+        assert!(
+            !names_a_missing_key(
+                &issue,
+                &PayloadPath::of(["fields", "status", "name", "deeper"])
+            ),
+            "the walk stopped on a string the source wrote, not on a key it lacks"
+        );
+        assert!(
+            !names_a_missing_key(&issue, &PayloadPath::of(["fields", "status", "name"])),
+            "a path that resolves names no missing key"
+        );
+        assert!(!names_a_missing_key(
+            &issue,
+            &PayloadPath::of([] as [&str; 0])
+        ));
     }
 
     #[test]

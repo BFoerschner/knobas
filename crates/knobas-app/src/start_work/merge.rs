@@ -213,7 +213,7 @@ pub async fn due(
         .bind(KIND_PR)
         .bind(KIND_TICKET)
         .bind(status)
-        .bind(sqlx::types::Json(declarations.as_json()))
+        .bind(declarations.as_param())
         .fetch_all(pool)
         .await
         .map_err(IpcError::internal)

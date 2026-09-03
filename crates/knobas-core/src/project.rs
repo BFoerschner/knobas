@@ -165,7 +165,7 @@ pub async fn list(
     declarations: &crate::payload::Declarations,
 ) -> Result<Vec<Project>, CoreError> {
     let rows: Vec<(String, String, Option<String>)> = sqlx::query_as(PROJECTS)
-        .bind(sqlx::types::Json(declarations.as_json()))
+        .bind(declarations.as_param())
         .fetch_all(pool)
         .await?;
     Ok(rows

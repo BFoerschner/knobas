@@ -289,27 +289,30 @@ where
 ///    corpus: a kind can be legitimately empty in one instance's data, but a
 ///    kind the descriptor does not name at all is a declaration nothing will
 ///    ever read.
-/// 2. **No declared path lands on a value of the wrong type.** A status
+/// 2. **No declared path leads to a value of the wrong type.** A status
 ///    declared one segment short reaches the `{"name": …}` object, and `->>`
 ///    would stringify that into a column headed `{"name":"In Progress"}` --
 ///    a guess dressed as an observation.
-/// 3. **A declared field the corpus has containers for resolves somewhere in
-///    that corpus.** This is the misspelling check, and it is asked of the
-///    corpus rather than of a record on purpose. One record cannot answer it:
-///    `fields.assignee` being null says nothing about whether `name` is the
-///    right key inside one, which is why an unassigned issue must not fail a
-///    declaration -- the property that makes this clause safe to run against a
-///    live instance. A corpus can: if some item of the kind carries the object
-///    the last key would live in, and no item of the kind resolves the path,
-///    the adapter has named a key its own records do not have. See
-///    [`container_of`](knobas_core::payload::container_of).
-/// 4. **A field a kind does not declare resolves to nothing.** The clause that
-///    keeps "a miss, never a guess" a property of the code: a resolver that
-///    grew a knobas-side fallback for an undeclared field would pass every
-///    other clause here and quietly put a value on screen that no source said.
+/// 3. **Where nothing of a kind resolved a declared field, no record of that
+///    kind may show the path naming a key it does not have.** This is the
+///    misspelling check, and it is asked of the corpus rather than of a record
+///    on purpose. One record cannot answer it: a key absent from one issue is
+///    also what a field the source omits when empty looks like, and an
+///    unassigned issue must not fail a declaration -- the property that makes
+///    this clause safe to run against a live instance. A corpus can: one item
+///    carrying the value settles the question for the whole kind, and where
+///    *no* item does, a record whose object simply lacks the key is the
+///    adapter having named a key its own records do not have. See
+///    [`names_a_missing_key`](knobas_core::payload::names_a_missing_key).
+/// 4. **A field a kind does not declare resolves to nothing.** Narrow and
+///    worth having: it says nothing about the *declaration*, but it is what a
+///    resolver that grew a knobas-side fallback for an undeclared field dies
+///    on, and such a resolver would pass every other clause here while quietly
+///    putting a value on screen that no source said.
 fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
     use knobas_core::payload::{
-        KindPaths, PayloadPath, at, container_of, field, resolve_flag, resolve_list, resolve_string,
+        KindPaths, PayloadPath, at, field, names_a_missing_key, resolve_flag, resolve_list,
+        resolve_string,
     };
 
     let kinds: std::collections::HashSet<&str> =
@@ -332,23 +335,43 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
         );
     }
 
-    /// What a declared field must be, and whether one value is it.
-    fn is(wanted: &str, value: &serde_json::Value) -> bool {
-        match wanted {
-            "string" => value.is_string(),
-            "boolean" => value.is_boolean(),
-            _ => value.is_array(),
+    /// What a declared field must lead to.
+    #[derive(Clone, Copy)]
+    enum Wanted {
+        /// A status, a priority, an assignee, a project key or name.
+        Text,
+        /// A merged flag.
+        Flag,
+        /// The array a list path opens.
+        List,
+    }
+
+    impl Wanted {
+        fn matches(self, value: &serde_json::Value) -> bool {
+            match self {
+                Wanted::Text => value.is_string(),
+                Wanted::Flag => value.is_boolean(),
+                Wanted::List => value.is_array(),
+            }
+        }
+
+        fn word(self) -> &'static str {
+            match self {
+                Wanted::Text => "string",
+                Wanted::Flag => "boolean",
+                Wanted::List => "array",
+            }
         }
     }
 
-    /// One (kind, field) pair's evidence, gathered over the whole corpus.
+    /// What one (kind, field) pair's paths showed across the whole corpus.
     #[derive(Default)]
     struct Evidence {
         /// Some item of this kind resolved the field.
         resolved: bool,
-        /// Some item of this kind carries the object the last key would sit
-        /// in, so the corpus is in a position to demand a resolution.
-        container: bool,
+        /// Some item of this kind has an object where the path's next key
+        /// would sit, and does not have that key.
+        names_a_missing_key: bool,
     }
 
     let nothing = KindPaths::default();
@@ -363,74 +386,81 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             .iter()
             .find(|p| p.kind == item.kind)
             .unwrap_or(&nothing);
-        let scalars: [(&str, &Vec<PayloadPath>, &str); 6] = [
-            (field::STATUS_NAME, &paths.status_name, "string"),
-            (field::PRIORITY, &paths.priority, "string"),
-            (field::ASSIGNEE, &paths.assignee, "string"),
-            (field::PROJECT_KEY, &paths.project_key, "string"),
-            (field::PROJECT_NAME, &paths.project_name, "string"),
-            (field::MERGED, &paths.merged, "boolean"),
+        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 6] = [
+            (field::STATUS_NAME, &paths.status_name, Wanted::Text),
+            (field::PRIORITY, &paths.priority, Wanted::Text),
+            (field::ASSIGNEE, &paths.assignee, Wanted::Text),
+            (field::PROJECT_KEY, &paths.project_key, Wanted::Text),
+            (field::PROJECT_NAME, &paths.project_name, Wanted::Text),
+            (field::MERGED, &paths.merged, Wanted::Flag),
         ];
+
+        /// Clause 2 for one path on one item, and the evidence clause 3 wants
+        /// from it.
+        let mut weigh = |seen: &mut Evidence,
+                         name: &str,
+                         payload: &serde_json::Value,
+                         path: &PayloadPath,
+                         wanted: Wanted,
+                         within: &str| {
+            if let Some(value) = at(payload, path) {
+                assert!(
+                    wanted.matches(value),
+                    "descriptor.payload_paths declares {name} of kind {:?} at {:?}, which leads \
+                     to {} {within} this adapter's own item {} -- a declared path must lead to a \
+                     {} or to nothing at all, or every reader of it gets a value no source meant. \
+                     Payload: {}",
+                    item.kind,
+                    path.segments(),
+                    match value {
+                        serde_json::Value::Object(_) => "an object",
+                        serde_json::Value::Array(_) => "an array",
+                        serde_json::Value::Number(_) => "a number",
+                        serde_json::Value::Bool(_) => "a boolean",
+                        _ => "a string",
+                    },
+                    item.entity,
+                    wanted.word(),
+                    item.payload
+                );
+                seen.resolved = true;
+            }
+            seen.names_a_missing_key |= names_a_missing_key(payload, path);
+        };
+
         for (name, candidates, wanted) in scalars {
             let seen = evidence.entry((&item.kind, name)).or_default();
             for path in candidates {
-                if let Some(value) = at(&item.payload, path) {
-                    assert!(
-                        is(wanted, value),
-                        "descriptor.payload_paths declares {name} of kind {:?} at {:?}, which \
-                         leads to {} on this adapter's own item {} -- a declared path must lead \
-                         to a {wanted} or to nothing at all, or every reader of it gets a value \
-                         no source meant. Payload: {}",
-                        item.kind,
-                        path.segments(),
-                        match value {
-                            serde_json::Value::Object(_) => "an object",
-                            serde_json::Value::Array(_) => "an array",
-                            serde_json::Value::Number(_) => "a number",
-                            serde_json::Value::Bool(_) => "a boolean",
-                            _ => "a string",
-                        },
-                        item.entity,
-                        item.payload
-                    );
-                    seen.resolved = true;
-                }
-                seen.container |= container_of(&item.payload, path).is_some();
+                weigh(seen, name, &item.payload, path, wanted, "on");
             }
         }
         for candidate in &paths.reviewers {
             let seen = evidence.entry((&item.kind, field::REVIEWERS)).or_default();
-            let elements = match at(&item.payload, &candidate.at) {
-                Some(value) => {
-                    assert!(
-                        value.is_array(),
-                        "descriptor.payload_paths declares reviewers of kind {:?} at {:?}, which \
-                         is not an array on this adapter's own item {} -- a declared list must \
-                         lead to an array or to nothing. Payload: {}",
-                        item.kind,
-                        candidate.at.segments(),
-                        item.entity,
-                        item.payload
-                    );
-                    value.as_array().map_or(&[][..], Vec::as_slice)
-                }
-                None => &[][..],
-            };
-            seen.container |= container_of(&item.payload, &candidate.at).is_some();
-            for element in elements {
-                if let Some(value) = at(element, &candidate.entry) {
-                    assert!(
-                        value.is_string(),
-                        "descriptor.payload_paths declares the reviewer entry of kind {:?} at \
-                         {:?}, which is not a string in this adapter's own element {element} of \
-                         item {}",
-                        item.kind,
-                        candidate.entry.segments(),
-                        item.entity
-                    );
-                    seen.resolved = true;
-                }
-                seen.container |= container_of(element, &candidate.entry).is_some();
+            // The array itself is weighed against its own evidence slot, so a
+            // list whose array is there and whose entry key is wrong is not
+            // excused by the array having resolved.
+            let mut array = Evidence::default();
+            weigh(
+                &mut array,
+                field::REVIEWERS,
+                &item.payload,
+                &candidate.at,
+                Wanted::List,
+                "on",
+            );
+            seen.names_a_missing_key |= array.names_a_missing_key;
+            for element in at(&item.payload, &candidate.at)
+                .and_then(serde_json::Value::as_array)
+                .map_or(&[][..], Vec::as_slice)
+            {
+                weigh(
+                    seen,
+                    field::REVIEWERS,
+                    element,
+                    &candidate.entry,
+                    Wanted::Text,
+                    "in an element of",
+                );
             }
         }
 
@@ -438,7 +468,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
         // including for a kind that declares nothing at all, which is most of
         // a corpus and the place a knobas-side fallback would show up first.
         for (name, candidates, _) in scalars {
-            if candidates.is_empty() && *name != *field::MERGED {
+            if candidates.is_empty() && name != field::MERGED {
                 assert_eq!(
                     resolve_string(&item.payload, candidates),
                     None,
@@ -470,11 +500,11 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
 
     for ((kind, name), seen) in evidence {
         assert!(
-            !seen.container || seen.resolved,
+            seen.resolved || !seen.names_a_missing_key,
             "descriptor.payload_paths declares {name} of kind {kind:?} at a path no item of that \
-             kind resolves, though some of them carry the object its last key would sit in -- so \
-             it names a key this adapter's own records do not have, and every reader of it misses \
-             for ever while looking exactly like a source that says nothing"
+             kind resolves, and some of those items carry an object the path's next key is simply \
+             not in -- so it names a key this adapter's own records do not have, and every reader \
+             of it misses for ever while looking exactly like a source that says nothing"
         );
     }
 }
@@ -550,10 +580,16 @@ mod tests {
         /// Declares the same kind's payload paths twice, so the second entry
         /// is a declaration nothing reads.
         PayloadPathsForOneKindTwice,
-        /// Declares a status one key off (`fields.status.nam`), which its own
-        /// items do not carry -- a read that misses for ever and looks exactly
-        /// like a source that says nothing.
+        /// Declares a status one key off in its **last** segment
+        /// (`fields.status.nam`), which its own items do not carry -- a read
+        /// that misses for ever and looks exactly like a source that says
+        /// nothing.
         MisspelledPayloadPath,
+        /// The same typo one segment **earlier** (`fieldz.status.name`), where
+        /// the walk stops at the payload root rather than deep inside it.
+        /// Structurally the harder of the two to catch, and the reason clause
+        /// 3 asks about a missing key rather than about a container.
+        MisspelledPayloadPathAtTheRoot,
         /// Declares a status at `fields.status`, which lands on the object
         /// rather than on a string.
         PayloadPathOntoAnObject,
@@ -650,6 +686,9 @@ mod tests {
                         }
                         Behavior::MisspelledPayloadPath => {
                             vec![ticket(PayloadPath::of(["fields", "status", "nam"]))]
+                        }
+                        Behavior::MisspelledPayloadPathAtTheRoot => {
+                            vec![ticket(PayloadPath::of(["fieldz", "status", "name"]))]
                         }
                         Behavior::PayloadPathOntoAnObject => {
                             vec![ticket(PayloadPath::of(["fields", "status"]))]
@@ -1011,6 +1050,21 @@ mod tests {
     async fn rejects_a_path_into_an_object_that_does_not_have_that_key() {
         rejects(
             Behavior::MisspelledPayloadPath,
+            "at a path no item of that kind resolves",
+        )
+        .await;
+    }
+
+    /// The same typo one segment earlier, which has no container anywhere in
+    /// the corpus and would pass a clause that asked "does the object this key
+    /// would sit in exist?" -- it does not, because the *previous* key is the
+    /// wrong one. Asking instead "does some record show this path naming a key
+    /// it does not have?" catches both, and a null still excuses neither the
+    /// declaration nor a reader.
+    #[tokio::test]
+    async fn rejects_a_path_misspelled_before_its_last_segment() {
+        rejects(
+            Behavior::MisspelledPayloadPathAtTheRoot,
             "at a path no item of that kind resolves",
         )
         .await;

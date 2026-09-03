@@ -83,7 +83,7 @@ struct Resolved {
 
 async fn in_sql(pool: &PgPool, declarations: &Declarations, entity_id: &str) -> Resolved {
     let row = sqlx::query(RESOLVED)
-        .bind(sqlx::types::Json(declarations.as_json()))
+        .bind(declarations.as_param())
         .bind(entity_id)
         .fetch_one(pool)
         .await

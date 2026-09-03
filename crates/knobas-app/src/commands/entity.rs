@@ -284,7 +284,7 @@ pub async fn list_entities_inner(
         .bind(i64::from(offset))
         .bind(members)
         .bind(filter.project.as_deref())
-        .bind(sqlx::types::Json(declarations.as_json()))
+        .bind(declarations.as_param())
         .fetch_all(pool)
         .await?;
 

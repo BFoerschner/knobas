@@ -357,8 +357,8 @@ knobas-core	lib/knobas_core	note::tests::a_blank_title_becomes_a_name
 knobas-core	lib/knobas_core	note::tests::a_body_names_the_things_between_its_double_brackets
 knobas-core	lib/knobas_core	note::tests::a_stray_bracket_is_not_a_reference
 knobas-core	lib/knobas_core	note::tests::an_unclosed_bracket_ends_the_scan_where_it_starts
-knobas-core	lib/knobas_core	payload::tests::a_container_is_only_reported_where_the_source_wrote_one
 knobas-core	lib/knobas_core	payload::tests::a_flag_is_a_boolean_or_it_is_nothing
+knobas-core	lib/knobas_core	payload::tests::a_key_an_object_lacks_is_named_and_a_null_is_not
 knobas-core	lib/knobas_core	payload::tests::a_kind_that_declares_nothing_misses
 knobas-core	lib/knobas_core	payload::tests::a_list_keeps_the_usable_strings_and_drops_the_rest
 knobas-core	lib/knobas_core	payload::tests::a_list_that_is_not_an_array_yields_nothing
@@ -921,6 +921,7 @@ knobas-source	lib/knobas_source	contract::tests::rejects_a_connectivity_failure_
 knobas-source	lib/knobas_source	contract::tests::rejects_a_do_nothing_adapter
 knobas-source	lib/knobas_source	contract::tests::rejects_a_foreign_namespace
 knobas-source	lib/knobas_source	contract::tests::rejects_a_path_into_an_object_that_does_not_have_that_key
+knobas-source	lib/knobas_source	contract::tests::rejects_a_path_misspelled_before_its_last_segment
 knobas-source	lib/knobas_source	contract::tests::rejects_a_path_that_lands_on_an_object
 knobas-source	lib/knobas_source	contract::tests::rejects_a_reviewer_entry_key_the_elements_do_not_carry
 knobas-source	lib/knobas_source	contract::tests::rejects_a_source_id_knobas_keeps_for_itself
