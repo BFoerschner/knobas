@@ -644,7 +644,8 @@ async fn the_days_blocks_come_back_in_time_order_whatever_order_they_were_writte
 
     let listed = time::day::list(&pool, day, day + Duration::days(1))
         .await
-        .expect("the day is readable");
+        .expect("the day is readable")
+        .blocks;
 
     assert_eq!(
         listed
@@ -718,7 +719,8 @@ async fn an_entity_block_carries_the_mirrors_title_and_a_blank_one_carries_none(
 
     let listed = time::day::list(&pool, day, day + Duration::days(1))
         .await
-        .expect("the day is readable");
+        .expect("the day is readable")
+        .blocks;
     assert_eq!(
         listed
             .iter()
@@ -755,7 +757,8 @@ async fn a_block_that_ran_through_midnight_is_on_both_days() {
 
     let third = time::day::list(&pool, midnight, midnight + Duration::days(1))
         .await
-        .expect("the 3rd is readable");
+        .expect("the 3rd is readable")
+        .blocks;
     assert_eq!(
         third.iter().map(|d| d.block.id).collect::<Vec<_>>(),
         vec![overnight],
@@ -764,7 +767,8 @@ async fn a_block_that_ran_through_midnight_is_on_both_days() {
 
     let second = time::day::list(&pool, midnight - Duration::days(1), midnight)
         .await
-        .expect("the 2nd is readable");
+        .expect("the 2nd is readable")
+        .blocks;
     assert!(
         second.iter().any(|d| d.block.id == overnight),
         "the same block has to be on the day it started too"
@@ -799,7 +803,8 @@ async fn a_blocks_start_end_and_target_can_all_be_moved() {
 
     let listed = time::day::list(&pool, day, day + Duration::days(1))
         .await
-        .expect("the day is readable");
+        .expect("the day is readable")
+        .blocks;
     assert_eq!(listed, vec![edited], "the read and the write disagree");
 }
 
@@ -877,7 +882,8 @@ async fn an_end_before_its_start_is_refused_in_words_the_reader_can_act_on() {
 
     let listed = time::day::list(&pool, day, day + Duration::days(1))
         .await
-        .unwrap();
+        .unwrap()
+        .blocks;
     assert_eq!(
         listed[0].block.started_at,
         day + Duration::hours(9),
@@ -938,7 +944,8 @@ async fn a_block_can_be_deleted_and_the_day_stops_listing_it() {
 
     let listed = time::day::list(&pool, day, day + Duration::days(1))
         .await
-        .unwrap();
+        .unwrap()
+        .blocks;
     assert_eq!(
         listed.iter().map(|d| d.block.id).collect::<Vec<_>>(),
         vec![kept],
@@ -1011,7 +1018,8 @@ async fn a_logged_block_refuses_both_edits_and_says_why() {
 
     let listed = time::day::list(&pool, day, day + Duration::days(1))
         .await
-        .unwrap();
+        .unwrap()
+        .blocks;
     assert_eq!(
         listed
             .iter()
@@ -1086,7 +1094,8 @@ async fn a_block_ending_at_midnight_belongs_to_the_day_it_ran_in() {
 
     let third = time::day::list(&pool, midnight, midnight + Duration::days(1))
         .await
-        .expect("the 3rd is readable");
+        .expect("the 3rd is readable")
+        .blocks;
     assert_eq!(
         third.iter().map(|d| d.block.id).collect::<Vec<_>>(),
         vec![sliver],
@@ -1096,7 +1105,8 @@ async fn a_block_ending_at_midnight_belongs_to_the_day_it_ran_in() {
 
     let second = time::day::list(&pool, midnight - Duration::days(1), midnight)
         .await
-        .expect("the 2nd is readable");
+        .expect("the 2nd is readable")
+        .blocks;
     assert_eq!(
         second.iter().map(|d| d.block.id).collect::<Vec<_>>(),
         vec![evening],
@@ -1158,6 +1168,7 @@ async fn day(pool: &PgPool, on_day: DateTime<Utc>) -> Vec<(BlockKind, TimerTarge
     time::day::list(pool, on_day, on_day + Duration::days(1))
         .await
         .expect("the day is readable")
+        .blocks
         .into_iter()
         .map(|entry| {
             (
@@ -1303,12 +1314,14 @@ async fn the_day_read_offers_the_blocks_the_beats_support() {
     let first: Vec<i64> = time::day::list(&pool, midnight, midnight + Duration::days(1))
         .await
         .unwrap()
+        .blocks
         .iter()
         .map(|entry| entry.block.id)
         .collect();
     let again: Vec<i64> = time::day::list(&pool, midnight, midnight + Duration::days(1))
         .await
         .unwrap()
+        .blocks
         .iter()
         .map(|entry| entry.block.id)
         .collect();
@@ -1370,7 +1383,8 @@ async fn assigning_a_passive_block_makes_it_manual_and_it_stays_assigned() {
 
     let offered = time::day::list(&pool, midnight, midnight + Duration::days(1))
         .await
-        .unwrap();
+        .unwrap()
+        .blocks;
     let [offered] = offered.as_slice() else {
         panic!("one passive block was offered, not {}", offered.len())
     };
@@ -1790,6 +1804,105 @@ async fn a_swept_day_keeps_its_block_and_an_observed_empty_day_loses_one() {
         day(&pool, empty_day).await.is_empty(),
         "a day observed with nothing in the foreground still takes its guess \
          back -- retention must not have switched forgetting off"
+    );
+}
+
+// -- the observation horizon, as a reader meets it (#337) -------------------
+//
+// Retention above is what the sweep *does*. This is what the day read *says*
+// about a day the sweep has been past: `DayRecord::past_horizon`, which is the
+// one thing on the wire that tells "knobas has no beats for this day" from
+// "knobas has beats and they say nothing". Both readings draw an empty passive
+// column, so nothing else on the strip can carry the difference.
+
+/// **A day past the horizon says so; a day inside it with nothing in the
+/// foreground does not.**
+///
+/// The two days are built to be indistinguishable in every other way a reader
+/// could check: neither offers a passive block, and neither has a manual one.
+/// The swept day's beats are gone and the observed day's beats attribute
+/// nothing -- `a_swept_day_keeps_its_block_and_an_observed_empty_day_loses_one`
+/// above is the same pair seen from the reconciliation's side. What is
+/// asserted here is the reading, which is the only half a person can see.
+#[tokio::test]
+async fn a_day_past_the_horizon_says_so_and_an_observed_empty_day_does_not() {
+    let pool = scratch("time-horizon-day").await;
+    time::passive::set_enabled(&pool, true).await.unwrap();
+    let observed_day = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
+    let swept_day = observed_day - Duration::days(10);
+
+    beats(
+        &pool,
+        None,
+        swept_day + Duration::hours(9),
+        21,
+        Duration::seconds(30),
+    )
+    .await;
+    beats(
+        &pool,
+        None,
+        observed_day + Duration::hours(9),
+        21,
+        Duration::seconds(30),
+    )
+    .await;
+
+    let taken = time::passive::prune(
+        &pool,
+        observed_day + Duration::days(time::passive::RETENTION_DAYS),
+    )
+    .await
+    .expect("the sweep runs");
+    assert_eq!(taken, 21, "the older day's beats are what went");
+
+    let swept = time::day::list(&pool, swept_day, swept_day + Duration::days(1))
+        .await
+        .expect("the swept day is readable");
+    let observed = time::day::list(&pool, observed_day, observed_day + Duration::days(1))
+        .await
+        .expect("the observed day is readable");
+
+    assert!(
+        swept.blocks.is_empty() && observed.blocks.is_empty(),
+        "both days have to draw the same empty strip, or the flag is not the \
+         only thing telling them apart"
+    );
+    assert!(
+        swept.past_horizon,
+        "the day whose beats retention took reads as a day with nothing on it"
+    );
+    assert!(
+        !observed.past_horizon,
+        "a day knobas still has the beats for was reported as one it does not \
+         -- which claims knobas has forgotten an afternoon it can still speak \
+         about"
+    );
+}
+
+/// **The flag is the stored stamp's answer, never the retention constant's.**
+///
+/// A day a year old on a database no sweep has ever run in: every beat it had
+/// is still there, so knobas has not forgotten it and must not say it has.
+/// This is the reading `PRUNED_KEY`'s own documentation argues for -- every
+/// test fixture, every restored archive and every profile whose owner never
+/// left the app running is such a database -- and it is what an implementation
+/// that compared the day against `now - RETENTION_DAYS` would get wrong on
+/// every one of them.
+#[tokio::test]
+async fn a_database_no_sweep_has_run_in_has_no_day_past_the_horizon() {
+    let pool = scratch("time-horizon-never-swept").await;
+    time::passive::set_enabled(&pool, true).await.unwrap();
+    let long_ago = Utc.with_ymd_and_hms(2025, 9, 3, 0, 0, 0).unwrap();
+
+    let read = time::day::list(&pool, long_ago, long_ago + Duration::days(1))
+        .await
+        .expect("a day a year back is readable");
+
+    assert!(
+        !read.past_horizon,
+        "a day older than the retention window on a database nothing has been \
+         swept out of still has all its beats, and knobas said it had none"
     );
 }
 

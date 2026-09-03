@@ -60,7 +60,12 @@ let app: Record<string, unknown> | undefined;
 
 function render(
   rows: DayBlock[],
-  over: { update?: () => Promise<DayBlock>; onchanged?: () => void } = {},
+  over: {
+    update?: () => Promise<DayBlock>;
+    onchanged?: () => void;
+    /** The day reaches back past what retention swept (#337). */
+    pastHorizon?: boolean;
+  } = {},
 ) {
   const updates: Update[] = [];
   const deletes: number[] = [];
@@ -88,7 +93,10 @@ function render(
       ports: {
         dayBlocks: (from: string, to: string) => {
           asked.push([from, to]);
-          return Promise.resolve(listed);
+          return Promise.resolve({
+            blocks: listed,
+            past_horizon: over.pastHorizon ?? false,
+          });
         },
         updateBlock: (id: number, from: string, to: string, on: TimerTarget) => {
           updates.push([id, from, to, on]);

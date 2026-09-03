@@ -164,6 +164,30 @@ export interface DayBlock {
 }
 
 /**
+ * One day as the day review reads it — `time::day::DayRecord`.
+ *
+ * A record rather than the bare list this read used to answer with, because
+ * one thing is true of the **day** and not of any block on it: whether knobas
+ * still has the observations for it (#337).
+ */
+export interface DayRecord {
+  /** The blocks overlapping the day, earliest first. */
+  blocks: DayBlock[];
+  /**
+   * Whether the day reaches back past what retention has swept.
+   *
+   * knobas keeps a month of observations, and `#/time/<date>` takes any date,
+   * so a day older than that draws exactly the strip a day nobody had the app
+   * open on draws. This is what tells the two apart.
+   *
+   * Passive blocks the day was already offered are still drawn: retention took
+   * the evidence, not the record made from it while the evidence was there. It
+   * says the strip cannot be added to, never that what is on it is untrue.
+   */
+  past_horizon: boolean;
+}
+
+/**
  * The blocks overlapping `[from, to)`, earliest first.
  *
  * **The caller computes the interval**, and for the day review it is the
@@ -176,8 +200,8 @@ export interface DayBlock {
  * Overlap, not containment: a block that ran through midnight is on both days
  * it touched, so the strip a person most wants to fix has something to edit.
  */
-export function dayBlocks(from: string, to: string): Promise<DayBlock[]> {
-  return invoke<DayBlock[]>("day_blocks", { from, to });
+export function dayBlocks(from: string, to: string): Promise<DayRecord> {
+  return invoke<DayRecord>("day_blocks", { from, to });
 }
 
 /**
@@ -557,6 +581,19 @@ export interface Week {
   days: string[];
   /** Targets first in title order, then the no-target row if it has one. */
   rows: WeekRow[];
+  /**
+   * Which of {@link Week.days} knobas no longer has the observations for, in
+   * the same order (#337).
+   *
+   * One entry per day rather than one flag for the week, because a week that
+   * straddles the horizon is the ordinary case: `week::vet` bounds a
+   * timesheet's column *count* and says nothing about where its windows sit.
+   *
+   * It is on the week and not on the "no target, app open" row because that
+   * row is dropped when it has nothing to say — and a week entirely past the
+   * horizon is precisely the week with no such row and the most to explain.
+   */
+  past_horizon: boolean[];
 }
 
 /** One worklog *Log all* would create — `week::PlannedWorklog`. */

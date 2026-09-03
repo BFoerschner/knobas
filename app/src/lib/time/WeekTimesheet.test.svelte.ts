@@ -47,8 +47,8 @@ function row(over: Partial<WeekRow> = {}): WeekRow {
   };
 }
 
-function weekOf(rows: WeekRow[]): Week {
-  return { days: DAYS, rows };
+function weekOf(rows: WeekRow[], pastHorizon?: boolean[]): Week {
+  return { days: DAYS, rows, past_horizon: pastHorizon ?? DAYS.map(() => false) };
 }
 
 let target: HTMLDivElement;

@@ -92,6 +92,35 @@ pub struct DayBlock {
     pub title: Option<String>,
 }
 
+/// One day, as the day review reads it: its blocks, and whether knobas still
+/// has the beats for it (#337).
+///
+/// A struct rather than the bare `Vec<DayBlock>` this read used to answer
+/// with, because there is now something true of the **day** rather than of any
+/// block on it. `RETENTION_DAYS` bounds how long observations are kept and
+/// bounds nothing about which day a reader may open -- `#/time/<date>` takes
+/// any date -- so a day past the horizon draws exactly the strip a day nobody
+/// had the app open on draws, and the difference between *knobas has no beats
+/// for this day* and *knobas has beats and they say nothing* had nowhere to
+/// ride.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct DayRecord {
+    /// The blocks overlapping the day, earliest first.
+    pub blocks: Vec<DayBlock>,
+    /// Whether the day reaches back past what retention has swept.
+    ///
+    /// The same question [`passive::materialize`](super::passive::materialize)
+    /// refuses to reconcile on, asked through the same
+    /// [`Horizon`](super::passive::Horizon), so the day the strip calls absent
+    /// is exactly the day the reconciliation left alone.
+    ///
+    /// **Passive blocks the day was already offered are still drawn**, and
+    /// that is not a contradiction: retention took the *evidence*, not the
+    /// record made from it while the evidence was there. The flag says the
+    /// strip cannot be added to, never that what is on it is untrue.
+    pub past_horizon: bool,
+}
+
 /// The columns every read here selects.
 ///
 /// Spelled out in each statement rather than concatenated: `sqlx::query` takes
@@ -202,21 +231,32 @@ fn day_block_of(row: &sqlx::postgres::PgRow) -> Result<DayBlock, IpcError> {
 /// It writes nothing at all when passive attribution is off, or when the day
 /// has no observations to speak from.
 ///
+/// # ...and reports whether it could have (#337)
+///
+/// [`DayRecord::past_horizon`] is read **after** the reconciliation and from
+/// the same [`Horizon`](super::passive::Horizon) it consulted, so the strip's
+/// word for a day and the guard's decision about it are the same answer rather
+/// than two computations of it.
+///
 /// # Errors
 /// [`IpcError`] if the read fails.
 pub async fn list(
     pool: &PgPool,
     from: DateTime<Utc>,
     to: DateTime<Utc>,
-) -> Result<Vec<DayBlock>, IpcError> {
+) -> Result<DayRecord, IpcError> {
     super::passive::materialize(pool, from, to).await?;
+    let past_horizon = super::passive::horizon_of(pool).await?.passed(from);
 
     let rows = sqlx::query(LIST)
         .bind(from)
         .bind(to)
         .fetch_all(pool)
         .await?;
-    rows.iter().map(day_block_of).collect()
+    Ok(DayRecord {
+        blocks: rows.iter().map(day_block_of).collect::<Result<_, _>>()?,
+        past_horizon,
+    })
 }
 
 /// Say why a write matched no row, in a sentence the day review can show.

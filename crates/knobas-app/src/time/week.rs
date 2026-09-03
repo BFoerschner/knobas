@@ -192,6 +192,20 @@ pub struct Week {
     /// Targets first, in title order, then the no-target row if it has
     /// anything to say.
     pub rows: Vec<WeekRow>,
+    /// Which of [`Week::days`] reach back past what retention has swept, in
+    /// the same order (#337).
+    ///
+    /// **One entry per day and not one flag for the week**, because a week
+    /// straddling the horizon is the ordinary case: [`vet`] bounds a
+    /// timesheet's column *count* and says nothing about where its windows
+    /// sit, so any four days can be behind the horizon and the other three in
+    /// front of it.
+    ///
+    /// It rides on the week rather than on the "no target, app open" row for
+    /// the reason that row is dropped when it has nothing to say: a week
+    /// entirely past the horizon has no such row, and that is exactly the week
+    /// this most needs to speak about.
+    pub past_horizon: Vec<bool>,
 }
 
 /// One worklog *Log all* would create, before it creates any of them.
@@ -371,6 +385,14 @@ pub async fn read(pool: &PgPool, days: &[DayWindow]) -> Result<Week, IpcError> {
     for window in days {
         passive::materialize(pool, window.from, window.to).await?;
     }
+    // One read for the seven columns, and the same comparison the guard above
+    // just made (#337): the days this reports are exactly the days those
+    // `materialize` calls declined to reconcile.
+    let horizon = passive::horizon_of(pool).await?;
+    let past_horizon: Vec<bool> = days
+        .iter()
+        .map(|window| horizon.passed(window.from))
+        .collect();
 
     let from = days[0].from;
     let to = days[days.len() - 1].to;
@@ -523,12 +545,18 @@ pub async fn read(pool: &PgPool, days: &[DayWindow]) -> Result<Week, IpcError> {
         // a permanent line saying nothing, and a reader cannot tell that from
         // "the app was shut all week" -- which is the same reading, and the
         // honest one, when the row is simply not there.
+        //
+        // The one week that reading is *wrong* for is a week past the horizon,
+        // where knobas was not shut and simply no longer has the beats. That
+        // is what `past_horizon` says, and it says it on the week for exactly
+        // this reason: there is no row here to hang it on (#337).
         out.push(open);
     }
 
     Ok(Week {
         days: days.iter().map(|window| window.day).collect(),
         rows: out,
+        past_horizon,
     })
 }
 

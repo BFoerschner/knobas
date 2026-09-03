@@ -108,8 +108,9 @@ pub const FLOOR_SECONDS: i64 = 120;
 /// knobas keeps a month, and a day older than that is a day it no longer has
 /// the beats for. Past the horizon the day review offers no passive blocks
 /// and the timesheet's "no target, app open" row reads zero for that day;
-/// what a surface should *say* about such a day is #337's, not this
-/// constant's. Reading one safely is [`materialize`]'s -- see [`prune`].
+/// what a surface *says* about such a day is [`Horizon`]'s, which both reads
+/// carry to the strip and the timesheet in words (#337). Reading one safely is
+/// [`materialize`]'s -- see [`prune`].
 pub const RETENTION_DAYS: i64 = 30;
 
 /// The `knobas.setting` key holding the instant before which observations
@@ -492,7 +493,10 @@ const OFFER: &str = "insert into knobas.block (started_at, ended_at, entity_id, 
 ///   strength of a record it threw away itself. The guard is on `from` and not
 ///   on `to` deliberately: the horizon is an instant and a day is an interval,
 ///   so one day always straddles it, and it is exactly that day -- half swept,
-///   half intact -- a `to` comparison would hand to the derivation.
+///   half intact -- a `to` comparison would hand to the derivation. The guard
+///   and the reading the two surfaces draw are one comparison, in
+///   [`Horizon::passed`], so "the day this refused to reconcile" and "the day
+///   the strip calls absent" cannot come apart (#337).
 /// * **A span overlaps a block the person owns.** Passive attribution never
 ///   draws over time a manual block already claims -- including a passive
 ///   block that has since been assigned, which is what stops an assignment
@@ -510,7 +514,7 @@ pub(super) async fn materialize(
     if !enabled(pool).await? {
         return Ok(());
     }
-    if pruned_before(pool).await?.is_some_and(|swept| from < swept) {
+    if horizon_of(pool).await?.passed(from) {
         return Ok(());
     }
 
@@ -609,6 +613,52 @@ where
         .fetch_optional(db)
         .await?;
     Ok(stored.and_then(|value| serde_json::from_value(value).ok()))
+}
+
+/// The observation horizon, as one value a caller can ask questions of.
+///
+/// A newtype over [`pruned_before`]'s answer rather than the `Option` itself,
+/// and the reason is #337: **three** callers now have to decide whether a day
+/// reaches back past what [`prune`] swept -- [`materialize`], which refuses to
+/// reconcile such a day, and the day and week reads, which have to *say* so.
+/// Three copies of `from < swept` is three chances for the surfaces to
+/// disagree with the guard about which days those are, and the disagreement
+/// would be invisible: both readings draw an empty passive column.
+///
+/// So the comparison is written once, here, and everything else asks
+/// [`Horizon::passed`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Horizon(Option<DateTime<Utc>>);
+
+impl Horizon {
+    /// Whether a day beginning at `from` reaches back past what [`prune`] has
+    /// swept.
+    ///
+    /// **On `from` and not on `to`**, the rule [`materialize`] records in
+    /// full: the horizon is an instant and a day is an interval, so one day
+    /// always straddles it, and that day -- half swept, half intact -- is one
+    /// knobas cannot speak about either.
+    pub(super) fn passed(self, from: DateTime<Utc>) -> bool {
+        self.0.is_some_and(|swept| from < swept)
+    }
+}
+
+/// Read the horizon this database is actually behind.
+///
+/// The stamp, never `now - RETENTION_DAYS`: [`PRUNED_KEY`] carries the whole
+/// argument, and it applies to what a surface *says* exactly as it applies to
+/// what [`materialize`] does. A database no sweep has run in -- a fresh
+/// fixture, a restored archive, a profile whose owner never left the app
+/// running -- has every beat it ever had, however old, and a reader must not
+/// be told otherwise.
+///
+/// # Errors
+/// [`IpcError`] if the read fails.
+pub(super) async fn horizon_of<'e, E>(db: E) -> Result<Horizon, IpcError>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    Ok(Horizon(pruned_before(db).await?))
 }
 
 /// Throw away the observations retention has aged out, and answer with how

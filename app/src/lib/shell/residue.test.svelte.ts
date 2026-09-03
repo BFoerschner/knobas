@@ -514,7 +514,7 @@ const CASES: Case[] = [
           router: createRouter(),
           day: "2026-09-03",
           ports: {
-            dayBlocks: () => deferred<never[]>([]),
+            dayBlocks: () => deferred({ blocks: [], past_horizon: false }),
             updateBlock: () => Promise.reject(new Error("no edit in this test")),
             deleteBlock: () => Promise.reject(new Error("no edit in this test")),
           },
@@ -537,7 +537,7 @@ const CASES: Case[] = [
         props: {
           day: "2026-08-26",
           ports: {
-            weekTimesheet: () => deferred({ days: [], rows: [] }),
+            weekTimesheet: () => deferred({ days: [], rows: [], past_horizon: [] }),
             logAllPreview: () => Promise.reject(new Error("no plan in this test")),
             logAll: () => Promise.reject(new Error("no write in this test")),
           },

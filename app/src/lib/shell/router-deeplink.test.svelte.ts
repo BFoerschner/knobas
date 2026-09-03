@@ -138,7 +138,7 @@ vi.mock("../ipc/time", () => ({
   startTimer: () => Promise.reject(new Error("no timer in this test")),
   stopTimer: () => Promise.resolve(null),
   timerHeartbeat: () => Promise.resolve(null),
-  dayBlocks: () => Promise.resolve([]),
+  dayBlocks: () => Promise.resolve({ blocks: [], past_horizon: false }),
   updateBlock: () => Promise.reject(new Error("no edit in this test")),
   deleteBlock: () => Promise.reject(new Error("no edit in this test")),
   createBlock: () => Promise.reject(new Error("no edit in this test")),
@@ -148,7 +148,7 @@ vi.mock("../ipc/time", () => ({
   setPassiveAttribution: () => Promise.reject(new Error("no settings write in this test")),
   // The week timesheet sits under the day strip on the same address (#283),
   // so a time deep link mounts it too.
-  weekTimesheet: () => Promise.resolve({ days: [], rows: [] }),
+  weekTimesheet: () => Promise.resolve({ days: [], rows: [], past_horizon: [] }),
   logAllPreview: () => Promise.reject(new Error("no plan in this test")),
   logAll: () => Promise.reject(new Error("no write in this test")),
 }));

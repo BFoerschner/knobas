@@ -145,6 +145,10 @@ pub async fn timer_heartbeat(
 /// Overlap, not containment: a block that ran through midnight is on both days
 /// it touched.
 ///
+/// The answer is a [`DayRecord`](time::day::DayRecord) rather than the bare
+/// list it used to be, because one thing on it is true of the *day* and not of
+/// any block: whether knobas still has the observations for it (#337).
+///
 /// # Errors
 ///
 /// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is still
@@ -154,7 +158,7 @@ pub async fn day_blocks(
     lifecycle: State<'_, Lifecycle>,
     from: chrono::DateTime<chrono::Utc>,
     to: chrono::DateTime<chrono::Utc>,
-) -> Result<Vec<time::day::DayBlock>, IpcError> {
+) -> Result<time::day::DayRecord, IpcError> {
     let pool = lifecycle.pool()?;
     time::day::list(&pool, from, to).await
 }
@@ -805,6 +809,23 @@ mod tests {
         assert_shape(MIRROR, "DayBlock", &wire, &["block", "title"]);
     }
 
+    /// What the day read answers with, which is the day and not the list
+    /// (#337).
+    ///
+    /// `past_horizon` is exercised as `true`, the arm the strip's note is
+    /// drawn on: `false` is this field's default and would satisfy the shape
+    /// against a mirror declaring anything at all.
+    #[test]
+    fn the_day_record_matches_its_typescript_mirror() {
+        let record = crate::time::day::DayRecord {
+            blocks: Vec::new(),
+            past_horizon: true,
+        };
+        let wire = serde_json::to_value(&record).unwrap();
+        assert_eq!(wire["past_horizon"], serde_json::Value::Bool(true));
+        assert_shape(MIRROR, "DayRecord", &wire, &["blocks", "past_horizon"]);
+    }
+
     // -- the worklog (#280) -------------------------------------------------
 
     fn candidate() -> crate::time::worklog::Candidate {
@@ -1121,13 +1142,19 @@ mod tests {
         let week = crate::time::week::Week {
             days: vec!["2026-08-24".parse().expect("a date")],
             rows: Vec::new(),
+            // `true`, not the default: the timesheet's note is drawn from this
+            // list, and an all-`false` fixture would satisfy the shape while
+            // witnessing nothing about the type the mirror declares (#337).
+            past_horizon: vec![true],
         };
-        assert_shape(
-            MIRROR,
-            "Week",
-            &serde_json::to_value(&week).unwrap(),
-            &["days", "rows"],
+        let json = serde_json::to_value(&week).unwrap();
+        assert_eq!(
+            json["past_horizon"],
+            serde_json::json!([true]),
+            "the flag crosses as one boolean per day in `days`' own order, \
+             which is what the note names its columns from"
         );
+        assert_shape(MIRROR, "Week", &json, &["days", "rows", "past_horizon"]);
     }
 
     /// The confirmation's line. `title` is exercised as `Some`, the arm the
