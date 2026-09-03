@@ -897,18 +897,34 @@ async fn an_edit_made_against_a_version_the_server_has_passed_is_refused_by_conf
         refused.detail
     );
     // **A refusal, not a wait** (ADR-0004): a 409 is a decision, so the queue
-    // must never go round again over it. Measured by flushing a second time
-    // and re-reading the row -- `store::due` is what decides whether a refused
-    // write is offered to a flush, and an unmoved `attempts` is that decision
-    // taken.
+    // must never go round again over it.
     //
     // `assert_eq!(refused.wait_reason, None)` stood here until #347 and could
     // not fail: migration `0005`'s `write_queue_reason_state_chk check
     // (wait_reason is null or state = 'pending')` puts a refused row carrying
     // a wait reason outside what any implementation can store, so once the
     // assertion above pinned the state, this one was Postgres restating
-    // itself. What it *meant* -- a fault that passes would be tried again --
-    // is what is asserted instead.
+    // itself. What it *meant* -- a decided write is never sent again -- is
+    // what is asserted instead, in the two places it is visible.
+    //
+    // **First, the offer.** `write_queue::due` is the whole of the decision:
+    // whatever it hands back is what the next flush sends. Asked directly,
+    // because the row alone cannot answer it -- measured under a mutant during
+    // #347's live window, widening `due`'s outer filter to
+    // `state in ('pending','refused')` re-sent this very write to Confluence
+    // and drew a second live 409, and *every column of the row was unchanged
+    // afterwards*, because `refuse`'s own `and state = 'pending'` guard means
+    // no transition matches a settled row. A test that watched only the row
+    // saw a redelivery it could not report.
+    let still_due = knobas_core::write_queue::due(&state.pool, CONFLUENCE)
+        .await
+        .expect("the queue's due list reads");
+    assert!(
+        !still_due.iter().any(|w| w.id == refused.id),
+        "a refused write is terminal: the queue still offers it to the next flush, so a decision          the server already made would be re-sent for ever: {:?}",
+        still_due.iter().map(|w| (w.id, w.state)).collect::<Vec<_>>()
+    );
+    // **Then the end-to-end half**: flush again and confirm nothing moved.
     knobas_sync::write_queue::flush_source(state.scheduler.deps(), CONFLUENCE)
         .await
         .expect("a second flush of the source runs");
@@ -919,8 +935,8 @@ async fn an_edit_made_against_a_version_the_server_has_passed_is_refused_by_conf
     assert_eq!(
         (again.state, again.attempts, again.wait_reason),
         (refused.state, refused.attempts, refused.wait_reason),
-        "a refused write is terminal: the flush after it picked the row up again, which is what \
-         a retryable classification would do to a person's edit for ever: {again:?}"
+        "a refused write is terminal: a flush moved the settled row, which is what a retryable \
+         classification would do to a person's edit for ever: {again:?}"
     );
     let detail = refused.detail.clone().unwrap_or_default();
     println!("SEEDED refused edit: {detail}");
