@@ -374,6 +374,17 @@ eval "$(./seed --env)"      # adds KNOBAS_JIRA_* and KNOBAS_CONFLUENCE_*
 The admin account is `knobas` / `knobas-dev` on both, and re-running the seed
 against a set-up instance is a no-op.
 
+**On a busy machine, bring them up one at a time — Jira first.** Two JVMs
+claiming their heaps at once on the 8 GB VM is what pushed Jira's post-wizard
+restart past its wait once (issue #314): it is the long pole, since Jira writes
+its schema and re-initialises its plugin system before `/status` says
+`RUNNING`. `just atlassian-live` does this for you; by hand it is `up -d
+jira-db jira` → `./seed-atlassian.sh jira` → `up -d confluence-db confluence` →
+`./seed-atlassian.sh confluence`, and then the content seed. The wait is capped
+at 900 s and prints the reported state every 30 s, so a slow start reads as a
+slow start rather than as a hang; if it fires, that is the machine, and
+`docker logs knobas-jira` is the next look.
+
 The keys live in your **shell**, not in `.env` — that file is tracked
 (`./fetch-timebomb-keys.sh --write` drops them in the git-ignored
 `.env.licences` if you want them to survive a new terminal).
@@ -412,16 +423,20 @@ whole window as one command:
 just atlassian-live      # from the repo root; refuses while knobas-teamcity is up
 ```
 
-which is: `fetch-timebomb-keys.sh` (before `up`, since Confluence reads its
-key at first start) → `up` → `seed-atlassian.sh` (waits for health, walks both
-wizards) → `seed-atlassian-content.sh` → `seed-atlassian-content.sh --verify`
-→ every crate test gated on `KNOBAS_JIRA_URL` / `KNOBAS_CONFLUENCE_URL` →
-`down -v` of the four Atlassian services, from a trap, so the teardown runs
-when a step fails and on Ctrl-C. The recipe's header carries the measured wall
-clock of a full run and where a new live suite's line goes. Measured
-2026-09-03, a full run from empty volumes is about four and a quarter minutes
-— three of them the two wizard walks, seconds of them the live suites; the
-three-hour window holds with hours of margin.
+which is: `fetch-timebomb-keys.sh` (before either `up`, since Confluence reads
+its key at first start) → `up -d --wait jira-db jira` →
+`seed-atlassian.sh jira` → `up -d --wait confluence-db confluence` →
+`seed-atlassian.sh confluence` → `seed-atlassian-content.sh` →
+`seed-atlassian-content.sh --verify` → every crate test gated on
+`KNOBAS_JIRA_URL` / `KNOBAS_CONFLUENCE_URL` → `down -v` of the four Atlassian
+services, from a trap, so the teardown runs when a step fails and on Ctrl-C.
+**One product at a time, Jira first**, for the reason above: the two JVMs
+starting together on the 8 GB VM is what made Jira's wait too tight under load
+(#314), and Confluence's container is not created until Jira is `RUNNING` with
+its REST answering. The recipe's header carries the measured wall clock of a
+full run and where a new live suite's line goes. <FILL: the sequenced
+measurement, from the live run> The three-hour window holds with hours of
+margin.
 
 **The suite gated on `KNOBAS_CONFLUENCE_URL`** (issue #284) is
 `crates/knobas-source-confluence/tests/live_confluence_seeded.rs`, and it is
@@ -725,7 +740,7 @@ notification in Notification Center.
 | `./seed-gitea.sh` | Org, users, repos, branches, commits, PRs, comments, reviews. |
 | `./seed-kuma.sh` | Kuma admin account, monitors, API key. |
 | `./fetch-timebomb-keys.sh` | Pulls the two 10-user, 3-hour Data Center timebomb keys off Atlassian's public page, checks each decodes to the right product, prints `export` lines (`--write` also drops them in the git-ignored `.env.licences`). `seed-atlassian.sh` calls it when a key is unset. |
-| `./seed-atlassian.sh` | The real Jira and Confluence containers' setup wizards, unattended (`--profile real-atlassian`); `./seed --atlassian` runs the script below after it. |
+| `./seed-atlassian.sh` | The real Jira and Confluence containers' setup wizards, unattended (`--profile real-atlassian`); `./seed --atlassian` runs the script below after it. Takes `jira` or `confluence` to walk one wizard, which is the shape a loaded machine wants — see *Jira and Confluence, end to end*. |
 | `./seed-atlassian-content.sh` | The Tidewater people, projects, issues, comments, worklogs and links in the real Jira; the ENG space, pages and comments in the real Confluence. `--verify` reads PAY-231 and one page back. `just atlassian-live` runs the whole window. |
 | `./seed-teamcity.sh` | The real TeamCity container's first start, an access token and one authorised agent (`--profile real-teamcity`); then runs the script below. |
 | `./seed-teamcity-builds.sh` | The Tidewater projects, build configurations, VCS roots and builds in the real TeamCity; `--running` for the fixture's running build. |
