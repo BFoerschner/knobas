@@ -164,6 +164,75 @@ export function editableBody(payload: unknown): string | null {
   return comment && typeof comment.body === "string" ? comment.body : null;
 }
 
+/** What a queued `log_work` write would put on a ticket, read off its payload. */
+export interface WithdrawnWorklog {
+  /** The ticket the time was logged against. */
+  entity: string;
+  /** RFC 3339 -- when the logged span began. */
+  started: string;
+  /** How long was worked, in the seconds that cross the wire. */
+  seconds: number;
+  comment: string;
+}
+
+/**
+ * The worklog a discard would withdraw, when withdrawing it can bill the same
+ * hour twice. `null` when the withdrawal is an ordinary one.
+ *
+ * ## Why `log_work` and no other op
+ *
+ * Since #328 a discarded worklog **gives its blocks back**: the local copy
+ * goes with the write and the hour is unlogged again, offered by *Log all*
+ * and editable in the day review. Set that beside the race
+ * `knobas_core::write_queue::discard` names in its own doc comment — the
+ * flush loop's per-source lock does not hold a discard back, and every writer
+ * of `attempts` bumps it *after* the call, so a write in flight is
+ * indistinguishable from one never tried — and the window is one HTTP
+ * round-trip wide. Inside it, the hour is at Jira *and* back on knobas'
+ * timesheet, one click from being sent again.
+ *
+ * No other op has that shape, because no other op hands a resource back:
+ *
+ * * `comment`, `approve`, `transition`, `trigger_build`, `rerun_build` —
+ *   withdrawing one in flight leaves the reply posted or the status moved,
+ *   which is the write the user asked for arriving. Nothing is re-offered and
+ *   nothing is charged twice.
+ * * `create_ticket` — ADR-0012 names it as the create that is *not* naturally
+ *   idempotent, but the duplicate it warns about is the **queue re-sending**,
+ *   which a discard prevents rather than causes. What a withdrawn
+ *   `create_ticket` can leave is one unclaimed ticket at the source: a
+ *   residue a person can see and delete, not an hour on an invoice, and not
+ *   something knobas then offers to do again.
+ * * `create_branch`, `create_pull_request` — the source refuses the duplicate
+ *   with a 409 (ADR-0012), so a re-send cannot make a second one.
+ *
+ * ## Why only a `pending` row
+ *
+ * `knobas_core::write_queue::due` yields an entity's head only when it is
+ * pending, so **a held or refused write never reaches the flush loop at
+ * all**. Its withdrawal cannot race a send, and telling its reader that Jira
+ * might already hold the hour would be a warning knobas cannot support. Those
+ * rows keep today's immediate discard.
+ *
+ * `WriteOp` grows per milestone (ADR-0006), so the payload is narrowed rather
+ * than asserted: a build that cannot read this worklog cannot describe it
+ * either, and a dialog with blanks where the hours go is worse than none.
+ */
+export function withdrawnWorklog(row: QueuedWrite): WithdrawnWorklog | null {
+  if (row.op !== "log_work" || row.state !== "pending") return null;
+  if (typeof row.payload !== "object" || row.payload === null) return null;
+  const log = (row.payload as { LogWork?: Record<string, unknown> }).LogWork;
+  if (!log) return null;
+  if (typeof log.entity !== "string" || typeof log.started !== "string") return null;
+  if (typeof log.seconds !== "number") return null;
+  return {
+    entity: log.entity,
+    started: log.started,
+    seconds: log.seconds,
+    comment: typeof log.comment === "string" ? log.comment : "",
+  };
+}
+
 /** The same payload with its text replaced, ready for `amendWrite`. */
 export function withBody(payload: unknown, body: string): WriteOpPayload | null {
   if (typeof payload !== "object" || payload === null) return null;
