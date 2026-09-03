@@ -593,6 +593,7 @@ mod tests {
             "set_passive_attribution",
             "worklog_draft",
             "log_work",
+            "ad_hoc_block",
         ] {
             assert!(
                 MIRROR.contains(&format!("\"{command}\"")),
@@ -638,6 +639,13 @@ mod tests {
             ("worklog_draft", "offsetMinutes"),
             ("log_work", "startedAt"),
             ("log_work", "offsetMinutes"),
+            // The room, on the command that has taken a target since #278: a
+            // start that sent the target and dropped this would record every
+            // block as having run nowhere, and rule two would simply stop
+            // firing -- with nothing on screen to say so.
+            ("start_timer", "inRoom"),
+            ("ad_hoc_block", "blockId"),
+            ("ad_hoc_block", "offsetMinutes"),
         ] {
             let at = MIRROR
                 .find(&format!("\"{call}\""))
@@ -827,6 +835,77 @@ mod tests {
                 "remote_id",
                 "created_at",
             ],
+        );
+    }
+
+    // -- the ad-hoc block (#281) --------------------------------------------
+
+    /// `title` is exercised as `Some`: an `Option` that is `None` serialises to
+    /// a `null` key and would satisfy `assert_shape` against any declared type
+    /// at all -- the discipline `entity_mirror.rs` records.
+    #[test]
+    fn the_suggestion_shape_matches_its_typescript_mirror() {
+        assert_shape(
+            MIRROR,
+            "Suggestion",
+            &serde_json::to_value(crate::time::suggest::Suggestion {
+                entity_id: "jira:PAY-231".to_owned(),
+                title: Some("Retry failed SEPA payouts".to_owned()),
+                rule: crate::time::suggest::SuggestionRule::LinkedToTarget,
+            })
+            .unwrap(),
+            &["entity_id", "title", "rule"],
+        );
+    }
+
+    /// The rules, read out of the mirror rather than listed here -- the rule
+    /// `entity_mirror.rs` states: a hand-copied list of members passes while
+    /// both the union and the copy drift from the Rust enum. The dialog
+    /// switches its *reason* on these three words, so a member that exists on
+    /// one side only is a suggestion drawn with no reason beside it.
+    #[test]
+    fn the_suggestion_rules_match_their_typescript_mirror() {
+        let mut rust: Vec<String> = [
+            crate::time::suggest::SuggestionRule::LinkedToTarget,
+            crate::time::suggest::SuggestionRule::ContextAnchor,
+            crate::time::suggest::SuggestionRule::LastLogged,
+        ]
+        .iter()
+        .map(|rule| {
+            serde_json::to_value(rule)
+                .unwrap()
+                .as_str()
+                .expect("a rule serialises to a string")
+                .to_owned()
+        })
+        .collect();
+        let mut declared = declared_union(MIRROR, "SuggestionRule");
+        declared.sort();
+        rust.sort();
+        assert_eq!(
+            rust, declared,
+            "the mirror's SuggestionRule and the Rust enum no longer agree, so              the dialog cannot say why it suggested what it suggested"
+        );
+    }
+
+    /// The offer, with its suggestion **present** -- the arm that carries a
+    /// type. Its empty arm is a `null` key, which the mirror declares as
+    /// `Suggestion | null` and which no fixture can distinguish.
+    #[test]
+    fn the_ad_hoc_block_shape_matches_its_typescript_mirror() {
+        let offer = crate::time::suggest::AdHocBlock {
+            block_id: 7,
+            suggestion: Some(crate::time::suggest::Suggestion {
+                entity_id: "jira:PAY-231".to_owned(),
+                title: None,
+                rule: crate::time::suggest::SuggestionRule::ContextAnchor,
+            }),
+        };
+        assert_shape(
+            MIRROR,
+            "AdHocBlock",
+            &serde_json::to_value(&offer).unwrap(),
+            &["block_id", "suggestion"],
         );
     }
 

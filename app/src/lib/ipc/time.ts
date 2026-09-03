@@ -96,14 +96,25 @@ export function currentTimer(): Promise<RunningTimer | null> {
 }
 
 /**
- * Start the timer on `target`.
+ * Start the timer on `target`, in the room the reader is standing in.
+ *
+ * `inRoom` is the **stored context** they are in — `RoomContext.filter.context`
+ * — and `null` for every derived room (*All work*, a source, a project), which
+ * is not a stored context and has nothing to anchor a suggestion to. It is
+ * recorded on the block and read later by {@link adHocBlock}'s second rule
+ * (#281): where the reader stood when the clock started is a different fact
+ * from where they are standing when they stop.
  *
  * Rejects with `conflict` when one is already running — every surface that
  * switches targets stops first, because a stop is what closes a block — and
- * with `invalid` for a stored context, a malformed entity id or a blank label.
+ * with `invalid` for a stored context as the *target*, a malformed entity id, a
+ * blank label, or a room that is not a `ctx:` id.
  */
-export function startTimer(target: TimerTarget): Promise<RunningTimer> {
-  return invoke<RunningTimer>("start_timer", { target });
+export function startTimer(
+  target: TimerTarget,
+  inRoom: string | null = null,
+): Promise<RunningTimer> {
+  return invoke<RunningTimer>("start_timer", { target, inRoom });
 }
 
 /**
@@ -391,4 +402,65 @@ export function passiveAttribution(): Promise<boolean> {
  */
 export function setPassiveAttribution(enabled: boolean): Promise<boolean> {
   return invoke<boolean>("set_passive_attribution", { enabled });
+}
+
+/**
+ * Which rule produced an ad-hoc block's suggestion — `suggest::SuggestionRule`.
+ *
+ * The dialog draws a sentence per member, and that is the whole of what this
+ * union is for: a suggestion whose reason is not on screen is a guess the
+ * reader can only trust or ignore.
+ */
+export type SuggestionRule = "linked_to_target" | "context_anchor" | "last_logged";
+
+/** The ticket *Log an ad-hoc block* offers, and why — `suggest::Suggestion`. */
+export interface Suggestion {
+  entity_id: string;
+  /**
+   * What the mirror calls it, or `null` — for an entity it has never held, has
+   * purged, or holds under a blank title. One question, one answer: show the
+   * id instead. The rule {@link DayBlock.title} states.
+   */
+  title: string | null;
+  rule: SuggestionRule;
+}
+
+/**
+ * What stopping the timer on a page, a note, a repo or a label offers —
+ * `suggest::AdHocBlock`.
+ *
+ * **Two absences, and they mean different things.** {@link adHocBlock}
+ * answering `null` is *this block is on a ticket*, and the worklog draft is
+ * what opens. This shape with `suggestion: null` is *the dialog opens and
+ * knobas has nothing to suggest* — no rule fired, and *Keep local* is the
+ * default.
+ */
+export interface AdHocBlock {
+  /** Echoed back, so a second stop cannot be drawn over the first answer. */
+  block_id: number;
+  suggestion: Suggestion | null;
+}
+
+/**
+ * What *Log an ad-hoc block* should show for a block, or `null` because that
+ * block is not an ad-hoc one.
+ *
+ * **Ask on every stop, before {@link worklogDraft}.** Whether a block's target
+ * is somewhere a worklog can go is the backend's decision, read off the
+ * source's declared write ops — so the shell asks once and opens whichever
+ * dialog it is handed, rather than keeping a list of kinds that goes stale the
+ * day an adapter starts taking worklogs.
+ *
+ * The day is the day the **block started on**, in the reader's own reckoning,
+ * for the reason {@link worklogDraft} takes one: a stop at 00:10 closes an
+ * afternoon that belongs to yesterday.
+ *
+ * Rejects with `not_found` for a block that is no longer there.
+ */
+export function adHocBlock(blockId: number, when: ReaderDay): Promise<AdHocBlock | null> {
+  return invoke<AdHocBlock | null>("ad_hoc_block", {
+    blockId,
+    day: when.day,
+    offsetMinutes: when.offsetMinutes,
+  });
 }
