@@ -106,7 +106,9 @@ async fn a_started_timer_is_what_the_next_read_answers_with() {
         "a fresh profile has no timer"
     );
 
-    let started = time::start(&pool, on(TICKET), None).await.expect("it starts");
+    let started = time::start(&pool, on(TICKET), None)
+        .await
+        .expect("it starts");
     assert_eq!(started.timer.target, on(TICKET));
 
     let read = time::current(&pool)
@@ -166,7 +168,9 @@ async fn a_stored_context_is_refused_as_a_target() {
 #[tokio::test]
 async fn a_second_start_is_refused_and_leaves_the_first_running() {
     let pool = scratch("time-second").await;
-    let first = time::start(&pool, on(TICKET), None).await.expect("it starts");
+    let first = time::start(&pool, on(TICKET), None)
+        .await
+        .expect("it starts");
 
     let refusal = time::start(&pool, labelled(LABEL), None)
         .await
@@ -185,7 +189,9 @@ async fn a_second_start_is_refused_and_leaves_the_first_running() {
 #[tokio::test]
 async fn stopping_closes_a_block_over_the_time_the_timer_ran() {
     let pool = scratch("time-stop").await;
-    time::start(&pool, on(TICKET), None).await.expect("it starts");
+    time::start(&pool, on(TICKET), None)
+        .await
+        .expect("it starts");
     age(&pool, Duration::minutes(45), Duration::seconds(10)).await;
 
     let stopped = time::stop(&pool)
@@ -219,7 +225,9 @@ async fn stopping_closes_a_block_over_the_time_the_timer_ran() {
 #[tokio::test]
 async fn stopping_a_stopped_timer_is_a_success_that_writes_nothing() {
     let pool = scratch("time-stop-twice").await;
-    time::start(&pool, on(TICKET), None).await.expect("it starts");
+    time::start(&pool, on(TICKET), None)
+        .await
+        .expect("it starts");
     time::stop(&pool).await.unwrap().expect("the first stop");
 
     assert!(
@@ -249,7 +257,9 @@ async fn blocks(pool: &PgPool) -> i64 {
 #[tokio::test]
 async fn a_heartbeat_moves_the_last_alive_stamp_forward() {
     let pool = scratch("time-beat").await;
-    time::start(&pool, on(TICKET), None).await.expect("it starts");
+    time::start(&pool, on(TICKET), None)
+        .await
+        .expect("it starts");
     age(&pool, Duration::hours(3), Duration::hours(2)).await;
 
     let before = time::current(&pool).await.unwrap().expect("running");
@@ -293,7 +303,9 @@ async fn a_foreground_the_timer_could_never_run_on_does_not_cost_the_beat() {
     let context = knobas_core::context::create_adhoc(&pool, "SEPA migration")
         .await
         .expect("a stored context");
-    time::start(&pool, on(TICKET), None).await.expect("it starts");
+    time::start(&pool, on(TICKET), None)
+        .await
+        .expect("it starts");
     age(&pool, Duration::hours(3), Duration::hours(2)).await;
     let before = time::current(&pool).await.unwrap().expect("running");
 
@@ -326,7 +338,9 @@ async fn a_foreground_the_timer_could_never_run_on_does_not_cost_the_beat() {
 #[tokio::test]
 async fn relaunch_closes_a_stranded_timer_at_its_last_heartbeat() {
     let pool = scratch("time-relaunch").await;
-    time::start(&pool, on(TICKET), None).await.expect("it starts");
+    time::start(&pool, on(TICKET), None)
+        .await
+        .expect("it starts");
     let started = Duration::hours(9);
     let died = Duration::hours(6);
     age(&pool, started, died).await;
@@ -402,7 +416,9 @@ async fn a_timer_that_never_saw_a_heartbeat_still_closes() {
 #[tokio::test]
 async fn starting_and_stopping_write_the_activity_lines_the_shell_reads() {
     let pool = scratch("time-activity").await;
-    time::start(&pool, on(TICKET), None).await.expect("it starts");
+    time::start(&pool, on(TICKET), None)
+        .await
+        .expect("it starts");
     time::stop(&pool).await.unwrap().expect("it stops");
 
     assert_eq!(
@@ -420,7 +436,9 @@ async fn starting_and_stopping_write_the_activity_lines_the_shell_reads() {
 #[tokio::test]
 async fn the_relaunch_sweep_signs_its_line_as_knobas() {
     let pool = scratch("time-activity-sweep").await;
-    time::start(&pool, on(TICKET), None).await.expect("it starts");
+    time::start(&pool, on(TICKET), None)
+        .await
+        .expect("it starts");
     age(&pool, Duration::hours(9), Duration::hours(6)).await;
     time::close_stranded(&pool).await.unwrap().expect("swept");
 
@@ -449,7 +467,9 @@ async fn a_label_timers_line_carries_the_label_and_no_entity() {
 #[tokio::test]
 async fn an_entity_timers_line_is_filed_under_that_entity() {
     let pool = scratch("time-activity-entity").await;
-    let started = time::start(&pool, on(TICKET), None).await.expect("it starts");
+    let started = time::start(&pool, on(TICKET), None)
+        .await
+        .expect("it starts");
     assert_eq!(started.activity.entity_id.as_deref(), Some(TICKET));
 
     let stopped = time::stop(&pool).await.unwrap().expect("it stops");
@@ -506,7 +526,9 @@ async fn the_schema_refuses_a_target_that_is_both_halves_or_neither() {
 #[tokio::test]
 async fn the_schema_refuses_a_second_timer_row() {
     let pool = scratch("time-singleton").await;
-    time::start(&pool, on(TICKET), None).await.expect("it starts");
+    time::start(&pool, on(TICKET), None)
+        .await
+        .expect("it starts");
 
     let refused = sqlx::query("insert into knobas.timer (label) values ($1)")
         .bind(LABEL)
@@ -790,7 +812,9 @@ async fn extending_a_relaunch_ended_block_moves_its_end_and_drops_the_marker() {
     // A real stranded block, closed by the sweep, rather than one this test
     // flagged by hand: the marker is what the sweep writes, and a fixture that
     // set the column itself would not witness that the two agree.
-    time::start(&pool, on(TICKET), None).await.expect("it starts");
+    time::start(&pool, on(TICKET), None)
+        .await
+        .expect("it starts");
     age(&pool, Duration::hours(9), Duration::hours(6)).await;
     let closed = time::close_stranded(&pool)
         .await
@@ -1163,7 +1187,9 @@ async fn with_passive_attribution_off_the_beat_still_stamps_and_nothing_is_recor
         "passive attribution is off until somebody switches it on"
     );
 
-    time::start(&pool, on(TICKET), None).await.expect("it starts");
+    time::start(&pool, on(TICKET), None)
+        .await
+        .expect("it starts");
     age(&pool, Duration::hours(2), Duration::hours(1)).await;
     let stale = time::current(&pool).await.unwrap().unwrap().last_heartbeat;
 
@@ -2137,7 +2163,9 @@ async fn a_ticket_linked_to_the_page_is_the_suggestion_and_names_its_rule() {
     linked(&pool, PAGE, TICKET, at(9, 0)).await;
 
     let block = timed(&pool, on(PAGE), None).await;
-    let offered = offer(&pool, block).await.expect("a page is an ad-hoc block");
+    let offered = offer(&pool, block)
+        .await
+        .expect("a page is an ad-hoc block");
     assert_eq!(offered.block_id, block, "the offer is about this block");
 
     let suggestion = offered.suggestion.expect("the linked ticket is suggested");
@@ -2218,7 +2246,13 @@ async fn an_unconfirmed_link_never_suggests_anything_until_it_is_confirmed() {
     let pool = scratch("suggest-confirmed-only").await;
     configure_jira(&pool, "mara.lindqvist").await;
     entity_named(&pool, PAGE, "page", "SEPA payout retry design").await;
-    entity_named(&pool, "jira:PAY-777", "ticket", "A ticket knobas guessed at").await;
+    entity_named(
+        &pool,
+        "jira:PAY-777",
+        "ticket",
+        "A ticket knobas guessed at",
+    )
+    .await;
     let guess = proposed(&pool, PAGE, "jira:PAY-777").await;
 
     let block = timed(&pool, on(PAGE), None).await;
@@ -2364,7 +2398,9 @@ async fn a_relaunch_closed_block_still_remembers_the_room_it_ran_in() {
     entity_named(&pool, TICKET, "ticket", "Retry failed SEPA payouts").await;
     let sepa = room_anchored_on(&pool, TICKET).await;
 
-    time::start(&pool, on(PAGE), Some(sepa)).await.expect("it starts");
+    time::start(&pool, on(PAGE), Some(sepa))
+        .await
+        .expect("it starts");
     age(&pool, Duration::hours(4), Duration::hours(3)).await;
     let block = time::close_stranded(&pool)
         .await
