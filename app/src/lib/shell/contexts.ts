@@ -135,6 +135,22 @@ export function columnsRefusal(columns: number): string | null {
   return holdsColumns(columns) ? null : `${columns} statuses; columns holds ${MAX_COLUMNS}`;
 }
 
+/**
+ * One configured source, as the switcher needs it.
+ *
+ * `adapterKind` is **optional**, unlike `switcherContexts`' `projects`: it is
+ * only ever read for a chip's wording, its absence has a correct answer
+ * (`projectWord`'s generic *project*), and the shell learns it from a store
+ * that answers `null` until the database is up. A caller that has not got it
+ * says so by leaving it out.
+ */
+export interface SwitcherSource {
+  id: string;
+  label: string;
+  /** Which adapter this source runs — `"confluence"`, `"jira"`. */
+  adapterKind?: string | null;
+}
+
 /** The id of the room every session starts in. Matches `router.DEFAULT_CTX`. */
 export const ALL_CONTEXT_ID = "all";
 
@@ -156,6 +172,41 @@ export const ALL_CONTEXT: RoomContext = {
 };
 
 /**
+ * The word a project room is chipped with, for a source running this adapter
+ * (#285, ADR-0010).
+ *
+ * **A project keeps the source's own word.** Confluence groups its pages into
+ * *spaces*, and a room chipped "project" over one is knobas telling the reader
+ * a word their wiki does not use. So this is a map, and it is keyed by
+ * **adapter kind** rather than by source id: the word is a property of the
+ * product, and two configured Confluences must not be able to disagree about
+ * it.
+ *
+ * It is deliberately not on the adapter's descriptor. That is a frozen surface
+ * (contract §10.8, `crates/knobas-source/src/**`), the entry it would need is a
+ * single English noun, and knobas already carries its own vocabulary for kinds
+ * one layer down (`kinds.ts`'s layer 2) for exactly this reason. When a third
+ * source arrives with a third word — a Gitea *organisation*, say — it is one
+ * line here.
+ *
+ * The fallback is `project`, and it is the honest one: *project* is what
+ * ADR-0010 calls the dimension, so a source nothing has said anything about is
+ * labelled with the generic word rather than with a guess. `null` reaches here
+ * whenever the shell has not learned the source's adapter yet
+ * (`source-kinds.svelte.ts`).
+ */
+export function projectWord(adapterKind: string | null | undefined): string {
+  return adapterKind !== null && adapterKind !== undefined
+    ? (PROJECT_WORDS[adapterKind] ?? "project")
+    : "project";
+}
+
+/** The sources whose own word is not *project*. See {@link projectWord}. */
+const PROJECT_WORDS: Record<string, string> = {
+  confluence: "space",
+};
+
+/**
  * One project the corpus shows, as the switcher offers it (#209).
  *
  * The label falls back to the key, and the fallback lives here rather than in
@@ -163,12 +214,16 @@ export const ALL_CONTEXT: RoomContext = {
  * could read, and a name the backend invented would be indistinguishable on
  * the wire from one the source really said. A project with a key is reachable
  * either way — nameless is not the same as absent.
+ *
+ * `adapterKind` is the source's, and only the chip reads it: a space and a
+ * project are one dimension with two words (ADR-0010), so the id, the filter
+ * and the label are unchanged and no address depends on the word.
  */
-function projectContext(project: Project): RoomContext {
+function projectContext(project: Project, adapterKind: string | null | undefined): RoomContext {
   return {
     id: `proj:${project.source_id}:${project.key}`,
     label: project.name ?? project.key,
-    kindWord: "project",
+    kindWord: projectWord(adapterKind),
     filter: { sources: [project.source_id], context: null, project: project.key },
     miniBoardLayout: "columns",
     anchorId: null,
@@ -193,7 +248,7 @@ function projectContext(project: Project): RoomContext {
  * no projects for it, while its own room goes on behaving as it always has.
  */
 export function builtinContexts(
-  sources: { id: string; label: string }[],
+  sources: SwitcherSource[],
   projects: Project[] = [],
 ): RoomContext[] {
   return [
@@ -207,7 +262,9 @@ export function builtinContexts(
         miniBoardLayout: "stacked" as const,
         anchorId: null,
       },
-      ...projects.filter((project) => project.source_id === source.id).map(projectContext),
+      ...projects
+        .filter((project) => project.source_id === source.id)
+        .map((project) => projectContext(project, source.adapterKind)),
     ]),
   ];
 }
@@ -257,7 +314,7 @@ export function storedContext(row: ContextRow): RoomContext {
  */
 export function switcherContexts(
   stored: ContextRow[],
-  sources: { id: string; label: string }[],
+  sources: SwitcherSource[],
   projects: Project[],
 ): RoomContext[] {
   const derived = builtinContexts(sources, projects);
