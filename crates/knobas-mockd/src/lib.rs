@@ -3,8 +3,8 @@
 //! `knobas-mockd` is frozen and deprecated. A mock certifies nothing: the real
 //! container is the witness for every adapter and every write path
 //! (`docs/adr/0013-the-real-instance-is-the-witness-a-mock-certifies-nothing.md`).
-//! Nothing new goes in — no Confluence half, no new endpoint, no new
-//! deviation — and port 8211 is unreserved. The crate and its Jira and
+//! Nothing new goes in, not a Confluence half, not an endpoint, not a
+//! deviation, and port 8211 is unreserved. The crate and its Jira and
 //! TeamCity tests stay only until the live suites (`just gitea-live`,
 //! `just teamcity-live-seeded`, and `just atlassian-live` arriving with #275)
 //! assert the same things; then the crate is deleted with them. `knobas-source-mock`, the trait-level

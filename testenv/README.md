@@ -1,8 +1,8 @@
 # `testenv` — the knobas test environment
 
 A small fake company on a laptop: the Tidewater Freight fixture served by real
-software — Gitea and Uptime Kuma always, TeamCity, Jira and Confluence behind
-opt-in profiles — and, until the live suites replace it, by our own deprecated
+software (Gitea and Uptime Kuma always, TeamCity, Jira and Confluence behind
+opt-in profiles) and, until the live suites replace it, by our own deprecated
 mock.
 
 ```sh
@@ -16,7 +16,7 @@ Two layers, and the difference is the point:
 | Layer | What | Why |
 |---|---|---|
 | **Real products** | Gitea, Uptime Kuma v2 | Cheap to self-host, so the adapters are certified against the actual software rather than against our idea of it. |
-| **mockd** — *deprecated* | Jira Data Center v2, TeamCity REST | Built while Jira and TeamCity were "not cheap to self-host". **Deprecated 2026-09-03 (ADR-0013):** a mock certifies nothing, the real containers behind the profiles below are the witness for every adapter and every write path, and mockd gets nothing new; its tests stay until the live suites assert the same things, then it is deleted. `crates/knobas-mockd` still serves the *same* Tidewater fixture, so both layers tell one story while it lasts (design §14a). |
+| **mockd** (deprecated) | Jira Data Center v2, TeamCity REST | Built while Jira and TeamCity were "not cheap to self-host". **Deprecated 2026-09-03 (ADR-0013).** A mock certifies nothing, the real containers behind the profiles below are the witness for every adapter and every write path, and mockd gets nothing new; its tests stay until the live suites assert the same things, then it is deleted. `crates/knobas-mockd` still serves the *same* Tidewater fixture, so both layers tell one story while it lasts (design §14a). |
 
 ## Ports
 

@@ -62,7 +62,7 @@ Principles that came out of the rounds:
 
 A local, append-only log of (a) every action taken through knobas (status change, comment, link created, worklog sent, build triggered, restart, ack …) and (b) notable synced events on your work (build finished, PR approved, monitor changed). Each line: when, actor, verb, entity refs, origin (user / sync).
 
-Why first-class: three already-decided features are views over exactly this data — the standup digest ("built from 3 commits, 2 worklogs …"; **corrected 2026-09-03, #272:** the digest is drawn from the mirror and the activity stream for the configured usernames — sync writes no per-event lines, so the stream alone cannot carry it; the `CONTEXT.md` **Digest** term), the day review's passive attribution, and the inbox's "acting on an item records a line". The mockup writes such lines ad-hoc; the real app should have one table and one writer. Also gives the status-bar "latest change" line and, later, "what was I doing before lunch" (§13) for free.
+Why first-class: three already-decided features are views over exactly this data — the standup digest ("built from 3 commits, 2 worklogs …"; **corrected 2026-09-03, #272:** the digest is drawn from the mirror and the activity stream for the configured usernames, since sync writes no per-event lines and the stream alone cannot carry it; the `CONTEXT.md` **Digest** term), the day review's passive attribution, and the inbox's "acting on an item records a line". The mockup writes such lines ad-hoc; the real app should have one table and one writer. Also gives the status-bar "latest change" line and, later, "what was I doing before lunch" (§13) for free.
 
 ---
 
@@ -335,7 +335,7 @@ Rust workspace: `knobas-core` (entities, links, contexts, notes, time, activity)
 
 **Contract-first (Rec 08-24, this is what enables parallel work):** three interfaces get frozen before fan-out — (1) the `Source` trait, (2) the DB schema (`knobas` + `sync`), (3) the Tauri command/event API as a typed IPC schema shared with the frontend (generated TS types). Adapter agents build against the trait + contract tests; frontend agents build against the IPC schema + the mock source; neither waits for the other.
 
-**Amended 2026-09-03 (ADR-0013):** adapter agents still *build* against the trait and the contract battery, but they are *certified* against the real system — a live suite against the seeded container, its output in the PR body, re-run by the merge-manager before the squash. `knobas-mockd` is no longer part of this picture: deprecated, frozen, deleted once the live suites cover its assertions. `knobas-source-mock` stays as the frontend's backend.
+**Amended 2026-09-03 (ADR-0013).** Adapter agents still *build* against the trait and the contract battery, but they are *certified* against the real system: a live suite against the seeded container, its output in the PR body, re-run by the merge-manager before the squash. `knobas-mockd` is no longer part of this picture: deprecated, frozen, deleted once the live suites cover its assertions. `knobas-source-mock` stays as the frontend's backend.
 
 ---
 
