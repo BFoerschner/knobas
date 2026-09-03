@@ -249,14 +249,18 @@ test("the heading totals the blocks on the strip and not the day around them", a
   const { deletes } = render([block(1, at(9), at(10)), block(2, at(10, 40), at(11))]);
   await vi.waitFor(() => expect(strip()).toEqual(["block", "gap", "block"]));
 
-  expect(heading()).toContain("1 h 20 min tracked");
+  // The whole heading, not a substring: `"1 h 20 min tracked"` *contains*
+  // `"20 min tracked"`, so a total that went stale would pass a loose
+  // assertion on the second reading below. The mutant that found this one
+  // survived until the assertion was tightened.
+  expect(heading()).toBe("Thursday 3 September 2026 1 h 20 min tracked");
 
   // The first *Delete* on the strip belongs to the first block.
   button("Delete")!.click();
   await vi.waitFor(() => expect(deletes).toEqual([1]));
   await vi.waitFor(() => {
     flushSync();
-    expect(heading()).toContain("20 min tracked");
+    expect(heading()).toBe("Thursday 3 September 2026 20 min tracked");
   });
 });
 
