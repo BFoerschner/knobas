@@ -583,6 +583,227 @@ async fn a_project_room_shows_a_configuration_only_project() {
     }
 }
 
+/// **A space is Confluence's project** (ADR-0010), and the census can tell one
+/// from a Jira project standing in the same corpus.
+///
+/// Both sources in one test, which is the whole point: each record's project
+/// is resolved through the declaration **its own adapter** makes (#277), so a
+/// read that spelled either source's path literally -- `space.key` for
+/// everything, or `fields.project.key` for everything -- would report one of
+/// these two projects and silently lose the other. Neither declaration is
+/// written here: they come out of `declared_paths` over the real registry, the
+/// way the running binary's `list_projects` gets them, so dropping `space.key`
+/// from the Confluence descriptor fails *this* test and not only the
+/// descriptor's own.
+///
+/// The **room** half is asserted beside the census because the two are one
+/// macro (`knobas_core::project_key_read!`): a space room holds that space's
+/// pages, and neither the wiki's other space nor the Jira project's ticket.
+/// The room hands its filter to every tile, so narrowing the filter is
+/// narrowing every tile -- there is no per-tile special case (#208).
+#[tokio::test]
+async fn a_confluence_space_is_a_project_room_and_a_jira_project_is_another() {
+    let pool = seeded().await;
+    let token = unique();
+    // `conf-` sorts before `jira-`, which is the order the census promises and
+    // the order the switcher offers the rooms in.
+    let wiki = format!("conf-{token}");
+    let tracker = format!("jira-{token}");
+
+    // Configured rows, because `declared_paths` resolves a declaration per
+    // *instance* off `knobas.source_config.kind` -- the adapter kind. Without
+    // these two rows neither source declares anything and every project read
+    // misses, which is this seam's stated failure direction.
+    for (id, adapter_kind) in [
+        (&wiki, knobas_source_confluence::ADAPTER_KIND),
+        (&tracker, "jira"),
+    ] {
+        sqlx::query(
+            "insert into knobas.source_config
+                 (id, kind, display_name, base_url, auth_kind)
+             values ($1, $2, $1, 'http://localhost', 'pat')",
+        )
+        .bind(id)
+        .bind(adapter_kind)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    // The shapes the two adapters store verbatim: a Confluence page names its
+    // space in the expanded `space` object (`knobas_source_confluence::map`),
+    // a Jira issue names its project under `fields`.
+    let seed: [(&str, &str, &str, serde_json::Value); 4] = [
+        (
+            wiki.as_str(),
+            knobas_source_confluence::KIND_PAGE,
+            "98307",
+            serde_json::json!({
+                "id": "98307",
+                "space": { "key": "ENG", "name": "Engineering", "type": "global" },
+            }),
+        ),
+        (
+            wiki.as_str(),
+            knobas_source_confluence::KIND_PAGE,
+            "98404",
+            serde_json::json!({
+                "id": "98404",
+                "space": { "key": "OPS", "name": "Operations", "type": "global" },
+            }),
+        ),
+        // A page filed in no space knobas can read is in no space room, and is
+        // still in the wiki's own room: absence, never a wrong room
+        // (ADR-0007 requirement 3).
+        (
+            wiki.as_str(),
+            knobas_source_confluence::KIND_PAGE,
+            "98500",
+            serde_json::json!({ "id": "98500", "space": { "name": "Engineering" } }),
+        ),
+        (
+            tracker.as_str(),
+            "ticket",
+            "PAY-231",
+            serde_json::json!({ "fields": { "project": { "key": "PAY", "name": "Payout" } } }),
+        ),
+    ];
+    for (source_id, kind, key, payload) in &seed {
+        let id = format!("{source_id}:{key}");
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1, $2, $3)")
+            .bind(&id)
+            .bind(kind)
+            .bind(*key)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+             values ($1, $2, $3, $4, '', $5)",
+        )
+        .bind(&id)
+        .bind(source_id)
+        .bind(kind)
+        .bind(*key)
+        .bind(payload)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    // What the running binary resolves: every configured source's declaration,
+    // off the compiled-in registry.
+    let declarations = knobas_app::sources::paths::declared_paths(
+        &pool,
+        &knobas_app::sources::Registry::builtin(),
+    )
+    .await
+    .expect("what the configured sources declare");
+
+    // -- the census, which is what the switcher's rooms are built from -------
+    let census = knobas_core::project::list(&pool, &declarations)
+        .await
+        .expect("the census `list_projects` answers with");
+    let mine: Vec<(String, String, Option<String>)> = census
+        .into_iter()
+        .filter(|project| project.source_id == wiki || project.source_id == tracker)
+        .map(|project| (project.source_id, project.key, project.name))
+        .collect();
+    assert_eq!(
+        mine,
+        vec![
+            (wiki.clone(), "ENG".to_owned(), Some("Engineering".to_owned())),
+            (wiki.clone(), "OPS".to_owned(), Some("Operations".to_owned())),
+            (
+                tracker.clone(),
+                "PAY".to_owned(),
+                Some("Payout".to_owned())
+            ),
+        ],
+        "two spaces under the wiki and one project under the tracker, each by \
+         its source's own spelling"
+    );
+
+    // -- the room, narrowed by the same read --------------------------------
+    let ids = |page: knobas_app::commands::entity::EntityPage| {
+        page.rows
+            .into_iter()
+            .map(|row| row.entity_id)
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    let room = |sources: Vec<String>, project: Option<&str>, kinds: Vec<String>| EntityFilter {
+        sources,
+        project: project.map(str::to_owned),
+        kinds,
+        ..all()
+    };
+
+    // Unscoped by kind, and scoped to the *Docs* tile's kind: the room hands
+    // one filter to every tile, so both answers are the space's pages.
+    for kinds in [
+        Vec::new(),
+        vec![knobas_source_confluence::KIND_PAGE.to_owned()],
+    ] {
+        let space_room = ids(list_entities_inner(
+            &pool,
+            &room(vec![wiki.clone()], Some("ENG"), kinds.clone()),
+            500,
+            0,
+            &declarations,
+        )
+        .await
+        .unwrap());
+        assert_eq!(
+            space_room,
+            std::collections::BTreeSet::from([format!("{wiki}:98307")]),
+            "one space's pages, whatever kinds the tile asked for ({kinds:?})"
+        );
+    }
+
+    // The Jira project's room is the tracker's, and the space room is not it.
+    let project_room = ids(list_entities_inner(
+        &pool,
+        &room(vec![tracker.clone()], Some("PAY"), Vec::new()),
+        500,
+        0,
+        &declarations,
+    )
+    .await
+    .unwrap());
+    assert_eq!(
+        project_room,
+        std::collections::BTreeSet::from([format!("{tracker}:PAY-231")]),
+        "a space key and a project key are two rooms in two sources"
+    );
+
+    // The spaceless page is in the wiki's room and in neither space's.
+    let wiki_room = ids(list_entities_inner(
+        &pool,
+        &room(vec![wiki.clone()], None, Vec::new()),
+        500,
+        0,
+        &declarations,
+    )
+    .await
+    .unwrap());
+    assert!(wiki_room.contains(&format!("{wiki}:98500")));
+    for space in ["ENG", "OPS", "NOPE"] {
+        let narrowed = ids(list_entities_inner(
+            &pool,
+            &room(vec![wiki.clone()], Some(space), Vec::new()),
+            500,
+            0,
+            &declarations,
+        )
+        .await
+        .unwrap());
+        assert!(
+            !narrowed.contains(&format!("{wiki}:98500")),
+            "a page filed in no readable space is in no space room, {space} included"
+        );
+    }
+}
+
 /// A project room reaching past the tombstone filter is still that project's.
 ///
 /// The `include_deleted` statements are the detail's way in (§5a) and narrow
