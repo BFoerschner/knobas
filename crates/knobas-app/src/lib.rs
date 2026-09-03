@@ -29,6 +29,7 @@ pub mod commands;
 mod error;
 pub mod inbox;
 mod profile;
+pub mod protocol;
 pub mod sources;
 pub mod standup;
 pub mod start_work;
@@ -266,6 +267,11 @@ pub fn run() {
             commands::entity::notification_kinds,
             commands::entity::set_notification_kinds,
             commands::entity::standup_digest,
+            commands::entity::standup_protocol,
+            commands::entity::publish_standup_protocol,
+            commands::entity::standup_publish_target,
+            commands::entity::set_standup_publish_target,
+            commands::entity::create_action_item_ticket,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

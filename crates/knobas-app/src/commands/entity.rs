@@ -2341,3 +2341,329 @@ pub async fn standup_digest_inner(
     let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
     crate::standup::digest(pool, &identity, &declarations, now, today, earlier).await
 }
+
+// -- the standup protocol (#289) ---------------------------------------------
+//
+// Here for the reason the digest above it is here, and the same sentence of
+// spec #272: §10.8 freezes the `commands/` + `ipc/` layout, "standup and
+// Confluence reads go into the entity module as usual", and the `time` module
+// pair was the one ratified exception. What these decide lives in
+// `crate::protocol`; this seam adds the pool, the sources state and the
+// announcement, and nothing else.
+
+/// The protocol for a date, made if it is not there yet (issue #289, spec
+/// #272 stories 64-67).
+///
+/// **Get-or-create, and this is the read the standup view opens with**, so it
+/// is also where a publication settled in the reader's absence catches up:
+/// [`protocol::reconcile`] runs on every read, and it is the whole of the path
+/// by which a write that landed after a restart comes to have its link. The
+/// page id it needs comes from `knobas.write_queue.remote_id`, which the
+/// settle wrote and which outlives the `WriteReceipt` that carried it.
+///
+/// The **date is the webview's**, exactly as it is for the digest and the day
+/// review: which day it is where the reader sits is a fact only that side
+/// holds.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) for a read or
+/// write failure.
+pub async fn standup_protocol_inner(
+    pool: &PgPool,
+    day: chrono::NaiveDate,
+) -> Result<crate::protocol::Protocol, IpcError> {
+    let note = crate::protocol::get_or_create(pool, day).await?;
+    let publication = match crate::protocol::publication_of(pool, day).await? {
+        Some(publication) => Some(crate::protocol::reconcile(pool, &note.id, publication).await?),
+        None => None,
+    };
+    Ok(crate::protocol::Protocol {
+        day,
+        note_id: note.id,
+        page_title: crate::protocol::page_title_of(day),
+        publication,
+    })
+}
+
+/// [`standup_protocol_inner`] behind the lifecycle.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the
+/// database is still coming up; otherwise as [`standup_protocol_inner`].
+#[tauri::command]
+pub async fn standup_protocol(
+    lifecycle: State<'_, Lifecycle>,
+    day: chrono::NaiveDate,
+) -> Result<crate::protocol::Protocol, IpcError> {
+    standup_protocol_inner(&lifecycle.pool()?, day).await
+}
+
+/// Publish a date's protocol to Confluence (stories 65-68).
+///
+/// `target` is the answer to the dialog the **first** publish shows: given, it
+/// is recorded as the setting and used; omitted, the stored one is used and a
+/// missing one is a refusal rather than a guess. That is both directions of
+/// story 67 in one command -- *asked for the first time, and changeable in
+/// settings* -- with `set_standup_publish_target` as the other door onto the
+/// same key.
+///
+/// **Which source is the caller's to decide, not this command's.** With two
+/// Confluence sources configured there is no defensible default and story 68
+/// says so in as many words, so the dialog asks and sends the answer here. A
+/// command that picked one would be the mistake the story exists to prevent.
+///
+/// **A second publish for one date queues nothing.** See
+/// `crate::protocol`'s ruling: the publication already on the queue is
+/// answered with, so *Publish* pressed twice is one page. The one case that
+/// composes a fresh op is a previous write that was refused or discarded,
+/// where nothing landed.
+///
+/// The write goes through `sources::write_queue::submit` like every other, so
+/// it queues when Confluence is down and it shows in the pending-writes panel.
+/// `submit` also re-syncs the source when the write lands, which is what puts
+/// the new page in the mirror in time for the link this call then draws --
+/// `knobas.link`'s endpoints are `knobas.entity` rows, so the link cannot
+/// precede the sync.
+///
+/// The publication is **re-read from the queue** rather than taken from what
+/// `submit` handed back: the row is the durable record, the read is the same
+/// one every later read makes, and taking the two answers from one place is
+/// what stops them disagreeing.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) when no publish
+/// target is stored and none was given, or when the one given is not a
+/// coherent target; [`NotFound`](crate::IpcErrorCode::NotFound) when the
+/// configured parent page is not in the mirror; otherwise whatever the write
+/// queue refuses with.
+pub async fn publish_standup_protocol_inner(
+    state: &crate::sources::SourcesState,
+    day: chrono::NaiveDate,
+    target: Option<crate::protocol::PublishTarget>,
+) -> Result<crate::protocol::Protocol, IpcError> {
+    let pool = &state.pool;
+    let target = match target {
+        Some(chosen) => crate::protocol::set_publish_target(pool, &chosen).await?,
+        None => crate::protocol::publish_target(pool).await?.ok_or_else(|| {
+            IpcError::invalid(
+                "knobas does not know where to publish standup protocols yet. Choose the \
+                 Confluence source and the parent page first.",
+            )
+        })?,
+    };
+
+    let note = crate::protocol::get_or_create(pool, day).await?;
+    if crate::protocol::publication_of(pool, day).await?.is_none() {
+        let space = crate::protocol::space_of(pool, &target.parent).await?;
+        let payload = crate::protocol::create_page_payload(&target, &space, day, &note.body_md);
+        crate::sources::write_queue::submit(state, payload).await?;
+    }
+    standup_protocol_inner(pool, day).await
+}
+
+/// [`publish_standup_protocol_inner`] behind the app handle.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up;
+/// otherwise as [`publish_standup_protocol_inner`].
+#[tauri::command]
+pub async fn publish_standup_protocol<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    day: chrono::NaiveDate,
+    target: Option<crate::protocol::PublishTarget>,
+) -> Result<crate::protocol::Protocol, IpcError> {
+    let state = crate::sources::state(&app)?;
+    publish_standup_protocol_inner(&state, day, target).await
+}
+
+/// Where standup protocols are published, or `null` until somebody has said
+/// (story 67).
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the
+/// database is still coming up, [`Internal`](crate::IpcErrorCode::Internal)
+/// for a read failure.
+#[tauri::command]
+pub async fn standup_publish_target(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<Option<crate::protocol::PublishTarget>, IpcError> {
+    crate::protocol::publish_target(&lifecycle.pool()?).await
+}
+
+/// Change where standup protocols are published -- settings' half of story 67.
+///
+/// The same key [`publish_standup_protocol`] writes when it is given a target,
+/// so the dialog and the settings panel cannot disagree about where the next
+/// page lands. A protocol **already published** is not moved: it has a page and
+/// a link, and the setting is about the next one.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a target that could not route
+/// a write.
+#[tauri::command]
+pub async fn set_standup_publish_target(
+    lifecycle: State<'_, Lifecycle>,
+    target: crate::protocol::PublishTarget,
+) -> Result<crate::protocol::PublishTarget, IpcError> {
+    crate::protocol::set_publish_target(&lifecycle.pool()?, &target).await
+}
+
+/// What became of filing a ticket from an action item.
+#[derive(Debug, serde::Serialize)]
+pub struct ActionItemTicket {
+    /// The write queue row carrying the create.
+    pub write_id: i64,
+    /// The ticket, as an entity id, once the mirror has it.
+    ///
+    /// `None` for a create that is still queued, and for one that landed at a
+    /// source whose re-read has not brought the ticket back yet. Both are "not
+    /// yet", and the note is unlinked in both -- there is nothing to link to.
+    pub ticket_entity_id: Option<String>,
+    /// Whether the note and the ticket are linked.
+    pub linked: bool,
+}
+
+/// File a ticket from an action item and link it to the protocol (story 69).
+///
+/// **The existing op, unchanged.** `WriteOp::CreateTicket` is what the ticket
+/// is made with and `submit` is what carries it, so this adds no write path --
+/// it is the start-work flow's shape in miniature: dispatch an op, find what it
+/// made by *reading the mirror*, draw the link.
+///
+/// Reading the mirror rather than a receipt, because that is the only answer
+/// there is: `knobas-source-jira`'s create deliberately drops the key it was
+/// given, on the reasoning `WriteReceipt` records -- a created ticket is a
+/// mirrored entity, and the mirror is the reading that survives a re-send.
+/// `submit` re-syncs the source when the write lands, so the ticket is
+/// normally there by the time this looks.
+///
+/// A ticket that is **not** there yet is not an error and files nothing twice:
+/// the write is queued, the caller is told the id is not known, and the link is
+/// the one thing left undone. Pressing *Create ticket* again would file a
+/// second ticket, which is why the answer says plainly that the create is on
+/// the queue.
+///
+/// `project` is the project's entity id (`jira:PAY`), which is what
+/// `WriteOp::CreateTicket` calls its `entity` and what `list_projects` hands
+/// the picker.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for a blank title
+/// or a project that is not an entity id,
+/// [`NotFound`](crate::IpcErrorCode::NotFound) if no note carries `note_id`;
+/// otherwise whatever the write queue refuses with.
+pub async fn create_action_item_ticket_inner(
+    state: &crate::sources::SourcesState,
+    note_id: &str,
+    project: &str,
+    ticket_type: &str,
+    title: &str,
+    body: &str,
+) -> Result<ActionItemTicket, IpcError> {
+    let pool = &state.pool;
+    let title = title.trim();
+    if title.is_empty() {
+        return Err(IpcError::invalid(
+            "an action item with no words is not a ticket anybody could act on",
+        ));
+    }
+    let project_ref = EntityRef::parse(project).map_err(IpcError::invalid)?;
+    // The note has to be there before the write is sent: the whole point is a
+    // ticket linked to a protocol, and discovering the note was deleted after
+    // Jira has the ticket leaves a ticket nothing points at.
+    get_note_inner(pool, note_id).await?;
+
+    let queued = crate::sources::write_queue::submit(
+        state,
+        serde_json::json!({
+            "CreateTicket": {
+                "entity": project,
+                "title": title,
+                "body": body,
+                "ticket_type": ticket_type,
+            }
+        }),
+    )
+    .await?;
+
+    let ticket_entity_id = ticket_titled(pool, &project_ref.namespace, title).await?;
+    let mut linked = false;
+    if let Some(ticket) = ticket_entity_id.as_deref() {
+        crate::protocol::draw_link(pool, note_id, ticket, crate::protocol::ACTION_ITEM_RELATION)
+            .await?;
+        linked = true;
+    }
+    Ok(ActionItemTicket {
+        write_id: queued.id,
+        ticket_entity_id,
+        linked,
+    })
+}
+
+/// The newest ticket in a source's corpus with exactly this title.
+///
+/// The look-back-after-write `start_work::queue`'s `PULL_REQUEST_BY_HEAD` is,
+/// and it carries the same warning: it is a source-shaped read outside an
+/// adapter and it exists because `Source::write` answers nothing for a create.
+/// §4.1 guarantees `title`, which is the only field a freshly created ticket
+/// can be recognised by from outside.
+///
+/// Newest first, so a project that has had this exact summary before answers
+/// with the one just made. A title nothing matches is `None`, never a guess.
+///
+/// The namespace is matched as a **literal prefix**: `_` matches any character
+/// in a `like` pattern and source ids carry them, so an unescaped prefix could
+/// find another source's ticket and link the protocol to it.
+async fn ticket_titled(
+    pool: &PgPool,
+    source_id: &str,
+    title: &str,
+) -> Result<Option<String>, IpcError> {
+    let mut prefix = String::with_capacity(source_id.len() + 4);
+    for ch in source_id.chars() {
+        if matches!(ch, '%' | '_' | '\\') {
+            prefix.push('\\');
+        }
+        prefix.push(ch);
+    }
+    prefix.push_str(":%");
+    let found: Option<String> = sqlx::query_scalar(
+        "select entity_id from sync.live_item
+          where entity_id like $1 and kind = 'ticket' and title = $2
+          order by item_updated_at desc nulls last, entity_id
+          limit 1",
+    )
+    .bind(&prefix)
+    .bind(title)
+    .fetch_optional(pool)
+    .await
+    .map_err(IpcError::internal)?;
+    Ok(found)
+}
+
+/// [`create_action_item_ticket_inner`] behind the app handle.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up;
+/// otherwise as [`create_action_item_ticket_inner`].
+#[tauri::command]
+pub async fn create_action_item_ticket<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    note_id: String,
+    project: String,
+    ticket_type: String,
+    title: String,
+    body: String,
+) -> Result<ActionItemTicket, IpcError> {
+    let state = crate::sources::state(&app)?;
+    create_action_item_ticket_inner(&state, &note_id, &project, &ticket_type, &title, &body).await
+}
