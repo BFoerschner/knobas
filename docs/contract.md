@@ -4238,7 +4238,15 @@ From this commit on, each of the following requires an orchestrator decision **a
   and neither *Log all* nor the draft offers the blocks again. Held is still the honest cell of the
   four this read has — the time has not reached the ticket and the blocks are spoken for — but the
   way out is the discard path's to build (clear the copy and the mark), not this read's to paper
-  over: filed as **#328** rather than fixed here. *Unlogged* is `tracked - logged - held` floored at zero; the floor is not
+  over: filed as **#328** rather than fixed here. **Built there since (#328, 2026-09-03):**
+  `knobas_core::write_queue::discard` now deletes the worklog copy in the statement that settles
+  the queue row, and `block_worklog_fk`'s `on delete set null` gives the blocks back, so discarded
+  time reads as *unlogged* and every surface offers it again. No migration and no new command --
+  no surface in this section's frozen list changed, which is why #328 has no entry of its own.
+  `discarded` stays in `is_logged`'s *held* half as a backstop: the release spares a copy carrying
+  a `remote_id`, so an hour Jira answered for is never offered for logging twice, and
+  `a_discard_leaves_a_worklog_jira_answered_for_alone` reads that cell rather than leaving the
+  claim unwitnessed. *Unlogged* is `tracked - logged - held` floored at zero; the floor is not
   tidiness, it is that the draft's interval and seconds are the reader's own and may exceed the
   blocks they were made of.
 

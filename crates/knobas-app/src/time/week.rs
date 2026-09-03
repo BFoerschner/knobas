@@ -23,28 +23,41 @@
 //! timesheet's logged and held numbers come from the local copy joined to the
 //! queue's state"). A worklog whose write is `pending` or `sent` is logged --
 //! spec story 39: the number is about what the reader did, not about sync
-//! timing. Anything else -- `held`, `refused`, `discarded`, or a copy with no
-//! queue row at all -- is **held**: one word for "this time has not reached
-//! the ticket", and the column is separate from unlogged rather than folded
-//! into it because the blocks under it already carry a worklog id and *Log
-//! all* will not offer them again. Drawing them as unlogged would be an
-//! invitation to log an afternoon twice; drawing them as logged would be
-//! false.
+//! timing. Anything else -- `held`, `refused`, or a copy with no queue row at
+//! all -- is **held**: one word for "this time has not reached the ticket",
+//! and the column is separate from unlogged rather than folded into it
+//! because the blocks under it already carry a worklog id and *Log all* will
+//! not offer them again. Drawing them as unlogged would be an invitation to
+//! log an afternoon twice; drawing them as logged would be false.
 //!
-//! **`discarded` is the one of the four that has no way out, and that is a
-//! gap rather than a decision here.** `held` and `refused` are open states:
-//! `write_queue::open` selects `state in ('pending','held','refused')`, so
-//! they are in the pending-writes panel and a person can retry or withdraw
-//! one. A discarded write is not -- that module's own words are "a sent or
-//! discarded write is history" -- and `write_queue::discard` touches only the
-//! queue row: the worklog copy stays and the block keeps its `worklog_id`.
-//! So the time reads as held for good, `unlogged` stays zero, and neither
-//! *Log all* nor the draft will offer the blocks again. Held is still the
-//! honest cell of the four available -- the time really has not reached the
-//! ticket and the blocks really are spoken for -- but the way out belongs to
-//! the discard path (clearing the copy and the mark), which is
-//! `knobas_core::write_queue`'s to build and not this read's to paper over --
-//! filed as #328.
+//! **`discarded` is not among them, and that is the whole of #328's fix.**
+//! `held` and `refused` are open states -- `write_queue::open` selects
+//! `state in ('pending','held','refused')` -- so they are in the
+//! pending-writes panel and a person can retry or withdraw one. A discarded
+//! write is not: that module's own words are "a sent or discarded write is
+//! history". Held was the honest cell of the four this read had, but it was a
+//! dead end -- the time read as held for good, `unlogged` stayed zero, and
+//! neither *Log all* nor the draft would offer the blocks again.
+//!
+//! The way out was the discard path's rather than this read's, and it is now
+//! built there: `knobas_core::write_queue::discard` deletes the worklog copy
+//! in the same statement that settles the queue row, and `block_worklog_fk`'s
+//! `on delete set null` gives the blocks back. So a discarded worklog reaches
+//! this read as **no worklog at all** -- its time is tracked and unlogged
+//! again, which is the honest cell, and every surface offers it.
+//!
+//! [`is_logged`] keeps its answer for `discarded` all the same, and it is
+//! still *held*. The release spares a copy the source answered for --
+//! `discard`'s `remote_id is null` guard, because an hour Jira holds must
+//! never be offered for logging twice -- and such a copy beside a discarded
+//! write is the one shape that still reaches this read. The state machine
+//! does not produce it today (`sent` writes the id and `state = 'sent'` in
+//! one statement, and nothing leaves `sent`), so this is a backstop rather
+//! than a column anybody has seen; if a path to it ever appears, *held* is
+//! the least wrong of the four and the cell will want revisiting with it.
+//! `tests/week_ipc.rs`'s `a_discard_leaves_a_worklog_jira_answered_for_alone`
+//! builds that fixture and reads the cell, so the claim is pinned rather than
+//! merely written down.
 //!
 //! **Unlogged** is the difference, floored at zero. The floor is not
 //! defensive tidiness: the draft's interval and seconds are the reader's own

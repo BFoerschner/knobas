@@ -567,6 +567,14 @@ pub async fn due(pool: &PgPool, source_id: &str) -> Result<Vec<QueuedWrite>, Cor
 /// Every transition below is one `update ... where id = $1 and state in (..)`,
 /// returning the row it changed.
 ///
+/// Two of them wrap that update in a CTE and write `knobas.worklog` in the
+/// same statement -- [`sent`] stamps the copy, [`discard`] deletes it -- and
+/// both say in place why that may not be a second statement. Both expand this
+/// macro inside the CTE rather than restating the update, so the shape and the
+/// concurrency argument below are theirs too. What each sets and which states
+/// it accepts are still its own -- that is what this macro takes as its
+/// argument -- and so is the sub-statement beside it.
+///
 /// The state guard in the `where` clause is what makes each of these safe to
 /// call concurrently with the others: two flush loops that both decided to
 /// send the same write cannot both settle it, and `None` -- no row matched --
@@ -721,14 +729,13 @@ pub async fn sent(
     remote_id: Option<&str>,
 ) -> Result<Option<QueuedWrite>, CoreError> {
     let row = sqlx::query_as::<_, QueuedWrite>(concat!(
-        "with settled as (
-           update knobas.write_queue
-              set state = 'sent', wait_reason = null, settled_at = now(),
-                  attempted_at = now(), attempts = attempts + 1,
-                  remote_id = coalesce($2, remote_id)
-            where id = $1 and state = 'pending'
-            returning ",
-        queue_columns!(),
+        "with settled as (",
+        transition!(
+            "state = 'sent', wait_reason = null, settled_at = now(), \
+             attempted_at = now(), attempts = attempts + 1, \
+             remote_id = coalesce($2, remote_id)
+              where id = $1 and state = 'pending'"
+        ),
         "
          ), stamped as (
            update knobas.worklog w
@@ -755,13 +762,87 @@ pub async fn sent(
 /// `None` if there was nothing open left to withdraw, which is what makes
 /// discarding twice honest rather than merely harmless.
 ///
+/// # And the withdrawal gives the time back (issue #328)
+///
+/// A `log_work` write carries a `knobas.worklog` row -- knobas' **copy** of a
+/// record Jira is going to hold -- and the blocks that copy was made of point
+/// back at it, which is what makes them read-only. Withdrawing the write used
+/// to leave both in place: the week timesheet drew the hours as *held* for
+/// good, `unlogged` stayed zero, and neither *Log all* nor the day review
+/// would offer or edit the blocks again. A person who cancelled a queued
+/// worklog had silently made that afternoon unloggable, with no way out from
+/// any surface.
+///
+/// So the withdrawal deletes the copy, and the `on delete set null` on
+/// `block_worklog_fk` gives the blocks back -- migration `0014`'s own words,
+/// "deleting a worklog must give its blocks back, never take the afternoon
+/// with it". The time returns to *unlogged* and every surface offers it again,
+/// because all four of them read the same two columns.
+///
+/// **This does not contradict ADR-0012.** The rule there is that a *sent*
+/// write is never rolled back, and this statement cannot reach one: the update
+/// narrows on `state in ('pending','held','refused')`, [`sent`] is the only
+/// writer of `state = 'sent'`, and no transition leads back out of it. What is
+/// deleted is a copy of a record that was never made.
+///
+/// **Except when Jira answered anyway**, which is what `remote_id is null`
+/// guards. The copy carries what the source called the worklog, and a copy
+/// that has one is knobas' record that the hour exists at Jira; deleting that
+/// would forget a worklog knobas cannot re-read, and then offer the same hour
+/// to *Log all*, which bills it twice. The guard is on the delete itself
+/// rather than left to the state machine, so the statement is safe on its own
+/// terms.
+///
+/// The one gap it cannot close is at-least-once's own (ADR-0012): a write that
+/// arrived and whose settle never landed is a `pending` row with no id
+/// anywhere, and nothing here can tell it from one that never left. **That is
+/// not only a crash.** `knobas_sync::write_queue::attempt` names the ordinary
+/// case in place -- "the row settled under us -- the user discarded it while
+/// it was in flight" -- and the flush loop's per-source lock does not hold a
+/// discard back. So the window is one HTTP round-trip wide, and inside it this
+/// statement gives back blocks whose hour is at Jira, which *Log all* will
+/// then offer again. `attempts` cannot narrow it either: every writer of that
+/// column bumps it *after* the call, never before, so a write in flight is
+/// indistinguishable from one that has not been tried.
+///
+/// What that buys is the alternative #328 weighed and rejected -- a copy no
+/// surface can release, reading as *held* for good. The queue row is kept,
+/// discarded, with its payload, so what was withdrawn is still answerable even
+/// when the copy is gone.
+///
+/// # Why this statement knows about `knobas.worklog`
+///
+/// [`sent`]'s reason, from the other end: the queue owns when a write stops
+/// being owed, and the copy's existence is a fact about that. One statement
+/// makes "the write is withdrawn" and "the time is knobas' own again" the same
+/// event, so the withdrawal is never half-done: no webview reads a settled
+/// queue row beside blocks this statement was going to release.
+///
+/// The claim stops at this statement, deliberately. `time::worklog::commit`
+/// queues the write and writes the copy in that order, so a discard landing
+/// between those two steps finds no copy to delete and the insert that follows
+/// attaches one to a row that is already discarded -- #328's own shape, and
+/// not withdrawable a second time. That window is two adjacent awaits wide and
+/// only a person can open it, so it is recorded here rather than guarded, and
+/// `time/week.rs` describes the cell it produces.
+///
 /// # Errors
 ///
 /// [`CoreError::Db`] if the statement fails.
 pub async fn discard(pool: &PgPool, id: i64) -> Result<Option<QueuedWrite>, CoreError> {
-    let row = sqlx::query_as::<_, QueuedWrite>(transition!(
-        "state = 'discarded', wait_reason = null, settled_at = now()
-          where id = $1 and state in ('pending','held','refused')"
+    let row = sqlx::query_as::<_, QueuedWrite>(concat!(
+        "with settled as (",
+        transition!(
+            "state = 'discarded', wait_reason = null, settled_at = now()
+              where id = $1 and state in ('pending','held','refused')"
+        ),
+        "
+         ), released as (
+           delete from knobas.worklog w
+            using settled
+            where w.write_queue_id = settled.id and w.remote_id is null
+         )
+         select * from settled"
     ))
     .bind(id)
     .fetch_optional(pool)

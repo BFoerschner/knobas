@@ -383,6 +383,12 @@ pub async fn amend(
 /// Withdraw a write -- cancelling a pending one (story 7) or conceding a held
 /// one (story 14).
 ///
+/// A `log_work` write takes its local worklog copy with it and gives the
+/// blocks it covered back, so the time returns to *unlogged* rather than
+/// reading as held for good (#328). That happens in the one statement
+/// `store::discard` is, where its own docs argue it; nothing here has to
+/// remember to do it, which is the point.
+///
 /// `None` if there was nothing open left to withdraw.
 ///
 /// # Errors
