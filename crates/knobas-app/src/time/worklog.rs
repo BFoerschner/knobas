@@ -66,7 +66,7 @@ use crate::sources::SourcesState;
 /// rule in the same words a descriptor does; `the_identifier_is_the_one_the_spi_defines`
 /// pins the two together, so a rename in the SPI fails here instead of leaving
 /// the draft quietly unavailable on every source.
-const LOG_WORK: &str = "log_work";
+pub(super) const LOG_WORK: &str = "log_work";
 
 /// The actor whose activity lines are the reader's own.
 const ACTOR: &str = "user";
@@ -193,7 +193,7 @@ pub struct Worklog {
 /// hidden: on the two days a year a zone changes offset, the window is an hour
 /// out at one end. The interval is editable in the draft, which is the remedy;
 /// carrying a zone database into the bridge for those two days is not.
-fn day_bounds(
+pub(super) fn day_bounds(
     day: NaiveDate,
     offset_minutes: i32,
 ) -> Result<(DateTime<Utc>, DateTime<Utc>), IpcError> {

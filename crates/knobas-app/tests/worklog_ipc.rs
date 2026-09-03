@@ -526,6 +526,7 @@ async fn stopping_the_timer_on_a_ticket_is_what_there_is_to_draft() {
         TimerTarget::Entity {
             entity_id: TICKET.to_owned(),
         },
+        None,
     )
     .await
     .expect("the timer starts");

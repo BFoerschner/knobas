@@ -106,7 +106,7 @@ async fn a_started_timer_is_what_the_next_read_answers_with() {
         "a fresh profile has no timer"
     );
 
-    let started = time::start(&pool, on(TICKET)).await.expect("it starts");
+    let started = time::start(&pool, on(TICKET), None).await.expect("it starts");
     assert_eq!(started.timer.target, on(TICKET));
 
     let read = time::current(&pool)
@@ -120,7 +120,7 @@ async fn a_started_timer_is_what_the_next_read_answers_with() {
 #[tokio::test]
 async fn an_ad_hoc_label_is_as_legal_a_target_as_a_ticket() {
     let pool = scratch("time-label").await;
-    let started = time::start(&pool, labelled(LABEL))
+    let started = time::start(&pool, labelled(LABEL), None)
         .await
         .expect("it starts");
     assert_eq!(started.timer.target, labelled(LABEL));
@@ -150,7 +150,7 @@ async fn a_stored_context_is_refused_as_a_target() {
         context.id
     );
 
-    let refusal = time::start(&pool, on(&context.id))
+    let refusal = time::start(&pool, on(&context.id), None)
         .await
         .expect_err("a context is a set, and time on a set has nowhere to go");
     assert_eq!(refusal.code, IpcErrorCode::Invalid);
@@ -166,9 +166,9 @@ async fn a_stored_context_is_refused_as_a_target() {
 #[tokio::test]
 async fn a_second_start_is_refused_and_leaves_the_first_running() {
     let pool = scratch("time-second").await;
-    let first = time::start(&pool, on(TICKET)).await.expect("it starts");
+    let first = time::start(&pool, on(TICKET), None).await.expect("it starts");
 
-    let refusal = time::start(&pool, labelled(LABEL))
+    let refusal = time::start(&pool, labelled(LABEL), None)
         .await
         .expect_err("there is already a timer");
     assert_eq!(refusal.code, IpcErrorCode::Conflict);
@@ -185,7 +185,7 @@ async fn a_second_start_is_refused_and_leaves_the_first_running() {
 #[tokio::test]
 async fn stopping_closes_a_block_over_the_time_the_timer_ran() {
     let pool = scratch("time-stop").await;
-    time::start(&pool, on(TICKET)).await.expect("it starts");
+    time::start(&pool, on(TICKET), None).await.expect("it starts");
     age(&pool, Duration::minutes(45), Duration::seconds(10)).await;
 
     let stopped = time::stop(&pool)
@@ -219,7 +219,7 @@ async fn stopping_closes_a_block_over_the_time_the_timer_ran() {
 #[tokio::test]
 async fn stopping_a_stopped_timer_is_a_success_that_writes_nothing() {
     let pool = scratch("time-stop-twice").await;
-    time::start(&pool, on(TICKET)).await.expect("it starts");
+    time::start(&pool, on(TICKET), None).await.expect("it starts");
     time::stop(&pool).await.unwrap().expect("the first stop");
 
     assert!(
@@ -249,7 +249,7 @@ async fn blocks(pool: &PgPool) -> i64 {
 #[tokio::test]
 async fn a_heartbeat_moves_the_last_alive_stamp_forward() {
     let pool = scratch("time-beat").await;
-    time::start(&pool, on(TICKET)).await.expect("it starts");
+    time::start(&pool, on(TICKET), None).await.expect("it starts");
     age(&pool, Duration::hours(3), Duration::hours(2)).await;
 
     let before = time::current(&pool).await.unwrap().expect("running");
@@ -293,7 +293,7 @@ async fn a_foreground_the_timer_could_never_run_on_does_not_cost_the_beat() {
     let context = knobas_core::context::create_adhoc(&pool, "SEPA migration")
         .await
         .expect("a stored context");
-    time::start(&pool, on(TICKET)).await.expect("it starts");
+    time::start(&pool, on(TICKET), None).await.expect("it starts");
     age(&pool, Duration::hours(3), Duration::hours(2)).await;
     let before = time::current(&pool).await.unwrap().expect("running");
 
@@ -326,7 +326,7 @@ async fn a_foreground_the_timer_could_never_run_on_does_not_cost_the_beat() {
 #[tokio::test]
 async fn relaunch_closes_a_stranded_timer_at_its_last_heartbeat() {
     let pool = scratch("time-relaunch").await;
-    time::start(&pool, on(TICKET)).await.expect("it starts");
+    time::start(&pool, on(TICKET), None).await.expect("it starts");
     let started = Duration::hours(9);
     let died = Duration::hours(6);
     age(&pool, started, died).await;
@@ -382,7 +382,7 @@ async fn relaunch_with_no_timer_closes_nothing() {
 #[tokio::test]
 async fn a_timer_that_never_saw_a_heartbeat_still_closes() {
     let pool = scratch("time-relaunch-instant").await;
-    time::start(&pool, labelled(LABEL))
+    time::start(&pool, labelled(LABEL), None)
         .await
         .expect("it starts");
     age(&pool, Duration::hours(4), Duration::hours(4)).await;
@@ -402,7 +402,7 @@ async fn a_timer_that_never_saw_a_heartbeat_still_closes() {
 #[tokio::test]
 async fn starting_and_stopping_write_the_activity_lines_the_shell_reads() {
     let pool = scratch("time-activity").await;
-    time::start(&pool, on(TICKET)).await.expect("it starts");
+    time::start(&pool, on(TICKET), None).await.expect("it starts");
     time::stop(&pool).await.unwrap().expect("it stops");
 
     assert_eq!(
@@ -420,7 +420,7 @@ async fn starting_and_stopping_write_the_activity_lines_the_shell_reads() {
 #[tokio::test]
 async fn the_relaunch_sweep_signs_its_line_as_knobas() {
     let pool = scratch("time-activity-sweep").await;
-    time::start(&pool, on(TICKET)).await.expect("it starts");
+    time::start(&pool, on(TICKET), None).await.expect("it starts");
     age(&pool, Duration::hours(9), Duration::hours(6)).await;
     time::close_stranded(&pool).await.unwrap().expect("swept");
 
@@ -433,7 +433,7 @@ async fn the_relaunch_sweep_signs_its_line_as_knobas() {
 #[tokio::test]
 async fn a_label_timers_line_carries_the_label_and_no_entity() {
     let pool = scratch("time-activity-label").await;
-    let started = time::start(&pool, labelled(LABEL))
+    let started = time::start(&pool, labelled(LABEL), None)
         .await
         .expect("it starts");
 
@@ -449,7 +449,7 @@ async fn a_label_timers_line_carries_the_label_and_no_entity() {
 #[tokio::test]
 async fn an_entity_timers_line_is_filed_under_that_entity() {
     let pool = scratch("time-activity-entity").await;
-    let started = time::start(&pool, on(TICKET)).await.expect("it starts");
+    let started = time::start(&pool, on(TICKET), None).await.expect("it starts");
     assert_eq!(started.activity.entity_id.as_deref(), Some(TICKET));
 
     let stopped = time::stop(&pool).await.unwrap().expect("it stops");
@@ -506,7 +506,7 @@ async fn the_schema_refuses_a_target_that_is_both_halves_or_neither() {
 #[tokio::test]
 async fn the_schema_refuses_a_second_timer_row() {
     let pool = scratch("time-singleton").await;
-    time::start(&pool, on(TICKET)).await.expect("it starts");
+    time::start(&pool, on(TICKET), None).await.expect("it starts");
 
     let refused = sqlx::query("insert into knobas.timer (label) values ($1)")
         .bind(LABEL)
@@ -790,7 +790,7 @@ async fn extending_a_relaunch_ended_block_moves_its_end_and_drops_the_marker() {
     // A real stranded block, closed by the sweep, rather than one this test
     // flagged by hand: the marker is what the sweep writes, and a fixture that
     // set the column itself would not witness that the two agree.
-    time::start(&pool, on(TICKET)).await.expect("it starts");
+    time::start(&pool, on(TICKET), None).await.expect("it starts");
     age(&pool, Duration::hours(9), Duration::hours(6)).await;
     let closed = time::close_stranded(&pool)
         .await
@@ -1163,7 +1163,7 @@ async fn with_passive_attribution_off_the_beat_still_stamps_and_nothing_is_recor
         "passive attribution is off until somebody switches it on"
     );
 
-    time::start(&pool, on(TICKET)).await.expect("it starts");
+    time::start(&pool, on(TICKET), None).await.expect("it starts");
     age(&pool, Duration::hours(2), Duration::hours(1)).await;
     let stale = time::current(&pool).await.unwrap().unwrap().last_heartbeat;
 
@@ -1954,4 +1954,599 @@ async fn the_candidates_are_the_readers_own_work_inside_the_interval() {
         "{}",
         draft.comment
     );
+}
+
+// -- the ad-hoc block's suggestion (#281) ------------------------------------
+//
+// Stopping on a page, a note, a repo or a label opens *Log an ad-hoc block*,
+// which suggests a ticket and names the rule that produced it. The three rules
+// are tried in order over **confirmed links only** (ADR-0008), and the whole
+// battery is about that order, that word "confirmed", and what happens when
+// nothing fires.
+//
+// The blocks below are made by **starting and stopping the timer**, not by an
+// `insert`: the room a block ran in is recorded by `start` and carried across
+// by the statement that closes it, so a fixture that wrote the row directly
+// would witness a column nothing fills.
+
+/// A page. Not [`mirrored`], which writes a ticket: half the point of these
+/// fixtures is that the block's own target is *not* something a worklog can go
+/// to.
+async fn entity_named(pool: &PgPool, entity_id: &str, kind: &str, title: &str) {
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, $2, $3)")
+        .bind(entity_id)
+        .bind(kind)
+        .bind(title)
+        .execute(pool)
+        .await
+        .expect("an entity row");
+}
+
+/// A second configured source, so "a ticket" can be told from "an item of some
+/// other source" by the rule the code actually uses -- the descriptor's
+/// `write_ops` -- rather than by a namespace nobody configured.
+async fn configure(pool: &PgPool, id: &str, adapter_kind: &str) {
+    knobas_sync::config::insert(
+        pool,
+        &knobas_sync::config::InsertConfig {
+            id: id.to_owned(),
+            adapter_kind: adapter_kind.to_owned(),
+            display_name: id.to_owned(),
+            base_url: "https://example.invalid".to_owned(),
+            auth_kind: knobas_sync::config::AuthKind::Method(knobas_source::AuthMethod::Pat),
+            config: serde_json::json!({ "username": "mara.lindqvist" }),
+            sync_interval_secs: 86_400,
+            enabled: true,
+        },
+    )
+    .await
+    .expect("the source row is written");
+}
+
+/// A confirmed link, drawn `from` -> `to`, **confirmed at `when`**.
+///
+/// The stamp is dictated because "most recently linked wins" is the tie-break
+/// this file has to be able to fail: two links written a microsecond apart in
+/// the same suite would order correctly by accident, and a test that cannot
+/// state which link is the newer one cannot tell the rule from its opposite.
+async fn linked(pool: &PgPool, from: &str, to: &str, when: DateTime<Utc>) {
+    let row = knobas_core::link::create(
+        pool,
+        &knobas_core::entity::EntityRef::parse(from).expect("an entity id"),
+        &knobas_core::entity::EntityRef::parse(to).expect("an entity id"),
+        "related",
+        knobas_core::link::Origin::Manual,
+        None,
+        "user",
+    )
+    .await
+    .expect("a link");
+    confirmed_at(pool, row.id, Some(when)).await;
+}
+
+/// Move a link's confirmation to `when`, or take it away entirely.
+///
+/// A fixture write, never an assertion -- the discipline [`age`] records.
+async fn confirmed_at(pool: &PgPool, id: uuid::Uuid, when: Option<DateTime<Utc>>) {
+    sqlx::query("update knobas.link set confirmed_at = $2 where id = $1")
+        .bind(id)
+        .bind(when)
+        .execute(pool)
+        .await
+        .expect("the link's confirmation is moved");
+}
+
+/// A **proposal**: a link row nobody has accepted (`confirmed_at is null`).
+///
+/// Written with SQL rather than through the detector, because what matters here
+/// is only that the row is in `knobas.link` and out of `knobas.confirmed_link`
+/// -- and a detector run would tie the fixture to whichever rules happen to
+/// fire on these ids. `link_proposal_chk` (migration `0007`) refuses an
+/// unconfirmed row with no reason, so the reason is real.
+async fn proposed(pool: &PgPool, from: &str, to: &str) -> uuid::Uuid {
+    sqlx::query_scalar::<_, uuid::Uuid>(
+        "insert into knobas.link
+           (from_id, to_id, relation, origin, created_by, confirmed_at,
+            rule, rule_class, reason)
+         values ($1, $2, 'related', 'suggested', 'knobas', null,
+                 'exact_key', 'exact_key', 'the page title contains the key')
+         returning id",
+    )
+    .bind(from)
+    .bind(to)
+    .fetch_one(pool)
+    .await
+    .expect("a proposal")
+}
+
+/// A stored context anchored on `anchor`, through the path a promoted room
+/// actually comes into existence by.
+async fn room_anchored_on(pool: &PgPool, anchor: &str) -> String {
+    knobas_core::context::promote(
+        pool,
+        &knobas_core::entity::EntityRef::parse(anchor).expect("an entity id"),
+    )
+    .await
+    .expect("the promotion runs")
+    .expect("the anchor has an entity row to promote")
+    .context
+    .id
+}
+
+/// A worklog on `entity`, logged at `when` -- rule three's raw material.
+async fn logged_at(pool: &PgPool, entity: &str, when: DateTime<Utc>) {
+    let id = sqlx::query_scalar::<_, i64>(
+        "insert into knobas.worklog (entity_id, started_at, seconds, comment, block_ids)
+         values ($1, $2, 3600, '', array[]::bigint[]) returning id",
+    )
+    .bind(entity)
+    .bind(when)
+    .fetch_one(pool)
+    .await
+    .expect("a worklog copy");
+    sqlx::query("update knobas.worklog set created_at = $2 where id = $1")
+        .bind(id)
+        .bind(when)
+        .execute(pool)
+        .await
+        .expect("the worklog is moved to when it was logged");
+}
+
+/// Time something and stop, in `room`, and answer with the block's id.
+///
+/// The real writers, so that the column `0016` adds is filled the way it is in
+/// the app and not by the fixture.
+async fn timed(pool: &PgPool, target: TimerTarget, room: Option<&str>) -> i64 {
+    time::start(pool, target, room.map(str::to_owned))
+        .await
+        .expect("it starts");
+    time::stop(pool)
+        .await
+        .expect("it stops")
+        .expect("a stop closes a block")
+        .block
+        .id
+}
+
+/// What the dialog would be handed for `block`, on [`DAY`].
+async fn offer(pool: &PgPool, block: i64) -> Option<knobas_app::time::suggest::AdHocBlock> {
+    time::suggest::offer(pool, &registry(), block, reader_day(), 0)
+        .await
+        .expect("the offer is readable")
+}
+
+/// The suggested ticket and the rule that produced it, for an offer that
+/// exists.
+async fn suggested(pool: &PgPool, block: i64) -> Option<(String, time::suggest::SuggestionRule)> {
+    offer(pool, block)
+        .await
+        .expect("this block is an ad-hoc one")
+        .suggestion
+        .map(|suggestion| (suggestion.entity_id, suggestion.rule))
+}
+
+const PAGE: &str = "confluence:ENG:SEPA payout retry design";
+
+/// Rule one, with the title the dialog draws beside the key.
+#[tokio::test]
+async fn a_ticket_linked_to_the_page_is_the_suggestion_and_names_its_rule() {
+    let pool = scratch("suggest-linked").await;
+    configure_jira(&pool, "mara.lindqvist").await;
+    entity_named(&pool, PAGE, "page", "SEPA payout retry design").await;
+    entity_named(&pool, TICKET, "ticket", "Retry failed SEPA payouts").await;
+    linked(&pool, PAGE, TICKET, at(9, 0)).await;
+
+    let block = timed(&pool, on(PAGE), None).await;
+    let offered = offer(&pool, block).await.expect("a page is an ad-hoc block");
+    assert_eq!(offered.block_id, block, "the offer is about this block");
+
+    let suggestion = offered.suggestion.expect("the linked ticket is suggested");
+    assert_eq!(suggestion.entity_id, TICKET);
+    assert_eq!(
+        suggestion.title.as_deref(),
+        Some("Retry failed SEPA payouts"),
+        "the dialog draws the ticket's name, not only its key"
+    );
+    assert_eq!(
+        suggestion.rule,
+        time::suggest::SuggestionRule::LinkedToTarget,
+        "the reason on screen has to be the rule that actually fired"
+    );
+}
+
+/// **The tie-break**: two linked tickets, and the newer link wins -- whichever
+/// end it was drawn from, and whatever the two ids sort like.
+///
+/// The second half is what makes this a test of *recency* rather than of the
+/// fixture's shape. Nothing about the rows changes between the two reads except
+/// which link was confirmed last, and the answer flips: an implementation
+/// ordering by entity id, by insertion order, or by "the oldest link wins"
+/// passes one half of this test and fails the other.
+#[tokio::test]
+async fn the_most_recently_linked_ticket_wins_whichever_end_it_was_drawn_from() {
+    let pool = scratch("suggest-tie-break").await;
+    configure_jira(&pool, "mara.lindqvist").await;
+    entity_named(&pool, PAGE, "page", "SEPA payout retry design").await;
+    entity_named(&pool, "jira:PAY-100", "ticket", "Old payout work").await;
+    entity_named(&pool, "jira:PAY-999", "ticket", "This week's payout work").await;
+
+    // Linked first, and drawn ticket -> page.
+    linked(&pool, "jira:PAY-100", PAGE, at(9, 0)).await;
+    // Linked second, and drawn page -> ticket. The later link and the larger
+    // id, so "oldest wins" and "smallest id wins" both answer PAY-100.
+    linked(&pool, PAGE, "jira:PAY-999", at(11, 0)).await;
+
+    let block = timed(&pool, on(PAGE), None).await;
+    assert_eq!(
+        suggested(&pool, block).await,
+        Some((
+            "jira:PAY-999".to_owned(),
+            time::suggest::SuggestionRule::LinkedToTarget
+        )),
+        "the ticket linked most recently is the one being worked on now"
+    );
+
+    // Re-drawn: the reader links PAY-100 again this afternoon. Same two rows,
+    // same two ids, same two directions -- only the confirmation moved.
+    let relinked = sqlx::query_scalar::<_, uuid::Uuid>(
+        "select id from knobas.link where from_id = $1 or to_id = $1",
+    )
+    .bind("jira:PAY-100")
+    .fetch_one(&pool)
+    .await
+    .expect("PAY-100's link");
+    confirmed_at(&pool, relinked, Some(at(15, 0))).await;
+
+    assert_eq!(
+        suggested(&pool, block).await,
+        Some((
+            "jira:PAY-100".to_owned(),
+            time::suggest::SuggestionRule::LinkedToTarget
+        )),
+        "moving the confirmation is the only change, so it has to be what decides"
+    );
+}
+
+/// **Confirmed links only** (ADR-0008, #41): a proposal is a detector's guess,
+/// and a guess must not put minutes on a ticket.
+///
+/// The second half is the positive control the first half needs: without it,
+/// a read that found no links at all -- a broken join, a wrong column -- would
+/// pass the "no suggestion" assertion for the wrong reason.
+#[tokio::test]
+async fn an_unconfirmed_link_never_suggests_anything_until_it_is_confirmed() {
+    let pool = scratch("suggest-confirmed-only").await;
+    configure_jira(&pool, "mara.lindqvist").await;
+    entity_named(&pool, PAGE, "page", "SEPA payout retry design").await;
+    entity_named(&pool, "jira:PAY-777", "ticket", "A ticket knobas guessed at").await;
+    let guess = proposed(&pool, PAGE, "jira:PAY-777").await;
+
+    let block = timed(&pool, on(PAGE), None).await;
+    assert_eq!(
+        suggested(&pool, block).await,
+        None,
+        "the tray's guess is not a link, and no other rule has anything to say"
+    );
+
+    confirmed_at(&pool, guess, Some(at(11, 0))).await;
+    assert_eq!(
+        suggested(&pool, block).await,
+        Some((
+            "jira:PAY-777".to_owned(),
+            time::suggest::SuggestionRule::LinkedToTarget
+        )),
+        "the same row, accepted, is a link -- so the first half failed on the \
+         word confirmed and not on the read"
+    );
+}
+
+/// A link to something that is not a ticket is not a suggestion, and does not
+/// stop the rule looking further down the list.
+///
+/// "Ticket" here means what it means everywhere in the time module: a source
+/// that declares `log_work`. A repo's pull request is linked more recently than
+/// the ticket and still loses, because a worklog cannot go to it.
+#[tokio::test]
+async fn a_link_to_something_no_worklog_can_go_to_is_skipped_not_taken() {
+    let pool = scratch("suggest-not-a-ticket").await;
+    configure_jira(&pool, "mara.lindqvist").await;
+    configure(&pool, "gitea", "gitea").await;
+    entity_named(&pool, PAGE, "page", "SEPA payout retry design").await;
+    entity_named(&pool, TICKET, "ticket", "Retry failed SEPA payouts").await;
+    entity_named(&pool, "gitea:tidewater/payments#4", "pr", "Retry loop").await;
+
+    linked(&pool, PAGE, TICKET, at(9, 0)).await;
+    linked(&pool, PAGE, "gitea:tidewater/payments#4", at(13, 0)).await;
+
+    let block = timed(&pool, on(PAGE), None).await;
+    assert_eq!(
+        suggested(&pool, block).await,
+        Some((
+            TICKET.to_owned(),
+            time::suggest::SuggestionRule::LinkedToTarget
+        )),
+        "the newest link is a pull request, and a worklog has nowhere to go on one"
+    );
+}
+
+/// **Rule two reads the room the block ran in, not the room anything is in
+/// now.**
+///
+/// Two rooms exist, each anchored on a different ticket, and two blocks ran --
+/// one in each. The read is handed nothing but a block id, so a rule that
+/// reached for "the newest context", "the only context" or "the context the
+/// reader is in" would answer the same ticket for both blocks; each block
+/// answering its own room's anchor is what says the fact came off the block.
+#[tokio::test]
+async fn the_anchor_of_the_room_the_block_ran_in_is_the_second_rule() {
+    let pool = scratch("suggest-room").await;
+    configure_jira(&pool, "mara.lindqvist").await;
+    entity_named(&pool, PAGE, "page", "SEPA payout retry design").await;
+    entity_named(&pool, TICKET, "ticket", "Retry failed SEPA payouts").await;
+    entity_named(&pool, "jira:PAY-104", "ticket", "Mandate import").await;
+
+    let sepa = room_anchored_on(&pool, TICKET).await;
+    let mandates = room_anchored_on(&pool, "jira:PAY-104").await;
+
+    let in_sepa = timed(&pool, on(PAGE), Some(&sepa)).await;
+    let in_mandates = timed(&pool, on(PAGE), Some(&mandates)).await;
+
+    assert_eq!(
+        suggested(&pool, in_sepa).await,
+        Some((
+            TICKET.to_owned(),
+            time::suggest::SuggestionRule::ContextAnchor
+        ))
+    );
+    assert_eq!(
+        suggested(&pool, in_mandates).await,
+        Some((
+            "jira:PAY-104".to_owned(),
+            time::suggest::SuggestionRule::ContextAnchor
+        )),
+        "the second block ran in the other room, and the newer room is not the \
+         answer for both"
+    );
+}
+
+/// The other direction of the column `0016` adds: a timer started in a derived
+/// room -- *All work*, a source, a project -- records no room, and rule two
+/// therefore does not fire even though a room with an anchor exists.
+///
+/// Without this, `start` could write the same context onto every block, or the
+/// read could take "any context that exists", and the test above would still
+/// pass.
+#[tokio::test]
+async fn a_block_started_outside_a_stored_room_is_not_given_one() {
+    let pool = scratch("suggest-no-room").await;
+    configure_jira(&pool, "mara.lindqvist").await;
+    entity_named(&pool, PAGE, "page", "SEPA payout retry design").await;
+    entity_named(&pool, TICKET, "ticket", "Retry failed SEPA payouts").await;
+    room_anchored_on(&pool, TICKET).await;
+
+    let block = timed(&pool, on(PAGE), None).await;
+    assert_eq!(
+        suggested(&pool, block).await,
+        None,
+        "the reader was in *All work*, so there is no room to draw an anchor from"
+    );
+}
+
+/// A room that is not a stored context is refused at the start, in words, and
+/// the timer is not started on a lie.
+#[tokio::test]
+async fn a_room_that_is_not_a_stored_context_is_refused() {
+    let pool = scratch("suggest-bad-room").await;
+    let refusal = time::start(&pool, on(TICKET), Some(TICKET.to_owned()))
+        .await
+        .expect_err("a ticket is not a room");
+    assert_eq!(refusal.code, IpcErrorCode::Invalid);
+    assert!(
+        refusal.message.contains("stored context"),
+        "the refusal has to say why: {}",
+        refusal.message
+    );
+    assert_eq!(
+        time::current(&pool).await.unwrap(),
+        None,
+        "a refused start leaves no timer behind"
+    );
+}
+
+/// Relaunch closes a stranded timer, and the block it writes still remembers
+/// the room -- which is a different statement from the one `stop` makes,
+/// because it is a different statement in the database.
+#[tokio::test]
+async fn a_relaunch_closed_block_still_remembers_the_room_it_ran_in() {
+    let pool = scratch("suggest-room-relaunch").await;
+    configure_jira(&pool, "mara.lindqvist").await;
+    entity_named(&pool, PAGE, "page", "SEPA payout retry design").await;
+    entity_named(&pool, TICKET, "ticket", "Retry failed SEPA payouts").await;
+    let sepa = room_anchored_on(&pool, TICKET).await;
+
+    time::start(&pool, on(PAGE), Some(sepa)).await.expect("it starts");
+    age(&pool, Duration::hours(4), Duration::hours(3)).await;
+    let block = time::close_stranded(&pool)
+        .await
+        .expect("the sweep runs")
+        .expect("a stranded timer was closed");
+
+    assert_eq!(
+        suggested(&pool, block.id).await,
+        Some((
+            TICKET.to_owned(),
+            time::suggest::SuggestionRule::ContextAnchor
+        )),
+        "an afternoon knobas had to close for the reader is still an afternoon \
+         that ran in a room"
+    );
+}
+
+/// Rule three, and the day it is about.
+///
+/// The first read has only yesterday's worklog to go on and answers nothing:
+/// "today's last logged ticket" is about the block's own day, so a read that
+/// took the newest worklog outright would suggest PAY-500 for a block on a day
+/// nobody logged anything.
+#[tokio::test]
+async fn todays_last_logged_ticket_is_the_third_rule() {
+    let pool = scratch("suggest-last-logged").await;
+    configure_jira(&pool, "mara.lindqvist").await;
+    entity_named(&pool, PAGE, "page", "SEPA payout retry design").await;
+    entity_named(&pool, "jira:PAY-500", "ticket", "Yesterday's work").await;
+    entity_named(&pool, "jira:PAY-104", "ticket", "Mandate import").await;
+    entity_named(&pool, TICKET, "ticket", "Retry failed SEPA payouts").await;
+
+    logged_at(
+        &pool,
+        "jira:PAY-500",
+        Utc.with_ymd_and_hms(2026, 9, 2, 16, 0, 0).unwrap(),
+    )
+    .await;
+
+    let block = timed(&pool, on(PAGE), None).await;
+    assert_eq!(
+        suggested(&pool, block).await,
+        None,
+        "nothing has been logged on this block's day"
+    );
+
+    logged_at(&pool, "jira:PAY-104", at(10, 0)).await;
+    logged_at(&pool, TICKET, at(15, 0)).await;
+
+    assert_eq!(
+        suggested(&pool, block).await,
+        Some((TICKET.to_owned(), time::suggest::SuggestionRule::LastLogged)),
+        "the *last* ticket logged to today, not the first"
+    );
+}
+
+/// **The order**, on one fixture that satisfies all three rules at once.
+///
+/// Each step takes one rule's input away and nothing else, so the answer walks
+/// down the list. A pair of rules swapped in the implementation fails the step
+/// that separates them, and cannot be hidden by a fixture that only ever had
+/// one rule to fire.
+#[tokio::test]
+async fn the_three_rules_are_tried_in_the_order_the_spec_states() {
+    let pool = scratch("suggest-order").await;
+    configure_jira(&pool, "mara.lindqvist").await;
+    entity_named(&pool, PAGE, "page", "SEPA payout retry design").await;
+    entity_named(&pool, TICKET, "ticket", "Retry failed SEPA payouts").await;
+    entity_named(&pool, "jira:PAY-104", "ticket", "Mandate import").await;
+    entity_named(&pool, "jira:PAY-500", "ticket", "Payout reconciliation").await;
+
+    linked(&pool, PAGE, TICKET, at(9, 0)).await;
+    let room = room_anchored_on(&pool, "jira:PAY-104").await;
+    logged_at(&pool, "jira:PAY-500", at(15, 0)).await;
+
+    let block = timed(&pool, on(PAGE), Some(&room)).await;
+    assert_eq!(
+        suggested(&pool, block).await,
+        Some((
+            TICKET.to_owned(),
+            time::suggest::SuggestionRule::LinkedToTarget
+        )),
+        "the link the reader drew outranks both of knobas' own readings"
+    );
+
+    // The reader unlinks the page from the ticket. Rule one has nothing left.
+    let link = sqlx::query_scalar::<_, uuid::Uuid>("select id from knobas.link where to_id = $1")
+        .bind(TICKET)
+        .fetch_one(&pool)
+        .await
+        .expect("the page's link");
+    knobas_core::link::unlink(&pool, link)
+        .await
+        .expect("the link is withdrawn");
+    assert_eq!(
+        suggested(&pool, block).await,
+        Some((
+            "jira:PAY-104".to_owned(),
+            time::suggest::SuggestionRule::ContextAnchor
+        )),
+        "with no link, the room the block ran in is what is left"
+    );
+
+    // ...and the room stops anchoring anything.
+    sqlx::query("update knobas.context set anchor_id = null where id = $1")
+        .bind(&room)
+        .execute(&pool)
+        .await
+        .expect("the room loses its anchor");
+    assert_eq!(
+        suggested(&pool, block).await,
+        Some((
+            "jira:PAY-500".to_owned(),
+            time::suggest::SuggestionRule::LastLogged
+        )),
+        "the weakest rule is the last one, not the first"
+    );
+
+    // ...and with the day's worklog gone, knobas has nothing to say.
+    sqlx::query("delete from knobas.worklog")
+        .execute(&pool)
+        .await
+        .expect("the day's worklogs are removed");
+    assert_eq!(
+        suggested(&pool, block).await,
+        None,
+        "no rule firing is no suggestion -- never a ticket picked for no reason"
+    );
+}
+
+/// **The dialog is for blocks a worklog cannot go to.** A block on a ticket is
+/// not one, and the read says so by answering nothing at all -- which is what
+/// keeps the shell from having a list of kinds.
+///
+/// The fixture is deliberately rich: this block has a linked ticket, a room
+/// with an anchor and a worklog on its day, so every rule *could* fire. The
+/// answer is still nothing, because the question is not asked.
+#[tokio::test]
+async fn a_block_on_a_ticket_is_not_an_ad_hoc_block_at_all() {
+    let pool = scratch("suggest-ticket-target").await;
+    configure_jira(&pool, "mara.lindqvist").await;
+    entity_named(&pool, TICKET, "ticket", "Retry failed SEPA payouts").await;
+    entity_named(&pool, "jira:PAY-104", "ticket", "Mandate import").await;
+    linked(&pool, TICKET, "jira:PAY-104", at(9, 0)).await;
+    let room = room_anchored_on(&pool, "jira:PAY-104").await;
+    logged_at(&pool, "jira:PAY-104", at(15, 0)).await;
+
+    let block = timed(&pool, on(TICKET), Some(&room)).await;
+    assert_eq!(
+        offer(&pool, block).await,
+        None,
+        "stopping on a ticket opens the worklog draft, not the ad-hoc dialog"
+    );
+}
+
+/// An ad-hoc **label** is the fourth target the dialog opens on, and the two
+/// rules that do not need an entity still work on it.
+#[tokio::test]
+async fn a_label_block_gets_the_dialog_and_the_rules_that_need_no_entity() {
+    let pool = scratch("suggest-label").await;
+    configure_jira(&pool, "mara.lindqvist").await;
+    entity_named(&pool, TICKET, "ticket", "Retry failed SEPA payouts").await;
+    let room = room_anchored_on(&pool, TICKET).await;
+
+    let block = timed(&pool, labelled(LABEL), Some(&room)).await;
+    assert_eq!(
+        suggested(&pool, block).await,
+        Some((
+            TICKET.to_owned(),
+            time::suggest::SuggestionRule::ContextAnchor
+        )),
+        "\"DB config for the migration\" has no links, and the room still knows \
+         what the afternoon was about"
+    );
+}
+
+/// A block that is not there is a `not_found` in words, not an empty dialog.
+#[tokio::test]
+async fn asking_about_a_block_that_is_not_there_says_so() {
+    let pool = scratch("suggest-missing").await;
+    let refusal = time::suggest::offer(&pool, &registry(), 4711, reader_day(), 0)
+        .await
+        .expect_err("there is no block 4711");
+    assert_eq!(refusal.code, IpcErrorCode::NotFound);
 }

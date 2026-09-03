@@ -57,27 +57,34 @@ pub async fn current_timer(
     time::current(&pool).await
 }
 
-/// Start the timer on `target`.
+/// Start the timer on `target`, in the room the reader is standing in.
 ///
-/// The argument is the tagged target, not two nullable strings: exactly one of
-/// an entity and a label is what the whole feature is about, and a shape that
-/// could carry both would put that rule in the caller.
+/// The first argument is the tagged target, not two nullable strings: exactly
+/// one of an entity and a label is what the whole feature is about, and a shape
+/// that could carry both would put that rule in the caller.
+///
+/// `inRoom` is the **stored context** the reader was in -- `null` for *All
+/// work*, a source room or a project room, none of which is a stored context.
+/// It is recorded on the timer and carried onto the block, because it is what
+/// the ad-hoc dialog's second rule reads (#281); a dialog that asked which room
+/// the reader is in *now* would be answering a different question.
 ///
 /// # Errors
 ///
 /// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
 /// [`Invalid`](crate::IpcErrorCode::Invalid) for a target that is not an
-/// entity id, is a stored context, or is a blank label, and
-/// [`Conflict`](crate::IpcErrorCode::Conflict) when a timer is already
-/// running -- stop it first.
+/// entity id, is a stored context, or is a blank label, and for a room that is
+/// not a stored context, and [`Conflict`](crate::IpcErrorCode::Conflict) when a
+/// timer is already running -- stop it first.
 #[tauri::command]
 pub async fn start_timer<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     lifecycle: State<'_, Lifecycle>,
     target: TimerTarget,
+    in_room: Option<String>,
 ) -> Result<RunningTimer, IpcError> {
     let pool = lifecycle.pool()?;
-    let started = time::start(&pool, target).await?;
+    let started = time::start(&pool, target, in_room).await?;
     announce(&app, started.activity);
     Ok(started.timer)
 }
@@ -350,6 +357,53 @@ pub async fn set_passive_attribution(
 ) -> Result<bool, IpcError> {
     let pool = lifecycle.pool()?;
     time::passive::set_enabled(&pool, enabled).await
+}
+
+/// What *Log an ad-hoc block* should show for a block, or `null` because that
+/// block is not an ad-hoc one (issue #281).
+///
+/// **Asked on every stop, before the worklog draft, and `null` is what says
+/// "this was a ticket".** The decision *is this something a worklog goes to*
+/// lives in [`crate::time::suggest`] with the descriptor it is read from, not
+/// in the webview as a list of kinds -- so the shell asks once and opens
+/// whichever dialog it is handed, and a source that starts taking worklogs
+/// needs no change here.
+///
+/// A `Some` whose `suggestion` is `null` is the other absence and a different
+/// one: the dialog opens, knobas has nothing to suggest, and *Keep local* is
+/// the default.
+///
+/// `day` is the reader's own day and `offsetMinutes` their own offset from
+/// UTC, for the reason [`worklog_draft`] takes them: their machine is the only
+/// thing that knows which day they mean. It is the day the **block** started
+/// on, not the day the dialog opened on.
+///
+/// **Takes no `Lifecycle`**, the shape [`worklog_draft`] uses and for the same
+/// reason: the rules ask the *adapter* which sources take a worklog, so this
+/// needs the sources state, which carries the pool as well.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`NotFound`](crate::IpcErrorCode::NotFound) for a block that is not there,
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for an offset that is not an
+/// offset.
+#[tauri::command]
+pub async fn ad_hoc_block<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    block_id: i64,
+    day: chrono::NaiveDate,
+    offset_minutes: i32,
+) -> Result<Option<time::suggest::AdHocBlock>, IpcError> {
+    let sources = crate::sources::state(&app)?;
+    time::suggest::offer(
+        &sources.pool,
+        sources.registry.as_ref(),
+        block_id,
+        day,
+        offset_minutes,
+    )
+    .await
 }
 
 #[cfg(test)]
