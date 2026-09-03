@@ -1615,7 +1615,7 @@ async fn a_seeded_days_work_is_what_the_digest_lists_under_yesterday() {
     let env = env();
     env.clear_leftovers().await;
     let mut litter = Litter::default();
-    let pat = Pat::issue(&env).await;
+    let pat = env.pat().await;
     let (state, _events) = app("atlassian_live_digest", &env, AuthMethod::Pat, &pat.raw).await;
 
     sync(&state).await;
@@ -2436,7 +2436,16 @@ async fn a_comment_that_mentions_me_becomes_an_inbox_mention() {
 #[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
 async fn a_page_the_source_says_is_mine_is_on_the_digest_for_the_day_it_moved() {
     let wiki = wiki();
-    let state = wiki_app("atlassian_live_digest_page", &wiki).await;
+    // User + password, which is what this test had before `wiki_app` took the
+    // method as a parameter (#317): the digest matches "mine" against
+    // `config.username`, and that is half of the Basic pair here.
+    let (state, _events) = wiki_app(
+        "atlassian_live_digest_page",
+        &wiki,
+        AuthMethod::UserPassword,
+        &wiki.password,
+    )
+    .await;
     sync_source(&state, CONFLUENCE).await;
 
     // The page, and the day the mirror says it last moved -- read back rather
