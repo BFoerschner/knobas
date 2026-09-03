@@ -71,10 +71,14 @@ VERIFIED_CONFLUENCE_IMAGE=sha256:d15c23a1dfea0d390536115003cd732c9b404571f85bc08
 
 # THE WAIT CAPS, AND WHY THE SECOND ONE IS FIFTEEN MINUTES.
 #
-# FIRST_RUN_CAP_S bounds the wait for a container to answer /status with a
-# state a wizard can be driven from. JIRA_RUNNING_CAP_S bounds Jira's
+# FIRST_RUN_CAP_S bounds two waits, not one: a container answering /status with
+# a state a wizard can be driven from, and -- Jira only -- that container then
+# actually serving the wizard, which lands about a minute later and is a
+# separate question (see wait_for_jira_wizard). JIRA_RUNNING_CAP_S bounds Jira's
 # post-wizard restart, which is the slow one: Jira writes its schema and
 # re-initialises the whole plugin system before /status says RUNNING.
+# POLL_TIMEOUT_S bounds one poll, so that a single unanswered request cannot
+# outlive the cap that exists to bound the wait it sits in.
 #
 # MEASURED on this machine -- 12 cores, an 8 GB Docker VM, images already
 # pulled, volumes empty, TeamCity stopped, and Jira starting ALONE
@@ -103,11 +107,12 @@ VERIFIED_CONFLUENCE_IMAGE=sha256:d15c23a1dfea0d390536115003cd732c9b404571f85bc08
 # three-hour licence window has ample room for that. A cap that fires here is a
 # report about the machine, not a flake to widen again.
 #
-# All four are seconds of WALL CLOCK, not counts of anything.
+# All five are seconds of WALL CLOCK, not counts of anything.
 FIRST_RUN_CAP_S=600
 JIRA_RUNNING_CAP_S=900
 POLL_S=5
 PROGRESS_EVERY_S=30
+POLL_TIMEOUT_S=10
 
 say() { echo "seed-atlassian: $*"; }
 die() { echo "seed-atlassian: $*" >&2; exit 1; }
@@ -157,8 +162,28 @@ wizard_end()   { [ -n "$JAR" ] && rm -f "$JAR" "$JAR.body"; JAR=; }
 
 # Read a wizard page into $PAGE, and pull out the form action it is showing
 # ($STEP) plus its XSRF token ($ATL_TOKEN).
-wizard_read() {  # wizard_read <url>
-  _raw=$(curl -sS -c "$JAR" -b "$JAR" -L -w '\n@@%{url_effective}' "$1")
+#
+# THE OPTIONAL TIMEOUT IS FOR POLLING, and it changes two things about the read.
+# It cannot outlive the cap of the wait it sits in, and a read that fails is
+# reported as no form yet at the next progress line instead of ending the run:
+# under `set -eu` an unguarded `_raw=$(curl ...)` exits the script, so without
+# it a single refused connection during Jira's start kills the seed with a bare
+# `curl: (7)` and none of the diagnosis the wait exists to print. `state_of`
+# answers UNREACHABLE for exactly the same reason, and this is that rule applied
+# to the one wait that reads a page rather than /status.
+#
+# Only the poll passes it. Every other call here reads the answer to a POST the
+# product has already accepted, where a slow response is legitimate -- Jira's
+# application-properties step is not quick -- and a failed one really is fatal.
+wizard_read() {  # wizard_read <url> [poll timeout seconds]
+  if [ -n "${2:-}" ]; then
+    # `@@$1` on failure so the fields below come out as "this url, no form",
+    # which is what the caller's progress line and die message want to say.
+    _raw=$(curl -sS --max-time "$2" -c "$JAR" -b "$JAR" -L \
+                -w '\n@@%{url_effective}' "$1" 2>/dev/null) || _raw="@@$1"
+  else
+    _raw=$(curl -sS -c "$JAR" -b "$JAR" -L -w '\n@@%{url_effective}' "$1")
+  fi
   WIZARD_URL=$(printf '%s' "$_raw" | tail -n 1 | sed 's/^@@//')
   PAGE=$(printf '%s' "$_raw" | sed '$d' | tr '\n' ' ')
   STEP=$(printf '%s' "$PAGE" | grep -o '<form[^>]*action="[^"]*"' | head -1 \
@@ -257,16 +282,21 @@ unknown_step() {  # unknown_step <product>
 # body is not a state -- mapping it to UNREACHABLE rather than to the empty
 # string is what stops the wait below from treating "no answer" as "ready".
 state_of() {  # state_of <url>
-  _s=$(curl -sS --max-time 10 "$1/status" 2>/dev/null | jq -r '.state // empty' 2>/dev/null) || _s=
+  _s=$(curl -sS --max-time "$POLL_TIMEOUT_S" "$1/status" 2>/dev/null | jq -r '.state // empty' 2>/dev/null) || _s=
   [ -n "$_s" ] || _s=UNREACHABLE
   printf '%s' "$_s"
 }
 
 # --------------------------------------------------------------------------
-# THE WAITS. Two of them -- one for a state a wizard can be driven from, one
-# for RUNNING after a wizard has been walked -- and they are one loop, because
-# everything except which states they accept is the same and the interesting
-# parts (the clock, the progress line, the diagnosis) are worth having once.
+# THE WAITS. Two of them ask /status -- one for a state a wizard can be driven
+# from, one for RUNNING after a wizard has been walked -- and those two are one
+# loop, because everything except which states they accept is the same and the
+# interesting parts (the clock, the progress line, the diagnosis) are worth
+# having once. The third, wait_for_jira_wizard below, reads a page instead of a
+# state and is deliberately its own loop rather than a fourth and fifth
+# parameter here: folding it in would mean passing the reader, the comparison
+# and the failure text as arguments too, and a five-line duplication is cheaper
+# to read than that.
 #
 # Acceptance comes in as a PREDICATE rather than as a `case` pattern: `case`'s
 # `|` is syntax, parsed before expansion, so "FIRST_RUN|RUNNING" out of a
@@ -282,7 +312,7 @@ state_is_running() {  # <state>
 
 # ELAPSED IS READ OFF THE CLOCK, NOT COUNTED IN SLEEPS. An earlier spelling
 # added POLL_S per iteration, which undercounts: each pass also spends up to
-# `curl --max-time 10` inside state_of, so against a container that is bound
+# POLL_TIMEOUT_S inside state_of's curl, so against a container that is bound
 # but not answering a "900s" cap counted in sleeps is up to 2700s of real
 # time -- and the seconds in the failure message would then be the one number
 # in it that had not been measured. Reading `date` makes the cap, the progress
@@ -348,15 +378,20 @@ wait_for_jira_wizard() {  # wait_for_jira_wizard <cap seconds>
   _t0=$(date +%s)
   _next=$PROGRESS_EVERY_S
   while :; do
-    wizard_read "$JIRA_URL/"
+    wizard_read "$JIRA_URL/" "$POLL_TIMEOUT_S"
     [ "$STEP" = "$JIRA_FIRST_STEP" ] && break
     [ "$(( $(date +%s) - _t0 ))" -lt "$1" ] || die "jira never served its first setup step (${1}s).
   expected form: $JIRA_FIRST_STEP
   last url:      $WIZARD_URL
   last form:     ${STEP:-none}
   A wizard stuck on the database step means ATL_JDBC_* is not reaching the
-  container (docker-compose.yml). Anything else means the wizard moved, and
-  the sequence has to be re-derived against the new image."
+  container (docker-compose.yml). A LATER step means this instance was already
+  part-walked by an earlier run: that is the half-set-up state this file's
+  header refuses to guess at, so tear the pair down and seed a fresh one rather
+  than resuming it --
+    docker compose --profile real-atlassian down -v jira jira-db confluence confluence-db
+  the four services named. Any other form means the wizard moved, and the
+  sequence has to be re-derived against the new image."
     sleep "$POLL_S"
     _waited=$(( $(date +%s) - _t0 ))
     if [ "$_waited" -ge "$_next" ]; then
