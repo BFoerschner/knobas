@@ -936,14 +936,18 @@ async fn sync(state: &SourcesState) {
 /// -- the last of them six of them over twenty-two seconds, with Jira's search
 /// index already agreeing -- and `sync.live_item` held the old assignee every
 /// time. It is deterministic, not flaky.
-async fn backfill(state: &SourcesState) {
+///
+/// Takes the source since #289, whose page has the same problem one product
+/// over: Confluence's CQL index is written asynchronously, so an incremental
+/// run right after a create can look and not find the page it just made.
+async fn backfill(state: &SourcesState, source: &str) {
     let (done, wait) = tokio::sync::oneshot::channel();
     let sink = Arc::new(Ending {
         done: std::sync::Mutex::new(Some(done)),
     });
     state
         .scheduler
-        .trigger(JIRA, SyncTrigger::Backfill, Some(sink))
+        .trigger(source, SyncTrigger::Backfill, Some(sink))
         .await
         .expect("the backfill starts");
     wait.await.expect("the run reports its ending");
@@ -1744,7 +1748,7 @@ async fn a_seeded_days_work_is_what_the_digest_lists_under_yesterday() {
     // there. It fails loudly with what the mirror actually held.
     let mut attributed_to = None;
     for attempt in 0..3 {
-        backfill(&state).await;
+        backfill(&state, JIRA).await;
         attributed_to = sqlx::query_scalar::<_, Option<String>>(
             "select author from sync.live_item where entity_id = $1",
         )
@@ -2880,9 +2884,17 @@ impl Wiki {
 /// 3. *Publish*, with the target the dialog would have produced. The write
 ///    goes through the queue, the real adapter and the real REST API.
 /// 4. The publication settled **sent**, carrying the id Confluence gave the
-///    page, and the note and the page are linked -- the link store's own rows,
-///    read from both ends.
-/// 5. The page is read back **from Confluence, not from the mirror**: its
+///    page.
+/// 5. A backfill, then the mirror asserted directly, then the ordinary read --
+///    the one the standup view makes on open -- and *then* the link, from both
+///    ends. The order is the point: an incremental run reads CQL, an index
+///    Confluence writes asynchronously, so the page a publish just made is
+///    routinely not in the mirror when the publish returns. That is the
+///    product working -- `reconcile` runs on every read for this reason, and
+///    the panel says so on screen -- and asserting the mirror before anything
+///    derived from it is what makes a failure name the step that did not
+///    happen.
+/// 6. The page is read back **from Confluence, not from the mirror**: its
 ///    title is the date, its parent is *Standup protocols*, and its stored
 ///    body carries the markup the note's markdown became. A mirror read would
 ///    only prove knobas agrees with itself.
@@ -2938,7 +2950,7 @@ async fn a_protocol_is_published_under_standup_protocols_and_reads_back() {
     .await
     .expect("the protocol publishes");
 
-    // 4. What the queue and the link store say.
+    // 4. What the queue says.
     let publication = published.publication.expect("there is a publication");
     assert_eq!(
         publication.state,
@@ -2963,6 +2975,48 @@ async fn a_protocol_is_published_under_standup_protocols_and_reads_back() {
         password: wiki.password.clone(),
         id: content_id.clone(),
     };
+    // **Not linked yet, and that is the product working.** `submit` re-reads the
+    // source when a write lands, but a Confluence incremental run reads CQL --
+    // an index written *asynchronously* -- so the page it just made is
+    // routinely not there yet. `knobas.link`'s endpoints are `knobas.entity`
+    // rows, so no link can be drawn until a run has seen the page, and
+    // `protocol::reconcile` is written to run on every read for exactly this
+    // reason. The panel says so on screen; `a_page_the_mirror_has_not_seen_yet_
+    // is_named_but_not_linked` pins the state offline.
+    //
+    // So: ask for the run that does not depend on that index. A backfill walks
+    // the content API from no position at all, the reasoning `backfill` records
+    // for Jira's assignee one product over (#345).
+    backfill(&state, CONFLUENCE).await;
+
+    // The **mirror's own state**, asserted before anything derived from it, so
+    // a failure names the step that did not happen rather than the one that
+    // could not have.
+    let mirrored: Option<String> =
+        sqlx::query_scalar("select entity_id from sync.live_item where entity_id = $1")
+            .bind(&page_entity)
+            .fetch_optional(&state.pool)
+            .await
+            .expect("the mirror reads");
+    assert_eq!(
+        mirrored.as_deref(),
+        Some(page_entity.as_str()),
+        "the backfill did not bring the published page into the mirror, so nothing downstream          could have linked it"
+    );
+
+    // Now the ordinary read -- the one the standup view makes on open -- draws
+    // the link, from the id the settle wrote onto the queue row.
+    let reopened = knobas_app::commands::entity::standup_protocol_inner(&state.pool, day)
+        .await
+        .expect("the protocol reopens");
+    let publication = reopened
+        .publication
+        .expect("the publication is still there");
+    assert_eq!(
+        publication.page_entity_id.as_deref(),
+        Some(page_entity.as_str()),
+        "the id came off the queue row, which is where the settle wrote it"
+    );
     assert!(publication.linked, "the note and the page are linked");
 
     let linked: Vec<(String, String, String)> = sqlx::query_as(
@@ -2992,7 +3046,7 @@ async fn a_protocol_is_published_under_standup_protocols_and_reads_back() {
     .expect("the page's links read");
     assert_eq!(from_the_page, std::slice::from_ref(&opened.note_id));
 
-    // 5. The page, read back from Confluence itself.
+    // 6. The page, read back from Confluence itself.
     let (status, body) = wiki
         .api(
             reqwest::Method::GET,
