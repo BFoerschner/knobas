@@ -785,6 +785,11 @@ async fn a_running_state_names_its_own_run_not_another_open_one() {
     );
 
     scheduler.shutdown().await;
+    // Close the neighbour by hand. `retire` holds the *source* off the
+    // schedule, but nothing holds off the next `Scheduler::start` in this
+    // binary: `reconcile_abandoned` is whole-database, so an open row left
+    // here would be closed by the next test's scheduler and counted as one of
+    // its own abandoned runs.
     sqlx::query("update knobas.sync_run set finished_at = now(), outcome = 'error' where id = $1")
         .bind(neighbour)
         .execute(&pool)

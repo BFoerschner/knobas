@@ -616,13 +616,16 @@ async fn sync_now_answers_before_the_run_and_reports_it_on_the_event() {
     // for the same reason (#300).
     //
     // The scheduler this test manages is the real one, so on the shared
-    // database it is one of several live over a single `source_config`, and
-    // `emit_state` does not build its payload from the run it is emitting for:
-    // it re-reads the source through `status_for`, whose query takes
-    // `coalesce(r.id, f.id)` from *whichever* run is open. A neighbour's open
-    // `mock` run therefore puts a **neighbour's** id on this run's `running`
-    // emit, and the run id stops telling the events apart -- PR #302's gate
-    // failed exactly there, on `running` rather than on `run_id`.
+    // database it is one of several live over a single `source_config`. That
+    // used to decide what the events said: `emit_state` re-read the source
+    // through `status_for`, whose query takes `coalesce(r.id, f.id)` from
+    // *whichever* run is open, so a neighbour's open `mock` run put a
+    // **neighbour's** id on this run's `running` emit and the run id stopped
+    // telling the events apart -- PR #302's gate failed exactly there, on
+    // `running` rather than on `run_id`. #304 has since made every emit carry
+    // the run it is emitting for, which is what makes the keying below sound;
+    // this database is still the test's own, because a shared one also lets a
+    // neighbour's *run* land in the window this test is watching.
     //
     // One scheduler over one database has at most one open `mock` run: while
     // this run is in flight `trigger` joins it rather than starting a second,

@@ -1445,6 +1445,7 @@ knobas-sync	lib/knobas_sync	run_log::tests::the_sync_status_shape_matches_its_ty
 knobas-sync	lib/knobas_sync	run_log::tests::the_vocabularies_are_exactly_what_the_migration_allows
 knobas-sync	lib/knobas_sync	run_log::tests::the_wire_spellings_are_the_stored_spellings
 knobas-sync	lib/knobas_sync	scheduler::tests::a_failed_existence_check_purges_rather_than_skipping
+knobas-sync	lib/knobas_sync	scheduler::tests::an_emits_identity_comes_from_its_run_and_its_countdown_from_the_source
 knobas-sync	lib/knobas_sync	scheduler::tests::the_concurrency_cap_leaves_the_bookkeeper_a_connection
 knobas-sync	lib/knobas_sync	scheduler::tests::the_states_with_no_next_run_are_spelled_the_way_the_enum_spells_them
 knobas-sync	lib/knobas_sync	scheduler::tests::the_tick_is_far_shorter_than_the_shortest_configurable_interval

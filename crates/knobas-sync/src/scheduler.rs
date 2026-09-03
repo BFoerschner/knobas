@@ -119,10 +119,15 @@ select c.id as source_id,
        r.id is not null as running,
        -- The run this status is *about*: the one in flight, or the last one to
        -- finish. Not `r.id` alone -- `last_finished_at` and `last_outcome`
-       -- already describe that finished run, so leaving its id out made the
-       -- terminal `sync:state` unattributable: a progress bar keyed on the run
-       -- id it was handed could not tell which run had just ended. `running` is
-       -- what says which of the two this is.
+       -- already describe that finished run, so leaving its id out would leave
+       -- the listing saying that a source last ran without saying which run
+       -- that was. `running` is what says which of the two this is.
+       --
+       -- This is the **listing's** answer, and only the listing's (#304). It
+       -- is by construction about the source rather than about any one run --
+       -- `r` takes whichever run is open, `f` whichever finished one started
+       -- last -- so an *event* about a particular run cannot be read out of
+       -- it; `emit_state` composes that from the run itself.
        coalesce(r.id, f.id) as run_id,
        r.started_at,
        f.finished_at as last_finished_at,
@@ -746,9 +751,9 @@ enum Transition {
 ///
 /// Two reads, each answering only what it can:
 ///
-/// * the **run's** log row -- its timestamps, in the database's clock, so the
-///   event and the diagnostics list agree about when this run started and
-///   ended;
+/// * the **run's** log row -- the timestamp of the transition being announced,
+///   in the database's clock, so the event and the diagnostics list agree
+///   about when this run started, or ended;
 /// * the **source's** status -- `backoff_until` and `next_run_at`, which
 ///   belong to the source and to no run, plus the previous run's ending, which
 ///   is what `last_outcome` means until this run has an ending of its own.
@@ -813,6 +818,12 @@ fn state_of_run(
         Transition::Ended(outcome) => {
             let base = SourceSyncStatus::finished(source_id, run_id, outcome);
             SourceSyncStatus {
+                // The run's other timestamp, `started_at`, stays `None`:
+                // "RFC 3339, while `running`" is what it is documented as on
+                // both sides of the bridge (`SourceSyncStatus`, and the
+                // TypeScript mirror), and a terminal event that filled it in
+                // would be offering a start time as if the run were still
+                // going. `last_finished_at` is this run's own time here.
                 last_finished_at: row.and_then(|r| r.finished_at).or(base.last_finished_at),
                 // Source-level, and both need `source_config`: when the next
                 // run is due, and how long a failing source is held off for.
@@ -1688,6 +1699,94 @@ mod tests {
                 "{state:?} is retryable, so it still counts down"
             );
         }
+    }
+
+    /// **Which field of an emit comes from the run, and which from the
+    /// source** (#304) -- the composition [`state_of_run`] exists to make
+    /// assertable without a database.
+    ///
+    /// Every value here is distinct, and the source's are the ones a
+    /// *neighbouring* run would have put in front of `status_for`: if a field
+    /// is taken from the wrong side, no two of them can look the same.
+    #[test]
+    fn an_emits_identity_comes_from_its_run_and_its_countdown_from_the_source() {
+        let t = |m: i64| Utc::now() + chrono::Duration::minutes(m);
+        let (started, finished, other_started, other_finished, next, backoff) =
+            (t(1), t(2), t(3), t(4), t(5), t(6));
+        let row = run_log::SyncRunRow {
+            id: 7,
+            source_id: "s".into(),
+            trigger: run_log::SyncTrigger::Manual,
+            started_at: started,
+            finished_at: Some(finished),
+            outcome: Some(SyncOutcome::Ok),
+            upserted: 0,
+            deleted: 0,
+            swept: 0,
+            error: None,
+            cursor_after: None,
+        };
+        // What `status_for` answers with a neighbour in front of this run.
+        let source = SourceSyncStatus {
+            source_id: "s".into(),
+            running: true,
+            run_id: Some(99),
+            started_at: Some(other_started),
+            last_finished_at: Some(other_finished),
+            last_outcome: Some(SyncOutcome::Unauthorized),
+            next_run_at: Some(next),
+            backoff_until: Some(backoff),
+        };
+
+        let running = state_of_run("s", 7, Transition::Started, Some(&row), &source);
+        assert_eq!(running.run_id, Some(7), "the run this emit is about");
+        assert!(running.running);
+        assert_eq!(running.started_at, Some(started), "this run's start");
+        assert_eq!(
+            running.last_finished_at,
+            Some(other_finished),
+            "source-level: this run has not finished, so `last_` is the last \
+             run that did"
+        );
+        assert_eq!(running.last_outcome, Some(SyncOutcome::Unauthorized));
+        assert_eq!(running.backoff_until, Some(backoff), "the source's");
+        assert_eq!(
+            running.next_run_at, None,
+            "a run in flight has nothing to count down to"
+        );
+
+        let ended = state_of_run(
+            "s",
+            7,
+            Transition::Ended(SyncOutcome::Unreachable),
+            Some(&row),
+            &source,
+        );
+        assert_eq!(ended.run_id, Some(7));
+        assert!(!ended.running);
+        assert_eq!(
+            ended.started_at, None,
+            "`started_at` is for a run in flight"
+        );
+        assert_eq!(ended.last_finished_at, Some(finished), "this run's finish");
+        assert_eq!(
+            ended.last_outcome,
+            Some(SyncOutcome::Unreachable),
+            "the verdict `settle` is applying, not the row's and not the \
+             source's: a run whose row failed to close is still over"
+        );
+        assert_eq!(ended.next_run_at, Some(next), "the source's countdown");
+        assert_eq!(ended.backoff_until, Some(backoff));
+
+        // Without the row -- pruned, or the read failed -- the identity still
+        // holds and the timestamp falls back to this process's clock.
+        let blind = state_of_run("s", 7, Transition::Started, None, &source);
+        assert_eq!(blind.run_id, Some(7));
+        assert!(
+            blind.started_at.is_some() && blind.started_at != Some(other_started),
+            "not the neighbour's start time: {:?}",
+            blind.started_at
+        );
     }
 
     /// The cap must stay strictly below the pool: the scheduler's bookkeeping
