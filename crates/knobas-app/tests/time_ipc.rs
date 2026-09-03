@@ -1630,9 +1630,12 @@ async fn a_day_inside_the_horizon_keeps_its_beats_and_is_still_offered() {
 
     // A `now` whose horizon falls exactly on the later day's midnight: the day
     // before it is past retention, the day after it is not.
-    let taken = time::passive::prune(&pool, midnight + Duration::days(time::passive::RETENTION_DAYS))
-        .await
-        .expect("the sweep runs");
+    let taken = time::passive::prune(
+        &pool,
+        midnight + Duration::days(time::passive::RETENTION_DAYS),
+    )
+    .await
+    .expect("the sweep runs");
 
     assert_eq!(taken, 21, "the older morning is what the horizon is past");
     assert_eq!(
@@ -1692,7 +1695,10 @@ async fn the_day_the_horizon_cuts_through_keeps_the_blocks_it_was_already_offere
     let taken = time::passive::prune(&pool, noon + Duration::days(time::passive::RETENTION_DAYS))
         .await
         .expect("the sweep runs");
-    assert_eq!(taken, 21, "the morning's beats went and the afternoon's did not");
+    assert_eq!(
+        taken, 21,
+        "the morning's beats went and the afternoon's did not"
+    );
 
     assert_eq!(
         day(&pool, midnight).await,
@@ -1737,12 +1743,29 @@ async fn a_swept_day_keeps_its_block_and_an_observed_empty_day_loses_one() {
         .expect("a passive block from a knobas that still had the beats");
     }
     let ticket = on(TICKET);
-    beats(&pool, Some(&ticket), swept_day + Duration::hours(9), 21, Duration::seconds(30)).await;
-    beats(&pool, None, empty_day + Duration::hours(9), 21, Duration::seconds(30)).await;
+    beats(
+        &pool,
+        Some(&ticket),
+        swept_day + Duration::hours(9),
+        21,
+        Duration::seconds(30),
+    )
+    .await;
+    beats(
+        &pool,
+        None,
+        empty_day + Duration::hours(9),
+        21,
+        Duration::seconds(30),
+    )
+    .await;
 
-    let taken = time::passive::prune(&pool, empty_day + Duration::days(time::passive::RETENTION_DAYS))
-        .await
-        .expect("the sweep runs");
+    let taken = time::passive::prune(
+        &pool,
+        empty_day + Duration::days(time::passive::RETENTION_DAYS),
+    )
+    .await
+    .expect("the sweep runs");
     assert_eq!(taken, 21, "the older day's beats are what went");
     assert_eq!(
         observations(&pool).await,

@@ -310,7 +310,10 @@ async fn a_tick_sweeps_the_observations_retention_has_aged_out() {
 
     let now = chrono::Utc::now();
     let retention = chrono::Duration::days(knobas_app::time::passive::RETENTION_DAYS);
-    for at in [now - retention - chrono::Duration::days(1), now - chrono::Duration::days(1)] {
+    for at in [
+        now - retention - chrono::Duration::days(1),
+        now - chrono::Duration::days(1),
+    ] {
         sqlx::query("insert into knobas.heartbeat (at, entity_id) values ($1, 'jira:PAY-231')")
             .bind(at)
             .execute(&service.pool)
