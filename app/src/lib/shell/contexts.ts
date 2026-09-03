@@ -147,7 +147,16 @@ export function columnsRefusal(columns: number): string | null {
 export interface SwitcherSource {
   id: string;
   label: string;
-  /** Which adapter this source runs — `"confluence"`, `"jira"`. */
+  /**
+   * Which adapter this source runs — `"confluence"`, `"jira"`.
+   *
+   * Optional **and** nullable, which is two spellings of one thing on purpose:
+   * they arrive from two different places. Absent is a caller with no census
+   * to annotate (`TopStrip`'s prop default, a fixture); `null` is
+   * `sourceKinds.of()` answering for a source it has not learned yet. Both
+   * mean *unknown*, both get the generic word, and collapsing them would make
+   * one of the two call sites lie.
+   */
   adapterKind?: string | null;
 }
 
@@ -196,9 +205,7 @@ export const ALL_CONTEXT: RoomContext = {
  * (`source-kinds.svelte.ts`).
  */
 export function projectWord(adapterKind: string | null | undefined): string {
-  return adapterKind !== null && adapterKind !== undefined
-    ? (PROJECT_WORDS[adapterKind] ?? "project")
-    : "project";
+  return PROJECT_WORDS[adapterKind ?? ""] ?? "project";
 }
 
 /** The sources whose own word is not *project*. See {@link projectWord}. */

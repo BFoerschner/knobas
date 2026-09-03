@@ -242,9 +242,18 @@
    * A comment is not a kind of its own: it rides in its page's payload the way
    * a Jira comment rides in its issue's, so this is a read of that payload and
    * not a second round trip. Empty for every other item.
+   *
+   * Parsed **here** and not in the `{#each}`, the same shape as the body
+   * above: a `parseStorageFormat` call in the template re-runs on every
+   * re-render of this panel -- a status board landing, a link being drawn --
+   * and re-parsing a discussion to answer a question nobody asked is work the
+   * derived value is for.
    */
   const pageComments = $derived(
-    pageCommentsOf(detail?.source.adapter_kind, detail?.payload),
+    pageCommentsOf(detail?.source.adapter_kind, detail?.payload).map((comment) => ({
+      id: comment.id,
+      nodes: parseStorageFormat(comment.storage),
+    })),
   );
 
   /**
@@ -646,10 +655,7 @@
           </div>
           {#each pageComments as comment (comment.id)}
             <div class="cmt d-body storage">
-              <StorageBody
-                nodes={parseStorageFormat(comment.storage)}
-                onopenlink={(href) => void open(href)}
-              />
+              <StorageBody nodes={comment.nodes} onopenlink={(href) => void open(href)} />
             </div>
           {/each}
         </div>
@@ -722,6 +728,19 @@
     wrong here -- the markup already says where the lines are, and preserving
     the storage format's own indentation would put a leading gap in front of
     every heading.
+
+    **Why these rules are here, reaching into a child through `:global`,**
+    rather than in `StorageBody.svelte` where the elements are made: Svelte
+    scopes a component's CSS by stamping a class onto the elements its own
+    selectors could match, and `StorageBody` emits every element through
+    `<svelte:element this={...}>`, whose tag is not knowable at compile time.
+    Giving that component an element selector therefore puts a `class`
+    attribute on every node of a page body -- and *no attribute on any of them*
+    is precisely the property `StorageBody.test.svelte.ts` asserts, one
+    assertion at the centre of this ticket's gotcha-7 case. A styling
+    convenience is not worth weakening that witness, so the page's typography
+    lives with the panel that owns the section, and the component's own
+    `<style>` keeps only the two class selectors it writes itself.
   */
   .d-body.storage {
     white-space: normal;
