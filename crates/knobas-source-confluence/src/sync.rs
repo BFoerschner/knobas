@@ -624,10 +624,7 @@ mod tests {
             if let Some(fault) = self.identity_fault.as_ref().or(self.fault.as_ref()) {
                 return Err(clone_fault(fault));
             }
-            Ok(serde_json::from_value(
-                json!({ "username": "knobas", "userKey": MY_KEY }),
-            )
-            .unwrap())
+            Ok(serde_json::from_value(json!({ "username": "knobas", "userKey": MY_KEY })).unwrap())
         }
 
         async fn search(

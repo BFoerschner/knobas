@@ -445,7 +445,11 @@ mod tests {
         .unwrap();
         assert_eq!(comment.content.content_type.as_deref(), Some("comment"));
         assert_eq!(
-            comment.content.container.as_ref().and_then(Container::content_id),
+            comment
+                .content
+                .container
+                .as_ref()
+                .and_then(Container::content_id),
             Some("98307")
         );
 

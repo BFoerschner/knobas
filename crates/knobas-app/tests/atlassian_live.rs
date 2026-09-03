@@ -1472,7 +1472,10 @@ impl Wiki {
         body["userKey"]
             .as_str()
             .unwrap_or_else(|| {
-                panic!("this Confluence reports no userKey for {}: {body}", self.user)
+                panic!(
+                    "this Confluence reports no userKey for {}: {body}",
+                    self.user
+                )
             })
             .to_owned()
     }
@@ -1588,7 +1591,10 @@ impl Mention {
             .as_str()
             .unwrap_or_default()
             .to_owned();
-        println!("SEEDED mentioning comment {id} on page {}: {stored}", wiki.page);
+        println!(
+            "SEEDED mentioning comment {id} on page {}: {stored}",
+            wiki.page
+        );
         Mention {
             url: wiki.url.clone(),
             user: wiki.user.clone(),
@@ -1634,7 +1640,9 @@ impl Drop for Mention {
             // A deleted comment is trashed rather than purged, and Confluence
             // answers 404 for one whose status is `trashed` on this path.
             if status != 404 {
-                return Err(format!("comment {id} still answers {status} after its delete"));
+                return Err(format!(
+                    "comment {id} still answers {status} after its delete"
+                ));
             }
             Ok(())
         });
@@ -1743,7 +1751,9 @@ async fn a_comment_that_mentions_me_becomes_an_inbox_mention() {
     sync_source(&state, CONFLUENCE).await;
     let mirrored = confluence_pages(&state.pool).await;
     assert!(
-        mirrored.iter().any(|id| id == &format!("confluence:{}", wiki.page)),
+        mirrored
+            .iter()
+            .any(|id| id == &format!("confluence:{}", wiki.page)),
         "the seeded page is mirrored before anything is written: {mirrored:?}"
     );
     let before = wiki.page_modified().await;
@@ -1799,7 +1809,10 @@ async fn a_comment_that_mentions_me_becomes_an_inbox_mention() {
         "*Open in browser* is the action knobas' own: {:?}",
         found.item
     );
-    println!("SEEDED inbox mention: {} ({})", found.item.key, found.item.title);
+    println!(
+        "SEEDED inbox mention: {} ({})",
+        found.item.key, found.item.title
+    );
 
     // 5. What it offers, and what an answer records.
     assert!(
