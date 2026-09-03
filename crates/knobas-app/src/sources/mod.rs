@@ -363,15 +363,24 @@ pub async fn start<R: tauri::Runtime>(
 /// `test-util` for the reason `AppState::over_pool` is: a production caller
 /// would get a scheduler whose pool nothing owns.
 ///
+/// **The caller names the database twice, and must name the same one both
+/// times**: `pool` is the scheduler's bookkeeping, `connections` is where each
+/// run takes its own dedicated connection (§10.6(c)). This took a connector of
+/// its own choosing until #300, which was fine only while every test shared one
+/// database -- a test that wants a private one (`scratch_database`, so that
+/// `status_for` sees its runs and nobody else's) would otherwise get a
+/// scheduler whose bookkeeping and whose runs are in *different* databases.
+///
 /// # Errors
 /// [`sqlx::Error`] if the startup reconciliation fails.
 #[cfg(feature = "test-util")]
 pub async fn test_scheduler<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
+    connections: knobas_db::embedded::Connector,
     pool: PgPool,
 ) -> Result<Scheduler, sqlx::Error> {
     Scheduler::start(SchedulerDeps {
-        connections: Arc::new(DbConnections(knobas_db::test_util::test_connector().await)),
+        connections: Arc::new(DbConnections(connections)),
         pool,
         registry: Arc::new(Registry::builtin()),
         secrets: Arc::new(knobas_secrets::MemoryStore::new()),
