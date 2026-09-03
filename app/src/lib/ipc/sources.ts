@@ -117,11 +117,7 @@ export function demoLoad(): Promise<SyncReport> {
  * which is a different prompt from a secret that was rejected.
  */
 export type AuthState =
-  | "ok"
-  | "unauthorized"
-  | "unreachable"
-  | "missing_secret"
-  | "unknown";
+  "ok" | "unauthorized" | "unreachable" | "missing_secret" | "unknown";
 
 /**
  * One source's credential health — `knobas_sync::CredentialHealth`, the
@@ -212,7 +208,8 @@ export interface SourceSyncStatus {
 }
 
 /** Where a run is — `knobas_sync::SyncPhase`. */
-export type SyncPhase = "started" | "fetching" | "writing" | "finished" | "failed";
+export type SyncPhase =
+  "started" | "fetching" | "writing" | "finished" | "failed";
 
 /** One progress message — `knobas_sync::SyncProgress`. */
 export interface SyncProgress {
@@ -363,7 +360,10 @@ export function addSource(input: NewSource): Promise<SourceSummary> {
   return invoke<SourceSummary>("add_source", { input });
 }
 
-export function updateSource(id: string, patch: SourcePatch): Promise<SourceSummary> {
+export function updateSource(
+  id: string,
+  patch: SourcePatch,
+): Promise<SourceSummary> {
   return invoke<SourceSummary>("update_source", { id, patch });
 }
 
@@ -375,7 +375,10 @@ export function deleteSource(id: string, purgeItems: boolean): Promise<void> {
  * Store a credential for a saved source and test it. Write-only: nothing reads
  * one back.
  */
-export function setSourceSecret(id: string, secret: SecretInput): Promise<CredentialHealth> {
+export function setSourceSecret(
+  id: string,
+  secret: SecretInput,
+): Promise<CredentialHealth> {
   return invoke<CredentialHealth>("set_source_secret", { id, secret });
 }
 
@@ -475,7 +478,10 @@ export function syncStatus(): Promise<SourceSyncStatus[]> {
  * (`finished_at - started_at`), item counts. `sourceId: null` spans every
  * source. `limit` is clamped to 500.
  */
-export function listSyncRuns(sourceId: string | null, limit: number): Promise<SyncRunRow[]> {
+export function listSyncRuns(
+  sourceId: string | null,
+  limit: number,
+): Promise<SyncRunRow[]> {
   return invoke<SyncRunRow[]>("list_sync_runs", { sourceId, limit });
 }
 

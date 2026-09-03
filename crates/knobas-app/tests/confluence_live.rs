@@ -575,10 +575,10 @@ async fn sync_until(
     let deadline = std::time::Instant::now() + INDEX_BUDGET;
     loop {
         sync(state).await;
-        if let Some(payload) = mirrored(&state.pool, id).await {
-            if wanted(&payload) {
-                return payload;
-            }
+        if let Some(payload) = mirrored(&state.pool, id).await
+            && wanted(&payload)
+        {
+            return payload;
         }
         assert!(
             std::time::Instant::now() < deadline,
@@ -656,7 +656,10 @@ async fn the_three_page_writes_go_through_the_queue_and_come_back_from_confluenc
     // The rest of the page, intact: the second section is untouched, character
     // for character.
     let tail = &before[end..];
-    assert!(after.ends_with(tail), "the rest of the page did not survive");
+    assert!(
+        after.ends_with(tail),
+        "the rest of the page did not survive"
+    );
     assert!(after.contains(&edit), "the edit is not in the page");
 
     // -- a comment -----------------------------------------------------------
@@ -700,9 +703,12 @@ async fn the_three_page_writes_go_through_the_queue_and_come_back_from_confluenc
         })
         .expect("the comment this suite posted")
         .clone();
-    litter
-        .created
-        .push(mine["id"].as_str().expect("the comment has an id").to_owned());
+    litter.created.push(
+        mine["id"]
+            .as_str()
+            .expect("the comment has an id")
+            .to_owned(),
+    );
     assert_eq!(
         mine["body"]["storage"]["value"].as_str(),
         Some(format!("<p>{words}</p>").as_str()),
@@ -863,7 +869,7 @@ async fn an_edit_made_against_a_version_the_mirror_has_passed_is_held() {
     )
     .await
     .expect("the credential is back");
-    knobas_sync::write_queue::flush_source(&state.scheduler.deps(), CONFLUENCE)
+    knobas_sync::write_queue::flush_source(state.scheduler.deps(), CONFLUENCE)
         .await
         .expect("the flush runs");
 

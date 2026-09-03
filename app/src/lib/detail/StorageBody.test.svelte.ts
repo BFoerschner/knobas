@@ -32,7 +32,10 @@ function render(storage: string) {
   const opened: string[] = [];
   const app = mount(StorageBody, {
     target,
-    props: { nodes: parseStorageFormat(storage), onopenlink: (href) => opened.push(href) },
+    props: {
+      nodes: parseStorageFormat(storage),
+      onopenlink: (href) => opened.push(href),
+    },
   });
   flushSync();
   return {
@@ -41,7 +44,10 @@ function render(storage: string) {
     /** The rendered text, with template whitespace collapsed. */
     text: () => (target.textContent ?? "").replace(/\s+/g, " ").trim(),
     /** Every element in the rendered subtree, by lowercased tag name. */
-    tags: () => [...target.querySelectorAll("*")].map((node) => node.tagName.toLowerCase()),
+    tags: () =>
+      [...target.querySelectorAll("*")].map((node) =>
+        node.tagName.toLowerCase(),
+      ),
     done: () => {
       unmount(app);
       target.remove();
@@ -73,23 +79,33 @@ test("a script tag, an event attribute and a javascript: link never reach the DO
       "<style>body{display:none}</style>",
   );
 
-  expect(screen.target.querySelector("script"), "a script element reached the webview").toBeNull();
-  expect(screen.target.querySelector("style"), "a style element reached the webview").toBeNull();
+  expect(
+    screen.target.querySelector("script"),
+    "a script element reached the webview",
+  ).toBeNull();
+  expect(
+    screen.target.querySelector("style"),
+    "a style element reached the webview",
+  ).toBeNull();
   expect(screen.target.querySelector("img")).toBeNull();
   expect(screen.target.querySelector("[onclick]")).toBeNull();
   expect(screen.target.querySelector("[onerror]")).toBeNull();
   // Not one attribute of any kind survives on the elements that did render.
   for (const element of screen.target.querySelectorAll("*")) {
-    expect([...element.attributes].map((a) => a.name), `${element.tagName} kept attributes`).toEqual(
-      [],
-    );
+    expect(
+      [...element.attributes].map((a) => a.name),
+      `${element.tagName} kept attributes`,
+    ).toEqual([]);
   }
   // The words the author actually wrote are all still there...
   expect(screen.text()).toContain("before");
   expect(screen.text()).toContain("after");
   expect(screen.text()).toContain("press me");
   // ...and the script's body is not shown as if it were some of them.
-  expect(screen.text(), "a script body was rendered as visible prose").not.toContain("alert(1)");
+  expect(
+    screen.text(),
+    "a script body was rendered as visible prose",
+  ).not.toContain("alert(1)");
   expect(screen.text()).not.toContain("display:none");
   screen.done();
 });
@@ -109,13 +125,17 @@ test("an unsafe link keeps its words and offers nothing to press", () => {
   const buttons = [...screen.target.querySelectorAll("button")];
   expect(buttons.map((button) => button.textContent?.trim())).toEqual(["safe"]);
   expect(screen.text()).toContain("danger");
-  expect(screen.target.querySelector("a"), "an anchor could navigate the webview away").toBeNull();
+  expect(
+    screen.target.querySelector("a"),
+    "an anchor could navigate the webview away",
+  ).toBeNull();
 
   buttons[0]!.click();
   flushSync();
-  expect(screen.opened, "a body link goes to the OS browser, like Open in browser").toEqual([
-    "https://wiki.example/x",
-  ]);
+  expect(
+    screen.opened,
+    "a body link goes to the OS browser, like Open in browser",
+  ).toEqual(["https://wiki.example/x"]);
   screen.done();
 });
 
@@ -144,7 +164,10 @@ test("an unsafe scheme in disguise is still unsafe", () => {
     "//evil.example/x",
   ]) {
     const screen = render(`<p><a href="${href}">go</a></p>`);
-    expect(screen.target.querySelector("button"), `${href} was offered as a link`).toBeNull();
+    expect(
+      screen.target.querySelector("button"),
+      `${href} was offered as a link`,
+    ).toBeNull();
     expect(screen.text()).toBe("go");
     screen.done();
   }
@@ -172,12 +195,15 @@ test("a macro is a placeholder naming the macro, and takes its content with it",
   const placeholders = [...screen.target.querySelectorAll(".ac")].map((node) =>
     node.textContent?.trim(),
   );
-  expect(placeholders, "the placeholder lost the macro's name").toEqual(["info macro"]);
+  expect(placeholders, "the placeholder lost the macro's name").toEqual([
+    "info macro",
+  ]);
   expect(screen.text()).toContain("above");
   expect(screen.text()).toContain("below");
-  expect(screen.text(), "the macro's body was rendered as editable prose").not.toContain(
-    "mind the gap",
-  );
+  expect(
+    screen.text(),
+    "the macro's body was rendered as editable prose",
+  ).not.toContain("mind the gap");
   screen.done();
 });
 
@@ -198,7 +224,9 @@ test("a self-closing macro, an unnamed one and a nested one each place one place
       "</ac:rich-text-body></ac:structured-macro><p>tail</p>",
   );
   expect(
-    [...nested.target.querySelectorAll(".ac")].map((node) => node.textContent?.trim()),
+    [...nested.target.querySelectorAll(".ac")].map((node) =>
+      node.textContent?.trim(),
+    ),
     "a macro inside a macro ended the outer one early",
   ).toEqual(["expand macro"]);
   expect(nested.text()).toContain("tail");
@@ -207,18 +235,23 @@ test("a self-closing macro, an unnamed one and a nested one each place one place
 
   const inline = render(
     '<p>see <ac:image ac:align="center"><ri:attachment ri:filename="x.png"/></ac:image> and ' +
-      "<ac:link><ri:page ri:content-title=\"Home\"/></ac:link>" +
+      '<ac:link><ri:page ri:content-title="Home"/></ac:link>' +
       // Genuinely self-closing, which is the shape that has no close tag to
       // skip to: a subtree skip started here would swallow the rest of the
       // paragraph.
-      " and <ac:image ac:align=\"right\"/> too</p>",
+      ' and <ac:image ac:align="right"/> too</p>',
   );
   expect(
-    [...inline.target.querySelectorAll(".ac")].map((node) => node.textContent?.trim()),
+    [...inline.target.querySelectorAll(".ac")].map((node) =>
+      node.textContent?.trim(),
+    ),
     "an element with no ac:name is labelled by its own name",
   ).toEqual(["image", "link", "image"]);
   expect(inline.text()).toContain("see");
-  expect(inline.text(), "a self-closing macro swallowed what followed it").toContain("too");
+  expect(
+    inline.text(),
+    "a self-closing macro swallowed what followed it",
+  ).toContain("too");
   inline.done();
 });
 
@@ -241,8 +274,14 @@ test("a macro inside a table cell stays in its cell and the table stays a table"
   expect(table.rows, "the table lost a row to the macro").toHaveLength(2);
   const cell = table.rows[0]!.cells[1]!;
   expect(cell.querySelector(".ac")?.textContent?.trim()).toBe("jira macro");
-  expect(cell.textContent, "the macro's parameters leaked into the cell").not.toContain("PAY-231");
-  expect([...table.rows[1]!.cells].map((c) => c.textContent)).toEqual(["Owner", "payments"]);
+  expect(
+    cell.textContent,
+    "the macro's parameters leaked into the cell",
+  ).not.toContain("PAY-231");
+  expect([...table.rows[1]!.cells].map((c) => c.textContent)).toEqual([
+    "Owner",
+    "payments",
+  ]);
   screen.done();
 });
 
@@ -253,7 +292,7 @@ test("a macro inside a table cell stays in its cell and the table stays a table"
  */
 test("a page written in a layout renders its body rather than a layout placeholder", () => {
   const screen = render(
-    "<ac:layout><ac:layout-section ac:type=\"two_equal\"><ac:layout-cell>" +
+    '<ac:layout><ac:layout-section ac:type="two_equal"><ac:layout-cell>' +
       "<p>left column</p></ac:layout-cell><ac:layout-cell><p>right column</p>" +
       "</ac:layout-cell></ac:layout-section></ac:layout>",
   );
@@ -283,10 +322,9 @@ test("a table renders as a table, with its header row", () => {
   const table = screen.target.querySelector("table");
   expect(table, "a table did not render as a table").not.toBeNull();
   expect(table!.rows).toHaveLength(3);
-  expect([...table!.rows[0]!.cells].map((cell) => cell.tagName.toLowerCase())).toEqual([
-    "th",
-    "th",
-  ]);
+  expect(
+    [...table!.rows[0]!.cells].map((cell) => cell.tagName.toLowerCase()),
+  ).toEqual(["th", "th"]);
   expect([...table!.rows[2]!.cells].map((cell) => cell.textContent)).toEqual([
     "409",
     "manual review",
@@ -315,7 +353,10 @@ test("headings, lists and inline emphasis survive, and an unknown wrapper is unw
   expect(screen.target.querySelector("em")?.textContent).toBe("2");
   expect(screen.target.querySelector("code")?.textContent).toBe("MAX=5");
   expect(screen.target.querySelector("blockquote")?.textContent).toBe("quoted");
-  expect(screen.tags(), "a wrapper knobas does not know reached the DOM").not.toContain("span");
+  expect(
+    screen.tags(),
+    "a wrapper knobas does not know reached the DOM",
+  ).not.toContain("span");
   expect(screen.tags()).not.toContain("div");
   expect(screen.text()).toContain("second");
   screen.done();
@@ -331,7 +372,9 @@ test("headings, lists and inline emphasis survive, and an unknown wrapper is unw
  * node, so the DOM has the characters and no element.
  */
 test("escaped markup is somebody's words, and stays words", () => {
-  const screen = render("<p>write &lt;script&gt;alert(1)&lt;/script&gt; in the box</p>");
+  const screen = render(
+    "<p>write &lt;script&gt;alert(1)&lt;/script&gt; in the box</p>",
+  );
 
   expect(screen.target.querySelector("script")).toBeNull();
   expect(screen.target.querySelectorAll("p")).toHaveLength(1);
@@ -397,7 +440,10 @@ test("the body and the comments are read at Confluence's own paths, for Confluen
     children: {
       comment: {
         results: [
-          { id: "98320", body: { storage: { value: "<p>@Mara can you add the SLA?</p>" } } },
+          {
+            id: "98320",
+            body: { storage: { value: "<p>@Mara can you add the SLA?</p>" } },
+          },
           { id: "98321", body: { storage: { value: "<p>on it</p>" } } },
         ],
       },
@@ -405,10 +451,16 @@ test("the body and the comments are read at Confluence's own paths, for Confluen
   };
 
   expect(storageBodyOf("confluence", payload)).toBe("<p>hello</p>");
-  expect(pageCommentsOf("confluence", payload).map((c) => c.id)).toEqual(["98320", "98321"]);
+  expect(pageCommentsOf("confluence", payload).map((c) => c.id)).toEqual([
+    "98320",
+    "98321",
+  ]);
 
   for (const other of ["jira", "gitea", "mock", "", null, undefined]) {
-    expect(storageBodyOf(other, payload), `${other} was read as storage format`).toBeNull();
+    expect(
+      storageBodyOf(other, payload),
+      `${other} was read as storage format`,
+    ).toBeNull();
     expect(pageCommentsOf(other, payload)).toEqual([]);
   }
 });
@@ -430,7 +482,10 @@ test("a payload with nothing readable at either path misses rather than guessing
     { body: { storage: { value: "   " } } },
     { body: [{ storage: { value: "<p>x</p>" } }] },
   ]) {
-    expect(storageBodyOf("confluence", payload), JSON.stringify(payload) ?? "undefined").toBeNull();
+    expect(
+      storageBodyOf("confluence", payload),
+      JSON.stringify(payload) ?? "undefined",
+    ).toBeNull();
   }
 
   for (const payload of [
@@ -438,7 +493,11 @@ test("a payload with nothing readable at either path misses rather than guessing
     { children: { comment: null } },
     { children: { comment: { results: {} } } },
     { children: { comment: { results: [null, 7, "x"] } } },
-    { children: { comment: { results: [{ id: "1", body: { storage: { value: "" } } }] } } },
+    {
+      children: {
+        comment: { results: [{ id: "1", body: { storage: { value: "" } } }] },
+      },
+    },
   ]) {
     expect(pageCommentsOf("confluence", payload)).toEqual([]);
   }
@@ -447,9 +506,13 @@ test("a payload with nothing readable at either path misses rather than guessing
   // be rendered under rather than being dropped.
   expect(
     pageCommentsOf("confluence", {
-      children: { comment: { results: [{ body: { storage: { value: "<p>x</p>" } } }] } },
+      children: {
+        comment: { results: [{ body: { storage: { value: "<p>x</p>" } } }] },
+      },
     }),
-  ).toEqual([{ id: "comment-0", storage: "<p>x</p>", author: null, when: null }]);
+  ).toEqual([
+    { id: "comment-0", storage: "<p>x</p>", author: null, when: null },
+  ]);
 });
 
 /**
@@ -472,7 +535,11 @@ test("a comment carries who wrote it and when, and misses to null", () => {
           {
             id: "98320",
             body: { storage: { value: "<p>@Mara can you add the SLA?</p>" } },
-            version: { number: 2, when: "2026-08-22T12:41:00.000Z", by: { username: "knobas" } },
+            version: {
+              number: 2,
+              when: "2026-08-22T12:41:00.000Z",
+              by: { username: "knobas" },
+            },
             history: { createdBy: { username: "mara.lindqvist" } },
           },
           {
@@ -489,7 +556,9 @@ test("a comment carries who wrote it and when, and misses to null", () => {
       },
     },
   };
-  expect(pageCommentsOf("confluence", payload).map((c) => [c.author, c.when])).toEqual([
+  expect(
+    pageCommentsOf("confluence", payload).map((c) => [c.author, c.when]),
+  ).toEqual([
     ["knobas", "2026-08-22T12:41:00.000Z"],
     // Nobody named on the version: its creator, which is #284's fallback.
     ["mara.lindqvist", "2026-08-22T13:00:00.000Z"],
@@ -528,8 +597,17 @@ test("a comment carries who wrote it and when, and misses to null", () => {
  */
 test("the page version is read as a positive integer or not at all", () => {
   expect(pageVersionOf("confluence", { version: { number: 3 } })).toBe(3);
-  for (const version of [{ number: "3" }, { number: 0 }, { number: -1 }, { number: 1.5 }, {}]) {
-    expect(pageVersionOf("confluence", { version }), JSON.stringify(version)).toBeNull();
+  for (const version of [
+    { number: "3" },
+    { number: 0 },
+    { number: -1 },
+    { number: 1.5 },
+    {},
+  ]) {
+    expect(
+      pageVersionOf("confluence", { version }),
+      JSON.stringify(version),
+    ).toBeNull();
   }
   expect(pageVersionOf("confluence", {})).toBeNull();
   // Gated on the adapter, like every other read here: `version.number` is a
@@ -555,7 +633,9 @@ test("a macro label decodes its name, and whitespace is no name at all", () => {
       '<ac:structured-macro ac:name="   "/>' +
       '<ac:structured-macro ac:name="&lt;script&gt;alert(1)&lt;/script&gt;"/>',
   );
-  const labels = [...screen.target.querySelectorAll(".ac")].map((n) => n.textContent?.trim());
+  const labels = [...screen.target.querySelectorAll(".ac")].map((n) =>
+    n.textContent?.trim(),
+  );
   expect(labels).toEqual([
     "drawio & friends macro",
     // No name: the element's own local name, so it reads as what it is.
@@ -563,7 +643,10 @@ test("a macro label decodes its name, and whitespace is no name at all", () => {
     "<script>alert(1)</script> macro",
   ]);
   // The decoded label is text and stays text: no element came out of it.
-  expect(screen.target.querySelector("script"), "a macro label became markup").toBeNull();
+  expect(
+    screen.target.querySelector("script"),
+    "a macro label became markup",
+  ).toBeNull();
   screen.done();
 });
 
@@ -583,7 +666,10 @@ test("an ri: element outside a macro is unwrapped, words and all", () => {
       '<ri:user ri:userkey="ff8080"/>.</p>',
   );
   expect(screen.text()).toBe("see the runbook and .");
-  expect(screen.target.querySelector("[ri\\:value]"), "an ri: attribute reached the DOM").toBeNull();
+  expect(
+    screen.target.querySelector("[ri\\:value]"),
+    "an ri: attribute reached the DOM",
+  ).toBeNull();
   expect(screen.target.innerHTML).not.toContain("ri:");
   screen.done();
 });
@@ -607,9 +693,14 @@ test("a body nested deeper than a page ever is still renders its words", () => {
   const depth = 4000;
   const screen = render(`${"<b>".repeat(depth)}deep${"</b>".repeat(depth)}`);
 
-  expect(screen.text(), "the words of a deeply nested body were lost").toBe("deep");
+  expect(screen.text(), "the words of a deeply nested body were lost").toBe(
+    "deep",
+  );
   const nesting = (node: Element): number =>
     1 + Math.max(0, ...[...node.children].map((child) => nesting(child)));
-  expect(nesting(screen.target), "the rendered tree is not bounded").toBeLessThanOrEqual(80);
+  expect(
+    nesting(screen.target),
+    "the rendered tree is not bounded",
+  ).toBeLessThanOrEqual(80);
   screen.done();
 });

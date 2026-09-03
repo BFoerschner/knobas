@@ -43,7 +43,11 @@
  * touch at all. Flattening is about one it may touch, honestly labelled.
  */
 
-import { parseStorageFormat, readTag, type StorageNode } from "./storage-format";
+import {
+  parseStorageFormat,
+  readTag,
+  type StorageNode,
+} from "./storage-format";
 
 /** Why a section may not be edited from knobas. */
 export type SectionRefusal =
@@ -121,14 +125,18 @@ const FLATTENED: ReadonlySet<string> = new Set([
 export function pageSections(storage: string): PageSection[] {
   const opens = headingOpens(storage);
   return opens.map((heading, index) => {
-    const next = opens.find((other, at) => at > index && other.level <= heading.level);
+    const next = opens.find(
+      (other, at) => at > index && other.level <= heading.level,
+    );
     const end = next?.start ?? storage.length;
     const body = storage.slice(heading.bodyStart, end);
     const whole = storage.slice(heading.start, end);
     return {
       index,
       level: heading.level,
-      heading: textOf(parseStorageFormat(storage.slice(heading.innerStart, heading.innerEnd))),
+      heading: textOf(
+        parseStorageFormat(storage.slice(heading.innerStart, heading.innerEnd)),
+      ),
       text: textOf(parseStorageFormat(body)),
       refusal: refusalIn(whole),
       flattens: flattensIn(body),
@@ -157,7 +165,11 @@ export function replaceSectionBody(
   section: PageSection,
   text: string,
 ): string {
-  return storage.slice(0, section.bodyStart) + toStorage(text) + storage.slice(section.end);
+  return (
+    storage.slice(0, section.bodyStart) +
+    toStorage(text) +
+    storage.slice(section.end)
+  );
 }
 
 /**
@@ -181,7 +193,9 @@ export function toStorage(text: string): string {
   return text
     .replace(/\r\n/g, "\n")
     .split("\n\n")
-    .map((paragraph) => withoutBlankEnds(paragraph.split("\n").map((line) => line.trimEnd())))
+    .map((paragraph) =>
+      withoutBlankEnds(paragraph.split("\n").map((line) => line.trimEnd())),
+    )
     .filter((lines) => lines.length > 0)
     .map((lines) => `<p>${lines.map(escape).join("<br/>")}</p>`)
     .join("");
@@ -289,7 +303,15 @@ function flattensIn(slice: string): boolean {
  * text, and stepping past the `>` a naive scan found would step past the
  * *next* tag with it.
  */
-function* tags(source: string): Generator<{ name: string; closing: boolean; selfClosing: boolean; at: number; after: number }> {
+function* tags(
+  source: string,
+): Generator<{
+  name: string;
+  closing: boolean;
+  selfClosing: boolean;
+  at: number;
+  after: number;
+}> {
   let at = 0;
   while (at < source.length) {
     const open = source.indexOf("<", at);

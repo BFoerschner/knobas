@@ -10,9 +10,16 @@
 import { expect, test } from "vitest";
 
 import type { LinkEntry } from "../ipc/entity";
-import { DEFAULT_RELATION, RELATIONS, groupLinks, readingOf } from "./relations";
+import {
+  DEFAULT_RELATION,
+  RELATIONS,
+  groupLinks,
+  readingOf,
+} from "./relations";
 
-function entry(over: { relation?: string; from?: string; to?: string; id?: string } = {}): LinkEntry {
+function entry(
+  over: { relation?: string; from?: string; to?: string; id?: string } = {},
+): LinkEntry {
   const from = over.from ?? "mock:PAY-231";
   const to = over.to ?? "mock:PAY-228";
   return {
@@ -30,7 +37,12 @@ function entry(over: { relation?: string; from?: string; to?: string; id?: strin
       rule_class: null,
       reason: null,
     },
-    other: { entity_id: to, kind: "ticket", title: "Retry storm", deleted_at: null },
+    other: {
+      entity_id: to,
+      kind: "ticket",
+      title: "Retry storm",
+      deleted_at: null,
+    },
   };
 }
 
@@ -62,19 +74,30 @@ test("related reads the same from both ends", () => {
  * screen.
  */
 test("a user-typed relation knobas does not know reads the same from both ends", () => {
-  expect(readingOf("supersedes-eventually", true)).toBe("supersedes-eventually");
-  expect(readingOf("supersedes-eventually", false)).toBe("supersedes-eventually");
+  expect(readingOf("supersedes-eventually", true)).toBe(
+    "supersedes-eventually",
+  );
+  expect(readingOf("supersedes-eventually", false)).toBe(
+    "supersedes-eventually",
+  );
 });
 
 /** The curated list is what the dialog offers and what the lookup keys on. */
 test("every curated relation has a lower-case id and two distinct readings", () => {
   expect(RELATIONS.length).toBeGreaterThan(3);
   for (const relation of RELATIONS) {
-    expect(relation.id, `${relation.id} is stored folded, so the lookup must key on it`).toBe(
-      relation.id.toLowerCase(),
-    );
-    expect(relation.forward.length, `${relation.id} has no forward reading`).toBeGreaterThan(0);
-    expect(relation.inverse.length, `${relation.id} has no inverse reading`).toBeGreaterThan(0);
+    expect(
+      relation.id,
+      `${relation.id} is stored folded, so the lookup must key on it`,
+    ).toBe(relation.id.toLowerCase());
+    expect(
+      relation.forward.length,
+      `${relation.id} has no forward reading`,
+    ).toBeGreaterThan(0);
+    expect(
+      relation.inverse.length,
+      `${relation.id} has no inverse reading`,
+    ).toBeGreaterThan(0);
   }
   expect(
     RELATIONS.map((relation) => relation.id),
@@ -100,7 +123,10 @@ test("rows group by how they read from the viewed entity, not by the stored rela
     viewed,
   );
 
-  expect(groups.map((group) => group.reading)).toEqual(["blocks", "blocked by"]);
+  expect(groups.map((group) => group.reading)).toEqual([
+    "blocks",
+    "blocked by",
+  ]);
   expect(groups[0]!.entries.map((item) => item.link.id)).toEqual(["a", "c"]);
   expect(groups[1]!.entries.map((item) => item.link.id)).toEqual(["b"]);
 });
@@ -118,5 +144,8 @@ test("groups and rows keep the order the read handed them over", () => {
   );
 
   expect(groups.map((group) => group.reading)).toEqual(["documents", "blocks"]);
-  expect(groups[0]!.entries.map((item) => item.link.id)).toEqual(["newest", "oldest"]);
+  expect(groups[0]!.entries.map((item) => item.link.id)).toEqual([
+    "newest",
+    "oldest",
+  ]);
 });

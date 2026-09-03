@@ -435,7 +435,6 @@ mod tests {
         assert_eq!(from_text("she said \"no\""), "<p>she said \"no\"</p>");
     }
 
-
     /// The seeded fixture page, in the storage format
     /// `testenv/seed-atlassian-content.sh` builds for it -- the exact body the
     /// live suite reads back off the real server.

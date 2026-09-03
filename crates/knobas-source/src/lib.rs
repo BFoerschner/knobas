@@ -966,7 +966,7 @@ mod tests {
             );
             assert!(seen.insert(id), "two variants both call themselves {id:?}");
         }
-        assert_eq!(seen.len(), 9, "a variant lost its probe in every_write_op");
+        assert_eq!(seen.len(), 11, "a variant lost its probe in every_write_op");
     }
 
     /// ADR-0004: a failure that came from a response carries the **status** it

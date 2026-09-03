@@ -520,7 +520,10 @@ async fn a_page_whose_version_moved_past_the_edit_holds_it_with_both_versions() 
     assert_eq!(held.held_snapshot.as_ref().unwrap()["text"], "base 60 s.");
     // The held reason is the target's, and it is not the disabled-source one:
     // the source is on, and #204 forbids collapsing the two explanations.
-    assert!(held.source_enabled, "the source is on; this is a target hold");
+    assert!(
+        held.source_enabled,
+        "the source is on; this is a target hold"
+    );
     assert!(h.verbs().contains(&"held".to_owned()));
 }
 

@@ -52,7 +52,11 @@ export const linkChanges = $state({ count: 0 });
  * Never rejects: this is invoked from a keyboard chain where the alternative
  * to a toast is an unhandled rejection nobody sees.
  */
-export async function linkTo(fromId: string, toId: string, label: string): Promise<void> {
+export async function linkTo(
+  fromId: string,
+  toId: string,
+  label: string,
+): Promise<void> {
   try {
     await createLink(fromId, toId);
     linkChanges.count += 1;

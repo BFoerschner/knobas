@@ -24,7 +24,8 @@ const opened: string[] = [];
 vi.mock("../ipc/entity", () => ({
   listContexts: () => Promise.resolve([]),
   contextMembers: () => Promise.resolve([]),
-  createContext: () => Promise.reject(new Error("no context creation in this test")),
+  createContext: () =>
+    Promise.reject(new Error("no context creation in this test")),
   promoteContext: () => Promise.reject(new Error("no promotion in this test")),
   getEntity: () => Promise.resolve(entity()),
   unlink: () => Promise.resolve(),
@@ -37,9 +38,17 @@ vi.mock("../ipc/entity", () => ({
 }));
 
 vi.mock("../ipc/search", () => ({
-  search: () => Promise.reject(new Error("the picker is not this file's business")),
-  launcherHome: () => Promise.reject(new Error("the dialog never loads the board")),
-  noFilters: () => ({ sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }),
+  search: () =>
+    Promise.reject(new Error("the picker is not this file's business")),
+  launcherHome: () =>
+    Promise.reject(new Error("the dialog never loads the board")),
+  noFilters: () => ({
+    sources: [],
+    kinds: [],
+    updated_within_days: null,
+    mine: false,
+    authors: [],
+  }),
 }));
 
 let writeOps: string[] = ["comment", "update_page", "create_page"];
@@ -91,7 +100,10 @@ const STORAGE =
 
 let entity: () => EntityDetail = () => page();
 
-function page(over: Partial<EntityDetail> = {}, payload: Record<string, unknown> = {}): EntityDetail {
+function page(
+  over: Partial<EntityDetail> = {},
+  payload: Record<string, unknown> = {},
+): EntityDetail {
   return {
     row: {
       entity_id: "confluence:98307",
@@ -114,7 +126,11 @@ function page(over: Partial<EntityDetail> = {}, payload: Record<string, unknown>
     payload: {
       id: "98307",
       body: { storage: { value: STORAGE, representation: "storage" } },
-      version: { number: 3, when: "2026-08-22T11:48:00Z", by: { username: "knobas" } },
+      version: {
+        number: 3,
+        when: "2026-08-22T11:48:00Z",
+        by: { username: "knobas" },
+      },
       ...payload,
     },
     web_url: "http://127.0.0.1:8090/display/ENG/SEPA+payout+retry+design",
@@ -147,7 +163,9 @@ function render() {
       [...target.querySelectorAll<HTMLButtonElement>("button")].find(
         (b) => (b.textContent ?? "").trim() === label,
       ),
-    editors: () => [...target.querySelectorAll<HTMLTextAreaElement>("textarea")],
+    editors: () => [
+      ...target.querySelectorAll<HTMLTextAreaElement>("textarea"),
+    ],
     text: () => (target.textContent ?? "").replace(/\s+/g, " "),
     done: () => {
       unmount(app);
@@ -186,10 +204,14 @@ test("offers an edit for each macro-free section and the wiki for the rest", asy
   await vi.waitFor(() => expect(screen.buttons()).toContain("Edit section"));
 
   expect(screen.buttons().filter((b) => b === "Edit section")).toHaveLength(2);
-  expect(screen.text()).toContain("This section has a macro, so knobas will not rewrite it.");
+  expect(screen.text()).toContain(
+    "This section has a macro, so knobas will not rewrite it.",
+  );
   // *Open in browser* twice: the page header's and the refused section's. The
   // refusal offers somewhere to go rather than a disabled button.
-  expect(screen.buttons().filter((b) => b === "Open in browser")).toHaveLength(2);
+  expect(screen.buttons().filter((b) => b === "Open in browser")).toHaveLength(
+    2,
+  );
 
   screen.done();
 });
@@ -206,9 +228,10 @@ test("a section edit queues the whole body with the mirrored version", async () 
 
   press(screen.button("Edit section"));
   const area = screen.editors()[0]!;
-  expect(area.value, "the editor did not open on the section as it stands").toBe(
-    "base 30 s, factor 2.",
-  );
+  expect(
+    area.value,
+    "the editor did not open on the section as it stands",
+  ).toBe("base 30 s, factor 2.");
   type(area, "base 45 s, factor 3.");
   press(screen.button("Queue edit"));
   await vi.waitFor(() => expect(queued).toHaveLength(1));
@@ -290,20 +313,31 @@ test("a comment on a page is queued as the SPI's own Comment op", async () => {
  */
 test("a comment renders who wrote it, and renders without one when nobody is named", async () => {
   entity = () =>
-    page({}, {
-      children: {
-        comment: {
-          results: [
-            {
-              id: "98320",
-              body: { storage: { value: "<p>@Mara can you add the SLA?</p>" } },
-              version: { when: "2026-08-22T12:41:00Z", by: { username: "knobas" } },
-            },
-            { id: "98321", body: { storage: { value: "<p>no expansions here</p>" } } },
-          ],
+    page(
+      {},
+      {
+        children: {
+          comment: {
+            results: [
+              {
+                id: "98320",
+                body: {
+                  storage: { value: "<p>@Mara can you add the SLA?</p>" },
+                },
+                version: {
+                  when: "2026-08-22T12:41:00Z",
+                  by: { username: "knobas" },
+                },
+              },
+              {
+                id: "98321",
+                body: { storage: { value: "<p>no expansions here</p>" } },
+              },
+            ],
+          },
         },
       },
-    });
+    );
   const screen = render();
   await vi.waitFor(() => expect(screen.text()).toContain("add the SLA"));
 

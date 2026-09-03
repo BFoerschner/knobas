@@ -326,7 +326,10 @@ mod tests {
         assert_eq!(back.adapter_kind, crate::ADAPTER_KIND);
         // The action bar is drawn from this on the other side of the bridge, so
         // an op lost on the hop is an action the user is never offered.
-        assert_eq!(back.write_ops, vec!["comment", "update_page", "create_page"]);
+        assert_eq!(
+            back.write_ops,
+            vec!["comment", "update_page", "create_page"]
+        );
         assert_eq!(back.capabilities, vec![knobas_source::Capability::Write]);
         assert!(back.entity_kinds[0].full_sync_exhaustive);
         // The declaration travels with it: a reader resolves it on the other

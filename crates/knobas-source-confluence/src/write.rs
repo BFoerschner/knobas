@@ -176,10 +176,7 @@ pub(crate) async fn comment(
 
 /// The `id` out of a create's answer, or the refusal that a write reported as
 /// done with nothing to point at deserves.
-async fn created_id(
-    response: knobas_http::Response,
-    what: &str,
-) -> Result<String, SourceError> {
+async fn created_id(response: knobas_http::Response, what: &str) -> Result<String, SourceError> {
     let status = response.status();
     let created: serde_json::Value = response.json().await.map_err(|error| {
         SourceError::protocol(format!(

@@ -501,6 +501,9 @@ mod tests {
                 body: "on it".to_owned(),
             })
             .await;
-        assert!(matches!(refused, Err(SourceError::Protocol { .. })), "{refused:?}");
+        assert!(
+            matches!(refused, Err(SourceError::Protocol { .. })),
+            "{refused:?}"
+        );
     }
 }
