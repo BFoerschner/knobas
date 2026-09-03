@@ -351,6 +351,19 @@ async fn every_listing_is_walked_to_the_end_against_a_server_that_caps_its_pages
         .filter(|full| full.starts_with(&format!("{}/", env.owner)))
         .cloned()
         .collect();
+    // The one oracle here that `must_be_capped_with_more_behind_it` does not
+    // already prove non-empty: it proves `repos.keys` paged, not that anything
+    // in it belongs to this owner. An `owned` that filtered down to nothing
+    // would make the equality below `[] == []` -- true of an adapter that
+    // emitted no repository at all (#347).
+    assert!(
+        !owned.is_empty(),
+        "{} owns none of the {} repositories the hand walk listed, so the equality below would \
+         compare two empty lists: {:?}",
+        env.owner,
+        repos.keys.len(),
+        repos.keys
+    );
     assert_eq!(
         sorted(of_kind(&items, "repo").iter().map(|i| i.entity.key.clone())),
         sorted(owned),
