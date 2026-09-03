@@ -26,7 +26,7 @@ The per-system implementation that speaks a source's API and emits its items.
 _Avoid_: plugin, client
 
 **Project**:
-A source's own grouping of its items, where the source has one — a Jira project, a TeamCity project. Per source and in the source's own word: Gitea has no such thing, and its repository is an entity kind rather than a grouping. Not a [Context](#context), which is a working set a person builds. (ADR-0010)
+A source's own grouping of its items, where the source has one — a Jira project, a TeamCity project, a Confluence **space** (from M3.2). Per source and in the source's own word: Gitea has no such thing, and its repository is an entity kind rather than a grouping. Not a [Context](#context), which is a working set a person builds. (ADR-0010)
 _Avoid_: container, space, workspace, board (ADR-0009)
 
 **Census**:
@@ -122,7 +122,7 @@ _Avoid_: filter, saved search
 ## Acting on sources
 
 **Write-back**:
-An operation that changes data in a source (status, comment, approval, trigger). Links, contexts, notes, and time are never write-back.
+An operation that changes data in a source (status, comment, approval, trigger, worklog, page). Links, contexts, notes, and [blocks](#block) are never write-back; a [worklog](#worklog) is one.
 
 **Pending write**:
 An edit queued because its source cannot currently accept it. The queue is a visible, inspectable list, not a count. Delivery is at least once — a write in flight when knobas stops may arrive twice; knobas re-sends rather than guess, and never merges or deduplicates what you wrote. (ADR-0012)
@@ -137,6 +137,32 @@ A queued write knobas will not send until the user acts, for one of two stated r
 **Inbox**:
 The single actionable stream — mentions, review requests, failed builds, assignments, credential expiry — with actions and snooze.
 _Avoid_: notifications, feed
+
+## Time
+
+**Timer target**:
+The one entity (ticket, page, note, repo, asset) or ad-hoc label a running timer is attributed to, and what a [block](#block) records. A [context](#context) is never a target: it is a set, and time on a set has nowhere to go; the ad-hoc label covers "worked across the SEPA context". Not the glossary's *context* — the two words were separated deliberately (ADR-0010).
+_Avoid_: timer context, context
+
+**Block**:
+A knobas-owned interval of time — start, end, [timer target](#timer-target) — and the unit everything about time is built from. **Manual** when the timer made it, **passive** when attribution recorded what was open. Blocks stay local and exportable; none is ever written to a source, and a passive block is never logged without a person saying so. A block remembers which [worklog](#worklog), if any, it was logged into.
+_Avoid_: interval (that is a worklog's editable span), entry, session
+
+**Worklog**:
+The Jira record that one or more [blocks](#block) become when logged — a [write-back](#write-back) through the write queue like any other, with a local copy. Sending it changes nothing about the blocks. At-least-once like every write (ADR-0012): a worklog in flight when knobas stops may land twice, and knobas re-sends rather than guess.
+_Avoid_: time entry, logged time (that is the timesheet's column, not the record)
+
+**Digest**:
+The standup's generated three lists — yesterday, today, blockers — drawn from the [mirror](#mirror) and the activity stream for the configured usernames, every line linking to the item it came from. *Yesterday* is the newest day before today that has any of your activity, at most seven days back. Mine only: it describes the person the sources were configured as, never a colleague. (M3 grilling, 2026-09-02)
+_Avoid_: report, summary, standup (that is the whole flow)
+
+**Standup protocol**:
+A [note](#note) — one per date, opened by its own address — holding attendees, per-person notes and action items. *Publish* creates a Confluence page from it under a configured parent and links note and page; the note stays the editable original. Not a kind of its own.
+_Avoid_: minutes, protocol page (that is the published copy)
+
+**Passive attribution**:
+The opt-in recording of which entity was in the foreground — the open detail, else the room's anchor entity, else nothing — while the app window is focused, as passive [blocks](#block). A gap stays a gap until a person assigns it; nothing recorded this way reaches a source on its own.
+_Avoid_: automatic tracking, activity tracking (that is the activity stream's word)
 
 ## Export
 
