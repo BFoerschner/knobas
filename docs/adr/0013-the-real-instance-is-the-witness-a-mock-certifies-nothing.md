@@ -16,7 +16,7 @@ Decided 2026-09-02 (Björn, M3 grilling session): **every adapter and every writ
 
 ## Consequences
 
-- The Atlassian pair lives on 10-user, 3-hour timebomb keys (self-service DC trials ended 2026-03-30), so the live shape is disposable: the seed must be fast, idempotent against a partly seeded instance, and followed by `down -v`. The keys are fetched, not typed: `testenv/fetch-timebomb-keys.sh` (#291) pulls them off Atlassian's public page, and `seed-atlassian.sh` calls it when a key is unset.
+- The Atlassian pair lives on 10-user, 3-hour timebomb keys (self-service DC trials ended 2026-03-30), so the live shape is disposable: the seed must be fast, idempotent against a partly seeded instance, and followed by `down -v`. The keys are fetched, not typed: `testenv/fetch-timebomb-keys.sh` (PR #291) pulls them off Atlassian's public page, and `seed-atlassian.sh` calls it when a key is unset.
 - Jira project creation over REST fixes a template key, so the seeded workflow is Jira's default rather than a custom Tidewater one; seeded worklogs and comments belong to the admin account, and identity-dependent tests configure that username.
 - **Flowrun is the single named exception**: it is an internal system with no container, so its stub *defines* the assumed contract until the real-system gate (roadmap §5). Nothing else gets one, and this sentence is not precedent.
 - M3 opens with a small gated **M3.0 Witness** that seeds the real Jira and Confluence and certifies the existing Jira adapter and its three write ops against Jira 10.3.24 before M3.1 writes the first worklog into it.
