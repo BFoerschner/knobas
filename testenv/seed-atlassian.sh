@@ -312,6 +312,52 @@ wait_for_state() {  # wait_for_state <predicate> <name> <url> <cap seconds> <acc
   say "$2 is $_st after $(( $(date +%s) - _t0 ))s"
 }
 
+# FIRST_RUN DOES NOT MEAN THE WIZARD IS BEING SERVED, and the gap between the
+# two is minutes wide. FIRST_RUN is Jira saying it has decided it needs setting
+# up; for a good while after that `GET /` still answers with the database step,
+# or with nothing that carries a form at all.
+#
+# The old confluence-first order hid this: Confluence's entire wizard walk ran
+# inside the gap, so by the time Jira's `/` was read it was serving. Seeding
+# Jira first (#314) walks straight into it, and the failure was silent -- `GET
+# /` did not land on a step, the walk loop's out-of-the-wizard exit fired
+# having walked nothing, and the script then sat in the post-wizard wait for a
+# RUNNING that could never come, until the cap killed it 900 s later. The
+# instance looked like the wizard had been walked and it had not, which is
+# exactly what this file's header says must never happen quietly.
+#
+# So the wizard being served is waited for, positively, the way every other
+# readiness question here is answered: by asking for the thing we are about to
+# use, not for a proxy. The step it must be showing is named rather than
+# pattern-matched, because the script is pinned to one image digest and this is
+# the step that image opens on; a wizard sitting on the database step instead
+# means ATL_JDBC_* never reached the container.
+JIRA_FIRST_STEP=SetupApplicationProperties.jspa
+
+wait_for_jira_wizard() {  # wait_for_jira_wizard <cap seconds>
+  say "waiting for jira to serve $JIRA_FIRST_STEP (cap ${1}s)"
+  _t0=$(date +%s)
+  _next=$PROGRESS_EVERY_S
+  while :; do
+    wizard_read "$JIRA_URL/"
+    [ "$STEP" = "$JIRA_FIRST_STEP" ] && break
+    [ "$(( $(date +%s) - _t0 ))" -lt "$1" ] || die "jira never served its first setup step (${1}s).
+  expected form: $JIRA_FIRST_STEP
+  last url:      $WIZARD_URL
+  last form:     ${STEP:-none}
+  A wizard stuck on the database step means ATL_JDBC_* is not reaching the
+  container (docker-compose.yml). Anything else means the wizard moved, and
+  the sequence has to be re-derived against the new image."
+    sleep "$POLL_S"
+    _waited=$(( $(date +%s) - _t0 ))
+    if [ "$_waited" -ge "$_next" ]; then
+      say "  jira is serving ${STEP:-no form yet} -- ${_waited}s of ${1}s"
+      _next=$(( _waited + PROGRESS_EVERY_S ))
+    fi
+  done
+  say "jira is serving $STEP after $(( $(date +%s) - _t0 ))s"
+}
+
 # Merge one product's block into seed-state.json rather than rewriting it:
 # seed-gitea.sh owns its own keys in the same file.
 record() {  # record <key> <json>
@@ -428,13 +474,15 @@ setup_jira() {
   fetch-timebomb-keys.sh did not set it -- see its error above."
 
   wizard_begin
-  wizard_read "$JIRA_URL/"
+  wait_for_jira_wizard "$FIRST_RUN_CAP_S"
   _n=0
+  _walked=0
   while [ "$_n" -lt 12 ]; do
     _n=$((_n + 1))
     # Out of the wizard is the exit condition: the last step lands on
     # WelcomeToJIRA.jspa, which has forms of its own that are not setup steps.
     case "$WIZARD_URL" in *"/secure/Setup"*) ;; *) break ;; esac
+    _walked=$((_walked + 1))
     case "$STEP" in
       SetupApplicationProperties.jspa)
         say "jira: application properties"
@@ -477,6 +525,13 @@ setup_jira() {
     esac
   done
   wizard_end
+
+  # Belt and braces on the failure above: that exit condition is a `break`, and
+  # a break on the first pass means the wizard was never walked, not that it
+  # finished. Reaching the post-wizard wait in that state costs a whole cap and
+  # then reports the wrong thing.
+  [ "$_walked" -gt 0 ] || die "jira's wizard walk did nothing -- it left the
+  wizard at $WIZARD_URL without POSTing a step. Jira has not been set up."
 
   wait_for_state state_is_running jira "$JIRA_URL" \
     "$JIRA_RUNNING_CAP_S" RUNNING
