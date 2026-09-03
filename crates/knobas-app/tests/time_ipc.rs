@@ -1651,6 +1651,57 @@ async fn a_day_inside_the_horizon_keeps_its_beats_and_is_still_offered() {
     );
 }
 
+/// **The day the horizon cuts through is left exactly as it was.**
+///
+/// The sharp edge of the whole ticket, and the one a reviewer should argue
+/// with first. The horizon is an instant and a day is an interval, so one day
+/// always straddles it: this one has a morning and an afternoon, both already
+/// offered as blocks, and the sweep takes the morning's beats and leaves the
+/// afternoon's.
+///
+/// A reconciliation that then ran would derive one span from what survived and
+/// **forget the morning block** -- deleting a record on the strength of
+/// evidence knobas itself had thrown away. Which is why a day reaching back
+/// past what was swept is treated the way a day with no observations is: left
+/// alone, absent rather than empty.
+#[tokio::test]
+async fn the_day_the_horizon_cuts_through_keeps_the_blocks_it_was_already_offered() {
+    let pool = scratch("time-passive-straddle").await;
+    time::passive::set_enabled(&pool, true).await.unwrap();
+    let midnight = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
+    let ticket = on(TICKET);
+    let run = |from| beats(&pool, Some(&ticket), from, 21, Duration::seconds(30));
+    run(midnight + Duration::hours(9)).await;
+    run(midnight + Duration::hours(14)).await;
+
+    let offered = day(&pool, midnight).await;
+    assert_eq!(
+        offered,
+        vec![
+            // The morning runs a beat window past its last beat: the gap to
+            // the afternoon is focused time the cap can afford to pay for.
+            (BlockKind::Passive, on(TICKET), 630),
+            (BlockKind::Passive, on(TICKET), 600),
+        ],
+        "a morning and an afternoon to lose"
+    );
+
+    // Noon, thirty days on: the morning is past the horizon and the afternoon
+    // is not.
+    let noon = midnight + Duration::hours(12);
+    let taken = time::passive::prune(&pool, noon + Duration::days(time::passive::RETENTION_DAYS))
+        .await
+        .expect("the sweep runs");
+    assert_eq!(taken, 21, "the morning's beats went and the afternoon's did not");
+
+    assert_eq!(
+        day(&pool, midnight).await,
+        offered,
+        "the day read reconciled a day it no longer has the beats for, and \
+         forgot the morning on the strength of the afternoon"
+    );
+}
+
 // -- the worklog draft (#280) -----------------------------------------------
 //
 // The draft's *reads*, against a real database: which blocks a day's interval

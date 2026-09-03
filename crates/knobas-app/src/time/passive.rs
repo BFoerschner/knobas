@@ -471,7 +471,7 @@ const OFFER: &str = "insert into knobas.block (started_at, ended_at, entity_id, 
 /// forgot would draw a day with no passive time and no way to tell that from a
 /// day with none.
 ///
-/// Three things stop it before it writes, and each is a rule rather than an
+/// Four things stop it before it writes, and each is a rule rather than an
 /// optimisation:
 ///
 /// * **The setting is off.** Nothing was recorded, and nothing already offered
@@ -479,6 +479,15 @@ const OFFER: &str = "insert into knobas.block (started_at, ended_at, entity_id, 
 /// * **The day has no observations at all.** Every day before this feature
 ///   existed is such a day, and a reconciliation that spoke about one would
 ///   delete passive blocks it has no evidence either way about.
+/// * **The day reaches back past what [`prune`] has swept.** The same rule
+///   one line further out: a day whose beats retention has taken is a day
+///   knobas has no evidence about either, and it has to read as **absent**
+///   rather than as observed-and-empty. Emptiness would delete the blocks the
+///   day was already offered, which is knobas forgetting an afternoon on the
+///   strength of a record it threw away itself. The guard is on `from` and not
+///   on `to` deliberately: the horizon is an instant and a day is an interval,
+///   so one day always straddles it, and it is exactly that day -- half swept,
+///   half intact -- a `to` comparison would hand to the derivation.
 /// * **A span overlaps a block the person owns.** Passive attribution never
 ///   draws over time a manual block already claims -- including a passive
 ///   block that has since been assigned, which is what stops an assignment
@@ -494,6 +503,9 @@ pub(super) async fn materialize(
     to: DateTime<Utc>,
 ) -> Result<(), IpcError> {
     if !enabled(pool).await? {
+        return Ok(());
+    }
+    if pruned_before(pool).await?.is_some_and(|swept| from < swept) {
         return Ok(());
     }
 
