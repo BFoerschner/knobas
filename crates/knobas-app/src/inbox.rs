@@ -287,22 +287,37 @@ mod tests {
     ///
     /// `knobas-source-confluence` declares no write ops (its `Comment` op is
     /// #286's), so a mention on it offers nothing -- and the item is still an
-    /// item, because *open*, *snooze* and *done* are knobas' own. That is the
-    /// first assertion, made against the **real descriptor** rather than an
-    /// empty list, so it stops being true the moment the adapter grows one.
+    /// item, because *open*, *snooze* and *done* are knobas' own.
     ///
-    /// The second is the criterion's other half, pinned before it lands: the
-    /// day that descriptor declares `comment`, this same call offers it, with
-    /// nothing here to change. `Category::Mention` has asked for `comment`
-    /// since #45.
+    /// The first assertion is against the **real descriptor**, and it is an
+    /// *intersection* rather than an `is_empty()` on purpose. An `is_empty()`
+    /// premise would be a tripwire: it would fail the day #286 declares
+    /// `comment` and send somebody here to edit a test that had not become
+    /// wrong. Written this way both sides are `[]` today and both sides are
+    /// `["comment"]` that day, which is the criterion discharged with nothing
+    /// here to edit.
+    ///
+    /// Which makes it `[] == []` for now, so it cannot on its own say *which*
+    /// op a mention asks for. The second assertion can, and it is the half
+    /// that carries the criterion: a source that declares `comment` is offered
+    /// it. `Category::Mention` has asked for `comment` since #45. That the
+    /// Confluence descriptor is empty *today* is
+    /// `knobas_source_confluence`'s own
+    /// `the_descriptor_and_the_dispatch_agree_that_this_adapter_is_read_only`,
+    /// which is where that fact belongs.
     #[test]
     fn a_mention_offers_comment_from_a_source_that_declares_it() {
         let confluence = knobas_source_confluence::descriptor_template().write_ops;
-        assert!(
-            confluence.is_empty(),
-            "this test's premise is that the Confluence adapter is read-only: {confluence:?}"
+        let declares_comment: Vec<String> = confluence
+            .iter()
+            .filter(|op| op.as_str() == "comment")
+            .cloned()
+            .collect();
+        assert_eq!(
+            offer(Category::Mention, Some(&confluence)),
+            declares_comment,
+            "a mention offers exactly the comment op its source declares: {confluence:?}"
         );
-        assert!(offer(Category::Mention, Some(&confluence)).is_empty());
         assert_eq!(
             offer(Category::Mention, Some(&ops(&["comment"]))),
             ops(&["comment"])

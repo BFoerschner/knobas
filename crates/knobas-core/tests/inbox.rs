@@ -409,7 +409,7 @@ async fn a_confluence_page_whose_comment_names_me_is_a_mention_on_the_same_rule(
 
 Backoff policy
 
-@mara.lindqvist can you add                    the SLA?",
+@mara.lindqvist can you add the SLA?",
             payload: serde_json::json!({ "space": { "key": "ENG" } }),
             updated: days_ago(1),
         },
