@@ -69,11 +69,11 @@
 //! label is the smallest reversible edit Jira has: it moves `updated`, which is
 //! the whole point, and it changes no field the fixture describes.
 //!
-//! What a *killed* run left behind is cleared by the next one:
-//! [`Seeded::clear_leftovers`] strips the label from any seeded issue wearing
-//! it and **deletes** any issue wearing it that the seed did not create -- the
-//! ticket `knobas-app`'s live suite files through the write queue, if that run
-//! was killed before its own cleanup. Every test that asserts an exact set
+//! What a *killed* run left behind is put back by the next one, and by this
+//! suite for **both** of them: [`Seeded::clear_leftovers`] restores the corpus
+//! from `seed-state.json` -- a stray issue deleted, a stray comment deleted, a
+//! label removed, a status moved back through the workflow -- which is the
+//! union of what either suite writes. Every test that asserts an exact set
 //! calls it before taking its baseline. Recovery from a dirty environment is
 //! "run the suite again".
 //!
@@ -122,13 +122,18 @@ const REQUEST_BUDGET: Duration = Duration::from_secs(30);
 const INDEX_BUDGET: Duration = Duration::from_secs(60);
 
 /// The label this suite and `knobas-app`'s Atlassian live suite mark
-/// everything they write with, and the one [`Seeded::clear_leftovers`] sweeps
-/// by.
+/// everything they write with, so that a person looking at the server can tell
+/// whose litter it is.
 ///
 /// A constant rather than a per-run salt, deliberately: the leftovers that
 /// matter are the ones a *killed* run left, and a process that is gone cannot
 /// be asked what it salted with. The cost is the one-owner rule, which this
 /// environment is under anyway.
+///
+/// It is a marker and not the mechanism: [`Seeded::clear_leftovers`] restores
+/// the corpus from `seed-state.json`, so a leftover that could not carry the
+/// label -- the ticket a create files, which `WriteOp::CreateTicket` has no
+/// field for -- is reached anyway.
 const LITTER_LABEL: &str = "knobas-live-suite";
 
 /// The `jira` block of `testenv/seed-state.json`: what the seed actually got
@@ -296,26 +301,16 @@ impl Seeded {
         (status, json)
     }
 
-    /// The keys a JQL query answers with, in the order Jira returned them.
-    async fn jql(&self, jql: &str) -> Vec<String> {
-        let encoded = jql
-            .replace(' ', "%20")
-            .replace('"', "%22")
-            .replace('=', "%3D");
+    /// One JQL query, with the fields it needs, as raw rows.
+    async fn jql(&self, jql: &str, fields: &str) -> Vec<serde_json::Value> {
         let (status, body) = self
             .get(&format!(
-                "rest/api/2/search?jql={encoded}&maxResults=100&fields=key"
+                "rest/api/2/search?jql={}&maxResults=100&fields={fields}",
+                url_encode(jql)
             ))
             .await;
         assert_eq!(status, 200, "JQL {jql:?} answered {body}");
-        body["issues"]
-            .as_array()
-            .map(|rows| {
-                rows.iter()
-                    .filter_map(|row| row["key"].as_str().map(str::to_owned))
-                    .collect()
-            })
-            .unwrap_or_default()
+        body["issues"].as_array().cloned().unwrap_or_default()
     }
 
     /// The adapter over this instance, authenticating as `./seed --env` says:
@@ -327,12 +322,7 @@ impl Seeded {
 
     /// The same, against another base URL -- the [`Fault::Unreachable`] case.
     fn source_at(&self, base_url: &str, config: serde_json::Value) -> Box<dyn Source> {
-        self.build_source(
-            base_url,
-            AuthMethod::UserPassword,
-            &self.password.clone(),
-            config,
-        )
+        self.build_source(base_url, AuthMethod::UserPassword, &self.password, config)
     }
 
     /// A source whose credential this Jira will not accept, as a **bearer
@@ -396,31 +386,65 @@ impl Seeded {
             .unwrap_or_else(|| panic!("seed-state.json records no issue {key}"))
     }
 
-    /// Strip [`LITTER_LABEL`] from every seeded issue wearing it, and delete
-    /// every issue wearing it that the seed did not create -- what a run that
-    /// was **killed** rather than failed left behind, since only a process that
-    /// unwinds reaches a `Drop`.
+    /// Put the corpus back to what the seed left, and say what had to be put
+    /// back -- **the recovery path for both Atlassian live suites**, since only
+    /// a process that unwinds reaches a `Drop` and a run that was *killed*
+    /// reaches none.
     ///
-    /// Scoped by `seed-state.json` and by the label rather than by anything a
-    /// run remembers, which is the only way to reach the leftovers of a run
-    /// that is gone. Read-only in the ordinary case: a clean server costs one
-    /// JQL query.
+    /// Scoped by `seed-state.json` and by nothing a run remembers, which is the
+    /// only way to reach the leftovers of a run that is gone -- the same rule
+    /// the seeded TeamCity suite's clearing works under. Four things can be
+    /// wrong, and it is the union of what either suite writes:
+    ///
+    /// * an issue the seed did not create -- the ticket `knobas-app`'s suite
+    ///   files through the write queue -- is **deleted**;
+    /// * [`LITTER_LABEL`] on a seeded issue -- this suite's own edit -- is
+    ///   removed;
+    /// * a comment whose id the seed did not record is **deleted**, so
+    ///   [`each_issue_carries_its_comments_and_worklogs_as_seeded`]'s exact id
+    ///   list means something;
+    /// * an issue in a status other than the one the seed put it in is moved
+    ///   back through the workflow, so
+    ///   [`a_full_sync_mirrors_every_seeded_issue_across_both_projects`]'s
+    ///   per-issue status assertion does too.
+    ///
+    /// The last two are what a killed `knobas-app` run leaves, and without them
+    /// the next run would fail two tests here on diffs that never name the
+    /// cause -- which is the failure the TeamCity suite built its own refusal
+    /// check around. Every test that asserts an exact set calls this before
+    /// taking its baseline. Read-only in the ordinary case: a clean server
+    /// costs one search.
     ///
     /// Not "sweep": `CONTEXT.md` spends that word on the engine pass that
     /// tombstones what a full sync no longer emitted.
     async fn clear_leftovers(&self) {
-        let littered = self.jql(&format!("labels = {LITTER_LABEL}")).await;
-        if littered.is_empty() {
-            return;
-        }
-        let seeded = self.seeded_keys();
-        println!(
-            "live suite: clearing {} leftover(s) from a run that was killed rather than failed: \
-             {littered:?}",
-            littered.len()
-        );
-        for key in &littered {
-            if seeded.contains(key) {
+        let rows = self.jql("ORDER BY key ASC", "status,labels,comment").await;
+        let mut cleared: Vec<String> = Vec::new();
+        for row in &rows {
+            let key = row["key"].as_str().expect("an issue has a key").to_owned();
+            let Some(seeded) = self.seed.issues.iter().find(|i| i.key == key) else {
+                let (status, body) = self
+                    .request(
+                        reqwest::Method::DELETE,
+                        &format!("rest/api/2/issue/{key}"),
+                        None,
+                    )
+                    .await;
+                // 404: the search index still named an issue a `Drop` had
+                // already deleted. Jira updates that index asynchronously, so a
+                // key it hands back is not a promise the issue is still there.
+                assert!(
+                    status == 204 || status == 404,
+                    "deleting the leftover issue {key}: {status} {body}"
+                );
+                cleared.push(format!("deleted {key}"));
+                continue;
+            };
+
+            if row["fields"]["labels"]
+                .as_array()
+                .is_some_and(|l| l.iter().any(|v| v == LITTER_LABEL))
+            {
                 let (status, body) = self
                     .request(
                         reqwest::Method::PUT,
@@ -430,29 +454,90 @@ impl Seeded {
                         })),
                     )
                     .await;
-                assert_eq!(
-                    status, 204,
-                    "removing the leftover label from {key}: {body}"
-                );
-            } else {
+                assert_eq!(status, 204, "unlabelling {key}: {body}");
+                cleared.push(format!("unlabelled {key}"));
+            }
+
+            for id in row["fields"]["comment"]["comments"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|c| c["id"].as_str())
+                .filter(|id| !seeded.comments.iter().any(|c| c.id == *id))
+            {
                 let (status, body) = self
                     .request(
                         reqwest::Method::DELETE,
-                        &format!("rest/api/2/issue/{key}"),
+                        &format!("rest/api/2/issue/{key}/comment/{id}"),
                         None,
                     )
                     .await;
-                assert_eq!(status, 204, "deleting the leftover issue {key}: {body}");
+                assert!(
+                    status == 204 || status == 404,
+                    "deleting the leftover comment {id} on {key}: {status} {body}"
+                );
+                cleared.push(format!("deleted comment {id} on {key}"));
+            }
+
+            let status_now = row["fields"]["status"]["name"].as_str().unwrap_or_default();
+            if status_now != seeded.status {
+                self.move_to(&key, &seeded.status).await;
+                cleared.push(format!(
+                    "moved {key} back from {status_now:?} to {:?}",
+                    seeded.status
+                ));
             }
         }
-        assert!(
-            self.jql(&format!("labels = {LITTER_LABEL}"))
-                .await
-                .is_empty(),
-            "the leftovers of an earlier run could not be cleared, so this run would measure a \
-             corpus that is not the seed's"
+        if cleared.is_empty() {
+            return;
+        }
+        println!(
+            "live suite: put back {} thing(s) a run that was killed rather than failed left \
+             behind: {}",
+            cleared.len(),
+            cleared.join("; ")
         );
     }
+
+    /// Move one issue through the workflow to `status`, the only way a status
+    /// changes. The seeded workflow reaches all four of its statuses from every
+    /// one of them, so the move always exists; a workflow that stopped offering
+    /// it is a changed template and says so.
+    async fn move_to(&self, key: &str, status: &str) {
+        let (code, body) = self
+            .get(&format!("rest/api/2/issue/{key}/transitions"))
+            .await;
+        assert_eq!(code, 200, "transitions of {key}: {body}");
+        let id = body["transitions"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|t| t["to"]["name"].as_str() == Some(status))
+            .and_then(|t| t["id"].as_str().map(str::to_owned))
+            .unwrap_or_else(|| panic!("the workflow offers {key} no way to {status:?}: {body}"));
+        let (code, body) = self
+            .request(
+                reqwest::Method::POST,
+                &format!("rest/api/2/issue/{key}/transitions"),
+                Some(serde_json::json!({ "transition": { "id": id } })),
+            )
+            .await;
+        assert_eq!(code, 204, "moving {key} to {status:?}: {body}");
+    }
+}
+
+/// Percent-encode what a JQL clause may contain. Deliberately tiny: the only
+/// queries here are composed from constants and from keys Jira itself
+/// answered.
+fn url_encode(raw: &str) -> String {
+    raw.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            other => format!("%{other:02X}"),
+        })
+        .collect()
 }
 
 /// The one label this suite adds, removed again when the guard drops --
@@ -621,6 +706,28 @@ fn updated_to(cursor: &str) -> chrono::DateTime<chrono::Utc> {
     raw.parse().unwrap_or_else(|e| panic!("{raw:?}: {e}"))
 }
 
+/// Wait until the wall clock has moved into a **later second** than `stamp`.
+///
+/// Jira stamps `updated` to the second, and the adapter's cursor recognises a
+/// re-delivered issue by its `(key, updated)` pair -- so an edit made inside
+/// the same second as the value a baseline run recorded is, to the cursor,
+/// *the same version of that issue*, and the next run correctly skips it as
+/// already delivered. `JiraCursor::already_delivered`'s own doc says as much
+/// ("an issue edited twice within the same second is missed here"), and it is
+/// a documented limitation of a minute-resolution query language, not a
+/// defect.
+///
+/// It is also not what the incremental test is about, and it made that test
+/// fail one run in eight (measured 2026-09-03) -- always the runs where the
+/// leftover clearing had just touched the issue, so its stamp *was* the
+/// current second. Waiting for the second to turn is what makes the edit one
+/// the cursor can tell apart, and it costs at most a second.
+async fn after_the_second_of(stamp: chrono::DateTime<chrono::Utc>) {
+    while chrono::Utc::now().timestamp() <= stamp.timestamp() {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 /// A port nothing listens on: bound to learn the number, then dropped.
 fn dead_url() -> String {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -644,6 +751,23 @@ fn nobody() -> String {
 }
 
 // ---------------------------------------------------------------------------
+
+/// The cleanup's "really gone" check is a check only if a server that does not
+/// answer reads as a failure rather than as an edit undone.
+///
+/// Witnessed on a port nothing listens on: [`unlabel`] reports the issue it
+/// could not reach instead of returning clean. Needs no container -- but it
+/// lives here, and is `#[ignore]`d with the rest, because [`unlabel`] does and
+/// because the claim it pins is [`Labeled`]'s. The seeded TeamCity suite
+/// carries the same test for the same reason.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
+async fn the_cleanup_reports_a_server_it_cannot_reach_rather_than_calling_the_edit_undone() {
+    let failure = unlabel(&client(), &dead_url(), "knobas", "irrelevant", "PAY-231")
+        .await
+        .expect_err("a port nothing listens on is not an edit undone");
+    assert!(failure.starts_with("PUT issue PAY-231: "), "{failure}");
+}
 
 /// *Test connection* against the server the seed set up: the version the seed
 /// recorded, and the account the credential belongs to.
@@ -943,7 +1067,9 @@ async fn an_incremental_run_after_one_edit_returns_that_issue_and_moves_the_wate
 
     let (items, cursor) = full(&*source).await;
     assert_eq!(keys(&items), seeded.seeded_keys());
-    let before = updated_to(&cursor);
+    let baseline = item(&items, EDITED)
+        .updated_at
+        .expect("a real Jira always sets updated");
 
     let (idle, same) = sync_from(&*source, Some(cursor.clone())).await;
     assert!(
@@ -953,6 +1079,11 @@ async fn an_incremental_run_after_one_edit_returns_that_issue_and_moves_the_wate
     );
     assert_eq!(same, cursor, "byte-identical");
 
+    // See [`after_the_second_of`]: an edit inside the same second as the
+    // baseline's stamp is the same version of the issue as far as the cursor
+    // is concerned, which is a documented adapter limitation and not the thing
+    // under test here.
+    after_the_second_of(baseline).await;
     guard.label(&seeded, EDITED).await;
 
     // Jira's search reads an index the write path updates asynchronously, so
@@ -996,11 +1127,14 @@ async fn an_incremental_run_after_one_edit_returns_that_issue_and_moves_the_wate
         "the position advances to the edited issue's own `updated` -- not to `now()`, and not \
          past what this run saw"
     );
-    assert!(witnessed > before, "the edit moved the issue's `updated`");
     assert!(
-        updated_to(&moved) < chrono::Utc::now(),
-        "an issue's `updated` is in the past by the time the run reads it; a watermark at or \
-         after `now()` would mean the run advanced past what it witnessed"
+        witnessed > baseline,
+        "the label moved {EDITED}'s own `updated` forward: {witnessed} after {baseline}"
+    );
+    assert!(
+        updated_to(&moved) <= chrono::Utc::now(),
+        "an issue's `updated` is in the past by the time the run reads it; a watermark after \
+         `now()` would mean the run advanced past what it witnessed"
     );
 
     let (idle, still) = sync_from(&*source, Some(moved.clone())).await;

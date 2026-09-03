@@ -482,14 +482,17 @@ teamcity-live-seeded:
 # the Confluence adapter's beside them. Serial and unparallelised for the
 # reason `gitea-live` gives: one server, and tests that write to it.
 #
-# THE SUITES SHARE ONE SEEDED SERVER, AND EACH TAKES BACK WHAT IT WROTE. Both
-# mark everything they create with the label `knobas-live-suite` and remove it
-# from a `Drop`; whichever runs next clears whatever a *killed* run left
-# wearing it. Order does not matter, and neither does a re-run: after a green
-# run the server holds exactly the seeded corpus. What neither can undo is
-# the `PAY` key counter -- the create leaves the project one key further on --
-# which is why nothing downstream may assume the fixture's keys are the
-# highest ones.
+# THE SUITES SHARE ONE SEEDED SERVER, AND EACH TAKES BACK WHAT IT WROTE, from
+# a `Drop` that checks rather than assumes. What a *killed* run leaves is put
+# back by the next run of the **Jira adapter's** suite, whose leftover
+# clearing works from `seed-state.json` rather than from anything a run
+# remembers: a stray issue and a stray comment deleted, a label removed, a
+# status moved back through the workflow -- the union of what either suite
+# writes. Order does not matter, and neither does a re-run: after a green run
+# the server holds exactly the seeded corpus, and a run started against a
+# dirty one prints what it put back. What neither suite can undo is the `PAY`
+# key counter -- the create leaves the project one key further on -- which is
+# why nothing downstream may assume the fixture's keys are the highest ones.
 #
 # THE 8 GB VM. Jira asks for ~4 GB, Confluence ~2 GB, plus a PostgreSQL each,
 # and Docker Desktop's VM here has 8 GB: the pair cannot share it with the

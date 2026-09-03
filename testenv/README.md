@@ -427,13 +427,16 @@ three-hour window holds with hours of margin.
 `crates/knobas-source-jira/tests/live_jira_seeded.rs` — the adapter: sync,
 payload, cursor, the real 401 — and `crates/knobas-app/tests/atlassian_live.rs`
 — the engine and the write queue: credential health end to end, and the three
-write ops read back out of Jira. Both write, and both take back what they
-wrote from a `Drop`; everything they create carries the label
-`knobas-live-suite`, and whichever runs next deletes whatever a *killed* run
-left wearing it. After a green run the server holds exactly the seeded corpus.
-The one thing neither can undo is the `PAY` key counter: the create leaves the
-project one key further on, so nothing may assume the fixture's keys are the
-highest ones.
+write ops read back out of Jira. Both write, and both take back what they wrote
+from a `Drop` that checks rather than assumes. What a *killed* run leaves is put
+back by the next run of the **adapter's** suite, whose leftover clearing works
+from `seed-state.json` rather than from anything a run remembers — a stray issue
+and a stray comment deleted, the `knobas-live-suite` label removed, a status
+moved back through the workflow — and prints what it put back. So after a green
+run the server holds exactly the seeded corpus, and recovery from a dirty one is
+"run the suite again". The one thing neither can undo is the `PAY` key counter:
+the create leaves the project one key further on, so nothing may assume the
+fixture's keys are the highest ones.
 
 **It refuses while TeamCity is up.** Docker Desktop's VM here has 8 GB; Jira
 wants ~4 GB, Confluence ~2 GB, plus a PostgreSQL each, and the seeded TeamCity

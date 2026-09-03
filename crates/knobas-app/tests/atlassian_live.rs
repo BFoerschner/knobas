@@ -39,10 +39,13 @@
 //! one transition of PAY-240 and back, and one new ticket in `PAY`. Every one
 //! of them is undone when the test ends, passing or panicking alike, by a
 //! `Drop` that checks rather than assumes -- [`Litter`] and [`Pat`]. What a
-//! *killed* run left behind is cleared by the next one: [`Env::clear_leftovers`]
-//! deletes every issue and every token carrying [`LITTER`], which is the same
-//! label `knobas-source-jira`'s live suite sweeps by, and the ticket a create
-//! files is labelled with it as soon as it has been read back.
+//! *killed* run left behind is cleared before the next one takes a baseline:
+//! [`Env::clear_leftovers`] deletes every issue and revokes every token
+//! carrying [`LITTER_LABEL`]. The **full** restore is
+//! `knobas-source-jira`'s live suite's `Seeded::clear_leftovers`, which works
+//! from `seed-state.json` rather than from a label and so also puts back a
+//! comment or a status this suite left behind -- either suite's leftovers are
+//! the other's to clear, because whichever runs next is the one that can.
 //!
 //! The two things it cannot take away are the `PAY` key counter -- Jira never
 //! rewinds one, so a created ticket costs the project one key for ever -- and
@@ -73,12 +76,11 @@ use serde_json::json;
 /// ticket is in (P10).
 const JIRA: &str = "jira";
 
-/// The label everything this suite writes is marked with, and the one both
-/// Atlassian live suites sweep by. Shared with
-/// `knobas-source-jira/tests/live_jira_seeded.rs` on purpose: either suite's
-/// leftovers are the other's to clear, because whichever runs next is the one
-/// that can.
-const LITTER: &str = "knobas-live-suite";
+/// The label everything this suite writes is marked with, spelled the same as
+/// `knobas-source-jira/tests/live_jira_seeded.rs`'s. A marker, so a person
+/// looking at the server can tell whose litter it is; the restore that matters
+/// is that suite's, and it works from `seed-state.json`.
+const LITTER_LABEL: &str = "knobas-live-suite";
 
 /// How long one HTTP exchange with the container may take.
 const REQUEST_BUDGET: Duration = Duration::from_secs(30);
@@ -242,7 +244,7 @@ impl Env {
     /// Delete every issue and revoke every token a **killed** run left behind
     /// -- the ones no `Drop` ever reached. Read-only in the ordinary case.
     async fn clear_leftovers(&self) {
-        for key in self.jql(&format!("labels = {LITTER}")).await {
+        for key in self.jql(&format!("labels = {LITTER_LABEL}")).await {
             let (status, body) = self
                 .api(
                     reqwest::Method::DELETE,
@@ -261,7 +263,11 @@ impl Env {
             .as_array()
             .into_iter()
             .flatten()
-            .filter(|t| t["name"].as_str().is_some_and(|n| n.starts_with(LITTER)))
+            .filter(|t| {
+                t["name"]
+                    .as_str()
+                    .is_some_and(|n| n.starts_with(LITTER_LABEL))
+            })
             .filter_map(|t| t["id"].as_i64())
         {
             let (status, body) = self
@@ -341,7 +347,7 @@ struct Pat {
 
 impl Pat {
     async fn issue(env: &Env) -> Pat {
-        let name = format!("{LITTER}-{}", std::process::id());
+        let name = format!("{LITTER_LABEL}-{}", std::process::id());
         let (status, body) = env
             .api(
                 reqwest::Method::POST,
@@ -546,7 +552,7 @@ where
     };
     let report = format!(
         "the live suite did not take back {what}, so the server is no longer in the plain-seed \
-         state -- the next run's leftover clearing removes what carries {LITTER:?}: {failure}"
+         state -- the next run's leftover clearing removes what carries {LITTER_LABEL:?}: {failure}"
     );
     if std::thread::panicking() {
         eprintln!("live suite cleanup: {report}");
@@ -609,12 +615,7 @@ impl Events {
 
 /// A `SourcesState` over a database of this test's own, with the Jira source
 /// configured and its credential in the (in-memory) keychain.
-async fn app(
-    name: &str,
-    env: &Env,
-    auth: AuthMethod,
-    secret: &str,
-) -> (SourcesState, Arc<Events>, sqlx::PgPool) {
+async fn app(name: &str, env: &Env, auth: AuthMethod, secret: &str) -> (SourcesState, Arc<Events>) {
     let connector = knobas_db::test_util::scratch_database(name).await;
     let pool = connector
         .pool(4)
@@ -663,13 +664,12 @@ async fn app(
 
     (
         SourcesState {
-            pool: pool.clone(),
+            pool,
             scheduler,
             secrets,
             registry: Arc::new(Registry::builtin()),
         },
         events,
-        pool,
     )
 }
 
@@ -764,18 +764,18 @@ async fn a_revoked_pat_reaches_the_credential_health_surface_and_the_mirror_surv
     env.clear_leftovers().await;
     let pat = Pat::issue(&env).await;
 
-    let (state, events, pool) = app("atlassian_live_health", &env, AuthMethod::Pat, &pat.raw).await;
+    let (state, events) = app("atlassian_live_health", &env, AuthMethod::Pat, &pat.raw).await;
 
     // 1. The token works, which is what makes revoking it mean anything -- and
     //    is the product's own answer to `http::credential`'s claim that a Jira
     //    DC personal access token is a Bearer token.
     sync(&state).await;
-    let synced = mirrored(&pool).await;
+    let synced = mirrored(&state.pool).await;
     assert!(
         synced.len() >= 7,
         "the seeded corpus is mirrored under a personal access token: {synced:?}"
     );
-    let healthy = knobas_sync::config::get(&pool, JIRA)
+    let healthy = knobas_sync::config::get(&state.pool, JIRA)
         .await
         .expect("the source row")
         .expect("the source this test configured");
@@ -804,7 +804,7 @@ async fn a_revoked_pat_reaches_the_credential_health_surface_and_the_mirror_surv
 
     // 3. The credential-health path, at both ends of it: the stored column the
     //    sources view polls, and the event it re-renders on.
-    let refused = knobas_sync::config::get(&pool, JIRA)
+    let refused = knobas_sync::config::get(&state.pool, JIRA)
         .await
         .expect("the source row")
         .expect("the source this test configured");
@@ -840,7 +840,7 @@ async fn a_revoked_pat_reaches_the_credential_health_surface_and_the_mirror_surv
     //    empty search is dangerous for: a `cursor: None` run reported `Ok` with
     //    no items authorises the sweep to tombstone the lot.
     assert_eq!(
-        mirrored(&pool).await,
+        mirrored(&state.pool).await,
         synced,
         "a refused sync must leave the mirror exactly as it was -- an anonymous \
          /rest/api/2/search answers 200 with total 0 on this server, and reporting that as a \
@@ -873,19 +873,20 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
     let env = env();
     env.clear_leftovers().await;
     let mut litter = Litter::default();
-    let (state, _events, pool) = app(
-        "atlassian_live_writes",
-        &env,
-        AuthMethod::UserPassword,
-        &env.password,
-    )
-    .await;
+    // Under a **personal access token**, not the seed's password: a PAT is the
+    // credential a real deployment configures and the one M3.1's `LogWork`
+    // will write worklogs with, and nothing else in the repo has ever sent
+    // Jira a write over one. The read direction under user + password is what
+    // the adapter's own live suite certifies, and the seed script itself
+    // writes over Basic, so neither scheme is left unwitnessed.
+    let pat = Pat::issue(&env).await;
+    let (state, _events) = app("atlassian_live_writes", &env, AuthMethod::Pat, &pat.raw).await;
 
     // The mirror has to hold the tickets first: the queue snapshots its target
     // when a write is queued and re-reads it before sending, which is how a
     // write over a ticket that moved is held rather than sent.
     sync(&state).await;
-    let held = mirrored(&pool).await;
+    let held = mirrored(&state.pool).await;
     for key in [COMMENTED, TRANSITIONED] {
         assert!(
             held.contains(&format!("{JIRA}:{key}")),
@@ -895,7 +896,7 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
 
     // -- 1. Comment ---------------------------------------------------------
     let body = format!(
-        "{LITTER}: knobas wrote this through the write queue (pid {})",
+        "{LITTER_LABEL}: knobas wrote this through the write queue (pid {})",
         std::process::id()
     );
     let before = env.issue(COMMENTED, "comment").await["fields"]["comment"]["total"]
@@ -908,21 +909,23 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
     .await;
     assert_eq!(row.state, WriteState::Sent, "{:?}", row.detail);
 
+    // Read back, and **owned before anything is asserted**: from here on the
+    // comment exists at Jira, so a failing assertion below must still leave the
+    // guard something to delete.
     let comments = env.issue(COMMENTED, "comment").await["fields"]["comment"].clone();
-    assert_eq!(
-        comments["total"].as_i64(),
-        Some(before + 1),
-        "the comment is on the ticket at Jira: {comments}"
-    );
     let posted = comments["comments"]
         .as_array()
         .and_then(|c| c.last())
         .cloned()
         .expect("the comment just added");
-    litter.comment = Some((
-        COMMENTED.to_owned(),
-        posted["id"].as_str().expect("a comment id").to_owned(),
-    ));
+    if let Some(id) = posted["id"].as_str() {
+        litter.comment = Some((COMMENTED.to_owned(), id.to_owned()));
+    }
+    assert_eq!(
+        comments["total"].as_i64(),
+        Some(before + 1),
+        "the comment is on the ticket at Jira: {comments}"
+    );
     assert_eq!(posted["body"], body);
     assert_eq!(
         posted["author"]["name"], env.user,
@@ -999,14 +1002,11 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
     // unmirrored container is `live: false` at queue time and at flush time
     // alike, so a create never holds.
     let title = format!(
-        "{LITTER}: filed by the knobas live suite (pid {})",
+        "{LITTER_LABEL}: filed by the knobas live suite (pid {})",
         std::process::id()
     );
-    let highest = |keys: Vec<String>| keys.into_iter().next();
-    let before = highest(
-        env.jql(&format!("project = {CREATE_PROJECT} ORDER BY key DESC"))
-            .await,
-    );
+    let scope = format!("project = {CREATE_PROJECT}");
+    let before: std::collections::BTreeSet<String> = env.jql(&scope).await.into_iter().collect();
     let row = write(
         &state,
         json!({
@@ -1021,22 +1021,36 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
     .await;
     assert_eq!(row.state, WriteState::Sent, "{:?}", row.detail);
 
-    // `Source::write` answers `()`, so the new key is found the way a person
-    // would find it. JQL is an index read, and Jira's index lags its own
-    // writes by a moment, so this is polled rather than assumed.
+    // `Source::write` answers `()` -- widening it is a frozen-SPI change and no
+    // criterion asks for one -- so the new key is found the way a person would
+    // find it, and then **confirmed by a read of the issue itself**.
+    //
+    // Both halves are needed. JQL is an index read and Jira's index lags its
+    // own writes, so the key may not be there yet; and the index also lags
+    // *deletes*, so a key it hands back may be a ticket an earlier run's
+    // cleanup already removed. Taking the newest key on trust would then read
+    // back a 404. `GET /rest/api/2/issue/{key}` goes to the database, so a
+    // ghost fails the summary check and the poll goes round again.
     let deadline = std::time::Instant::now() + INDEX_BUDGET;
-    let created = loop {
-        let newest = highest(
-            env.jql(&format!("project = {CREATE_PROJECT} ORDER BY key DESC"))
-                .await,
-        );
-        if let Some(key) = newest.filter(|k| Some(k) != before.as_ref()) {
-            break key;
+    let created = 'found: loop {
+        for key in env.jql(&scope).await {
+            if before.contains(&key) {
+                continue;
+            }
+            let (status, body) = env
+                .api(
+                    reqwest::Method::GET,
+                    &format!("rest/api/2/issue/{key}?fields=summary"),
+                    None,
+                )
+                .await;
+            if status == 200 && body["fields"]["summary"] == title.as_str() {
+                break 'found key;
+            }
         }
         assert!(
             std::time::Instant::now() < deadline,
-            "the created ticket did not reach Jira's search index within {INDEX_BUDGET:?} \
-             (newest key is still {before:?})"
+            "the created ticket did not reach Jira's search index within {INDEX_BUDGET:?}"
         );
         tokio::time::sleep(Duration::from_secs(1)).await;
     };
@@ -1047,7 +1061,7 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
         .api(
             reqwest::Method::PUT,
             &format!("rest/api/2/issue/{created}"),
-            Some(json!({ "update": { "labels": [{ "add": LITTER }] } })),
+            Some(json!({ "update": { "labels": [{ "add": LITTER_LABEL }] } })),
         )
         .await;
     assert_eq!(status, 204, "labelling the created ticket: {labelled}");
