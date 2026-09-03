@@ -13,7 +13,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use chrono::FixedOffset;
+use chrono::{DateTime, FixedOffset};
 use serde_json::{Value, json};
 
 use crate::jql::parse_jql;
@@ -45,7 +45,7 @@ pub fn router(state: Arc<MockState>) -> Router {
         )
         .route(
             "/rest/api/2/issue/{issueIdOrKey}/worklog",
-            get(issue_worklogs),
+            get(issue_worklogs).merge(post(add_worklog)),
         )
         // M2's write-back set (issue #43). `POST /issue` is a literal route and
         // is registered *before* the templated `/issue/{issueIdOrKey}` for the
@@ -58,8 +58,8 @@ pub fn router(state: Arc<MockState>) -> Router {
         )
         .fallback(unimplemented)
         // A verb the WADL declares on a path mockd *does* serve (`POST
-        // /search`, `PUT /myself`, `PUT`/`DELETE /issue/{key}`, `POST
-        // .../worklog`) is not a method violation: the middleware already let
+        // /search`, `PUT /myself`, `PUT`/`DELETE /issue/{key}`) is not a
+        // method violation: the middleware already let
         // it through, because the contract has it. Without this, axum answers
         // its own 405 -- an `Allow` header describing mockd's routing table
         // rather than the contract, an empty body instead of the Jira error
@@ -838,6 +838,93 @@ async fn post_comment(
     )
         .into_response()
 }
+
+/// M3.1's write (issue #280): `POST /rest/api/2/issue/{key}/worklog`.
+///
+/// The WADL declares it as `addWorklog`, and what it declares about the body is
+/// what this refuses on: `started` and `timeSpentSeconds` are the two fields a
+/// worklog cannot be made without. **`started` is parsed with Jira's own
+/// pattern** -- `yyyy-MM-dd'T'HH:mm:ss.SSSZ`, milliseconds and a numeric
+/// offset, both mandatory -- rather than with a lenient RFC 3339 reader,
+/// because an adapter that sent `...Z` passes against a forgiving mock and is
+/// refused by the product. That divergence is the one thing a mock of this
+/// endpoint is actually for.
+///
+/// **`adjustEstimate` is accepted and ignored.** mockd holds no remaining
+/// estimate, so honouring it would be inventing a field; the point of taking
+/// it at all is that a caller sending one is not a violation.
+async fn add_worklog(
+    State(s): State<Arc<MockState>>,
+    Path(id_or_key): Path<String>,
+    body: Option<Json<Value>>,
+) -> Response {
+    let Some(i) = find_issue(&s, &id_or_key) else {
+        return no_such_issue(&id_or_key);
+    };
+    let body = body.as_ref().map(|Json(v)| v.clone()).unwrap_or_default();
+
+    let Some(raw) = body.get("started").and_then(Value::as_str) else {
+        return jira_error(StatusCode::BAD_REQUEST, "Worklog must have a start date");
+    };
+    let Ok(started) = DateTime::parse_from_str(raw, JIRA_STARTED) else {
+        return jira_error(
+            StatusCode::BAD_REQUEST,
+            &format!("Date value {raw} is invalid"),
+        );
+    };
+    let Some(seconds) = body.get("timeSpentSeconds").and_then(Value::as_u64) else {
+        return jira_error(
+            StatusCode::BAD_REQUEST,
+            "Worklog must indicate the time spent",
+        );
+    };
+    if seconds == 0 {
+        return jira_error(
+            StatusCode::BAD_REQUEST,
+            "Time spent must not be zero or negative",
+        );
+    }
+    let comment = body
+        .get("comment")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+
+    // mockd authenticates as Mara, matching `myself`.
+    let author = knobas_source_mock::fixture()
+        .person(MYSELF)
+        .expect("the fixture has Mara")
+        .username
+        .clone();
+    let Some(id) = s.add_worklog(
+        &i.key,
+        &author,
+        started.with_timezone(&chrono::Utc),
+        seconds,
+        comment,
+    ) else {
+        return no_such_issue(&id_or_key);
+    };
+    let after = s.issue(&i.key).expect("the issue was just logged against");
+    let created = after
+        .worklogs
+        .iter()
+        .find(|w| w.id == id)
+        .expect("the worklog that was just added");
+    (
+        StatusCode::CREATED,
+        Json(worklog_json(
+            &s.base_url(API),
+            &after,
+            created,
+            s.server_offset(),
+        )),
+    )
+        .into_response()
+}
+
+/// Jira's `started` pattern, and mockd parses with exactly it -- see
+/// [`add_worklog`].
+const JIRA_STARTED: &str = "%Y-%m-%dT%H:%M:%S%.3f%z";
 
 // -- the M2 write-back set (issue #43) --------------------------------------
 

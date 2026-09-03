@@ -66,6 +66,21 @@ export interface TimerPorts {
   now: () => Date;
 }
 
+/**
+ * What one press of ⌘T did — {@link Timer.press}'s answer.
+ *
+ * A shape rather than the bare word it used to be (#278 → #280): a stop
+ * closes a block, and the block is what the worklog draft opens on. The word
+ * alone would have the shell read the timer back to find out what it had just
+ * closed, which is a different block whenever another surface started one in
+ * between.
+ */
+export interface TimerPress {
+  did: "started" | "stopped" | "pick";
+  /** The block a stop closed. `null` for every other outcome. */
+  closed: Block | null;
+}
+
 export interface Timer {
   /** The running timer, or `null`. */
   readonly current: RunningTimer | null;
@@ -114,9 +129,11 @@ export interface Timer {
    * *that* the key was pressed; this decides what it means.
    *
    * `"pick"` rather than a callback: opening a dialog is the shell's, and a
-   * store that could open one would be a store with a view in it.
+   * store that could open one would be a store with a view in it — and so is
+   * the worklog draft the returned {@link TimerPress.closed} block opens
+   * (#280).
    */
-  press(): Promise<"started" | "stopped" | "pick">;
+  press(): Promise<TimerPress>;
   /** Subscribe, tick and beat. Returns its teardown. */
   begin(): () => void;
 }
@@ -193,13 +210,12 @@ export function createTimer(ports?: Partial<TimerPorts>): Timer {
     },
     async press() {
       if (state.current) {
-        await this.stop();
-        return "stopped";
+        return { did: "stopped", closed: await this.stop() };
       }
       const target = state.foreground;
-      if (!target) return "pick";
+      if (!target) return { did: "pick", closed: null };
       await this.start(target);
-      return "started";
+      return { did: "started", closed: null };
     },
     begin() {
       if (live) {

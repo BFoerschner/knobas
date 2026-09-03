@@ -530,6 +530,8 @@ mod tests {
             "create_block",
             "passive_attribution",
             "set_passive_attribution",
+            "worklog_draft",
+            "log_work",
         ] {
             assert!(
                 MIRROR.contains(&format!("\"{command}\"")),
@@ -571,6 +573,10 @@ mod tests {
             ("create_block", "endedAt"),
             ("create_block", "target"),
             ("set_passive_attribution", "enabled"),
+            ("worklog_draft", "entityId"),
+            ("worklog_draft", "offsetMinutes"),
+            ("log_work", "startedAt"),
+            ("log_work", "offsetMinutes"),
         ] {
             let at = MIRROR
                 .find(&format!("\"{call}\""))
@@ -640,5 +646,159 @@ mod tests {
         let wire = serde_json::to_value(&row).unwrap();
         assert_eq!(wire["title"], serde_json::Value::Null);
         assert_shape(MIRROR, "DayBlock", &wire, &["block", "title"]);
+    }
+
+    // -- the worklog (#280) -------------------------------------------------
+
+    fn candidate() -> crate::time::worklog::Candidate {
+        crate::time::worklog::Candidate {
+            id: "item:jira:PAY-231".to_owned(),
+            source: crate::time::worklog::CandidateSource::Mirror,
+            at: at(9, 30),
+            entity_id: Some("jira:PAY-231".to_owned()),
+            bullet: "- Retry SEPA payouts".to_owned(),
+        }
+    }
+
+    /// `entity_id` is exercised as `Some` **and** the draft's candidate list
+    /// as non-empty: an `Option` that is `None` still serialises to a `null`
+    /// key, so either would satisfy `assert_shape`, but only a filled one
+    /// witnesses the type the mirror declares.
+    #[test]
+    fn the_candidate_shape_matches_its_typescript_mirror() {
+        assert_shape(
+            MIRROR,
+            "Candidate",
+            &serde_json::to_value(candidate()).unwrap(),
+            &["id", "source", "at", "entity_id", "bullet"],
+        );
+    }
+
+    #[test]
+    fn the_candidate_sources_match_their_typescript_mirror() {
+        let rust: Vec<String> = [
+            crate::time::worklog::CandidateSource::Mirror,
+            crate::time::worklog::CandidateSource::Activity,
+        ]
+        .iter()
+        .map(|source| {
+            serde_json::to_value(source)
+                .unwrap()
+                .as_str()
+                .expect("a candidate source serialises to a string")
+                .to_owned()
+        })
+        .collect();
+        let mut declared = declared_union(MIRROR, "CandidateSource");
+        declared.sort();
+        let mut rust = rust;
+        rust.sort();
+        assert_eq!(
+            rust, declared,
+            "the mirror's CandidateSource and the Rust enum no longer agree, so \
+             the draft cannot say where a candidate came from"
+        );
+    }
+
+    #[test]
+    fn the_draft_shape_matches_its_typescript_mirror() {
+        let draft = crate::time::worklog::Draft {
+            entity_id: "jira:PAY-231".to_owned(),
+            day: "2026-09-03".parse().expect("a date"),
+            started_at: at(9, 0),
+            ended_at: at(14, 0),
+            seconds: 150 * 60,
+            block_ids: vec![7, 8],
+            candidates: vec![candidate()],
+            comment: "- Retry SEPA payouts".to_owned(),
+        };
+        let json = serde_json::to_value(&draft).unwrap();
+        assert_eq!(
+            json["day"], "2026-09-03",
+            "the day crosses as the reader's own spelling of it, which is what \
+             the mirror declares and what `worklog_draft` takes back"
+        );
+        assert_shape(
+            MIRROR,
+            "Draft",
+            &json,
+            &[
+                "entity_id",
+                "day",
+                "started_at",
+                "ended_at",
+                "seconds",
+                "block_ids",
+                "candidates",
+                "comment",
+            ],
+        );
+    }
+
+    /// `remote_id` and `write_queue_id` are exercised as `Some`, the rule
+    /// `entity_mirror.rs` records: a `None` serialises to a `null` key and
+    /// would pass against a mirror declaring any type at all.
+    #[test]
+    fn the_worklog_shape_matches_its_typescript_mirror() {
+        let worklog = crate::time::worklog::Worklog {
+            id: 3,
+            entity_id: "jira:PAY-231".to_owned(),
+            started_at: at(9, 0),
+            seconds: 150 * 60,
+            comment: "- Retry SEPA payouts".to_owned(),
+            block_ids: vec![7, 8],
+            write_queue_id: Some(11),
+            remote_id: Some("30007".to_owned()),
+            created_at: at(14, 1),
+        };
+        assert_shape(
+            MIRROR,
+            "Worklog",
+            &serde_json::to_value(&worklog).unwrap(),
+            &[
+                "id",
+                "entity_id",
+                "started_at",
+                "seconds",
+                "comment",
+                "block_ids",
+                "write_queue_id",
+                "remote_id",
+                "created_at",
+            ],
+        );
+    }
+
+    /// **ADR-0012's sentence, verbatim, on the draft** (#280's criterion).
+    ///
+    /// Read out of the ADR and out of the component, and compared with
+    /// whitespace collapsed on both sides -- the file is Prettier-formatted, so
+    /// the sentence is wrapped across lines there and a literal `contains`
+    /// would fail on the formatting rather than on the words.
+    ///
+    /// A source scan from Rust, for the reason `the_shells_context_namespace_is_the_one_the_backend_refuses`
+    /// gives for its own: this is prose in a `.svelte` file, and nothing else
+    /// in the tree compares it to the decision record it comes from. The
+    /// alternative is a frontend test holding its own copy of the sentence,
+    /// which is a second place for it to drift from the ADR.
+    #[test]
+    fn the_draft_quotes_adr_0012s_sentence_verbatim() {
+        const ADR: &str =
+            include_str!("../../../../docs/adr/0012-writes-are-at-least-once-no-idempotency-key.md");
+        const DRAFT: &str = include_str!("../../../../app/src/lib/time/WorklogDraft.svelte");
+
+        let flatten = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let sentence = ADR
+            .lines()
+            .find(|line| line.starts_with("> A write knobas was sending"))
+            .map(|line| flatten(line.trim_start_matches("> ")))
+            .expect("ADR-0012 states the canonical sentence as a block quote");
+
+        assert!(
+            flatten(DRAFT).contains(&sentence),
+            "the worklog draft no longer quotes ADR-0012's sentence verbatim. \
+             It is the one thing a person can observe about the write queue's \
+             guarantee, and the draft is where a re-send is contemplated:\n  {sentence}"
+        );
     }
 }

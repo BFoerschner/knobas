@@ -1,0 +1,289 @@
+<!--
+  What stopping the timer on a ticket opens (#280, spec #272 "Worklog draft and
+  ad-hoc block").
+
+  The day's blocks on that ticket, concatenated into one interval, the reader's
+  own work inside it as checkboxes, and a comment generated from what is
+  ticked. *Log 2h 30m to PAY-231* queues it like any other write.
+
+  ## What this component decides, and what it does not
+
+  It decides **which candidates are ticked** and nothing else about the words.
+  A candidate carries its own `bullet`, composed by the backend, and the
+  comment is those bullets joined — so the wording of a worklog is one rule in
+  one language, and unticking a box cannot produce a line this file spelled
+  differently from the one the draft opened with.
+
+  The moment the reader types in the comment box, it is **theirs**: ticking
+  after that would silently overwrite what they wrote, so the boxes stop
+  rewriting it and say so. Editing down to empty is allowed — a worklog with no
+  words is a worklog.
+
+  The **interval is editable** in the same spirit, but only its length: the
+  start is what the blocks say and the duration is what is logged. A reader who
+  worked longer than the clock says can raise it; nothing here re-derives the
+  blocks from the number, because which blocks are covered is the backend's
+  (`knobas_app::time::worklog::log` records why).
+
+  ## ADR-0012's sentence is here on purpose
+
+  A worklog is a write, and a write in flight when knobas stops may arrive
+  twice — which for a worklog means two entries on a timesheet somebody bills
+  from. The write-queue panel says it where a re-send is contemplated
+  (#224); this says it where a *worklog* is, because this is the surface a
+  person reaches for the one write of knobas' whose duplicate costs money.
+  `commands/time.rs`'s `the_draft_quotes_adr_0012s_sentence_verbatim` reads the
+  ADR and this file and fails if the two ever stop agreeing.
+-->
+<script lang="ts">
+  import { logWork as realLogWork, type Draft, type Worklog } from "../ipc/time";
+  import Modal from "../shell/Modal.svelte";
+  import { offsetMinutes } from "./draft";
+
+  let {
+    draft,
+    onclose,
+    onlogged,
+    logWork = realLogWork,
+  }: {
+    /** The draft the backend answered `worklog_draft` with. */
+    draft: Draft;
+    onclose: () => void;
+    /** The copy that now exists. Saying so on screen is the shell's. */
+    onlogged: (worklog: Worklog) => void;
+    /** The bridge, injectable so a test needs no Tauri. */
+    logWork?: typeof realLogWork;
+  } = $props();
+
+  /** Unique per instance, so two drafts cannot share a control's `for`. */
+  const uid = `worklog-${Math.random().toString(36).slice(2, 9)}`;
+
+  /**
+   * The ticked candidates, by id.
+   *
+   * A `Set` of ids rather than a flag on a copy of each candidate: the
+   * candidates are the backend's list and this component has no business
+   * holding a second version of them.
+   */
+  // svelte-ignore state_referenced_locally
+  // Read once, at init, on purpose: a draft is one afternoon and this dialog
+  // is opened for one, so a `draft` swapped mid-life would silently discard
+  // whatever the reader had already ticked. The shell closes and reopens.
+  let ticked = $state(new Set(draft.candidates.map((c) => c.id)));
+
+  /**
+   * Whether the reader has taken the comment over.
+   *
+   * Once they have typed, ticking a box no longer rewrites what they wrote —
+   * the alternative is a checkbox silently deleting a sentence somebody
+   * composed, which is the one thing a draft must not do.
+   */
+  let edited = $state(false);
+  // svelte-ignore state_referenced_locally
+  let typed = $state(draft.comment);
+
+  // svelte-ignore state_referenced_locally
+  /** Minutes, because that is the unit a person corrects a clock in. */
+  let minutes = $state(Math.round(draft.seconds / 60));
+
+  let sending = $state(false);
+  /** What the backend said, if it refused. */
+  let failed = $state<string | null>(null);
+
+  /** The comment as the ticks make it — the backend's bullets, joined. */
+  const generated = $derived(
+    draft.candidates
+      .filter((c) => ticked.has(c.id))
+      .map((c) => c.bullet)
+      .join("\n"),
+  );
+
+  const comment = $derived(edited ? typed : generated);
+  const seconds = $derived(Math.max(0, Math.round(minutes * 60)));
+
+  /** `2h 30m`, `45m` — the reading on the button. */
+  const reading = $derived.by(() => {
+    const whole = Math.floor(minutes / 60);
+    const rest = minutes % 60;
+    if (whole === 0) return `${rest}m`;
+    return rest === 0 ? `${whole}h` : `${whole}h ${rest}m`;
+  });
+
+  /** `PAY-231` — the half after the first colon, as everywhere else. */
+  const key = $derived(draft.entity_id.slice(draft.entity_id.indexOf(":") + 1));
+
+  function toggle(id: string) {
+    // Reassigned rather than mutated: `$state` over a `Set` tracks the binding,
+    // and `.add()` on the same object re-renders nothing.
+    const next = new Set(ticked);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    ticked = next;
+  }
+
+  function send() {
+    if (sending) return;
+    sending = true;
+    failed = null;
+    void logWork(
+      draft.entity_id,
+      draft.day,
+      offsetMinutes(),
+      draft.started_at,
+      seconds,
+      comment,
+    )
+      .then((worklog) => {
+        onlogged(worklog);
+        onclose();
+      })
+      .catch((error: unknown) => {
+        // Said, never swallowed: the blocks are still unlogged, and a reader
+        // who is not told will close the draft believing their day is on the
+        // ticket.
+        failed = error instanceof Error ? error.message : String(error);
+        sending = false;
+      });
+  }
+
+  /** `09:00` — the clock reading, in the reader's own zone. */
+  function clock(at: string): string {
+    return new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+</script>
+
+<Modal title="Log time to {key}" subtitle={draft.day} {onclose}>
+  {#snippet body()}
+    <p class="lab">
+      {clock(draft.started_at)}–{clock(draft.ended_at)}, the day's blocks on this ticket
+      concatenated.
+    </p>
+
+    <div class="fld">
+      <label class="l" for="{uid}-mins">Time logged (minutes)</label>
+      <input class="inp" id="{uid}-mins" type="number" min="1" step="1" bind:value={minutes} />
+    </div>
+
+    {#if draft.candidates.length > 0}
+      <p class="lab head">What you did in that time</p>
+      <ul class="cands">
+        {#each draft.candidates as candidate (candidate.id)}
+          <li>
+            <label class="cand">
+              <input
+                type="checkbox"
+                checked={ticked.has(candidate.id)}
+                onchange={() => toggle(candidate.id)}
+              />
+              <span class="t">{candidate.bullet.replace(/^- /, "")}</span>
+            </label>
+          </li>
+        {/each}
+      </ul>
+      {#if edited}
+        <p class="lab note">
+          The comment is yours now — ticking no longer rewrites it.
+        </p>
+      {/if}
+    {:else}
+      <p class="lab head">knobas saw nothing else in that time. The comment is yours to write.</p>
+    {/if}
+
+    <div class="fld">
+      <label class="l" for="{uid}-comment">Comment</label>
+      <textarea
+        class="inp ta"
+        id="{uid}-comment"
+        rows="4"
+        value={comment}
+        oninput={(event) => {
+          edited = true;
+          typed = event.currentTarget.value;
+        }}
+      ></textarea>
+    </div>
+
+    {#if failed}
+      <p class="fail">{failed}</p>
+    {/if}
+  {/snippet}
+
+  {#snippet footer()}
+    <p class="guarantee">
+      A write knobas was sending when it stopped may arrive twice. knobas re-sends rather than
+      guess; it never merges or drops what you wrote.
+    </p>
+    <span class="spacer"></span>
+    <button class="btn ghost" type="button" onclick={onclose}>Not now</button>
+    <button class="btn pri" type="button" disabled={sending || seconds <= 0} onclick={send}>
+      Log {reading} to {key}
+    </button>
+  {/snippet}
+</Modal>
+
+<style>
+  .head {
+    margin: 14px 0 6px;
+  }
+
+  .note {
+    margin-top: 6px;
+  }
+
+  .fld {
+    margin-top: 12px;
+  }
+
+  .fld .l {
+    display: block;
+    font: 500 10px var(--mono);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--faint);
+    margin-bottom: 4px;
+  }
+
+  .ta {
+    width: 100%;
+    resize: vertical;
+    font: 400 12px var(--mono);
+  }
+
+  .cands {
+    display: grid;
+    gap: 2px;
+  }
+
+  .cand {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    column-gap: 8px;
+    padding: 3px 4px;
+    border-radius: 2px;
+  }
+
+  .cand:hover {
+    background: var(--raised);
+  }
+
+  .cand .t {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .fail {
+    margin-top: 10px;
+    color: var(--fail);
+    font-size: 12px;
+  }
+
+  .guarantee {
+    max-width: 44ch;
+    margin: 0;
+    color: var(--faint);
+    font-size: 11px;
+    line-height: 1.4;
+  }
+</style>
