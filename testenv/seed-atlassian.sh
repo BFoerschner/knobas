@@ -37,11 +37,21 @@
 # a real instance, `docker compose down -v`. It is not a long-lived seeded
 # environment like Gitea's.
 #
-# Supply the keys in the environment, never in `testenv/.env` -- that file is
-# tracked:
-#   export JIRA_LICENSE_KEY='AAAB...'  CONFLUENCE_LICENSE_KEY='AAAB...'
+# The keys are public and `fetch-timebomb-keys.sh` pulls them off Atlassian's
+# page. Run it BEFORE `docker compose up`, because Confluence reads its key at
+# first start:
+#   eval "$(./fetch-timebomb-keys.sh)"
+# Never put them in `testenv/.env` -- that file is tracked. Jira's key goes in
+# through the wizard, so an unset JIRA_LICENSE_KEY is fetched here on the spot;
+# an unset CONFLUENCE_LICENSE_KEY is fetched too, but the container must have
+# been started with it, which is checked below against the container's own
+# environment rather than this shell's.
 set -eu
 cd "$(dirname "$0")"
+
+if [ -z "${JIRA_LICENSE_KEY:-}" ] || [ -z "${CONFLUENCE_LICENSE_KEY:-}" ]; then
+  eval "$(./fetch-timebomb-keys.sh)"
+fi
 
 JIRA_URL=${KNOBAS_JIRA_URL:-http://127.0.0.1:8080}
 CONFLUENCE_URL=${KNOBAS_CONFLUENCE_URL:-http://127.0.0.1:8090}
@@ -248,11 +258,14 @@ setup_confluence() {
     return 0
   fi
 
-  [ -n "${CONFLUENCE_LICENSE_KEY:-}" ] || die "CONFLUENCE_LICENSE_KEY is unset.
-  It is read by the container at FIRST-TIME setup only, so it must have been
-  set when confluence first started -- not just now. Get the 10-user, 3-hour
-  'Confluence Data Center' key from Atlassian's testing licences page, then:
-    export CONFLUENCE_LICENSE_KEY='AAAB...'
+  # The key is read by the container at FIRST-TIME setup only, so what counts
+  # is the environment the container was started with, not this shell's.
+  _in_container=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' knobas-confluence \
+    | sed -n 's/^ATL_LICENSE_KEY=//p')
+  [ -n "$_in_container" ] || die "confluence was started WITHOUT a licence key.
+  It reads ATL_LICENSE_KEY at first-time setup only, so export the key and
+  recreate the container:
+    eval \"\$(./fetch-timebomb-keys.sh)\"
     docker compose --profile real-atlassian down -v confluence
     docker compose --profile real-atlassian up -d confluence"
 
@@ -332,10 +345,8 @@ setup_jira() {
     return 0
   fi
 
-  [ -n "${JIRA_LICENSE_KEY:-}" ] || die "JIRA_LICENSE_KEY is unset. Get the
-  10-user, 3-hour 'Jira Software Data Center' key from Atlassian's testing
-  licences page and export it. Unlike Confluence's, it is applied through the
-  wizard, so it can be set now without recreating the container."
+  [ -n "${JIRA_LICENSE_KEY:-}" ] || die "JIRA_LICENSE_KEY is unset and
+  fetch-timebomb-keys.sh did not set it -- see its error above."
 
   wizard_begin
   wizard_read "$JIRA_URL/"

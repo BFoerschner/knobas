@@ -355,11 +355,13 @@ engine, so without them the setup wizard stops at its database step.
 Both are then set up unattended, in about three minutes from empty volumes:
 
 ```sh
-# 10-user, 3-hour Data Center keys, free and needing no my.atlassian.com
-# account. Atlassian ended self-service 30-day DC trials on 2026-03-30, so
-# these are the only free licences left:
-#   https://developer.atlassian.com/platform/marketplace/timebomb-licenses-for-testing-server-apps/
-export JIRA_LICENSE_KEY='AAAB...' CONFLUENCE_LICENSE_KEY='AAAB...'
+# 10-user, 3-hour Data Center keys, free, public, and needing no
+# my.atlassian.com account. Atlassian ended self-service 30-day DC trials on
+# 2026-03-30, so these are the only free licences left. The script pulls them
+# off Atlassian's page and checks each decodes to the 10-user, 3-hour Data
+# Center licence for its product; nothing to type or paste. Run it BEFORE
+# `up`, because Confluence reads its key at first start.
+eval "$(./fetch-timebomb-keys.sh)"
 
 docker compose --profile real-atlassian up -d jira-db jira confluence-db confluence
 ./seed --atlassian          # or ./seed-atlassian.sh jira|confluence
@@ -369,10 +371,13 @@ eval "$(./seed --env)"      # adds KNOBAS_JIRA_* and KNOBAS_CONFLUENCE_*
 The admin account is `knobas` / `knobas-dev` on both, and re-running the seed
 against a set-up instance is a no-op.
 
-Put the keys in your **shell**, not in `.env` — that file is tracked.
+The keys live in your **shell**, not in `.env` — that file is tracked
+(`./fetch-timebomb-keys.sh --write` drops them in the git-ignored
+`.env.licences` if you want them to survive a new terminal).
 `CONFLUENCE_LICENSE_KEY` must be set when the container *first starts*, since
-Confluence reads it at first-time setup; Jira's goes in through the wizard and
-can be exported later.
+Confluence reads it at first-time setup, and `seed-atlassian.sh` checks the
+container's own environment for it; Jira's goes in through the wizard, and the
+seed fetches it itself when it is unset.
 
 **Three hours is the shape of this environment.** The licence expires three
 hours after it is applied, and restarting the container does not reset it. So
@@ -494,6 +499,7 @@ history.
 | `./seed` | Everything below, in order. Idempotent — re-running is a no-op that exits 0. |
 | `./seed-gitea.sh` | Org, users, repos, branches, commits, PRs, comments, reviews. |
 | `./seed-kuma.sh` | Kuma admin account, monitors, API key. |
+| `./fetch-timebomb-keys.sh` | Pulls the two 10-user, 3-hour Data Center timebomb keys off Atlassian's public page, checks each decodes to the right product, prints `export` lines (`--write` also drops them in the git-ignored `.env.licences`). `seed-atlassian.sh` calls it when a key is unset. |
 | `./seed-atlassian.sh` | The real Jira and Confluence containers' setup wizards, unattended (`--profile real-atlassian`). |
 | `./seed-teamcity.sh` | The real TeamCity container's first start, an access token and one authorised agent (`--profile real-teamcity`); then runs the script below. |
 | `./seed-teamcity-builds.sh` | The Tidewater projects, build configurations, VCS roots and builds in the real TeamCity; `--running` for the fixture's running build. |
