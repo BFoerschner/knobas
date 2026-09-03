@@ -224,9 +224,19 @@ export function parseStorageFormat(storage: string): StorageNode[] {
 
     const tag = readTag(storage, open);
     if (!tag) {
-      // A `<` that opens nothing: the rest of the document is text.
+      // A `<` that never closes: the rest of the document is text.
       pushText(storage.slice(open));
       break;
+    }
+    if (tag.name === "") {
+      // A `<` that closes but names no element -- `3 < 4` in somebody's prose,
+      // where the `>` a scan finds belongs to the *next* tag. Only the bracket
+      // is text; the tag after it is still a tag, which is what keeps
+      // `<p>3 < 4</p>` one paragraph rather than a paragraph and a literal
+      // `</p>`.
+      pushText("<");
+      at = open + 1;
+      continue;
     }
     at = tag.after;
 
@@ -347,8 +357,10 @@ function readTag(source: string, open: number): Tag | null {
   const closing = inside.startsWith("/");
   const selfClosing = inside.endsWith("/");
   const body = inside.replace(/^\//, "").replace(/\/$/, "");
+  // The empty string for a `<` that names nothing; the caller decides what
+  // that means, because "not a tag" and "no closing bracket at all" are two
+  // different recoveries.
   const name = (body.match(/^[^\s/>]+/)?.[0] ?? "").toLowerCase();
-  if (name === "") return null;
   return {
     name,
     closing,
@@ -417,6 +429,13 @@ function skipSubtree(source: string, from: number, name: string): number {
     }
     const tag = readTag(source, open);
     if (!tag) return source.length;
+    if (tag.name === "") {
+      // A bare `<` in the macro's own prose. Stepping past the `>` a scan
+      // found would step past the macro's *close* tag with it, and the rest
+      // of the page would vanish into the macro.
+      at = open + 1;
+      continue;
+    }
     at = tag.after;
     if (tag.name !== name || tag.selfClosing) continue;
     if (tag.closing) {
