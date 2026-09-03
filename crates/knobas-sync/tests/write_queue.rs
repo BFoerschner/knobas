@@ -851,9 +851,15 @@ async fn a_source_with_no_credential_keeps_the_write() {
 /// The match has no wildcard arm for the same reason `WriteOp::identifier`
 /// has none, so a new variant stops this test compiling until it is given a
 /// probe value -- and then this assertion until it is given a projection.
-#[test]
-fn every_write_op_has_a_stated_projection() {
-    let probes = [
+/// One probe value per `WriteOp` variant, shared by the two tests below that
+/// each ask the enum a question of its own.
+///
+/// The array itself forces nothing -- an array does not go non-exhaustive when
+/// an enum grows. The no-wildcard `match` in each test is the forcing
+/// function, and the length assertions beside them are what catch a variant
+/// added there but never given a probe here.
+fn write_op_probes() -> Vec<WriteOp> {
+    vec![
         WriteOp::Comment {
             entity: "jira:PAY-231".to_owned(),
             body: "probe".to_owned(),
@@ -909,7 +915,12 @@ fn every_write_op_has_a_stated_projection() {
             base_version: 3,
             body: "<h2>Backoff policy</h2><p>base 30 s.</p>".to_owned(),
         },
-    ];
+    ]
+}
+
+#[test]
+fn every_write_op_has_a_stated_projection() {
+    let probes = write_op_probes();
     for op in &probes {
         let identifier = match op {
             WriteOp::Comment { .. }
@@ -1132,6 +1143,81 @@ async fn a_row_that_settled_some_other_way_is_not_called_withdrawn() {
     assert!(
         !h.verbs().contains(&"unclaimed".to_owned()),
         "the row was not withdrawn, so nothing may say it was: {:?}",
+        h.verbs()
+    );
+}
+
+/// The forcing function ADR-0006 relies on, applied to the residue a
+/// withdrawal can leave: a new `WriteOp` variant must say whether withdrawing
+/// it in flight can leave something at the source that knobas cannot name.
+///
+/// The match has no wildcard arm, so a new variant stops this test compiling
+/// until somebody answers -- and the answer is written here, next to the op,
+/// rather than inferred from a list that would grow by omission.
+#[test]
+fn every_write_op_says_whether_a_withdrawal_can_leave_one() {
+    let probes = write_op_probes();
+    for op in &probes {
+        let leaves_one = match op {
+            // Both make something new that lives only at the source until the
+            // next sync, with nothing linking it to what asked for it.
+            WriteOp::CreateTicket { .. } | WriteOp::CreatePage { .. } => true,
+            // Changes to something the mirror already holds: the write simply
+            // arrived, which is what the user asked for.
+            WriteOp::Comment { .. }
+            | WriteOp::Transition { .. }
+            | WriteOp::Approve { .. }
+            | WriteOp::UpdatePage { .. }
+            // A build is not an artefact, and knobas never claimed one.
+            | WriteOp::TriggerBuild { .. }
+            | WriteOp::RerunBuild { .. }
+            // The hour is at Jira and #328 owns that gap; the worklog's own
+            // copy, not this line, is where it is answered.
+            | WriteOp::LogWork { .. }
+            // Weighed under #333's re-send question and left there: Gitea
+            // refuses the duplicate with a 409. Widening to them is a decision
+            // for the ticket that makes it.
+            | WriteOp::CreateBranch { .. }
+            | WriteOp::CreatePullRequest { .. } => false,
+        };
+        assert_eq!(
+            flusher::UNCLAIMED_OPS.contains(&op.identifier()),
+            leaves_one,
+            "{:?} and UNCLAIMED_OPS disagree about what a withdrawal leaves",
+            op.identifier()
+        );
+    }
+    assert_eq!(
+        probes.len(),
+        11,
+        "a `WriteOp` variant has no probe in `write_op_probes`"
+    );
+}
+
+/// The op is what the line is about, not the race. A `comment` that landed
+/// after the user withdrew it left nothing unclaimed: the reply is on a ticket
+/// the mirror names, and it is the write that was asked for.
+#[tokio::test]
+async fn a_comment_that_landed_after_a_withdrawal_leaves_nothing_unclaimed() {
+    let h = harness().await;
+    let ticket = h.mirror("PAY-337", "a payout fails").await;
+
+    h.answer(Answer::Unreachable);
+    let write = h.comment(&ticket, "on it").await;
+
+    h.answer(Answer::Accept);
+    h.interrupt(Interrupt::Withdraw(write.id));
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+
+    assert_eq!(
+        h.delivered(),
+        vec!["on it".to_owned()],
+        "the race really happened -- the comment went"
+    );
+    assert_eq!(h.reload(write.id).await.state, WriteState::Discarded);
+    assert!(
+        !h.verbs().contains(&"unclaimed".to_owned()),
+        "nothing was left unclaimed, so nothing may say it was: {:?}",
         h.verbs()
     );
 }

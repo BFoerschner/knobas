@@ -54,6 +54,32 @@ use crate::scheduler::{RunFailure, SchedulerDeps};
 /// comment impersonate the source's last sync.
 const ACTOR: &str = "user";
 
+/// The ops a withdrawal can leave an **unclaimed write** behind at the source
+/// (`CONTEXT.md`, issue #336).
+///
+/// The question each op has to answer is not "did the write land after the
+/// user withdrew it" -- that is true of any op, and the branch in [`attempt`]
+/// knows it without asking. It is narrower: *did the source make something new
+/// that knobas cannot name?* A `comment` and an `update_page` change a thing
+/// the mirror already holds, a `transition` and an `approve` change a field, a
+/// build is not an artefact -- for all of those the write simply arrived,
+/// which is what the user asked for. These two make something that exists only
+/// at the source until the next sync, with nothing linking it to what asked
+/// for it, and ADR-0012 singles out the first as the op a duplicate files
+/// twice.
+///
+/// **`create_branch` and `create_pull_request` are deliberately not here.**
+/// They were weighed under this question in #333's table and left with the
+/// re-send answer they had -- Gitea refuses the duplicate with a 409 -- and
+/// widening to them is a decision for the ticket that makes it, not a side
+/// effect of this one.
+///
+/// Stated as a list for [`PROJECTED_OPS`](store::PROJECTED_OPS)'s reason, and
+/// guarded the same way: `every_write_op_says_whether_a_withdrawal_can_leave_one`
+/// matches on `WriteOp` with no wildcard arm, so growing the enum stops that
+/// test compiling until somebody writes down the answer for the new variant.
+pub const UNCLAIMED_OPS: &[&str] = &["create_ticket", "create_page"];
+
 /// Why a flush could not even begin.
 ///
 /// Deliberately **not** a new `SyncError` variant: `From<SyncError> for
@@ -619,6 +645,13 @@ async fn waited(
 /// "the user withdrew it" are different statements, and only the second is
 /// what this line says.
 ///
+/// # Which ops
+///
+/// [`UNCLAIMED_OPS`], and its doc comment is where that choice is argued. The
+/// op is checked before the row is re-read, so an ordinary write that landed
+/// under a withdrawal costs nothing and says nothing: it arrived, which is
+/// what was asked for.
+///
 /// `remote_id` rides along **only when the source named what it made**. That
 /// is `WriteReceipt`'s own rule and it splits the two ops this exists for:
 /// Confluence's `create_page` answers an id, so the line can point at the
@@ -648,6 +681,9 @@ async fn waited(
 /// on it -- [`attempt`] returns `Ok(false)` either way, because the queue did
 /// not move.
 async fn unclaimed(deps: &SchedulerDeps, write: &QueuedWrite, receipt: &WriteReceipt) {
+    if !UNCLAIMED_OPS.contains(&write.op.as_str()) {
+        return;
+    }
     let settled = match store::get(&deps.pool, write.id).await {
         Ok(Some(settled)) => settled,
         Ok(None) => return,
