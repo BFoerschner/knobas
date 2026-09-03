@@ -85,10 +85,10 @@ pub const FLOOR_SECONDS: i64 = 120;
 ///
 /// Thirty, and the number is a floor plus margin rather than a preference:
 ///
-/// * **The week timesheet reaches back seven days.** [`super::week`] reads at
-///   most [`MOST_DAYS`](super::week::MOST_DAYS) windows and they are the week
-///   the reader is on, so a Sunday read starts at the Monday before it.
-/// * **The standup digest reaches back seven more.** Its *yesterday* is the
+/// * **One week timesheet read covers seven days.** [`super::week`] takes at
+///   most [`MOST_DAYS`](super::week::MOST_DAYS) windows and they are one
+///   week, so a Sunday read starts at the Monday before it.
+/// * **The standup digest looks back seven more.** Its *yesterday* is the
 ///   most recent day with any activity on it, at most seven days back (#288),
 ///   so Monday reads Friday and a week of silence reads a week ago.
 ///
@@ -101,10 +101,15 @@ pub const FLOOR_SECONDS: i64 = 120;
 /// rounded to a month so that what knobas promises can be said in a sentence:
 /// **it keeps a month of observations.**
 ///
-/// What it does *not* bound is how far back the day review can be pointed:
-/// `#/time/<date>` takes any date, and a day past the horizon is a day knobas
-/// no longer has the beats for. That case is [`materialize`]'s to get right,
-/// not this constant's -- see [`prune`].
+/// **Both numbers are the width of one read, not a bound on how far back a
+/// read may sit**, and no constant here could be: `#/time/<date>` takes any
+/// date, and `week::vet` bounds a timesheet's *column count* and nothing
+/// about where its windows are. So this is a promise and not a proof --
+/// knobas keeps a month, and a day older than that is a day it no longer has
+/// the beats for. Past the horizon the day review offers no passive blocks
+/// and the timesheet's "no target, app open" row reads zero for that day;
+/// what a surface should *say* about such a day is #337's, not this
+/// constant's. Reading one safely is [`materialize`]'s -- see [`prune`].
 pub const RETENTION_DAYS: i64 = 30;
 
 /// The `knobas.setting` key holding the instant before which observations
@@ -1157,6 +1162,13 @@ mod tests {
     /// beats had been swept. The other is a literal, because #288's digest
     /// does not exist yet and a constant invented for it would be this module
     /// guessing at another module's rule.
+    ///
+    /// **"Outlasts" is about the *width* of a read and not about where a
+    /// reader may point one.** No assertion here could be about the latter:
+    /// both surfaces take an arbitrary past date, so the only thing a
+    /// constant can promise is a window, and what a surface should say once
+    /// it is outside one is #337's. This is why the failure message names a
+    /// span rather than a date.
     #[test]
     fn the_retention_window_outlasts_the_surfaces_that_read_a_past_day() {
         /// The standup digest's *yesterday* reaches back at most this far
