@@ -1859,6 +1859,9 @@ struct Wiki {
     page: String,
     /// The page's title, for the messages.
     title: String,
+    /// The seeded *Standup protocols* page, by content id -- what #289
+    /// publishes under.
+    standup_parent: String,
 }
 
 fn wiki() -> Wiki {
@@ -1903,7 +1906,23 @@ fn wiki() -> Wiki {
                 state.display()
             )
         });
+    // The fixture's "parent of daily protocol pages" (`fixtures/tidewater/
+    // work.json`), which the seed creates empty precisely so the standup
+    // protocol has somewhere to land.
+    let standup = confluence["pages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|p| p["fixture_id"] == json!("standup-protocols"))
+        .unwrap_or_else(|| {
+            panic!(
+                "{}: no confluence.pages entry for `standup-protocols` -- run \
+                 `./seed-atlassian-content.sh`",
+                state.display()
+            )
+        });
     Wiki {
+        standup_parent: standup["id"].as_str().expect("a page id").to_owned(),
         url: need("KNOBAS_CONFLUENCE_URL")
             .trim_end_matches('/')
             .to_owned(),
@@ -2735,4 +2754,341 @@ async fn a_revoked_confluence_pat_reaches_the_credential_health_surface_and_the_
     );
 
     state.scheduler.shutdown().await;
+// -- the standup protocol, published into the real Confluence (#289) ---------
+
+/// The date this suite's protocol is for.
+///
+/// Fixed and far in the past, for two reasons: the page's title *is* the date,
+/// so a leftover from a killed run is recognisable by name without a marker in
+/// its body, and a date nobody's real standup will ever be about cannot
+/// collide with a page a person made.
+const PROTOCOL_DAY: &str = "2009-02-13";
+
+/// The page the publish makes, taken back out when the guard drops.
+///
+/// A guard rather than a `clear_leftovers` sweep alone, for the reason every
+/// other guard in this file exists: the seeded server is a shared fixture and
+/// a suite that leaves a page behind has changed what the next suite reads.
+struct Protocol {
+    url: String,
+    user: String,
+    password: String,
+    id: String,
+}
+
+impl Drop for Protocol {
+    fn drop(&mut self) {
+        let (url, user, password, id) = (
+            self.url.clone(),
+            self.user.clone(),
+            self.password.clone(),
+            self.id.clone(),
+        );
+        undo("the published protocol page", move || async move {
+            let http = client();
+            let (status, body) = api(
+                &http,
+                &url,
+                &user,
+                &password,
+                reqwest::Method::DELETE,
+                &format!("rest/api/content/{id}"),
+                None,
+            )
+            .await;
+            if status != 204 && status != 200 && status != 404 {
+                return Err(format!("DELETE page {id} -> {status}: {body}"));
+            }
+            // Trashed rather than purged, and this path answers 404 for a
+            // trashed page -- the reading `Mention`'s guard records.
+            let (status, _) = api(
+                &http,
+                &url,
+                &user,
+                &password,
+                reqwest::Method::GET,
+                &format!("rest/api/content/{id}"),
+                None,
+            )
+            .await;
+            if status != 404 {
+                return Err(format!("page {id} still answers {status} after its delete"));
+            }
+            Ok(())
+        });
+    }
+}
+
+impl Wiki {
+    /// Delete every child of *Standup protocols* a killed run left behind.
+    ///
+    /// Recognised by **title**, which for a protocol page is the date and
+    /// nothing else. Read-only in the ordinary case: the seed leaves that page
+    /// childless.
+    async fn clear_protocol_leftovers(&self) {
+        let (status, body) = self
+            .api(
+                reqwest::Method::GET,
+                &format!(
+                    "rest/api/content/{}/child/page?limit=100",
+                    self.standup_parent
+                ),
+                None,
+            )
+            .await;
+        assert_eq!(
+            status, 200,
+            "listing children of {}: {body}",
+            self.standup_parent
+        );
+        for id in body["results"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|page| page["title"] == json!(PROTOCOL_DAY))
+            .filter_map(|page| page["id"].as_str().map(str::to_owned))
+        {
+            let (status, body) = self
+                .api(
+                    reqwest::Method::DELETE,
+                    &format!("rest/api/content/{id}"),
+                    None,
+                )
+                .await;
+            assert!(
+                status == 204 || status == 200,
+                "deleting the leftover protocol page {id}: {status} {body}"
+            );
+            println!("live suite: deleted leftover protocol page {id}");
+        }
+    }
+}
+
+/// **M3.3's exit criterion for the protocol: it is published to the real
+/// Confluence under *Standup protocols*, reads back with its body, and the
+/// note and the page are linked** (#289, spec #272 stories 64-67).
+///
+/// The sequence, and every step of it is a fact the offline batteries cannot
+/// establish:
+///
+/// 1. A full sync, so the *Standup protocols* page is in the mirror -- which
+///    is what makes it pickable as a parent and what `space_of` reads the
+///    space key off.
+/// 2. Get-or-create the protocol, and type into it.
+/// 3. *Publish*, with the target the dialog would have produced. The write
+///    goes through the queue, the real adapter and the real REST API.
+/// 4. The publication settled **sent**, carrying the id Confluence gave the
+///    page, and the note and the page are linked -- the link store's own rows,
+///    read from both ends.
+/// 5. The page is read back **from Confluence, not from the mirror**: its
+///    title is the date, its parent is *Standup protocols*, and its stored
+///    body carries the markup the note's markdown became. A mirror read would
+///    only prove knobas agrees with itself.
+///
+/// The duplicate-title ruling has a test of its own below.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
+async fn a_protocol_is_published_under_standup_protocols_and_reads_back() {
+    let wiki = wiki();
+    wiki.clear_protocol_leftovers().await;
+    let state = wiki_app("atlassian_live_protocol", &wiki).await;
+    let day: chrono::NaiveDate = PROTOCOL_DAY.parse().expect("the date parses");
+
+    // 1. The seeded corpus, so the parent page has an address.
+    sync_source(&state, CONFLUENCE).await;
+    let parent = format!("{CONFLUENCE}:{}", wiki.standup_parent);
+
+    // 2. The protocol, and what was said at the standup.
+    let opened = knobas_app::commands::entity::standup_protocol_inner(&state.pool, day)
+        .await
+        .expect("the protocol opens");
+    assert!(
+        opened.publication.is_none(),
+        "a fresh date has not been published"
+    );
+    knobas_app::commands::entity::save_note_inner(
+        &state.pool,
+        &opened.note_id,
+        &knobas_app::protocol::title_of(day),
+        "## Attendees\n\n- Mara\n- Jonas\n\n## Action items\n\n- [ ] Ask Ines about the retry\n",
+    )
+    .await
+    .expect("the note saves");
+
+    // 3. Publish, with the answer the first publish's dialog would have given.
+    let published = knobas_app::commands::entity::publish_standup_protocol_inner(
+        &state,
+        day,
+        Some(knobas_app::protocol::PublishTarget {
+            source_id: CONFLUENCE.to_owned(),
+            parent: parent.clone(),
+        }),
+    )
+    .await
+    .expect("the protocol publishes");
+
+    // 4. What the queue and the link store say.
+    let publication = published.publication.expect("there is a publication");
+    assert_eq!(
+        publication.state,
+        knobas_core::write_queue::WriteState::Sent,
+        "the write reached the real Confluence: {:?}",
+        publication.detail
+    );
+    let page_entity = publication
+        .page_entity_id
+        .clone()
+        .expect("Confluence named the page it made");
+    let content_id = page_entity
+        .split_once(':')
+        .expect("an entity id")
+        .1
+        .to_owned();
+    // From here on the page exists on a shared server, so the guard is armed
+    // before anything else can fail.
+    let _guard = Protocol {
+        url: wiki.url.clone(),
+        user: wiki.user.clone(),
+        password: wiki.password.clone(),
+        id: content_id.clone(),
+    };
+    assert!(publication.linked, "the note and the page are linked");
+
+    let linked: Vec<(String, String, String)> = sqlx::query_as(
+        "select from_id, to_id, relation from knobas.confirmed_link
+          where from_id = $1 or to_id = $1",
+    )
+    .bind(&opened.note_id)
+    .fetch_all(&state.pool)
+    .await
+    .expect("the note's links read");
+    assert_eq!(
+        linked,
+        [(
+            opened.note_id.clone(),
+            page_entity.clone(),
+            knobas_app::protocol::PUBLISHED_RELATION.to_owned()
+        )],
+        "one link, and both details read this row"
+    );
+    // The other end, as the *page's* detail asks it.
+    let from_the_page: Vec<String> = sqlx::query_scalar(
+        "select from_id from knobas.confirmed_link where to_id = $1 or from_id = $1",
+    )
+    .bind(&page_entity)
+    .fetch_all(&state.pool)
+    .await
+    .expect("the page's links read");
+    assert_eq!(from_the_page, [opened.note_id.clone()]);
+
+    // 5. The page, read back from Confluence itself.
+    let (status, body) = wiki
+        .api(
+            reqwest::Method::GET,
+            &format!("rest/api/content/{content_id}?expand=body.storage,ancestors,space"),
+            None,
+        )
+        .await;
+    assert_eq!(status, 200, "reading the published page back: {body}");
+    assert_eq!(
+        body["title"], json!(PROTOCOL_DAY),
+        "the page is titled with the date"
+    );
+    assert_eq!(body["space"]["key"], json!(wiki.space));
+    let ancestors: Vec<&str> = body["ancestors"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|a| a["id"].as_str())
+        .collect();
+    assert!(
+        ancestors.contains(&wiki.standup_parent.as_str()),
+        "the page sits under Standup protocols; its ancestors are {ancestors:?}"
+    );
+    let stored = body["body"]["storage"]["value"]
+        .as_str()
+        .expect("a storage body");
+    for expected in ["<h2>Attendees</h2>", "<li>Mara</li>", "Ask Ines about the retry"] {
+        assert!(
+            stored.contains(expected),
+            "the published body is missing {expected:?}: {stored}"
+        );
+    }
+    println!("live suite: published protocol page {content_id} under {}", wiki.standup_parent);
+}
+
+/// **The duplicate-title ruling's second layer, against the real product**
+/// (#289).
+///
+/// knobas refuses to *ask* twice -- `protocol::publish` answers with the
+/// publication already on the queue, and `publishing_a_date_twice_queues_one_page`
+/// is that half's witness. What that cannot cover is the ask knobas does not
+/// know it made: delivery is at-least-once (ADR-0012), a `POST` whose response
+/// was lost is a page that exists with knobas none the wiser, and the queue
+/// re-sends. Unlike `UpdatePage` there is no version for the server to check.
+///
+/// The claim the ruling rests on is therefore a claim about **Confluence**:
+/// a page title is unique within its space, so the redelivery comes back a
+/// refusal rather than a second page. Atlassian publishes no machine-readable
+/// specification for this product (ADR-0013), so the only way to know it is to
+/// ask the product -- which is what this does, by sending the *same* create
+/// twice over REST, exactly as a re-sent write would.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
+async fn a_second_page_with_one_title_in_one_space_is_refused() {
+    let wiki = wiki();
+    wiki.clear_protocol_leftovers().await;
+
+    let create = json!({
+        "type": "page",
+        "title": PROTOCOL_DAY,
+        "space": { "key": wiki.space },
+        "ancestors": [{ "id": wiki.standup_parent }],
+        "body": { "storage": { "value": "<p>first</p>", "representation": "storage" } },
+    });
+
+    let (status, body) = wiki
+        .api(reqwest::Method::POST, "rest/api/content", Some(create.clone()))
+        .await;
+    assert_eq!(status, 200, "the first create: {body}");
+    let id = body["id"].as_str().expect("an id").to_owned();
+    let _guard = Protocol {
+        url: wiki.url.clone(),
+        user: wiki.user.clone(),
+        password: wiki.password.clone(),
+        id: id.clone(),
+    };
+
+    // The same request again -- what an at-least-once redelivery is.
+    let (status, body) = wiki
+        .api(reqwest::Method::POST, "rest/api/content", Some(create))
+        .await;
+    assert!(
+        status >= 400,
+        "a second page with one title in one space must be refused, not made. Confluence \
+         answered {status}: {body}. If this ever starts passing, `knobas_app::protocol`'s \
+         duplicate ruling loses its backstop and needs re-deciding."
+    );
+    println!("live suite: the duplicate create was refused with {status}");
+
+    // And there is still exactly one page by that title under the parent.
+    let (status, listing) = wiki
+        .api(
+            reqwest::Method::GET,
+            &format!(
+                "rest/api/content/{}/child/page?limit=100",
+                wiki.standup_parent
+            ),
+            None,
+        )
+        .await;
+    assert_eq!(status, 200, "listing the parent's children: {listing}");
+    let named: Vec<&str> = listing["results"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|page| page["title"] == json!(PROTOCOL_DAY))
+        .filter_map(|page| page["id"].as_str())
+        .collect();
+    assert_eq!(named, [id.as_str()], "one page, not two");
 }
