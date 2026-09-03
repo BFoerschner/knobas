@@ -87,10 +87,56 @@ fn no_grant_reaches_further_than_the_app_does() {
 
     assert_eq!(
         granted,
-        vec!["core:default", "opener:allow-open-url"],
+        vec![
+            "core:default",
+            "opener:allow-open-url",
+            "notification:allow-is-permission-granted",
+            "notification:allow-request-permission",
+            "notification:allow-notify",
+        ],
         "a permission was added or widened -- every entry here is a door the \
          webview can open, and `opener:default` in particular also grants \
-         `reveal-item-in-dir` and `mailto:`/`tel:`"
+         `reveal-item-in-dir` and `mailto:`/`tel:`, while `notification:default` \
+         grants sixteen permissions where knobas makes three calls"
+    );
+}
+
+/// The three notification commands the frontend actually calls, and no fourth.
+///
+/// `notification:default` is deliberately *not* used: it bundles sixteen
+/// permissions -- channels, scheduling, cancelling, reading back what is on
+/// screen, registering action types -- and `app/src/lib/inbox/notify.svelte.ts`
+/// makes exactly three calls. The shortest way to acquire the other thirteen is
+/// somebody "simplifying" this file into one word.
+///
+/// Stated as its own test beside the exact-list one above because the exact
+/// list is about *width* and this is about *these three being present*: a
+/// rewrite that dropped `allow-notify` and added something else would still be
+/// a list of five.
+#[test]
+fn the_window_may_ask_about_notify_and_nothing_else_about_notifications() {
+    let capability = capability();
+    let granted: Vec<String> = capability["permissions"]
+        .as_array()
+        .expect("permissions is a list")
+        .iter()
+        .map(|entry| match entry {
+            Value::String(identifier) => identifier.clone(),
+            other => other["identifier"].as_str().unwrap_or_default().to_owned(),
+        })
+        .filter(|identifier| identifier.starts_with("notification:"))
+        .collect();
+
+    assert_eq!(
+        granted,
+        vec![
+            "notification:allow-is-permission-granted",
+            "notification:allow-request-permission",
+            "notification:allow-notify",
+        ],
+        "these are the three plugin commands the notifier calls -- a missing \
+         one is denied at run time with no build or test failure anywhere, and \
+         an extra one is a door nothing asked for"
     );
 }
 
@@ -127,6 +173,97 @@ fn the_opener_plugin_is_registered() {
         code.contains(".plugin(tauri_plugin_opener::init())"),
         "the opener plugin is not registered in `run()`, so `opener:allow-open-url` \
          grants a command that does not exist -- and nothing else in the tree fails"
+    );
+}
+
+/// Each Tauri plugin's two halves are pinned to **one** version.
+///
+/// A plugin is a Rust crate and an npm package speaking one protocol over
+/// `invoke`, and a mismatch fails at *run time* with Tauri's own "command not
+/// found" -- not at build time, and not in any test that stubs the npm half,
+/// which is every frontend test there is. `Cargo.toml` says the rule in prose
+/// beside both pins; this is the check.
+///
+/// Exact pins (`=2.5.4`) rather than carets, for the same reason: a caret on
+/// one side and a lockfile refresh on the other is exactly how the two drift.
+#[test]
+fn each_plugin_is_pinned_to_one_version_on_both_sides_of_the_bridge() {
+    let manifest = include_str!("../Cargo.toml");
+    let package = include_str!("../../../app/package.json");
+
+    for plugin in ["opener", "notification"] {
+        let crate_pin = manifest
+            .lines()
+            .find_map(|line| {
+                line.trim()
+                    .strip_prefix(&format!("tauri-plugin-{plugin} = "))
+            })
+            .unwrap_or_else(|| panic!("`tauri-plugin-{plugin}` is not a dependency"))
+            .trim()
+            .trim_matches('"')
+            .to_owned();
+        let js_pin = package
+            .lines()
+            .find_map(|line| {
+                line.trim()
+                    .strip_prefix(&format!("\"@tauri-apps/plugin-{plugin}\": "))
+            })
+            .unwrap_or_else(|| panic!("`@tauri-apps/plugin-{plugin}` is not in app/package.json"))
+            .trim()
+            .trim_end_matches(',')
+            .trim_matches('"')
+            .to_owned();
+
+        assert!(
+            crate_pin.starts_with('='),
+            "`tauri-plugin-{plugin} = {crate_pin:?}` is not an exact pin, so a \
+             `cargo update` can move the Rust half away from the npm one"
+        );
+        assert_eq!(
+            crate_pin.trim_start_matches('='),
+            js_pin,
+            "the two halves of the {plugin} plugin are on different versions; \
+             they speak one protocol and the mismatch fails at run time with \
+             \"command not found\""
+        );
+        assert!(
+            !js_pin.starts_with('^') && !js_pin.starts_with('~'),
+            "`@tauri-apps/plugin-{plugin}` is a range ({js_pin:?}), not a pin"
+        );
+    }
+}
+
+/// The notification plugin is registered in `run()`.
+///
+/// The same source scan as the opener above, for the same three-way lineup and
+/// with the same worth: dropping the crate is a build error (`tauri-build`
+/// resolves every identifier in `capabilities/` against the plugins it can
+/// see), dropping the permissions is the two tests above, and what is left --
+/// crate present, permissions present, nobody calling `.plugin(..)` -- produces
+/// no compile error and no test failure anywhere else.
+///
+/// **And here, as with the opener, the source scan is not the witness.** What
+/// proves the opener call is *reached* is a bundled build where somebody
+/// pressed the button. The equivalent run for this plugin is
+/// `testenv/README.md`, "Signed dev build (macOS)": on 2026-09-03, macOS
+/// 26.5.2 with the `knobas-dev` self-signed certificate, one `credential_expiry`
+/// item arriving on an unfocused window produced one banner, with
+/// `Presenting ... as banner` for `dev.knobas.desktop` in `usernoted`'s log.
+/// The first attempt showed nothing because the app had no macOS notification
+/// authorization; the README says how to tell that state apart from a knobas
+/// bug, and it is worth reading before trusting a silent run.
+///
+/// What no run in this tree proves is the **click**: the plugin's
+/// `register_listener` is mobile-only, so a notification's click has no
+/// channel to arrive on and the navigation is proven against the stub alone.
+#[test]
+fn the_notification_plugin_is_registered() {
+    let code = strip_comments(include_str!("../src/lib.rs"));
+    assert!(
+        code.contains(".plugin(tauri_plugin_notification::init())"),
+        "the notification plugin is not registered in `run()`, so the three \
+         `notification:*` grants name commands that do not exist -- and \
+         nothing else in the tree fails"
     );
 }
 

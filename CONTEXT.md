@@ -149,6 +149,10 @@ A queued write knobas will not send until the user acts, for one of two stated r
 The single actionable stream — mentions, review requests, failed builds, assignments, credential expiry — with actions and snooze.
 _Avoid_: notifications, feed
 
+**Desktop notification**:
+What the operating system shows for **one new [inbox](#inbox) item**, when that item's category is switched on and the window is not focused; clicking it opens the item. Per category, all off until somebody says otherwise, and once per item. Always spelled in full: the bare word *notifications* is the inbox's forbidden synonym above, and the two must not collapse — the inbox is the stream that stays until it is answered, and this is one interruption about one line of it. Nothing that is not an inbox item is ever notified. (#290, spec #272)
+_Avoid_: notification (bare), alert, toast (that is the in-window message)
+
 ## Time
 
 **Timer target**:

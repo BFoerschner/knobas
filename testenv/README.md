@@ -747,6 +747,59 @@ notarization warning is expected too. The #290 manual check is: in that
 bundle, switch one notification kind on, unfocus the window, and see one
 notification in Notification Center.
 
+**The first run of that check shows nothing, and the reason is macOS, not
+knobas.** Written down here because it cost an afternoon once. A fresh bundle
+identifier has no notification authorization, and the legacy
+`NSUserNotification` path the plugin ends up on (`tauri-plugin-notification` ->
+`notify-rust` -> `mac-notification-sys`) does not raise the permission sheet
+itself. macOS raises its own banner-shaped prompt -- *"knobas Notifications:
+Notifications may include alerts, sounds, and icon badges"* -- on the app's
+first contact with `usernoted`, and **withdraws it unanswered when the app
+quits**, after which it is not asked again. Until somebody answers it, every
+notification is *delivered and never presented*: it goes into Notification
+Center's store and no banner appears.
+
+Both states are visible in the unified log, and this is the way to tell them
+apart without guessing:
+
+```sh
+log show --last 5m --predicate 'process == "usernoted"' --style compact \
+  | grep -E 'knobas.desktop|askpermissions'
+```
+
+* `Delivering <NotificationRecord app:"dev.knobas.desktop" ...> to
+  [ .alert .lockScreen .notificationCenter ]` with **no matching `Presenting`
+  line** -- knobas called the plugin and macOS held the notification back.
+  Not authorized.
+* `Presenting <NotificationRecord app:"dev.knobas.desktop" ...> as banner` --
+  the check passed.
+* `Event was resolved: ... outcome: allowed; reason: disabled` from
+  `donotdisturbd` says no Focus mode is swallowing anything; an `outcome`
+  other than `allowed` is a Focus, not a knobas bug.
+
+**To answer the prompt after it has been withdrawn:** System Settings ->
+Notifications -> Application Notifications -> **knobas** -> *Allow
+notifications* on. The app is listed there once it has posted at least one
+notification, even though it never appears in
+`~/Library/Preferences/com.apple.ncprefs.plist` while it is refused -- an
+absence from that file is therefore not evidence that the code never ran.
+
+**Result of the check, 2026-09-03, macOS 26.5.2 (25F84), `knobas-dev`
+self-signed:** with authorization on, one `credential_expiry` item arriving on
+an unfocused window produced exactly one banner, *"Tidewater (mock) -- the
+Tidewater (mock) credential expires on Sunday 06 Sep 2026"*, with
+`Presenting ... as banner` in the log. A self-signed certificate with
+`TeamIdentifier=not set` is sufficient; no Apple identity is needed.
+
+**What the check still cannot prove is the click.**
+`tauri-plugin-notification` 2.4.0's desktop `notify` hands the notification to
+`notify-rust` and discards the result (`let _ = notification.show()` inside a
+spawned task), and its `register_listener` -- the command behind `onAction` --
+is mobile-only. So a notification's click has no channel to arrive on, and
+`app/src/lib/inbox/notify.svelte.ts`'s navigation is proven against the stub
+only. That is a gap in the plugin, recorded in the module header and in
+`docs/contract.md` §10.8.
+
 ## Scripts
 
 | Script | Does |

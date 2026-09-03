@@ -249,6 +249,116 @@ async fn find(
     )))
 }
 
+/// The `knobas.setting` key holding which inbox categories are allowed to
+/// raise a desktop notification (#290, spec #272 "Notifications").
+///
+/// `knobas.setting` exists for exactly this (`0002`, comment 6), so the switch
+/// needs no migration of its own -- the reasoning `backup::SCHEDULE_KEY`
+/// records and `time::passive`'s `SETTING_KEY` repeats. Namespaced `inbox.`
+/// because the setting is about the inbox's own categories and nothing else
+/// in knobas has an opinion about them.
+///
+/// `pub` so that a test writing the row by hand -- the only way to reach the
+/// read side's forgiving half, which no writer of ours can produce -- names
+/// the same key the reader does instead of retyping it into a SQL literal.
+pub const NOTIFICATION_KINDS_KEY: &str = "inbox.notification_kinds";
+
+/// Which categories may notify. **Empty until somebody says otherwise**: every
+/// kind is off by default (spec #272, story 71), so a noisy Jira cannot make
+/// the feature unusable on the day it is installed.
+///
+/// A stored value that is not a list of known category words reads as *empty*
+/// rather than as a failure: the setting is a permission to interrupt
+/// somebody, and the safe direction for an unreadable one is silence. An
+/// unknown word inside an otherwise good list is dropped for the same reason
+/// -- it is a category this build does not have, so there is nothing it could
+/// switch on.
+///
+/// # Errors
+///
+/// [`IpcError`] if the read fails.
+pub async fn notification_kinds(pool: &PgPool) -> Result<Vec<Category>, IpcError> {
+    let stored: Option<serde_json::Value> =
+        sqlx::query_scalar("select value from knobas.setting where key = $1")
+            .bind(NOTIFICATION_KINDS_KEY)
+            .fetch_optional(pool)
+            .await?;
+    let Some(serde_json::Value::Array(words)) = stored else {
+        return Ok(Vec::new());
+    };
+    Ok(canonical(words.iter().filter_map(|word| {
+        word.as_str()?.parse::<Category>().ok()
+    })))
+}
+
+/// Set which categories may notify, and answer with what is now stored.
+///
+/// The answer is the stored value rather than nothing, so the settings toggles
+/// draw what the database holds instead of what the click asked for -- the
+/// rule `set_backup_schedule` and `set_passive_attribution` both follow on the
+/// same screen.
+///
+/// **An unknown word is refused, not dropped.** This is the write side, and
+/// the only caller is a settings surface sending back words it was given: a
+/// word this build does not know is a mistake somewhere, and storing the rest
+/// silently would leave a toggle that reads on and never fires. The read side
+/// above is the forgiving one, because there the alternative is a settings
+/// section that cannot draw at all.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for a word that is
+/// not a category, [`IpcError`] if the write fails.
+pub async fn set_notification_kinds(
+    pool: &PgPool,
+    kinds: &[String],
+) -> Result<Vec<Category>, IpcError> {
+    let mut parsed = Vec::with_capacity(kinds.len());
+    for word in kinds {
+        parsed.push(word.parse::<Category>().map_err(|unknown| {
+            IpcError::invalid(format!(
+                "{unknown} -- the inbox notifies for {}",
+                Category::ALL
+                    .iter()
+                    .map(|category| category.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
+        })?);
+    }
+    let stored = canonical(parsed.into_iter());
+    sqlx::query(
+        "insert into knobas.setting (key, value) values ($1, $2)
+         on conflict (key) do update set value = excluded.value, updated_at = now()",
+    )
+    .bind(NOTIFICATION_KINDS_KEY)
+    .bind(serde_json::Value::Array(
+        stored
+            .iter()
+            .map(|category| serde_json::Value::String(category.as_str().to_owned()))
+            .collect(),
+    ))
+    .execute(pool)
+    .await?;
+    Ok(stored)
+}
+
+/// Deduplicated, and in [`Category::ALL`]'s order rather than the caller's.
+///
+/// One spelling for one set: the settings section draws a checkbox per
+/// category and sends the whole set back on every click, so a list whose order
+/// followed the order the boxes were ticked in would make two identical
+/// settings compare unequal -- and a duplicate would make one item notify
+/// twice if this list were ever iterated instead of searched.
+fn canonical(kinds: impl Iterator<Item = Category>) -> Vec<Category> {
+    let chosen: std::collections::HashSet<Category> = kinds.collect();
+    Category::ALL
+        .iter()
+        .copied()
+        .filter(|category| chosen.contains(category))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -366,6 +476,28 @@ mod tests {
             )),
             "InboxView's WINDOW_DAYS no longer matches knobas_core::inbox::WINDOW_DAYS"
         );
+    }
+
+    /// Every category has a **toggle in the interface** (#290).
+    ///
+    /// The other half of `app/src/lib/settings/NotificationsSection.svelte`,
+    /// and the half that cannot be checked from TypeScript: `InboxCategory`
+    /// is a string union mirrored by hand, so a sixth category added here
+    /// would compile on both sides and simply never appear as a switch --
+    /// a demand nobody can ever be notified about, with nothing failing
+    /// anywhere. The words themselves are the interface's to choose; that each
+    /// category is named is not.
+    #[test]
+    fn every_inbox_category_has_a_toggle_in_the_interface() {
+        const SECTION: &str =
+            include_str!("../../../app/src/lib/settings/NotificationsSection.svelte");
+        for category in Category::ALL {
+            assert!(
+                SECTION.contains(&format!("id: \"{}\"", category.as_str())),
+                "{category} has no toggle in the settings section, so nobody \
+                 can ever switch notifications on for it"
+            );
+        }
     }
 
     /// Every candidate op a category names has a **form in the interface**.

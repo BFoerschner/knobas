@@ -3,6 +3,7 @@
 
   import InboxView from "./lib/inbox/InboxView.svelte";
   import { inbox } from "./lib/inbox/inbox.svelte";
+  import { notifications } from "./lib/inbox/notify.svelte";
   import { Launcher } from "./lib/launcher";
   import Booting from "./lib/shell/Booting.svelte";
   import Room from "./lib/shell/Room.svelte";
@@ -438,6 +439,7 @@
     let stopProjects: (() => void) | undefined;
     let stopSourceKinds: (() => void) | undefined;
     let stopTimer: (() => void) | undefined;
+    let stopNotify: (() => void) | undefined;
 
     void (async () => {
       // Dev only, and behind `import.meta.env.DEV` so Rollup folds the branch
@@ -498,6 +500,14 @@
       // Nothing is waiting on the tick: the first `refresh` comes from the
       // `lifecycle.ready` effect below, which fires long after this.
       stopTimer = timer.begin();
+      // The notification listener's click channel (#290). Behind the same
+      // await as everything above it, and for the same reason: it is an
+      // `invoke` under a `listen`-shaped API, and under `?fake-ipc` an
+      // invocation issued before the fixture is one into nothing. It is
+      // *expected* to fail on desktop -- `tauri-plugin-notification` has no
+      // click channel there, which `notify.svelte.ts` records -- and the store
+      // swallows that: notifications still fire, they simply have no door.
+      stopNotify = notifications.start();
       // Once, at shell start: `list_adapters` is static per build and answers
       // before the database is up, so there is nothing to poll and nothing to
       // tear down.
@@ -515,6 +525,7 @@
 
     return () => {
       disposed = true;
+      stopNotify?.();
       stopTimer?.();
       stopHealth?.();
       stopMerges?.();
@@ -608,6 +619,45 @@
    */
   $effect(() => {
     if (lifecycle.ready) void timer.refresh();
+  });
+
+  /**
+   * Seed which kinds may notify the moment the database can answer (#290) —
+   * the same rule and the same shape as the seeds above. `notification_kinds`
+   * rejects with `not_ready` for the whole of bring-up, and nothing emits an
+   * event when a setting is written, so a read at mount would leave the store
+   * holding *no kinds* for the session and every notification would be
+   * silently gated off.
+   */
+  $effect(() => {
+    if (lifecycle.ready) void notifications.reseed();
+  });
+
+  /**
+   * **Hand the inbox's stream to the notifier**, which is the whole of the
+   * wire between the two (#290).
+   *
+   * There is no `inbox:*` event and there is deliberately not going to be one
+   * (`inbox.svelte.ts` records why), so the change signal the notifier listens
+   * to *is* this store moving: the inbox already re-reads on `activity:new`
+   * and on every finished sync, and this effect runs when the answer changes.
+   *
+   * **Gated on `inbox.answered`, and that is the load-bearing half.** The
+   * store holds an empty stream until its first read comes back, and a
+   * notifier primed against that would take the reader's whole backlog for
+   * news — a burst of notifications about nothing new, landing the moment
+   * knobas opens.
+   *
+   * The call runs untracked: `saw` reads the enabled kinds, and a tracked read
+   * there would make switching a kind on in settings a reason to walk the
+   * stream again.
+   */
+  $effect(() => {
+    const stream = inbox.stream;
+    const answered = inbox.answered;
+    untrack(() => {
+      if (answered) notifications.saw(stream);
+    });
   });
 
   /**

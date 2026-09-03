@@ -43,7 +43,14 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { AppStatus } from "./lib/ipc/app";
-import type { ContextRow, EntityRow, Project } from "./lib/ipc/entity";
+import type {
+  ActivityRow,
+  ContextRow,
+  EntityRow,
+  InboxCategory,
+  InboxEntry,
+  Project,
+} from "./lib/ipc/entity";
 import type { CredentialHealth, SourceSummary } from "./lib/ipc/sources";
 // The shell's own reckoning of the reader's day, used by the tests below to
 // state the expectation in the same terms `App.svelte` computes it in --
@@ -177,6 +184,39 @@ vi.mock("./lib/ipc/entity", () => ({
   // The detail slide-over reads the board for its status select (#179); an
   // empty board is what a room with nothing in it answers.
   miniBoard: () => Promise.resolve({ columns: [], sources: [] }),
+  // The inbox (#45), which the notifier is fed from (#290). Answered rather
+  // than left undefined, because a stream that always fails is one that can
+  // never witness an item arriving -- the #238 fixture gap this file's own
+  // header is about, in the store the whole of #290 hangs off.
+  inboxItems: (shelf: string) => Promise.resolve(shelf === "stream" ? inboxRows : []),
+  inboxCount: () => Promise.resolve(inboxRows.length),
+  snoozeInboxItem: () => Promise.reject(new Error("no snooze in this test")),
+  completeInboxItem: () => Promise.reject(new Error("no answer in this test")),
+  // Which kinds may raise a desktop notification (#290).
+  notificationKinds: () => Promise.resolve(notifyKinds),
+  setNotificationKinds: () => Promise.reject(new Error("no settings write in this test")),
+}));
+
+/** The stream `inbox_items` answers. Mutable: an item arrives mid-session. */
+let inboxRows: InboxEntry[] = [];
+/** Which kinds `notification_kinds` says are switched on (#290). */
+let notifyKinds: InboxCategory[] = [];
+/** Every notification the plugin was handed, in order (#290). */
+let notified: { title: string; body: string; extra: Record<string, unknown> }[] = [];
+
+vi.mock("@tauri-apps/plugin-notification", () => ({
+  sendNotification: (notification: {
+    title: string;
+    body: string;
+    extra: Record<string, unknown>;
+  }) => notified.push(notification),
+  isPermissionGranted: () => Promise.resolve(true),
+  requestPermission: () => Promise.resolve("granted"),
+  // What the desktop plugin really does with a click subscription: there is no
+  // `register_listener` command outside mobile, so the invoke behind `onAction`
+  // rejects. The shell has to survive that, which is why the fixture reproduces
+  // it rather than resolving.
+  onAction: () => Promise.reject(new Error("command plugin:notification|register_listener not found")),
 }));
 
 /**
@@ -347,6 +387,8 @@ function deleteButtons(): number {
 
 const { default: App } = await import("./App.svelte");
 const { EVENTS } = await import("./lib/ipc");
+const { inbox } = await import("./lib/inbox/inbox.svelte");
+const { notifications } = await import("./lib/inbox/notify.svelte");
 const { health } = await import("./lib/shell/health.svelte");
 const { lifecycle } = await import("./lib/shell/lifecycle.svelte");
 const { router } = await import("./lib/shell/router.svelte");
@@ -404,6 +446,9 @@ beforeEach(() => {
   adHocOffer = null;
   entityRows = [];
   sourceRows = [];
+  inboxRows = [];
+  notifyKinds = [];
+  notified = [];
   health.replace([]);
   toasts.items = [];
   target = document.createElement("div");
@@ -452,6 +497,60 @@ function until(condition: () => boolean, whatWasWaitedFor: string): Promise<void
     { timeout: 3_000, interval: 5 },
   );
 }
+
+/**
+ * **The notifier is not fed until the inbox has actually answered** (#290).
+ *
+ * The gate is `inbox.answered`, and it exists because the store holds an empty
+ * stream until its first read comes back: a notifier primed against *that*
+ * takes the reader's whole backlog for news, as a burst of notifications the
+ * moment knobas opens. The seam is the shell's — three lines here and no other
+ * — so this is the only place it can be witnessed.
+ *
+ * **This test is first in the file on purpose, and it says so out loud.**
+ * `inbox` is the window's one store and `answered` is sticky: any earlier test
+ * that mounts the shell with the database up makes it true for the rest of the
+ * run, and this assertion would then pass against a shell with no gate in it
+ * at all. The precondition below is what turns "somebody added a test above
+ * this one" from a silently vacuous pass into a failure that names the reason.
+ */
+test("the notifier is handed nothing until the inbox has read", async () => {
+  expect(
+    inbox.answered,
+    "this test must be the first in this file: the inbox store is the window's \
+one and `answered` never goes back to false, so an earlier mount makes the \
+gate below untestable",
+  ).toBe(false);
+
+  const saw = vi.spyOn(notifications, "saw");
+  try {
+    // The database is still coming up, so `inbox_items` is never called and
+    // the store's stream is the empty list it was built with.
+    inboxRows = [inboxEntry("mention", "PAY-231")];
+    app = mount(App, { target, props: {} });
+    await until(
+      () => listenCalls > 0 && lifecycle.status !== null,
+      "the shell never finished bring-up",
+    );
+    expect(saw, "the empty stream was taken for a read of an empty inbox").not.toHaveBeenCalled();
+
+    // ...and once it can answer, the backlog is what the notifier is primed
+    // against.
+    dbReady = true;
+    emit(EVENTS.dbState, { state: "ready", detail: null });
+    await until(() => saw.mock.calls.length > 0, "the inbox's read never reached the notifier");
+    expect(saw.mock.calls[0]![0]!.map((entry) => entry.item.key)).toEqual(["mention:PAY-231"]);
+  } finally {
+    saw.mockRestore();
+    // The lifecycle store is the window's one instance and its state outlives
+    // a test, the same way the router's address does. A test that walked the
+    // database from `starting` to `ready` has to walk it back, or the next
+    // mount is `ready` before its first `app_status` — which is precisely the
+    // condition the test below this one is about.
+    dbReady = false;
+    emit(EVENTS.dbState, { state: "starting", detail: null });
+  }
+});
 
 test("credential health is not read while the database is still coming up", async () => {
   healthRows = [row("gitea", "unauthorized")];
@@ -1654,4 +1753,122 @@ test("⌘T on an open page detail starts the timer on the page", async () => {
     { kind: "entity", entity_id: "confluence:98307" },
   ]);
   expect(pickerTitle(), "the picker opened over a page that was right there").toBeNull();
+});
+
+// -- the notification listener's wire (#290) --------------------------------
+
+/**
+ * One `activity:new` payload.
+ *
+ * A real row and not `null`: the suggestion tray subscribes to the same event
+ * and reads `payload.verb`, so a bare `null` takes the window down inside the
+ * emit rather than reaching the store under test. The verb is one the tray
+ * does not act on, so this is an arrival for the inbox and nothing else.
+ */
+function activityRow(): ActivityRow {
+  return {
+    id: 1,
+    at: "2026-09-03T09:00:00Z",
+    actor: "sync:gitea",
+    verb: "synced",
+    entity_id: null,
+    detail: {},
+  };
+}
+
+/** One line of the inbox stream, of `category`, about `entityId`. */
+function inboxEntry(
+  category: InboxCategory,
+  key: string,
+  entityId: string | null = "gitea:acme/payouts#144",
+): InboxEntry {
+  return {
+    item: {
+      key: `${category}:${key}`,
+      category,
+      source_id: "gitea",
+      entity_id: entityId,
+      kind: entityId === null ? null : "pr",
+      title: `Title of ${key}`,
+      reason: `Why ${key} is here`,
+      occurred_at: "2026-09-03T09:00:00Z",
+      web_url: null,
+      snoozed_until: null,
+    },
+    actions: [],
+  };
+}
+
+/**
+ * **An item arriving on an unfocused window is a notification** — the whole
+ * wire, end to end, in the one place it exists (#290).
+ *
+ * `notify.test.svelte.ts` drives the store's rules directly and nothing there
+ * proves the shell ever hands it a stream: the setting seed, the
+ * `inbox.answered` gate and the effect that feeds it are three lines in this
+ * file with no other seam, which is the class this whole file was written for
+ * (#238). The fixture is the real one: the inbox re-reads on `activity:new`,
+ * so the arrival is delivered as that event and the notification is read off
+ * the stubbed plugin.
+ */
+test("an inbox item arriving while the window is unfocused reaches the notification plugin", async () => {
+  dbReady = true;
+  notifyKinds = ["failed_build"];
+  const unfocused = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+  try {
+    app = mount(App, { target, props: {} });
+    await until(
+      () => notifications.kinds.length > 0,
+      "the shell never seeded which kinds may notify",
+    );
+
+    inboxRows = [inboxEntry("failed_build", "tidewater-payouts-42")];
+    emit(EVENTS.activityNew, activityRow());
+    await until(() => notified.length > 0, "the arrival never reached the plugin");
+
+    expect(notified).toHaveLength(1);
+    expect(notified[0]!.title).toBe("Title of tidewater-payouts-42");
+    expect(notified[0]!.body).toBe("Why tidewater-payouts-42 is here");
+    expect(
+      notified[0]!.extra["address"],
+      "the notification's click has nowhere to go",
+    ).toBe("#/entity/gitea:acme%2Fpayouts%23144");
+  } finally {
+    unfocused.mockRestore();
+  }
+});
+
+/**
+ * The same arrival on a **focused** window reaches the plugin not at all.
+ *
+ * The positive control for the silence is the test above: same shell, same
+ * event, same fixture, focus the other way round. Without it this would pass
+ * against a wire that was never connected.
+ */
+test("the same arrival on a focused window sends nothing", async () => {
+  dbReady = true;
+  notifyKinds = ["failed_build"];
+  const focused = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  try {
+    app = mount(App, { target, props: {} });
+    await until(
+      () => notifications.kinds.length > 0,
+      "the shell never seeded which kinds may notify",
+    );
+
+    inboxRows = [inboxEntry("failed_build", "tidewater-payouts-43")];
+    emit(EVENTS.activityNew, activityRow());
+    // The inbox has re-read and the notifier has seen **this** item; nothing
+    // was sent. Waiting on the key rather than on the length: `inbox` is the
+    // window's one store and the test above leaves an item in it, so a length
+    // check would be satisfied before this test's own read had landed — and
+    // the silence below would then be about a stream nobody had offered yet.
+    await until(
+      () => inbox.stream.some((entry) => entry.item.key.endsWith("tidewater-payouts-43")),
+      "the inbox never re-read after the activity signal",
+    );
+    expect(notified, "the reader was told about something already on screen").toEqual([]);
+  } finally {
+    focused.mockRestore();
+  }
 });
