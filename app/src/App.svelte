@@ -175,7 +175,7 @@
    * `openEntity` is: the address is what says what is open, and it is the
    * shell's to read. `null` is a legal answer and not a missing one — it is
    * what makes ⌘T open the picker rather than start on nothing, and what
-   * passive attribution (#281) will record as an unattributed gap.
+   * passive attribution (#282) will record as an unattributed gap.
    *
    * Everything is put through `canBeTarget` before it leaves here. A promoted
    * context's anchor is a ticket or an epic, so it always passes today; the

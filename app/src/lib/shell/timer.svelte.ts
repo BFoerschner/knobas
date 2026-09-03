@@ -27,7 +27,7 @@
  * ride on it and neither tolerates a beat sent by a window nobody is looking
  * at: it is the last-alive stamp a stranded timer is closed at, so a beat from
  * a backgrounded window would place a crash later than it happened; and it is
- * the observation passive attribution (#281) will turn into passive blocks,
+ * the observation passive attribution (#282) will turn into passive blocks,
  * where an unfocused window must never count as work (story 27).
  *
  * The beat carries the **foreground** by the rule *open detail, else room
