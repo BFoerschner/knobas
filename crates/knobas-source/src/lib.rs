@@ -484,6 +484,63 @@ pub enum WriteOp {
         seconds: i64,
         comment: String,
     },
+    /// Identifier `"create_page"`. Make a new wiki page (M3.2, issue #286).
+    ///
+    /// `parent` rather than `entity`, and it is the **only** variant that
+    /// spells its target under another name. The reason is that this op has
+    /// two containers and they are not interchangeable: a page is created
+    /// *inside a space* and *under a parent page*, and Confluence's create
+    /// wants both. Calling the parent `entity` and leaving `space` beside it
+    /// would read as though the space were incidental; naming the field for
+    /// what it is says which of the two the queue orders and holds against.
+    /// `knobas_sync::write_queue::target_entity` has an arm of its own for it.
+    ///
+    /// `parent` is an [`EntityRef`] in string form naming a **mirrored page**
+    /// (`confluence:98400`) -- unlike a create's container elsewhere in this
+    /// enum, which is typically something knobas does not mirror. That is not
+    /// a stricter rule imposed here, it is what Confluence's own model gives:
+    /// every page has a parent, and the one knobas creates under is a page a
+    /// reader picked out of the mirror.
+    ///
+    /// `space` is the space **key** in the source's own spelling (`"ENG"`),
+    /// not an `EntityRef`: ADR-0010 makes a space Confluence's *project*, and
+    /// knobas does not mirror projects as entities in any source.
+    ///
+    /// `body` is **storage format**, the dialect the page is stored in and the
+    /// one `body.storage` gives back. Not knobas-flavoured markup and not
+    /// HTML: what goes out is what a later read must return unchanged, and a
+    /// translation layer here would make the round trip lossy.
+    ///
+    /// [`EntityRef`]: knobas_core::entity::EntityRef
+    CreatePage {
+        parent: String,
+        space: String,
+        title: String,
+        body: String,
+    },
+    /// Identifier `"update_page"`. Replace a wiki page's body (M3.2, issue
+    /// #286).
+    ///
+    /// `entity` is the **page**, and `body` is its **whole** storage format --
+    /// never the fragment the reader edited. Confluence's content `PUT`
+    /// replaces the record, so a request carrying one section would delete the
+    /// rest of the page; re-assembling the whole body around the edited
+    /// section is the caller's job and `app/src/lib/detail/page-sections.ts`
+    /// is where it happens.
+    ///
+    /// `base_version` is the version number the edit was made **against** --
+    /// `version.number` as the mirror held it when the reader started typing.
+    /// It is not the version to write: the adapter sends `base_version + 1`,
+    /// which is how Confluence is asked to abort when somebody else got there
+    /// first. That abort is the **backstop** and not the mechanism: the write
+    /// queue holds this op when the mirror moved on after it was queued
+    /// (`knobas_core::write_queue::project`), and Confluence's own conflict
+    /// answer catches the window the mirror could not see.
+    UpdatePage {
+        entity: String,
+        base_version: i64,
+        body: String,
+    },
 }
 
 impl WriteOp {
@@ -516,6 +573,8 @@ impl WriteOp {
             WriteOp::TriggerBuild { .. } => "trigger_build",
             WriteOp::RerunBuild { .. } => "rerun_build",
             WriteOp::LogWork { .. } => "log_work",
+            WriteOp::CreatePage { .. } => "create_page",
+            WriteOp::UpdatePage { .. } => "update_page",
         }
     }
 }
@@ -833,6 +892,17 @@ mod tests {
                 seconds: 2_700,
                 comment: "SEPA retry".into(),
             },
+            WriteOp::CreatePage {
+                parent: "confluence:98400".into(),
+                space: "ENG".into(),
+                title: "Standup 2026-09-03".into(),
+                body: "<p>nothing blocked</p>".into(),
+            },
+            WriteOp::UpdatePage {
+                entity: "confluence:98307".into(),
+                base_version: 3,
+                body: "<h2>Backoff policy</h2><p>base 30 s.</p>".into(),
+            },
         ];
         for op in &probes {
             match op {
@@ -844,7 +914,9 @@ mod tests {
                 | WriteOp::Approve { .. }
                 | WriteOp::TriggerBuild { .. }
                 | WriteOp::RerunBuild { .. }
-                | WriteOp::LogWork { .. } => {}
+                | WriteOp::LogWork { .. }
+                | WriteOp::CreatePage { .. }
+                | WriteOp::UpdatePage { .. } => {}
             }
         }
         probes

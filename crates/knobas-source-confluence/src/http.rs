@@ -190,6 +190,47 @@ impl ConfluenceHttp {
             ))
         })
     }
+
+    /// `POST <base>/<path>` with `body` as JSON, keeping the response.
+    ///
+    /// The response is handed back rather than decoded here because the
+    /// creates want the id Confluence assigned and the update wants nothing at
+    /// all -- a helper that insisted on a shape would have to invent one for
+    /// the second (issue #286).
+    ///
+    /// # Errors
+    ///
+    /// The [`SourceError`] the failure maps to, with Confluence's own words in
+    /// the message where it sent any (see [`error_envelope`]).
+    pub(crate) async fn post_json(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<knobas_http::Response, SourceError> {
+        let request = self.client.request(Method::POST, path).json(body);
+        self.client.send(request).await
+    }
+
+    /// `PUT <base>/<path>` with `body` as JSON, keeping the response.
+    ///
+    /// A separate verb rather than a parameter on [`Self::post_json`] because
+    /// the two are not interchangeable here: Confluence's content `PUT`
+    /// **replaces** the record and is the one request in this adapter that can
+    /// destroy something. A call site reads which of the two it is.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::post_json`]. In particular the 409 a version conflict
+    /// answers arrives as [`SourceError::Protocol`] carrying Confluence's own
+    /// sentence, which is what makes it a refusal rather than a retry.
+    pub(crate) async fn put_json(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<knobas_http::Response, SourceError> {
+        let request = self.client.request(Method::PUT, path).json(body);
+        self.client.send(request).await
+    }
 }
 
 /// The sentence inside Confluence's error envelope, for `knobas-http` to build

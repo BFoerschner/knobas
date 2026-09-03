@@ -344,6 +344,8 @@ pub const PROJECTED_OPS: &[&str] = &[
     "trigger_build",
     "rerun_build",
     "log_work",
+    "create_page",
+    "update_page",
 ];
 
 /// What `op` counts as its target having changed.
@@ -400,8 +402,8 @@ pub const PROJECTED_OPS: &[&str] = &[
 ///   lands.
 ///
 /// **Liveness alone** -- `"create_ticket"`, `"create_branch"`,
-/// `"create_pull_request"`, `"trigger_build"`, `"rerun_build"`, `"log_work"`.
-/// These do not
+/// `"create_pull_request"`, `"trigger_build"`, `"rerun_build"`, `"log_work"`,
+/// `"create_page"`. These do not
 /// overwrite anything: they add a ticket, a branch, a pull request, a queued
 /// build or a worklog *beside* whatever the container holds now, so a change to the
 /// container is not a change to what the write would replace -- there is
@@ -422,6 +424,30 @@ pub const PROJECTED_OPS: &[&str] = &[
 /// the two versions the hold dialog would show them would differ in a comment
 /// that has nothing to do with the time. What does still hold it is the ticket
 /// leaving the mirror -- there is then nothing to log against.
+///
+/// `"create_page"` is in that group for the additive reason and not by
+/// analogy: a new page goes *beside* whatever else sits under its parent, so a
+/// parent whose title or discussion moved on is not a parent this write would
+/// overwrite. What still holds it is the parent **leaving the mirror** -- a
+/// page created under a deleted parent is a page nobody will find. It is the
+/// one create whose container knobas really does mirror, so this is also the
+/// one where that clause has teeth (issue #286).
+///
+/// **The whole mirrored record, and the version inside it** -- `"update_page"`
+/// joins `"transition"` and `"approve"` in the `other` arm below, and the
+/// reason is the sharpest of the three: this op *replaces a page's body*.
+/// Anything at all that happened to the page since the reader started typing
+/// is something their re-assembled body would silently delete.
+///
+/// That arm carries the verbatim `payload`, which is where a Confluence page
+/// keeps `version.number` -- so the two sides of a held `update_page` differ
+/// in the version number itself, and "the mirror's version has passed the one
+/// the edit was made against" is not a separate check bolted on here but the
+/// ordinary snapshot comparison reading a field that happens to say it. The
+/// op's own `base_version` is the *source's* half of the same question:
+/// Confluence is sent `base_version + 1` and aborts on conflict, which is the
+/// backstop for the window between the last sync and the flush that the
+/// mirror cannot see (issue #286, ADR-0012).
 ///
 /// For a create the target is the **container**, and knobas does not mirror
 /// every container: there is no `jira:PAY` item. Such a target projects
@@ -449,7 +475,8 @@ pub fn project(op: &str, target: Option<&Target>) -> serde_json::Value {
         | "create_pull_request"
         | "trigger_build"
         | "rerun_build"
-        | "log_work" => serde_json::json!({
+        | "log_work"
+        | "create_page" => serde_json::json!({
             "op": op,
             "live": live,
         }),

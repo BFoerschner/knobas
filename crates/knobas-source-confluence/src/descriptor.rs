@@ -23,22 +23,30 @@ pub fn descriptor_template() -> SourceDescriptor {
         id: crate::ADAPTER_KIND.to_owned(),
         adapter_kind: crate::ADAPTER_KIND.to_owned(),
         name: "Confluence".to_owned(),
-        // Read-only in this ticket, so **no** capabilities: `Capability::Write`
-        // with no ops leaves the UI nothing to offer, and the battery rejects
-        // that pair in both directions. `Capability::Search` stays reserved
-        // for a server-side `Source::search` the SPI does not have -- knobas'
-        // launcher answers from the local index either way, and this adapter
-        // would be the first with a real server-side search to declare if the
-        // SPI ever grows one.
-        capabilities: Vec::new(),
+        // `Write` since #286, and it is the only capability. `Capability::Search`
+        // stays reserved for a server-side `Source::search` the SPI does not
+        // have -- knobas' launcher answers from the local index either way, and
+        // this adapter would be the first with a real server-side search to
+        // declare if the SPI ever grows one. `Webhooks` likewise: Confluence DC
+        // has them and knobas has no receiver.
+        capabilities: vec![knobas_source::Capability::Write],
         adapter_version: crate::ADAPTER_VERSION.to_owned(),
         // Bearer PAT (DC >= 7.9) or Basic user+password (spec §3).
         auth_methods: vec![AuthMethod::Pat, AuthMethod::UserPassword],
-        // `CreatePage`, `UpdatePage` and `Comment` are spec #272's Confluence
-        // set and are the *next* ticket's, each a §10.8-ratified growth of
-        // `WriteOp` (ADR-0006). Until they exist, this adapter refuses every
-        // op it is handed, which the battery checks.
-        write_ops: Vec::new(),
+        // Spec #272's Confluence set, ratified under ADR-0006 in one §10.8
+        // entry (#286). `comment` is the SPI's existing op re-used with the
+        // **page** as its container -- a reply on a page is the same act as a
+        // reply on a ticket, and inventing a `CommentOnPage` would have made
+        // the enum adapter-aware, which is what ADR-0006 rejects.
+        //
+        // The order is the order the action bar renders in, and it is
+        // deliberate: the two a reader reaches for from a page detail come
+        // first, and the one that makes a new page last.
+        write_ops: vec![
+            "comment".to_owned(),
+            "update_page".to_owned(),
+            "create_page".to_owned(),
+        ],
         entity_kinds: vec![KindInfo {
             id: crate::KIND_PAGE.to_owned(),
             label: "Page".to_owned(),
@@ -152,20 +160,23 @@ mod tests {
     use knobas_source::Capability;
 
     /// The sources view renders its action bar from `write_ops`, so what is
-    /// here is exactly what the user is offered -- and for this ticket that is
-    /// nothing. A write op declared here that `write` refuses is an action
-    /// that 404s; the battery holds both directions.
+    /// here is exactly what the user is offered. A write op declared here that
+    /// `write` refuses is an action that 404s, and an op `write` performs but
+    /// that is missing here is an action the UI never draws; the battery holds
+    /// both directions.
+    ///
+    /// The three names are checked **literally**, not through
+    /// `WriteOp::identifier`: this declaration is the wire contract the
+    /// frontend's `WriteOpPayload` and the queue's `PROJECTED_OPS` are keyed
+    /// on, and a test that computed them from the enum would agree with a
+    /// rename that broke every one of them (#286).
     #[test]
-    fn the_template_declares_one_kind_and_no_writes() {
+    fn the_template_declares_one_kind_and_the_three_page_writes() {
         let d = descriptor_template();
         assert_eq!(d.id, crate::ADAPTER_KIND);
         assert_eq!(d.adapter_kind, crate::ADAPTER_KIND);
-        assert!(d.capabilities.is_empty(), "{:?}", d.capabilities);
-        assert!(
-            !d.capabilities.contains(&Capability::Write),
-            "declaring Write with no ops leaves the UI nothing to offer"
-        );
-        assert!(d.write_ops.is_empty(), "{:?}", d.write_ops);
+        assert_eq!(d.capabilities, vec![Capability::Write]);
+        assert_eq!(d.write_ops, vec!["comment", "update_page", "create_page"]);
         assert_eq!(d.adapter_version, crate::ADAPTER_VERSION);
         assert_eq!(
             d.auth_methods,
@@ -313,7 +324,10 @@ mod tests {
         let json = serde_json::to_string(&descriptor_template()).unwrap();
         let back: SourceDescriptor = serde_json::from_str(&json).unwrap();
         assert_eq!(back.adapter_kind, crate::ADAPTER_KIND);
-        assert!(back.write_ops.is_empty());
+        // The action bar is drawn from this on the other side of the bridge, so
+        // an op lost on the hop is an action the user is never offered.
+        assert_eq!(back.write_ops, vec!["comment", "update_page", "create_page"]);
+        assert_eq!(back.capabilities, vec![knobas_source::Capability::Write]);
         assert!(back.entity_kinds[0].full_sync_exhaustive);
         // The declaration travels with it: a reader resolves it on the other
         // side of the bridge, so a hop that dropped it would turn every

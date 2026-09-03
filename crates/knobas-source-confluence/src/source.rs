@@ -8,6 +8,7 @@ use knobas_source::{
 use crate::api::ConfluenceApi;
 use crate::http::{self, ConfluenceHttp};
 use crate::sync::SyncRun;
+use crate::write;
 use crate::{ConfluenceConfig, descriptor_template};
 
 /// One configured Confluence Data Center instance.
@@ -20,6 +21,44 @@ pub struct ConfluenceSource {
     base_url: String,
     cfg: ConfluenceConfig,
     http: ConfluenceHttp,
+}
+
+impl ConfluenceSource {
+    /// The **content id** a write targets, out of an `EntityRef` in this
+    /// source's namespace.
+    ///
+    /// The key half of a Confluence entity is Confluence's own content id
+    /// (`confluence:98307`), which `map::to_sync_item` chose over the title so
+    /// that a renamed page stays the same entity. So the unwrapping is one
+    /// step and the check that matters is the namespace: a write aimed at
+    /// `confluence-eu:98307` must not be performed by *this* instance against
+    /// an id that means a different page on its own server.
+    ///
+    /// The id is not validated beyond being non-empty. Confluence's ids are
+    /// decimal today, and a client that refused anything else would be
+    /// guessing at a format the server owns; an id that is not one 404s and
+    /// arrives as a refusal carrying the server's own words (ADR-0004).
+    ///
+    /// # Errors
+    ///
+    /// [`SourceError::Protocol`] for an id that does not parse, one belonging
+    /// to another source, or one with an empty key.
+    fn content_id(&self, entity: &str) -> Result<String, SourceError> {
+        let parsed = knobas_core::entity::EntityRef::parse(entity)
+            .map_err(|error| SourceError::protocol(error.to_string()))?;
+        if parsed.namespace != self.id {
+            return Err(SourceError::protocol(format!(
+                "{entity:?} belongs to source {:?}, not to {:?}",
+                parsed.namespace, self.id
+            )));
+        }
+        if parsed.key.trim().is_empty() {
+            return Err(SourceError::protocol(format!(
+                "{entity:?} names no content id"
+            )));
+        }
+        Ok(parsed.key)
+    }
 }
 
 /// The base URL as `SyncItem::web_url` is built from it: trimmed of
@@ -120,27 +159,60 @@ impl Source for ConfluenceSource {
         .await
     }
 
-    /// Refuse every write, by name.
+    /// The three writes this adapter declares, and a refusal by name for
+    /// everything else.
     ///
     /// **The refusal arm is the contract, not a gap** (SPI doc, battery
     /// clause 5): an adapter must reject every op absent from its own
     /// `descriptor.write_ops` with `Protocol`, and it must say which op it
     /// refused so a mis-declared descriptor is diagnosable from the message.
-    /// This adapter declares none, so every op lands here.
     ///
     /// The match has **no wildcard arm**: `WriteOp` grows per milestone
-    /// (ADR-0006), and when spec #272's `CreatePage` and `UpdatePage` are
-    /// ratified this file stops compiling until they are given a decision here
-    /// -- which is exactly the reminder the next ticket wants. `log_work`
-    /// (#280) arrived that way and is refused here like the rest.
+    /// (ADR-0006), so the next growth stops this file compiling until it is
+    /// given a decision here. `create_page` and `update_page` (#286) arrived
+    /// exactly that way.
     ///
-    /// The answer type is [`WriteReceipt`] since #280, and this adapter never
-    /// builds one: a receipt is what a source says about a row it created, and
-    /// nothing here creates anything yet.
+    /// **A create answers a receipt and an update does not**, and the
+    /// asymmetry is [`WriteReceipt`]'s own rule rather than an oversight:
+    /// knobas addresses what it wrote by reading it back, and a page it just
+    /// created is not in the mirror until the next sync -- the id Confluence
+    /// answered with is the only handle that exists in between. An
+    /// `update_page` and a `comment` change something knobas can already name,
+    /// so they answer [`WriteReceipt::none`].
     async fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError> {
         match &op {
-            WriteOp::Comment { .. }
-            | WriteOp::Transition { .. }
+            WriteOp::CreatePage {
+                parent,
+                space,
+                title,
+                body,
+            } => {
+                let id =
+                    write::create_page(&self.http, space, &self.content_id(parent)?, title, body)
+                        .await?;
+                Ok(WriteReceipt::id(id))
+            }
+            WriteOp::UpdatePage {
+                entity,
+                base_version,
+                body,
+            } => {
+                write::update_page(&self.http, &self.content_id(entity)?, *base_version, body)
+                    .await?;
+                Ok(WriteReceipt::none())
+            }
+            WriteOp::Comment { entity, body } => {
+                // Dropped, and the value is in having asked for it: a
+                // Confluence that accepted the comment without naming it is a
+                // write reported as done with nothing to point at, which
+                // `write::comment` refuses rather than reports as success. The
+                // comment itself rides in its page's payload on the next sync
+                // (#284), so the mirror can name it and the receipt need not.
+                let created = write::comment(&self.http, &self.content_id(entity)?, body).await?;
+                let _ = created;
+                Ok(WriteReceipt::none())
+            }
+            WriteOp::Transition { .. }
             | WriteOp::CreateTicket { .. }
             | WriteOp::CreateBranch { .. }
             | WriteOp::CreatePullRequest { .. }
@@ -148,8 +220,7 @@ impl Source for ConfluenceSource {
             | WriteOp::TriggerBuild { .. }
             | WriteOp::RerunBuild { .. }
             | WriteOp::LogWork { .. } => Err(SourceError::protocol(format!(
-                "the Confluence adapter does not support {:?}: it is read-only until the page \
-                 write ops land",
+                "the Confluence adapter does not support {:?}",
                 op.identifier()
             ))),
         }
@@ -203,8 +274,8 @@ mod tests {
         assert_eq!(d.adapter_kind, crate::ADAPTER_KIND);
         assert_eq!(d.name, "Tidewater Confluence");
         assert_eq!(d.entity_kinds.len(), 1);
-        assert!(d.capabilities.is_empty());
-        assert!(d.write_ops.is_empty());
+        assert_eq!(d.capabilities, vec![knobas_source::Capability::Write]);
+        assert_eq!(d.write_ops, vec!["comment", "update_page", "create_page"]);
         // The claim the engine's tombstone sweep rests on travels with the
         // instance descriptor too, not only with the template.
         assert!(d.entity_kinds.iter().all(|k| k.full_sync_exhaustive));
@@ -272,25 +343,25 @@ mod tests {
         );
     }
 
-    /// Battery clause 5, from this adapter's side: **every** op is refused,
-    /// because this adapter declares none -- and the refusal **names the op**,
-    /// which is what makes a descriptor that drifted from its dispatch
-    /// diagnosable instead of merely broken.
+    /// Battery clause 5, from this adapter's side: every op this adapter does
+    /// **not** declare is refused, and the refusal **names the op**, which is
+    /// what makes a descriptor that drifted from its dispatch diagnosable
+    /// instead of merely broken.
     ///
     /// The adapter here points at a port nothing listens on, so a refusal that
     /// slipped through to the network would surface as `Unreachable` and fail
-    /// this loudly rather than pass quietly.
+    /// this loudly rather than pass quietly. The three declared ops are
+    /// therefore *not* in this list -- they would reach that dead port, which
+    /// is the whole assertion working. What holds them to their own contract is
+    /// [`the_descriptor_and_the_dispatch_declare_the_same_three_ops`] and the
+    /// live suite.
     #[tokio::test]
-    async fn every_write_op_is_refused_by_name_and_none_reaches_the_network() {
+    async fn every_undeclared_write_op_is_refused_by_name_and_none_reaches_the_network() {
         let mut i = instance(json!({}));
         i.base_url = dead_port_url();
         let source = built(i);
         let target = "confluence:98307".to_owned();
         for op in [
-            WriteOp::Comment {
-                entity: target.clone(),
-                body: "on it".to_owned(),
-            },
             WriteOp::Transition {
                 entity: target.clone(),
                 status: "Done".to_owned(),
@@ -340,14 +411,96 @@ mod tests {
         }
     }
 
-    /// The two halves of the descriptor that say "read-only" have to agree
-    /// with the dispatch above, and the battery enforces both directions --
-    /// but only against a live server. Pinned here too, because this is the
-    /// pair that has to change together the day the page write ops land.
-    #[test]
-    fn the_descriptor_and_the_dispatch_agree_that_this_adapter_is_read_only() {
-        let d = built(instance(json!({}))).descriptor();
-        assert!(d.write_ops.is_empty());
-        assert!(!d.capabilities.contains(&knobas_source::Capability::Write));
+    /// The descriptor and the dispatch have to name the same three ops, and
+    /// the battery enforces both directions -- but only against a live server.
+    /// Pinned here too, because this is the pair that has to change together
+    /// every time the set grows.
+    ///
+    /// The forward direction ("declared, and the dispatch has an arm") is
+    /// checked by *sending* each declared op at a dead port and requiring the
+    /// failure to be `Unreachable`: an op with no arm would be refused by
+    /// `Protocol` before any socket was opened, which is exactly the drift
+    /// this is looking for. The reverse direction is the assertion on the
+    /// list itself.
+    #[tokio::test]
+    async fn the_descriptor_and_the_dispatch_declare_the_same_three_ops() {
+        let mut i = instance(json!({}));
+        i.base_url = dead_port_url();
+        let source = built(i);
+        let d = source.descriptor();
+        assert_eq!(d.write_ops, vec!["comment", "update_page", "create_page"]);
+        assert!(d.capabilities.contains(&knobas_source::Capability::Write));
+
+        let target = "confluence:98307".to_owned();
+        for op in [
+            WriteOp::Comment {
+                entity: target.clone(),
+                body: "on it".to_owned(),
+            },
+            WriteOp::UpdatePage {
+                entity: target.clone(),
+                base_version: 3,
+                body: "<p>edited</p>".to_owned(),
+            },
+            WriteOp::CreatePage {
+                parent: target.clone(),
+                space: "ENG".to_owned(),
+                title: "Standup 2026-09-03".to_owned(),
+                body: "<p>nothing blocked</p>".to_owned(),
+            },
+        ] {
+            let name = op.identifier();
+            let attempted = source.write(op).await;
+            assert!(
+                matches!(&attempted, Err(SourceError::Unreachable(_))),
+                "{name} is declared, so it must reach the network rather than be refused: \
+                 {attempted:?}"
+            );
+        }
+    }
+
+    /// A write aimed at another instance's namespace is refused rather than
+    /// performed against an id that means a different page here (P10).
+    ///
+    /// Two Confluences are `confluence` and `confluence-eu`, and their content
+    /// ids collide freely -- `98307` is a page on both. The dead port is what
+    /// makes "refused" and "attempted" distinguishable.
+    #[tokio::test]
+    async fn a_write_aimed_at_another_instance_is_refused_before_the_network() {
+        let mut i = instance(json!({}));
+        i.base_url = dead_port_url();
+        let source = built(i);
+        for op in [
+            WriteOp::UpdatePage {
+                entity: "confluence-eu:98307".to_owned(),
+                base_version: 3,
+                body: "<p>edited</p>".to_owned(),
+            },
+            WriteOp::CreatePage {
+                parent: "confluence-eu:98400".to_owned(),
+                space: "ENG".to_owned(),
+                title: "t".to_owned(),
+                body: "<p>b</p>".to_owned(),
+            },
+            WriteOp::Comment {
+                entity: "confluence-eu:98307".to_owned(),
+                body: "on it".to_owned(),
+            },
+        ] {
+            let refused = source.write(op).await;
+            let Err(SourceError::Protocol { message, .. }) = &refused else {
+                panic!("a foreign namespace must be refused, got {refused:?}");
+            };
+            assert!(message.contains("confluence-eu"), "{message}");
+        }
+
+        // And an id with no key at all names nothing to write to.
+        let refused = source
+            .write(WriteOp::Comment {
+                entity: "confluence:".to_owned(),
+                body: "on it".to_owned(),
+            })
+            .await;
+        assert!(matches!(refused, Err(SourceError::Protocol { .. })), "{refused:?}");
     }
 }

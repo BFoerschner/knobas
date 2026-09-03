@@ -1,12 +1,12 @@
 //! The Confluence **Data Center** adapter: `/rest/api/…`, CQL search,
 //! `_links.next` pagination.
 //!
-//! Read-only (issue #284, M3.2 first half): pages arrive as items of kind
-//! [`KIND_PAGE`], carrying the storage-format body verbatim, their comments,
-//! their ancestors and their space. The write ops spec #272 lists for
-//! Confluence -- `CreatePage`, `UpdatePage`, `Comment` -- are the next
-//! ticket's, so [`Source::write`](knobas_source::Source::write) refuses
-//! everything, which is the SPI's rule and what the contract battery checks.
+//! Pages arrive as items of kind [`KIND_PAGE`], carrying the storage-format
+//! body verbatim, their comments, their ancestors and their space (issue
+//! #284). Since issue #286 the adapter also writes: `CreatePage`, `UpdatePage`
+//! and `Comment` on a page -- spec #272's Confluence set, ratified under
+//! ADR-0006 -- and refuses every other op by name, which is the SPI's rule and
+//! what the contract battery checks.
 //!
 //! # Which Confluence this speaks
 //!
@@ -37,6 +37,7 @@ mod source;
 mod storage;
 mod sync;
 mod time;
+mod write;
 
 pub use config::{ConfluenceConfig, Flavor};
 pub use descriptor::descriptor_template;

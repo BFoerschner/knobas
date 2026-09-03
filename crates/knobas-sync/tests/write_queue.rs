@@ -643,6 +643,17 @@ fn every_write_op_has_a_stated_projection() {
             seconds: 2_700,
             comment: "SEPA retry".to_owned(),
         },
+        WriteOp::CreatePage {
+            parent: "confluence:98400".to_owned(),
+            space: "ENG".to_owned(),
+            title: "Standup 2026-09-03".to_owned(),
+            body: "<p>nothing blocked</p>".to_owned(),
+        },
+        WriteOp::UpdatePage {
+            entity: "confluence:98307".to_owned(),
+            base_version: 3,
+            body: "<h2>Backoff policy</h2><p>base 30 s.</p>".to_owned(),
+        },
     ];
     for op in &probes {
         let identifier = match op {
@@ -654,7 +665,9 @@ fn every_write_op_has_a_stated_projection() {
             | WriteOp::Approve { .. }
             | WriteOp::TriggerBuild { .. }
             | WriteOp::RerunBuild { .. }
-            | WriteOp::LogWork { .. } => op.identifier(),
+            | WriteOp::LogWork { .. }
+            | WriteOp::CreatePage { .. }
+            | WriteOp::UpdatePage { .. } => op.identifier(),
         };
         assert!(
             store::PROJECTED_OPS.contains(&identifier),
