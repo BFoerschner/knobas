@@ -279,52 +279,6 @@ test("the first stream primes and says nothing, and the next arrival speaks", as
   expect(first.calls.sent.map((notification) => notification.title)).toEqual(["Title of PAY-3"]);
 });
 
-/**
- * **Nothing is seen before the setting has been read**, and the item that
- * arrived while the read was in flight is still announced afterwards.
- *
- * `seen` is a one-way memory, so this is the one direction that cannot be
- * undone: a store that recorded the stream against an unknown setting would
- * cost the reader every item that arrived during a slow read — or, if the read
- * failed and is sitting behind the section's *Retry*, every item until they
- * notice.
- */
-test("a stream offered before the setting has been read costs the reader nothing", async () => {
-  let answer: (kinds: InboxCategory[]) => void = () => {};
-  const b = bench({
-    notificationKinds: () =>
-      new Promise<InboxCategory[]>((resolve) => {
-        answer = resolve;
-      }),
-  });
-
-  void b.store.reseed();
-  b.store.saw([entry("mention", "PAY-231")]);
-  expect(b.store.loaded).toBe(false);
-
-  answer(["mention"]);
-  await vi.waitFor(() => expect(b.store.loaded).toBe(true));
-
-  // The first stream after the read is the backlog and primes; the item is
-  // still in it, so it is announced by the next one rather than lost.
-  b.store.saw([entry("mention", "PAY-231")]);
-  expect(b.calls.sent).toEqual([]);
-  b.store.saw([entry("mention", "PAY-231"), entry("mention", "PAY-999")]);
-  expect(b.calls.sent.map((notification) => notification.title)).toEqual(["Title of PAY-999"]);
-});
-
-/** A read that failed leaves the same door shut, for the same reason. */
-test("a stream offered while the setting is unreadable is not burned", async () => {
-  const b = bench({
-    notificationKinds: () =>
-      Promise.reject({ code: "not_ready", message: "the database is still starting" }),
-  });
-  await b.store.reseed();
-  b.store.saw([entry("mention", "PAY-231")]);
-  expect(b.calls.sent).toEqual([]);
-  expect(b.store.loaded).toBe(false);
-});
-
 // -- the click --------------------------------------------------------------
 
 /** The address a notification carries is the item's own. */

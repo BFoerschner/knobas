@@ -23,14 +23,19 @@
  * silence in this path is always attributable to the kind or to the focus, and
  * never to a permission the notifier failed to check.
  *
- * ## Why nothing is seen before the setting has been read
+ * ## Why {@link Notifications.saw} does *not* wait for the setting
  *
- * `seen` is a one-way memory, so an item recorded there is disqualified for
- * the rest of the session. Until the stored kinds have come back this store
- * does not know which kinds are on — and *unknown is not off* — so
- * {@link Notifications.saw} returns before touching anything. A read that is
- * slow, or one that failed and is waiting on the section's *Retry*, therefore
- * costs the reader nothing but the wait.
+ * It looks as though it should: `seen` is a one-way memory, so a stream
+ * offered while the stored kinds are still in flight — or while a failed read
+ * waits behind the section's *Retry* — marks items the reader can then never
+ * be told about. A `loaded` gate was written, and then taken out again,
+ * because it changes nothing anybody can observe: while the setting is
+ * unknown no kind is on, so those items are silent either way, and the only
+ * question is *which* stream gets spent as the backlog below. Gating simply
+ * moves that to the next one, and the next one contains the same items plus
+ * anything that has since arrived — so if it differs at all, it differs by
+ * swallowing more. Written down because the guard reads as an obvious
+ * omission; it is a decoration, and its mutant proved it by surviving.
  *
  * ## Why the first read is primed and not announced
  *
@@ -260,16 +265,6 @@ export function createNotifications(ports?: Partial<NotifyPorts>): Notifications
   }
 
   function saw(items: InboxEntry[]): void {
-    // **Nothing is seen until the setting has been read.** `seen` is a
-    // one-way memory, so an item recorded here is disqualified for the rest of
-    // the session -- and while `loaded` is false this store does not know
-    // which kinds are on. *Unknown is not off* is the rule {@link reseed}
-    // states, and burning the stream against an unknown setting would break it
-    // in the one direction that cannot be undone: a read that is slow, or one
-    // that failed and is waiting on *Retry*, would silently cost the reader
-    // every item that arrived in the meantime.
-    if (!state.loaded) return;
-
     const fresh: InboxEntry[] = [];
     for (const entry of items) {
       const key = entry.item.key;
