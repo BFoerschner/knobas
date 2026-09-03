@@ -2984,25 +2984,37 @@ async fn a_protocol_is_published_under_standup_protocols_and_reads_back() {
     // reason. The panel says so on screen; `a_page_the_mirror_has_not_seen_yet_
     // is_named_but_not_linked` pins the state offline.
     //
-    // So: ask for the run that does not depend on that index. A backfill walks
-    // the content API from no position at all, the reasoning `backfill` records
-    // for Jira's assignee one product over (#345).
-    backfill(&state, CONFLUENCE).await;
-
-    // The **mirror's own state**, asserted before anything derived from it, so
-    // a failure names the step that did not happen rather than the one that
-    // could not have.
-    let mirrored: Option<String> =
-        sqlx::query_scalar("select entity_id from sync.live_item where entity_id = $1")
-            .bind(&page_entity)
-            .fetch_optional(&state.pool)
-            .await
-            .expect("the mirror reads");
-    assert_eq!(
-        mirrored.as_deref(),
-        Some(page_entity.as_str()),
-        "the backfill did not bring the published page into the mirror, so nothing downstream          could have linked it"
-    );
+    // So: **backfill, and poll**. A backfill walks from no position at all --
+    // the reasoning `backfill` records for Jira's assignee one product over
+    // (#345) -- but it is not enough on its own here, and two live runs proved
+    // it: this adapter reads CQL for *both* its runs, and CQL answers from an
+    // index Confluence writes after the create has already returned an id. So
+    // the run that matters is not the next one but the first one after the
+    // index catches up, and this polls to `INDEX_BUDGET` the way
+    // `a_comment_that_mentions_me_becomes_an_inbox_mention` polls against the
+    // same index -- never a sleep somebody guessed at.
+    let deadline = std::time::Instant::now() + INDEX_BUDGET;
+    loop {
+        backfill(&state, CONFLUENCE).await;
+        // The **mirror's own state**, asked directly and before anything
+        // derived from it, so a failure names the step that did not happen
+        // rather than the one that could not have.
+        let mirrored: Option<String> =
+            sqlx::query_scalar("select entity_id from sync.live_item where entity_id = $1")
+                .bind(&page_entity)
+                .fetch_optional(&state.pool)
+                .await
+                .expect("the mirror reads");
+        if mirrored.is_some() {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the published page {page_entity} never reached the mirror in {INDEX_BUDGET:?} of \
+             backfilling -- Confluence's CQL index never listed the page its own create had \
+             already answered for, so nothing downstream could have linked it"
+        );
+    }
 
     // Now the ordinary read -- the one the standup view makes on open -- draws
     // the link, from the id the settle wrote onto the queue row.
