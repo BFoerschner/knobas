@@ -1451,6 +1451,56 @@ and a form assertion cannot say that a build which *should* be on a page is miss
 
 ---
 
+### Amendments from the Jira cursor-identity fix (2026-09-04, binding) — issue #345
+
+Approved by the orchestrator on #345 after the measurement below; the fix is in
+`crates/knobas-source-jira/**`, which §10.8 does not freeze, so **no §10.8 entry is owed**. The
+§4.2 Jira `cursor` row is *superseded*, not wrong, so under #112's convention above the old text
+stands and this entry carries the new truth.
+
+**§4.2 Jira `cursor` reads, from this commit:**
+`{"v":2,"updated_to":"2026-08-24T09:14:00Z","tz_offset_secs":7200,"seen":[{"k":"PAY-231","u":"…","h":"3f0c1a92be44d7e5"}]}`.
+The JQL is **unchanged** — `updated >= "<watermark − 2 min>" ORDER BY updated ASC`, the two-minute
+overlap still mandatory for the reason the row gives. What changed is the identity inside `seen`:
+an entry is recognised by `(key, h)` where `h` is a 64-bit digest of the raw `/search` record, and
+`u` is kept only to bound the set to the overlap window.
+
+**What the old identity got wrong, measured on Jira DC 10.3.24 (2026-09-04).**
+`GET /rest/api/2/issue/{key}` reports `updated` to the millisecond; `GET /rest/api/2/search` —
+the only one a sync run reads — reports the same instant truncated to the second
+(`22:54:59.036` and `22:54:59.124` both arrive as `22:54:59`). So `(key, updated)` could not tell
+two changes inside one second apart, and a run between them recognised the second as already
+delivered and dropped it before the sink. **Permanently**: `updated` does not move again on its
+own, so no later incremental run reached it and only a backfill recovered it. The everyday
+sequence that hits it is not rare — `knobas_app::sources::write_queue`'s `refresh` fires a sync
+after every landed write, so *comment through knobas, then reassign in Jira* is exactly it, and
+`author` is what the standup digest's mirror half, the inbox's author matching (#82) and every
+`@me` filter key on.
+
+**The Confluence row already said this.** Its `cursor` row sets identity to
+`(content id, version.number)` and not `(id, timestamp)` "because Confluence's version counter
+closes the *edited twice in one second* hole the Jira cursor documents". Jira has no version
+counter; the digest is the same guarantee computed from data already in hand, with no extra
+request and no change to the query.
+
+**No migration, and none needed.** `JiraCursor::parse` already reads an unrecognised version as
+"no cursor", which is a full sync — so every stored version-1 cursor stops parsing on the first
+run of this build, each affected source re-reads once, and comes back with a version-2 cursor.
+That full sync is also the right recovery on its own terms: a mirror that ran on version 1 may
+hold rows whose last change this bug dropped, and nothing cheaper finds them.
+
+**mockd is untouched** (ADR-0013 freezes it): the fix adds no JQL clause and no request, so its
+grammar never comes into it and its Jira suite is green unchanged.
+
+**The direction that is unwitnessed offline, and where it is witnessed.** The digest is over the
+whole `/search` record, so a field that differed between two reads of an *unchanged* issue would
+make every poll re-emit the overlap window — correctness surviving, battery clause 2 not. No fake
+can find that, because a fake answers what it was seeded with. `live_jira_seeded.rs`'s
+`an_untouched_source_is_still_quiet_after_many_polls` is the witness, and it fails on the first
+poll that emits.
+
+---
+
 ## 10. As built — the contract PR (2026-08-24)
 
 *The task brief called this section §9. §9 was taken by the plan-authoring amendments before this ran, so the as-built record is §10; "§9 of the interfaces doc" in `plan-02-contract` means this section.*
