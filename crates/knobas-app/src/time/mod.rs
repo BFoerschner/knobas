@@ -57,6 +57,15 @@ use crate::IpcError;
 /// a child module and not a sibling.
 pub mod day;
 
+/// The week timesheet and *Log all* (#283).
+///
+/// A fourth file for the reason there is a third: [`day`] is one day's blocks
+/// and their edits, and this is the same time added up across seven of them,
+/// plus the one bulk write in the module. It reads [`worklog`]'s rules rather
+/// than restating them, which is what keeps *Log all* and the draft from
+/// disagreeing about what is loggable.
+pub mod week;
+
 /// Passive attribution: the heartbeat's observations, and the blocks they
 /// support (#282).
 ///

@@ -527,7 +527,7 @@ pub(super) async fn materialize(
 /// broken row. Sharing one decoder would mean either an internal error on
 /// every empty room or a silent fallback that made a broken timer row look
 /// like an empty one. Two rules, two decoders, and the reason written down.
-fn observation_of(row: &sqlx::postgres::PgRow) -> Result<Observation, IpcError> {
+pub(super) fn observation_of(row: &sqlx::postgres::PgRow) -> Result<Observation, IpcError> {
     let entity_id: Option<String> = row.try_get("entity_id")?;
     let label: Option<String> = row.try_get("label")?;
     let foreground = match (entity_id, label) {
