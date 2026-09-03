@@ -780,6 +780,7 @@ mod tests {
             window("2026-08-31"), // the digest's own day
             window("2026-09-01"), // after it
             window("2026-08-17"), // a fortnight back -- one window, still out
+            window("2026-08-23"), // eight days back -- one day too far
             window("2026-08-24"), // exactly seven days back -- in
             window("2026-08-30"), // the day before -- in, and first
         ];
