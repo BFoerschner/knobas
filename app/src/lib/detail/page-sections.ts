@@ -181,26 +181,25 @@ export function toStorage(text: string): string {
   return text
     .replace(/\r\n/g, "\n")
     .split("\n\n")
-    .map((paragraph) =>
-      paragraph
-        .split("\n")
-        .map((line) => line.replace(/\s+$/, ""))
-        .filter((line, at, lines) => trimmedRange(lines).includes(at)),
-    )
+    .map((paragraph) => withoutBlankEnds(paragraph.split("\n").map((line) => line.trimEnd())))
     .filter((lines) => lines.length > 0)
     .map((lines) => `<p>${lines.map(escape).join("<br/>")}</p>`)
     .join("");
 }
 
-/** The indices of `lines` with the leading and trailing blank runs removed. */
-function trimmedRange(lines: string[]): number[] {
+/**
+ * `lines` with its leading and trailing blank runs removed.
+ *
+ * A run of three newlines is one paragraph break, not one break and an empty
+ * paragraph, and a body that begins or ends with them begins and ends with
+ * words.
+ */
+function withoutBlankEnds(lines: string[]): string[] {
   let first = 0;
-  let last = lines.length - 1;
-  while (first <= last && lines[first]!.trim() === "") first += 1;
-  while (last >= first && lines[last]!.trim() === "") last -= 1;
-  const kept: number[] = [];
-  for (let at = first; at <= last; at += 1) kept.push(at);
-  return kept;
+  let last = lines.length;
+  while (first < last && lines[first]!.trim() === "") first += 1;
+  while (last > first && lines[last - 1]!.trim() === "") last -= 1;
+  return lines.slice(first, last);
 }
 
 /** The three characters that are markup in character data. */

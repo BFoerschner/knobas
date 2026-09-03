@@ -18,7 +18,12 @@ import { flushSync, mount, unmount } from "svelte";
 import { expect, test } from "vitest";
 
 import StorageBody from "./StorageBody.svelte";
-import { pageCommentsOf, parseStorageFormat, storageBodyOf } from "./storage-format";
+import {
+  pageCommentsOf,
+  pageVersionOf,
+  parseStorageFormat,
+  storageBodyOf,
+} from "./storage-format";
 
 /** Mount a storage-format body and hand back its live DOM. */
 function render(storage: string) {
@@ -444,7 +449,143 @@ test("a payload with nothing readable at either path misses rather than guessing
     pageCommentsOf("confluence", {
       children: { comment: { results: [{ body: { storage: { value: "<p>x</p>" } } }] } },
     }),
-  ).toEqual([{ id: "comment-0", storage: "<p>x</p>" }]);
+  ).toEqual([{ id: "comment-0", storage: "<p>x</p>", author: null, when: null }]);
+});
+
+/**
+ * **Who wrote a comment and when** (#286).
+ *
+ * `api.rs`'s `EXPAND` asked for a comment's body and nothing else until this
+ * ticket, so the payload carried no author and no timestamp and this section
+ * could render the words alone. The two expansions it now asks for are the
+ * ones the completion path already used, and this is the read of them.
+ *
+ * The author rule is the adapter's own for a *page*: the person who made this
+ * version, and the creator for a comment nobody has edited since. Two answers
+ * to one question would be worse than one that sometimes misses.
+ */
+test("a comment carries who wrote it and when, and misses to null", () => {
+  const payload = {
+    children: {
+      comment: {
+        results: [
+          {
+            id: "98320",
+            body: { storage: { value: "<p>@Mara can you add the SLA?</p>" } },
+            version: { number: 2, when: "2026-08-22T12:41:00.000Z", by: { username: "knobas" } },
+            history: { createdBy: { username: "mara.lindqvist" } },
+          },
+          {
+            id: "98321",
+            body: { storage: { value: "<p>on it</p>" } },
+            version: { number: 1, when: "2026-08-22T13:00:00.000Z" },
+            history: { createdBy: { username: "mara.lindqvist" } },
+          },
+          {
+            id: "98322",
+            body: { storage: { value: "<p>no expansions</p>" } },
+          },
+        ],
+      },
+    },
+  };
+  expect(pageCommentsOf("confluence", payload).map((c) => [c.author, c.when])).toEqual([
+    ["knobas", "2026-08-22T12:41:00.000Z"],
+    // Nobody named on the version: its creator, which is #284's fallback.
+    ["mara.lindqvist", "2026-08-22T13:00:00.000Z"],
+    // A server that would not expand this deeply: no author, no instant, and
+    // the comment still renders. Absence, never a guess.
+    [null, null],
+  ]);
+
+  // A blank author is the same absence as a missing one -- it would otherwise
+  // render as an empty byline beside somebody's words.
+  expect(
+    pageCommentsOf("confluence", {
+      children: {
+        comment: {
+          results: [
+            {
+              id: "1",
+              body: { storage: { value: "<p>x</p>" } },
+              version: { when: "  ", by: { username: "   " } },
+            },
+          ],
+        },
+      },
+    })[0],
+  ).toEqual({ id: "1", storage: "<p>x</p>", author: null, when: null });
+});
+
+/**
+ * **The version a section edit is made against** (#286).
+ *
+ * `pageVersionOf` is what fills `WriteOp::UpdatePage`'s `base_version`, and the
+ * failure direction is stated rather than hoped: a record that does not say
+ * what version it is yields `null`, and the surface offers **no edit** rather
+ * than one sent against a guess. A string `"3"` is a miss for the same reason
+ * -- it would reach the adapter and become `"3" + 1` on the wire.
+ */
+test("the page version is read as a positive integer or not at all", () => {
+  expect(pageVersionOf("confluence", { version: { number: 3 } })).toBe(3);
+  for (const version of [{ number: "3" }, { number: 0 }, { number: -1 }, { number: 1.5 }, {}]) {
+    expect(pageVersionOf("confluence", { version }), JSON.stringify(version)).toBeNull();
+  }
+  expect(pageVersionOf("confluence", {})).toBeNull();
+  // Gated on the adapter, like every other read here: `version.number` is a
+  // path some other source could carry meaning something else entirely.
+  expect(pageVersionOf("jira", { version: { number: 3 } })).toBeNull();
+});
+
+/**
+ * Two macro shapes #285 left unwitnessed, closed here (#286).
+ *
+ * A macro whose `ac:name` carries an entity is the author's word with an `&`
+ * in it, and the placeholder must say the word rather than the escape. It is
+ * safe to decode: a label leaves this module as a `text` node, so a decoded
+ * `<` has no path to becoming an element -- which the second half asserts on
+ * the DOM rather than on the string.
+ *
+ * An `ac:name` of nothing but whitespace is the same absence as a missing one,
+ * and falls back to the element's own local name.
+ */
+test("a macro label decodes its name, and whitespace is no name at all", () => {
+  const screen = render(
+    '<ac:structured-macro ac:name="drawio &amp; friends"/>' +
+      '<ac:structured-macro ac:name="   "/>' +
+      '<ac:structured-macro ac:name="&lt;script&gt;alert(1)&lt;/script&gt;"/>',
+  );
+  const labels = [...screen.target.querySelectorAll(".ac")].map((n) => n.textContent?.trim());
+  expect(labels).toEqual([
+    "drawio & friends macro",
+    // No name: the element's own local name, so it reads as what it is.
+    "structured macro",
+    "<script>alert(1)</script> macro",
+  ]);
+  // The decoded label is text and stays text: no element came out of it.
+  expect(screen.target.querySelector("script"), "a macro label became markup").toBeNull();
+  screen.done();
+});
+
+/**
+ * `ri:` elements **outside** any `ac:` parent — the other shape #285 left
+ * unwitnessed.
+ *
+ * Inside a macro they are skipped with its subtree, which is asserted above.
+ * Outside one the storage format is malformed, and the rule that applies is
+ * the one every unknown element gets: **unwrapped**. The wrapper goes, every
+ * word survives, and no attribute of it reaches the DOM — `ri:userkey` and
+ * `ri:value` are exactly the attributes a naive renderer would have carried.
+ */
+test("an ri: element outside a macro is unwrapped, words and all", () => {
+  const screen = render(
+    '<p>see <ri:url ri:value="https://x.example">the runbook</ri:url> and ' +
+      '<ri:user ri:userkey="ff8080"/>.</p>',
+  );
+  expect(screen.text()).toBe("see the runbook and .");
+  expect(screen.target.querySelector("[ri\\:value]"), "an ri: attribute reached the DOM").toBeNull();
+  expect(screen.target.innerHTML).not.toContain("ri:");
+  screen.done();
 });
 
 /**
