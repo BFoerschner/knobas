@@ -2945,6 +2945,7 @@ dependencies = [
  "knobas-http",
  "knobas-mockd",
  "knobas-source",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",

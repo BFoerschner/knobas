@@ -162,6 +162,78 @@
 //!     it is one instance. It also has no `GET /rest/api/2/field`, so nothing
 //!     here can be discovered; a test names [`jira::EPIC_LINK_FIELD`].
 //!
+//!     **Measured against the real product** (issue #276, Jira 10.3.24 seeded
+//!     from `testenv/seed-atlassian-content.sh`, 2026-09-03): the seeded `PAY`
+//!     and `OPS` are *classic* Data Center projects, and they serve exactly the
+//!     custom field. `fields.parent` is **absent from every issue in the
+//!     corpus**, the epic's five children included — it is the sub-task
+//!     relation there, not the epic one — and the Epic Link id is
+//!     `customfield_10101`, which is the reason `seed-state.json` now records
+//!     `jira.epic_link_field` rather than any suite hard-coding one. Serving
+//!     both spellings is therefore a convenience no single instance offers, and
+//!     it hid a real consequence: against a classic Data Center project a Jira
+//!     source configured without `epic_link_field` mirrors **no** epic
+//!     membership at all. `knobas-source-jira/tests/live_jira_seeded.rs`'s
+//!     `epic_membership_lives_in_the_epic_link_field_and_parent_is_absent` is
+//!     the standing witness.
+//! 14. **Every rejection is a Seraph 401.** A real Jira DC rejects in three
+//!     different ways, and only one of them is what
+//!     `validate::seraph_401` reproduces (issue #276, measured on Jira
+//!     10.3.24, 2026-09-03):
+//!
+//!     * A wrong **password** is a failed login: `401` plus
+//!       `X-Seraph-LoginReason: AUTHENTICATED_FAILED`, on every endpoint —
+//!       and an **HTML login page** for a body, not the `errorMessages`
+//!       envelope, which is exactly the body `knobas-source-jira`'s
+//!       `error_envelope` reads nothing out of.
+//!     * A **bearer token the instance cannot resolve** never reaches Seraph.
+//!       The request proceeds **anonymously**: `401` with *no* Seraph header on
+//!       `/serverInfo`, `/myself` and `/issue/{key}/…`, and — the one that
+//!       matters — **`200` with `total: 0`** on `/rest/api/2/search`, which
+//!       needs no permission to ask. `docs/contract.md`'s promise of the header
+//!       on "an invalid/absent Bearer" was written from the documentation and
+//!       is wrong for this product.
+//!     * No credential at all behaves as the unresolvable bearer token does.
+//!
+//!     mockd's single shape is still the right one *for mockd* — deviation 4
+//!     exists so that a missing credential is loud — but it cannot certify the
+//!     hazard, which is that a revoked PAT makes a full sync look like a Jira
+//!     with no issues in it. The `ticket` kind claims
+//!     `full_sync_exhaustive: true`, so reporting that as a completed sync
+//!     would tombstone the whole mirror. What prevents it is the order of calls
+//!     in the sync run: `/serverInfo` is asked first, for the UTC offset, and
+//!     that one is a 401.
+//!     `knobas-source-jira/tests/live_jira_seeded.rs`'s
+//!     `the_search_that_reads_as_an_empty_corpus_is_never_the_first_call` and
+//!     `knobas-app/tests/atlassian_live.rs`'s
+//!     `a_revoked_pat_reaches_the_credential_health_surface_and_the_mirror_survives`
+//!     are the two standing witnesses.
+//! 15. **mockd cannot lock an account out, and a real Jira can.** Jira DC
+//!     counts failed *password* logins per account and, past this container's
+//!     default, answers `403 Basic Authentication Failure - Reason :
+//!     AUTHENTICATION_DENIED` — to the **correct** password as well, until an
+//!     administrator clears the elevated security check. A live suite that
+//!     draws its 401s from a wrong password therefore locks the seed's admin
+//!     account out part-way through its own run and fails everything after it
+//!     on a cause none of those failures name; measured exactly that way on
+//!     2026-09-03. Both Atlassian live suites take their refusals from a
+//!     **bearer token** instead, which is not a login attempt, and the one
+//!     wrong-password probe that remains runs under a username the instance
+//!     does not have. Nothing here needs changing — this is a note for whoever
+//!     writes the next live suite against a real Atlassian product.
+//! 16. **mockd's fixture workflow does not offer a status the ticket is
+//!     already in; the seeded real one does.** The *Basic software
+//!     development* template's "Software Simplified Workflow" reaches all four
+//!     of its statuses from every one of them (transition ids 11/21/31/41), so
+//!     against the real server a transition to the current status is accepted
+//!     rather than refused. A test that wants to witness a **refused**
+//!     transition there must therefore name a status the workflow does not
+//!     have at all, which is what `knobas-app/tests/atlassian_live.rs` does
+//!     (and it checks `seed-state.json`'s `jira.statuses` rather than assuming
+//!     which). mockd's narrower workflow is still the more useful fake —
+//!     it exercises the refusal path with a status a person might plausibly
+//!     pick — but it is not what a default Jira project does.
+//!
 //! ## The shared credentials
 //!
 //! Adapter tests send [`JIRA_TOKEN`] and [`TEAMCITY_TOKEN`]. mockd accepts any

@@ -76,7 +76,8 @@
 # fixture's `spent_week_m` (a worklog sum the fixture's worklogs do not add up
 # to), `assigned_by` (Jira has no such field), and a Confluence page's
 # `edited` date and author. Ids the server assigns (page ids, comment ids,
-# worklog ids) go to seed-state.json so a live suite can look them up.
+# worklog ids, and this instance's Epic Link custom field id) go to
+# seed-state.json so a live suite can look them up.
 #
 # ENDPOINT PROVENANCE. Jira: every path is in the vendored
 # testenv/specs/jira-dc-rest.wadl (`project`, `user`, `field`,
@@ -468,11 +469,13 @@ done
 # shellcheck disable=SC2016
 record '.jira += {
   template_key: $v.template, statuses: $v.statuses, author: $v.author,
-  projects: $v.projects, issues: $v.issues, unreachable_statuses: $v.unreachable,
-  _comment: "Seeded by testenv/seed-atlassian-content.sh. Jira assigns issue ids, comment ids and worklog ids; the keys are the fixture'"'"'s. Comments and worklogs are authored by `author`. `unreachable_statuses` lists fixture statuses the template'"'"'s workflow does not have."
+  epic_link_field: $v.epic_link, projects: $v.projects, issues: $v.issues,
+  unreachable_statuses: $v.unreachable,
+  _comment: "Seeded by testenv/seed-atlassian-content.sh. Jira assigns issue ids, comment ids, worklog ids and custom field ids; the keys are the fixture'"'"'s. Comments and worklogs are authored by `author`. `epic_link_field` is this instance'"'"'s Epic Link id, which is what a classic Data Center project keeps epic membership in (`fields.parent` is for sub-tasks and is absent here). `unreachable_statuses` lists fixture statuses the template'"'"'s workflow does not have."
 }' "$(jq -n --arg t "$TEMPLATE_KEY" --arg a "$ADMIN_USER" --argjson ids "$JIRA_IDS" \
         --argjson un "${UNREACHABLE:-[]}" --argjson pr "$PROJECTS_JSON" --argjson st "$STATUSES" \
-        '{template: $t, author: $a, statuses: $st, projects: $pr, issues: $ids, unreachable: $un}')"
+        --arg el "$EPIC_LINK_FIELD" \
+        '{template: $t, author: $a, statuses: $st, epic_link: $el, projects: $pr, issues: $ids, unreachable: $un}')"
 
 # ==========================================================================
 # Confluence

@@ -419,8 +419,21 @@ wizards) → `seed-atlassian-content.sh` → `seed-atlassian-content.sh --verify
 `down -v` of the four Atlassian services, from a trap, so the teardown runs
 when a step fails and on Ctrl-C. The recipe's header carries the measured wall
 clock of a full run and where a new live suite's line goes. Measured
-2026-09-03, a full run from empty volumes is 4 min 3 s, three minutes of it
-the two wizard walks; the three-hour window holds with hours of margin.
+2026-09-03, a full run from empty volumes is about four and a quarter minutes
+— three of them the two wizard walks, seconds of them the two live suites; the
+three-hour window holds with hours of margin.
+
+**The two suites gated on `KNOBAS_JIRA_URL`** (issue #276) are
+`crates/knobas-source-jira/tests/live_jira_seeded.rs` — the adapter: sync,
+payload, cursor, the real 401 — and `crates/knobas-app/tests/atlassian_live.rs`
+— the engine and the write queue: credential health end to end, and the three
+write ops read back out of Jira. Both write, and both take back what they
+wrote from a `Drop`; everything they create carries the label
+`knobas-live-suite`, and whichever runs next deletes whatever a *killed* run
+left wearing it. After a green run the server holds exactly the seeded corpus.
+The one thing neither can undo is the `PAY` key counter: the create leaves the
+project one key further on, so nothing may assume the fixture's keys are the
+highest ones.
 
 **It refuses while TeamCity is up.** Docker Desktop's VM here has 8 GB; Jira
 wants ~4 GB, Confluence ~2 GB, plus a PostgreSQL each, and the seeded TeamCity
@@ -449,6 +462,40 @@ suites' transition tests use. The template's issue type scheme has no
 *Story*, so the seed adds the global Story type to each project's scheme
 over `PUT /rest/api/2/issuetypescheme/<id>`.
 
+**Epic membership is in the Epic Link custom field, and only there.** `PAY`
+and `OPS` are *classic* Data Center projects, so `fields.parent` — the
+spelling a next-gen or a recent company-managed project uses — is **absent
+from every issue**, the epic's children included. The relationship lives in
+the "Epic Link" custom field, whose id is this instance's own
+(`customfield_10101` on a fresh seed), and the seed records it as
+`jira.epic_link_field`. A Jira source configured without the adapter's
+`epic_link_field` option therefore mirrors no epic membership at all from this
+server. `knobas-mockd` serves both spellings, which is what hid that until
+#276.
+
+**Never send this Jira a wrong password.** Jira DC counts failed password
+logins per account and, past the container's default of a few, answers `403
+Basic Authentication Failure - Reason : AUTHENTICATION_DENIED` — to the
+**correct** password as well, until an administrator clears the elevated
+security check. A suite that draws its 401s from a wrong password locks
+`knobas` out part-way through its own run and fails everything after it on a
+cause none of those failures name. Take refusals from a **bearer token**
+instead, which never reaches Seraph and counts against nothing; if it has
+already happened, the quickest way out inside a window is
+`docker exec knobas-jira-db psql -U jira -d jira -c "update
+cwd_user_attributes set attribute_value='0' where attribute_name =
+'login.currentFailedCount'"`, and the proper one is `down -v` and seed again.
+
+**An unresolvable bearer token searches anonymously.** It is *not* a failed
+login: `/rest/api/2/serverInfo`, `/myself` and `/issue/{key}/…` answer `401`
+with no `X-Seraph-LoginReason` at all, and `/rest/api/2/search` answers **`200`
+with `total: 0`**, because asking needs no permission. Only a wrong *password*
+carries `X-Seraph-LoginReason: AUTHENTICATED_FAILED`, with Jira's HTML login
+page for a body rather than the `errorMessages` envelope. `docs/contract.md`'s
+promise of that header on "an invalid/absent Bearer" was written from the
+documentation and is wrong for the product; `knobas-mockd`'s deviations 14–16
+record all of it.
+
 **The keys are the fixture's because the keys in front of them are burned.**
 Jira allocates keys from a per-project counter no REST call sets, so the seed
 bulk-creates placeholders (summary `(reserved)`, label `knobas-placeholder`)
@@ -471,7 +518,8 @@ but nothing is written as them.
 (the server stamps now; worklogs carry the fixture's date at 09:00 UTC), the
 fixture's `spent_week_m`, a page's `edited` date and author. The ids the
 server assigns — issue ids, comment ids, worklog ids, page and page-comment
-ids, the space home page — go to `seed-state.json` under `jira.issues` and
+ids, the space home page, and the Epic Link custom field's id — go to
+`seed-state.json` under `jira.issues`, `jira.epic_link_field` and
 `confluence.pages`, keyed by fixture key and fixture page id, so a live
 assertion looks a literal id up there and asserts everything else by key,
 title and text. Should a fixture status ever be missing from the workflow,

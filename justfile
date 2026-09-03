@@ -463,22 +463,33 @@ teamcity-live-seeded:
 # Confluence, end to end"); the pair is disposable by design, which is why
 # this recipe ends in `down -v` rather than leaving a seeded environment the
 # way `gitea-live` does. MEASURED 2026-09-03 on this machine (12 cores, the
-# 8 GB Docker VM), from empty volumes, images already pulled, no live suite
-# yet: 4 min 3 s wall clock -- seeded and verified at 3 min 51 s, of which
-# the two wizard walks and Jira's final start are about three minutes and
-# the content seed about a minute (310 key placeholders in and out again);
-# `down -v` 11 s; 4 min 15 s on a second run with a full `just check` going
-# alongside. A live suite is minutes, not hours, so the three-hour window
-# holds with more than two and a half hours of margin; the number to
-# re-measure is the one in this header, when a suite is added below.
+# 8 GB Docker VM), from empty volumes, images already pulled: the pair
+# seeded and verified in about four minutes -- of which the two wizard walks
+# and Jira's final start are about three and the content seed about one (310
+# key placeholders in and out again) -- the two live suites about ten
+# seconds between them once compiled, and `down -v` about ten. The suites
+# are seconds, not hours, so the three-hour window holds with well over two
+# and a half hours of margin; the number to re-measure is the one in this
+# header, when a suite is added below.
 #
 # WHERE THE LIVE SUITES GO. One line per suite in the block marked below, each
 # a `cargo test -p <crate> --test <live suite> -- --ignored --nocapture
 # --test-threads=1`, gated on KNOBAS_JIRA_URL / KNOBAS_CONFLUENCE_URL from
-# `./seed --env`. None exists yet: #276 adds the Jira adapter's, M3.2 the
-# Confluence adapter's, and the app crate's end-to-end tests follow. Serial
-# and unparallelised for the reason `gitea-live` gives: one server, and tests
-# that write to it.
+# `./seed --env`. Two exist (#276): the Jira adapter's
+# `live_jira_seeded` -- sync, payload, cursor, the real 401 -- and the app
+# crate's `atlassian_live`, which is the engine-and-queue half: credential
+# health end to end, and the three write ops read back out of Jira. M3.2 adds
+# the Confluence adapter's beside them. Serial and unparallelised for the
+# reason `gitea-live` gives: one server, and tests that write to it.
+#
+# THE SUITES SHARE ONE SEEDED SERVER, AND EACH TAKES BACK WHAT IT WROTE. Both
+# mark everything they create with the label `knobas-live-suite` and remove it
+# from a `Drop`; whichever runs next clears whatever a *killed* run left
+# wearing it. Order does not matter, and neither does a re-run: after a green
+# run the server holds exactly the seeded corpus. What neither can undo is
+# the `PAY` key counter -- the create leaves the project one key further on --
+# which is why nothing downstream may assume the fixture's keys are the
+# highest ones.
 #
 # THE 8 GB VM. Jira asks for ~4 GB, Confluence ~2 GB, plus a PostgreSQL each,
 # and Docker Desktop's VM here has 8 GB: the pair cannot share it with the
@@ -534,6 +545,6 @@ atlassian-live:
     echo "atlassian-live: seeded and verified after $(( $(date +%s) - t0 ))s; KNOBAS_JIRA_URL=$KNOBAS_JIRA_URL KNOBAS_CONFLUENCE_URL=$KNOBAS_CONFLUENCE_URL"
     cd ..
     # ---- live suites gated on the Atlassian URLs: one line each, added here ----
-    # (none yet -- see the header: #276 brings the Jira adapter's)
-    # env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-jira --test live_jira -- --ignored --nocapture --test-threads=1
-    echo "atlassian-live: every Atlassian-gated live suite green (0 suites yet)"
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-jira --test live_jira_seeded -- --ignored --nocapture --test-threads=1
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test atlassian_live -- --ignored --nocapture --test-threads=1
+    echo "atlassian-live: every Atlassian-gated live suite green (2 suites)"
