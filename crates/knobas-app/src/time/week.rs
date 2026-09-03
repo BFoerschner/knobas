@@ -25,12 +25,25 @@
 //! spec story 39: the number is about what the reader did, not about sync
 //! timing. Anything else -- `held`, `refused`, `discarded`, or a copy with no
 //! queue row at all -- is **held**: one word for "this time has not reached
-//! the ticket and it is waiting on a person", which is the only thing the
-//! reader can act on and is acted on in the pending-writes panel either way.
-//! Held is reported separately rather than folded into unlogged, because the
-//! blocks under it are already spoken for and *Log all* will not offer them
-//! again; showing it as unlogged would be an invitation to log an afternoon
-//! twice.
+//! the ticket", and the column is separate from unlogged rather than folded
+//! into it because the blocks under it already carry a worklog id and *Log
+//! all* will not offer them again. Drawing them as unlogged would be an
+//! invitation to log an afternoon twice; drawing them as logged would be
+//! false.
+//!
+//! **`discarded` is the one of the four that has no way out, and that is a
+//! gap rather than a decision here.** `held` and `refused` are open states:
+//! `write_queue::open` selects `state in ('pending','held','refused')`, so
+//! they are in the pending-writes panel and a person can retry or withdraw
+//! one. A discarded write is not -- that module's own words are "a sent or
+//! discarded write is history" -- and `write_queue::discard` touches only the
+//! queue row: the worklog copy stays and the block keeps its `worklog_id`.
+//! So the time reads as held for good, `unlogged` stays zero, and neither
+//! *Log all* nor the draft will offer the blocks again. Held is still the
+//! honest cell of the four available -- the time really has not reached the
+//! ticket and the blocks really are spoken for -- but the way out belongs to
+//! the discard path (clearing the copy and the mark), which is
+//! `knobas_core::write_queue`'s to build and not this read's to paper over.
 //!
 //! **Unlogged** is the difference, floored at zero. The floor is not
 //! defensive tidiness: the draft's interval and seconds are the reader's own
@@ -380,6 +393,11 @@ pub async fn read(pool: &PgPool, days: &[DayWindow]) -> Result<Week, IpcError> {
         .await?
     {
         let stretch = stretch_of(&row)?;
+        // The **coverage** rule, which is one of the two this file keeps: a
+        // block covers every day it *overlaps*, and `uncovered_seconds` clips
+        // it to the day. The question here is whether a given instant was
+        // inside a block, and a stretch that ran from Monday evening into
+        // Tuesday morning was covering both mornings it touched.
         for (index, window) in days.iter().enumerate() {
             if stretch.started_at < window.to && stretch.ended_at > window.from {
                 covers[index].push((stretch.started_at, stretch.ended_at));

@@ -783,23 +783,42 @@
     <TimerPicker onpick={startFromPicker} onclose={() => (pickerOpen = false)} />
   {/if}
   {#if adHoc}
+    <!--
+      *Log to a ticket…* re-targets the block before it opens the draft, and a
+      re-targeted block moves a row of the week from one target to another — so
+      it bumps the counter for the same reason an edit on the strip does.
+    -->
     <AdHocBlockDialog
       block={adHoc.block}
       offer={adHoc.offer}
       onclose={() => (adHoc = null)}
-      onlog={(draft) => (worklog = draft)}
+      onlog={(draft) => {
+        timeRevision += 1;
+        worklog = draft;
+      }}
     />
   {/if}
   {#if worklog}
+    <!--
+      **A worklog made here counts as a time write too** (#283). The draft is
+      the ordinary way one gets made — every stop on a ticket offers it — and
+      it moves the same two numbers *Log all* moves: the week's `logged` column,
+      and the strip's blocks, which have just become read-only. Without the
+      bump the reader logs an afternoon and watches the week go on calling it
+      unlogged, which is the staleness story 44 is about, arriving through the
+      other door.
+    -->
     <WorklogDraft
       draft={worklog}
       onclose={() => (worklog = null)}
-      onlogged={(logged) =>
+      onlogged={(logged) => {
+        timeRevision += 1;
         push({
           text: `Logged ${Math.round(logged.seconds / 60)}m to ${logged.entity_id.slice(
             logged.entity_id.indexOf(":") + 1,
           )}.`,
-        })}
+        });
+      }}
     />
   {/if}
 {:else}

@@ -682,3 +682,110 @@ async fn log_all_touches_neither_a_passive_block_nor_a_label_one() {
 
     state.scheduler.shutdown().await;
 }
+
+/// **A block that ran through midnight, under both of this file's day rules
+/// at once** -- the asymmetry `time::week`'s module docs call deliberate, and
+/// the one thing in the week that two reasonable readings get differently.
+///
+/// One stretch, Monday 22:00 to Tuesday 01:00:
+///
+/// * **Bookkeeping counts it on the day it started, whole.** Monday's
+///   *tracked* is all three hours and Tuesday's is zero -- the rule
+///   `worklog::UNLOGGED_BLOCKS` keys on, and it has to be the same rule here
+///   because *Log all* logs by it. A week that split the block at midnight
+///   would draw an hour on Tuesday that *Log all* then sent on Monday, and the
+///   two would never reconcile. So the third assertion is not decoration: the
+///   plan is checked against the columns.
+/// * **Coverage asks about an instant, so it clips to the day.** Tuesday's
+///   beats are in two batches -- ten minutes from 00:00, inside the block's
+///   Tuesday half, and ten from 09:00, outside every block. The "no target"
+///   row must be **600**, not 1200: the block covers the small hours it ran
+///   through even though it is booked on Monday.
+///
+/// The two rules disagree about the same three hours on purpose, and a mutant
+/// that makes either one agree with the other dies here.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_block_through_midnight_is_booked_on_monday_and_covers_tuesdays_small_hours() {
+    let (state, wrote) = app("week_ipc_midnight").await;
+    let days = week();
+    time::passive::set_enabled(&state.pool, true)
+        .await
+        .expect("passive attribution is switched on");
+
+    sqlx::query(
+        "insert into knobas.block (started_at, ended_at, entity_id, kind)
+         values ($1, $2, $3, 'manual')",
+    )
+    .bind(at(MONDAY, 22, 0))
+    .bind(at(MONDAY + 1, 1, 0))
+    .bind(TICKET)
+    .execute(&state.pool)
+    .await
+    .expect("the overnight block is written");
+
+    // Ten minutes inside the block's Tuesday half, and ten outside every
+    // block. Nothing is in the foreground, so no passive block is derived
+    // from either batch and the coverage under test is the manual one.
+    beats(&state.pool, MONDAY + 1, 0, 0, 21).await;
+    beats(&state.pool, MONDAY + 1, 9, 0, 21).await;
+
+    let sheet = time::week::read(&state.pool, &days)
+        .await
+        .expect("the week reads");
+    let ticket = row_for(&sheet, Some(TICKET)).expect("the ticket has a row");
+    assert_eq!(
+        ticket.cells[column(MONDAY)].tracked_seconds,
+        3 * 3_600,
+        "a block belongs to the day it started on, whole -- all three hours \
+         are Monday's"
+    );
+    assert_eq!(
+        ticket.cells[column(MONDAY + 1)].tracked_seconds,
+        0,
+        "...and none of them are Tuesday's, because splitting it at midnight \
+         would invent a boundary nobody made"
+    );
+
+    let open = row_for(&sheet, None).expect("an open window has a row of its own");
+    assert_eq!(
+        open.cells[column(MONDAY + 1)].tracked_seconds,
+        600,
+        "coverage is the other rule: the block covers the small hours it ran \
+         through, so only the ten minutes at 09:00 have no target"
+    );
+
+    // And the columns reconcile with what *Log all* sends: one worklog, on
+    // Monday, of the whole stretch.
+    let planned = time::week::plan(&state.pool, state.registry.as_ref(), &days)
+        .await
+        .expect("the plan reads");
+    assert_eq!(
+        planned
+            .iter()
+            .map(|entry| (entry.day, entry.seconds))
+            .collect::<Vec<_>>(),
+        vec![(date(MONDAY), 3 * 3_600)],
+        "Monday's column is what Monday sends: {planned:?}"
+    );
+
+    time::week::log_all(&state, &days).await.expect("it logs");
+    let sent: Vec<(DateTime<Utc>, i64)> = wrote
+        .ops
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|op| match op {
+            WriteOp::LogWork {
+                started, seconds, ..
+            } => (*started, *seconds),
+            other => panic!("the source was handed {other:?}, not a worklog"),
+        })
+        .collect();
+    assert_eq!(
+        sent,
+        vec![(at(MONDAY, 22, 0), 3 * 3_600)],
+        "the worklog starts when the block did, on the evening it started"
+    );
+
+    state.scheduler.shutdown().await;
+}

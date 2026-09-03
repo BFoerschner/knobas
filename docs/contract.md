@@ -4219,11 +4219,21 @@ From this commit on, each of the following requires an orchestrator decision **a
   wording. `pending` and `sent` are *logged*, because story 39 says the number is about what the
   reader did rather than about sync timing. Everything else — `held`, `refused`, `discarded`, or a
   copy whose queue row has been pruned — is *held*: one word for "this time has not reached the
-  ticket and it is waiting on a person", which is the only thing a reader can act on and is acted
-  on in the pending-writes panel whichever of the four it is. It is reported separately from
+  ticket". It is reported separately from
   *unlogged* rather than folded into it, because the blocks under it already carry a worklog id and
   *Log all* will not offer them again — drawing it as unlogged would be an invitation to log one
-  afternoon twice. *Unlogged* is `tracked - logged - held` floored at zero; the floor is not
+  afternoon twice, and drawing it as logged would be false.
+
+  **The ruling on the four, made at the merge (2026-09-03).** `held` and `refused` are *open*
+  states — `write_queue::open` selects `state in ('pending','held','refused')` — so they sit in the
+  pending-writes panel and a person can retry or withdraw one; held is plainly right for them.
+  `discarded` is not: that module's own words are "a sent or discarded write is history", and
+  `write_queue::discard` touches only the queue row, leaving the worklog copy and the block's
+  `worklog_id` in place. Discarded time therefore reads as held for good, `unlogged` stays zero,
+  and neither *Log all* nor the draft offers the blocks again. Held is still the honest cell of the
+  four this read has — the time has not reached the ticket and the blocks are spoken for — but the
+  way out is the discard path's to build (clear the copy and the mark), not this read's to paper
+  over, and it is filed rather than fixed here. *Unlogged* is `tracked - logged - held` floored at zero; the floor is not
   tidiness, it is that the draft's interval and seconds are the reader's own and may exceed the
   blocks they were made of.
 
@@ -4255,11 +4265,18 @@ From this commit on, each of the following requires an orchestrator decision **a
   commands deliberately write **no activity line** (#278's entry gives the reason for the timer's
   reads; `update_block` and `create_block` carry their own), so there is no signal to listen to and
   inventing one would be a second thing to keep in step with the first. `App.svelte` therefore
-  holds a `timeRevision` counter: each view calls `onchanged` after a **successful** write and
-  re-reads when the counter moves. That is spec #272 story 44 — "assigning a block and watching the
-  week's unlogged total change is one glance" — and a refusal deliberately does not bump it,
-  because nothing was written. This is shell state, not a frozen surface: no event name, no DTO
-  field, no command.
+  holds a `timeRevision` counter: each view bumps it after a write and re-reads when it moves.
+  That is spec #272 story 44 — "assigning a block and watching the week's unlogged total change is
+  one glance". **The rule is "after something was written", not "after the call returned `ok`",
+  and the two differ in exactly one place.** A refused *edit* does not bump it, because one
+  refused statement wrote nothing. A refused ***Log all*** does, because it is not one statement:
+  a day that fails does not roll back the days that succeeded (ADR-0012), so most of a week's
+  worklogs may exist behind that rejection, and a success-only bump would leave the strip offering
+  *Edit* on blocks they have just made read-only. The shell's own two writers bump it as well —
+  the worklog draft when it logs (the ordinary way a worklog is made, and it moves the same
+  `logged` column *Log all* moves) and the ad-hoc dialog when it re-targets a block, which moves a
+  row of the week from one target to another. This is shell state, not a frozen surface: no event
+  name, no DTO field, no command.
 
   **The column the strip stands on is never collapsed.** The weekend rule and the highlight rule
   meet on an empty Saturday, and the naive composition loses: the highlighted column would be the
@@ -4292,9 +4309,13 @@ From this commit on, each of the following requires an orchestrator decision **a
   **The share export's time toggle is recorded, not built.** The curated share export is M4's
   (roadmap §"export/import complete"); there is no share export in the tree to add a toggle to.
   What this ticket owes it — the sentence #282's entry called "#283's paperwork" — is the
-  **default**, and that is now in `CONTEXT.md`'s **Share export** entry and in the design doc's
-  §14 row: time is out of a share export by default, personal the way a note is, and toggleable
-  with every other part when that export is built.
+  **default**, and that is now in three places: `CONTEXT.md`'s **Share export** entry, the design
+  doc's **§14 Export / import row** — where an M4 implementer reads the defaults off — and its
+  **§16 answer 12**, which is where that row's defaults were ratified. Time is out of a share
+  export by default, personal the way a note is, and toggleable with every other part when that
+  export is built. Recorded at the merge because the criterion says *toggle* and there is no
+  toggle: the criterion is discharged by the default, and the M4 ticket that builds the export
+  inherits the rest of it.
 
   **What did not change.** Nothing under `crates/knobas-source/src/**` — a block, a worklog and a
   heartbeat are knobas' own and no adapter hears about one; `WriteOp::LogWork` is #280's growth

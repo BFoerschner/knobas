@@ -186,6 +186,15 @@
    * Send it, then re-read: every cell in the week has just changed — and so
    * has the strip above, whose blocks have just become read-only, which is
    * what `onchanged` is for.
+   *
+   * **`onchanged` fires on the refusal path too, and `DayReview`'s does not.**
+   * The difference is not an oversight, it is what `log_all` is: a day that
+   * fails does not roll back the days that succeeded (ADR-0012 — the copies
+   * are knobas' record of writes that may already have landed), so a rejected
+   * *Log all* has still written, usually most of a week of it. A success-only
+   * bump here would leave the strip above offering *Edit* on blocks that four
+   * of five days' worklogs have just made read-only. An edit is the other
+   * case: it is one statement, and a refused one wrote nothing.
    */
   async function send() {
     sending = true;
