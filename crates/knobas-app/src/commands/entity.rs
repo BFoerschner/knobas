@@ -2374,9 +2374,21 @@ pub async fn standup_protocol_inner(
     day: chrono::NaiveDate,
 ) -> Result<crate::protocol::Protocol, IpcError> {
     let note = crate::protocol::get_or_create(pool, day).await?;
-    let publication = match crate::protocol::publication_of(pool, day).await? {
-        Some(publication) => Some(crate::protocol::reconcile(pool, &note.id, publication).await?),
+    // A publication is per date **and per Confluence**, so the read needs to
+    // know which one -- and the stored target is the only thing that says.
+    // With none stored nothing has been published from here, which is what
+    // `None` says: `publish` refuses before it queues anything when the target
+    // is missing, so there is no publication for a read to have missed.
+    let publication = match crate::protocol::publish_target(pool).await? {
         None => None,
+        Some(target) => {
+            match crate::protocol::publication_of(pool, day, &target.source_id).await? {
+                Some(publication) => {
+                    Some(crate::protocol::reconcile(pool, &note.id, publication).await?)
+                }
+                None => None,
+            }
+        }
     };
     Ok(crate::protocol::Protocol {
         day,
@@ -2458,7 +2470,10 @@ pub async fn publish_standup_protocol_inner(
     };
 
     let note = crate::protocol::get_or_create(pool, day).await?;
-    if crate::protocol::publication_of(pool, day).await?.is_none() {
+    if crate::protocol::publication_of(pool, day, &target.source_id)
+        .await?
+        .is_none()
+    {
         let space = crate::protocol::space_of(pool, &target.parent).await?;
         let payload = crate::protocol::create_page_payload(&target, &space, day, &note.body_md);
         crate::sources::write_queue::submit(state, payload).await?;
@@ -2629,22 +2644,27 @@ pub async fn create_action_item_ticket_inner(
 /// Newest first, so a project that has had this exact summary before answers
 /// with the one just made. A title nothing matches is `None`, never a guess.
 ///
-/// The namespace is matched as a **literal prefix**: `_` matches any character
-/// in a `like` pattern and source ids carry them, so an unescaped prefix could
-/// find another source's ticket and link the protocol to it.
+/// **What this cannot do, stated rather than left to be met.** Two action items
+/// worded identically, or a project that already holds a ticket with this exact
+/// summary, link the protocol to the wrong ticket -- `start_work`'s precedent
+/// matched a head branch, and this matches free prose. The fix is not a better
+/// statement: it is the key Jira *did* answer with, which
+/// `knobas-source-jira`'s create deliberately drops on `WriteReceipt`'s own
+/// reasoning ("a created ticket is a mirrored entity"). Undoing that decision
+/// is the adapter's to make and the orchestrator's to ratify; until then this
+/// is the only answer there is, and the failure direction is a link to a
+/// *sibling* ticket rather than to nothing.
+///
+/// The namespace is matched as a **literal prefix** through
+/// `start_work::queue::escape_like`, the one escaping in this crate: `_`
+/// matches any character in a `like` pattern and source ids carry them, so an
+/// unescaped prefix could find another source's ticket.
 async fn ticket_titled(
     pool: &PgPool,
     source_id: &str,
     title: &str,
 ) -> Result<Option<String>, IpcError> {
-    let mut prefix = String::with_capacity(source_id.len() + 4);
-    for ch in source_id.chars() {
-        if matches!(ch, '%' | '_' | '\\') {
-            prefix.push('\\');
-        }
-        prefix.push(ch);
-    }
-    prefix.push_str(":%");
+    let prefix = format!("{}:%", crate::start_work::queue::escape_like(source_id));
     let found: Option<String> = sqlx::query_scalar(
         "select entity_id from sync.live_item
           where entity_id like $1 and kind = 'ticket' and title = $2

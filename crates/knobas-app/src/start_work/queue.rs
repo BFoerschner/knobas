@@ -12,10 +12,7 @@
 use async_trait::async_trait;
 use knobas_core::entity::EntityRef;
 use knobas_core::write_queue::{self, WriteState};
-use knobas_sync::SyncTrigger;
-use knobas_sync::progress::{ProgressSink, SyncPhase, SyncProgress};
 use sqlx::PgPool;
-use std::sync::Arc;
 
 use super::{Landing, Linked, Steps};
 use crate::sources::SourcesState;
@@ -93,7 +90,7 @@ impl Steps for Queue<'_> {
         found(
             &self.state.pool,
             BRANCH_BY_NAME,
-            &like_prefix(repo),
+            &like_prefix(&repo.to_string()),
             KIND_BRANCH,
             name,
         )
@@ -104,7 +101,7 @@ impl Steps for Queue<'_> {
         found(
             &self.state.pool,
             PULL_REQUEST_BY_HEAD,
-            &like_prefix(repo),
+            &like_prefix(&repo.to_string()),
             KIND_PR,
             head,
         )
@@ -114,26 +111,13 @@ impl Steps for Queue<'_> {
     async fn refresh(&self, source: &str) {
         // Wait for the run, rather than triggering and hoping: the very next
         // thing the caller does is look for the pull request this run is
-        // fetching. ADR-0005 guarantees the sink is told how the run ended,
-        // including when the id handed back belongs to a run already in
-        // flight, so this cannot wait for something that will never speak.
-        let (done, wait) = tokio::sync::oneshot::channel();
-        let sink = Arc::new(Ending {
-            done: std::sync::Mutex::new(Some(done)),
-        });
-        if self
-            .state
-            .scheduler
-            .trigger(source, SyncTrigger::Manual, Some(sink))
-            .await
-            .is_err()
-        {
-            return;
-        }
-        // A failure to wait is a mirror that may be stale, which the step
-        // reports as "no pull request has reached the mirror yet" and the user
-        // retries. It is never a reason to fail the flow.
-        let _ = wait.await;
+        // fetching. One implementation of that wait, in
+        // `crate::sources::write_queue::resync`, because #289's protocol
+        // publish needs the identical thing for the identical reason -- a
+        // create answers no address, so the mirror is the only way to name
+        // what was made, and reading it before the run has finished is reading
+        // it too early.
+        crate::sources::write_queue::resync(self.state, source).await;
     }
 }
 
@@ -162,8 +146,7 @@ const PULL_REQUEST_BY_HEAD: &str = "select entity_id from sync.live_item
       where entity_id like $1 and kind = $2 and payload->'head'->>'ref' = $3
       order by entity_id limit 1";
 
-/// The repository's id as a `like` prefix, with `like`'s own metacharacters
-/// escaped.
+/// An id as a `like` prefix, with `like`'s own metacharacters escaped.
 ///
 /// `_` is common in repository names and matches *any* character in a
 /// pattern, so an unescaped `gitea:acme/payout_service%` would also match
@@ -171,16 +154,30 @@ const PULL_REQUEST_BY_HEAD: &str = "select entity_id from sync.live_item
 /// repository's branch would settle a step "succeeded" against an effect that
 /// does not exist. Postgres' default escape character is `\`, and the value
 /// is bound, so escaping the three metacharacters is the whole job.
-fn like_prefix(repo: &EntityRef) -> String {
-    let id = repo.to_string();
-    let mut out = String::with_capacity(id.len() + 4);
-    for ch in id.chars() {
+///
+/// Takes a `&str` rather than an `EntityRef` since #289, which needs the same
+/// escaping for a **source id** -- `commands::entity::ticket_titled` narrows a
+/// look-back-after-write to one source's corpus, and source ids carry
+/// underscores just as repository names do. One escaping, so a second caller
+/// cannot get it subtly wrong.
+pub(crate) fn like_prefix(id: &str) -> String {
+    format!("{}%", escape_like(id))
+}
+
+/// The escaping half of [`like_prefix`], without the trailing `%`.
+///
+/// Separate because #289's caller wants `<escaped source id>:%` and not
+/// `<escaped source id>%` -- and trimming the `%` back off would be wrong for
+/// an id that ends in one, since its own `%` is escaped to `\%` and a trim
+/// cannot tell the two apart.
+pub(crate) fn escape_like(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 4);
+    for ch in value.chars() {
         if matches!(ch, '%' | '_' | '\\') {
             out.push('\\');
         }
         out.push(ch);
     }
-    out.push('%');
     out
 }
 
@@ -205,33 +202,6 @@ async fn found(
         .map_err(IpcError::internal)
 }
 
-/// A sink that resolves when its run ends.
-///
-/// ADR-0005: a run id always comes with an ending, so exactly one terminal
-/// message arrives here. The `Option` is what makes a second one -- which the
-/// ADR says cannot happen, and which this must survive if it ever did -- a
-/// no-op rather than a panic inside a sink, which the sync crate would have to
-/// catch.
-struct Ending {
-    done: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
-}
-
-impl ProgressSink for Ending {
-    fn report(&self, progress: SyncProgress) {
-        if !matches!(progress.phase, SyncPhase::Finished | SyncPhase::Failed) {
-            return;
-        }
-        let sender = self
-            .done
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
-        if let Some(sender) = sender {
-            let _ = sender.send(());
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,8 +212,15 @@ mod tests {
     #[test]
     fn a_repository_id_is_matched_literally_not_as_a_pattern() {
         let repo = EntityRef::new("gitea", "acme/payout_service");
-        assert_eq!(like_prefix(&repo), "gitea:acme/payout\\_service%");
+        assert_eq!(
+            like_prefix(&repo.to_string()),
+            "gitea:acme/payout\\_service%"
+        );
         let plain = EntityRef::new("gitea", "acme/payouts");
-        assert_eq!(like_prefix(&plain), "gitea:acme/payouts%");
+        assert_eq!(like_prefix(&plain.to_string()), "gitea:acme/payouts%");
+        // The same escaping a source id gets (#289), without the `%` that
+        // would make a trailing one indistinguishable from an escaped one.
+        assert_eq!(escape_like("wiki_two"), "wiki\\_two");
+        assert_eq!(escape_like("odd%"), "odd\\%");
     }
 }

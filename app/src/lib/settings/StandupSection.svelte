@@ -29,7 +29,9 @@
     standupPublishTarget as realRead,
     type PublishTarget,
   } from "../ipc/entity";
+  import { search as realSearch } from "../ipc/search";
   import { listAdapters as realListAdapters, listSources as realListSources } from "../ipc/sources";
+  import PublishTargetPicker from "../standup/PublishTargetPicker.svelte";
   import { publishableSources } from "../standup/protocol";
 
   let {
@@ -41,6 +43,7 @@
       setStandupPublishTarget: typeof realWrite;
       listSources: typeof realListSources;
       listAdapters: typeof realListAdapters;
+      search: typeof realSearch;
     }>;
   } = $props();
 
@@ -50,6 +53,7 @@
     setStandupPublishTarget: realWrite,
     listSources: realListSources,
     listAdapters: realListAdapters,
+    search: realSearch,
     ...ports,
   };
 
@@ -59,9 +63,15 @@
   let failure = $state<string | null>(null);
   let saving = $state(false);
 
-  /** What the fields hold while the reader is editing them. */
-  let sourceId = $state("");
-  let parent = $state("");
+  /**
+   * What the picker has settled on, or `null` while it is incomplete.
+   *
+   * The **same picker** the first publish's dialog uses, so the two halves of
+   * story 67 ask the same question the same way: a page is searched for, never
+   * typed as an entity id. A settings panel with the worse ask is the one
+   * people would meet while fixing a mistake.
+   */
+  let chosen = $state<PublishTarget | null>(null);
 
   $effect(() => {
     void load();
@@ -76,8 +86,7 @@
       ]);
       stored = target;
       sources = publishableSources(configured, descriptors);
-      sourceId = target?.source_id ?? "";
-      parent = target?.parent ?? "";
+      chosen = target;
       failure = null;
     } catch (cause) {
       // Not "none": "nothing is stored" is a claim about the database, and a
@@ -90,7 +99,8 @@
   async function save() {
     saving = true;
     try {
-      stored = await io.setStandupPublishTarget({ source_id: sourceId, parent });
+      if (chosen === null) return;
+      stored = await io.setStandupPublishTarget(chosen);
       failure = null;
     } catch (cause) {
       failure = ipcErrorMessage(cause);
@@ -124,38 +134,16 @@
       {/if}
     </p>
 
-    <label class="fld">
-      Confluence
-      <select
-        aria-label="Confluence source for standup protocols"
-        value={sourceId}
-        disabled={saving}
-        onchange={(event) => (sourceId = event.currentTarget.value)}
-      >
-        <option value="">Choose…</option>
-        {#each sources as source (source.id)}
-          <option value={source.id}>{source.name}</option>
-        {/each}
-      </select>
-    </label>
-
-    <label class="fld">
-      Parent page
-      <input
-        type="text"
-        aria-label="Parent page for standup protocols"
-        placeholder="confluence:98400"
-        value={parent}
-        disabled={saving}
-        oninput={(event) => (parent = event.currentTarget.value)}
+    <div class="pick">
+      <PublishTargetPicker
+        {sources}
+        value={stored}
+        search={io.search}
+        onchange={(target) => (chosen = target)}
       />
-    </label>
+    </div>
 
-    <button
-      class="btn"
-      disabled={saving || sourceId === "" || parent.trim() === ""}
-      onclick={() => void save()}
-    >
+    <button class="btn" disabled={saving || chosen === null} onclick={() => void save()}>
       Save
     </button>
   {/if}
@@ -181,11 +169,10 @@
     color: var(--fail);
   }
 
-  .fld {
+  .pick {
     display: grid;
-    gap: 4px;
+    gap: 8px;
     max-width: 42ch;
-    margin-top: 10px;
-    color: var(--muted);
+    margin: 10px 0;
   }
 </style>

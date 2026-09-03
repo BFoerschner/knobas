@@ -2754,6 +2754,8 @@ async fn a_revoked_confluence_pat_reaches_the_credential_health_surface_and_the_
     );
 
     state.scheduler.shutdown().await;
+}
+
 // -- the standup protocol, published into the real Confluence (#289) ---------
 
 /// The date this suite's protocol is for.
@@ -2891,7 +2893,16 @@ impl Wiki {
 async fn a_protocol_is_published_under_standup_protocols_and_reads_back() {
     let wiki = wiki();
     wiki.clear_protocol_leftovers().await;
-    let state = wiki_app("atlassian_live_protocol", &wiki).await;
+    // User + password, the way the mention test signs in: this criterion is
+    // about publishing as the seeded admin, and #317's bearer-token variant
+    // exists for the credential-health path alone.
+    let (state, _events) = wiki_app(
+        "atlassian_live_protocol",
+        &wiki,
+        AuthMethod::UserPassword,
+        &wiki.password,
+    )
+    .await;
     let day: chrono::NaiveDate = PROTOCOL_DAY.parse().expect("the date parses");
 
     // 1. The seeded corpus, so the parent page has an address.

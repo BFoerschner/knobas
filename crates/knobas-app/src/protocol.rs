@@ -474,22 +474,34 @@ fn escape(text: &str) -> String {
         .replace('>', "&gt;")
 }
 
-/// The publication for a date, if there is one.
+/// The publication for a date in one Confluence, if there is one.
 ///
-/// **Found by the page's title**, which is the module header's ruling put into
-/// a statement: a `create_page` write whose `title` is this date's page title
-/// is this date's publication, whatever the reader has since done to the
-/// publish target.
+/// **Found by the page's title, inside `source_id`**, which is the module
+/// header's ruling put into a statement -- and the scope is the point of it.
+/// The collision the ruling is about is Confluence's own: a page title is
+/// unique *within a space*, and a space lives in one instance. So the match
+/// asks the same question the server will ask, and a `2026-09-03` in another
+/// wiki -- a second Confluence, a page somebody made from elsewhere -- is not
+/// this date's publication and does not suppress publishing here.
+///
+/// **The parent is deliberately not matched.** Doing so would strand a write
+/// queued under yesterday's parent and let a second one be composed beside it
+/// in the same space, which is the duplicate this rule exists to prevent. The
+/// source is the coarser scope and the safe one; the parent is not.
+///
+/// Moving the target to a *different* Confluence is therefore a real move: the
+/// next date publishes there, and a date already published in the old instance
+/// reports its publication only while the target still names that instance.
+/// That is the honest reading -- the two pages are in two products -- and it is
+/// what `the_stored_target_is_what_the_next_publish_uses` leaves free to
+/// change.
 ///
 /// The title is read at `payload->'CreatePage'->>'title'` because the payload
 /// column holds the **whole serialized `WriteOp`**, and serde's default
 /// external tagging puts the variant's name around its fields. A path that
-/// forgot the tag would match nothing and every publish would be a first one,
-/// which is the duplicate this rule exists to prevent -- so
-/// `publishing_a_date_twice_queues_one_page` asserts on the queue's depth
-/// rather than on what the call answered. Matching the parent too would strand a write queued under
-/// yesterday's target and let a second one be composed beside it, which is
-/// exactly the duplicate this rule exists to prevent.
+/// forgot the tag would match nothing and every publish would be a first one --
+/// so `publishing_a_date_twice_queues_one_page` asserts on the queue's depth
+/// rather than on what the call answered.
 ///
 /// A **refused** or **discarded** write is not a publication: the first is the
 /// source saying no in its own words and the second is the reader withdrawing
@@ -506,6 +518,7 @@ fn escape(text: &str) -> String {
 pub async fn publication_of(
     pool: &PgPool,
     day: NaiveDate,
+    source_id: &str,
 ) -> Result<Option<Publication>, IpcError> {
     /// The five columns a publication is read out of.
     ///
@@ -528,13 +541,15 @@ pub async fn publication_of(
         "select id, source_id, state, detail, remote_id
            from knobas.write_queue
           where op = $1
-            and payload->'CreatePage'->>'title' = $2
+            and source_id = $2
+            and payload->'CreatePage'->>'title' = $3
             and state <> 'refused'
             and state <> 'discarded'
           order by id desc
           limit 1",
     )
     .bind(CREATE_PAGE)
+    .bind(source_id)
     .bind(page_title_of(day))
     .fetch_optional(pool)
     .await

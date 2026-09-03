@@ -49,11 +49,12 @@
     type Protocol,
     type PublishTarget,
   } from "../ipc/entity";
-  import { search as realSearch, type SearchHit } from "../ipc/search";
+  import { search as realSearch } from "../ipc/search";
   import { listAdapters as realListAdapters, listSources as realListSources } from "../ipc/sources";
   import { hashFor, type Router } from "../shell/router.svelte";
   import { push } from "../shell/toasts.svelte";
-  import { actionItems, presumedSource, publishableSources } from "./protocol";
+  import PublishTargetPicker from "./PublishTargetPicker.svelte";
+  import { actionItems, publishableSources } from "./protocol";
 
   interface ProtocolPorts {
     standupProtocol: typeof realStandupProtocol;
@@ -103,13 +104,16 @@
   let loaded = $state(false);
   let publishing = $state(false);
 
-  /** The target dialog, open with the sources it found. */
+  /**
+   * The target dialog, open with the sources it found.
+   *
+   * `chosen` is whatever {@link PublishTargetPicker} has settled on — `null`
+   * while the reader has not answered both halves, which is what keeps
+   * *Publish* disabled until they have.
+   */
   let dialog = $state<{
     sources: { id: string; name: string }[];
-    sourceId: string | null;
-    query: string;
-    hits: SearchHit[];
-    parent: string | null;
+    chosen: PublishTarget | null;
   } | null>(null);
 
   /** The create-ticket dialog, open on one action item. */
@@ -146,9 +150,18 @@
     timer = setTimeout(() => void save(), saveAfterMs);
   }
 
-  async function save() {
+  /**
+   * Write the body. Answers whether it landed.
+   *
+   * The answer is load-bearing for {@link send}: publishing a body the backend
+   * still holds an older version of would put yesterday's words on the wiki
+   * under today's date, and a save that failed is exactly when that happens.
+   * The text stays in the textarea whatever the answer, so a failure costs a
+   * round trip and never a sentence.
+   */
+  async function save(): Promise<boolean> {
     const open = protocol;
-    if (!open) return;
+    if (!open) return false;
     try {
       // The title is the protocol's identity — it is what the get-or-create
       // matches on — so it is never rewritten from here. Only the body is the
@@ -156,8 +169,10 @@
       const note = await io.getNote(open.note_id);
       await io.saveNote(open.note_id, note.note.title, body);
       failure = null;
+      return true;
     } catch (cause) {
       failure = ipcErrorMessage(cause);
+      return false;
     }
   }
 
@@ -166,32 +181,41 @@
    * again — the stored one is read first, and only its absence opens a dialog.
    */
   async function publish() {
-    const stored = await io.standupPublishTarget().catch(() => null);
-    if (stored) {
-      await send(undefined);
+    // Neither read is swallowed. "Nothing is stored" and "no Confluence is
+    // configured" are claims about the database, and a panel that could not
+    // ask has not earned either — the rule `PassiveSection` records and
+    // `StandupSection` repeats. A swallowed target read would re-ask a
+    // question already answered; a swallowed source list would say there is
+    // nowhere to publish while there is.
+    let stored: PublishTarget | null;
+    let offered: { id: string; name: string }[];
+    try {
+      stored = await io.standupPublishTarget();
+      if (stored) {
+        await send(undefined);
+        return;
+      }
+      const [sources, descriptors] = await Promise.all([
+        io.listSources(),
+        io.listAdapters(),
+      ]);
+      offered = publishableSources(sources, descriptors);
+    } catch (cause) {
+      failure = ipcErrorMessage(cause);
       return;
     }
-    const [sources, descriptors] = await Promise.all([
-      io.listSources(),
-      io.listAdapters(),
-    ]).catch(() => [[], []] as const);
-    const offered = publishableSources(sources, descriptors);
-    dialog = {
-      sources: offered,
-      sourceId: presumedSource(offered),
-      query: "",
-      hits: [],
-      parent: null,
-    };
+    dialog = { sources: offered, chosen: null };
   }
 
   async function send(target: PublishTarget | undefined) {
     publishing = true;
     try {
-      // Save first: publishing what is on screen rather than what the last
-      // pause happened to have written is the only reading that is not a
-      // surprise.
-      await save();
+      // Save first, and **stop if it did not land**: the page is made from the
+      // body the backend holds, so publishing after a failed save would put a
+      // stale protocol on the wiki under today's date — and a page cannot be
+      // taken back the way a keystroke can. The failure the save set stays on
+      // screen and the button can be pressed again.
+      if (!(await save())) return;
       protocol = await io.publishStandupProtocol(day, target);
       dialog = null;
       failure = null;
@@ -199,38 +223,6 @@
       failure = ipcErrorMessage(cause);
     } finally {
       publishing = false;
-    }
-  }
-
-  /** Pages of the chosen source, for the parent picker. */
-  async function findPages(text: string) {
-    const open = dialog;
-    if (!open || open.sourceId === null) return;
-    open.query = text;
-    if (text.trim() === "") {
-      open.hits = [];
-      return;
-    }
-    try {
-      // The kinds filter narrows the corpus at the backend; the source is
-      // narrowed here, because a page's source is on the hit and the launcher's
-      // own filter vocabulary is about what the *reader* typed.
-      const found = await io.search({
-        raw: text,
-        limit: 20,
-        filters: {
-          sources: [],
-          kinds: ["page"],
-          updated_within_days: null,
-          mine: false,
-          authors: [],
-        },
-      });
-      open.hits = found.groups
-        .flatMap((group) => group.hits)
-        .filter((hit) => hit.kind === "page" && hit.source_id === open.sourceId);
-    } catch {
-      open.hits = [];
     }
   }
 
@@ -282,6 +274,18 @@
 <section class="pr">
   <div class="pr-h">
     <h2>Protocol</h2>
+    <!--
+      The way to the note itself. This panel is an *editing* surface under the
+      digest and deliberately not a second note view: a protocol's `[[refs]]`
+      as chips, its links panel and its delete live where every other note's
+      do, and `CONTEXT.md`'s "editable like any note" is only true if there is
+      a door to that. One line, and it is the whole of the door.
+    -->
+    {#if protocol}
+      <button class="link sm" onclick={() => router.go(addressOf(protocol!.note_id))}>
+        Open as note
+      </button>
+    {/if}
     {#if publication === null}
       <button
         class="btn"
@@ -347,68 +351,17 @@
 {#if dialog}
   <div class="dlg">
     <h3>Where do standup protocols go?</h3>
-    {#if dialog.sources.length === 0}
-      <p class="sub">
-        No Confluence source is configured, so there is nowhere to publish yet.
-      </p>
-    {:else}
-      <label>
-        Confluence
-        <select
-          aria-label="Confluence to publish into"
-          value={dialog.sourceId ?? ""}
-          onchange={(event) => {
-            dialog!.sourceId = event.currentTarget.value || null;
-            dialog!.parent = null;
-            dialog!.hits = [];
-          }}
-        >
-          <!--
-            An empty first option, and it is selected when there is more than
-            one source: story 68 asks to be *asked*, and a preselected instance
-            is an answer nobody gave.
-          -->
-          <option value="">Choose…</option>
-          {#each dialog.sources as source (source.id)}
-            <option value={source.id}>{source.name}</option>
-          {/each}
-        </select>
-      </label>
-
-      <label>
-        Parent page
-        <input
-          type="search"
-          aria-label="Parent page"
-          placeholder="Standup protocols"
-          disabled={dialog.sourceId === null}
-          value={dialog.query}
-          oninput={(event) => void findPages(event.currentTarget.value)}
-        />
-      </label>
-      <ul class="hits">
-        {#each dialog.hits as hit (hit.entity_id)}
-          <li>
-            <button
-              class="link"
-              class:picked={dialog.parent === hit.entity_id}
-              onclick={() => (dialog!.parent = hit.entity_id)}
-            >
-              {hit.title}
-              {#if hit.path}<span class="sub">{hit.path}</span>{/if}
-            </button>
-          </li>
-        {/each}
-      </ul>
-    {/if}
-
+    <PublishTargetPicker
+      sources={dialog.sources}
+      search={io.search}
+      onchange={(target) => (dialog!.chosen = target)}
+    />
     <div class="dlg-f">
       <button class="btn" onclick={() => (dialog = null)}>Cancel</button>
       <button
         class="btn"
-        disabled={dialog.sourceId === null || dialog.parent === null || publishing}
-        onclick={() =>
-          void send({ source_id: dialog!.sourceId!, parent: dialog!.parent! })}
+        disabled={dialog.chosen === null || publishing}
+        onclick={() => void send(dialog!.chosen!)}
       >
         Publish
       </button>
@@ -556,14 +509,8 @@
     justify-content: flex-end;
   }
 
-  .hits {
-    display: grid;
-    gap: 2px;
-    max-height: 180px;
-    overflow-y: auto;
-    margin: 0;
-    padding: 0;
-    list-style: none;
+  .sm {
+    font-size: 12px;
   }
 
   button.link {
@@ -574,10 +521,6 @@
     text-align: left;
     color: var(--link);
     cursor: pointer;
-  }
-
-  button.link.picked {
-    text-decoration: underline;
   }
 
   .sub {

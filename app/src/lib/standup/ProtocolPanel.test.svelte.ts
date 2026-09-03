@@ -72,6 +72,10 @@ function render(
     stored?: PublishTarget | null;
     sources?: ReturnType<typeof wiki>[];
     body?: string;
+    /** Make the stored-target read fail, the way a database that is down does. */
+    targetReadFails?: boolean;
+    /** Make every save fail, the way a note deleted underneath does. */
+    saveFails?: boolean;
   } = {},
 ) {
   const calls: Calls = { published: [], saved: [], filed: [] };
@@ -89,9 +93,14 @@ function render(
         getNote: () => Promise.resolve(note(over.body ?? BODY)),
         saveNote: (_id: string, title: string, body: string) => {
           calls.saved.push({ title, body });
-          return Promise.resolve(note(body));
+          return over.saveFails
+            ? Promise.reject({ code: "internal", message: "the note would not save" })
+            : Promise.resolve(note(body));
         },
-        standupPublishTarget: () => Promise.resolve(over.stored ?? null),
+        standupPublishTarget: () =>
+          over.targetReadFails
+            ? Promise.reject({ code: "internal", message: "the setting would not read" })
+            : Promise.resolve(over.stored ?? null),
         listSources: () => Promise.resolve((over.sources ?? [wiki("wiki")]) as never),
         listAdapters: () => Promise.resolve([CONFLUENCE] as never),
         search: () =>
@@ -355,4 +364,36 @@ test("creating a ticket from an action item asks for the project first", async (
   expect(calls.filed).toEqual([
     { project: "tracker:PAY", type: "Task", title: "Ask Ines" },
   ]);
+});
+
+test("a target read that failed says so, instead of asking again", async () => {
+  // "Nothing is stored" is a claim about the database. A panel that could not
+  // ask has not earned it — and the visible cost of getting this wrong is a
+  // dialog re-asking a question the reader already answered.
+  const { calls } = render(protocol(), { targetReadFails: true });
+  await settle();
+  button("Publish to Confluence")?.click();
+  await settle();
+
+  expect(text()).toContain("the setting would not read");
+  expect(text()).not.toContain("Where do standup protocols go?");
+  expect(calls.published).toEqual([]);
+});
+
+test("a save that failed publishes nothing", async () => {
+  // The page is made from the body the *backend* holds, so publishing after a
+  // failed save would put a stale protocol on the wiki under today's date —
+  // and a page cannot be taken back the way a keystroke can.
+  const { calls } = render(protocol(), {
+    stored: { source_id: "wiki", parent: "wiki:98400" },
+    saveFails: true,
+  });
+  await settle();
+  button("Publish to Confluence")?.click();
+  await settle();
+
+  expect(calls.published).toEqual([]);
+  expect(text()).toContain("the note would not save");
+  // And the words are still in the box, which is what makes retrying free.
+  expect(target.querySelector<HTMLTextAreaElement>("textarea")?.value).toContain("Attendees");
 });

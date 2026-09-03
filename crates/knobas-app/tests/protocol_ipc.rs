@@ -628,6 +628,62 @@ async fn publishing_a_date_twice_queues_one_page() {
     );
 }
 
+/// A page of the same title in **another Confluence** is not this date's
+/// publication.
+///
+/// The publication is scoped to the source the target names, because the
+/// collision the ruling is about is Confluence's own -- a title is unique
+/// within a space, and a space lives in one instance. A match on the title
+/// alone would let a `2026-09-03` in a second wiki suppress publishing here,
+/// which is a *refusal to publish at all* rather than a duplicate avoided.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_page_of_this_title_in_another_wiki_is_not_this_publication() {
+    let harness = Harness::new("protocol_other_wiki").await;
+    harness.open().await;
+
+    // The other wiki's parent, and a create_page under it carrying this date
+    // as its title -- the row the old title-only match would have found.
+    harness.mirror(SyncItem {
+        entity: knobas_core::entity::EntityRef::new(OTHER_WIKI, PARENT_KEY),
+        kind: "page".to_owned(),
+        title: "Standup protocols".to_owned(),
+        body_text: String::new(),
+        author: None,
+        updated_at: Some(chrono::Utc::now()),
+        payload: serde_json::json!({ "id": PARENT_KEY, "space": { "key": SPACE } }),
+        web_url: None,
+        deleted: false,
+    });
+    harness.sync(OTHER_WIKI).await;
+    knobas_app::commands::entity::publish_standup_protocol_inner(
+        &harness.state,
+        day(),
+        Some(PublishTarget {
+            source_id: OTHER_WIKI.to_owned(),
+            parent: format!("{OTHER_WIKI}:{PARENT_KEY}"),
+        }),
+    )
+    .await
+    .expect("the other wiki publishes");
+    assert_eq!(harness.create_pages_queued().await, 1);
+
+    // Now the reader points the target back at this wiki and publishes. The
+    // other wiki's page is not this one's publication.
+    harness.publish(Some(target())).await.expect("it publishes");
+    assert_eq!(
+        harness.create_pages_queued().await,
+        2,
+        "two Confluences, two pages -- neither suppresses the other"
+    );
+    let sources: Vec<String> = sqlx::query_scalar(
+        "select source_id from knobas.write_queue where op = 'create_page' order by id",
+    )
+    .fetch_all(harness.pool())
+    .await
+    .expect("the sources read");
+    assert_eq!(sources, [OTHER_WIKI.to_owned(), WIKI.to_owned()]);
+}
+
 /// The same refusal while the write is still **waiting**, which is the case
 /// that would actually bite: an offline Confluence, a reader who presses
 /// *Publish* again because nothing seems to have happened.
