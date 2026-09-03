@@ -30,6 +30,7 @@ mod error;
 pub mod inbox;
 mod profile;
 pub mod sources;
+pub mod standup;
 pub mod start_work;
 pub mod time;
 
@@ -264,6 +265,7 @@ pub fn run() {
             // and #288 was appending to it in the same week.
             commands::entity::notification_kinds,
             commands::entity::set_notification_kinds,
+            commands::entity::standup_digest,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")
