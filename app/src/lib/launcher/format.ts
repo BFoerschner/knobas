@@ -76,9 +76,9 @@ export function provenance(
 export { sourceMonogram };
 
 /**
- * Re-exported so a launcher row's three-and-a-bit strings are all reachable
- * from one place; the rule itself lives in `ancestors.ts` because the **detail
- * view** draws the same path out of the same payload, and this module pulls in
- * the credential-health store that a detail panel has no use for.
+ * Re-exported so the strings a launcher row is made of stay reachable from one
+ * place; the rule itself lives in `ancestors.ts` because the **detail view**
+ * draws the same path out of the same payload, and this module pulls in the
+ * credential-health store that a detail panel has no use for.
  */
 export { ancestorPath } from "./ancestors";

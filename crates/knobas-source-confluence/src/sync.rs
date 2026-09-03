@@ -107,7 +107,13 @@ pub(crate) struct SyncRun<'a> {
 }
 
 /// What the run-start probe witnessed.
-struct Horizon {
+///
+/// Named for `CONTEXT.md`'s **Watermark** entry -- "the newest position the
+/// run *witnessed* at its start" -- rather than for a synonym of its own: this
+/// is the module that most needs the glossary's word for the thing, and a
+/// second word for it here is how the next reader comes to believe there are
+/// two concepts.
+struct RunStart {
     /// The newest `version.when` in this source's corpus when the run started,
     /// or `None` for a corpus with no page in it at all.
     ceiling: Option<DateTime<Utc>>,
@@ -126,8 +132,8 @@ impl SyncRun<'_> {
         // anonymously with an empty page, and this call cannot.
         self.api.current_user().await?;
 
-        let horizon = self.horizon().await?;
-        let offset = horizon.offset_secs;
+        let witnessed = self.run_start().await?;
+        let offset = witnessed.offset_secs;
         let previous = cursor.as_deref().and_then(ConfluenceCursor::parse);
         let since = previous.as_ref().and_then(|c| c.since(offset));
         let cql = build_cql(self.cfg, since, offset, Order::Ascending);
@@ -202,10 +208,24 @@ impl SyncRun<'_> {
             // readable `version.when`; advancing to anything would be a guess.
             (_, None) => Ok(cursor.unwrap_or_else(|| ConfluenceCursor::empty(offset).encode())),
             (_, Some(w)) => {
-                // The ceiling clamp. A page edited *during* the walk may have
-                // been stepped over, and advancing past run start would put it
-                // below the next run's lower bound forever.
-                let clamped = horizon.ceiling.map_or(w, |ceiling| w.min(ceiling));
+                // The ceiling clamp. An edit made *during* the walk carries a
+                // stamp later than anything the run saw at its start;
+                // advancing to it would put the run's own duration below the
+                // next query's lower bound and hide every other edit made
+                // while it ran.
+                let clamped = witnessed.ceiling.map_or(w, |ceiling| w.min(ceiling));
+                // ...but never **backwards**. The ceiling is the newest page
+                // in the corpus *now*, and that can be older than the
+                // watermark -- the page which set it was deleted, or moved out
+                // of the configured spaces. Clamping to it unconditionally
+                // would then drag the position back, which is the one thing
+                // the `max(previous, …)` rule above exists to prevent
+                // ([`ConfluenceCursor::since`], condition 1). The cost of
+                // refusing is a ceiling that does not bind on that one run;
+                // the cost of accepting is a source that re-delivers its whole
+                // recent history on every poll and never settles.
+                let floor = previous.as_ref().and_then(|c| c.modified_to);
+                let clamped = floor.map_or(clamped, |previous| clamped.max(previous));
                 Ok(ConfluenceCursor::advanced(clamped, offset, &seen_in_window).encode())
             }
         }
@@ -224,7 +244,7 @@ impl SyncRun<'_> {
     /// skips edits permanently, guessing it low only re-reads them. An empty
     /// corpus has nothing to re-read, so the fallback costs nothing at all --
     /// and the moment a page exists, the probe answers.
-    async fn horizon(&self) -> Result<Horizon, SourceError> {
+    async fn run_start(&self) -> Result<RunStart, SourceError> {
         let probe = build_cql(self.cfg, None, 0, Order::Descending);
         let page = self.api.search(&probe, 1, "version").await?;
         let when = page
@@ -232,7 +252,7 @@ impl SyncRun<'_> {
             .first()
             .and_then(|c| c.content.version.as_ref())
             .and_then(|v| v.when.as_deref());
-        Ok(Horizon {
+        Ok(RunStart {
             ceiling: when.and_then(crate::time::parse_time),
             offset_secs: when
                 .and_then(crate::time::parse_offset_secs)
@@ -757,6 +777,50 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(ids(&all), vec!["100", "101", "102", "103", "104"]);
+    }
+
+    /// **The clamp never drags the position backwards.**
+    ///
+    /// The ceiling is the newest page in the corpus *at run start*, and that
+    /// can be **older** than the watermark: the page which set the watermark
+    /// was deleted, or moved out of the configured spaces. Clamping to it
+    /// unconditionally would then move the position back, and a source whose
+    /// newest page was deleted would re-deliver its recent history on every
+    /// poll for ever -- battery clause 2 failing in steady state.
+    ///
+    /// Witnessed as a sequence, because a single run cannot show it: sync,
+    /// delete the newest page, sync again. The second run's ceiling is the
+    /// *second*-newest page, and the position stays where it was.
+    #[tokio::test]
+    async fn the_ceiling_clamp_never_moves_the_position_backwards() {
+        let fake = Fake::new(a_corpus());
+        let (_, first) = run(&fake, &cfg(json!({})), None).await.unwrap();
+        assert_eq!(watermark(&first), "2026-08-22T10:40:00Z");
+
+        // The newest page is gone, so the corpus's newest is now 08-21 -- and
+        // a page edited into the overlap window arrives to make the run emit
+        // something at all.
+        fake.pages
+            .lock()
+            .unwrap()
+            .retain(|p| p["id"] != json!("104"));
+        fake.pages.lock().unwrap().push(page(
+            "105",
+            "Retry budget notes",
+            "2026-08-22T10:39:30.000Z",
+            1,
+        ));
+
+        let (items, second) = run(&fake, &cfg(json!({})), Some(first.clone()))
+            .await
+            .unwrap();
+        assert_eq!(ids(&items), vec!["105"]);
+        assert_eq!(
+            watermark(&second),
+            "2026-08-22T10:40:00Z",
+            "the ceiling is now older than the watermark, and the position stays put rather \
+             than being dragged back to it"
+        );
     }
 
     /// The completion path: a server that did not expand the comments is not

@@ -1,10 +1,12 @@
 /**
  * Where an item sits inside its source, as one line.
  *
- * A leaf on purpose: this module imports nothing. The launcher row and the
- * detail panel both draw this string, and `format.ts` -- the launcher's other
- * row rules -- reaches the credential-health store, which a detail panel has
- * no business loading to render a breadcrumb.
+ * A leaf on purpose: this module imports nothing. The detail panel draws this
+ * string today; the launcher row is meant to draw the same one and cannot yet,
+ * because a search hit carries no payload to read it out of -- see the PR for
+ * #284. It is not in `format.ts`, the launcher's other row rules, because that
+ * module reaches the credential-health store, which a detail panel has no
+ * business loading to render a breadcrumb.
  */
 
 /**
@@ -25,7 +27,8 @@
  * 2. **One named function**, so a second source that nests its items is one
  *    more shape read here and nothing anywhere else.
  * 3. **The failure direction is absence**, pinned by
- *    `format.test.ts`'s `a record with no readable ancestors has no path`
+ *    `ancestors.test.ts`'s `a record with no readable
+ *    ancestors has no path`
  *    and the four shapes beside it.
  *
  * ## Outermost first, and the space home kept

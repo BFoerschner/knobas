@@ -203,11 +203,12 @@
    * Where this item sits inside its source, when its record says — a
    * Confluence page's ancestor path (#284).
    *
-   * The **one** named read of that shape lives in `launcher/format.ts`
-   * (ADR-0007 requirement 2), because the launcher row draws the same string;
-   * a second spelling here is how the two come to disagree about what a path
-   * is. It misses to `null`, so a ticket, a build and a page nobody has filed
-   * anywhere all show no path rather than a wrong one.
+   * The **one** named read of that shape lives in `launcher/ancestors.ts`
+   * (ADR-0007 requirement 2) rather than here, because the launcher row is
+   * meant to draw the same string and a second spelling is how the two come to
+   * disagree about what a path is. It misses to `null`, so a ticket, a build
+   * and a page nobody has filed anywhere all show no path rather than a wrong
+   * one.
    */
   const path = $derived(detail ? ancestorPath(detail.payload) : null);
   /** Narrowed once, so the button and its handler agree that it is a string. */

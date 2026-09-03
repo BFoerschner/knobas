@@ -1045,6 +1045,7 @@ knobas-source-confluence	lib/knobas_source_confluence	sync::tests::an_expanded_c
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::an_idle_incremental_run_emits_nothing_and_returns_the_same_bytes
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::comments_the_search_did_not_expand_are_fetched_and_land_in_the_payload
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::one_edit_then_an_idle_poll_settles
+knobas-source-confluence	lib/knobas_source_confluence	sync::tests::the_ceiling_clamp_never_moves_the_position_backwards
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::the_configured_space_list_reaches_every_query_the_run_sends
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::the_credential_is_checked_before_anything_that_could_answer_emptily
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::the_watermark_never_passes_the_ceiling_the_run_witnessed
