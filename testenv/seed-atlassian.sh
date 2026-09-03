@@ -69,6 +69,52 @@ STATE=seed-state.json
 VERIFIED_JIRA_IMAGE=sha256:64e139808556925e87a63db57455764519ceb8d213a11c9af106e525836a3114
 VERIFIED_CONFLUENCE_IMAGE=sha256:d15c23a1dfea0d390536115003cd732c9b404571f85bc081f9ae507e51feeafd
 
+# THE WAIT CAPS, AND WHY THE SECOND ONE IS FIFTEEN MINUTES.
+#
+# FIRST_RUN_CAP_S bounds two waits, not one: a container answering /status with
+# a state a wizard can be driven from, and -- Jira only -- that container then
+# actually serving the wizard, which lands about a minute later and is a
+# separate question (see wait_for_jira_wizard). JIRA_RUNNING_CAP_S bounds Jira's
+# post-wizard restart, which is the slow one: Jira writes its schema and
+# re-initialises the whole plugin system before /status says RUNNING.
+# POLL_TIMEOUT_S bounds one poll, so that a single unanswered request cannot
+# outlive the cap that exists to bound the wait it sits in.
+#
+# MEASURED on this machine -- 12 cores, an 8 GB Docker VM, images already
+# pulled, volumes empty, TeamCity stopped, and Jira starting ALONE
+# (`just atlassian-live`, 2026-09-03): jira reached FIRST_RUN 56 s after `up`,
+# served its first wizard step 53 s after that, and the post-wizard wait this
+# cap bounds returned in **0 s** -- the walk's last step does not answer until
+# Jira has restarted, so by the time the wait begins /status already says
+# RUNNING. On a VM Jira has to itself, this wait is not a wait.
+#
+# Under load it is a different measurement entirely. On 2026-09-03, with seven
+# agents working and Confluence's JVM starting beside it, that same restart did
+# NOT finish inside the old 300 s cap -- twice, at this same line, each time
+# killing a whole `just atlassian-live` window before a suite ran (#313 -> #314).
+# 300 s was the cap and not a measurement, so the slowest start under that load
+# is unknown and above it.
+#
+# WHICH MAKES 900 s INSURANCE, NOT A FIX. The fix is the sequencing: Jira
+# starts and is seeded with the VM to itself, before Confluence exists (see the
+# recipe's header), and every recipe run since -- 292 s, 399 s, 480 s, the
+# 392 s one that measured the numbers above, and the 327 s re-run of the
+# merged bytes -- has been nowhere near even the old cap. What kept 300 s
+# survivable this long is the recipe's refusal to run while TeamCity is up;
+# the pair sharing the VM with a third JVM is the case nobody has measured,
+# and 900 s is the margin for it. The cap costs a working run nothing -- the
+# loop breaks the moment /status says RUNNING -- so all it decides is how long
+# a run that is going to fail takes to say so, and the three-hour licence
+# window has ample room for that. A cap that fires here is a report about the
+# machine, not a flake to widen again.
+#
+# All five are seconds of WALL CLOCK, not counts of anything.
+FIRST_RUN_CAP_S=600
+JIRA_RUNNING_CAP_S=900
+POLL_S=5
+PROGRESS_EVERY_S=30
+POLL_TIMEOUT_S=10
+
 say() { echo "seed-atlassian: $*"; }
 die() { echo "seed-atlassian: $*" >&2; exit 1; }
 
@@ -117,8 +163,28 @@ wizard_end()   { [ -n "$JAR" ] && rm -f "$JAR" "$JAR.body"; JAR=; }
 
 # Read a wizard page into $PAGE, and pull out the form action it is showing
 # ($STEP) plus its XSRF token ($ATL_TOKEN).
-wizard_read() {  # wizard_read <url>
-  _raw=$(curl -sS -c "$JAR" -b "$JAR" -L -w '\n@@%{url_effective}' "$1")
+#
+# THE OPTIONAL TIMEOUT IS FOR POLLING, and it changes two things about the read.
+# It cannot outlive the cap of the wait it sits in, and a read that fails is
+# reported as no form yet at the next progress line instead of ending the run:
+# under `set -eu` an unguarded `_raw=$(curl ...)` exits the script, so without
+# it a single refused connection during Jira's start kills the seed with a bare
+# `curl: (7)` and none of the diagnosis the wait exists to print. `state_of`
+# answers UNREACHABLE for exactly the same reason, and this is that rule applied
+# to the one wait that reads a page rather than /status.
+#
+# Only the poll passes it. Every other call here reads the answer to a POST the
+# product has already accepted, where a slow response is legitimate -- Jira's
+# application-properties step is not quick -- and a failed one really is fatal.
+wizard_read() {  # wizard_read <url> [poll timeout seconds]
+  if [ -n "${2:-}" ]; then
+    # `@@$1` on failure so the fields below come out as "this url, no form",
+    # which is what the caller's progress line and die message want to say.
+    _raw=$(curl -sS --max-time "$2" -c "$JAR" -b "$JAR" -L \
+                -w '\n@@%{url_effective}' "$1" 2>/dev/null) || _raw="@@$1"
+  else
+    _raw=$(curl -sS -c "$JAR" -b "$JAR" -L -w '\n@@%{url_effective}' "$1")
+  fi
   WIZARD_URL=$(printf '%s' "$_raw" | tail -n 1 | sed 's/^@@//')
   PAGE=$(printf '%s' "$_raw" | sed '$d' | tr '\n' ' ')
   STEP=$(printf '%s' "$PAGE" | grep -o '<form[^>]*action="[^"]*"' | head -1 \
@@ -217,26 +283,124 @@ unknown_step() {  # unknown_step <product>
 # body is not a state -- mapping it to UNREACHABLE rather than to the empty
 # string is what stops the wait below from treating "no answer" as "ready".
 state_of() {  # state_of <url>
-  _s=$(curl -sS --max-time 10 "$1/status" 2>/dev/null | jq -r '.state // empty' 2>/dev/null) || _s=
+  _s=$(curl -sS --max-time "$POLL_TIMEOUT_S" "$1/status" 2>/dev/null | jq -r '.state // empty' 2>/dev/null) || _s=
   [ -n "$_s" ] || _s=UNREACHABLE
   printf '%s' "$_s"
 }
 
-# Waits for a state the wizard can be driven from, named positively: the
-# earlier spelling ("not UNREACHABLE and not STARTING") accepted the empty
-# answer of a container still binding its port.
-wait_for_first_run() {  # wait_for_first_run <name> <url>
-  printf 'seed-atlassian: waiting for %s ' "$1"
-  _i=0
+# --------------------------------------------------------------------------
+# THE WAITS. Two of them ask /status -- one for a state a wizard can be driven
+# from, one for RUNNING after a wizard has been walked -- and those two are one
+# loop, because everything except which states they accept is the same and the
+# interesting parts (the clock, the progress line, the diagnosis) are worth
+# having once. The third, wait_for_jira_wizard below, reads a page instead of a
+# state and is deliberately its own loop rather than a fourth and fifth
+# parameter here: folding it in would mean passing the reader, the comparison
+# and the failure text as arguments too, and a five-line duplication is cheaper
+# to read than that.
+#
+# Acceptance comes in as a PREDICATE rather than as a `case` pattern: `case`'s
+# `|` is syntax, parsed before expansion, so "FIRST_RUN|RUNNING" out of a
+# variable would be one pattern containing a literal bar and would match
+# nothing.
+state_is_wizard_ready() {  # <state>
+  case "$1" in FIRST_RUN|RUNNING) return 0 ;; esac
+  return 1
+}
+state_is_running() {  # <state>
+  [ "$1" = RUNNING ]
+}
+
+# ELAPSED IS READ OFF THE CLOCK, NOT COUNTED IN SLEEPS. An earlier spelling
+# added POLL_S per iteration, which undercounts: each pass also spends up to
+# POLL_TIMEOUT_S inside state_of's curl, so against a container that is bound
+# but not answering a "900s" cap counted in sleeps is up to 2700s of real
+# time -- and the seconds in the failure message would then be the one number
+# in it that had not been measured. Reading `date` makes the cap, the progress
+# line and the message all the same seconds, the ones that actually passed.
+#
+# The progress line is the whole reason a caller can tell a slow start from a
+# hung one: every 30 s it prints the state the product is reporting and how
+# far into the cap we are. #313's failed run printed 59 anonymous dots, off
+# which you could read neither how much of the cap was left nor whether
+# anything was moving. A state that climbs -- UNREACHABLE, then FIRST_RUN or
+# STARTING, then RUNNING -- is a slow start; one state repeated to the cap is
+# a hang; and UNREACHABLE the whole way is a container that never bound its
+# port, or died, which is a `docker logs` question and not a waiting one.
+wait_for_state() {  # wait_for_state <predicate> <name> <url> <cap seconds> <accepted, in words>
+  say "waiting for $2 to reach $5 (cap ${4}s)"
+  _t0=$(date +%s)
+  _next=$PROGRESS_EVERY_S
   while :; do
-    case "$(state_of "$2")" in
-      FIRST_RUN|RUNNING) break ;;
-    esac
-    _i=$((_i + 1))
-    [ "$_i" -lt 120 ] || { echo; die "$1 never reached FIRST_RUN or RUNNING (600s)"; }
-    printf '.'; sleep 5
+    _st=$(state_of "$3")
+    "$1" "$_st" && break
+    [ "$(( $(date +%s) - _t0 ))" -lt "$4" ] || die "$2 never reached $5 (${4}s; last answer: $_st).
+  A wait that long is the machine and not the product. Something heavy was
+  starting beside it -- two JVMs at once is what made 300s too tight for Jira
+  (#314) -- or the container is not alive at all. Its name is knobas-<service>
+  (docker-compose.yml), so:
+    docker logs --tail 50 knobas-$2"
+    sleep "$POLL_S"
+    _waited=$(( $(date +%s) - _t0 ))
+    if [ "$_waited" -ge "$_next" ]; then
+      say "  $2 is $_st -- ${_waited}s of ${4}s"
+      # From now, not from the last multiple: a poll that took 15 s must not
+      # earn two progress lines, and PROGRESS_EVERY_S need not divide POLL_S.
+      _next=$(( _waited + PROGRESS_EVERY_S ))
+    fi
   done
-  echo " $(state_of "$2")"
+  say "$2 is $_st after $(( $(date +%s) - _t0 ))s"
+}
+
+# FIRST_RUN DOES NOT MEAN THE WIZARD IS BEING SERVED, and the gap between the
+# two is minutes wide. FIRST_RUN is Jira saying it has decided it needs setting
+# up; for a good while after that `GET /` still answers with the database step,
+# or with nothing that carries a form at all.
+#
+# The old confluence-first order hid this: Confluence's entire wizard walk ran
+# inside the gap, so by the time Jira's `/` was read it was serving. Seeding
+# Jira first (#314) walks straight into it, and the failure was silent -- `GET
+# /` did not land on a step, the walk loop's out-of-the-wizard exit fired
+# having walked nothing, and the script then sat in the post-wizard wait for a
+# RUNNING that could never come, until the cap killed it 900 s later. The
+# instance looked like the wizard had been walked and it had not, which is
+# exactly what this file's header says must never happen quietly.
+#
+# So the wizard being served is waited for, positively, the way every other
+# readiness question here is answered: by asking for the thing we are about to
+# use, not for a proxy. The step it must be showing is named rather than
+# pattern-matched, because the script is pinned to one image digest and this is
+# the step that image opens on; a wizard sitting on the database step instead
+# means ATL_JDBC_* never reached the container.
+JIRA_FIRST_STEP=SetupApplicationProperties.jspa
+
+wait_for_jira_wizard() {  # wait_for_jira_wizard <cap seconds>
+  say "waiting for jira to serve $JIRA_FIRST_STEP (cap ${1}s)"
+  _t0=$(date +%s)
+  _next=$PROGRESS_EVERY_S
+  while :; do
+    wizard_read "$JIRA_URL/" "$POLL_TIMEOUT_S"
+    [ "$STEP" = "$JIRA_FIRST_STEP" ] && break
+    [ "$(( $(date +%s) - _t0 ))" -lt "$1" ] || die "jira never served its first setup step (${1}s).
+  expected form: $JIRA_FIRST_STEP
+  last url:      $WIZARD_URL
+  last form:     ${STEP:-none}
+  A wizard stuck on the database step means ATL_JDBC_* is not reaching the
+  container (docker-compose.yml). A LATER step means this instance was already
+  part-walked by an earlier run: that is the half-set-up state this file's
+  header refuses to guess at, so tear the pair down and seed a fresh one rather
+  than resuming it --
+    docker compose --profile real-atlassian down -v jira jira-db confluence confluence-db
+  the four services named. Any other form means the wizard moved, and the
+  sequence has to be re-derived against the new image."
+    sleep "$POLL_S"
+    _waited=$(( $(date +%s) - _t0 ))
+    if [ "$_waited" -ge "$_next" ]; then
+      say "  jira is serving ${STEP:-no form yet} -- ${_waited}s of ${1}s"
+      _next=$(( _waited + PROGRESS_EVERY_S ))
+    fi
+  done
+  say "jira is serving $STEP after $(( $(date +%s) - _t0 ))s"
 }
 
 # Merge one product's block into seed-state.json rather than rewriting it:
@@ -253,7 +417,8 @@ record() {  # record <key> <json>
 # by ATL_LICENSE_KEY and ATL_JDBC_*, so the wizard opens on the cluster choice.
 setup_confluence() {
   guard_image knobas-confluence "$VERIFIED_CONFLUENCE_IMAGE" CONFLUENCE
-  wait_for_first_run confluence "$CONFLUENCE_URL"
+  wait_for_state state_is_wizard_ready confluence "$CONFLUENCE_URL" \
+    "$FIRST_RUN_CAP_S" "FIRST_RUN or RUNNING"
 
   if [ "$(state_of "$CONFLUENCE_URL")" = "RUNNING" ]; then
     say "confluence is already set up"
@@ -338,7 +503,8 @@ setup_confluence() {
 # variable for it.
 setup_jira() {
   guard_image knobas-jira "$VERIFIED_JIRA_IMAGE" JIRA
-  wait_for_first_run jira "$JIRA_URL"
+  wait_for_state state_is_wizard_ready jira "$JIRA_URL" \
+    "$FIRST_RUN_CAP_S" "FIRST_RUN or RUNNING"
 
   if [ "$(state_of "$JIRA_URL")" = "RUNNING" ]; then
     say "jira is already set up"
@@ -353,13 +519,15 @@ setup_jira() {
   fetch-timebomb-keys.sh did not set it -- see its error above."
 
   wizard_begin
-  wizard_read "$JIRA_URL/"
+  wait_for_jira_wizard "$FIRST_RUN_CAP_S"
   _n=0
+  _walked=0
   while [ "$_n" -lt 12 ]; do
     _n=$((_n + 1))
     # Out of the wizard is the exit condition: the last step lands on
     # WelcomeToJIRA.jspa, which has forms of its own that are not setup steps.
     case "$WIZARD_URL" in *"/secure/Setup"*) ;; *) break ;; esac
+    _walked=$((_walked + 1))
     case "$STEP" in
       SetupApplicationProperties.jspa)
         say "jira: application properties"
@@ -403,14 +571,15 @@ setup_jira() {
   done
   wizard_end
 
-  printf 'seed-atlassian: waiting for jira to finish starting '
-  _i=0
-  until [ "$(state_of "$JIRA_URL")" = "RUNNING" ]; do
-    _i=$((_i + 1))
-    [ "$_i" -lt 60 ] || { echo; die "jira never reached RUNNING (300s)"; }
-    printf '.'; sleep 5
-  done
-  echo ' ok'
+  # Belt and braces on the failure above: that exit condition is a `break`, and
+  # a break on the first pass means the wizard was never walked, not that it
+  # finished. Reaching the post-wizard wait in that state costs a whole cap and
+  # then reports the wrong thing.
+  [ "$_walked" -gt 0 ] || die "jira's wizard walk did nothing -- it left the
+  wizard at $WIZARD_URL without POSTing a step. Jira has not been set up."
+
+  wait_for_state state_is_running jira "$JIRA_URL" \
+    "$JIRA_RUNNING_CAP_S" RUNNING
 
   _code=$(curl -sS -o /dev/null -w '%{http_code}' -u "$ADMIN_USER:$ADMIN_PASS" \
                "$JIRA_URL/rest/api/2/myself")
@@ -421,11 +590,22 @@ setup_jira() {
     '{url:$u, user:$n, password:$p, version:$v}')"
 }
 
-case "${1:-both}" in
-  both)       setup_confluence; setup_jira ;;
+# JIRA FIRST in `both`, so this mode agrees with the order `just atlassian-live`
+# drives one product per invocation in, and for the same reason: Jira's
+# post-wizard restart is the long pole and it wants the VM to itself. `both`
+# can only reduce the overlap and not remove it -- by the time it runs, the
+# caller has started both containers and the two JVMs are already up -- so on a
+# loaded machine prefer the recipe's shape: up and seed Jira, then up and seed
+# Confluence.
+MODE=${1:-both}
+case "$MODE" in
+  both)       setup_jira; setup_confluence ;;
   jira)       setup_jira ;;
   confluence) setup_confluence ;;
   *) die "usage: ./seed-atlassian.sh [both|jira|confluence]" ;;
 esac
 
-say "done -- both licences expire 3 hours after they were applied"
+# Named per invocation, because one product at a time is now the normal call:
+# saying "both licences" after `./seed-atlassian.sh jira` was a small lie about
+# which timebomb had started ticking.
+say "done -- $MODE; each product's timebomb licence expires 3 hours after it is applied"

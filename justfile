@@ -462,15 +462,46 @@ teamcity-live-seeded:
 # expire three hours after they are applied (testenv/README.md, "Jira and
 # Confluence, end to end"); the pair is disposable by design, which is why
 # this recipe ends in `down -v` rather than leaving a seeded environment the
-# way `gitea-live` does. MEASURED 2026-09-03 on this machine (12 cores, the
-# 8 GB Docker VM), from empty volumes, images already pulled: the pair
-# seeded and verified in about four minutes -- of which the two wizard walks
-# and Jira's final start are about three and the content seed about one (310
-# key placeholders in and out again) -- the two live suites about ten
-# seconds between them once compiled, and `down -v` about ten. The suites
-# are seconds, not hours, so the three-hour window holds with well over two
-# and a half hours of margin; the number to re-measure is the one in this
-# header, when a suite is added below.
+# way `gitea-live` does.
+#
+# MEASURED on this machine (12 cores, the 8 GB Docker VM), from empty volumes
+# with the images already pulled:
+#
+#   2026-09-03, both products brought up at once (the shape before #314): the
+#     pair seeded and verified in about four minutes -- of which the two wizard
+#     walks and Jira's final start are about three and the content seed about
+#     one (310 key placeholders in and out again) -- the live suites about ten
+#     seconds between them once compiled, and `down -v` about ten. This is also
+#     the shape that died twice under seven-agent load, on Jira's post-wizard
+#     start, before a suite ran (#313).
+#
+#   2026-09-03, one product at a time as below: **392 s in all**, with TeamCity
+#     stopped and the machine otherwise busy. Seeded and verified at 317 s, of
+#     which Jira's half is about 160 (56 s to FIRST_RUN, 53 s more before it
+#     served its first wizard step, four POSTs, and a post-wizard restart that
+#     had already finished by the time the wait for it began), Confluence's
+#     about 40 (FIRST_RUN 9 s after `up`, on a VM Jira had just stopped
+#     competing for), and the content seed the rest. The three suites, 26 tests,
+#     ran in 14 s once compiled; the teardown took the balance.
+#
+#   2026-09-03, the same shape re-run on the merged bytes, TeamCity stopped and
+#     two other agents building: **327 s in all**, seeded and verified at 265,
+#     the three suites (28 tests by then) in 22. Same run, the two numbers this
+#     ticket is about: Jira served its wizard 46 s after answering FIRST_RUN --
+#     one progress line, `jira is serving no form yet -- 30s of 600s`, printed
+#     inside that gap -- and the post-wizard wait for RUNNING returned in 0 s
+#     again. Full runs so far sit between 311 s and 392 s.
+#
+# The suites are seconds, not hours, so the three-hour window holds with well
+# over two and a half hours of margin either way; the number to re-measure is
+# the one in this header, whenever a suite is added below or the order changes.
+#
+# THE SEQUENCING IS THE FIX; THE WIDER CAP IN seed-atlassian.sh IS INSURANCE.
+# No run since has come near even the old 300 s cap -- 292 s, 399 s, 480 s, and
+# the 392 s and 327 s ones above, all with TeamCity stopped -- and what has kept
+# that cap survivable is the refusal below to start while TeamCity is up. The
+# pair sharing the 8 GB VM with a third JVM is the case that killed #313 and
+# the case nobody has measured.
 #
 # WHERE THE LIVE SUITES GO. One line per suite in the block marked below, each
 # a `cargo test -p <crate> --test <live suite> -- --ignored --nocapture
@@ -502,7 +533,11 @@ teamcity-live-seeded:
 # THE 8 GB VM. Jira asks for ~4 GB, Confluence ~2 GB, plus a PostgreSQL each,
 # and Docker Desktop's VM here has 8 GB: the pair cannot share it with the
 # seeded TeamCity (~2.2 GB for server and agent), so this recipe REFUSES to
-# start while `knobas-teamcity` is up and prints the `stop` to run. It does
+# start while `knobas-teamcity` is up and prints the `stop` to run. The same
+# 8 GB is why the pair does not comfortably *start* together either -- two JVMs
+# claiming their heaps at once is what pushed Jira's post-wizard restart past
+# its cap under load -- and why the two products are brought up and seeded one
+# at a time below, Jira first. It does
 # not stop it itself, because `--profile real-teamcity stop` is somebody's
 # seeded environment going away under them (testenv/README.md, "One
 # environment, one owner at a time"), and `stop` -- never `down -v` -- is the
@@ -533,20 +568,38 @@ atlassian-live:
       exit 1
     fi
     t0=$(date +%s)
-    # Before `up`: Confluence reads its key at first start.
+    # Above both `up`s below, and it has to stay there: Confluence reads its key
+    # at first start.
     eval "$(./fetch-timebomb-keys.sh)"
     teardown() {
       cd "$testenv"
+      # All four named on every path, including a failure before Confluence was
+      # created: `down -v` on a service with no container is a no-op, and the
+      # alternative -- tearing down only what got started -- is bookkeeping that
+      # would leave a volume behind the first time it was wrong.
       docker compose --profile real-atlassian down -v jira jira-db confluence confluence-db
       echo "atlassian-live: pair torn down; $(( $(date +%s) - t0 ))s wall clock in all"
     }
     trap 'teardown' EXIT
     trap 'trap - EXIT INT; teardown; kill -INT $$' INT
     trap 'trap - EXIT TERM; teardown; kill -TERM $$' TERM
-    # `--wait` holds for the two databases' healthchecks; the products have none,
-    # and seed-atlassian.sh is what waits for FIRST_RUN before touching a wizard.
-    docker compose --profile real-atlassian up -d --wait jira-db jira confluence-db confluence
-    ./seed-atlassian.sh                   # waits for each product, walks both wizards
+    # ONE PRODUCT AT A TIME, JIRA FIRST. Both JVMs starting together on the 8 GB
+    # VM is what stretched Jira's post-wizard restart past its old 300s cap and
+    # killed two windows before a suite ran (#313 -> #314). Jira now has the VM
+    # to itself until it is RUNNING and its REST answers; Confluence's container
+    # does not exist until then. `--wait` holds for each database's healthcheck
+    # -- the products have none -- and seed-atlassian.sh is what waits for a
+    # state a wizard can be driven from.
+    #
+    # THE LICENCE FETCH STAYS ABOVE BOTH `up`s. Confluence reads ATL_LICENSE_KEY
+    # at first start, so the key has to be in this shell before its container is
+    # created -- which is now the second `up`, not the first. Moving the fetch
+    # down between the two would still work today and would break the moment the
+    # order changed again, so it stays where nothing can get in front of it.
+    docker compose --profile real-atlassian up -d --wait jira-db jira
+    ./seed-atlassian.sh jira              # waits for FIRST_RUN, walks Jira's wizard
+    docker compose --profile real-atlassian up -d --wait confluence-db confluence
+    ./seed-atlassian.sh confluence        # ... and Confluence's, on a quiet VM
     ./seed-atlassian-content.sh           # the Tidewater content
     ./seed-atlassian-content.sh --verify  # PAY-231 with its worklogs, one page with its body
     eval "$(./seed --env)"
