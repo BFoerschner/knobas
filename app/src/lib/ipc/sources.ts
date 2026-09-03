@@ -562,6 +562,35 @@ export type WriteOpPayload =
         seconds: number;
         comment: string;
       };
+    }
+  | {
+      CreatePage: {
+        /** The **parent page**, as an entity id — this op's queue target. */
+        parent: string;
+        /** The space key in Confluence's own spelling (`ENG`), not an id. */
+        space: string;
+        title: string;
+        /** Storage format, not text: what a later read must return unchanged. */
+        body: string;
+      };
+    }
+  | {
+      UpdatePage: {
+        entity: string;
+        /**
+         * The version the edit was made **against**, not the one to write: the
+         * adapter sends `base_version + 1` and Confluence aborts if somebody
+         * else got there first (#286).
+         */
+        base_version: number;
+        /**
+         * The page's **whole** storage format. Confluence's content `PUT`
+         * replaces the record, so a body carrying only the edited section
+         * would delete the rest of the page — `page-sections.ts`'s
+         * `replaceSectionBody` is what composes this.
+         */
+        body: string;
+      };
     };
 
 /**

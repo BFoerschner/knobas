@@ -139,7 +139,15 @@
               <p class="wq-why">The target changed after you queued this.</p>
               <div class="grid2">
                 <div>
-                  <span class="wq-side">When you queued it</span>
+                  <!--
+                    The version, where the op has one (#286). A page edit is the
+                    one write whose two sides can read alike while differing in
+                    what matters, so the number goes in the label rather than
+                    leaving the reader to spot it.
+                  -->
+                  <span class="wq-side">
+                    When you queued it{before.version === null ? "" : ` — version ${before.version}`}
+                  </span>
                   {#if before.raw !== null}
                     <pre class="log">{before.raw}</pre>
                   {:else if before.live}
@@ -149,7 +157,9 @@
                   {/if}
                 </div>
                 <div>
-                  <span class="wq-side">As it stands now</span>
+                  <span class="wq-side">
+                    As it stands now{nowSide.version === null ? "" : ` — version ${nowSide.version}`}
+                  </span>
                   {#if nowSide.raw !== null}
                     <pre class="log">{nowSide.raw}</pre>
                   {:else if nowSide.live}

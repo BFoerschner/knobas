@@ -216,7 +216,9 @@ impl Source for GiteaSource {
             | WriteOp::CreateTicket { .. }
             | WriteOp::TriggerBuild { .. }
             | WriteOp::RerunBuild { .. }
-            | WriteOp::LogWork { .. } => Err(SourceError::protocol(format!(
+            | WriteOp::LogWork { .. }
+            | WriteOp::CreatePage { .. }
+            | WriteOp::UpdatePage { .. } => Err(SourceError::protocol(format!(
                 "gitea: {:?} is not an operation this adapter supports",
                 op.identifier()
             ))),

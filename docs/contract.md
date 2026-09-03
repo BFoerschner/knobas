@@ -496,19 +496,20 @@ Added after the M1 table above rather than as a fifth column, because the table'
 | auth | Bearer PAT (DC ≥ 7.9) or Basic user+password |
 | test_connection | `GET /rest/api/user/current`, reporting `username` as the account. **No version**: Confluence DC publishes it only through the administrators-only `/rest/api/settings/systemInfo`, so `ConnectionInfo::server_version` is `None` rather than an *unreachable* for an ordinary account |
 | read endpoints | `GET /rest/api/content/search` (`cql`, `limit`, `expand`), the `_links.next` continuation it answers with, `GET /rest/api/content/{id}/child/comment` (`start`, `limit`, `expand`) as the completion path, and `GET /rest/api/content/{id}` (`expand`) — the mention walk's second half, which resolves a mentioning comment to the page it is on (#287) |
-| `expand=` | `body.storage,ancestors,space,version,history,children.comment.body.storage,children.comment.version` — the storage format kept verbatim in `payload`, the space as ADR-0010's project, the ancestors as the launcher's path, `version.number`/`version.when` as the cursor's identity, and the discussion **with its dates** in one request instead of one per page (#287; the dates are what let a comment date the page it is on, below) |
+| write endpoints (#286) | `POST /rest/api/content` for a page (`type: page`, `space.key`, `ancestors[0].id`, `body.storage`) and for a comment (`type: comment`, `container.{id,type}`, `body.storage`); `GET /rest/api/content/{id}` then `PUT` the same for an edit. **The content `PUT` replaces the record**, so the title and the content type are read back and sent again — a request that omitted the title would blank it — and `version.number` is sent as `base_version + 1`, which is how Confluence is asked to abort with a 409 when somebody else got there first |
+| `expand=` | `body.storage,ancestors,space,version,history,children.comment.body.storage,children.comment.version,children.comment.history` — the storage format kept verbatim in `payload`, the space as ADR-0010's project, the ancestors as the launcher's path, `version.number`/`version.when` as the cursor's identity and (since #286) as what a section edit is made against, and the discussion **with its dates and its authors** in one request instead of one per page. Two tickets asked for the comment expansions and both reasons are kept: the dates are what let a comment date the page it is on (#287, below), and `version.by`/`history.createdBy` are the byline the detail's comment section renders (#286). They are the same expansions the completion path already asked for |
 | paging | **`_links.next`, followed verbatim**, and there is no `total`: a content search reports `size` (this page) and a next link. `limit` is capped at **50** by the server once a body is expanded, so `page_size` is refused above it rather than silently clamped. A continuation link that is not a path rooted at the instance is refused — a walk that stopped early must never be reported as a completed one, because the kind is exhaustive |
 | cursor | `{"v":1,"modified_to":"2026-08-22T10:40:00Z","tz_offset_secs":7200,"seen":[{"i":"98307","n":3,"u":"…"}]}`; CQL `type = page [AND space in (…)] AND lastmodified >= "<watermark − 2 min>" order by lastmodified asc`. The 2-minute overlap is mandatory for the same reason as Jira's: **a CQL date literal is `"yyyy-MM-dd HH:mm"` and therefore minute-resolution**, so an exact-boundary watermark drops items. Identity in `seen` is `(content id, version.number)` and not `(id, timestamp)` — Confluence's version counter closes the "edited twice in one second" hole the Jira cursor documents |
 | zone | CQL literals carry **no zone** and are read in the instance's own. It is learned from a timestamp the server itself rendered (`version.when` on the run-start probe), never from a timezone database and never from an admin endpoint. Unknown falls back to UTC−12, not UTC: guessing the offset *high* moves the query's lower bound forward and skips edits permanently, guessing it low only re-reads them |
 | ceiling | the run-start probe is the **same scope**, `order by lastmodified desc`, `limit=1`, `expand=version`. Its `version.when` is the ceiling the watermark may not pass (`CONTEXT.md`, *Watermark*), so a page edited *during* a run cannot carry the position past run start and hide every other edit made while it ran. Witnessed, not clocked — `now()` is guaranteed too high the moment the two clocks disagree. **The never-backwards rule outranks the clamp**: where the previous watermark is already *above* the ceiling — the page that set it was deleted, or moved out of the configured spaces — the position stays where it was rather than being dragged back to a ceiling now older than it. The clamp does not bind on that one run, which costs a re-walk; accepting it would cost a source that re-delivers its recent history on every poll and never settles |
 | call order | **`/rest/api/user/current` is the first call of every run**, before the probe and before the walk. A content search is a read a server may allow anonymously, and where it does an unresolvable credential answers 200 with an empty result set — which on an exhaustive kind is the engine's licence to tombstone the mirror. The identity call has no anonymous answer. This is the Confluence spelling of the `/serverInfo`-first ordering issue #276 measured on Jira |
 | config (`config_schema`) | `flavor` (`datacenter`\|`cloud`, default `datacenter`; Cloud refused by name), `spaces[]` (**empty = every space the account can see**), `username` (identity — filled by *Test connection*, used for `@me`/My items; also the login for user + password auth), `page_size` (1–50, default 50) |
-| write ops | **none.** `write_ops: []` and no `Capability::Write`; every op is refused by name. `CreatePage`, `UpdatePage` and a reused `Comment` are spec #272's Confluence set, each an ADR-0006 growth of `WriteOp` and a §10.8 entry, and they are the next ticket's. This is what an inbox mention on a Confluence source offers **no** button (#287): `Category::Mention` asks for `comment`, `knobas_app::inbox::offer` keeps only what the descriptor declares, and the day #286 declares it the button appears with nothing else changing |
-| contract source | **the real container, and nothing else.** ADR-0013: Atlassian publishes no machine-readable Confluence DC spec, so `knobas-mockd` has no Confluence half and port 8211 stays unreserved. `crates/knobas-source-confluence/tests/live_confluence_seeded.rs` against the seeded instance is the only witness, run by `just atlassian-live` |
+| write ops (#286) | `comment`, `update_page`, `create_page`, with `Capability::Write`; every other op is refused by name. `comment` is the SPI's existing op re-used with the **page** as its container — a reply on a page is the same act as a reply on a ticket, and an adapter-shaped variant of one is what ADR-0006 rejects. `create_page` and `update_page` are M3.2's ADR-0006 growth and carry the §10.8 entry below. This is also what makes an inbox mention on a Confluence source offer a button (#287): `Category::Mention` asks for `comment`, `knobas_app::inbox::offer` keeps only what the descriptor declares, and declaring it here is all that was needed — `a_mention_offers_comment_from_a_source_that_declares_it` flipped on its own |
+| contract source | **the real container, and nothing else.** ADR-0013: Atlassian publishes no machine-readable Confluence DC spec, so `knobas-mockd` has no Confluence half and port 8211 stays unreserved. `crates/knobas-source-confluence/tests/live_confluence_seeded.rs` (the adapter) and `crates/knobas-app/tests/confluence_live.rs` (the write path through the queue, #286) against the seeded instance are the only witnesses, run by `just atlassian-live` |
 | mentions (#287) | a **second CQL query per run**, `mention = currentUser() AND type in (page, comment) [AND space in (…)] [AND lastmodified >= "<watermark − 2 min>"] order by lastmodified asc`, whose results are resolved to the pages they are on and emitted as ordinary `page` items. It exists because a comment is *separate content*: posting one does not move its page's `lastmodified`, so the page walk can never reach a comment on a page nobody has edited since. `mention = currentUser()` and not a text match, because a mention is stored as a user **key** and only the server can resolve one. It **does not move the watermark** — the two walks share one cursor and a comment posted today would put every page edit below the next run's lower bound — but it does contribute its records to `seen`, which is what makes an idle poll idle (battery clause 2) |
 | §4.1 `body_text` carries a rendered `@name` | a Confluence mention is markup (`<ac:link><ri:user ri:userkey="…"/></ac:link>`), so stripping tags leaves no trace of who was named and `knobas_core::inbox`'s mention rule — which reads `body_text` for `@name`/`[~name]` — could never fire. `storage::to_text` therefore renders `ri:user`: `ri:username` as whoever it names, `ri:userkey` **only** when it is the key `/rest/api/user/current` reported for this credential. Every other link renders as nothing: ADR-0007's miss direction, chosen so an unresolvable key costs a mention knobas never claims rather than claiming somebody else's. This is the same class as TeamCity composing `"{state} {status}"` into `body_text` (below); `payload` stays verbatim (§3a) |
 | §4.1 `updated_at` is the newest of the page **and its discussion** | a comment does not move a page's `version.when`, so a page dated by its own edit alone would be a page commented on this morning wearing last year's date — and every reader that filters on recency drops it, `knobas_core::inbox::WINDOW_DAYS` first among them, which would make the mention walk pointless. Jira answers this natively (a comment moves `fields.updated`); `children.comment.version` is what lets Confluence answer it too. **The cursor is unaffected**: it walks and clamps on the page's own `version.when`, because that is what CQL's `lastmodified` matches for a page. A server that will not expand the comment dates falls back to the page's stamp, which is the miss direction |
-| client | hand-rolled reqwest through `knobas-http` (5 calls) |
+| client | hand-rolled reqwest through `knobas-http` (5 reads, 3 writes) |
 
 **Accepted limitation, recorded rather than hidden.** Offset paging over the field being ordered by can *step over* a row: a page at the front of an `asc` order is edited, moves to the end, every row behind it shifts down by one, and the walk's next offset lands one past where it should. The stepped-over page keeps its old timestamp, so no incremental query reaches it either — only the next full sync does. This is the same class the Jira adapter accepts with `startAt` and `ORDER BY updated ASC`, and the ceiling does not close it; `a_page_edited_mid_walk_can_shift_a_row_past_the_offset` pins it so a reader does not build a stronger guarantee on top of it.
 
@@ -4341,6 +4342,115 @@ From this commit on, each of the following requires an orchestrator decision **a
   Ratified by the orchestrator as spec #272 and issue #283, whose acceptance criteria specify the
   week read, *Log all* and its confirmation, the view, the backup round trip, the tests and this
   entry.
+- **`crates/knobas-source/src/**`, issue #286 (2026-09-03):** the Confluence write set — M3.2's
+  `WriteOp` growth, the adapter that declares it, and the version hold it is written to be caught
+  by. One entry for the package, the arrangement the #278 and #280 entries above record for a
+  sub-milestone.
+
+  **The SPI, and it is two variants rather than three.** `Comment` is re-used with the **page** as
+  its container: a reply on a page is the same act as a reply on a ticket, and a `CommentOnPage`
+  variant would make the enum adapter-aware, which is the coupling ADR-0006 rejects by name. So
+  the growth is:
+
+  ```rust
+  WriteOp::CreatePage { parent: String, space: String, title: String, body: String },
+  WriteOp::UpdatePage { entity: String, base_version: i64, body: String },
+  ```
+
+  identifiers `"create_page"` and `"update_page"`, each with its probe in
+  `contract::known_write_ops` and its arm in `WriteOp::identifier` — the two no-wildcard matches
+  ADR-0006 relies on. `Source::write`'s signature is unchanged; `WriteReceipt` is unchanged, and
+  `create_page` is the second op in knobas to answer one (`WriteReceipt::id`), for the reason the
+  type documents: a page knobas just made is not in the mirror until the next sync, so the id the
+  server answered with is the only handle that exists in between.
+
+  **`CreatePage` spells its target `parent`, and it is the only variant that does not spell it
+  `entity`.** This op has two containers and they are not interchangeable — a page is created
+  *inside a space* and *under a parent page*, and Confluence's create wants both. Naming the field
+  for what it is says which of the two the queue orders and holds against;
+  `knobas_sync::write_queue::target_entity` gets an arm of its own for it rather than a wildcard.
+  `parent` is a **mirrored** page (`confluence:98400`), unlike a create's container elsewhere in
+  the enum; `space` is Confluence's own space key and is not an `EntityRef`, because ADR-0010 makes
+  a space a *project* and knobas mirrors no project as an entity.
+
+  **`body` is storage format on both, and `Comment`'s is not.** What an `UpdatePage` carries is
+  mostly a page's *untouched* markup — macros, tables, layouts — which no adapter may re-render, so
+  the dialect crosses the SPI as it will be stored. `Comment.body` is shared with Jira and Gitea,
+  whose comment fields take plain text, so the Confluence adapter renders it
+  (`storage::from_text`: `&` `<` `>` escaped, `&` first; blank line a paragraph, newline a break).
+  The frontend has the same rule in `page-sections.ts`'s `toStorage` for the *page* body, and the
+  two are documented as a pair.
+
+  **Declared by the Confluence adapter alone**, `write_ops: ["comment", "update_page",
+  "create_page"]` with `Capability::Write`; every other adapter refuses both new ops by name, which
+  is battery clause 5 and which `knobas-app/tests/sources_registry.rs`'s whole-table assertion
+  pins across the registry.
+
+  **The hold is the existing mechanism, reading a field that happens to say "version".**
+  `update_page` is listed in `knobas_core::write_queue::PROJECTED_OPS` and takes the **whole-record**
+  shape it shares with `transition` and `approve`, for the sharpest version of their reason: this
+  op replaces a page's body, so anything at all that happened to the page since the reader started
+  typing is something their re-assembled body would delete. That shape already carries the mirrored
+  `payload` verbatim, and a Confluence page keeps `version.number` in it — so the ordinary
+  "snapshot at queue time against snapshot at flush time" comparison **is** the version comparison,
+  and the two sides of a held page edit differ in the version number itself. No payload read was
+  added to `knobas-core`, and ADR-0007's ban on one in the *write* direction stands untouched.
+  `create_page` takes the liveness-only shape: a new page goes beside whatever else sits under its
+  parent, so only the parent leaving the mirror holds it.
+
+  **`base_version` is Confluence's half of the same question**, and the backstop rather than the
+  mechanism: the adapter sends `base_version + 1` and the server aborts with a 409, which catches
+  the window between the last sync and the flush that the mirror cannot see. Both directions
+  matter and neither is sufficient alone (ADR-0012 — delivery is still at-least-once, and a
+  re-sent `update_page` whose first attempt landed is refused by that same version check rather
+  than applied twice).
+
+  **The section rule is a pure function and lives on the frontend**, `app/src/lib/detail/
+  page-sections.ts`: a section is a heading of level one to three and everything until the next
+  heading of the same or higher level, refused when it holds any `ac:` element or a table — or
+  when it sits inside one, which a cell tag in its own slice is the signal for. It
+  re-uses #285's parser for a tag's extent and for a body's words, and scans for **offsets** itself
+  — a `StorageNode` carries no index, and re-assembling the whole body means copying everything
+  outside the edited section byte for byte.
+
+  **What changed on the IPC schema, and it is one thing.** No command, no event, no DTO field: a
+  page write is `submit_write` with a payload, which is the command the *Comment* and status
+  controls already use. What did grow is the **argument** shape of that one command —
+  `knobas_source::WriteOp` gained two variants, so `app/src/lib/ipc/sources.ts`'s `WriteOpPayload`
+  union gained the two matching members. That union is the mirror of the SPI enum rather than a
+  schema of its own, and its own doc comment says it grows with `WriteOp` per ADR-0006; the
+  implementer flags it here rather than deciding it, since §10.8 freezes "the IPC command and
+  event schema" and a reader could reasonably count `submit_write`'s argument as part of it.
+  `crates/knobas-app/tests/sources_mirror.rs` is what holds the two halves together and it was
+  extended with both variants.
+
+  **What did not change.** No migration. `crates/knobas-http/**` and
+  `crates/knobas-app/src/{error,profile}.rs` are untouched. `QueuedWrite` keeps its shape and its
+  mirror. No settings key. No barrel was appended — no command was added.
+  **`knobas-mockd` is untouched** and deliberately: ADR-0013 freezes it and gives Confluence no
+  mock half at all, so the witness is `crates/knobas-app/tests/confluence_live.rs` and
+  `crates/knobas-source-confluence/tests/live_confluence_seeded.rs` against the seeded container,
+  run by `just atlassian-live` (now four suites).
+
+  **The interim payload reads stay interim, and are named here so they are not lost.**
+  `storage-format.ts`'s `storageBodyOf` (#285) is joined by `pageVersionOf` and by a comment's
+  author and instant. All are ADR-0007 interim reads in the *read* direction: one named statement
+  each, gated on `adapter_kind` rather than guessed from the payload's shape, missing to `null` —
+  and for `pageVersionOf` the miss is load-bearing, since a record that does not say what version
+  it is gets **no edit offered** rather than an edit sent against a guess. #277's `KindPaths` has
+  no slot shaped like "a body in this markup dialect" or "the record's own revision number", and
+  adding one is a `crates/knobas-source/src/**` change with its own §10.8 conversation. These reads
+  expire into it when there is one; this ticket did not open that conversation.
+
+  A fourth interim read joins them on the *shell* side: `write-queue.svelte.ts`'s `readSnapshot`
+  reads `payload.version.number` out of a held snapshot so the panel can print which version each
+  side of the comparison is. Gated on the **op** (`update_page`) rather than on the adapter kind,
+  because a snapshot carries no adapter kind and one adapter declares that op — the same rule under
+  a different key, with the same miss to `null`.
+
+  Ratified by the orchestrator as spec #272 and issue #286, whose acceptance criteria specify the
+  two ops, the identifiers and battery probes, the pure section rule, the whole-body re-assembly,
+  the version hold, the live tests and this entry.
 
 **`crates/knobas-sync/**` is NOT frozen — and stream F is expected to restructure it.**
 

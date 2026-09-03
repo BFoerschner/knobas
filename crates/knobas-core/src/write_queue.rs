@@ -344,6 +344,8 @@ pub const PROJECTED_OPS: &[&str] = &[
     "trigger_build",
     "rerun_build",
     "log_work",
+    "create_page",
+    "update_page",
 ];
 
 /// What `op` counts as its target having changed.
@@ -400,8 +402,8 @@ pub const PROJECTED_OPS: &[&str] = &[
 ///   lands.
 ///
 /// **Liveness alone** -- `"create_ticket"`, `"create_branch"`,
-/// `"create_pull_request"`, `"trigger_build"`, `"rerun_build"`, `"log_work"`.
-/// These do not
+/// `"create_pull_request"`, `"trigger_build"`, `"rerun_build"`, `"log_work"`,
+/// `"create_page"`. These do not
 /// overwrite anything: they add a ticket, a branch, a pull request, a queued
 /// build or a worklog *beside* whatever the container holds now, so a change to the
 /// container is not a change to what the write would replace -- there is
@@ -422,6 +424,45 @@ pub const PROJECTED_OPS: &[&str] = &[
 /// the two versions the hold dialog would show them would differ in a comment
 /// that has nothing to do with the time. What does still hold it is the ticket
 /// leaving the mirror -- there is then nothing to log against.
+///
+/// `"create_page"` is in that group for the additive reason and not by
+/// analogy: a new page goes *beside* whatever else sits under its parent, so a
+/// parent whose title or discussion moved on is not a parent this write would
+/// overwrite. What still holds it is the parent **leaving the mirror** -- a
+/// page created under a deleted parent is a page nobody will find. It is the
+/// one create whose container knobas really does mirror, so this is also the
+/// one where that clause has teeth (issue #286).
+///
+/// **The whole mirrored record, and the version inside it** -- `"update_page"`
+/// joins `"transition"` and `"approve"` in the `other` arm below, and the
+/// reason is the sharpest of the three: this op *replaces a page's body*.
+/// Anything at all that happened to the page since the reader started typing
+/// is something their re-assembled body would silently delete.
+///
+/// That arm carries the verbatim `payload`, which is where a Confluence page
+/// keeps `version.number` -- so the two sides of a held `update_page` differ
+/// in the version number itself, and "the mirror's version has passed the one
+/// the edit was made against" is not a separate check bolted on here but the
+/// ordinary snapshot comparison reading a field that happens to say it. The
+/// op's own `base_version` is the *source's* half of the same question:
+/// Confluence is sent `base_version + 1` and aborts on conflict, which is the
+/// backstop for the window between the last sync and the flush that the
+/// mirror cannot see (issue #286, ADR-0012).
+///
+/// **Both of this shape's error directions are the safe one, and both are worth
+/// stating for this op.** A colleague replying to the page bumps no version
+/// number, but the reply rides in `children.comment` inside the payload and in
+/// `body_text` beside it, so it holds the edit -- a *false* hold, over two
+/// bodies that read alike. That is `"transition"`'s trade-off in its own
+/// words: a false hold shows both versions side by side and is one *Apply
+/// anyway* away, a missed hold shows nothing. The panel prints the version
+/// number beside each side precisely so a reader can see at a glance that this
+/// is the false one. And in the other direction, an edit whose `base_version`
+/// was *already* behind the mirror when it was queued -- the reader typed for
+/// two minutes while a sync landed -- is not held, because nothing changed
+/// between queue and flush: the snapshot is of a page that had already moved.
+/// That write goes, and Confluence refuses it on the version. Which is the
+/// division of labour spec #272 asks for, not a hole in it.
 ///
 /// For a create the target is the **container**, and knobas does not mirror
 /// every container: there is no `jira:PAY` item. Such a target projects
@@ -449,7 +490,8 @@ pub fn project(op: &str, target: Option<&Target>) -> serde_json::Value {
         | "create_pull_request"
         | "trigger_build"
         | "rerun_build"
-        | "log_work" => serde_json::json!({
+        | "log_work"
+        | "create_page" => serde_json::json!({
             "op": op,
             "live": live,
         }),
@@ -1062,7 +1104,14 @@ mod tests {
     #[test]
     fn a_judgement_op_holds_on_the_whole_record() {
         let (before, after) = payload_differs();
-        for op in ["transition", "approve"] {
+        // `update_page` is here and not with the creates, and the difference is
+        // the sharpest of the three shapes: this op *replaces a page's body*,
+        // so anything at all that happened to the page since the reader
+        // started typing is something their re-assembled body would delete.
+        // The payload the shape carries is where a Confluence page keeps
+        // `version.number`, which is why "the mirror's version has passed the
+        // one the edit was made against" needs no separate check (#286).
+        for op in ["transition", "approve", "update_page"] {
             assert!(PROJECTED_OPS.contains(&op), "{op} must be stated");
             assert_ne!(
                 project(op, Some(&before)),
@@ -1096,6 +1145,11 @@ mod tests {
             "create_pull_request",
             "trigger_build",
             "rerun_build",
+            // A new page goes *beside* whatever else sits under its parent, so
+            // a parent that was retitled or replied to is not a parent this
+            // write would overwrite -- but a parent that left the mirror is a
+            // page nobody would find the new one under (#286).
+            "create_page",
         ] {
             assert!(PROJECTED_OPS.contains(&op), "{op} must be stated");
             assert_eq!(

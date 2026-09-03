@@ -320,7 +320,9 @@ impl Source for JiraSource {
             | WriteOp::CreatePullRequest { .. }
             | WriteOp::Approve { .. }
             | WriteOp::TriggerBuild { .. }
-            | WriteOp::RerunBuild { .. } => Err(SourceError::protocol(format!(
+            | WriteOp::RerunBuild { .. }
+            | WriteOp::CreatePage { .. }
+            | WriteOp::UpdatePage { .. } => Err(SourceError::protocol(format!(
                 "the Jira adapter does not support {:?}",
                 op.identifier()
             ))),

@@ -174,7 +174,9 @@ impl Source for TeamCitySource {
             | WriteOp::CreateBranch { .. }
             | WriteOp::CreatePullRequest { .. }
             | WriteOp::Approve { .. }
-            | WriteOp::LogWork { .. } => Err(SourceError::protocol(format!(
+            | WriteOp::LogWork { .. }
+            | WriteOp::CreatePage { .. }
+            | WriteOp::UpdatePage { .. } => Err(SourceError::protocol(format!(
                 "the TeamCity adapter does not support {:?}",
                 op.identifier()
             ))),

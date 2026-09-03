@@ -34,7 +34,17 @@
   import PayloadView from "./PayloadView.svelte";
   import { projectPayload } from "./payload";
   import StorageBody from "./StorageBody.svelte";
-  import { pageCommentsOf, parseStorageFormat, storageBodyOf } from "./storage-format";
+  import {
+    pageSections,
+    replaceSectionBody,
+    type PageSection,
+  } from "./page-sections";
+  import {
+    pageCommentsOf,
+    pageVersionOf,
+    parseStorageFormat,
+    storageBodyOf,
+  } from "./storage-format";
 
   let {
     entityId,
@@ -231,10 +241,45 @@
    * tree and has no opinion about where markup comes from — and so the
    * fallback can be decided by whether there *is* a tree.
    */
-  const pageBody = $derived.by(() => {
-    const storage = storageBodyOf(detail?.source.adapter_kind, detail?.payload);
-    return storage === null ? null : parseStorageFormat(storage);
+  const pageStorage = $derived(storageBodyOf(detail?.source.adapter_kind, detail?.payload));
+
+  const pageBody = $derived(pageStorage === null ? null : parseStorageFormat(pageStorage));
+
+  /**
+   * The page's body cut into sections, each with its own rendered tree (#286).
+   *
+   * The **string** is what a section carries offsets into, so the cut is made
+   * over `pageStorage` and each part is parsed from its own slice. The result
+   * is the same nodes {@link pageBody} would have produced, split at the
+   * headings -- which is what lets an *Edit* sit beside one heading's prose
+   * rather than over the whole page.
+   *
+   * `preamble` is what comes before the first heading. It belongs to no
+   * section and is therefore not editable: a paragraph with no heading has
+   * nothing an *Edit* could name.
+   */
+  const pageParts = $derived.by(() => {
+    if (pageStorage === null) return null;
+    const sections = pageSections(pageStorage);
+    return {
+      preamble: parseStorageFormat(pageStorage.slice(0, sections[0]?.start ?? pageStorage.length)),
+      sections: sections.map((section) => ({
+        section,
+        nodes: parseStorageFormat(pageStorage.slice(section.start, section.end)),
+      })),
+    };
   });
+
+  /**
+   * The version the mirror holds for this page, which is what an edit is made
+   * **against** -- `null` when the record does not say.
+   *
+   * The gate on offering an edit at all, and the direction is deliberate: an
+   * `UpdatePage` sent with a guessed `base_version` would either overwrite
+   * somebody's work or be refused by Confluence for a reason the reader cannot
+   * act on. No version, no *Edit* (#286).
+   */
+  const pageVersion = $derived(pageVersionOf(detail?.source.adapter_kind, detail?.payload));
 
   /**
    * The page's comments, in the order its record carries them (#284, #285).
@@ -252,6 +297,8 @@
   const pageComments = $derived(
     pageCommentsOf(detail?.source.adapter_kind, detail?.payload).map((comment) => ({
       id: comment.id,
+      author: comment.author,
+      when: comment.when,
       nodes: parseStorageFormat(comment.storage),
     })),
   );
@@ -395,6 +442,131 @@
       push({ text: `Could not queue the move: ${ipcErrorMessage(rejection)}`, tone: "err" });
     } finally {
       moving = false;
+    }
+  }
+
+  // -- the page section edit and the page comment (#286) ---------------------
+  //
+  // Spec #272's Confluence half, and the two affordances it asks for: one
+  // section of prose at a time, and a reply. Both are queued writes like every
+  // other -- `submitWrite` puts them on the write queue, which decides send,
+  // pend or hold, and nothing here waits for a source.
+
+  /**
+   * Whether this page's sections say anything about editing at all.
+   *
+   * Two things: it is a page whose markup this app can read, and its adapter
+   * declares `update_page` (`submit_write` refuses one that does not, and the
+   * surface that offered it is what is at fault). When this is false the page
+   * renders exactly as it did before #286 -- no offer, and no explanation of
+   * an offer nobody was expecting.
+   */
+  const pageWritesOffered = $derived(
+    pageStorage !== null &&
+      kindRegistry.writeOps(detail?.source.adapter_kind ?? "").includes("update_page"),
+  );
+
+  /**
+   * Whether an edit can actually be *made*, which is the narrower question.
+   *
+   * The record has to say what version it stands at: that is what the edit is
+   * made against, and an `UpdatePage` sent with a guessed `base_version` would
+   * either overwrite somebody's work or be refused for a reason the reader
+   * cannot act on.
+   *
+   * Kept apart from {@link pageWritesOffered} deliberately. Folding the two
+   * would take the **refusal** away with the offer -- a page with no readable
+   * version would show no *Edit*, no sentence saying why, and no way to the
+   * wiki, which is a section that silently offers nothing rather than one that
+   * refuses.
+   *
+   * A *section* may still refuse itself -- see `PageSection.refusal` -- and
+   * that is a per-section fact this flag does not carry.
+   */
+  const canEditPage = $derived(pageWritesOffered && pageVersion !== null);
+
+  /** Whether a comment may be added to this page from here. */
+  const canCommentOnPage = $derived(
+    pageStorage !== null &&
+      kindRegistry.writeOps(detail?.source.adapter_kind ?? "").includes("comment"),
+  );
+
+  /** The section being edited, by its index, or `null`. One at a time. */
+  let editingSection = $state<number | null>(null);
+  /** What the reader has typed into the open section editor. */
+  let sectionDraft = $state("");
+  /** True while a section edit is being queued, so the button cannot double-fire. */
+  let queueingSection = $state(false);
+
+  /** Open the editor on one section, prefilled with the section as it stands. */
+  function editSection(section: PageSection) {
+    editingSection = section.index;
+    sectionDraft = section.text;
+  }
+
+  /**
+   * Queue the edit as a whole-body `UpdatePage`.
+   *
+   * **The whole body**, re-assembled around the edited section: Confluence's
+   * content `PUT` replaces the record, so a write carrying one section would
+   * delete the rest of the page. `replaceSectionBody` copies everything
+   * outside the section byte for byte, macros and tables included.
+   *
+   * `base_version` is the version the **mirror** holds, which is the version
+   * the reader was looking at when they typed. If the page has moved on since,
+   * the write is held with both versions side by side; if it moves on between
+   * the last sync and the flush, Confluence itself aborts. Neither is this
+   * function's job, and that is the point.
+   */
+  async function queueSectionEdit(section: PageSection) {
+    if (pageStorage === null || pageVersion === null || queueingSection) return;
+    queueingSection = true;
+    try {
+      await submitWrite({
+        UpdatePage: {
+          entity: entityId,
+          base_version: pageVersion,
+          body: replaceSectionBody(pageStorage, section, sectionDraft),
+        },
+      });
+      push({ text: `Edit to ${section.heading} queued for ${key}` });
+      editingSection = null;
+      sectionDraft = "";
+    } catch (rejection) {
+      push({ text: `Could not queue the edit: ${ipcErrorMessage(rejection)}`, tone: "err" });
+    } finally {
+      queueingSection = false;
+    }
+  }
+
+  /** True while the comment box is open. */
+  let commenting = $state(false);
+  /** What the reader has typed into the comment box. */
+  let commentDraft = $state("");
+  /** True while a comment is being queued. */
+  let queueingComment = $state(false);
+
+  /**
+   * Queue a comment on this page.
+   *
+   * The op is the SPI's own `Comment` with the **page** as its container --
+   * the same act as a reply on a ticket, so it is the same op. What the reader
+   * typed goes over as text and the adapter renders it into storage format,
+   * which is where the escaping lives: a `<` in somebody's prose must reach
+   * the wiki as a `<` and not as the start of an element.
+   */
+  async function queueComment() {
+    if (commentDraft.trim() === "" || queueingComment) return;
+    queueingComment = true;
+    try {
+      await submitWrite({ Comment: { entity: entityId, body: commentDraft } });
+      push({ text: `Comment queued for ${key}` });
+      commenting = false;
+      commentDraft = "";
+    } catch (rejection) {
+      push({ text: `Could not queue the comment: ${ipcErrorMessage(rejection)}`, tone: "err" });
+    } finally {
+      queueingComment = false;
     }
   }
 
@@ -627,12 +799,98 @@
         two sections, because it is one thing — what this item says — and a
         panel that could show both would show a page twice.
       -->
-      {#if pageBody}
+      {#if pageParts}
         <div class="sec">
           <div class="sec-h"><span class="lab">Description</span></div>
-          <div class="d-body storage">
-            <StorageBody nodes={pageBody} onopenlink={(href) => void open(href)} />
-          </div>
+          {#if pageParts.preamble.length > 0}
+            <div class="d-body storage">
+              <StorageBody nodes={pageParts.preamble} onopenlink={(href) => void open(href)} />
+            </div>
+          {/if}
+          <!--
+            One entry per section, so an *Edit* names the heading it belongs to
+            (#286). A section that refuses itself says why and offers the wiki
+            instead; a page nothing offers page writes for renders exactly as
+            it did before this ticket, with no footer at all.
+          -->
+          {#each pageParts.sections as part (part.section.index)}
+            <div class="pg-sec">
+              {#if editingSection === part.section.index}
+                <div class="pg-edit">
+                  <span class="lab" id="pg-edit-label-{part.section.index}">
+                    {part.section.heading}
+                  </span>
+                  <textarea
+                    class="inp"
+                    aria-labelledby="pg-edit-label-{part.section.index}"
+                    bind:value={sectionDraft}
+                    rows="8"
+                  ></textarea>
+                  {#if part.section.flattens}
+                    <p class="pg-note">
+                      This section has sub-headings, lists or formatting knobas rewrites as plain
+                      paragraphs.
+                    </p>
+                  {/if}
+                  <footer class="pg-acts">
+                    <button
+                      class="btn pri sm"
+                      disabled={queueingSection}
+                      onclick={() => void queueSectionEdit(part.section)}
+                    >
+                      Queue edit
+                    </button>
+                    <button class="btn ghost sm" onclick={() => (editingSection = null)}>
+                      Cancel
+                    </button>
+                  </footer>
+                </div>
+              {:else}
+                <div class="d-body storage">
+                  <StorageBody nodes={part.nodes} onopenlink={(href) => void open(href)} />
+                </div>
+                {#if pageWritesOffered}
+                  <!--
+                    Three states, and the middle one is why `pageWritesOffered`
+                    and `canEditPage` are two flags: a section that refuses
+                    itself, a page knobas cannot tell the version of, and a
+                    section that can be edited. Folding the first two into the
+                    edit gate would take the *refusal* away with the offer, and
+                    a section that silently offers nothing is worse than one
+                    that says why.
+                  -->
+                  <footer class="pg-acts">
+                    {#if part.section.refusal !== null}
+                      <span class="pg-note">
+                        {part.section.refusal === "macro"
+                          ? "This section has a macro, so knobas will not rewrite it."
+                          : "This section has a table, so knobas will not rewrite it."}
+                      </span>
+                      {#if webUrl}
+                        <button class="btn sm" onclick={() => void open(webUrl)}>
+                          Open in browser
+                        </button>
+                      {/if}
+                    {:else if !canEditPage}
+                      <span class="pg-note">
+                        knobas cannot tell what version this page is at, so it will not rewrite
+                        it.
+                      </span>
+                      {#if webUrl}
+                        <button class="btn sm" onclick={() => void open(webUrl)}>
+                          Open in browser
+                        </button>
+                      {/if}
+                    {:else}
+                      <button class="btn sm" onclick={() => editSection(part.section)}>
+                        Edit section
+                      </button>
+                    {/if}
+                  </footer>
+                {/if}
+              {/if}
+            </div>
+          {/each}
         </div>
       {:else if detail.body_text}
         <div class="sec">
@@ -647,17 +905,57 @@
         none: a *Comments* heading over nothing is a section that says only
         that the reader has been counted.
       -->
-      {#if pageComments.length > 0}
+      {#if pageComments.length > 0 || canCommentOnPage}
         <div class="sec">
           <div class="sec-h">
             <span class="lab">Comments</span>
             <span class="k muted">{pageComments.length}</span>
           </div>
           {#each pageComments as comment (comment.id)}
-            <div class="cmt d-body storage">
-              <StorageBody nodes={comment.nodes} onopenlink={(href) => void open(href)} />
+            <div class="cmt">
+              <!--
+                Who wrote it and when, where the record says (#286). Absent
+                rather than "—" per field: a byline that reads "unknown" over
+                somebody's words says less than no byline at all.
+              -->
+              {#if comment.author || comment.when}
+                <div class="cmt-by k muted">
+                  {#if comment.author}<span>{comment.author}</span>{/if}
+                  {#if comment.when}<span>{ago(comment.when)}</span>{/if}
+                </div>
+              {/if}
+              <div class="d-body storage">
+                <StorageBody nodes={comment.nodes} onopenlink={(href) => void open(href)} />
+              </div>
             </div>
           {/each}
+          {#if canCommentOnPage}
+            {#if commenting}
+              <div class="pg-edit">
+                <span class="lab" id="pg-comment-label">Your comment</span>
+                <textarea
+                  class="inp"
+                  aria-labelledby="pg-comment-label"
+                  bind:value={commentDraft}
+                  rows="4"
+                ></textarea>
+                <footer class="pg-acts">
+                  <button
+                    class="btn pri sm"
+                    disabled={queueingComment || commentDraft.trim() === ""}
+                    onclick={() => void queueComment()}
+                  >
+                    Queue comment
+                  </button>
+                  <button class="btn ghost sm" onclick={() => (commenting = false)}>Cancel</button>
+                </footer>
+              </div>
+            {:else}
+              <footer class="pg-acts">
+                <button class="btn sm" onclick={() => (commenting = true)}>Comment</button>
+              </footer>
+            {/if}
+          {/if}
         </div>
       {/if}
 
@@ -832,6 +1130,43 @@
 
   .cmt:first-of-type {
     border-top: 0;
+  }
+
+  /* Who wrote a comment and when, above its words (#286). */
+  .cmt-by {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 2px;
+  }
+
+  /*
+    One section of a page, with whatever it offers under it. No border and no
+    background: the sections are the page's own structure, and boxing each one
+    would make a document look like a form.
+  */
+  .pg-sec + .pg-sec {
+    margin-top: 4px;
+  }
+
+  .pg-acts {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 4px 0 8px;
+  }
+
+  .pg-edit {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 8px 0;
+  }
+
+  .pg-note {
+    color: var(--muted);
+    font-size: 12px;
+    margin: 0;
   }
 
   /*

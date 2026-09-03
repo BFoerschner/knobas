@@ -93,7 +93,7 @@ fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
             entity: target.clone(),
         },
         crate::WriteOp::LogWork {
-            entity: target,
+            entity: target.clone(),
             // A fixed instant, not `Utc::now()`: an adapter that (wrongly)
             // attempted this probe would otherwise write a different worklog
             // on every run, and a battery whose payload moves is one whose
@@ -101,6 +101,25 @@ fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
             started: chrono::DateTime::from_timestamp(1_788_000_000, 0).expect("a fixed instant"),
             seconds: 60,
             comment: "contract battery probe".into(),
+        },
+        crate::WriteOp::CreatePage {
+            // The parent is the probe target like every other container here,
+            // so an adapter that (wrongly) attempted this would 404 on a page
+            // id that does not exist rather than create a page in somebody's
+            // wiki. The space key is the battery's own name for the same
+            // reason: no instance has a space called this.
+            parent: target.clone(),
+            space: "CONTRACTBATTERY".into(),
+            title: "contract battery probe".into(),
+            body: "<p>contract battery probe</p>".into(),
+        },
+        crate::WriteOp::UpdatePage {
+            entity: target,
+            // Version 0 exists on no Confluence page -- the first version is
+            // 1 -- so an adapter that attempted this probe would be refused by
+            // the server rather than overwrite a real page's body.
+            base_version: 0,
+            body: "<p>contract battery probe</p>".into(),
         },
     ]
     .into_iter()

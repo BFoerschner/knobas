@@ -83,6 +83,11 @@ pub enum FlushError {
 /// wildcard here would let a new variant reach the queue with no target: it
 /// would be ordered against nothing and hold against nothing, silently. The
 /// compiler is the reminder.
+///
+/// Most variants spell their target `entity` and share one or-pattern;
+/// `CreatePage` spells it `parent` and gets an arm of its own, which is the
+/// shape this function is meant to have when a variant's target has a better
+/// name than "entity" -- not a licence to leave one unbound.
 #[must_use]
 pub fn target_entity(op: &WriteOp) -> &str {
     match op {
@@ -94,7 +99,13 @@ pub fn target_entity(op: &WriteOp) -> &str {
         | WriteOp::Approve { entity, .. }
         | WriteOp::TriggerBuild { entity }
         | WriteOp::RerunBuild { entity }
-        | WriteOp::LogWork { entity, .. } => entity,
+        | WriteOp::LogWork { entity, .. }
+        | WriteOp::UpdatePage { entity, .. } => entity,
+        // The one variant whose target is not spelled `entity`: a page is
+        // created *under a parent page*, and the parent is what the queue
+        // orders against and what leaving the mirror holds it on. See
+        // `WriteOp::CreatePage` for why the field is named for what it is.
+        WriteOp::CreatePage { parent, .. } => parent,
     }
 }
 

@@ -353,8 +353,16 @@ export function parseStorageFormat(storage: string): StorageNode[] {
 
 type ElementNode = Extract<StorageNode, { kind: "element" }>;
 
-/** One parsed tag. */
-interface Tag {
+/**
+ * One parsed tag.
+ *
+ * Exported with {@link readTag} for `page-sections.ts`, which scans the *same*
+ * markup for heading boundaries and must read a tag the same way this parser
+ * does -- quoted attribute values and all. A second scanner with its own idea
+ * of where a tag ends is how `<img alt="a > b"/>` becomes two different
+ * documents to two readers of one page.
+ */
+export interface Tag {
   name: string;
   closing: boolean;
   selfClosing: boolean;
@@ -370,7 +378,7 @@ interface Tag {
  * half and spill `b"/>` into the page as text. `null` for a `<` that never
  * closes.
  */
-function readTag(source: string, open: number): Tag | null {
+export function readTag(source: string, open: number): Tag | null {
   let quote: string | null = null;
   let end = -1;
   for (let at = open + 1; at < source.length; at += 1) {
@@ -432,8 +440,12 @@ function readAttributes(rest: string): Record<string, string> {
  * reads *link* rather than both reading "macro".
  */
 function macroLabel(tag: Tag): string {
-  const named = tag.attributes["ac:name"]?.trim();
-  if (named !== undefined && named !== "") return `${named} macro`;
+  // Decoded, because the attribute is raw: `ac:name` is the author's word and
+  // `a &amp; b` is not the word they typed. Safe to decode here and nowhere
+  // else in this function's output, since a label leaves as a `text` node --
+  // there is no path by which a decoded `<` becomes an element (#286).
+  const named = decodeEntities(tag.attributes["ac:name"] ?? "").trim();
+  if (named !== "") return `${named} macro`;
   return tag.name.slice("ac:".length).replace(/-/g, " ");
 }
 
@@ -586,6 +598,17 @@ export interface PageComment {
   id: string;
   /** The comment's storage format, verbatim. */
   storage: string;
+  /**
+   * Who wrote it, in the source's own spelling, or `null`.
+   *
+   * The same rule the adapter applies to a *page*'s author
+   * (`knobas_source_confluence::map`): the person who made this version, and
+   * the creator for a comment nobody has edited since. Two answers to one
+   * question would be worse than one that sometimes misses.
+   */
+  author: string | null;
+  /** When it was last written, as the record spells the instant, or `null`. */
+  when: string | null;
 }
 
 /**
@@ -608,8 +631,51 @@ export function pageCommentsOf(
     const storage = at(at(at(entry, "body"), "storage"), "value");
     if (typeof storage !== "string" || storage.trim() === "") return [];
     const id = at(entry, "id");
-    return [{ id: typeof id === "string" ? id : `comment-${index}`, storage }];
+    return [
+      {
+        id: typeof id === "string" ? id : `comment-${index}`,
+        storage,
+        author:
+          text(at(at(at(entry, "version"), "by"), "username")) ??
+          text(at(at(at(entry, "history"), "createdBy"), "username")),
+        when: text(at(at(entry, "version"), "when")),
+      },
+    ];
   });
+}
+
+/**
+ * The **version number** a page's record stands at, or `null`.
+ *
+ * What a section edit is made *against*: `WriteOp::UpdatePage` carries it as
+ * `base_version`, the adapter sends `base_version + 1`, and Confluence aborts
+ * the write if somebody else got there first. A page whose record does not say
+ * what version it is therefore gets **no edit offered** rather than an edit
+ * sent against a guess -- which is this read's stated failure direction and the
+ * reason it answers `null` instead of `1`.
+ *
+ * The same interim payload-read discipline as {@link storageBodyOf}, for the
+ * same reason and with the same expiry: one named read, gated on the adapter
+ * kind rather than guessed from the payload's shape, missing to `null`. #277's
+ * `KindPaths` has no slot shaped like "the record's own revision number"
+ * either, and adding one is a `crates/knobas-source/src/**` change with its own
+ * §10.8 conversation; this read expires into it when there is one.
+ *
+ * An integer, and checked to be one: `version.number` arriving as a string
+ * would otherwise flow into `base_version + 1` as concatenation on the wire.
+ */
+export function pageVersionOf(
+  adapterKind: string | null | undefined,
+  payload: unknown,
+): number | null {
+  if (adapterKind !== STORAGE_FORMAT_ADAPTER) return null;
+  const value = at(at(payload, "version"), "number");
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
+/** A non-blank string at that path, or `null`. Every other shape is a miss. */
+function text(value: unknown): string | null {
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 }
 
 /** One step into an object, or `undefined`. Arrays and `null` are misses. */

@@ -296,6 +296,69 @@ fn tidy(raw: &str) -> String {
         .join("\n")
 }
 
+/// Plain text in, **storage format** out -- the other direction, and the only
+/// one a write takes (issue #286).
+///
+/// `WriteOp::Comment` carries what the reader typed, because it is the same op
+/// Jira and Gitea take and their comment fields are plain text. Confluence's
+/// is not: a body posted as `representation: "storage"` is XHTML, so a `<` in
+/// somebody's prose would either be dropped by the wiki's own sanitizer or
+/// stored as the start of an element they did not write. Translating here is
+/// this adapter's job, and it is the same reasoning as [`to_text`]'s in
+/// reverse.
+///
+/// The rules, and they are deliberately few:
+///
+/// * `&`, `<` and `>` are escaped, `&` **first** -- the mirror image of
+///   [`to_text`]'s "strip before decoding". Escaping `<` first would then
+///   escape the `&` of the `&lt;` it just wrote and produce `&amp;lt;`.
+/// * A blank line starts a new `<p>`; a single newline inside a paragraph
+///   becomes `<br/>`. That is what the Confluence editor does with the same
+///   keystrokes, so a comment reads back the way it was typed.
+/// * Text that is only whitespace produces the empty string rather than an
+///   empty `<p>`. Confluence refuses an empty comment with a 400 carrying its
+///   own sentence, which is a better message than one knobas would invent.
+///
+/// No attribute is ever composed here, so `"` and `'` are left alone: they are
+/// legal character data and escaping them would put `&quot;` in the reader's
+/// prose.
+#[must_use]
+pub(crate) fn from_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 16);
+    for paragraph in text.replace("\r\n", "\n").split("\n\n") {
+        let lines: Vec<&str> = paragraph
+            .split('\n')
+            .map(str::trim_end)
+            .skip_while(|line| line.trim().is_empty())
+            .collect();
+        // `skip_while` cannot reach a trailing blank run, so trim the tail too.
+        let mut lines = lines.as_slice();
+        while lines.last().is_some_and(|line| line.trim().is_empty()) {
+            lines = &lines[..lines.len() - 1];
+        }
+        if lines.is_empty() {
+            continue;
+        }
+        out.push_str("<p>");
+        for (index, line) in lines.iter().enumerate() {
+            if index > 0 {
+                out.push_str("<br/>");
+            }
+            out.push_str(&escape(line));
+        }
+        out.push_str("</p>");
+    }
+    out
+}
+
+/// The three characters that are markup in character data, escaped in the one
+/// order that is not self-defeating.
+fn escape(raw: &str) -> String {
+    raw.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -315,6 +378,61 @@ mod tests {
             username: "knobas",
             user_key: Some("ff8080818f2a1b4c018f2a1c9d0e0001"),
         }
+    }
+    // -- plain text out to the wiki (issue #286) ---------------------------
+
+    /// The whole point of the direction: what a reader types is **character
+    /// data**, and a wiki that received it as markup would either eat it or
+    /// store an element nobody wrote. `&` is escaped first, so the escapes
+    /// this function writes are not escaped again.
+    #[test]
+    fn a_comment_is_escaped_before_it_becomes_markup() {
+        assert_eq!(
+            from_text("use <script> & the a > b case"),
+            "<p>use &lt;script&gt; &amp; the a &gt; b case</p>"
+        );
+        // Not `&amp;lt;`: the order is what keeps this from doubling.
+        assert!(!from_text("<b>").contains("&amp;lt;"));
+    }
+
+    /// A round trip through both directions is the pair's own check: the words
+    /// a reader typed come back as the words they typed, brackets included.
+    #[test]
+    fn what_a_reader_typed_survives_both_directions() {
+        let typed = "3 < 4 && \"quoted\" stays";
+        assert_eq!(to_text(&from_text(typed)), typed);
+    }
+
+    /// Blank line, new paragraph; single newline, a break -- which is what the
+    /// Confluence editor does with the same keystrokes.
+    #[test]
+    fn blank_lines_are_paragraphs_and_single_newlines_are_breaks() {
+        assert_eq!(
+            from_text("first\nsecond\n\nthird"),
+            "<p>first<br/>second</p><p>third</p>"
+        );
+        // A Windows newline is the same keystroke.
+        assert_eq!(from_text("a\r\n\r\nb"), "<p>a</p><p>b</p>");
+        // Runs of blank lines are one break, and leading and trailing ones
+        // produce no empty paragraph.
+        assert_eq!(from_text("\n\n  \na\n\n\n\nb\n\n"), "<p>a</p><p>b</p>");
+    }
+
+    /// Nothing typed is nothing sent -- **not** an empty `<p>`. Confluence
+    /// refuses an empty comment with its own sentence, which is a better
+    /// message than one knobas would compose.
+    #[test]
+    fn text_that_is_only_whitespace_produces_no_markup() {
+        assert_eq!(from_text(""), "");
+        assert_eq!(from_text("   \n\n \t \n"), "");
+    }
+
+    /// Quotes and apostrophes are legal character data here, and escaping them
+    /// would put `&quot;` in somebody's prose. No attribute is ever composed
+    /// by this function, which is what makes that safe.
+    #[test]
+    fn quotes_are_left_alone_because_no_attribute_is_ever_composed() {
+        assert_eq!(from_text("she said \"no\""), "<p>she said \"no\"</p>");
     }
 
     /// The seeded fixture page, in the storage format

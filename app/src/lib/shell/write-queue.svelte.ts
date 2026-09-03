@@ -94,20 +94,60 @@ export interface SnapshotView {
   live: boolean;
   /** Set when the snapshot is not a shape this build knows how to render. */
   raw: string | null;
+  /**
+   * The **version** this side of the comparison is of, where the op has one.
+   *
+   * A held page edit is the one write whose two sides can look identical while
+   * differing in what matters: a wiki page whose body was reformatted, or
+   * moved, or whose macro re-rendered, reads the same stripped down to text.
+   * The number is what says the mirror moved (#286), so the panel shows it
+   * beside each side rather than asking the reader to spot the difference.
+   *
+   * `null` for every other op. Read only from an `update_page` snapshot, which
+   * one adapter declares and no other — so this is gated on the op the same
+   * way `storage-format.ts`'s reads are gated on the adapter kind, and it
+   * misses to `null` like them.
+   */
+  version: number | null;
 }
 
 export function readSnapshot(snapshot: unknown): SnapshotView {
   if (typeof snapshot !== "object" || snapshot === null) {
-    return { text: null, live: false, raw: snapshot === undefined ? null : JSON.stringify(snapshot) };
+    return {
+      text: null,
+      live: false,
+      raw: snapshot === undefined ? null : JSON.stringify(snapshot),
+      version: null,
+    };
   }
   const bag = snapshot as Record<string, unknown>;
   const live = bag.live === true;
-  if (typeof bag.text === "string") return { text: bag.text, live, raw: null };
-  if (bag.text === null) return { text: null, live, raw: null };
+  const version = pageVersion(bag);
+  if (typeof bag.text === "string") return { text: bag.text, live, raw: null, version };
+  if (bag.text === null) return { text: null, live, raw: null, version };
   // A projection this build has no reader for. Shown verbatim rather than
   // hidden: the user is being asked to decide, and "I cannot show you what
   // changed" is information they need in order to answer honestly.
-  return { text: null, live, raw: JSON.stringify(snapshot, null, 2) };
+  return { text: null, live, raw: JSON.stringify(snapshot, null, 2), version };
+}
+
+/**
+ * `version.number` out of an `update_page` snapshot's mirrored payload.
+ *
+ * The whole-record projection carries the payload verbatim, and a Confluence
+ * page keeps its version there. Nothing else is read out of it, and nothing
+ * but `update_page` is read at all: a `version` key means different things in
+ * different sources, and guessing from a payload's shape is the guess ADR-0007
+ * forbids.
+ */
+function pageVersion(bag: Record<string, unknown>): number | null {
+  if (bag.op !== "update_page") return null;
+  const payload = bag.payload;
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return null;
+  const version = (payload as Record<string, unknown>).version;
+  if (typeof version !== "object" || version === null || Array.isArray(version)) return null;
+  const number = (version as Record<string, unknown>).number;
+  return typeof number === "number" && Number.isSafeInteger(number) ? number : null;
 }
 
 /**

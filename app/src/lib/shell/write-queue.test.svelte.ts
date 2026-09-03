@@ -145,18 +145,52 @@ test("a snapshot is read per op, and says so when it cannot be", () => {
     text: "hello",
     live: true,
     raw: null,
+    version: null,
   });
   // A target that is gone is not an unreadable snapshot -- it is a fact.
   expect(readSnapshot({ op: "comment", live: false, text: null })).toEqual({
     text: null,
     live: false,
     raw: null,
+    version: null,
   });
   // A projection this build has no reader for is shown verbatim rather than
   // hidden: the reader is being asked to decide.
   const unknown = readSnapshot({ op: "transition", live: true, payload: { status: "done" } });
   expect(unknown.text).toBeNull();
   expect(unknown.raw).toContain("transition");
+});
+
+/**
+ * **A held page edit shows which version each side is** (#286).
+ *
+ * The one write whose two sides can read alike while differing in what
+ * matters: a page reformatted, moved, or whose macro re-rendered strips to the
+ * same text. The number is what says the mirror moved, and it is read only out
+ * of an `update_page` snapshot — a `version` key means different things in
+ * different sources, so guessing from a payload's shape is the guess ADR-0007
+ * forbids.
+ */
+test("a held page edit says which version each side is, and no other op does", () => {
+  const page = (number: unknown) => ({
+    op: "update_page",
+    live: true,
+    text: "base 30 s.",
+    payload: { version: { number } },
+  });
+  expect(readSnapshot(page(3)).version).toBe(3);
+  expect(readSnapshot(page(4)).version).toBe(4);
+  // The text still renders: the number is beside it, never instead of it.
+  expect(readSnapshot(page(3)).text).toBe("base 30 s.");
+
+  // Every shape that is not a version number is a miss, not a guess.
+  for (const number of ["3", null, 1.5, undefined]) {
+    expect(readSnapshot(page(number)).version, JSON.stringify(number)).toBeNull();
+  }
+  expect(readSnapshot({ op: "update_page", live: true, text: "x" }).version).toBeNull();
+  // Another op carrying the same path is not read at all.
+  expect(readSnapshot({ op: "transition", live: true, payload: { version: { number: 3 } } }).version)
+    .toBeNull();
 });
 
 /**

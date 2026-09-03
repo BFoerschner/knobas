@@ -53,16 +53,32 @@ pub(crate) const MENTION_EXPAND: &str = "version,container";
 ///   of one per page. A server that will not expand this deeply is not a
 ///   failure: [`crate::sync`] completes what it did not get, which is the
 ///   Jira adapter's `complete` under another name.
-/// * `children.comment.version` -- **when** each of those comments was
-///   written. `body_text` has always carried the discussion; without its dates
-///   the record could not say when it last changed, and a page whose only
-///   recent event is a comment would be dated by an edit a year old. Jira
-///   answers this natively -- a comment moves an issue's `fields.updated` --
-///   and this expansion is what lets a Confluence page answer the same
-///   question ([`crate::map`]). A server that will not expand it falls back to
-///   the page's own stamp, which is the behaviour before it was asked for.
-pub(crate) const EXPAND: &str = "body.storage,ancestors,space,version,history,\
-                                 children.comment.body.storage,children.comment.version";
+/// * `children.comment.version` and `children.comment.history` -- **when each
+///   of those comments was written, and by whom.** Two tickets asked for this
+///   expansion for two different reasons and both are kept, because they are
+///   the same fact read twice.
+///
+///   *When* is #287's: `body_text` has always carried the discussion, but
+///   without its dates the record could not say when it last changed, and a
+///   page whose only recent event is a comment would be dated by an edit a
+///   year old. Jira answers this natively -- a comment moves an issue's
+///   `fields.updated` -- and this is what lets a Confluence page answer the
+///   same question ([`crate::map`]).
+///
+///   *By whom* is #286's: the page's own record has carried its author since
+///   #284 and a comment's had none, so the detail's comment section could
+///   render the words and nothing else. `history` is the creator fallback for
+///   a comment nobody has edited since, exactly as it is for a page.
+///
+///   These are the same expansions [`ConfluenceApi::comments`] asks for on the
+///   completion path, which is what makes a comment that arrived with its page
+///   and one that arrived through completion the same shape downstream. A
+///   server that will not expand them falls back to the page's own stamp and
+///   to no byline, which is the behaviour before they were asked for.
+pub const EXPAND: &str = concat!(
+    "body.storage,ancestors,space,version,history,",
+    "children.comment.body.storage,children.comment.version,children.comment.history"
+);
 
 #[async_trait::async_trait]
 pub(crate) trait ConfluenceApi: Send + Sync {
