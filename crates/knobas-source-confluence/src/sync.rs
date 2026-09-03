@@ -329,7 +329,21 @@ mod tests {
 
         /// The rows a CQL asks for, ordered and bounded the way the server
         /// would order and bound them.
-        fn matching(&self, cql: &str, start: usize, limit: usize) -> (Vec<Value>, bool) {
+        ///
+        /// `expand` is honoured for the **comment container**, and that is not
+        /// decoration: it is the only thing offline that can tell whether the
+        /// adapter still asks for the discussion. A fake that answered the
+        /// same rows whatever it was asked would agree with an adapter that
+        /// had stopped asking, and the cost -- one extra request per page,
+        /// every run, for ever -- is invisible in a payload assertion because
+        /// the completion path fills the container in either way.
+        fn matching(
+            &self,
+            cql: &str,
+            expand: &str,
+            start: usize,
+            limit: usize,
+        ) -> (Vec<Value>, bool) {
             let pages = self.pages.lock().unwrap().clone();
             let bound = cql
                 .split_once("lastmodified >= \"")
@@ -348,7 +362,14 @@ mod tests {
                 rows.reverse();
             }
             let total = rows.len();
-            let page: Vec<Value> = rows.into_iter().skip(start).take(limit).collect();
+            let mut page: Vec<Value> = rows.into_iter().skip(start).take(limit).collect();
+            if !expand.contains("children.comment") {
+                for row in &mut page {
+                    if let Some(object) = row.as_object_mut() {
+                        object.remove("children");
+                    }
+                }
+            }
             let more = start + page.len() < total;
             (page, more)
         }
@@ -409,9 +430,11 @@ mod tests {
                 cql.contains("type = page"),
                 "every query this adapter sends is scoped to pages: {cql}"
             );
-            let (rows, more) = self.matching(cql, 0, limit as usize);
-            let _ = expand;
-            Ok(envelope(rows, more.then(|| next_link(cql, limit, limit))))
+            let (rows, more) = self.matching(cql, expand, 0, limit as usize);
+            Ok(envelope(
+                rows,
+                more.then(|| next_link(cql, expand, limit, limit)),
+            ))
         }
 
         async fn follow(
@@ -433,13 +456,16 @@ mod tests {
                     }
                 }
             }
-            let (cql, start, limit) = parse_link(path_and_query);
-            let (rows, more) = self.matching(&cql, start, limit);
+            let (cql, expand, start, limit) = parse_link(path_and_query);
+            let (rows, more) = self.matching(&cql, &expand, start, limit);
             let (start, limit) = (
                 u32::try_from(start + limit).unwrap_or(u32::MAX),
                 u32::try_from(limit).unwrap_or(u32::MAX),
             );
-            Ok(envelope(rows, more.then(|| next_link(&cql, start, limit))))
+            Ok(envelope(
+                rows,
+                more.then(|| next_link(&cql, &expand, start, limit)),
+            ))
         }
 
         async fn comments(
@@ -475,28 +501,31 @@ mod tests {
         .expect("the fake builds a well-formed envelope")
     }
 
-    /// The continuation link Confluence builds: its own cql, start and limit.
-    fn next_link(cql: &str, start: u32, limit: u32) -> String {
+    /// The continuation link Confluence builds: its own cql, expand, start and
+    /// limit. The expansions ride along, which is what makes the walk's later
+    /// pages carry what its first one did.
+    fn next_link(cql: &str, expand: &str, start: u32, limit: u32) -> String {
         format!(
-            "/rest/api/content/search?cql={}&start={start}&limit={limit}&expand={EXPAND}",
+            "/rest/api/content/search?cql={}&start={start}&limit={limit}&expand={expand}",
             cql.replace(' ', "%20")
         )
     }
 
-    fn parse_link(link: &str) -> (String, usize, usize) {
+    fn parse_link(link: &str) -> (String, String, usize, usize) {
         let query = link.split_once('?').expect("a link has a query").1;
-        let mut cql = String::new();
+        let (mut cql, mut expand) = (String::new(), String::new());
         let (mut start, mut limit) = (0usize, 50usize);
         for pair in query.split('&') {
             let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
             match key {
                 "cql" => cql = value.replace("%20", " "),
+                "expand" => expand = value.to_owned(),
                 "start" => start = value.parse().unwrap_or(0),
                 "limit" => limit = value.parse().unwrap_or(50),
                 _ => {}
             }
         }
-        (cql, start, limit)
+        (cql, expand, start, limit)
     }
 
     fn cfg(value: Value) -> ConfluenceConfig {
@@ -835,10 +864,18 @@ mod tests {
         let fake = Fake::new(Vec::new());
         let (items, cursor) = run(&fake, &cfg(json!({})), None).await.unwrap();
         assert!(items.is_empty());
-        assert!(
-            ConfluenceCursor::parse(&cursor).is_some(),
-            "the cursor is one this adapter can read back: {cursor}"
-        );
+        let parsed = ConfluenceCursor::parse(&cursor).unwrap_or_else(|| {
+            panic!("the cursor must be one this adapter can read back: {cursor}")
+        });
+        // **The zone, when the probe could not answer one.** A corpus with no
+        // page in it renders no timestamp, so the offset every later CQL
+        // literal is read in has to be guessed -- and the guess is UTC-12, not
+        // UTC. Guessing the offset *high* moves the query's lower bound
+        // forward and skips edits permanently; guessing it low only re-reads
+        // work upserts absorb. `time.rs` pins the rule; this pins that the
+        // sync run is the caller that applies it, which is where a plausible
+        // `unwrap_or(0)` would live.
+        assert_eq!(parsed.tz_offset_secs, crate::time::MIN_UTC_OFFSET_SECS);
     }
 
     /// A credential the server refuses is refused **before** anything is
