@@ -27,7 +27,7 @@ _Avoid_: plugin, client
 
 **Project**:
 A source's own grouping of its items, where the source has one — a Jira project, a TeamCity project, a Confluence **space** (from M3.2). Per source and in the source's own word: Gitea has no such thing, and its repository is an entity kind rather than a grouping. Not a [Context](#context), which is a working set a person builds. (ADR-0010)
-_Avoid_: container, space, workspace, board (ADR-0009)
+_Avoid_: container, space (as a synonym for project; it stays as Confluence's own word, ADR-0010), workspace, board (ADR-0009)
 
 **Census**:
 The whole-corpus report of every [project](#project) a source's live items show (`list_projects`), which is what the switcher builds project rooms from. Deliberately not a room's own read — that scans the newest 200 items and is a window, not a census, so a quiet project would silently lose its room. (#208)
@@ -145,7 +145,7 @@ The one entity (ticket, page, note, repo, asset) or ad-hoc label a running timer
 _Avoid_: timer context, context
 
 **Block**:
-A knobas-owned interval of time — start, end, [timer target](#timer-target) — and the unit everything about time is built from. **Manual** when the timer made it, **passive** when attribution recorded what was open. Blocks stay local and exportable; none is ever written to a source, and a passive block is never logged without a person saying so. A block remembers which [worklog](#worklog), if any, it was logged into.
+A knobas-owned stretch of time — start, end, [timer target](#timer-target) — and the unit everything about time is built from. **Manual** when the timer made it, **passive** when attribution recorded what was open. Blocks stay local and exportable; none is ever written to a source, and a passive block is never logged without a person saying so. A block remembers which [worklog](#worklog), if any, it was logged into.
 _Avoid_: interval (that is a worklog's editable span), entry, session
 
 **Worklog**:
