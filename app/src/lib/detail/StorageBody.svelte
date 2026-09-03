@@ -12,11 +12,11 @@
   It recurses by importing itself, which is Svelte 5's replacement for the
   deprecated `<svelte:self>`.
 
-  A **link** is a `<button>`, not an `<a>`. An `<a href="https://…">` clicked
-  in a Tauri webview navigates the webview: the app becomes a browser showing
-  a wiki, with no way back. So a body link does what *Open in browser* does —
-  hands the URL to the OS — and the callback is the caller's, which keeps this
-  component free of the IPC and of the toast a refusal needs.
+  A **link** is a `<button>`, not an `<a>`. An anchor with an absolute `href`,
+  clicked in a Tauri webview, navigates the webview: the app becomes a browser
+  showing a wiki, with no way back. So a body link does what *Open in browser*
+  does — hands the URL to the OS — and the callback is the caller's, which
+  keeps this component free of the IPC and of the toast a refusal needs.
 -->
 <script lang="ts">
   import Self from "./StorageBody.svelte";
@@ -40,14 +40,12 @@
   the whole list is rebuilt whenever the body changes, and nothing here holds
   state that a re-order would have to follow.
 -->
-{#each nodes as node, index (index)}{#if node.kind === "text"}{node.text}{:else if node.kind === "macro"}<span
-      class="ac">{node.label}</span>{:else if node.tag === "a"}{#if node.href}{@const href =
-        node.href}<button class="lnk" type="button" onclick={() => onopenlink(href)}
-        ><Self nodes={node.children} {onopenlink} /></button
-      >{:else}<Self nodes={node.children} {onopenlink} />{/if}{:else if node.children.length ===
-    0}<svelte:element this={node.tag} />{:else}<svelte:element this={node.tag}
-      ><Self nodes={node.children} {onopenlink} /></svelte:element
-    >{/if}{/each}
+{#each nodes as node, index (index)}{#if node.kind === "text"}{node.text}{:else if node.kind ===
+    "macro"}<span class="ac">{node.label}</span>{:else if node.tag === "a"}{#if node.href}{@const href =
+      node.href}<button class="lnk" type="button" onclick={() => onopenlink(href)}><Self nodes={node.children} {onopenlink} /></button>{:else}<Self
+      nodes={node.children}
+      {onopenlink}
+    />{/if}{:else if node.children.length === 0}<svelte:element this={node.tag} />{:else}<svelte:element this={node.tag}><Self nodes={node.children} {onopenlink} /></svelte:element>{/if}{/each}
 
 <style>
   /*

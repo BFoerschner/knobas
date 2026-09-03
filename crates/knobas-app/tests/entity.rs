@@ -712,13 +712,17 @@ async fn a_confluence_space_is_a_project_room_and_a_jira_project_is_another() {
     assert_eq!(
         mine,
         vec![
-            (wiki.clone(), "ENG".to_owned(), Some("Engineering".to_owned())),
-            (wiki.clone(), "OPS".to_owned(), Some("Operations".to_owned())),
             (
-                tracker.clone(),
-                "PAY".to_owned(),
-                Some("Payout".to_owned())
+                wiki.clone(),
+                "ENG".to_owned(),
+                Some("Engineering".to_owned())
             ),
+            (
+                wiki.clone(),
+                "OPS".to_owned(),
+                Some("Operations".to_owned())
+            ),
+            (tracker.clone(), "PAY".to_owned(), Some("Payout".to_owned())),
         ],
         "two spaces under the wiki and one project under the tracker, each by \
          its source's own spelling"
