@@ -81,6 +81,52 @@ pub const BEAT_WINDOW_SECONDS: i64 = 30;
 /// only thing in this module a person might reasonably want to argue with.
 pub const FLOOR_SECONDS: i64 = 120;
 
+/// How many days of observations knobas keeps (issue #315).
+///
+/// Thirty, and the number is a floor plus margin rather than a preference:
+///
+/// * **One week timesheet read covers seven days.** [`super::week`] takes at
+///   most [`MOST_DAYS`](super::week::MOST_DAYS) windows and they are one
+///   week, so a Sunday read starts at the Monday before it.
+/// * **The standup digest looks back seven more.** Its *yesterday* is the
+///   most recent day with any activity on it, at most seven days back (#288),
+///   so Monday reads Friday and a week of silence reads a week ago.
+///
+/// Fourteen is therefore the floor the two surfaces put under it -- an
+/// over-count, since both are look-backs from today and only the longer one
+/// truly binds, and taken as the floor anyway because a rule that assumed
+/// they would never compose is a rule that would have to be re-derived the
+/// day one of them moves. Doubled for the margin, which is what covers a
+/// laptop shut for a fortnight and a surface nobody has built yet, and
+/// rounded to a month so that what knobas promises can be said in a sentence:
+/// **it keeps a month of observations.**
+///
+/// **Both numbers are the width of one read, not a bound on how far back a
+/// read may sit**, and no constant here could be: `#/time/<date>` takes any
+/// date, and `week::vet` bounds a timesheet's *column count* and nothing
+/// about where its windows are. So this is a promise and not a proof --
+/// knobas keeps a month, and a day older than that is a day it no longer has
+/// the beats for. Past the horizon the day review offers no passive blocks
+/// and the timesheet's "no target, app open" row reads zero for that day;
+/// what a surface should *say* about such a day is #337's, not this
+/// constant's. Reading one safely is [`materialize`]'s -- see [`prune`].
+pub const RETENTION_DAYS: i64 = 30;
+
+/// The `knobas.setting` key holding the instant before which observations
+/// have actually been thrown away.
+///
+/// `knobas.setting` again, so retention needs no migration -- the same
+/// reasoning [`SETTING_KEY`] and `backup::SCHEDULE_KEY` record.
+///
+/// **Stored rather than recomputed from the clock**, and that is the whole of
+/// what makes the guard in [`materialize`] safe. A guard that asked "is this
+/// day older than [`RETENTION_DAYS`]" would start refusing days whose beats
+/// are all still there, on any database the sweep has never run in -- every
+/// test fixture, every restored archive, every profile whose owner never left
+/// the app running long enough. This stamp says what knobas *did*, so a day
+/// is refused when its record may actually be incomplete and never otherwise.
+const PRUNED_KEY: &str = "time.observations_pruned_before";
+
 /// One heartbeat, as passive attribution sees it.
 ///
 /// The three facts a beat carries and nothing else: when, what was in front of
@@ -430,7 +476,7 @@ const OFFER: &str = "insert into knobas.block (started_at, ended_at, entity_id, 
 /// forgot would draw a day with no passive time and no way to tell that from a
 /// day with none.
 ///
-/// Three things stop it before it writes, and each is a rule rather than an
+/// Four things stop it before it writes, and each is a rule rather than an
 /// optimisation:
 ///
 /// * **The setting is off.** Nothing was recorded, and nothing already offered
@@ -438,6 +484,15 @@ const OFFER: &str = "insert into knobas.block (started_at, ended_at, entity_id, 
 /// * **The day has no observations at all.** Every day before this feature
 ///   existed is such a day, and a reconciliation that spoke about one would
 ///   delete passive blocks it has no evidence either way about.
+/// * **The day reaches back past what [`prune`] has swept.** The same rule
+///   one line further out: a day whose beats retention has taken is a day
+///   knobas has no evidence about either, and it has to read as **absent**
+///   rather than as observed-and-empty. Emptiness would delete the blocks the
+///   day was already offered, which is knobas forgetting an afternoon on the
+///   strength of a record it threw away itself. The guard is on `from` and not
+///   on `to` deliberately: the horizon is an instant and a day is an interval,
+///   so one day always straddles it, and it is exactly that day -- half swept,
+///   half intact -- a `to` comparison would hand to the derivation.
 /// * **A span overlaps a block the person owns.** Passive attribution never
 ///   draws over time a manual block already claims -- including a passive
 ///   block that has since been assigned, which is what stops an assignment
@@ -453,6 +508,9 @@ pub(super) async fn materialize(
     to: DateTime<Utc>,
 ) -> Result<(), IpcError> {
     if !enabled(pool).await? {
+        return Ok(());
+    }
+    if pruned_before(pool).await?.is_some_and(|swept| from < swept) {
         return Ok(());
     }
 
@@ -508,6 +566,117 @@ pub(super) async fn materialize(
     }
     tx.commit().await?;
     Ok(())
+}
+
+/// Every observation older than the horizon goes, in one statement.
+const SWEEP: &str = "delete from knobas.heartbeat where at < $1";
+
+/// Read the stamp; `None` when knobas has never thrown an observation away.
+const STAMP_READ: &str = "select value from knobas.setting where key = $1";
+
+/// Move the stamp. Same upsert `set_enabled` uses, on a different key.
+const STAMP_WRITE: &str = "insert into knobas.setting (key, value) values ($1, $2)
+      on conflict (key) do update set value = excluded.value, updated_at = now()";
+
+/// The oldest instant an observation may carry at `now` and still be kept.
+///
+/// A function of the clock and nothing else, so the rule can be read at a
+/// glance -- the treatment [`derive`] gets, for the same reason. Private:
+/// [`prune`] is the only thing that spends it, and a caller outside this
+/// module holding its own copy of the horizon is the drift the stamp exists
+/// to make impossible.
+fn horizon(now: DateTime<Utc>) -> DateTime<Utc> {
+    now - Duration::days(RETENTION_DAYS)
+}
+
+/// The instant before which knobas no longer has observations.
+///
+/// `None` on a database no sweep has taken anything out of, which is the
+/// answer that lets [`materialize`] reconcile freely: nothing is missing, so
+/// nothing can be missed. A value that no longer decodes reads as `None` too
+/// -- the same resolution `backup::read_setting` records, and it errs the
+/// same way [`enabled`] does, toward doing the ordinary thing rather than
+/// refusing every day on the strength of a row nobody can read.
+///
+/// # Errors
+/// [`IpcError`] if the read fails.
+async fn pruned_before<'e, E>(db: E) -> Result<Option<DateTime<Utc>>, IpcError>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    let stored: Option<serde_json::Value> = sqlx::query_scalar(STAMP_READ)
+        .bind(PRUNED_KEY)
+        .fetch_optional(db)
+        .await?;
+    Ok(stored.and_then(|value| serde_json::from_value(value).ok()))
+}
+
+/// Throw away the observations retention has aged out, and answer with how
+/// many went (issue #315).
+///
+/// `now` is a parameter and not a clock, so the rule is testable at a horizon
+/// a fixture chooses rather than only at one thirty days behind the machine.
+/// Its one production caller is `backup::tick`.
+///
+/// # Where this runs, and why it is not the day read
+///
+/// The obvious home is [`materialize`], which already runs on every day read
+/// and already knows about beats. It is the wrong one: the table grows while
+/// **passive attribution is on**, not while somebody is reviewing, so a sweep
+/// bound to the day read never runs for the reader who switched the feature on
+/// and has not opened the strip since -- the one reader whose table nobody is
+/// bounding. Worse, that reader is also the one for whom the promise
+/// [`RETENTION_DAYS`] makes is a privacy claim: a person who switches passive
+/// attribution *off* is asking knobas to stop keeping a record of what they
+/// had open, and a sweep that only runs on the day read would keep the old one
+/// for as long as they stayed away.
+///
+/// So it runs on the background task that ticks whatever the reader is doing,
+/// which is `backup`'s -- the module that already owns a retention rule (its
+/// archives') and the app's only wall-clock loop that is not per-source. The
+/// rule and the constant stay here; that module contributes the clock.
+///
+/// # The stamp, and why it moves only when something was deleted
+///
+/// The delete and the stamp are **one transaction**, so a day read either sees
+/// every beat and no stamp or the surviving beats and the stamp that explains
+/// them. There is no instant in between for a reconciliation to run in, which
+/// is what makes "what happens to the day the reader is looking at while this
+/// runs" a question with a boring answer.
+///
+/// The stamp moves only when rows actually went, and never backwards. A sweep
+/// that found nothing has thrown nothing away, so it has no claim to record --
+/// and recording one anyway would refuse [`materialize`] a day whose beats are
+/// all still present. The `max` is what keeps a clock that jumped backwards
+/// from un-forgetting rows that are already gone.
+///
+/// # Errors
+/// [`IpcError`] if the delete or either half of the stamp fails.
+pub async fn prune(pool: &PgPool, now: DateTime<Utc>) -> Result<u64, IpcError> {
+    let cut = horizon(now);
+    let mut tx = pool.begin().await?;
+    let taken = sqlx::query(SWEEP)
+        .bind(cut)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    if taken > 0 {
+        let stamp = pruned_before(&mut *tx)
+            .await?
+            .map_or(cut, |had| had.max(cut));
+        sqlx::query(STAMP_WRITE)
+            .bind(PRUNED_KEY)
+            // Spelled as a string here rather than serialized, so there is no
+            // failure to resolve. `serde_json::to_value` cannot fail for a
+            // `DateTime<Utc>`, but the fallback such a call needs would be a
+            // value the read decodes as *never swept* -- which disarms the
+            // guard in `materialize` on the one write that most needs it.
+            .bind(serde_json::Value::String(stamp.to_rfc3339()))
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(taken)
 }
 
 /// Rebuild an observation from its row.
@@ -981,6 +1150,37 @@ mod tests {
         assert_eq!(
             FLOOR_SECONDS, 120,
             "spec #272: visits shorter than two minutes are dropped"
+        );
+    }
+
+    /// The retention window outlasts every surface that reads a past day.
+    ///
+    /// [`RETENTION_DAYS`]' floor, spelled where lowering it fails rather than
+    /// in prose alone. One half is a constant this crate holds
+    /// ([`MOST_DAYS`](super::week::MOST_DAYS)), so a timesheet that grew to a
+    /// fortnight would fail here rather than start quietly reading days whose
+    /// beats had been swept. The other is a literal, because #288's digest
+    /// does not exist yet and a constant invented for it would be this module
+    /// guessing at another module's rule.
+    ///
+    /// **"Outlasts" is about the *width* of a read and not about where a
+    /// reader may point one.** No assertion here could be about the latter:
+    /// both surfaces take an arbitrary past date, so the only thing a
+    /// constant can promise is a window, and what a surface should say once
+    /// it is outside one is #337's. This is why the failure message names a
+    /// span rather than a date.
+    #[test]
+    fn the_retention_window_outlasts_the_surfaces_that_read_a_past_day() {
+        /// The standup digest's *yesterday* reaches back at most this far
+        /// (#288: "at most seven days back, so Monday reads Friday").
+        const DIGEST_LOOK_BACK_DAYS: i64 = 7;
+        let week = i64::try_from(super::super::week::MOST_DAYS).expect("a week is small");
+
+        assert!(
+            RETENTION_DAYS >= week + DIGEST_LOOK_BACK_DAYS,
+            "knobas keeps {RETENTION_DAYS} days of observations and a surface reads \
+back {week} + {DIGEST_LOOK_BACK_DAYS}: a day the reader can still be shown is a \
+day the sweep has taken the beats for"
         );
     }
 }

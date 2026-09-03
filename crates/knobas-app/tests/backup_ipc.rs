@@ -286,6 +286,65 @@ async fn a_directory_named_like_an_archive_is_neither_listed_nor_pruned() {
     );
 }
 
+/// **One tick sweeps the observations retention has aged out** (#315), and it
+/// does so with the nightly export switched off.
+///
+/// The wire, not the rule: `time::passive::prune` has its own tests against a
+/// horizon of their choosing, and what nothing else can witness is that
+/// anything in a running knobas ever calls it. The schedule is off on purpose
+/// -- a sweep that only happened on the nights a backup was written would
+/// leave the table of a person who turned backups off growing for ever, and a
+/// test that let the export run could not tell the two arrangements apart.
+#[tokio::test]
+async fn a_tick_sweeps_the_observations_retention_has_aged_out() {
+    let (service, _dir) = service("sweep").await;
+    backup::save_schedule(
+        &service.pool,
+        BackupSchedule {
+            enabled: false,
+            ..BackupSchedule::default()
+        },
+    )
+    .await
+    .expect("a schedule that never comes due");
+
+    let now = chrono::Utc::now();
+    let retention = chrono::Duration::days(knobas_app::time::passive::RETENTION_DAYS);
+    for at in [
+        now - retention - chrono::Duration::days(1),
+        now - chrono::Duration::days(1),
+    ] {
+        sqlx::query("insert into knobas.heartbeat (at, entity_id) values ($1, 'jira:PAY-231')")
+            .bind(at)
+            .execute(&service.pool)
+            .await
+            .expect("an observation in the past");
+    }
+
+    backup::tick(&service).await;
+
+    let kept: Vec<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("select at from knobas.heartbeat order by at")
+            .fetch_all(&service.pool)
+            .await
+            .expect("the observations are readable");
+    assert_eq!(
+        kept.len(),
+        1,
+        "the tick left the table exactly as it found it: nothing calls the sweep"
+    );
+    assert!(
+        kept[0] > now - retention,
+        "the tick swept the wrong side of the horizon: {:?}",
+        kept[0]
+    );
+    assert_eq!(
+        backup::status(&service).await.expect("status").last,
+        None,
+        "the sweep must not have depended on an export being due"
+    );
+}
+
 /// *Restore*, minimal: a name that is not an archive in this profile's
 /// directory is refused before anything touches the database.
 ///
