@@ -366,7 +366,8 @@ Both are then set up unattended, in about three minutes from empty volumes:
 eval "$(./fetch-timebomb-keys.sh)"
 
 docker compose --profile real-atlassian up -d jira-db jira confluence-db confluence
-./seed --atlassian          # or ./seed-atlassian.sh jira|confluence
+./seed --atlassian          # the wizards, then the Tidewater content (next section);
+                            # or ./seed-atlassian.sh jira|confluence for the wizards alone
 eval "$(./seed --env)"      # adds KNOBAS_JIRA_* and KNOBAS_CONFLUENCE_*
 ```
 
@@ -590,7 +591,7 @@ history.
 | `./seed-gitea.sh` | Org, users, repos, branches, commits, PRs, comments, reviews. |
 | `./seed-kuma.sh` | Kuma admin account, monitors, API key. |
 | `./fetch-timebomb-keys.sh` | Pulls the two 10-user, 3-hour Data Center timebomb keys off Atlassian's public page, checks each decodes to the right product, prints `export` lines (`--write` also drops them in the git-ignored `.env.licences`). `seed-atlassian.sh` calls it when a key is unset. |
-| `./seed-atlassian.sh` | The real Jira and Confluence containers' setup wizards, unattended (`--profile real-atlassian`). |
+| `./seed-atlassian.sh` | The real Jira and Confluence containers' setup wizards, unattended (`--profile real-atlassian`); `./seed --atlassian` runs the script below after it. |
 | `./seed-atlassian-content.sh` | The Tidewater people, projects, issues, comments, worklogs and links in the real Jira; the ENG space, pages and comments in the real Confluence. `--verify` reads PAY-231 and one page back. `just atlassian-live` runs the whole window. |
 | `./seed-teamcity.sh` | The real TeamCity container's first start, an access token and one authorised agent (`--profile real-teamcity`); then runs the script below. |
 | `./seed-teamcity-builds.sh` | The Tidewater projects, build configurations, VCS roots and builds in the real TeamCity; `--running` for the fixture's running build. |

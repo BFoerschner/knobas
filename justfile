@@ -467,7 +467,8 @@ teamcity-live-seeded:
 # yet: 4 min 3 s wall clock -- seeded and verified at 3 min 51 s, of which
 # the two wizard walks and Jira's final start are about three minutes and
 # the content seed about a minute (310 key placeholders in and out again);
-# `down -v` 11 s. A live suite is minutes, not hours, so the three-hour window
+# `down -v` 11 s; 4 min 15 s on a second run with a full `just check` going
+# alongside. A live suite is minutes, not hours, so the three-hour window
 # holds with more than two and a half hours of margin; the number to
 # re-measure is the one in this header, when a suite is added below.
 #
@@ -523,8 +524,10 @@ atlassian-live:
     trap 'teardown' EXIT
     trap 'trap - EXIT INT; teardown; kill -INT $$' INT
     trap 'trap - EXIT TERM; teardown; kill -TERM $$' TERM
-    docker compose --profile real-atlassian up -d jira-db jira confluence-db confluence
-    ./seed-atlassian.sh                   # waits for health, walks both wizards
+    # `--wait` holds for the two databases' healthchecks; the products have none,
+    # and seed-atlassian.sh is what waits for FIRST_RUN before touching a wizard.
+    docker compose --profile real-atlassian up -d --wait jira-db jira confluence-db confluence
+    ./seed-atlassian.sh                   # waits for each product, walks both wizards
     ./seed-atlassian-content.sh           # the Tidewater content
     ./seed-atlassian-content.sh --verify  # PAY-231 with its worklogs, one page with its body
     eval "$(./seed --env)"

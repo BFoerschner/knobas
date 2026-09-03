@@ -4,7 +4,8 @@
 #
 #   ./seed             seed Gitea and Uptime Kuma, then print the adapter env vars
 #   ./seed --env       print the env vars for an already-seeded environment
-#   ./seed --atlassian set up the opt-in real Jira and Confluence containers
+#   ./seed --atlassian set up the opt-in real Jira and Confluence containers,
+#                      then seed the Tidewater content into both
 #   ./seed --teamcity  set up the opt-in real TeamCity server and its agent,
 #                      then seed the Tidewater builds into it
 #   ./seed --teamcity --running
@@ -60,7 +61,7 @@ print_env() {
 }
 
 if [ "${1:-}" = "--env" ]; then print_env; exit 0; fi
-if [ "${1:-}" = "--atlassian" ]; then exec ./seed-atlassian.sh; fi
+if [ "${1:-}" = "--atlassian" ]; then ./seed-atlassian.sh && exec ./seed-atlassian-content.sh; fi
 if [ "${1:-}" = "--teamcity" ]; then shift; exec ./seed-teamcity.sh "$@"; fi
 [ $# -eq 0 ] || {
   echo "seed: unknown argument '$1'; usage: ./seed [--env|--atlassian|--teamcity [--running]]" >&2; exit 2; }

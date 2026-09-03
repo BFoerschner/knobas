@@ -74,8 +74,9 @@
 # WHAT THIS CANNOT REPRODUCE -- see README.md, "Jira and Confluence, end to
 # end": created and updated timestamps (the server stamps now), the
 # fixture's `spent_week_m` (a worklog sum the fixture's worklogs do not add up
-# to), and a Confluence page's `edited` date and author. Ids the server assigns (page ids, comment ids, worklog ids) go to
-# seed-state.json so a live suite can look them up.
+# to), `assigned_by` (Jira has no such field), and a Confluence page's
+# `edited` date and author. Ids the server assigns (page ids, comment ids,
+# worklog ids) go to seed-state.json so a live suite can look them up.
 #
 # ENDPOINT PROVENANCE. Jira: every path is in the vendored
 # testenv/specs/jira-dc-rest.wadl (`project`, `user`, `field`,
@@ -186,7 +187,10 @@ verify() {
     [ "$(printf '%s' "$API_BODY" | jq -r .key)" = "PAY-231" ] || { echo "  key is not PAY-231" >&2; _fail=1; }
   fi
 
-  _title="SEPA payout retry design"
+  # The page with a body, and its first `## ` heading -- from the fixture, so
+  # a renamed page in work.json is still what this checks for.
+  _title=$(jqf '[.pages[] | select(.body)] | first | .title')
+  _heading=$(jqf '[.pages[] | select(.body)] | first | .body | split("## ")[1] | split(" — ")[0]')
   say "verify: GET $CONF_URL/rest/api/content?spaceKey=$SPACE_KEY&title=$(urlenc "$_title")"
   conf GET "/rest/api/content?spaceKey=$SPACE_KEY&type=page&title=$(urlenc "$_title")&expand=body.storage,ancestors,version"
   if [ "$API_STATUS" != "200" ] || [ "$(printf '%s' "$API_BODY" | jq '.size // 0')" -lt 1 ]; then
@@ -194,8 +198,8 @@ verify() {
   else
     printf '%s' "$API_BODY" | jq '.results[0] | {id, title, version: .version.number,
       ancestors: [.ancestors[].title], body: .body.storage.value}'
-    printf '%s' "$API_BODY" | jq -e '.results[0].body.storage.value | contains("Backoff policy")' >/dev/null \
-      || { echo "  page body does not contain \"Backoff policy\"" >&2; _fail=1; }
+    printf '%s' "$API_BODY" | jq -e --arg h "<h2>$_heading</h2>" '.results[0].body.storage.value | contains($h)' >/dev/null \
+      || { echo "  page body does not contain \"<h2>$_heading</h2>\"" >&2; _fail=1; }
   fi
   [ "$_fail" -eq 0 ] || die "verify FAILED"
   say "verify ok: PAY-231 with its worklogs, and \"$_title\" with its body"
@@ -232,6 +236,7 @@ done
 # project names one.
 PROJECTS_JSON=$(jqf '[.tickets[] | {key: (.key | split("-")[0]), name: (.project.name // empty)}]
   | group_by(.key) | map({key: .[0].key, name: (map(.name) | first)})')
+PROJECT_KEYS=$(printf '%s' "$PROJECTS_JSON" | jq -r '.[].key')
 for row in $(printf '%s' "$PROJECTS_JSON" | jq -r '.[] | @base64'); do
   d=$(printf '%s' "$row" | base64 -d)
   pkey=$(printf '%s' "$d" | jq -r .key)
@@ -249,14 +254,17 @@ done
 jira GET /rest/api/2/issuetype
 expect "list issue types" 200
 ALL_TYPES=$API_BODY
-for row in $(printf '%s' "$PROJECTS_JSON" | jq -r '.[] | @base64'); do
-  pkey=$(printf '%s' "$row" | base64 -d | jq -r .key)
+for pkey in $PROJECT_KEYS; do
   jira GET "/rest/api/2/project/$pkey"
   expect "read project $pkey" 200
   have_types=$(printf '%s' "$API_BODY" | jq -c '[.issueTypes[].name]')
-  missing=$(jqf "[.tickets[] | select(.key | startswith(\"$pkey-\")) | .type] | unique | .[]" \
-            | while read -r t; do printf '%s' "$have_types" | jq -e --arg t "$t" 'index($t)' >/dev/null || echo "$t"; done)
-  if [ -z "$missing" ]; then skip "issue types of $pkey ($(printf '%s' "$have_types" | jq -r 'join(", ")'))"; continue; fi
+  # A JSON array end to end: a type name may carry a space ("New Feature").
+  missing=$(jq --arg p "$pkey-" --argjson have "$have_types" \
+    '[.tickets[] | select(.key | startswith($p)) | .type] | unique - $have' "$FIXTURE")
+  if [ "$(printf '%s' "$missing" | jq 'length')" -eq 0 ]; then
+    skip "issue types of $pkey ($(printf '%s' "$have_types" | jq -r 'join(", ")'))"; continue
+  fi
+  missing_names=$(printf '%s' "$missing" | jq -r 'join(", ")')
   jira GET /rest/api/2/issuetypescheme
   expect "list issue type schemes" 200
   scheme=''
@@ -268,12 +276,12 @@ for row in $(printf '%s' "$PROJECTS_JSON" | jq -r '.[] | @base64'); do
   [ -n "$scheme" ] || die "no issue type scheme is associated with project $pkey"
   jira GET "/rest/api/2/issuetypescheme/$scheme?expand=defaultIssueType,issueTypes"
   expect "read scheme $scheme" 200
-  body=$(printf '%s' "$API_BODY" | jq --argjson all "$ALL_TYPES" --arg m "$(printf '%s' "$missing" | tr '\n' ' ')" \
+  body=$(printf '%s' "$API_BODY" | jq --argjson all "$ALL_TYPES" --argjson m "$missing" \
     '{name, description, defaultIssueTypeId: (.defaultIssueType.id // empty),
-      issueTypeIds: ([.issueTypes[].id] + [$all[] | select(.name as $n | ($m | split(" ") | index($n))) | .id])}')
+      issueTypeIds: ([.issueTypes[].id] + [$all[] | select(.name as $n | $m | index($n)) | .id])}')
   jira PUT "/rest/api/2/issuetypescheme/$scheme" "$body"
-  expect "add $(printf '%s' "$missing" | tr '\n' ' ') to scheme $scheme of $pkey" 200
-  created "issue type(s) $(printf '%s' "$missing" | tr '\n' ' ') in the scheme of $pkey"
+  expect "add $missing_names to scheme $scheme of $pkey" 200
+  created "issue type(s) $missing_names in the scheme of $pkey"
 done
 
 # -- the two Epic custom fields, by name ------------------------------------
@@ -352,7 +360,9 @@ for row in $ISSUES; do
   # -- status: the fixture's, when the workflow has it ----------------------
   want=$(printf '%s' "$d" | jq -r .status)
   have=$(printf '%s' "$API_BODY" | jq -r .fields.status.name)
-  if [ "$have" != "$want" ]; then
+  if [ "$have" = "$want" ]; then
+    skip "status of $key ($have)"
+  else
     jira GET "/rest/api/2/issue/$key/transitions"
     expect "transitions of $key" 200
     tid=$(printf '%s' "$API_BODY" | jq -r --arg s "$want" '.transitions[] | select(.to.name==$s) | .id' | head -n 1)
@@ -441,8 +451,7 @@ for row in $ISSUES; do
            worklogs: [$i.fields.worklog.worklogs[] | {id, comment, timeSpentSeconds}]}]')
 done
 STATUSES='{}'
-for row in $(printf '%s' "$PROJECTS_JSON" | jq -r '.[] | @base64'); do
-  pkey=$(printf '%s' "$row" | base64 -d | jq -r .key)
+for pkey in $PROJECT_KEYS; do
   jira GET "/rest/api/2/project/$pkey/statuses"
   expect "statuses of $pkey" 200
   STATUSES=$(printf '%s' "$STATUSES" | jq --arg k "$pkey" --argjson s "$(printf '%s' "$API_BODY" | jq '[.[0].statuses[].name]')" '. + {($k): $s}')
@@ -478,10 +487,15 @@ HOME_ID=$(printf '%s' "$API_BODY" | jq -r '.homepage.id // empty')
 
 # The fixture's page body is a flat string of "## Heading — text" sections;
 # storage format wants <h2> and <p>, with `code` and *em* as their tags. A
-# page with no body is created empty.
+# page with no body is created empty. A comment is one <p>. Both escape the
+# same three characters, through the one jq definition below.
+# shellcheck disable=SC2016
+JQ_ESC='def esc: gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;");'
+comment_storage() {  # comment_storage <text>
+  jq -rn --arg t "$1" "$JQ_ESC"' "<p>\($t | esc)</p>"'
+}
 page_storage() {  # page_storage <fixture body or empty>
-  jq -rn --arg b "$1" '
-    def esc: gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;");
+  jq -rn --arg b "$1" "$JQ_ESC"'
     def inline: esc
       | gsub("`(?<c>[^`]+)`"; "<code>\(.c)</code>")
       | gsub("\\*(?<e>[^*]+)\\*"; "<em>\(.e)</em>");
@@ -495,7 +509,7 @@ page_storage() {  # page_storage <fixture body or empty>
 }
 
 PAGE_IDS='[]'
-for row in $(jqf '.pages[] | select(.space == "ENG") | @base64'); do
+for row in $(jq -r --arg k "$SPACE_KEY" '.pages[] | select(.space == $k) | @base64' "$FIXTURE"); do
   d=$(printf '%s' "$row" | base64 -d)
   title=$(printf '%s' "$d" | jq -r .title)
   fid=$(printf '%s' "$d" | jq -r .id)
@@ -520,7 +534,7 @@ for row in $(jqf '.pages[] | select(.space == "ENG") | @base64'); do
   comment_ids='[]'
   for c in $(printf '%s' "$d" | jq -r '.comments[]? | @base64'); do
     text=$(printf '%s' "$c" | base64 -d | jq -r .text)
-    html=$(jq -rn --arg t "$text" '"<p>\($t | gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;"))</p>"')
+    html=$(comment_storage "$text")
     cid=$(printf '%s' "$have_comments" | jq -r --arg h "$html" '.results[] | select(.body.storage.value == $h) | .id' | head -n 1)
     if [ -n "$cid" ]; then
       skip "comment on \"$title\" (id $cid)"
