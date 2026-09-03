@@ -170,6 +170,24 @@ const TRANSPARENT_AC: ReadonlySet<string> = new Set([
   "ac:layout-cell",
 ]);
 
+/**
+ * How deep the rendered tree may nest before a wrapper is dropped.
+ *
+ * **`StorageBody.svelte` recurses**, one component instance per level, so a
+ * body's nesting depth is a JavaScript stack depth at render time — and a page
+ * body is untrusted input. Measured: a body of ~150 nested `<b>` elements
+ * overflows the stack under the test runner, and the throw happens inside
+ * Svelte's flush where nothing catches it, so one adversarial page would take
+ * the window down rather than merely render badly. The parser itself is
+ * iterative and has no such limit; this cap is the renderer's.
+ *
+ * Past the cap an allow-listed element is **unwrapped** — the same treatment a
+ * `<span>` gets, so every word survives and only structure nobody wrote on
+ * purpose is lost. 64 is far above anything prose reaches (a table inside a
+ * list inside a quote is about six) and far below where the stack complains.
+ */
+const MAX_ELEMENT_DEPTH = 64;
+
 /** Containers in which only elements are legal, so stray whitespace is noise. */
 const ELEMENT_ONLY: ReadonlySet<string> = new Set([
   "ul",
@@ -194,6 +212,8 @@ export function parseStorageFormat(storage: string): StorageNode[] {
   /** Open elements, innermost last. `node === null` is an unwrapped frame. */
   const stack: { name: string; node: ElementNode | null; children: StorageNode[] }[] = [];
   const into = () => (stack.length > 0 ? stack[stack.length - 1]!.children : root);
+  /** Open *element* frames — the depth of the tree the renderer will recurse. */
+  let depth = 0;
 
   let at = 0;
   while (at < storage.length) {
@@ -249,11 +269,15 @@ export function parseStorageFormat(storage: string): StorageNode[] {
       if (!tag.selfClosing) at = skipSubtree(storage, at, tag.name);
       continue;
     }
+    // `DROPPED` is consulted **before** `ALLOWED`, deliberately: the two lists
+    // are disjoint today, and this order is what keeps a future edit that adds
+    // a name to both from turning a skip into a rendered element. Refusal wins
+    // over permission.
     if (DROPPED.has(tag.name)) {
       if (!tag.selfClosing) at = skipSubtree(storage, at, tag.name);
       continue;
     }
-    if (ALLOWED_SET.has(tag.name)) {
+    if (ALLOWED_SET.has(tag.name) && depth < MAX_ELEMENT_DEPTH) {
       const allowed = tag.name as AllowedTag;
       if (VOID_TAGS.has(allowed) || tag.selfClosing) {
         into().push({ kind: "element", tag: allowed, href: null, children: [] });
@@ -266,10 +290,14 @@ export function parseStorageFormat(storage: string): StorageNode[] {
         children: [],
       };
       stack.push({ name: tag.name, node, children: node.children });
+      depth += 1;
       continue;
     }
     // Anything else — a `<span>`, a `<div>`, an `ac:layout`, a namespace this
-    // app has never heard of — is unwrapped: the wrapper goes, the words stay.
+    // app has never heard of, and an allow-listed element past
+    // {@link MAX_ELEMENT_DEPTH} — is unwrapped: the wrapper goes, the words
+    // stay. An unwrapped frame costs no render recursion, so nesting below the
+    // cap is bounded however deep the markup goes.
     if (!tag.selfClosing) stack.push({ name: tag.name, node: null, children: [] });
   }
 
@@ -311,8 +339,14 @@ export function parseStorageFormat(storage: string): StorageNode[] {
     while (stack.length > found) {
       const frame = stack.pop()!;
       const parent = stack.length > 0 ? stack[stack.length - 1]!.children : root;
-      if (frame.node) parent.push(frame.node);
-      else parent.push(...frame.children);
+      if (frame.node) {
+        parent.push(frame.node);
+        depth -= 1;
+      } else {
+        // One at a time rather than a spread: a frame's children are a page's,
+        // and `push(...huge)` is an argument list, which has a limit.
+        for (const child of frame.children) parent.push(child);
+      }
     }
   }
 }

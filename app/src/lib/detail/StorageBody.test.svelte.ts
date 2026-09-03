@@ -446,3 +446,29 @@ test("a payload with nothing readable at either path misses rather than guessing
     }),
   ).toEqual([{ id: "comment-0", storage: "<p>x</p>" }]);
 });
+
+/**
+ * **A body nested past the cap renders, rather than taking the window down.**
+ *
+ * `StorageBody` recurses once per level, so a page's nesting depth is a
+ * JavaScript stack depth at render time, and a page body is untrusted input.
+ * Before `MAX_ELEMENT_DEPTH` this mount threw a stack overflow at around 150
+ * nested elements — inside Svelte's flush, where this app has no boundary to
+ * catch it, so one page written to do it would blank the window for whoever
+ * opened it.
+ *
+ * Asserted on the DOM after mount, like everything else here, and asserted in
+ * both directions: the words all arrive, and the tree the renderer had to walk
+ * is bounded. The wrappers past the cap are unwrapped exactly as a `<span>` is
+ * — structure nobody wrote on purpose is the only thing lost.
+ */
+test("a body nested deeper than a page ever is still renders its words", () => {
+  const depth = 4000;
+  const screen = render(`${"<b>".repeat(depth)}deep${"</b>".repeat(depth)}`);
+
+  expect(screen.text(), "the words of a deeply nested body were lost").toBe("deep");
+  const nesting = (node: Element): number =>
+    1 + Math.max(0, ...[...node.children].map((child) => nesting(child)));
+  expect(nesting(screen.target), "the rendered tree is not bounded").toBeLessThanOrEqual(80);
+  screen.done();
+});
