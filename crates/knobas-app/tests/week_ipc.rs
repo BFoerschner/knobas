@@ -789,3 +789,226 @@ async fn a_block_through_midnight_is_booked_on_monday_and_covers_tuesdays_small_
 
     state.scheduler.shutdown().await;
 }
+
+// -- discarding a queued worklog (#328) --------------------------------------
+
+/// Is there still a `knobas.worklog` row with this id?
+async fn copy_exists(pool: &PgPool, worklog: i64) -> bool {
+    sqlx::query_scalar::<_, i64>("select count(*) from knobas.worklog where id = $1")
+        .bind(worklog)
+        .fetch_one(pool)
+        .await
+        .expect("the worklog table is readable")
+        == 1
+}
+
+/// What Jira called this copy, as the copy itself has it.
+async fn remote_id_of(pool: &PgPool, worklog: i64) -> Option<String> {
+    sqlx::query_scalar("select remote_id from knobas.worklog where id = $1")
+        .bind(worklog)
+        .fetch_one(pool)
+        .await
+        .expect("the worklog is readable")
+}
+
+/// **Withdrawing a queued worklog gives the afternoon back** (issue #328).
+///
+/// The four columns the ticket names, each of which a discard used to leave
+/// wrong for good, and all four of them are one fact seen from four places --
+/// so all four are asserted here rather than split, because an implementation
+/// that fixed one and not the rest is exactly the failure that shipped:
+///
+/// 1. the week draws the time as **held**, permanently;
+/// 2. `unlogged` stays **zero**, so story 41's honest total understates;
+/// 3. ***Log all*** never offers the blocks again (`plan` is empty);
+/// 4. the **day review** will not let them be edited by hand either -- the
+///    `worklog_id is null` guard on `day::update` is the read-only rule.
+///
+/// **Tuesday is the control.** A second day is logged and *not* discarded, so
+/// the release has something it must leave alone: a statement that deleted
+/// every worklog, or released every block, would pass every Monday assertion
+/// below and fail here.
+///
+/// The source refuses the credential throughout, which is what keeps the write
+/// `pending` rather than `sent` -- a settled write is not discardable at all
+/// (`discard` narrows on `state in ('pending','held','refused')`), so a fixture
+/// that let it settle would be testing nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn discarding_a_queued_worklog_gives_the_afternoon_back() {
+    let (state, wrote) = app("week_ipc_discard").await;
+    *wrote.fault.lock().unwrap() = Some(401);
+
+    let monday_block = block(&state.pool, MONDAY, (9, 0), (10, 0), TICKET, "manual").await;
+    let monday = time::worklog::log(&state, TICKET, date(MONDAY), 0, at(MONDAY, 9, 0), 3_600, "")
+        .await
+        .expect("Monday is logged");
+
+    let tuesday_block = block(&state.pool, MONDAY + 1, (9, 0), (10, 0), TICKET, "manual").await;
+    let tuesday = time::worklog::log(
+        &state,
+        TICKET,
+        date(MONDAY + 1),
+        0,
+        at(MONDAY + 1, 9, 0),
+        3_600,
+        "",
+    )
+    .await
+    .expect("Tuesday is logged");
+
+    // The state the discard is about to act on, read back rather than assumed.
+    let queued = monday.write_queue_id.expect("a write carries the worklog");
+    assert_eq!(
+        knobas_core::write_queue::get(&state.pool, queued)
+            .await
+            .expect("the queue row is readable")
+            .expect("the row exists")
+            .state,
+        WriteState::Pending,
+        "the fixture needs an open write -- a settled one cannot be discarded"
+    );
+    assert_eq!(worklog_id_of(&state.pool, monday_block).await, Some(monday.id));
+
+    // The withdrawal itself, through the seam `discard_write` shims.
+    let discarded = knobas_sync::write_queue::discard(state.scheduler.deps(), queued)
+        .await
+        .expect("the discard runs")
+        .expect("there was an open write to withdraw");
+    assert_eq!(discarded.state, WriteState::Discarded);
+
+    // The block is knobas' own again, and the copy of a record Jira never took
+    // is gone with the write that was going to make it.
+    assert_eq!(
+        worklog_id_of(&state.pool, monday_block).await,
+        None,
+        "a discarded worklog gives its blocks back"
+    );
+    assert!(
+        !copy_exists(&state.pool, monday.id).await,
+        "nothing was sent, so there is no record to keep a copy of"
+    );
+
+    // 1 and 2: the week says unlogged, not held.
+    let sheet = time::week::read(&state.pool, &week())
+        .await
+        .expect("the week reads");
+    let row = row_for(&sheet, Some(TICKET)).expect("the ticket has a row");
+    let cell = row.cells[column(MONDAY)];
+    assert_eq!(cell.tracked_seconds, 3_600);
+    assert_eq!(cell.logged_seconds, 0);
+    assert_eq!(
+        cell.held_seconds, 0,
+        "a withdrawn write holds nothing -- there is no worklog left to hold it"
+    );
+    assert_eq!(
+        cell.unlogged_seconds, 3_600,
+        "the hour is unlogged again, which is what story 41's honest total needs"
+    );
+
+    // 3: *Log all* offers the afternoon again.
+    let planned = time::week::plan(&state.pool, state.registry.as_ref(), &week())
+        .await
+        .expect("the plan reads");
+    assert_eq!(
+        planned
+            .iter()
+            .map(|entry| (entry.day, entry.entity_id.clone(), entry.seconds))
+            .collect::<Vec<_>>(),
+        vec![(date(MONDAY), TICKET.to_owned(), 3_600)],
+        "Monday is loggable again and Tuesday is still spoken for: {planned:?}"
+    );
+
+    // 4: and so does the day review -- the read-only rule is off this block.
+    time::day::update(
+        &state.pool,
+        monday_block,
+        at(MONDAY, 9, 0),
+        at(MONDAY, 9, 30),
+        time::TimerTarget::Entity {
+            entity_id: TICKET.to_owned(),
+        },
+    )
+    .await
+    .expect("a released block is editable again");
+
+    // Tuesday, untouched: the release is keyed on the write that was
+    // withdrawn, not on worklogs in general.
+    assert_eq!(
+        worklog_id_of(&state.pool, tuesday_block).await,
+        Some(tuesday.id),
+        "the day nobody withdrew keeps its worklog"
+    );
+    assert!(copy_exists(&state.pool, tuesday.id).await);
+    assert_eq!(
+        row.cells[column(MONDAY + 1)].logged_seconds,
+        3_600,
+        "Tuesday's write is still pending, which the week counts as logged"
+    );
+    assert_eq!(row.cells[column(MONDAY + 1)].unlogged_seconds, 0);
+
+    state.scheduler.shutdown().await;
+}
+
+/// **A worklog Jira answered for is not undone by a discard** (issue #328).
+///
+/// `remote_id` on the copy is knobas' record that the source made a worklog,
+/// and a release that removed one would be knobas forgetting an entry that
+/// exists in Jira -- and then offering the same hour to *Log all* again, which
+/// bills it twice. So the delete carries `remote_id is null` as its own
+/// condition, and this is the direction that pins it.
+///
+/// **The fixture stamps the copy directly**, the way `hold` above sets a state
+/// directly, and for the same reason: this is the read's input rather than
+/// something under test. The state machine does not currently produce it --
+/// `sent` writes the id and `state = 'sent'` in one statement, and nothing
+/// moves a row out of `sent` -- so the guard is what keeps the delete safe on
+/// its own terms rather than by an argument about the rest of the file.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_discard_leaves_a_worklog_jira_answered_for_alone() {
+    let (state, wrote) = app("week_ipc_discard_sent").await;
+    *wrote.fault.lock().unwrap() = Some(401);
+
+    let logged = block(&state.pool, MONDAY, (9, 0), (10, 0), TICKET, "manual").await;
+    let worklog = time::worklog::log(&state, TICKET, date(MONDAY), 0, at(MONDAY, 9, 0), 3_600, "")
+        .await
+        .expect("Monday is logged");
+
+    sqlx::query("update knobas.worklog set remote_id = $2 where id = $1")
+        .bind(worklog.id)
+        .bind(WORKLOG_ID)
+        .execute(&state.pool)
+        .await
+        .expect("the copy is stamped");
+
+    knobas_sync::write_queue::discard(
+        state.scheduler.deps(),
+        worklog.write_queue_id.expect("a write carries the worklog"),
+    )
+    .await
+    .expect("the discard runs")
+    .expect("there was an open write to withdraw");
+
+    assert!(
+        copy_exists(&state.pool, worklog.id).await,
+        "Jira holds this worklog -- knobas' copy of it is not the queue's to delete"
+    );
+    assert_eq!(
+        remote_id_of(&state.pool, worklog.id).await.as_deref(),
+        Some(WORKLOG_ID)
+    );
+    assert_eq!(
+        worklog_id_of(&state.pool, logged).await,
+        Some(worklog.id),
+        "the blocks stay spoken for: the hour is at Jira"
+    );
+
+    let planned = time::week::plan(&state.pool, state.registry.as_ref(), &week())
+        .await
+        .expect("the plan reads");
+    assert!(
+        planned.is_empty(),
+        "*Log all* must not offer an hour Jira already has: {planned:?}"
+    );
+
+    state.scheduler.shutdown().await;
+}

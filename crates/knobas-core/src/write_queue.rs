@@ -755,13 +755,68 @@ pub async fn sent(
 /// `None` if there was nothing open left to withdraw, which is what makes
 /// discarding twice honest rather than merely harmless.
 ///
+/// # And the withdrawal gives the time back (issue #328)
+///
+/// A `log_work` write carries a `knobas.worklog` row -- knobas' **copy** of a
+/// record Jira is going to hold -- and the blocks that copy was made of point
+/// back at it, which is what makes them read-only. Withdrawing the write used
+/// to leave both in place: the week timesheet drew the hours as *held* for
+/// good, `unlogged` stayed zero, and neither *Log all* nor the day review
+/// would offer or edit the blocks again. A person who cancelled a queued
+/// worklog had silently made that afternoon unloggable, with no way out from
+/// any surface.
+///
+/// So the withdrawal deletes the copy, and the `on delete set null` on
+/// `block_worklog_fk` gives the blocks back -- migration `0014`'s own words,
+/// "deleting a worklog must give its blocks back, never take the afternoon
+/// with it". The time returns to *unlogged* and every surface offers it again,
+/// because all four of them read the same two columns.
+///
+/// **This does not contradict ADR-0012.** The rule there is that a *sent*
+/// write is never rolled back, and this statement cannot reach one: the update
+/// narrows on `state in ('pending','held','refused')`, [`sent`] is the only
+/// writer of `state = 'sent'`, and no transition leads back out of it. What is
+/// deleted is a copy of a record that was never made.
+///
+/// **Except when Jira answered anyway**, which is what `remote_id is null`
+/// guards. The copy carries what the source called the worklog, and a copy
+/// that has one is knobas' record that the hour exists at Jira; deleting that
+/// would forget an entry knobas cannot re-read, and then offer the same hour
+/// to *Log all*, which bills it twice. The guard is on the delete itself
+/// rather than left to the state machine, so the statement is safe on its own
+/// terms.
+///
+/// The one gap it cannot close is at-least-once's own (ADR-0012): a write that
+/// arrived and whose settle never landed is a `pending` row with no id
+/// anywhere, and nothing here can tell it from one that never left. The queue
+/// row is kept, discarded, with its payload -- so what was withdrawn is still
+/// answerable even when the copy is gone.
+///
+/// # Why this statement knows about `knobas.worklog`
+///
+/// [`sent`]'s reason, from the other end: the queue owns when a write stops
+/// being owed, and the copy's existence is a fact about that. One statement
+/// makes "the write is withdrawn" and "the time is knobas' own again" the same
+/// event, so no window exists in which a webview reads a settled queue row
+/// beside blocks that are still spoken for.
+///
 /// # Errors
 ///
 /// [`CoreError::Db`] if the statement fails.
 pub async fn discard(pool: &PgPool, id: i64) -> Result<Option<QueuedWrite>, CoreError> {
-    let row = sqlx::query_as::<_, QueuedWrite>(transition!(
-        "state = 'discarded', wait_reason = null, settled_at = now()
-          where id = $1 and state in ('pending','held','refused')"
+    let row = sqlx::query_as::<_, QueuedWrite>(concat!(
+        "with settled as (",
+        transition!(
+            "state = 'discarded', wait_reason = null, settled_at = now()
+              where id = $1 and state in ('pending','held','refused')"
+        ),
+        "
+         ), released as (
+           delete from knobas.worklog w
+            using settled
+            where w.write_queue_id = settled.id and w.remote_id is null
+         )
+         select * from settled"
     ))
     .bind(id)
     .fetch_optional(pool)
