@@ -1612,10 +1612,16 @@ async fn a_passive_block_a_new_manual_one_overlaps_is_taken_back_whole() {
 /// A day the day review can still reach keeps every beat it had, whether or
 /// not anybody has read it yet.
 ///
-/// The sweep runs **before** this day is ever materialized, which is the case
-/// worth naming: a retention rule that kept only what had already been turned
-/// into blocks would quietly delete the afternoons of the reader who has not
-/// got round to reviewing them, which is most readers most weeks.
+/// The sweep runs **before** this day is ever read, so what the last assertion
+/// witnesses is a day whose passive rows did not exist when the beats were
+/// swept past still being offered afterwards. Most readers most weeks are that
+/// reader: the strip is not open, and a rule that only spared what somebody
+/// had already reviewed would take their afternoons.
+///
+/// What it cannot see is the other side of that -- a day past the horizon
+/// nobody has read loses its beats, materialized or not, and the ticket's
+/// literal wording asked for the opposite. The PR says why: a sweep on a
+/// background task has no webview to ask where a day begins.
 #[tokio::test]
 async fn a_day_inside_the_horizon_keeps_its_beats_and_is_still_offered() {
     let pool = scratch("time-passive-retain").await;

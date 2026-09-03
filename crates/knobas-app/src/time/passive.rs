@@ -576,10 +576,11 @@ const STAMP_WRITE: &str = "insert into knobas.setting (key, value) values ($1, $
 /// The oldest instant an observation may carry at `now` and still be kept.
 ///
 /// A function of the clock and nothing else, so the rule can be read at a
-/// glance and driven from a literal -- the treatment [`derive`] gets, for the
-/// same reason.
-#[must_use]
-pub fn horizon(now: DateTime<Utc>) -> DateTime<Utc> {
+/// glance -- the treatment [`derive`] gets, for the same reason. Private:
+/// [`prune`] is the only thing that spends it, and a caller outside this
+/// module holding its own copy of the horizon is the drift the stamp exists
+/// to make impossible.
+fn horizon(now: DateTime<Utc>) -> DateTime<Utc> {
     now - Duration::days(RETENTION_DAYS)
 }
 
@@ -594,10 +595,13 @@ pub fn horizon(now: DateTime<Utc>) -> DateTime<Utc> {
 ///
 /// # Errors
 /// [`IpcError`] if the read fails.
-async fn pruned_before(pool: &PgPool) -> Result<Option<DateTime<Utc>>, IpcError> {
+async fn pruned_before<'e, E>(db: E) -> Result<Option<DateTime<Utc>>, IpcError>
+where
+    E: sqlx::PgExecutor<'e>,
+{
     let stored: Option<serde_json::Value> = sqlx::query_scalar(STAMP_READ)
         .bind(PRUNED_KEY)
-        .fetch_optional(pool)
+        .fetch_optional(db)
         .await?;
     Ok(stored.and_then(|value| serde_json::from_value(value).ok()))
 }
@@ -652,16 +656,17 @@ pub async fn prune(pool: &PgPool, now: DateTime<Utc>) -> Result<u64, IpcError> {
         .await?
         .rows_affected();
     if taken > 0 {
-        let stored: Option<serde_json::Value> = sqlx::query_scalar(STAMP_READ)
-            .bind(PRUNED_KEY)
-            .fetch_optional(&mut *tx)
-            .await?;
-        let stamp = stored
-            .and_then(|value| serde_json::from_value::<DateTime<Utc>>(value).ok())
+        let stamp = pruned_before(&mut *tx)
+            .await?
             .map_or(cut, |had| had.max(cut));
         sqlx::query(STAMP_WRITE)
             .bind(PRUNED_KEY)
-            .bind(serde_json::to_value(stamp).unwrap_or(serde_json::Value::Null))
+            // Spelled as a string here rather than serialized, so there is no
+            // failure to resolve. `serde_json::to_value` cannot fail for a
+            // `DateTime<Utc>`, but the fallback such a call needs would be a
+            // value the read decodes as *never swept* -- which disarms the
+            // guard in `materialize` on the one write that most needs it.
+            .bind(serde_json::Value::String(stamp.to_rfc3339()))
             .execute(&mut *tx)
             .await?;
     }
@@ -1161,7 +1166,9 @@ mod tests {
 
         assert!(
             RETENTION_DAYS >= week + DIGEST_LOOK_BACK_DAYS,
-            "knobas keeps {RETENTION_DAYS} days of observations, and a surface              reads back {week} + {DIGEST_LOOK_BACK_DAYS}: some day the reader              can still be shown is a day the sweep has taken the beats for"
+            "knobas keeps {RETENTION_DAYS} days of observations and a surface reads \
+back {week} + {DIGEST_LOOK_BACK_DAYS}: a day the reader can still be shown is a \
+day the sweep has taken the beats for"
         );
     }
 }

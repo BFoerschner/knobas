@@ -12,6 +12,11 @@
 //! * This file is the rest: where archives go, what is remembered between
 //!   runs, retention, and the task that ticks.
 //!
+//! That task does one thing this module does not otherwise own: it sweeps the
+//! observations `time::passive` has kept past its retention window (#315).
+//! Two retention rules, one clock -- see [`tick`] for why the clock is the one
+//! that belongs here and the rule is the one that does not.
+//!
 //! # Where the schedule is stored
 //!
 //! `knobas.setting`, whose migration (`0002`, comment 6) names "later the
