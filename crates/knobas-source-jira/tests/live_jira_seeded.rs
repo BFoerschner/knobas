@@ -1702,9 +1702,7 @@ async fn a_reassignment_through_the_assignee_endpoint_reaches_the_next_increment
 
     let (items, cursor) = full(&*source).await;
     let before = item(&items, BORROWED);
-    let baseline = before
-        .updated_at
-        .expect("a real Jira always sets updated");
+    let baseline = before.updated_at.expect("a real Jira always sets updated");
     let was = before.author.clone();
     assert_ne!(
         was.as_deref(),
