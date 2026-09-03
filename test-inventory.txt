@@ -1489,6 +1489,7 @@ knobas-source-jira	lib/knobas_source_jira	source::tests::an_unreachable_instance
 knobas-source-jira	lib/knobas_source_jira	source::tests::basic_auth_needs_the_username_from_the_config
 knobas-source-jira	lib/knobas_source_jira	source::tests::the_cloud_flavor_is_refused_at_build_time
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_changed_issue_is_the_only_thing_the_next_run_emits
+knobas-source-jira	lib/knobas_source_jira	sync::tests::a_field_changed_without_moving_updated_is_invisible_to_every_later_run
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_full_sync_walks_the_whole_total_not_just_the_first_page
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_page_that_arrives_empty_while_total_still_claims_more_ends_the_run
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_sink_failure_aborts_the_run

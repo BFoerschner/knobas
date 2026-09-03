@@ -353,12 +353,25 @@ mod tests {
         }
         /// Rewrite one issue's `updated`, the way an edit upstream would.
         fn edit(&mut self, key: &str, updated: &str) {
+            self.field_of(key)["updated"] = serde_json::json!(updated);
+        }
+
+        /// Rewrite one issue's assignee and **leave `updated` where it is** --
+        /// the shape issue #345 is about. See
+        /// [`a_field_changed_without_moving_updated_is_invisible_to_every_later_run`].
+        fn reassign(&mut self, key: &str, name: &str) {
+            self.field_of(key)["assignee"] = serde_json::json!({
+                "name": name, "displayName": name, "active": true
+            });
+        }
+
+        fn field_of(&mut self, key: &str) -> &mut serde_json::Value {
             let hit = self
                 .issues
                 .iter_mut()
                 .find(|i| i["key"] == key)
                 .unwrap_or_else(|| panic!("no {key} in the fake"));
-            hit["fields"]["updated"] = serde_json::json!(updated);
+            &mut hit["fields"]
         }
     }
 
@@ -540,6 +553,16 @@ mod tests {
             .await
             .expect("run succeeds");
         (sink.0.iter().map(|i| i.entity.key.clone()).collect(), next)
+    }
+
+    /// [`issue`] with an assignee, which is what §4.1's `author` maps from on
+    /// Jira (`crate::map`).
+    fn assigned(key: &str, updated: &str, name: &str) -> serde_json::Value {
+        let mut raw = issue(key, updated, 0, 0);
+        raw["fields"]["assignee"] = serde_json::json!({
+            "name": name, "displayName": name, "active": true
+        });
+        raw
     }
 
     fn five_issues() -> Vec<serde_json::Value> {
@@ -1112,6 +1135,86 @@ mod tests {
         assert_eq!(
             parsed.updated_to,
             crate::time::parse_jira_time("2026-08-22T12:30:00.000+0000")
+        );
+    }
+
+    /// **A change that does not move `fields.updated` is invisible to every
+    /// later incremental run** (issue #345).
+    ///
+    /// This pins the *mechanism*, not a Jira behaviour: the adapter's whole
+    /// incremental window is `updated >= watermark − 2 min`, so an issue whose
+    /// `updated` stayed where it was is never **returned** by the query at
+    /// all. That is a different failure from the one
+    /// [`crate::cursor::JiraCursor::already_delivered`] produces -- there the
+    /// issue comes back and is recognised -- and the two are worth telling
+    /// apart, because only the second is recoverable by widening the overlap.
+    ///
+    /// **Both directions in one run.** PAY-231 is edited the ordinary way and
+    /// PAY-228 is reassigned without its `updated` moving, so the run is *not*
+    /// idle: something is emitted, the watermark advances, and PAY-228 is
+    /// still missing. A fixture that only reassigned would witness nothing but
+    /// "an idle run is idle", which is
+    /// [`an_idle_incremental_emits_nothing_and_returns_the_same_cursor`]'s job.
+    ///
+    /// The consequence downstream is the ticket: `author` is the assignee
+    /// (`crate::map`), and `sync.live_item.author` is what the standup digest's
+    /// mirror half, the inbox's author matching (#82) and every `@me` filter
+    /// key on. None of them can learn the new assignee, because nothing
+    /// re-reads the row. `knobas_sync::run_backfill` -- which hands the adapter
+    /// no position at all -- is the only run that recovers it.
+    ///
+    /// Whether Jira DC really leaves `updated` alone on
+    /// `PUT /rest/api/2/issue/{key}/assignee` is a question about the product
+    /// and is settled against the seeded container (ADR-0013), never here.
+    /// This test says what follows *if* it does.
+    #[tokio::test]
+    async fn a_field_changed_without_moving_updated_is_invisible_to_every_later_run() {
+        let mut issues = five_issues();
+        issues[3] = assigned("PAY-228", "2026-08-21T16:05:00.000+0000", "mara.lindqvist");
+        let mut api = FakeApi {
+            issues,
+            ..FakeApi::default()
+        };
+        let config = cfg(serde_json::json!({}));
+
+        let mut first = VecSink(Vec::new());
+        let cursor = run(&api, &config, None, &mut first).await.unwrap();
+        let mirrored = |sink: &VecSink| {
+            sink.0
+                .iter()
+                .find(|i| i.entity.key == "PAY-228")
+                .map(|i| i.author.clone())
+        };
+        assert_eq!(
+            mirrored(&first),
+            Some(Some("mara.lindqvist".to_owned())),
+            "the full sync is what puts the old assignee in the mirror"
+        );
+
+        // The reassignment, as Jira's dedicated assignee endpoint is claimed to
+        // make it: the field changes and `updated` does not.
+        api.reassign("PAY-228", "knobas");
+        // …and an ordinary edit elsewhere, so this run has work to do.
+        api.edit("PAY-231", "2026-08-22T12:30:00.000+0000");
+
+        let (keys, advanced) = keys_of(&api, &config, Some(cursor.clone())).await;
+        assert_eq!(
+            keys,
+            vec!["PAY-231"],
+            "the edited issue came back and the reassigned one never entered the window"
+        );
+        assert_ne!(
+            advanced, cursor,
+            "the run was not idle -- which is what makes the miss above a miss and not an \
+             absence of syncing"
+        );
+
+        // And it stays missing however many times the source is polled: the
+        // window only ever moves forward, away from PAY-228's untouched stamp.
+        let (again, _) = keys_of(&api, &config, Some(advanced)).await;
+        assert!(
+            again.is_empty(),
+            "a later poll does not reach it either: {again:?}"
         );
     }
 
