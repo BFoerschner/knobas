@@ -567,6 +567,13 @@ pub async fn due(pool: &PgPool, source_id: &str) -> Result<Vec<QueuedWrite>, Cor
 /// Every transition below is one `update ... where id = $1 and state in (..)`,
 /// returning the row it changed.
 ///
+/// Two of them wrap that update in a CTE and write `knobas.worklog` in the
+/// same statement -- [`sent`] stamps the copy, [`discard`] deletes it -- and
+/// both say in place why that may not be a second statement. The update is
+/// still exactly this one, guard and all, so the concurrency argument below
+/// covers them: `discard` expands this macro inside its CTE; `sent` spells the
+/// same update out, having a `returning` list it builds around.
+///
 /// The state guard in the `where` clause is what makes each of these safe to
 /// call concurrently with the others: two flush loops that both decided to
 /// send the same write cannot both settle it, and `None` -- no row matched --

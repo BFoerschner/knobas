@@ -559,6 +559,10 @@ pub async fn amend_write<R: tauri::Runtime>(
 /// The row is kept, tombstoned: the activity stream refers to it, and "it was
 /// discarded" and "it never existed" are different answers.
 ///
+/// Withdrawing a worklog's write also gives its afternoon back -- the local
+/// copy goes and the blocks it covered are knobas' own again, so the week's
+/// *unlogged* and *Log all* both offer the time once more (#328).
+///
 /// # Errors
 /// `conflict` if there was nothing open left to withdraw.
 #[tauri::command]

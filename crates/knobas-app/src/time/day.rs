@@ -54,6 +54,13 @@
 //! sentence [`refusal`] builds, because "nothing happened" is not something a
 //! person can act on.
 //!
+//! **It is not a one-way door.** Withdrawing the worklog's queued write gives
+//! the blocks back — `knobas_core::write_queue::discard` deletes the copy and
+//! `block_worklog_fk`'s `on delete set null` clears the pointer — so the same
+//! clause that made them read-only makes them editable again, with nothing
+//! here to change (#328). A worklog Jira answered for is not withdrawable that
+//! way, which is what keeps the rule meaningful.
+//!
 //! The worklog table itself arrives with #280; the column is here now
 //! (migration `0013`) precisely so this rule did not have to wait for it.
 
