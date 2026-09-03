@@ -31,7 +31,7 @@ const CQL_FMT: &str = "%Y-%m-%d %H:%M";
 /// than any real zone can only move it backwards, which re-reads work already
 /// done -- and upserts are idempotent. Over-fetching is recoverable;
 /// under-fetching is not.
-pub(crate) const MIN_UTC_OFFSET_SECS: i32 = -12 * 3600;
+pub const MIN_UTC_OFFSET_SECS: i32 = -12 * 3600;
 
 /// Parse a Confluence timestamp into UTC.
 ///

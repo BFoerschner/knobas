@@ -41,6 +41,13 @@ mod time;
 pub use config::{ConfluenceConfig, Flavor};
 pub use descriptor::descriptor_template;
 pub use source::{ConfluenceSource, build};
+/// The offset this adapter falls back to when it could not read the
+/// instance's own -- **not** UTC, for the reason spelled out on it.
+///
+/// Public only so `tests/live_confluence_seeded.rs` can assert that the
+/// fallback was *not* taken against a corpus that has timestamps: a run that
+/// silently guessed would otherwise look exactly like one that read.
+pub use time::MIN_UTC_OFFSET_SECS;
 
 /// The adapter kind: `SourceDescriptor::adapter_kind`, and the default
 /// instance id offered by the Add-source form.

@@ -73,6 +73,32 @@
 //! (`testenv/README.md`): the exact-set assertions and clause 2 mean nothing
 //! while somebody else is writing to this Confluence.
 //!
+//! # What this server does that the documentation did not say
+//!
+//! Both were measured on Confluence 9.2.21 on 2026-09-03, and both are the
+//! kind of thing a mock built from reading the docs would have got wrong.
+//!
+//! * **`version.when` comes back in UTC, with a `Z`** -- not in the
+//!   instance's configured zone with an offset, which is what Jira DC sends
+//!   (`2026-08-22T12:40:00.000+02:00`). So the offset this adapter learns from
+//!   it is `0`, and every CQL literal is rendered in UTC. That is *fine* and
+//!   it is why the offset is read off a timestamp the server rendered rather
+//!   than assumed: had the adapter hard-coded Jira's shape, or guessed the
+//!   host's zone, every incremental query would have been bounded two hours
+//!   wrong on this container. `the_cursor_records_the_zone_the_server_renders_in`
+//!   pins the reading.
+//! * **A bearer token this Confluence cannot resolve is a clean 401 on the
+//!   content search too**, with `{"message":"Client must be authenticated to
+//!   access this resource.","status-code":401}` -- it does **not** answer 200
+//!   with an empty result set the way Jira's `/search` does for the same
+//!   mistake (#276's finding). So the emptied-mirror hazard that ordering
+//!   guard exists for does not arise on this container's default
+//!   configuration. The guard stays and
+//!   [`the_search_that_could_read_as_an_empty_corpus_is_never_the_first_call`]
+//!   still asserts the **ordering** rather than the permission, which is what
+//!   makes it hold on an instance where anonymous access is switched on -- and
+//!   Confluence has that switch.
+//!
 //! # A red run here is never answered by running it again
 //!
 //! When the adapter and the server disagree, the **adapter** is wrong. A
@@ -866,6 +892,54 @@ async fn each_page_carries_its_comments_as_seeded() {
     );
 }
 
+/// **The zone this instance renders timestamps in**, read off a timestamp the
+/// server rendered rather than assumed.
+///
+/// CQL date literals carry no zone and are read in the instance's own, and
+/// Confluence publishes its settings only to administrators -- so the adapter
+/// learns the offset from `version.when` on its run-start probe. Measured
+/// here: this container answers **UTC with a `Z`**, so the cursor records
+/// `tz_offset_secs: 0`. Jira DC sends `+02:00` for the same field on the same
+/// host, which is exactly why this is read and not shared between the two
+/// adapters.
+///
+/// The assertion is that the cursor's recorded zone is the one the payload was
+/// rendered in -- not that it is zero. An instance configured otherwise stays
+/// green, and an adapter that stopped reading the offset at all goes red.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
+async fn the_cursor_records_the_zone_the_server_renders_in() {
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let (items, cursor) = full(&*seeded.source(seeded.scoped())).await;
+
+    let stamped = items
+        .iter()
+        .find_map(|i| i.payload["version"]["when"].as_str())
+        .expect("a seeded page carries version.when");
+    let rendered = chrono::DateTime::parse_from_rfc3339(stamped)
+        .unwrap_or_else(|e| panic!("{stamped:?} is not the RFC 3339 this adapter parses: {e}"));
+    let offset = rendered.offset().local_minus_utc();
+
+    let recorded = serde_json::from_str::<serde_json::Value>(&cursor).expect("the cursor is JSON")
+        ["tz_offset_secs"]
+        .as_i64()
+        .expect("the cursor records the zone it queried in");
+    assert_eq!(
+        recorded,
+        i64::from(offset),
+        "the cursor's zone is the one the server rendered {stamped:?} in, so every CQL literal \
+         is read back the way it was written"
+    );
+    assert_ne!(
+        recorded,
+        i64::from(knobas_source_confluence::MIN_UTC_OFFSET_SECS),
+        "the probe fell back to the safe guess, which means it read no timestamp at all -- the \
+         corpus is not empty, so that is a defect and not a quiet corner"
+    );
+    println!("SEEDED zone: version.when {stamped:?} -> tz_offset_secs {recorded}");
+}
+
 /// **The declared project paths (#277) and the ancestor path, against the
 /// real payload.**
 ///
@@ -1075,20 +1149,47 @@ async fn a_renamed_page_keeps_its_id_and_moves_the_watermark_to_itself() {
     let witnessed = after
         .updated_at
         .expect("a real Confluence always stamps version.when");
-    assert_eq!(
-        modified_to(&moved),
-        witnessed,
-        "the position advances to the renamed page's own version time -- not to `now()`, and \
-         not past what this run saw"
-    );
     assert!(
         witnessed > baseline,
         "the rename moved the page's own version time forward: {witnessed} after {baseline}"
     );
+
+    // **The watermark rule, as the ceiling makes it** -- and the inequality is
+    // the assertion, not a weaker version of an equality.
+    //
+    // Measured on this container (2026-09-03): a run probes for its ceiling
+    // and then walks, and Confluence's CQL index caught up *in between* on the
+    // run that first saw the rename -- so the probe returned the previous
+    // newest page and the walk returned the renamed one, whose stamp is later
+    // than the ceiling. Clamping is exactly what is supposed to happen there:
+    // advancing to an edit made after run start would put the run's own
+    // duration below the next query's lower bound and hide every other edit
+    // made while it ran. The next run re-walks from two minutes before the
+    // clamped position and re-offers it, which is what the idle poll below
+    // shows settling.
+    //
+    // So the position sits between the baseline and what this run witnessed,
+    // and never at `now()`. An equality here would be green or red depending
+    // on which side of a millisecond the index landed.
+    let moved_to = modified_to(&moved);
     assert!(
-        modified_to(&moved) <= chrono::Utc::now(),
+        moved_to >= baseline,
+        "the position never moves backwards: {moved_to} before {baseline}"
+    );
+    assert!(
+        moved_to <= witnessed,
+        "the position never passes what the run witnessed -- and never reaches `now()`: \
+         {moved_to} is after the renamed page's own {witnessed}"
+    );
+    assert!(
+        moved_to <= chrono::Utc::now(),
         "a version time is in the past by the time the run reads it; a watermark after `now()` \
          would mean the run advanced past what it witnessed"
+    );
+    println!(
+        "SEEDED watermark after the rename: {moved_to} (the page's own stamp is {witnessed}; \
+         equal when the run-start probe already saw the edit, earlier when the index caught up \
+         between the probe and the walk)"
     );
 
     let (idle, still) = sync_from(&*source, Some(moved.clone())).await;
