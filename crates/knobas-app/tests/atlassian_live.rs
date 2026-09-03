@@ -63,8 +63,8 @@
 //! PAY-231, and -- for the Confluence half -- one comment on a seeded page and
 //! one Confluence personal access token.
 //! Every one of them is undone when the test ends, passing or panicking alike,
-//! by a `Drop` that checks rather than assumes -- [`Litter`], [`Pat`],
-//! [`Mention`] and [`WikiPat`]. What a
+//! by a `Drop` that checks rather than assumes -- [`Litter`], [`Pat`] (which
+//! guards a token at either product) and [`Mention`]. What a
 //! *killed* run left behind is cleared before the next one takes a baseline:
 //! [`Env::clear_leftovers`] deletes every issue and revokes every token
 //! carrying [`LITTER_LABEL`], [`Wiki::clear_leftovers`] deletes every
@@ -325,17 +325,7 @@ impl Env {
             .api(reqwest::Method::GET, "rest/pat/latest/tokens", None)
             .await;
         assert_eq!(status, 200, "listing personal access tokens: {body}");
-        for id in body
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|t| {
-                t["name"]
-                    .as_str()
-                    .is_some_and(|n| n.starts_with(LITTER_LABEL))
-            })
-            .filter_map(|t| t["id"].as_i64())
-        {
+        for id in token_ids(&body, |name| name.starts_with(LITTER_LABEL)) {
             let (status, body) = self
                 .api(
                     reqwest::Method::DELETE,
@@ -343,9 +333,17 @@ impl Env {
                     None,
                 )
                 .await;
-            assert_eq!(status, 204, "revoking the leftover token {id}: {body}");
+            assert_eq!(
+                status, JIRA_TOKENS.revoked,
+                "revoking the leftover token {id}: {body}"
+            );
             println!("live suite: revoked leftover personal access token {id}");
         }
+    }
+
+    /// A personal access token at this Jira, revoked when the guard drops.
+    async fn pat(&self) -> Pat {
+        Pat::issue(&self.url, &self.user, &self.password, JIRA_TOKENS).await
     }
 }
 
@@ -392,44 +390,93 @@ fn url_encode(raw: &str) -> String {
 
 // -- what the suite writes, and gives back -----------------------------------
 
+/// What one product answers to the two personal-access-token calls this suite
+/// makes.
+///
+/// Data rather than a range, because this file's rule is that a status is a
+/// **measured fact about a server** and every assertion over one cites where it
+/// was measured. `2xx` would pass on a Confluence that started answering `202`
+/// to a create, and the whole point of a live suite is that it does not.
+#[derive(Clone, Copy)]
+struct TokenStatuses {
+    created: u16,
+    revoked: u16,
+}
+
+/// Jira's, measured by #276's run of this suite.
+const JIRA_TOKENS: TokenStatuses = TokenStatuses {
+    created: 201,
+    revoked: 204,
+};
+
+/// Confluence's. The same `/rest/pat/latest/tokens` REST API and, on the
+/// documentation, the same answers -- and #317's live run is what turns that
+/// into a measurement, because **nothing in this repo had ever called this
+/// endpoint on a Confluence before it**. Both adapters' notes call it "outside
+/// this adapter's endpoint set", which is a statement about the adapter and not
+/// about the server.
+const CONFLUENCE_TOKENS: TokenStatuses = TokenStatuses {
+    created: 201,
+    revoked: 204,
+};
+
 /// A personal access token of this suite's own, revoked when the guard drops.
 ///
 /// The credential-health criterion is about a **PAT**, and it is about one that
 /// *worked* and stopped working -- so the suite makes a real one rather than
 /// asserting over a token that was never valid. It also certifies, against the
-/// product, the claim `knobas-source-jira`'s `http` module makes from the
-/// documentation: a Jira DC personal access token is a Bearer token.
+/// product, the claim each adapter's `http` module makes from the
+/// documentation: a Data Center personal access token is a Bearer token.
 ///
-/// `/rest/pat/latest/tokens` is outside the adapter's own endpoint set (it is
-/// why `ConnectionInfo::secret_expires_at` is always `None`), which is exactly
-/// why it is reached here with raw requests and not through the adapter.
+/// `/rest/pat/latest/tokens` is outside either adapter's own endpoint set (it
+/// is why `ConnectionInfo::secret_expires_at` is always `None`), which is
+/// exactly why it is reached here with raw requests and not through the
+/// adapter.
+///
+/// **One type for both products**, reached through [`Env::pat`] and
+/// [`Wiki::pat`]: the call, the guard and the checked revoke are the same three
+/// requests at Jira and at Confluence, and the only things that differ are the
+/// account they are made as and the two statuses above -- both of which are
+/// values, so a second copy of the type would carry no second fact.
 struct Pat {
     url: String,
     user: String,
     password: String,
-    id: i64,
+    statuses: TokenStatuses,
+    /// A string on both, though Jira spells it as a JSON number: see
+    /// [`token_id`].
+    id: String,
     raw: String,
 }
 
 impl Pat {
-    async fn issue(env: &Env) -> Pat {
+    async fn issue(url: &str, user: &str, password: &str, statuses: TokenStatuses) -> Pat {
         let name = format!("{LITTER_LABEL}-{}", std::process::id());
-        let (status, body) = env
-            .api(
-                reqwest::Method::POST,
-                "rest/pat/latest/tokens",
-                Some(json!({ "name": name, "expirationDuration": 1 })),
-            )
-            .await;
-        assert_eq!(status, 201, "creating a personal access token: {body}");
+        let (status, body) = api(
+            &client(),
+            url,
+            user,
+            password,
+            reqwest::Method::POST,
+            "rest/pat/latest/tokens",
+            Some(json!({ "name": name, "expirationDuration": 1 })),
+        )
+        .await;
+        assert_eq!(
+            status, statuses.created,
+            "creating a personal access token at {url}: {status} {body}"
+        );
         Pat {
-            url: env.url.clone(),
-            user: env.user.clone(),
-            password: env.password.clone(),
-            id: body["id"].as_i64().expect("a token id"),
+            url: url.to_owned(),
+            user: user.to_owned(),
+            password: password.to_owned(),
+            statuses,
+            id: token_id(&body).unwrap_or_else(|| panic!("a token id: {body}")),
             raw: body["rawToken"]
                 .as_str()
-                .expect("Jira answers the raw token exactly once, at creation")
+                .unwrap_or_else(|| {
+                    panic!("the raw token is answered exactly once, at creation: {body}")
+                })
                 .to_owned(),
         }
     }
@@ -437,15 +484,18 @@ impl Pat {
 
 impl Drop for Pat {
     fn drop(&mut self) {
-        let (url, user, password, id) = (
+        let (url, user, password, statuses, id) = (
             self.url.clone(),
             self.user.clone(),
             self.password.clone(),
-            self.id,
+            self.statuses,
+            self.id.clone(),
         );
-        undo("the personal access token", move || async move {
+        let what = format!("the personal access token at {url}");
+        undo(&what, move || async move {
+            let http = client();
             let (status, body) = api(
-                &client(),
+                &http,
                 &url,
                 &user,
                 &password,
@@ -454,11 +504,11 @@ impl Drop for Pat {
                 None,
             )
             .await;
-            if status != 204 && status != 404 {
+            if status != statuses.revoked && status != 404 {
                 return Err(format!("DELETE token {id} -> {status}: {body}"));
             }
             let (status, body) = api(
-                &client(),
+                &http,
                 &url,
                 &user,
                 &password,
@@ -472,16 +522,55 @@ impl Drop for Pat {
                     "listing tokens after the delete -> {status}: {body}"
                 ));
             }
-            if body
-                .as_array()
-                .into_iter()
-                .flatten()
-                .any(|t| t["id"].as_i64() == Some(id))
-            {
+            if token_ids(&body, |_| true).contains(&id) {
                 return Err(format!("token {id} is still listed after its delete"));
             }
             Ok(())
         });
+    }
+}
+
+/// The ids of the tokens in a `rest/pat/latest/tokens` listing whose name the
+/// predicate accepts.
+fn token_ids(body: &serde_json::Value, accept: impl Fn(&str) -> bool) -> Vec<String> {
+    token_rows(body)
+        .iter()
+        .filter(|t| t["name"].as_str().is_some_and(&accept))
+        .filter_map(token_id)
+        .collect()
+}
+
+/// The records in a token listing -- and a **panic** for a body that is none of
+/// the shapes below.
+///
+/// Three spellings are read because the two products in this file need not
+/// agree: a bare array, which is what Jira answers, or one under `values` or
+/// under `results`, the envelope every other Confluence read in this repo pages
+/// on. Reading an unrecognised body as *no tokens* is the failure mode worth
+/// spending a panic on: [`Pat`]'s `Drop` would then report a revoke it never
+/// checked, and the header of this file promises a guard that checks rather
+/// than assumes. `undo` catches the panic and reports it, so a `Drop` that hits
+/// this says so rather than aborting.
+fn token_rows(body: &serde_json::Value) -> &Vec<serde_json::Value> {
+    body.as_array()
+        .or_else(|| body["values"].as_array())
+        .or_else(|| body["results"].as_array())
+        .unwrap_or_else(|| {
+            panic!(
+                "a token listing is an array, or one under `values` or `results`; this is none \
+                 of them, and reading it as no tokens would make every revoke below vacuous: {body}"
+            )
+        })
+}
+
+/// One token record's id, whichever way the server spells it: Jira answers a
+/// JSON number and this file carries the id as the path segment it becomes, so
+/// there is one spelling downstream and the number is stringified here.
+fn token_id(token: &serde_json::Value) -> Option<String> {
+    match &token["id"] {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        _ => None,
     }
 }
 
@@ -930,7 +1019,7 @@ async fn write(
 async fn a_revoked_pat_reaches_the_credential_health_surface_and_the_mirror_survives() {
     let env = env();
     env.clear_leftovers().await;
-    let pat = Pat::issue(&env).await;
+    let pat = env.pat().await;
 
     let (state, events) = app("atlassian_live_health", &env, AuthMethod::Pat, &pat.raw).await;
 
@@ -1047,7 +1136,7 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
     // Jira a write over one. The read direction under user + password is what
     // the adapter's own live suite certifies, and the seed script itself
     // writes over Basic, so neither scheme is left unwitnessed.
-    let pat = Pat::issue(&env).await;
+    let pat = env.pat().await;
     let (state, _events) = app("atlassian_live_writes", &env, AuthMethod::Pat, &pat.raw).await;
 
     // The mirror has to hold the tickets first: the queue snapshots its target
@@ -1292,7 +1381,7 @@ async fn a_days_work_is_logged_to_pay_231_and_comes_back_in_the_mirror() {
     // A personal access token, for the reason the write test above gives: it
     // is the credential a real deployment configures, and M3.1's worklog is
     // the write it was chosen for.
-    let pat = Pat::issue(&env).await;
+    let pat = env.pat().await;
     let (state, _events) = app("atlassian_live_worklog", &env, AuthMethod::Pat, &pat.raw).await;
 
     sync(&state).await;
@@ -1932,39 +2021,18 @@ impl Wiki {
                     None,
                 )
                 .await;
-            assert!(
-                status == 204 || status == 200,
-                "revoking the leftover Confluence token {id}: {status} {body}"
+            assert_eq!(
+                status, CONFLUENCE_TOKENS.revoked,
+                "revoking the leftover Confluence token {id}: {body}"
             );
             println!("live suite: revoked leftover Confluence personal access token {id}");
         }
     }
-}
 
-/// The ids of the tokens in a `rest/pat/latest/tokens` listing whose name the
-/// predicate accepts.
-///
-/// Two shapes are read, because the two products in this file do not agree:
-/// Jira answers a bare array and Confluence a paged object, and a token id is
-/// a number on one and a string on the other. Neither is worth a second
-/// helper, and reading both here is what keeps [`WikiPat`]'s `Drop` able to
-/// *check* its revoke rather than assume it.
-fn token_ids(body: &serde_json::Value, accept: impl Fn(&str) -> bool) -> Vec<String> {
-    body.as_array()
-        .or_else(|| body["values"].as_array())
-        .into_iter()
-        .flatten()
-        .filter(|t| t["name"].as_str().is_some_and(&accept))
-        .filter_map(token_id)
-        .collect()
-}
-
-/// One token record's id, whichever way the server spells it.
-fn token_id(token: &serde_json::Value) -> Option<String> {
-    match &token["id"] {
-        serde_json::Value::String(s) => Some(s.clone()),
-        serde_json::Value::Number(n) => Some(n.to_string()),
-        _ => None,
+    /// A personal access token at this Confluence, revoked when the guard
+    /// drops.
+    async fn pat(&self) -> Pat {
+        Pat::issue(&self.url, &self.user, &self.password, CONFLUENCE_TOKENS).await
     }
 }
 
@@ -2085,7 +2153,7 @@ impl Drop for Mention {
 /// (#276 measured it on Jira). `AuthKind` is not patchable after the insert --
 /// `config::PatchConfig` deliberately has no field for it, because a re-auth
 /// goes through `set_source_secret` -- so the method is chosen here, once.
-async fn wiki_app_as(
+async fn wiki_app(
     name: &str,
     wiki: &Wiki,
     auth: AuthMethod,
@@ -2149,13 +2217,6 @@ async fn wiki_app_as(
     )
 }
 
-/// A `SourcesState` with the seeded Confluence configured as the seed admin.
-async fn wiki_app(name: &str, wiki: &Wiki) -> SourcesState {
-    wiki_app_as(name, wiki, AuthMethod::UserPassword, &wiki.password)
-        .await
-        .0
-}
-
 /// Sync one source and wait for the run to end, whichever way it ends.
 async fn sync_source(state: &SourcesState, id: &str) {
     let (done, wait) = tokio::sync::oneshot::channel();
@@ -2197,7 +2258,13 @@ async fn sync_source(state: &SourcesState, id: &str) {
 async fn a_comment_that_mentions_me_becomes_an_inbox_mention() {
     let wiki = wiki();
     wiki.clear_leftovers().await;
-    let state = wiki_app("atlassian_live_mention", &wiki).await;
+    let (state, _events) = wiki_app(
+        "atlassian_live_mention",
+        &wiki,
+        AuthMethod::UserPassword,
+        &wiki.password,
+    )
+    .await;
 
     // 1. The seeded corpus, and a cursor.
     sync_source(&state, CONFLUENCE).await;
@@ -2444,100 +2511,6 @@ async fn inbox_mentions(state: &SourcesState) -> Vec<knobas_app::inbox::InboxEnt
 
 // -- the Confluence half: credential health through the app (#317) -----------
 
-/// A Confluence personal access token of this suite's own, revoked when the
-/// guard drops.
-///
-/// The same reasoning as [`Pat`], and the same endpoint set: Confluence Data
-/// Center has had `/rest/pat/latest/tokens` since 7.9, which is the release
-/// `knobas-source-confluence`'s `http::credential` names when it maps
-/// [`AuthMethod::Pat`] onto a Bearer header. Issuing a real one is what makes
-/// the revoke below mean something -- a test that only ever presented a token
-/// that never existed would witness a refusal, but not a *credential that
-/// worked and stopped working*, and it is the second sentence that the sources
-/// view's *Re-enter* exists for.
-struct WikiPat {
-    url: String,
-    user: String,
-    password: String,
-    id: String,
-    raw: String,
-}
-
-impl WikiPat {
-    async fn issue(wiki: &Wiki) -> WikiPat {
-        let name = format!("{LITTER_LABEL}-{}", std::process::id());
-        let (status, body) = wiki
-            .api(
-                reqwest::Method::POST,
-                "rest/pat/latest/tokens",
-                Some(json!({ "name": name, "expirationDuration": 1 })),
-            )
-            .await;
-        assert!(
-            status == 201 || status == 200,
-            "creating a Confluence personal access token: {status} {body}"
-        );
-        WikiPat {
-            url: wiki.url.clone(),
-            user: wiki.user.clone(),
-            password: wiki.password.clone(),
-            id: token_id(&body).unwrap_or_else(|| panic!("a token id: {body}")),
-            raw: body["rawToken"]
-                .as_str()
-                .unwrap_or_else(|| {
-                    panic!("Confluence answers the raw token exactly once, at creation: {body}")
-                })
-                .to_owned(),
-        }
-    }
-}
-
-impl Drop for WikiPat {
-    fn drop(&mut self) {
-        let (url, user, password, id) = (
-            self.url.clone(),
-            self.user.clone(),
-            self.password.clone(),
-            self.id.clone(),
-        );
-        undo("the Confluence personal access token", move || async move {
-            let http = client();
-            let (status, body) = api(
-                &http,
-                &url,
-                &user,
-                &password,
-                reqwest::Method::DELETE,
-                &format!("rest/pat/latest/tokens/{id}"),
-                None,
-            )
-            .await;
-            if status != 204 && status != 200 && status != 404 {
-                return Err(format!("DELETE token {id} -> {status}: {body}"));
-            }
-            let (status, body) = api(
-                &http,
-                &url,
-                &user,
-                &password,
-                reqwest::Method::GET,
-                "rest/pat/latest/tokens",
-                None,
-            )
-            .await;
-            if status != 200 {
-                return Err(format!(
-                    "listing tokens after the revoke -> {status}: {body}"
-                ));
-            }
-            if !token_ids(&body, |_| true).contains(&id) {
-                return Ok(());
-            }
-            Err(format!("token {id} is still listed after its revoke"))
-        });
-    }
-}
-
 /// **A Confluence personal access token that worked and stopped working**, all
 /// the way to what the sources view renders -- and the mirror still standing
 /// afterwards.
@@ -2587,15 +2560,15 @@ impl Drop for WikiPat {
 /// **Never a wrong password.** The refusal is a bearer token and nothing else;
 /// a few failed password logins lock the seed admin out for the *correct*
 /// password too, which is why `AuthKind` is `Pat` from the insert onwards and
-/// [`wiki_app_as`] takes the method as a parameter.
+/// [`wiki_app`] takes the method as a parameter.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
 async fn a_revoked_confluence_pat_reaches_the_credential_health_surface_and_the_mirror_survives() {
     let wiki = wiki();
     wiki.clear_leftover_tokens().await;
-    let pat = WikiPat::issue(&wiki).await;
+    let pat = wiki.pat().await;
 
-    let (state, events) = wiki_app_as(
+    let (state, events) = wiki_app(
         "atlassian_live_wiki_health",
         &wiki,
         AuthMethod::Pat,
@@ -2611,8 +2584,10 @@ async fn a_revoked_confluence_pat_reaches_the_credential_health_surface_and_the_
     let synced = confluence_pages(&state.pool).await;
     assert!(
         synced.len() >= 5,
-        "`fixtures/tidewater/work.json` names five pages, and they are mirrored under a personal \
-         access token: {synced:?}"
+        "`fixtures/tidewater/work.json` names five pages and the seed puts each of them under the \
+         space home page, so a walk of the space answers at least six and never fewer than five \
+         -- an exact count here would be asserting the home page rather than the fixture: \
+         {synced:?}"
     );
     assert!(
         synced
@@ -2637,9 +2612,13 @@ async fn a_revoked_confluence_pat_reaches_the_credential_health_surface_and_the_
          last assertion here a claim about a cursor that exists: {healthy:?}"
     );
 
-    // 2. The token is revoked -- here by swapping what the keychain holds,
-    //    which is the same thing from the adapter's side and leaves the real
-    //    token for the guard to clean up.
+    // 2. The token stops working -- here by swapping what the keychain holds
+    //    for a string this Confluence never issued, which is the shape
+    //    `live_confluence_seeded.rs`'s own `bad_token()` uses, and which leaves
+    //    the real token for the guard to revoke. What it is *not* is a revoke
+    //    at the server: what the next run measures is a bearer the server
+    //    cannot **resolve** -- the 401 #284 recorded -- and not a token whose
+    //    row Confluence has deleted.
     state
         .secrets
         .put(
