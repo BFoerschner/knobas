@@ -23,8 +23,8 @@
  * the detail on purpose -- a detail open over a maximised tile closes first,
  * and the tile is still there for the next press.
  *
- * `⌘T` is M3's timer and is deliberately **not** bound — binding it now would
- * train a habit the app cannot honour.
+ * `⌘T` is the timer (#278). It is not part of the ladder: it is a verb, not an
+ * unwind, and it acts wherever the reader is.
  */
 import type { Router } from "./router.svelte";
 
@@ -63,6 +63,27 @@ export interface KeyHandlers {
    * as though it had.
    */
   restoreTile: () => boolean;
+  /**
+   * `⌘T` / `Ctrl+T` — the timer (#278).
+   *
+   * ## Where the three behaviours live, and why not here
+   *
+   * One keystroke, three outcomes: a running timer stops, a foreground entity
+   * starts, and neither opens the picker. **None of that is decided here.**
+   * This handler says *the key was pressed*; `shell/timer.svelte.ts`'s
+   * `press()` decides what it means, because deciding needs the running timer
+   * and the foreground, and a keyboard that read both would be a second owner
+   * of the timer's state.
+   *
+   * The same line the `⌘K` contract above draws between the shell and the
+   * launcher, for the same reason.
+   *
+   * It is bound **unconditionally**, above the `Esc` ladder and outside it: a
+   * verb is not a rung. A modal that wants to keep the key stops propagation
+   * itself, exactly as `Modal.svelte` already does for `Esc` — so ⌘T inside
+   * the picker does not start a second timer behind it.
+   */
+  toggleTimer: () => void;
 }
 
 /**
@@ -77,6 +98,15 @@ export function installKeys(router: Router, handlers: KeyHandlers): () => void {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
       event.preventDefault();
       handlers.openLauncher();
+      return;
+    }
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "t") {
+      // `preventDefault` unconditionally: on a Mac ⌘T is the browser's
+      // new-tab, which does nothing in a Tauri window, and on Linux Ctrl+T is
+      // the same. Letting it through would be letting a keystroke mean two
+      // things depending on the build.
+      event.preventDefault();
+      handlers.toggleTimer();
       return;
     }
     if (event.key !== "Escape") return;

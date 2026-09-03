@@ -17,6 +17,9 @@
   import { lifecycle } from "./lib/shell/lifecycle.svelte";
   import { projects } from "./lib/shell/projects.svelte";
   import { router } from "./lib/shell/router.svelte";
+  import { timer } from "./lib/shell/timer.svelte";
+  import { canBeTarget } from "./lib/shell/timer";
+  import TimerPicker from "./lib/shell/TimerPicker.svelte";
   import { push } from "./lib/shell/toasts.svelte";
   import SettingsView from "./lib/settings/SettingsView.svelte";
   import FirstRun from "./lib/sources/FirstRun.svelte";
@@ -162,6 +165,103 @@
     return { entityId: id, label: id.slice(id.indexOf(":") + 1) };
   });
 
+  /**
+   * **What is in front of the reader**, by the rule spec #272 states for both
+   * the heartbeat and ⌘T: *the open detail, else the room's anchor, else
+   * none* (#278).
+   *
+   * Read off the address and the resolved room, for the same reason
+   * `openEntity` is: the address is what says what is open, and it is the
+   * shell's to read. `null` is a legal answer and not a missing one — it is
+   * what makes ⌘T open the picker rather than start on nothing, and what
+   * passive attribution (#281) will record as an unattributed gap.
+   *
+   * Everything is put through `canBeTarget` before it leaves here. A promoted
+   * context's anchor is a ticket or an epic, so it always passes today; the
+   * guard is what stops a room shape that changes later quietly making a
+   * context the thing the clock runs on.
+   */
+  const foreground = $derived.by(() => {
+    const route = router.route;
+    if (route.view !== "room") return null;
+    const open = route.detail?.entityId;
+    if (open && canBeTarget({ entityId: open })) {
+      return { kind: "entity", entity_id: open } as const;
+    }
+    const anchor = contexts.find((candidate) => candidate.id === route.ctx)?.anchorId;
+    if (anchor && canBeTarget({ entityId: anchor })) {
+      return { kind: "entity", entity_id: anchor } as const;
+    }
+    return null;
+  });
+
+  // The store holds the answer rather than a function that computes it: the
+  // heartbeat fires from an interval, outside any reactive scope, and a
+  // callback closing over runes read there would be read untracked.
+  $effect(() => {
+    timer.foreground = foreground;
+  });
+
+  /** Whether ⌘T's picker is up (#278, story 9). */
+  let pickerOpen = $state(false);
+
+  /**
+   * ⌘T, and the strip's timer slot: one verb with three outcomes, all three
+   * decided by `timer.press()` — see its documentation for why the rule is
+   * there and not in `keys.ts`.
+   *
+   * The one thing decided here is `"pick"`, because opening a dialog is the
+   * shell's. A refusal is a toast: `start_timer` rejects a stored context, a
+   * blank label and a second timer, and every one of those is a sentence the
+   * reader can act on.
+   */
+  function toggleTimer() {
+    void timer
+      .press()
+      .then((outcome) => {
+        if (outcome === "pick") pickerOpen = true;
+      })
+      .catch((error) => {
+        push({ text: ipcErrorMessage(error), tone: "err" });
+      });
+  }
+
+  /**
+   * The launcher's *Start timer* row: **stop what is running, then start**
+   * (#278, story 11).
+   *
+   * The stop comes first and unconditionally, because that is what closes the
+   * block the reader was in; switching targets without one would discard the
+   * sitting. It is a plain stop today. #280 makes it open the worklog draft,
+   * and the ordering here is what that ticket hangs on.
+   *
+   * The launcher stays open behind this deliberately — it closes on its own
+   * `Enter`, and a chain action is not a navigation.
+   */
+  function startTimerOn(entityId: string, title: string) {
+    void timer
+      .stop()
+      .then(() => timer.start({ kind: "entity", entity_id: entityId }))
+      .then(() => {
+        push({ text: `Timing ${title}.` });
+      })
+      .catch((error) => {
+        push({ text: ipcErrorMessage(error), tone: "err" });
+      });
+  }
+
+  /** Start on what the picker chose, and close it only if that worked. */
+  function startFromPicker(target: Parameters<typeof timer.start>[0]) {
+    void timer
+      .start(target)
+      .then(() => {
+        pickerOpen = false;
+      })
+      .catch((error) => {
+        push({ text: ipcErrorMessage(error), tone: "err" });
+      });
+  }
+
   onMount(() => {
     /**
      * Unmounted before the bridge was ready.
@@ -236,10 +336,18 @@
     const stopKeys = installKeys(router, {
       openLauncher,
       restoreTile: () => room?.restoreTile() ?? false,
+      toggleTimer,
     });
+    // The clock, the heartbeat and the activity subscription. Outside the
+    // `await` above because none of the three touches the bridge until it
+    // fires -- and because the tick has to be running before the first
+    // `refresh` lands, or the strip would draw a frozen elapsed reading until
+    // the next second.
+    const stopTimer = timer.begin();
 
     return () => {
       disposed = true;
+      stopTimer();
       stopHealth?.();
       stopMerges?.();
       stopInbox?.();
@@ -305,6 +413,21 @@
    */
   $effect(() => {
     if (lifecycle.ready) void projects.reseed();
+  });
+
+  /**
+   * Seed the timer the moment the database can answer — the same rule and the
+   * same shape as the four seeds above. `current_timer` rejects with
+   * `not_ready` for the whole of bring-up, and the activity signal only fires
+   * on a mutation, so without this a session that starts with a timer already
+   * running would show nothing in the strip until the next thing happened.
+   *
+   * This is also the read the relaunch sweep runs *before*: by the time the
+   * database says `ready`, a timer that outlived the last process has already
+   * been closed, so what comes back here is never a clock that ran all night.
+   */
+  $effect(() => {
+    if (lifecycle.ready) void timer.refresh();
   });
 
   /**
@@ -385,7 +508,7 @@
 {#if lifecycle.ready && firstRun}
   <FirstRun demo={lifecycle.status?.demo ?? false} onfinish={onFirstRunDone} />
 {:else if lifecycle.ready}
-  <Shell {router} {lifecycle} {contexts} onsearch={openLauncher}>
+  <Shell {router} {lifecycle} {contexts} onsearch={openLauncher} {timer} ontimer={toggleTimer}>
     {#snippet main()}
       {#if router.route.view === "unknown"}
         <!--
@@ -442,9 +565,13 @@
       // assumption.
       if (openEntity) void linkTo(openEntity.entityId, targetId, targetTitle);
     }}
+    ontimer={startTimerOn}
     onnavigate={(hash) => router.go(hash)}
     onclose={() => {}}
   />
+  {#if pickerOpen}
+    <TimerPicker onpick={startFromPicker} onclose={() => (pickerOpen = false)} />
+  {/if}
 {:else}
   <Booting
     db={lifecycle.db}

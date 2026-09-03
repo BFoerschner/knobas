@@ -639,6 +639,92 @@ test("the open entity's own row has no chain", async () => {
 });
 
 /**
+ * *Start timer* on the selected result (#278, story 11).
+ *
+ * It needs no open detail — that is the difference from *Link to…*, which
+ * needs a second end — so this drives the launcher with `openEntity` absent,
+ * which is how the shell mounts it from a room with nothing open.
+ *
+ * The launcher only says *which* result was chosen. **Stopping the running
+ * timer first is the shell's**, and the two are separated here on purpose: a
+ * launcher that stopped a timer itself would be a second owner of the clock.
+ */
+test("Tab offers Start timer on a result, with no detail open", async () => {
+  const ontimer = vi.fn();
+  open({ ontimer });
+  await settle();
+  target.querySelector("input")!.value = "sepa";
+  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+
+  press("Tab");
+  const chain = target.querySelector('[aria-label="Actions on the selected result"]');
+  expect(chain?.textContent).toContain("Start timer on Retry failed SEPA payouts");
+
+  press("Enter");
+  expect(ontimer).toHaveBeenCalledWith("jira:PAY-231", "Retry failed SEPA payouts");
+  expect(target.querySelector('[aria-label="Actions on the selected result"]')).toBeNull();
+});
+
+/**
+ * **The refusal, in the launcher.** A stored context is a row in
+ * `knobas.entity` and comes back from search like anything else, so the row
+ * has to be taken out rather than assumed away — the same rule
+ * `shell/timer.ts` states and `start_timer` enforces.
+ *
+ * The fixture puts the context group **first**, so the chain under test is the
+ * one on the selected row, and *Link to…* is offered alongside: the assertion
+ * is that the timer row is gone and the link row is not, which a chain that
+ * simply had nothing in it could not satisfy.
+ */
+test("a stored context result is not offered a timer, though it can still be linked", async () => {
+  const ontimer = vi.fn();
+  const onlink = vi.fn();
+  const withContext = response({
+    groups: [
+      {
+        kind: "ctx",
+        label: "Context",
+        plural: "Contexts",
+        monogram: "CX",
+        total: 1,
+        hits: [
+          hit({
+            entity_id: "ctx:5b1c0f1e",
+            kind: "ctx",
+            title: "SEPA migration",
+            source_id: "ctx",
+          }),
+        ],
+      },
+      ...response().groups,
+    ],
+  });
+  open({
+    ontimer,
+    onlink,
+    openEntity: OPEN,
+    ports: { search: async () => withContext, launcherHome: async () => HOME },
+  });
+  await settle();
+  target.querySelector("input")!.value = "sepa";
+  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+
+  press("Tab");
+  const chain = target.querySelector('[aria-label="Actions on the selected result"]');
+  expect(chain?.textContent, "a context was offered a timer").not.toContain("Start timer");
+  expect(chain?.textContent, "the whole chain vanished, so this proves nothing").toContain(
+    "Link to PAY-999",
+  );
+
+  press("Enter");
+  expect(ontimer).not.toHaveBeenCalled();
+});
+
+/**
  * Escape unwinds the chain first — one rung per press, and the shell's ladder
  * still never sees the key.
  */

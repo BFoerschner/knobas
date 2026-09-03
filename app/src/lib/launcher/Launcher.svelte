@@ -18,15 +18,25 @@
 
   ## The Tab action chain
 
-  §4's *"do it here"* rows, over the selected result. M2 has exactly one of
-  them: **Link to ⟨the open entity⟩**, and it exists only while a detail is
-  open — an action chain that offered "link to nothing" would be a row that
-  cannot be pressed. `Tab` still swallows the keystroke when the chain would be
-  empty, because the alternative is `Tab` moving focus out of the box.
+  §4's *"do it here"* rows, over the selected result. There are two:
 
-  The launcher does not write the link. It says *which* result the reader chose
-  and lets the shell do it, for the same reason it does not navigate: this is
+  * **Link to ⟨the open entity⟩** (M2), which exists only while a detail is
+    open — an action chain that offered "link to nothing" would be a row that
+    cannot be pressed;
+  * **Start timer** (M3, #278), which exists on any result that can be a timer
+    target. A stored context cannot (`shell/timer.ts`), so the row is absent
+    there rather than offered and then refused by the backend.
+
+  `Tab` still swallows the keystroke when the chain would be empty, because the
+  alternative is `Tab` moving focus out of the box.
+
+  The launcher does neither of them. It says *which* result the reader chose
+  and lets the shell act, for the same reason it does not navigate: this is
   stream E, and the entity that is open, the IPC and the toast are the shell's.
+  For the timer that division carries a rule with it — *Start timer* on another
+  entity **stops the running one first**, so the block the reader was in is
+  closed rather than lost (story 11) — and the shell is where the stop, and
+  #280's draft, belong.
 -->
 <script lang="ts">
   import { onMount, tick } from "svelte";
@@ -34,6 +44,7 @@
   import { launcherHome as defaultHome, search as defaultSearch } from "../ipc";
   import type { CredentialHealth } from "../ipc/sources";
   import { hashFor } from "../shell/router.svelte";
+  import { canBeTarget } from "../shell/timer";
   import Board from "./Board.svelte";
   import Chips from "./Chips.svelte";
   import Help from "./Help.svelte";
@@ -51,6 +62,7 @@
     onclose,
     openEntity,
     onlink,
+    ontimer,
     ports,
     now,
   }: {
@@ -81,6 +93,16 @@
      * acknowledgement and the failure message are the shell's.
      */
     onlink?: ((targetId: string, targetTitle: string) => void) | undefined;
+    /**
+     * Start the timer on the chosen result, **stopping whatever is running
+     * first** (#278, story 11).
+     *
+     * The stop, the start, the acknowledgement and the failure message are all
+     * the shell's, exactly as `onlink`'s write is. `undefined` — a caller with
+     * no timer to offer — leaves the row out of the chain entirely, the same
+     * distinction `onlink` draws.
+     */
+    ontimer?: ((targetId: string, targetTitle: string) => void) | undefined;
     /**
      * The IPC, injectable. Production passes nothing and gets the real
      * bridge; a test passes fakes and needs no `window.__TAURI_INTERNALS__`.
@@ -167,19 +189,38 @@
    */
   function chainFor(row: LauncherRow): ChainAction[] {
     const entity = entityOf(row);
+    if (!entity) return [];
+    const actions: ChainAction[] = [];
+
     const open = openEntity;
-    if (!entity || !open || !onlink || entity.entityId === open.entityId) return [];
-    const link = onlink;
-    return [
-      {
+    if (open && onlink && entity.entityId !== open.entityId) {
+      const link = onlink;
+      actions.push({
         id: "link",
         label: `Link to ${open.label}`,
         run: () => {
           link(entity.entityId, entity.title);
           chain = null;
         },
-      },
-    ];
+      });
+    }
+
+    // Refused rather than absent: a context is a row in `knobas.entity` and
+    // reaches this list like anything else, so the row has to be taken *out*
+    // — see `shell/timer.ts`. Offering it would offer a row whose only
+    // outcome is the backend's `invalid`.
+    if (ontimer && canBeTarget({ entityId: entity.entityId })) {
+      const start = ontimer;
+      actions.push({
+        id: "timer",
+        label: `Start timer on ${entity.title}`,
+        run: () => {
+          start(entity.entityId, entity.title);
+          chain = null;
+        },
+      });
+    }
+    return actions;
   }
 
   // The chain belongs to one row. Moving the cursor abandons it.

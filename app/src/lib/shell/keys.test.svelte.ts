@@ -23,8 +23,9 @@ function at(hash: string, maximised = false) {
   routerTeardown = router.start();
   const openLauncher = vi.fn();
   const restoreTile = vi.fn(() => maximised);
-  teardown = installKeys(router, { openLauncher, restoreTile });
-  return { router, openLauncher, restoreTile };
+  const toggleTimer = vi.fn();
+  teardown = installKeys(router, { openLauncher, restoreTile, toggleTimer });
+  return { router, openLauncher, restoreTile, toggleTimer };
 }
 
 function press(key: string, options: KeyboardEventInit = {}) {
@@ -170,11 +171,68 @@ test("Cmd-K and Ctrl-K both open the launcher", () => {
   expect(openLauncher).toHaveBeenCalledTimes(2);
 });
 
-/** ⌘T is M3's. Binding it now would train a habit the app cannot honour. */
-test("plain k, and Cmd-T, are left alone", () => {
+test("plain k is left alone", () => {
   const { openLauncher } = at("#/ctx/all");
 
   press("k");
-  press("t", { metaKey: true });
   expect(openLauncher).not.toHaveBeenCalled();
+});
+
+/**
+ * ⌘T reaches the timer, and the keystroke is swallowed (#278).
+ *
+ * `preventDefault` matters as much as the call: ⌘T is the browser's new-tab
+ * on every platform this ships to, and a keystroke that means two things
+ * depending on the build is one nobody can rely on.
+ *
+ * **What the key does is not decided here** — `timer.svelte.ts`'s `press()`
+ * owns the three behaviours, and `timer.test.svelte.ts` drives them. This is
+ * the binding: the key is heard, and it is heard once.
+ */
+test("Cmd-T and Ctrl-T both reach the timer, and the keystroke is swallowed", () => {
+  const { toggleTimer, openLauncher } = at("#/ctx/all");
+
+  const meta = press("t", { metaKey: true });
+  const ctrl = press("T", { ctrlKey: true });
+  expect(toggleTimer).toHaveBeenCalledTimes(2);
+  expect(meta.defaultPrevented).toBe(true);
+  expect(ctrl.defaultPrevented).toBe(true);
+  expect(openLauncher, "⌘T opened the launcher as well").not.toHaveBeenCalled();
+});
+
+/** A bare `t` is typing, not a command. */
+test("plain t is left alone", () => {
+  const { toggleTimer } = at("#/ctx/all");
+
+  press("t");
+  expect(toggleTimer).not.toHaveBeenCalled();
+});
+
+/**
+ * ⌘T is a verb, not a rung, so it does not unwind anything — a detail open
+ * over a room stays open while the clock starts.
+ */
+test("Cmd-T does not move the address", () => {
+  const { router } = at("#/ctx/src:jira");
+  router.go("#/ticket/mock:PAY-231");
+
+  press("t", { metaKey: true });
+  expect(location.hash).toBe("#/ticket/mock:PAY-231");
+});
+
+/**
+ * ...and a dialog that stops the key keeps it, exactly as `Esc` is kept: ⌘T
+ * inside the picker must not start a second timer behind it.
+ */
+test("a Cmd-T whose propagation was stopped below window never reaches the timer", () => {
+  const { toggleTimer } = at("#/ctx/all");
+
+  const dialog = document.createElement("div");
+  document.body.append(dialog);
+  dialog.addEventListener("keydown", (event) => event.stopPropagation());
+
+  dialog.dispatchEvent(new KeyboardEvent("keydown", { key: "t", metaKey: true, bubbles: true }));
+  expect(toggleTimer).not.toHaveBeenCalled();
+
+  dialog.remove();
 });

@@ -62,6 +62,7 @@ test("the fallback is All work by identity, not by position", () => {
       kindWord: "source",
       filter: { sources: ["jira"], context: null, project: null },
       miniBoardLayout: "stacked" as const,
+      anchorId: null,
     },
     ALL_CONTEXT,
   ];
