@@ -1440,12 +1440,6 @@ knobas-source-jira	lib/knobas_source_jira	descriptor::tests::the_schema_asks_for
 knobas-source-jira	lib/knobas_source_jira	descriptor::tests::the_schema_defaults_are_a_valid_configuration
 knobas-source-jira	lib/knobas_source_jira	descriptor::tests::the_template_declares_the_ratified_write_set_and_nothing_else
 knobas-source-jira	lib/knobas_source_jira	descriptor::tests::the_template_survives_a_json_round_trip
-knobas-source-jira	lib/knobas_source_jira	digest::tests::a_boundary_cannot_be_forged_by_the_content_around_it
-knobas-source-jira	lib/knobas_source_jira	digest::tests::a_changed_field_changes_the_digest_even_with_updated_untouched
-knobas-source-jira	lib/knobas_source_jira	digest::tests::an_absent_field_and_an_empty_one_are_different_records
-knobas-source-jira	lib/knobas_source_jira	digest::tests::key_order_cannot_reach_the_digest_however_the_map_is_built
-knobas-source-jira	lib/knobas_source_jira	digest::tests::the_same_record_digests_the_same_whatever_order_its_keys_arrived_in
-knobas-source-jira	lib/knobas_source_jira	digest::tests::the_type_is_part_of_the_record
 knobas-source-jira	lib/knobas_source_jira	discover::tests::a_field_table_with_no_schemas_falls_back_to_the_name
 knobas-source-jira	lib/knobas_source_jira	discover::tests::an_id_that_is_not_a_bare_field_id_is_not_discovered
 knobas-source-jira	lib/knobas_source_jira	discover::tests::an_instance_without_the_plugin_discovers_nothing
@@ -1453,6 +1447,12 @@ knobas-source-jira	lib/knobas_source_jira	discover::tests::epic_status_is_never_
 knobas-source-jira	lib/knobas_source_jira	discover::tests::the_epic_link_field_is_the_one_with_the_greenhopper_key
 knobas-source-jira	lib/knobas_source_jira	discover::tests::the_name_fallback_never_reaches_a_system_field
 knobas-source-jira	lib/knobas_source_jira	discover::tests::the_plugin_key_beats_the_display_name
+knobas-source-jira	lib/knobas_source_jira	fingerprint::tests::a_boundary_cannot_be_forged_by_the_content_around_it
+knobas-source-jira	lib/knobas_source_jira	fingerprint::tests::a_changed_field_changes_the_digest_even_with_updated_untouched
+knobas-source-jira	lib/knobas_source_jira	fingerprint::tests::an_absent_field_and_an_empty_one_are_different_records
+knobas-source-jira	lib/knobas_source_jira	fingerprint::tests::key_order_cannot_reach_the_digest_however_the_map_is_built
+knobas-source-jira	lib/knobas_source_jira	fingerprint::tests::the_same_record_digests_the_same_whatever_order_its_keys_arrived_in
+knobas-source-jira	lib/knobas_source_jira	fingerprint::tests::the_type_is_part_of_the_record
 knobas-source-jira	lib/knobas_source_jira	http::tests::a_base_url_that_is_not_a_url_is_refused
 knobas-source-jira	lib/knobas_source_jira	http::tests::a_body_that_is_not_jiras_envelope_is_read_as_nothing
 knobas-source-jira	lib/knobas_source_jira	http::tests::a_configuration_problem_outranks_a_missing_secret

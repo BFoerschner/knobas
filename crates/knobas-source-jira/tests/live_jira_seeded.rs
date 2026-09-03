@@ -571,6 +571,25 @@ impl Labeled {
         }
     }
 
+    /// Add or remove [`LITTER_LABEL`] on `key` -- **repeatable**, unlike
+    /// [`Self::label`], so a test that has to try a timing window more than
+    /// once can reset between attempts. `Drop` removes the label either way,
+    /// and removing an absent one is a no-op that `unlabel` still verifies.
+    async fn set(&mut self, seeded: &Seeded, key: &str, on: bool) {
+        self.key = Some(key.to_owned());
+        let change = if on { "add" } else { "remove" };
+        let (status, body) = seeded
+            .request(
+                reqwest::Method::PUT,
+                &format!("rest/api/2/issue/{key}"),
+                Some(serde_json::json!({
+                    "update": { "labels": [{ change: LITTER_LABEL }] }
+                })),
+            )
+            .await;
+        assert_eq!(status, 204, "{change} {LITTER_LABEL} on {key}: {body}");
+    }
+
     /// Add [`LITTER_LABEL`] to `key`, and own its removal from this line on.
     async fn label(&mut self, seeded: &Seeded, key: &str) {
         assert!(self.key.is_none(), "this guard owns exactly one edit");
@@ -713,20 +732,28 @@ fn updated_to(cursor: &str) -> chrono::DateTime<chrono::Utc> {
 
 /// Wait until the wall clock has moved into a **later second** than `stamp`.
 ///
-/// Jira stamps `updated` to the second, and the adapter's cursor recognises a
-/// re-delivered issue by its `(key, updated)` pair -- so an edit made inside
-/// the same second as the value a baseline run recorded is, to the cursor,
-/// *the same version of that issue*, and the next run correctly skips it as
-/// already delivered. `JiraCursor::already_delivered`'s own doc says as much
-/// ("an issue edited twice within the same second is missed here"), and it is
-/// a documented limitation of a minute-resolution query language, not a
-/// defect.
+/// **What this used to be for, and no longer is.** Jira stamps `updated` to the
+/// second, and the adapter's cursor used to recognise a re-delivered issue by
+/// its `(key, updated)` pair -- so an edit inside the same second as the value a
+/// baseline run recorded was, to the cursor, the same version of that issue and
+/// was skipped. This helper existed to keep that off the incremental test,
+/// which it failed about one run in eight (measured 2026-09-03), and the
+/// docstring here called it a documented limitation rather than a defect.
 ///
-/// It is also not what the incremental test is about, and it made that test
-/// fail one run in eight (measured 2026-09-03) -- always the runs where the
-/// leftover clearing had just touched the issue, so its stamp *was* the
-/// current second. Waiting for the second to turn is what makes the edit one
-/// the cursor can tell apart, and it costs at most a second.
+/// It was a defect, and issue #345 is where it was measured properly and fixed:
+/// the skipped edit was not "missed until the next one", it was **lost for
+/// ever**, because `updated` does not move again on its own. `seen` now
+/// recognises a *record*, by fingerprint, so an edit inside one second is a
+/// different record and is delivered --
+/// `two_changes_inside_one_second_with_a_run_between_them_both_reach_the_sink`
+/// is the test that says so against this server.
+///
+/// **It is still needed, for a different assertion.** A test that asserts an
+/// edit moved `updated` *forward* (`witnessed > baseline`) is comparing values
+/// `/search` renders to the second, and two edits inside one second render
+/// equal. That is a fact about the timestamp, not about the cursor, and waiting
+/// for the second to turn is what makes such an assertion meaningful. It costs
+/// at most a second.
 async fn after_the_second_of(stamp: chrono::DateTime<chrono::Utc>) {
     while chrono::Utc::now().timestamp() <= stamp.timestamp() {
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -1562,7 +1589,37 @@ impl Reassigned {
     /// endpoint, which is the one issue #345 is about, and not a `fields` edit
     /// through the generic issue `PUT`.
     async fn take(&mut self, seeded: &Seeded, key: &str) {
-        assert!(self.was.is_none(), "this guard owns exactly one issue");
+        let before = self.remember(seeded, key).await;
+        assert_ne!(
+            before.as_deref(),
+            Some(seeded.user.as_str()),
+            "{key} is already the suite's, so becoming its assignee would witness nothing"
+        );
+        self.set(seeded, key, Some(&seeded.user.clone())).await;
+    }
+
+    /// Assign `key` to `to`, or to nobody -- **repeatable**, so a test that has
+    /// to try a timing window more than once can put the issue back and go
+    /// again. The *first* call is what records the seeded owner, so however
+    /// many times this runs, [`Drop`] restores the state the suite found.
+    async fn set(&mut self, seeded: &Seeded, key: &str, to: Option<&str>) {
+        self.remember(seeded, key).await;
+        let (status, body) = seeded
+            .request(
+                reqwest::Method::PUT,
+                &format!("rest/api/2/issue/{key}/assignee"),
+                Some(serde_json::json!({ "name": to })),
+            )
+            .await;
+        assert_eq!(status, 204, "assigning {key} to {to:?}: {body}");
+    }
+
+    /// The assignee `key` had when this guard first touched it.
+    async fn remember(&mut self, seeded: &Seeded, key: &str) -> Option<String> {
+        if let Some((owned, was)) = &self.was {
+            assert_eq!(owned, key, "this guard owns exactly one issue");
+            return was.clone();
+        }
         let (status, body) = seeded
             .get(&format!("rest/api/2/issue/{key}?fields=assignee"))
             .await;
@@ -1570,20 +1627,8 @@ impl Reassigned {
         let before = body["fields"]["assignee"]["name"]
             .as_str()
             .map(str::to_owned);
-        assert_ne!(
-            before.as_deref(),
-            Some(seeded.user.as_str()),
-            "{key} is already the suite's, so becoming its assignee would witness nothing"
-        );
-        self.was = Some((key.to_owned(), before));
-        let (status, body) = seeded
-            .request(
-                reqwest::Method::PUT,
-                &format!("rest/api/2/issue/{key}/assignee"),
-                Some(serde_json::json!({ "name": seeded.user })),
-            )
-            .await;
-        assert_eq!(status, 204, "assigning {key} to {}: {body}", seeded.user);
+        self.was = Some((key.to_owned(), before.clone()));
+        before
     }
 }
 
@@ -1771,107 +1816,137 @@ async fn a_reassignment_through_the_assignee_endpoint_reaches_the_next_increment
 ///
 /// This is the bug in its own habitat, and the one thing no fake can settle:
 /// that Jira's `/search` really does report `updated` to the second while the
-/// issue underneath it changes in milliseconds, so that two changes can share
-/// a stamp *at the only resolution a run can observe*. The fixture does not
-/// contrive the collision -- it makes two ordinary writes back to back and
-/// asserts, from the server's own answers, that they landed in the same second
-/// before the assertion that matters. If they did not, the test says so and
-/// fails rather than passing vacuously, because a run between two changes a
-/// second apart would prove nothing.
+/// issue underneath it changes in milliseconds, so two changes can share a
+/// stamp *at the only resolution a run can observe*.
 ///
-/// The run in the middle is what made this permanent rather than transient:
+/// The run in the middle is what made the loss permanent rather than transient.
 /// `knobas_app::sources::write_queue`'s `refresh` fires one after every landed
-/// write, so *comment through knobas, then reassign in Jira* put the issue in
-/// `seen` at the shared second and no later run ever reached it -- `updated`
-/// does not move again on its own. Only a backfill recovered it.
+/// write, so *comment through knobas, then reassign in Jira* put the issue into
+/// `seen` at the shared second, and no later run ever reached it -- `updated`
+/// does not move again on its own, so only a backfill recovered it.
 ///
-/// Both changes are asserted, not just the second: an adapter that delivered
-/// the reassignment while losing the comment would be the same bug wearing the
-/// other shoe.
+/// # Why this retries, and what it does *not* retry
+///
+/// The collision cannot be commanded: it needs the reassignment to land in the
+/// same wall-clock second as the change the intervening run recorded, and
+/// between them sits a wait on Jira's asynchronous search index -- the one this
+/// file budgets [`INDEX_BUDGET`] for and #325 records. Measured on this
+/// container that wait is usually zero polls, so the pair usually shares a
+/// second; on a loaded machine it need not. An earlier version of this test
+/// asserted the shared second outright, which meant a slow index failed the
+/// suite with no bug present.
+///
+/// So each attempt resets the issue, tries again, and **only the collision is
+/// retried**. Once one is achieved the delivery assertion is made once and is
+/// not retried at all: a reassignment that did not arrive is a failure, never
+/// something to poll past. Exhausting the attempts is also a failure -- it
+/// means this environment cannot produce the shape the criterion is about --
+/// and it reports every gap it measured so the reason is on the log.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
 async fn two_changes_inside_one_second_with_a_run_between_them_both_reach_the_sink() {
+    /// Each attempt costs a full sync of seven issues plus four small writes.
+    const ATTEMPTS: usize = 6;
+
     let seeded = seeded();
-    // `Labeled::new` clears an earlier run's leftovers, so the baseline below
-    // is taken over a clean corpus.
+    // `Labeled::new` clears an earlier run's leftovers, so each attempt starts
+    // from the plain corpus.
     let mut labelled = Labeled::new(&seeded).await;
     let mut assigned = Reassigned::new(&seeded);
     let source = seeded.source(serde_json::json!({}));
     const BORROWED: &str = "PAY-240";
 
-    let (items, cursor) = full(&*source).await;
-    let baseline = item(&items, BORROWED)
-        .updated_at
-        .expect("a real Jira always sets updated");
-    after_the_second_of(baseline).await;
+    let mut gaps: Vec<i64> = Vec::new();
+    let mut collided: Option<(String, chrono::DateTime<chrono::Utc>)> = None;
 
-    // Change one: a label, through the generic issue PUT.
-    labelled.label(&seeded, BORROWED).await;
-    let after_first = stamp_of(&seeded, BORROWED).await;
+    for attempt in 1..=ATTEMPTS {
+        // Back to the baseline, so every attempt asks the identical question:
+        // no litter label, and the seeded owner on the ticket.
+        labelled.set(&seeded, BORROWED, false).await;
+        let owner = assigned.remember(&seeded, BORROWED).await;
+        assigned.set(&seeded, BORROWED, owner.as_deref()).await;
 
-    // The run in between -- this is what records the issue at that second.
-    let deadline = std::time::Instant::now() + INDEX_BUDGET;
-    let between = loop {
-        let (items, next) = sync_from(&*source, Some(cursor.clone())).await;
-        if !items.is_empty() {
+        // A position that already holds this issue's current record.
+        let (items, cursor) = full(&*source).await;
+        assert_eq!(keys(&items), seeded.seeded_keys());
+        let baseline = item(&items, BORROWED)
+            .updated_at
+            .expect("a real Jira always sets updated");
+        after_the_second_of(baseline).await;
+
+        // Change one: a label, through the generic issue PUT.
+        labelled.set(&seeded, BORROWED, true).await;
+
+        // The run in between -- the one that records the issue at that second.
+        let deadline = std::time::Instant::now() + INDEX_BUDGET;
+        let (recorded, between) = loop {
+            let (items, next) = sync_from(&*source, Some(cursor.clone())).await;
+            if !items.is_empty() {
+                let seen = item(&items, BORROWED);
+                assert!(
+                    seen.payload["fields"]["labels"]
+                        .as_array()
+                        .is_some_and(|l| l.iter().any(|v| v == LITTER_LABEL)),
+                    "the run in between must be the one that saw the label, or the \
+                     collision below is not the one being tested"
+                );
+                break (
+                    seen.updated_at.expect("a real Jira always sets updated"),
+                    next,
+                );
+            }
             assert!(
-                item(&items, BORROWED).payload["fields"]["labels"]
-                    .as_array()
-                    .is_some_and(|l| l.iter().any(|v| v == LITTER_LABEL)),
-                "the run in between must be the one that saw the label, or the collision \
-                 below is not the one being tested"
+                std::time::Instant::now() < deadline,
+                "the label did not reach the index within {INDEX_BUDGET:?}"
             );
-            break next;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the label did not reach the index within {INDEX_BUDGET:?}"
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        };
+
+        // Change two, immediately: the reassignment, through the dedicated
+        // endpoint.
+        assigned
+            .set(&seeded, BORROWED, Some(&seeded.user.clone()))
+            .await;
+        let after = stamp_of(&seeded, BORROWED).await;
+
+        // The premise, from the server rather than from hope. `/search`
+        // truncates to whole seconds, so this is the comparison a run can
+        // actually make -- and `recorded` is the value that really went into
+        // the cursor, read back off the item the run delivered.
+        let gap = (after - recorded).num_milliseconds();
+        gaps.push(gap);
+        println!(
+            "SEEDED attempt {attempt}: the run recorded {BORROWED} at {recorded}, the \
+             reassignment landed at {after} ({gap} ms later) -- same second: {}",
+            recorded.timestamp() == after.timestamp()
         );
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        if recorded.timestamp() == after.timestamp() {
+            collided = Some((between, after));
+            break;
+        }
+    }
+
+    let Some((between, _)) = collided else {
+        panic!(
+            "{ATTEMPTS} attempts and the reassignment never landed in the second the \
+             previous run recorded, so this run cannot witness the collision #345 is \
+             about. Gaps in ms: {gaps:?}. Each gap is one wait on Jira's asynchronous \
+             search index plus a sync and a PUT, so a machine this slow is one where the \
+             assertion below would pass for the wrong reason."
+        )
     };
 
-    // Change two, immediately: the reassignment, through the dedicated
-    // endpoint, inside the same second if the machine is quick enough.
-    assigned.take(&seeded, BORROWED).await;
-    let after_second = stamp_of(&seeded, BORROWED).await;
-
-    // The premise, from the server rather than from hope. `/search` truncates
-    // to the second, so this is the comparison a run can actually make.
-    // Whole seconds, because that is the resolution `/search` answers in and
-    // therefore the only one a run can compare at.
-    let one_second = after_first.timestamp() == after_second.timestamp();
-    assert!(
-        after_second >= after_first,
-        "time ran backwards: {after_first} then {after_second}"
+    // And now the assertion, made once: the second change is delivered although
+    // the only timestamp a run can see is unchanged. Not polled -- a
+    // reassignment that did not arrive is the bug, not a slow index, and the
+    // index has already been shown to be current by the run above.
+    let (delivered, _) = sync_from(&*source, Some(between)).await;
+    assert_eq!(
+        keys(&delivered),
+        vec![BORROWED.to_owned()],
+        "the reassignment shares a second with the change the previous run recorded, and \
+         that is exactly the record the cursor's fingerprint exists to tell apart"
     );
-    println!(
-        "SEEDED {BORROWED}: label at {after_first}, reassignment at {after_second} \
-         -- same second: {one_second}"
-    );
-    assert!(
-        one_second,
-        "the two writes landed {} ms apart and in different seconds, so this run cannot \
-         witness the collision #345 is about. It is not a flake to retry past: a machine \
-         slow enough for this is one where the assertion would pass for the wrong reason.",
-        (after_second - after_first).num_milliseconds()
-    );
-
-    // And the second change is still delivered, although the only timestamp a
-    // run can see is unchanged.
-    let deadline = std::time::Instant::now() + INDEX_BUDGET;
-    let delivered = loop {
-        let (items, _) = sync_from(&*source, Some(between.clone())).await;
-        if !items.is_empty() {
-            break items;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the reassignment of {BORROWED} was never delivered. Its `updated` shares a \
-             second with the change the previous run recorded, which is exactly the record \
-             the cursor's digest exists to tell apart."
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    };
     let now = item(&delivered, BORROWED);
     assert_eq!(
         now.author.as_deref(),
@@ -1882,7 +1957,9 @@ async fn two_changes_inside_one_second_with_a_run_between_them_both_reach_the_si
         now.payload["fields"]["labels"]
             .as_array()
             .is_some_and(|l| l.iter().any(|v| v == LITTER_LABEL)),
-        "and the first change is still on the record it delivered"
+        "and the first change is still on the record it delivered -- an adapter that \
+         delivered the reassignment while losing the label would be the same bug wearing \
+         the other shoe"
     );
 }
 

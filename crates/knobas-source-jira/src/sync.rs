@@ -30,12 +30,12 @@
 //!
 //! # What "already delivered" means, and what it costs to get wrong
 //!
-//! An issue is recognised by [`crate::digest`] of the raw `/search` record and
+//! An issue is recognised by [`crate::fingerprint`] of the raw `/search` record and
 //! **not** by its `updated` (issue #345, cursor version 2). `/search` reports
 //! `updated` to the second, an issue changes in milliseconds, and this run is
 //! fired after every landed write -- so keying on the timestamp dropped, for
 //! ever, any change that landed in the same second as the one a run had just
-//! recorded. The digest is computed here, before the skip decision and before
+//! recorded. The fingerprint is computed here, before the skip decision and before
 //! `complete`, which is what keeps the comparison like-for-like across runs
 //! without costing a request per issue.
 
@@ -144,9 +144,9 @@ impl SyncRun<'_> {
         let mut start_at: u32 = 0;
         let mut pages: u32 = 0;
         let mut emitted: usize = 0;
-        // Every `(key, updated, digest)` this run *saw* in the window -- see
-        // the module docs. Skipped records belong here as much as emitted ones.
-        let mut seen_in_window: Vec<(String, DateTime<Utc>, String)> = Vec::new();
+        // Every record this run *saw* in the window -- see the module docs.
+        // Skipped ones belong here as much as emitted ones.
+        let mut seen_in_window: Vec<crate::cursor::Seen> = Vec::new();
         // Seeded from the previous position, which is what makes the new one
         // `max(previous, newest emitted)` rather than "newest emitted".
         let mut watermark: Option<DateTime<Utc>> = previous.as_ref().and_then(|c| c.updated_to);
@@ -168,17 +168,21 @@ impl SyncRun<'_> {
                     .updated
                     .as_deref()
                     .and_then(parse_jira_time);
-                // Digested before `complete`, which is what makes the value
+                // Taken before `complete`, which is what makes the value
                 // comparable across runs -- see the module docs.
-                let digest = crate::digest::of(&raw.raw);
+                let fingerprint = crate::fingerprint::of(&raw.raw);
                 if let Some(u) = updated {
-                    seen_in_window.push((raw.issue.key.clone(), u, digest.clone()));
+                    seen_in_window.push(crate::cursor::Seen {
+                        k: raw.issue.key.clone(),
+                        u,
+                        h: fingerprint.clone(),
+                    });
                 }
                 // The overlap exists so nothing is missed; this is what keeps
                 // it from also meaning "everything arrives twice".
                 if previous
                     .as_ref()
-                    .is_some_and(|c| c.already_delivered(&raw.issue.key, &digest))
+                    .is_some_and(|c| c.already_delivered(&raw.issue.key, &fingerprint))
                 {
                     continue;
                 }

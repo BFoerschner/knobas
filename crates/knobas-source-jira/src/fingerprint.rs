@@ -1,5 +1,11 @@
 //! A stable fingerprint of one issue as `/search` returned it.
 //!
+//! **Not a [`Digest`](../../../CONTEXT.md).** `CONTEXT.md` is the canonical
+//! vocabulary and *digest* there is the standup's three lists; this is a
+//! fingerprint of a record, and the two words must not blur -- the sentence
+//! "the digest the digest test needs" is one an earlier draft of this module
+//! actually produced.
+//!
 //! # Why the cursor needs one (issue #345)
 //!
 //! [`crate::cursor::JiraCursor`]'s `seen` set exists to answer *"was this
@@ -85,7 +91,7 @@ const PRIME: u64 = 0x0000_0100_0000_01b3;
 struct Fnv(u64);
 
 impl Fnv {
-    fn feed(&mut self, bytes: &[u8]) {
+    fn write(&mut self, bytes: &[u8]) {
         for byte in bytes {
             self.0 ^= u64::from(*byte);
             self.0 = self.0.wrapping_mul(PRIME);
@@ -102,7 +108,7 @@ impl Fnv {
 /// population is far past the point where anything else is the weak link.
 pub(crate) fn of(raw: &Value) -> String {
     let mut hasher = Fnv(OFFSET_BASIS);
-    feed(&mut hasher, raw);
+    feed_value(&mut hasher, raw);
     format!("{:016x}", hasher.0)
 }
 
@@ -110,45 +116,49 @@ pub(crate) fn of(raw: &Value) -> String {
 /// different records can encode to the same bytes: without the length, the
 /// arrays `["a", "bc"]` and `["ab", "c"]` differ only by where a separator
 /// falls, and any separator character can also appear inside a Jira summary.
-fn feed(hasher: &mut Fnv, value: &Value) {
+fn feed_value(hasher: &mut Fnv, value: &Value) {
     match value {
-        Value::Null => hasher.feed(b"0"),
-        Value::Bool(false) => hasher.feed(b"1"),
-        Value::Bool(true) => hasher.feed(b"2"),
+        Value::Null => hasher.write(b"0"),
+        Value::Bool(false) => hasher.write(b"1"),
+        Value::Bool(true) => hasher.write(b"2"),
         Value::Number(number) => {
-            hasher.feed(b"3");
+            hasher.write(b"3");
             // `Number`'s own rendering: it round-trips the literal Jira sent,
             // integer or float, without this module having to decide which.
-            feed_bytes(hasher, number.to_string().as_bytes());
+            feed_framed(hasher, number.to_string().as_bytes());
         }
         Value::String(text) => {
-            hasher.feed(b"4");
-            feed_bytes(hasher, text.as_bytes());
+            hasher.write(b"4");
+            feed_framed(hasher, text.as_bytes());
         }
         Value::Array(items) => {
-            hasher.feed(b"5");
-            feed_bytes(hasher, &(items.len() as u64).to_le_bytes());
+            hasher.write(b"5");
+            feed_framed(hasher, &(items.len() as u64).to_le_bytes());
             for item in items {
-                feed(hasher, item);
+                feed_value(hasher, item);
             }
         }
         Value::Object(map) => {
-            hasher.feed(b"6");
-            feed_bytes(hasher, &(map.len() as u64).to_le_bytes());
+            hasher.write(b"6");
+            feed_framed(hasher, &(map.len() as u64).to_le_bytes());
             // Sorted here, deliberately: see the module docs, point 1.
             let mut keys: Vec<&String> = map.keys().collect();
             keys.sort_unstable();
             for key in keys {
-                feed_bytes(hasher, key.as_bytes());
-                feed(hasher, &map[key]);
+                feed_framed(hasher, key.as_bytes());
+                feed_value(hasher, &map[key]);
             }
         }
     }
 }
 
-fn feed_bytes(hasher: &mut Fnv, bytes: &[u8]) {
-    hasher.feed(&(bytes.len() as u64).to_le_bytes());
-    hasher.feed(bytes);
+/// **Framed**, never bare: the length goes in before the bytes. The name says so
+/// because that prefix is the whole reason two different records cannot encode
+/// to the same stream, and a `feed_bytes` beside [`Fnv::write`] would have read
+/// as the same thing spelled twice.
+fn feed_framed(hasher: &mut Fnv, bytes: &[u8]) {
+    hasher.write(&(bytes.len() as u64).to_le_bytes());
+    hasher.write(bytes);
 }
 
 #[cfg(test)]
@@ -213,7 +223,7 @@ mod tests {
     ///
     /// `serde_json::Value`'s map is a `BTreeMap` unless some crate in the tree
     /// turns `preserve_order` on, and a `BTreeMap` hands its keys over sorted
-    /// already -- so with the sort in [`feed`] deleted, this build's digests do
+    /// already -- so with the sort in [`feed_value`] deleted, this build's digests do
     /// not change and no test here can tell. That is exactly the day the sort
     /// matters: under `preserve_order` the map would follow the order Jira
     /// serialized a field in, two reads could differ in nothing else, and every

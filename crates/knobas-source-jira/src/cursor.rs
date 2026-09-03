@@ -19,13 +19,13 @@
 //! An entry carries both and they do different jobs, which is why neither can
 //! be dropped:
 //!
-//! * **`h`** -- [`crate::digest`] of the raw `/search` record -- is what
+//! * **`h`** -- [`crate::fingerprint`] of the raw `/search` record -- is what
 //!   [`JiraCursor::already_delivered`] matches on. It replaced `u` in that role
 //!   in cursor version 2. `/search` reports `updated` to the *second* while an
 //!   issue changes to the millisecond, so two changes inside one second shared
 //!   a `(key, updated)` pair: with a run in between them, the second change was
 //!   dropped before the sink and lost for ever, because `updated` never moves
-//!   again on its own. Measured on Jira DC 10.3.24; `crate::digest`'s own docs
+//!   again on its own. Measured on Jira DC 10.3.24; `crate::fingerprint`'s own docs
 //!   carry the numbers and the everyday sequence that reaches it.
 //! * **`u`** is what [`JiraCursor::advanced`] filters the set on, so it holds
 //!   the overlap window and nothing more. A digest carries no date, so without
@@ -37,7 +37,7 @@ use chrono::{DateTime, Utc};
 /// Bump when the envelope's shape changes: an unrecognised version reads as
 /// "no cursor", which is a full sync.
 ///
-/// **2** since issue #345 gave `seen` a digest. That path is the whole upgrade
+/// **2** since issue #345 gave `seen` a fingerprint. That path is the whole upgrade
 /// plan and it needs no migration: every stored version-1 cursor stops parsing
 /// the moment this build runs, each affected source does one full sync, and it
 /// comes back with a version-2 cursor. A full sync is the correct recovery
@@ -79,7 +79,7 @@ pub(crate) struct Seen {
     pub k: String,
     /// Its `fields.updated`, which bounds the set to the overlap window.
     pub u: DateTime<Utc>,
-    /// [`crate::digest`] of the raw record -- the identity.
+    /// [`crate::fingerprint`] of the raw record -- the identity.
     pub h: String,
 }
 
@@ -148,7 +148,7 @@ impl JiraCursor {
 
     /// Was this exact version of this issue already handed to the sink?
     ///
-    /// **The digest is the identity and the timestamp takes no part in the
+    /// **The fingerprint is the identity and the timestamp takes no part in the
     /// answer** (issue #345). Matching on `updated` as well was not a harmless
     /// belt-and-braces: it *was* the identity until cursor version 2, and it
     /// answered "yes" to a record that had changed since, whenever the change
@@ -159,19 +159,18 @@ impl JiraCursor {
     /// The dropped change was then permanent: `updated` does not move again on
     /// its own, so no later incremental run reached it either.
     ///
-    /// Two records with the same digest are the same record, whatever their
+    /// Two records with the same fingerprint are the same record, whatever their
     /// clocks said, so re-adding `u` to this comparison could only ever make it
     /// wrong again in the same direction.
-    pub(crate) fn already_delivered(&self, key: &str, digest: &str) -> bool {
-        self.seen.iter().any(|s| s.k == key && s.h == digest)
+    pub(crate) fn already_delivered(&self, key: &str, fingerprint: &str) -> bool {
+        self.seen.iter().any(|s| s.k == key && s.h == fingerprint)
     }
 
     /// The cursor for a run that emitted something.
     ///
     /// # `seen_in_window` is every record the run *saw*, not every one it sent
     ///
-    /// The run must pass every `(key, updated, digest)` it observed inside the
-    /// overlap window -- **the ones it skipped as already-delivered just as much as the
+    /// The run must pass every [`Seen`] it observed inside the overlap window -- **the ones it skipped as already-delivered just as much as the
     /// ones it pushed to the sink**. `seen` is a record of what the *window*
     /// contained, not of what crossed the SPI, and the two differ on exactly
     /// the items that make an idle poll idle.
@@ -187,7 +186,7 @@ impl JiraCursor {
     pub(crate) fn advanced(
         watermark: DateTime<Utc>,
         tz_offset_secs: i32,
-        seen_in_window: &[(String, DateTime<Utc>, String)],
+        seen_in_window: &[Seen],
     ) -> Self {
         // The band the next query will really return, not the band the
         // arithmetic suggests. `since` subtracts whole minutes, but the literal
@@ -209,12 +208,8 @@ impl JiraCursor {
         );
         let mut seen: Vec<Seen> = seen_in_window
             .iter()
-            .filter(|(_, u, _)| *u >= floor)
-            .map(|(k, u, h)| Seen {
-                k: k.clone(),
-                u: *u,
-                h: h.clone(),
-            })
+            .filter(|s| s.u >= floor)
+            .cloned()
             .collect();
         // Newest first, so the cap drops the entries least likely to come back,
         // with the key breaking ties. A key appears at most once, so this is a
@@ -252,12 +247,20 @@ mod tests {
     /// two reports of the same **unchanged** issue agree -- which is the case
     /// every test here but [`a_record_that_changed_within_one_second_is_not_the_one_already_delivered`]
     /// is about. [`edited`] is the same issue with a different record.
-    fn saw(key: &str, updated: DateTime<Utc>) -> (String, DateTime<Utc>, String) {
-        (key.to_owned(), updated, format!("h-{key}"))
+    fn saw(key: &str, updated: DateTime<Utc>) -> Seen {
+        Seen {
+            k: key.to_owned(),
+            u: updated,
+            h: h(key),
+        }
     }
 
-    fn edited(key: &str, updated: DateTime<Utc>) -> (String, DateTime<Utc>, String) {
-        (key.to_owned(), updated, format!("h-{key}-edited"))
+    fn edited(key: &str, updated: DateTime<Utc>) -> Seen {
+        Seen {
+            k: key.to_owned(),
+            u: updated,
+            h: format!("h-{key}-edited"),
+        }
     }
 
     /// The digest [`saw`] would report for `key`.
@@ -336,7 +339,7 @@ mod tests {
         let c = JiraCursor::advanced(updated, 0, &[saw("PAY-231", updated)]);
         assert!(c.already_delivered("PAY-231", &h("PAY-231")));
         // Edited since: a different record, so a real change.
-        assert!(!c.already_delivered("PAY-231", &edited("PAY-231", updated).2));
+        assert!(!c.already_delivered("PAY-231", &edited("PAY-231", updated).h));
         // Another issue, even one whose record happened to digest the same.
         assert!(!c.already_delivered("PAY-240", &h("PAY-231")));
     }
@@ -363,7 +366,7 @@ mod tests {
             "the unchanged record is still recognised -- battery clause 2"
         );
         assert!(
-            !c.already_delivered("PAY-240", &edited("PAY-240", one_second).2),
+            !c.already_delivered("PAY-240", &edited("PAY-240", one_second).h),
             "the reassignment landed 88 ms after the comment and shares its second; \
              recognising it here is how it was lost for ever"
         );
@@ -486,10 +489,11 @@ mod tests {
         let c = JiraCursor::advanced(watermark, offset, &delivered);
         let floor = query_floor(&c, offset);
 
-        for (key, updated, digest) in &delivered {
-            if *updated >= floor {
+        for record in &delivered {
+            let (key, updated) = (&record.k, record.u);
+            if updated >= floor {
                 assert!(
-                    c.already_delivered(key, digest),
+                    c.already_delivered(key, &record.h),
                     "{key} @ {updated} is inside the next query's window (>= {floor}) \
                      but is not in seen -- it will be re-emitted and drag the watermark back"
                 );
@@ -509,7 +513,7 @@ mod tests {
             let offset = hours * 3_600;
             for second in [0, 1, 17, 30, 59] {
                 let watermark = t(&format!("2026-08-22T11:48:{second:02}.000+0000"));
-                let delivered: Vec<(String, DateTime<Utc>, String)> = (0..150)
+                let delivered: Vec<Seen> = (0..150)
                     .map(|i| {
                         saw(
                             &format!("PAY-{i}"),
@@ -519,10 +523,11 @@ mod tests {
                     .collect();
                 let c = JiraCursor::advanced(watermark, offset, &delivered);
                 let floor = query_floor(&c, offset);
-                for (key, updated, digest) in &delivered {
-                    if *updated >= floor {
+                for record in &delivered {
+                    let (key, updated) = (&record.k, record.u);
+                    if updated >= floor {
                         assert!(
-                            c.already_delivered(key, digest),
+                            c.already_delivered(key, &record.h),
                             "offset {hours}h second {second}: {key} @ {updated} \
                              is in the window (>= {floor}) but not in seen"
                         );
@@ -537,14 +542,11 @@ mod tests {
     /// The sync loop is task 5's; this is only the three lines of it that
     /// [`JiraCursor::already_delivered`] already decides, which is enough to
     /// show what [`JiraCursor::advanced`]'s input contract buys.
-    fn would_emit<'a>(
-        cursor: &JiraCursor,
-        returned: &'a [(String, DateTime<Utc>, String)],
-    ) -> Vec<&'a str> {
+    fn would_emit<'a>(cursor: &JiraCursor, returned: &'a [Seen]) -> Vec<&'a str> {
         returned
             .iter()
-            .filter(|(key, _, digest)| !cursor.already_delivered(key, digest))
-            .map(|(key, _, _)| key.as_str())
+            .filter(|s| !cursor.already_delivered(&s.k, &s.h))
+            .map(|s| s.k.as_str())
             .collect()
     }
 
@@ -603,7 +605,7 @@ mod tests {
     #[test]
     fn the_seen_set_is_capped_at_the_newest_entries() {
         let watermark = t("2026-08-22T11:48:00.000+0000");
-        let delivered: Vec<(String, DateTime<Utc>, String)> = (0..SEEN_CAP + 50)
+        let delivered: Vec<Seen> = (0..SEEN_CAP + 50)
             .map(|i| {
                 saw(
                     &format!("PAY-{i}"),
@@ -617,7 +619,7 @@ mod tests {
         // will hand back again.
         assert!(c.already_delivered("PAY-0", &h("PAY-0")));
         let oldest = &delivered[SEEN_CAP + 49];
-        assert!(!c.already_delivered(&oldest.0, &oldest.2));
+        assert!(!c.already_delivered(&oldest.k, &oldest.h));
     }
 
     /// Battery clause 2: a run that emitted nothing hands back the cursor it
