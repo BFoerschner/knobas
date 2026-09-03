@@ -117,6 +117,7 @@ fn every_adapter_crate_linked_into_the_app_has_a_row() {
         knobas_source_jira::descriptor_template().adapter_kind,
         knobas_source_teamcity::descriptor_template().adapter_kind,
         knobas_source_gitea::descriptor_template().adapter_kind,
+        knobas_source_confluence::descriptor_template().adapter_kind,
     ] {
         assert!(
             kinds.contains(&expected),
@@ -158,6 +159,12 @@ fn the_registry_declares_exactly_the_write_set_m2_ratified() {
             vec!["create_branch", "create_pull_request", "comment", "approve"],
         ),
         ("teamcity", vec!["trigger_build", "rerun_build"]),
+        // Confluence (#284) reads and does not write. Its three ops --
+        // `CreatePage`, `UpdatePage` and a reused `Comment` -- are spec #272's
+        // and are each an ADR-0006 growth of `WriteOp` plus a §10.8 entry, so
+        // the empty list here is the assertion that none of that has happened
+        // yet rather than an omission.
+        ("confluence", vec![]),
     ]
     .into_iter()
     .collect();

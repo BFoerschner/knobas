@@ -2785,6 +2785,7 @@ dependencies = [
  "knobas-search",
  "knobas-secrets",
  "knobas-source",
+ "knobas-source-confluence",
  "knobas-source-gitea",
  "knobas-source-jira",
  "knobas-source-mock",
@@ -2915,6 +2916,21 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.20",
+ "tokio",
+]
+
+[[package]]
+name = "knobas-source-confluence"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "knobas-core",
+ "knobas-http",
+ "knobas-source",
+ "reqwest",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 

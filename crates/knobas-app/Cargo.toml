@@ -37,6 +37,7 @@ knobas-secrets = { path = "../knobas-secrets" }
 knobas-source = { path = "../knobas-source" }
 # One line per compiled-in adapter -- the registry in `sources/registry.rs` is
 # the only place in knobas that names them, and this is its manifest half.
+knobas-source-confluence = { path = "../knobas-source-confluence" }
 knobas-source-gitea = { path = "../knobas-source-gitea" }
 knobas-source-jira = { path = "../knobas-source-jira" }
 knobas-source-mock = { path = "../knobas-source-mock" }

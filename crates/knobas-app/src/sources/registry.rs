@@ -53,6 +53,11 @@ const ADAPTERS: &[Adapter] = &[
         template: knobas_source_gitea::descriptor_template,
         build: knobas_source_gitea::build,
     },
+    Adapter {
+        kind: "confluence",
+        template: knobas_source_confluence::descriptor_template,
+        build: knobas_source_confluence::build,
+    },
 ];
 
 /// Turns stored configurations into live adapters.
