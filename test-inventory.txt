@@ -1504,6 +1504,7 @@ knobas-source-jira	lib/knobas_source_jira	sync::tests::an_unreadable_cursor_fall
 knobas-source-jira	lib/knobas_source_jira	sync::tests::completes_a_truncated_comment_container
 knobas-source-jira	lib/knobas_source_jira	sync::tests::completion_pages_the_comment_endpoint_too
 knobas-source-jira	lib/knobas_source_jira	sync::tests::fetches_comments_when_the_container_is_absent
+knobas-source-jira	lib/knobas_source_jira	sync::tests::inside_the_overlap_window_the_reassigned_issue_is_returned_and_then_skipped
 knobas-source-jira	lib/knobas_source_jira	sync::tests::leaves_a_complete_container_alone
 knobas-source-jira	lib/knobas_source_jira	sync::tests::one_new_issue_then_an_idle_poll_settles
 knobas-source-jira	lib/knobas_source_jira	sync::tests::pages_with_start_at_until_the_total_is_reached

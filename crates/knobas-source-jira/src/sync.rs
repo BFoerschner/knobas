@@ -1218,6 +1218,51 @@ mod tests {
         );
     }
 
+    /// **The same miss, by the other door**: inside the overlap window the
+    /// query *does* return the reassigned issue, and `seen` skips it (#345).
+    ///
+    /// The sibling above is the case where the issue never enters the window.
+    /// For the first two minutes after a run there is a second mechanism, and
+    /// it matters to any proposed fix: `already_delivered` recognises the pair
+    /// `(key, updated)`, `updated` is exactly what did not change, so the issue
+    /// is delivered to the run and dropped before the sink. **Widening the
+    /// query alone therefore fixes nothing here** -- the wider window would
+    /// return the issue and `seen` would skip it again.
+    ///
+    /// The witness that the two doors really are different is the cursor's own
+    /// `seen`: it is built from what the *pages returned*, so PAY-231 being in
+    /// it is proof the query answered with it and the run chose to skip it.
+    #[tokio::test]
+    async fn inside_the_overlap_window_the_reassigned_issue_is_returned_and_then_skipped() {
+        let mut issues = five_issues();
+        issues[4] = assigned("PAY-231", "2026-08-22T11:48:00.000+0000", "mara.lindqvist");
+        let mut api = FakeApi {
+            issues,
+            ..FakeApi::default()
+        };
+        let config = cfg(serde_json::json!({}));
+        let cursor = keys_of(&api, &config, None).await.1;
+
+        api.reassign("PAY-231", "knobas");
+        // Something else inside the window, so the run is not idle.
+        api.edit("PAY-228", "2026-08-22T11:49:00.000+0000");
+
+        let (keys, advanced) = keys_of(&api, &config, Some(cursor)).await;
+        assert_eq!(
+            keys,
+            vec!["PAY-228"],
+            "the reassigned issue reached the run and was dropped before the sink"
+        );
+        let parsed = crate::cursor::JiraCursor::parse(&advanced).unwrap();
+        assert!(
+            parsed.seen.iter().any(|s| s.k == "PAY-231"
+                && Some(s.u) == crate::time::parse_jira_time("2026-08-22T11:48:00.000+0000")),
+            "`seen` records what the window contained, so PAY-231 in it is proof the query \
+             answered with it: {:?}",
+            parsed.seen
+        );
+    }
+
     /// The watermark is `max(previous, newest emitted)`, never just "newest
     /// emitted".
     ///
