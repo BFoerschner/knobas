@@ -242,14 +242,20 @@ fn each_plugin_is_pinned_to_one_version_on_both_sides_of_the_bridge() {
 /// crate present, permissions present, nobody calling `.plugin(..)` -- produces
 /// no compile error and no test failure anywhere else.
 ///
-/// **And here the opener's argument runs out, which is stated rather than
-/// borrowed.** What proves the opener call is *reached* is a bundled build
-/// where somebody pressed the button. The equivalent run for this plugin --
-/// `testenv/README.md`, "Signed dev build (macOS)" -- produced **no
-/// notification**: knobas' own half is reached (the item arrives, the shell
-/// hands it to `sendNotification`) and nothing comes out of `notify-rust`,
-/// whose result the plugin discards. So this test proves the call is written,
-/// and nothing in the tree yet proves it is answered.
+/// **And here, as with the opener, the source scan is not the witness.** What
+/// proves the opener call is *reached* is a bundled build where somebody
+/// pressed the button. The equivalent run for this plugin is
+/// `testenv/README.md`, "Signed dev build (macOS)": on 2026-09-03, macOS
+/// 26.5.2 with the `knobas-dev` self-signed certificate, one `credential_expiry`
+/// item arriving on an unfocused window produced one banner, with
+/// `Presenting ... as banner` for `dev.knobas.desktop` in `usernoted`'s log.
+/// The first attempt showed nothing because the app had no macOS notification
+/// authorization; the README says how to tell that state apart from a knobas
+/// bug, and it is worth reading before trusting a silent run.
+///
+/// What no run in this tree proves is the **click**: the plugin's
+/// `register_listener` is mobile-only, so a notification's click has no
+/// channel to arrive on and the navigation is proven against the stub alone.
 #[test]
 fn the_notification_plugin_is_registered() {
     let code = strip_comments(include_str!("../src/lib.rs"));
