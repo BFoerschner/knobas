@@ -1517,7 +1517,10 @@ async fn a_seeded_days_work_is_what_the_digest_lists_under_yesterday() {
         )
         .await;
     litter.assigned = Some((TRANSITIONED.to_owned(), was.clone()));
-    assert_eq!(status, 204, "assigning {TRANSITIONED} to the suite: {answered}");
+    assert_eq!(
+        status, 204,
+        "assigning {TRANSITIONED} to the suite: {answered}"
+    );
     // The assignment and the comment both moved `updated`, so this sync is
     // what puts today's date on the mirror row as well as the account.
     sync(&state).await;
@@ -1576,9 +1579,7 @@ async fn a_seeded_days_work_is_what_the_digest_lists_under_yesterday() {
         );
     }
     assert!(
-        !listed
-            .iter()
-            .any(|(id, _, _)| *id == Some(seeded.as_str())),
+        !listed.iter().any(|(id, _, _)| *id == Some(seeded.as_str())),
         "{COMMENTED} is assigned to somebody else and its work is theirs: {listed:?}"
     );
     println!(

@@ -719,9 +719,7 @@ async fn a_timer_running_outside_the_day_being_asked_about_is_not_on_its_list() 
     let ticket = h.ticket("PAY-231", ME, "In Progress").await;
     h.timer(Some(&ticket), None, noon()).await;
 
-    let digest = h
-        .digest_at(noon() + Duration::days(2), &earlier(7))
-        .await;
+    let digest = h.digest_at(noon() + Duration::days(2), &earlier(7)).await;
 
     assert!(
         digest.today.is_empty(),

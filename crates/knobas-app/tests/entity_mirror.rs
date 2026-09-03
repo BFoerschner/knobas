@@ -989,7 +989,13 @@ fn the_mini_board_shapes_match_their_typescript_mirror() {
 
 /// Every field of a digest line, in the order `DigestLine` declares them.
 const DIGEST_LINE_FIELDS: &[&str] = &[
-    "entity_id", "kind", "title", "source", "verb", "reason", "at",
+    "entity_id",
+    "kind",
+    "title",
+    "source",
+    "verb",
+    "reason",
+    "at",
 ];
 
 /// The line with an item behind it -- the shape every list but one draws.
@@ -1046,9 +1052,7 @@ fn the_digest_line_shape_matches_its_typescript_mirror() {
 #[test]
 fn the_standup_digest_shape_matches_its_typescript_mirror() {
     let filled = knobas_app::standup::StandupDigest {
-        yesterday_day: Some(
-            chrono::NaiveDate::from_ymd_opt(2026, 8, 28).expect("a Friday"),
-        ),
+        yesterday_day: Some(chrono::NaiveDate::from_ymd_opt(2026, 8, 28).expect("a Friday")),
         yesterday: vec![digest_line()],
         today: vec![digest_label_line()],
         blockers: vec![digest_line()],
