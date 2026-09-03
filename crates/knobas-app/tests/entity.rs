@@ -7,7 +7,7 @@
 
 use knobas_app::commands::entity::{
     DEFAULT_RELATION, EntityFilter, EntityOrder, create_link_inner, get_entity_inner,
-    list_entities_inner, recent_activity_inner, unlink_inner,
+    list_entities_inner, list_projects_inner, recent_activity_inner, unlink_inner,
 };
 use knobas_source_mock::MockSource;
 use sqlx::PgPool;
@@ -692,7 +692,8 @@ async fn a_confluence_space_is_a_project_room_and_a_jira_project_is_another() {
     }
 
     // What the running binary resolves: every configured source's declaration,
-    // off the compiled-in registry.
+    // off the compiled-in registry. Wanted here for the *room* half below --
+    // the census reaches it through the command seam, which resolves its own.
     let declarations = knobas_app::sources::paths::declared_paths(
         &pool,
         &knobas_app::sources::Registry::builtin(),
@@ -701,7 +702,12 @@ async fn a_confluence_space_is_a_project_room_and_a_jira_project_is_another() {
     .expect("what the configured sources declare");
 
     // -- the census, which is what the switcher's rooms are built from -------
-    let census = knobas_core::project::list(&pool, &declarations)
+    //
+    // Through `list_projects_inner`, which *is* `list_projects` with its pool
+    // handed in: a test that called `project::list` directly would be
+    // re-typing the command's body, and would go on passing after the command
+    // stopped resolving declarations at all.
+    let census = list_projects_inner(&pool)
         .await
         .expect("the census `list_projects` answers with");
     let mine: Vec<(String, String, Option<String>)> = census
