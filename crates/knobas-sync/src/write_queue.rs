@@ -624,7 +624,7 @@ async fn waited(
 /// Confluence's `create_page` answers an id, so the line can point at the
 /// page; Jira's `create_ticket` answers `WriteReceipt::none()` on purpose --
 /// a created ticket is addressed by reading the mirror back -- so the line
-/// says a ticket was made and withdrawn and says nothing about which. The
+/// says a ticket was made and withdrawn and says nothing about which.
 /// Inventing an id here would be knobas naming an artefact it never saw.
 ///
 /// **The line does not copy the payload**, for the reason `discard` gives for
