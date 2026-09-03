@@ -754,9 +754,11 @@ enum Transition {
 /// * the **run's** log row -- the timestamp of the transition being announced,
 ///   in the database's clock, so the event and the diagnostics list agree
 ///   about when this run started, or ended;
-/// * the **source's** status -- `backoff_until` and `next_run_at`, which
-///   belong to the source and to no run, plus the previous run's ending, which
-///   is what `last_outcome` means until this run has an ending of its own.
+/// * the **source's** status -- `backoff_until`, and `next_run_at` on the emit
+///   that *ends* a run: both belong to the source and to no run, and the emit
+///   that starts one keeps `None`, because a run in flight has nothing to
+///   count down to. Plus the previous run's ending, which is what
+///   `last_outcome` means until this run has an ending of its own.
 async fn emit_state(deps: &SchedulerDeps, source_id: &str, run_id: i64, transition: Transition) {
     let source = match status_for(&deps.pool, source_id).await {
         Ok(Some(source)) => source,
