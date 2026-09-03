@@ -3409,16 +3409,6 @@ From this commit on, each of the following requires an orchestrator decision **a
   Ratified by the orchestrator as spec #272 and issue #278, whose acceptance criteria specify the
   migration, the module pair, the four commands, the relaunch rule, the tests and this entry.
 
-**`crates/knobas-sync/**` is NOT frozen — and stream F is expected to restructure it.**
-
-Spelled out because the list above is short and the omission would otherwise be read as an oversight. `knobas_sync::run` and `run_once` are a *starting point*, not a contract: F owns the scheduler, the cursor lifecycle, backoff, the sweep, and — explicitly — **`run_once`'s transaction boundary**, which §10.6(c) says has to move so a run's HTTP work stops happening inside an advisory-locked transaction.
-
-§10.5 tells F it "extends `knobas_sync::run`". Read narrowly that says *extend, do not restructure*, which is the opposite of what is wanted here: a stream that believes the engine is frozen will build a second sync path beside it rather than fix the one that exists, and M1 would end with two. So: extend it where extending is right, and change it where changing is right. The only parts of that crate this section pins are the **DTO shapes other streams read** — `SyncProgress`/`SyncPhase` (stream D's progress bar), `CredentialHealth`/`AuthState` (D's top strip, E's board), `SourceSyncStatus` (the `sync:state` payload) — because those cross the bridge and have TypeScript mirrors. Their *fields* are the frozen part; where they live and what writes them is F's.
-
-The same reading applies to `crates/knobas-app/src/demo.rs` and `commands/sources.rs`: F owns both, and the bare `tauri::async_runtime::spawn` in the latter is a placeholder the scheduler replaces outright.
-
-§6.1 ownership is in force from the same commit. Streams T, then A–F, may be dispatched.
-
 - **`crates/knobas-source/src/**` and the IPC surface, issue #277 (2026-09-03): the source
   descriptor grows declared payload paths, and every landed payload read outside an adapter
   expires into them.** ADR-0007 ratified the interim discipline for a payload read — miss, one
@@ -3508,3 +3498,13 @@ The same reading applies to `crates/knobas-app/src/demo.rs` and `commands/source
 
   Ratified by the orchestrator as spec #272 and issue #277, whose acceptance criteria specify the
   descriptor fields, the battery clauses, the expired reads and this entry.
+
+**`crates/knobas-sync/**` is NOT frozen — and stream F is expected to restructure it.**
+
+Spelled out because the list above is short and the omission would otherwise be read as an oversight. `knobas_sync::run` and `run_once` are a *starting point*, not a contract: F owns the scheduler, the cursor lifecycle, backoff, the sweep, and — explicitly — **`run_once`'s transaction boundary**, which §10.6(c) says has to move so a run's HTTP work stops happening inside an advisory-locked transaction.
+
+§10.5 tells F it "extends `knobas_sync::run`". Read narrowly that says *extend, do not restructure*, which is the opposite of what is wanted here: a stream that believes the engine is frozen will build a second sync path beside it rather than fix the one that exists, and M1 would end with two. So: extend it where extending is right, and change it where changing is right. The only parts of that crate this section pins are the **DTO shapes other streams read** — `SyncProgress`/`SyncPhase` (stream D's progress bar), `CredentialHealth`/`AuthState` (D's top strip, E's board), `SourceSyncStatus` (the `sync:state` payload) — because those cross the bridge and have TypeScript mirrors. Their *fields* are the frozen part; where they live and what writes them is F's.
+
+The same reading applies to `crates/knobas-app/src/demo.rs` and `commands/sources.rs`: F owns both, and the bare `tauri::async_runtime::spawn` in the latter is a placeholder the scheduler replaces outright.
+
+§6.1 ownership is in force from the same commit. Streams T, then A–F, may be dispatched.
