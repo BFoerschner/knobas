@@ -266,6 +266,7 @@ const FirstRun = (await import("../sources/FirstRun.svelte")).default;
 const ReenterSecret = (await import("../sources/ReenterSecret.svelte")).default;
 const SourcesView = (await import("../sources/SourcesView.svelte")).default;
 const BackupSection = (await import("../settings/BackupSection.svelte")).default;
+const PassiveSection = (await import("../settings/PassiveSection.svelte")).default;
 const { createHealth } = await import("./health.svelte");
 
 /**
@@ -615,11 +616,32 @@ const CASES: Case[] = [
   {
     /**
      * The settings view itself has no effect of its own — it is a frame around
-     * one section — so the section is what is walked here.
+     * its sections — so the sections are what is walked here.
      */
     name: "BackupSection",
     source: "lib/settings/BackupSection.svelte",
     open: (target) => ({ app: mount(BackupSection, { target, props: {} }) }),
+  },
+  {
+    /**
+     * The passive attribution toggle (#282). Its effect is the setting read,
+     * and the case that matters is leaving settings before it answers —
+     * `deferred`, so the answer lands after the unmount.
+     */
+    name: "PassiveSection",
+    source: "lib/settings/PassiveSection.svelte",
+    open: (target) => ({
+      app: mount(PassiveSection, {
+        target,
+        props: {
+          ports: {
+            passiveAttribution: () => deferred<boolean>(false),
+            setPassiveAttribution: () =>
+              Promise.reject(new Error("no settings write in this test")),
+          },
+        },
+      }),
+    }),
   },
   {
     name: "Diagnostics",

@@ -514,7 +514,11 @@ mod tests {
             .iter()
             .filter(|span| span.target == on("jira:PAY-231"))
             .collect();
-        assert_eq!(ticket.len(), 1, "one visit, not none and not four: {spans:?}");
+        assert_eq!(
+            ticket.len(),
+            1,
+            "one visit, not none and not four: {spans:?}"
+        );
         assert_eq!(seconds(ticket[0]), 150);
     }
 
@@ -594,7 +598,11 @@ mod tests {
             "sixty-one beats five seconds apart are five minutes of focused \
              time, and the claims they make add up to five and a half"
         );
-        assert_eq!(spans[0].ended_at, at(300), "the visit ends at its last beat");
+        assert_eq!(
+            spans[0].ended_at,
+            at(300),
+            "the visit ends at its last beat"
+        );
     }
 
     /// Focused time is time, whatever was open. A stretch with nothing in the
@@ -632,7 +640,11 @@ mod tests {
 
         let spans = derive(&observations);
 
-        assert_eq!(spans.len(), 1, "one visit, not one and a quarter hour: {spans:?}");
+        assert_eq!(
+            spans.len(),
+            1,
+            "one visit, not one and a quarter hour: {spans:?}"
+        );
         assert_eq!(
             spans[0].ended_at,
             at(330),
@@ -653,7 +665,11 @@ mod tests {
         let spans = derive(&observations);
 
         assert_eq!(spans.len(), 2, "a lunch is not work: {spans:?}");
-        assert_eq!(spans[0].ended_at, at(330), "the first visit outlives its last beat by one window");
+        assert_eq!(
+            spans[0].ended_at,
+            at(330),
+            "the first visit outlives its last beat by one window"
+        );
         assert_eq!(spans[1].started_at, at(3600));
     }
 
@@ -691,6 +707,9 @@ mod tests {
              {BEAT_WINDOW_SECONDS} seconds, so every passive visit is credited \
              past the last beat that supported it"
         );
-        assert_eq!(FLOOR_SECONDS, 120, "spec #272: visits shorter than two minutes are dropped");
+        assert_eq!(
+            FLOOR_SECONDS, 120,
+            "spec #272: visits shorter than two minutes are dropped"
+        );
     }
 }

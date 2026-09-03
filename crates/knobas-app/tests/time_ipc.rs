@@ -1214,9 +1214,30 @@ async fn the_day_read_offers_the_blocks_the_beats_support() {
     let midnight = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
     let at = |h, m, s| midnight + Duration::hours(h) + Duration::minutes(m) + Duration::seconds(s);
 
-    beats(&pool, Some(&on(TICKET)), at(9, 0, 0), 21, Duration::seconds(30)).await;
-    beats(&pool, Some(&on(OTHER)), at(9, 10, 30), 3, Duration::seconds(30)).await;
-    beats(&pool, Some(&on(TICKET)), at(9, 12, 0), 21, Duration::seconds(30)).await;
+    beats(
+        &pool,
+        Some(&on(TICKET)),
+        at(9, 0, 0),
+        21,
+        Duration::seconds(30),
+    )
+    .await;
+    beats(
+        &pool,
+        Some(&on(OTHER)),
+        at(9, 10, 30),
+        3,
+        Duration::seconds(30),
+    )
+    .await;
+    beats(
+        &pool,
+        Some(&on(TICKET)),
+        at(9, 12, 0),
+        21,
+        Duration::seconds(30),
+    )
+    .await;
 
     assert_eq!(
         day(&pool, midnight).await,
@@ -1243,7 +1264,10 @@ async fn the_day_read_offers_the_blocks_the_beats_support() {
         .iter()
         .map(|entry| entry.block.id)
         .collect();
-    assert_eq!(first, again, "a second read rewrote the day's passive blocks");
+    assert_eq!(
+        first, again,
+        "a second read rewrote the day's passive blocks"
+    );
 }
 
 /// The cap, through the day read, on the numbers that separate it from the
@@ -1318,7 +1342,10 @@ async fn assigning_a_passive_block_makes_it_manual_and_it_stays_assigned() {
         BlockKind::Manual,
         "a block a person has named is theirs, not knobas' guess"
     );
-    assert_eq!(assigned.block.id, offered.block.id, "assigning wrote a new row");
+    assert_eq!(
+        assigned.block.id, offered.block.id,
+        "assigning wrote a new row"
+    );
 
     assert_eq!(
         day(&pool, midnight).await,
@@ -1395,8 +1422,22 @@ async fn a_stretch_a_block_already_covers_is_not_offered_passively() {
     let at = |h, m| midnight + Duration::hours(h) + Duration::minutes(m);
     block_at(&pool, at(9, 0), at(9, 30), &labelled(LABEL)).await;
 
-    beats(&pool, Some(&on(TICKET)), at(9, 5), 21, Duration::seconds(30)).await;
-    beats(&pool, Some(&on(TICKET)), at(10, 0), 21, Duration::seconds(30)).await;
+    beats(
+        &pool,
+        Some(&on(TICKET)),
+        at(9, 5),
+        21,
+        Duration::seconds(30),
+    )
+    .await;
+    beats(
+        &pool,
+        Some(&on(TICKET)),
+        at(10, 0),
+        21,
+        Duration::seconds(30),
+    )
+    .await;
 
     assert_eq!(
         day(&pool, midnight).await,

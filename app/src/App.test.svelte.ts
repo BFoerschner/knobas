@@ -201,6 +201,14 @@ vi.mock("./lib/ipc/time", () => ({
     return Promise.resolve(null);
   },
   timerHeartbeat: () => Promise.resolve(null),
+  // The day review and the settings view are both mounted by the shell; what
+  // they call on arrival has to exist here even where no test drives it.
+  dayBlocks: () => Promise.resolve([]),
+  updateBlock: () => Promise.reject(new Error("no edit in this test")),
+  deleteBlock: () => Promise.reject(new Error("no edit in this test")),
+  createBlock: () => Promise.reject(new Error("no edit in this test")),
+  passiveAttribution: () => Promise.resolve(false),
+  setPassiveAttribution: () => Promise.reject(new Error("no settings write in this test")),
 }));
 
 /**
