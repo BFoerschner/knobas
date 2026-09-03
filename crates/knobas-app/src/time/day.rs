@@ -92,17 +92,17 @@ pub struct DayBlock {
     pub title: Option<String>,
 }
 
-/// One day, as the day review reads it: its blocks, and whether knobas still
-/// has the beats for it (#337).
+/// One day, as the day review reads it: its blocks, and whether it reaches
+/// back past the observation horizon (#337).
 ///
 /// A struct rather than the bare `Vec<DayBlock>` this read used to answer
 /// with, because there is now something true of the **day** rather than of any
 /// block on it. `RETENTION_DAYS` bounds how long observations are kept and
 /// bounds nothing about which day a reader may open -- `#/time/<date>` takes
 /// any date -- so a day past the horizon draws exactly the strip a day nobody
-/// had the app open on draws, and the difference between *knobas has no beats
-/// for this day* and *knobas has beats and they say nothing* had nowhere to
-/// ride.
+/// had the app open on draws, and the difference between *knobas has no
+/// observations for this day* and *knobas has observations and they say
+/// nothing* had nowhere to ride.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct DayRecord {
     /// The blocks overlapping the day, earliest first.
@@ -123,10 +123,11 @@ pub struct DayRecord {
     /// that is deliberate. The stamp it comes from is written only where a
     /// sweep actually deleted rows, so a profile that never had the feature on
     /// has no stamp and no day past the horizon; one that had it on, was
-    /// swept, and has since switched it off really has lost those beats, and
-    /// the sentence stays true. Gating it on the switch would make the strip
-    /// stop explaining a gap at the moment a person turned the recording off,
-    /// which is when they are most likely to be looking at one.
+    /// swept, and has since switched it off really has lost those
+    /// observations, and the sentence stays true. Gating it on the switch
+    /// would make the strip stop explaining a gap at the moment a person
+    /// turned the recording off, which is when they are most likely to be
+    /// looking at one.
     pub past_horizon: bool,
 }
 

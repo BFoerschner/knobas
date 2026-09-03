@@ -528,7 +528,7 @@ async fn the_no_target_row_tells_app_open_from_app_closed_and_from_claimed_time(
     assert_eq!(
         row.cells[column(MONDAY + 2)].tracked_seconds,
         0,
-        "no beats at all is knobas shut, not knobas open and idle"
+        "no observations at all is knobas shut, not knobas open and idle"
     );
 
     state.scheduler.shutdown().await;
@@ -1072,9 +1072,9 @@ async fn a_discard_leaves_a_worklog_jira_answered_for_alone() {
 ///
 /// The sharp case, and the one the fixture week is shaped for: the sweep's
 /// horizon falls on Thursday's midnight, so Monday to Wednesday are days
-/// knobas no longer has the beats for and Thursday to Sunday are days it does.
+/// knobas has no observations for and Thursday to Sunday are days it has them.
 /// The "no target, app open" row reads **zero** for every one of the seven --
-/// Monday's beats are gone and the rest never had any -- so without the flag
+/// Monday's observations are gone and the rest never had any -- so without the flag
 /// the timesheet says the same thing about a day it swept and a day the reader
 /// had the app shut on.
 ///
@@ -1082,7 +1082,7 @@ async fn a_discard_leaves_a_worklog_jira_answered_for_alone() {
 /// horizon loses it altogether (`week::read` drops a row with nothing in it),
 /// which is why the reading cannot be hung on that row and rides on the week.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_week_straddling_the_horizon_says_which_of_its_days_have_no_beats() {
+async fn a_week_straddling_the_horizon_says_which_of_its_days_have_no_observations() {
     let (state, _wrote) = app("week_ipc_horizon").await;
     time::passive::set_enabled(&state.pool, true)
         .await
@@ -1100,7 +1100,10 @@ async fn a_week_straddling_the_horizon_says_which_of_its_days_have_no_beats() {
     )
     .await
     .expect("the sweep runs");
-    assert_eq!(taken, 21, "Monday's beats are what the horizon is past");
+    assert_eq!(
+        taken, 21,
+        "Monday's observations are what the horizon is past"
+    );
 
     let sheet = time::week::read(&state.pool, &week())
         .await
@@ -1109,7 +1112,7 @@ async fn a_week_straddling_the_horizon_says_which_of_its_days_have_no_beats() {
     assert_eq!(
         sheet.past_horizon,
         vec![true, true, true, false, false, false, false],
-        "the week has to name the days knobas no longer has the beats for, \
+        "the week has to name the days knobas has no observations for, \
          and only those"
     );
     assert!(
@@ -1139,8 +1142,8 @@ async fn a_week_nobody_had_the_app_open_in_is_not_past_the_horizon() {
     assert_eq!(
         sheet.past_horizon,
         vec![false; 7],
-        "nothing has been swept, so knobas still has every beat these days \
-         never had"
+        "nothing has been swept, so knobas still has every observation these \
+         days never had"
     );
     assert!(row_for(&sheet, None).is_none(), "the app was shut all week");
 }

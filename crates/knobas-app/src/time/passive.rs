@@ -28,19 +28,19 @@
 //!
 //! * **A visit shorter than [`FLOOR_SECONDS`] is dropped.** Two minutes, a
 //!   named constant, because glancing at a ticket is not working on it.
-//! * **Adjacent visits to one target merge.** Six beats on one ticket are one
-//!   stretch, not six.
+//! * **Adjacent visits to one target merge.** Six observations on one ticket
+//!   are one stretch, not six.
 //! * **The total never exceeds focused time.** See [`derive`] for why this is
 //!   load-bearing rather than theoretical: it is what makes a session's last
 //!   visit end at its last beat instead of one beat window later.
 //!
 //! # What an observation claims, and why the cap follows from it
 //!
-//! A beat says *this was in the foreground at this instant*. It cannot say
-//! what was open in between, so the rule is: **a beat credits its target
-//! forward, for one beat window, and no further.** Silence therefore stops
-//! being work [`BEAT_WINDOW_SECONDS`] after the last thing knobas heard,
-//! whatever happened to the process in between.
+//! An observation says *this was in the foreground at this instant*. It
+//! cannot say what was open in between, so the rule is: **a beat credits its
+//! target forward, for one beat window, and no further.** Silence therefore
+//! stops being work [`BEAT_WINDOW_SECONDS`] after the last thing knobas
+//! heard, whatever happened to the process in between.
 //!
 //! Focused time is the same walk read a beat later: the gap between one beat
 //! and the next, clamped to the same window. So a session's claims add up to
@@ -105,8 +105,8 @@ pub const FLOOR_SECONDS: i64 = 120;
 /// read may sit**, and no constant here could be: `#/time/<date>` takes any
 /// date, and `week::vet` bounds a timesheet's *column count* and nothing
 /// about where its windows are. So this is a promise and not a proof --
-/// knobas keeps a month, and a day older than that is a day it no longer has
-/// the beats for. Past the horizon the day review offers no passive blocks
+/// knobas keeps a month, and a day older than that is a day past the
+/// observation horizon. Past it the day review offers no passive blocks
 /// and the timesheet's "no target, app open" row reads zero for that day;
 /// what a surface *says* about such a day is [`Horizon`]'s, which both reads
 /// carry to the strip and the timesheet in words (#337). Reading one safely is
@@ -486,8 +486,8 @@ const OFFER: &str = "insert into knobas.block (started_at, ended_at, entity_id, 
 ///   existed is such a day, and a reconciliation that spoke about one would
 ///   delete passive blocks it has no evidence either way about.
 /// * **The day reaches back past what [`prune`] has swept.** The same rule
-///   one line further out: a day whose beats retention has taken is a day
-///   knobas has no evidence about either, and it has to read as **absent**
+///   one line further out: a day whose observations retention has taken is a
+///   day knobas has no evidence about either, and it reads as **absent**
 ///   rather than as observed-and-empty. Emptiness would delete the blocks the
 ///   day was already offered, which is knobas forgetting an afternoon on the
 ///   strength of a record it threw away itself. The guard is on `from` and not
@@ -587,9 +587,17 @@ const STAMP_WRITE: &str = "insert into knobas.setting (key, value) values ($1, $
 /// A function of the clock and nothing else, so the rule can be read at a
 /// glance -- the treatment [`derive`] gets, for the same reason. Private:
 /// [`prune`] is the only thing that spends it, and a caller outside this
-/// module holding its own copy of the horizon is the drift the stamp exists
+/// module holding its own copy of the cutoff is the drift the stamp exists
 /// to make impossible.
-fn horizon(now: DateTime<Utc>) -> DateTime<Utc> {
+///
+/// **Not the observation horizon**, which it sat next to under that name
+/// until #344. This is what a sweep at `now` *would* take; the horizon is
+/// what a sweep actually took, and [`horizon_of`] is the only thing that
+/// knows it. The two coincide right after [`prune`] deletes something and
+/// diverge every second after -- and on a database no sweep has run in there
+/// is a cutoff every day but no horizon at all, which is the case
+/// [`horizon_of`]'s own doc warns not to compute past.
+fn sweep_cutoff(now: DateTime<Utc>) -> DateTime<Utc> {
     now - Duration::days(RETENTION_DAYS)
 }
 
@@ -649,8 +657,8 @@ impl Horizon {
 /// argument, and it applies to what a surface *says* exactly as it applies to
 /// what [`materialize`] does. A database no sweep has run in -- a fresh
 /// fixture, a restored archive, a profile whose owner never left the app
-/// running -- has every beat it ever had, however old, and a reader must not
-/// be told otherwise.
+/// running -- has every observation it ever had, however old, and a reader
+/// must not be told otherwise.
 ///
 /// # Errors
 /// [`IpcError`] if the read fails.
@@ -664,8 +672,9 @@ where
 /// Throw away the observations retention has aged out, and answer with how
 /// many went (issue #315).
 ///
-/// `now` is a parameter and not a clock, so the rule is testable at a horizon
-/// a fixture chooses rather than only at one thirty days behind the machine.
+/// `now` is a parameter and not a clock, so the rule is testable at a
+/// [`sweep_cutoff`] a fixture chooses rather than only at one thirty days
+/// behind the machine.
 /// Its one production caller is `backup::tick`.
 ///
 /// # Where this runs, and why it is not the day read
@@ -703,7 +712,7 @@ where
 /// # Errors
 /// [`IpcError`] if the delete or either half of the stamp fails.
 pub async fn prune(pool: &PgPool, now: DateTime<Utc>) -> Result<u64, IpcError> {
-    let cut = horizon(now);
+    let cut = sweep_cutoff(now);
     let mut tx = pool.begin().await?;
     let taken = sqlx::query(SWEEP)
         .bind(cut)
