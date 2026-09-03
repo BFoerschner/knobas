@@ -324,13 +324,20 @@ for row in $ISSUES; do
   pkey=${key%%-*}; num=${key##*-}
   jira GET "/rest/api/2/issue/$key?fields=summary,status"
   if [ "$API_STATUS" = "200" ]; then
+    # Present at its key: skipped, but only if it is the fixture's issue. A
+    # placeholder or a stranger at a fixture key is a mis-key, not a skip.
+    have_summary=$(printf '%s' "$API_BODY" | jq -r .fields.summary)
+    want_summary=$(printf '%s' "$d" | jq -r .summary)
+    [ "$have_summary" = "$want_summary" ] || die "$key exists but is \"$have_summary\", not the fixture's \"$want_summary\" --
+  the keys cannot be trusted. \`docker compose --profile real-atlassian down -v jira
+  jira-db confluence confluence-db\` and seed again."
     skip "issue $key"
   else
     cur=$(max_key "$pkey")
     [ "$cur" -lt "$num" ] || die "$key cannot be $key: project $pkey is already at $pkey-$cur.
   Keys come from a counter that never rewinds, so the fixture's keys are reachable
   only in a project this script created from empty. \`docker compose --profile
-  real-atlassian down -v\` and seed again."
+  real-atlassian down -v jira jira-db confluence confluence-db\` and seed again."
     if [ $((num - cur - 1)) -gt 0 ]; then
       say "burning $pkey-$((cur + 1))..$pkey-$((num - 1)) so the next issue is $key"
       last=$(burn "$pkey" $((num - cur - 1)))
@@ -351,7 +358,8 @@ for row in $ISSUES; do
     got=$(printf '%s' "$API_BODY" | jq -r .key)
     [ "$got" = "$key" ] || die "created the fixture's $key but Jira keyed it $got -- the key counter
   is not where this script believed; nothing downstream can trust the keys now.
-  \`docker compose --profile real-atlassian down -v\` and seed again."
+  \`docker compose --profile real-atlassian down -v jira jira-db confluence
+  confluence-db\` and seed again."
     created "issue $key ($(printf '%s' "$d" | jq -r .type): $(printf '%s' "$d" | jq -r .summary))"
     jira GET "/rest/api/2/issue/$key?fields=summary,status"
     expect "read back $key" 200

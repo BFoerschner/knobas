@@ -331,7 +331,9 @@ services:
       ATL_LICENSE_KEY: ${CONFLUENCE_LICENSE_KEY:-}
       # The key is written to confluence.cfg.xml on the persisted volume and is
       # NOT re-read on restart, so restarting does not reset the 3-hour timer.
-      # After expiry, either `docker compose down -v` for a clean re-setup, or:
+      # After expiry, either `docker compose --profile real-atlassian down -v jira
+      # jira-db confluence confluence-db` for a clean re-setup (name the four:
+      # a bare `down -v` takes Gitea and its volume too), or:
       #   ATL_FORCE_CFG_UPDATE=true docker compose --profile real-atlassian up -d confluence
       ATL_FORCE_CFG_UPDATE: ${ATL_FORCE_CFG_UPDATE:-false}
     volumes:

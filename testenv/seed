@@ -61,7 +61,9 @@ print_env() {
 }
 
 if [ "${1:-}" = "--env" ]; then print_env; exit 0; fi
-if [ "${1:-}" = "--atlassian" ]; then ./seed-atlassian.sh && exec ./seed-atlassian-content.sh; fi
+# Two statements, not `a && exec b`: under `set -e` a failing left side of `&&`
+# is exempt from errexit and would fall through to the usage error below.
+if [ "${1:-}" = "--atlassian" ]; then ./seed-atlassian.sh; exec ./seed-atlassian-content.sh; fi
 if [ "${1:-}" = "--teamcity" ]; then shift; exec ./seed-teamcity.sh "$@"; fi
 [ $# -eq 0 ] || {
   echo "seed: unknown argument '$1'; usage: ./seed [--env|--atlassian|--teamcity [--running]]" >&2; exit 2; }
