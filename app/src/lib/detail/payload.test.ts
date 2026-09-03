@@ -20,15 +20,8 @@ const textOf = (field: Projected | undefined) =>
   field && "text" in field ? field.text : undefined;
 
 test("projects scalars in declaration order", () => {
-  const out = projectPayload({
-    key: "PAY-231",
-    status: "In Progress",
-    story_points: 3,
-    blocked: false,
-  });
-  expect(
-    out.map((f) => [f.key, f.kind === "nested" ? f.summary : f.text]),
-  ).toEqual([
+  const out = projectPayload({ key: "PAY-231", status: "In Progress", story_points: 3, blocked: false });
+  expect(out.map((f) => [f.key, f.kind === "nested" ? f.summary : f.text])).toEqual([
     ["key", "PAY-231"],
     ["status", "In Progress"],
     ["story_points", "3"],
@@ -40,18 +33,12 @@ test("projects scalars in declaration order", () => {
 test("humanises keys without losing them", () => {
   expect(projectPayload({ story_points: 1 })[0]?.label).toBe("Story points");
   expect(projectPayload({ story_points: 1 })[0]?.key).toBe("story_points");
-  expect(projectPayload({ "affected-services": 1 })[0]?.label).toBe(
-    "Affected services",
-  );
+  expect(projectPayload({ "affected-services": 1 })[0]?.label).toBe("Affected services");
 });
 
 test("long strings become text blocks, nested values become summaries", () => {
   const long = "x".repeat(200);
-  const out = projectPayload({
-    desc: long,
-    comments: [{ by: "mara" }, { by: "jonas" }],
-    fields: { a: 1 },
-  });
+  const out = projectPayload({ desc: long, comments: [{ by: "mara" }, { by: "jonas" }], fields: { a: 1 } });
   expect(out[0]?.kind).toBe("text");
   expect(out[1]).toMatchObject({ kind: "nested", summary: "2 items" });
   expect(out[2]).toMatchObject({ kind: "nested", summary: "1 field" });
@@ -66,20 +53,14 @@ test("long strings become text blocks, nested values become summaries", () => {
  */
 test("the long-string cutoff is a cutoff", () => {
   expect(projectPayload({ d: "x".repeat(LONG_TEXT) })[0]?.kind).toBe("scalar");
-  expect(projectPayload({ d: "x".repeat(LONG_TEXT + 1) })[0]?.kind).toBe(
-    "text",
-  );
+  expect(projectPayload({ d: "x".repeat(LONG_TEXT + 1) })[0]?.kind).toBe("text");
 });
 
 /** One is one, not "1 items". */
 test("summaries count in the singular too", () => {
-  expect(projectPayload({ a: ["one"] })[0]).toMatchObject({
-    summary: "1 item",
-  });
+  expect(projectPayload({ a: ["one"] })[0]).toMatchObject({ summary: "1 item" });
   expect(projectPayload({ a: [] })[0]).toMatchObject({ summary: "0 items" });
-  expect(projectPayload({ a: { x: 1, y: 2 } })[0]).toMatchObject({
-    summary: "2 fields",
-  });
+  expect(projectPayload({ a: { x: 1, y: 2 } })[0]).toMatchObject({ summary: "2 fields" });
   expect(projectPayload({ a: {} })[0]).toMatchObject({ summary: "0 fields" });
 });
 
@@ -123,9 +104,7 @@ test("markup in a payload stays text", () => {
   );
   // ...including inside a nested value's JSON, which a `<details>` shows raw.
   const nested = projectPayload({ c: [{ text: "<img onerror=alert(1)>" }] })[0];
-  expect(nested?.kind === "nested" && nested.json).toContain(
-    "<img onerror=alert(1)>",
-  );
+  expect(nested?.kind === "nested" && nested.json).toContain("<img onerror=alert(1)>");
 });
 
 /**
@@ -135,15 +114,9 @@ test("markup in a payload stays text", () => {
  * would take the whole detail view down with it.
  */
 test("a value that will not stringify still yields a row", () => {
-  const hostile = {
-    toJSON() {
-      throw new Error("no");
-    },
-  };
+  const hostile = { toJSON() { throw new Error("no"); } };
   const out = projectPayload({ weird: hostile });
   expect(out).toHaveLength(1);
   expect(out[0]?.kind).toBe("nested");
-  expect(out[0]?.kind === "nested" && out[0].json).toContain(
-    "could not be rendered",
-  );
+  expect(out[0]?.kind === "nested" && out[0].json).toContain("could not be rendered");
 });

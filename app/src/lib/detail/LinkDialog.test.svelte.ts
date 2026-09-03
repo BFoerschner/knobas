@@ -14,23 +14,15 @@ import type { SearchQuery, SearchResponse } from "../ipc/search";
 
 /** Every query the picker asked, in order. */
 const queries: string[] = [];
-let answer: (query: SearchQuery) => Promise<SearchResponse> = () =>
-  Promise.resolve(response([]));
+let answer: (query: SearchQuery) => Promise<SearchResponse> = () => Promise.resolve(response([]));
 
 vi.mock("../ipc/search", () => ({
   search: (query: SearchQuery) => {
     queries.push(query.raw);
     return answer(query);
   },
-  launcherHome: () =>
-    Promise.reject(new Error("the dialog never loads the board")),
-  noFilters: () => ({
-    sources: [],
-    kinds: [],
-    updated_within_days: null,
-    mine: false,
-    authors: [],
-  }),
+  launcherHome: () => Promise.reject(new Error("the dialog never loads the board")),
+  noFilters: () => ({ sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }),
 }));
 
 /** Every `create_link` the dialog issued. */
@@ -48,12 +40,7 @@ vi.mock("../ipc/entity", () => ({
   // answer with nothing.
   miniBoard: () => Promise.resolve({ columns: [], sources: [] }),
   submitWrite: () => Promise.reject(new Error("no write in this test")),
-  createLink: async (
-    fromId: string,
-    toId: string,
-    relation?: string,
-    note?: string,
-  ) => {
+  createLink: async (fromId: string, toId: string, relation?: string, note?: string) => {
     writes.push({ fromId, toId, relation, note });
     if (writeFails) throw writeFails;
     return {};
@@ -78,25 +65,19 @@ function hit(over: { id: string; kind?: string; title: string }) {
 
 function response(hits: ReturnType<typeof hit>[]): SearchResponse {
   return {
-    interpreted: {
-      prefix: "none",
-      text: "",
-      segments: [],
-      filters: null,
-    } as never,
-    groups:
-      hits.length === 0
-        ? []
-        : [
-            {
-              kind: "ticket",
-              label: "Ticket",
-              plural: "Tickets",
-              monogram: "TI",
-              total: hits.length,
-              hits,
-            },
-          ],
+    interpreted: { prefix: "none", text: "", segments: [], filters: null } as never,
+    groups: hits.length === 0
+      ? []
+      : [
+          {
+            kind: "ticket",
+            label: "Ticket",
+            plural: "Tickets",
+            monogram: "TI",
+            total: hits.length,
+            hits,
+          },
+        ],
     total: hits.length,
     took_ms: 3,
     coverage: [],
@@ -121,9 +102,7 @@ function render() {
   const field = (label: string) =>
     [...target.querySelectorAll<HTMLLabelElement>("label")]
       .filter((node) => node.textContent?.includes(label))
-      .map((node) =>
-        target.querySelector<HTMLInputElement>(`#${node.htmlFor}`),
-      )[0]!;
+      .map((node) => target.querySelector<HTMLInputElement>(`#${node.htmlFor}`))[0]!;
   return {
     target,
     onclose,
@@ -144,11 +123,7 @@ function render() {
       flushSync();
     },
     press: (node: HTMLElement, key: string) => {
-      const event = new KeyboardEvent("keydown", {
-        key,
-        bubbles: true,
-        cancelable: true,
-      });
+      const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
       node.dispatchEvent(event);
       flushSync();
       return event;
@@ -172,8 +147,8 @@ test("the relation is pre-filled with related, and the curated list is offered",
   const screen = render();
 
   expect(screen.relation().value).toBe("related");
-  const offered = [...screen.target.querySelectorAll("datalist option")].map(
-    (o) => o.getAttribute("value"),
+  const offered = [...screen.target.querySelectorAll("datalist option")].map((o) =>
+    o.getAttribute("value"),
   );
   expect(offered).toContain("blocks");
   expect(offered).toContain("documents");
@@ -184,10 +159,7 @@ test("the relation is pre-filled with related, and the curated list is offered",
 
 /** Story 2: the picker is the launcher — it debounces and it asks the backend. */
 test("the target picker searches what is typed", async () => {
-  answer = () =>
-    Promise.resolve(
-      response([hit({ id: "mock:PAY-228", title: "Payout retries pile up" })]),
-    );
+  answer = () => Promise.resolve(response([hit({ id: "mock:PAY-228", title: "Payout retries pile up" })]));
   const screen = render();
 
   screen.type(screen.picker(), "payout");
@@ -242,10 +214,7 @@ test("the whole flow is keyboard-only, and writes what was chosen", async () => 
 
 /** Story 3: a relation nobody curated is still a relation. */
 test("a free-typed relation is sent as typed", async () => {
-  answer = () =>
-    Promise.resolve(
-      response([hit({ id: "mock:PAY-228", title: "Payout retries" })]),
-    );
+  answer = () => Promise.resolve(response([hit({ id: "mock:PAY-228", title: "Payout retries" })]));
   const screen = render();
 
   screen.type(screen.picker(), "payout");
@@ -268,10 +237,7 @@ test("a free-typed relation is sent as typed", async () => {
  * not what is shown.
  */
 test("already linked is surfaced inline, and the dialog stays open", async () => {
-  answer = () =>
-    Promise.resolve(
-      response([hit({ id: "mock:PAY-228", title: "Payout retries" })]),
-    );
+  answer = () => Promise.resolve(response([hit({ id: "mock:PAY-228", title: "Payout retries" })]));
   writeFails = {
     code: "conflict",
     message: 'duplicate key value violates unique constraint "link_active_idx"',
@@ -287,9 +253,7 @@ test("already linked is surfaced inline, and the dialog stays open", async () =>
   await vi.waitFor(() => expect(screen.text()).toContain("Already linked"));
   flushSync();
 
-  expect(screen.target.querySelector('[role="alert"]')?.textContent).toContain(
-    "Already linked",
-  );
+  expect(screen.target.querySelector('[role="alert"]')?.textContent).toContain("Already linked");
   expect(screen.text()).not.toContain("link_active_idx");
   expect(screen.onclose).not.toHaveBeenCalled();
   expect(screen.oncreated).not.toHaveBeenCalled();
@@ -301,10 +265,7 @@ test("already linked is surfaced inline, and the dialog stays open", async () =>
 
 /** Any other refusal keeps its own words — `not_found` names what has not synced. */
 test("a refusal that is not a conflict keeps the backend's sentence", async () => {
-  answer = () =>
-    Promise.resolve(
-      response([hit({ id: "mock:PAY-228", title: "Payout retries" })]),
-    );
+  answer = () => Promise.resolve(response([hit({ id: "mock:PAY-228", title: "Payout retries" })]));
   writeFails = {
     code: "not_found",
     message: "mock:PAY-228 is not in the local index",
@@ -317,9 +278,7 @@ test("a refusal that is not a conflict keeps the backend's sentence", async () =
   screen.press(screen.picker(), "Enter");
   screen.button("Link").click();
 
-  await vi.waitFor(() =>
-    expect(screen.text()).toContain("is not in the local index"),
-  );
+  await vi.waitFor(() => expect(screen.text()).toContain("is not in the local index"));
 
   screen.done();
 });
@@ -330,10 +289,7 @@ test("a refusal that is not a conflict keeps the backend's sentence", async () =
  * through to `Modal`.
  */
 test("Esc clears the search first and only then closes the dialog", async () => {
-  answer = () =>
-    Promise.resolve(
-      response([hit({ id: "mock:PAY-228", title: "Payout retries" })]),
-    );
+  answer = () => Promise.resolve(response([hit({ id: "mock:PAY-228", title: "Payout retries" })]));
   const screen = render();
 
   screen.type(screen.picker(), "payout");
@@ -341,9 +297,7 @@ test("Esc clears the search first and only then closes the dialog", async () => 
   flushSync();
 
   const first = screen.press(screen.picker(), "Escape");
-  expect(first.defaultPrevented, "the first Esc is the picker's own rung").toBe(
-    true,
-  );
+  expect(first.defaultPrevented, "the first Esc is the picker's own rung").toBe(true);
   expect(screen.onclose).not.toHaveBeenCalled();
   expect(screen.picker().value).toBe("");
 
@@ -355,10 +309,7 @@ test("Esc clears the search first and only then closes the dialog", async () => 
 
 /** Nothing can be written before a target is chosen. */
 test("Link is unavailable until a target is picked", async () => {
-  answer = () =>
-    Promise.resolve(
-      response([hit({ id: "mock:PAY-228", title: "Payout retries" })]),
-    );
+  answer = () => Promise.resolve(response([hit({ id: "mock:PAY-228", title: "Payout retries" })]));
   const screen = render();
 
   expect(screen.button("Link").disabled).toBe(true);
@@ -375,10 +326,7 @@ test("Link is unavailable until a target is picked", async () => {
 
 /** A hit's title is source text, and is rendered as text (gotcha 7). */
 test("a result title is text, whatever a source put in it", async () => {
-  answer = () =>
-    Promise.resolve(
-      response([hit({ id: "mock:PAY-228", title: "<em>Payout</em>" })]),
-    );
+  answer = () => Promise.resolve(response([hit({ id: "mock:PAY-228", title: "<em>Payout</em>" })]));
   const screen = render();
 
   screen.type(screen.picker(), "payout");

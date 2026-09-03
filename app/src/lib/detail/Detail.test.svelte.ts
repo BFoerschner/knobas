@@ -1261,11 +1261,7 @@ test("a Confluence page renders its markup, its macro placeholders and its comme
               results: [
                 {
                   id: "98320",
-                  body: {
-                    storage: {
-                      value: "<p>@Mara can you add the <em>SLA</em>?</p>",
-                    },
-                  },
+                  body: { storage: { value: "<p>@Mara can you add the <em>SLA</em>?</p>" } },
                 },
                 { id: "98321", body: { storage: { value: "<p>on it</p>" } } },
               ],
@@ -1279,18 +1275,15 @@ test("a Confluence page renders its markup, its macro placeholders and its comme
   flushSync();
 
   const body = screen.target.querySelector(".d-body.storage");
-  expect(
-    body,
-    "the page detail did not render its storage format at all",
-  ).not.toBeNull();
+  expect(body, "the page detail did not render its storage format at all").not.toBeNull();
   expect(body!.querySelector("h2")?.textContent).toBe("Backoff policy");
   expect(body!.querySelector("strong")?.textContent).toBe("30 s");
   // A table, as a table (criterion 2).
   expect(body!.querySelector("table")!.rows).toHaveLength(2);
   // A macro, named, with its own body gone with it.
-  expect(
-    [...body!.querySelectorAll(".ac")].map((n) => n.textContent?.trim()),
-  ).toEqual(["info macro"]);
+  expect([...body!.querySelectorAll(".ac")].map((n) => n.textContent?.trim())).toEqual([
+    "info macro",
+  ]);
   expect(body!.textContent).not.toContain("owned by payments");
   // gotcha 7, at the surface it is about: no script element anywhere in the
   // panel, and its body is not shown as prose in the page either.
@@ -1304,9 +1297,7 @@ test("a Confluence page renders its markup, its macro placeholders and its comme
   expect(screen.target.querySelector("script")).toBeNull();
   expect(body!.textContent).not.toContain("alert(1)");
   // The markup arm was taken, not the text arm.
-  expect(screen.text(), "the panel fell back to the FTS blob").not.toContain(
-    "STRIPPED-TEXT-ARM",
-  );
+  expect(screen.text(), "the panel fell back to the FTS blob").not.toContain("STRIPPED-TEXT-ARM");
 
   // The comments, under the body, each rendered the same way (criterion 3).
   const comments = [...screen.target.querySelectorAll(".cmt")];
@@ -1353,12 +1344,7 @@ test("a page from another adapter is not rendered as Confluence markup", async (
         },
         body_text: "Home\n\nrunbooks live here",
         payload: {
-          body: {
-            storage: {
-              value: "<h2>Not Confluence</h2>",
-              representation: "storage",
-            },
-          },
+          body: { storage: { value: "<h2>Not Confluence</h2>", representation: "storage" } },
         },
       }),
     );
@@ -1430,17 +1416,12 @@ test("a page detail links to a ticket, with the page as the near end", async () 
   picker.value = "sepa";
   picker.dispatchEvent(new Event("input", { bubbles: true }));
   await vi.waitFor(() =>
-    expect(
-      screen.target.querySelectorAll('[role="option"]').length,
-    ).toBeGreaterThan(0),
+    expect(screen.target.querySelectorAll('[role="option"]').length).toBeGreaterThan(0),
   );
-  const ticket = [
-    ...screen.target.querySelectorAll<HTMLButtonElement>('[role="option"]'),
-  ].find((option) => option.textContent?.includes("Retry failed SEPA payouts"));
-  expect(
-    ticket,
-    "the picker offered no ticket to link the page to",
-  ).toBeDefined();
+  const ticket = [...screen.target.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(
+    (option) => option.textContent?.includes("Retry failed SEPA payouts"),
+  );
+  expect(ticket, "the picker offered no ticket to link the page to").toBeDefined();
   ticket!.click();
   flushSync();
   [...screen.target.querySelectorAll<HTMLButtonElement>("button")]
@@ -1448,8 +1429,6 @@ test("a page detail links to a ticket, with the page as the near end", async () 
     .click();
 
   await vi.waitFor(() => expect(created).toHaveLength(1));
-  expect(created).toEqual([
-    { fromId: "confluence:98307", toId: "jira:PAY-231" },
-  ]);
+  expect(created).toEqual([{ fromId: "confluence:98307", toId: "jira:PAY-231" }]);
   screen.done();
 });

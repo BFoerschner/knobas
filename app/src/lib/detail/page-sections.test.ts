@@ -21,11 +21,7 @@ const PAGE =
 describe("pageSections", () => {
   it("cuts a section at the next heading of the same level", () => {
     const sections = pageSections(PAGE);
-    expect(sections.map((s) => s.heading)).toEqual([
-      "Backoff policy",
-      "Rollout",
-      "Runbook",
-    ]);
+    expect(sections.map((s) => s.heading)).toEqual(["Backoff policy", "Rollout", "Runbook"]);
     expect(sections.map((s) => s.level)).toEqual([2, 2, 2]);
     expect(sections[0]!.text).toBe("base 30 s, factor 2.");
     expect(sections[1]!.text).toBe("behind a flag.");
@@ -61,9 +57,7 @@ describe("pageSections", () => {
       "1:Ledger",
     ]);
     // The h1 swallows everything under it, up to the next h1 and no further.
-    expect(sections[0]!.text).toBe(
-      "the area.\n\nBackoff\n\nbase 30 s.\n\nJitter\n\nfull.",
-    );
+    expect(sections[0]!.text).toBe("the area.\n\nBackoff\n\nbase 30 s.\n\nJitter\n\nfull.");
     // The h2 stops at the next h1 rather than running to the end.
     expect(sections[1]!.text).toBe("base 30 s.\n\nJitter\n\nfull.");
     expect(sections[3]!.text).toBe("elsewhere.");
@@ -71,8 +65,7 @@ describe("pageSections", () => {
 
   /** Four to six are content inside a section, not the start of one. */
   it("opens a section for h1 to h3 and for nothing deeper", () => {
-    const storage =
-      "<h3>Jitter</h3><p>full.</p><h4>Caveat</h4><p>on retries.</p>";
+    const storage = "<h3>Jitter</h3><p>full.</p><h4>Caveat</h4><p>on retries.</p>";
     const sections = pageSections(storage);
     expect(sections.map((s) => s.heading)).toEqual(["Jitter"]);
     expect(sections[0]!.text).toBe("full.\n\nCaveat\n\non retries.");
@@ -94,10 +87,7 @@ describe("the refusal rule", () => {
     const storage =
       "<h2>Limits</h2><table><tbody><tr><td>30 s</td></tr></tbody></table>" +
       "<h2>Prose</h2><p>nothing but words.</p>";
-    expect(pageSections(storage).map((s) => s.refusal)).toEqual([
-      "table",
-      null,
-    ]);
+    expect(pageSections(storage).map((s) => s.refusal)).toEqual(["table", null]);
   });
 
   /**
@@ -117,8 +107,7 @@ describe("the refusal rule", () => {
 
   /** The heading itself is inside its own section. */
   it("refuses when the macro is in the heading rather than the body", () => {
-    const storage =
-      '<h2>Runbook <ac:emoticon ac:name="warning"/></h2><p>steps.</p>';
+    const storage = '<h2>Runbook <ac:emoticon ac:name="warning"/></h2><p>steps.</p>';
     expect(pageSections(storage)[0]!.refusal).toBe("macro");
   });
 
@@ -132,8 +121,7 @@ describe("the refusal rule", () => {
       "</ac:plain-text-body>";
     expect(pageSections(storage).map((s) => s.heading)).toEqual(["Example"]);
 
-    const commented =
-      "<h2>Limits</h2><!-- <table><tr><td>x</td></tr></table> --><p>words.</p>";
+    const commented = "<h2>Limits</h2><!-- <table><tr><td>x</td></tr></table> --><p>words.</p>";
     expect(pageSections(commented)[0]!.refusal).toBe(null);
   });
 
@@ -144,8 +132,7 @@ describe("the refusal rule", () => {
    * the flat scan's answer is the safe one.
    */
   it("refuses a heading that lives inside a table", () => {
-    const storage =
-      "<table><tbody><tr><td><h2>In a cell</h2><p>words.</p></td></tr></tbody></table>";
+    const storage = "<table><tbody><tr><td><h2>In a cell</h2><p>words.</p></td></tr></tbody></table>";
     expect(pageSections(storage)[0]!.refusal).toBe("table");
   });
 
@@ -195,9 +182,9 @@ describe("replaceSectionBody", () => {
   /** What a reader types is character data, not markup. */
   it("escapes what the reader typed", () => {
     const sections = pageSections("<h2>H</h2><p>old.</p>");
-    expect(
-      replaceSectionBody("<h2>H</h2><p>old.</p>", sections[0]!, "3 < 4 && <b>"),
-    ).toBe("<h2>H</h2><p>3 &lt; 4 &amp;&amp; &lt;b&gt;</p>");
+    expect(replaceSectionBody("<h2>H</h2><p>old.</p>", sections[0]!, "3 < 4 && <b>")).toBe(
+      "<h2>H</h2><p>3 &lt; 4 &amp;&amp; &lt;b&gt;</p>",
+    );
   });
 
   /** An emptied section is an empty section, not a page of empty paragraphs. */
@@ -225,9 +212,7 @@ describe("replaceSectionBody", () => {
 
 describe("toStorage", () => {
   it("makes a paragraph of a blank line and a break of a newline", () => {
-    expect(toStorage("first\nsecond\n\nthird")).toBe(
-      "<p>first<br/>second</p><p>third</p>",
-    );
+    expect(toStorage("first\nsecond\n\nthird")).toBe("<p>first<br/>second</p><p>third</p>");
     expect(toStorage("a\r\n\r\nb")).toBe("<p>a</p><p>b</p>");
     expect(toStorage("\n\n  \na\n\n\n\nb\n\n")).toBe("<p>a</p><p>b</p>");
   });
@@ -261,17 +246,14 @@ describe("malformed markup", () => {
    * behind it.
    */
   it("reads a bare angle bracket as prose without losing the next heading", () => {
-    const sections = pageSections(
-      "<h2>A</h2><p>3 < 4</p><h2>B</h2><p>words.</p>",
-    );
+    const sections = pageSections("<h2>A</h2><p>3 < 4</p><h2>B</h2><p>words.</p>");
     expect(sections.map((s) => s.heading)).toEqual(["A", "B"]);
     expect(sections[0]!.text).toBe("3 < 4");
   });
 
   /** An attribute value holding a `>` is one tag, not two. */
   it("does not cut a tag in half at a quoted angle bracket", () => {
-    const storage =
-      '<h2>A</h2><p><a href="https://x.example/?a=1&gt;2">link</a></p><h2>B</h2>';
+    const storage = '<h2>A</h2><p><a href="https://x.example/?a=1&gt;2">link</a></p><h2>B</h2>';
     expect(pageSections(storage).map((s) => s.heading)).toEqual(["A", "B"]);
   });
 

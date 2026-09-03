@@ -63,9 +63,7 @@ export function projectPayload(payload: unknown): Projected[] {
   if (payload === null || payload === undefined) return [];
 
   if (typeof payload !== "object") {
-    return [
-      { key: "payload", label: "Payload", kind: "text", text: String(payload) },
-    ];
+    return [{ key: "payload", label: "Payload", kind: "text", text: String(payload) }];
   }
 
   if (Array.isArray(payload)) {
@@ -81,22 +79,15 @@ export function projectPayload(payload: unknown): Projected[] {
 
 /** One value, without its key. */
 function project(value: unknown): ProjectedValue {
-  if (value === null || value === undefined)
-    return { kind: "scalar", text: ABSENT };
+  if (value === null || value === undefined) return { kind: "scalar", text: ABSENT };
   if (typeof value === "object") return nested(value);
 
   const text = String(value);
-  return text.length > LONG_TEXT
-    ? { kind: "text", text }
-    : { kind: "scalar", text };
+  return text.length > LONG_TEXT ? { kind: "text", text } : { kind: "scalar", text };
 }
 
 /** An array or object: how big it is, and the whole of it behind a disclosure. */
-function nested(value: object): {
-  kind: "nested";
-  summary: string;
-  json: string;
-} {
+function nested(value: object): { kind: "nested"; summary: string; json: string } {
   const summary = Array.isArray(value)
     ? count(value.length, "item")
     : count(Object.keys(value).length, "field");

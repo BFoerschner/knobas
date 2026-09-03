@@ -32,8 +32,7 @@ function render(activity: ActivityRow[]) {
   return {
     target,
     text: () => target.textContent ?? "",
-    monograms: () =>
-      [...target.querySelectorAll(".mg")].map((m) => m.textContent),
+    monograms: () => [...target.querySelectorAll(".mg")].map((m) => m.textContent),
     done: () => {
       unmount(app);
       target.remove();
@@ -43,12 +42,7 @@ function render(activity: ActivityRow[]) {
 
 test("a synced line and a user line are told apart", () => {
   const screen = render([
-    line({
-      id: 2,
-      actor: "sync:mock",
-      verb: "synced",
-      detail: { upserted: 9 },
-    }),
+    line({ id: 2, actor: "sync:mock", verb: "synced", detail: { upserted: 9 } }),
     line({ id: 1, actor: "user", verb: "opened" }),
   ]);
 
@@ -97,16 +91,8 @@ test("an item with no history says so rather than rendering nothing", () => {
 /** Every actor spelling the column can hold renders as something. */
 test("an actor knobas does not recognise still renders", () => {
   expect(parseActor("user")).toMatchObject({ kind: "user", monogram: "ME" });
-  expect(parseActor("sync:gitea")).toMatchObject({
-    kind: "sync",
-    monogram: "GI",
-    label: "synced by gitea",
-  });
-  expect(parseActor("scheduler")).toMatchObject({
-    kind: "other",
-    monogram: "SC",
-    label: "scheduler",
-  });
+  expect(parseActor("sync:gitea")).toMatchObject({ kind: "sync", monogram: "GI", label: "synced by gitea" });
+  expect(parseActor("scheduler")).toMatchObject({ kind: "other", monogram: "SC", label: "scheduler" });
   expect(parseActor("")).toMatchObject({ kind: "other", monogram: "??" });
   expect(parseActor("sync:")).toMatchObject({ kind: "sync", monogram: "??" });
 });

@@ -29,26 +29,19 @@ let submitFails = false;
 vi.mock("../ipc/entity", () => ({
   listContexts: () => Promise.resolve([]),
   contextMembers: () => Promise.resolve([]),
-  createContext: () =>
-    Promise.reject(new Error("no context creation in this test")),
+  createContext: () => Promise.reject(new Error("no context creation in this test")),
   promoteContext: () => Promise.reject(new Error("no promotion in this test")),
   getEntity: () => Promise.resolve(entity()),
   unlink: () => Promise.resolve(),
   createLink: () => Promise.resolve({}),
-  miniBoard: (
-    filter: Pick<EntityFilter, "sources" | "context" | "project">,
-  ) => {
+  miniBoard: (filter: Pick<EntityFilter, "sources" | "context" | "project">) => {
     boardCalls.push(filter);
     return board();
   },
   submitWrite: (payload: unknown) => {
     queued.push(payload);
     if (submitFails) {
-      return Promise.reject({
-        code: "conflict",
-        message: "the queue is holding a write",
-        source_id: null,
-      });
+      return Promise.reject({ code: "conflict", message: "the queue is holding a write", source_id: null });
     }
     return Promise.resolve({});
   },
@@ -56,17 +49,9 @@ vi.mock("../ipc/entity", () => ({
 
 /** The dialog's picker; this file never opens it. */
 vi.mock("../ipc/search", () => ({
-  search: () =>
-    Promise.reject(new Error("the picker is not this file's business")),
-  launcherHome: () =>
-    Promise.reject(new Error("the dialog never loads the board")),
-  noFilters: () => ({
-    sources: [],
-    kinds: [],
-    updated_within_days: null,
-    mine: false,
-    authors: [],
-  }),
+  search: () => Promise.reject(new Error("the picker is not this file's business")),
+  launcherHome: () => Promise.reject(new Error("the dialog never loads the board")),
+  noFilters: () => ({ sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }),
 }));
 
 /** What `get_entity` answers with; a test that needs another kind swaps it. */
@@ -99,9 +84,7 @@ vi.mock("../ipc/sources", () => ({
     ]),
 }));
 
-vi.mock("@tauri-apps/plugin-opener", () => ({
-  openUrl: () => Promise.resolve(),
-}));
+vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: () => Promise.resolve() }));
 
 const { default: Detail } = await import("./Detail.svelte");
 const { toasts } = await import("../shell/toasts.svelte");
@@ -120,12 +103,7 @@ const BOARD: MiniBoard = {
     { status: "To Do", cards: [card("PAY-240")] },
     { status: "In Progress", cards: [card("PAY-231")] },
   ],
-  sources: [
-    {
-      source_id: "mock",
-      statuses: ["To Do", "In Progress", "In Review", "Done"],
-    },
-  ],
+  sources: [{ source_id: "mock", statuses: ["To Do", "In Progress", "In Review", "Done"] }],
 };
 
 function card(key: string) {
@@ -149,12 +127,7 @@ function detail(over: Partial<EntityDetail> = {}): EntityDetail {
       synced_at: "2026-08-22T14:30:00Z",
       path: null,
     },
-    source: {
-      id: "mock",
-      display_name: "Tidewater (mock)",
-      adapter_kind: "mock",
-      enabled: true,
-    },
+    source: { id: "mock", display_name: "Tidewater (mock)", adapter_kind: "mock", enabled: true },
     kind_info: null,
     body_text: "",
     author: "mara",
@@ -188,11 +161,9 @@ function render(entityId = "mock:PAY-231", kind: string | null = "ticket") {
     },
     select: () => target.querySelector<HTMLSelectElement>("select.sel-inline"),
     options: () =>
-      [
-        ...(target.querySelectorAll<HTMLOptionElement>(
-          "select.sel-inline option",
-        ) ?? []),
-      ].map((option) => option.textContent ?? ""),
+      [...(target.querySelectorAll<HTMLOptionElement>("select.sel-inline option") ?? [])].map(
+        (option) => option.textContent ?? "",
+      ),
     text: () => (target.textContent ?? "").replace(/\s+/g, " "),
     done: () => {
       unmount(app);
@@ -224,19 +195,12 @@ test("offers the statuses that source's corpus shows, with the mirrored one sele
   await vi.waitFor(() => expect(screen.select()).not.toBeNull());
   flushSync();
 
-  expect(screen.options()).toEqual([
-    "To Do",
-    "In Progress",
-    "In Review",
-    "Done",
-  ]);
+  expect(screen.options()).toEqual(["To Do", "In Progress", "In Review", "Done"]);
   expect(screen.select()?.value).toBe("In Progress");
   // The offer is the source's corpus, not the room's columns — so the read is
   // scoped to the source and to no context (#177), and to no project either
   // (#208): a project room with nothing finished still has to offer Done.
-  expect(boardCalls).toEqual([
-    { sources: ["mock"], context: null, project: null },
-  ]);
+  expect(boardCalls).toEqual([{ sources: ["mock"], context: null, project: null }]);
 
   screen.done();
 });
@@ -248,9 +212,7 @@ test("picking a status queues a transition through the write queue", async () =>
   pick(screen.select()!, "In Review");
   await vi.waitFor(() => expect(queued).toHaveLength(1));
 
-  expect(queued[0]).toEqual({
-    Transition: { entity: "mock:PAY-231", status: "In Review" },
-  });
+  expect(queued[0]).toEqual({ Transition: { entity: "mock:PAY-231", status: "In Review" } });
   expect(toasts.items.at(-1)?.text).toContain("Move to In Review queued");
 
   screen.done();
@@ -267,10 +229,9 @@ test("the select goes back to the mirrored status and never shows the picked one
   await vi.waitFor(() => expect(screen.select()).not.toBeNull());
 
   pick(screen.select()!, "Done");
-  expect(
-    screen.select()?.value,
-    "the control must not sit on an unmirrored status",
-  ).toBe("In Progress");
+  expect(screen.select()?.value, "the control must not sit on an unmirrored status").toBe(
+    "In Progress",
+  );
 
   await vi.waitFor(() => expect(queued).toHaveLength(1));
   flushSync();
@@ -319,9 +280,7 @@ test("a ticket in the terminal group shows No status, unselectable, and can stil
 
   pick(screen.select()!, "To Do");
   await vi.waitFor(() => expect(queued).toHaveLength(1));
-  expect(queued[0]).toEqual({
-    Transition: { entity: "mock:PAY-231", status: "To Do" },
-  });
+  expect(queued[0]).toEqual({ Transition: { entity: "mock:PAY-231", status: "To Do" } });
 
   screen.done();
 });
@@ -359,10 +318,7 @@ test("opening another ticket never leaves the previous one's status on screen", 
   await vi.waitFor(() => expect(boardCalls).toHaveLength(2));
   flushSync();
 
-  expect(
-    screen.select(),
-    "the previous ticket's select is still on screen",
-  ).toBeNull();
+  expect(screen.select(), "the previous ticket's select is still on screen").toBeNull();
 
   land({
     columns: [{ status: "To Do", cards: [card("PAY-240")] }],
@@ -412,10 +368,7 @@ test("a slow board answer from the previous ticket is discarded, not shown", asy
   first(BOARD);
   await Promise.resolve();
   flushSync();
-  expect(
-    screen.select()?.value,
-    "the previous ticket's board overwrote this one",
-  ).toBe("To Do");
+  expect(screen.select()?.value, "the previous ticket's board overwrote this one").toBe("To Do");
   expect(screen.options()).toEqual(["To Do", "In Progress"]);
 
   screen.done();
@@ -470,9 +423,7 @@ test("no select on a kind that is not a ticket", async () => {
   flushSync();
 
   expect(screen.select()).toBeNull();
-  expect(boardCalls, "a kind with no select must not read the board").toEqual(
-    [],
-  );
+  expect(boardCalls, "a kind with no select must not read the board").toEqual([]);
 
   screen.done();
 });

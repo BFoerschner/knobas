@@ -32,9 +32,5 @@ export function parseActor(actor: string): Actor {
   }
   // Not a guess and not a crash: a row written by something that has not been
   // built yet still renders, and says exactly what the column holds.
-  return {
-    kind: "other",
-    monogram: actor.slice(0, 2).toUpperCase() || "??",
-    label: actor,
-  };
+  return { kind: "other", monogram: actor.slice(0, 2).toUpperCase() || "??", label: actor };
 }

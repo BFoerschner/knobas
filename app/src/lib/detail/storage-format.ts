@@ -55,12 +55,7 @@ export type StorageNode =
   /** Somebody's words, entity-decoded. Rendered as a text node. */
   | { kind: "text"; text: string }
   /** An allow-listed element. `href` is set on `a` alone, and only when safe. */
-  | {
-      kind: "element";
-      tag: AllowedTag;
-      href: string | null;
-      children: StorageNode[];
-    }
+  | { kind: "element"; tag: AllowedTag; href: string | null; children: StorageNode[] }
   /**
    * A macro, in place of the element it replaces — content and all.
    *
@@ -215,13 +210,8 @@ const ELEMENT_ONLY: ReadonlySet<string> = new Set([
 export function parseStorageFormat(storage: string): StorageNode[] {
   const root: StorageNode[] = [];
   /** Open elements, innermost last. `node === null` is an unwrapped frame. */
-  const stack: {
-    name: string;
-    node: ElementNode | null;
-    children: StorageNode[];
-  }[] = [];
-  const into = () =>
-    stack.length > 0 ? stack[stack.length - 1]!.children : root;
+  const stack: { name: string; node: ElementNode | null; children: StorageNode[] }[] = [];
+  const into = () => (stack.length > 0 ? stack[stack.length - 1]!.children : root);
   /** Open *element* frames — the depth of the tree the renderer will recurse. */
   let depth = 0;
 
@@ -290,12 +280,7 @@ export function parseStorageFormat(storage: string): StorageNode[] {
     if (ALLOWED_SET.has(tag.name) && depth < MAX_ELEMENT_DEPTH) {
       const allowed = tag.name as AllowedTag;
       if (VOID_TAGS.has(allowed) || tag.selfClosing) {
-        into().push({
-          kind: "element",
-          tag: allowed,
-          href: null,
-          children: [],
-        });
+        into().push({ kind: "element", tag: allowed, href: null, children: [] });
         continue;
       }
       const node: ElementNode = {
@@ -313,8 +298,7 @@ export function parseStorageFormat(storage: string): StorageNode[] {
     // {@link MAX_ELEMENT_DEPTH} — is unwrapped: the wrapper goes, the words
     // stay. An unwrapped frame costs no render recursion, so nesting below the
     // cap is bounded however deep the markup goes.
-    if (!tag.selfClosing)
-      stack.push({ name: tag.name, node: null, children: [] });
+    if (!tag.selfClosing) stack.push({ name: tag.name, node: null, children: [] });
   }
 
   // An unclosed tag closes itself at the end of the document.
@@ -322,16 +306,10 @@ export function parseStorageFormat(storage: string): StorageNode[] {
   return root;
 
   function pushText(raw: string) {
-    const text = inPre()
-      ? decodeEntities(raw)
-      : decodeEntities(raw).replace(/\s+/g, " ");
+    const text = inPre() ? decodeEntities(raw) : decodeEntities(raw).replace(/\s+/g, " ");
     if (text === "") return;
     // Whitespace between a `<tr>` and its `<td>` is indentation, not prose.
-    if (
-      text.trim() === "" &&
-      ELEMENT_ONLY.has(stack[stack.length - 1]?.name ?? "")
-    )
-      return;
+    if (text.trim() === "" && ELEMENT_ONLY.has(stack[stack.length - 1]?.name ?? "")) return;
     into().push({ kind: "text", text });
   }
 
@@ -360,8 +338,7 @@ export function parseStorageFormat(storage: string): StorageNode[] {
     if (found === -1) return;
     while (stack.length > found) {
       const frame = stack.pop()!;
-      const parent =
-        stack.length > 0 ? stack[stack.length - 1]!.children : root;
+      const parent = stack.length > 0 ? stack[stack.length - 1]!.children : root;
       if (frame.node) {
         parent.push(frame.node);
         depth -= 1;
@@ -693,9 +670,7 @@ export function pageVersionOf(
 ): number | null {
   if (adapterKind !== STORAGE_FORMAT_ADAPTER) return null;
   const value = at(at(payload, "version"), "number");
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
-    ? value
-    : null;
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
 /** A non-blank string at that path, or `null`. Every other shape is a miss. */
@@ -705,7 +680,6 @@ function text(value: unknown): string | null {
 
 /** One step into an object, or `undefined`. Arrays and `null` are misses. */
 function at(value: unknown, key: string): unknown {
-  if (typeof value !== "object" || value === null || Array.isArray(value))
-    return undefined;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
   return (value as Record<string, unknown>)[key];
 }

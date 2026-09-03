@@ -75,13 +75,10 @@ function render(links: LinkEntry[]) {
     /** The panel's text with runs of whitespace collapsed (see `Detail.test`). */
     text: () => (target.textContent ?? "").replace(/\s+/g, " "),
     buttons: (label: string) =>
-      [...target.querySelectorAll<HTMLButtonElement>("button")].filter(
-        (button) => button.textContent?.includes(label),
+      [...target.querySelectorAll<HTMLButtonElement>("button")].filter((button) =>
+        button.textContent?.includes(label),
       ),
-    headings: () =>
-      [...target.querySelectorAll(".row.hd span:nth-child(2)")].map(
-        (h) => h.textContent,
-      ),
+    headings: () => [...target.querySelectorAll(".row.hd span:nth-child(2)")].map((h) => h.textContent),
     done: () => {
       unmount(app);
       target.remove();
@@ -91,9 +88,7 @@ function render(links: LinkEntry[]) {
 
 /** Story 9: an id is not something a person recognises. */
 test("a row names the other end's kind and title, not its id", () => {
-  const screen = render([
-    entry({ title: "Retry storm postmortem", kind: "page" }),
-  ]);
+  const screen = render([entry({ title: "Retry storm postmortem", kind: "page" })]);
 
   expect(screen.text()).toContain("Retry storm postmortem");
   expect(screen.text()).toContain("Page");
@@ -119,9 +114,7 @@ test("rows read from the viewed entity's side, so one relation gives two heading
 
 /** A relation knobas has never seen reads as typed, from either end. */
 test("a user-typed relation is not inverted into language nobody wrote", () => {
-  const screen = render([
-    entry({ relation: "supersedes", from: "mock:PAY-400", to: VIEWED }),
-  ]);
+  const screen = render([entry({ relation: "supersedes", from: "mock:PAY-400", to: VIEWED })]);
 
   expect(screen.headings()).toEqual(["supersedes"]);
 
@@ -147,10 +140,7 @@ test("clicking a row navigates to the other end's stable address", () => {
 /** Story 10: kept and marked, rather than dropped or silently normal. */
 test("a target the source withdrew is still listed, and says so", () => {
   const screen = render([
-    entry({
-      title: "Legacy payout reconciliation",
-      deleted: "2026-08-20T09:00:00Z",
-    }),
+    entry({ title: "Legacy payout reconciliation", deleted: "2026-08-20T09:00:00Z" }),
   ]);
 
   expect(screen.text()).toContain("Legacy payout reconciliation");
@@ -245,10 +235,7 @@ test("a title is text, whatever a source put in it", () => {
  */
 test("an accepted suggestion still shows the reason knobas proposed it with", () => {
   const screen = render([
-    entry({
-      rule: "branch_name_key",
-      reason: "the branch name contains PAY-231",
-    }),
+    entry({ rule: "branch_name_key", reason: "the branch name contains PAY-231" }),
   ]);
 
   expect(screen.text()).toContain("the branch name contains PAY-231");
