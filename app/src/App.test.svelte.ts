@@ -45,6 +45,10 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { AppStatus } from "./lib/ipc/app";
 import type { ContextRow, EntityRow, Project } from "./lib/ipc/entity";
 import type { CredentialHealth, SourceSummary } from "./lib/ipc/sources";
+// The shell's own reckoning of the reader's day, used by the tests below to
+// state the expectation in the same terms `App.svelte` computes it in --
+// spelling `YYYY-MM-DD` a second time here would be a second implementation.
+import { localDay, offsetMinutes } from "./lib/time/draft";
 
 /** Readings `credential_health` hands back, and how many times it was asked. */
 let healthRows: CredentialHealth[] = [];
@@ -185,9 +189,15 @@ vi.mock("./lib/ipc/entity", () => ({
  */
 let timerStarts: unknown[] = [];
 let timerStops = 0;
+/** What `currentTimer` answers on bring-up — set by a test that needs one running. */
+let timerRunning: unknown = null;
+/** The block `stopTimer` closes, which is what the worklog draft opens on (#280). */
+let timerClosed: unknown = null;
+/** Every `worklog_draft` the shell asked for, in order (#280). */
+let draftAsks: { entityId: string; day: string; offsetMinutes: number }[] = [];
 
 vi.mock("./lib/ipc/time", () => ({
-  currentTimer: () => Promise.resolve(null),
+  currentTimer: () => Promise.resolve(timerRunning),
   startTimer: (target: unknown) => {
     timerStarts.push(target);
     return Promise.resolve({
@@ -198,7 +208,7 @@ vi.mock("./lib/ipc/time", () => ({
   },
   stopTimer: () => {
     timerStops += 1;
-    return Promise.resolve(null);
+    return Promise.resolve(timerClosed);
   },
   timerHeartbeat: () => Promise.resolve(null),
   // The day review and the settings view are both mounted by the shell; what
@@ -209,6 +219,10 @@ vi.mock("./lib/ipc/time", () => ({
   createBlock: () => Promise.reject(new Error("no edit in this test")),
   passiveAttribution: () => Promise.resolve(false),
   setPassiveAttribution: () => Promise.reject(new Error("no settings write in this test")),
+  worklogDraft: (entityId: string, when: { day: string; offsetMinutes: number }) => {
+    draftAsks.push({ entityId, ...when });
+    return Promise.resolve(null);
+  },
 }));
 
 /**
@@ -367,6 +381,9 @@ beforeEach(() => {
   projectCalls = 0;
   timerStarts = [];
   timerStops = 0;
+  timerRunning = null;
+  timerClosed = null;
+  draftAsks = [];
   contextRows = [];
   entityRows = [];
   sourceRows = [];
@@ -1266,6 +1283,103 @@ test("⌘T with nothing in front of the reader opens the picker and starts nothi
 
   expect(timerStarts, "a timer was started on nothing").toEqual([]);
   expect(timerStops, "⌘T stopped a timer that was not running").toBe(0);
+});
+
+/**
+ * **A stop asks for the draft under the day the block *started* on** (#280).
+ *
+ * The wire the shell owns and nothing else can witness: `worklog_draft` takes
+ * a day, the backend files a block by its `started_at` ("a block belongs to
+ * the day it started on", `UNLOGGED_BLOCKS`), and the only value the shell has
+ * in hand at that moment is the block it just closed. Asking under the *end*
+ * agrees with the start on every ordinary afternoon and disagrees on exactly
+ * one — a timer that crossed midnight — where the backend would answer `null`
+ * and the reader would see nothing, with nothing on screen to say why.
+ *
+ * The fixture straddles local midnight and is built from the machine's own
+ * clock, so the two days differ in every timezone rather than only in UTC.
+ */
+test("stopping a timer that crossed midnight drafts the day the work began on", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  location.hash = "#/ctx/all";
+
+  const endedAt = new Date();
+  endedAt.setHours(0, 10, 0, 0);
+  const startedAt = new Date(endedAt.getTime() - 30 * 60_000);
+  expect(
+    localDay(startedAt),
+    "the fixture has to straddle local midnight or it witnesses nothing",
+  ).not.toBe(localDay(endedAt));
+
+  timerRunning = {
+    target: { kind: "entity", entity_id: "mock:PAY-231" },
+    started_at: startedAt.toISOString(),
+    last_heartbeat: endedAt.toISOString(),
+  };
+  timerClosed = {
+    id: 7,
+    started_at: startedAt.toISOString(),
+    ended_at: endedAt.toISOString(),
+    target: { kind: "entity", entity_id: "mock:PAY-231" },
+    kind: "manual",
+    ended_by_relaunch: false,
+    worklog_id: null,
+  };
+
+  app = mount(App, { target, props: {} });
+  await until(() => tabLabels().includes("All work"), "the shell never drew a room");
+
+  pressTimerKey();
+  await until(() => draftAsks.length > 0, "the stop never asked for a draft");
+
+  expect(timerStops, "⌘T started something instead of stopping").toBe(1);
+  expect(draftAsks[0]).toEqual({
+    entityId: "mock:PAY-231",
+    day: localDay(startedAt),
+    offsetMinutes: offsetMinutes(),
+  });
+});
+
+/**
+ * A stop on an **ad-hoc label** opens no draft: a label has nowhere to write
+ * back to, and #281's ad-hoc dialog is what that stop eventually gets. The
+ * direction that keeps the rule above from reading "every stop asks".
+ */
+test("stopping a timer on an ad-hoc label asks for no draft", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  location.hash = "#/ctx/all";
+
+  timerRunning = {
+    target: { kind: "label", label: "Thursday triage" },
+    started_at: "2026-09-03T09:00:00Z",
+    last_heartbeat: "2026-09-03T09:30:00Z",
+  };
+  timerClosed = {
+    id: 8,
+    started_at: "2026-09-03T09:00:00Z",
+    ended_at: "2026-09-03T09:30:00Z",
+    target: { kind: "label", label: "Thursday triage" },
+    kind: "manual",
+    ended_by_relaunch: false,
+    worklog_id: null,
+  };
+
+  app = mount(App, { target, props: {} });
+  await until(() => tabLabels().includes("All work"), "the shell never drew a room");
+
+  pressTimerKey();
+  await until(() => timerStops > 0, "⌘T never stopped the label's timer");
+  // ...and then past the point where the ask *would* have been made. Every
+  // promise in the stop's chain is already resolved, so one macrotask boundary
+  // drains all of it; `until` alone sees `timerStops` on its first synchronous
+  // check, which is before the chain has run at all -- a mutation run with the
+  // guard removed passed against that.
+  await new Promise((settled) => setTimeout(settled, 0));
+  flushSync();
+
+  expect(draftAsks, "a label has nowhere to log to, so nothing may be drafted").toEqual([]);
 });
 
 /**

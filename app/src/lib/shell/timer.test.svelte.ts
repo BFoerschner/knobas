@@ -111,7 +111,7 @@ test("⌘T with nothing running starts the timer on the foreground entity", asyn
   const { timer, calls } = bench();
   timer.foreground = TICKET;
 
-  await expect(timer.press()).resolves.toBe("started");
+  await expect(timer.press()).resolves.toEqual({ did: "started", closed: null });
   expect(calls.started).toEqual([TICKET]);
   expect(timer.current?.target).toEqual(TICKET);
 });
@@ -121,7 +121,7 @@ test("⌘T with nothing running and nothing in front asks for a target", async (
   const { timer, calls } = bench();
   timer.foreground = null;
 
-  await expect(timer.press()).resolves.toBe("pick");
+  await expect(timer.press()).resolves.toEqual({ did: "pick", closed: null });
   expect(calls.started, "a timer was started on nothing").toEqual([]);
   expect(timer.current).toBeNull();
 });
@@ -132,7 +132,12 @@ test("⌘T with a timer running stops it, and does not start a second", async ()
   timer.foreground = LABEL;
   await timer.start(TICKET);
 
-  await expect(timer.press()).resolves.toBe("stopped");
+  // The block comes back with the outcome: it is what #280's worklog draft
+  // opens on, and reading the timer back for it would find a different block
+  // whenever another surface started one in between.
+  const pressed = await timer.press();
+  expect(pressed.did).toBe("stopped");
+  expect(pressed.closed?.target).toEqual(TICKET);
   expect(calls.stopped).toBe(1);
   expect(calls.started, "the foreground was started over the stop").toEqual([TICKET]);
   expect(timer.current).toBeNull();

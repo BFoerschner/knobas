@@ -52,10 +52,53 @@ pub async fn submit(
     state: &crate::sources::SourcesState,
     payload: serde_json::Value,
 ) -> Result<QueuedWrite, IpcError> {
-    let (op, source_id) = submittable(&state.pool, state.registry.as_ref(), payload).await?;
+    let (queued, source_id) = queue(state, payload).await?;
+    flush(state, &source_id, queued.id).await?;
+    Ok(queued)
+}
 
+/// [`submit`]'s first half: everything it decides, and the row, **without
+/// trying to deliver it**.
+///
+/// Split out for one caller, `crate::time::worklog` (issue #280), and for one
+/// reason: a worklog's local copy has to exist, carrying this row's id, before
+/// the flush can settle the write -- because settling is what stamps Jira's
+/// worklog id onto that copy, and it stamps by that id.
+/// `knobas_sync::write_queue::queue` records the whole of the reasoning; the
+/// pair is `queue`, then the copy, then [`flush`].
+///
+/// The source id comes back with the row because the caller needs it for
+/// [`flush`] and it was already worked out here -- reading it out of the
+/// entity id a second time would be a second answer to a settled question.
+///
+/// # Errors
+///
+/// As [`submit`].
+pub(crate) async fn queue(
+    state: &crate::sources::SourcesState,
+    payload: serde_json::Value,
+) -> Result<(QueuedWrite, String), IpcError> {
+    let (op, source_id) = submittable(&state.pool, state.registry.as_ref(), payload).await?;
+    let queued = knobas_sync::write_queue::queue(state.scheduler.deps(), &source_id, op)
+        .await
+        .map_err(IpcError::internal)?;
+    Ok((queued, source_id))
+}
+
+/// [`submit`]'s second half: send what the source owes, and re-read the mirror
+/// if the write landed.
+///
+/// # Errors
+///
+/// As [`submit`]. A source that cannot take the write is **not** an error --
+/// that is what the queue is for.
+pub(crate) async fn flush(
+    state: &crate::sources::SourcesState,
+    source_id: &str,
+    write_id: i64,
+) -> Result<(), IpcError> {
     let scheduler = &state.scheduler;
-    let queued = knobas_sync::write_queue::submit(scheduler.deps(), &source_id, op)
+    knobas_sync::write_queue::flush_source(scheduler.deps(), source_id)
         .await
         .map_err(IpcError::internal)?;
 
@@ -73,10 +116,10 @@ pub async fn submit(
     // Only when the write actually **went**. A write that is waiting has
     // changed nothing at the source, and a run for it would re-read what
     // nobody touched.
-    if landed(scheduler.deps(), queued.id).await {
-        refresh(scheduler, &source_id).await;
+    if landed(scheduler.deps(), write_id).await {
+        refresh(scheduler, source_id).await;
     }
-    Ok(queued)
+    Ok(())
 }
 
 /// Everything [`submit`] decides before a row exists, as one function so a

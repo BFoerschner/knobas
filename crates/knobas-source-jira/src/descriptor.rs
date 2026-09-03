@@ -7,7 +7,7 @@
 
 use knobas_source::{AuthMethod, Capability, KindInfo, SourceDescriptor};
 
-use crate::{WRITE_OP_COMMENT, WRITE_OP_CREATE_TICKET, WRITE_OP_TRANSITION};
+use crate::{WRITE_OP_COMMENT, WRITE_OP_CREATE_TICKET, WRITE_OP_LOG_WORK, WRITE_OP_TRANSITION};
 
 /// The static, instance-free descriptor: `id == adapter_kind` (interfaces §4.2).
 /// A configured instance's descriptor is this with `id` and `name` replaced by
@@ -25,15 +25,20 @@ pub fn descriptor_template() -> SourceDescriptor {
         adapter_version: crate::ADAPTER_VERSION.to_owned(),
         // Bearer PAT (DC >= 8.14) or Basic user+password (spec §3).
         auth_methods: vec![AuthMethod::Pat, AuthMethod::UserPassword],
-        // M2's ratified Jira set (issue #43, ADR-0006). The UI renders its
-        // action bar from exactly this, so an op listed here that `write`
-        // refuses is an action that 404s, and one `write` accepts but this
-        // omits is an action nothing ever offers. The contract battery holds
-        // both directions.
+        // M2's ratified Jira set (issue #43, ADR-0006), plus M3.1's `log_work`
+        // (issue #280). The UI renders its action bar from exactly this, so an
+        // op listed here that `write` refuses is an action that 404s, and one
+        // `write` accepts but this omits is an action nothing ever offers. The
+        // contract battery holds both directions.
+        //
+        // `log_work` is declared **here and nowhere else**: Gitea and TeamCity
+        // hold no worklogs, so the battery's clause 5 is what proves they
+        // refuse it rather than a comment saying they would.
         write_ops: vec![
             WRITE_OP_COMMENT.to_owned(),
             WRITE_OP_TRANSITION.to_owned(),
             WRITE_OP_CREATE_TICKET.to_owned(),
+            WRITE_OP_LOG_WORK.to_owned(),
         ],
         entity_kinds: vec![KindInfo {
             id: crate::KIND_TICKET.to_owned(),
@@ -160,11 +165,12 @@ mod tests {
     use super::*;
 
     /// The sources view renders its action bar from `write_ops`, so what is
-    /// here is exactly what the user is offered: M2's ratified Jira set and
-    /// nothing else (issue #43, ADR-0006). `Capability::Search` stays absent --
-    /// it is reserved for a server-side `Source::search` the SPI does not have.
+    /// here is exactly what the user is offered: M2's ratified Jira set plus
+    /// M3.1's `log_work`, and nothing else (issues #43 and #280, ADR-0006).
+    /// `Capability::Search` stays absent -- it is reserved for a server-side
+    /// `Source::search` the SPI does not have.
     #[test]
-    fn the_template_declares_m2s_ratified_write_set_and_nothing_else() {
+    fn the_template_declares_the_ratified_write_set_and_nothing_else() {
         let d = descriptor_template();
         assert_eq!(d.id, crate::ADAPTER_KIND);
         assert_eq!(d.adapter_kind, crate::ADAPTER_KIND);
@@ -176,7 +182,7 @@ mod tests {
         );
         assert_eq!(
             d.write_ops,
-            vec!["comment", "transition", "create_ticket"],
+            vec!["comment", "transition", "create_ticket", "log_work"],
             "the action bar is rendered from this list alone"
         );
         assert_eq!(d.adapter_version, crate::ADAPTER_VERSION);

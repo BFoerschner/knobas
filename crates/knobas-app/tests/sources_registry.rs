@@ -135,8 +135,9 @@ fn every_adapter_crate_linked_into_the_app_has_a_row() {
     );
 }
 
-/// The write surface of the whole registry, as M2 ratified it (issue #43,
-/// ADR-0006).
+/// The write surface of the whole registry, as it has been ratified: M2's set
+/// (issue #43) plus M3.1's `log_work` on Jira alone (issue #280), both under
+/// ADR-0006.
 ///
 /// The battery already holds each adapter to `Capability::Write` ⇔ non-empty
 /// `write_ops`, and each adapter's own suite holds its list to its dispatch.
@@ -150,10 +151,16 @@ fn every_adapter_crate_linked_into_the_app_has_a_row() {
 /// rule ("every op is a known identifier") is satisfied by an adapter declaring
 /// an op it was never given, which is the thing being guarded against.
 #[test]
-fn the_registry_declares_exactly_the_write_set_m2_ratified() {
+fn the_registry_declares_exactly_the_ratified_write_set() {
     let expected: std::collections::BTreeMap<&str, Vec<&str>> = [
         ("mock", vec!["comment"]),
-        ("jira", vec!["comment", "transition", "create_ticket"]),
+        (
+            "jira",
+            // `log_work` is M3.1's growth and is **Jira's alone**: no other
+            // source knobas mirrors holds worklogs, and this table is what
+            // says so across the registry rather than adapter by adapter.
+            vec!["comment", "transition", "create_ticket", "log_work"],
+        ),
         (
             "gitea",
             vec!["create_branch", "create_pull_request", "comment", "approve"],
@@ -180,7 +187,7 @@ fn the_registry_declares_exactly_the_write_set_m2_ratified() {
         .collect();
     assert_eq!(
         actual_ref, expected,
-        "the registry's write surface is not M2's ratified set -- growing it is an ADR-0006 \
+        "the registry's write surface is not the ratified set -- growing it is an ADR-0006 \
          conversation and a contract §10.8 entry, not a descriptor edit"
     );
 

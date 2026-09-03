@@ -583,6 +583,15 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
         knobas_source::WriteOp::RerunBuild {
             entity: "teamcity:build:1187".to_owned(),
         },
+        knobas_source::WriteOp::LogWork {
+            entity: "jira:PAY-231".to_owned(),
+            // A fixed instant, the discipline `contract.rs`'s sibling probe
+            // records: a probe whose payload moves is one whose failures
+            // cannot be compared between runs.
+            started: chrono::DateTime::from_timestamp(1_788_000_000, 0).expect("a fixed instant"),
+            seconds: 2_700,
+            comment: "probe".to_owned(),
+        },
     ];
     for op in &probes {
         let tag = match op {
@@ -594,6 +603,7 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
             knobas_source::WriteOp::Approve { .. } => "Approve",
             knobas_source::WriteOp::TriggerBuild { .. } => "TriggerBuild",
             knobas_source::WriteOp::RerunBuild { .. } => "RerunBuild",
+            knobas_source::WriteOp::LogWork { .. } => "LogWork",
         };
         let json = serde_json::to_value(op).unwrap();
         assert!(

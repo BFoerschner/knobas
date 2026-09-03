@@ -1,7 +1,9 @@
 //! The `Source` implementation: what the sync engine and `test_source` hold.
 
 use knobas_source::instance::SourceInstance;
-use knobas_source::{ConnectionInfo, Cursor, Sink, Source, SourceDescriptor, SourceError, WriteOp};
+use knobas_source::{
+    ConnectionInfo, Cursor, Sink, Source, SourceDescriptor, SourceError, WriteOp, WriteReceipt,
+};
 
 use crate::api::JiraApi;
 use crate::http::{self, JiraHttp};
@@ -177,13 +179,15 @@ impl Source for JiraSource {
     /// 5): an adapter must reject every op absent from its own
     /// `descriptor.write_ops` with `Protocol`, and it must say which op it
     /// refused so a mis-declared descriptor is diagnosable from the message.
-    async fn write(&self, op: WriteOp) -> Result<(), SourceError> {
+    async fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError> {
         match &op {
             WriteOp::Comment { entity, body } => {
-                write::comment(&self.http, &self.issue_key(entity)?, body).await
+                write::comment(&self.http, &self.issue_key(entity)?, body).await?;
+                Ok(WriteReceipt::none())
             }
             WriteOp::Transition { entity, status } => {
-                write::transition(&self.http, &self.issue_key(entity)?, status).await
+                write::transition(&self.http, &self.issue_key(entity)?, status).await?;
+                Ok(WriteReceipt::none())
             }
             WriteOp::CreateTicket {
                 entity,
@@ -199,14 +203,41 @@ impl Source for JiraSource {
                     ticket_type,
                 )
                 .await?;
-                // Dropped, and the value is in having asked for it:
-                // `Source::write` answers `()` (widening it is a frozen-SPI
-                // change nothing in M2 needs), but a Jira that accepted the
-                // create without naming what it made is a write reported as
-                // done with nothing to point at -- which `create_ticket`
-                // refuses rather than reports as success.
+                // Dropped, and the value is in having asked for it: a Jira
+                // that accepted the create without naming what it made is a
+                // write reported as done with nothing to point at, which
+                // `create_ticket` refuses rather than reports as success.
+                //
+                // Still dropped now that `Source::write` can carry an id back
+                // (#280). A created ticket is a *mirrored entity*: the start-
+                // work flow already finds it by reading the mirror, which is
+                // the reading that survives a re-send, and putting the key in
+                // the receipt as well would be a second answer to a question
+                // that already has one. The receipt exists for what the
+                // mirror cannot name -- see `WriteReceipt`.
                 let _ = created;
-                Ok(())
+                Ok(WriteReceipt::none())
+            }
+            WriteOp::LogWork {
+                entity,
+                started,
+                seconds,
+                comment,
+            } => {
+                let id = write::log_work(
+                    &self.http,
+                    &self.issue_key(entity)?,
+                    *started,
+                    *seconds,
+                    comment,
+                )
+                .await?;
+                // **The one receipt in knobas.** A worklog is not a mirrored
+                // entity and two worklogs of the same length on the same day
+                // are indistinguishable from outside, so the id Jira just
+                // answered with is the only way the local copy can ever name
+                // the row it stands for (issue #280).
+                Ok(WriteReceipt::id(id))
             }
             WriteOp::CreateBranch { .. }
             | WriteOp::CreatePullRequest { .. }
@@ -269,7 +300,10 @@ mod tests {
         assert_eq!(d.name, "Tidewater Jira");
         assert_eq!(d.entity_kinds.len(), 1);
         assert_eq!(d.capabilities, vec![knobas_source::Capability::Write]);
-        assert_eq!(d.write_ops, vec!["comment", "transition", "create_ticket"]);
+        assert_eq!(
+            d.write_ops,
+            vec!["comment", "transition", "create_ticket", "log_work"]
+        );
         // The claim the engine's tombstone sweep rests on travels with the
         // instance descriptor too, not only with the template.
         assert!(d.entity_kinds.iter().all(|k| k.full_sync_exhaustive));

@@ -541,7 +541,17 @@ export type WriteOpPayload =
     }
   | { Approve: { entity: string; body: string } }
   | { TriggerBuild: { entity: string } }
-  | { RerunBuild: { entity: string } };
+  | { RerunBuild: { entity: string } }
+  | {
+      LogWork: {
+        entity: string;
+        /** RFC 3339, UTC — when the logged span began. */
+        started: string;
+        /** How long was **worked**, which is not the span's length. */
+        seconds: number;
+        comment: string;
+      };
+    };
 
 /**
  * One write knobas still owes a source —

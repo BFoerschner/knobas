@@ -21,12 +21,15 @@
   import { canBeTarget } from "./lib/shell/timer";
   import TimerPicker from "./lib/shell/TimerPicker.svelte";
   import { push } from "./lib/shell/toasts.svelte";
+  import { localDay, offsetMinutes } from "./lib/time/draft";
+  import WorklogDraft from "./lib/time/WorklogDraft.svelte";
   import SettingsView from "./lib/settings/SettingsView.svelte";
   import FirstRun from "./lib/sources/FirstRun.svelte";
   import SourcesView from "./lib/sources/SourcesView.svelte";
   import StartWork from "./lib/start-work/StartWork.svelte";
   import DayReview from "./lib/time/DayReview.svelte";
   import { ipcErrorMessage } from "./lib/ipc";
+  import { worklogDraft, type Block, type Draft } from "./lib/ipc/time";
   import { linkTo } from "./lib/detail/links.svelte";
 
   /**
@@ -206,6 +209,41 @@
   /** Whether ⌘T's picker is up (#278, story 9). */
   let pickerOpen = $state(false);
 
+  /** The worklog draft a stop opened, or `null` (#280). */
+  let worklog = $state<Draft | null>(null);
+
+  /**
+   * **Every stop on an entity asks for a draft, and `null` is the ordinary
+   * answer** (#280).
+   *
+   * Whether a worklog can go anywhere is the backend's decision, read off the
+   * source's declared write ops — so the shell asks and opens the draft when
+   * it gets one. A list of kinds here would be the hardcoded per-adapter table
+   * §3a exists to prevent, and would go stale the day an adapter starts taking
+   * worklogs.
+   *
+   * The **day is the one the block started on**, which is the rule the backend
+   * files a block under (`UNLOGGED_BLOCKS` narrows on `started_at`). A stop at
+   * 00:10 closes an afternoon that belongs to yesterday, and asking for today
+   * would answer `null` — the reader would get nothing, with no way to tell
+   * why.
+   *
+   * A failed read is a toast, not silence: the reader pressed stop expecting a
+   * draft, and the blocks are still there to log by hand from the day review.
+   */
+  function draftWorklog(closed: Block | null) {
+    if (!closed || closed.target.kind !== "entity") return;
+    const on = closed.target.entity_id;
+    void worklogDraft(on, {
+      day: localDay(new Date(closed.started_at)),
+      offsetMinutes: offsetMinutes(),
+    })
+      .then((draft) => {
+        worklog = draft;
+      })
+      .catch(complain);
+  }
+
   /**
    * Say why a timer command refused, in the backend's own words.
    *
@@ -232,8 +270,9 @@
   function toggleTimer() {
     void timer
       .press()
-      .then((outcome) => {
-        if (outcome === "pick") pickerOpen = true;
+      .then((pressed) => {
+        if (pressed.did === "pick") pickerOpen = true;
+        if (pressed.did === "stopped") draftWorklog(pressed.closed);
       })
       .catch(complain);
   }
@@ -254,8 +293,13 @@
   function startTimerOn(entityId: string, title: string) {
     void timer
       .switchTo({ kind: "entity", entity_id: entityId })
-      .then(() => {
+      .then((closed) => {
         push({ text: `Timing ${title}.` });
+        // The block the switch closed is a day's work on the *previous*
+        // target, and #280's draft is what it opens: a switch is a stop, and a
+        // stop that quietly discarded the offer to log would make the launcher
+        // row the one way to lose an afternoon.
+        draftWorklog(closed);
       })
       .catch(complain);
   }
@@ -593,6 +637,18 @@
   />
   {#if pickerOpen}
     <TimerPicker onpick={startFromPicker} onclose={() => (pickerOpen = false)} />
+  {/if}
+  {#if worklog}
+    <WorklogDraft
+      draft={worklog}
+      onclose={() => (worklog = null)}
+      onlogged={(logged) =>
+        push({
+          text: `Logged ${Math.round(logged.seconds / 60)}m to ${logged.entity_id.slice(
+            logged.entity_id.indexOf(":") + 1,
+          )}.`,
+        })}
+    />
   {/if}
 {:else}
   <Booting

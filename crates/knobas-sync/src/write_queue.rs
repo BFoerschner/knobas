@@ -93,7 +93,8 @@ pub fn target_entity(op: &WriteOp) -> &str {
         | WriteOp::CreatePullRequest { entity, .. }
         | WriteOp::Approve { entity, .. }
         | WriteOp::TriggerBuild { entity }
-        | WriteOp::RerunBuild { entity } => entity,
+        | WriteOp::RerunBuild { entity }
+        | WriteOp::LogWork { entity, .. } => entity,
     }
 }
 
@@ -148,6 +149,49 @@ pub async fn submit(
     source_id: &str,
     op: WriteOp,
 ) -> Result<QueuedWrite, FlushError> {
+    let queued = queue(deps, source_id, op).await?;
+    // Try it now. A failure here is the queue working, not the call failing.
+    flush_source(deps, source_id).await?;
+    Ok(queued)
+}
+
+/// Queue an outbound write **without trying to deliver it**, and hand back the
+/// row.
+///
+/// [`submit`] is this plus a flush, and is what almost everything wants. This
+/// half exists on its own for one caller and one reason: **nothing may be sent
+/// to a source before knobas' own record of it exists.**
+///
+/// The worklog is that caller (issue #280). It keeps a local copy of what it
+/// sent, and the copy is also what marks the blocks it covers as spent -- so a
+/// crash in the gap between the send and the copy would leave a worklog on the
+/// ticket with no trace of it here and the same afternoon offered for logging
+/// again. `submit` has that gap by construction; this half plus
+/// [`flush_source`] does not.
+///
+/// The pair is therefore: `queue`, write the local record against this row's
+/// id, then [`flush_source`]. A crash between them leaves a pending write and
+/// a copy that says so -- which is the ordinary state of every worklog logged
+/// while Jira is down, and the next flush finishes it.
+///
+/// **The id Jira answers with is a separate problem and is solved separately**
+/// (`knobas_core::write_queue::sent`): the settle records it on the queue row
+/// as well as on the copy, so a flush the scheduler happens to run first
+/// cannot lose it.
+///
+/// **Not a second write path.** Nothing here reaches a source: the flush loop
+/// is still the only thing that calls `Source::write`, and a row queued and
+/// never flushed by its caller is picked up by the next flush of that source
+/// like any other pending write.
+///
+/// # Errors
+///
+/// As [`submit`].
+pub async fn queue(
+    deps: &SchedulerDeps,
+    source_id: &str,
+    op: WriteOp,
+) -> Result<QueuedWrite, FlushError> {
     let entity = EntityRef::parse(target_entity(&op)).map_err(|e| {
         // An op whose target is not an entity id cannot be ordered or held
         // against anything. It is knobas' own bug, not a source fault.
@@ -169,9 +213,6 @@ pub async fn submit(
     )
     .await?;
     announce(deps, "queued", &queued).await;
-
-    // Try it now. A failure here is the queue working, not the call failing.
-    flush_source(deps, source_id).await?;
     Ok(queued)
 }
 
@@ -408,8 +449,15 @@ async fn attempt(
     // and what would reopen the question.
     // ---------------------------------------------------------------------
     match source.write(op).await {
-        Ok(()) => {
-            if let Some(sent) = store::sent(&deps.pool, write.id).await? {
+        Ok(receipt) => {
+            // The receipt, and the settle, in one statement: `sent` is where
+            // a worklog's local copy learns the id Jira gave it (#280), and
+            // this is the only moment that id exists. An adapter with nothing
+            // to say answers `WriteReceipt::none()` and the settle is exactly
+            // what it always was.
+            if let Some(sent) =
+                store::sent(&deps.pool, write.id, receipt.remote_id.as_deref()).await?
+            {
                 announce(deps, "sent", &sent).await;
                 return Ok(true);
             }

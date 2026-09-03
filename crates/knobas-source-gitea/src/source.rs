@@ -2,7 +2,9 @@
 //! hold.
 
 use knobas_source::instance::{SourceInstance, validate_instance_id};
-use knobas_source::{ConnectionInfo, Cursor, Sink, Source, SourceDescriptor, SourceError, WriteOp};
+use knobas_source::{
+    ConnectionInfo, Cursor, Sink, Source, SourceDescriptor, SourceError, WriteOp, WriteReceipt,
+};
 
 use crate::client::{self, GiteaClient};
 use crate::config::GiteaConfig;
@@ -174,7 +176,7 @@ impl Source for GiteaSource {
     /// through to `create_branch` would build the path
     /// `/repos/owner/repo#142/branches`, which is a 404 on a good day and a
     /// different repository on a bad one.
-    async fn write(&self, op: WriteOp) -> Result<(), SourceError> {
+    async fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError> {
         match &op {
             WriteOp::CreateBranch {
                 entity,
@@ -182,7 +184,8 @@ impl Source for GiteaSource {
                 from_ref,
             } => {
                 let (owner, repo) = self.repo_of(entity)?;
-                write::create_branch(&self.client, &owner, &repo, name, from_ref).await
+                write::create_branch(&self.client, &owner, &repo, name, from_ref).await?;
+                Ok(WriteReceipt::none())
             }
             WriteOp::CreatePullRequest {
                 entity,
@@ -193,20 +196,24 @@ impl Source for GiteaSource {
             } => {
                 let (owner, repo) = self.repo_of(entity)?;
                 write::create_pull_request(&self.client, &owner, &repo, title, body, head, base)
-                    .await
+                    .await?;
+                Ok(WriteReceipt::none())
             }
             WriteOp::Comment { entity, body } => {
                 let (owner, repo, index) = self.pull_of(entity)?;
-                write::comment(&self.client, &owner, &repo, index, body).await
+                write::comment(&self.client, &owner, &repo, index, body).await?;
+                Ok(WriteReceipt::none())
             }
             WriteOp::Approve { entity, body } => {
                 let (owner, repo, index) = self.pull_of(entity)?;
-                write::approve(&self.client, &owner, &repo, index, body).await
+                write::approve(&self.client, &owner, &repo, index, body).await?;
+                Ok(WriteReceipt::none())
             }
             WriteOp::Transition { .. }
             | WriteOp::CreateTicket { .. }
             | WriteOp::TriggerBuild { .. }
-            | WriteOp::RerunBuild { .. } => Err(SourceError::protocol(format!(
+            | WriteOp::RerunBuild { .. }
+            | WriteOp::LogWork { .. } => Err(SourceError::protocol(format!(
                 "gitea: {:?} is not an operation this adapter supports",
                 op.identifier()
             ))),

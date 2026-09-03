@@ -88,7 +88,7 @@ impl Source for Fake {
         Ok(cursor.unwrap_or_default())
     }
 
-    async fn write(&self, op: WriteOp) -> Result<(), SourceError> {
+    async fn write(&self, op: WriteOp) -> Result<knobas_source::WriteReceipt, SourceError> {
         let answer = *self.answer.lock().unwrap();
         let dwell = *self.dwell.lock().unwrap();
         if !dwell.is_zero() {
@@ -96,7 +96,7 @@ impl Source for Fake {
         }
         if answer == Answer::Accept {
             self.written.lock().unwrap().push(op);
-            return Ok(());
+            return Ok(knobas_source::WriteReceipt::none());
         }
         Err(match answer {
             Answer::Unreachable => SourceError::Unreachable("connection timed out".to_owned()),
@@ -634,6 +634,14 @@ fn every_write_op_has_a_stated_projection() {
         WriteOp::RerunBuild {
             entity: "teamcity:build:1187".to_owned(),
         },
+        WriteOp::LogWork {
+            entity: "jira:PAY-231".to_owned(),
+            // Fixed, like `contract.rs`'s probe: a payload that moves between
+            // runs is one whose failures cannot be compared.
+            started: chrono::DateTime::from_timestamp(1_788_000_000, 0).expect("a fixed instant"),
+            seconds: 2_700,
+            comment: "SEPA retry".to_owned(),
+        },
     ];
     for op in &probes {
         let identifier = match op {
@@ -644,7 +652,8 @@ fn every_write_op_has_a_stated_projection() {
             | WriteOp::CreatePullRequest { .. }
             | WriteOp::Approve { .. }
             | WriteOp::TriggerBuild { .. }
-            | WriteOp::RerunBuild { .. } => op.identifier(),
+            | WriteOp::RerunBuild { .. }
+            | WriteOp::LogWork { .. } => op.identifier(),
         };
         assert!(
             store::PROJECTED_OPS.contains(&identifier),

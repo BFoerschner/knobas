@@ -132,7 +132,7 @@ async fn one_entitys_writes_are_offered_oldest_first_and_one_at_a_time() {
         "the second write must wait behind the first"
     );
 
-    wq::sent(&pool, first.id).await.unwrap().unwrap();
+    wq::sent(&pool, first.id, None).await.unwrap().unwrap();
     let due = wq::due(&pool, &source).await.unwrap();
     assert_eq!(
         due.iter().map(|w| w.id).collect::<Vec<_>>(),
@@ -267,7 +267,7 @@ async fn the_open_list_and_the_counts_separate_what_needs_a_decision() {
     .await
     .unwrap()
     .unwrap();
-    wq::sent(&pool, to_send.id).await.unwrap().unwrap();
+    wq::sent(&pool, to_send.id, None).await.unwrap().unwrap();
     wq::discard(&pool, to_drop.id).await.unwrap().unwrap();
 
     let open = wq::open(&pool).await.unwrap();
@@ -358,7 +358,7 @@ async fn the_user_may_apply_discard_or_edit_a_held_write() {
             .collect::<Vec<_>>(),
         vec![apply.id]
     );
-    wq::sent(&pool, apply.id).await.unwrap().unwrap();
+    wq::sent(&pool, apply.id, None).await.unwrap().unwrap();
 
     // Discard: one action, and it is terminal.
     let drop_it = queue_comment(&pool, &ticket, "concede").await;
@@ -373,7 +373,7 @@ async fn the_user_may_apply_discard_or_edit_a_held_write() {
         wq::discard(&pool, drop_it.id).await.unwrap().is_none(),
         "discarding twice changes nothing, and says so"
     );
-    wq::sent(&pool, drop_it.id).await.unwrap();
+    wq::sent(&pool, drop_it.id, None).await.unwrap();
     assert_eq!(
         wq::get(&pool, drop_it.id).await.unwrap().unwrap().state,
         WriteState::Discarded,

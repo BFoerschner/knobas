@@ -1,7 +1,9 @@
 //! The `Source` implementation: what the sync engine and `test_source` hold.
 
 use knobas_source::instance::SourceInstance;
-use knobas_source::{ConnectionInfo, Cursor, Sink, Source, SourceDescriptor, SourceError, WriteOp};
+use knobas_source::{
+    ConnectionInfo, Cursor, Sink, Source, SourceDescriptor, SourceError, WriteOp, WriteReceipt,
+};
 
 use crate::api::ConfluenceApi;
 use crate::http::{self, ConfluenceHttp};
@@ -125,8 +127,13 @@ impl Source for ConfluenceSource {
     /// The match has **no wildcard arm**: `WriteOp` grows per milestone
     /// (ADR-0006), and when spec #272's `CreatePage` and `UpdatePage` are
     /// ratified this file stops compiling until they are given a decision here
-    /// -- which is exactly the reminder the next ticket wants.
-    async fn write(&self, op: WriteOp) -> Result<(), SourceError> {
+    /// -- which is exactly the reminder the next ticket wants. `log_work`
+    /// (#280) arrived that way and is refused here like the rest.
+    ///
+    /// The answer type is [`WriteReceipt`] since #280, and this adapter never
+    /// builds one: a receipt is what a source says about a row it created, and
+    /// nothing here creates anything yet.
+    async fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError> {
         match &op {
             WriteOp::Comment { .. }
             | WriteOp::Transition { .. }
@@ -135,7 +142,8 @@ impl Source for ConfluenceSource {
             | WriteOp::CreatePullRequest { .. }
             | WriteOp::Approve { .. }
             | WriteOp::TriggerBuild { .. }
-            | WriteOp::RerunBuild { .. } => Err(SourceError::protocol(format!(
+            | WriteOp::RerunBuild { .. }
+            | WriteOp::LogWork { .. } => Err(SourceError::protocol(format!(
                 "the Confluence adapter does not support {:?}: it is read-only until the page \
                  write ops land",
                 op.identifier()

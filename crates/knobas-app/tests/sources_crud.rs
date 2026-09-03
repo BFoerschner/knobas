@@ -58,7 +58,10 @@ impl Source for Refusing {
     ) -> Result<knobas_source::Cursor, SourceError> {
         Err((self.error)())
     }
-    async fn write(&self, _op: knobas_source::WriteOp) -> Result<(), SourceError> {
+    async fn write(
+        &self,
+        _op: knobas_source::WriteOp,
+    ) -> Result<knobas_source::WriteReceipt, SourceError> {
         Err(SourceError::protocol("read-only"))
     }
 }

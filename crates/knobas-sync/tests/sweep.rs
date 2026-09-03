@@ -99,7 +99,7 @@ impl Source for Shrinking {
         Ok(r#"{"v":1,"n":1}"#.to_owned())
     }
 
-    async fn write(&self, _op: WriteOp) -> Result<(), SourceError> {
+    async fn write(&self, _op: WriteOp) -> Result<knobas_source::WriteReceipt, SourceError> {
         Err(SourceError::protocol("read-only"))
     }
 }

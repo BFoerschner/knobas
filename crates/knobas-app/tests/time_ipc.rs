@@ -51,6 +51,12 @@ fn on(entity_id: &str) -> TimerTarget {
     }
 }
 
+/// An instant on [`DAY`], the day every worklog fixture below is on.
+fn at(hour: u32, minute: u32) -> DateTime<Utc> {
+    use chrono::TimeZone;
+    Utc.with_ymd_and_hms(2026, 9, 3, hour, minute, 0).unwrap()
+}
+
 fn labelled(label: &str) -> TimerTarget {
     TimerTarget::Label {
         label: label.to_owned(),
@@ -638,11 +644,26 @@ async fn mirrored(pool: &PgPool, entity_id: &str, title: &str) {
         .expect("a mirrored ticket");
 }
 
-/// Stamp a block as logged. **The only way to reach the read-only rule until
-/// #280**: `knobas.worklog` does not exist yet and nothing writes this column,
-/// so the alternative is a rule with no test at all until the worklog lands.
-/// Migration `0013` put the column here for exactly this reason.
-async fn logged_into(pool: &PgPool, block: i64, worklog: i64) {
+/// Stamp a block as logged, by writing the worklog it was logged into, and
+/// answer that worklog's id.
+///
+/// **A real `knobas.worklog` row, since #280** -- which is the shape this
+/// helper's own note said it would take once the worklog landed. Migration
+/// `0014` puts a foreign key on `knobas.block.worklog_id`, so a fabricated id
+/// is now a state the schema refuses; that is what the key is for, and it is
+/// what makes deleting a worklog give its blocks back rather than leave them
+/// locked for ever.
+async fn logged_into(pool: &PgPool, block: i64) -> i64 {
+    let worklog = sqlx::query_scalar::<_, i64>(
+        "insert into knobas.worklog
+           (entity_id, started_at, seconds, comment, block_ids)
+         values ($1, now(), 3600, '', array[$2::bigint]) returning id",
+    )
+    .bind(TICKET)
+    .bind(block)
+    .fetch_one(pool)
+    .await
+    .expect("a worklog to log the block into");
     let rows = sqlx::query("update knobas.block set worklog_id = $2 where id = $1")
         .bind(block)
         .bind(worklog)
@@ -651,6 +672,7 @@ async fn logged_into(pool: &PgPool, block: i64, worklog: i64) {
         .expect("the block is stamped")
         .rows_affected();
     assert_eq!(rows, 1, "there was no block {block} to stamp");
+    worklog
 }
 
 /// The strip labels an entity block with the title the mirror holds, and falls
@@ -938,7 +960,7 @@ async fn a_logged_block_refuses_both_edits_and_says_why() {
         &on(TICKET),
     )
     .await;
-    logged_into(&pool, id, 77).await;
+    let worklog = logged_into(&pool, id).await;
 
     let refusal = time::day::update(
         &pool,
@@ -974,7 +996,7 @@ async fn a_logged_block_refuses_both_edits_and_says_why() {
         vec![(
             day + Duration::hours(9),
             day + Duration::hours(10),
-            Some(77)
+            Some(worklog)
         )],
         "the refused edits changed the block anyway, so what knobas shows now \
          disagrees with what the worklog holds"
@@ -994,7 +1016,7 @@ async fn an_unlogged_block_beside_a_logged_one_is_still_editable() {
         &on(TICKET),
     )
     .await;
-    logged_into(&pool, locked, 77).await;
+    logged_into(&pool, locked).await;
     let free = block_at(
         &pool,
         day + Duration::hours(11),
@@ -1551,5 +1573,385 @@ async fn a_passive_block_a_new_manual_one_overlaps_is_taken_back_whole() {
         vec![(BlockKind::Manual, labelled(LABEL), 2100)],
         "the passive block knobas had guessed is still there underneath the \
          one the reader wrote over it"
+    );
+}
+
+// -- the worklog draft (#280) -----------------------------------------------
+//
+// The draft's *reads*, against a real database: which blocks a day's interval
+// is made of, what the candidates are, and what the comment says. The other
+// half of the worklog -- queueing the write, the local copy, Jira's id landing
+// on it -- needs a source that answers, and lives in `tests/worklog_ipc.rs`
+// behind a trait-level fake (the layer ADR-0013 keeps).
+
+/// The reader's day, and the offset their machine sends with it. UTC here, so
+/// the fixtures below read as the instants they are.
+const DAY: &str = "2026-09-03";
+
+fn reader_day() -> chrono::NaiveDate {
+    DAY.parse().expect("a date")
+}
+
+/// The Jira source every draft below is drawn against.
+///
+/// A configuration row is what makes `jira:` a namespace that takes worklogs:
+/// `worklog::draft` asks the **adapter** whether it declares `log_work`, and
+/// the row is the hop from the instance id to the adapter kind.
+async fn configure_jira(pool: &PgPool, username: &str) {
+    knobas_sync::config::insert(
+        pool,
+        &knobas_sync::config::InsertConfig {
+            id: "jira".to_owned(),
+            adapter_kind: "jira".to_owned(),
+            display_name: "Tidewater Jira".to_owned(),
+            base_url: "https://jira.example".to_owned(),
+            auth_kind: knobas_sync::config::AuthKind::Method(knobas_source::AuthMethod::Pat),
+            config: serde_json::json!({ "username": username }),
+            sync_interval_secs: 86_400,
+            enabled: true,
+        },
+    )
+    .await
+    .expect("the source row is written");
+}
+
+/// One block on `entity`, from `from` to `to` on [`DAY`].
+async fn block(pool: &PgPool, entity: &str, from: (u32, u32), to: (u32, u32)) -> i64 {
+    let at = |(h, m): (u32, u32)| {
+        use chrono::TimeZone;
+        Utc.with_ymd_and_hms(2026, 9, 3, h, m, 0).unwrap()
+    };
+    sqlx::query_scalar::<_, i64>(
+        "insert into knobas.block (started_at, ended_at, entity_id, kind)
+         values ($1, $2, $3, 'manual') returning id",
+    )
+    .bind(at(from))
+    .bind(at(to))
+    .bind(entity)
+    .fetch_one(pool)
+    .await
+    .expect("a block is written")
+}
+
+/// A mirrored item **authored by `author`**, updated at `at`.
+///
+/// Not the day review's `mirrored` above: that one writes a title for a block
+/// to read back, and the two fields this one exists for -- who wrote it and
+/// when -- are exactly what the candidate list narrows on.
+async fn authored(pool: &PgPool, id: &str, title: &str, author: &str, at: DateTime<Utc>) {
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'commit', $2)")
+        .bind(id)
+        .bind(title)
+        .execute(pool)
+        .await
+        .expect("the entity row");
+    sqlx::query(
+        "insert into sync.item
+           (entity_id, source_id, kind, title, body_text, author, item_updated_at, payload)
+         values ($1, 'jira', 'commit', $2, '', $3, $4, '{}'::jsonb)",
+    )
+    .bind(id)
+    .bind(title)
+    .bind(author)
+    .bind(at)
+    .execute(pool)
+    .await
+    .expect("the mirror row");
+}
+
+/// One activity line of the reader's own, **at a moment this test dictates**.
+///
+/// `activity::record` stamps `now()`, which would put the line inside or
+/// outside a fixture interval depending on what time of day the suite runs --
+/// a test that passes over lunch and fails after it. The stamp is moved with
+/// one `update`, which writes a fixture and never an assertion, the discipline
+/// this file's `age` records for the timer.
+async fn line(pool: &PgPool, verb: &str, at: DateTime<Utc>) {
+    let ticket = knobas_core::entity::EntityRef::parse(TICKET).expect("an entity id");
+    let row =
+        knobas_core::activity::record(pool, "user", verb, Some(&ticket), serde_json::json!({}))
+            .await
+            .expect("an activity line");
+    sqlx::query("update knobas.activity set at = $1 where id = $2")
+        .bind(at)
+        .bind(row.id)
+        .execute(pool)
+        .await
+        .expect("the line is moved into the interval");
+}
+
+fn registry() -> knobas_app::sources::Registry {
+    knobas_app::sources::Registry::builtin()
+}
+
+async fn draft_of(pool: &PgPool, entity: &str) -> Option<knobas_app::time::worklog::Draft> {
+    time::worklog::draft(pool, &registry(), entity, reader_day(), 0)
+        .await
+        .expect("the draft is readable")
+}
+
+/// **The one number that can be wrong invisibly**, against a real database: an
+/// afternoon with a lunch in it.
+///
+/// 09:00--10:30 and 13:00--14:00 is two and a half hours of work inside a five
+/// hour window, and the draft logs the first. The unit test beside
+/// `concatenate` pins the arithmetic; this pins that the *read* feeding it
+/// picks up both blocks and no others.
+#[tokio::test]
+async fn a_days_blocks_concatenate_into_one_interval_that_bills_no_lunch() {
+    let pool = scratch("worklog-interval").await;
+    configure_jira(&pool, "mara.lindqvist").await;
+    let morning = block(&pool, TICKET, (9, 0), (10, 30)).await;
+    let afternoon = block(&pool, TICKET, (13, 0), (14, 0)).await;
+
+    let draft = draft_of(&pool, TICKET).await.expect("there is time to log");
+    assert_eq!(draft.started_at, at(9, 0));
+    assert_eq!(draft.ended_at, at(14, 0));
+    assert_eq!(draft.seconds, 150 * 60, "two and a half hours were worked");
+    assert_eq!(draft.block_ids, vec![morning, afternoon]);
+}
+
+/// Another ticket's afternoon is not this ticket's worklog.
+///
+/// The mutation this exists for is a `where` clause that lost its entity: the
+/// draft would then read as a longer day, silently, and log somebody else's
+/// hours against PAY-231.
+#[tokio::test]
+async fn another_tickets_blocks_are_not_in_this_tickets_interval() {
+    let pool = scratch("worklog-other-ticket").await;
+    configure_jira(&pool, "mara.lindqvist").await;
+    let mine = block(&pool, TICKET, (9, 0), (10, 0)).await;
+    block(&pool, "jira:PAY-240", (10, 0), (12, 0)).await;
+    // ...and an ad-hoc label's block, which has no ticket at all.
+    sqlx::query(
+        "insert into knobas.block (started_at, ended_at, label, kind)
+         values ($1, $2, $3, 'manual')",
+    )
+    .bind(at(13, 0))
+    .bind(at(15, 0))
+    .bind(LABEL)
+    .execute(&pool)
+    .await
+    .expect("a labelled block");
+
+    let draft = draft_of(&pool, TICKET).await.expect("there is time to log");
+    assert_eq!(draft.block_ids, vec![mine], "{:?}", draft.block_ids);
+    assert_eq!(draft.seconds, 60 * 60);
+}
+
+/// Yesterday's blocks are not today's draft, and the day is **the reader's**.
+#[tokio::test]
+async fn a_day_is_the_readers_day() {
+    let pool = scratch("worklog-day").await;
+    configure_jira(&pool, "mara.lindqvist").await;
+    let today = block(&pool, TICKET, (9, 0), (10, 0)).await;
+    sqlx::query(
+        "insert into knobas.block (started_at, ended_at, entity_id, kind)
+         values ($1, $2, $3, 'manual')",
+    )
+    .bind(at(9, 0) - Duration::days(1))
+    .bind(at(10, 0) - Duration::days(1))
+    .bind(TICKET)
+    .execute(&pool)
+    .await
+    .expect("yesterday's block");
+
+    let draft = draft_of(&pool, TICKET).await.expect("there is time to log");
+    assert_eq!(draft.block_ids, vec![today]);
+
+    // The same blocks, read by somebody four hours east: 09:00 UTC is 13:00 to
+    // them, still today -- but a block at 22:00 UTC is tomorrow, and the
+    // server's own date would have said otherwise.
+    let evening = block(&pool, TICKET, (22, 0), (23, 0)).await;
+    let theirs = time::worklog::draft(&pool, &registry(), TICKET, reader_day(), 240)
+        .await
+        .expect("the draft is readable")
+        .expect("there is time to log");
+    assert!(
+        !theirs.block_ids.contains(&evening),
+        "22:00 UTC is tomorrow for a reader at +04:00, and their day must not \
+         carry it: {:?}",
+        theirs.block_ids
+    );
+}
+
+/// A source that does not declare `log_work` gets no draft at all -- which is
+/// how a stop on a Gitea commit or a note passes without an apology.
+#[tokio::test]
+async fn a_source_that_takes_no_worklogs_has_no_draft() {
+    let pool = scratch("worklog-no-source").await;
+    configure_jira(&pool, "mara.lindqvist").await;
+    block(&pool, "gitea:tidewater/payout-service#142", (9, 0), (10, 0)).await;
+    block(&pool, "note:5b1c0f1e", (10, 0), (11, 0)).await;
+
+    for id in ["gitea:tidewater/payout-service#142", "note:5b1c0f1e"] {
+        assert!(
+            draft_of(&pool, id).await.is_none(),
+            "{id} is not somewhere a worklog can go, so there is nothing to draft"
+        );
+    }
+    // ...and the direction that shows the refusal is not simply refusing
+    // everything.
+    block(&pool, TICKET, (11, 0), (12, 0)).await;
+    assert!(draft_of(&pool, TICKET).await.is_some());
+}
+
+/// A ticket with nothing left to log has no draft either -- the same `null`,
+/// for the reason the command's own documentation gives: the shell asks on
+/// every stop and opens the draft only if it got one.
+#[tokio::test]
+async fn a_ticket_with_no_unlogged_time_has_no_draft() {
+    let pool = scratch("worklog-nothing").await;
+    configure_jira(&pool, "mara.lindqvist").await;
+    assert!(draft_of(&pool, TICKET).await.is_none());
+}
+
+/// **A passive block is not something to log.**
+///
+/// `0013`'s block vocabulary has two kinds and #282 writes the second one:
+/// `passive` is knobas' guess at what was open on screen, not a person's
+/// account of an afternoon. Drafting one would put minutes nobody vouched for
+/// into a worklog that bills a client, so the draft narrows to `manual` -- and
+/// so does `log`, which re-derives its covered blocks from the same read.
+///
+/// The row is inserted directly rather than derived from heartbeats: the
+/// timer only ever makes `manual` ones, and #282's derivation -- the writer of
+/// the other kind, which landed while this branch was open -- has its own
+/// tests above for whether it produces the row. What is witnessed here is the
+/// draft's side of the boundary, which is a fact about the `kind` column and
+/// nothing else, so the shortest fixture that states it is the honest one.
+#[tokio::test]
+async fn a_passive_block_is_not_drafted() {
+    let pool = scratch("worklog-passive").await;
+    configure_jira(&pool, "mara.lindqvist").await;
+    sqlx::query(
+        "insert into knobas.block (started_at, ended_at, entity_id, kind)
+         values ($1, $2, $3, 'passive')",
+    )
+    .bind(Utc.with_ymd_and_hms(2026, 9, 3, 9, 0, 0).unwrap())
+    .bind(Utc.with_ymd_and_hms(2026, 9, 3, 10, 30, 0).unwrap())
+    .bind(TICKET)
+    .execute(&pool)
+    .await
+    .expect("a passive block is written");
+
+    assert!(
+        draft_of(&pool, TICKET).await.is_none(),
+        "the day's only block was passive -- knobas guessed at it, and a guess \
+         is not an afternoon anybody has claimed"
+    );
+
+    // ...and the direction that shows the narrowing is `kind` and not the
+    // fixture failing to insert: a manual block beside it *is* drafted, and
+    // the interval is that block alone.
+    let claimed = block(&pool, TICKET, (11, 0), (12, 0)).await;
+    let drafted = draft_of(&pool, TICKET)
+        .await
+        .expect("the manual block is something to draft");
+    assert_eq!(
+        drafted.block_ids,
+        vec![claimed],
+        "the passive block was drafted alongside the manual one"
+    );
+    assert_eq!(
+        drafted.seconds, 3_600,
+        "the passive block's ninety minutes are in the interval"
+    );
+}
+
+/// The candidates: what the mirror says the reader did in the interval, and
+/// what their own activity lines say -- and **one bullet each**.
+///
+/// Four fixtures, and each is a direction the read can be wrong in:
+///
+/// * a commit of theirs inside the window is offered;
+/// * a colleague's commit, in the same window, is not -- "authored by me" is
+///   the whole of what this list means;
+/// * a commit of theirs *outside* the window is not, so the interval is doing
+///   the narrowing rather than the day;
+/// * their own activity line is offered, but the timer's own `stopped` is not:
+///   a worklog comment that says "stopped the timer" is knobas talking about
+///   itself.
+#[tokio::test]
+async fn the_candidates_are_the_readers_own_work_inside_the_interval() {
+    let pool = scratch("worklog-candidates").await;
+    configure_jira(&pool, "mara.lindqvist").await;
+    block(&pool, TICKET, (9, 0), (11, 0)).await;
+
+    authored(
+        &pool,
+        "jira:c1",
+        "Retry SEPA payouts",
+        "mara.lindqvist",
+        at(9, 30),
+    )
+    .await;
+    authored(
+        &pool,
+        "jira:c2",
+        "Someone else's work",
+        "jonas.k",
+        at(9, 40),
+    )
+    .await;
+    authored(
+        &pool,
+        "jira:c3",
+        "Yesterday's commit",
+        "mara.lindqvist",
+        at(9, 30) - Duration::days(1),
+    )
+    .await;
+
+    line(&pool, "linked", at(9, 30)).await;
+    line(&pool, "stopped", at(9, 40)).await;
+
+    let draft = draft_of(&pool, TICKET).await.expect("there is time to log");
+    let ids: Vec<&str> = draft.candidates.iter().map(|c| c.id.as_str()).collect();
+    assert!(
+        ids.contains(&"item:jira:c1"),
+        "the reader's own commit is a candidate: {ids:?}"
+    );
+    assert!(
+        !ids.contains(&"item:jira:c2"),
+        "somebody else's commit is not the reader's afternoon: {ids:?}"
+    );
+    assert!(
+        !ids.contains(&"item:jira:c3"),
+        "a commit outside the interval is not in it: {ids:?}"
+    );
+    assert!(
+        draft
+            .candidates
+            .iter()
+            .any(|c| c.bullet == "- linked PAY-231"),
+        "the reader's own activity line is a candidate: {:?}",
+        draft.candidates
+    );
+    assert!(
+        !draft
+            .candidates
+            .iter()
+            .any(|c| c.bullet.contains("stopped")),
+        "the timer's own bookkeeping is not work: {:?}",
+        draft.candidates
+    );
+
+    // The comment the draft opens with is those bullets, in order, and
+    // nothing else -- which is what the frontend re-joins when a box is
+    // unticked.
+    assert_eq!(
+        draft.comment,
+        draft
+            .candidates
+            .iter()
+            .map(|c| c.bullet.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    assert!(
+        draft.comment.contains("- Retry SEPA payouts"),
+        "{}",
+        draft.comment
     );
 }

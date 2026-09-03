@@ -354,6 +354,7 @@ impl SourceError {
 /// | [`Approve`](Self::Approve) | `"approve"` | M2 (Gitea) |
 /// | [`TriggerBuild`](Self::TriggerBuild) | `"trigger_build"` | M2 (TeamCity) |
 /// | [`RerunBuild`](Self::RerunBuild) | `"rerun_build"` | M2 (TeamCity) |
+/// | [`LogWork`](Self::LogWork) | `"log_work"` | M3 (Jira) |
 ///
 /// The enum grows per milestone and **each growth is a §10.8 ratified
 /// exception** (ADR-0006); an adapter must reject every op it does not declare
@@ -432,6 +433,39 @@ pub enum WriteOp {
     /// Identifier `"rerun_build"`. `entity` is the **build** to run again; the
     /// adapter asks the source which configuration it belonged to.
     RerunBuild { entity: String },
+    /// Identifier `"log_work"`. Log time against a ticket (M3.1, issue #280).
+    ///
+    /// `entity` is the **ticket** the time goes on. One op carries one
+    /// worklog: `CONTEXT.md`'s **worklog** is what one or more of knobas'
+    /// blocks *become* when logged, so the concatenation of a day's blocks
+    /// into a single span happens on knobas' side and what crosses here is
+    /// already the record the source will hold.
+    ///
+    /// `started` is the instant the logged span began, as
+    /// [`DateTime<Utc>`](chrono::DateTime) -- an instant rather than a
+    /// source-formatted string, because "what a worklog's `started` looks
+    /// like on the wire" is the adapter's business and Jira's spelling of it
+    /// (`yyyy-MM-dd'T'HH:mm:ss.SSSZ`, offset mandatory) is not a shape the
+    /// SPI should be teaching every other source.
+    ///
+    /// `seconds` is how long was worked, which is **not** `ended - started`:
+    /// the blocks a worklog covers may have gaps between them, and it is the
+    /// worked time that is logged rather than the span it sits in.
+    ///
+    /// `comment` may be empty -- a worklog with no words is a worklog -- and
+    /// an adapter sends it as the source's own comment field rather than
+    /// inventing text for an empty one.
+    ///
+    /// **Nothing here says what to do with the remaining estimate.** Jira's
+    /// `adjustEstimate` defaults to `auto` and that default is what knobas
+    /// takes: an op that carried the choice would be asking every caller a
+    /// question no surface in knobas puts to the user.
+    LogWork {
+        entity: String,
+        started: chrono::DateTime<chrono::Utc>,
+        seconds: i64,
+        comment: String,
+    },
 }
 
 impl WriteOp {
@@ -463,6 +497,50 @@ impl WriteOp {
             WriteOp::Approve { .. } => "approve",
             WriteOp::TriggerBuild { .. } => "trigger_build",
             WriteOp::RerunBuild { .. } => "rerun_build",
+            WriteOp::LogWork { .. } => "log_work",
+        }
+    }
+}
+
+/// What the source said about the write it just performed.
+///
+/// [`Source::write`] answered `()` until M3.1 (issue #280), and the reason it
+/// no longer does is one write op rather than a general appetite for return
+/// values: a **worklog** is a record the source assigns an id to, knobas keeps
+/// a local copy of it, and the copy has to be able to name the remote row --
+/// `start_work`'s look-before-write trick of finding the thing again by
+/// reading the mirror cannot work here, because a worklog is not a mirrored
+/// entity and two worklogs of the same length on the same day are
+/// indistinguishable from outside.
+///
+/// A struct rather than `Option<String>` so the next thing a source has to say
+/// about a write is a field rather than a second signature change, and so the
+/// call site reads as what it is.
+///
+/// Delivery is still at-least-once (ADR-0012): a receipt is what the source
+/// answered *this* time, and a re-sent write answers with a second id for a
+/// second row. It is not an idempotency key and nothing treats it as one.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WriteReceipt {
+    /// The id the source gave what this write created, in the source's own
+    /// spelling (Jira's worklog ids are decimal strings). `None` when the op
+    /// creates nothing addressable, or when the source did not say.
+    pub remote_id: Option<String>,
+}
+
+impl WriteReceipt {
+    /// The source had nothing to say -- the answer for every op but
+    /// `log_work`.
+    #[must_use]
+    pub fn none() -> Self {
+        Self { remote_id: None }
+    }
+
+    /// The source named what it made.
+    #[must_use]
+    pub fn id(remote_id: impl Into<String>) -> Self {
+        Self {
+            remote_id: Some(remote_id.into()),
         }
     }
 }
@@ -504,7 +582,15 @@ pub trait Source: Send + Sync {
     /// Perform a write on the remote system. Ops absent from
     /// [`SourceDescriptor::write_ops`] must be refused with
     /// [`SourceError::Protocol`] rather than attempted.
-    async fn write(&self, op: WriteOp) -> Result<(), SourceError>;
+    ///
+    /// The answer is a [`WriteReceipt`], which for almost every op is
+    /// [`WriteReceipt::none`]: knobas addresses what it wrote by *reading it
+    /// back*, and a receipt exists only for the writes where reading it back
+    /// cannot identify the thing that was made. There is one today -- a
+    /// worklog, whose id is what the local copy carries and what a later
+    /// edit or delete would need (issue #280) -- and an adapter that has
+    /// nothing to say answers `none` rather than inventing an id.
+    async fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError>;
 }
 
 /// Where a syncing adapter hands its items. Implemented by the sync engine;
@@ -722,6 +808,13 @@ mod tests {
             WriteOp::RerunBuild {
                 entity: "teamcity:build:1187".into(),
             },
+            WriteOp::LogWork {
+                entity: "jira:PAY-231".into(),
+                started: chrono::DateTime::from_timestamp(1_788_000_000, 0)
+                    .expect("a fixed instant"),
+                seconds: 2_700,
+                comment: "SEPA retry".into(),
+            },
         ];
         for op in &probes {
             match op {
@@ -732,7 +825,8 @@ mod tests {
                 | WriteOp::CreatePullRequest { .. }
                 | WriteOp::Approve { .. }
                 | WriteOp::TriggerBuild { .. }
-                | WriteOp::RerunBuild { .. } => {}
+                | WriteOp::RerunBuild { .. }
+                | WriteOp::LogWork { .. } => {}
             }
         }
         probes
@@ -782,7 +876,7 @@ mod tests {
             );
             assert!(seen.insert(id), "two variants both call themselves {id:?}");
         }
-        assert_eq!(seen.len(), 8, "a variant lost its probe in every_write_op");
+        assert_eq!(seen.len(), 9, "a variant lost its probe in every_write_op");
     }
 
     /// ADR-0004: a failure that came from a response carries the **status** it

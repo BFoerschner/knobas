@@ -80,6 +80,14 @@ const HANDS_TO_THE_QUEUE: &[&str] = &[
     // run-time surprise. Nothing here dispatches: the orchestrator beside it
     // moves payloads and never names the enum at all.
     "knobas-app/src/start_work/plan.rs",
+    // Issue #280's worklog. It builds the `log_work` op out of the interval
+    // and comment the reader settled on and hands it to
+    // `sources::write_queue::queue` -- the queue's first half, because the
+    // worklog's local copy has to name the queued row before the flush can
+    // settle it. Typed rather than a `json!` literal for the reason the entry
+    // above gives: the SPI's serde shape in a string literal is a renamed
+    // field discovered at run time. Nothing here dispatches.
+    "knobas-app/src/time/worklog.rs",
 ];
 
 /// A call spelled on a `Source` -- method syntax or UFCS (`Source::write(..)`),
