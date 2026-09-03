@@ -56,6 +56,10 @@ export const RELATIONS: readonly Relation[] = [
   { id: "depends-on", forward: "depends on", inverse: "depended on by" },
   { id: "implements", forward: "implements", inverse: "implemented by" },
   { id: "documents", forward: "documents", inverse: "documented by" },
+  // The relation a published standup protocol carries (#289). Curated here
+  // because an unknown relation reads the same word from both ends, and
+  // "published-as" on a *page* would be the opposite of what the row says.
+  { id: "published-as", forward: "published as", inverse: "published from" },
   { id: "duplicates", forward: "duplicates", inverse: "duplicated by" },
   { id: "fixes", forward: "fixes", inverse: "fixed by" },
   { id: "runs-on", forward: "runs on", inverse: "hosts" },

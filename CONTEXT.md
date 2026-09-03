@@ -172,7 +172,7 @@ The standup's generated three lists — yesterday, today, blockers — drawn fro
 _Avoid_: report, summary, standup (that is the whole flow)
 
 **Standup protocol**:
-A [note](#note) — one per date, opened by its own address — holding attendees, per-person notes and action items. *Publish* creates a Confluence page from it under a configured parent and links note and page; the note stays the editable original. Not a kind of its own.
+A [note](#note) — one per date, opened by its own address — holding attendees, per-person notes and action items. *Publish* creates a Confluence page from it under a configured parent and links note and page; the note stays the editable original. Not a kind of its own. One page per date: knobas queues one create however often *Publish* is pressed, and the redelivery it cannot see (ADR-0012) is refused by Confluence's own per-space title uniqueness rather than duplicated. (M3 grilling 2026-09-02; built in #289)
 _Avoid_: minutes, protocol page (that is the published copy)
 
 **Timesheet**:

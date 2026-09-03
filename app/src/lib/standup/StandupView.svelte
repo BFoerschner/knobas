@@ -33,12 +33,15 @@
   reader which list was empty and nothing else.
 -->
 <script lang="ts">
+  import type { ComponentProps } from "svelte";
+
   import { ipcErrorMessage } from "../ipc";
   import { standupDigest as realStandupDigest, type DigestLine } from "../ipc/entity";
   import { dayKey, dayLabel } from "../time/day";
   import { latestRead } from "../shell/latest-read";
   import { hashFor, type Router } from "../shell/router.svelte";
   import { ago } from "../shell/time";
+  import ProtocolPanel from "./ProtocolPanel.svelte";
   import { digestWindows, LOOKBACK_DAYS } from "./standup";
 
   /**
@@ -56,10 +59,19 @@
   let {
     router,
     ports,
+    protocolPorts,
     now = () => new Date(),
   }: {
     router: Router;
     ports?: Partial<StandupPorts>;
+    /**
+     * The protocol panel's own bridge, passed straight through.
+     *
+     * Separate from {@link ports} rather than merged into it: the panel owns
+     * a different set of calls and a test that drives one of the two should
+     * not have to stub the other's.
+     */
+    protocolPorts?: ComponentProps<typeof ProtocolPanel>["ports"];
     /** Injectable clock — which day the digest is about. */
     now?: () => Date;
   } = $props();
@@ -187,6 +199,13 @@
     )}
     {@render list("Today", today, "Nothing touched yet today.")}
     {@render list("Blockers", blockers, "Nothing of yours is blocked.")}
+
+    <!--
+      The protocol, under the digest and not beside it: the three lists are
+      what a person reads *out*, and the protocol is what the meeting produces.
+      Story 64's own order.
+    -->
+    <ProtocolPanel {router} day={key} ports={protocolPorts ?? {}} />
   </div>
 </section>
 

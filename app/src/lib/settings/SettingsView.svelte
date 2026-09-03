@@ -21,12 +21,14 @@
 
   The second section arrived with #282 (passive attribution) and cost exactly
   what the ruling said it would: one component and one import. So did the third
-  (#290, desktop notifications).
+  (#290, desktop notifications) and the fourth (#289, where standup protocols
+  are published).
 -->
 <script lang="ts">
   import BackupSection from "./BackupSection.svelte";
   import NotificationsSection from "./NotificationsSection.svelte";
   import PassiveSection from "./PassiveSection.svelte";
+  import StandupSection from "./StandupSection.svelte";
 </script>
 
 <div class="view">
@@ -38,5 +40,6 @@
     <BackupSection />
     <PassiveSection />
     <NotificationsSection />
+    <StandupSection />
   </div>
 </div>
