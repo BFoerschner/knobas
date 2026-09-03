@@ -12,6 +12,7 @@
  * | `#/inbox/ctx/<id>`     | the inbox, pre-filtered to one context (#47)     |
  * | `#/time/<YYYY-MM-DD>`  | the day review for one day (#279)                |
  * | `#/time`               | the day review, on today                         |
+ * | `#/standup`            | the standup digest, on today (#288)              |
  * | `#/sources`            | the sources view                                 |
  * | `#/settings`           | the settings view                                |
  * | `#/first-run`          | the §14a wizard                                  |
@@ -22,12 +23,12 @@
  * would otherwise collide on one key. `:` is legal in a URI fragment, so the
  * address stays readable.
  *
- * `#/time`, `#/standup`, `#/assets/*`, `#/route/*` and `#/monitor/*` are
- * M2–M4. They parse to `unknown` rather than being mistaken for kinds, so the
- * shell can say which milestone they arrive in. `#/start-work/*` was one of
- * them until #44 and is now a view of its own — it stays in `RESERVED` so that
- * an adapter declaring a `start-work` *kind* could never take the address.
- * `#/inbox` graduated the same way with #45.
+ * `#/assets/*`, `#/route/*` and `#/monitor/*` are M4. They parse to `unknown`
+ * rather than being mistaken for kinds, so the shell can say which milestone
+ * they arrive in. `#/start-work/*` was one of them until #44 and is now a view
+ * of its own — it stays in `RESERVED` so that an adapter declaring a
+ * `start-work` *kind* could never take the address. `#/inbox` graduated the
+ * same way with #45, `#/time` with #279 and `#/standup` with #288.
  */
 
 export type Route =
@@ -56,6 +57,17 @@ export type Route =
    * noticed.
    */
   | { view: "time"; day: string | null }
+  /**
+   * The standup digest (#288): yesterday, today and blockers, for today.
+   *
+   * No day segment, and that is a decision rather than an omission. A digest
+   * is *this morning's* standup — `CONTEXT.md`'s **yesterday** is defined
+   * relative to today and the running timer only means anything now — so
+   * there is no date for the address to carry. `#/standup/<date>` is the
+   * standup **protocol**'s address, which is a note per date and a different
+   * surface; keeping this one bare leaves that segment free for it.
+   */
+  | { view: "standup" }
   | { view: "first-run" }
   /**
    * The start-work stepper for one ticket (#44). `key` is the ticket's entity
@@ -94,14 +106,18 @@ const RESERVED = new Set([
   // for the reason `inbox` does -- a *kind* called `time` must still never
   // claim the address.
   "time",
-  // M2-M4, reserved so an open kind never collides with a view.
+  // `standup` is a view now (#288): `#/standup` reaches `StandupView` rather
+  // than reading "arrives in a later milestone". It stays in this list for the
+  // reason `time` does -- a *kind* called `standup` must still never claim the
+  // address.
+  "standup",
+  // M4, reserved so an open kind never collides with a view.
   //
   // `note` was here until #46 and is not any more: notes are a kind now, so
   // `#/note/note:<uuid>` has to reach `NoteView` the way `#/ticket/<id>`
   // reaches `Detail`. It is the one word in this list that stopped being a
   // *view* and became a kind, which is exactly what this list is arranged
   // around -- so a later tidy-up that adds it back is a note nobody can open.
-  "standup",
   "assets",
   "asset",
   "route",
@@ -168,6 +184,11 @@ export function parseHash(hash: string, ctx: string = DEFAULT_CTX): Route {
     const day = segments[1] ?? "";
     return { view: "time", day: DAY.test(day) ? day : null };
   }
+  // Before the open-kind branch, for the reason `time` above it is: `standup`
+  // is in `RESERVED`, so this is the only thing that can reach the view. The
+  // head owns the whole address -- `#/standup/anything` is the digest, the
+  // same rule `#/sources/x` and `#/time/whenever` already follow.
+  if (head === "standup") return { view: "standup" };
   if (head === "sources") return { view: "sources" };
   if (head === "settings") return { view: "settings" };
   if (head === "first-run") return { view: "first-run" };
@@ -215,6 +236,8 @@ export function hashFor(route: Route): string {
       return route.ctx === null ? "#/inbox" : `#/inbox/ctx/${encodeId(route.ctx)}`;
     case "time":
       return route.day === null ? "#/time" : `#/time/${route.day}`;
+    case "standup":
+      return "#/standup";
     case "sources":
       return "#/sources";
     case "settings":

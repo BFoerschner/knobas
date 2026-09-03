@@ -73,15 +73,31 @@ test("#/entity/<id> is a detail whose kind is not known yet", () => {
   });
 });
 
-/** M3–M4 addresses parse, so the shell can say "arrives in M<n>" rather than
- * rendering a blank screen or, worse, treating `standup` as a kind.
+/** M4 addresses parse, so the shell can say "arrives in M<n>" rather than
+ * rendering a blank screen or, worse, treating `assets` as a kind.
  *
- * `#/time` left this list with #279 and has a view of its own; the test above
- * it is where it went. */
+ * `#/time` left this list with #279 and `#/standup` with #288; each has a view
+ * of its own now, and the tests around this one are where they went. */
 test("a later milestone's address is known-unknown, not a kind", () => {
-  for (const hash of ["#/standup", "#/assets/board", "#/monitor/db-1"]) {
+  for (const hash of ["#/assets/board", "#/monitor/db-1", "#/route/edge"]) {
     expect(parseHash(hash)).toEqual({ view: "unknown", hash });
   }
+});
+
+/**
+ * The digest has an address of its own (#288), and the head owns the whole of
+ * it.
+ *
+ * `standup` stays in `RESERVED`, so this branch is the only thing that can
+ * reach the view -- without it the word would fall through to the open-kind
+ * branch and `#/standup/anything` would be sent to `get_entity` as a kind. A
+ * tail is *this morning's* digest all the same: the digest is defined against
+ * today and there is nothing for a date segment to mean.
+ */
+test("the standup address reaches its own view, tail or no tail", () => {
+  expect(parseHash("#/standup")).toEqual({ view: "standup" });
+  expect(parseHash("#/standup/2026-08-31")).toEqual({ view: "standup" });
+  expect(hashFor({ view: "standup" })).toBe("#/standup");
 });
 
 /**
@@ -151,6 +167,7 @@ test("round-trips every address it produces", () => {
     "#/ctx/all",
     "#/time",
     "#/time/2026-09-03",
+    "#/standup",
     "#/ctx/src:jira",
     "#/ticket/mock:PAY-231",
     "#/entity/mock:PAY-231",

@@ -61,6 +61,11 @@ vi.mock("../ipc/entity", () => ({
   // The Tickets tile's read (#178); this file is about addresses, not the
   // board.
   miniBoard: () => Promise.resolve({ columns: [], sources: [] }),
+  // The standup digest (#288): its view is one of the addresses below, so the
+  // mock has to answer for it. Three empty lists -- this file is about which
+  // surface an address reaches, not about what is on it.
+  standupDigest: () =>
+    Promise.resolve({ yesterday_day: null, yesterday: [], today: [], blockers: [] }),
   listEntities: () => Promise.resolve(PAGE),
   getEntity: () => Promise.resolve(DETAIL),
   recentActivity: () => Promise.resolve([]),
@@ -232,8 +237,10 @@ const ADDRESSES = [
   // address means today, and a dated one means that day.
   "#/time",
   "#/time/2026-09-03",
-  // M3-M4 addresses, reserved so an open kind never collides with a view.
+  // The standup digest is a real view since #288, and it has to render from a
+  // cold deep link with an empty database like every other address.
   "#/standup",
+  // M4 addresses, reserved so an open kind never collides with a view.
   "#/assets/board",
   "#/monitor/kuma",
   "#/start-work/mock:PAY-231",
@@ -263,12 +270,15 @@ test("an address a later milestone owns says which, and offers the way back", as
   // what makes the assertion below about the ladder rather than about
   // whichever address ran last.
   await open("#/ctx/all");
-  location.hash = "#/standup";
+  // `#/assets/board` and not `#/standup`, which reaches a view of its own
+  // since #288. This test is about the *pane* a reserved-but-unbuilt address
+  // renders, so it has to name an address that is still one.
+  location.hash = "#/assets/board";
   window.dispatchEvent(new HashChangeEvent("hashchange"));
   flushSync();
 
   const text = (target.textContent ?? "").replace(/\s+/g, " ");
-  expect(text).toContain("#/standup");
+  expect(text).toContain("#/assets/board");
   expect(text).toMatch(/milestone/i);
   const back = [...target.querySelectorAll<HTMLButtonElement>("button")].find(
     (button) => button.textContent?.trim() === "Back to the room",
