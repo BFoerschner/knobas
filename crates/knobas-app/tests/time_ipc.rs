@@ -1726,6 +1726,29 @@ async fn the_day_the_horizon_cuts_through_keeps_the_blocks_it_was_already_offere
         "the day read reconciled a day it no longer has the beats for, and \
          forgot the morning on the strength of the afternoon"
     );
+
+    // **And the strip says so about the whole day, afternoon included (#337).**
+    //
+    // The one deliberate over-claim in the reading: this day's afternoon
+    // beats are still in the table, and knobas announces the day as one it no
+    // longer has the beats for. It is the guard's own `from` comparison --
+    // `Horizon::passed`, the single one -- and saying anything softer here
+    // would promise a reader beats that `materialize` has just refused to
+    // spend, which is the mismatch #337 exists to close. The error runs
+    // towards admitting ignorance and never towards claiming the time was
+    // zero.
+    //
+    // The horizon is at **noon**, so this is the only fixture in the suite
+    // where it falls inside a day rather than on a midnight.
+    let read = time::day::list(&pool, midnight, midnight + Duration::days(1))
+        .await
+        .expect("the straddled day is readable");
+    assert!(
+        read.past_horizon,
+        "the day the horizon cuts through was drawn as one knobas can still \
+         speak about, while the guard above refused to reconcile it -- the \
+         strip's word and the guard's decision have come apart"
+    );
 }
 
 /// **A swept day and an empty one are different days, and the strip shows
