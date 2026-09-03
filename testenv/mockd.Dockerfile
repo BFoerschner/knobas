@@ -36,7 +36,8 @@ RUN apt-get update \
 RUN useradd -r -u 10001 mockd
 COPY --from=build /src/target/release/mockd /usr/local/bin/mockd
 USER mockd
-# 8211 (Confluence DC, M3) and 8213 (Flowrun, M4) are reserved by interfaces §5
-# and deliberately not exposed: those APIs do not exist yet.
+# 8213 (Flowrun, M4) is reserved by interfaces §5 and deliberately not exposed:
+# that API does not exist yet. 8211 is unreserved (ADR-0013, 2026-09-03: mockd
+# is deprecated and gets no Confluence half).
 EXPOSE 8200 8210 8212
 ENTRYPOINT ["/usr/local/bin/mockd"]

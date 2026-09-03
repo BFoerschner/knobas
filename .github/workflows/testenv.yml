@@ -105,7 +105,7 @@ jobs:
 
       # The port map itself. `config -q` is happy with any port at all, so it
       # cannot see 8210 becoming 8299, a service published on 0.0.0.0 instead
-      # of 127.0.0.1, or the reserved 8211/8213 being bound. check-ports.sh
+      # of 127.0.0.1, or the reserved 8213 being bound. check-ports.sh
       # reads the *resolved* model and asserts the §5 table; it was built with
       # five mutants, each of which it kills.
       #

@@ -101,13 +101,18 @@ if [ "$actual_capped" != "$expected_default" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 3. 8211 (Confluence DC mock, M3) and 8213 (Flowrun stub, M4) are RESERVED.
-#    Binding one now is how M3 discovers, months later, that its port is taken.
-#    Checked separately from the maps above so the failure says *why*.
+# 3. 8213 (Flowrun stub, M4) is RESERVED. Binding it now is how M4 discovers,
+#    months later, that its port is taken. Checked separately from the maps
+#    above so the failure says *why*.
+#
+#    8211 was reserved next to it for a Confluence DC mock until 2026-09-03.
+#    ADR-0013 gives mockd no Confluence half -- the real container on 8090 is
+#    the witness -- so 8211 is an ordinary free port now, and Flowrun keeps its
+#    reservation only because it is that ADR's single named exception.
 # ---------------------------------------------------------------------------
-for reserved in 8211 8213; do
+for reserved in 8213; do
   if printf '%s\n' "$actual_all" | grep -q "|$reserved|"; then
-    note "port $reserved is RESERVED by interfaces §5 (8211 = Confluence DC mock, M3; 8213 = Flowrun stub, M4) and must be bound by nothing"
+    note "port $reserved is RESERVED by interfaces §5 (8213 = Flowrun stub, M4) and must be bound by nothing"
   fi
 done
 
@@ -125,4 +130,4 @@ if [ "$fail" -ne 0 ]; then
   echo "check-ports: FAILED" >&2
   exit 1
 fi
-echo "check-ports: ok -- default, opt-in and capped-overlay port maps match interfaces §5, 8211/8213 unbound, all on 127.0.0.1"
+echo "check-ports: ok -- default, opt-in and capped-overlay port maps match interfaces §5, 8213 unbound, all on 127.0.0.1"

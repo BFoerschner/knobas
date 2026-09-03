@@ -5,13 +5,17 @@
 #
 #   * REAL products we can self-host -- Gitea and Uptime Kuma v2. The adapters
 #     for these are certified against the actual software, not against a mock.
-#   * mockd, our own faithful mock of the products we cannot self-host cheaply
-#     (Jira Data Center, TeamCity). It serves the same Tidewater Freight
-#     fixture, so both layers tell one story (design §14a).
+#   * mockd, our own mock of Jira Data Center and TeamCity, serving the same
+#     Tidewater Freight fixture. DEPRECATED since 2026-09-03 (ADR-0013): a mock
+#     certifies nothing, the real containers behind the profiles below are the
+#     witness, and mockd gets nothing new. It stays only until the live suites
+#     assert what its Jira and TeamCity tests assert, then goes with them.
 #
-# The opt-in profiles bring up the real Jira, Confluence and TeamCity servers
-# for whole-product fidelity checks. They are off by default because they are
-# expensive: see the cost note in .env, and the profile comments below.
+# The opt-in profiles bring up the real Jira, Confluence and TeamCity servers.
+# Since ADR-0013 they are the witness for every adapter and every write path,
+# each with a seed and a `just <system>-live` recipe. They are off by default
+# because they are expensive: see the cost note in .env, and the profile
+# comments below.
 #
 # Everything binds 127.0.0.1 only. This environment has developer-grade
 # credentials in it (knobas/knobas-dev) and must never be reachable off-host.
@@ -99,6 +103,8 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------- mock ----
+  # DEPRECATED (ADR-0013, 2026-09-03): frozen, nothing new goes in, and the
+  # service is deleted once the live suites assert what its tests assert.
   mockd:
     build:
       # The repo root: build.rs needs testenv/specs/, knobas-source-mock needs
@@ -121,9 +127,10 @@ services:
       - "127.0.0.1:8200:8200"   # health + /__mock/* admin API
       - "127.0.0.1:8210:8210"   # Jira Data Center REST v2
       - "127.0.0.1:8212:8212"   # TeamCity REST
-      # 8211 (Confluence DC mock, M3) and 8213 (Flowrun stub, M4) are RESERVED
-      # by interfaces §5. They are bound by nothing, here or in the binary, and
-      # check-ports.sh fails if that ever changes by accident.
+      # 8213 (Flowrun stub, M4) is RESERVED by interfaces §5: bound by nothing,
+      # here or in the binary, and check-ports.sh fails if that ever changes by
+      # accident. 8211 was the Confluence DC mock's until ADR-0013 (2026-09-03)
+      # ruled there will be no Confluence half; it is unreserved and free.
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8200/__mock/health"]
       interval: 5s

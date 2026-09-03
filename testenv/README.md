@@ -1,8 +1,9 @@
 # `testenv` — the knobas test environment
 
 A small fake company on a laptop: the Tidewater Freight fixture served by real
-software where we can self-host it, and by our own faithful mock where we
-cannot.
+software — Gitea and Uptime Kuma always, TeamCity, Jira and Confluence behind
+opt-in profiles — and, until the live suites replace it, by our own deprecated
+mock.
 
 ```sh
 cd testenv
@@ -15,7 +16,7 @@ Two layers, and the difference is the point:
 | Layer | What | Why |
 |---|---|---|
 | **Real products** | Gitea, Uptime Kuma v2 | Cheap to self-host, so the adapters are certified against the actual software rather than against our idea of it. |
-| **mockd** | Jira Data Center v2, TeamCity REST | Jira and TeamCity are not cheap to self-host (see the profiles below). `crates/knobas-mockd` serves the *same* Tidewater fixture, so both layers tell one story (design §14a). |
+| **mockd** — *deprecated* | Jira Data Center v2, TeamCity REST | Built while Jira and TeamCity were "not cheap to self-host". **Deprecated 2026-09-03 (ADR-0013):** a mock certifies nothing, the real containers behind the profiles below are the witness for every adapter and every write path, and mockd gets nothing new; its tests stay until the live suites assert the same things, then it is deleted. `crates/knobas-mockd` still serves the *same* Tidewater fixture, so both layers tell one story while it lasts (design §14a). |
 
 ## Ports
 
@@ -30,15 +31,16 @@ runs it, so the table and the file cannot drift.
 | 3001 | Uptime Kuma v2 | default |
 | 8200 | mockd — health + `/__mock/*` admin API | default |
 | 8210 | mockd — Jira Data Center REST v2 | default |
-| 8211 | **reserved** — Confluence DC mock (M3) | *bound by nothing* |
 | 8212 | mockd — TeamCity REST | default |
 | 8213 | **reserved** — Flowrun stub (M4) | *bound by nothing* |
 | 8111 | real TeamCity server | `--profile real-teamcity` |
 | 8080 | real Jira Software | `--profile real-atlassian` |
 | 8090 | real Confluence | `--profile real-atlassian` |
 
-8211 and 8213 are reserved on purpose and bound by nothing — in the compose
-file *and* in the `mockd` binary. They were not forgotten.
+8213 is reserved on purpose and bound by nothing — in the compose file *and*
+in the `mockd` binary. It was not forgotten: Flowrun is ADR-0013's single
+named exception. 8211, reserved for a Confluence mock until 2026-09-03, is
+unreserved by the same ADR; the real Confluence on 8090 is the witness.
 
 ## Credentials
 
