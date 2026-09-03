@@ -33,6 +33,8 @@
   import LinksPanel from "./LinksPanel.svelte";
   import PayloadView from "./PayloadView.svelte";
   import { projectPayload } from "./payload";
+  import StorageBody from "./StorageBody.svelte";
+  import { pageCommentsOf, parseStorageFormat, storageBodyOf } from "./storage-format";
 
   let {
     entityId,
@@ -214,6 +216,45 @@
   const path = $derived(detail?.row.path ?? null);
   /** Narrowed once, so the button and its handler agree that it is a string. */
   const webUrl = $derived(detail?.web_url ?? null);
+
+  /**
+   * The page's own body, as nodes — a Confluence page and nothing else (#285).
+   *
+   * `null` for every other item, and that is the whole gate: the read is
+   * `storageBodyOf`, which answers only for the adapter whose payloads carry a
+   * storage format, and this panel falls back to the normalized `body_text`
+   * below exactly as it always did. A markup dialect is not something #277's
+   * `KindPaths` can declare yet — see `storage-format.ts` for why the interim
+   * read is shaped this way.
+   *
+   * Parsed here rather than inside `StorageBody`, so the component takes a
+   * tree and has no opinion about where markup comes from — and so the
+   * fallback can be decided by whether there *is* a tree.
+   */
+  const pageBody = $derived.by(() => {
+    const storage = storageBodyOf(detail?.source.adapter_kind, detail?.payload);
+    return storage === null ? null : parseStorageFormat(storage);
+  });
+
+  /**
+   * The page's comments, in the order its record carries them (#284, #285).
+   *
+   * A comment is not a kind of its own: it rides in its page's payload the way
+   * a Jira comment rides in its issue's, so this is a read of that payload and
+   * not a second round trip. Empty for every other item.
+   *
+   * Parsed **here** and not in the `{#each}`, the same shape as the body
+   * above: a `parseStorageFormat` call in the template re-runs on every
+   * re-render of this panel -- a status board landing, a link being drawn --
+   * and re-parsing a discussion to answer a question nobody asked is work the
+   * derived value is for.
+   */
+  const pageComments = $derived(
+    pageCommentsOf(detail?.source.adapter_kind, detail?.payload).map((comment) => ({
+      id: comment.id,
+      nodes: parseStorageFormat(comment.storage),
+    })),
+  );
 
   /**
    * Hand the item's own URL to the OS browser.
@@ -580,10 +621,43 @@
         </div>
       </div>
 
-      {#if detail.body_text}
+      <!--
+        A Confluence page renders its own markup; everything else renders the
+        normalized text the mirror holds. Two arms of one section rather than
+        two sections, because it is one thing — what this item says — and a
+        panel that could show both would show a page twice.
+      -->
+      {#if pageBody}
+        <div class="sec">
+          <div class="sec-h"><span class="lab">Description</span></div>
+          <div class="d-body storage">
+            <StorageBody nodes={pageBody} onopenlink={(href) => void open(href)} />
+          </div>
+        </div>
+      {:else if detail.body_text}
         <div class="sec">
           <div class="sec-h"><span class="lab">Description</span></div>
           <p class="d-body">{detail.body_text}</p>
+        </div>
+      {/if}
+
+      <!--
+        Under the body, which is where a page's discussion belongs and where
+        Confluence itself puts it. Absent rather than empty when there are
+        none: a *Comments* heading over nothing is a section that says only
+        that the reader has been counted.
+      -->
+      {#if pageComments.length > 0}
+        <div class="sec">
+          <div class="sec-h">
+            <span class="lab">Comments</span>
+            <span class="k muted">{pageComments.length}</span>
+          </div>
+          {#each pageComments as comment (comment.id)}
+            <div class="cmt d-body storage">
+              <StorageBody nodes={comment.nodes} onopenlink={(href) => void open(href)} />
+            </div>
+          {/each}
         </div>
       {/if}
 
@@ -647,6 +721,117 @@
   .d-body {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+  }
+
+  /*
+    A rendered page body. `pre-wrap` is the plain-text arm's rule and would be
+    wrong here -- the markup already says where the lines are, and preserving
+    the storage format's own indentation would put a leading gap in front of
+    every heading.
+
+    **Why these rules are here, reaching into a child through `:global`,**
+    rather than in `StorageBody.svelte` where the elements are made: Svelte
+    scopes a component's CSS by stamping a class onto the elements its own
+    selectors could match, and `StorageBody` emits every element through
+    `<svelte:element this={...}>`, whose tag is not knowable at compile time.
+    Giving that component an element selector therefore puts a `class`
+    attribute on every node of a page body -- and *no attribute on any of them*
+    is precisely the property `StorageBody.test.svelte.ts` asserts, one
+    assertion at the centre of this ticket's gotcha-7 case. A styling
+    convenience is not worth weakening that witness, so the page's typography
+    lives with the panel that owns the section, and the component's own
+    `<style>` keeps only the two class selectors it writes itself.
+  */
+  .d-body.storage {
+    white-space: normal;
+  }
+
+  .d-body.storage :global(h1),
+  .d-body.storage :global(h2),
+  .d-body.storage :global(h3),
+  .d-body.storage :global(h4),
+  .d-body.storage :global(h5),
+  .d-body.storage :global(h6) {
+    margin: 12px 0 4px;
+    font-family: var(--disp);
+    font-size: 14px;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+
+  .d-body.storage :global(p),
+  .d-body.storage :global(ul),
+  .d-body.storage :global(ol),
+  .d-body.storage :global(blockquote) {
+    margin: 6px 0;
+  }
+
+  .d-body.storage :global(ul),
+  .d-body.storage :global(ol) {
+    padding-left: 18px;
+  }
+
+  .d-body.storage :global(blockquote) {
+    padding-left: 10px;
+    border-left: 2px solid var(--hair2);
+    color: var(--muted);
+  }
+
+  .d-body.storage :global(code) {
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+
+  /*
+    A page's code block, and the one place the storage format's own
+    whitespace is the author's: it scrolls sideways rather than widening the
+    panel, the rule every wide thing in this app follows.
+  */
+  .d-body.storage :global(pre) {
+    margin: 6px 0;
+    padding: 8px;
+    overflow-x: auto;
+    background: var(--raised);
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: 12px;
+    white-space: pre;
+  }
+
+  /*
+    A table is a table (criterion 2). Its own scroll container, because a wiki
+    table is as wide as somebody made it and the panel is 550px.
+  */
+  .d-body.storage :global(table) {
+    display: block;
+    overflow-x: auto;
+    width: max-content;
+    max-width: 100%;
+    margin: 8px 0;
+    border-collapse: collapse;
+  }
+
+  .d-body.storage :global(th),
+  .d-body.storage :global(td) {
+    padding: 3px 8px;
+    border: 1px solid var(--hair);
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .d-body.storage :global(th) {
+    background: var(--raised);
+    font-weight: 600;
+  }
+
+  /* One comment, separated from the next by a hairline rather than a card. */
+  .cmt {
+    padding: 8px 0;
+    border-top: 1px solid var(--hair);
+  }
+
+  .cmt:first-of-type {
+    border-top: 0;
   }
 
   /*

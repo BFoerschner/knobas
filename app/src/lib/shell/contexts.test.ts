@@ -14,6 +14,7 @@ import {
   columnsRefusal,
   contextById,
   effectiveMiniBoardLayout,
+  projectWord,
   storedContext,
   switcherContexts,
 } from "./contexts";
@@ -211,6 +212,64 @@ test("a project room narrows by its project within its own source", () => {
   expect(cs[2]?.filter).toEqual({ sources: ["jira"], context: null, project: "PAY" });
   expect(cs[2]?.label).toBe("Payments Platform");
   expect(cs[2]?.kindWord).toBe("project");
+});
+
+/**
+ * **A project keeps the source's own word** (ADR-0010, #285): Confluence
+ * groups pages into *spaces*, so a Confluence source's project rooms are
+ * chipped *space* and a Jira source's are chipped *project*.
+ *
+ * Both sources in one call, which is the assertion that matters: a word
+ * hardcoded either way — the old fixed `"project"`, or a `"space"` applied to
+ * whatever came past — passes half of this and fails the other half. The ids,
+ * the labels and the filters are asserted unchanged beside it, because a space
+ * and a project are one dimension with two words: no address depends on which
+ * word it is.
+ */
+test("a Confluence source's project rooms are chipped space, and a Jira source's project", () => {
+  const cs = builtinContexts(
+    [
+      { id: "wiki", label: "Tidewater wiki", adapterKind: "confluence" },
+      { id: "jira", label: "Tidewater Jira", adapterKind: "jira" },
+    ],
+    [
+      { source_id: "wiki", key: "ENG", name: "Engineering" },
+      { source_id: "jira", key: "PAY", name: "Payments Platform" },
+    ],
+  );
+
+  expect(cs.map((c) => [c.id, c.label, c.kindWord])).toEqual([
+    ["all", "All work", "everything synced"],
+    ["src:wiki", "Tidewater wiki", "source"],
+    ["proj:wiki:ENG", "Engineering", "space"],
+    ["src:jira", "Tidewater Jira", "source"],
+    ["proj:jira:PAY", "Payments Platform", "project"],
+  ]);
+  // One dimension, two words: the space room narrows by `project` exactly as
+  // the Jira one does.
+  expect(cs[2]?.filter).toEqual({ sources: ["wiki"], context: null, project: "ENG" });
+});
+
+/**
+ * The map's own two directions, at the seam the chip reads.
+ *
+ * The generic word is the fallback, and it has to stay one: *project* is what
+ * ADR-0010 calls the dimension, so an adapter nothing has been said about —
+ * and a source whose adapter the shell has not learned yet, which is what
+ * `null` means (`source-kinds.svelte.ts`) — is labelled generically rather
+ * than guessed at.
+ */
+test("the project word is the source's own where there is one, and generic otherwise", () => {
+  expect(projectWord("confluence")).toBe("space");
+  expect(projectWord("jira")).toBe("project");
+  expect(projectWord("teamcity")).toBe("project");
+  expect(projectWord("gitea")).toBe("project");
+  expect(projectWord(null)).toBe("project");
+  expect(projectWord(undefined)).toBe("project");
+  // Not a prefix or a substring match: a second Confluence is configured as
+  // its own *instance*, but its adapter kind is still exactly `confluence`,
+  // and an adapter kind that merely contains the word is not that adapter.
+  expect(projectWord("confluence-eu")).toBe("project");
 });
 
 /**

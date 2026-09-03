@@ -16,6 +16,7 @@
   import { installKeys } from "./lib/shell/keys";
   import { lifecycle } from "./lib/shell/lifecycle.svelte";
   import { projects } from "./lib/shell/projects.svelte";
+  import { sourceKinds } from "./lib/shell/source-kinds.svelte";
   import { router } from "./lib/shell/router.svelte";
   import { timer } from "./lib/shell/timer.svelte";
   import { canBeTarget } from "./lib/shell/timer";
@@ -54,7 +55,11 @@
   const contexts = $derived(
     switcherContexts(
       storedContexts.all,
-      health.all.map((source) => ({ id: source.source_id, label: source.source_id })),
+      health.all.map((source) => ({
+        id: source.source_id,
+        label: source.source_id,
+        adapterKind: sourceKinds.of(source.source_id),
+      })),
       projects.all,
     ),
   );
@@ -332,6 +337,7 @@
     let stopInbox: (() => void) | undefined;
     let stopContexts: (() => void) | undefined;
     let stopProjects: (() => void) | undefined;
+    let stopSourceKinds: (() => void) | undefined;
     let stopTimer: (() => void) | undefined;
 
     void (async () => {
@@ -377,6 +383,10 @@
       // a sync run ending, because a project room appears when the first item
       // carrying it syncs.
       stopProjects = projects.start();
+      // Which adapter each source runs (#285), which is what a project room's
+      // chip is worded from. Its event is `source:health`, because an adapter
+      // kind is immutable per source and only the *set* of sources can move.
+      stopSourceKinds = sourceKinds.start();
       // The clock, the heartbeat and the activity subscription (#278). Behind
       // the same await as the four above, and for the same reason: `begin()`
       // issues a `listen` *synchronously*, and a `listen` before the fixture
@@ -412,6 +422,7 @@
       stopInbox?.();
       stopContexts?.();
       stopProjects?.();
+      stopSourceKinds?.();
       stopKeys();
       stopRouter();
       lifecycle.stop();
@@ -475,6 +486,17 @@
   });
 
   /**
+   * Seed the adapter kinds the moment the database can answer (#285) — the
+   * same rule and the same shape as the seeds above. `list_sources` rejects
+   * with `not_ready` for the whole of bring-up, and `source:health` fires on a
+   * change only, so a steady install would otherwise chip every Confluence
+   * space room *project* for the session.
+   */
+  $effect(() => {
+    if (lifecycle.ready) void sourceKinds.reseed();
+  });
+
+  /**
    * Seed the timer the moment the database can answer — the same rule and the
    * same shape as the four seeds above. `current_timer` rejects with
    * `not_ready` for the whole of bring-up, and the activity signal only fires
@@ -526,6 +548,10 @@
     // through here. Kept because the *Finish* path needs no event to be
     // right, and because the health half above still has no event behind it.
     void projects.reseed();
+    // ...and the wizard has just configured the sources those projects belong
+    // to, which is the only thing that decides whether their rooms are chipped
+    // *space* or *project* (#285).
+    void sourceKinds.reseed();
     router.go("#/ctx/all");
     launcherOpen = true;
   }

@@ -570,6 +570,51 @@ test("a project the census reports gets a room in the switcher", async () => {
 });
 
 /**
+ * **A project keeps the source's own word** (ADR-0010, #285), end to end
+ * through the shell: a Confluence source's project room is chipped *space*,
+ * and the Jira source's beside it is chipped *project*.
+ *
+ * The wire this witnesses is the one nothing else can see: `App.svelte` is
+ * where a source's adapter kind meets the census, on one line into
+ * `switcherContexts`, and the store it comes from is seeded on another. Drop
+ * either and every space room silently reads *project* -- the generic word,
+ * which is the same word four fifths of the app legitimately shows, so no
+ * other test would notice.
+ *
+ * Both rooms in one test, and read off the **rendered** chip: a fixture with
+ * only the Confluence source would pass just as happily against a word
+ * hardcoded to "space".
+ */
+test("a Confluence source's project room is chipped space, and a Jira one project", async () => {
+  dbReady = true;
+  healthRows = [row("wiki", "ok"), row("jira", "ok")];
+  // The adapter kind is the *only* thing separating these two sources here,
+  // which is what makes the chip's word attributable to it.
+  sourceRows = [
+    { ...summary("wiki"), adapter_kind: "confluence" },
+    { ...summary("jira"), adapter_kind: "jira" },
+  ];
+  projectRows = [
+    { source_id: "wiki", key: "ENG", name: "Engineering" },
+    { source_id: "jira", key: "PAY", name: "Payments Platform" },
+  ];
+  location.hash = "#/ctx/proj:wiki:ENG";
+
+  app = mount(App, { target, props: {} });
+  await until(() => roomName() === "Engineering", "the space room never arrived");
+  await until(() => roomKindWord() !== "", "the room drew no kind chip at all");
+
+  expect(
+    roomKindWord(),
+    "a Confluence space room is chipped with knobas' generic word instead of the wiki's own",
+  ).toBe("space");
+
+  router.go("#/ctx/proj:jira:PAY");
+  await until(() => roomName() === "Payments Platform", "the project room never arrived");
+  expect(roomKindWord(), "the Jira project room borrowed Confluence's word").toBe("project");
+});
+
+/**
  * The subscription behind the project rooms (`projects.start()`), which is
  * what keeps them current *within* a session.
  *
@@ -843,6 +888,11 @@ test("a source room that vanishes under the reader is announced too", async () =
 /** The switcher's own name for the room the reader is in. */
 function roomName(): string {
   return target.querySelector(".ctx-name .nm")?.textContent?.trim() ?? "";
+}
+
+/** The chip beside the room's heading — its `kindWord`, as a reader sees it. */
+function roomKindWord(): string {
+  return target.querySelector(".room-bar .kind")?.textContent?.trim() ?? "";
 }
 
 /**
@@ -1408,4 +1458,39 @@ test("⌘T in an ad-hoc room, which has no anchor, opens the picker", async () =
   pressTimerKey();
   await until(() => pickerTitle() !== null, "⌘T never opened the picker");
   expect(timerStarts).toEqual([]);
+});
+
+/**
+ * **A page is a timer target** (#285 criterion 4, asserted rather than built).
+ *
+ * Nothing in the timer knows what a page is: `canBeTarget` refuses one word —
+ * a stored context — and allows everything else, on purpose, because §3a says
+ * a new adapter's kind is browsable on day one and a timer that ran only on a
+ * table of known kinds would be that table. So what is worth witnessing is
+ * that a Confluence page reaches the *foreground* rule intact: the address
+ * `#/page/confluence:98307` is what the reader has open, and ⌘T starts the
+ * clock on `confluence:98307` rather than opening the picker.
+ *
+ * The room behind it is a promoted context with an anchor, so the first rung
+ * genuinely competes with the second: in *All work* a passing fixture would
+ * prove only that the picker did not open.
+ */
+test("⌘T on an open page detail starts the timer on the page", async () => {
+  dbReady = true;
+  healthRows = [row("confluence", "ok")];
+  contextRows = [PROMOTED];
+  location.hash = "#/ctx/ctx:pay";
+
+  app = mount(App, { target, props: {} });
+  await until(() => roomName() === "SEPA migration", "the stored room never arrived");
+
+  router.go("#/page/confluence:98307");
+  flushSync();
+  pressTimerKey();
+  await until(() => timerStarts.length > 0, "⌘T never reached the timer");
+
+  expect(timerStarts, "a page did not reach the foreground rule").toEqual([
+    { kind: "entity", entity_id: "confluence:98307" },
+  ]);
+  expect(pickerTitle(), "the picker opened over a page that was right there").toBeNull();
 });

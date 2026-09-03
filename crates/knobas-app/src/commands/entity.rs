@@ -2194,7 +2194,27 @@ pub async fn mini_board(
 pub async fn list_projects(
     lifecycle: State<'_, Lifecycle>,
 ) -> Result<Vec<knobas_core::project::Project>, IpcError> {
-    let pool = lifecycle.pool()?;
-    let declarations = declared_paths(&pool).await?;
-    Ok(knobas_core::project::list(&pool, &declarations).await?)
+    list_projects_inner(&lifecycle.pool()?).await
+}
+
+/// [`list_projects`] with the pool handed in, so a test can reach it.
+///
+/// The same split every other read in this module has, and for the same
+/// reason: `tauri::State` cannot be constructed by hand, so a command that
+/// resolved its own pool would be unreachable and a test of it would have to
+/// re-type the two lines it contains -- which is a test that goes on passing
+/// after the command stops doing this. Pinned by
+/// `a_confluence_space_is_a_project_room_and_a_jira_project_is_another` in
+/// `tests/entity.rs`, which dies when the declarations stop being resolved
+/// here.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) for a query
+/// failure or a source listing that fails.
+pub async fn list_projects_inner(
+    pool: &PgPool,
+) -> Result<Vec<knobas_core::project::Project>, IpcError> {
+    let declarations = declared_paths(pool).await?;
+    Ok(knobas_core::project::list(pool, &declarations).await?)
 }
