@@ -5,10 +5,11 @@
 //! (`docs/adr/0013-the-real-instance-is-the-witness-a-mock-certifies-nothing.md`).
 //! Nothing new goes in, not a Confluence half, not an endpoint, not a
 //! deviation, and port 8211 is unreserved. The crate and its Jira and
-//! TeamCity tests stay only until the live suites (`just gitea-live`,
-//! `just teamcity-live-seeded`, and `just atlassian-live` arriving with #275)
-//! assert the same things; then the crate is deleted with them. `knobas-source-mock`, the trait-level
-//! fake behind `--demo` and the UI tests, is a different thing and stays.
+//! TeamCity tests stay only until the live suites for those two systems
+//! (`just teamcity-live-seeded`, and `just atlassian-live` arriving with
+//! #275) assert the same things; then the crate is deleted with them.
+//! `knobas-source-mock`, the trait-level fake behind `--demo` and the UI
+//! tests, is a different thing and stays.
 //!
 //! What follows describes the crate as it is while it lasts.
 //!
