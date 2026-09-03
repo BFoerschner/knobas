@@ -75,7 +75,7 @@ const ACTOR: &str = "user";
 /// worklog comment.
 ///
 /// A list, because an activity line carries no flag saying whether it is work:
-/// the timer's own two verbs (`super`) and the write queue's eight
+/// the timer's own two verbs (`super`) and the write queue's nine
 /// (`knobas_sync::write_queue`'s `announce` call sites) are all written with
 /// actor `user`, because a person did press the button -- but "queued a write"
 /// is not something to tell Jira about the afternoon.
@@ -98,6 +98,7 @@ const NOT_WORK: &[&str] = &[
     "sent",
     "refused",
     "waiting",
+    "unclaimed",
 ];
 
 /// One thing knobas saw the reader do inside a draft's interval.

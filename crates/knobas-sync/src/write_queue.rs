@@ -40,8 +40,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use knobas_core::activity;
 use knobas_core::entity::EntityRef;
-use knobas_core::write_queue::{self as store, QueuedWrite, WaitReason};
-use knobas_source::{Source, SourceError, WriteOp};
+use knobas_core::write_queue::{self as store, QueuedWrite, WaitReason, WriteState};
+use knobas_source::{Source, SourceError, WriteOp, WriteReceipt};
 
 use crate::config;
 use crate::scheduler::{RunFailure, SchedulerDeps};
@@ -478,9 +478,11 @@ async fn attempt(
                 announce(deps, "sent", &sent).await;
                 return Ok(true);
             }
-            // The row settled under us -- the user discarded it while it was
-            // in flight. The write landed; there is nothing left to record
-            // against a row that no longer expects it.
+            // The row settled under us -- the user withdrew it while it was
+            // in flight. The write landed anyway, and this is the only moment
+            // knobas can know that, so it says so rather than returning
+            // quietly (issue #336).
+            unclaimed(deps, write, &receipt).await?;
             Ok(false)
         }
         Err(error) => {
@@ -536,11 +538,25 @@ async fn build(
 /// losing the narration must not turn a delivered write into a failed one --
 /// the same treatment `run_inner` gives a run's activity line.
 async fn announce(deps: &SchedulerDeps, verb: &str, write: &QueuedWrite) {
+    announce_with(deps, verb, write, serde_json::Map::new()).await;
+}
+
+/// [`announce`], with `extra` merged into the line's detail.
+///
+/// The extra fields are added rather than replacing the shape, so every line
+/// this module writes still answers the same six questions and a reader does
+/// not have to know which verb they are looking at to find the write.
+async fn announce_with(
+    deps: &SchedulerDeps,
+    verb: &str,
+    write: &QueuedWrite,
+    extra: serde_json::Map<String, serde_json::Value>,
+) {
     let entity = match EntityRef::parse(&write.entity_id) {
         Ok(entity) => entity,
         Err(_) => return,
     };
-    let detail = serde_json::json!({
+    let mut detail = serde_json::json!({
         "write_id": write.id,
         "source_id": write.source_id,
         "op": write.op,
@@ -548,6 +564,9 @@ async fn announce(deps: &SchedulerDeps, verb: &str, write: &QueuedWrite) {
         "reason": write.wait_reason.map(|r| r.as_str()),
         "detail": write.detail,
     });
+    if let Some(object) = detail.as_object_mut() {
+        object.extend(extra);
+    }
     match activity::record(&deps.pool, ACTOR, verb, Some(&entity), detail).await {
         Ok(row) => deps.events.activity_new(row),
         Err(error) => tracing::warn!(%error, verb, "the write queue's activity line failed"),
@@ -573,6 +592,77 @@ async fn waited(
             announce(deps, "waiting", &waiting).await;
         }
     }
+    Ok(())
+}
+
+/// The write landed after the user withdrew it, and what it made is still at
+/// the source with nothing in knobas claiming it (issue #336).
+///
+/// # Why here and nowhere else
+///
+/// This is the only moment the fact exists. **At discard time knobas cannot
+/// know it**: `knobas_core::write_queue::discard` says so in its own doc
+/// comment -- the flush loop's per-source lock does not hold a discard back,
+/// and every writer of `attempts` bumps it *after* the call, so a write in
+/// flight is indistinguishable from one that was never tried. A dialog at that
+/// end could only have offered a coin flip. Here the receipt is in hand and
+/// [`store::sent`] has just come back empty, which together mean one thing and
+/// not two: the source took the write, and the row it belonged to is no longer
+/// open.
+///
+/// # What it may claim
+///
+/// The state is **read off the row** rather than inferred from the empty
+/// settle. Withdrawal is the only transition a person can land in that window
+/// today -- the loop is the only writer of `held` and `refused` and it holds
+/// the source lock across the call -- but "the settle matched nothing" and
+/// "the user withdrew it" are different statements, and only the second is
+/// what this line says.
+///
+/// `remote_id` rides along **only when the source named what it made**. That
+/// is `WriteReceipt`'s own rule and it splits the two ops this exists for:
+/// Confluence's `create_page` answers an id, so the line can point at the
+/// page; Jira's `create_ticket` answers `WriteReceipt::none()` on purpose --
+/// a created ticket is addressed by reading the mirror back -- so the line
+/// says a ticket was made and withdrawn and says nothing about which. The
+/// Inventing an id here would be knobas naming an artefact it never saw.
+///
+/// **The line does not copy the payload**, for the reason `discard` gives for
+/// keeping the row: the withdrawn write is still there, with what was asked
+/// for in it, and `write_id` is what points at it. A create's payload is the
+/// whole body of a page, and the activity log is not where a second copy of it
+/// belongs.
+///
+/// **This is a disclosure, not a repair.** Nothing reconciles the artefact:
+/// knobas has no key on it, the next sync cannot tell a ticket it made from
+/// one a colleague made, and `create_page`'s id names a page that is not in
+/// the mirror until that sync. What the user gets is the record that it
+/// happened, on the container it happened under, which is where a person
+/// looking for it would look.
+///
+/// A failure to write the line is logged, never raised -- [`announce`]'s
+/// reason: the write is delivered either way, and losing the narration must
+/// not turn a delivered write into a failed one.
+///
+/// # Errors
+///
+/// [`FlushError::Store`] if the row cannot be re-read.
+async fn unclaimed(
+    deps: &SchedulerDeps,
+    write: &QueuedWrite,
+    receipt: &WriteReceipt,
+) -> Result<(), FlushError> {
+    let Some(settled) = store::get(&deps.pool, write.id).await? else {
+        return Ok(());
+    };
+    if settled.state != WriteState::Discarded {
+        return Ok(());
+    }
+    let mut extra = serde_json::Map::new();
+    if let Some(remote_id) = &receipt.remote_id {
+        extra.insert("remote_id".to_owned(), remote_id.as_str().into());
+    }
+    announce_with(deps, "unclaimed", &settled, extra).await;
     Ok(())
 }
 
