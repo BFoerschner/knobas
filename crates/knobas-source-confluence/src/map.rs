@@ -1,6 +1,7 @@
 //! One Confluence page → one [`SyncItem`], per contract §4.1
 //! "Normalization".
 
+use chrono::{DateTime, Utc};
 use knobas_core::entity::EntityRef;
 use knobas_source::SyncItem;
 
@@ -56,14 +57,28 @@ pub(crate) fn to_sync_item(
         // since it was created falls back to its creator rather than to
         // nothing.
         author: version_author(raw).or_else(|| created_by(raw)),
-        // The source's own timestamp, never now(). `version.when` is exactly
-        // what CQL's `lastmodified` matches, so the mirror's idea of "changed"
-        // and the cursor's are the same idea.
-        updated_at: content
-            .version
-            .as_ref()
-            .and_then(|v| v.when.as_deref())
-            .and_then(crate::time::parse_time),
+        // The source's own timestamp, never now() -- and the newest one this
+        // record carries, page **and** discussion.
+        //
+        // The discussion half is not a flourish, it is what makes a Confluence
+        // page answer the same question a Jira issue does. `body_text` has
+        // always been the page plus its comments, so "when did this item last
+        // change" has to mean the newest of the two; and a comment in
+        // Confluence is separate content that does *not* move its page's
+        // `version.when`. Dating the page by its own edit alone would leave a
+        // page commented on this morning dated a year ago -- and every reader
+        // that filters on recency, the inbox's mention window
+        // (`knobas_core::inbox::WINDOW_DAYS`) first among them, would drop it.
+        // Jira gets this for free: posting a comment moves `fields.updated`.
+        //
+        // **This is not the cursor's idea of changed, and must not become
+        // it.** `crate::sync` walks and clamps on the page's own
+        // `version.when`, because that is what CQL's `lastmodified` matches
+        // for a page; the mention walk is how a comment is reached instead. A
+        // record whose comments carry no `version` -- a server that would not
+        // expand that deeply -- falls back to the page's stamp, which is the
+        // miss direction and the behaviour before the expansion was asked for.
+        updated_at: newest_change(raw),
         payload: raw.raw.clone(),
         // P5: the page Confluence itself names in `_links.webui`, on the base
         // URL the user typed -- which is the one reachable from the user's
@@ -86,6 +101,33 @@ pub(crate) fn to_sync_item(
         // tombstones what stopped coming back (contract §4.1).
         deleted: false,
     }
+}
+
+/// The newest `version.when` on the record: the page's own, or a comment's
+/// where the discussion has moved on since. `None` for a record nothing dated.
+fn newest_change(raw: &RawContent) -> Option<DateTime<Utc>> {
+    let page = raw
+        .content
+        .version
+        .as_ref()
+        .and_then(|v| v.when.as_deref())
+        .and_then(crate::time::parse_time);
+    raw.content
+        .children
+        .as_ref()
+        .and_then(|c| c.comment.as_ref())
+        .map(|c| c.results.as_slice())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|c| {
+            c.content
+                .version
+                .as_ref()
+                .and_then(|v| v.when.as_deref())
+                .and_then(crate::time::parse_time)
+        })
+        .chain(page)
+        .max()
 }
 
 fn version_author(raw: &RawContent) -> Option<String> {
@@ -225,6 +267,64 @@ mod tests {
              attempts.\n\n@Mara can you add the SLA?"
         );
         assert!(!item.body_text.contains('<'), "{}", item.body_text);
+    }
+
+    /// **`updated_at` follows the discussion** -- the fix the inbox's mention
+    /// window needs, and the thing Jira gives for free.
+    ///
+    /// A comment in Confluence is separate content and does not move its
+    /// page's `version.when`, so a page commented on this morning would
+    /// otherwise be dated by whatever edit it last had. Every reader that
+    /// filters on recency would drop it, `knobas_core::inbox`'s
+    /// `WINDOW_DAYS` first among them -- which is precisely the case the
+    /// mention walk exists to reach.
+    ///
+    /// Three arms, because the direction matters in each: a newer comment
+    /// wins, an older one does not drag the page backwards, and a comment
+    /// whose `version` the server would not expand leaves the page's own stamp
+    /// standing rather than nothing (the miss direction).
+    #[test]
+    fn updated_at_is_the_newest_of_the_page_and_its_discussion() {
+        let stamped = |when: &str| {
+            let mut page = a_page();
+            page.raw["children"]["comment"]["results"][0]["version"] =
+                json!({ "number": 1, "when": when });
+            page.content
+                .children
+                .as_mut()
+                .unwrap()
+                .comment
+                .as_mut()
+                .unwrap()
+                .results[0]
+                .content
+                .version = Some(
+                serde_json::from_value(json!({ "number": 1, "when": when })).expect("a version"),
+            );
+            to_sync_item("confluence", "http://x.example", &page)
+                .updated_at
+                .map(|t| t.to_rfc3339())
+        };
+        // The page's own edit is 2026-08-22T10:40:00Z.
+        assert_eq!(
+            stamped("2026-09-03T09:00:00.000Z").as_deref(),
+            Some("2026-09-03T09:00:00+00:00"),
+            "a comment written after the last edit is when this item last changed"
+        );
+        assert_eq!(
+            stamped("2026-07-01T09:00:00.000Z").as_deref(),
+            Some("2026-08-22T10:40:00+00:00"),
+            "an older comment must not drag the page's date backwards"
+        );
+        // The unexpanded case: the fixture's comment carries no `version`.
+        assert_eq!(
+            to_sync_item("confluence", "http://x.example", &a_page())
+                .updated_at
+                .map(|t| t.to_rfc3339())
+                .as_deref(),
+            Some("2026-08-22T10:40:00+00:00"),
+            "a comment the server would not date leaves the page's own stamp standing"
+        );
     }
 
     /// Spec §3a: `payload` is the raw record, so a later mapping can

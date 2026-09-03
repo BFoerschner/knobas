@@ -379,9 +379,17 @@ async fn a_mention_is_the_marked_name_and_not_every_appearance_of_it() {
 /// `<ac:link><ri:user ri:userkey="…"/></ac:link>`, a *key*, and a body_text
 /// built by stripping tags carries no trace of it. `knobas-source-confluence`
 /// resolves that key against the account the credential is and renders it back
-/// to `@name`, and the string below is exactly what its
-/// `storage::to_text` produces -- so this test fails the day either half stops
-/// agreeing with the other, which no test inside one crate can do.
+/// to `@name`, and the body below is a **transcription** of what its
+/// `storage::to_text` produces.
+///
+/// A transcription is not a witness, and this test does not pretend to be one:
+/// nothing here reads the adapter, so a renderer that changed its spelling
+/// would leave this green. What it pins is this rule's **end** of the
+/// agreement -- that a `page` from a Confluence carrying that spelling is a
+/// mention, and that the spelling is what does it. The witness that the two
+/// halves meet is `knobas-app/tests/atlassian_live.rs`'s
+/// `a_comment_that_mentions_me_becomes_an_inbox_mention`, against the real
+/// server (ADR-0013).
 ///
 /// The kind is `page` and the source is a Confluence, both of which the rule
 /// already admitted; nothing in `knobas-core` changed for this ticket, which

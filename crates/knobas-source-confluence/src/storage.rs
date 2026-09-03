@@ -91,7 +91,7 @@ pub(crate) fn to_text(storage: &str, me: Option<Account<'_>>) -> String {
         };
         let name = tag_name(tag);
         if name == "ri:user" {
-            if let Some(mentioned) = mentioned(tag, me) {
+            if let Some(mentioned) = mentioned_name(tag, me) {
                 // A trailing space, always: the mention rule requires the
                 // username not be followed by another name character, and a
                 // `<ac:plain-text-link-body>` right behind the link would
@@ -136,7 +136,7 @@ fn split_tag(rest: &str) -> Option<(&str, &str)> {
 /// the account outright and is rendered whoever it is, and `ri:userkey` is
 /// rendered only when it is [`Account`]'s own -- an unresolvable key is a
 /// miss, never a guess.
-fn mentioned<'a>(tag: &'a str, me: Option<Account<'a>>) -> Option<&'a str> {
+fn mentioned_name<'a>(tag: &'a str, me: Option<Account<'a>>) -> Option<&'a str> {
     if let Some(name) = attr(tag, "ri:username").filter(|name| !name.is_empty()) {
         return Some(name);
     }
@@ -148,12 +148,13 @@ fn mentioned<'a>(tag: &'a str, me: Option<Account<'a>>) -> Option<&'a str> {
 /// One attribute's value out of a tag body, or `None` for an attribute that is
 /// absent or unquoted.
 ///
-/// The name must be delimited on **both** sides -- preceded by whitespace or
-/// the element name's end, followed by whitespace or `=` -- because
+/// The name must be **preceded by whitespace and followed by `=`**, because
 /// `ri:username` contains `ri:user` and a substring search for one would find
-/// the other. Deliberately total: a malformed tag yields no attribute rather
-/// than an error, which is this module's whole discipline (a body that would
-/// not parse is a page that is not searchable).
+/// the other. Whitespace and not "or the start of the tag": the first token in
+/// a tag body is the element name, never an attribute, so requiring the space
+/// costs nothing and needs no second case. Deliberately total: a malformed tag
+/// yields no attribute rather than an error, which is this module's whole
+/// discipline (a body that would not parse is a page that is not searchable).
 fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
     let mut rest = tag;
     loop {

@@ -96,7 +96,7 @@ use crate::api::{ConfluenceApi, EXPAND, MENTION_EXPAND};
 use crate::cql::{Order, build_cql, build_mention_cql};
 use crate::cursor::{ConfluenceCursor, Seen};
 use crate::map;
-use crate::model::{Container, RawContent};
+use crate::model::RawContent;
 use crate::storage::Account;
 
 /// A stop so a server that keeps handing out `_links.next` cannot spin a run
@@ -145,6 +145,26 @@ struct RunStart {
     /// The UTC offset the instance renders timestamps in -- the zone every CQL
     /// literal will be read back in.
     offset_secs: i32,
+}
+
+/// The band of the corpus a walk reads, and the identity it reads it as.
+///
+/// One type because the four travel together and always will: the mention
+/// walk reads the *same* cursor the page walk is bounded by, in the same zone,
+/// as the same account -- and a run that passed three of the four would be a
+/// second answer to "where is this source up to".
+struct Window<'a> {
+    /// The lower bound of the `lastmodified >=` clause, or `None` for a full
+    /// sync.
+    since: Option<DateTime<Utc>>,
+    /// The UTC offset every CQL literal in this run is rendered in.
+    offset_secs: i32,
+    /// The position the run started from, which is what recognises a record
+    /// the overlap re-delivered.
+    previous: Option<&'a ConfluenceCursor>,
+    /// Who the credential is, for resolving a mention's user key
+    /// ([`crate::storage::Account`]).
+    me: Option<Account<'a>>,
 }
 
 impl SyncRun<'_> {
@@ -242,10 +262,12 @@ impl SyncRun<'_> {
 
         emitted += self
             .mentions(
-                since,
-                offset,
-                previous.as_ref(),
-                me,
+                &Window {
+                    since,
+                    offset_secs: offset,
+                    previous: previous.as_ref(),
+                    me,
+                },
                 &mut delivered,
                 &mut seen_in_window,
                 sink,
@@ -298,7 +320,11 @@ impl SyncRun<'_> {
     ///   so deduplicating on the *page* would re-emit it on every run for
     ///   ever. Deduplicating on the comment cannot: its timestamp is newer
     ///   than the watermark, so it stays in `seen` exactly as long as the
-    ///   query keeps returning it.
+    ///   query keeps returning it. It also *wins* `seen`'s cap for the same
+    ///   reason -- [`crate::cursor::SEEN_CAP`] keeps the newest entries -- so
+    ///   a run with hundreds of fresh mentions can evict page-walk entries and
+    ///   re-deliver a page. That is the cap's documented cost (bandwidth, not
+    ///   correctness), reached from a second direction.
     /// * **The page is fetched whole** rather than mapped from the thin
     ///   `MENTION_EXPAND` record, so a mentioning page and a page the ordinary
     ///   walk delivered are mapped from the same shape -- and the comment
@@ -311,15 +337,12 @@ impl SyncRun<'_> {
     ///   direction a person can see and act on.
     async fn mentions(
         &self,
-        since: Option<DateTime<Utc>>,
-        offset_secs: i32,
-        previous: Option<&ConfluenceCursor>,
-        me: Option<Account<'_>>,
+        window: &Window<'_>,
         delivered: &mut std::collections::BTreeSet<String>,
         seen_in_window: &mut Vec<Seen>,
         sink: &mut (dyn Sink + Send),
     ) -> Result<usize, SourceError> {
-        let cql = build_mention_cql(self.cfg, since, offset_secs);
+        let cql = build_mention_cql(self.cfg, window.since, window.offset_secs);
         let mut emitted: usize = 0;
         let mut next: Option<String> = None;
         let mut requests: u32 = 0;
@@ -345,10 +368,13 @@ impl SyncRun<'_> {
                         u,
                     });
                 }
-                if previous.is_some_and(|c| c.already_delivered(&raw.content.id, number)) {
+                if window
+                    .previous
+                    .is_some_and(|c| c.already_delivered(&raw.content.id, number))
+                {
                     continue;
                 }
-                let Some(page_id) = mentioning_page(&raw.content) else {
+                let Some(page_id) = raw.content.page_it_is_on() else {
                     continue;
                 };
                 if !delivered.insert(page_id.clone()) {
@@ -356,7 +382,7 @@ impl SyncRun<'_> {
                 }
                 let mut target = self.api.content(&page_id, EXPAND).await?;
                 self.complete(&mut target).await?;
-                let item = map::to_sync_item(self.source_id, self.base_url, &target, me);
+                let item = map::to_sync_item(self.source_id, self.base_url, &target, window.me);
                 sink.item(item).await?;
                 emitted += 1;
             }
@@ -438,31 +464,6 @@ impl SyncRun<'_> {
         }
         raw.set_comments(all);
         Ok(())
-    }
-}
-
-/// Which page a mention-walk result is *on*, or `None` for a record this walk
-/// cannot place.
-///
-/// **The type is read first, and that is the whole point.** A comment's
-/// `container` is the page it hangs off; a **page's** container is its *space*,
-/// whose id is from another namespace entirely. A walk that read a container id
-/// without asking what it was holding would fetch a space id as a page and
-/// either 404 or, worse, mirror something that is not the page.
-///
-/// A record whose type the walk never asked for -- a blog post, an attachment,
-/// a type a later Confluence adds -- contributes nothing: this adapter emits
-/// one kind, and the alternative is inventing a page for something that has
-/// none.
-fn mentioning_page(content: &crate::model::Content) -> Option<String> {
-    match content.content_type.as_deref() {
-        Some("comment") => content
-            .container
-            .as_ref()
-            .and_then(Container::content_id)
-            .map(str::to_owned),
-        Some("page") => Some(content.id.clone()),
-        _ => None,
     }
 }
 
@@ -705,10 +706,10 @@ mod tests {
                 .into_iter()
                 .find(|p| p["id"] == json!(id))
                 .ok_or_else(|| SourceError::protocol(format!("no content {id}")))?;
-            if !expand.contains("children.comment") {
-                if let Some(object) = row.as_object_mut() {
-                    object.remove("children");
-                }
+            if !expand.contains("children.comment")
+                && let Some(object) = row.as_object_mut()
+            {
+                object.remove("children");
             }
             Ok(serde_json::from_value(row).expect("the fake holds well-formed records"))
         }
@@ -1177,6 +1178,16 @@ mod tests {
             fake.calls().contains(&format!("content {page_id}")),
             "{:?}",
             fake.calls()
+        );
+        // **And the item is dated by the comment**, which is what puts it
+        // inside `knobas_core::inbox::WINDOW_DAYS`. The page's own edit is two
+        // months old; an item dated by that would be mirrored, searchable and
+        // *absent from the inbox* -- the one failure that would make the whole
+        // walk pointless.
+        assert_eq!(
+            items[0].updated_at.map(|t| t.to_rfc3339()).as_deref(),
+            Some("2026-09-03T09:00:00+00:00"),
+            "the mention's own date, not the page's last edit"
         );
     }
 

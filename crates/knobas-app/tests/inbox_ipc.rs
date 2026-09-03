@@ -504,8 +504,11 @@ async fn a_wiki_mention_offers_no_source_action_and_still_records_both_answers()
             "page",
             "98307",
             THEM,
-            // What `knobas-source-confluence`'s storage renderer produces for
-            // `<ac:link><ri:user ri:userkey="…"/></ac:link>` in a comment.
+            // A transcription of what `knobas-source-confluence`'s storage
+            // renderer produces for `<ac:link><ri:user ri:userkey="…"/></ac:link>`
+            // in a comment -- this crate cannot witness that agreement, and
+            // `atlassian_live.rs` is where it is witnessed. What is asserted
+            // here is what the *inbox* does with such a body.
             &format!("SEPA payout retry design\n\n@{ME} can you add the SLA?"),
             serde_json::json!({ "space": { "key": "ENG" } }),
         )

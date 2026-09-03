@@ -37,7 +37,7 @@ pub(crate) fn build_cql(
     // `type = page` is the scope, not a filter on top of one: this adapter
     // emits exactly one kind, and a blog post or an attachment arriving as a
     // `page` item would be a kind the descriptor never declared.
-    render("type = page", cfg, since, offset_secs, order)
+    render_query("type = page", cfg, since, offset_secs, order)
 }
 
 /// `mention = currentUser() AND type in (page, comment) [AND space in (…)]
@@ -66,7 +66,7 @@ pub(crate) fn build_mention_cql(
     since: Option<DateTime<Utc>>,
     offset_secs: i32,
 ) -> String {
-    render(
+    render_query(
         "mention = currentUser() AND type in (page, comment)",
         cfg,
         since,
@@ -75,12 +75,13 @@ pub(crate) fn build_mention_cql(
     )
 }
 
-/// The scope, then the two clauses every walk shares, then the ordering.
+/// One CQL string: the scope, then the two clauses every walk shares, then the
+/// ordering.
 ///
 /// One renderer so the space list and the watermark literal cannot come out
 /// differently for the two walks: the mention walk reads the *same* cursor,
 /// so a bound rendered in another zone there would be a bound two hours wrong.
-fn render(
+fn render_query(
     scope: &str,
     cfg: &ConfluenceConfig,
     since: Option<DateTime<Utc>>,

@@ -175,6 +175,34 @@ impl Container {
     }
 }
 
+impl Content {
+    /// Which page this record is *on*, or `None` for one nothing can place --
+    /// the mention walk's only reader.
+    ///
+    /// **The type is read first, and that is the whole point.** A comment's
+    /// [`container`](Self::container) is the page it hangs off; a **page's**
+    /// container is its *space*, whose id is from another namespace entirely.
+    /// A walk that read a container id without asking what it was holding
+    /// would fetch a space id as though it were a page's and either 404 or,
+    /// worse, mirror something that is not the page.
+    ///
+    /// A record whose type this adapter never asked for -- a blog post, an
+    /// attachment, a type a later Confluence adds -- is placed nowhere: the
+    /// adapter emits one kind, and the alternative is inventing a page for
+    /// something that has none.
+    pub(crate) fn page_it_is_on(&self) -> Option<String> {
+        match self.content_type.as_deref() {
+            Some("comment") => self
+                .container
+                .as_ref()
+                .and_then(Container::content_id)
+                .map(str::to_owned),
+            Some("page") => Some(self.id.clone()),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct Body {
     #[serde(default)]
