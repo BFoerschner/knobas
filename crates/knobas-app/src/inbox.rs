@@ -282,11 +282,9 @@ pub async fn notification_kinds(pool: &PgPool) -> Result<Vec<Category>, IpcError
     let Some(serde_json::Value::Array(words)) = stored else {
         return Ok(Vec::new());
     };
-    Ok(canonical(
-        words
-            .iter()
-            .filter_map(|word| word.as_str()?.parse::<Category>().ok()),
-    ))
+    Ok(canonical(words.iter().filter_map(|word| {
+        word.as_str()?.parse::<Category>().ok()
+    })))
 }
 
 /// Set which categories may notify, and answer with what is now stored.

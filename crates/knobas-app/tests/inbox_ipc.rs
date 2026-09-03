@@ -869,7 +869,11 @@ async fn an_unknown_word_beside_known_ones_drops_only_itself() {
         "insert into knobas.setting (key, value) values ('inbox.notification_kinds', $1)
          on conflict (key) do update set value = excluded.value",
     )
-    .bind(serde_json::json!(["from_the_future", "mention", "failed_build"]))
+    .bind(serde_json::json!([
+        "from_the_future",
+        "mention",
+        "failed_build"
+    ]))
     .execute(&harness.deps.pool)
     .await
     .expect("the row is written");

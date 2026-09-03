@@ -194,7 +194,10 @@ fn each_plugin_is_pinned_to_one_version_on_both_sides_of_the_bridge() {
     for plugin in ["opener", "notification"] {
         let crate_pin = manifest
             .lines()
-            .find_map(|line| line.trim().strip_prefix(&format!("tauri-plugin-{plugin} = ")))
+            .find_map(|line| {
+                line.trim()
+                    .strip_prefix(&format!("tauri-plugin-{plugin} = "))
+            })
             .unwrap_or_else(|| panic!("`tauri-plugin-{plugin}` is not a dependency"))
             .trim()
             .trim_matches('"')
