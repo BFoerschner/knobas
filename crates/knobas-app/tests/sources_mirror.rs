@@ -603,6 +603,17 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
             seconds: 2_700,
             comment: "probe".to_owned(),
         },
+        knobas_source::WriteOp::CreatePage {
+            parent: "confluence:98400".to_owned(),
+            space: "ENG".to_owned(),
+            title: "Standup 2026-09-03".to_owned(),
+            body: "<p>nothing blocked</p>".to_owned(),
+        },
+        knobas_source::WriteOp::UpdatePage {
+            entity: "confluence:98307".to_owned(),
+            base_version: 3,
+            body: "<h2>Backoff policy</h2><p>base 30 s.</p>".to_owned(),
+        },
     ];
     for op in &probes {
         let tag = match op {
@@ -615,6 +626,8 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
             knobas_source::WriteOp::TriggerBuild { .. } => "TriggerBuild",
             knobas_source::WriteOp::RerunBuild { .. } => "RerunBuild",
             knobas_source::WriteOp::LogWork { .. } => "LogWork",
+            knobas_source::WriteOp::CreatePage { .. } => "CreatePage",
+            knobas_source::WriteOp::UpdatePage { .. } => "UpdatePage",
         };
         let json = serde_json::to_value(op).unwrap();
         assert!(

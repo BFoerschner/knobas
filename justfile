@@ -609,4 +609,5 @@ atlassian-live:
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-jira --test live_jira_seeded -- --ignored --nocapture --test-threads=1
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test atlassian_live -- --ignored --nocapture --test-threads=1
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-confluence --test live_confluence_seeded -- --ignored --nocapture --test-threads=1
-    echo "atlassian-live: every Atlassian-gated live suite green (3 suites)"
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test confluence_live -- --ignored --nocapture --test-threads=1
+    echo "atlassian-live: every Atlassian-gated live suite green (4 suites)"

@@ -131,6 +131,10 @@ _Avoid_: filter, saved search
 **Write-back**:
 An operation that changes data in a source (status, comment, approval, trigger, worklog, page). Links, contexts, notes, and [blocks](#block) are never write-back; a [worklog](#worklog) is one.
 
+**Section**:
+A heading of level one to three on a wiki [page](#kind), and everything under it until the next heading of the same or higher level. The unit knobas edits a page in: one section of prose at a time, never the whole page and never a fragment of one. A section holding a macro or a table **refuses** its edit and offers the source's own editor instead, because knobas reads those but cannot write them back. The edit that goes out still carries the whole page body — the source replaces the record — so everything outside the section is sent back exactly as it arrived. (#286)
+_Avoid_: block (that is a unit of [time](#block)), chunk, fragment
+
 **Pending write**:
 An edit queued because its source cannot currently accept it. The queue is a visible, inspectable list, not a count. Delivery is at least once — a write in flight when knobas stops may arrive twice; knobas re-sends rather than guess, and never merges or deduplicates what you wrote. (ADR-0012)
 
