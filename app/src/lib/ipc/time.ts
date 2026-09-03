@@ -115,6 +115,11 @@ export function stopTimer(): Promise<Block | null> {
  * the reader has in front of them — open detail, else the room's anchor, else
  * `null`. It is what passive attribution (#281) will be derived from; today
  * the backend vets it and stores nothing.
+ *
+ * **A foreground the backend dislikes never costs the beat.** The stamp is
+ * what a stranded timer's block is closed at, so a refused beat would freeze
+ * it and the next relaunch would close the block hours early; a bad foreground
+ * is logged on the backend instead.
  */
 export function timerHeartbeat(foreground: TimerTarget | null): Promise<RunningTimer | null> {
   return invoke<RunningTimer | null>("timer_heartbeat", { foreground });

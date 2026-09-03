@@ -108,13 +108,13 @@ pub async fn stop_timer<R: tauri::Runtime>(
 /// Sent every thirty seconds while the window is focused. `foreground` is what
 /// the reader has in front of them by the rule *open detail, else room anchor,
 /// else none*; [`crate::time`]'s module docs record why it is taken and not
-/// yet stored.
+/// yet stored, and [`time::heartbeat`] records why a foreground it dislikes is
+/// logged rather than refused.
 ///
 /// # Errors
 ///
 /// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
-/// [`Invalid`](crate::IpcErrorCode::Invalid) for a foreground that could never
-/// be a target, [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
+/// [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
 #[tauri::command]
 pub async fn timer_heartbeat(
     lifecycle: State<'_, Lifecycle>,
@@ -260,6 +260,35 @@ mod tests {
                 "{half} carries no `kind`, so the union cannot be narrowed"
             );
         }
+    }
+
+    /// The shell refuses the same word the backend does (#278, story 15).
+    ///
+    /// Three copies of `ctx` decide whether a stored context can be timed:
+    /// `knobas_core::entity::RESERVED_NAMESPACES`, `time::CONTEXT_NAMESPACE`,
+    /// and `app/src/lib/shell/timer.ts`'s own constant. The first two are
+    /// pinned in `time`'s own tests; this is the third, and it is the one that
+    /// fails **silently** without a pin — a rename in Rust would leave the
+    /// picker and the launcher filtering for a spelling nothing produces any
+    /// more, so every list would go on looking correct while offering a target
+    /// the backend then refuses.
+    ///
+    /// A source scan, for the reason `tests/wiring.rs` gives for its own: this
+    /// is a TypeScript constant, and there is nothing else in the tree that
+    /// compares the two.
+    #[test]
+    fn the_shells_context_namespace_is_the_one_the_backend_refuses() {
+        const SHELL: &str = include_str!("../../../../app/src/lib/shell/timer.ts");
+        let declaration = format!(
+            "const CONTEXT_NAMESPACE = \"{}\";",
+            crate::time::CONTEXT_NAMESPACE
+        );
+        assert!(
+            SHELL.contains(&declaration),
+            "app/src/lib/shell/timer.ts does not declare `{declaration}`, so the \
+             picker and the launcher are filtering for a spelling the backend \
+             no longer refuses"
+        );
     }
 
     /// The four commands, named in the mirror's `invoke` calls.

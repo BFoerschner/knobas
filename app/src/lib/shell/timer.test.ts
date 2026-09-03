@@ -12,7 +12,6 @@ import {
   canBeTarget,
   elapsedReading,
   legalCandidates,
-  refuseAsTarget,
   targetReading,
   type TargetCandidate,
 } from "./timer";
@@ -25,21 +24,20 @@ function candidate(entityId: string, kind: string, title = entityId): TargetCand
 
 /**
  * Story 15, and the direction that makes it a rule rather than an accident: a
- * context is **refused**, with a reason, not merely missing from some list.
+ * context is **refused** by the predicate, not merely missing from some list.
  *
- * Both spellings are checked separately, because either one alone has to be
- * enough — a candidate that lost its kind on the way here is still a context,
- * and so is one whose kind says so while its id is something else.
+ * Each spelling is driven on its own, because either alone has to be enough —
+ * a candidate that lost its kind on the way here is still a context, and so is
+ * one whose kind says so while its id is something else.
  */
-test("a stored context is refused as a timer target, and the refusal says why", () => {
-  const byBoth = refuseAsTarget(candidate("ctx:5b1c0f1e", "ctx"));
-  expect(byBoth).toContain("a set");
-
-  expect(refuseAsTarget({ entityId: "ctx:5b1c0f1e" })).toBe(byBoth);
-  expect(refuseAsTarget({ entityId: "jira:PAY-231", kind: "ctx" })).toBe(byBoth);
+test("a stored context is refused as a timer target, by id or by kind alone", () => {
+  expect(canBeTarget(candidate("ctx:5b1c0f1e", "ctx"))).toBe(false);
+  expect(canBeTarget({ entityId: "ctx:5b1c0f1e" })).toBe(false);
+  expect(canBeTarget({ entityId: "jira:PAY-231", kind: "ctx" })).toBe(false);
   // Case is not a way around it: `NOTE:` and `note:` address the same
   // namespace to every human reading them, and so do `CTX:` and `ctx:`.
-  expect(refuseAsTarget({ entityId: "CTX:5b1c0f1e" })).toBe(byBoth);
+  expect(canBeTarget({ entityId: "CTX:5b1c0f1e" })).toBe(false);
+  expect(canBeTarget({ entityId: "jira:PAY-231", kind: "CTX" })).toBe(false);
 });
 
 /**
@@ -56,14 +54,13 @@ test("every other entity is a legal target, including a kind knobas has never se
     ["gitea:tidewater/payout-service", "repo"],
     ["pagerduty:INC-9", "incident"],
   ] as const) {
-    expect(refuseAsTarget(candidate(id, kind)), `${id} should be legal`).toBeNull();
-    expect(canBeTarget(candidate(id, kind))).toBe(true);
+    expect(canBeTarget(candidate(id, kind)), `${id} should be legal`).toBe(true);
   }
 });
 
 test("something that is not an entity id at all is refused too", () => {
   for (const id of ["DB config for the migration", "", ":PAY-231", "jira:", "jira:   "]) {
-    expect(refuseAsTarget({ entityId: id }), `${id} should be refused`).not.toBeNull();
+    expect(canBeTarget({ entityId: id }), `${id} should be refused`).toBe(false);
   }
 });
 

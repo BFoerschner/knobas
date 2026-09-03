@@ -16,7 +16,7 @@
   Recents come out of `knobas.entity`, and a stored context **is** a row there
   — kind `ctx`, id `ctx:<uuid>` (`knobas_core::context`). So it arrives in this
   list like anything else, and the list is filtered through
-  `timer.ts`'s `refuseAsTarget` rather than happening not to contain one. The
+  `timer.ts`'s `canBeTarget` rather than happening not to contain one. The
   reason is the glossary's: a context is a set, and time on a set has nowhere
   to go — the label field above is what covers "worked across the SEPA
   context". `start_timer` refuses one too; this is what keeps the reader from

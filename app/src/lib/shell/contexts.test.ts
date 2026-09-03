@@ -128,6 +128,48 @@ test("an ad-hoc context's chip says ad-hoc", () => {
 });
 
 /**
+ * The room's `anchorId` is the **anchor**, never the context's own id (#278).
+ *
+ * It is the second rung of the timer's foreground rule — *open detail, else
+ * room anchor, else none* — and a room that handed back its own `ctx:` id
+ * would aim the clock at a set, which `start_timer` refuses outright and the
+ * glossary forbids. An ad-hoc context has no anchor at all, which is the other
+ * direction and the one that keeps the rule from reading "any stored room
+ * starts on something".
+ */
+test("a stored room carries its anchor, and an ad-hoc one carries none", () => {
+  const promoted = storedContext({
+    id: "ctx:pay",
+    kind: "epic",
+    title: "SEPA migration",
+    anchor_id: "jira:EPIC-1",
+    created_at: "2026-08-29T12:00:00Z",
+    archived_at: null,
+  });
+  expect(promoted.anchorId).toBe("jira:EPIC-1");
+  expect(promoted.anchorId, "the room offered itself as a timer target").not.toBe(promoted.id);
+
+  const adhoc = storedContext({
+    id: "ctx:x",
+    kind: "adhoc",
+    title: "x",
+    anchor_id: null,
+    created_at: "2026-08-29T12:00:00Z",
+    archived_at: null,
+  });
+  expect(adhoc.anchorId).toBeNull();
+});
+
+/** Every derived room is about a scope rather than about a thing, so none has one. */
+test("no derived room carries an anchor", () => {
+  const derived = builtinContexts(
+    [{ id: "jira", label: "Tidewater Jira" }],
+    [{ source_id: "jira", key: "PAY", name: "Payments" }],
+  );
+  expect(derived.map((room) => room.anchorId)).toEqual([null, null, null]);
+});
+
+/**
  * A project room sits **immediately after its own source's room** (#209), so
  * the switcher reads as *All work*, the stored contexts, then each source
  * followed by the projects inside it.

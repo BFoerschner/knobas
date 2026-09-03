@@ -273,19 +273,38 @@ async fn a_heartbeat_with_no_timer_running_is_not_a_failure() {
     assert_eq!(time::heartbeat(&pool, None).await.unwrap(), None);
 }
 
-/// A foreground the timer could never run on is a frontend bug, and refusing
-/// it here is what stops passive attribution (#281) inheriting one.
+/// **A foreground the backend dislikes must not cost the beat.**
+///
+/// The stamp is a statement about knobas being alive, not about what the
+/// reader was looking at. A heartbeat refused because its foreground was
+/// malformed would leave `last_heartbeat` frozen, and the next relaunch would
+/// close the block there -- silently discarding every hour since, which is the
+/// one failure the relaunch rule exists to prevent. So the observation is
+/// dropped and the stamp lands.
 #[tokio::test]
-async fn a_heartbeat_carrying_a_context_as_its_foreground_is_refused() {
+async fn a_foreground_the_timer_could_never_run_on_does_not_cost_the_beat() {
     let pool = scratch("time-beat-ctx").await;
     let context = knobas_core::context::create_adhoc(&pool, "SEPA migration")
         .await
         .expect("a stored context");
+    time::start(&pool, on(TICKET)).await.expect("it starts");
+    age(&pool, Duration::hours(3), Duration::hours(2)).await;
+    let before = time::current(&pool).await.unwrap().expect("running");
 
-    let refusal = time::heartbeat(&pool, Some(on(&context.id)))
+    let after = time::heartbeat(&pool, Some(on(&context.id)))
         .await
-        .expect_err("a context is not a thing time can be attributed to");
-    assert_eq!(refusal.code, IpcErrorCode::Invalid);
+        .expect("a context foreground is not a reason to lose the stamp")
+        .expect("the timer is still running");
+
+    assert!(
+        after.last_heartbeat > before.last_heartbeat + Duration::hours(1),
+        "the stamp did not move, so a relaunch would close this block two \
+         hours early: {} -> {}",
+        before.last_heartbeat,
+        after.last_heartbeat
+    );
+    // ...and the observation itself went nowhere: the target is untouched.
+    assert_eq!(after.target, on(TICKET));
 }
 
 // -- relaunch ---------------------------------------------------------------

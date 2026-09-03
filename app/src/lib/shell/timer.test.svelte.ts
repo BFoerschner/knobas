@@ -152,6 +152,47 @@ test("a refused start leaves the strip empty rather than optimistic", async () =
   expect(timer.current).toBeNull();
 });
 
+/**
+ * Story 11: *Start timer* on another entity **stops the running one first**,
+ * so the block the reader was in is closed rather than lost.
+ *
+ * The assertion is the **order**, read off one call log rather than off two
+ * counters: "stop happened" and "start happened" are both true whichever way
+ * round they ran, and the wrong way round is exactly the bug — a start over a
+ * running timer is refused by the backend with `conflict`, so the switch would
+ * fail outright and the reader would be left on the old target.
+ */
+test("switching targets stops before it starts, and answers with the block that closed", async () => {
+  const order: string[] = [];
+  const belt = bench({
+    stopTimer: () => {
+      order.push("stop");
+      return Promise.resolve(block());
+    },
+    startTimer: (target) => {
+      order.push("start");
+      return Promise.resolve(running(target));
+    },
+  });
+  await belt.timer.start(TICKET);
+  order.length = 0;
+
+  const closed = await belt.timer.switchTo(LABEL);
+
+  expect(order).toEqual(["stop", "start"]);
+  expect(belt.timer.current?.target).toEqual(LABEL);
+  // What #280's worklog draft opens on.
+  expect(closed?.target).toEqual(TICKET);
+});
+
+/** ...and switching from nothing is a plain start, not a failure. */
+test("switching with nothing running is just a start", async () => {
+  const belt = bench({ stopTimer: () => Promise.resolve(null) });
+
+  await expect(belt.timer.switchTo(TICKET)).resolves.toBeNull();
+  expect(belt.calls.started).toEqual([TICKET]);
+});
+
 // -- what the strip reads ---------------------------------------------------
 
 test("elapsed is null while nothing runs, and counts up once something does", async () => {

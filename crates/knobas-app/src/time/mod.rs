@@ -51,14 +51,22 @@ use crate::IpcError;
 /// The activity actor for everything a person does with the timer.
 const ACTOR: &str = "user";
 
-/// The namespace stored contexts live in.
+/// The namespace stored contexts live in, and the kind their `knobas.entity`
+/// row carries -- the same word, because `knobas_core::context::insert` writes
+/// both from it.
 ///
 /// One of `knobas_core::entity::RESERVED_NAMESPACES`, and spelled here rather
-/// than indexed out of that array because an index is not a name. The test
-/// `the_context_namespace_is_the_one_knobas_core_reserves` is what keeps the
-/// two in step: a rename there fails here rather than silently making every
-/// context a legal timer target again.
-const CONTEXT_NAMESPACE: &str = "ctx";
+/// than indexed out of that array because an index is not a name. Two tests
+/// keep the three copies of this word in step, and neither is optional:
+/// `the_context_namespace_is_the_one_knobas_core_reserves` pins it downward to
+/// `knobas-core`, so a rename there fails here rather than silently making
+/// every context a legal target again; and `commands::time`'s
+/// `the_shells_context_namespace_is_the_one_the_backend_refuses` pins it
+/// sideways to `app/src/lib/shell/timer.ts`, so the picker and the launcher
+/// cannot go on filtering for a spelling the backend has stopped refusing.
+///
+/// `pub` for the second of those: it is read from a test in another module.
+pub const CONTEXT_NAMESPACE: &str = "ctx";
 
 /// The activity actor for the relaunch sweep.
 ///
@@ -282,7 +290,16 @@ const STOP_TIMER: &str = "with stopped as (
      returning id, started_at, ended_at, entity_id, label, kind,
                ended_by_relaunch, worklog_id";
 
-/// The same, ending at the last heartbeat and flagged. See [`close_stranded`].
+/// The same shape as [`STOP_TIMER`], ending at the last heartbeat and flagged.
+///
+/// **Two statements and not one parameterised statement**, deliberately. The
+/// difference between them is which column becomes the end and whether the
+/// flag is set, and expressing that as a bind would need either dynamic SQL --
+/// which this module does not do, for the reason `commands/entity.rs` records
+/// -- or a `case` that made both readings harder than either is now. The two
+/// are also not the same event: one is a person stopping a clock and the other
+/// is knobas admitting it stopped being alive, and the day review distinguishes
+/// them.
 const CLOSE_STRANDED: &str = "with stranded as (
          delete from knobas.timer
          returning entity_id, label, started_at, last_heartbeat
@@ -392,9 +409,17 @@ pub async fn stop(pool: &PgPool) -> Result<Option<TimerStopped>, IpcError> {
 /// Stamp the timer as alive, and answer with it.
 ///
 /// `foreground` is what the window has in front of the reader right now --
-/// see the module docs for why it is taken and not yet stored. It is vetted
-/// all the same: a foreground the timer could never run on is a frontend bug,
-/// and refusing it here is what stops #281 inheriting one.
+/// see the module docs for why it is taken and not yet stored.
+///
+/// **Nothing about the foreground can stop the stamp landing, and that is the
+/// whole shape of this function.** The stamp is a statement about *knobas*,
+/// not about what the reader was looking at: it is the moment
+/// [`close_stranded`] closes a stranded block at. A beat refused because its
+/// foreground was malformed would leave `last_heartbeat` frozen at the last
+/// beat that happened to be well-formed, and the next relaunch would close the
+/// block there -- silently losing every hour since, which is the one failure
+/// the relaunch rule exists to prevent. So the foreground is vetted *after*
+/// the write and a refusal is logged, never propagated.
 ///
 /// `None` when no timer is running. The heartbeat is sent on a schedule rather
 /// than on a state, so "there is nothing to stamp" is its ordinary answer and
@@ -402,15 +427,27 @@ pub async fn stop(pool: &PgPool) -> Result<Option<TimerStopped>, IpcError> {
 /// stale timer that the clock has stopped.
 ///
 /// # Errors
-/// `invalid` for a foreground [`vet`] refuses; [`IpcError`] if the write fails.
+/// [`IpcError`] if the write fails. **Not** for a foreground [`vet`] refuses.
 pub async fn heartbeat(
     pool: &PgPool,
     foreground: Option<TimerTarget>,
 ) -> Result<Option<RunningTimer>, IpcError> {
-    if let Some(foreground) = foreground {
-        let _observed = vet(foreground)?;
-    }
+    // **The stamp first, and unconditionally.** See the doc comment: a beat
+    // that a bad foreground could refuse would freeze the last-alive stamp,
+    // and the block would then be closed at whenever the frontend last sent
+    // something this function happened to like.
     let row = sqlx::query(BEAT).fetch_optional(pool).await?;
+
+    // The observation is vetted and dropped. It is dropped because #281 brings
+    // the table to keep it in; it is vetted because a foreground the timer
+    // could never run on is a frontend bug, and a log line is where a bug with
+    // no user-visible consequence belongs.
+    if let Some(foreground) = foreground
+        && let Err(error) = vet(foreground)
+    {
+        tracing::warn!(%error, "a heartbeat carried a foreground that is not a legal timer target");
+    }
+
     row.as_ref().map(timer_of).transpose()
 }
 
@@ -559,8 +596,9 @@ mod tests {
     }
 
     /// The wire spelling of the target, which the mirror and the picker both
-    /// depend on. Pinned here as well as in `tests/time_mirror.rs` because
-    /// this is where the `#[serde]` attributes are.
+    /// depend on. Pinned here as well as by `commands::time`'s mirror tests
+    /// -- which check the TypeScript against it -- because this is where the
+    /// `#[serde]` attributes that decide the spelling actually live.
     #[test]
     fn a_target_is_tagged_by_which_half_it_is() {
         assert_eq!(

@@ -206,6 +206,19 @@
   let pickerOpen = $state(false);
 
   /**
+   * Say why a timer command refused, in the backend's own words.
+   *
+   * One helper for the three of them: `start_timer` refuses a stored context,
+   * a blank label and a second timer, and each of those is a sentence the
+   * reader can act on — so there is nothing per-caller to add, and three
+   * copies of the same arrow would be three chances for one of them to start
+   * swallowing.
+   */
+  function complain(error: unknown) {
+    push({ text: ipcErrorMessage(error), tone: "err" });
+  }
+
+  /**
    * ⌘T, and the strip's timer slot: one verb with three outcomes, all three
    * decided by `timer.press()` — see its documentation for why the rule is
    * there and not in `keys.ts`.
@@ -221,33 +234,29 @@
       .then((outcome) => {
         if (outcome === "pick") pickerOpen = true;
       })
-      .catch((error) => {
-        push({ text: ipcErrorMessage(error), tone: "err" });
-      });
+      .catch(complain);
   }
 
   /**
    * The launcher's *Start timer* row: **stop what is running, then start**
    * (#278, story 11).
    *
-   * The stop comes first and unconditionally, because that is what closes the
-   * block the reader was in; switching targets without one would discard the
-   * sitting. It is a plain stop today. #280 makes it open the worklog draft,
-   * and the ordering here is what that ticket hangs on.
+   * The **order** is `timer.switchTo`'s and not this function's — the store
+   * owns it, with its own witness — because it is a rule about the clock
+   * rather than a step in the shell's glue. What is here is the sentence the
+   * reader sees. #280 turns the closed block it answers with into a worklog
+   * draft.
    *
    * The launcher stays open behind this deliberately — it closes on its own
    * `Enter`, and a chain action is not a navigation.
    */
   function startTimerOn(entityId: string, title: string) {
     void timer
-      .stop()
-      .then(() => timer.start({ kind: "entity", entity_id: entityId }))
+      .switchTo({ kind: "entity", entity_id: entityId })
       .then(() => {
         push({ text: `Timing ${title}.` });
       })
-      .catch((error) => {
-        push({ text: ipcErrorMessage(error), tone: "err" });
-      });
+      .catch(complain);
   }
 
   /** Start on what the picker chose, and close it only if that worked. */
@@ -257,9 +266,7 @@
       .then(() => {
         pickerOpen = false;
       })
-      .catch((error) => {
-        push({ text: ipcErrorMessage(error), tone: "err" });
-      });
+      .catch(complain);
   }
 
   onMount(() => {

@@ -10,53 +10,46 @@ import type { EntityRow } from "../ipc/entity";
 import type { TimerTarget } from "../ipc/time";
 
 /**
- * The entity namespace stored contexts live in
- * (`knobas_core::entity::RESERVED_NAMESPACES`, mirrored by
- * `knobas_app::time::CONTEXT_NAMESPACE`).
+ * The one word this module refuses on — both the entity namespace stored
+ * contexts live in and the kind their `knobas.entity` row carries, which are
+ * the same word because `knobas_core::context::insert` writes both from it.
  *
- * A context is a row in `knobas.entity` of kind `ctx` with the id
- * `ctx:<uuid>`, so it turns up in recents and in search results like anything
- * else. That is exactly why the refusal below has to be a rule and not an
- * absence.
+ * Pinned to the backend's own copy, `knobas_app::time::CONTEXT_NAMESPACE`, by
+ * `the_shells_context_namespace_is_the_one_the_backend_refuses` in
+ * `crates/knobas-app/src/commands/time.rs`, which reads this file. Without
+ * that, a rename in Rust would leave this filtering for a spelling nothing
+ * produces any more — green, and refusing nothing.
+ *
+ * A context is a real row in `knobas.entity`, so it turns up in recents and in
+ * search results like anything else. That is exactly why {@link canBeTarget}
+ * has to be a rule and not an absence.
  */
 const CONTEXT_NAMESPACE = "ctx";
 
-/** The kind `knobas.entity` gives a stored context's row. */
-const CONTEXT_KIND = "ctx";
-
 /**
- * Why this candidate cannot be a timer target, or `null` when it can.
+ * Whether this candidate may be a timer target.
  *
  * **The rule, and the one thing it is for** (`CONTEXT.md`, *timer target*;
  * spec #272 story 15): a stored context is never a target. A context is a
  * *set*, and time on a set has nowhere to go — the ad-hoc label is what covers
- * "worked across the SEPA context". The picker draws candidates from recents
- * and from search, both of which carry contexts, so a picker that did not
- * refuse would offer one.
+ * "worked across the SEPA context". The picker draws its candidates from the
+ * launcher's recents, which carry contexts, so a picker that did not refuse
+ * would offer one.
  *
- * Both halves are checked, and either alone is enough. The `kind` is what a
+ * Both spellings are checked and either alone is enough. The `kind` is what a
  * row carries and the namespace is what the id itself says; a caller that has
  * one and not the other still gets the right answer, and a context reached by
  * a route that lost its kind is still refused.
  *
  * Everything else is legal, including a kind knobas has never heard of. §3a is
  * the constraint: an adapter's new kind is browsable on day one, and a timer
- * that only ran on a table of known kinds would be the table §3a forbids.
- * That is why this is a refusal list and not an allow list.
+ * that only ran on a table of known kinds would be the table §3a forbids. That
+ * is why this refuses one word rather than allowing a list.
  */
-export function refuseAsTarget(candidate: { entityId: string; kind?: string }): string | null {
-  if (candidate.kind === CONTEXT_KIND || namespaceOf(candidate.entityId) === CONTEXT_NAMESPACE) {
-    return "a context is a set, and time on a set has nowhere to go — use a label";
-  }
-  if (namespaceOf(candidate.entityId) === null) {
-    return "not an entity";
-  }
-  return null;
-}
-
-/** Whether this candidate may be a timer target. */
 export function canBeTarget(candidate: { entityId: string; kind?: string }): boolean {
-  return refuseAsTarget(candidate) === null;
+  if (candidate.kind?.toLowerCase() === CONTEXT_NAMESPACE) return false;
+  return namespaceOf(candidate.entityId) !== null &&
+    namespaceOf(candidate.entityId) !== CONTEXT_NAMESPACE;
 }
 
 /**

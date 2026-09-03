@@ -176,6 +176,34 @@ vi.mock("./lib/ipc/entity", () => ({
 }));
 
 /**
+ * What the timer commands were asked to do, in order (#278).
+ *
+ * `App.svelte` is the only place the **foreground rule** — *open detail, else
+ * the room's anchor, else none* — exists, and the only place ⌘T's `"pick"`
+ * outcome is joined to the picker. Both are wires with no other seam, which is
+ * the class this whole file was written for.
+ */
+let timerStarts: unknown[] = [];
+let timerStops = 0;
+
+vi.mock("./lib/ipc/time", () => ({
+  currentTimer: () => Promise.resolve(null),
+  startTimer: (target: unknown) => {
+    timerStarts.push(target);
+    return Promise.resolve({
+      target,
+      started_at: "2026-09-03T09:00:00Z",
+      last_heartbeat: "2026-09-03T09:00:00Z",
+    });
+  },
+  stopTimer: () => {
+    timerStops += 1;
+    return Promise.resolve(null);
+  },
+  timerHeartbeat: () => Promise.resolve(null),
+}));
+
+/**
  * How many subscriptions the shell has opened.
  *
  * The first `listen` is `health.start()`, which is the line immediately after
@@ -328,6 +356,8 @@ beforeEach(() => {
   demoProfile = false;
   projectRows = [];
   projectCalls = 0;
+  timerStarts = [];
+  timerStops = 0;
   contextRows = [];
   entityRows = [];
   sourceRows = [];
@@ -1120,4 +1150,129 @@ test("a dead address for a room the reader never stood in stays silent even thou
   expect(toasts.items, "nothing the reader stood in went under them").toEqual([]);
   expect(location.hash, "a dead address opened cold keeps its address").toBe("#/ctx/src:gitea");
   expect(roomName()).toBe("All work");
+});
+
+
+// -- the timer's two shell-only wires (#278) --------------------------------
+
+/** ⌘T, as the window receives it. */
+function pressTimerKey(): void {
+  window.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "t", metaKey: true, bubbles: true, cancelable: true }),
+  );
+  flushSync();
+}
+
+/** The ⌘T picker, if it is up. */
+function pickerTitle(): string | null {
+  const dialogs = [...target.querySelectorAll<HTMLElement>('[role="dialog"]')];
+  const picker = dialogs.find((dialog) => dialog.textContent?.includes("What is the time on?"));
+  return picker ? "open" : null;
+}
+
+/**
+ * The first half of the foreground rule: **the open detail**.
+ *
+ * This rule lives in exactly one place — `App.svelte`'s `foreground` — and it
+ * is read by two things that cannot see each other, ⌘T and the heartbeat. ⌘T
+ * is the observable half, so pressing it is how the rule is witnessed: the
+ * target it starts on *is* the foreground.
+ */
+test("⌘T starts on the entity the detail slide-over has open", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  location.hash = "#/ctx/all";
+
+  app = mount(App, { target, props: {} });
+  await until(() => tabLabels().includes("All work"), "the shell never drew a room");
+
+  router.go("#/ticket/mock:PAY-231");
+  flushSync();
+  pressTimerKey();
+  await until(() => timerStarts.length > 0, "⌘T never reached the timer");
+
+  expect(timerStarts).toEqual([{ kind: "entity", entity_id: "mock:PAY-231" }]);
+  expect(pickerTitle(), "the picker opened over a foreground that existed").toBeNull();
+});
+
+/**
+ * The second half: **the room's anchor**, when no detail is open.
+ *
+ * The anchor is a promoted context's `anchor_id` — a ticket or an epic, never
+ * the context's own `ctx:` id, which is the claim `contexts.ts`'s `anchorId`
+ * makes and this is what witnesses it end to end: the room is addressed as
+ * `#/ctx/ctx:pay` and the timer starts on `jira:EPIC-1`.
+ */
+test("⌘T with no detail open starts on the room's anchor, never on the room itself", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  contextRows = [
+    {
+      id: "ctx:pay",
+      kind: "epic",
+      title: "SEPA migration",
+      anchor_id: "jira:EPIC-1",
+      created_at: "2026-09-02T09:00:00Z",
+      archived_at: null,
+    },
+  ];
+  location.hash = "#/ctx/ctx:pay";
+
+  app = mount(App, { target, props: {} });
+  await until(() => roomName() === "SEPA migration", "the stored room never arrived");
+
+  pressTimerKey();
+  await until(() => timerStarts.length > 0, "⌘T never reached the timer");
+
+  expect(timerStarts).toEqual([{ kind: "entity", entity_id: "jira:EPIC-1" }]);
+});
+
+/**
+ * The third: **nothing in front of the reader**, so ⌘T asks (story 9).
+ *
+ * *All work* is a derived room and has no anchor, and no detail is open — the
+ * one state in which the picker is the right answer. Nothing may be started
+ * on nothing.
+ */
+test("⌘T with nothing in front of the reader opens the picker and starts nothing", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  location.hash = "#/ctx/all";
+
+  app = mount(App, { target, props: {} });
+  await until(() => tabLabels().includes("All work"), "the shell never drew a room");
+
+  pressTimerKey();
+  await until(() => pickerTitle() !== null, "⌘T never opened the picker");
+
+  expect(timerStarts, "a timer was started on nothing").toEqual([]);
+  expect(timerStops, "⌘T stopped a timer that was not running").toBe(0);
+});
+
+/**
+ * An ad-hoc context has no anchor -- it never needed a source system -- so it
+ * is the stored room that still asks. The direction that stops the anchor rule
+ * from reading "any stored room starts on something".
+ */
+test("⌘T in an ad-hoc room, which has no anchor, opens the picker", async () => {
+  dbReady = true;
+  healthRows = [row("mock", "ok")];
+  contextRows = [
+    {
+      id: "ctx:triage",
+      kind: "adhoc",
+      title: "Thursday triage",
+      anchor_id: null,
+      created_at: "2026-09-02T09:00:00Z",
+      archived_at: null,
+    },
+  ];
+  location.hash = "#/ctx/ctx:triage";
+
+  app = mount(App, { target, props: {} });
+  await until(() => roomName() === "Thursday triage", "the stored room never arrived");
+
+  pressTimerKey();
+  await until(() => pickerTitle() !== null, "⌘T never opened the picker");
+  expect(timerStarts).toEqual([]);
 });

@@ -84,6 +84,21 @@ export interface Timer {
   /** Stop, and answer with the block that closed, or `null`. */
   stop(): Promise<Block | null>;
   /**
+   * **Move the clock to another target: stop first, then start** (#278,
+   * story 11) — what the launcher's *Start timer* row does.
+   *
+   * The stop comes first and unconditionally, because that is what closes the
+   * block the reader was in; a start that let the backend refuse it as a
+   * `conflict`, or one that replaced the row, would lose the sitting either
+   * way. It answers with the block that closed, which is what #280's worklog
+   * draft opens on.
+   *
+   * Here rather than in the shell's glue, for the reason `press()` is: the
+   * order is a rule about the clock, and a rule the shell owned would be one
+   * every future caller had to remember.
+   */
+  switchTo(target: TimerTarget): Promise<Block | null>;
+  /**
    * **What ⌘T does**, decided here rather than in the keyboard.
    *
    * The three behaviours of issue #278, in the order the ticket states them:
@@ -166,6 +181,11 @@ export function createTimer(ports?: Partial<TimerPorts>): Timer {
     async stop() {
       const closed = await io.stopTimer();
       state.current = null;
+      return closed;
+    },
+    async switchTo(target: TimerTarget) {
+      const closed = await this.stop();
+      await this.start(target);
       return closed;
     },
     async press() {

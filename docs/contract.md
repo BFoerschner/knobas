@@ -3368,7 +3368,8 @@ From this commit on, each of the following requires an orchestrator decision **a
   shell's first `current_timer` can never beat it. A stranded timer's block ends at
   `last_heartbeat`, not at `now()`: `now()` would log the hours knobas spent closed as work, which
   is the one thing a forgotten timer must not do. It is flagged `ended_by_relaunch` so #279 can
-  offer *Extend to now* rather than silently shortening a real overnight session. A sweep that
+  offer *Extend to now* rather than silently shortening a block somebody really did work
+  through. A sweep that
   fails is logged and bring-up continues — refusing to start over a forgotten timer would make it
   a reason knobas cannot open at all. Both halves are witnessed: `time_ipc.rs` closes a timer
   whose last heartbeat is **hours** before the sweep, so "at the heartbeat" and "at `now()`" are
