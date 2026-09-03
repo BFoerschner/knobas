@@ -56,6 +56,31 @@ function render(answer: StandupDigest) {
           return Promise.resolve(answer);
         },
       },
+      // The protocol panel below the digest (#289) is stubbed rather than
+      // left to reach a Tauri that is not here: this file is about the three
+      // lists, and a panel that failed its own reads would put a sentence
+      // about the protocol into `text()` on every assertion made here.
+      protocolPorts: {
+        standupProtocol: () =>
+          Promise.resolve({
+            day: "2026-08-31",
+            note_id: "note:1",
+            page_title: "2026-08-31",
+            publication: null,
+          }),
+        getNote: () =>
+          Promise.resolve({
+            note: {
+              id: "note:1",
+              title: "Standup 2026-08-31",
+              body_md: "",
+              created_at: "2026-08-31T07:00:00Z",
+              updated_at: "2026-08-31T07:00:00Z",
+            },
+            refs: [],
+            links: [],
+          }),
+      },
     },
   });
   flushSync();
