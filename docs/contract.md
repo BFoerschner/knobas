@@ -3414,7 +3414,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   **No new event, and that is the acceptance criterion rather than an omission.** `start_timer`
   and `stop_timer` write activity lines with actor `user` and announce them on the existing
   `activity:new`, so the status bar's latest-change line, the shell's timer store and the digest
-  (#282) all learn through the signal they already watch; the strip ticks *elapsed* client-side
+  (#288) all learn through the signal they already watch; the strip ticks *elapsed* client-side
   from `started_at`. A channel of the timer's own would be a second thing to keep in step with the
   first and would carry no fact the row does not already hold. The relaunch sweep signs its line
   `knobas` — the actor `knobas_core::activity` reserves for an action knobas took on its own —

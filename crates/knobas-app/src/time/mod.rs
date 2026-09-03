@@ -22,7 +22,7 @@
 //! stream it already watches** (`activity:new`, `app/src/lib/shell/
 //! latest-change.svelte.ts`). [`start`] and [`stop`] write an activity line
 //! with actor `user`, so the status bar's latest-change line and the digest
-//! (#282) both see them without a channel of their own, and the strip's
+//! (#288) both see them without a channel of their own, and the strip's
 //! *elapsed* is ticked client-side off `started_at` rather than pushed. A
 //! second event would be a second thing to keep in step with the first, and
 //! it would carry no fact the row does not already hold.
@@ -544,7 +544,7 @@ pub async fn close_stranded(pool: &PgPool) -> Result<Option<Block>, IpcError> {
 /// What an activity line says about a closed block, beyond its verb.
 ///
 /// `seconds` rather than the two stamps again: the line is read by the status
-/// bar and by the digest (#282), and both want "how long", which neither would
+/// bar and by the digest (#288), and both want "how long", which neither would
 /// otherwise be able to work out without re-reading the block.
 fn detail_of(block: &Block) -> serde_json::Value {
     serde_json::json!({
