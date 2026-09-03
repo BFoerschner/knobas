@@ -917,8 +917,8 @@ async fn an_edit_made_against_a_version_the_server_has_passed_is_refused_by_conf
         .expect("the queue row is readable")
         .expect("the row the refusal settled");
     assert_eq!(
-        (again.state, again.attempts, again.wait_reason.clone()),
-        (refused.state, refused.attempts, refused.wait_reason.clone()),
+        (again.state, again.attempts, again.wait_reason),
+        (refused.state, refused.attempts, refused.wait_reason),
         "a refused write is terminal: the flush after it picked the row up again, which is what \
          a retryable classification would do to a person's edit for ever: {again:?}"
     );
