@@ -6,6 +6,10 @@ import { invoke } from "@tauri-apps/api/core";
 // what it hands over and what comes back are the queue's, and a second
 // declaration of either would be two shapes for one wire format.
 import type { QueuedWrite, WriteOpPayload } from "./sources";
+// A day is a day wherever it is asked for: the digest takes the same
+// `DayWindow` the timesheet does rather than declaring a second shape for one
+// wire format, which is the rule the import above follows for the queue's.
+import type { DayWindow } from "./time";
 
 /**
  * One line in a room — `knobas_app::commands::entity::EntityRow`.
@@ -1098,4 +1102,98 @@ export function notificationKinds(): Promise<InboxCategory[]> {
  */
 export function setNotificationKinds(kinds: InboxCategory[]): Promise<InboxCategory[]> {
   return invoke<InboxCategory[]>("set_notification_kinds", { kinds });
+}
+
+/**
+ * One line of the standup digest — `knobas_app::standup::DigestLine` (#288).
+ *
+ * Story 59: *every digest line links to the commit, PR, worklog, comment or
+ * transition it came from, so that a line is something I can check.* The first
+ * three fields are what the line is about and the last three are why it is
+ * here — produced by the rule that made the line, never re-rendered from
+ * {@link verb} at display time.
+ */
+export interface DigestLine {
+  /**
+   * The item to open, as an entity id.
+   *
+   * `null` for exactly one line: a running timer on an ad-hoc label, which has
+   * no item behind it. The view draws that line as text rather than as a link;
+   * "DB config for the migration" is a legal thing to be working on and a
+   * digest that dropped it would leave the reader's own afternoon out of their
+   * standup.
+   */
+  entity_id: string | null;
+  /** The entity's kind, for the monogram. `null` with `entity_id`. */
+  kind: string | null;
+  /**
+   * What the line is about, in the source's own words — or the ad-hoc label.
+   * Raw source text: render as text, never as markup (gotcha 7).
+   */
+  title: string;
+  /**
+   * Which source said so — a `source_config.id`, or `knobas` for a line that
+   * is knobas' own record of an act (a worklog copy, the running timer).
+   */
+  source: string;
+  /**
+   * Which verb, as one word: `authored`, the write queue's own op (`comment`,
+   * `transition`, …), `log_work`, `timer`, `blocked_status` or `blocked_by`.
+   */
+  verb: string;
+  /** Why this line is here, as a sentence naming the source and the verb. */
+  reason: string;
+  /** RFC 3339 — when it happened, and what each list is ordered by. */
+  at: string;
+}
+
+/**
+ * The standup's three lists — `knobas_app::standup::StandupDigest` (#288).
+ *
+ * `CONTEXT.md`'s **digest**, drawn from the mirror and the activity stream for
+ * the configured usernames. Mine only: it describes the person the sources
+ * were configured as, never a colleague.
+ */
+export interface StandupDigest {
+  /**
+   * `"2026-08-28"` — the day {@link yesterday} is really about, in the
+   * reader's own reckoning. Friday, on a Monday.
+   *
+   * `null` when nothing was found inside the seven-day cap, which is a week
+   * off and not an error. The view says so; a date filled in anyway would put
+   * a heading over an empty list claiming that day was quiet.
+   */
+  yesterday_day: string | null;
+  /** The newest earlier day with any of the user's activity, newest first. */
+  yesterday: DigestLine[];
+  /**
+   * What has been touched since the day's own midnight, plus the running
+   * timer's target, newest first.
+   */
+  today: DigestLine[];
+  /**
+   * The user's items a source calls stuck or a link calls blocked. An item can
+   * be on this list twice, once for each reason — they are two different facts
+   * about it and collapsing them would throw one of them away.
+   */
+  blockers: DigestLine[];
+}
+
+/**
+ * The standup digest for one day — `standup_digest` (#288, spec #272).
+ *
+ * **The webview computes the days**, each as a date and the two instants it
+ * spans, because the machine's timezone is a fact only this side holds — the
+ * rule `lib/time/day.ts` records in full. `today` is the day being asked about
+ * and `earlier` the days before it, oldest first; `lib/standup/standup.ts`'s
+ * `digestWindows` is what builds both.
+ *
+ * How far back *yesterday* may reach is **not** this side's to decide: the
+ * backend consults at most its own seven, however many windows are sent.
+ */
+export function standupDigest(
+  today: DayWindow,
+  earlier: DayWindow[],
+): Promise<StandupDigest> {
+  return invoke<StandupDigest>("standup_digest", { today, earlier });
 }
