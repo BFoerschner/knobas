@@ -416,6 +416,44 @@ pub fn shutdown<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
+/// One pass of the background task: back up if one is due, then sweep.
+///
+/// A function rather than the body of the loop so that
+/// `tests/backup_ipc.rs` can run one pass and read what it did; the loop
+/// around it decides only how often.
+///
+/// **The sweep is not conditional on the export.** Observations age out on a
+/// clock of their own (`time::passive::RETENTION_DAYS`), and a person who
+/// turns nightly backups off has not asked knobas to keep a record of what
+/// they had open for ever -- if anything, the opposite.
+///
+/// # Why the observation sweep is here at all
+///
+/// Because this is the app's one wall-clock loop that is not per-source, and
+/// because retention is already this module's business -- the archives on disk
+/// have a `keep` and this is where it is spent. The rule and the constant stay
+/// in `time::passive`, which owns what an observation is; what this module
+/// contributes is the clock. `time::passive::prune` records the rest of the
+/// reasoning, including why the day read is the wrong home for it.
+///
+/// Neither half can stop the other: each is logged and the tick returns, for
+/// the reason the loop never breaks. A backup that cannot be written is not a
+/// reason to stop trying every night, and there is no window to report either
+/// failure in from here (the settings dialog reads `backup_status`, which
+/// shows the last export that *did* work).
+pub async fn tick(state: &BackupState) {
+    match export_if_due(state).await {
+        Ok(Some(record)) => tracing::info!(file = %record.file, "nightly backup taken"),
+        Ok(None) => {}
+        Err(error) => tracing::error!(%error, "the nightly backup failed"),
+    }
+    match crate::time::passive::prune(&state.pool, Utc::now()).await {
+        Ok(0) => {}
+        Ok(taken) => tracing::info!(taken, "observations older than the horizon pruned"),
+        Err(error) => tracing::error!(%error, "the observation sweep failed"),
+    }
+}
+
 /// Ask whether a backup is due, every [`TICK`], until cancelled.
 async fn tick_loop(state: Arc<BackupState>) {
     tokio::select! {
@@ -423,15 +461,7 @@ async fn tick_loop(state: Arc<BackupState>) {
         () = tokio::time::sleep(STARTUP_DELAY) => {}
     }
     loop {
-        // A failed export is logged and the loop goes on: a backup that cannot
-        // be written is not a reason to stop trying every night, and there is
-        // no window to report it in from here (the settings dialog reads
-        // `backup_status`, which shows the last one that *did* work).
-        match export_if_due(&state).await {
-            Ok(Some(record)) => tracing::info!(file = %record.file, "nightly backup taken"),
-            Ok(None) => {}
-            Err(error) => tracing::error!(%error, "the nightly backup failed"),
-        }
+        tick(&state).await;
         tokio::select! {
             () = state.cancel.cancelled() => return,
             () = tokio::time::sleep(TICK) => {}

@@ -1702,6 +1702,68 @@ async fn the_day_the_horizon_cuts_through_keeps_the_blocks_it_was_already_offere
     );
 }
 
+/// **A swept day and an empty one are different days, and the strip shows
+/// which.**
+///
+/// Two days carrying the same passive block, read the same way, one read
+/// apart. The swept one had beats and no longer has them; the empty one has
+/// beats that attribute nothing -- a reader in a room with nothing open, which
+/// is a real observation and not a missing one. The first keeps its block and
+/// the second loses it, which is the whole difference between *absent* and
+/// *observed and had nothing* stated at the only level a person can see it.
+///
+/// The empty half is what stops this passing on a `materialize` that had
+/// simply stopped reconciling: forgetting still works, on the day the evidence
+/// is still there for.
+#[tokio::test]
+async fn a_swept_day_keeps_its_block_and_an_observed_empty_day_loses_one() {
+    let pool = scratch("time-passive-swept-vs-empty").await;
+    time::passive::set_enabled(&pool, true).await.unwrap();
+    let empty_day = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
+    let swept_day = empty_day - Duration::days(10);
+
+    // One guess, on each day, of the kind a knobas that still had the beats
+    // would have written.
+    for day_start in [swept_day, empty_day] {
+        sqlx::query(
+            "insert into knobas.block (started_at, ended_at, entity_id, kind)
+             values ($1, $2, $3, 'passive')",
+        )
+        .bind(day_start + Duration::hours(9))
+        .bind(day_start + Duration::hours(10))
+        .bind(TICKET)
+        .execute(&pool)
+        .await
+        .expect("a passive block from a knobas that still had the beats");
+    }
+    let ticket = on(TICKET);
+    beats(&pool, Some(&ticket), swept_day + Duration::hours(9), 21, Duration::seconds(30)).await;
+    beats(&pool, None, empty_day + Duration::hours(9), 21, Duration::seconds(30)).await;
+
+    let taken = time::passive::prune(&pool, empty_day + Duration::days(time::passive::RETENTION_DAYS))
+        .await
+        .expect("the sweep runs");
+    assert_eq!(taken, 21, "the older day's beats are what went");
+    assert_eq!(
+        observations(&pool).await,
+        21,
+        "the later day is still observed -- that is what makes it empty rather \
+         than absent"
+    );
+
+    assert_eq!(
+        day(&pool, swept_day).await,
+        vec![(BlockKind::Passive, on(TICKET), 3600)],
+        "the swept day read as observed-and-empty and its block was \
+         reconciled away"
+    );
+    assert!(
+        day(&pool, empty_day).await.is_empty(),
+        "a day observed with nothing in the foreground still takes its guess \
+         back -- retention must not have switched forgetting off"
+    );
+}
+
 // -- the worklog draft (#280) -----------------------------------------------
 //
 // The draft's *reads*, against a real database: which blocks a day's interval
