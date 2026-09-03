@@ -279,6 +279,39 @@ impl Harness {
         id
     }
 
+    /// `count` mirrored commits of the reader's, all at the same instant.
+    ///
+    /// Bulk, because the only thing this fixture is about is the *number*:
+    /// filling one producer's own cap is the only way to ask whether the
+    /// merged list is capped again behind it.
+    async fn many_items(&self, count: i64, at: DateTime<Utc>) {
+        sqlx::query(
+            "insert into knobas.entity (id, kind, title)
+             select $1 || ':bulk' || n, 'commit', 'bulk ' || n
+               from generate_series(1, $2) as n",
+        )
+        .bind(FORGE)
+        .bind(count)
+        .execute(&self.pool)
+        .await
+        .expect("the entity rows are written");
+        sqlx::query(
+            "insert into sync.item
+                 (entity_id, source_id, kind, title, body_text, author,
+                  item_updated_at, payload)
+             select $1 || ':bulk' || n, $1, 'commit', 'bulk ' || n, '', $3, $4,
+                    '{}'::jsonb
+               from generate_series(1, $2) as n",
+        )
+        .bind(FORGE)
+        .bind(count)
+        .bind(ME)
+        .bind(at)
+        .execute(&self.pool)
+        .await
+        .expect("the mirror rows are written");
+    }
+
     async fn entity(&self, id: &str, kind: &str, title: &str) {
         sqlx::query(
             "insert into knobas.entity (id, kind, title) values ($1,$2,$3)
@@ -611,6 +644,48 @@ async fn a_logged_afternoon_is_one_line_and_not_the_queue_line_as_well() {
         vec![(Some(ticket.as_str()), TRACKER, "log_work")],
         "the local copy is the worklog's one line; its queue line is the same \
          fact a second time"
+    );
+}
+
+/// **The cap is per producer, and the merged list is not capped again.**
+///
+/// The bound `knobas_app::standup::MOST_LINES` puts on each of the three reads
+/// is documented as deliberately *not* applied to the merge, because a second
+/// cap at the same number is one that can silently delete a whole producer.
+/// Nothing witnessed that until this fixture: a mutant re-applying the cap at
+/// its real value passes every other test in the battery, because no other
+/// fixture has more than a handful of lines in it.
+///
+/// So: two hundred mirror commits, which is exactly what that producer's own
+/// `limit` allows, every one of them later in the day than the afternoon that
+/// was logged. The worklog is the oldest line and therefore the last, which
+/// is precisely the one a cap over the merge takes -- and the reader would be
+/// looking at a standup with their own hours missing and nothing saying so.
+#[tokio::test]
+async fn a_days_hours_are_still_on_the_list_under_two_hundred_mirror_lines() {
+    // The mirror producer's own `limit`. Spelled here rather than imported
+    // because the constant is private to the module under test; the number is
+    // load-bearing only in that it has to *fill* that limit.
+    const MOST_LINES: i64 = 200;
+
+    let h = harness("standup-no-second-cap").await;
+    let logged = h.ticket("PAY-231", ME, "In Progress").await;
+    h.worklog(&logged, days_before(1, 6, 0)).await;
+    h.many_items(MOST_LINES, days_before(1, 12, 0)).await;
+
+    let digest = h.digest().await;
+
+    assert_eq!(
+        digest.yesterday.len() as i64,
+        MOST_LINES + 1,
+        "two hundred mirror lines and one worklog are two hundred and one lines"
+    );
+    let last = digest.yesterday.last().expect("a last line");
+    assert_eq!(
+        (last.entity_id.as_deref(), last.verb.as_str()),
+        (Some(logged.as_str()), "log_work"),
+        "the hours are the oldest line on the day and so the first thing a \
+         second cap would drop"
     );
 }
 
