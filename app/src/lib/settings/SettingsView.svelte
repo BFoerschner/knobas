@@ -20,10 +20,12 @@
   architecture this ticket does not own.
 
   The second section arrived with #282 (passive attribution) and cost exactly
-  what the ruling said it would: one component and one import.
+  what the ruling said it would: one component and one import. So did the third
+  (#290, desktop notifications).
 -->
 <script lang="ts">
   import BackupSection from "./BackupSection.svelte";
+  import NotificationsSection from "./NotificationsSection.svelte";
   import PassiveSection from "./PassiveSection.svelte";
 </script>
 
@@ -35,5 +37,6 @@
   <div class="view-b">
     <BackupSection />
     <PassiveSection />
+    <NotificationsSection />
   </div>
 </div>

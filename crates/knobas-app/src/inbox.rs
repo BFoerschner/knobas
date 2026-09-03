@@ -476,6 +476,28 @@ mod tests {
         );
     }
 
+    /// Every category has a **toggle in the interface** (#290).
+    ///
+    /// The other half of `app/src/lib/settings/NotificationsSection.svelte`,
+    /// and the half that cannot be checked from TypeScript: `InboxCategory`
+    /// is a string union mirrored by hand, so a sixth category added here
+    /// would compile on both sides and simply never appear as a switch --
+    /// a demand nobody can ever be notified about, with nothing failing
+    /// anywhere. The words themselves are the interface's to choose; that each
+    /// category is named is not.
+    #[test]
+    fn every_inbox_category_has_a_toggle_in_the_interface() {
+        const SECTION: &str =
+            include_str!("../../../app/src/lib/settings/NotificationsSection.svelte");
+        for category in Category::ALL {
+            assert!(
+                SECTION.contains(&format!("id: \"{}\"", category.as_str())),
+                "{category} has no toggle in the settings section, so nobody \
+                 can ever switch notifications on for it"
+            );
+        }
+    }
+
     /// Every candidate op a category names has a **form in the interface**.
     ///
     /// The other half of `app/src/lib/inbox/actions.ts`, and the half that
