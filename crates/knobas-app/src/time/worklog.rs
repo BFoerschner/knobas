@@ -89,8 +89,8 @@ const NOT_WORK: &[&str] = &[
     // The timer's own (`super::start`, `super::stop`).
     "started",
     "stopped",
-    // The write queue's (`knobas_sync::write_queue`'s `announce` and, for the
-    // last of them, `announce_with`).
+    // The write queue's (`knobas_sync::write_queue`'s `announce` and
+    // `announce_with`).
     "queued",
     "released",
     "amended",

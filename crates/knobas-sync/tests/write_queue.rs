@@ -844,20 +844,13 @@ async fn a_source_with_no_credential_keeps_the_write() {
     assert!(h.delivered().is_empty());
 }
 
-/// The forcing function ADR-0006 relies on, applied to hold detection: a new
-/// `WriteOp` variant that reaches the queue without a stated definition of
-/// "changed" must fail a test rather than fall back quietly.
-///
-/// The match has no wildcard arm for the same reason `WriteOp::identifier`
-/// has none, so a new variant stops this test compiling until it is given a
-/// probe value -- and then this assertion until it is given a projection.
 /// One probe value per `WriteOp` variant, shared by the two tests below that
 /// each ask the enum a question of its own.
 ///
-/// The array itself forces nothing -- an array does not go non-exhaustive when
+/// The list itself forces nothing -- a `vec!` does not go non-exhaustive when
 /// an enum grows. The no-wildcard `match` in each test is the forcing
-/// function, and the length assertions beside them are what catch a variant
-/// added there but never given a probe here.
+/// function, and the length assertion beside it is what catches a variant
+/// given an arm there but never a probe here.
 fn write_op_probes() -> Vec<WriteOp> {
     vec![
         WriteOp::Comment {
@@ -918,6 +911,13 @@ fn write_op_probes() -> Vec<WriteOp> {
     ]
 }
 
+/// The forcing function ADR-0006 relies on, applied to hold detection: a new
+/// `WriteOp` variant that reaches the queue without a stated definition of
+/// "changed" must fail a test rather than fall back quietly.
+///
+/// The match has no wildcard arm for the same reason `WriteOp::identifier`
+/// has none, so a new variant stops this test compiling until it is given a
+/// probe value -- and then this assertion until it is given a projection.
 #[test]
 fn every_write_op_has_a_stated_projection() {
     let probes = write_op_probes();
@@ -1187,11 +1187,23 @@ fn every_write_op_says_whether_a_withdrawal_can_leave_one() {
             op.identifier()
         );
     }
+    // `PROJECTED_OPS` is one entry per variant -- the test above is what makes
+    // that true -- so it is the variant count, and using it here rather than a
+    // literal means neither of these tests has a number to hand-bump.
     assert_eq!(
         probes.len(),
-        11,
+        store::PROJECTED_OPS.len(),
         "a `WriteOp` variant has no probe in `write_op_probes`"
     );
+    // And the other direction, which iterating the probes cannot reach: an
+    // entry in `UNCLAIMED_OPS` that names no variant at all would never be
+    // compared against one, so it would sit there inert and unfalsifiable.
+    for op in flusher::UNCLAIMED_OPS {
+        assert!(
+            probes.iter().any(|probe| probe.identifier() == *op),
+            "UNCLAIMED_OPS names {op:?}, which is not a `WriteOp`"
+        );
+    }
 }
 
 /// The op is what the line is about, not the race. A `comment` that landed

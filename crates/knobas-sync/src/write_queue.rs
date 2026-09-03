@@ -564,19 +564,24 @@ async fn build(
 /// losing the narration must not turn a delivered write into a failed one --
 /// the same treatment `run_inner` gives a run's activity line.
 async fn announce(deps: &SchedulerDeps, verb: &str, write: &QueuedWrite) {
-    announce_with(deps, verb, write, serde_json::Map::new()).await;
+    announce_with(deps, verb, write, None).await;
 }
 
-/// [`announce`], with `extra` merged into the line's detail.
+/// [`announce`], plus the id the source gave what it made.
 ///
-/// The extra fields are added rather than replacing the shape, so every line
-/// this module writes still answers the same six questions and a reader does
-/// not have to know which verb they are looking at to find the write.
+/// One named key rather than a bag the caller fills: the six fields below are
+/// what every line this module writes answers, so a reader does not have to
+/// know which verb they are looking at to find the write, and a merge wide
+/// enough to add a seventh is wide enough to overwrite one of the six.
+///
+/// `None` writes no key at all rather than a `null` -- the distinction
+/// [`unclaimed`] rests on, since a source that named nothing and a source
+/// that named nothing *knowable* are the same silence.
 async fn announce_with(
     deps: &SchedulerDeps,
     verb: &str,
     write: &QueuedWrite,
-    extra: serde_json::Map<String, serde_json::Value>,
+    remote_id: Option<&str>,
 ) {
     let entity = match EntityRef::parse(&write.entity_id) {
         Ok(entity) => entity,
@@ -590,8 +595,8 @@ async fn announce_with(
         "reason": write.wait_reason.map(|r| r.as_str()),
         "detail": write.detail,
     });
-    if let Some(object) = detail.as_object_mut() {
-        object.extend(extra);
+    if let (Some(remote_id), Some(object)) = (remote_id, detail.as_object_mut()) {
+        object.insert("remote_id".to_owned(), remote_id.into());
     }
     match activity::record(&deps.pool, ACTOR, verb, Some(&entity), detail).await {
         Ok(row) => deps.events.activity_new(row),
@@ -695,11 +700,7 @@ async fn unclaimed(deps: &SchedulerDeps, write: &QueuedWrite, receipt: &WriteRec
     if settled.state != WriteState::Discarded {
         return;
     }
-    let mut extra = serde_json::Map::new();
-    if let Some(remote_id) = &receipt.remote_id {
-        extra.insert("remote_id".to_owned(), remote_id.as_str().into());
-    }
-    announce_with(deps, "unclaimed", &settled, extra).await;
+    announce_with(deps, "unclaimed", &settled, receipt.remote_id.as_deref()).await;
 }
 
 /// The source refused the write. It stops being offered.
