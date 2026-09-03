@@ -1765,3 +1765,190 @@ async fn a_reassignment_through_the_assignee_endpoint_reaches_the_next_increment
         now.author
     );
 }
+
+/// **Two changes to one issue inside one second, with a run between them, and
+/// both reach the sink** (issue #345, the acceptance criterion).
+///
+/// This is the bug in its own habitat, and the one thing no fake can settle:
+/// that Jira's `/search` really does report `updated` to the second while the
+/// issue underneath it changes in milliseconds, so that two changes can share
+/// a stamp *at the only resolution a run can observe*. The fixture does not
+/// contrive the collision -- it makes two ordinary writes back to back and
+/// asserts, from the server's own answers, that they landed in the same second
+/// before the assertion that matters. If they did not, the test says so and
+/// fails rather than passing vacuously, because a run between two changes a
+/// second apart would prove nothing.
+///
+/// The run in the middle is what made this permanent rather than transient:
+/// `knobas_app::sources::write_queue`'s `refresh` fires one after every landed
+/// write, so *comment through knobas, then reassign in Jira* put the issue in
+/// `seen` at the shared second and no later run ever reached it -- `updated`
+/// does not move again on its own. Only a backfill recovered it.
+///
+/// Both changes are asserted, not just the second: an adapter that delivered
+/// the reassignment while losing the comment would be the same bug wearing the
+/// other shoe.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
+async fn two_changes_inside_one_second_with_a_run_between_them_both_reach_the_sink() {
+    let seeded = seeded();
+    // `Labeled::new` clears an earlier run's leftovers, so the baseline below
+    // is taken over a clean corpus.
+    let mut labelled = Labeled::new(&seeded).await;
+    let mut assigned = Reassigned::new(&seeded);
+    let source = seeded.source(serde_json::json!({}));
+    const BORROWED: &str = "PAY-240";
+
+    let (items, cursor) = full(&*source).await;
+    let baseline = item(&items, BORROWED)
+        .updated_at
+        .expect("a real Jira always sets updated");
+    after_the_second_of(baseline).await;
+
+    // Change one: a label, through the generic issue PUT.
+    labelled.label(&seeded, BORROWED).await;
+    let after_first = stamp_of(&seeded, BORROWED).await;
+
+    // The run in between -- this is what records the issue at that second.
+    let deadline = std::time::Instant::now() + INDEX_BUDGET;
+    let between = loop {
+        let (items, next) = sync_from(&*source, Some(cursor.clone())).await;
+        if !items.is_empty() {
+            assert!(
+                item(&items, BORROWED).payload["fields"]["labels"]
+                    .as_array()
+                    .is_some_and(|l| l.iter().any(|v| v == LITTER_LABEL)),
+                "the run in between must be the one that saw the label, or the collision \
+                 below is not the one being tested"
+            );
+            break next;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the label did not reach the index within {INDEX_BUDGET:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+
+    // Change two, immediately: the reassignment, through the dedicated
+    // endpoint, inside the same second if the machine is quick enough.
+    assigned.take(&seeded, BORROWED).await;
+    let after_second = stamp_of(&seeded, BORROWED).await;
+
+    // The premise, from the server rather than from hope. `/search` truncates
+    // to the second, so this is the comparison a run can actually make.
+    // Whole seconds, because that is the resolution `/search` answers in and
+    // therefore the only one a run can compare at.
+    let one_second = after_first.timestamp() == after_second.timestamp();
+    assert!(
+        after_second >= after_first,
+        "time ran backwards: {after_first} then {after_second}"
+    );
+    println!(
+        "SEEDED {BORROWED}: label at {after_first}, reassignment at {after_second} \
+         -- same second: {one_second}"
+    );
+    assert!(
+        one_second,
+        "the two writes landed {} ms apart and in different seconds, so this run cannot \
+         witness the collision #345 is about. It is not a flake to retry past: a machine \
+         slow enough for this is one where the assertion would pass for the wrong reason.",
+        (after_second - after_first).num_milliseconds()
+    );
+
+    // And the second change is still delivered, although the only timestamp a
+    // run can see is unchanged.
+    let deadline = std::time::Instant::now() + INDEX_BUDGET;
+    let delivered = loop {
+        let (items, _) = sync_from(&*source, Some(between.clone())).await;
+        if !items.is_empty() {
+            break items;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the reassignment of {BORROWED} was never delivered. Its `updated` shares a \
+             second with the change the previous run recorded, which is exactly the record \
+             the cursor's digest exists to tell apart."
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+    let now = item(&delivered, BORROWED);
+    assert_eq!(
+        now.author.as_deref(),
+        Some(seeded.user.as_str()),
+        "the second change reached the sink but not its content"
+    );
+    assert!(
+        now.payload["fields"]["labels"]
+            .as_array()
+            .is_some_and(|l| l.iter().any(|v| v == LITTER_LABEL)),
+        "and the first change is still on the record it delivered"
+    );
+}
+
+/// One issue's `updated` as the **issue endpoint** reports it -- to the
+/// millisecond, which `/search` does not.
+async fn stamp_of(seeded: &Seeded, key: &str) -> chrono::DateTime<chrono::Utc> {
+    let (status, body) = seeded
+        .get(&format!("rest/api/2/issue/{key}?fields=updated"))
+        .await;
+    assert_eq!(status, 200, "reading {key}'s updated: {body}");
+    let raw = body["fields"]["updated"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{key} has no updated: {body}"));
+    chrono::DateTime::parse_from_str(raw, "%Y-%m-%dT%H:%M:%S%.3f%z")
+        .unwrap_or_else(|e| panic!("{raw:?}: {e}"))
+        .with_timezone(&chrono::Utc)
+}
+
+/// **An untouched source stays quiet, poll after poll after poll** (battery
+/// clause 2, against the real index).
+///
+/// The suite already asserts one idle poll. This asserts [`IDLE_POLLS`] of
+/// them, and it exists for one specific risk that arrived with issue #345's
+/// digest identity: `seen` now recognises a record by a fingerprint of
+/// everything `/search` returned for it, so **any** field that differs between
+/// two reads of an unchanged issue makes every poll re-emit the whole window.
+/// Correctness would survive that -- upserts are idempotent -- and clause 2
+/// would not, and neither would the user's activity log, which would grow a
+/// line per source per poll for ever.
+///
+/// No fake can find that: a fake answers whatever it was seeded with, so a
+/// volatile field is by construction invisible to it. It takes the real server
+/// answering the same query repeatedly, which is what this does. It fails on
+/// the **first** poll that emits anything, and names the issue, so a flapping
+/// field is loud rather than a quiet doubling of every sync.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
+async fn an_untouched_source_is_still_quiet_after_many_polls() {
+    /// Enough to mean it, and still under a second in total against a local
+    /// container: the failure this looks for is deterministic, so the number is
+    /// about conviction rather than about catching a rare event.
+    const IDLE_POLLS: usize = 12;
+
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let source = seeded.source(serde_json::json!({}));
+
+    let (items, mut cursor) = full(&*source).await;
+    assert_eq!(keys(&items), seeded.seeded_keys());
+
+    for poll in 1..=IDLE_POLLS {
+        let (items, next) = sync_from(&*source, Some(cursor.clone())).await;
+        assert!(
+            items.is_empty(),
+            "poll {poll} of {IDLE_POLLS} emitted {:?} from a source nothing has touched. \
+             Every one of those issues was recognised on the polls before it, so what \
+             changed is Jira's answer and not the corpus: some field in the `/search` \
+             record differs between two reads, and the cursor's digest is over the whole \
+             record. Find it by diffing two consecutive `/search` responses for that key.",
+            keys(&items)
+        );
+        assert_eq!(
+            next, cursor,
+            "poll {poll} emitted nothing and still handed back different bytes"
+        );
+        cursor = next;
+    }
+    println!("SEEDED {IDLE_POLLS} idle polls, all quiet, cursor unchanged: {cursor}");
+}

@@ -926,20 +926,26 @@ async fn sync(state: &SourcesState) {
 /// Sync the source **from no position at all**, and wait for the run to end.
 ///
 /// `knobas_sync::backfill`'s own words: an incremental run re-fetches what
-/// changed *upstream*, and it decides that from the watermark and the
-/// `(key, updated)` pairs the previous run recorded. A fixture that changes a
-/// field through the REST API and then wants the mirror to agree is asking for
-/// exactly the job that entry point exists to do -- so it asks for it, rather
-/// than syncing repeatedly and hoping an incremental notices.
+/// changed *upstream*, and it decides that from the watermark and the records
+/// the previous run recorded. A fixture that changes something through the REST
+/// API and then wants the mirror to agree is asking for exactly the job that
+/// entry point exists to do.
 ///
-/// Measured, not assumed: three live runs asserted after ordinary `sync` calls
-/// -- the last of them six of them over twenty-two seconds, with Jira's search
-/// index already agreeing -- and `sync.live_item` held the old assignee every
-/// time. It is deterministic, not flaky.
+/// **The Jira half of this fixture no longer needs it, and that is the point of
+/// issue #345.** It used to: a comment through the write queue and a
+/// reassignment in Jira landed in the same second, `/search` reports `updated`
+/// to the second, and the cursor's `(key, updated)` pair therefore recognised
+/// the reassignment as something already delivered and dropped it for ever.
+/// Reaching for `backfill` got the fixture green and hid a real bug behind it.
+/// The cursor now recognises a *record* by fingerprint, so an ordinary `sync`
+/// delivers it, and the digest test below asks for one -- which is what keeps
+/// that fixed.
 ///
-/// Takes the source since #289, whose page has the same problem one product
-/// over: Confluence's CQL index is written asynchronously, so an incremental
-/// run right after a create can look and not find the page it just made.
+/// **The Confluence half still needs it** (#289), for a different reason and
+/// one no cursor change touches: that adapter reads CQL for *both* its runs, so
+/// a page created seconds ago is missing from an incremental and from a
+/// backfill alike until the CQL index catches up. It takes the source for that
+/// reason.
 async fn backfill(state: &SourcesState, source: &str) {
     let (done, wait) = tokio::sync::oneshot::channel();
     let sink = Arc::new(Ending {
@@ -1739,22 +1745,28 @@ async fn a_seeded_days_work_is_what_the_digest_lists_under_yesterday() {
     // -- and now wait for the *mirror* to have caught up ---------------------
     //
     // The precondition the digest's mirror half needs is "`sync.live_item`
-    // holds this ticket as the suite's", and an ordinary sync does not deliver
-    // it: an incremental run decides what to re-fetch from its watermark and
-    // the `(key, updated)` pairs it recorded last time, and an assignment made
-    // through Jira's own assignee endpoint does not reliably move that item
-    // into the window. Measured over three live runs, the last with six syncs
-    // across twenty-two seconds and the search index already agreeing: the
-    // mirror held the old assignee every time.
+    // holds this ticket as the suite's", and an **ordinary sync** delivers it.
     //
-    // So this asks for the run that exists for exactly this -- `backfill`,
-    // no stored position, `knobas_sync::backfill`'s own reason -- and still
-    // converges rather than assuming, because the assertion downstream is
-    // about what the digest makes of the mirror and not about how a sync got
-    // there. It fails loudly with what the mirror actually held.
+    // It did not use to, and this is where that showed. The comment above ran
+    // through the write queue, which fires a sync as soon as the write lands
+    // (`knobas_app::sources::write_queue`'s `refresh`), and the assignment
+    // below it landed inside the same second -- 88 ms after, measured. Jira's
+    // `/search` reports `updated` to the second, so to a run those were one
+    // version of the ticket, and the cursor's `(key, updated)` pair recognised
+    // the reassignment as something it had already delivered and dropped it.
+    // For ever: `updated` never moves again on its own. This fixture reached
+    // for `backfill` to get round it, which hid a real bug behind a fixture.
+    // Issue #345 fixed it in the cursor -- `seen` recognises a **record**, by
+    // digest, not a timestamp -- so a plain sync is enough again, and asking
+    // for one here is what keeps that fixed.
+    //
+    // Still a convergence loop rather than a single sync, and for the reason it
+    // always had: Jira's search index is asynchronous (#325), so the run that
+    // first sees the write is not necessarily the next one. It fails loudly
+    // with what the mirror actually held.
     let mut attributed_to = None;
-    for attempt in 0..3 {
-        backfill(&state, JIRA).await;
+    for attempt in 0..5 {
+        sync(&state).await;
         attributed_to = sqlx::query_scalar::<_, Option<String>>(
             "select author from sync.live_item where entity_id = $1",
         )
@@ -1765,20 +1777,22 @@ async fn a_seeded_days_work_is_what_the_digest_lists_under_yesterday() {
         if attributed_to.as_deref() == Some(env.user.as_str()) {
             if attempt > 0 {
                 println!(
-                    "SEEDED mirror caught up with the assignment on backfill {}",
+                    "SEEDED mirror caught up with the assignment on sync {}",
                     attempt + 1
                 );
             }
             break;
         }
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
     assert_eq!(
         attributed_to.as_deref(),
         Some(env.user.as_str()),
-        "three backfills and the mirror still does not hold {TRANSITIONED} as the suite's, so \
-         the digest cannot attribute it; the write itself landed (its 204 is asserted above) \
-         and the search index agreed (the wait above returned)"
+        "five ordinary syncs and the mirror still does not hold {TRANSITIONED} as the suite's, \
+         so the digest cannot attribute it. The write itself landed (its 204 is asserted \
+         above) and the search index agreed (the wait above returned), so what did not happen \
+         is the delivery: the assignment shares a second with the comment's write, which is \
+         the record #345's cursor digest exists to tell apart."
     );
 
     // -- and what the digest makes of it ------------------------------------
