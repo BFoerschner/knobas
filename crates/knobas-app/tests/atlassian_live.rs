@@ -17,6 +17,12 @@
 //!   that as a completed sync would hand the engine a licence to tombstone
 //!   every ticket in the mirror. [`a_revoked_pat_reaches_the_credential_health_surface_and_the_mirror_survives`]
 //!   is that whole sentence, measured.
+//! * **A worklog, all the way to PAY-231 and back** (issue #280). The write
+//!   queue is what logs a day's blocks, and the id Jira answers with is what
+//!   the local copy carries -- a value that exists for exactly the length of
+//!   one POST response, and that nothing downstream could recover if the
+//!   settle dropped it. [`a_days_work_is_logged_to_pay_231_and_comes_back_in_the_mirror`]
+//!   asserts it at Jira, on the copy, and in the next sync's mirrored payload.
 //! * **The three write ops through the write queue.** `tests/mockd.rs` calls
 //!   `Source::write` directly; the queue is what the *app* calls, and what
 //!   turns an adapter's refusal into the `refused` row the pending-writes panel
@@ -36,7 +42,8 @@
 //! # What this file writes, and what it takes away
 //!
 //! It is the suite that writes: a personal access token, a comment on PAY-231,
-//! one transition of PAY-240 and back, and one new ticket in `PAY`. Every one
+//! one transition of PAY-240 and back, one new ticket in `PAY`, and one
+//! worklog on PAY-231. Every one
 //! of them is undone when the test ends, passing or panicking alike, by a
 //! `Drop` that checks rather than assumes -- [`Litter`] and [`Pat`]. What a
 //! *killed* run left behind is cleared before the next one takes a baseline:
@@ -430,12 +437,25 @@ struct Litter {
     moved: Option<(String, String)>,
     /// The key of the ticket the create filed.
     created: Option<String>,
+    /// `(issue key, worklog id)` -- what `log_work` put on the ticket.
+    ///
+    /// A worklog carries no label, so a **killed** run's worklog is the one
+    /// thing here that `Env::clear_leftovers` cannot find: it is not an issue
+    /// and it is not a token. What puts it back is the adapter live suite's
+    /// `Seeded::clear_leftovers`, which restores PAY-231's worklogs from
+    /// `seed-state.json` rather than from a marker -- the same division the
+    /// module docs record for a comment and a status.
+    worklog: Option<(String, String)>,
 }
 
 impl Drop for Litter {
     fn drop(&mut self) {
-        let (comment, moved, created) =
-            (self.comment.take(), self.moved.take(), self.created.take());
+        let (comment, moved, created, worklog) = (
+            self.comment.take(),
+            self.moved.take(),
+            self.created.take(),
+            self.worklog.take(),
+        );
         let env = env();
         undo("what the write queue sent", move || async move {
             let http = client();
@@ -492,6 +512,43 @@ impl Drop for Litter {
                                 .push(format!("moving {key} back to {was:?} -> {status}: {body}"));
                         }
                     }
+                }
+            }
+
+            // Deleted with `adjustEstimate=leave`, deliberately: the POST that
+            // made it left the estimate at Jira's default of `auto`, which took
+            // the logged time *off* the remaining estimate. The delete's own
+            // default would put it back -- and `auto` on a delete means
+            // "increase", so a seeded estimate would come back changed by the
+            // rounding rather than restored. `leave` takes the worklog away and
+            // touches nothing else, which is what a guard is for.
+            if let Some((key, id)) = worklog {
+                let (status, body) = call(
+                    reqwest::Method::DELETE,
+                    format!(
+                        "rest/api/2/issue/{key}/worklog/{id}?adjustEstimate=leave"
+                    ),
+                    None,
+                )
+                .await;
+                if status != 204 && status != 404 {
+                    failures.push(format!("DELETE worklog {id} on {key} -> {status}: {body}"));
+                }
+                let (status, after) = call(
+                    reqwest::Method::GET,
+                    format!("rest/api/2/issue/{key}/worklog"),
+                    None,
+                )
+                .await;
+                if status != 200 {
+                    failures.push(format!("reading {key}'s worklogs back -> {status}: {after}"));
+                } else if after["worklogs"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|w| w["id"].as_str() == Some(id.as_str()))
+                {
+                    failures.push(format!("worklog {id} is still on {key} after its delete"));
                 }
             }
 
@@ -1081,6 +1138,216 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
         "story 17: attributed to me"
     );
     println!("SEEDED created ticket: {created} ({title})");
+
+    state.scheduler.shutdown().await;
+    drop(litter);
+}
+
+/// **A day's blocks logged to PAY-231, at Jira and back through the mirror**
+/// (issue #280, M3.1).
+///
+/// The claim M3.1 makes is not "a POST returns 201". It is that a person can
+/// stop a timer and have the afternoon end up on the ticket, that knobas'
+/// copy can still name what it sent afterwards, and that the next sync shows
+/// the same worklog coming back. Each of those is a different piece of
+/// machinery and the middle one is unrecoverable if it is wrong: Jira names a
+/// worklog exactly once, in the answer to the POST, and the local copy is
+/// stamped from that answer inside the same statement that settles the write.
+/// If the settle dropped it there is nothing to re-read it from.
+///
+/// Four assertions, in the order the failure would matter:
+///
+/// 1. **the write settled `sent`** through the queue, like every other write;
+/// 2. **the worklog is on PAY-231 at Jira**, with the seconds, the comment and
+///    the start knobas asked for -- read back over REST as the seed's admin,
+///    so it is the server's account and not knobas';
+/// 3. **the copy carries Jira's id**, and it is the id of the row that was
+///    just read back;
+/// 4. **the next sync's mirrored payload carries it**, which is what makes a
+///    worklog visible to everything downstream of the mirror.
+///
+/// The blocks are **two with a gap between them**, because that is the fixture
+/// that can tell "the time worked" from "the window it sat in": 90 minutes and
+/// 60 minutes inside a four-and-a-half-hour span. A draft that logged the span
+/// would put 4h30m on somebody's timesheet.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
+async fn a_days_work_is_logged_to_pay_231_and_comes_back_in_the_mirror() {
+    use knobas_core::write_queue::WriteState;
+
+    let env = env();
+    env.clear_leftovers().await;
+    let mut litter = Litter::default();
+    // A personal access token, for the reason the write test above gives: it
+    // is the credential a real deployment configures, and M3.1's worklog is
+    // the write it was chosen for.
+    let pat = Pat::issue(&env).await;
+    let (state, _events) = app("atlassian_live_worklog", &env, AuthMethod::Pat, &pat.raw).await;
+
+    sync(&state).await;
+    let ticket = format!("{JIRA}:{COMMENTED}");
+    assert!(
+        mirrored(&state.pool).await.contains(&ticket),
+        "the queue snapshots its target at queue time, so {COMMENTED} has to be in \
+         the mirror before a write against it can go"
+    );
+
+    // A day whose whole 09:00--13:30 window is in the **past**, wherever in the
+    // day this suite happens to run: before 14:00 UTC that is yesterday. A
+    // worklog dated in the future is not what this is testing, and a run at
+    // 08:00 would otherwise file one.
+    let now = chrono::Utc::now();
+    let day = if now.time() < chrono::NaiveTime::from_hms_opt(14, 0, 0).expect("14:00") {
+        now.date_naive()
+            .pred_opt()
+            .expect("yesterday exists")
+    } else {
+        now.date_naive()
+    };
+    let at = |hour: u32, minute: u32| {
+        day.and_hms_opt(hour, minute, 0)
+            .expect("a time of day")
+            .and_utc()
+    };
+    for (from, to) in [(at(9, 0), at(10, 30)), (at(12, 30), at(13, 30))] {
+        sqlx::query(
+            "insert into knobas.block (started_at, ended_at, entity_id, kind)
+             values ($1, $2, $3, 'manual')",
+        )
+        .bind(from)
+        .bind(to)
+        .bind(&ticket)
+        .execute(&state.pool)
+        .await
+        .expect("a block is written");
+    }
+
+    let draft = knobas_app::time::worklog::draft(
+        &state.pool,
+        state.registry.as_ref(),
+        &ticket,
+        day,
+        0,
+    )
+    .await
+    .expect("the draft is readable")
+    .expect("a Jira ticket with unlogged blocks has a draft");
+    assert_eq!(
+        draft.seconds,
+        150 * 60,
+        "two and a half hours were worked inside a four-and-a-half-hour window"
+    );
+    assert_eq!(draft.started_at, at(9, 0));
+
+    let comment = format!(
+        "{LITTER_LABEL}: knobas logged this through the write queue (pid {})",
+        std::process::id()
+    );
+    let before = env.issue(COMMENTED, "worklog").await["fields"]["worklog"]["total"]
+        .as_i64()
+        .unwrap_or(0);
+
+    let logged = knobas_app::time::worklog::log(
+        &state,
+        &ticket,
+        day,
+        0,
+        draft.started_at,
+        draft.seconds,
+        &comment,
+    )
+    .await
+    .expect("the day is logged");
+
+    // Owned before anything is asserted: from here the worklog exists at Jira,
+    // so a failing assertion below must still leave the guard something to
+    // delete.
+    if let Some(id) = logged.remote_id.clone() {
+        litter.worklog = Some((COMMENTED.to_owned(), id));
+    }
+
+    // 1. Through the queue, settled.
+    let write_id = logged
+        .write_queue_id
+        .expect("a logged worklog names the write that carries it");
+    let row = knobas_core::write_queue::get(&state.pool, write_id)
+        .await
+        .expect("the queue row is readable")
+        .expect("the row `log` queued");
+    assert_eq!(row.state, WriteState::Sent, "{:?}", row.detail);
+    assert_eq!(row.op, "log_work");
+
+    // 2. On the ticket at Jira, in Jira's own account of it.
+    let worklogs = env.issue(COMMENTED, "worklog").await["fields"]["worklog"].clone();
+    assert_eq!(
+        worklogs["total"].as_i64(),
+        Some(before + 1),
+        "the worklog is on the ticket at Jira: {worklogs}"
+    );
+    let at_jira = worklogs["worklogs"]
+        .as_array()
+        .and_then(|all| {
+            all.iter()
+                .find(|w| w["id"].as_str() == logged.remote_id.as_deref())
+        })
+        .cloned()
+        .unwrap_or_else(|| panic!("the worklog knobas named is not on the ticket: {worklogs}"));
+    assert_eq!(at_jira["timeSpentSeconds"].as_i64(), Some(150 * 60));
+    assert_eq!(at_jira["comment"], comment.as_str());
+    assert_eq!(
+        at_jira["author"]["name"], env.user,
+        "story 17: the source attributes the write to the credential's own account"
+    );
+    // `started` is the field with a *format* rather than a value, and Jira
+    // refuses every spelling but `yyyy-MM-dd'T'HH:mm:ss.SSSZ`. Compared as an
+    // instant, because Jira echoes it back in the instance's own offset.
+    let started_back = at_jira["started"]
+        .as_str()
+        .and_then(|raw| chrono::DateTime::parse_from_str(raw, "%Y-%m-%dT%H:%M:%S%.3f%z").ok())
+        .unwrap_or_else(|| panic!("Jira's own `started` did not parse: {at_jira}"));
+    assert_eq!(
+        started_back.with_timezone(&chrono::Utc),
+        at(9, 0),
+        "the worklog is filed at the moment the work began, not at the moment it \
+         was logged"
+    );
+
+    // 3. ...and the copy names it. (Already used above to find the row -- this
+    //     is the assertion that says so out loud, and that `None` would have
+    //     failed here rather than passing vacuously.)
+    assert!(
+        logged.remote_id.is_some(),
+        "the settle is the only moment Jira's worklog id exists, and the copy \
+         has nothing to point at without it"
+    );
+    println!(
+        "SEEDED worklog {} on {COMMENTED}: {}s",
+        logged.remote_id.clone().unwrap_or_default(),
+        logged.seconds
+    );
+
+    // 4. And the next sync brings it back into the mirror's payload, which is
+    //    what everything downstream of the mirror reads (§4.1: the record is
+    //    verbatim).
+    sync(&state).await;
+    let payload: serde_json::Value = sqlx::query_scalar(
+        "select payload from sync.live_item where entity_id = $1",
+    )
+    .bind(&ticket)
+    .fetch_one(&state.pool)
+    .await
+    .expect("the mirrored ticket is readable");
+    let mirrored_ids: Vec<String> = payload["fields"]["worklog"]["worklogs"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|w| w["id"].as_str().map(str::to_owned))
+        .collect();
+    assert!(
+        mirrored_ids.contains(&logged.remote_id.clone().unwrap_or_default()),
+        "the worklog knobas wrote is not in the next sync's mirrored payload: \
+         {mirrored_ids:?}"
+    );
 
     state.scheduler.shutdown().await;
     drop(litter);

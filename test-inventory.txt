@@ -43,11 +43,16 @@ knobas-app	lib/knobas_app	commands::time::tests::both_halves_of_a_target_match_t
 knobas-app	lib/knobas_app	commands::time::tests::the_block_kinds_match_their_typescript_mirror
 knobas-app	lib/knobas_app	commands::time::tests::the_block_shape_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::time::tests::the_day_review_row_matches_its_typescript_mirror
+knobas-app	lib/knobas_app	commands::time::tests::the_candidate_shape_matches_its_typescript_mirror
+knobas-app	lib/knobas_app	commands::time::tests::the_candidate_sources_match_their_typescript_mirror
+knobas-app	lib/knobas_app	commands::time::tests::the_draft_quotes_adr_0012s_sentence_verbatim
+knobas-app	lib/knobas_app	commands::time::tests::the_draft_shape_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::time::tests::the_mirror_declares_the_target_as_a_union_of_its_two_halves
 knobas-app	lib/knobas_app	commands::time::tests::the_mirror_invokes_the_commands_by_their_registered_names
 knobas-app	lib/knobas_app	commands::time::tests::the_mirror_sends_the_argument_names_tauri_expects
 knobas-app	lib/knobas_app	commands::time::tests::the_running_timer_shape_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::time::tests::the_shells_context_namespace_is_the_one_the_backend_refuses
+knobas-app	lib/knobas_app	commands::time::tests::the_worklog_shape_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	error::tests::a_failed_run_keeps_the_source_it_belongs_to
 knobas-app	lib/knobas_app	error::tests::a_link_endpoint_that_is_not_in_the_mirror_is_not_found
 knobas-app	lib/knobas_app	error::tests::every_code_has_its_snake_case_spelling
@@ -123,9 +128,18 @@ knobas-app	lib/knobas_app	time::tests::a_target_is_tagged_by_which_half_it_is
 knobas-app	lib/knobas_app	time::tests::a_target_with_both_halves_or_neither_is_a_failure_not_a_guess
 knobas-app	lib/knobas_app	time::tests::every_block_kind_is_one_the_schema_accepts
 knobas-app	lib/knobas_app	time::tests::the_context_namespace_is_the_one_knobas_core_reserves
+knobas-app	lib/knobas_app	time::worklog::tests::a_concatenated_interval_logs_the_time_worked_not_the_window_it_sat_in
+knobas-app	lib/knobas_app	time::worklog::tests::a_day_is_the_readers_day_and_not_the_servers
+knobas-app	lib/knobas_app	time::worklog::tests::an_offset_that_is_not_an_offset_is_refused
+knobas-app	lib/knobas_app	time::worklog::tests::no_blocks_is_no_interval
+knobas-app	lib/knobas_app	time::worklog::tests::the_comment_is_the_bullets_and_nothing_else
+knobas-app	lib/knobas_app	time::worklog::tests::the_identifier_is_the_one_the_spi_defines
+knobas-app	lib/knobas_app	time::worklog::tests::the_key_is_the_half_after_the_first_colon
+knobas-app	lib/knobas_app	time::worklog::tests::the_timers_own_verbs_are_not_work
 knobas-app	test/adapter_to_mirror	a_backfill_widens_the_stored_payload_of_an_issue_nobody_touched
 knobas-app	test/adapter_to_mirror	a_classic_projects_epic_link_reaches_the_stored_payload
 knobas-app	test/adapter_to_mirror	a_teamcity_project_survives_its_builds_through_its_configurations
+knobas-app	test/atlassian_live	a_days_work_is_logged_to_pay_231_and_comes_back_in_the_mirror
 knobas-app	test/atlassian_live	a_revoked_pat_reaches_the_credential_health_surface_and_the_mirror_survives
 knobas-app	test/atlassian_live	the_three_write_ops_go_through_the_queue_and_come_back_from_jira
 knobas-app	test/backup	a_restore_brings_back_no_mirror_rows_of_its_own
@@ -331,6 +345,8 @@ knobas-app	test/time_ipc	a_block_ending_at_midnight_belongs_to_the_day_it_ran_in
 knobas-app	test/time_ipc	a_block_that_ran_through_midnight_is_on_both_days
 knobas-app	test/time_ipc	a_blocks_start_end_and_target_can_all_be_moved
 knobas-app	test/time_ipc	a_day_with_no_observations_is_left_exactly_as_it_was
+knobas-app	test/time_ipc	a_day_is_the_readers_day
+knobas-app	test/time_ipc	a_days_blocks_concatenate_into_one_interval_that_bills_no_lunch
 knobas-app	test/time_ipc	a_foreground_the_timer_could_never_run_on_does_not_cost_the_beat
 knobas-app	test/time_ipc	a_heartbeat_moves_the_last_alive_stamp_forward
 knobas-app	test/time_ipc	a_heartbeat_with_no_timer_running_is_not_a_failure
@@ -339,9 +355,11 @@ knobas-app	test/time_ipc	a_logged_block_refuses_both_edits_and_says_why
 knobas-app	test/time_ipc	a_manual_block_is_never_turned_passive
 knobas-app	test/time_ipc	a_passive_block_a_new_manual_one_overlaps_is_taken_back_whole
 knobas-app	test/time_ipc	a_second_start_is_refused_and_leaves_the_first_running
+knobas-app	test/time_ipc	a_source_that_takes_no_worklogs_has_no_draft
 knobas-app	test/time_ipc	a_started_timer_is_what_the_next_read_answers_with
 knobas-app	test/time_ipc	a_stored_context_is_refused_as_a_target
 knobas-app	test/time_ipc	a_stretch_a_block_already_covers_is_not_offered_passively
+knobas-app	test/time_ipc	a_ticket_with_no_unlogged_time_has_no_draft
 knobas-app	test/time_ipc	a_timer_that_never_saw_a_heartbeat_still_closes
 knobas-app	test/time_ipc	an_ad_hoc_label_is_as_legal_a_target_as_a_ticket
 knobas-app	test/time_ipc	an_end_before_its_start_is_refused_in_words_the_reader_can_act_on
@@ -352,6 +370,7 @@ knobas-app	test/time_ipc	assigning_a_gap_writes_a_manual_block_over_it
 knobas-app	test/time_ipc	assigning_a_passive_block_makes_it_manual_and_it_stays_assigned
 knobas-app	test/time_ipc	editing_or_deleting_a_block_that_is_not_there_says_so
 knobas-app	test/time_ipc	extending_a_relaunch_ended_block_moves_its_end_and_drops_the_marker
+knobas-app	test/time_ipc	another_tickets_blocks_are_not_in_this_tickets_interval
 knobas-app	test/time_ipc	relaunch_closes_a_stranded_timer_at_its_last_heartbeat
 knobas-app	test/time_ipc	relaunch_with_no_timer_closes_nothing
 knobas-app	test/time_ipc	starting_and_stopping_write_the_activity_lines_the_shell_reads
@@ -362,6 +381,7 @@ knobas-app	test/time_ipc	switching_it_off_leaves_the_blocks_already_offered_alon
 knobas-app	test/time_ipc	the_cap_binds_through_the_day_read
 knobas-app	test/time_ipc	the_day_read_offers_the_blocks_the_beats_support
 knobas-app	test/time_ipc	the_days_blocks_come_back_in_time_order_whatever_order_they_were_written_in
+knobas-app	test/time_ipc	the_candidates_are_the_readers_own_work_inside_the_interval
 knobas-app	test/time_ipc	the_relaunch_sweep_signs_its_line_as_knobas
 knobas-app	test/time_ipc	the_schema_accepts_a_block_of_no_length
 knobas-app	test/time_ipc	the_schema_refuses_a_block_that_ends_before_it_starts
@@ -373,6 +393,9 @@ knobas-app	test/wiring	no_grant_reaches_further_than_the_app_does
 knobas-app	test/wiring	the_opener_plugin_is_registered
 knobas-app	test/wiring	the_stranded_timer_sweep_runs_before_the_database_is_announced_ready
 knobas-app	test/wiring	the_window_may_open_http_urls_and_only_http_urls
+knobas-app	test/worklog_ipc	a_days_blocks_become_one_worklog_at_jira_and_a_copy_that_names_it
+knobas-app	test/worklog_ipc	a_worklog_jira_never_took_still_has_a_copy_and_still_spends_its_blocks
+knobas-app	test/worklog_ipc	stopping_the_timer_on_a_ticket_is_what_there_is_to_draft
 knobas-core	lib/knobas_core	context::tests::a_minted_id_is_a_parseable_local_ref
 knobas-core	lib/knobas_core	context::tests::kind_roundtrips_through_its_column_value
 knobas-core	lib/knobas_core	context::tests::kind_serializes_as_its_column_value
@@ -1272,7 +1295,7 @@ knobas-source-jira	lib/knobas_source_jira	descriptor::tests::the_full_sync_claim
 knobas-source-jira	lib/knobas_source_jira	descriptor::tests::the_schema_and_the_config_struct_agree
 knobas-source-jira	lib/knobas_source_jira	descriptor::tests::the_schema_asks_for_no_secret
 knobas-source-jira	lib/knobas_source_jira	descriptor::tests::the_schema_defaults_are_a_valid_configuration
-knobas-source-jira	lib/knobas_source_jira	descriptor::tests::the_template_declares_m2s_ratified_write_set_and_nothing_else
+knobas-source-jira	lib/knobas_source_jira	descriptor::tests::the_template_declares_the_ratified_write_set_and_nothing_else
 knobas-source-jira	lib/knobas_source_jira	descriptor::tests::the_template_survives_a_json_round_trip
 knobas-source-jira	lib/knobas_source_jira	http::tests::a_base_url_that_is_not_a_url_is_refused
 knobas-source-jira	lib/knobas_source_jira	http::tests::a_body_that_is_not_jiras_envelope_is_read_as_nothing
@@ -1347,6 +1370,7 @@ knobas-source-jira	lib/knobas_source_jira	time::tests::refuses_what_it_cannot_re
 knobas-source-jira	lib/knobas_source_jira	time::tests::rendering_a_literal_never_shifts_the_query_forward
 knobas-source-jira	lib/knobas_source_jira	time::tests::renders_a_jql_literal_in_the_servers_zone
 knobas-source-jira	lib/knobas_source_jira	time::tests::the_query_floor_is_the_start_of_the_rendered_minute
+knobas-source-jira	lib/knobas_source_jira	write::tests::a_worklogs_started_carries_milliseconds_and_a_numeric_offset
 knobas-source-jira	test/live_jira_seeded	a_full_sync_mirrors_every_seeded_issue_across_both_projects
 knobas-source-jira	test/live_jira_seeded	a_rejected_credential_is_a_real_401_and_only_basic_auth_carries_the_seraph_header
 knobas-source-jira	test/live_jira_seeded	an_incremental_run_after_one_edit_returns_that_issue_and_moves_the_watermark_to_it
@@ -1376,6 +1400,7 @@ knobas-source-jira	test/mockd	an_idle_incremental_returns_nothing_and_the_same_c
 knobas-source-jira	test/mockd	an_incremental_run_delivers_the_widened_payload_for_what_it_returns
 knobas-source-jira	test/mockd	an_incremental_run_returns_exactly_what_changed
 knobas-source-jira	test/mockd	an_undeclared_op_never_reaches_the_server
+knobas-source-jira	test/mockd	logging_work_puts_a_worklog_on_the_ticket_and_names_it
 knobas-source-jira	test/mockd	one_new_issue_then_an_idle_poll_settles
 knobas-source-jira	test/mockd	pages_across_more_than_one_response
 knobas-source-jira	test/mockd	passes_the_contract_battery
