@@ -39,6 +39,13 @@ mod sync;
 mod time;
 mod write;
 
+/// The expansion set every page record is fetched with.
+///
+/// Public **only** so a live suite can read a page back the way this adapter
+/// reads it, rather than composing its own expansion and asserting against a
+/// record the adapter would never have seen. `crates/knobas-app/tests/
+/// confluence_live.rs` is the one caller (#286); nothing in the app reads it.
+pub use api::EXPAND as EXPAND_FOR_TESTS;
 pub use config::{ConfluenceConfig, Flavor};
 pub use descriptor::descriptor_template;
 pub use source::{ConfluenceSource, build};

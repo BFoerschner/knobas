@@ -18,12 +18,12 @@
 //!   record -- so "intact" is not a hope about a patch, it is the assertion
 //!   that the body knobas re-assembled is byte for byte the seeded page with
 //!   one paragraph changed.
-//! * **An edit made against a version the mirror has passed is held.** The
-//!   page is edited out of band, a sync mirrors that, and the queued write
-//!   goes to [`WriteState::Held`] with both versions in the row -- which is
-//!   `CONTEXT.md`'s **held write**, "resolved by choosing between the two
-//!   versions, shown side by side", and not a silent overwrite. Nothing but
-//!   the real queue over a real mirror can say this.
+//! * **An edit made against a version the server has passed is refused**, with
+//!   Confluence's own sentence, and the other writer's text is still on the
+//!   page. That is the abort-on-conflict backstop at the wire. Its sibling --
+//!   the *hold*, which fires when the **mirror** moves between queue and flush
+//!   -- is witnessed offline in `crates/knobas-sync/tests/write_queue.rs`, and
+//!   the second test below says at length why it cannot be witnessed here.
 //! * **A comment lands on a page**, as the SPI's own `Comment` op with the
 //!   page as its container, and comes back at `children.comment` where the
 //!   detail reads it -- with the author and instant `EXPAND` now asks for.
@@ -32,8 +32,8 @@
 //!
 //! # What this file writes, and what it takes away
 //!
-//! One paragraph of one seeded page's body, one comment, and one page. All
-//! three are undone in [`Litter`]'s `Drop` -- passing or panicking alike, on a
+//! One seeded page's body, one comment, and one page. All three are undone in
+//! [`Litter`]'s `Drop` -- passing or panicking alike, on a
 //! thread with a runtime of its own -- and the removal is checked rather than
 //! assumed. The page body is restored from the bytes read **before** the edit,
 //! so a failure part-way leaves the seed as it was rather than as this suite
@@ -699,23 +699,31 @@ async fn the_three_page_writes_go_through_the_queue_and_come_back_from_confluenc
         commented.detail
     );
 
-    // Read back through the mirror, at the path the detail reads it from, with
-    // the author and instant `EXPAND` now asks for (#286).
-    let payload = sync_until(&state, &edited.id, "the new comment", |payload| {
-        payload["children"]["comment"]["results"]
-            .as_array()
-            .is_some_and(|rows| {
-                rows.iter().any(|row| {
-                    row["body"]["storage"]["value"]
-                        .as_str()
-                        .is_some_and(|v| v.contains(LITTER))
-                })
-            })
-    })
-    .await;
-    let mine = payload["children"]["comment"]["results"]
+    // Read back **through the adapter's own expansion**, not through the
+    // mirror -- and the reason is a measured fact about this product rather
+    // than a shortcut.
+    //
+    // A comment is separate content: posting one does not move its page's
+    // `lastmodified`, which is what the page walk's CQL matches, so no
+    // incremental sync can reach a page whose only change is a fresh comment
+    // (contract §4.2 D, "mentions"; #287's own live suite prints the two
+    // identical timestamps that prove it). The one path that *does* reach one
+    // is the mention query, and it reaches only comments that mention this
+    // account -- which this one deliberately does not, because a suite that
+    // could only assert a comment it had also @-mentioned itself in would be
+    // asserting the mention feature rather than the write.
+    //
+    // So what is asserted here is the write and the expansion: the comment is
+    // on the page, it is stored as the storage format the adapter rendered,
+    // and it carries the author and the instant `EXPAND` asks for. Those two
+    // fields are #286's widening, and this is the only place the real server
+    // confirms it.
+    let record = env
+        .content(&edited.id, knobas_source_confluence::EXPAND_FOR_TESTS)
+        .await;
+    let mine = record["children"]["comment"]["results"]
         .as_array()
-        .expect("the comments are a list")
+        .expect("the page's comments came back expanded")
         .iter()
         .find(|row| {
             row["body"]["storage"]["value"]
@@ -811,21 +819,39 @@ async fn the_three_page_writes_go_through_the_queue_and_come_back_from_confluenc
     drop(state);
 }
 
-/// **An edit made against a version the mirror has passed is held** --
-/// `CONTEXT.md`'s held write, with both versions in the row and nothing sent.
+/// **An edit made against a version the server has passed is refused by
+/// Confluence** — the abort-on-conflict backstop, at the wire, which is the
+/// half of the version guard nothing offline can measure.
 ///
-/// The sequence is the one a person really hits: knobas mirrors the page,
-/// somebody edits it in Confluence, the source is unreachable for a moment so
-/// the write waits, a sync brings the new version in, and the flush that
-/// follows finds the target has moved.
+/// # Why the *held* half is not here, and where it is instead
 ///
-/// The source is made unreachable by **disabling nothing and pointing at
-/// nothing**: the write is queued while the page is still at the version it
-/// was read at, which is what makes the snapshot the edit's own -- then the
-/// out-of-band edit and one more sync are what move the target under it.
+/// The ticket's fourth criterion has two mechanisms in it, and they are caught
+/// in two places on purpose.
+///
+/// The **hold** is knobas' own: it fires when the mirror moves between the
+/// moment a write is queued and the moment it flushes, and it is witnessed by
+/// `crates/knobas-sync/tests/write_queue.rs`'s
+/// `a_page_whose_version_moved_past_the_edit_holds_it_with_both_versions`,
+/// against a real Postgres, a real queue and a real flush.
+///
+/// It cannot be witnessed *here*, and the reason is a fact about the app
+/// rather than a gap in the suite: the scheduler drains the write queue every
+/// `TICK` — five seconds — so producing a hold live would need a window in
+/// which the write is undeliverable while a sync is still able to run, and
+/// there is no such window. Removing the credential stops the flush and the
+/// sync together; leaving it in place lets a drain fire before Confluence's
+/// search index has caught up, and the write goes. Manufacturing the window by
+/// writing `sync.item` by hand is exactly what the offline test does, better,
+/// with no container in the way.
+///
+/// What is left is the half only the server can answer, and it was worth
+/// coming here for: `base_version + 1` against a page that has already
+/// advanced is a **409**, it reaches the queue as `Refused` carrying
+/// Confluence's own sentence rather than as a retry (ADR-0004), and — the
+/// point of the whole guard — the other writer's text is still on the page.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
-async fn an_edit_made_against_a_version_the_mirror_has_passed_is_held() {
+async fn an_edit_made_against_a_version_the_server_has_passed_is_refused_by_confluence() {
     let env = env();
     let edited = env.page(EDITED);
     let mut litter = Litter::default();
@@ -833,22 +859,21 @@ async fn an_edit_made_against_a_version_the_mirror_has_passed_is_held() {
     let (before, base_version) = env.body_and_version(&edited.id).await;
     litter.body = Some((edited.id.clone(), edited.title.clone(), before.clone()));
 
-    let state = app("confluence_live_hold", &env).await;
+    let state = app("confluence_live_conflict", &env).await;
     sync_until(&state, &edited.id, "the seeded body", |payload| {
         payload["version"]["number"].as_i64() == Some(base_version)
     })
     .await;
 
-    // Queued against a source that cannot take it yet, so the row waits rather
-    // than flushing straight through: the credential is removed for the moment
-    // the write is submitted. This is #42's *pending* state, reached the way a
-    // person reaches it (their token expired), and it is what leaves a write on
-    // the queue for a later flush to reconsider.
-    knobas_secrets::spawn::delete(&state.secrets, CONFLUENCE)
-        .await
-        .expect("the credential is removed");
+    // Somebody else edits the page. knobas does **not** sync afterwards, so the
+    // mirror still holds `base_version` and the queue has nothing to hold
+    // against -- which is the window the queue cannot see and the server can.
+    let theirs = format!("{before}<p>somebody else was here -- {LITTER}.</p>");
+    env.put_body(&edited.id, &edited.title, &theirs, base_version)
+        .await;
+
     let mine = format!("{before}<p>knobas was here -- {LITTER}.</p>");
-    let queued = write(
+    let refused = write(
         &state,
         json!({
             "UpdatePage": {
@@ -859,73 +884,34 @@ async fn an_edit_made_against_a_version_the_mirror_has_passed_is_held() {
         }),
     )
     .await;
-    assert_eq!(
-        queued.state,
-        WriteState::Pending,
-        "the write should be waiting on the credential, not settled: {:?}",
-        queued.detail
-    );
 
-    // Somebody else edits the page, and a sync brings that in.
-    env.put_body(
-        &edited.id,
-        &edited.title,
-        &format!("{before}<p>somebody else was here -- {LITTER}.</p>"),
-        base_version,
-    )
-    .await;
-    sync_until(&state, &edited.id, "the out-of-band edit", |payload| {
-        payload["version"]["number"].as_i64() == Some(base_version + 1)
-    })
-    .await;
-
-    // The credential comes back, and the flush finds the target moved.
-    knobas_secrets::spawn::put(
-        &state.secrets,
-        CONFLUENCE,
-        Secret {
-            kind: AuthMethod::UserPassword,
-            value: env.password.clone(),
-        },
-    )
-    .await
-    .expect("the credential is back");
-    knobas_sync::write_queue::flush_source(state.scheduler.deps(), CONFLUENCE)
-        .await
-        .expect("the flush runs");
-
-    let held = knobas_core::write_queue::get(&state.pool, queued.id)
-        .await
-        .expect("the queue row is readable")
-        .expect("the row is still there");
     assert_eq!(
-        held.state,
-        WriteState::Held,
-        "an edit over a page that moved on must be held, not sent: {:?}",
-        held.detail
+        refused.state,
+        WriteState::Refused,
+        "an edit over a version the server has passed must be refused, not sent or kept: {:?}",
+        refused.detail
     );
-    // **Both versions**, which is what the reader is shown side by side.
+    // **A refusal, not a wait** (ADR-0004): a 409 is a decision, so nothing
+    // here may claim a retryable fault.
     assert_eq!(
-        held.target_snapshot["payload"]["version"]["number"].as_i64(),
-        Some(base_version),
-        "the queued snapshot is not the version the edit was made against"
+        refused.wait_reason, None,
+        "a version conflict is a decision, not a fault that passes: {refused:?}"
     );
-    assert_eq!(
-        held.held_snapshot.as_ref().expect("a held snapshot")["payload"]["version"]["number"]
-            .as_i64(),
-        Some(base_version + 1),
-        "the held snapshot is not the version the mirror now holds"
-    );
-    // The reason is the target's, not the disabled source's (#204): the source
-    // is on by now, and the two explanations are never collapsed.
-    assert!(held.source_enabled);
-
-    // And nothing knobas queued reached the page: the body is the one the other
-    // writer left.
-    let (now, _) = env.body_and_version(&edited.id).await;
+    let detail = refused.detail.clone().unwrap_or_default();
+    println!("SEEDED refused edit: {detail}");
     assert!(
-        now.contains("somebody else was here") && !now.contains("knobas was here"),
-        "a held write reached the server"
+        detail.contains("409") || detail.to_lowercase().contains("version"),
+        "the refusal must carry Confluence's own sentence about the version: {detail:?}"
+    );
+
+    // And the point of the guard: the other writer's text is still there and
+    // knobas' is not.
+    let (now, now_version) = env.body_and_version(&edited.id).await;
+    assert_eq!(now, theirs, "the refused write reached the page anyway");
+    assert_eq!(
+        now_version,
+        base_version + 1,
+        "the refused write moved the version"
     );
 
     drop(state);

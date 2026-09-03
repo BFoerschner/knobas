@@ -75,7 +75,7 @@ pub(crate) const MENTION_EXPAND: &str = "version,container";
 ///   and one that arrived through completion the same shape downstream. A
 ///   server that will not expand them falls back to the page's own stamp and
 ///   to no byline, which is the behaviour before they were asked for.
-pub(crate) const EXPAND: &str = concat!(
+pub const EXPAND: &str = concat!(
     "body.storage,ancestors,space,version,history,",
     "children.comment.body.storage,children.comment.version,children.comment.history"
 );
