@@ -748,6 +748,11 @@ async fn the_three_page_writes_go_through_the_queue_and_come_back_from_confluenc
         Some(env.user.as_str()),
         "the widened EXPAND did not bring the comment's author: {mine}"
     );
+    // Cleared by #347's sweep rather than rewritten: `version.by` and
+    // `version.when` ride on the one `children.comment.version` token in
+    // `api::EXPAND`, so this cannot fail while the assertion above passes --
+    // it is a second reading of the same widening, not a second witness, and
+    // it is kept because the two fields are read by different callers.
     assert!(
         mine["version"]["when"].as_str().is_some(),
         "the widened EXPAND did not bring the comment's instant: {mine}"
@@ -891,11 +896,31 @@ async fn an_edit_made_against_a_version_the_server_has_passed_is_refused_by_conf
         "an edit over a version the server has passed must be refused, not sent or kept: {:?}",
         refused.detail
     );
-    // **A refusal, not a wait** (ADR-0004): a 409 is a decision, so nothing
-    // here may claim a retryable fault.
+    // **A refusal, not a wait** (ADR-0004): a 409 is a decision, so the queue
+    // must never go round again over it. Measured by flushing a second time
+    // and re-reading the row -- `store::due` is what decides whether a refused
+    // write is offered to a flush, and an unmoved `attempts` is that decision
+    // taken.
+    //
+    // `assert_eq!(refused.wait_reason, None)` stood here until #347 and could
+    // not fail: migration `0005`'s `write_queue_reason_state_chk check
+    // (wait_reason is null or state = 'pending')` puts a refused row carrying
+    // a wait reason outside what any implementation can store, so once the
+    // assertion above pinned the state, this one was Postgres restating
+    // itself. What it *meant* -- a fault that passes would be tried again --
+    // is what is asserted instead.
+    knobas_sync::write_queue::flush_source(state.scheduler.deps(), CONFLUENCE)
+        .await
+        .expect("a second flush of the source runs");
+    let again = knobas_core::write_queue::get(&state.pool, refused.id)
+        .await
+        .expect("the queue row is readable")
+        .expect("the row the refusal settled");
     assert_eq!(
-        refused.wait_reason, None,
-        "a version conflict is a decision, not a fault that passes: {refused:?}"
+        (again.state, again.attempts, again.wait_reason.clone()),
+        (refused.state, refused.attempts, refused.wait_reason.clone()),
+        "a refused write is terminal: the flush after it picked the row up again, which is what \
+         a retryable classification would do to a person's edit for ever: {again:?}"
     );
     let detail = refused.detail.clone().unwrap_or_default();
     println!("SEEDED refused edit: {detail}");
