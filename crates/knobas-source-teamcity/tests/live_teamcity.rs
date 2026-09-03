@@ -821,11 +821,25 @@ async fn the_two_facet_dimensions_do_not_open_the_personal_facet() {
             "id,personal",
         )
         .await;
+    let wide_personal = wide.iter().filter(|b| personal(b)).count();
     println!(
-        "LIVE facets: defaultFilter:false answered {}/{} personal builds",
-        wide.iter().filter(|b| personal(b)).count(),
+        "LIVE facets: defaultFilter:false answered {wide_personal}/{} personal builds",
         wide.len()
     );
+    // Whether this run witnessed anything at all, said out loud (#347). The
+    // assertion below is `leaked.is_empty()`, and on a window with no personal
+    // build in it that is true of a TeamCity whose dimensions leak the facet
+    // wide open -- there was simply nothing to leak. The suite may not depend
+    // on JetBrains' corpus (the doc above says why), so this stays a print and
+    // not a precondition; what it must not do is read as a green witness on a
+    // run where the corpus could not carry the signal.
+    if wide_personal == 0 {
+        println!(
+            "LIVE facets: this run is NOT a witness -- `defaultFilter:false` found no personal \
+             build in its window either, so the empty answer below is the corpus and not the \
+             dimensions."
+        );
+    }
 
     let narrow = live
         .builds(
@@ -984,13 +998,17 @@ async fn a_rest_error_is_a_json_envelope_the_adapter_can_read() {
             !message.trim().is_empty(),
             "the envelope carries the sentence, not just a status: {body}"
         );
-        // The plaintext shape `error_message` used to *require*, absent --
-        // which is why requiring it made the function useless here.
-        let plaintext = body.as_str().unwrap_or_default();
-        assert!(
-            !plaintext.starts_with("Error has occurred during request processing"),
-            "the body is both a JSON envelope and the plaintext shape, which cannot be: {body}"
-        );
+        // The plaintext shape `error_message` used to *require* is absent --
+        // which is why requiring it made the function useless here -- and the
+        // `unwrap_or_else` above is what says so. An
+        // `assert!(!body.as_str().unwrap_or_default().starts_with("Error has
+        // occurred during request processing"))` stood here until #347 and was
+        // inert: `Live::get` only leaves `body` a JSON *string* when the
+        // response did not parse as JSON, and a string's `.get("errors")` is
+        // `None`, so a plaintext body panics five lines up and never reaches a
+        // line asserting it is not plaintext. On every run that gets this far
+        // `body` is an object, `as_str()` is `None`, and the assertion read
+        // `!"".starts_with(..)`.
 
         // The three keys beside it are the ones mockd transcribes, so a server
         // that stopped sending them would be a fake drifting from a server
@@ -1068,19 +1086,17 @@ async fn a_rest_error_is_a_json_envelope_the_adapter_can_read() {
         &format!("HTTP 404 Not Found: {sentence}"),
         "the user is shown the server's sentence, not the envelope around it"
     );
-    for envelope_key in [
-        "errors",
-        "additionalMessage",
-        "statusText",
-        "stackTrace",
-        "{",
-    ] {
-        assert!(
-            !message.contains(envelope_key),
-            "the user is shown the server's sentence, not the envelope around it -- {envelope_key:?} \
-             is in {message:?}"
-        );
-    }
+    // A loop over `["errors", "additionalMessage", "statusText", "stackTrace",
+    // "{"]` asserting `!message.contains(key)` stood here until #347. The
+    // equality above pins `message` to exactly `"HTTP 404 Not Found: " +
+    // sentence`, so the loop could not fail on any mutation of
+    // `http::error_message` -- the equality fails first, every time -- while
+    // it *could* fail spuriously on the day the server's own sentence
+    // contained one of those five strings, accusing the adapter of leaking an
+    // envelope it had faithfully passed through. The claim is the equality.
+    // A needle check of this shape is still a real witness in the probe loop
+    // above -- `!message.contains("jetbrains.buildServer")` there reads the
+    // server's own envelope field, which nothing has pinned.
     println!(
         "LIVE error rendered through the adapter: {message:?} -- the server's own \
          errors[0].message was {sentence:?}"
