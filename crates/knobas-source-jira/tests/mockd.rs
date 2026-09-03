@@ -654,9 +654,9 @@ async fn test_connection_reports_the_account_and_the_server() {
     assert_only_the_field_probe(&jira);
 }
 
-/// A source that already names the field says so, and never re-reads it: the
-/// id the reader saved is the one the sync uses, whatever a probe would have
-/// found.
+/// A source that already names the field says so, and the probe never
+/// replaces it: the id the reader saved is the one the sync uses, whatever the
+/// field table would have answered.
 #[tokio::test]
 async fn a_configured_epic_link_field_is_what_the_connection_reports() {
     let jira = spawn_mock_jira().await;

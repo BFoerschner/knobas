@@ -4125,6 +4125,13 @@ From this commit on, each of the following requires an orchestrator decision **a
   every mapping downstream and the contract battery, which gains no clause: an adapter that
   discovers nothing is a correct adapter.
 
+  **`#[serde(default)]` covers decoding, not construction.** A Rust struct literal must still name
+  every field, so growing this struct costs one line at every construction site — eight in this
+  repo today: the five adapters (Jira, Confluence, Gitea, TeamCity and the mock) and three test
+  fakes. That is the price of the frozen struct being a plain `struct` and it is charged once per
+  site, not per call; the two sites that build it as `..ConnectionInfo::default()` are unaffected,
+  and so is any stored or in-flight report, which decodes as an adapter that discovered nothing.
+
   **The IPC touch.** No new command, no new event, no new module on either side, and no DTO the
   frontend acts on changes meaning: `ConnectionReport` (`knobas-app`'s, the §2.2 shape that already
   deviates from the interfaces doc by carrying a `String` + `IpcErrorCode` instead of a

@@ -1187,7 +1187,8 @@ async fn test_connection_discovers_the_epic_link_field_and_that_id_is_the_one_th
         .get("epic_link_field")
         .unwrap_or_else(|| {
             panic!(
-                "test_connection discovered no Epic Link field on an instance that has one                  ({}): {info:?}",
+                "test_connection discovered no Epic Link field on an instance that has \
+                 one ({}): {info:?}",
                 seeded.seed.epic_link_field
             )
         })
@@ -1202,7 +1203,8 @@ async fn test_connection_discovers_the_epic_link_field_and_that_id_is_the_one_th
         info.detail
             .as_deref()
             .is_some_and(|d| d.contains(&format!("Epic Link {found}"))),
-        "the connection detail names what was found, which is what the sources view shows:          {info:?}"
+        "the connection detail names what was found, which is what the sources view \
+         shows: {info:?}"
     );
 
     // The round trip: configured from the *discovered* id, not from the seed's
