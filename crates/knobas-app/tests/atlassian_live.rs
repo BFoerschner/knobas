@@ -1815,11 +1815,34 @@ async fn a_comment_that_mentions_me_becomes_an_inbox_mention() {
     );
 
     // 5. What it offers, and what an answer records.
-    assert!(
-        found.actions.is_empty(),
-        "the Confluence adapter declares no write op yet (#286), so no button is offered: {:?}",
+    //
+    // **`Comment`, and it appeared without this test being told to expect it**
+    // -- which is the claim #287 wrote this clause to be able to make. That
+    // ticket asserted `is_empty()` because the Confluence adapter declared no
+    // write op; #286 declares `comment` and nothing in the inbox changed. The
+    // assertion is the same shape it always was: whatever
+    // `knobas_app::inbox::offer` keeps of what the **descriptor** declares,
+    // measured against the descriptor itself rather than against a list typed
+    // here, so the day the adapter declares a fourth op this still reads true.
+    let declared = state
+        .registry
+        .descriptors()
+        .into_iter()
+        .find(|d| d.adapter_kind == "confluence")
+        .expect("the Confluence adapter is compiled in")
+        .write_ops;
+    let offered: Vec<String> = found.actions.clone();
+    assert_eq!(
+        offered,
+        declared
+            .iter()
+            .filter(|op| op.as_str() == "comment")
+            .cloned()
+            .collect::<Vec<String>>(),
+        "a mention offers exactly the mention ops its source declares: {:?}",
         found.actions
     );
+    println!("SEEDED mention offers: {offered:?} (declared {declared:?})");
     let line = knobas_app::commands::entity::snooze_inbox_item_inner(
         &state.pool,
         state.registry.as_ref(),
