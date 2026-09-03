@@ -246,6 +246,7 @@ const App = (await import("../../App.svelte")).default;
 const ContextTabs = (await import("./ContextTabs.svelte")).default;
 const Flap = (await import("./Flap.svelte")).default;
 const ModalFixture = (await import("./Modal.fixture.svelte")).default;
+const TimerPicker = (await import("./TimerPicker.svelte")).default;
 const Room = (await import("./Room.svelte")).default;
 const SuggestionTray = (await import("./SuggestionTray.svelte")).default;
 const ShellFixture = (await import("./Shell.fixture.svelte")).default;
@@ -507,6 +508,26 @@ const CASES: Case[] = [
     open: (target) => ({ app: mount(ModalFixture, { target, props: { onclose: () => {} } }) }),
   },
   {
+    /**
+     * ⌘T's picker (#278). Its effect reads the recents, and the read is
+     * `deferred` here — so the "unmounted while its reads are still in
+     * flight" half is the case this component actually has: a reader who
+     * presses `Esc` before `launcher_home` answers.
+     */
+    name: "TimerPicker",
+    source: "lib/shell/TimerPicker.svelte",
+    open: (target) => ({
+      app: mount(TimerPicker, {
+        target,
+        props: {
+          onpick: () => {},
+          onclose: () => {},
+          recent: () => deferred<EntityRow[]>([]),
+        },
+      }),
+    }),
+  },
+  {
     name: "Launcher",
     source: "lib/launcher/Launcher.svelte",
     open: (target) => ({
@@ -516,6 +537,7 @@ const CASES: Case[] = [
           open: true,
           onnavigate: () => {},
           onclose: () => {},
+          ontimer: undefined,
           ports: LAUNCHER_PORTS,
         },
       }),

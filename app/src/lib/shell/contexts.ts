@@ -44,6 +44,21 @@ export interface RoomContext {
    */
   filter: Pick<EntityFilter, "sources" | "context" | "project">;
   /**
+   * The entity this room is *about*, when it is about one — a promoted
+   * context's anchor (`ContextRow.anchor_id`).
+   *
+   * `null` for every derived room and for an ad-hoc context, which have no
+   * anchor to be about. It is here rather than read off `ContextRow` at the
+   * call site because the one thing that needs it — the timer's foreground
+   * rule, *open detail, else room anchor, else none* (#278) — has the resolved
+   * room in its hand and not the row it came from.
+   *
+   * **Never the context's own id.** A context is a set, and time on a set has
+   * nowhere to go (`CONTEXT.md`, *timer target*); the anchor is a ticket or an
+   * epic, which is a thing.
+   */
+  anchorId: string | null;
+  /**
    * Which layout this room's mini board draws (#210).
    *
    * A property of the **room**, because the thing that decides is whether the
@@ -137,6 +152,7 @@ export const ALL_CONTEXT: RoomContext = {
   kindWord: "everything synced",
   filter: { sources: [], context: null, project: null },
   miniBoardLayout: "stacked",
+  anchorId: null,
 };
 
 /**
@@ -155,6 +171,7 @@ function projectContext(project: Project): RoomContext {
     kindWord: "project",
     filter: { sources: [project.source_id], context: null, project: project.key },
     miniBoardLayout: "columns",
+    anchorId: null,
   };
 }
 
@@ -188,6 +205,7 @@ export function builtinContexts(
         kindWord: "source",
         filter: { sources: [source.id], context: null, project: null },
         miniBoardLayout: "stacked" as const,
+        anchorId: null,
       },
       ...projects.filter((project) => project.source_id === source.id).map(projectContext),
     ]),
@@ -211,6 +229,7 @@ export function storedContext(row: ContextRow): RoomContext {
     kindWord: kindWordOf(row),
     filter: { sources: [], context: row.id, project: null },
     miniBoardLayout: "columns",
+    anchorId: row.anchor_id,
   };
 }
 

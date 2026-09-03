@@ -31,6 +31,7 @@ pub mod inbox;
 mod profile;
 pub mod sources;
 pub mod start_work;
+pub mod time;
 
 pub use commands::app::{DbState, Lifecycle};
 pub use error::{IpcError, IpcErrorCode};
@@ -237,6 +238,10 @@ pub fn run() {
             commands::sources::list_sync_runs,
             commands::sources::db_stats,
             commands::sources::reindex_fts,
+            commands::time::current_timer,
+            commands::time::start_timer,
+            commands::time::stop_timer,
+            commands::time::timer_heartbeat,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")
@@ -301,6 +306,23 @@ pub(crate) fn spawn_bring_up<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
             let db = knobas_db::EmbeddedDb::start(config).await?;
             set_db_state(&handle, DbState::Migrating);
             knobas_db::migrate::run(db.pool()).await?;
+            // **Before anything can read the timer row** (#278): a timer that
+            // outlived the last process is closed at the last moment knobas
+            // was alive, flagged, and gone before the shell's first
+            // `current_timer`. Placed here rather than beside `backup::start`
+            // because the order matters and the other two do not: a shell that
+            // read a stranded timer would draw a clock that has been running
+            // all night, and correcting it a moment later is worse than never
+            // showing it.
+            //
+            // A sweep that fails is logged and bring-up goes on. The database
+            // is up, which is the thing the window is waiting for; the row
+            // stays and the next launch tries again. Refusing to start over a
+            // failed sweep would make a forgotten timer a reason knobas cannot
+            // open at all.
+            if let Err(error) = time::close_stranded(db.pool()).await {
+                tracing::error!(%error, "the stranded-timer sweep failed");
+            }
             // Before `Ready`, and before `AppState` is installed: the sync
             // engine is part of "the database is up" as far as the frontend is
             // concerned, and a window that reacted to `ready` by calling

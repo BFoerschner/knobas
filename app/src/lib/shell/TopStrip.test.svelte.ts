@@ -13,9 +13,11 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 
 import { createInbox, type Inbox } from "../inbox/inbox.svelte";
 import type { AuthState, CredentialHealth } from "../ipc/sources";
+import type { RunningTimer, TimerTarget } from "../ipc/time";
 import TopStrip from "./TopStrip.svelte";
 import { createHealth } from "./health.svelte";
 import { createRouter } from "./router.svelte";
+import { createTimer, type Timer } from "./timer.svelte";
 
 function row(source_id: string, state: AuthState): CredentialHealth {
   return {
@@ -48,16 +50,51 @@ function inboxOf(count: number): Inbox {
   return inbox;
 }
 
-function render(states: CredentialHealth[], inbox: Inbox = inboxOf(0)) {
+/**
+ * A timer store with no bridge behind it, holding what the test dictates.
+ *
+ * `now` is fixed, so the elapsed reading is an assertion rather than a race,
+ * and `begin()` is never called: the strip reads the store, it does not drive
+ * it, and a ticking clock in these tests would only make them flaky.
+ */
+function timerOn(target_: TimerTarget | null, startedAt = "2026-09-03T09:00:00Z"): Timer {
+  const running: RunningTimer | null = target_
+    ? { target: target_, started_at: startedAt, last_heartbeat: startedAt }
+    : null;
+  return createTimer({
+    currentTimer: () => Promise.resolve(running),
+    startTimer: () => Promise.resolve(running!),
+    stopTimer: () => Promise.resolve(null),
+    timerHeartbeat: () => Promise.resolve(running),
+    listen: () => Promise.resolve(() => {}),
+    focused: () => true,
+    now: () => new Date("2026-09-03T09:45:12Z"),
+  });
+}
+
+function render(
+  states: CredentialHealth[],
+  inbox: Inbox = inboxOf(0),
+  timer: Timer = timerOn(null),
+  ontimer?: () => void,
+) {
   const health = createHealth({
     credentialHealth: () => Promise.resolve([]),
     listen: () => Promise.resolve(() => {}),
   });
   for (const entry of states) health.patch(entry);
   const router = createRouter();
-  app = mount(TopStrip, { target, props: { router, onsearch: () => {}, health, inbox } });
+  app = mount(TopStrip, {
+    target,
+    props: { router, onsearch: () => {}, health, inbox, timer, ontimer },
+  });
   flushSync();
-  return { health, router };
+  return { health, router, timer };
+}
+
+/** The timer slot, if the strip is drawing one. */
+function timerSlot(): HTMLButtonElement | null {
+  return target.querySelector<HTMLButtonElement>("button.timer");
 }
 
 /** The inbox button, if the strip is drawing one. */
@@ -211,4 +248,68 @@ test("an empty inbox draws no button at all", async () => {
   await inbox.refreshCount();
   render([], inbox);
   expect(inboxButton()).toBeFalsy();
+});
+
+
+// -- the timer slot (#278) --------------------------------------------------
+
+/**
+ * Absent when nothing is running — the inbox count's rule, and for the same
+ * reason: ⌘T starts a timer from anywhere, so an empty slot would buy nothing
+ * and cost a permanent place for the eye to check.
+ */
+test("the timer slot is absent while nothing is running", () => {
+  render([]);
+  expect(timerSlot()).toBeNull();
+});
+
+test("a running timer shows what it is on and how long it has been", async () => {
+  const timer = timerOn({ kind: "entity", entity_id: "jira:PAY-231" });
+  render([], inboxOf(0), timer);
+  await timer.refresh();
+  flushSync();
+
+  const slot = timerSlot();
+  expect(slot, "the strip drew no timer for a running one").not.toBeNull();
+  // The key, not the whole id: the same half the detail header and the
+  // launcher's *Link to…* row use, so the surfaces say one word per ticket.
+  expect(slot!.querySelector(".ctx")?.textContent).toBe("PAY-231");
+  // 09:00:00 to 09:45:12, and drawn **through a `Flap`** (story 16): the
+  // elapsed reading is spec §2's archetypal value that changes while you
+  // watch, and `Flap` is also where `prefers-reduced-motion` is honoured, so
+  // a hand-rolled span here would silently drop that promise.
+  const flap = slot!.querySelector(".flap");
+  expect(flap, "the elapsed reading is not a flap").not.toBeNull();
+  expect(flap!.textContent).toContain("45:12");
+  expect(slot!.getAttribute("aria-label")).toBe("Timing PAY-231 — 45:12");
+});
+
+/** An ad-hoc label reads as itself: it is already what a person typed. */
+test("a label timer reads as its label", async () => {
+  const timer = timerOn({ kind: "label", label: "DB config for the migration" });
+  render([], inboxOf(0), timer);
+  await timer.refresh();
+  flushSync();
+
+  expect(timerSlot()!.querySelector(".ctx")?.textContent).toBe("DB config for the migration");
+});
+
+/**
+ * The slot is a control, and pressing it is the same verb ⌘T performs. The
+ * strip does not stop the timer itself — #280 opens the worklog draft on a
+ * stop, and the draft is the shell's.
+ */
+test("pressing the slot asks the shell to stop, and the strip stops nothing itself", async () => {
+  const timer = timerOn({ kind: "entity", entity_id: "jira:PAY-231" });
+  let asked = 0;
+  render([], inboxOf(0), timer, () => {
+    asked += 1;
+  });
+  await timer.refresh();
+  flushSync();
+
+  timerSlot()!.click();
+  flushSync();
+  expect(asked).toBe(1);
+  expect(timer.current, "the strip stopped the timer behind the shell's back").not.toBeNull();
 });

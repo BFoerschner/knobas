@@ -30,7 +30,7 @@
   };
 </script>
 
-<Shell {router} {lifecycle} {onsearch}>
+<Shell {router} {lifecycle} {onsearch} ontimer={undefined}>
   {#snippet main()}
     <div class="empty">room</div>
   {/snippet}

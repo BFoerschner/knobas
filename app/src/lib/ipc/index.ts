@@ -21,6 +21,7 @@ export * from "./backup";
 export * from "./entity";
 export * from "./search";
 export * from "./sources";
+export * from "./time";
 
 /**
  * Tauri event names — the mirror of `knobas_app::events`, pinned by a Rust

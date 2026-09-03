@@ -130,6 +130,41 @@ fn the_opener_plugin_is_registered() {
     );
 }
 
+/// The stranded-timer sweep runs during bring-up, and **before the state
+/// reaches `Ready`** (issue #278).
+///
+/// `tests/time_ipc.rs` proves the sweep closes a block at the last heartbeat.
+/// Nothing there proves it is ever *called*: `spawn_bring_up` needs a Tauri
+/// app handle and a real PostgreSQL provisioning, so the call itself has no
+/// seam under test, and a sweep that exists and is never reached looks exactly
+/// like one that works -- until a user quits with the clock running and comes
+/// back to a timer that has been going all night.
+///
+/// So this reads the source, with comments stripped so that a sentence *about*
+/// sweeping cannot stand in for the sweep. Position matters as much as
+/// presence: the acceptance criterion is "before the shell's first read", and
+/// the shell reads when `DbState::Ready` is announced.
+#[test]
+fn the_stranded_timer_sweep_runs_before_the_database_is_announced_ready() {
+    let code = strip_comments(include_str!("../src/lib.rs"));
+    let start = code
+        .find("fn spawn_bring_up")
+        .expect("bring-up is where a session's one-off work happens");
+    let body = &code[start..];
+
+    let swept = body
+        .find("time::close_stranded")
+        .expect("a timer that outlived the last process is never closed, so the strip draws a clock that ran all night");
+    let ready = body
+        .find("DbState::Ready")
+        .expect("bring-up announces readiness");
+    assert!(
+        swept < ready,
+        "the sweep runs after `DbState::Ready`, so the shell's first \
+         `current_timer` can beat it and draw the stranded clock"
+    );
+}
+
 /// Rust source with its comments removed, string literals intact.
 ///
 /// The file this scans documents the plugin in prose right next to the call,

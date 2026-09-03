@@ -11,20 +11,31 @@
   it is *absent* at zero rather than drawn as `0`, for the reason the rest of
   this comment gives.
 
-  The timer, Assets and Today/Day buttons of spec §2 are M3/M4 and are
-  deliberately absent. Reserving a slot for a button that cannot work is how a
-  shell fills up with dead chrome, and a disabled control teaches the reader
-  nothing except that the app is unfinished.
+  The **timer** joined them in M3 (#278): spec §2 puts one global timer in the
+  strip, and story 7 is that a reader always knows what the clock is on. It is
+  drawn **only while something is running**, the same rule as the inbox count
+  and for the same reason — a permanent empty slot is one the eye keeps
+  checking, and ⌘T is how a timer starts from anywhere. Its elapsed reading
+  flaps (story 16), which is spec §2's rule for a flap literally: a value that
+  changes while you watch.
+
+  The Assets and Today/Day buttons of spec §2 are M3.1's later tickets and M4
+  and are deliberately absent. Reserving a slot for a button that cannot work
+  is how a shell fills up with dead chrome, and a disabled control teaches the
+  reader nothing except that the app is unfinished.
 -->
 <script lang="ts">
   import { inbox as sharedInbox, type Inbox } from "../inbox/inbox.svelte";
   import type { AuthState } from "../ipc/sources";
   import ContextTabs from "./ContextTabs.svelte";
+  import Flap from "./Flap.svelte";
   import Monogram from "./Monogram.svelte";
   import { sourceMonogram } from "./monogram";
   import { builtinContexts, type RoomContext } from "./contexts";
   import { health as sharedHealth, isActionable, type Health } from "./health.svelte";
   import type { Router } from "./router.svelte";
+  import { timer as sharedTimer, type Timer } from "./timer.svelte";
+  import { targetReading } from "./timer";
 
   let {
     router,
@@ -32,9 +43,37 @@
     contexts = builtinContexts([]),
     health = sharedHealth,
     inbox = sharedInbox,
+    timer = sharedTimer,
+    ontimer,
   }: {
     router: Router;
     onsearch: () => void;
+    /**
+     * The live timer store the slot draws.
+     *
+     * A prop with the shell's singleton as its default, the shape `health`
+     * uses: the strip is correct whatever a caller passes, and a test can hand
+     * it a store with no Tauri bridge behind it.
+     */
+    timer?: Timer;
+    /**
+     * Stop the running timer — what the slot's button does, and the same verb
+     * ⌘T performs while one is running.
+     *
+     * The strip does not stop it itself. Stopping opens the worklog draft in
+     * #280, and the draft is the shell's; a strip that called the store
+     * directly would be a second place that decision was made. `undefined`
+     * leaves the slot a plain reading with no button, which is what a caller
+     * with nothing to do about it gets.
+     *
+     * **Required, and deliberately not defaulted** (the rule #238 set and
+     * `shell/contexts.ts`'s `switcherContexts` records): this prop is the
+     * whole of the join between the strip's slot and the shell's stop, and an
+     * optional one can be dropped from a call site, type-check clean, and
+     * leave a permanently disabled button that no test fails on. A caller with
+     * nothing to do about the timer says so by passing `undefined`.
+     */
+    ontimer: (() => void) | undefined;
     /** The rooms the switcher offers. Defaults to *All work* alone. */
     contexts?: RoomContext[];
     /**
@@ -136,6 +175,35 @@
         <path d="M1.8 8.5h3l1 2h4.4l1-2h3M1.8 8.5 3.6 3h8.8l1.8 5.5v4a1 1 0 0 1-1 1H2.8a1 1 0 0 1-1-1z" />
       </svg>
       <span class="k">{inbox.count}</span>
+    </button>
+  {/if}
+
+  <!--
+    Absent when nothing is running, deliberately — the inbox count's rule.
+    ⌘T starts a timer from anywhere, so an empty slot would buy nothing and
+    cost a permanent place for the eye to check.
+  -->
+  {#if timer.current}
+    <button
+      class="tb-btn timer run"
+      aria-label="Timing {targetReading(timer.current.target)} — {timer.elapsed}"
+      title="Timing {targetReading(timer.current.target)}. Stop it with ⌘T."
+      onclick={() => ontimer?.()}
+      disabled={ontimer === undefined}
+    >
+      <!--
+        `.timer`, `.pulse` and `.ctx` are the mockup's own classes, ported into
+        `app.css` with the rest of the sheet and dormant until now: this is the
+        slot they were written for.
+      -->
+      <span class="pulse" aria-hidden="true"></span>
+      <span class="ctx">{targetReading(timer.current.target)}</span>
+      <!--
+        A flap: the archetypal value that changes while you watch (spec §2,
+        story 16). `Flap` honours `prefers-reduced-motion` itself, so a reader
+        who asked for stillness gets the number without the leaves.
+      -->
+      <Flap value={timer.elapsed ?? "0:00"} width="s" label="time on this timer" />
     </button>
   {/if}
 
