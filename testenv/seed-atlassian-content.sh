@@ -272,8 +272,8 @@ for row in $(printf '%s' "$PROJECTS_JSON" | jq -r '.[] | @base64'); do
     '{name, description, defaultIssueTypeId: (.defaultIssueType.id // empty),
       issueTypeIds: ([.issueTypes[].id] + [$all[] | select(.name as $n | ($m | split(" ") | index($n))) | .id])}')
   jira PUT "/rest/api/2/issuetypescheme/$scheme" "$body"
-  expect "add $(printf '%s' "$missing" | tr '\n' ' ')to scheme $scheme of $pkey" 200
-  created "issue type(s) $(printf '%s' "$missing" | tr '\n' ' ')in the scheme of $pkey"
+  expect "add $(printf '%s' "$missing" | tr '\n' ' ') to scheme $scheme of $pkey" 200
+  created "issue type(s) $(printf '%s' "$missing" | tr '\n' ' ') in the scheme of $pkey"
 done
 
 # -- the two Epic custom fields, by name ------------------------------------
@@ -447,6 +447,8 @@ for row in $(printf '%s' "$PROJECTS_JSON" | jq -r '.[] | @base64'); do
   expect "statuses of $pkey" 200
   STATUSES=$(printf '%s' "$STATUSES" | jq --arg k "$pkey" --argjson s "$(printf '%s' "$API_BODY" | jq '[.[0].statuses[].name]')" '. + {($k): $s}')
 done
+# The argument is a jq PROGRAM: $v is jq's variable, not the shell's.
+# shellcheck disable=SC2016
 record '.jira += {
   template_key: $v.template, statuses: $v.statuses, author: $v.author,
   projects: $v.projects, issues: $v.issues, unreachable_statuses: $v.unreachable,
@@ -536,6 +538,8 @@ for row in $(jqf '.pages[] | select(.space == "ENG") | @base64'); do
     '. + [{fixture_id: $f, title: $t, id: $i, comments: $c}]')
 done
 
+# The argument is a jq PROGRAM: $v is jq's variable, not the shell's.
+# shellcheck disable=SC2016
 record '.confluence += {
   space: $v.space, home_page_id: $v.home, author: $v.author, pages: $v.pages,
   _comment: "Seeded by testenv/seed-atlassian-content.sh. Confluence assigns content ids; pages are found by title in the space, and every page sits under the space home page because the fixture names no ancestors. Comments are authored by `author`."

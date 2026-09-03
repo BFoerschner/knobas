@@ -451,3 +451,86 @@ teamcity-live-seeded:
     cd ..
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-teamcity --test live_teamcity_seeded \
       -- --ignored --nocapture --test-threads=1
+
+# The real Jira and Confluence, end to end, inside one licence window: fetch
+# the timebomb keys, stand the pair up, walk both setup wizards, seed the
+# Tidewater content, prove the seed by reading it back, run every live suite
+# gated on the Atlassian URLs, and `down -v` the pair -- from a trap, so the
+# teardown runs when a step fails too (issue #275, ADR-0013).
+#
+# THREE HOURS IS THE WINDOW. The licences are 10-user timebomb keys that
+# expire three hours after they are applied (testenv/README.md, "Jira and
+# Confluence, end to end"); the pair is disposable by design, which is why
+# this recipe ends in `down -v` rather than leaving a seeded environment the
+# way `gitea-live` does. MEASURED 2026-09-03 on this machine (12 cores, the
+# 8 GB Docker VM), from empty volumes, images already pulled, no live suite
+# yet: 4 min 3 s wall clock -- seeded and verified at 3 min 51 s, of which
+# the two wizard walks and Jira's final start are about three minutes and
+# the content seed about a minute (310 key placeholders in and out again);
+# `down -v` 11 s. A live suite is minutes, not hours, so the three-hour window
+# holds with more than two and a half hours of margin; the number to
+# re-measure is the one in this header, when a suite is added below.
+#
+# WHERE THE LIVE SUITES GO. One line per suite in the block marked below, each
+# a `cargo test -p <crate> --test <live suite> -- --ignored --nocapture
+# --test-threads=1`, gated on KNOBAS_JIRA_URL / KNOBAS_CONFLUENCE_URL from
+# `./seed --env`. None exists yet: #276 adds the Jira adapter's, M3.2 the
+# Confluence adapter's, and the app crate's end-to-end tests follow. Serial
+# and unparallelised for the reason `gitea-live` gives: one server, and tests
+# that write to it.
+#
+# THE 8 GB VM. Jira asks for ~4 GB, Confluence ~2 GB, plus a PostgreSQL each,
+# and Docker Desktop's VM here has 8 GB: the pair cannot share it with the
+# seeded TeamCity (~2.2 GB for server and agent), so this recipe REFUSES to
+# start while `knobas-teamcity` is up and prints the `stop` to run. It does
+# not stop it itself, because `--profile real-teamcity stop` is somebody's
+# seeded environment going away under them (testenv/README.md, "One
+# environment, one owner at a time"), and `stop` -- never `down -v` -- is the
+# right verb there: the TeamCity volumes hold the seeded builds.
+#
+# `down -v` NAMES THE FOUR SERVICES. `docker compose --profile real-atlassian
+# down -v` with no service named also takes the default profile's containers
+# and volumes with it -- Gitea and its seeded corpus included (checked with
+# `--dry-run` on Compose v5.1.2). Naming jira, jira-db, confluence and
+# confluence-db removes exactly their four volumes and nothing else.
+#
+# `INT` and `TERM` as well as `EXIT`, the rule `gitea-live-capped` states:
+# each signal trap clears the `EXIT` trap first, tears down once, and
+# re-raises, so a Ctrl-C mid-wizard still leaves no timebombed pair behind.
+atlassian-live:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd testenv
+    testenv=$PWD
+    # `{{{{` is just's escape for a literal double brace; the closing pair passes through as is.
+    if docker ps --format '{{{{.Names}}' | grep -qx knobas-teamcity; then
+      echo "atlassian-live: knobas-teamcity is running, and the Docker VM (8 GB) cannot hold" >&2
+      echo "  the Atlassian pair next to it. Stop it -- stop, not down -v: its volumes hold" >&2
+      echo "  the seeded builds -- and put it back afterwards:" >&2
+      echo "    (cd testenv && docker compose --profile real-teamcity stop teamcity teamcity-agent)" >&2
+      echo "    just atlassian-live" >&2
+      echo "    (cd testenv && docker compose --profile real-teamcity up -d teamcity teamcity-agent)" >&2
+      exit 1
+    fi
+    t0=$(date +%s)
+    # Before `up`: Confluence reads its key at first start.
+    eval "$(./fetch-timebomb-keys.sh)"
+    teardown() {
+      cd "$testenv"
+      docker compose --profile real-atlassian down -v jira jira-db confluence confluence-db
+      echo "atlassian-live: pair torn down; $(( $(date +%s) - t0 ))s wall clock in all"
+    }
+    trap 'teardown' EXIT
+    trap 'trap - EXIT INT; teardown; kill -INT $$' INT
+    trap 'trap - EXIT TERM; teardown; kill -TERM $$' TERM
+    docker compose --profile real-atlassian up -d jira-db jira confluence-db confluence
+    ./seed-atlassian.sh                   # waits for health, walks both wizards
+    ./seed-atlassian-content.sh           # the Tidewater content
+    ./seed-atlassian-content.sh --verify  # PAY-231 with its worklogs, one page with its body
+    eval "$(./seed --env)"
+    echo "atlassian-live: seeded and verified after $(( $(date +%s) - t0 ))s; KNOBAS_JIRA_URL=$KNOBAS_JIRA_URL KNOBAS_CONFLUENCE_URL=$KNOBAS_CONFLUENCE_URL"
+    cd ..
+    # ---- live suites gated on the Atlassian URLs: one line each, added here ----
+    # (none yet -- see the header: #276 brings the Jira adapter's)
+    # env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-jira --test live_jira -- --ignored --nocapture --test-threads=1
+    echo "atlassian-live: every Atlassian-gated live suite green (0 suites yet)"

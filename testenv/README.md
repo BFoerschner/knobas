@@ -384,7 +384,12 @@ seed fetches it itself when it is unset.
 **Three hours is the shape of this environment.** The licence expires three
 hours after it is applied, and restarting the container does not reset it. So
 this is stand up → run what needs a real instance → `docker compose
---profile real-atlassian down -v`, not a long-lived environment like Gitea's.
+--profile real-atlassian down -v jira jira-db confluence confluence-db`, not a
+long-lived environment like Gitea's. **Name the four services.** A
+profile-scoped `down -v` with no service named takes the default profile's
+containers and volumes with it too — Gitea and its seeded corpus included
+(checked with `--dry-run` on Compose v5.1.2); naming them removes exactly the
+pair's four volumes.
 
 The versions are pinned to what a timebomb key actually starts rather than to
 the newest release — Jira 11.x is reported to reject it. `seed-atlassian.sh`
@@ -394,6 +399,89 @@ drives are not an API and change between versions.
 Real Confluence is here in M1 although Confluence is M3's target, because
 Atlassian publishes **no machine-readable Confluence DC spec at all** — the
 running container is the only contract there will ever be.
+
+### The Tidewater content, and `just atlassian-live`
+
+`seed-atlassian-content.sh` puts `fixtures/tidewater/work.json` into the pair
+`seed-atlassian.sh` set up — the same file the demo loader compiles in, so
+there is no second copy of the dataset — and `just atlassian-live` runs the
+whole window as one command:
+
+```sh
+just atlassian-live      # from the repo root; refuses while knobas-teamcity is up
+```
+
+which is: `fetch-timebomb-keys.sh` (before `up`, since Confluence reads its
+key at first start) → `up` → `seed-atlassian.sh` (waits for health, walks both
+wizards) → `seed-atlassian-content.sh` → `seed-atlassian-content.sh --verify`
+→ every crate test gated on `KNOBAS_JIRA_URL` / `KNOBAS_CONFLUENCE_URL` →
+`down -v` of the four Atlassian services, from a trap, so the teardown runs
+when a step fails and on Ctrl-C. The recipe's header carries the measured wall
+clock of a full run and where a new live suite's line goes. Measured
+2026-09-03, a full run from empty volumes is 4 min 3 s, three minutes of it
+the two wizard walks; the three-hour window holds with hours of margin.
+
+**It refuses while TeamCity is up.** Docker Desktop's VM here has 8 GB; Jira
+wants ~4 GB, Confluence ~2 GB, plus a PostgreSQL each, and the seeded TeamCity
+(server and agent, ~2.2 GB) does not fit beside them. The recipe prints the
+`stop` to run — `docker compose --profile real-teamcity stop teamcity
+teamcity-agent`, *stop* and never `down -v`, because those volumes hold the
+seeded builds — and does not run it itself: the TeamCity environment is
+somebody's (see *One environment, one owner at a time*). Gitea stays up
+throughout; the pair does not need it.
+
+**What the content seed creates.** In Jira, the fixture's five people as
+users (`tidewater-dev`, six accounts on the ten-user key), the `PAY` and
+`OPS` projects from Jira Software's *Basic software development* template
+(`com.pyxis.greenhopper.jira:basic-software-development-template`, the key
+is fixed in the script), every fixture issue **at its fixture key** with its
+type, priority, assignee, estimate, description, status, Epic Name and Epic
+Link, its comments and worklogs, and `blocked_by` as a *Blocks* link. In
+Confluence, the `ENG` space (named *Engineering*; the fixture names only the
+key), its five pages under the space home page with the fixture's `##`
+sections as `<h2>`/`<p>` storage format, their comments, and *Standup
+protocols* as the empty page the standup flow will publish under. The
+template's workflow is *Software Simplified Workflow for Project `<KEY>`*:
+**To Do, In Progress, In Review, Done**, every transition available from
+every status — exactly the fixture's four statuses, and the names the live
+suites' transition tests use. The template's issue type scheme has no
+*Story*, so the seed adds the global Story type to each project's scheme
+over `PUT /rest/api/2/issuetypescheme/<id>`.
+
+**The keys are the fixture's because the keys in front of them are burned.**
+Jira allocates keys from a per-project counter no REST call sets, so the seed
+bulk-creates placeholders (summary `(reserved)`, label `knobas-placeholder`)
+up to the key before each fixture issue, creates the issue, asserts the key,
+and deletes every placeholder at the end. That is why the fixture's keys are
+reachable only in a project the seed created from empty: an issue deleted by
+hand cannot come back at its key (the counter never rewinds), and the seed
+says so and stops rather than seeding PAY-240 as PAY-241. The remedy is the
+one the recipe ends with anyway: `down -v` of the four services, seed again.
+
+**The admin username tests must configure.** Comments and worklogs are
+authored by `knobas` — Jira's and Confluence's REST take no author on
+either — and `seed-state.json` records it as `jira.author` and
+`confluence.author`. An identity-dependent live test configures that username
+(it is what `KNOBAS_JIRA_USER` / `KNOBAS_CONFLUENCE_USER` from `./seed --env`
+already say); the fixture's people exist so that assignees are the fixture's,
+but nothing is written as them.
+
+**What it cannot reproduce**, as for Gitea: created and updated timestamps
+(the server stamps now; worklogs carry the fixture's date at 09:00 UTC), the
+fixture's `spent_week_m`, a page's `edited` date and author. The ids the
+server assigns — issue ids, comment ids, worklog ids, page and page-comment
+ids, the space home page — go to `seed-state.json` under `jira.issues` and
+`confluence.pages`, keyed by fixture key and fixture page id, so a live
+assertion looks a literal id up there and asserts everything else by key,
+title and text. Should a fixture status ever be missing from the workflow,
+`jira.unreachable_statuses` says which issue kept which status; today it is
+empty.
+
+**Idempotent, and it says what it skipped.** Every create is preceded by a
+read — issues by key, comments and worklogs by text, pages by title in the
+space, page comments by text — and the run ends with `done: created N,
+skipped M`. Re-running against a half-seeded instance finishes it; against a
+seeded one it creates nothing.
 
 ## The capped-Gitea overlay
 
@@ -503,6 +591,7 @@ history.
 | `./seed-kuma.sh` | Kuma admin account, monitors, API key. |
 | `./fetch-timebomb-keys.sh` | Pulls the two 10-user, 3-hour Data Center timebomb keys off Atlassian's public page, checks each decodes to the right product, prints `export` lines (`--write` also drops them in the git-ignored `.env.licences`). `seed-atlassian.sh` calls it when a key is unset. |
 | `./seed-atlassian.sh` | The real Jira and Confluence containers' setup wizards, unattended (`--profile real-atlassian`). |
+| `./seed-atlassian-content.sh` | The Tidewater people, projects, issues, comments, worklogs and links in the real Jira; the ENG space, pages and comments in the real Confluence. `--verify` reads PAY-231 and one page back. `just atlassian-live` runs the whole window. |
 | `./seed-teamcity.sh` | The real TeamCity container's first start, an access token and one authorised agent (`--profile real-teamcity`); then runs the script below. |
 | `./seed-teamcity-builds.sh` | The Tidewater projects, build configurations, VCS roots and builds in the real TeamCity; `--running` for the fixture's running build. |
 | `./pin-images.sh` | Re-resolve image tags to digests into `.env`; guarded pins are held, `--move VAR` takes a new one. |
