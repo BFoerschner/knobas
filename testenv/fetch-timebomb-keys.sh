@@ -40,6 +40,7 @@ html=$(curl -sfL -A 'knobas-testenv (fetch-timebomb-keys.sh)' "$PAGE") \
 
 # One line per product: NAME KEY. python3 does the extraction and the decode
 # check; the shell only formats.
+# shellcheck disable=SC2016  # the single quotes hold a Python program; its $ are Python's
 pairs=$(printf '%s' "$html" | python3 -c '
 import re, sys, base64, zlib, struct
 s = sys.stdin.read()

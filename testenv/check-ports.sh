@@ -110,11 +110,9 @@ fi
 #    the witness -- so 8211 is an ordinary free port now, and Flowrun keeps its
 #    reservation only because it is that ADR's single named exception.
 # ---------------------------------------------------------------------------
-for reserved in 8213; do
-  if printf '%s\n' "$actual_all" | grep -q "|$reserved|"; then
-    note "port $reserved is RESERVED by interfaces §5 (8213 = Flowrun stub, M4) and must be bound by nothing"
-  fi
-done
+if printf '%s\n' "$actual_all" | grep -q "|8213|"; then
+  note "port 8213 is RESERVED by interfaces §5 (8213 = Flowrun stub, M4) and must be bound by nothing"
+fi
 
 # ---------------------------------------------------------------------------
 # 4. Nothing may listen off-host. These are developer credentials on an
