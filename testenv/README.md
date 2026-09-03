@@ -653,6 +653,70 @@ Uptime Kuma v2 prunes raw heartbeats to ~24 h, **absence of a metric means
 seed asserts presence, never a particular value, and never waits for heartbeat
 history.
 
+## Signed dev build (macOS)
+
+Desktop notifications (M3.3, #290) need a `.app` bundle with a stable signed
+identity, and an unsigned build re-prompts the keychain on every run (roadmap
+gotcha 10). `tauri dev` produces neither, so the check runs against a bundle.
+No Apple identity is required: a self-signed code-signing certificate is a
+stable identity as far as the keychain and TCC are concerned.
+
+The identity on the dev Mac is **`knobas-dev`**, a self-signed certificate
+created 2026-09-03 (#273). If `security find-identity -v -p codesigning` does
+not list it, recreate it:
+
+```sh
+cat > knobas-dev.cnf <<'CNF'
+[req]
+distinguished_name = dn
+x509_extensions = ext
+prompt = no
+[dn]
+CN = knobas-dev
+[ext]
+basicConstraints = critical,CA:false
+keyUsage = critical,digitalSignature
+extendedKeyUsage = critical,codeSigning
+subjectKeyIdentifier = hash
+CNF
+openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -config knobas-dev.cnf \
+  -keyout knobas-dev.key -out knobas-dev.pem
+openssl pkcs12 -export -inkey knobas-dev.key -in knobas-dev.pem -name knobas-dev \
+  -passout pass:knobas -out knobas-dev.p12
+security import knobas-dev.p12 -k ~/Library/Keychains/login.keychain-db -P knobas \
+  -T /usr/bin/codesign -T /usr/bin/security
+security add-trusted-cert -r trustRoot -p codeSign \
+  -k ~/Library/Keychains/login.keychain-db knobas-dev.pem
+```
+
+(`openssl pkcs12 -export` may need `-legacy` on an OpenSSL 3 that refuses the
+default cipher. An Apple Development certificate from Xcode works the same way;
+export its full quoted name instead.)
+
+Build and sign a debug bundle from the crate that owns `tauri.conf.json`, the
+way the `dev` recipe does. `env -u RUSTUP_TOOLCHAIN` for the reason at the top
+of the justfile; `--bundles app` skips the dmg:
+
+```sh
+export APPLE_SIGNING_IDENTITY="knobas-dev"
+cd crates/knobas-app
+env -u RUSTUP_TOOLCHAIN PATH="$PWD/../../app/node_modules/.bin:$PATH" \
+  tauri build --debug --bundles app
+```
+
+Verify, then launch the bundle rather than the bare binary:
+
+```sh
+codesign -dv --verbose=2 target/debug/bundle/macos/knobas.app   # Authority=knobas-dev
+codesign --verify --deep --strict target/debug/bundle/macos/knobas.app
+open target/debug/bundle/macos/knobas.app
+```
+
+`TeamIdentifier=not set` is expected for a self-signed certificate; the
+notarization warning is expected too. The #290 manual check is: in that
+bundle, switch one notification kind on, unfocus the window, and see one
+notification in Notification Center.
+
 ## Scripts
 
 | Script | Does |
