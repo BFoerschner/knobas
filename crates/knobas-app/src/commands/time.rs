@@ -406,6 +406,85 @@ pub async fn ad_hoc_block<R: tauri::Runtime>(
     .await
 }
 
+/// The week timesheet: a row per target and a cell per day (issue #283).
+///
+/// **The webview computes the seven days**, each as a date and the two
+/// instants it spans, for the reason [`day_blocks`] takes instants: the
+/// machine's timezone is a fact only that side holds, and one UTC offset for a
+/// week would be wrong for every week containing a daylight-saving change.
+/// Sending seven windows gets each edge right by construction.
+///
+/// This read **reconciles each day's passive blocks first**, exactly as
+/// `day_blocks` does and for the same reason -- see [`crate::time::week::read`].
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a day list that is empty,
+/// longer than a week, or whose windows overlap, and
+/// [`Internal`](crate::IpcErrorCode::Internal) if a read fails.
+#[tauri::command]
+pub async fn week_timesheet(
+    lifecycle: State<'_, Lifecycle>,
+    days: Vec<time::week::DayWindow>,
+) -> Result<time::week::Week, IpcError> {
+    let pool = lifecycle.pool()?;
+    time::week::read(&pool, &days).await
+}
+
+/// What *Log all* would send, before any of it is sent (issue #283).
+///
+/// The confirmation's list, and it is a command of its own rather than a field
+/// on the timesheet because it is a different question: the timesheet is what
+/// the week *was*, and this is what a button is about to do to a ticketing
+/// system other people read. [`log_all`] re-derives its own work rather than
+/// being handed this back, for the reason [`log_work`] does not take block ids.
+///
+/// **Takes no `Lifecycle`** and reaches the pool through the sources state, the
+/// shape [`worklog_draft`] records: the plan asks each target's *adapter*
+/// whether a worklog can go there.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a day list the timesheet
+/// would refuse.
+#[tauri::command]
+pub async fn log_all_preview<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    days: Vec<time::week::DayWindow>,
+) -> Result<Vec<time::week::PlannedWorklog>, IpcError> {
+    let sources = crate::sources::state(&app)?;
+    time::week::plan(&sources.pool, sources.registry.as_ref(), &days).await
+}
+
+/// Log the week: one worklog per day and ticket, from that day's unlogged
+/// manual blocks (issue #283, spec story 43).
+///
+/// The worklogs it made. Each is queued, copied and flushed the way a single
+/// *Log* is, so they appear in the pending-writes panel like any other write.
+/// Passive and label blocks are untouched -- [`crate::time::week::plan`]
+/// carries why each exclusion is a rule rather than a filter.
+///
+/// A day and ticket that fails does **not** roll back the ones that succeeded:
+/// the copies are knobas' record of writes that may already have landed, and
+/// ADR-0012 forbids losing one. The failure is reported once the rest of the
+/// week is logged.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a day list the timesheet
+/// would refuse, and otherwise whatever the queue or the database said.
+#[tauri::command]
+pub async fn log_all<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    days: Vec<time::week::DayWindow>,
+) -> Result<Vec<time::worklog::Worklog>, IpcError> {
+    let sources = crate::sources::state(&app)?;
+    time::week::log_all(&sources, &days).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -594,6 +673,9 @@ mod tests {
             "worklog_draft",
             "log_work",
             "ad_hoc_block",
+            "week_timesheet",
+            "log_all_preview",
+            "log_all",
         ] {
             assert!(
                 MIRROR.contains(&format!("\"{command}\"")),
@@ -646,6 +728,12 @@ mod tests {
             ("start_timer", "inRoom"),
             ("ad_hoc_block", "blockId"),
             ("ad_hoc_block", "offsetMinutes"),
+            // One argument on all three, and it is a *list of structs*: Tauri
+            // renames the argument and leaves the fields inside it alone, so
+            // `days` here and `day`, `from`, `to` inside each entry.
+            ("week_timesheet", "days"),
+            ("log_all_preview", "days"),
+            ("log_all", "days"),
         ] {
             let at = MIRROR
                 .find(&format!("\"{call}\""))
@@ -940,6 +1028,132 @@ mod tests {
             "the worklog draft no longer quotes ADR-0012's sentence verbatim. \
              It is the one thing a person can observe about the write queue's \
              guarantee, and the draft is where a re-send is contemplated:\n  {sentence}"
+        );
+    }
+
+    // -- the week timesheet (#283) ------------------------------------------
+
+    fn window() -> crate::time::week::DayWindow {
+        crate::time::week::DayWindow {
+            day: "2026-08-24".parse().expect("a date"),
+            from: at(0, 0),
+            to: at(0, 0) + chrono::Duration::days(1),
+        }
+    }
+
+    /// The day window the webview builds, in the shape it sends it.
+    ///
+    /// A struct on the wire and therefore **snake_case fields inside a
+    /// camelCase argument** -- the split
+    /// `the_mirror_sends_the_argument_names_tauri_expects` exists for. Getting
+    /// this one wrong is a week read that arrives with every window at the
+    /// Unix epoch rather than an error anybody sees.
+    #[test]
+    fn the_day_window_matches_its_typescript_mirror() {
+        assert_shape(
+            MIRROR,
+            "DayWindow",
+            &serde_json::to_value(window()).unwrap(),
+            &["day", "from", "to"],
+        );
+    }
+
+    /// The cell's four numbers, all four declared.
+    #[test]
+    fn the_week_cell_matches_its_typescript_mirror() {
+        let cell = crate::time::week::WeekCell {
+            tracked_seconds: 5_400,
+            offered_seconds: 900,
+            logged_seconds: 3_600,
+            held_seconds: 0,
+            unlogged_seconds: 1_800,
+        };
+        assert_shape(
+            MIRROR,
+            "WeekCell",
+            &serde_json::to_value(cell).unwrap(),
+            &[
+                "tracked_seconds",
+                "offered_seconds",
+                "logged_seconds",
+                "held_seconds",
+                "unlogged_seconds",
+            ],
+        );
+    }
+
+    /// The row, with a target and a title -- and then the **no-target** row,
+    /// which is the arm the "app open" line is drawn on and the one where both
+    /// `Option`s are `None`.
+    ///
+    /// Both, because an `Option` serialises to a `null` key either way: only a
+    /// filled row witnesses the type the mirror declares, and only the empty
+    /// one witnesses that the keys survive being empty.
+    #[test]
+    fn the_week_row_matches_its_typescript_mirror_with_a_target_and_without() {
+        let row = crate::time::week::WeekRow {
+            target: Some(TimerTarget::Entity {
+                entity_id: "jira:PAY-231".to_owned(),
+            }),
+            title: Some("Retry failed SEPA payouts".to_owned()),
+            cells: vec![crate::time::week::WeekCell::default()],
+        };
+        assert_shape(
+            MIRROR,
+            "WeekRow",
+            &serde_json::to_value(&row).unwrap(),
+            &["target", "title", "cells"],
+        );
+
+        let open = crate::time::week::WeekRow {
+            target: None,
+            title: None,
+            cells: vec![crate::time::week::WeekCell::default()],
+        };
+        let wire = serde_json::to_value(&open).unwrap();
+        assert_eq!(wire["target"], serde_json::Value::Null);
+        assert_eq!(wire["title"], serde_json::Value::Null);
+        assert_shape(MIRROR, "WeekRow", &wire, &["target", "title", "cells"]);
+    }
+
+    #[test]
+    fn the_week_matches_its_typescript_mirror() {
+        let week = crate::time::week::Week {
+            days: vec!["2026-08-24".parse().expect("a date")],
+            rows: Vec::new(),
+        };
+        assert_shape(
+            MIRROR,
+            "Week",
+            &serde_json::to_value(&week).unwrap(),
+            &["days", "rows"],
+        );
+    }
+
+    /// The confirmation's line. `title` is exercised as `Some`, the arm the
+    /// reader recognises a ticket by.
+    #[test]
+    fn the_planned_worklog_matches_its_typescript_mirror() {
+        let planned = crate::time::week::PlannedWorklog {
+            day: "2026-08-24".parse().expect("a date"),
+            entity_id: "jira:PAY-231".to_owned(),
+            title: Some("Retry failed SEPA payouts".to_owned()),
+            started_at: at(9, 0),
+            seconds: 5_400,
+            blocks: 2,
+        };
+        assert_shape(
+            MIRROR,
+            "PlannedWorklog",
+            &serde_json::to_value(&planned).unwrap(),
+            &[
+                "day",
+                "entity_id",
+                "title",
+                "started_at",
+                "seconds",
+                "blocks",
+            ],
         );
     }
 }

@@ -260,6 +260,7 @@ const NoteView = (await import("../notes/NoteView.svelte")).default;
 const QueryBox = (await import("../launcher/QueryBox.svelte")).default;
 const StartWork = (await import("../start-work/StartWork.svelte")).default;
 const DayReview = (await import("../time/DayReview.svelte")).default;
+const WeekTimesheet = (await import("../time/WeekTimesheet.svelte")).default;
 const AddSource = (await import("../sources/AddSource.svelte")).default;
 const Diagnostics = (await import("../sources/Diagnostics.svelte")).default;
 const FirstRun = (await import("../sources/FirstRun.svelte")).default;
@@ -513,6 +514,29 @@ const CASES: Case[] = [
             dayBlocks: () => deferred<never[]>([]),
             updateBlock: () => Promise.reject(new Error("no edit in this test")),
             deleteBlock: () => Promise.reject(new Error("no edit in this test")),
+          },
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * The week timesheet (#283). Its effect is the week's read, keyed on the
+     * Monday of the address's day — `deferred` here, so the answer lands after
+     * the unmount, which is what a reader leaving the view before the week
+     * arrives does.
+     */
+    name: "WeekTimesheet",
+    source: "lib/time/WeekTimesheet.svelte",
+    open: (target) => ({
+      app: mount(WeekTimesheet, {
+        target,
+        props: {
+          day: "2026-08-26",
+          ports: {
+            weekTimesheet: () => deferred({ days: [], rows: [] }),
+            logAllPreview: () => Promise.reject(new Error("no plan in this test")),
+            logAll: () => Promise.reject(new Error("no write in this test")),
           },
         },
       }),

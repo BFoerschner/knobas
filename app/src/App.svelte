@@ -30,6 +30,7 @@
   import SourcesView from "./lib/sources/SourcesView.svelte";
   import StartWork from "./lib/start-work/StartWork.svelte";
   import DayReview from "./lib/time/DayReview.svelte";
+  import WeekTimesheet from "./lib/time/WeekTimesheet.svelte";
   import { ipcErrorMessage } from "./lib/ipc";
   import {
     adHocBlock,
@@ -269,6 +270,20 @@
    * day would be a second read of a row the stop already handed over.
    */
   let adHoc = $state<{ block: Block; offer: AdHocBlock } | null>(null);
+
+  /**
+   * Bumped whenever the time view writes anything (#283).
+   *
+   * The day strip and the week timesheet share one address and one screen, and
+   * an edit on either changes what the other draws — assigning a block moves
+   * the week's unlogged total, and *Log all* makes the strip's blocks
+   * read-only. Neither owns the other, and the time commands deliberately
+   * write no activity line, so the shell holds one counter between them: each
+   * view calls `onchanged` after a successful write and re-reads when the
+   * counter moves. Spec #272 story 44 is the reason: "assigning a block and
+   * watching the week's unlogged total change is one glance".
+   */
+  let timeRevision = $state(0);
 
   /**
    * **Every stop on an entity asks for a draft, and `null` is the ordinary
@@ -701,7 +716,26 @@
           the view resolves against its own clock -- `parseHash` is pure and
           must not read one.
         -->
-        <DayReview {router} day={router.route.day} />
+        <!--
+          The day strip and the week under it (#279, #283) — one address, and
+          one counter between them. Story 44 wants assigning a block and
+          watching the week's unlogged total change to be *one glance*: each
+          view bumps `timeRevision` when it writes, and each re-reads when it
+          moves. The shell holds the counter because the two are siblings and
+          neither owns the other; the time commands deliberately write no
+          activity line of their own, so there is no signal to listen to.
+        -->
+        <DayReview
+          {router}
+          day={router.route.day}
+          revision={timeRevision}
+          onchanged={() => (timeRevision += 1)}
+        />
+        <WeekTimesheet
+          day={router.route.day}
+          revision={timeRevision}
+          onchanged={() => (timeRevision += 1)}
+        />
       {:else if router.route.view === "first-run"}
         <FirstRun demo={lifecycle.status?.demo ?? false} onfinish={onFirstRunDone} />
       {:else if router.route.view === "start-work"}
@@ -749,23 +783,42 @@
     <TimerPicker onpick={startFromPicker} onclose={() => (pickerOpen = false)} />
   {/if}
   {#if adHoc}
+    <!--
+      *Log to a ticket…* re-targets the block before it opens the draft, and a
+      re-targeted block moves a row of the week from one target to another — so
+      it bumps the counter for the same reason an edit on the strip does.
+    -->
     <AdHocBlockDialog
       block={adHoc.block}
       offer={adHoc.offer}
       onclose={() => (adHoc = null)}
-      onlog={(draft) => (worklog = draft)}
+      onlog={(draft) => {
+        timeRevision += 1;
+        worklog = draft;
+      }}
     />
   {/if}
   {#if worklog}
+    <!--
+      **A worklog made here counts as a time write too** (#283). The draft is
+      the ordinary way one gets made — every stop on a ticket offers it — and
+      it moves the same two numbers *Log all* moves: the week's `logged` column,
+      and the strip's blocks, which have just become read-only. Without the
+      bump the reader logs an afternoon and watches the week go on calling it
+      unlogged, which is the staleness story 44 is about, arriving through the
+      other door.
+    -->
     <WorklogDraft
       draft={worklog}
       onclose={() => (worklog = null)}
-      onlogged={(logged) =>
+      onlogged={(logged) => {
+        timeRevision += 1;
         push({
           text: `Logged ${Math.round(logged.seconds / 60)}m to ${logged.entity_id.slice(
             logged.entity_id.indexOf(":") + 1,
           )}.`,
-        })}
+        });
+      }}
     />
   {/if}
 {:else}

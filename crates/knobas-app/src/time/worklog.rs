@@ -249,6 +249,23 @@ async fn takes_a_worklog(
     }))
 }
 
+/// The same question asked of a whole entity id, for callers that have one
+/// rather than a namespace -- #283's *Log all*, which walks a day's targets.
+///
+/// `false`, never a refusal, for an id that is not an entity id at all: a
+/// timesheet listing one is a timesheet with a row nothing can be logged
+/// from, which is a thing to skip rather than a read to fail.
+pub(super) async fn takes_a_worklog_for(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    entity_id: &str,
+) -> Result<bool, IpcError> {
+    let Ok(entity) = EntityRef::parse(entity_id) else {
+        return Ok(false);
+    };
+    takes_a_worklog(pool, registry, &entity.namespace).await
+}
+
 /// The blocks of one local day on one entity that have not been logged yet.
 ///
 /// **A block belongs to the day it started on**, and a timer left running
@@ -293,13 +310,21 @@ fn worklog_of(row: &sqlx::postgres::PgRow) -> Result<Worklog, IpcError> {
 }
 
 /// One stretch, as the interval maths sees it.
-struct Span {
-    id: i64,
-    started_at: DateTime<Utc>,
-    ended_at: DateTime<Utc>,
+///
+/// `pub(super)` for #283's *Log all*, which concatenates the same spans over a
+/// whole day rather than over one draft.
+pub(super) struct Span {
+    pub id: i64,
+    pub started_at: DateTime<Utc>,
+    pub ended_at: DateTime<Utc>,
 }
 
-async fn unlogged(
+/// The unlogged manual blocks on one entity inside an interval.
+///
+/// `pub(super)` rather than private, and that visibility is the rule: *Log
+/// all* (#283) must offer exactly the blocks a draft would, so it asks this
+/// question rather than writing the predicate out a second time.
+pub(super) async fn unlogged(
     pool: &PgPool,
     entity_id: &str,
     from: DateTime<Utc>,
@@ -330,7 +355,7 @@ async fn unlogged(
 /// agrees with the sum on every unbroken afternoon and disagrees by exactly
 /// the lunch on every other one, so a test with a gap in it is the only test
 /// that can tell them apart.
-fn concatenate(spans: &[Span]) -> Option<(DateTime<Utc>, DateTime<Utc>, i64)> {
+pub(super) fn concatenate(spans: &[Span]) -> Option<(DateTime<Utc>, DateTime<Utc>, i64)> {
     let first = spans.first()?;
     let started_at = first.started_at;
     let ended_at = spans.iter().map(|s| s.ended_at).max()?;
@@ -612,12 +637,29 @@ pub async fn log(
              logged already, or the blocks are on another day"
         )));
     }
+    commit(state, entity_id, started_at, seconds, comment, &spans).await
+}
+
+/// Queue the write, keep the copy, flush, and read the copy back.
+///
+/// The last three steps of [`log`], extracted because #283's *Log all* takes
+/// exactly the same three and taking them a second way is how two paths come
+/// to disagree about whether a copy exists before a write is sent.
+///
+/// **Queue first, copy second, flush third** -- see this module's docs. The
+/// copy has to carry the queue row's id before anything can settle it, because
+/// the settle is what stamps Jira's worklog id onto the copy and it stamps by
+/// that id.
+async fn commit(
+    state: &SourcesState,
+    entity_id: &str,
+    started_at: DateTime<Utc>,
+    seconds: i64,
+    comment: &str,
+    spans: &[Span],
+) -> Result<Worklog, IpcError> {
     let block_ids: Vec<i64> = spans.iter().map(|s| s.id).collect();
 
-    // **Queue first, copy second, flush third** -- see this module's docs. The
-    // copy has to carry the queue row's id before anything can settle it,
-    // because the settle is what stamps Jira's worklog id onto the copy and it
-    // stamps by that id.
     let op = WriteOp::LogWork {
         entity: entity_id.to_owned(),
         started: started_at,
@@ -652,6 +694,59 @@ pub async fn log(
     .fetch_optional(&state.pool)
     .await?;
     settled.as_ref().map_or(Ok(worklog), worklog_of)
+}
+
+/// Log everything unlogged on one ticket inside one interval -- *Log all*'s
+/// single step (#283).
+///
+/// [`log`] with the reader taken out of it. The differences are the whole
+/// point of it being a second entry rather than a parameter on the first:
+///
+/// * **The interval is the caller's two instants**, not a date and an offset.
+///   The week timesheet computes seven of them in the webview, which is the
+///   only place a reader's midnights are known, and a week containing a
+///   daylight-saving change has two offsets across it.
+/// * **The seconds and the start are derived, never given.** In the draft they
+///   are the reader's account of their afternoon and knobas has no business
+///   overruling them; in a bulk action nobody has looked at a single one of
+///   them, so the only honest number is [`concatenate`]'s -- the blocks added
+///   up, gaps excluded.
+/// * **The comment is the caller's, and *Log all* passes an empty one.** A
+///   worklog with no words is a worklog (story 33); generated bullets nobody
+///   ticked are not.
+///
+/// # Errors
+/// `invalid` for a source that does not take worklogs and for a day whose
+/// blocks add up to nothing; `conflict` when the interval has no unlogged
+/// manual blocks on this ticket left; otherwise whatever the queue or the
+/// database says.
+pub(super) async fn log_within(
+    state: &SourcesState,
+    entity_id: &str,
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+    comment: &str,
+) -> Result<Worklog, IpcError> {
+    if !takes_a_worklog_for(&state.pool, state.registry.as_ref(), entity_id).await? {
+        return Err(IpcError::invalid(format!(
+            "{entity_id} belongs to a source that does not take worklogs -- \
+             `{LOG_WORK}` is not in what its adapter declares"
+        )));
+    }
+    let spans = unlogged(&state.pool, entity_id, from, to).await?;
+    let Some((started_at, _, seconds)) = concatenate(&spans) else {
+        return Err(IpcError::conflict(format!(
+            "there is no unlogged time on {entity_id} in that interval -- it \
+             has been logged already, or the blocks are on another day"
+        )));
+    };
+    if seconds <= 0 {
+        return Err(IpcError::invalid(
+            "a worklog of no time is not a worklog -- edit the interval or leave \
+             the blocks unlogged",
+        ));
+    }
+    commit(state, entity_id, started_at, seconds, comment, &spans).await
 }
 
 #[cfg(test)]

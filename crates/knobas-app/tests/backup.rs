@@ -358,3 +358,194 @@ async fn a_restore_refuses_a_database_that_already_holds_knobas_data() {
         "the refusal has to say what to do instead: {error}"
     );
 }
+
+/// **A day of work survives the machine move** (#283): the running timer, the
+/// blocks it made, the worklog they became, and the settings that govern them.
+///
+/// Every one of these is `knobas`-owned and therefore already in the archive
+/// by construction -- the dump is schema-scoped (§16.12) rather than a table
+/// list, which is the decision `crates/knobas-db/src/backup.rs` records so
+/// that a table a later migration adds rides in it without anybody
+/// remembering. That is precisely why it needs a test: *by construction* is
+/// exactly the kind of claim that stops being true silently, and a `--schema`
+/// that somebody narrows to a table list would break nothing else in this
+/// suite.
+///
+/// Two assertions, and they are different questions:
+///
+/// 1. **the archive's own table of contents names the four time tables**, read
+///    back off the file with `pg_restore --list` -- the seam the ratified
+///    scope is held against, because the argument list that produced the dump
+///    is what is under test and reading it back off the file is the one
+///    observation that cannot agree with a wrong one;
+/// 2. **the rows come back**, read through the same store the timesheet reads
+///    through, into a database that has never seen them.
+///
+/// A source database of its own rather than the shared one, because
+/// `knobas.timer` holds **at most one row, structurally** (`0013`): a fixture
+/// writing one into a pool three tests share is a fixture that fails on
+/// whichever of them runs second.
+#[tokio::test]
+async fn a_restored_backup_brings_back_the_timer_its_blocks_and_its_worklogs() {
+    use knobas_app::time::week::DayWindow;
+
+    let source = knobas_db::test_util::scratch_database("timesource").await;
+    let from = source.pool(2).await.unwrap();
+
+    let ticket = format!("jira:PAY-{}", token("time"));
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ticket', $2)")
+        .bind(&ticket)
+        .bind("Retry failed payouts")
+        .execute(&from)
+        .await
+        .unwrap();
+
+    // The running timer, on an ad-hoc label -- the half a mirror could never
+    // rebuild, which is why it is the half worth carrying.
+    sqlx::query("insert into knobas.timer (entity_id, label, started_at) values (null, $1, $2)")
+        .bind("DB config for the migration")
+        .bind(day(9, 0))
+        .execute(&from)
+        .await
+        .unwrap();
+
+    // Two blocks: one a person tracked, one knobas guessed at.
+    for (start, end, kind) in [(9, 10, "manual"), (14, 15, "passive")] {
+        sqlx::query(
+            "insert into knobas.block (started_at, ended_at, entity_id, kind)
+             values ($1, $2, $3, $4)",
+        )
+        .bind(day(start, 0))
+        .bind(day(end, 0))
+        .bind(&ticket)
+        .bind(kind)
+        .execute(&from)
+        .await
+        .unwrap();
+    }
+
+    // A worklog over the manual one, and the block pointed back at it -- the
+    // pair that makes a block read-only, which a restore that dropped either
+    // half would silently turn editable again.
+    let worklog: i64 = sqlx::query_scalar(
+        "insert into knobas.worklog
+           (entity_id, started_at, seconds, comment, block_ids, remote_id)
+         select $1, $2, 3600, 'drained the payout queue', array[b.id], '30013'
+           from knobas.block b
+          where b.entity_id = $1 and b.kind = 'manual'
+         returning id",
+    )
+    .bind(&ticket)
+    .bind(day(9, 0))
+    .fetch_one(&from)
+    .await
+    .unwrap();
+    sqlx::query("update knobas.block set worklog_id = $1 where entity_id = $2 and kind = 'manual'")
+        .bind(worklog)
+        .bind(&ticket)
+        .execute(&from)
+        .await
+        .unwrap();
+
+    // One heartbeat, and the setting that is the only reason one was recorded.
+    knobas_app::time::passive::set_enabled(&from, true)
+        .await
+        .expect("passive attribution is switched on");
+    sqlx::query("insert into knobas.heartbeat (at, entity_id, focused) values ($1, $2, true)")
+        .bind(day(16, 0))
+        .bind(&ticket)
+        .execute(&from)
+        .await
+        .unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let archive = dir.path().join("a-day-of-work.knobas");
+    backup::dump(&source, &archive).await.expect("a backup");
+
+    // 1. The archive says what it holds.
+    let contents = backup::archive_contents(&archive)
+        .await
+        .expect("the archive lists");
+    for table in ["timer", "block", "worklog", "heartbeat"] {
+        assert!(
+            contents.iter().any(|entry| {
+                entry.kind == "TABLE DATA" && entry.schema == "knobas" && entry.name == table
+            }),
+            "knobas.{table} is not in the archive -- the dump is schema-scoped \
+             so that a table a migration adds rides in it, and something has \
+             narrowed it: {contents:?}"
+        );
+    }
+
+    // 2. The rows come back into a database that has never seen them.
+    let target = knobas_db::test_util::scratch_database("timerestore").await;
+    backup::restore(&target, &archive)
+        .await
+        .expect("restore into an empty database");
+    let into = target.pool(2).await.unwrap();
+
+    let running = knobas_app::time::current(&into)
+        .await
+        .expect("the timer reads")
+        .expect("a timer that was running is a timer that is running");
+    assert_eq!(
+        running.target,
+        knobas_app::time::TimerTarget::Label {
+            label: "DB config for the migration".to_owned()
+        },
+        "an ad-hoc label exists nowhere but in knobas' own schema"
+    );
+
+    // Through the week read, which is the seam the timesheet uses: one day, so
+    // the blocks, the worklog and the setting all have to have come back for
+    // the numbers to be right.
+    let week = knobas_app::time::week::read(
+        &into,
+        &[DayWindow {
+            day: chrono::NaiveDate::from_ymd_opt(2026, 8, 24).unwrap(),
+            from: day(0, 0),
+            to: day(0, 0) + chrono::Duration::days(1),
+        }],
+    )
+    .await
+    .expect("the restored week reads");
+    let row = week
+        .rows
+        .iter()
+        .find(|row| {
+            row.target
+                == Some(knobas_app::time::TimerTarget::Entity {
+                    entity_id: ticket.clone(),
+                })
+        })
+        .unwrap_or_else(|| panic!("the ticket has no row after the restore: {week:?}"));
+    assert_eq!(
+        row.cells[0].tracked_seconds, 3_600,
+        "the manual block came back"
+    );
+    assert_eq!(
+        row.cells[0].held_seconds, 3_600,
+        "...and so did the worklog over it, with no queue row to carry it, \
+         which is the state that asks somebody to look"
+    );
+
+    assert!(
+        knobas_app::time::passive::enabled(&into)
+            .await
+            .expect("the setting reads"),
+        "the time settings are knobas' own and belong in a backup"
+    );
+    let beats: i64 = sqlx::query_scalar("select count(*) from knobas.heartbeat")
+        .fetch_one(&into)
+        .await
+        .unwrap();
+    assert_eq!(beats, 1, "the observations came back too");
+}
+
+/// A moment on the fixture's Monday, in UTC.
+fn day(hour: u32, minute: u32) -> chrono::DateTime<chrono::Utc> {
+    use chrono::TimeZone;
+    chrono::Utc
+        .with_ymd_and_hms(2026, 8, 24, hour, minute, 0)
+        .unwrap()
+}

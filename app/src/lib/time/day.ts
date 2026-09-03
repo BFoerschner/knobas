@@ -29,7 +29,14 @@ const WEEKDAYS = [
   "Friday",
   "Saturday",
 ];
-const MONTHS = [
+/**
+ * Exported for `week.ts`'s heading, which names the same months.
+ *
+ * One array rather than two: two copies of a list this stable do not drift
+ * often, but when one does the two headings on one screen disagree, and the
+ * screen is the timesheet and the day strip above it.
+ */
+export const MONTHS = [
   "January",
   "February",
   "March",

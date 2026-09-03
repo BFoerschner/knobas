@@ -78,6 +78,8 @@
   let {
     router,
     day = null,
+    revision = 0,
+    onchanged,
     ports,
     now = () => new Date(),
   }: {
@@ -90,6 +92,19 @@
      * depending on when it was parsed.
      */
     day?: string | null;
+    /**
+     * Bumped by whatever else on this screen changed this day — the week
+     * timesheet's *Log all*, which makes this day's blocks read-only (#283).
+     *
+     * A number rather than an event, because the two views are siblings and
+     * the shell owns the screen: `update_block` and `log_all` deliberately
+     * write no activity line of their own, so there is no signal to listen to
+     * and inventing one would be a second thing to keep in step with the
+     * first.
+     */
+    revision?: number;
+    /** Called after a successful edit, so the week below re-reads too. */
+    onchanged?: (() => void) | undefined;
     ports?: Partial<DayPorts>;
     /** Injectable clock — what *Today* and *Extend to now* mean. */
     now?: () => Date;
@@ -183,6 +198,10 @@
    */
   const readDay = latestRead<DayBlock[]>();
   $effect(() => {
+    // Read for its own sake: *Log all* below changes this day's blocks without
+    // changing the address, and a strip still offering *Edit* on a block that
+    // has just become read-only is a strip that disagrees with the backend.
+    revision;
     void load(key);
   });
 
@@ -225,17 +244,26 @@
   }
 
 
-  /** Run one edit, keep its refusal, and re-read the day either way. */
+  /**
+   * Run one edit, keep its refusal, and re-read the day either way.
+   *
+   * `onchanged` on success only, and it is story 44's whole mechanism: the
+   * week below re-reads, so assigning a block and watching the week's unlogged
+   * total change is one glance rather than a reload.
+   */
   async function write(action: () => Promise<unknown>) {
     refusal = null;
+    let wrote = false;
     try {
       await action();
       editing = null;
       assigning = null;
+      wrote = true;
     } catch (error) {
       refusal = ipcErrorMessage(error);
     }
     await load(key);
+    if (wrote) onchanged?.();
   }
 
   /**

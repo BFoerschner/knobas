@@ -465,3 +465,154 @@ export function adHocBlock(blockId: number, when: ReaderDay): Promise<AdHocBlock
     offsetMinutes: when.offsetMinutes,
   });
 }
+
+/**
+ * One of the reader's days, as the week timesheet asks for it —
+ * `week::DayWindow`.
+ *
+ * Both halves travel together because neither side can derive the other: the
+ * backend queries on the instants and keys the cell on the date, and it must
+ * not do the timezone arithmetic itself. `weekWindows` in `lib/time/week.ts`
+ * is what builds these — one `Date` per local midnight, so a week containing a
+ * daylight-saving change is still seven correct windows rather than seven
+ * equal ones.
+ */
+export interface DayWindow {
+  /** `"2026-08-24"`, in the reader's own reckoning. */
+  day: string;
+  /** RFC 3339, UTC — the reader's local midnight. */
+  from: string;
+  /** RFC 3339, UTC — the next local midnight. Half-open. */
+  to: string;
+}
+
+/**
+ * One target's numbers on one day, in **seconds** — `week::WeekCell`.
+ *
+ * Seconds on the wire and minutes on the screen. `CONTEXT.md`'s timesheet is
+ * minute-granular with no rounding, and rounding once in the view on a number
+ * that never lost precision is what keeps a week's total equal to the total of
+ * its days.
+ */
+export interface WeekCell {
+  /**
+   * The day's **manual** blocks on this target, added up — and on the
+   * no-target row, the focused time no block covered.
+   *
+   * Passive blocks are not in it: tracked time is what the reader said their
+   * day was, which is the same rule the day review's heading states.
+   */
+  tracked_seconds: number;
+  /**
+   * The day's **passive** blocks on this target — what knobas is offering.
+   *
+   * Beside {@link tracked_seconds} rather than inside it, and present rather
+   * than dropped: the day strip above draws these blocks and says "*N*
+   * offered" beside its own tracked total, so a week that left them out would
+   * disagree with it about the same afternoon. Nothing logs one until a person
+   * assigns it, so it pays into no other number here.
+   */
+  offered_seconds: number;
+  /**
+   * Worklog seconds whose write is `pending` or `sent`.
+   *
+   * **A pending worklog counts as logged** (spec #272 story 39): the number is
+   * about what the reader did, not about sync timing.
+   */
+  logged_seconds: number;
+  /**
+   * Worklog seconds whose write is waiting on a person — `held`, `refused`,
+   * `discarded`, or a copy whose queue row is gone.
+   *
+   * Shown as *held* rather than folded into either neighbour: the blocks under
+   * it already carry a worklog id, so *Log all* will not offer them again, and
+   * drawing it as unlogged would invite logging one afternoon twice.
+   */
+  held_seconds: number;
+  /** `tracked - logged - held`, floored at zero. */
+  unlogged_seconds: number;
+}
+
+/** One row of the timesheet — `week::WeekRow`. */
+export interface WeekRow {
+  /**
+   * The target, or `null` for the **"no target, app open"** row.
+   *
+   * That row is focused time no block covers, so that the week's total is
+   * honest (spec story 41). It has no target and therefore nothing to log:
+   * *Log all* never sees it. It is present only when there is something to
+   * say — a week knobas was shut for has no such row at all, which is how
+   * "the app was closed" reads differently from "the app was open and idle".
+   */
+  target: TimerTarget | null;
+  /** What the mirror calls the target, or `null` — the `DayBlock` split. */
+  title: string | null;
+  /** One cell per day in {@link Week.days}, in that order. */
+  cells: WeekCell[];
+}
+
+/** The week, as the timesheet draws it — `week::Week`. */
+export interface Week {
+  /** `"2026-08-24"` … — the column headings, in the order asked for. */
+  days: string[];
+  /** Targets first in title order, then the no-target row if it has one. */
+  rows: WeekRow[];
+}
+
+/** One worklog *Log all* would create — `week::PlannedWorklog`. */
+export interface PlannedWorklog {
+  /** `"2026-08-24"` — the day this worklog is for. */
+  day: string;
+  entity_id: string;
+  /** The mirror's title for it, or `null`. For the reader to recognise. */
+  title: string | null;
+  /** RFC 3339, UTC — the first covered block's start. */
+  started_at: string;
+  /** The covered blocks' durations added up, gaps excluded. */
+  seconds: number;
+  /** How many blocks it concatenates. */
+  blocks: number;
+}
+
+/**
+ * The week timesheet: a row per target and a cell per day.
+ *
+ * **The caller computes the days**, the way {@link dayBlocks}'s caller
+ * computes one — the machine's timezone is a fact only this side holds, and a
+ * single UTC offset would move one edge of the week that contains a
+ * daylight-saving change.
+ *
+ * Rejects with `invalid` for no days, more than seven, or windows that overlap
+ * — an overlap would count one block into two columns.
+ */
+export function weekTimesheet(days: DayWindow[]): Promise<Week> {
+  return invoke<Week>("week_timesheet", { days });
+}
+
+/**
+ * What {@link logAll} would send, before it sends any of it.
+ *
+ * The confirmation's list. Ask for it, show it, and call {@link logAll} only
+ * if the reader says yes — a bulk write into a ticketing system other people
+ * read is not something to discover afterwards.
+ */
+export function logAllPreview(days: DayWindow[]): Promise<PlannedWorklog[]> {
+  return invoke<PlannedWorklog[]>("log_all_preview", { days });
+}
+
+/**
+ * Log the week: one worklog per day and ticket from that day's unlogged
+ * **manual** blocks.
+ *
+ * Passive blocks and ad-hoc label blocks are never touched — a passive block
+ * is knobas' own guess, and a label is not somewhere a worklog can go. The
+ * work is re-derived rather than taken from the plan, so a timer that stopped
+ * while the confirmation was on screen is logged too.
+ *
+ * Rejects with whatever the queue said, **after** the rest of the week has
+ * been logged: each worklog is its own write and one that failed does not undo
+ * the copies of the ones that did not.
+ */
+export function logAll(days: DayWindow[]): Promise<Worklog[]> {
+  return invoke<Worklog[]>("log_all", { days });
+}

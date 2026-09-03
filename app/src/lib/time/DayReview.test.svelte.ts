@@ -58,7 +58,10 @@ type Create = [string, string, TimerTarget];
 let target: HTMLDivElement;
 let app: Record<string, unknown> | undefined;
 
-function render(rows: DayBlock[], over: { update?: () => Promise<DayBlock> } = {}) {
+function render(
+  rows: DayBlock[],
+  over: { update?: () => Promise<DayBlock>; onchanged?: () => void } = {},
+) {
   const updates: Update[] = [];
   const deletes: number[] = [];
   const creates: Create[] = [];
@@ -81,6 +84,7 @@ function render(rows: DayBlock[], over: { update?: () => Promise<DayBlock> } = {
         return router.route.view === "time" ? router.route.day : DAY;
       },
       now: () => NOW,
+      onchanged: over.onchanged,
       ports: {
         dayBlocks: (from: string, to: string) => {
           asked.push([from, to]);
@@ -164,6 +168,42 @@ afterEach(() => {
   app = undefined;
   target.remove();
   location.hash = "";
+});
+
+/**
+ * **A successful edit tells the shell the screen changed** (#283, spec #272
+ * story 44: "assigning a block and watching the week's unlogged total change
+ * is one glance").
+ *
+ * The week timesheet is this strip's sibling on one address, and `update_block`
+ * deliberately writes no activity line — so there is no signal to listen to
+ * and the shell holds one counter between the two views. A refused edit must
+ * not bump it: nothing changed, and a week re-reading over a refusal would be
+ * knobas claiming a write that did not happen.
+ */
+test("an edit tells the shell the screen changed, and a refusal does not", async () => {
+  let changed = 0;
+  const { updates } = render([stranded()], { onchanged: () => (changed += 1) });
+  await vi.waitFor(() => expect(strip()).toEqual(["block"]));
+  expect(changed, "reading a day is not changing it").toBe(0);
+
+  button("Extend to now")!.click();
+  await vi.waitFor(() => expect(updates).toHaveLength(1));
+  await vi.waitFor(() => expect(changed).toBe(1));
+});
+
+test("a refused edit does not tell the shell anything changed", async () => {
+  let changed = 0;
+  const { updates } = render([stranded()], {
+    onchanged: () => (changed += 1),
+    update: () => Promise.reject({ code: "invalid", message: "this block has been logged" }),
+  });
+  await vi.waitFor(() => expect(strip()).toEqual(["block"]));
+
+  button("Extend to now")!.click();
+  await vi.waitFor(() => expect(updates).toHaveLength(1));
+  await vi.waitFor(() => expect(text()).toContain("this block has been logged"));
+  expect(changed, "nothing was written, so nothing on the screen changed").toBe(0);
 });
 
 test("the day is read as the reader's own midnight-to-midnight", async () => {

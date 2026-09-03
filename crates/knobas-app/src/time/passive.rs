@@ -125,6 +125,76 @@ impl PassiveSpan {
     }
 }
 
+/// A stretch the window was **focused** for, whatever was in the foreground.
+///
+/// Not a [`PassiveSpan`]: it carries no target, because it is the answer to a
+/// different question. A passive span says *this was open*; this says *knobas
+/// was being looked at*. The week timesheet's "no target, app open" row (#283)
+/// is the second question minus every block, and it has to be measured the
+/// same way [`derive`] measures its cap or the two surfaces would disagree
+/// about the same afternoon.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FocusedSpan {
+    pub started_at: DateTime<Utc>,
+    pub ended_at: DateTime<Utc>,
+}
+
+impl FocusedSpan {
+    fn length(self) -> Duration {
+        self.ended_at - self.started_at
+    }
+}
+
+/// The stretches the window was focused for, in order and never overlapping.
+///
+/// **The one measurement of focused time in the crate**, and both readers of
+/// it are here: [`derive`] sums these into the cap it spends, and #283's week
+/// read subtracts the day's blocks from them to get "app open, nothing
+/// claimed". A second walk would be a second opinion about the same beats.
+///
+/// A beat credits the interval up to the **next** beat, clamped to one beat
+/// window: a gap longer than the window is focus that was lost and came back,
+/// and only the window counts -- otherwise a laptop shut at lunch would bill
+/// the afternoon. The **final** beat credits nothing forward, because there is
+/// no next beat to credit toward; that missing window is why a day's focused
+/// time is one window shorter than the claims [`derive`] builds from the same
+/// beats, and therefore why the cap binds at all.
+///
+/// An unfocused beat credits nothing: it is neither time nor attribution.
+#[must_use]
+pub fn focused_spans(observations: &[Observation]) -> Vec<FocusedSpan> {
+    let window = Duration::seconds(BEAT_WINDOW_SECONDS);
+    let mut beats: Vec<&Observation> = observations.iter().collect();
+    beats.sort_by_key(|beat| beat.at);
+
+    let mut spans: Vec<FocusedSpan> = Vec::new();
+    for pair in beats.windows(2) {
+        if !pair[0].focused {
+            continue;
+        }
+        let span = FocusedSpan {
+            started_at: pair[0].at,
+            ended_at: pair[0].at + (pair[1].at - pair[0].at).min(window),
+        };
+        if span.length() <= Duration::zero() {
+            // Two beats in the same instant. A zero-length span is not a
+            // stretch and would only ever be a row of nothing to subtract.
+            continue;
+        }
+        match spans.last_mut() {
+            // Consecutive beats inside the window leave spans that butt onto
+            // each other; merged so the output is the *shape* of the focused
+            // time rather than one entry per beat, which is what makes
+            // subtracting blocks from it readable.
+            Some(open) if open.ended_at >= span.started_at => {
+                open.ended_at = open.ended_at.max(span.ended_at);
+            }
+            _ => spans.push(span),
+        }
+    }
+    spans
+}
+
 /// Turn a sequence of observations into the passive blocks it supports.
 ///
 /// **Pure**: no clock, no database, no setting. Give it beats, get spans.
@@ -165,12 +235,14 @@ pub fn derive(observations: &[Observation]) -> Vec<PassiveSpan> {
     let mut beats: Vec<&Observation> = observations.iter().collect();
     beats.sort_by_key(|beat| beat.at);
 
-    let mut budget = Duration::zero();
-    for pair in beats.windows(2) {
-        if pair[0].focused {
-            budget += (pair[1].at - pair[0].at).min(window);
-        }
-    }
+    // The cap's budget, measured by the crate's one walk over focused time
+    // (`focused_spans`) rather than by a second loop here: #283's week read
+    // subtracts blocks from those same spans, and two walks would be two
+    // opinions about one afternoon.
+    let budget: Duration = focused_spans(observations)
+        .iter()
+        .map(|span| span.length())
+        .fold(Duration::zero(), |total, length| total + length);
 
     let mut visits: Vec<PassiveSpan> = Vec::new();
     for beat in &beats {
@@ -455,7 +527,7 @@ pub(super) async fn materialize(
 /// broken row. Sharing one decoder would mean either an internal error on
 /// every empty room or a silent fallback that made a broken timer row look
 /// like an empty one. Two rules, two decoders, and the reason written down.
-fn observation_of(row: &sqlx::postgres::PgRow) -> Result<Observation, IpcError> {
+pub(super) fn observation_of(row: &sqlx::postgres::PgRow) -> Result<Observation, IpcError> {
     let entity_id: Option<String> = row.try_get("entity_id")?;
     let label: Option<String> = row.try_get("label")?;
     let foreground = match (entity_id, label) {
@@ -503,6 +575,74 @@ mod tests {
 
     fn seconds(span: &PassiveSpan) -> i64 {
         span.length().num_seconds()
+    }
+
+    /// **A silence is a break in focused time, not more of it**, and the
+    /// break costs everything past one beat window.
+    ///
+    /// Two runs of beats an hour apart. The walk gives two spans, and the hour
+    /// between them buys exactly **thirty seconds** -- the window the last
+    /// beat of the first run credits forward before knobas stops claiming to
+    /// know anything. The other 2970 seconds are not focused time, which is
+    /// the rule that stops a laptop shut at lunch billing the afternoon, and
+    /// it is the rule #283's "app open" row is read through as well.
+    #[test]
+    fn focused_time_is_the_beats_shape_and_a_silence_is_not_in_it() {
+        let mut observations = beats(Some(on("jira:PAY-231")), 0, 600, 30);
+        observations.extend(beats(None, 3600, 3720, 30));
+
+        let spans = focused_spans(&observations);
+
+        assert_eq!(spans.len(), 2, "an hour of silence is a break: {spans:?}");
+        assert_eq!(spans[0].started_at, at(0));
+        assert_eq!(
+            spans[0].ended_at,
+            at(630),
+            "the run's last beat credits one window toward the silence and no \
+             more of it"
+        );
+        assert_eq!(spans[1].started_at, at(3600));
+        assert_eq!(
+            spans[1].ended_at,
+            at(3720),
+            "and the very last beat of all credits nothing forward"
+        );
+        assert_eq!(
+            spans.iter().map(|s| s.length().num_seconds()).sum::<i64>(),
+            750,
+            "an hour of wall clock is 750 seconds of focused time, and that is \
+             what the cap spends"
+        );
+    }
+
+    /// An unfocused beat is neither time nor attribution, so it credits
+    /// nothing -- the direction that keeps a window left open behind another
+    /// app out of the week's "app open" row.
+    #[test]
+    fn an_unfocused_beat_credits_no_focused_time() {
+        let observations = vec![
+            Observation {
+                at: at(0),
+                foreground: Some(on("jira:PAY-231")),
+                focused: false,
+            },
+            Observation {
+                at: at(30),
+                foreground: Some(on("jira:PAY-231")),
+                focused: true,
+            },
+            Observation {
+                at: at(60),
+                foreground: Some(on("jira:PAY-231")),
+                focused: true,
+            },
+        ];
+
+        let spans = focused_spans(&observations);
+
+        assert_eq!(spans.len(), 1, "only the focused pair counts: {spans:?}");
+        assert_eq!(spans[0].started_at, at(30));
+        assert_eq!(spans[0].ended_at, at(60));
     }
 
     /// **The cap is spent in order, and the later visit is the one trimmed.**

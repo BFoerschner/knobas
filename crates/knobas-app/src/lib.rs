@@ -251,6 +251,9 @@ pub fn run() {
             commands::time::worklog_draft,
             commands::time::log_work,
             commands::time::ad_hoc_block,
+            commands::time::week_timesheet,
+            commands::time::log_all_preview,
+            commands::time::log_all,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")
