@@ -23,6 +23,7 @@
   import TimerPicker from "./lib/shell/TimerPicker.svelte";
   import { push } from "./lib/shell/toasts.svelte";
   import { localDay, offsetMinutes } from "./lib/time/draft";
+  import AdHocBlockDialog from "./lib/time/AdHocBlock.svelte";
   import WorklogDraft from "./lib/time/WorklogDraft.svelte";
   import SettingsView from "./lib/settings/SettingsView.svelte";
   import FirstRun from "./lib/sources/FirstRun.svelte";
@@ -30,7 +31,13 @@
   import StartWork from "./lib/start-work/StartWork.svelte";
   import DayReview from "./lib/time/DayReview.svelte";
   import { ipcErrorMessage } from "./lib/ipc";
-  import { worklogDraft, type Block, type Draft } from "./lib/ipc/time";
+  import {
+    adHocBlock,
+    worklogDraft,
+    type AdHocBlock,
+    type Block,
+    type Draft,
+  } from "./lib/ipc/time";
   import { linkTo } from "./lib/detail/links.svelte";
 
   /**
@@ -175,6 +182,22 @@
   });
 
   /**
+   * **The room the reader is standing in**, resolved, or `null` when they are
+   * not in one.
+   *
+   * One lookup for the two questions below, which read different fields of it:
+   * the foreground rule wants its *anchor* (what the clock runs on when nothing
+   * is open) and the timer's room wants its *stored context* (where the reader
+   * was standing). Two `find`s over the same list would be two chances for one
+   * of them to go on reading a room the address has left.
+   */
+  const standingIn = $derived.by(() => {
+    const route = router.route;
+    if (route.view !== "room") return null;
+    return contexts.find((candidate) => candidate.id === route.ctx) ?? null;
+  });
+
+  /**
    * **What is in front of the reader**, by the rule spec #272 states for both
    * the heartbeat and ⌘T: *the open detail, else the room's anchor, else
    * none* (#278).
@@ -197,7 +220,7 @@
     if (open && canBeTarget({ entityId: open })) {
       return { kind: "entity", entity_id: open } as const;
     }
-    const anchor = contexts.find((candidate) => candidate.id === route.ctx)?.anchorId;
+    const anchor = standingIn?.anchorId;
     if (anchor && canBeTarget({ entityId: anchor })) {
       return { kind: "entity", entity_id: anchor } as const;
     }
@@ -211,11 +234,41 @@
     timer.foreground = foreground;
   });
 
+  /**
+   * **The stored context the reader is standing in**, which every start
+   * records on the block it opens (#281).
+   *
+   * `filter.context` and not the room's own id: *All work*, a source room and
+   * a project room are derived rooms with no `ctx:` row behind them, and each
+   * of them carries `null` there (`contexts.ts`). A room id passed straight
+   * through would send `src:jira` as a context, which the backend refuses.
+   *
+   * Not the anchor, which is what `foreground` reads: the anchor is *what the
+   * clock runs on* when nothing is open, and this is *where the reader was
+   * standing*. The same room supplies both, and they answer different
+   * questions.
+   */
+  const roomContext = $derived(standingIn?.filter.context ?? null);
+
+  $effect(() => {
+    timer.roomContext = roomContext;
+  });
+
   /** Whether ⌘T's picker is up (#278, story 9). */
   let pickerOpen = $state(false);
 
   /** The worklog draft a stop opened, or `null` (#280). */
   let worklog = $state<Draft | null>(null);
+
+  /**
+   * The ad-hoc block dialog a stop opened, with the block it is about, or
+   * `null` (#281).
+   *
+   * The block travels beside the offer because the dialog draws it — how long
+   * it was, what it was on — and re-targets it by id. Reading it back off the
+   * day would be a second read of a row the stop already handed over.
+   */
+  let adHoc = $state<{ block: Block; offer: AdHocBlock } | null>(null);
 
   /**
    * **Every stop on an entity asks for a draft, and `null` is the ordinary
@@ -250,6 +303,37 @@
   }
 
   /**
+   * **What a stop opens**, decided by the backend and not by a list of kinds
+   * here (#281).
+   *
+   * `ad_hoc_block` is asked first, and its `null` is the answer that says *the
+   * block is on a ticket* — so the worklog draft is what opens. Anything else
+   * is a page, a note, a repo or a label, and the ad-hoc dialog opens on it,
+   * with or without a suggestion inside.
+   *
+   * The shell could not make this decision itself without keeping a table of
+   * which kinds take worklogs, which is the per-adapter table §3a exists to
+   * prevent: the day an adapter starts taking them, the table is wrong and
+   * nothing says so.
+   *
+   * A failed read is a toast and nothing else: the block exists either way,
+   * and the day review is where it can still be given a ticket by hand.
+   */
+  function offerOn(closed: Block | null) {
+    if (!closed) return;
+    const day = { day: localDay(new Date(closed.started_at)), offsetMinutes: offsetMinutes() };
+    void adHocBlock(closed.id, day)
+      .then((offer) => {
+        if (offer) {
+          adHoc = { block: closed, offer };
+          return;
+        }
+        draftWorklog(closed);
+      })
+      .catch(complain);
+  }
+
+  /**
    * Say why a timer command refused, in the backend's own words.
    *
    * One helper for the three of them: `start_timer` refuses a stored context,
@@ -277,7 +361,7 @@
       .press()
       .then((pressed) => {
         if (pressed.did === "pick") pickerOpen = true;
-        if (pressed.did === "stopped") draftWorklog(pressed.closed);
+        if (pressed.did === "stopped") offerOn(pressed.closed);
       })
       .catch(complain);
   }
@@ -301,10 +385,10 @@
       .then((closed) => {
         push({ text: `Timing ${title}.` });
         // The block the switch closed is a day's work on the *previous*
-        // target, and #280's draft is what it opens: a switch is a stop, and a
-        // stop that quietly discarded the offer to log would make the launcher
-        // row the one way to lose an afternoon.
-        draftWorklog(closed);
+        // target, and it opens whichever dialog that target calls for: a
+        // switch is a stop, and a stop that quietly discarded the offer to log
+        // would make the launcher row the one way to lose an afternoon.
+        offerOn(closed);
       })
       .catch(complain);
   }
@@ -663,6 +747,14 @@
   />
   {#if pickerOpen}
     <TimerPicker onpick={startFromPicker} onclose={() => (pickerOpen = false)} />
+  {/if}
+  {#if adHoc}
+    <AdHocBlockDialog
+      block={adHoc.block}
+      offer={adHoc.offer}
+      onclose={() => (adHoc = null)}
+      onlog={(draft) => (worklog = draft)}
+    />
   {/if}
   {#if worklog}
     <WorklogDraft

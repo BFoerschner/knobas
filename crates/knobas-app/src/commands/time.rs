@@ -57,27 +57,34 @@ pub async fn current_timer(
     time::current(&pool).await
 }
 
-/// Start the timer on `target`.
+/// Start the timer on `target`, in the room the reader is standing in.
 ///
-/// The argument is the tagged target, not two nullable strings: exactly one of
-/// an entity and a label is what the whole feature is about, and a shape that
-/// could carry both would put that rule in the caller.
+/// The first argument is the tagged target, not two nullable strings: exactly
+/// one of an entity and a label is what the whole feature is about, and a shape
+/// that could carry both would put that rule in the caller.
+///
+/// `inRoom` is the **stored context** the reader was in -- `null` for *All
+/// work*, a source room or a project room, none of which is a stored context.
+/// It is recorded on the timer and carried onto the block, because it is what
+/// the ad-hoc dialog's second rule reads (#281); a dialog that asked which room
+/// the reader is in *now* would be answering a different question.
 ///
 /// # Errors
 ///
 /// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
 /// [`Invalid`](crate::IpcErrorCode::Invalid) for a target that is not an
-/// entity id, is a stored context, or is a blank label, and
-/// [`Conflict`](crate::IpcErrorCode::Conflict) when a timer is already
-/// running -- stop it first.
+/// entity id, is a stored context, or is a blank label, and for a room that is
+/// not a stored context, and [`Conflict`](crate::IpcErrorCode::Conflict) when a
+/// timer is already running -- stop it first.
 #[tauri::command]
 pub async fn start_timer<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     lifecycle: State<'_, Lifecycle>,
     target: TimerTarget,
+    in_room: Option<String>,
 ) -> Result<RunningTimer, IpcError> {
     let pool = lifecycle.pool()?;
-    let started = time::start(&pool, target).await?;
+    let started = time::start(&pool, target, in_room).await?;
     announce(&app, started.activity);
     Ok(started.timer)
 }
@@ -352,6 +359,53 @@ pub async fn set_passive_attribution(
     time::passive::set_enabled(&pool, enabled).await
 }
 
+/// What *Log an ad-hoc block* should show for a block, or `null` because that
+/// block is not an ad-hoc one (issue #281).
+///
+/// **Asked on every stop, before the worklog draft, and `null` is what says
+/// "this was a ticket".** The decision *is this something a worklog goes to*
+/// lives in [`crate::time::suggest`] with the descriptor it is read from, not
+/// in the webview as a list of kinds -- so the shell asks once and opens
+/// whichever dialog it is handed, and a source that starts taking worklogs
+/// needs no change here.
+///
+/// A `Some` whose `suggestion` is `null` is the other absence and a different
+/// one: the dialog opens, knobas has nothing to suggest, and *Keep local* is
+/// the default.
+///
+/// `day` is the reader's own day and `offsetMinutes` their own offset from
+/// UTC, for the reason [`worklog_draft`] takes them: their machine is the only
+/// thing that knows which day they mean. It is the day the **block** started
+/// on, not the day the dialog opened on.
+///
+/// **Takes no `Lifecycle`**, the shape [`worklog_draft`] uses and for the same
+/// reason: the rules ask the *adapter* which sources take a worklog, so this
+/// needs the sources state, which carries the pool as well.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`NotFound`](crate::IpcErrorCode::NotFound) for a block that is not there,
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for an offset that is not an
+/// offset.
+#[tauri::command]
+pub async fn ad_hoc_block<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    block_id: i64,
+    day: chrono::NaiveDate,
+    offset_minutes: i32,
+) -> Result<Option<time::suggest::AdHocBlock>, IpcError> {
+    let sources = crate::sources::state(&app)?;
+    time::suggest::offer(
+        &sources.pool,
+        sources.registry.as_ref(),
+        block_id,
+        day,
+        offset_minutes,
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -539,6 +593,7 @@ mod tests {
             "set_passive_attribution",
             "worklog_draft",
             "log_work",
+            "ad_hoc_block",
         ] {
             assert!(
                 MIRROR.contains(&format!("\"{command}\"")),
@@ -584,6 +639,13 @@ mod tests {
             ("worklog_draft", "offsetMinutes"),
             ("log_work", "startedAt"),
             ("log_work", "offsetMinutes"),
+            // The room, on the command that has taken a target since #278: a
+            // start that sent the target and dropped this would record every
+            // block as having run nowhere, and rule two would simply stop
+            // firing -- with nothing on screen to say so.
+            ("start_timer", "inRoom"),
+            ("ad_hoc_block", "blockId"),
+            ("ad_hoc_block", "offsetMinutes"),
         ] {
             let at = MIRROR
                 .find(&format!("\"{call}\""))
@@ -773,6 +835,77 @@ mod tests {
                 "remote_id",
                 "created_at",
             ],
+        );
+    }
+
+    // -- the ad-hoc block (#281) --------------------------------------------
+
+    /// `title` is exercised as `Some`: an `Option` that is `None` serialises to
+    /// a `null` key and would satisfy `assert_shape` against any declared type
+    /// at all -- the discipline `entity_mirror.rs` records.
+    #[test]
+    fn the_suggestion_shape_matches_its_typescript_mirror() {
+        assert_shape(
+            MIRROR,
+            "Suggestion",
+            &serde_json::to_value(crate::time::suggest::Suggestion {
+                entity_id: "jira:PAY-231".to_owned(),
+                title: Some("Retry failed SEPA payouts".to_owned()),
+                rule: crate::time::suggest::SuggestionRule::LinkedToTarget,
+            })
+            .unwrap(),
+            &["entity_id", "title", "rule"],
+        );
+    }
+
+    /// The rules, read out of the mirror rather than listed here -- the rule
+    /// `entity_mirror.rs` states: a hand-copied list of members passes while
+    /// both the union and the copy drift from the Rust enum. The dialog
+    /// switches its *reason* on these three words, so a member that exists on
+    /// one side only is a suggestion drawn with no reason beside it.
+    #[test]
+    fn the_suggestion_rules_match_their_typescript_mirror() {
+        let mut rust: Vec<String> = [
+            crate::time::suggest::SuggestionRule::LinkedToTarget,
+            crate::time::suggest::SuggestionRule::ContextAnchor,
+            crate::time::suggest::SuggestionRule::LastLogged,
+        ]
+        .iter()
+        .map(|rule| {
+            serde_json::to_value(rule)
+                .unwrap()
+                .as_str()
+                .expect("a rule serialises to a string")
+                .to_owned()
+        })
+        .collect();
+        let mut declared = declared_union(MIRROR, "SuggestionRule");
+        declared.sort();
+        rust.sort();
+        assert_eq!(
+            rust, declared,
+            "the mirror's SuggestionRule and the Rust enum no longer agree, so \
+             the dialog cannot say why it suggested what it suggested"
+        );
+    }
+
+    /// The offer, with its suggestion **present** -- the arm that carries a
+    /// type. Its empty arm is a `null` key, which the mirror declares as
+    /// `Suggestion | null` and which no fixture can distinguish.
+    #[test]
+    fn the_ad_hoc_block_shape_matches_its_typescript_mirror() {
+        let offer = crate::time::suggest::AdHocBlock {
+            suggestion: Some(crate::time::suggest::Suggestion {
+                entity_id: "jira:PAY-231".to_owned(),
+                title: None,
+                rule: crate::time::suggest::SuggestionRule::ContextAnchor,
+            }),
+        };
+        assert_shape(
+            MIRROR,
+            "AdHocBlock",
+            &serde_json::to_value(&offer).unwrap(),
+            &["suggestion"],
         );
     }
 

@@ -250,6 +250,7 @@ pub fn run() {
             commands::time::set_passive_attribution,
             commands::time::worklog_draft,
             commands::time::log_work,
+            commands::time::ad_hoc_block,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

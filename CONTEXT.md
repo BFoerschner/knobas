@@ -148,7 +148,7 @@ The one entity (ticket, page, note, repo, asset) or ad-hoc label a running timer
 _Avoid_: timer context, context
 
 **Block**:
-A knobas-owned stretch of time — start, end, [timer target](#timer-target) — and the unit everything about time is built from. **Manual** when the timer made it, **passive** when attribution recorded what was open. Blocks stay local and exportable; none is ever written to a source, and a passive block is never logged without a person saying so. A block remembers which [worklog](#worklog), if any, it was logged into.
+A knobas-owned stretch of time — start, end, [timer target](#timer-target) — and the unit everything about time is built from. **Manual** when the timer made it, **passive** when attribution recorded what was open. Blocks stay local and exportable; none is ever written to a source, and a passive block is never logged without a person saying so. A block remembers which [worklog](#worklog), if any, it was logged into, and which stored [context](#context), if any, the timer was started in — a fact about that moment, never about the context you are standing in when you look at it later.
 _Avoid_: interval (that is a worklog's editable span), entry, session
 
 **Worklog**:

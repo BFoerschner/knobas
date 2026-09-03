@@ -67,6 +67,16 @@ pub mod day;
 /// to look hardest at it.
 pub mod passive;
 
+/// The ad-hoc block's suggested ticket and the rule that produced it (#281).
+///
+/// A fourth file, and the same reason again: [`day`] is a read and two writes,
+/// [`passive`] is one pure derivation, and this is one read that answers a
+/// question none of them ask -- *which ticket should this page's afternoon go
+/// to?* It reads the link graph, the context this module's own [`start`]
+/// recorded, and the worklogs [`worklog`] wrote, which is three tables none of
+/// the others touch.
+pub mod suggest;
+
 /// The activity actor for everything a person does with the timer.
 const ACTOR: &str = "user";
 
@@ -266,6 +276,46 @@ fn vet(target: TimerTarget) -> Result<TimerTarget, IpcError> {
     }
 }
 
+/// The stored context a timer is being started in, or the refusal.
+///
+/// **The mirror image of [`vet`]'s context rule, and that is the whole of it.**
+/// A `ctx:` id is the one thing that may not be a target, and it is the one
+/// thing that may be a room: a context is a set, so time on it has nowhere to
+/// go, but the set is exactly what "which room was I in" names. The namespace
+/// is read from [`CONTEXT_NAMESPACE`] rather than spelled again, so the two
+/// rules cannot drift apart.
+///
+/// **A room that is not a stored context is refused, not dropped.** The value
+/// comes from the shell's own room list, where a derived room already carries
+/// `null` (`app/src/lib/shell/contexts.ts`); anything else arriving here is a
+/// frontend bug, and swallowing it would file blocks under a room that does not
+/// exist and leave rule two silently never firing. This is the opposite call
+/// from [`heartbeat`]'s foreground, and the difference is what rides on each: a
+/// refused beat freezes the last-alive stamp and shortens a block by hours,
+/// while a refused start is a sentence in front of a reader whose finger is
+/// still on the key.
+///
+/// **`None` is the only way to say "no room", and a blank string is not one.**
+/// The shell's derived rooms carry `null` and never `""`, so an empty string is
+/// the same frontend bug as any other malformed value and is refused with the
+/// rest -- a second spelling of absence would be a second thing every later
+/// reader had to know about.
+fn in_room(context_id: Option<String>) -> Result<Option<String>, IpcError> {
+    let Some(context_id) = context_id else {
+        return Ok(None);
+    };
+    let context_id = context_id.trim().to_owned();
+    let reference = EntityRef::parse(&context_id).map_err(IpcError::invalid)?;
+    if !reference.namespace.eq_ignore_ascii_case(CONTEXT_NAMESPACE) {
+        return Err(IpcError::invalid(format!(
+            "{context_id} is not a stored context, so it is not a room a timer \
+             can have been started in. Derived rooms -- all work, a source, a \
+             project -- carry no room at all."
+        )));
+    }
+    Ok(Some(context_id))
+}
+
 /// Rebuild a target from the two columns it was stored as.
 ///
 /// The `internal` arms are unreachable while `timer_target_chk` and
@@ -296,8 +346,8 @@ const READ_TIMER: &str = "select entity_id, label, started_at, last_heartbeat fr
 
 /// Insert the one timer row, or answer with nothing because one already
 /// exists. See [`start`] for why the refusal is the `on conflict`.
-const START_TIMER: &str = "insert into knobas.timer (entity_id, label)
-     values ($1, $2)
+const START_TIMER: &str = "insert into knobas.timer (entity_id, label, context_id)
+     values ($1, $2, $3)
      on conflict (only_one) do nothing
      returning entity_id, label, started_at, last_heartbeat";
 
@@ -308,10 +358,12 @@ const BEAT: &str = "update knobas.timer set last_heartbeat = now()
 /// Delete the timer and write its block, in one statement, so there is no
 /// window in which the timer is gone and its block does not exist yet.
 const STOP_TIMER: &str = "with stopped as (
-         delete from knobas.timer returning entity_id, label, started_at
+         delete from knobas.timer
+         returning entity_id, label, started_at, context_id
      )
-     insert into knobas.block (started_at, ended_at, entity_id, label, kind)
-     select started_at, now(), entity_id, label, 'manual' from stopped
+     insert into knobas.block
+         (started_at, ended_at, entity_id, label, kind, context_id)
+     select started_at, now(), entity_id, label, 'manual', context_id from stopped
      returning id, started_at, ended_at, entity_id, label, kind,
                ended_by_relaunch, worklog_id";
 
@@ -327,11 +379,12 @@ const STOP_TIMER: &str = "with stopped as (
 /// them.
 const CLOSE_STRANDED: &str = "with stranded as (
          delete from knobas.timer
-         returning entity_id, label, started_at, last_heartbeat
+         returning entity_id, label, started_at, last_heartbeat, context_id
      )
      insert into knobas.block
-         (started_at, ended_at, entity_id, label, kind, ended_by_relaunch)
-     select started_at, last_heartbeat, entity_id, label, 'manual', true from stranded
+         (started_at, ended_at, entity_id, label, kind, ended_by_relaunch, context_id)
+     select started_at, last_heartbeat, entity_id, label, 'manual', true, context_id
+       from stranded
      returning id, started_at, ended_at, entity_id, label, kind,
                ended_by_relaunch, worklog_id";
 
@@ -373,16 +426,31 @@ pub async fn current(pool: &PgPool) -> Result<Option<RunningTimer>, IpcError> {
 /// the `on conflict do nothing` below answering with no row, so two starts
 /// racing produce one timer and one refusal rather than two timers.
 ///
+/// `in_room` is **the stored context the reader was standing in**, or `None`
+/// for a derived room -- *All work*, a source room, a project room -- which is
+/// not a stored context and has nothing to anchor a suggestion to. It is
+/// recorded here, at the start, because it is a fact about the moment the
+/// clock started: the room the reader is in when the block is later looked at
+/// is a different fact, and reading that one would attribute this morning's
+/// page to this afternoon's epic ([`suggest`], migration `0016`).
+///
 /// # Errors
-/// `invalid` for a target [`vet`] refuses, `conflict` when a timer is already
-/// running, [`IpcError`] if the write fails.
-pub async fn start(pool: &PgPool, target: TimerTarget) -> Result<TimerStarted, IpcError> {
+/// `invalid` for a target [`vet`] refuses or a room [`in_room`] refuses,
+/// `conflict` when a timer is already running, [`IpcError`] if the write
+/// fails.
+pub async fn start(
+    pool: &PgPool,
+    target: TimerTarget,
+    in_room: Option<String>,
+) -> Result<TimerStarted, IpcError> {
     let target = vet(target)?;
+    let context = self::in_room(in_room)?;
     let (entity_id, label) = target.columns();
 
     let row = sqlx::query(START_TIMER)
         .bind(entity_id)
         .bind(label)
+        .bind(context.as_deref())
         .fetch_optional(pool)
         .await?;
     let Some(row) = row else {

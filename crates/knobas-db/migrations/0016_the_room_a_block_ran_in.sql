@@ -1,0 +1,77 @@
+-- 0016_the_room_a_block_ran_in.sql -- the stored context a timer was started
+-- in, carried onto the block it becomes (issue #281, spec #272 "Worklog draft
+-- and ad-hoc block").
+--
+-- Single-writer (orchestrator), like every migration: a stream that needs more
+-- schema requests `0017` and never edits this file or its predecessors -- sqlx
+-- checksums applied migrations and an edit fails startup on every existing
+-- database.
+--
+-- `0013` is the timer's, `0014` #280's worklog, `0015` #282's heartbeat. This
+-- stream took `0016`.
+--
+-- Frozen surface: `crates/knobas-db/migrations/**` is §10.8-frozen, and this
+-- migration is a ratified exception recorded in that section with issue #281.
+--
+-- ## What this column is for, and why it cannot be worked out later
+--
+-- Stopping the timer on a page, a note, a repo or an ad-hoc label opens *Log an
+-- ad-hoc block*, which suggests a ticket and says which rule produced it. The
+-- second of those three rules is **the anchor ticket of the stored context the
+-- block ran in** -- and "ran in" is a fact about the moment the clock started
+-- that nothing else in this schema records. The room the reader is standing in
+-- when they later open the dialog is a different fact: they may have switched
+-- rooms twice since, and a suggestion drawn from where they are now would
+-- quietly attribute this morning's page reading to this afternoon's epic.
+--
+-- So it is stored at `start`, on the timer, and carried onto the block by the
+-- same statement that closes it. There is no back-fill and there can be none:
+-- every block written before this migration ran carries `null`, which reads as
+-- *the reader was not in a stored room*, and rule two simply does not fire for
+-- them.
+--
+-- ## Why it is on both tables
+--
+-- `knobas.timer` is a fact about now and `knobas.block` a fact about the past
+-- (`0013`), and the one statement that turns the first into the second is an
+-- `insert ... select` over the deleted timer row. A column on the block alone
+-- would have to be bound by the writer from something it no longer holds --
+-- the room the reader stood in an hour ago -- so the timer is where the value
+-- waits, exactly as `started_at` does.
+--
+-- ## Nullable, and null is a real answer
+--
+-- *All work*, a source room and a project room are **derived** rooms, not
+-- stored contexts (`app/src/lib/shell/contexts.ts`): they have no `ctx:` row
+-- and nothing to anchor a suggestion to. A timer started in one of them stores
+-- `null`, and that is the honest record of where it ran -- not a missing value
+-- to be guessed at later.
+--
+-- ## No foreign key on `context_id`
+--
+-- The decision `0005`, `0008`, `0009` and `0013` all record, and it applies
+-- with one addition. A block is a record of *what the user did with their day*,
+-- and deleting the context they did it in must not delete the afternoon, nor
+-- rewrite where it happened. `knobas.context` rows are archived rather than
+-- deleted today (`0010`'s `archived_at`), so the constraint would rarely bite
+-- -- but "rarely" is the wrong ground to put an afternoon on, and a dangling
+-- `ctx:` id reads correctly without one: the anchor read finds no row and rule
+-- two does not fire.
+--
+-- The column holds a `knobas.context.id` -- `'ctx:<key>'` -- and never an
+-- entity id of any other namespace. That rule is `knobas_app::time::in_room`'s,
+-- on the way in, for the reason `0013` gives for the mirror-image rule about
+-- targets: a check constraint that parsed entity ids would be a second copy of
+-- `knobas_core::entity::RESERVED_NAMESPACES`, and it is the copy that goes
+-- stale.
+--
+-- ## Not on `knobas.heartbeat`, and not on the `Block` DTO
+--
+-- A passive block (#282) is derived from what was in the *foreground*, and the
+-- room is not that; giving the observation a room would be a second attribution
+-- rule nobody asked for. And nothing on screen draws this column: it is knobas'
+-- reason for a suggestion, read only by the suggestion, so putting it on the
+-- wire would add a field to every statement in the time module for no reader.
+
+alter table knobas.timer add column context_id text;
+alter table knobas.block add column context_id text;
