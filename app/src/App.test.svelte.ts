@@ -1375,6 +1375,13 @@ test("stopping a timer on an ad-hoc label asks for no draft", async () => {
 
   pressTimerKey();
   await until(() => timerStops > 0, "⌘T never stopped the label's timer");
+  // ...and then past the point where the ask *would* have been made. Every
+  // promise in the stop's chain is already resolved, so one macrotask boundary
+  // drains all of it; `until` alone sees `timerStops` on its first synchronous
+  // check, which is before the chain has run at all -- a mutation run with the
+  // guard removed passed against that.
+  await new Promise((settled) => setTimeout(settled, 0));
+  flushSync();
 
   expect(draftAsks, "a label has nowhere to log to, so nothing may be drafted").toEqual([]);
 });
