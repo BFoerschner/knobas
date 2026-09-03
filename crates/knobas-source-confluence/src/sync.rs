@@ -17,8 +17,32 @@
 //!    following `_links.next` until there is none.
 //! 5. Drop what the overlap re-delivered, complete the comments the server did
 //!    not expand, push the rest into the sink.
-//! 6. If nothing was pushed, hand back the cursor byte-identically. Otherwise
+//! 6. **The mention walk** ([`SyncRun::mentions`]): one more query, `mention =
+//!    currentUser() AND type in (page, comment)` over the same window, whose
+//!    results are resolved to the pages they are on and pushed too.
+//! 7. If nothing was pushed, hand back the cursor byte-identically. Otherwise
 //!    advance the watermark to `min(max(previous, newest emitted), ceiling)`.
+//!
+//! # Why the mention walk is a second query and not a wider first one
+//!
+//! A mention usually lives in a **comment**, and a comment is separate content
+//! in Confluence: posting one does not move the page's `lastmodified`. So the
+//! page walk -- bounded by a page's own `lastmodified` -- can never reach a
+//! comment posted on a page nobody has edited since, which is most pages. The
+//! second query is bounded by the *comment's* timestamp instead, and that is
+//! the only bound that reaches it (`crate::cql::build_mention_cql`).
+//!
+//! It emits the **page**, never the comment: this adapter declares one entity
+//! kind, a comment belongs to its page's payload (`crate::KIND_PAGE`), and the
+//! thing a person opens from the inbox is the page the discussion is on.
+//!
+//! **It does not move the watermark.** The two walks share one cursor, and the
+//! records the mention walk sees are newer than the page edits the page walk
+//! is bounded by -- advancing on a comment posted today would put every page
+//! edited yesterday below the next run's lower bound and lose it for good.
+//! What the mention walk does contribute is its `seen` entries, which is what
+//! makes the *next* run skip the same comment and leaves an idle poll idle
+//! (battery clause 2).
 //!
 //! # The ceiling, and what it is for (`CONTEXT.md`, *Watermark*)
 //!
@@ -68,11 +92,11 @@ use chrono::{DateTime, Utc};
 use knobas_source::{Sink, SourceError};
 
 use crate::ConfluenceConfig;
-use crate::api::{ConfluenceApi, EXPAND};
-use crate::cql::{Order, build_cql};
+use crate::api::{ConfluenceApi, EXPAND, MENTION_EXPAND};
+use crate::cql::{Order, build_cql, build_mention_cql};
 use crate::cursor::{ConfluenceCursor, Seen};
 use crate::map;
-use crate::model::RawContent;
+use crate::model::{Container, RawContent};
 use crate::storage::Account;
 
 /// A stop so a server that keeps handing out `_links.next` cannot spin a run
@@ -150,6 +174,11 @@ impl SyncRun<'_> {
         let cql = build_cql(self.cfg, since, offset, Order::Ascending);
 
         let mut emitted: usize = 0;
+        // The entity ids this run has already handed to the sink, so the
+        // mention walk does not re-deliver a page the page walk just sent --
+        // one wasted request and one wasted upsert per mentioning page on
+        // every full sync, otherwise.
+        let mut delivered: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         // Every record this run *saw* in the window -- see the module docs.
         // Skipped ones belong here as much as emitted ones.
         let mut seen_in_window: Vec<Seen> = Vec::new();
@@ -188,6 +217,7 @@ impl SyncRun<'_> {
                 self.complete(&mut raw).await?;
                 let item = map::to_sync_item(self.source_id, self.base_url, &raw, me);
                 // Sink failures are never swallowed (SPI doc on `Source::sync`).
+                delivered.insert(raw.content.id.clone());
                 sink.item(item).await?;
                 emitted += 1;
                 if let Some(u) = when {
@@ -209,6 +239,18 @@ impl SyncRun<'_> {
             }
             next = Some(link);
         }
+
+        emitted += self
+            .mentions(
+                since,
+                offset,
+                previous.as_ref(),
+                me,
+                &mut delivered,
+                &mut seen_in_window,
+                sink,
+            )
+            .await?;
 
         match (emitted, watermark) {
             // Battery clause 2: nothing happened, so the position did not
@@ -240,6 +282,95 @@ impl SyncRun<'_> {
                 Ok(ConfluenceCursor::advanced(clamped, offset, &seen_in_window).encode())
             }
         }
+    }
+
+    /// The mention walk: every page and comment that names this account since
+    /// the cursor, emitted as the **page** it is on.
+    ///
+    /// Answers how many items it pushed. The module docs carry why this is a
+    /// second query and why it must not move the watermark; the three
+    /// decisions that live here:
+    ///
+    /// * **`seen` is fed from the record CQL returned**, comment or page, and
+    ///   the skip is checked against the same identity. That is what makes an
+    ///   idle poll idle: the page a comment resolves to keeps its own old
+    ///   `version.when` and would fall out of the `seen` window immediately,
+    ///   so deduplicating on the *page* would re-emit it on every run for
+    ///   ever. Deduplicating on the comment cannot: its timestamp is newer
+    ///   than the watermark, so it stays in `seen` exactly as long as the
+    ///   query keeps returning it.
+    /// * **The page is fetched whole** rather than mapped from the thin
+    ///   `MENTION_EXPAND` record, so a mentioning page and a page the ordinary
+    ///   walk delivered are mapped from the same shape -- and the comment
+    ///   carrying the mention is in the payload where every other comment is.
+    /// * **A failure here fails the run**, and is not swallowed into a partial
+    ///   success. `mention` is a CQL field Confluence Data Center has had for
+    ///   as long as CQL, and `tests/live_confluence_seeded.rs` is the witness
+    ///   that this instance answers it; an instance that does not would leave
+    ///   the source stuck rather than quietly mention-blind, which is the
+    ///   direction a person can see and act on.
+    async fn mentions(
+        &self,
+        since: Option<DateTime<Utc>>,
+        offset_secs: i32,
+        previous: Option<&ConfluenceCursor>,
+        me: Option<Account<'_>>,
+        delivered: &mut std::collections::BTreeSet<String>,
+        seen_in_window: &mut Vec<Seen>,
+        sink: &mut (dyn Sink + Send),
+    ) -> Result<usize, SourceError> {
+        let cql = build_mention_cql(self.cfg, since, offset_secs);
+        let mut emitted: usize = 0;
+        let mut next: Option<String> = None;
+        let mut requests: u32 = 0;
+        loop {
+            let page = match &next {
+                None => {
+                    self.api
+                        .search(&cql, self.cfg.page_size, MENTION_EXPAND)
+                        .await?
+                }
+                Some(link) => self.api.follow(link).await?,
+            };
+            for raw in &page.results {
+                let version = raw.content.version.as_ref();
+                let number = version.and_then(|v| v.number);
+                if let Some(u) = version
+                    .and_then(|v| v.when.as_deref())
+                    .and_then(crate::time::parse_time)
+                {
+                    seen_in_window.push(Seen {
+                        i: raw.content.id.clone(),
+                        n: number,
+                        u,
+                    });
+                }
+                if previous.is_some_and(|c| c.already_delivered(&raw.content.id, number)) {
+                    continue;
+                }
+                let Some(page_id) = mentioning_page(&raw.content) else {
+                    continue;
+                };
+                if !delivered.insert(page_id.clone()) {
+                    continue;
+                }
+                let mut target = self.api.content(&page_id, EXPAND).await?;
+                self.complete(&mut target).await?;
+                let item = map::to_sync_item(self.source_id, self.base_url, &target, me);
+                sink.item(item).await?;
+                emitted += 1;
+            }
+            let Some(link) = page.links.next else { break };
+            requests += 1;
+            if requests >= MAX_PAGES {
+                return Err(SourceError::protocol(format!(
+                    "Confluence kept offering another page of mention results after \
+                     {MAX_PAGES}; refusing to report a partial walk as a completed sync."
+                )));
+            }
+            next = Some(link);
+        }
+        Ok(emitted)
     }
 
     /// The run-start probe: the newest page in this source's scope, and the
@@ -310,6 +441,31 @@ impl SyncRun<'_> {
     }
 }
 
+/// Which page a mention-walk result is *on*, or `None` for a record this walk
+/// cannot place.
+///
+/// **The type is read first, and that is the whole point.** A comment's
+/// `container` is the page it hangs off; a **page's** container is its *space*,
+/// whose id is from another namespace entirely. A walk that read a container id
+/// without asking what it was holding would fetch a space id as a page and
+/// either 404 or, worse, mirror something that is not the page.
+///
+/// A record whose type the walk never asked for -- a blog post, an attachment,
+/// a type a later Confluence adds -- contributes nothing: this adapter emits
+/// one kind, and the alternative is inventing a page for something that has
+/// none.
+fn mentioning_page(content: &crate::model::Content) -> Option<String> {
+    match content.content_type.as_deref() {
+        Some("comment") => content
+            .container
+            .as_ref()
+            .and_then(Container::content_id)
+            .map(str::to_owned),
+        Some("page") => Some(content.id.clone()),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -332,6 +488,11 @@ mod tests {
     /// **this run** does with what a server says.
     struct Fake {
         pages: Mutex<Vec<Value>>,
+        /// What `mention = currentUser()` answers: comment records carrying
+        /// the page they are on in `container`, and page records naming the
+        /// account in their own body. Empty in every test that is not about
+        /// mentions, which is how the mention walk stays invisible to them.
+        mentions: Mutex<Vec<Value>>,
         /// Comments the search does *not* expand, by content id -- the
         /// completion path's input.
         detached_comments: Mutex<std::collections::BTreeMap<String, Vec<Value>>>,
@@ -354,12 +515,19 @@ mod tests {
         fn new(pages: Vec<Value>) -> Self {
             Self {
                 pages: Mutex::new(pages),
+                mentions: Mutex::new(Vec::new()),
                 detached_comments: Mutex::new(std::collections::BTreeMap::new()),
                 calls: Mutex::new(Vec::new()),
                 fault: None,
                 identity_fault: None,
                 edit_mid_walk: Mutex::new(None),
             }
+        }
+
+        /// The records `mention = currentUser()` will answer with.
+        fn mentioning(mut self, rows: Vec<Value>) -> Self {
+            self.mentions = Mutex::new(rows);
+            self
         }
 
         fn calls(&self) -> Vec<String> {
@@ -383,7 +551,11 @@ mod tests {
             start: usize,
             limit: usize,
         ) -> (Vec<Value>, bool) {
-            let pages = self.pages.lock().unwrap().clone();
+            let pages = if is_mention_query(cql) {
+                self.mentions.lock().unwrap().clone()
+            } else {
+                self.pages.lock().unwrap().clone()
+            };
             let bound = cql
                 .split_once("lastmodified >= \"")
                 .map(|(_, rest)| rest.split('"').next().unwrap_or_default().to_owned());
@@ -466,8 +638,8 @@ mod tests {
                 return Err(clone_fault(fault));
             }
             assert!(
-                cql.contains("type = page"),
-                "every query this adapter sends is scoped to pages: {cql}"
+                cql.contains("type = page") || is_mention_query(cql),
+                "every query this adapter sends is the page walk's or the mention walk's: {cql}"
             );
             let (rows, more) = self.matching(cql, expand, 0, limit as usize);
             Ok(envelope(
@@ -518,6 +690,34 @@ mod tests {
             let rows = held.get(id).cloned().unwrap_or_default();
             Ok(envelope(rows, None))
         }
+
+        async fn content(
+            &self,
+            id: &str,
+            expand: &str,
+        ) -> Result<crate::model::RawContent, SourceError> {
+            self.calls.lock().unwrap().push(format!("content {id}"));
+            if let Some(fault) = &self.fault {
+                return Err(clone_fault(fault));
+            }
+            let pages = self.pages.lock().unwrap().clone();
+            let mut row = pages
+                .into_iter()
+                .find(|p| p["id"] == json!(id))
+                .ok_or_else(|| SourceError::protocol(format!("no content {id}")))?;
+            if !expand.contains("children.comment") {
+                if let Some(object) = row.as_object_mut() {
+                    object.remove("children");
+                }
+            }
+            Ok(serde_json::from_value(row).expect("the fake holds well-formed records"))
+        }
+    }
+
+    /// Whether a CQL is the mention walk's, read the way the fake's `search`
+    /// has to read it: by the clause only that walk sends.
+    fn is_mention_query(cql: &str) -> bool {
+        cql.contains("mention = currentUser()")
     }
 
     fn clone_fault(fault: &SourceError) -> SourceError {
@@ -906,7 +1106,11 @@ mod tests {
             .into_iter()
             .filter(|c| c.starts_with("search "))
             .collect();
-        assert_eq!(searches.len(), 2, "the probe and the walk: {searches:?}");
+        assert_eq!(
+            searches.len(),
+            3,
+            "the probe, the page walk and the mention walk: {searches:?}"
+        );
         for search in &searches {
             assert!(
                 search.contains("space in (\"ENG\")"),
