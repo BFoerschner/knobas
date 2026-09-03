@@ -1251,7 +1251,7 @@ mod tests {
     ///
     /// The overlap re-delivers the last two minutes on every run by design, and
     /// `seen` is the only thing keeping that from meaning "every poll emits the
-    /// recent corpus". Giving the identity a digest could have broken it in one
+    /// recent corpus". Giving the identity a fingerprint could have broken it in one
     /// specific way -- a field that differed between two reads of an unchanged
     /// issue would make every poll re-emit everything -- so the property is
     /// asserted here rather than left to follow from its sibling.

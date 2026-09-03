@@ -1448,10 +1448,10 @@ knobas-source-jira	lib/knobas_source_jira	discover::tests::the_epic_link_field_i
 knobas-source-jira	lib/knobas_source_jira	discover::tests::the_name_fallback_never_reaches_a_system_field
 knobas-source-jira	lib/knobas_source_jira	discover::tests::the_plugin_key_beats_the_display_name
 knobas-source-jira	lib/knobas_source_jira	fingerprint::tests::a_boundary_cannot_be_forged_by_the_content_around_it
-knobas-source-jira	lib/knobas_source_jira	fingerprint::tests::a_changed_field_changes_the_digest_even_with_updated_untouched
+knobas-source-jira	lib/knobas_source_jira	fingerprint::tests::a_changed_field_changes_the_fingerprint_even_with_updated_untouched
 knobas-source-jira	lib/knobas_source_jira	fingerprint::tests::an_absent_field_and_an_empty_one_are_different_records
-knobas-source-jira	lib/knobas_source_jira	fingerprint::tests::key_order_cannot_reach_the_digest_however_the_map_is_built
-knobas-source-jira	lib/knobas_source_jira	fingerprint::tests::the_same_record_digests_the_same_whatever_order_its_keys_arrived_in
+knobas-source-jira	lib/knobas_source_jira	fingerprint::tests::key_order_cannot_reach_the_fingerprint_however_the_map_is_built
+knobas-source-jira	lib/knobas_source_jira	fingerprint::tests::the_same_record_fingerprints_the_same_whatever_order_its_keys_arrived_in
 knobas-source-jira	lib/knobas_source_jira	fingerprint::tests::the_type_is_part_of_the_record
 knobas-source-jira	lib/knobas_source_jira	http::tests::a_base_url_that_is_not_a_url_is_refused
 knobas-source-jira	lib/knobas_source_jira	http::tests::a_body_that_is_not_jiras_envelope_is_read_as_nothing

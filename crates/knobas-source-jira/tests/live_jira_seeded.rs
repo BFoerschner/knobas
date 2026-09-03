@@ -1792,7 +1792,7 @@ async fn a_reassignment_through_the_assignee_endpoint_reaches_the_next_increment
         now.author.as_deref(),
         Some(seeded.user.as_str()),
         "the run delivered {BORROWED} still attributed to {was:?} -- `author` is the assignee on \
-         Jira, and the digest, the inbox and every `@me` filter read it"
+         Jira, and the standup digest, the inbox and every `@me` filter read it"
     );
     let witnessed = now.updated_at.expect("a real Jira always sets updated");
     assert!(
@@ -1983,7 +1983,7 @@ async fn stamp_of(seeded: &Seeded, key: &str) -> chrono::DateTime<chrono::Utc> {
 ///
 /// The suite already asserts one idle poll. This asserts [`IDLE_POLLS`] of
 /// them, and it exists for one specific risk that arrived with issue #345's
-/// digest identity: `seen` now recognises a record by a fingerprint of
+/// fingerprint identity: `seen` now recognises a record by a fingerprint of
 /// everything `/search` returned for it, so **any** field that differs between
 /// two reads of an unchanged issue makes every poll re-emit the whole window.
 /// Correctness would survive that -- upserts are idempotent -- and clause 2
@@ -2017,7 +2017,7 @@ async fn an_untouched_source_is_still_quiet_after_many_polls() {
             "poll {poll} of {IDLE_POLLS} emitted {:?} from a source nothing has touched. \
              Every one of those issues was recognised on the polls before it, so what \
              changed is Jira's answer and not the corpus: some field in the `/search` \
-             record differs between two reads, and the cursor's digest is over the whole \
+             record differs between two reads, and the cursor's fingerprint is over the whole \
              record. Find it by diffing two consecutive `/search` responses for that key.",
             keys(&items)
         );

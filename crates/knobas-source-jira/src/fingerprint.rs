@@ -30,7 +30,7 @@
 //! digest's mirror half, the inbox's author matching (#82) and every `@me`
 //! filter read.
 //!
-//! A digest of the record closes it exactly: an unchanged issue fingerprints
+//! A fingerprint of the record closes it exactly: an unchanged issue fingerprints
 //! the same, so battery clause 2 still holds and an idle poll is still idle;
 //! a changed one fingerprints differently whatever its clock said. It is the
 //! same move interfaces §4.2 already records for Confluence, whose `seen`
@@ -40,21 +40,21 @@
 //! is the same guarantee computed from data already in hand, with no extra
 //! request.
 //!
-//! # What is digested, and when
+//! # What is fingerprinted, and when
 //!
 //! The **raw `/search` record**, before [`crate::sync::SyncRun::complete`]
 //! fills in a truncated `comment` or `worklog` container. Both halves of that
 //! matter:
 //!
 //! * **Raw, not mapped.** Spec §3a keeps `payload` verbatim, so the raw record
-//!   *is* what the run delivers. A digest of the mapped [`knobas_source::SyncItem`]
+//!   *is* what the run delivers. A fingerprint of the mapped [`knobas_source::SyncItem`]
 //!   would go blind to every field the current mapping ignores -- which is
 //!   exactly the data §3a preserves so a later mapping can use it.
 //! * **Before completion, not after.** The skip decision happens before
 //!   completion, and it has to: completing first would cost a request per
 //!   issue with a truncated container on every run, including the runs that go
-//!   on to skip it. Digesting the pre-completion record is consistent because
-//!   *both* runs digest the pre-completion record -- the comparison is
+//!   on to skip it. Fingerprinting the pre-completion record is consistent because
+//!   *both* runs fingerprint the pre-completion record -- the comparison is
 //!   like-for-like, and a comment added upstream moves `updated` and the
 //!   container's `total` alike.
 //!
@@ -68,7 +68,7 @@
 //! 1. **The encoding is canonical here, not in `serde_json`.** Object keys are
 //!    sorted by this module rather than relying on `Value`'s map type, because
 //!    that type is a *feature flag* away from preserving insertion order --
-//!    any dependency in the tree may turn `preserve_order` on, and the digest
+//!    any dependency in the tree may turn `preserve_order` on, and the fingerprint
 //!    must not silently start depending on the order Jira happened to serialize
 //!    a field in.
 //! 2. **The real server is the witness**, ADR-0013.
@@ -102,7 +102,7 @@ impl Fnv {
 /// The fingerprint of one raw issue, as sixteen hex characters.
 ///
 /// Not cryptographic and does not need to be: it is only ever compared against
-/// other digests **of the same issue key**, one run apart, to answer "did this
+/// other fingerprints **of the same issue key**, one run apart, to answer "did this
 /// change?". The failure a collision would cause is one skipped re-delivery of
 /// one issue, which the next change to it corrects -- and 64 bits over that
 /// population is far past the point where anything else is the weak link.
@@ -169,18 +169,18 @@ mod tests {
     /// The property the cursor rests on: same record in, same sixteen
     /// characters out, however the object was built.
     #[test]
-    fn the_same_record_digests_the_same_whatever_order_its_keys_arrived_in() {
+    fn the_same_record_fingerprints_the_same_whatever_order_its_keys_arrived_in() {
         let one = json!({ "key": "PAY-240", "fields": { "summary": "a", "updated": "b" } });
         let other = json!({ "fields": { "updated": "b", "summary": "a" }, "key": "PAY-240" });
         assert_eq!(of(&one), of(&other));
         assert_eq!(of(&one).len(), 16, "{}", of(&one));
     }
 
-    /// The property the fix rests on: a field that changed changes the digest,
+    /// The property the fix rests on: a field that changed changes the fingerprint,
     /// **including one nested where the assignee really lives** and including
     /// one whose `updated` did not move with it.
     #[test]
-    fn a_changed_field_changes_the_digest_even_with_updated_untouched() {
+    fn a_changed_field_changes_the_fingerprint_even_with_updated_untouched() {
         let before = json!({
             "key": "PAY-240",
             "fields": {
@@ -223,19 +223,19 @@ mod tests {
     ///
     /// `serde_json::Value`'s map is a `BTreeMap` unless some crate in the tree
     /// turns `preserve_order` on, and a `BTreeMap` hands its keys over sorted
-    /// already -- so with the sort in [`feed_value`] deleted, this build's digests do
+    /// already -- so with the sort in [`feed_value`] deleted, this build's fingerprints do
     /// not change and no test here can tell. That is exactly the day the sort
     /// matters: under `preserve_order` the map would follow the order Jira
     /// serialized a field in, two reads could differ in nothing else, and every
     /// poll would re-emit the corpus.
     ///
     /// So this asserts the *invariant* rather than the mechanism -- a record
-    /// built by inserting its keys in reverse digests as one built in order --
+    /// built by inserting its keys in reverse fingerprints as one built in order --
     /// and it starts failing on its own the moment the flag makes it capable
     /// of failing. `an_untouched_source_is_still_quiet_after_many_polls` in the
     /// live suite is the other end of the same rope.
     #[test]
-    fn key_order_cannot_reach_the_digest_however_the_map_is_built() {
+    fn key_order_cannot_reach_the_fingerprint_however_the_map_is_built() {
         let mut forwards = serde_json::Map::new();
         for key in ["assignee", "labels", "summary", "updated"] {
             forwards.insert(key.to_owned(), json!(key));
@@ -247,7 +247,7 @@ mod tests {
         assert_eq!(
             of(&Value::Object(forwards)),
             of(&Value::Object(backwards)),
-            "insertion order reached the digest, so two reads of one unchanged issue can \
+            "insertion order reached the fingerprint, so two reads of one unchanged issue can \
              disagree and every poll will re-emit the window"
         );
     }
@@ -259,12 +259,12 @@ mod tests {
         let all = [json!("1"), json!(1), json!(true), json!(null), json!([1])];
         for (i, one) in all.iter().enumerate() {
             for other in &all[i + 1..] {
-                assert_ne!(of(one), of(other), "{one} and {other} digest the same");
+                assert_ne!(of(one), of(other), "{one} and {other} fingerprint the same");
             }
         }
     }
 
-    /// The digest is a **value**, not an address: an empty container and a
+    /// The fingerprint is a **value**, not an address: an empty container and a
     /// missing key are different records, which is what keeps a truncated
     /// container from reading as an absent one.
     #[test]

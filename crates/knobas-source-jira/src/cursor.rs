@@ -28,7 +28,7 @@
 //!   again on its own. Measured on Jira DC 10.3.24; `crate::fingerprint`'s own docs
 //!   carry the numbers and the everyday sequence that reaches it.
 //! * **`u`** is what [`JiraCursor::advanced`] filters the set on, so it holds
-//!   the overlap window and nothing more. A digest carries no date, so without
+//!   the overlap window and nothing more. A fingerprint carries no date, so without
 //!   `u` there would be nothing to bound the set by and it would grow until the
 //!   cap dropped entries the next query still returns.
 
@@ -240,9 +240,9 @@ mod tests {
         crate::time::parse_jira_time(s).unwrap()
     }
 
-    /// One record the way a run reports it: `(key, updated, digest)`.
+    /// One record the way a run reports it: key, `updated`, fingerprint.
     ///
-    /// The digest stands in for [`crate::digest::of`] over that issue's raw
+    /// The fingerprint stands in for [`crate::fingerprint::of`] over that issue's raw
     /// record. Derived from the key alone, so two *different* issues differ and
     /// two reports of the same **unchanged** issue agree -- which is the case
     /// every test here but [`a_record_that_changed_within_one_second_is_not_the_one_already_delivered`]
@@ -263,7 +263,7 @@ mod tests {
         }
     }
 
-    /// The digest [`saw`] would report for `key`.
+    /// The fingerprint [`saw`] would report for `key`.
     fn h(key: &str) -> String {
         format!("h-{key}")
     }
@@ -340,7 +340,7 @@ mod tests {
         assert!(c.already_delivered("PAY-231", &h("PAY-231")));
         // Edited since: a different record, so a real change.
         assert!(!c.already_delivered("PAY-231", &edited("PAY-231", updated).h));
-        // Another issue, even one whose record happened to digest the same.
+        // Another issue, even one whose record happened to fingerprint the same.
         assert!(!c.already_delivered("PAY-240", &h("PAY-231")));
     }
 
