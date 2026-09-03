@@ -6,6 +6,7 @@ pub mod inbox;
 pub mod link;
 pub mod mini_board;
 pub mod note;
+pub mod payload;
 pub mod project;
 pub mod start_work;
 pub mod suggest;
