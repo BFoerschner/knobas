@@ -1858,9 +1858,13 @@ test("the same arrival on a focused window sends nothing", async () => {
 
     inboxRows = [inboxEntry("failed_build", "tidewater-payouts-43")];
     emit(EVENTS.activityNew, activityRow());
-    // The inbox has re-read and the notifier has seen it; nothing was sent.
+    // The inbox has re-read and the notifier has seen **this** item; nothing
+    // was sent. Waiting on the key rather than on the length: `inbox` is the
+    // window's one store and the test above leaves an item in it, so a length
+    // check would be satisfied before this test's own read had landed — and
+    // the silence below would then be about a stream nobody had offered yet.
     await until(
-      () => inbox.stream.length === 1,
+      () => inbox.stream.some((entry) => entry.item.key.endsWith("tidewater-payouts-43")),
       "the inbox never re-read after the activity signal",
     );
     expect(notified, "the reader was told about something already on screen").toEqual([]);
