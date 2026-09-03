@@ -168,7 +168,7 @@ The Jira record that one or more [blocks](#block) become when logged — a [writ
 _Avoid_: time entry, logged time (that is the timesheet's column, not the record)
 
 **Digest**:
-The standup's generated three lists — yesterday, today, blockers — drawn from the [mirror](#mirror) and the activity stream for the configured usernames, every line linking to the item it came from. *Yesterday* is the newest day before today that has any of your activity, at most seven days back. Mine only: it describes the person the sources were configured as, never a colleague. (M3 grilling, 2026-09-02)
+The standup's generated three lists — yesterday, today, blockers — drawn from the [mirror](#mirror) and the activity stream for the configured usernames, every line linking to the item it came from. *Yesterday* is the newest day before today that has any of your activity, at most seven days back. Mine only: it describes the person the sources were configured as, never a colleague. Three producers, and no fourth: the [mirror](#mirror) for what the sources saw you author, the activity stream for the writes you made through knobas, and the local [worklog](#worklog) copy for the hours. *Blockers* are your items whose status their own source declares blocked-like plus the ones a confirmed link marks blocked by. (M3 grilling, 2026-09-02; built in #288)
 _Avoid_: report, summary, standup (that is the whole flow)
 
 **Standup protocol**:
