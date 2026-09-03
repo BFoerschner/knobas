@@ -458,6 +458,12 @@ test("only a pending worklog's withdrawal needs consent", () => {
   // worklog it can describe, and a dialog with blanks in it is worse than
   // none.
   expect(withdrawnWorklog(worklog({ payload: { Comment: { entity: "x", body: "y" } } }))).toBeNull();
+
+  // …and the *identifier* is what decides, never the payload's shape. `op` is
+  // the stable name the backend and the panel already agree on (ADR-0006);
+  // sniffing the payload instead would be a build confirming on an op it has
+  // misread.
+  expect(withdrawnWorklog(worklog({ op: "comment" }))).toBeNull();
 });
 
 /**
