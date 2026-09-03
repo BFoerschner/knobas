@@ -3480,9 +3480,10 @@ From this commit on, each of the following requires an orchestrator decision **a
   ADR-0007 requires, and stay static `&'static str`: the declaration crosses as a parameter and
   `sqlx` 0.9's `SqlSafeStr` makes that structural rather than a habit. The **declined** option was
   a persisted declaration per source row: it would have left every core signature alone and cost a
-  migration on this section's frozen list (`0013`), plus a writer on the bring-up path, to cache
-  something a `const` table answers in microseconds — and a stored copy is stale from the moment an
-  adapter learns a spelling. **No migration: `0013` is still the next free number.**
+  migration on this section's frozen list, plus a writer on the bring-up path, to cache something a
+  `const` table answers in microseconds — and a stored copy is stale from the moment an adapter
+  learns a spelling. **This adds no migration at all**, so it claims no number: `0013` is the
+  timer's (#278, the entry above), and the next free one is whatever that leaves.
 
   **The IPC touch.** No new command, no new event, no new module on either side, and no change to
   any DTO the frontend acts on — `payload_paths` rides inside the `SourceDescriptor` that
