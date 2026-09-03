@@ -283,6 +283,32 @@ mod tests {
         );
     }
 
+    /// **The two halves of a Confluence mention's actions** (#287).
+    ///
+    /// `knobas-source-confluence` declares no write ops (its `Comment` op is
+    /// #286's), so a mention on it offers nothing -- and the item is still an
+    /// item, because *open*, *snooze* and *done* are knobas' own. That is the
+    /// first assertion, made against the **real descriptor** rather than an
+    /// empty list, so it stops being true the moment the adapter grows one.
+    ///
+    /// The second is the criterion's other half, pinned before it lands: the
+    /// day that descriptor declares `comment`, this same call offers it, with
+    /// nothing here to change. `Category::Mention` has asked for `comment`
+    /// since #45.
+    #[test]
+    fn a_mention_offers_comment_from_a_source_that_declares_it() {
+        let confluence = knobas_source_confluence::descriptor_template().write_ops;
+        assert!(
+            confluence.is_empty(),
+            "this test's premise is that the Confluence adapter is read-only: {confluence:?}"
+        );
+        assert!(offer(Category::Mention, Some(&confluence)).is_empty());
+        assert_eq!(
+            offer(Category::Mention, Some(&ops(&["comment"]))),
+            ops(&["comment"])
+        );
+    }
+
     /// A source with no write capability at all offers nothing, and so does a
     /// source knobas has no configuration for -- neither is an error, and the
     /// item is still worth seeing.

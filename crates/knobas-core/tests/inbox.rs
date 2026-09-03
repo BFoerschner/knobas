@@ -372,6 +372,68 @@ async fn a_mention_is_the_marked_name_and_not_every_appearance_of_it() {
     );
 }
 
+/// **A Confluence page is a mention on the same rule** (#287) -- the seam
+/// between the adapter's rendering and this rule, asserted from this side.
+///
+/// A Confluence mention is not text at all: the storage format holds
+/// `<ac:link><ri:user ri:userkey="…"/></ac:link>`, a *key*, and a body_text
+/// built by stripping tags carries no trace of it. `knobas-source-confluence`
+/// resolves that key against the account the credential is and renders it back
+/// to `@name`, and the string below is exactly what its
+/// `storage::to_text` produces -- so this test fails the day either half stops
+/// agreeing with the other, which no test inside one crate can do.
+///
+/// The kind is `page` and the source is a Confluence, both of which the rule
+/// already admitted; nothing in `knobas-core` changed for this ticket, which
+/// is the point.
+#[tokio::test]
+async fn a_confluence_page_whose_comment_names_me_is_a_mention_on_the_same_rule() {
+    let pool = &scratch().await;
+    let mentioning = item(
+        pool,
+        Mirrored {
+            source: "confluence",
+            kind: "page",
+            key: "98307",
+            author: Some(THEM),
+            // What `storage::to_text` renders a key-shaped user link as.
+            body: "SEPA payout retry design
+
+Backoff policy
+
+@mara.lindqvist can you add                    the SLA?",
+            payload: serde_json::json!({ "space": { "key": "ENG" } }),
+            updated: days_ago(1),
+        },
+    )
+    .await;
+    // The same page with the link left as markup: what the mirror held before
+    // the adapter learned to resolve a key, and what the rule cannot see. This
+    // is the negative control that says the *rendering* is load-bearing.
+    let unrendered = item(
+        pool,
+        Mirrored {
+            source: "confluence",
+            kind: "page",
+            key: "98311",
+            author: Some(THEM),
+            body: "Ledger reconciliation runbook
+
+can you add the SLA?",
+            payload: serde_json::json!({ "space": { "key": "ENG" } }),
+            updated: days_ago(1),
+        },
+    )
+    .await;
+
+    let keys = keys(&stream(pool).await);
+    assert!(keys.contains(&format!("mention:{mentioning}")), "{keys:?}");
+    assert!(
+        !keys.contains(&format!("mention:{unrendered}")),
+        "a body with the mention markup stripped out names nobody: {keys:?}"
+    );
+}
+
 /// The prefix case, on its own because it is the one a reader will doubt: an
 /// account called `mara` must not collect every `@mara.lindqvist`.
 #[tokio::test]

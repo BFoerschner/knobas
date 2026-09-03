@@ -126,19 +126,26 @@ fn descriptor(id: &str, kind: &str, write_ops: &[String]) -> SourceDescriptor {
     }
 }
 
-/// Two adapter kinds with different write ops, so "an op the source does not
-/// declare is not offered" is a statement about two real descriptors rather
-/// than about one flag.
+/// Three adapter kinds with different write ops, so "an op the source does not
+/// declare is not offered" is a statement about real descriptors rather than
+/// about one flag.
+///
+/// `wiki` declares **none**, which is the shape `knobas-source-confluence` is
+/// at (#287: its `Comment` op arrives with #286). It is here so the
+/// read-only-source case is witnessed by a descriptor rather than assumed.
 struct Registry {
     ops: Arc<Mutex<Vec<WriteOp>>>,
 }
 
 const FORGE_OPS: &[&str] = &["approve", "comment", "create_pull_request"];
 const TRACKER_OPS: &[&str] = &["comment", "transition"];
+/// A read-only source: the Confluence adapter's shape until #286.
+const WIKI_OPS: &[&str] = &[];
 
 fn ops_of(kind: &str) -> Vec<String> {
     match kind {
         "forge" => FORGE_OPS,
+        "wiki" => WIKI_OPS,
         _ => TRACKER_OPS,
     }
     .iter()
@@ -148,7 +155,7 @@ fn ops_of(kind: &str) -> Vec<String> {
 
 impl AdapterRegistry for Registry {
     fn descriptors(&self) -> Vec<SourceDescriptor> {
-        ["forge", "tracker"]
+        ["forge", "tracker", "wiki"]
             .into_iter()
             .map(|kind| descriptor(kind, kind, &ops_of(kind)))
             .collect()
@@ -301,7 +308,7 @@ async fn harness() -> Harness {
     let pool = connector.pool(4).await.expect("a pool onto the scratch db");
 
     let secrets = MemoryStore::new();
-    for id in ["forge", "tracker"] {
+    for id in ["forge", "tracker", "wiki"] {
         secrets
             .put(
                 id,
@@ -466,6 +473,75 @@ async fn snoozing_records_one_line_naming_the_item_and_its_date() {
             .unwrap(),
         0,
         "and the number the top strip shows is what needs me now"
+    );
+}
+
+/// **The Confluence mention's actions, in full** (#287, criterion 2).
+///
+/// A wiki page whose discussion names the reader is a mention like any other,
+/// and everything the inbox promises on it is here in one test:
+///
+/// * it is **on the stream**, with the page as its entity;
+/// * *open* is knobas' own -- it is `web_url`, not a write op, so it is never
+///   in `actions`;
+/// * **no source-side action is offered**, because this adapter declares no
+///   write ops yet. The ticket's *comment (through the comment op)* is the
+///   half #286 lands -- `Category::Mention` already asks for `comment`, so the
+///   day the Confluence descriptor declares it the button appears with nothing
+///   in this crate changing, which
+///   `knobas_app::inbox`'s `a_mention_offers_comment_from_a_source_that_declares_it`
+///   pins from the other side;
+/// * *snooze* and *complete* each record **one** activity line naming the
+///   page, which is what story 21 asks for and the only writer that can (the
+///   queue records the ops, and there is no op here).
+#[tokio::test]
+async fn a_wiki_mention_offers_no_source_action_and_still_records_both_answers() {
+    let h = harness().await;
+    h.source("wiki", "wiki", ME).await;
+    let page = h
+        .item(
+            "wiki",
+            "page",
+            "98307",
+            THEM,
+            // What `knobas-source-confluence`'s storage renderer produces for
+            // `<ac:link><ri:user ri:userkey="…"/></ac:link>` in a comment.
+            &format!("SEPA payout retry design\n\n@{ME} can you add the SLA?"),
+            serde_json::json!({ "space": { "key": "ENG" } }),
+        )
+        .await;
+    let key = format!("mention:{page}");
+
+    let entry = h.entry(&key).await;
+    assert_eq!(entry.item.entity_id.as_deref(), Some(page.as_str()));
+    assert_eq!(entry.item.kind.as_deref(), Some("page"));
+    assert!(
+        entry.actions.is_empty(),
+        "a source that declares no write op must offer no button: {:?}",
+        entry.actions
+    );
+
+    let until = now() + Duration::days(2);
+    snooze_inbox_item_inner(h.pool(), h.registry.as_ref(), now(), &key, until)
+        .await
+        .expect("the mention is on the stream");
+    complete_inbox_item_inner(h.pool(), h.registry.as_ref(), now(), &key)
+        .await
+        .expect("a snoozed item can still be answered");
+
+    let verbs: Vec<(String, Option<String>)> = h
+        .activity()
+        .await
+        .into_iter()
+        .map(|r| (r.verb, r.entity_id))
+        .collect();
+    assert_eq!(
+        verbs,
+        vec![
+            ("snoozed".to_owned(), Some(page.clone())),
+            ("completed".to_owned(), Some(page.clone())),
+        ],
+        "one line each, and each naming the page"
     );
 }
 
