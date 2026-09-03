@@ -1532,3 +1532,238 @@ async fn passes_the_contract_battery_against_the_seeded_server() {
     })
     .await;
 }
+
+/// The suite's account owns a seeded issue's **assignee** for the length of the
+/// test, and gives it back -- checked, the way [`Labeled`] checks its unlabel.
+///
+/// A separate guard from `Labeled` rather than a second mode on it: the field
+/// is different, the restore is "back to whoever it was" rather than "remove
+/// what we added", and an issue whose seeded assignee was *nobody* has to come
+/// back unassigned rather than assigned to the seed's admin.
+struct Reassigned {
+    url: String,
+    user: String,
+    password: String,
+    /// `(key, the name it had, or `None` for unassigned)`.
+    was: Option<(String, Option<String>)>,
+}
+
+impl Reassigned {
+    fn new(seeded: &Seeded) -> Reassigned {
+        Reassigned {
+            url: seeded.url.clone(),
+            user: seeded.user.clone(),
+            password: seeded.password.clone(),
+            was: None,
+        }
+    }
+
+    /// `PUT /rest/api/2/issue/{key}/assignee` -- Jira's **dedicated** assignee
+    /// endpoint, which is the one issue #345 is about, and not a `fields` edit
+    /// through the generic issue `PUT`.
+    async fn take(&mut self, seeded: &Seeded, key: &str) {
+        assert!(self.was.is_none(), "this guard owns exactly one issue");
+        let (status, body) = seeded
+            .get(&format!("rest/api/2/issue/{key}?fields=assignee"))
+            .await;
+        assert_eq!(status, 200, "reading {key}'s assignee: {body}");
+        let before = body["fields"]["assignee"]["name"]
+            .as_str()
+            .map(str::to_owned);
+        assert_ne!(
+            before.as_deref(),
+            Some(seeded.user.as_str()),
+            "{key} is already the suite's, so becoming its assignee would witness nothing"
+        );
+        self.was = Some((key.to_owned(), before));
+        let (status, body) = seeded
+            .request(
+                reqwest::Method::PUT,
+                &format!("rest/api/2/issue/{key}/assignee"),
+                Some(serde_json::json!({ "name": seeded.user })),
+            )
+            .await;
+        assert_eq!(status, 204, "assigning {key} to {}: {body}", seeded.user);
+    }
+}
+
+impl Drop for Reassigned {
+    fn drop(&mut self) {
+        let Some((key, was)) = self.was.take() else {
+            return;
+        };
+        let (url, user, password) = (self.url.clone(), self.user.clone(), self.password.clone());
+        let restore = key.clone();
+        // The same shape as `Labeled`'s, and for the same measured reason: a
+        // `reqwest::Client` driven from a second runtime hangs rather than
+        // failing, so the cleanup gets its own thread and its own runtime.
+        let report = std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("a runtime for the cleanup")
+                .block_on(async move {
+                    reassign(&client(), &url, &user, &password, &restore, was.as_deref()).await
+                })
+        })
+        .join();
+        let failure = match report {
+            Ok(Ok(())) => return,
+            Ok(Err(e)) => e,
+            Err(_) => format!(
+                "the cleanup thread panicked (its own message is on stderr), so {key} may still \
+                 be assigned to the suite"
+            ),
+        };
+        let report = format!(
+            "the live suite did not give {key}'s assignee back, so the server is no longer in \
+             the plain-seed state: {failure}"
+        );
+        if std::thread::panicking() {
+            eprintln!("live suite cleanup: {report}");
+        } else {
+            panic!("{report}");
+        }
+    }
+}
+
+/// Put one issue's assignee back and **check** it landed -- a server that
+/// stopped answering must not read as a cleanup that worked.
+async fn reassign(
+    http: &reqwest::Client,
+    url: &str,
+    user: &str,
+    password: &str,
+    key: &str,
+    to: Option<&str>,
+) -> Result<(), String> {
+    let body = serde_json::json!({ "name": to });
+    let response = http
+        .put(format!("{url}/rest/api/2/issue/{key}/assignee"))
+        .header("Accept", "application/json")
+        .basic_auth(user, Some(password))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("PUT {key}/assignee: {e}"))?;
+    let status = response.status().as_u16();
+    if status != 204 {
+        let text = response.text().await.unwrap_or_default();
+        return Err(format!("PUT {key}/assignee answered {status}: {text}"));
+    }
+    let response = http
+        .get(format!("{url}/rest/api/2/issue/{key}?fields=assignee"))
+        .header("Accept", "application/json")
+        .basic_auth(user, Some(password))
+        .send()
+        .await
+        .map_err(|e| format!("re-reading {key}: {e}"))?;
+    let json: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("re-reading {key}: {e}"))?;
+    let now = json["fields"]["assignee"]["name"].as_str();
+    if now == to {
+        Ok(())
+    } else {
+        Err(format!(
+            "{key} should be assigned to {to:?} again and Jira reports {now:?}"
+        ))
+    }
+}
+
+/// **A reassignment through Jira's dedicated assignee endpoint reaches the next
+/// incremental run's `author`** (issue #345).
+///
+/// The ticket's hypothesis was that `PUT /rest/api/2/issue/{key}/assignee` does
+/// not move the issue's `updated`, which would put the issue permanently below
+/// every later incremental query's lower bound. That was measured against this
+/// container and is **false**: the PUT moves `updated` and Jira's search index
+/// carries the new stamp within a second. This test is what keeps that answer
+/// from having to be re-measured by hand, and it is the one shape
+/// [`an_incremental_run_after_one_edit_returns_that_issue_and_moves_the_watermark_to_it`]
+/// cannot cover -- that test edits `labels` through the generic issue `PUT`,
+/// and the whole question here was whether the *dedicated* endpoint behaves
+/// differently.
+///
+/// It asserts `author` and not just delivery, because `author` is what the
+/// standup digest's mirror half, the inbox's author matching (#82) and every
+/// `@me` filter key on: an adapter that re-delivered the issue while mapping
+/// the old assignee would satisfy "the run returned it" and still leave every
+/// one of those readers wrong.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
+async fn a_reassignment_through_the_assignee_endpoint_reaches_the_next_incremental_run() {
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let mut guard = Reassigned::new(&seeded);
+    let source = seeded.source(serde_json::json!({}));
+    const BORROWED: &str = "PAY-240";
+
+    let (items, cursor) = full(&*source).await;
+    let before = item(&items, BORROWED);
+    let baseline = before
+        .updated_at
+        .expect("a real Jira always sets updated");
+    let was = before.author.clone();
+    assert_ne!(
+        was.as_deref(),
+        Some(seeded.user.as_str()),
+        "the full sync must start with {BORROWED} as somebody else's"
+    );
+
+    // The same second-boundary wait the label test needs: an edit inside the
+    // second the baseline recorded is, to the cursor, the same version of the
+    // issue. See `after_the_second_of`.
+    after_the_second_of(baseline).await;
+    guard.take(&seeded, BORROWED).await;
+
+    // Polled rather than assumed, for the reason #325 records and #289's live
+    // run repeated: the adapter enumerates through Lucene, which the write
+    // path updates asynchronously.
+    let deadline = std::time::Instant::now() + INDEX_BUDGET;
+    let (changed, moved) = loop {
+        let (items, next) = sync_from(&*source, Some(cursor.clone())).await;
+        if !items.is_empty() {
+            break (items, next);
+        }
+        assert_eq!(
+            next, cursor,
+            "an idle poll hands back the cursor it was given"
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the reassignment of {BORROWED} did not reach Jira's search index within \
+             {INDEX_BUDGET:?}"
+        );
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    };
+
+    assert_eq!(
+        keys(&changed),
+        vec![BORROWED.to_owned()],
+        "the next incremental run returns exactly the issue that was reassigned"
+    );
+    let now = item(&changed, BORROWED);
+    assert_eq!(
+        now.author.as_deref(),
+        Some(seeded.user.as_str()),
+        "the run delivered {BORROWED} still attributed to {was:?} -- `author` is the assignee on \
+         Jira, and the digest, the inbox and every `@me` filter read it"
+    );
+    let witnessed = now.updated_at.expect("a real Jira always sets updated");
+    assert!(
+        witnessed > baseline,
+        "the assignee endpoint moved {BORROWED}'s own `updated` forward: {witnessed} after \
+         {baseline} -- this is the measurement #345's hypothesis got backwards"
+    );
+    assert_eq!(
+        updated_to(&moved),
+        witnessed,
+        "the position advances to the reassigned issue's own `updated`"
+    );
+    println!(
+        "SEEDED {BORROWED} reassigned {was:?} -> {:?}; updated {baseline} -> {witnessed}",
+        now.author
+    );
+}
