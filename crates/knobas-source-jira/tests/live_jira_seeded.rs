@@ -268,7 +268,8 @@ fn seeded() -> Seeded {
 impl Seeded {
     /// One raw `GET`, with the credential `./seed --env` prints.
     async fn get(&self, path_and_query: &str) -> (u16, serde_json::Value) {
-        self.request(reqwest::Method::GET, path_and_query, None).await
+        self.request(reqwest::Method::GET, path_and_query, None)
+            .await
     }
 
     async fn request(
@@ -297,7 +298,10 @@ impl Seeded {
 
     /// The keys a JQL query answers with, in the order Jira returned them.
     async fn jql(&self, jql: &str) -> Vec<String> {
-        let encoded = jql.replace(' ', "%20").replace('"', "%22").replace('=', "%3D");
+        let encoded = jql
+            .replace(' ', "%20")
+            .replace('"', "%22")
+            .replace('=', "%3D");
         let (status, body) = self
             .get(&format!(
                 "rest/api/2/search?jql={encoded}&maxResults=100&fields=key"
@@ -426,7 +430,10 @@ impl Seeded {
                         })),
                     )
                     .await;
-                assert_eq!(status, 204, "removing the leftover label from {key}: {body}");
+                assert_eq!(
+                    status, 204,
+                    "removing the leftover label from {key}: {body}"
+                );
             } else {
                 let (status, body) = self
                     .request(
@@ -439,7 +446,9 @@ impl Seeded {
             }
         }
         assert!(
-            self.jql(&format!("labels = {LITTER_LABEL}")).await.is_empty(),
+            self.jql(&format!("labels = {LITTER_LABEL}"))
+                .await
+                .is_empty(),
             "the leftovers of an earlier run could not be cleared, so this run would measure a \
              corpus that is not the seed's"
         );
@@ -956,7 +965,10 @@ async fn an_incremental_run_after_one_edit_returns_that_issue_and_moves_the_wate
         if !items.is_empty() {
             break (items, next);
         }
-        assert_eq!(next, cursor, "an idle poll hands back the cursor it was given");
+        assert_eq!(
+            next, cursor,
+            "an idle poll hands back the cursor it was given"
+        );
         assert!(
             std::time::Instant::now() < deadline,
             "the edit to {EDITED} did not reach Jira's search index within {INDEX_BUDGET:?}"

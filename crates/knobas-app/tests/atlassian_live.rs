@@ -143,8 +143,12 @@ fn env() -> Env {
         .unwrap_or_else(|_| {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testenv/seed-state.json")
         });
-    let raw = std::fs::read_to_string(&state)
-        .unwrap_or_else(|e| panic!("{}: {e} -- run `./seed-atlassian-content.sh`", state.display()));
+    let raw = std::fs::read_to_string(&state).unwrap_or_else(|e| {
+        panic!(
+            "{}: {e} -- run `./seed-atlassian-content.sh`",
+            state.display()
+        )
+    });
     let whole: serde_json::Value = serde_json::from_str(&raw).expect("seed-state.json is JSON");
     let statuses: Vec<String> = whole["jira"]["statuses"][CREATE_PROJECT]
         .as_array()
@@ -249,7 +253,9 @@ impl Env {
             assert_eq!(status, 204, "deleting the leftover issue {key}: {body}");
             println!("live suite: deleted leftover issue {key}");
         }
-        let (status, body) = self.api(reqwest::Method::GET, "rest/pat/latest/tokens", None).await;
+        let (status, body) = self
+            .api(reqwest::Method::GET, "rest/pat/latest/tokens", None)
+            .await;
         assert_eq!(status, 200, "listing personal access tokens: {body}");
         for id in body
             .as_array()
@@ -390,7 +396,9 @@ impl Drop for Pat {
             )
             .await;
             if status != 200 {
-                return Err(format!("listing tokens after the delete -> {status}: {body}"));
+                return Err(format!(
+                    "listing tokens after the delete -> {status}: {body}"
+                ));
             }
             if body
                 .as_array()
@@ -420,7 +428,8 @@ struct Litter {
 
 impl Drop for Litter {
     fn drop(&mut self) {
-        let (comment, moved, created) = (self.comment.take(), self.moved.take(), self.created.take());
+        let (comment, moved, created) =
+            (self.comment.take(), self.moved.take(), self.created.take());
         let env = env();
         undo("what the write queue sent", move || async move {
             let http = client();
@@ -473,7 +482,8 @@ impl Drop for Litter {
                         )
                         .await;
                         if status != 204 {
-                            failures.push(format!("moving {key} back to {was:?} -> {status}: {body}"));
+                            failures
+                                .push(format!("moving {key} back to {was:?} -> {status}: {body}"));
                         }
                     }
                 }
@@ -712,7 +722,10 @@ async fn mirrored(pool: &sqlx::PgPool) -> Vec<String> {
 
 /// Queue one write through the app's own submit path -- the same call the
 /// *Comment* button makes -- and answer the row as it settled.
-async fn write(state: &SourcesState, op: serde_json::Value) -> knobas_core::write_queue::QueuedWrite {
+async fn write(
+    state: &SourcesState,
+    op: serde_json::Value,
+) -> knobas_core::write_queue::QueuedWrite {
     let queued = knobas_app::sources::write_queue::submit(state, op)
         .await
         .expect("the write is queued");
@@ -802,11 +815,7 @@ async fn a_revoked_pat_reaches_the_credential_health_surface_and_the_mirror_surv
          row (interfaces §3): {:?}",
         refused.health
     );
-    assert!(
-        refused.health.checked_at.is_some(),
-        "{:?}",
-        refused.health
-    );
+    assert!(refused.health.checked_at.is_some(), "{:?}", refused.health);
     let event = events.last();
     assert_eq!(event.state, AuthState::Unauthorized);
     assert_eq!(event.source_id, JIRA);
@@ -885,7 +894,10 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
     }
 
     // -- 1. Comment ---------------------------------------------------------
-    let body = format!("{LITTER}: knobas wrote this through the write queue (pid {})", std::process::id());
+    let body = format!(
+        "{LITTER}: knobas wrote this through the write queue (pid {})",
+        std::process::id()
+    );
     let before = env.issue(COMMENTED, "comment").await["fields"]["comment"]["total"]
         .as_i64()
         .expect("a comment total");
@@ -986,9 +998,15 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
     // mirror -- which is what the queue's hold detection is built for: an
     // unmirrored container is `live: false` at queue time and at flush time
     // alike, so a create never holds.
-    let title = format!("{LITTER}: filed by the knobas live suite (pid {})", std::process::id());
+    let title = format!(
+        "{LITTER}: filed by the knobas live suite (pid {})",
+        std::process::id()
+    );
     let highest = |keys: Vec<String>| keys.into_iter().next();
-    let before = highest(env.jql(&format!("project = {CREATE_PROJECT} ORDER BY key DESC")).await);
+    let before = highest(
+        env.jql(&format!("project = {CREATE_PROJECT} ORDER BY key DESC"))
+            .await,
+    );
     let row = write(
         &state,
         json!({
@@ -1008,9 +1026,12 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
     // writes by a moment, so this is polled rather than assumed.
     let deadline = std::time::Instant::now() + INDEX_BUDGET;
     let created = loop {
-        let newest = highest(env.jql(&format!("project = {CREATE_PROJECT} ORDER BY key DESC")).await);
-        if newest.is_some() && newest != before {
-            break newest.expect("checked");
+        let newest = highest(
+            env.jql(&format!("project = {CREATE_PROJECT} ORDER BY key DESC"))
+                .await,
+        );
+        if let Some(key) = newest.filter(|k| Some(k) != before.as_ref()) {
+            break key;
         }
         assert!(
             std::time::Instant::now() < deadline,
