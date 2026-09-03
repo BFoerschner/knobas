@@ -634,13 +634,29 @@ async fn sync_now_answers_before_the_run_and_reports_it_on_the_event() {
     .deserialize::<i64>()
     .expect("a run id came back");
 
+    // **This run's** events, not merely the first ones to arrive (#300). The
+    // scheduler managed above is the real one and the pool it runs over is the
+    // database this whole binary shares, so its own ticks emit `sync:state`
+    // for other tests' sources into this same recorder. Under load one of
+    // those lands ahead of the events this run owns -- and its terminal one
+    // can land behind them -- so `first()`, and the last terminal event of any
+    // run, read somebody else's. The id `sync_now` returned is what tells them
+    // apart: the searches below carry the `run_id` claim that used to be
+    // asserted after the fact, which is why neither asserts it again.
+    let mine = |status: &serde_json::Value| status["run_id"] == serde_json::json!(returned);
+
     // Emitted before the spawn, so it is already there.
-    let started = seen.lock().unwrap().first().cloned().expect(
-        "a `running` sync:state must be emitted before sync_now returns -- \
-         otherwise EVENTS.syncState is a promise the docs make and nothing keeps",
-    );
+    let started = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|status| mine(status))
+        .cloned()
+        .expect(
+            "a `running` sync:state must be emitted before sync_now returns -- \
+             otherwise EVENTS.syncState is a promise the docs make and nothing keeps",
+        );
     assert_eq!(started["running"], serde_json::json!(true));
-    assert_eq!(started["run_id"], serde_json::json!(returned));
     assert_eq!(started["source_id"], serde_json::json!("mock"));
 
     // The run lands on its own task. Wait for the **event**, not for the log
@@ -655,7 +671,7 @@ async fn sync_now_answers_before_the_run_and_reports_it_on_the_event() {
             .unwrap()
             .iter()
             .rev()
-            .find(|status| status["running"] == serde_json::json!(false))
+            .find(|status| mine(status) && status["running"] == serde_json::json!(false))
             .cloned();
         if terminal.is_some() {
             break;
@@ -663,7 +679,6 @@ async fn sync_now_answers_before_the_run_and_reports_it_on_the_event() {
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     }
     let terminal = terminal.expect("a terminal sync:state must follow the run");
-    assert_eq!(terminal["run_id"], serde_json::json!(returned));
     assert_eq!(terminal["last_outcome"], serde_json::json!("ok"));
 
     // And by then the row it describes is closed, because the emit is the last
