@@ -327,6 +327,58 @@ test("a block's start, end and target can all be moved from the strip", async ()
   expect(on).toEqual({ kind: "entity", entity_id: "jira:PAY-231" });
 });
 
+/**
+ * **A field the reader did not touch does not move the stamp.**
+ *
+ * The form is minute-granular and the stamps are not, so an *Edit* opened to
+ * change only the target and saved would otherwise rebuild both edges from the
+ * fields and truncate the seconds off each — a rounding policy arrived at by
+ * accident, which is what `CONTEXT.md`'s minute granularity, no rounding
+ * forbids. The block below carries seconds on both edges, and they have to
+ * come back unchanged.
+ */
+test("saving without touching the times leaves the stamps exactly as they were", async () => {
+  const from = new Date(2026, 8, 3, 9, 0, 37, 0).toISOString();
+  const to = new Date(2026, 8, 3, 10, 15, 12, 0).toISOString();
+  const { updates } = render([block(1, from, to)]);
+  await vi.waitFor(() => expect(button("Edit")).toBeTruthy());
+
+  button("Edit")!.click();
+  flushSync();
+  // Only the target is changed; both time fields are left as the form filled
+  // them, which is the case this rule is about.
+  set(target.querySelector<HTMLInputElement>("input[type=text]")!, "another label");
+  button("Save")!.click();
+  await vi.waitFor(() => expect(updates).toHaveLength(1));
+
+  expect(updates[0]![1]).toBe(from);
+  expect(updates[0]![2]).toBe(to);
+});
+
+/**
+ * `TimerTarget` is exactly-one, on the wire, in the Rust and in the schema. A
+ * field that kept `jira:PAY-231` after a switch to *A label* would submit an
+ * entity id as the sentence a person is supposed to have written — and the
+ * backend would take it, because a label is free text.
+ */
+test("switching which half the target is clears the other half's text", async () => {
+  render([onTicket(1, at(9), at(10), "Retry failed SEPA payouts")]);
+  await vi.waitFor(() => expect(button("Edit")).toBeTruthy());
+
+  button("Edit")!.click();
+  flushSync();
+  const value = () => target.querySelector<HTMLInputElement>("input[type=text]")!.value;
+  expect(value()).toBe("jira:PAY-231");
+
+  set(target.querySelector<HTMLSelectElement>("select")!, "label");
+  expect(value(), "the entity id would be submitted as the label").toBe("");
+
+  // ...and switching back is the block's own target again, not a field the
+  // reader now has to retype.
+  set(target.querySelector<HTMLSelectElement>("select")!, "entity");
+  expect(value()).toBe("jira:PAY-231");
+});
+
 test("a block can be deleted and the strip stops drawing it", async () => {
   const { deletes } = render([block(1, at(9), at(10)), block(2, at(11), at(12))]);
   await vi.waitFor(() => expect(strip()).toEqual(["block", "gap", "block"]));
