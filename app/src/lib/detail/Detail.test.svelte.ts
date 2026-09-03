@@ -76,8 +76,31 @@ vi.mock("../ipc/search", () => ({
           },
         ],
       },
+      // A ticket, *after* the page, so the keyboard tests below still land on
+      // the page as their first option -- and so a page's own panel can link
+      // to a ticket, which is the direction #285's criterion 4 names.
+      {
+        kind: "ticket",
+        label: "Ticket",
+        plural: "Tickets",
+        monogram: "TK",
+        total: 1,
+        hits: [
+          {
+            entity_id: "jira:PAY-231",
+            kind: "ticket",
+            source_id: "jira",
+            updated_at: null,
+            synced_at: "2026-08-28T09:30:00Z",
+            path: null,
+            title: "Retry failed SEPA payouts",
+            rank: 1,
+            snippet: [],
+          },
+        ],
+      },
     ],
-    total: 1,
+    total: 2,
     took_ms: 2,
   }),
   launcherHome: () =>
@@ -1346,12 +1369,16 @@ test("a page from another adapter is not rendered as Confluence markup", async (
  *
  * Nothing in the linking flow knows about kinds — `create_link` takes two
  * addresses — so what is worth witnessing is that the flow is *reachable* from
- * a page's own panel: the header offers *Link to…*, the dialog opens over a
- * page, and the write goes out with the page's address as the near end. The
- * far end is a page too here, which is the picker's one fixed answer in this
- * file, so both ends of this link are pages.
+ * a page's own panel and lands on the pair the criterion names: the header
+ * offers *Link to…*, the dialog opens over a page, and the write goes out as
+ * **page → ticket**.
+ *
+ * The ticket is picked by pressing its own row rather than by Enter, which
+ * would take the picker's first option (the page). That is the difference
+ * between witnessing "a page can be linked to something" and witnessing the
+ * direction the criterion asks for.
  */
-test("a page detail can draw a link, with the page as the near end", async () => {
+test("a page detail links to a ticket, with the page as the near end", async () => {
   answer = () =>
     Promise.resolve(
       detail({
@@ -1391,15 +1418,17 @@ test("a page detail can draw a link, with the page as the near end", async () =>
   await vi.waitFor(() =>
     expect(screen.target.querySelectorAll('[role="option"]').length).toBeGreaterThan(0),
   );
-  picker.dispatchEvent(
-    new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+  const ticket = [...screen.target.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(
+    (option) => option.textContent?.includes("Retry failed SEPA payouts"),
   );
+  expect(ticket, "the picker offered no ticket to link the page to").toBeDefined();
+  ticket!.click();
   flushSync();
   [...screen.target.querySelectorAll<HTMLButtonElement>("button")]
     .find((button) => button.textContent?.trim() === "Link")!
     .click();
 
   await vi.waitFor(() => expect(created).toHaveLength(1));
-  expect(created).toEqual([{ fromId: "confluence:98307", toId: "mock:ENG-SEPA" }]);
+  expect(created).toEqual([{ fromId: "confluence:98307", toId: "jira:PAY-231" }]);
   screen.done();
 });
