@@ -211,7 +211,6 @@ vi.mock("./lib/ipc/time", () => ({
     return Promise.resolve(timerClosed);
   },
   timerHeartbeat: () => Promise.resolve(null),
-<<<<<<< HEAD
   // The day review and the settings view are both mounted by the shell; what
   // they call on arrival has to exist here even where no test drives it.
   dayBlocks: () => Promise.resolve([]),
@@ -220,13 +219,10 @@ vi.mock("./lib/ipc/time", () => ({
   createBlock: () => Promise.reject(new Error("no edit in this test")),
   passiveAttribution: () => Promise.resolve(false),
   setPassiveAttribution: () => Promise.reject(new Error("no settings write in this test")),
-||||||| parent of c3233fb (Review: the draft asks under the day the work began on)
-=======
   worklogDraft: (entityId: string, when: { day: string; offsetMinutes: number }) => {
     draftAsks.push({ entityId, ...when });
     return Promise.resolve(null);
   },
->>>>>>> c3233fb (Review: the draft asks under the day the work began on)
 }));
 
 /**

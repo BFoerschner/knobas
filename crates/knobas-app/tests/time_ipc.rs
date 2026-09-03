@@ -1574,6 +1574,8 @@ async fn a_passive_block_a_new_manual_one_overlaps_is_taken_back_whole() {
         "the passive block knobas had guessed is still there underneath the \
          one the reader wrote over it"
     );
+}
+
 // -- the worklog draft (#280) -----------------------------------------------
 //
 // The draft's *reads*, against a real database: which blocks a day's interval
@@ -1586,7 +1588,7 @@ async fn a_passive_block_a_new_manual_one_overlaps_is_taken_back_whole() {
 /// the fixtures below read as the instants they are.
 const DAY: &str = "2026-09-03";
 
-fn day() -> chrono::NaiveDate {
+fn reader_day() -> chrono::NaiveDate {
     DAY.parse().expect("a date")
 }
 
@@ -1683,7 +1685,7 @@ fn registry() -> knobas_app::sources::Registry {
 }
 
 async fn draft_of(pool: &PgPool, entity: &str) -> Option<knobas_app::time::worklog::Draft> {
-    time::worklog::draft(pool, &registry(), entity, day(), 0)
+    time::worklog::draft(pool, &registry(), entity, reader_day(), 0)
         .await
         .expect("the draft is readable")
 }
@@ -1761,7 +1763,7 @@ async fn a_day_is_the_readers_day() {
     // them, still today -- but a block at 22:00 UTC is tomorrow, and the
     // server's own date would have said otherwise.
     let evening = block(&pool, TICKET, (22, 0), (23, 0)).await;
-    let theirs = time::worklog::draft(&pool, &registry(), TICKET, day(), 240)
+    let theirs = time::worklog::draft(&pool, &registry(), TICKET, reader_day(), 240)
         .await
         .expect("the draft is readable")
         .expect("there is time to log");
