@@ -3650,7 +3650,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   address, the three commands, the strip, *Extend to now*, the tests and this entry.
 
 - **`crates/knobas-source/src/**`, `crates/knobas-db/migrations/0014_the_worklog.sql` and the IPC
-  command schema with both append-only barrels, issue #280 (2026-09-03):** the worklog — M3.1's
+  command schema, issue #280 (2026-09-03):** the worklog — M3.1's
   `WriteOp` growth, the local copy of what it sends, and the two commands that draft and log it.
   One entry for the package, as the #278 entry above records is the arrangement for this
   sub-milestone.
@@ -3779,9 +3779,10 @@ From this commit on, each of the following requires an orchestrator decision **a
 
   **The interval is editable as a whole** (spec #272, story 31): the draft carries a start field
   and a minutes field, and both are the reader's — a timer started ten minutes after the work did
-  is the ordinary case. An untouched start is sent **verbatim**, seconds and all, rather than put
-  through the minute-granularity field: rounding 09:00:37 down on a draft nobody edited would be
-  knobas quietly changing a fact it measured.
+  is the ordinary case. **An untouched field is sent verbatim, seconds and all**, on both halves,
+  rather than put through the minute-granularity field: a block is measured to the second, so
+  rounding 09:00:37 down — or logging 9000s for blocks worth 9037s and marking those exact blocks
+  spent — would be knobas quietly changing a fact it measured on a draft nobody edited.
 
   **Which blocks a worklog covers is not an argument**, and that asymmetry is the point:
   `started_at`, `seconds` and `comment` are the reader's, edited in the draft or not, and knobas
@@ -3810,6 +3811,10 @@ From this commit on, each of the following requires an orchestrator decision **a
   shape, not an IPC one, and recorded because #278's entry described the old one: a stop closes a
   block and the block is what the draft opens on, and reading the timer back for it would find a
   different block whenever another surface started one in between.
+
+  **One barrel, not both.** `crates/knobas-app/src/lib.rs`'s `generate_handler!` gains the two
+  commands; `app/src/lib/ipc/index.ts` is untouched, because #278's entry already exported
+  `./time` from it and the two commands land in that module.
 
   **What did not change.** No new event — a worklog appears in the pending-writes panel like any
   other write, on the signal that panel already watches. `crates/knobas-http/**` and

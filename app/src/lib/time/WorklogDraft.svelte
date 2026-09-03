@@ -119,7 +119,22 @@
   );
 
   const comment = $derived(edited ? typed : generated);
-  const seconds = $derived(Math.max(0, Math.round(minutes * 60)));
+
+  /**
+   * ...and the length that is sent.
+   *
+   * **An untouched field sends the blocks' own sum, verbatim**, for the reason
+   * `startedAt` above does: a block is measured to the second, so a day of two
+   * stretches rarely adds up to a whole minute, and putting every draft
+   * through a minutes field would log a number knobas never measured while
+   * marking those exact blocks spent. The field is minutes because that is the
+   * unit a person corrects a clock in, not because a worklog is one.
+   */
+  const seconds = $derived(
+    minutes === Math.round(draft.seconds / 60)
+      ? draft.seconds
+      : Math.max(0, Math.round(minutes * 60)),
+  );
 
   /** `2h 30m`, `45m` — the reading on the button. */
   const reading = $derived.by(() => {

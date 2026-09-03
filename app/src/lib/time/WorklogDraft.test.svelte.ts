@@ -223,6 +223,24 @@ test("a corrected start is what is logged, on the same day", async () => {
   expect(sent[0]!.day, "correcting a start must not move the day").toBe("2026-09-03");
 });
 
+/**
+ * **An untouched start is sent verbatim, seconds and all.**
+ *
+ * The fixture above starts on a whole minute, so it cannot tell the two
+ * readings apart; this one starts at 09:00:37. A time field has no seconds, so
+ * a component that put every start through `atClock` would send 09:00:00 — and
+ * a draft nobody edited would have quietly moved a fact knobas measured.
+ */
+test("a start nobody touched is sent exactly as the block recorded it", async () => {
+  const measured = "2026-09-03T09:00:37.482Z";
+  const { sent } = render({ ...DRAFT, started_at: measured });
+
+  logButton().click();
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+
+  expect(sent[0]!.startedAt).toBe(measured);
+});
+
 /** An edited length is what is logged — the minutes field, not the blocks. */
 test("the length can be corrected, and the button says what will be logged", async () => {
   const { sent } = render();
@@ -244,6 +262,47 @@ test("the length can be corrected, and the button says what will be logged", asy
  * A draft that closed on failure would leave the reader believing their day is
  * on the ticket when the blocks are still sitting there unlogged.
  */
+/**
+ * **A length nobody touched is sent as the blocks measured it.**
+ *
+ * The fixture above sums to a whole number of minutes, so it cannot tell the
+ * two readings apart; this one sums to 2h 30m and 37s. The minutes field
+ * cannot hold that second, and a component that read every length back out of
+ * the field would log 9000s while marking blocks worth 9037s spent — the same
+ * failure as a rounded start, in the number the reader is billed on.
+ */
+test("a length nobody touched is sent as the blocks measured it", async () => {
+  const measured = 150 * 60 + 37;
+  const { sent } = render({ ...DRAFT, seconds: measured });
+
+  logButton().click();
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+
+  expect(sent[0]!.seconds).toBe(measured);
+});
+
+/**
+ * **A worklog with no words is a worklog**, all the way to the call: unticking
+ * everything empties the comment, and the empty string is what goes.
+ *
+ * The sibling test above stops at the textarea's value; this one is the wire.
+ * A component that fell back to the generated comment, or refused to send an
+ * empty one, would pass that assertion and put words nobody chose on a ticket.
+ */
+test("a comment emptied down to nothing is sent empty", async () => {
+  const { sent } = render();
+
+  for (const box of boxes()) {
+    box.click();
+    flushSync();
+  }
+  expect(commentBox().value).toBe("");
+
+  logButton().click();
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]!.comment).toBe("");
+});
+
 test("a refused log is reported and leaves the draft standing", async () => {
   const { onclose, onlogged } = render(DRAFT, () =>
     Promise.reject(new Error("there is no unlogged time on jira:PAY-231 for 2026-09-03")),

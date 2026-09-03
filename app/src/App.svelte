@@ -222,9 +222,11 @@
    * §3a exists to prevent, and would go stale the day an adapter starts taking
    * worklogs.
    *
-   * The **day is the block's, not today's**: a stop at 00:10 closes an
-   * afternoon that belongs to yesterday, and drafting today would offer the
-   * reader nothing with no way to tell why.
+   * The **day is the one the block started on**, which is the rule the backend
+   * files a block under (`UNLOGGED_BLOCKS` narrows on `started_at`). A stop at
+   * 00:10 closes an afternoon that belongs to yesterday, and asking for today
+   * would answer `null` — the reader would get nothing, with no way to tell
+   * why.
    *
    * A failed read is a toast, not silence: the reader pressed stop expecting a
    * draft, and the blocks are still there to log by hand from the day review.
@@ -233,7 +235,7 @@
     if (!closed || closed.target.kind !== "entity") return;
     const on = closed.target.entity_id;
     void worklogDraft(on, {
-      day: localDay(new Date(closed.ended_at)),
+      day: localDay(new Date(closed.started_at)),
       offsetMinutes: offsetMinutes(),
     })
       .then((draft) => {
