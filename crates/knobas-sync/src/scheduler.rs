@@ -542,7 +542,7 @@ pub async fn settle(deps: &SchedulerDeps, source_id: &str, run_id: i64, result: 
     if result.outcome == SyncOutcome::Ok && result.counts.touched() > 0 {
         emit_latest_activity(deps, source_id).await;
     }
-    emit_state(deps, source_id).await;
+    emit_state(deps, source_id, run_id, Transition::Ended(result.outcome)).await;
 }
 
 /// Whether a source holds `source_id` **now**, as [`Scheduler::forget_source`]
@@ -714,13 +714,113 @@ async fn emit_latest_activity(deps: &SchedulerDeps, source_id: &str) {
     }
 }
 
-/// Emit the current state for one source. Called at the start of a run (right
-/// after its log row exists) and again from [`settle`].
-async fn emit_state(deps: &SchedulerDeps, source_id: &str) {
-    match status_for(&deps.pool, source_id).await {
-        Ok(Some(status)) => deps.events.sync_state(status),
-        Ok(None) => {}
-        Err(error) => tracing::warn!(source_id, %error, "reading sync status for the event failed"),
+/// Which transition an emit is about -- and, for the one that ends a run, how
+/// it ended.
+///
+/// Passed in rather than inferred from the log row, because the row can
+/// disagree with the truth on exactly one path: [`settle`] warns and carries on
+/// when the `update` that closes the row fails, and a run whose row stayed open
+/// is still a run that is over. Inferring `running` from `finished_at` there
+/// would leave the UI spinning on a run nobody is doing.
+#[derive(Debug, Clone, Copy)]
+enum Transition {
+    /// The run's log row exists and it is about to execute.
+    Started,
+    /// The run is over, with this verdict.
+    Ended(SyncOutcome),
+}
+
+/// Emit the state of **one run** for one source. Called at the start of a run
+/// (right after its log row exists) and again from [`settle`].
+///
+/// Built from the run it is emitting for, not from a bare source-level read
+/// (#304). [`status_for`]'s laterals take *whichever* run is open for the
+/// source and *whichever* finished one started last, so a second run for the
+/// same source decided what this event carried: an open neighbour (two
+/// schedulers over one `source_config`), or -- once
+/// [`run_log::reconcile_abandoned`] has closed every open row at start -- a
+/// *finished* neighbour dated ahead of this one. ADR-0005 promises that
+/// whoever holds a run id is told how *that* run ended; an emit naming another
+/// run breaks the pairing for every listener keyed on `run_id`, the first-run
+/// wizard's DONE panel included.
+///
+/// Two reads, each answering only what it can:
+///
+/// * the **run's** log row -- its timestamps, in the database's clock, so the
+///   event and the diagnostics list agree about when this run started and
+///   ended;
+/// * the **source's** status -- `backoff_until` and `next_run_at`, which
+///   belong to the source and to no run, plus the previous run's ending, which
+///   is what `last_outcome` means until this run has an ending of its own.
+async fn emit_state(deps: &SchedulerDeps, source_id: &str, run_id: i64, transition: Transition) {
+    let source = match status_for(&deps.pool, source_id).await {
+        Ok(Some(source)) => source,
+        // Deleted while its run was in flight: there is no source left to
+        // report a state for, and `sync_status` would not list one either.
+        Ok(None) => return,
+        Err(error) => {
+            tracing::warn!(source_id, %error, "reading sync status for the event failed");
+            return;
+        }
+    };
+    // Best-effort, like everything else on this path: without the row the
+    // event still names the right run, and its timestamp comes from this
+    // process's clock instead of the database's.
+    let row = match run_log::get(&deps.pool, run_id).await {
+        Ok(row) => row,
+        Err(error) => {
+            tracing::warn!(source_id, run_id, %error, "reading the run for the event failed");
+            None
+        }
+    };
+    deps.events.sync_state(state_of_run(
+        source_id,
+        run_id,
+        transition,
+        row.as_ref(),
+        &source,
+    ));
+}
+
+/// The `sync:state` payload for one run: the run's own identity, timing and
+/// ending; the source's own backoff and countdown.
+///
+/// Separated from the two reads above so the composition -- which field comes
+/// from which of them -- is assertable without a database.
+fn state_of_run(
+    source_id: &str,
+    run_id: i64,
+    transition: Transition,
+    row: Option<&run_log::SyncRunRow>,
+    source: &SourceSyncStatus,
+) -> SourceSyncStatus {
+    match transition {
+        Transition::Started => {
+            let base = SourceSyncStatus::started(source_id, run_id);
+            SourceSyncStatus {
+                started_at: row.map(|r| r.started_at).or(base.started_at),
+                // The *source's*: this run has no ending yet, and
+                // `last_outcome` is about the last run that had one.
+                last_finished_at: source.last_finished_at,
+                last_outcome: source.last_outcome,
+                backoff_until: source.backoff_until,
+                // `next_run_at` is deliberately not taken from the source: it
+                // is the countdown, and a run in flight has nothing to count
+                // down to. `started` already says `None`.
+                ..base
+            }
+        }
+        Transition::Ended(outcome) => {
+            let base = SourceSyncStatus::finished(source_id, run_id, outcome);
+            SourceSyncStatus {
+                last_finished_at: row.and_then(|r| r.finished_at).or(base.last_finished_at),
+                // Source-level, and both need `source_config`: when the next
+                // run is due, and how long a failing source is held off for.
+                next_run_at: source.next_run_at,
+                backoff_until: source.backoff_until,
+                ..base
+            }
+        }
     }
 }
 
@@ -1352,7 +1452,7 @@ impl Inner {
         // exists, so the status read is accurate -- including for a run that is
         // still waiting on a permit, which *is* running as far as the UI is
         // concerned.
-        emit_state(&self.deps, source_id).await;
+        emit_state(&self.deps, source_id, run_id, Transition::Started).await;
 
         let inner = Arc::clone(self);
         let id = source_id.to_owned();
