@@ -783,8 +783,9 @@ mod tests {
     /// which is a second place for it to drift from the ADR.
     #[test]
     fn the_draft_quotes_adr_0012s_sentence_verbatim() {
-        const ADR: &str =
-            include_str!("../../../../docs/adr/0012-writes-are-at-least-once-no-idempotency-key.md");
+        const ADR: &str = include_str!(
+            "../../../../docs/adr/0012-writes-are-at-least-once-no-idempotency-key.md"
+        );
         const DRAFT: &str = include_str!("../../../../app/src/lib/time/WorklogDraft.svelte");
 
         let flatten = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");

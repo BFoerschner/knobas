@@ -300,7 +300,10 @@ mod tests {
         assert_eq!(d.name, "Tidewater Jira");
         assert_eq!(d.entity_kinds.len(), 1);
         assert_eq!(d.capabilities, vec![knobas_source::Capability::Write]);
-        assert_eq!(d.write_ops, vec!["comment", "transition", "create_ticket"]);
+        assert_eq!(
+            d.write_ops,
+            vec!["comment", "transition", "create_ticket", "log_work"]
+        );
         // The claim the engine's tombstone sweep rests on travels with the
         // instance descriptor too, not only with the template.
         assert!(d.entity_kinds.iter().all(|k| k.full_sync_exhaustive));

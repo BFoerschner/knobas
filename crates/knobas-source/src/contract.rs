@@ -98,8 +98,7 @@ fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
             // attempted this probe would otherwise write a different worklog
             // on every run, and a battery whose payload moves is one whose
             // failures cannot be compared between runs.
-            started: chrono::DateTime::from_timestamp(1_788_000_000, 0)
-                .expect("a fixed instant"),
+            started: chrono::DateTime::from_timestamp(1_788_000_000, 0).expect("a fixed instant"),
             seconds: 60,
             comment: "contract battery probe".into(),
         },

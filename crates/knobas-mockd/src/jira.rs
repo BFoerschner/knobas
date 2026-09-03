@@ -869,7 +869,7 @@ async fn add_worklog(
     let Ok(started) = DateTime::parse_from_str(raw, JIRA_STARTED) else {
         return jira_error(
             StatusCode::BAD_REQUEST,
-            &format!("Date value {raw} is invalid"),
+            format!("Date value {raw} is invalid"),
         );
     };
     let Some(seconds) = body.get("timeSpentSeconds").and_then(Value::as_u64) else {

@@ -163,8 +163,9 @@ async fn refused_url_points_at_nothing() {
 
 #[tokio::test]
 async fn a_contract_verb_mockd_does_not_serve_is_a_501_not_a_bare_405() {
-    // These five (verb, path) pairs ARE in the WADL, so they are not method
+    // These four (verb, path) pairs ARE in the WADL, so they are not method
     // violations -- the contract declares them and mockd simply has no handler.
+    // `POST .../worklog` was here too until #280 gave it one.
     // Routing them through axum's own 405 would answer with an `Allow` header
     // describing mockd's routing table rather than the contract, an empty body
     // instead of the Jira error shape, and no violation at all -- i.e. mockd
@@ -175,7 +176,6 @@ async fn a_contract_verb_mockd_does_not_serve_is_a_501_not_a_bare_405() {
         (reqwest::Method::PUT, "/rest/api/2/myself"),
         (reqwest::Method::PUT, "/rest/api/2/issue/PAY-231"),
         (reqwest::Method::DELETE, "/rest/api/2/issue/PAY-231"),
-        (reqwest::Method::POST, "/rest/api/2/issue/PAY-231/worklog"),
     ];
     for (method, path) in &cases {
         let r = client()

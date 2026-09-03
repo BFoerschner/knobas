@@ -1637,6 +1637,27 @@ async fn mirrored(pool: &PgPool, id: &str, title: &str, author: &str, at: DateTi
     .expect("the mirror row");
 }
 
+/// One activity line of the reader's own, **at a moment this test dictates**.
+///
+/// `activity::record` stamps `now()`, which would put the line inside or
+/// outside a fixture interval depending on what time of day the suite runs --
+/// a test that passes over lunch and fails after it. The stamp is moved with
+/// one `update`, which writes a fixture and never an assertion, the discipline
+/// this file's `age` records for the timer.
+async fn line(pool: &PgPool, verb: &str, at: DateTime<Utc>) {
+    let ticket = knobas_core::entity::EntityRef::parse(TICKET).expect("an entity id");
+    let row =
+        knobas_core::activity::record(pool, "user", verb, Some(&ticket), serde_json::json!({}))
+            .await
+            .expect("an activity line");
+    sqlx::query("update knobas.activity set at = $1 where id = $2")
+        .bind(at)
+        .bind(row.id)
+        .execute(pool)
+        .await
+        .expect("the line is moved into the interval");
+}
+
 fn registry() -> knobas_app::sources::Registry {
     knobas_app::sources::Registry::builtin()
 }
@@ -1790,7 +1811,14 @@ async fn the_candidates_are_the_readers_own_work_inside_the_interval() {
         at(9, 30),
     )
     .await;
-    mirrored(&pool, "jira:c2", "Someone else's work", "jonas.k", at(9, 40)).await;
+    mirrored(
+        &pool,
+        "jira:c2",
+        "Someone else's work",
+        "jonas.k",
+        at(9, 40),
+    )
+    .await;
     mirrored(
         &pool,
         "jira:c3",
@@ -1800,25 +1828,8 @@ async fn the_candidates_are_the_readers_own_work_inside_the_interval() {
     )
     .await;
 
-    let ticket = knobas_core::entity::EntityRef::parse(TICKET).unwrap();
-    knobas_core::activity::record(
-        &pool,
-        "user",
-        "linked",
-        Some(&ticket),
-        serde_json::json!({}),
-    )
-    .await
-    .expect("an activity line");
-    knobas_core::activity::record(
-        &pool,
-        "user",
-        "stopped",
-        Some(&ticket),
-        serde_json::json!({}),
-    )
-    .await
-    .expect("the timer's own line");
+    line(&pool, "linked", at(9, 30)).await;
+    line(&pool, "stopped", at(9, 40)).await;
 
     let draft = draft_of(&pool, TICKET).await.expect("there is time to log");
     let ids: Vec<&str> = draft.candidates.iter().map(|c| c.id.as_str()).collect();
@@ -1835,12 +1846,18 @@ async fn the_candidates_are_the_readers_own_work_inside_the_interval() {
         "a commit outside the interval is not in it: {ids:?}"
     );
     assert!(
-        draft.candidates.iter().any(|c| c.bullet == "- linked PAY-231"),
+        draft
+            .candidates
+            .iter()
+            .any(|c| c.bullet == "- linked PAY-231"),
         "the reader's own activity line is a candidate: {:?}",
         draft.candidates
     );
     assert!(
-        !draft.candidates.iter().any(|c| c.bullet.contains("stopped")),
+        !draft
+            .candidates
+            .iter()
+            .any(|c| c.bullet.contains("stopped")),
         "the timer's own bookkeeping is not work: {:?}",
         draft.candidates
     );
@@ -1857,5 +1874,9 @@ async fn the_candidates_are_the_readers_own_work_inside_the_interval() {
             .collect::<Vec<_>>()
             .join("\n")
     );
-    assert!(draft.comment.contains("- Retry SEPA payouts"), "{}", draft.comment);
+    assert!(
+        draft.comment.contains("- Retry SEPA payouts"),
+        "{}",
+        draft.comment
+    );
 }

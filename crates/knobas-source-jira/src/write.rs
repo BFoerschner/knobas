@@ -244,9 +244,7 @@ mod tests {
     /// because the live suite needs a licensed container and this is a string.
     #[test]
     fn a_worklogs_started_carries_milliseconds_and_a_numeric_offset() {
-        let at = chrono::Utc
-            .with_ymd_and_hms(2026, 9, 3, 9, 30, 0)
-            .unwrap();
+        let at = chrono::Utc.with_ymd_and_hms(2026, 9, 3, 9, 30, 0).unwrap();
         assert_eq!(
             at.format(super::JIRA_STARTED).to_string(),
             "2026-09-03T09:30:00.000+0000",

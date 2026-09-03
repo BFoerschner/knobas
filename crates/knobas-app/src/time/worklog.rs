@@ -184,7 +184,10 @@ pub struct Worklog {
 /// hidden: on the two days a year a zone changes offset, the window is an hour
 /// out at one end. The interval is editable in the draft, which is the remedy;
 /// carrying a zone database into the bridge for those two days is not.
-fn day_bounds(day: NaiveDate, offset_minutes: i32) -> Result<(DateTime<Utc>, DateTime<Utc>), IpcError> {
+fn day_bounds(
+    day: NaiveDate,
+    offset_minutes: i32,
+) -> Result<(DateTime<Utc>, DateTime<Utc>), IpcError> {
     let offset = FixedOffset::east_opt(offset_minutes * 60).ok_or_else(|| {
         IpcError::invalid(format!(
             "{offset_minutes} is not a usable offset from UTC -- the value is \
@@ -194,7 +197,11 @@ fn day_bounds(day: NaiveDate, offset_minutes: i32) -> Result<(DateTime<Utc>, Dat
     let start = day
         .and_hms_opt(0, 0, 0)
         .and_then(|midnight| midnight.and_local_timezone(offset).single())
-        .ok_or_else(|| IpcError::invalid(format!("{day} has no midnight at {offset_minutes:+} minutes")))?
+        .ok_or_else(|| {
+            IpcError::invalid(format!(
+                "{day} has no midnight at {offset_minutes:+} minutes"
+            ))
+        })?
         .with_timezone(&Utc);
     Ok((start, start + Duration::days(1)))
 }
@@ -228,10 +235,9 @@ async fn takes_a_worklog(
     else {
         return Ok(false);
     };
-    Ok(registry
-        .descriptors()
-        .into_iter()
-        .any(|d| d.adapter_kind == source.adapter_kind && d.write_ops.iter().any(|op| op == LOG_WORK)))
+    Ok(registry.descriptors().into_iter().any(|d| {
+        d.adapter_kind == source.adapter_kind && d.write_ops.iter().any(|op| op == LOG_WORK)
+    }))
 }
 
 /// The blocks of one local day on one entity that have not been logged yet.
@@ -609,9 +615,12 @@ mod tests {
     #[test]
     fn a_concatenated_interval_logs_the_time_worked_not_the_window_it_sat_in() {
         let spans = [span((9, 0), (10, 30), 1), span((13, 0), (14, 0), 2)];
-        let (started_at, ended_at, seconds) =
-            concatenate(&spans).expect("two blocks concatenate");
-        assert_eq!(started_at, at(9, 0), "the interval starts at the first block");
+        let (started_at, ended_at, seconds) = concatenate(&spans).expect("two blocks concatenate");
+        assert_eq!(
+            started_at,
+            at(9, 0),
+            "the interval starts at the first block"
+        );
         assert_eq!(ended_at, at(14, 0), "...and ends at the last one");
         assert_eq!(seconds, 150 * 60, "two and a half hours were worked");
         assert_eq!(

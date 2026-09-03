@@ -525,9 +525,7 @@ impl Drop for Litter {
             if let Some((key, id)) = worklog {
                 let (status, body) = call(
                     reqwest::Method::DELETE,
-                    format!(
-                        "rest/api/2/issue/{key}/worklog/{id}?adjustEstimate=leave"
-                    ),
+                    format!("rest/api/2/issue/{key}/worklog/{id}?adjustEstimate=leave"),
                     None,
                 )
                 .await;
@@ -541,7 +539,9 @@ impl Drop for Litter {
                 )
                 .await;
                 if status != 200 {
-                    failures.push(format!("reading {key}'s worklogs back -> {status}: {after}"));
+                    failures.push(format!(
+                        "reading {key}'s worklogs back -> {status}: {after}"
+                    ));
                 } else if after["worklogs"]
                     .as_array()
                     .into_iter()
@@ -1198,9 +1198,7 @@ async fn a_days_work_is_logged_to_pay_231_and_comes_back_in_the_mirror() {
     // 08:00 would otherwise file one.
     let now = chrono::Utc::now();
     let day = if now.time() < chrono::NaiveTime::from_hms_opt(14, 0, 0).expect("14:00") {
-        now.date_naive()
-            .pred_opt()
-            .expect("yesterday exists")
+        now.date_naive().pred_opt().expect("yesterday exists")
     } else {
         now.date_naive()
     };
@@ -1222,16 +1220,11 @@ async fn a_days_work_is_logged_to_pay_231_and_comes_back_in_the_mirror() {
         .expect("a block is written");
     }
 
-    let draft = knobas_app::time::worklog::draft(
-        &state.pool,
-        state.registry.as_ref(),
-        &ticket,
-        day,
-        0,
-    )
-    .await
-    .expect("the draft is readable")
-    .expect("a Jira ticket with unlogged blocks has a draft");
+    let draft =
+        knobas_app::time::worklog::draft(&state.pool, state.registry.as_ref(), &ticket, day, 0)
+            .await
+            .expect("the draft is readable")
+            .expect("a Jira ticket with unlogged blocks has a draft");
     assert_eq!(
         draft.seconds,
         150 * 60,
@@ -1330,13 +1323,12 @@ async fn a_days_work_is_logged_to_pay_231_and_comes_back_in_the_mirror() {
     //    what everything downstream of the mirror reads (§4.1: the record is
     //    verbatim).
     sync(&state).await;
-    let payload: serde_json::Value = sqlx::query_scalar(
-        "select payload from sync.live_item where entity_id = $1",
-    )
-    .bind(&ticket)
-    .fetch_one(&state.pool)
-    .await
-    .expect("the mirrored ticket is readable");
+    let payload: serde_json::Value =
+        sqlx::query_scalar("select payload from sync.live_item where entity_id = $1")
+            .bind(&ticket)
+            .fetch_one(&state.pool)
+            .await
+            .expect("the mirrored ticket is readable");
     let mirrored_ids: Vec<String> = payload["fields"]["worklog"]["worklogs"]
         .as_array()
         .into_iter()

@@ -106,15 +106,16 @@ async fn app(name: &str, jira_url: &str) -> SourcesState {
     .await
     .expect("the source row is written");
 
-    let scheduler = knobas_sync::scheduler::Scheduler::start(knobas_sync::scheduler::SchedulerDeps {
-        pool: pool.clone(),
-        connections: Arc::new(Connections(connector)),
-        registry: Arc::new(Registry::builtin()),
-        secrets: secrets.clone(),
-        events: Arc::new(Quiet),
-    })
-    .await
-    .expect("a scheduler over the scratch database");
+    let scheduler =
+        knobas_sync::scheduler::Scheduler::start(knobas_sync::scheduler::SchedulerDeps {
+            pool: pool.clone(),
+            connections: Arc::new(Connections(connector)),
+            registry: Arc::new(Registry::builtin()),
+            secrets: secrets.clone(),
+            events: Arc::new(Quiet),
+        })
+        .await
+        .expect("a scheduler over the scratch database");
 
     SourcesState {
         pool,
