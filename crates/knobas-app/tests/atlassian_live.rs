@@ -409,12 +409,15 @@ const JIRA_TOKENS: TokenStatuses = TokenStatuses {
     revoked: 204,
 };
 
-/// Confluence's. The same `/rest/pat/latest/tokens` REST API and, on the
-/// documentation, the same answers -- and #317's live run is what turns that
-/// into a measurement, because **nothing in this repo had ever called this
-/// endpoint on a Confluence before it**. Both adapters' notes call it "outside
-/// this adapter's endpoint set", which is a statement about the adapter and not
-/// about the server.
+/// Confluence's, measured by #317's run against `atlassian/confluence:9.2.21`
+/// -- the same numbers, from the same `/rest/pat/latest/tokens` REST API.
+///
+/// Written down as a *measurement* because until that run nothing in this repo
+/// had ever called this endpoint on a Confluence: both adapters' notes call it
+/// "outside this adapter's endpoint set", which is a statement about the
+/// adapter and not about the server. The same run confirmed the two halves the
+/// suite rests on -- a token issued here authenticates `/rest/api/content`
+/// (200), and once revoked it is a 401 there.
 const CONFLUENCE_TOKENS: TokenStatuses = TokenStatuses {
     created: 201,
     revoked: 204,
@@ -443,8 +446,7 @@ struct Pat {
     user: String,
     password: String,
     statuses: TokenStatuses,
-    /// A string on both, though Jira spells it as a JSON number: see
-    /// [`token_id`].
+    /// The path segment it becomes: see [`token_id`].
     id: String,
     raw: String,
 }
@@ -471,7 +473,7 @@ impl Pat {
             user: user.to_owned(),
             password: password.to_owned(),
             statuses,
-            id: token_id(&body).unwrap_or_else(|| panic!("a token id: {body}")),
+            id: token_id(&body),
             raw: body["rawToken"]
                 .as_str()
                 .unwrap_or_else(|| {
@@ -536,42 +538,45 @@ fn token_ids(body: &serde_json::Value, accept: impl Fn(&str) -> bool) -> Vec<Str
     token_rows(body)
         .iter()
         .filter(|t| t["name"].as_str().is_some_and(&accept))
-        .filter_map(token_id)
+        .map(token_id)
         .collect()
 }
 
-/// The records in a token listing -- and a **panic** for a body that is none of
-/// the shapes below.
+/// The records in a token listing -- and a **panic** for a body that is not
+/// one.
 ///
-/// Three spellings are read because the two products in this file need not
-/// agree: a bare array, which is what Jira answers, or one under `values` or
-/// under `results`, the envelope every other Confluence read in this repo pages
-/// on. Reading an unrecognised body as *no tokens* is the failure mode worth
-/// spending a panic on: [`Pat`]'s `Drop` would then report a revoke it never
-/// checked, and the header of this file promises a guard that checks rather
-/// than assumes. `undo` catches the panic and reports it, so a `Drop` that hits
-/// this says so rather than aborting.
+/// Both products answer a bare array, measured: Jira's by #276, Confluence's by
+/// #317. So there is one shape here and no envelope to unwrap, and this is a
+/// function rather than an `as_array()` at each of the three call sites for the
+/// sake of the panic. Reading an unrecognised body as *no tokens* is the
+/// failure worth spending one on: [`Pat`]'s `Drop` would then report a revoke
+/// it never checked, and the header of this file promises a guard that checks
+/// rather than assumes. [`undo`] catches the panic and reports it, so a `Drop`
+/// that hits this says so rather than aborting.
 fn token_rows(body: &serde_json::Value) -> &Vec<serde_json::Value> {
-    body.as_array()
-        .or_else(|| body["values"].as_array())
-        .or_else(|| body["results"].as_array())
-        .unwrap_or_else(|| {
-            panic!(
-                "a token listing is an array, or one under `values` or `results`; this is none \
-                 of them, and reading it as no tokens would make every revoke below vacuous: {body}"
-            )
-        })
+    body.as_array().unwrap_or_else(|| {
+        panic!(
+            "a token listing is an array; this is not one, and reading it as no tokens would \
+             make every revoke below vacuous: {body}"
+        )
+    })
 }
 
-/// One token record's id, whichever way the server spells it: Jira answers a
-/// JSON number and this file carries the id as the path segment it becomes, so
-/// there is one spelling downstream and the number is stringified here.
-fn token_id(token: &serde_json::Value) -> Option<String> {
-    match &token["id"] {
-        serde_json::Value::String(s) => Some(s.clone()),
-        serde_json::Value::Number(n) => Some(n.to_string()),
-        _ => None,
-    }
+/// One token record's id, as the path segment it becomes.
+///
+/// Both products answer a JSON **number** -- Jira's read that way since #276,
+/// Confluence's measured by #317 -- and every use of an id here is either a URL
+/// path segment or a comparison between two of those, so it is stringified in
+/// this one place and there is one spelling downstream.
+///
+/// A record whose id is neither panics rather than being skipped, for
+/// [`token_rows`]'s reason: a silently dropped record is a revoke reported
+/// without being checked.
+fn token_id(token: &serde_json::Value) -> String {
+    token["id"]
+        .as_i64()
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| panic!("a token id is a JSON number on both products: {token}"))
 }
 
 /// Everything the write tests put into Jira, taken back out when the guard
