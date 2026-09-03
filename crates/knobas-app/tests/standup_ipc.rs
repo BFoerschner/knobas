@@ -294,12 +294,26 @@ impl Harness {
 
     /// A ticket of `assignee`'s, standing in `status`.
     async fn ticket(&self, key: &str, assignee: &str, status: &str) -> String {
+        self.ticket_at(key, assignee, status, days_before(4, 9, 0))
+            .await
+    }
+
+    /// The same, with the instant the mirror says it last moved chosen -- what
+    /// the blockers list is ordered by, and the only way to tell a merged
+    /// list from two concatenated ones.
+    async fn ticket_at(
+        &self,
+        key: &str,
+        assignee: &str,
+        status: &str,
+        moved: DateTime<Utc>,
+    ) -> String {
         self.item(
             TRACKER,
             "ticket",
             key,
             "somebody.else",
-            days_before(4, 9, 0),
+            moved,
             serde_json::json!({
                 "fields": {
                     "status": { "name": status },
@@ -746,11 +760,22 @@ async fn a_timer_running_outside_the_day_being_asked_about_is_not_on_its_list() 
 /// list. The reasons are checked as well as the membership: a line whose
 /// provenance cannot be shown is not shippable, and here the two halves are
 /// the two things a reader has to be able to tell apart.
+///
+/// **The order is asserted, not sorted away.** The two halves are two reads,
+/// each already ordered by `at`, and concatenating them gives two descending
+/// runs rather than one list -- which is what `DigestLine::at` promises on
+/// both sides of the wire and what the view's *ago* column is drawn from. The
+/// link blocker is given the newer instant, so it has to come **first**, which
+/// is the opposite of the order the two reads happen in.
 #[tokio::test]
 async fn blockers_come_from_the_declared_set_and_from_the_link_graph_and_nowhere_else() {
     let h = harness("standup-blockers").await;
-    let by_status = h.ticket("PAY-231", ME, DECLARED_BLOCKED).await;
-    let by_link = h.ticket("PAY-240", ME, "In Progress").await;
+    let by_status = h
+        .ticket_at("PAY-231", ME, DECLARED_BLOCKED, days_before(4, 9, 0))
+        .await;
+    let by_link = h
+        .ticket_at("PAY-240", ME, "In Progress", days_before(2, 9, 0))
+        .await;
     let undeclared = h.ticket("PAY-250", ME, UNDECLARED_BLOCKED).await;
     let neither = h.ticket("PAY-260", ME, "In Progress").await;
     let blocker = h.ticket("PAY-9", THEM, "In Progress").await;
@@ -758,20 +783,20 @@ async fn blockers_come_from_the_declared_set_and_from_the_link_graph_and_nowhere
 
     let digest = h.digest().await;
 
-    let mut listed: Vec<(Option<&str>, &str)> = digest
+    let listed: Vec<(Option<&str>, &str)> = digest
         .blockers
         .iter()
         .map(|l| (l.entity_id.as_deref(), l.verb.as_str()))
         .collect();
-    listed.sort();
     assert_eq!(
         listed,
         vec![
-            (Some(by_status.as_str()), "blocked_status"),
             (Some(by_link.as_str()), "blocked_by"),
+            (Some(by_status.as_str()), "blocked_status"),
         ],
-        "the declared status and the link, and neither {undeclared} -- whose \
-         status this source declares nothing about -- nor {neither}"
+        "the declared status and the link, newest first across both halves, \
+         and neither {undeclared} -- whose status this source declares nothing \
+         about -- nor {neither}"
     );
 
     let status_line = digest

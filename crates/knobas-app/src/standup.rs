@@ -690,13 +690,20 @@ struct BlockedLinkRow {
     other_title: String,
 }
 
-/// Both halves of the blockers list, the declared set first.
+/// Both halves of the blockers list, merged and sorted newest first.
 ///
 /// An item can be on both and then it is on the list twice, with a different
 /// reason each time -- deliberately. The two are different facts about the
 /// same ticket (its source calls it blocked; somebody drew a link saying what
 /// is in its way), and collapsing them would throw away one of the two things
 /// a reader came for.
+///
+/// **Sorted after the merge, the shape [`work_in`] has.** Two reads each
+/// ordered by `at` and then concatenated are not one list ordered by `at`:
+/// they are two descending runs, and the view draws an *ago* column down the
+/// side of them. [`DigestLine::at`] is documented as what every list is
+/// ordered by, on both sides of the wire, so the merge has to make that true
+/// rather than leave the reader to notice it is not.
 async fn blockers(
     pool: &PgPool,
     identity: &[String],
@@ -742,6 +749,7 @@ async fn blockers(
         reason: format!("a link marks it blocked by {}", row.other_title),
         at: row.at,
     }));
+    sort_newest_first(&mut lines);
     Ok(lines)
 }
 
@@ -851,6 +859,35 @@ mod tests {
             BLOCKED_BY_LINK.contains("l.to_id = s.entity_id"),
             "the blocked item is the `to` end; joining `from_id` would list \
              what is in somebody else's way"
+        );
+    }
+
+    /// The op the activity half skips is the one the **SPI** spells.
+    ///
+    /// [`LOG_WORK`] is the whole of the no-double-counting rule: the activity
+    /// statement skips `detail->>'op' = 'log_work'` because `knobas.worklog`
+    /// already carries that afternoon. But the `op` in that column is written
+    /// from [`WriteOp::identifier`](knobas_source::WriteOp::identifier), so a
+    /// rename there and no rename here does not fail -- it silently stops
+    /// matching, and every logged afternoon is on the standup twice with
+    /// nothing saying so.
+    ///
+    /// The same pin `crate::time::worklog`'s
+    /// `the_identifier_is_the_one_the_spi_defines` holds over the same
+    /// constant, and for the same reason: a value two crates have to agree on
+    /// needs one test that fails when they stop.
+    #[test]
+    fn the_skipped_op_is_the_one_the_spi_spells() {
+        let op = knobas_source::WriteOp::LogWork {
+            entity: "jira:PAY-231".to_owned(),
+            started: "2026-09-03T09:00:00Z".parse().expect("an instant"),
+            seconds: 3600,
+            comment: String::new(),
+        };
+        assert_eq!(op.identifier(), LOG_WORK);
+        assert!(
+            WRITTEN.contains("a.detail->>'op' <> $2"),
+            "the skip is the statement's, and $2 is where {LOG_WORK} is bound"
         );
     }
 

@@ -2101,7 +2101,6 @@ async fn a_comment_that_mentions_me_becomes_an_inbox_mention() {
     drop(mention);
 }
 
-/// The page ids this source holds live.
 /// **A page the source says is mine is on the digest, under the day it moved**
 /// (issue #288, the Confluence half of criterion 4).
 ///
@@ -2202,6 +2201,7 @@ async fn a_page_the_source_says_is_mine_is_on_the_digest_for_the_day_it_moved() 
     state.scheduler.shutdown().await;
 }
 
+/// The page ids this source holds live.
 async fn confluence_pages(pool: &sqlx::PgPool) -> Vec<String> {
     sqlx::query_scalar::<_, String>(
         "select entity_id from sync.live_item where source_id = $1 order by entity_id",

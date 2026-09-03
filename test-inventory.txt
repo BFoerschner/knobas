@@ -101,6 +101,7 @@ knobas-app	lib/knobas_app	standup::tests::only_the_seven_days_before_the_digests
 knobas-app	lib/knobas_app	standup::tests::the_blocked_set_is_looked_up_at_the_key_kind_paths_serializes_it_under
 knobas-app	lib/knobas_app	standup::tests::the_blocker_statements_read_the_declaration_and_never_a_word_of_their_own
 knobas-app	lib/knobas_app	standup::tests::the_link_half_joins_the_blocked_end_of_a_blocks_link
+knobas-app	lib/knobas_app	standup::tests::the_skipped_op_is_the_one_the_spi_spells
 knobas-app	lib/knobas_app	start_work::merge::tests::only_a_link_can_bring_a_ticket_into_the_pass
 knobas-app	lib/knobas_app	start_work::merge::tests::the_statement_reads_the_path_this_module_names
 knobas-app	lib/knobas_app	start_work::plan::tests::a_branch_name_is_the_key_and_a_slug_of_the_title
