@@ -4412,11 +4412,20 @@ From this commit on, each of the following requires an orchestrator decision **a
   — a `StorageNode` carries no index, and re-assembling the whole body means copying everything
   outside the edited section byte for byte.
 
-  **What did not change.** No migration. No IPC command, no DTO field and no event name: a page
-  write is `submit_write` with a payload, which is the command the *Comment* and status controls
-  already use, and the frontend's `WriteOpPayload` union grew two members the way ADR-0006 says it
-  will. `crates/knobas-http/**` and `crates/knobas-app/src/{error,profile}.rs` are untouched.
-  `QueuedWrite` keeps its shape. No settings key. No barrel was appended — no command was added.
+  **What changed on the IPC schema, and it is one thing.** No command, no event, no DTO field: a
+  page write is `submit_write` with a payload, which is the command the *Comment* and status
+  controls already use. What did grow is the **argument** shape of that one command —
+  `knobas_source::WriteOp` gained two variants, so `app/src/lib/ipc/sources.ts`'s `WriteOpPayload`
+  union gained the two matching members. That union is the mirror of the SPI enum rather than a
+  schema of its own, and its own doc comment says it grows with `WriteOp` per ADR-0006; the
+  implementer flags it here rather than deciding it, since §10.8 freezes "the IPC command and
+  event schema" and a reader could reasonably count `submit_write`'s argument as part of it.
+  `crates/knobas-app/tests/sources_mirror.rs` is what holds the two halves together and it was
+  extended with both variants.
+
+  **What did not change.** No migration. `crates/knobas-http/**` and
+  `crates/knobas-app/src/{error,profile}.rs` are untouched. `QueuedWrite` keeps its shape and its
+  mirror. No settings key. No barrel was appended — no command was added.
   **`knobas-mockd` is untouched** and deliberately: ADR-0013 freezes it and gives Confluence no
   mock half at all, so the witness is `crates/knobas-app/tests/confluence_live.rs` and
   `crates/knobas-source-confluence/tests/live_confluence_seeded.rs` against the seeded container,
@@ -4431,6 +4440,12 @@ From this commit on, each of the following requires an orchestrator decision **a
   no slot shaped like "a body in this markup dialect" or "the record's own revision number", and
   adding one is a `crates/knobas-source/src/**` change with its own §10.8 conversation. These reads
   expire into it when there is one; this ticket did not open that conversation.
+
+  A fourth interim read joins them on the *shell* side: `write-queue.svelte.ts`'s `readSnapshot`
+  reads `payload.version.number` out of a held snapshot so the panel can print which version each
+  side of the comparison is. Gated on the **op** (`update_page`) rather than on the adapter kind,
+  because a snapshot carries no adapter kind and one adapter declares that op — the same rule under
+  a different key, with the same miss to `null`.
 
   Ratified by the orchestrator as spec #272 and issue #286, whose acceptance criteria specify the
   two ops, the identifiers and battery probes, the pure section rule, the whole-body re-assembly,

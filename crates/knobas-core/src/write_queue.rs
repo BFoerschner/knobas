@@ -449,6 +449,21 @@ pub const PROJECTED_OPS: &[&str] = &[
 /// backstop for the window between the last sync and the flush that the
 /// mirror cannot see (issue #286, ADR-0012).
 ///
+/// **Both of this shape's error directions are the safe one, and both are worth
+/// stating for this op.** A colleague replying to the page bumps no version
+/// number, but the reply rides in `children.comment` inside the payload and in
+/// `body_text` beside it, so it holds the edit -- a *false* hold, over two
+/// bodies that read alike. That is `"transition"`'s trade-off in its own
+/// words: a false hold shows both versions side by side and is one *Apply
+/// anyway* away, a missed hold shows nothing. The panel prints the version
+/// number beside each side precisely so a reader can see at a glance that this
+/// is the false one. And in the other direction, an edit whose `base_version`
+/// was *already* behind the mirror when it was queued -- the reader typed for
+/// two minutes while a sync landed -- is not held, because nothing changed
+/// between queue and flush: the snapshot is of a page that had already moved.
+/// That write goes, and Confluence refuses it on the version. Which is the
+/// division of labour spec #272 asks for, not a hole in it.
+///
 /// For a create the target is the **container**, and knobas does not mirror
 /// every container: there is no `jira:PAY` item. Such a target projects
 /// `{"live": false}` at queue time and again at flush time, which is equal, so

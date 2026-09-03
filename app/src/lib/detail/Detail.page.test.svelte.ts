@@ -237,15 +237,40 @@ test("a section edit queues the whole body with the mirrored version", async () 
  * the version read. An `UpdatePage` sent against a guessed `base_version`
  * would either overwrite somebody's work or be refused for a reason the reader
  * cannot act on.
+ *
+ * **And the refusal does not vanish with the offer.** The section still says
+ * why it will not be rewritten and still offers the wiki: a section that
+ * silently offers nothing is worse than one that says why, and folding the two
+ * gates into one is exactly how the sentence would have been lost.
  */
-test("offers no edit at all when the record does not say what version it is", async () => {
+test("says why and offers the wiki when the record does not say what version it is", async () => {
   entity = () => page({}, { version: { when: "2026-08-22T11:48:00Z" } });
   const screen = render();
   await vi.waitFor(() => expect(screen.text()).toContain("Backoff policy"));
 
   expect(screen.buttons()).not.toContain("Edit section");
+  expect(screen.text()).toContain("knobas cannot tell what version this page is at");
+  // One per section, plus the page header's own.
+  expect(screen.buttons().filter((b) => b === "Open in browser")).toHaveLength(4);
   // And the page still renders, macro placeholder and all.
   expect(screen.text()).toContain("info macro");
+
+  screen.done();
+});
+
+/**
+ * An adapter that declares no page write says **nothing** — no footer, no
+ * sentence, no offer. A reader whose Confluence knobas cannot write to should
+ * see the page it always saw, not three explanations of an absence.
+ */
+test("says nothing about editing when the adapter declares no page write", async () => {
+  writeOps = ["comment"];
+  const screen = render();
+  await vi.waitFor(() => expect(screen.text()).toContain("Backoff policy"));
+
+  expect(screen.text()).not.toContain("knobas will not rewrite it");
+  expect(screen.text()).not.toContain("knobas cannot tell what version");
+  expect(screen.buttons().filter((b) => b === "Open in browser")).toHaveLength(1);
 
   screen.done();
 });

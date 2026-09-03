@@ -453,22 +453,37 @@
   // pend or hold, and nothing here waits for a source.
 
   /**
-   * Whether a section of this page may be edited from here.
+   * Whether this page's sections say anything about editing at all.
    *
-   * Three things, each absence honest rather than a disabled control: it is a
-   * page whose markup this app can read, its adapter declares `update_page`
-   * (`submit_write` refuses one that does not, and the surface that offered it
-   * is what is at fault), and the record says what version it stands at, which
-   * is what the edit is made against.
+   * Two things: it is a page whose markup this app can read, and its adapter
+   * declares `update_page` (`submit_write` refuses one that does not, and the
+   * surface that offered it is what is at fault). When this is false the page
+   * renders exactly as it did before #286 -- no offer, and no explanation of
+   * an offer nobody was expecting.
+   */
+  const pageWritesOffered = $derived(
+    pageStorage !== null &&
+      kindRegistry.writeOps(detail?.source.adapter_kind ?? "").includes("update_page"),
+  );
+
+  /**
+   * Whether an edit can actually be *made*, which is the narrower question.
+   *
+   * The record has to say what version it stands at: that is what the edit is
+   * made against, and an `UpdatePage` sent with a guessed `base_version` would
+   * either overwrite somebody's work or be refused for a reason the reader
+   * cannot act on.
+   *
+   * Kept apart from {@link pageWritesOffered} deliberately. Folding the two
+   * would take the **refusal** away with the offer -- a page with no readable
+   * version would show no *Edit*, no sentence saying why, and no way to the
+   * wiki, which is a section that silently offers nothing rather than one that
+   * refuses.
    *
    * A *section* may still refuse itself -- see `PageSection.refusal` -- and
    * that is a per-section fact this flag does not carry.
    */
-  const canEditPage = $derived(
-    pageStorage !== null &&
-      pageVersion !== null &&
-      kindRegistry.writeOps(detail?.source.adapter_kind ?? "").includes("update_page"),
-  );
+  const canEditPage = $derived(pageWritesOffered && pageVersion !== null);
 
   /** Whether a comment may be added to this page from here. */
   const canCommentOnPage = $derived(
@@ -793,10 +808,10 @@
             </div>
           {/if}
           <!--
-            One block per section, so an *Edit* names the heading it belongs to
+            One entry per section, so an *Edit* names the heading it belongs to
             (#286). A section that refuses itself says why and offers the wiki
-            instead; a section nothing offers an edit for renders exactly as it
-            did before this ticket.
+            instead; a page nothing offers page writes for renders exactly as
+            it did before this ticket, with no footer at all.
           -->
           {#each pageParts.sections as part (part.section.index)}
             <div class="pg-sec">
@@ -813,7 +828,8 @@
                   ></textarea>
                   {#if part.section.flattens}
                     <p class="pg-note">
-                      This section has lists or formatting knobas rewrites as plain paragraphs.
+                      This section has sub-headings, lists or formatting knobas rewrites as plain
+                      paragraphs.
                     </p>
                   {/if}
                   <footer class="pg-acts">
@@ -833,13 +849,18 @@
                 <div class="d-body storage">
                   <StorageBody nodes={part.nodes} onopenlink={(href) => void open(href)} />
                 </div>
-                {#if canEditPage}
+                {#if pageWritesOffered}
+                  <!--
+                    Three states, and the middle one is why `pageWritesOffered`
+                    and `canEditPage` are two flags: a section that refuses
+                    itself, a page knobas cannot tell the version of, and a
+                    section that can be edited. Folding the first two into the
+                    edit gate would take the *refusal* away with the offer, and
+                    a section that silently offers nothing is worse than one
+                    that says why.
+                  -->
                   <footer class="pg-acts">
-                    {#if part.section.refusal === null}
-                      <button class="btn sm" onclick={() => editSection(part.section)}>
-                        Edit section
-                      </button>
-                    {:else}
+                    {#if part.section.refusal !== null}
                       <span class="pg-note">
                         {part.section.refusal === "macro"
                           ? "This section has a macro, so knobas will not rewrite it."
@@ -850,6 +871,20 @@
                           Open in browser
                         </button>
                       {/if}
+                    {:else if !canEditPage}
+                      <span class="pg-note">
+                        knobas cannot tell what version this page is at, so it will not rewrite
+                        it.
+                      </span>
+                      {#if webUrl}
+                        <button class="btn sm" onclick={() => void open(webUrl)}>
+                          Open in browser
+                        </button>
+                      {/if}
+                    {:else}
+                      <button class="btn sm" onclick={() => editSection(part.section)}>
+                        Edit section
+                      </button>
                     {/if}
                   </footer>
                 {/if}

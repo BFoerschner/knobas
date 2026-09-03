@@ -32,6 +32,14 @@
  *   below finds indices, and it finds them with the parser's **own**
  *   {@link readTag}, so "where does this tag end" has one answer in this app.
  *
+ * The scan below therefore repeats that parser's skip of CDATA and comments,
+ * and it repeats it because the two answer **differently** on purpose. The
+ * parser renders a code macro's CDATA as text, since that is what the reader
+ * should see; this scan steps over it, because a `<h2>` inside somebody's code
+ * sample is their example of markup and not a heading of this page. One shared
+ * scanner would need a flag saying which of the two it was being, which is a
+ * worse thing to get wrong than a repeated four-line skip.
+ *
  * # What a text edit keeps, and what it does not
  *
  * A section's body goes to the reader as text and comes back as paragraphs and
@@ -90,21 +98,43 @@ export interface PageSection {
 /** Heading levels that open a section. Four to six are content, not structure. */
 const SECTION_LEVELS = /^h([123])$/;
 
-/** Block elements a text edit turns into paragraphs rather than rebuilding. */
-const FLATTENED: ReadonlySet<string> = new Set([
-  "ul",
-  "ol",
-  "li",
-  "blockquote",
-  "pre",
-  "code",
+/**
+ * Which rendered elements end a line of text.
+ *
+ * The one list, and {@link FLATTENED} is derived from it: "what ends a line"
+ * and "what a text edit cannot rebuild" are two questions with overlapping
+ * answers, and two hand-written sets would drift the day somebody adds a tag
+ * to one of them.
+ */
+const BLOCK: ReadonlySet<string> = new Set([
+  "p",
   "h1",
   "h2",
   "h3",
   "h4",
   "h5",
   "h6",
+  "li",
+  "br",
+  "hr",
+  "blockquote",
+  "pre",
+  "tr",
+  "table",
 ]);
+
+/** What {@link toStorage} can put back: a paragraph and a line break. */
+const REBUILDABLE: ReadonlySet<string> = new Set(["p", "br"]);
+
+/**
+ * Block structure a text edit turns into paragraphs rather than rebuilding.
+ *
+ * Every block {@link toStorage} cannot write, plus `code` -- which is inline
+ * rather than a block, and is still formatting an edit would flatten.
+ */
+const FLATTENED: ReadonlySet<string> = new Set(
+  [...BLOCK, "code"].filter((tag) => !REBUILDABLE.has(tag)),
+);
 
 /**
  * The sections of a storage-format body, in document order.
@@ -320,24 +350,6 @@ function* tags(source: string): Generator<{ name: string; closing: boolean; self
     };
   }
 }
-
-/** Which rendered elements end a line of text. */
-const BLOCK: ReadonlySet<string> = new Set([
-  "p",
-  "h1",
-  "h2",
-  "h3",
-  "h4",
-  "h5",
-  "h6",
-  "li",
-  "br",
-  "hr",
-  "blockquote",
-  "pre",
-  "tr",
-  "table",
-]);
 
 /**
  * A parsed body as the text a reader edits.

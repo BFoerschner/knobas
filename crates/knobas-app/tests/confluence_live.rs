@@ -135,8 +135,8 @@ fn env() -> Env {
         )
     });
     let whole: serde_json::Value = serde_json::from_str(&raw).expect("seed-state.json is JSON");
-    let block = &whole["confluence"];
-    let pages: Vec<SeededPage> = serde_json::from_value(block["pages"].clone())
+    let seeded = &whole["confluence"];
+    let pages: Vec<SeededPage> = serde_json::from_value(seeded["pages"].clone())
         .unwrap_or_else(|e| panic!("{}: no `confluence.pages`: {e}", state.display()));
     assert!(
         !pages.is_empty(),
@@ -149,7 +149,7 @@ fn env() -> Env {
             .to_owned(),
         user: need("KNOBAS_CONFLUENCE_USER"),
         password: need("KNOBAS_CONFLUENCE_PASSWORD"),
-        space: block["space"].as_str().unwrap_or("ENG").to_owned(),
+        space: seeded["space"].as_str().unwrap_or("ENG").to_owned(),
         pages,
     }
 }
@@ -667,6 +667,20 @@ async fn the_three_page_writes_go_through_the_queue_and_come_back_from_confluenc
     assert_eq!(
         after, whole,
         "Confluence stored something other than the body knobas sent"
+    );
+
+    // **And it reads back through knobas**, not only through a raw REST call:
+    // the assertions above are about what the server stored, and this one is
+    // about the round trip the reader actually makes -- adapter, sync engine,
+    // mirror, and the payload the detail re-renders the page from.
+    let mirrored_after = sync_until(&state, &edited.id, "the edited body", |payload| {
+        payload["version"]["number"].as_i64() == Some(base_version + 1)
+    })
+    .await;
+    assert_eq!(
+        mirrored_after["body"]["storage"]["value"].as_str(),
+        Some(whole.as_str()),
+        "the mirror does not hold the body the edit wrote"
     );
 
     // -- a comment -----------------------------------------------------------

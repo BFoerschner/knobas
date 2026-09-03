@@ -202,14 +202,14 @@ impl Source for ConfluenceSource {
                 Ok(WriteReceipt::none())
             }
             WriteOp::Comment { entity, body } => {
-                // Dropped, and the value is in having asked for it: a
-                // Confluence that accepted the comment without naming it is a
-                // write reported as done with nothing to point at, which
-                // `write::comment` refuses rather than reports as success. The
-                // comment itself rides in its page's payload on the next sync
-                // (#284), so the mirror can name it and the receipt need not.
-                let created = write::comment(&self.http, &self.content_id(entity)?, body).await?;
-                let _ = created;
+                // The id `write::comment` answers with is dropped, and the
+                // value is in having asked for it: a Confluence that accepted
+                // the comment without naming it is a write reported as done
+                // with nothing to point at, which that function refuses rather
+                // than reports as success. The comment itself rides in its
+                // page's payload on the next sync (#284), so the mirror can
+                // name it and the receipt need not.
+                write::comment(&self.http, &self.content_id(entity)?, body).await?;
                 Ok(WriteReceipt::none())
             }
             WriteOp::Transition { .. }
