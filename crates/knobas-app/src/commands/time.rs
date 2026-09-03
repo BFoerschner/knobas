@@ -124,6 +124,83 @@ pub async fn timer_heartbeat(
     time::heartbeat(&pool, foreground).await
 }
 
+/// The blocks overlapping `[from, to)`, earliest first — the day review's read
+/// (#279).
+///
+/// **The interval is the reader's local day, computed in the webview**, and
+/// the argument is two instants rather than a `YYYY-MM-DD` because the
+/// machine's timezone is a fact only the webview holds. A UTC offset passed
+/// instead would be the wrong shape as well as the wrong owner: a day
+/// containing a DST change is 23 or 25 hours long and has two offsets.
+/// `crate::time::day`'s module docs carry the whole reasoning.
+///
+/// Overlap, not containment: a block that ran through midnight is on both days
+/// it touched.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is still
+/// coming up, [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn day_blocks(
+    lifecycle: State<'_, Lifecycle>,
+    from: chrono::DateTime<chrono::Utc>,
+    to: chrono::DateTime<chrono::Utc>,
+) -> Result<Vec<time::day::DayBlock>, IpcError> {
+    let pool = lifecycle.pool()?;
+    time::day::list(&pool, from, to).await
+}
+
+/// Move a block's start, its end and its target — the day review's edit, and
+/// what *Extend to now* is (#279, stories 19 and 13).
+///
+/// The whole editable shape in one call, not a patch: the reader is saying
+/// what the block *is*. That is also what makes clearing `ended_by_relaunch`
+/// honest — the marker means *knobas guessed this end*, and once a person has
+/// stated the end it is theirs.
+///
+/// **No `AppHandle` and no activity line.** Editing a block is a correction to
+/// knobas' own record of a stretch that has already happened, not something
+/// that happened; and the timer store re-reads itself on every `activity:new`,
+/// so a line here would make every correction a reason for the top strip to go
+/// back to the database for a clock that did not move.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a target that is not an
+/// entity id, is a stored context or is a blank label, for an end before its
+/// start, and for a block that has been logged into a worklog — which is
+/// read-only (story 20) — and [`NotFound`](crate::IpcErrorCode::NotFound) for
+/// a block that is not there.
+#[tauri::command]
+pub async fn update_block(
+    lifecycle: State<'_, Lifecycle>,
+    id: i64,
+    started_at: chrono::DateTime<chrono::Utc>,
+    ended_at: chrono::DateTime<chrono::Utc>,
+    target: TimerTarget,
+) -> Result<time::day::DayBlock, IpcError> {
+    let pool = lifecycle.pool()?;
+    time::day::update(&pool, id, started_at, ended_at, target).await
+}
+
+/// Delete a block.
+///
+/// Nothing comes back: the day review re-reads the day, which is the one
+/// answer that is true about every other block on the strip as well.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a block that has been logged,
+/// [`NotFound`](crate::IpcErrorCode::NotFound) for a block that is not there.
+#[tauri::command]
+pub async fn delete_block(lifecycle: State<'_, Lifecycle>, id: i64) -> Result<(), IpcError> {
+    let pool = lifecycle.pool()?;
+    time::day::remove(&pool, id).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,6 +380,9 @@ mod tests {
             "start_timer",
             "stop_timer",
             "timer_heartbeat",
+            "day_blocks",
+            "update_block",
+            "delete_block",
         ] {
             assert!(
                 MIRROR.contains(&format!("\"{command}\"")),
@@ -323,7 +403,21 @@ mod tests {
     /// no error anywhere.
     #[test]
     fn the_mirror_sends_the_argument_names_tauri_expects() {
-        for (call, argument) in [("start_timer", "target"), ("timer_heartbeat", "foreground")] {
+        for (call, argument) in [
+            ("start_timer", "target"),
+            ("timer_heartbeat", "foreground"),
+            ("day_blocks", "from"),
+            ("day_blocks", "to"),
+            // camelCase, and the whole reason this test exists: the Rust
+            // parameter is `started_at` and Tauri renames it. A mirror sending
+            // `started_at` arrives with the value missing and no error
+            // anywhere -- while `target`, a *field* inside the payload, keeps
+            // its snake_case. Both spellings are on this one call.
+            ("update_block", "startedAt"),
+            ("update_block", "endedAt"),
+            ("update_block", "target"),
+            ("delete_block", "id"),
+        ] {
             let at = MIRROR
                 .find(&format!("\"{call}\""))
                 .unwrap_or_else(|| panic!("{call} is not invoked from the mirror"));
@@ -335,5 +429,62 @@ mod tests {
                  command receives nothing: {invocation}"
             );
         }
+    }
+
+    /// The day review's row, both halves.
+    ///
+    /// `title` is exercised as `Some`, and the nested `block` as a value
+    /// rather than a placeholder: `assert_shape` compares top-level keys, so
+    /// what this pins is that the mirror declares `block` and `title` and
+    /// nothing else -- the block's own fields are pinned by
+    /// `the_block_shape_matches_its_typescript_mirror` above, which is the
+    /// only place they should be stated.
+    #[test]
+    fn the_day_review_row_matches_its_typescript_mirror() {
+        let row = crate::time::day::DayBlock {
+            block: Block {
+                id: 7,
+                started_at: at(9, 30),
+                ended_at: at(10, 15),
+                target: TimerTarget::Entity {
+                    entity_id: "jira:PAY-231".to_owned(),
+                },
+                kind: crate::time::BlockKind::Manual,
+                ended_by_relaunch: false,
+                worklog_id: None,
+            },
+            title: Some("Retry failed SEPA payouts".to_owned()),
+        };
+        assert_shape(
+            MIRROR,
+            "DayBlock",
+            &serde_json::to_value(&row).unwrap(),
+            &["block", "title"],
+        );
+    }
+
+    /// ...and with no title, because that is the arm the strip falls back on
+    /// and an `Option` serializes to a `null` **key** -- the discipline
+    /// `entity_mirror.rs` records, and the reason the mirror declares
+    /// `string | null` rather than an optional field.
+    #[test]
+    fn a_day_review_row_with_no_title_still_carries_the_key() {
+        let row = crate::time::day::DayBlock {
+            block: Block {
+                id: 8,
+                started_at: at(11, 0),
+                ended_at: at(11, 0),
+                target: TimerTarget::Label {
+                    label: "DB config for the migration".to_owned(),
+                },
+                kind: crate::time::BlockKind::Manual,
+                ended_by_relaunch: true,
+                worklog_id: Some(77),
+            },
+            title: None,
+        };
+        let wire = serde_json::to_value(&row).unwrap();
+        assert_eq!(wire["title"], serde_json::Value::Null);
+        assert_shape(MIRROR, "DayBlock", &wire, &["block", "title"]);
     }
 }

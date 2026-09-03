@@ -28,7 +28,7 @@
 //! each other's outcomes on the very rule the schema exists to make
 //! structural. The same reasoning `tests/start_work.rs` records for its flows.
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, TimeZone, Utc};
 use knobas_app::IpcErrorCode;
 use knobas_app::time::{self, BlockKind, TimerTarget};
 use sqlx::{PgPool, Row};
@@ -563,4 +563,498 @@ async fn the_schema_accepts_a_block_of_no_length() {
     .execute(&pool)
     .await
     .expect("a block of no length is a block");
+}
+
+// -- the day review: reading a day ------------------------------------------
+
+/// Put a block in the past directly. The day review's fixtures are *finished*
+/// blocks, and the only writer of one until now was a timer being stopped --
+/// which can only ever produce a block ending at `now()`. A day with a
+/// morning, an afternoon and a gap between them cannot be built by stopping a
+/// clock three times.
+///
+/// SQL, and the same licence `age` above takes: it writes a **past**, never an
+/// assertion. Everything asserted goes through `time::day`.
+async fn block_at(
+    pool: &PgPool,
+    started_at: DateTime<Utc>,
+    ended_at: DateTime<Utc>,
+    target: &TimerTarget,
+) -> i64 {
+    let (entity_id, label) = match target {
+        TimerTarget::Entity { entity_id } => (Some(entity_id.as_str()), None),
+        TimerTarget::Label { label } => (None, Some(label.as_str())),
+    };
+    sqlx::query(
+        "insert into knobas.block (started_at, ended_at, entity_id, label, kind)
+         values ($1, $2, $3, $4, 'manual') returning id",
+    )
+    .bind(started_at)
+    .bind(ended_at)
+    .bind(entity_id)
+    .bind(label)
+    .fetch_one(pool)
+    .await
+    .expect("a block in the past")
+    .get::<i64, _>("id")
+}
+
+#[tokio::test]
+async fn the_days_blocks_come_back_in_time_order_whatever_order_they_were_written_in() {
+    let pool = scratch("time-day-list").await;
+    let day = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
+    let at = |h, m| day + Duration::hours(h) + Duration::minutes(m);
+
+    // Written out of order on purpose, and out of *both* orders: three blocks
+    // whose insertion order is neither the time order nor its reverse, so
+    // "ordered by id" and "ordered by id backwards" are each wrong here. A
+    // two-block fixture cannot separate those -- the reverse of a two-item
+    // list written backwards is the right answer by accident.
+    block_at(&pool, at(11, 0), at(12, 0), &on(TICKET)).await;
+    block_at(&pool, at(9, 0), at(10, 0), &labelled(LABEL)).await;
+    block_at(&pool, at(13, 0), at(14, 30), &on(TICKET)).await;
+
+    let listed = time::day::list(&pool, day, day + Duration::days(1))
+        .await
+        .expect("the day is readable");
+
+    assert_eq!(
+        listed
+            .iter()
+            .map(|d| d.block.started_at)
+            .collect::<Vec<_>>(),
+        vec![at(9, 0), at(11, 0), at(13, 0)],
+        "the day review draws its strip in the order this list comes in"
+    );
+}
+
+/// Put a row in the mirror, so a block's target has a name.
+async fn mirrored(pool: &PgPool, entity_id: &str, title: &str) {
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ticket', $2)")
+        .bind(entity_id)
+        .bind(title)
+        .execute(pool)
+        .await
+        .expect("a mirrored ticket");
+}
+
+/// Stamp a block as logged. **The only way to reach the read-only rule until
+/// #280**: `knobas.worklog` does not exist yet and nothing writes this column,
+/// so the alternative is a rule with no test at all until the worklog lands.
+/// Migration `0013` put the column here for exactly this reason.
+async fn logged_into(pool: &PgPool, block: i64, worklog: i64) {
+    let rows = sqlx::query("update knobas.block set worklog_id = $2 where id = $1")
+        .bind(block)
+        .bind(worklog)
+        .execute(pool)
+        .await
+        .expect("the block is stamped")
+        .rows_affected();
+    assert_eq!(rows, 1, "there was no block {block} to stamp");
+}
+
+/// The strip labels an entity block with the title the mirror holds, and falls
+/// back to nothing -- so the view shows the id -- where it holds none.
+///
+/// Both directions in one test, because a `title` that is always `None` and a
+/// `title` that is always the first row's would each pass half of it.
+#[tokio::test]
+async fn an_entity_block_carries_the_mirrors_title_and_a_blank_one_carries_none() {
+    let pool = scratch("time-day-title").await;
+    let day = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
+    let at = |h: i64| day + Duration::hours(h);
+
+    mirrored(&pool, TICKET, "Retry failed SEPA payouts").await;
+    // Synced before its adapter could name it: the column defaults to `''`.
+    mirrored(&pool, "jira:PAY-9", "   ").await;
+
+    block_at(&pool, at(9), at(10), &on(TICKET)).await;
+    block_at(&pool, at(11), at(12), &on("jira:PAY-9")).await;
+    block_at(&pool, at(13), at(14), &on("jira:PAY-404")).await;
+
+    let listed = time::day::list(&pool, day, day + Duration::days(1))
+        .await
+        .expect("the day is readable");
+    assert_eq!(
+        listed
+            .iter()
+            .map(|d| d.title.clone())
+            .collect::<Vec<Option<String>>>(),
+        vec![Some("Retry failed SEPA payouts".to_owned()), None, None],
+        "a blank title and a purged entity both have to read as `no name`, and \
+         a mirrored one has to read as its name"
+    );
+}
+
+/// A block that ran through midnight belongs to **both** days it touched: the
+/// day review a person most wants to fix is the one with the block they left
+/// running, and a read that dropped it would be a strip with nothing to edit.
+#[tokio::test]
+async fn a_block_that_ran_through_midnight_is_on_both_days() {
+    let pool = scratch("time-day-midnight").await;
+    let midnight = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
+    let overnight = block_at(
+        &pool,
+        midnight - Duration::hours(2),
+        midnight + Duration::hours(1),
+        &labelled(LABEL),
+    )
+    .await;
+    // ...and one wholly on the day before, which must *not* reach the 3rd.
+    block_at(
+        &pool,
+        midnight - Duration::hours(6),
+        midnight - Duration::hours(5),
+        &on(TICKET),
+    )
+    .await;
+
+    let third = time::day::list(&pool, midnight, midnight + Duration::days(1))
+        .await
+        .expect("the 3rd is readable");
+    assert_eq!(
+        third.iter().map(|d| d.block.id).collect::<Vec<_>>(),
+        vec![overnight],
+        "the day review reads the blocks that overlap the day, and only those"
+    );
+
+    let second = time::day::list(&pool, midnight - Duration::days(1), midnight)
+        .await
+        .expect("the 2nd is readable");
+    assert!(
+        second.iter().any(|d| d.block.id == overnight),
+        "the same block has to be on the day it started too"
+    );
+}
+
+// -- the day review: editing a block ----------------------------------------
+
+/// Story 19: a mistake at the keyboard is a mistake I can fix. All three
+/// fields move, and what comes back is what the next read says.
+#[tokio::test]
+async fn a_blocks_start_end_and_target_can_all_be_moved() {
+    let pool = scratch("time-day-edit").await;
+    let day = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
+    let at = |h: i64, m: i64| day + Duration::hours(h) + Duration::minutes(m);
+    mirrored(&pool, TICKET, "Retry failed SEPA payouts").await;
+    let id = block_at(&pool, at(9, 0), at(10, 0), &labelled(LABEL)).await;
+
+    let edited = time::day::update(&pool, id, at(9, 30), at(11, 15), on(TICKET))
+        .await
+        .expect("a manual block is editable");
+
+    assert_eq!(edited.block.started_at, at(9, 30));
+    assert_eq!(edited.block.ended_at, at(11, 15));
+    assert_eq!(edited.block.target, on(TICKET));
+    assert_eq!(
+        edited.title.as_deref(),
+        Some("Retry failed SEPA payouts"),
+        "the answer has to carry the new target's name, or the strip draws \
+         the old one until the next read"
+    );
+
+    let listed = time::day::list(&pool, day, day + Duration::days(1))
+        .await
+        .expect("the day is readable");
+    assert_eq!(listed, vec![edited], "the read and the write disagree");
+}
+
+/// *Extend to now*, at the seam that decides it (#272, story 13; #279's fourth
+/// criterion). **Both halves**: the end moves to the moment asked for, and the
+/// block stops claiming knobas chose its end.
+#[tokio::test]
+async fn extending_a_relaunch_ended_block_moves_its_end_and_drops_the_marker() {
+    let pool = scratch("time-day-extend").await;
+    // A real stranded block, closed by the sweep, rather than one this test
+    // flagged by hand: the marker is what the sweep writes, and a fixture that
+    // set the column itself would not witness that the two agree.
+    time::start(&pool, on(TICKET)).await.expect("it starts");
+    age(&pool, Duration::hours(9), Duration::hours(6)).await;
+    let closed = time::close_stranded(&pool)
+        .await
+        .unwrap()
+        .expect("the sweep closed it");
+    assert!(closed.ended_by_relaunch, "this test needs a marked block");
+
+    let now = Utc::now();
+    let extended = time::day::update(&pool, closed.id, closed.started_at, now, closed.target)
+        .await
+        .expect("a relaunch-ended block is editable");
+
+    assert_eq!(
+        extended.block.ended_at, now,
+        "*Extend to now* did not move the end, so the block still stops where \
+         knobas stopped being alive"
+    );
+    assert!(
+        !extended.block.ended_by_relaunch,
+        "the block still says knobas closed it, so the strip goes on offering \
+         *Extend to now* on a block the reader has already vouched for"
+    );
+    assert_eq!(
+        extended.block.started_at, closed.started_at,
+        "extending the end moved the start too"
+    );
+}
+
+/// A block that ends before it starts is refused **with a sentence**.
+/// `block_span_chk` refuses it too, and that is the backstop: a check
+/// violation reaches the reader as an internal error, which is not something
+/// anybody can act on.
+#[tokio::test]
+async fn an_end_before_its_start_is_refused_in_words_the_reader_can_act_on() {
+    let pool = scratch("time-day-backwards").await;
+    let day = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
+    let id = block_at(
+        &pool,
+        day + Duration::hours(9),
+        day + Duration::hours(10),
+        &on(TICKET),
+    )
+    .await;
+
+    let refusal = time::day::update(
+        &pool,
+        id,
+        day + Duration::hours(10),
+        day + Duration::hours(9),
+        on(TICKET),
+    )
+    .await
+    .expect_err("a block cannot run backwards");
+    assert_eq!(refusal.code, IpcErrorCode::Invalid);
+    assert!(
+        refusal.message.contains("end before it starts"),
+        "the refusal has to say what is wrong: {}",
+        refusal.message
+    );
+
+    let listed = time::day::list(&pool, day, day + Duration::days(1))
+        .await
+        .unwrap();
+    assert_eq!(
+        listed[0].block.started_at,
+        day + Duration::hours(9),
+        "the refused edit landed anyway"
+    );
+}
+
+/// A stored context is no more a block's target than a timer's (story 15) --
+/// the same `vet`, so the rule cannot be spelled two ways.
+#[tokio::test]
+async fn a_block_cannot_be_retargeted_onto_a_stored_context() {
+    let pool = scratch("time-day-ctx").await;
+    let day = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
+    let context = knobas_core::context::create_adhoc(&pool, "SEPA migration")
+        .await
+        .expect("a stored context");
+    let id = block_at(
+        &pool,
+        day + Duration::hours(9),
+        day + Duration::hours(10),
+        &on(TICKET),
+    )
+    .await;
+
+    let refusal = time::day::update(
+        &pool,
+        id,
+        day + Duration::hours(9),
+        day + Duration::hours(10),
+        on(&context.id),
+    )
+    .await
+    .expect_err("a context is a set, and time on a set has nowhere to go");
+    assert_eq!(refusal.code, IpcErrorCode::Invalid);
+    assert!(refusal.message.contains("stored context"));
+}
+
+#[tokio::test]
+async fn a_block_can_be_deleted_and_the_day_stops_listing_it() {
+    let pool = scratch("time-day-delete").await;
+    let day = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
+    let kept = block_at(
+        &pool,
+        day + Duration::hours(9),
+        day + Duration::hours(10),
+        &on(TICKET),
+    )
+    .await;
+    let gone = block_at(
+        &pool,
+        day + Duration::hours(11),
+        day + Duration::hours(12),
+        &labelled(LABEL),
+    )
+    .await;
+
+    time::day::remove(&pool, gone).await.expect("it deletes");
+
+    let listed = time::day::list(&pool, day, day + Duration::days(1))
+        .await
+        .unwrap();
+    assert_eq!(
+        listed.iter().map(|d| d.block.id).collect::<Vec<_>>(),
+        vec![kept],
+        "delete took the wrong block, or none"
+    );
+}
+
+/// A block that is not there is `not_found`, not a silent success -- the day
+/// review may be looking at a day another window has already edited.
+#[tokio::test]
+async fn editing_or_deleting_a_block_that_is_not_there_says_so() {
+    let pool = scratch("time-day-missing").await;
+    let at = Utc.with_ymd_and_hms(2026, 9, 3, 9, 0, 0).unwrap();
+
+    let refusal = time::day::update(&pool, 4242, at, at + Duration::hours(1), on(TICKET))
+        .await
+        .expect_err("there is no block 4242");
+    assert_eq!(refusal.code, IpcErrorCode::NotFound);
+
+    let refusal = time::day::remove(&pool, 4242)
+        .await
+        .expect_err("there is no block 4242");
+    assert_eq!(refusal.code, IpcErrorCode::NotFound);
+}
+
+// -- the day review: a logged block is read-only -----------------------------
+
+/// **Story 20**, in both directions and on both writers.
+///
+/// The `worklog_id` is set directly, because that is the only way to reach
+/// this rule until #280 brings the table that writes it -- migration `0013`
+/// put the column here so the rule did not have to wait. What is asserted is
+/// what the view shows: the code the shell branches on, the sentence it
+/// prints, and the block still being exactly as it was afterwards.
+#[tokio::test]
+async fn a_logged_block_refuses_both_edits_and_says_why() {
+    let pool = scratch("time-day-logged").await;
+    let day = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
+    let id = block_at(
+        &pool,
+        day + Duration::hours(9),
+        day + Duration::hours(10),
+        &on(TICKET),
+    )
+    .await;
+    logged_into(&pool, id, 77).await;
+
+    let refusal = time::day::update(
+        &pool,
+        id,
+        day + Duration::hours(8),
+        day + Duration::hours(12),
+        labelled(LABEL),
+    )
+    .await
+    .expect_err("a logged block is read-only");
+    assert_eq!(refusal.code, IpcErrorCode::Invalid);
+    assert!(
+        refusal.message.contains("worklog") && refusal.message.contains("read-only"),
+        "the reader has to be told the block is logged, not merely that \
+         nothing happened: {}",
+        refusal.message
+    );
+
+    let refusal = time::day::remove(&pool, id)
+        .await
+        .expect_err("a logged block cannot be deleted either");
+    assert_eq!(refusal.code, IpcErrorCode::Invalid);
+    assert!(refusal.message.contains("worklog"));
+
+    let listed = time::day::list(&pool, day, day + Duration::days(1))
+        .await
+        .unwrap();
+    assert_eq!(
+        listed
+            .iter()
+            .map(|d| (d.block.started_at, d.block.ended_at, d.block.worklog_id))
+            .collect::<Vec<_>>(),
+        vec![(
+            day + Duration::hours(9),
+            day + Duration::hours(10),
+            Some(77)
+        )],
+        "the refused edits changed the block anyway, so what knobas shows now \
+         disagrees with what the worklog holds"
+    );
+}
+
+/// ...and the direction that shows the rule is not simply refusing every
+/// write: the same two commands on the same day's *unlogged* block go through.
+#[tokio::test]
+async fn an_unlogged_block_beside_a_logged_one_is_still_editable() {
+    let pool = scratch("time-day-unlogged").await;
+    let day = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
+    let locked = block_at(
+        &pool,
+        day + Duration::hours(9),
+        day + Duration::hours(10),
+        &on(TICKET),
+    )
+    .await;
+    logged_into(&pool, locked, 77).await;
+    let free = block_at(
+        &pool,
+        day + Duration::hours(11),
+        day + Duration::hours(12),
+        &labelled(LABEL),
+    )
+    .await;
+
+    time::day::update(
+        &pool,
+        free,
+        day + Duration::hours(11),
+        day + Duration::hours(13),
+        labelled(LABEL),
+    )
+    .await
+    .expect("an unlogged block is editable");
+    time::day::remove(&pool, free)
+        .await
+        .expect("an unlogged block is deletable");
+}
+
+/// The boundary the overlap rule turns on, in both directions.
+///
+/// A block that ends **exactly** at a day's first instant does not overlap
+/// that day at all -- it is the previous evening's, and it stops where the day
+/// begins. Returning it puts a zero-width sliver at the head of the strip and
+/// the day review then draws the whole night before the first real block as
+/// unaccounted time.
+///
+/// A block that *starts* exactly there is the opposite: it belongs to this day
+/// even when it has no length, because a block of no length is still a block
+/// (the relaunch sweep writes one for a timer that died before its first
+/// heartbeat). So the two cases are asserted together -- a predicate that
+/// admitted both, or refused both, fails here.
+#[tokio::test]
+async fn a_block_ending_at_midnight_belongs_to_the_day_it_ran_in() {
+    let pool = scratch("time-day-boundary").await;
+    let midnight = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
+
+    let evening = block_at(&pool, midnight - Duration::hours(2), midnight, &on(TICKET)).await;
+    let sliver = block_at(&pool, midnight, midnight, &labelled(LABEL)).await;
+
+    let third = time::day::list(&pool, midnight, midnight + Duration::days(1))
+        .await
+        .expect("the 3rd is readable");
+    assert_eq!(
+        third.iter().map(|d| d.block.id).collect::<Vec<_>>(),
+        vec![sliver],
+        "a block that stops where the day starts is the day before's, and a \
+         block of no length that starts here is this day's"
+    );
+
+    let second = time::day::list(&pool, midnight - Duration::days(1), midnight)
+        .await
+        .expect("the 2nd is readable");
+    assert_eq!(
+        second.iter().map(|d| d.block.id).collect::<Vec<_>>(),
+        vec![evening],
+        "the evening's block has to be on the evening's day, or it is on no \
+         day at all"
+    );
 }

@@ -25,6 +25,7 @@
   import FirstRun from "./lib/sources/FirstRun.svelte";
   import SourcesView from "./lib/sources/SourcesView.svelte";
   import StartWork from "./lib/start-work/StartWork.svelte";
+  import DayReview from "./lib/time/DayReview.svelte";
   import { ipcErrorMessage } from "./lib/ipc";
   import { linkTo } from "./lib/detail/links.svelte";
 
@@ -540,6 +541,13 @@
         <SourcesView />
       {:else if router.route.view === "settings"}
         <SettingsView />
+      {:else if router.route.view === "time"}
+        <!--
+          The day review (#279). `day` is `null` for the bare `#/time`, which
+          the view resolves against its own clock -- `parseHash` is pure and
+          must not read one.
+        -->
+        <DayReview {router} day={router.route.day} />
       {:else if router.route.view === "first-run"}
         <FirstRun demo={lifecycle.status?.demo ?? false} onfinish={onFirstRunDone} />
       {:else if router.route.view === "start-work"}

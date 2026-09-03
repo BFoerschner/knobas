@@ -258,6 +258,7 @@ const InboxView = (await import("../inbox/InboxView.svelte")).default;
 const NoteView = (await import("../notes/NoteView.svelte")).default;
 const QueryBox = (await import("../launcher/QueryBox.svelte")).default;
 const StartWork = (await import("../start-work/StartWork.svelte")).default;
+const DayReview = (await import("../time/DayReview.svelte")).default;
 const AddSource = (await import("../sources/AddSource.svelte")).default;
 const Diagnostics = (await import("../sources/Diagnostics.svelte")).default;
 const FirstRun = (await import("../sources/FirstRun.svelte")).default;
@@ -487,6 +488,30 @@ const CASES: Case[] = [
           entityId: "mock:PAY-231",
           onnavigate: () => {},
           onclose: () => {},
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * The day review (#279). Its effect is the day's read, keyed on the
+     * address, so a reader clicking through days re-runs it -- and the read is
+     * `deferred` here, which is this component's real case: leaving the view
+     * before `day_blocks` answers.
+     */
+    name: "DayReview",
+    source: "lib/time/DayReview.svelte",
+    open: (target) => ({
+      app: mount(DayReview, {
+        target,
+        props: {
+          router: createRouter(),
+          day: "2026-09-03",
+          ports: {
+            dayBlocks: () => deferred<never[]>([]),
+            updateBlock: () => Promise.reject(new Error("no edit in this test")),
+            deleteBlock: () => Promise.reject(new Error("no edit in this test")),
+          },
         },
       }),
     }),
