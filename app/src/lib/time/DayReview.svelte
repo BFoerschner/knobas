@@ -17,7 +17,9 @@
   10:15 · 1 h 15 min` — which is the reading a person checks against a
   timesheet anyway.
 
-  **A logged block is read-only** (`CONTEXT.md`, *block*; story 20). The strip
+  **A logged block is read-only** (spec #272, story 20 — not a sentence
+  `CONTEXT.md` carries; its *block* entry says only that a block remembers
+  which worklog it was logged into). The strip
   says so and offers nothing; the backend refuses it as well, and if that
   refusal is what a reader hits, the sentence it came with is shown here rather
   than swallowed — "nothing happened" is not something anybody can act on.
@@ -36,6 +38,7 @@
     type DayBlock,
     type TimerTarget,
   } from "../ipc/time";
+  import { latestRead } from "../shell/latest-read";
   import { hashFor, type Router } from "../shell/router.svelte";
   import { targetReading } from "../shell/timer";
   import {
@@ -126,27 +129,28 @@
   /**
    * Read the day whenever the address names another one.
    *
-   * Tokened rather than cancelled: two reads can be in flight when a reader
-   * clicks through days quickly, and the one that answers last must not be the
-   * one that wins if it is not the one that was asked for last.
+   * Through `latestRead` rather than a token of this view's own: clicking
+   * through days puts several reads in flight with nothing sequencing them,
+   * and that module exists because the guard is four lines copied wrong in one
+   * predictable way — the **rejection** path gets dropped, so a stale failure
+   * blanks a day that has since read fine (#107).
    */
-  let reads = 0;
+  const readDay = latestRead<DayBlock[]>();
   $effect(() => {
     void load(key);
   });
 
   async function load(on: string) {
-    const mine = ++reads;
     const { from, to } = dayBounds(on);
-    try {
-      const listed = await io.dayBlocks(from.toISOString(), to.toISOString());
-      if (mine !== reads) return;
-      rows = listed;
-      failure = null;
-    } catch (error) {
-      if (mine !== reads) return;
-      failure = ipcErrorMessage(error);
-    }
+    await readDay(() => io.dayBlocks(from.toISOString(), to.toISOString()), {
+      ok: (listed) => {
+        rows = listed;
+        failure = null;
+      },
+      fail: (cause) => {
+        failure = ipcErrorMessage(cause);
+      },
+    });
   }
 
   function go(to: string) {
@@ -156,24 +160,23 @@
   }
 
   /**
-   * Open the entity a block was on.
+   * The address an entity target opens at.
    *
-   * The kind-agnostic `#/entity/<id>` alias, and through `hashFor` rather than
-   * a template string: a block's target is an entity id, entity keys carry `#`
-   * and `/` (`gitea:acme/payouts#144`), and unencoded the first truncates the
-   * fragment at the browser level. The kind is `get_entity`'s to resolve — the
-   * same route `InboxView` takes, for the same reason.
+   * The kind-agnostic `#/entity/<id>` alias, and built with `hashFor` rather
+   * than a template string: entity keys carry `#` and `/`
+   * (`gitea:acme/payouts#144`), and unencoded the first truncates the fragment
+   * at the browser level and the second reads as another path segment. The
+   * kind is `get_entity`'s to resolve — the same route `InboxView` takes, for
+   * the same reason.
+   *
+   * One function for both the navigation and the tooltip, so the address a
+   * reader is promised and the address they are taken to cannot be built two
+   * ways.
    */
-  function open(entityId: string) {
-    router.go(hashFor({ view: "room", ctx: router.ctx, detail: { kind: null, entityId } }));
+  function addressOf(entityId: string): string {
+    return hashFor({ view: "room", ctx: router.ctx, detail: { kind: null, entityId } });
   }
 
-  /** Where a block's target goes when it is clicked, or `null` for a label. */
-  function addressOf(target: TimerTarget): string | null {
-    return target.kind === "entity"
-      ? hashFor({ view: "room", ctx: router.ctx, detail: { kind: null, entityId: target.entity_id } })
-      : null;
-  }
 
   /** Run one edit, keep its refusal, and re-read the day either way. */
   async function write(action: () => Promise<unknown>) {
@@ -210,6 +213,11 @@
     void write(() => io.deleteBlock(entry.block.id));
   }
 
+  /** The half of a target a person types: an entity id, or the label itself. */
+  function valueOf(target: TimerTarget): string {
+    return target.kind === "entity" ? target.entity_id : target.label;
+  }
+
   function edit(entry: DayBlock) {
     refusal = null;
     editing = entry.block.id;
@@ -217,10 +225,7 @@
       from: clockReading(entry.block.started_at),
       to: clockReading(entry.block.ended_at),
       kind: entry.block.target.kind,
-      value:
-        entry.block.target.kind === "entity"
-          ? entry.block.target.entity_id
-          : entry.block.target.label,
+      value: valueOf(entry.block.target),
     };
   }
 
@@ -235,6 +240,12 @@
    * nothing.
    */
   function withClock(iso: string, hhmm: string): string {
+    // **A field the reader did not touch does not move the stamp.** The form
+    // is minute-granular and the stamp is not, so rebuilding it from the field
+    // would quietly drop the seconds off both edges of every block anybody
+    // opened *Edit* on — a rounding policy by accident, which is exactly what
+    // `CONTEXT.md`'s minute granularity, no rounding forbids.
+    if (clockReading(iso) === hhmm) return iso;
     const [hours, minutes] = hhmm.split(":").map(Number);
     if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return iso;
     const at = new Date(iso);
@@ -312,7 +323,9 @@
             always time somebody lost.
           -->
           <li class="seg gap">
-            <span class="when">{clockReading(segment.from)} → {clockReading(segment.to)}</span>
+            <span class="when">
+              {clockReading(segment.from, key)} → {clockReading(segment.to, key)}
+            </span>
             <span class="txt">{durationReading(segment.minutes)} unaccounted</span>
           </li>
         {:else}
@@ -322,7 +335,7 @@
           {@const locked = block.worklog_id !== null}
           <li class="seg block {block.kind} {locked ? 'locked' : ''}">
             <span class="when">
-              {clockReading(block.started_at)} → {clockReading(block.ended_at)}
+              {clockReading(block.started_at, key)} → {clockReading(block.ended_at, key)}
               <i>{durationReading(minutesBetween(block.started_at, block.ended_at))}</i>
             </span>
 
@@ -337,8 +350,8 @@
                 -->
                 <button
                   class="link"
-                  onclick={() => open(target.entity_id)}
-                  title="Open {addressOf(target)}"
+                  onclick={() => router.go(addressOf(target.entity_id))}
+                  title="Open {addressOf(target.entity_id)}"
                 >
                   {entry.title ?? targetReading(target)}
                 </button>
@@ -391,7 +404,18 @@
                   the one place that rule was a heuristic.
                 -->
                 <label class="l" for="kind-{block.id}">On</label>
-                <select class="sel-inline" id="kind-{block.id}" bind:value={form.kind}>
+                <!--
+                  Switching halves clears the text unless it is the block's own
+                  again: `TimerTarget` is exactly-one, and an entity id left in
+                  the field after a switch to *A label* would be submitted as
+                  the label a person is supposed to have written.
+                -->
+                <select
+                  class="sel-inline"
+                  id="kind-{block.id}"
+                  bind:value={form.kind}
+                  onchange={() => (form.value = form.kind === target.kind ? valueOf(target) : "")}
+                >
                   <option value="entity">An entity</option>
                   <option value="label">A label</option>
                 </select>

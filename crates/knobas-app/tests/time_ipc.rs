@@ -600,7 +600,7 @@ async fn block_at(
 }
 
 #[tokio::test]
-async fn the_days_blocks_come_back_in_time_order_with_the_titles_the_mirror_holds() {
+async fn the_days_blocks_come_back_in_time_order_whatever_order_they_were_written_in() {
     let pool = scratch("time-day-list").await;
     let day = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
     let at = |h, m| day + Duration::hours(h) + Duration::minutes(m);
@@ -626,15 +626,6 @@ async fn the_days_blocks_come_back_in_time_order_with_the_titles_the_mirror_hold
         vec![at(9, 0), at(11, 0), at(13, 0)],
         "the day review draws its strip in the order this list comes in"
     );
-    assert_eq!(
-        listed[0].title, None,
-        "a label block has no entity to title"
-    );
-    assert_eq!(
-        listed[1].title, None,
-        "the mirror has never heard of PAY-231"
-    );
-    assert_eq!(listed[2].title, None);
 }
 
 /// Put a row in the mirror, so a block's target has a name.
@@ -1024,4 +1015,46 @@ async fn an_unlogged_block_beside_a_logged_one_is_still_editable() {
     time::day::remove(&pool, free)
         .await
         .expect("an unlogged block is deletable");
+}
+
+/// The boundary the overlap rule turns on, in both directions.
+///
+/// A block that ends **exactly** at a day's first instant does not overlap
+/// that day at all -- it is the previous evening's, and it stops where the day
+/// begins. Returning it puts a zero-width sliver at the head of the strip and
+/// the day review then draws the whole night before the first real block as
+/// unaccounted time.
+///
+/// A block that *starts* exactly there is the opposite: it belongs to this day
+/// even when it has no length, because a block of no length is still a block
+/// (the relaunch sweep writes one for a timer that died before its first
+/// heartbeat). So the two cases are asserted together -- a predicate that
+/// admitted both, or refused both, fails here.
+#[tokio::test]
+async fn a_block_ending_at_midnight_belongs_to_the_day_it_ran_in() {
+    let pool = scratch("time-day-boundary").await;
+    let midnight = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
+
+    let evening = block_at(&pool, midnight - Duration::hours(2), midnight, &on(TICKET)).await;
+    let sliver = block_at(&pool, midnight, midnight, &labelled(LABEL)).await;
+
+    let third = time::day::list(&pool, midnight, midnight + Duration::days(1))
+        .await
+        .expect("the 3rd is readable");
+    assert_eq!(
+        third.iter().map(|d| d.block.id).collect::<Vec<_>>(),
+        vec![sliver],
+        "a block that stops where the day starts is the day before's, and a \
+         block of no length that starts here is this day's"
+    );
+
+    let second = time::day::list(&pool, midnight - Duration::days(1), midnight)
+        .await
+        .expect("the 2nd is readable");
+    assert_eq!(
+        second.iter().map(|d| d.block.id).collect::<Vec<_>>(),
+        vec![evening],
+        "the evening's block has to be on the evening's day, or it is on no \
+         day at all"
+    );
 }

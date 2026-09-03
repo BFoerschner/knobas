@@ -5,8 +5,7 @@
 //! *record* — the blocks it made, read back for one day and edited. They are
 //! one module pair on the bridge (the §10.8 exception #278 landed under) and
 //! two files here, because the timer is a state machine with two writers and
-//! this is a read and three statements over rows that have already stopped
-//! moving.
+//! this is a read and two writes over rows that have already stopped moving.
 //!
 //! # Why a day is two instants and not a date
 //!
@@ -30,9 +29,25 @@
 //! that dropped it would be a strip a person cannot edit the one block on
 //! their day they most want to fix.
 //!
+//! The interval is half-open, and the predicate says so in both directions.
+//! `ended_at > from` and not `>=`: a block that stops *exactly* where the day
+//! begins is the previous evening's, and returning it would put a zero-width
+//! sliver at the head of the strip -- after which the day review draws the
+//! whole night before the first real block as unaccounted time. The
+//! `or started_at >= from` beside it is what keeps a **block of no length**
+//! that starts at midnight, which is a real thing (the relaunch sweep writes
+//! one for a timer that died before its first heartbeat) and is this day's.
+//!
 //! # What a logged block is
 //!
-//! Read-only, in both directions (`CONTEXT.md`'s **block**; #272 story 20).
+//! Read-only, in both directions. The rule is spec #272's story 20 -- "a block
+//! that has been logged into a worklog is read-only, so that what knobas shows
+//! never disagrees with what Jira holds" -- and it is **not** in `CONTEXT.md`'s
+//! **block** entry, which says only that a block remembers which worklog it
+//! was logged into. Cited from the spec rather than from the glossary on
+//! purpose: the glossary is single-writer paperwork, and a term added here
+//! would be a definition with no decision record behind it.
+//!
 //! The rule is one `where` clause on each of [`update`] and [`remove`] —
 //! `worklog_id is null` — so a logged block cannot be edited even by a caller
 //! that never asked whether it was logged. What the reader sees is the
@@ -80,7 +95,7 @@ const LIST: &str = "select b.id, b.started_at, b.ended_at, b.entity_id, b.label,
             b.ended_by_relaunch, b.worklog_id, e.title
        from knobas.block b
        left join knobas.entity e on e.id = b.entity_id
-      where b.started_at < $2 and b.ended_at >= $1
+      where b.started_at < $2 and (b.ended_at > $1 or b.started_at >= $1)
       order by b.started_at, b.id";
 
 /// Rewrite one block, in one statement, and hand back what it now is.

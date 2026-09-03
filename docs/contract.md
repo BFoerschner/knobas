@@ -3543,7 +3543,10 @@ From this commit on, each of the following requires an orchestrator decision **a
   would move one edge of the strip wrongly twice a year. `app/src/lib/time/day.ts`'s `dayBounds`
   asks `Date` for that day's midnight and the next day's. It is also the shape the week timesheet
   (#283) wants without a second command. The interval is half-open and matches on **overlap**:
-  work that ran through midnight is on both days it touched.
+  work that ran through midnight is on both days it touched, while a block that stops *exactly*
+  where a day begins is the previous evening's — returning it would put a zero-width sliver at the
+  head of the strip and the whole night would then draw as unaccounted time. A block of no length
+  starting at midnight is still that day's, because a block of no length is still a block.
 
   **`update_block` takes the whole editable shape, and clears `ended_by_relaunch` on every
   success.** A patch would leave "the end is unchanged" and "the end is absent" spelled the same

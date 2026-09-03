@@ -231,6 +231,24 @@ test("a gap is a gap, and a block of no length is not one", async () => {
   expect(segmentText(2)).not.toContain("a moment");
 });
 
+/**
+ * A block that ran through midnight is on **both** days it touched — the
+ * backend returns it on each, deliberately — so on the second of them the
+ * strip opens with the previous evening's clock. Without the day carried
+ * beside it, `23:30 → 01:00` reads as a strip drawn out of order rather than
+ * as work that started the night before.
+ *
+ * This is the wiring of `clockReading`'s second argument; `day.test.ts` owns
+ * the arithmetic. Both are needed: a strip that computed the marker perfectly
+ * and never passed the day would render nothing at all.
+ */
+test("a block that ran through midnight says which day its edges fell on", async () => {
+  render([block(1, at(23, 30, 2), at(1, 0, 4))]);
+  await vi.waitFor(() => expect(strip()).toEqual(["block"]));
+
+  expect(segmentText(0)).toContain("23:30 (−1) → 01:00 (+1)");
+});
+
 // -- relaunch-ended blocks ---------------------------------------------------
 
 const stranded = () =>
@@ -374,7 +392,7 @@ test("a refused edit shows the reason the backend gave", async () => {
 
 // -- moving between days -----------------------------------------------------
 
-test("the neighbouring days and today are one click away, and they address", async () => {
+test("the neighbouring days and today are one click away, and each is an address", async () => {
   const { router } = render([]);
   await vi.waitFor(() => expect(text()).toContain("Thursday 3 September 2026"));
 

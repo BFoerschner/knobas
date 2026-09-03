@@ -92,10 +92,29 @@ export function dayLabel(key: string): string {
   return `${WEEKDAYS[at.getDay()]} ${at.getDate()} ${MONTHS[at.getMonth()]} ${at.getFullYear()}`;
 }
 
-/** `"09:05"` — the clock the reader was looking at when this instant passed. */
-export function clockReading(iso: string): string {
+/**
+ * `"09:05"` — the clock the reader was looking at when this instant passed.
+ *
+ * With `on` given, an instant that fell on **another day** carries which:
+ * `"01:00 (+1)"`, `"23:30 (−1)"`. `day_blocks` returns a block that ran
+ * through midnight on *both* days it touched, deliberately, so without this
+ * the strip for the second day opens `23:30 → 01:00` and reads as a day drawn
+ * out of order rather than as work that started the night before.
+ *
+ * The offset is in days and is computed from the two midnights, so a day
+ * containing a daylight-saving change — 23 or 25 hours long — still counts as
+ * one day.
+ */
+export function clockReading(iso: string, on?: string): string {
   const at = new Date(iso);
-  return `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+  const clock = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+  if (on === undefined) return clock;
+
+  const days = Math.round(
+    (midnight(dayKey(at)).getTime() - midnight(on).getTime()) / 86_400_000,
+  );
+  if (days === 0) return clock;
+  return `${clock} (${days > 0 ? "+" : "−"}${Math.abs(days)})`;
 }
 
 /** Whole minutes between two instants, rounded down. */

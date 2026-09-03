@@ -48,11 +48,11 @@ use sqlx::{PgPool, Row};
 
 use crate::IpcError;
 
-/// The day review's read and its three edits (#279).
+/// The day review's read and its two edits (#279).
 ///
 /// A second file rather than more of this one: the timer is a state machine
-/// with two writers, and the day review is a read and three statements over
-/// blocks that have already stopped moving. They share the vocabulary above
+/// with two writers, and the day review is a read and two writes over blocks
+/// that have already stopped moving. They share the vocabulary above
 /// -- [`Block`], [`TimerTarget`], [`vet`], [`block_of`] -- which is why it is
 /// a child module and not a sibling.
 pub mod day;

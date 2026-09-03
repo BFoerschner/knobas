@@ -10,9 +10,9 @@
  * | `#/entity/<entity_id>` | kind-agnostic alias, resolved via `get_entity`   |
  * | `#/inbox`              | the inbox — one actionable stream (#45)          |
  * | `#/inbox/ctx/<id>`     | the inbox, pre-filtered to one context (#47)     |
- * | `#/time/<YYYY-MM-DD>` | the day review for one day (#279)                |
- * | `#/time`              | the day review, on today                         |
- * | `#/sources`           | the sources view                                 |
+ * | `#/time/<YYYY-MM-DD>`  | the day review for one day (#279)                |
+ * | `#/time`               | the day review, on today                         |
+ * | `#/sources`            | the sources view                                 |
  * | `#/settings`           | the settings view                                |
  * | `#/first-run`          | the §14a wizard                                  |
  *

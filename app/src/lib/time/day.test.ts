@@ -93,6 +93,20 @@ test("an instant reads as the clock the reader was looking at", () => {
   expect(clockReading(at(17, 45))).toBe("17:45");
 });
 
+/**
+ * A block that ran through midnight is on **both** days it touched — that is
+ * the backend's rule, and it is deliberate — so on the second of them the
+ * strip opens with the previous evening's clock. Without the day carried
+ * beside it, `23:30 → 01:00` reads as a strip drawn out of order rather than
+ * as work that started the night before.
+ */
+test("an instant on another day says which day", () => {
+  expect(clockReading(at(23, 30, 2), "2026-09-03")).toBe("23:30 (−1)");
+  expect(clockReading(at(1, 0, 4), "2026-09-03")).toBe("01:00 (+1)");
+  // ...and the direction that shows the marker is not simply always drawn.
+  expect(clockReading(at(9, 5), "2026-09-03")).toBe("09:05");
+});
+
 test("a span reads in hours and minutes, and never in bare minutes past an hour", () => {
   expect(durationReading(0)).toBe("0 min");
   expect(durationReading(45)).toBe("45 min");
