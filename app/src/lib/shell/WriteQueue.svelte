@@ -13,6 +13,12 @@
   their own verb — not a differently-shaded member of one list. Story 18 is
   "distinguishable at a glance", and a badge on row nine of twelve is not that.
 
+  **A worklog's withdrawal asks first.** Discarding any other write is
+  immediate, as it always was; discarding a queued worklog opens a
+  confirmation, because since #328 that withdrawal gives the blocks back and
+  the same hour can then be logged a second time (issue #331). The rule for
+  *which* lives in `withdrawnWorklog`, beside its reasons.
+
   **There is no timeout and there is nothing here that could become one.** No
   auto-apply, no bulk "send everything", no timer. *Flush now* asks the queue
   to retry what is merely waiting; it cannot release a held write, and the
@@ -124,6 +130,19 @@
     return durationReading(minutesOf(seconds));
   }
 </script>
+
+<!--
+  ADR-0012's canonical sentence, written once and rendered twice -- under the
+  retry control, and in the withdrawal dialog. A second typed copy is a second
+  place for it to drift from the decision record, which is the reason
+  `write-queue.test.svelte.ts` stopped holding one of its own.
+-->
+{#snippet guarantee()}
+  <p class="wq-guarantee">
+    A write knobas was sending when it stopped may arrive twice. knobas re-sends rather than
+    guess; it never merges or drops what you wrote.
+  </p>
+{/snippet}
 
 <Modal
   title="Pending writes"
@@ -305,10 +324,7 @@
     -->
     <div class="wq-foot">
       <span class="lab">Retries the waiting writes. Held writes are untouched.</span>
-      <p class="wq-guarantee">
-        A write knobas was sending when it stopped may arrive twice. knobas re-sends rather than
-        guess; it never merges or drops what you wrote.
-      </p>
+      {@render guarantee()}
     </div>
     <span class="spacer"></span>
     <button class="btn" disabled={queue.busy} onclick={() => queue.flush(null)}>Flush now</button>
@@ -325,11 +341,16 @@
   Three things, in the order the reader needs them. **What is being
   withdrawn**, so the question is about a worklog they recognise rather than
   about a queue row. **What knobas cannot promise**, in plain words: the
-  write may be at Jira this second -- `knobas_core::write_queue::discard`
-  names the window in its own doc comment, one HTTP round-trip wide and not
+  write may already be at Jira -- `knobas_core::write_queue::discard` names
+  the window in its own doc comment, one HTTP round-trip wide and not
   crash-only -- and since #328 the withdrawal hands the same hour back to
   *Log all*. **ADR-0012's sentence**, verbatim, because the guarantee behind
   all of that is written down once and quoted, never paraphrased.
+
+  It asks on every open worklog, not only a pending one. `withdrawnWorklog`
+  carries the reasoning: a refusal can be a worklog Jira accepted but did not
+  name, and a hold can be one that arrived before the settle was lost, so the
+  state is not evidence of anything the dialog would need.
 
   No end instant is shown. `WriteOp::LogWork` carries `started` and `seconds`
   and nothing else, and `seconds` is worked time rather than the span it sits
@@ -346,17 +367,15 @@
         seconds.
       </p>
       {#if log.comment}<pre class="log wq-mine">{log.comment}</pre>{/if}
-      <p class="wq-why">
-        knobas cannot tell whether Jira already took it. A write is marked sent only once Jira
-        has answered, and this one may be on its way there now — withdrawing it in between takes
-        back a worklog that arrived. The time returns to your timesheet either way, so if Jira
-        did take it, logging it again puts the same {worked(log.seconds)} on
-        {ticketKey(log.entity)} twice.
+      <p>
+        <b>knobas cannot tell whether Jira already took it.</b> Nothing in the queue separates a
+        write that arrived and was never marked sent from one that never left — not the state it
+        is in, and not how many times it has been tried. Withdrawing it makes this time
+        <b>unlogged</b> again and offers it back to <i>Log all</i>, so if Jira did take it,
+        logging it a second time puts the same {worked(log.seconds)} on {ticketKey(log.entity)}
+        twice.
       </p>
-      <p class="wq-guarantee">
-        A write knobas was sending when it stopped may arrive twice. knobas re-sends rather than
-        guess; it never merges or drops what you wrote.
-      </p>
+      {@render guarantee()}
     {/snippet}
     {#snippet footer()}
       <span class="spacer"></span>

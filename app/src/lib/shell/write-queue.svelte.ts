@@ -206,20 +206,38 @@ export interface WithdrawnWorklog {
  * * `create_branch`, `create_pull_request` — the source refuses the duplicate
  *   with a 409 (ADR-0012), so a re-send cannot make a second one.
  *
- * ## Why only a `pending` row
+ * ## Why the state is not part of the question
  *
+ * It is tempting to ask only about a `pending` row, on the grounds that
  * `knobas_core::write_queue::due` yields an entity's head only when it is
- * pending, so **a held or refused write never reaches the flush loop at
- * all**. Its withdrawal cannot race a send, and telling its reader that Jira
- * might already hold the hour would be a warning knobas cannot support. Those
- * rows keep today's immediate discard.
+ * pending and so the flush loop cannot be holding a held or refused one. That
+ * reasoning is wrong in both directions, and `discard` releases the blocks of
+ * all three states alike:
+ *
+ * * **Refused.** `knobas_source_jira::write::log_work` answers
+ *   `SourceError::Protocol` "if Jira accepted the worklog but did not name
+ *   it", and a bare `Protocol` is not retryable, so that row lands in
+ *   `refused`. It is a refusal whose worklog is *at Jira*.
+ * * **Held.** Hold detection runs *before* the send, so a write that arrived
+ *   and whose `sent` never landed sits `pending` until the next flush -- which
+ *   re-reads the target, finds it moved, and holds it. The hour is at Jira and
+ *   the row says the target changed.
+ *
+ * The honest rule is the one `discard`'s own doc comment states: nothing in
+ * the queue tells a write that arrived and was never settled from one that
+ * never left -- not the state, and not `attempts`, which every writer bumps
+ * *after* the call. So every open worklog is asked about, and the dialog says
+ * exactly that rather than pretending to know which.
+ *
+ * Only *open* rows ever reach this: `pendingWrites` returns `pending`, `held`
+ * and `refused` and nothing else, so a settled row is not a case to guard.
  *
  * `WriteOp` grows per milestone (ADR-0006), so the payload is narrowed rather
  * than asserted: a build that cannot read this worklog cannot describe it
  * either, and a dialog with blanks where the hours go is worse than none.
  */
 export function withdrawnWorklog(row: QueuedWrite): WithdrawnWorklog | null {
-  if (row.op !== "log_work" || row.state !== "pending") return null;
+  if (row.op !== "log_work") return null;
   if (typeof row.payload !== "object" || row.payload === null) return null;
   const log = (row.payload as { LogWork?: Record<string, unknown> }).LogWork;
   if (!log) return null;

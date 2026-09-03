@@ -426,13 +426,15 @@ test("discard and cancel both withdraw the write", async () => {
 /**
  * Which withdrawals need consent, as a decision rather than as markup.
  *
- * Two conditions, and each one is a thing that would otherwise be wrong: the
- * **op**, because only a worklog's withdrawal hands the same hour back to
- * *Log all*, and the **state**, because a held or refused write never reached
- * the wire and telling its reader that Jira might already have it would be a
- * scare knobas cannot support.
+ * The op, and **only** the op. Scoping it to `pending` as well was the
+ * obvious-looking narrowing and it is wrong twice over: Jira answers a
+ * `Protocol` refusal for a worklog it *accepted but did not name*
+ * (`knobas_source_jira::write::log_work`), and hold detection runs before the
+ * send, so a write that arrived and lost its settle is held on the next
+ * flush. `discard` releases the blocks of all three open states alike, so all
+ * three are asked about.
  */
-test("only a pending worklog's withdrawal needs consent", () => {
+test("every open worklog's withdrawal needs consent, and no other op's", () => {
   const log = worklog();
   expect(withdrawnWorklog(log)).toEqual({
     entity: "jira:PAY-231",
@@ -448,10 +450,11 @@ test("only a pending worklog's withdrawal needs consent", () => {
   } as const;
   expect(withdrawnWorklog(write({ op: "create_ticket", payload: create }))).toBeNull();
 
-  // A worklog the flush loop cannot be holding. `due` yields an entity's head
-  // only when it is pending, so neither of these is in the window.
-  expect(withdrawnWorklog(worklog({ state: "held" }))).toBeNull();
-  expect(withdrawnWorklog(worklog({ state: "refused" }))).toBeNull();
+  // A refusal can be a worklog Jira took and did not name; a hold can be one
+  // that arrived before its settle was lost. Neither state is evidence, and
+  // neither is treated as any.
+  expect(withdrawnWorklog(worklog({ state: "held" }))).not.toBeNull();
+  expect(withdrawnWorklog(worklog({ state: "refused" }))).not.toBeNull();
 
   // An op named `log_work` whose payload this build cannot read is not a
   // worklog it can describe, and a dialog with blanks in it is worse than
@@ -507,6 +510,28 @@ test("discarding a queued worklog asks first, and cancelling leaves it queued", 
   // The row itself: still in the queue the panel read, and still on screen.
   expect(screen.queue.rows.map((row) => row.id)).toEqual([4]);
   expect(screen.section("Waiting")!.textContent).toContain("jira:PAY-231");
+  screen.done();
+});
+
+/**
+ * The same question from the other section, on the state that looks safest.
+ *
+ * A refused worklog is the one this nearly missed: Jira refuses with a
+ * `Protocol` fault when it *took* the worklog and did not name it, so the row
+ * that reads "the source refused this write" can be an hour already logged.
+ */
+test("a refused worklog asks too, from the decisions section", async () => {
+  rows = [worklog({ state: "refused", wait_reason: null, detail: "worklog id missing" })];
+  counts = { pending: 0, held: 0, refused: 1 };
+  const screen = await render();
+  calls.length = 0;
+
+  screen.button("Discard")!.click();
+  flushSync();
+
+  expect(calls.filter((c) => c.command === "discard_write")).toEqual([]);
+  expect(screen.dialogs()).toHaveLength(2);
+  expect(screen.dialogs()[1]!.textContent).toContain("knobas cannot tell whether Jira already");
   screen.done();
 });
 
