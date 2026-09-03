@@ -65,8 +65,7 @@ pub(crate) trait ConfluenceApi: Send + Sync {
     async fn follow(&self, path_and_query: &str) -> Result<ContentPage, SourceError>;
     /// `GET /rest/api/content/{id}/child/comment` -- the completion path, for
     /// a server that did not expand the comments with the page.
-    async fn comments(&self, id: &str, start: u32, limit: u32)
-    -> Result<ContentPage, SourceError>;
+    async fn comments(&self, id: &str, start: u32, limit: u32) -> Result<ContentPage, SourceError>;
 }
 
 /// The real endpoints.
@@ -102,12 +101,7 @@ impl ConfluenceApi for crate::http::ConfluenceHttp {
         self.get_link(path_and_query).await
     }
 
-    async fn comments(
-        &self,
-        id: &str,
-        start: u32,
-        limit: u32,
-    ) -> Result<ContentPage, SourceError> {
+    async fn comments(&self, id: &str, start: u32, limit: u32) -> Result<ContentPage, SourceError> {
         self.get_json(
             &format!("rest/api/content/{id}/child/comment"),
             &[

@@ -22,6 +22,7 @@
   import { openFreshContext } from "../shell/contexts.svelte";
   import Monogram from "../shell/Monogram.svelte";
   import { kindRegistry } from "../shell/kind-registry.svelte";
+  import { ancestorPath } from "../launcher/ancestors";
   import { hashFor } from "../shell/router.svelte";
   import { kindMonogram, kindSingular } from "../shell/kinds";
   import { openExternal } from "../shell/open-external";
@@ -198,6 +199,17 @@
   const label = $derived(kindSingular(shownKind, declared));
   const key = $derived(entityId.slice(entityId.indexOf(":") + 1));
   const fields = $derived(detail ? projectPayload(detail.payload) : []);
+  /**
+   * Where this item sits inside its source, when its record says — a
+   * Confluence page's ancestor path (#284).
+   *
+   * The **one** named read of that shape lives in `launcher/format.ts`
+   * (ADR-0007 requirement 2), because the launcher row draws the same string;
+   * a second spelling here is how the two come to disagree about what a path
+   * is. It misses to `null`, so a ticket, a build and a page nobody has filed
+   * anywhere all show no path rather than a wrong one.
+   */
+  const path = $derived(detail ? ancestorPath(detail.payload) : null);
   /** Narrowed once, so the button and its handler agree that it is a string. */
   const webUrl = $derived(detail?.web_url ?? null);
 
@@ -504,6 +516,9 @@
             {key}
           </span>
           <h2 id={titleId}>{detail.row.title}</h2>
+          {#if path}
+            <div class="d-path">{path}</div>
+          {/if}
         </div>
       </div>
 
@@ -629,6 +644,19 @@
   */
   .d-body {
     white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  /*
+    Where the item lives, under its title: quieter than the title and allowed
+    to wrap, because a path is prose of unbounded length and truncating it
+    throws away the end — which is the half nearest the page.
+  */
+  .d-path {
+    margin-top: 2px;
+    color: var(--faint);
+    font-size: 11.5px;
+    line-height: 1.35;
     overflow-wrap: anywhere;
   }
 </style>

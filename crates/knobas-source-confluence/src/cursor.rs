@@ -141,9 +141,7 @@ impl ConfluenceCursor {
         let Some(number) = number else {
             return false;
         };
-        self.seen
-            .iter()
-            .any(|s| s.n == Some(number) && s.i == id)
+        self.seen.iter().any(|s| s.n == Some(number) && s.i == id)
     }
 
     /// The cursor for a run that emitted something.

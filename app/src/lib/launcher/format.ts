@@ -23,7 +23,6 @@ export function syncAge(iso: string, now?: Date): string {
   return `synced ${ago(iso, now)}`;
 }
 
-
 /**
  * What to say about a source whose credential needs attention.
  *
@@ -62,7 +61,10 @@ export function provenance(
   // remove it, it only respells it as `health?.state` and costs the narrowing
   // that `COMPLAINT[health.state]` below depends on.
   if (health && isActionable(health.state)) {
-    return { text: `${sourceId} · ${COMPLAINT[health.state] ?? health.state}`, failing: true };
+    return {
+      text: `${sourceId} · ${COMPLAINT[health.state] ?? health.state}`,
+      failing: true,
+    };
   }
   return { text: syncAge(syncedAt, now), failing: false };
 }
@@ -72,3 +74,11 @@ export function provenance(
  * `shell/monogram.ts`, because the top strip and the sources view draw it too.
  */
 export { sourceMonogram };
+
+/**
+ * Re-exported so a launcher row's three-and-a-bit strings are all reachable
+ * from one place; the rule itself lives in `ancestors.ts` because the **detail
+ * view** draws the same path out of the same payload, and this module pulls in
+ * the credential-health store that a detail panel has no use for.
+ */
+export { ancestorPath } from "./ancestors";

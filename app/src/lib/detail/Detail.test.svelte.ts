@@ -12,7 +12,8 @@ import type { EntityDetail, LinkEntry } from "../ipc/entity";
 
 /** A plain function, not a `vi.fn` — see the note in `shell/Tile.test.svelte.ts`. */
 const calls: string[] = [];
-let answer: (entityId: string) => Promise<EntityDetail> = () => Promise.resolve(detail());
+let answer: (entityId: string) => Promise<EntityDetail> = () =>
+  Promise.resolve(detail());
 
 /** Link ids handed to `unlink`, and whether the command refuses. */
 const unlinked: string[] = [];
@@ -31,7 +32,8 @@ vi.mock("../ipc/entity", () => ({
   // this module has to define them even where no context is ever made.
   listContexts: () => Promise.resolve([]),
   contextMembers: () => Promise.resolve([]),
-  createContext: () => Promise.reject(new Error("no context creation in this test")),
+  createContext: () =>
+    Promise.reject(new Error("no context creation in this test")),
   promoteContext: () => Promise.reject(new Error("no promotion in this test")),
   getEntity: (entityId: string) => {
     calls.push(entityId);
@@ -39,7 +41,8 @@ vi.mock("../ipc/entity", () => ({
   },
   unlink: async (linkId: string) => {
     unlinked.push(linkId);
-    if (unlinkFails) throw { code: "not_found", message: "no such link", source_id: null };
+    if (unlinkFails)
+      throw { code: "not_found", message: "no such link", source_id: null };
   },
   createLink: async (fromId: string, toId: string) => {
     created.push({ fromId, toId });
@@ -76,8 +79,15 @@ vi.mock("../ipc/search", () => ({
     total: 1,
     took_ms: 2,
   }),
-  launcherHome: () => Promise.reject(new Error("the dialog never loads the board")),
-  noFilters: () => ({ sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }),
+  launcherHome: () =>
+    Promise.reject(new Error("the dialog never loads the board")),
+  noFilters: () => ({
+    sources: [],
+    kinds: [],
+    updated_within_days: null,
+    mine: false,
+    authors: [],
+  }),
 }));
 
 /** What the OS opener was handed, and whether it refused. */
@@ -105,7 +115,12 @@ function detail(over: Partial<EntityDetail> = {}): EntityDetail {
       updated_at: "2026-08-22T11:48:00Z",
       synced_at: "2026-08-22T14:30:00Z",
     },
-    source: { id: "mock", display_name: "Tidewater (mock)", adapter_kind: "mock", enabled: true },
+    source: {
+      id: "mock",
+      display_name: "Tidewater (mock)",
+      adapter_kind: "mock",
+      enabled: true,
+    },
     kind_info: null,
     body_text: "Payouts to two SEPA banks fail with a 409 on retry.",
     author: "mara",
@@ -166,14 +181,16 @@ beforeEach(() => {
 
 /** The header's *Open in browser*, if the panel is showing one. */
 function openButton(target: HTMLElement) {
-  return [...target.querySelectorAll<HTMLButtonElement>(".d-h button")].find((button) =>
-    button.textContent?.includes("Open in browser"),
+  return [...target.querySelectorAll<HTMLButtonElement>(".d-h button")].find(
+    (button) => button.textContent?.includes("Open in browser"),
   );
 }
 
 test("draws the title, the provenance and the projected payload", async () => {
   const screen = render();
-  await vi.waitFor(() => expect(screen.text()).toContain("Retry failed SEPA payouts"));
+  await vi.waitFor(() =>
+    expect(screen.text()).toContain("Retry failed SEPA payouts"),
+  );
   flushSync();
 
   expect(calls).toEqual(["mock:PAY-231"]);
@@ -182,7 +199,9 @@ test("draws the title, the provenance and the projected payload", async () => {
   // The §3a projection, not a per-kind view.
   expect(screen.text()).toContain("Status");
   expect(screen.text()).toContain("In Progress");
-  expect(screen.target.querySelector(".d-h .crumb")?.textContent).toContain("All work");
+  expect(screen.target.querySelector(".d-h .crumb")?.textContent).toContain(
+    "All work",
+  );
 
   screen.done();
 });
@@ -204,14 +223,18 @@ test("body text and title are interpolated, never parsed as markup", async () =>
       }),
     );
   const screen = render();
-  await vi.waitFor(() => expect(screen.text()).toContain("<script>alert(1)</script>"));
+  await vi.waitFor(() =>
+    expect(screen.text()).toContain("<script>alert(1)</script>"),
+  );
   flushSync();
 
   expect(screen.text()).toContain("<b>bold</b> ticket");
   expect(screen.text()).toContain("<img onerror=x>");
   // The only `<b>` in the panel is the crumb's own separator: nothing from the
   // payload became an element.
-  expect([...screen.target.querySelectorAll("b")].map((b) => b.textContent)).toEqual(["›"]);
+  expect(
+    [...screen.target.querySelectorAll("b")].map((b) => b.textContent),
+  ).toEqual(["›"]);
   expect(screen.target.querySelector("script")).toBeNull();
   expect(screen.target.querySelector("img")).toBeNull();
 
@@ -233,7 +256,9 @@ test("not_found renders a panel with the id and a way out", async () => {
     });
 
   const screen = render({ entityId: "mock:NOPE-1" });
-  await vi.waitFor(() => expect(screen.text()).toContain("Not in the local index"));
+  await vi.waitFor(() =>
+    expect(screen.text()).toContain("Not in the local index"),
+  );
   flushSync();
 
   expect(screen.text()).toContain("NOPE-1");
@@ -252,10 +277,16 @@ test("not_found renders a panel with the id and a way out", async () => {
 /** A mistyped address says *that*, rather than claiming the entity is missing. */
 test("invalid and not_found say different things", async () => {
   answer = () =>
-    Promise.reject({ code: "invalid", message: "no-colon has no ':' separator", source_id: null });
+    Promise.reject({
+      code: "invalid",
+      message: "no-colon has no ':' separator",
+      source_id: null,
+    });
 
   const screen = render({ entityId: "no-colon" });
-  await vi.waitFor(() => expect(screen.text()).toContain("not an entity address"));
+  await vi.waitFor(() =>
+    expect(screen.text()).toContain("not an entity address"),
+  );
   expect(screen.text()).not.toContain("Not in the local index");
   screen.done();
 });
@@ -263,7 +294,9 @@ test("invalid and not_found say different things", async () => {
 /** The close button is the same call the Esc ladder makes. */
 test("the header's x closes the panel", async () => {
   const screen = render();
-  await vi.waitFor(() => expect(screen.text()).toContain("Retry failed SEPA payouts"));
+  await vi.waitFor(() =>
+    expect(screen.text()).toContain("Retry failed SEPA payouts"),
+  );
 
   screen.target.querySelector<HTMLButtonElement>(".d-h .x")?.click();
   expect(screen.onclose).toHaveBeenCalledOnce();
@@ -307,15 +340,23 @@ test("an undeclared kind is browsable — §3a's promise", async () => {
           synced_at: "2026-08-22T14:30:00Z",
         },
         kind_info: null,
-        payload: { id: "INC-1", severity: "SEV2", affected_services: ["payout", "ledger"] },
+        payload: {
+          id: "INC-1",
+          severity: "SEV2",
+          affected_services: ["payout", "ledger"],
+        },
       }),
     );
 
   const screen = render({ entityId: "mock:INC-1", kind: "incident" });
-  await vi.waitFor(() => expect(screen.text()).toContain("Payout queue backed up"));
+  await vi.waitFor(() =>
+    expect(screen.text()).toContain("Payout queue backed up"),
+  );
   flushSync();
 
-  expect(screen.target.querySelector(".d-h .crumb")?.textContent).toContain("Incident");
+  expect(screen.target.querySelector(".d-h .crumb")?.textContent).toContain(
+    "Incident",
+  );
   expect(screen.text()).toContain("Severity");
   expect(screen.text()).toContain("SEV2");
   // The nested value is summarised, and its JSON is behind a disclosure.
@@ -347,10 +388,14 @@ test("a declared kind_info names the header", async () => {
     );
 
   const screen = render();
-  await vi.waitFor(() => expect(screen.text()).toContain("Retry failed SEPA payouts"));
+  await vi.waitFor(() =>
+    expect(screen.text()).toContain("Retry failed SEPA payouts"),
+  );
   flushSync();
 
-  expect(screen.target.querySelector(".d-h .crumb")?.textContent).toContain("Issue");
+  expect(screen.target.querySelector(".d-h .crumb")?.textContent).toContain(
+    "Issue",
+  );
   expect(screen.target.querySelector(".mg")?.textContent).toBe("IS");
 
   screen.done();
@@ -359,7 +404,8 @@ test("a declared kind_info names the header", async () => {
 /** A slow answer for an entity the reader has left must not land. */
 test("a superseded read is discarded", async () => {
   let resolveFirst!: (value: EntityDetail) => void;
-  answer = () => new Promise<EntityDetail>((resolve) => (resolveFirst = resolve));
+  answer = () =>
+    new Promise<EntityDetail>((resolve) => (resolveFirst = resolve));
 
   const target = document.createElement("div");
   document.body.append(target);
@@ -373,7 +419,12 @@ test("a superseded read is discarded", async () => {
   const app = mount(Detail, { target, props });
   flushSync();
 
-  answer = () => Promise.resolve(detail({ row: { ...detail().row, entity_id: "mock:PAY-228", title: "Second" } }));
+  answer = () =>
+    Promise.resolve(
+      detail({
+        row: { ...detail().row, entity_id: "mock:PAY-228", title: "Second" },
+      }),
+    );
   props.entityId = "mock:PAY-228";
   flushSync();
   await vi.waitFor(() => expect(target.textContent ?? "").toContain("Second"));
@@ -428,7 +479,9 @@ test("a withdrawn entity opens with a banner that says why it is still here", as
 /** A live entity carries no banner at all. */
 test("a live entity has no withdrawn banner", async () => {
   const screen = render();
-  await vi.waitFor(() => expect(screen.text()).toContain("Retry failed SEPA payouts"));
+  await vi.waitFor(() =>
+    expect(screen.text()).toContain("Retry failed SEPA payouts"),
+  );
   flushSync();
 
   expect(screen.target.querySelector(".prompt")).toBeNull();
@@ -448,12 +501,19 @@ test("a disabled source's entity opens with a banner naming the remedy", async (
   answer = () =>
     Promise.resolve(
       detail({
-        source: { id: "mock", display_name: "Tidewater (mock)", adapter_kind: "mock", enabled: false },
+        source: {
+          id: "mock",
+          display_name: "Tidewater (mock)",
+          adapter_kind: "mock",
+          enabled: false,
+        },
       }),
     );
 
   const screen = render();
-  await vi.waitFor(() => expect(screen.text()).toContain("source is turned off"));
+  await vi.waitFor(() =>
+    expect(screen.text()).toContain("source is turned off"),
+  );
   flushSync();
 
   expect(screen.text()).toContain("Tidewater (mock)");
@@ -473,7 +533,9 @@ test("a disabled source's entity opens with a banner naming the remedy", async (
  */
 test("an enabled source's entity has no turned-off banner", async () => {
   const screen = render();
-  await vi.waitFor(() => expect(screen.text()).toContain("Retry failed SEPA payouts"));
+  await vi.waitFor(() =>
+    expect(screen.text()).toContain("Retry failed SEPA payouts"),
+  );
   flushSync();
 
   expect(screen.text()).not.toContain("source is turned off");
@@ -600,7 +662,9 @@ test("a link renders the far end by title, in either direction", async () => {
   expect(screen.text()).toContain("documented by");
   expect(screen.text()).not.toContain("Nothing linked yet");
   // Neither row names the entity being viewed.
-  const cells = [...screen.target.querySelectorAll(".lopen")].map((n) => n.textContent?.trim());
+  const cells = [...screen.target.querySelectorAll(".lopen")].map((n) =>
+    n.textContent?.trim(),
+  );
   expect(cells.join(" ")).not.toContain("mock:PAY-231");
 
   screen.done();
@@ -626,11 +690,15 @@ test("clicking a linked row asks the shell for the other end's address", async (
   await vi.waitFor(() => expect(screen.text()).toContain("Retry SEPA payouts"));
   flushSync();
 
-  const row = [...screen.target.querySelectorAll<HTMLButtonElement>(".lopen")][0]!;
+  const row = [
+    ...screen.target.querySelectorAll<HTMLButtonElement>(".lopen"),
+  ][0]!;
   row.click();
   flushSync();
 
-  expect(screen.onnavigate).toHaveBeenCalledWith("#/pr/mock:payout-service%23142");
+  expect(screen.onnavigate).toHaveBeenCalledWith(
+    "#/pr/mock:payout-service%23142",
+  );
 
   screen.done();
 });
@@ -644,7 +712,10 @@ test("clicking a linked row asks the shell for the other end's address", async (
  * disagree with the next read.
  */
 test("unlinking removes the row without reopening the detail", async () => {
-  const kept = link({ id: "22222222-2222-2222-2222-222222222222", otherTitle: "Kept link" });
+  const kept = link({
+    id: "22222222-2222-2222-2222-222222222222",
+    otherTitle: "Kept link",
+  });
   const doomed = link({
     id: "11111111-1111-1111-1111-111111111111",
     to: "mock:payout-service#142",
@@ -659,9 +730,9 @@ test("unlinking removes the row without reopening the detail", async () => {
 
   // The backend is what forgets the link; the panel re-reads.
   links = [kept];
-  const unlinkButton = [...screen.target.querySelectorAll<HTMLButtonElement>("button")].find(
-    (button) => button.textContent?.includes("Unlink"),
-  )!;
+  const unlinkButton = [
+    ...screen.target.querySelectorAll<HTMLButtonElement>("button"),
+  ].find((button) => button.textContent?.includes("Unlink"))!;
   unlinkButton.click();
 
   await vi.waitFor(() => expect(screen.text()).not.toContain("Doomed link"));
@@ -701,7 +772,9 @@ test("unlinking a note's reference from the target's end is refused, with the re
     );
 
   const screen = render();
-  await vi.waitFor(() => expect(screen.text()).toContain("SEPA retry investigation"));
+  await vi.waitFor(() =>
+    expect(screen.text()).toContain("SEPA retry investigation"),
+  );
   flushSync();
 
   [...screen.target.querySelectorAll<HTMLButtonElement>("button")]
@@ -709,7 +782,9 @@ test("unlinking a note's reference from the target's end is refused, with the re
     .click();
 
   await vi.waitFor(() =>
-    expect(toasts.items.map((toast) => toast.text).join(" ")).toMatch(/Remove the reference/),
+    expect(toasts.items.map((toast) => toast.text).join(" ")).toMatch(
+      /Remove the reference/,
+    ),
   );
   flushSync();
 
@@ -727,7 +802,12 @@ test("an unlink that fails is reported and changes nothing", async () => {
   answer = () =>
     Promise.resolve(
       detail({
-        links: [link({ id: "11111111-1111-1111-1111-111111111111", otherTitle: "Still here" })],
+        links: [
+          link({
+            id: "11111111-1111-1111-1111-111111111111",
+            otherTitle: "Still here",
+          }),
+        ],
       }),
     );
 
@@ -740,7 +820,9 @@ test("an unlink that fails is reported and changes nothing", async () => {
     .click();
 
   await vi.waitFor(() =>
-    expect(toasts.items.map((toast) => toast.text).join(" ")).toMatch(/no such link/),
+    expect(toasts.items.map((toast) => toast.text).join(" ")).toMatch(
+      /no such link/,
+    ),
   );
   flushSync();
 
@@ -767,20 +849,30 @@ test("a link made in the dialog appears in the panel without reopening the detai
   await vi.waitFor(() => expect(screen.text()).toContain("Nothing linked yet"));
   flushSync();
 
-  const openDialog = [...screen.target.querySelectorAll<HTMLButtonElement>(".d-h button")].find(
-    (button) => button.textContent?.includes("Link to"),
-  )!;
+  const openDialog = [
+    ...screen.target.querySelectorAll<HTMLButtonElement>(".d-h button"),
+  ].find((button) => button.textContent?.includes("Link to"))!;
   openDialog.click();
   flushSync();
   expect(screen.target.querySelector('[role="dialog"]')).not.toBeNull();
 
-  const picker = screen.target.querySelector<HTMLInputElement>('input[placeholder="Search everything"]')!;
+  const picker = screen.target.querySelector<HTMLInputElement>(
+    'input[placeholder="Search everything"]',
+  )!;
   picker.value = "sepa";
   picker.dispatchEvent(new Event("input", { bubbles: true }));
   await vi.waitFor(() =>
-    expect(screen.target.querySelectorAll('[role="option"]').length).toBeGreaterThan(0),
+    expect(
+      screen.target.querySelectorAll('[role="option"]').length,
+    ).toBeGreaterThan(0),
   );
-  picker.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  picker.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
   flushSync();
 
   // What the backend will answer once the write lands.
@@ -809,7 +901,9 @@ test("a link made in the dialog appears in the panel without reopening the detai
   expect(screen.text()).not.toContain("Nothing linked yet");
   // The dialog is done and the detail never closed.
   expect(screen.target.querySelector('[role="dialog"]')).toBeNull();
-  expect(screen.text(), "the new row reads under its own heading").toContain("related to");
+  expect(screen.text(), "the new row reads under its own heading").toContain(
+    "related to",
+  );
   expect(screen.onclose).not.toHaveBeenCalled();
   expect(screen.text()).toContain("Retry failed SEPA payouts");
 
@@ -838,12 +932,20 @@ test("Esc in the dialog closes the dialog and not the detail", async () => {
   window.addEventListener("keydown", listener);
 
   const dialog = screen.target.querySelector<HTMLElement>('[role="dialog"]')!;
-  dialog.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  dialog.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: "Escape",
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
   flushSync();
   window.removeEventListener("keydown", listener);
 
   expect(screen.target.querySelector('[role="dialog"]')).toBeNull();
-  expect(reachedTheShell, "one keystroke must not unwind two ladders").toEqual([]);
+  expect(reachedTheShell, "one keystroke must not unwind two ladders").toEqual(
+    [],
+  );
   expect(screen.onclose).not.toHaveBeenCalled();
 
   screen.done();
@@ -875,7 +977,9 @@ test("a link drawn from outside the detail brings the panel up to date", async (
   linkChanges.count += 1;
   flushSync();
 
-  await vi.waitFor(() => expect(screen.text()).toContain("Linked from the launcher"));
+  await vi.waitFor(() =>
+    expect(screen.text()).toContain("Linked from the launcher"),
+  );
   expect(calls).toEqual(["mock:PAY-231", "mock:PAY-231"]);
   expect(screen.text()).not.toContain("Nothing linked yet");
 
@@ -910,7 +1014,6 @@ test("history arrives with the entity rather than in a second call", async () =>
   screen.done();
 });
 
-
 // -- Open in browser --------------------------------------------------------
 
 /**
@@ -922,18 +1025,25 @@ test("history arrives with the entity rather than in a second call", async () =>
  */
 test("Open in browser appears exactly when the adapter reported a url", async () => {
   const screen = render();
-  await vi.waitFor(() => expect(screen.text()).toContain("Retry failed SEPA payouts"));
+  await vi.waitFor(() =>
+    expect(screen.text()).toContain("Retry failed SEPA payouts"),
+  );
   flushSync();
   expect(openButton(screen.target), "no url, so no button").toBeUndefined();
   screen.done();
 
-  answer = () => Promise.resolve(detail({ web_url: "https://127.0.0.1:8443/browse/PAY-231" }));
+  answer = () =>
+    Promise.resolve(
+      detail({ web_url: "https://127.0.0.1:8443/browse/PAY-231" }),
+    );
   const withUrl = render();
   await vi.waitFor(() => expect(openButton(withUrl.target)).toBeDefined());
   flushSync();
 
   openButton(withUrl.target)?.click();
-  await vi.waitFor(() => expect(opened).toEqual(["https://127.0.0.1:8443/browse/PAY-231"]));
+  await vi.waitFor(() =>
+    expect(opened).toEqual(["https://127.0.0.1:8443/browse/PAY-231"]),
+  );
 
   withUrl.done();
 });
@@ -953,7 +1063,9 @@ test("a url the guard refuses never reaches the opener, and says so", async () =
 
   openButton(screen.target)?.click();
   await vi.waitFor(() =>
-    expect(toasts.items.map((toast) => toast.text).join(" ")).toMatch(/Could not open the link/),
+    expect(toasts.items.map((toast) => toast.text).join(" ")).toMatch(
+      /Could not open the link/,
+    ),
   );
   expect(opened, "file:// reached the OS opener").toEqual([]);
   expect(toasts.items.map((toast) => toast.text).join(" ")).toMatch(/file:/);
@@ -965,17 +1077,96 @@ test("a url the guard refuses never reaches the opener, and says so", async () =
 /** ...and so is a failure from the OS itself. */
 test("a failure from the opener becomes a toast", async () => {
   openerFails = true;
-  answer = () => Promise.resolve(detail({ web_url: "https://127.0.0.1:8443/x" }));
+  answer = () =>
+    Promise.resolve(detail({ web_url: "https://127.0.0.1:8443/x" }));
   const screen = render();
   await vi.waitFor(() => expect(openButton(screen.target)).toBeDefined());
   flushSync();
 
   openButton(screen.target)?.click();
   await vi.waitFor(() =>
-    expect(toasts.items.map((toast) => toast.text).join(" ")).toMatch(/no handler/),
+    expect(toasts.items.map((toast) => toast.text).join(" ")).toMatch(
+      /no handler/,
+    ),
   );
   expect(opened).toEqual(["https://127.0.0.1:8443/x"]);
 
   toasts.items = [];
+  screen.done();
+});
+
+/**
+ * A page opens at its address, shows its ancestor path, and shows its body as
+ * **text** (#284).
+ *
+ * The body half is the criterion's "for now": the storage format is in the
+ * payload verbatim and rendering it is the next ticket, so what a reader sees
+ * today is `body_text` — the stripped words, with the headings on their own
+ * lines. It is drawn as text and never as markup, which is roadmap §4 gotcha
+ * 7 and is why the escaped tag below has to come out as the characters the
+ * author typed rather than as an element.
+ */
+test("a page shows its ancestor path and its body as text", async () => {
+  answer = () =>
+    Promise.resolve(
+      detail({
+        row: {
+          entity_id: "confluence:98307",
+          kind: "page",
+          source_id: "confluence",
+          title: "SEPA payout retry design",
+          updated_at: "2026-08-22T10:40:00Z",
+          synced_at: "2026-08-22T14:30:00Z",
+        },
+        body_text:
+          "SEPA payout retry design\n\nBackoff policy\nbase 30 s, factor 2\n\nuse <retry> here",
+        payload: {
+          id: "98307",
+          space: { key: "ENG", name: "Engineering" },
+          ancestors: [
+            { id: "65537", title: "Engineering" },
+            { id: "65540", title: "Payments" },
+          ],
+          body: {
+            storage: {
+              value: "<h2>Backoff policy</h2>",
+              representation: "storage",
+            },
+          },
+        },
+      }),
+    );
+  const screen = render({ entityId: "confluence:98307", kind: "page" });
+  await vi.waitFor(() =>
+    expect(screen.text()).toContain("SEPA payout retry design"),
+  );
+  flushSync();
+
+  expect(calls).toEqual(["confluence:98307"]);
+  expect(screen.target.querySelector(".d-path")?.textContent).toBe(
+    "Engineering › Payments",
+  );
+  // The body, as text: the stripped words are there, and the one that looks
+  // like markup arrived as characters rather than as an element.
+  const body = screen.target.querySelector(".d-body");
+  expect(body?.textContent).toContain("Backoff policy");
+  expect(body?.textContent).toContain("use <retry> here");
+  expect(body?.querySelector("retry")).toBeNull();
+
+  screen.done();
+});
+
+/**
+ * ADR-0007's failure direction, at the seam a reader actually meets: a record
+ * with no ancestors draws **no path**, rather than an empty line or a guess.
+ * Every ticket, build and commit in the mirror is this case.
+ */
+test("an item whose record names no ancestors shows no path at all", async () => {
+  const screen = render();
+  await vi.waitFor(() =>
+    expect(screen.text()).toContain("Retry failed SEPA payouts"),
+  );
+  flushSync();
+  expect(screen.target.querySelector(".d-path")).toBeNull();
   screen.done();
 });

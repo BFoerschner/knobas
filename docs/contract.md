@@ -483,6 +483,33 @@ pub struct Secret { pub kind: knobas_source::AuthMethod, pub value: String } // 
 | contract source | `testenv/specs/jira-dc-rest.wadl` + `knobas-mockd` | the **real** pinned Gitea container (roadmap §3) | TeamCity swagger extracted per `testenv/specs/fetch.sh` + `knobas-mockd` |
 | client | hand-rolled reqwest (~5 endpoints) | hand-rolled reqwest; codegen from `/swagger.v1.json` is permitted by roadmap §4 but is stream B's internal call | hand-rolled reqwest |
 
+#### D — Confluence DC (M3.2, issue #284)
+
+Added after the M1 table above rather than as a fifth column, because the table's columns are M1's three streams and a fourth would misread as one. The universal rules of §4.1 apply unchanged.
+
+| | **D — Confluence DC** |
+|---|---|
+| `adapter_kind` | `confluence` |
+| kinds (`KindInfo.id`) | `page` (PG), `full_sync_exhaustive: true` over the configured space list |
+| key form | the **content id**: `confluence:98307`. Not the title and not `space:title` — a page renamed or moved keeps its content id, and every link, note and timer drawn to it survives the rename |
+| auth | Bearer PAT (DC ≥ 7.9) or Basic user+password |
+| test_connection | `GET /rest/api/user/current`, reporting `username` as the account. **No version**: Confluence DC publishes it only through the administrators-only `/rest/api/settings/systemInfo`, so `ConnectionInfo::server_version` is `None` rather than an *unreachable* for an ordinary account |
+| read endpoints | `GET /rest/api/content/search` (`cql`, `limit`, `expand`), the `_links.next` continuation it answers with, and `GET /rest/api/content/{id}/child/comment` (`start`, `limit`, `expand`) as the completion path |
+| `expand=` | `body.storage,ancestors,space,version,history,children.comment.body.storage` — the storage format kept verbatim in `payload`, the space as ADR-0010's project, the ancestors as the launcher's path, `version.number`/`version.when` as the cursor's identity, and the discussion in one request instead of one per page |
+| paging | **`_links.next`, followed verbatim**, and there is no `total`: a content search reports `size` (this page) and a next link. `limit` is capped at **50** by the server once a body is expanded, so `page_size` is refused above it rather than silently clamped. A continuation link that is not a path rooted at the instance is refused — a walk that stopped early must never be reported as a completed one, because the kind is exhaustive |
+| cursor | `{"v":1,"modified_to":"2026-08-22T10:40:00Z","tz_offset_secs":7200,"seen":[{"i":"98307","n":3,"u":"…"}]}`; CQL `type = page [AND space in (…)] AND lastmodified >= "<watermark − 2 min>" order by lastmodified asc`. The 2-minute overlap is mandatory for the same reason as Jira's: **a CQL date literal is `"yyyy-MM-dd HH:mm"` and therefore minute-resolution**, so an exact-boundary watermark drops items. Identity in `seen` is `(content id, version.number)` and not `(id, timestamp)` — Confluence's version counter closes the "edited twice in one second" hole the Jira cursor documents |
+| zone | CQL literals carry **no zone** and are read in the instance's own. It is learned from a timestamp the server itself rendered (`version.when` on the run-start probe), never from a timezone database and never from an admin endpoint. Unknown falls back to UTC−12, not UTC: guessing the offset *high* moves the query's lower bound forward and skips edits permanently, guessing it low only re-reads them |
+| ceiling | the run-start probe is the **same scope**, `order by lastmodified desc`, `limit=1`, `expand=version`. Its `version.when` is the ceiling the watermark may not pass (`CONTEXT.md`, *Watermark*), so a page edited *during* a run cannot carry the position past run start and hide every other edit made while it ran. Witnessed, not clocked — `now()` is guaranteed too high the moment the two clocks disagree |
+| call order | **`/rest/api/user/current` is the first call of every run**, before the probe and before the walk. A content search is a read a server may allow anonymously, and where it does an unresolvable credential answers 200 with an empty result set — which on an exhaustive kind is the engine's licence to tombstone the mirror. The identity call has no anonymous answer. This is the Confluence spelling of the `/serverInfo`-first ordering issue #276 measured on Jira |
+| config (`config_schema`) | `flavor` (`datacenter`\|`cloud`, default `datacenter`; Cloud refused by name), `spaces[]` (**empty = every space the account can see**), `username` (identity — filled by *Test connection*, used for `@me`/My items; also the login for user + password auth), `page_size` (1–50, default 50) |
+| write ops | **none.** `write_ops: []` and no `Capability::Write`; every op is refused by name. `CreatePage`, `UpdatePage` and a reused `Comment` are spec #272's Confluence set, each an ADR-0006 growth of `WriteOp` and a §10.8 entry, and they are the next ticket's |
+| contract source | **the real container, and nothing else.** ADR-0013: Atlassian publishes no machine-readable Confluence DC spec, so `knobas-mockd` has no Confluence half and port 8211 stays unreserved. `crates/knobas-source-confluence/tests/live_confluence_seeded.rs` against the seeded instance is the only witness, run by `just atlassian-live` |
+| client | hand-rolled reqwest through `knobas-http` (4 calls) |
+
+**Accepted limitation, recorded rather than hidden.** Offset paging over the field being ordered by can *step over* a row: a page at the front of an `asc` order is edited, moves to the end, every row behind it shifts down by one, and the walk's next offset lands one past where it should. The stepped-over page keeps its old timestamp, so no incremental query reaches it either — only the next full sync does. This is the same class the Jira adapter accepts with `startAt` and `ORDER BY updated ASC`, and the ceiling does not close it; `a_page_edited_mid_walk_can_shift_a_row_past_the_offset` pins it so a reader does not build a stronger guarantee on top of it.
+
+**Frozen surfaces: none.** `crates/knobas-source-confluence/**` is a new crate and is not in §10.8's list; the registry row and the app manifest line are the append-only additions §3a's "one crate + one registry line" describes. No migration, no IPC command, no DTO change.
+
 **Adapter construction** (needed by the scheduler and by `test_source`): each adapter crate exposes exactly
 ```rust
 pub fn descriptor_template() -> knobas_source::SourceDescriptor;   // id == adapter_kind

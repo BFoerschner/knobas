@@ -219,7 +219,10 @@ mod tests {
 
     #[test]
     fn a_heading_and_a_paragraph_become_two_lines() {
-        assert_eq!(to_text("<h2>Backoff policy</h2><p>base 30 s</p>"), "Backoff policy\nbase 30 s");
+        assert_eq!(
+            to_text("<h2>Backoff policy</h2><p>base 30 s</p>"),
+            "Backoff policy\nbase 30 s"
+        );
     }
 
     /// Inline elements are not boundaries: a word wrapped in `<code>` is still
@@ -295,7 +298,10 @@ mod tests {
         assert_eq!(to_text("<p>&hellip;</p>"), "&hellip;");
         // An `&` that opens nothing is an `&`, and what follows it is still
         // the author's words.
-        assert_eq!(to_text("<p>100 &amp still counts</p>"), "100 &amp still counts");
+        assert_eq!(
+            to_text("<p>100 &amp still counts</p>"),
+            "100 &amp still counts"
+        );
     }
 
     /// A list is lines, not one run-on sentence -- which is what makes a

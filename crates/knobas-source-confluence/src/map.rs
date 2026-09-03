@@ -22,9 +22,11 @@ pub(crate) fn to_sync_item(source_id: &str, base_url: &str, raw: &RawContent) ->
         .map(|c| c.results.as_slice())
         .unwrap_or_default();
     let body_text = join(
-        [title.clone(), body]
-            .into_iter()
-            .chain(comments.iter().map(|c| crate::storage::to_text(c.storage()))),
+        [title.clone(), body].into_iter().chain(
+            comments
+                .iter()
+                .map(|c| crate::storage::to_text(c.storage())),
+        ),
     );
     SyncItem {
         // **The content id, never the title.** A page renamed in Confluence
@@ -218,7 +220,10 @@ mod tests {
         assert_eq!(item.payload["ancestors"][0]["title"], "Engineering");
         assert_eq!(item.payload["ancestors"][1]["title"], "Payments");
         // The comments, at Confluence's own path.
-        assert_eq!(item.payload["children"]["comment"]["results"][0]["id"], "98320");
+        assert_eq!(
+            item.payload["children"]["comment"]["results"][0]["id"],
+            "98320"
+        );
         assert_eq!(item.payload["version"]["number"], 3);
     }
 
@@ -269,7 +274,10 @@ mod tests {
     fn a_page_with_no_web_link_has_no_web_url() {
         let mut page = a_page();
         page.content.links = None;
-        assert_eq!(to_sync_item("confluence", "http://x.example", &page).web_url, None);
+        assert_eq!(
+            to_sync_item("confluence", "http://x.example", &page).web_url,
+            None
+        );
 
         let mut blank = a_page();
         blank.content.links.as_mut().unwrap().webui = Some("  ".to_owned());
@@ -284,7 +292,11 @@ mod tests {
     /// trailing slash must not produce `…example//display/…`.
     #[test]
     fn the_namespace_is_the_instance_id_and_the_base_url_does_not_double() {
-        let item = to_sync_item("confluence-eu", "https://wiki.eu.example/confluence/", &a_page());
+        let item = to_sync_item(
+            "confluence-eu",
+            "https://wiki.eu.example/confluence/",
+            &a_page(),
+        );
         assert_eq!(item.entity.namespace, "confluence-eu");
         assert_eq!(
             item.web_url.as_deref(),

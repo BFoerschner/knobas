@@ -306,11 +306,17 @@ mod tests {
     fn both_views_are_built_from_one_record() {
         let page = a_page();
         assert_eq!(page.content.id, "98307");
-        assert_eq!(page.content.title.as_deref(), Some("SEPA payout retry design"));
+        assert_eq!(
+            page.content.title.as_deref(),
+            Some("SEPA payout retry design")
+        );
         assert_eq!(page.storage(), "<p>hello</p>");
         let version = page.content.version.as_ref().unwrap();
         assert_eq!(version.number, Some(3));
-        assert_eq!(version.when.as_deref(), Some("2026-08-22T12:40:00.000+02:00"));
+        assert_eq!(
+            version.when.as_deref(),
+            Some("2026-08-22T12:40:00.000+02:00")
+        );
         assert_eq!(
             page.content.links.as_ref().unwrap().webui.as_deref(),
             Some("/display/ENG/SEPA+payout+retry+design")
@@ -352,7 +358,14 @@ mod tests {
         assert_eq!(page.raw["children"]["comment"]["size"], 1);
         // The typed half moved with it, so the completion check does not
         // re-fetch this page's comments on every run.
-        let container = page.content.children.as_ref().unwrap().comment.as_ref().unwrap();
+        let container = page
+            .content
+            .children
+            .as_ref()
+            .unwrap()
+            .comment
+            .as_ref()
+            .unwrap();
         assert_eq!(container.results.len(), 1);
         assert!(!container.truncated());
     }

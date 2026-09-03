@@ -420,8 +420,21 @@ wizards) → `seed-atlassian-content.sh` → `seed-atlassian-content.sh --verify
 when a step fails and on Ctrl-C. The recipe's header carries the measured wall
 clock of a full run and where a new live suite's line goes. Measured
 2026-09-03, a full run from empty volumes is about four and a quarter minutes
-— three of them the two wizard walks, seconds of them the two live suites; the
+— three of them the two wizard walks, seconds of them the live suites; the
 three-hour window holds with hours of margin.
+
+**The suite gated on `KNOBAS_CONFLUENCE_URL`** (issue #284) is
+`crates/knobas-source-confluence/tests/live_confluence_seeded.rs`, and it is
+the **only** witness that adapter has or will have: ADR-0013 refused a mockd
+Confluence half because there is no machine-readable spec to build one from, so
+every claim the crate makes about a response shape — that a content search
+answers `_links.next` and no total, that `version.when` carries the instance's
+UTC offset, that `children.comment` is where an expanded discussion lands — is
+a claim this file re-makes against Confluence itself. It writes exactly one
+thing: a **title**, on one seeded page, to witness that a renamed page keeps
+its content id. It puts it back from a `Drop` that checks, and its leftover
+clearing restores every seeded page's title from `seed-state.json`, so a
+*killed* run is recovered by the next one.
 
 **The two suites gated on `KNOBAS_JIRA_URL`** (issue #276) are
 `crates/knobas-source-jira/tests/live_jira_seeded.rs` — the adapter: sync,
@@ -457,7 +470,12 @@ Link, its comments and worklogs, and `blocked_by` as a *Blocks* link. In
 Confluence, the `ENG` space (named *Engineering*; the fixture names only the
 key), its five pages under the space home page with the fixture's `##`
 sections as `<h2>`/`<p>` storage format, their comments, and *Standup
-protocols* as the empty page the standup flow will publish under. The
+protocols* as the empty page the standup flow will publish under. Only
+*SEPA payout retry design* has a body and a comment in the fixture — the other
+four are titles under the space home, which is what makes them the test that
+an empty page is still a page. The ids Confluence assigns are recorded as
+`confluence.pages[]`, with `confluence.space`, `confluence.home_page_id` and
+`confluence.author` beside them; the Confluence live suite reads all four. The
 template's workflow is *Software Simplified Workflow for Project `<KEY>`*:
 **To Do, In Progress, In Review, Done**, every transition available from
 every status — exactly the fixture's four statuses, and the names the live

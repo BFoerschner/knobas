@@ -331,9 +331,9 @@ mod tests {
         /// would order and bound them.
         fn matching(&self, cql: &str, start: usize, limit: usize) -> (Vec<Value>, bool) {
             let pages = self.pages.lock().unwrap().clone();
-            let bound = cql.split_once("lastmodified >= \"").map(|(_, rest)| {
-                rest.split('"').next().unwrap_or_default().to_owned()
-            });
+            let bound = cql
+                .split_once("lastmodified >= \"")
+                .map(|(_, rest)| rest.split('"').next().unwrap_or_default().to_owned());
             let mut rows: Vec<Value> = pages
                 .into_iter()
                 .filter(|p| match &bound {
@@ -355,7 +355,10 @@ mod tests {
     }
 
     fn when_of(page: &Value) -> String {
-        page["version"]["when"].as_str().unwrap_or_default().to_owned()
+        page["version"]["when"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned()
     }
 
     /// One page record, as the server would answer it with the expansions
@@ -415,7 +418,10 @@ mod tests {
             &self,
             path_and_query: &str,
         ) -> Result<crate::model::ContentPage, SourceError> {
-            self.calls.lock().unwrap().push(format!("follow {path_and_query}"));
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("follow {path_and_query}"));
             // The mid-run edit: the moment the walk asks for a second page,
             // one of the pages is modified and jumps to the end of the order.
             if let Some((id, when)) = self.edit_mid_walk.lock().unwrap().take() {
@@ -528,10 +534,25 @@ mod tests {
     fn a_corpus() -> Vec<Value> {
         vec![
             page("100", "On-call handbook", "2026-07-02T00:00:00.000Z", 1),
-            page("101", "Payments architecture overview", "2026-08-11T00:00:00.000Z", 1),
-            page("102", "Ledger reconciliation runbook", "2026-08-19T00:00:00.000Z", 1),
+            page(
+                "101",
+                "Payments architecture overview",
+                "2026-08-11T00:00:00.000Z",
+                1,
+            ),
+            page(
+                "102",
+                "Ledger reconciliation runbook",
+                "2026-08-19T00:00:00.000Z",
+                1,
+            ),
             page("103", "Standup protocols", "2026-08-21T00:00:00.000Z", 1),
-            page("104", "SEPA payout retry design", "2026-08-22T10:40:00.000Z", 3),
+            page(
+                "104",
+                "SEPA payout retry design",
+                "2026-08-22T10:40:00.000Z",
+                3,
+            ),
         ]
     }
 
@@ -563,7 +584,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(ids(&items), vec!["100", "101", "102", "103", "104"]);
-        let follows = fake.calls().iter().filter(|c| c.starts_with("follow ")).count();
+        let follows = fake
+            .calls()
+            .iter()
+            .filter(|c| c.starts_with("follow "))
+            .count();
         assert_eq!(follows, 2, "{:?}", fake.calls());
         // The watermark is the newest page's own timestamp, never a clock
         // reading -- `CONTEXT.md`'s Watermark rule.
@@ -726,7 +751,10 @@ mod tests {
         );
         let (items, _) = run(&fake, &cfg(json!({})), None).await.unwrap();
         let it = &items[0];
-        assert_eq!(it.payload["children"]["comment"]["results"][0]["id"], "98320");
+        assert_eq!(
+            it.payload["children"]["comment"]["results"][0]["id"],
+            "98320"
+        );
         assert!(
             it.body_text.contains("@Mara can you add the SLA?"),
             "the discussion reaches what FTS indexes: {:?}",
@@ -828,7 +856,10 @@ mod tests {
         }
         .run(None, &mut sink)
         .await;
-        assert!(matches!(got, Err(SourceError::Unauthorized { .. })), "{got:?}");
+        assert!(
+            matches!(got, Err(SourceError::Unauthorized { .. })),
+            "{got:?}"
+        );
         assert!(sink.0.is_empty());
     }
 }

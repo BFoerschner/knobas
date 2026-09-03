@@ -132,7 +132,10 @@ mod tests {
     /// rendered: it is the zone the CQL literal will be read back in.
     #[test]
     fn the_offset_is_read_off_the_servers_own_rendering() {
-        assert_eq!(parse_offset_secs("2026-08-22T12:40:00.000+02:00"), Some(7200));
+        assert_eq!(
+            parse_offset_secs("2026-08-22T12:40:00.000+02:00"),
+            Some(7200)
+        );
         assert_eq!(
             parse_offset_secs("2026-08-22T05:40:00.000-05:00"),
             Some(-5 * 3600)

@@ -57,7 +57,10 @@ pub(crate) fn build_cql(
         Order::Ascending => "asc",
         Order::Descending => "desc",
     };
-    format!("{} order by lastmodified {direction}", clauses.join(" AND "))
+    format!(
+        "{} order by lastmodified {direction}",
+        clauses.join(" AND ")
+    )
 }
 
 #[cfg(test)]
