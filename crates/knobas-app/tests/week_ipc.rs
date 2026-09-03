@@ -876,18 +876,6 @@ async fn discarding_a_queued_worklog_gives_the_afternoon_back() {
         .expect("there was an open write to withdraw");
     assert_eq!(discarded.state, WriteState::Discarded);
 
-    // The block is knobas' own again, and the copy of a record Jira never took
-    // is gone with the write that was going to make it.
-    assert_eq!(
-        worklog_id_of(&state.pool, monday_block).await,
-        None,
-        "a discarded worklog gives its blocks back"
-    );
-    assert!(
-        !copy_exists(&state.pool, monday.id).await,
-        "nothing was sent, so there is no record to keep a copy of"
-    );
-
     // 1 and 2: the week says unlogged, not held.
     let sheet = time::week::read(&state.pool, &week())
         .await
@@ -930,6 +918,19 @@ async fn discarding_a_queued_worklog_gives_the_afternoon_back() {
     )
     .await
     .expect("a released block is editable again");
+
+    // And the mechanism under all four: the block is knobas' own again, and
+    // the copy of a record Jira never took is gone with the write that was
+    // going to make it.
+    assert_eq!(
+        worklog_id_of(&state.pool, monday_block).await,
+        None,
+        "a discarded worklog gives its blocks back"
+    );
+    assert!(
+        !copy_exists(&state.pool, monday.id).await,
+        "nothing was sent, so there is no record to keep a copy of"
+    );
 
     // Tuesday, untouched: the release is keyed on the write that was
     // withdrawn, not on worklogs in general.
