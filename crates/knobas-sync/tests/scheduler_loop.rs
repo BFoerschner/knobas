@@ -543,30 +543,72 @@ async fn a_cancelled_run_leaves_the_source_lock_free() {
     let (pool, sched_pool) = pools().await;
     let ids = seed(&pool, 1).await;
     let id = ids[0].clone();
-    let (deps, _) = deps(sched_pool, Duration::from_secs(30)).await;
+    let (deps, inside) = deps_watching_the_adapter(sched_pool, Duration::from_secs(30)).await;
 
     let scheduler = Scheduler::start(deps).await.unwrap();
     scheduler
         .trigger(&id, SyncTrigger::Manual, None)
         .await
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // Both waits here are conditions, not clock (#307). A fixed sleep before
+    // the shutdown decided by guess whether the run had reached
+    // `run_locked`'s `pg_advisory_xact_lock` yet, and on a loaded machine it
+    // sometimes had not -- a run cancelled *before* it took the lock leaves
+    // the lock free for a reason this test is not about, so the sleep was
+    // buying a green that says nothing. `await_inside` puts the run past that
+    // statement and inside the adapter, where it demonstrably holds the lock.
+    await_inside(&inside).await;
+    assert!(
+        inside.load(Ordering::SeqCst) > 0,
+        "the run must be holding the source's lock when the cancellation arrives"
+    );
+
     scheduler.shutdown().await;
 
-    let (free,): (bool,) = tokio::time::timeout(
-        Duration::from_secs(5),
-        sqlx::query_as("select pg_try_advisory_lock(hashtext($1::text))")
-            .bind(&id)
-            .fetch_one(&pool),
-    )
-    .await
-    .expect("asking for the lock must not block")
-    .unwrap();
+    // And the release is waited for rather than assumed. `shutdown` returns
+    // when the run's *task* is done; the lock goes when the server notices the
+    // dropped connection, which is a beat later and not one this process can
+    // observe. Polling to a deadline covers that beat without paying for it on
+    // a quiet machine -- and a lock that is never released still fails, five
+    // seconds later, which is what the mutation proof turns on.
     assert!(
-        free,
+        await_lock_free(&pool, &id).await,
         "the cancelled run's connection is still holding the source's lock"
     );
     retire(&pool, &ids).await;
+}
+
+/// Wait, to a deadline, for `source_id`'s advisory lock to come free.
+///
+/// `pg_try_advisory_lock` is the *non-blocking* form: it answers at once
+/// whether the lock is free rather than queueing behind whoever holds it, so
+/// the deadline here bounds the waiting and no query can hang inside it. The
+/// answer is taken on one connection held for the whole poll and handed
+/// straight back on success, because a session lock belongs to the session
+/// that took it -- an unlock on some other connection out of the pool would
+/// release nothing and leave the test's own lock behind for whoever draws
+/// that connection next.
+async fn await_lock_free(pool: &PgPool, source_id: &str) -> bool {
+    let mut conn = pool.acquire().await.unwrap();
+    for attempt in 0..250 {
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let (free,): (bool,) = sqlx::query_as("select pg_try_advisory_lock(hashtext($1::text))")
+            .bind(source_id)
+            .fetch_one(&mut *conn)
+            .await
+            .unwrap();
+        if free {
+            sqlx::query("select pg_advisory_unlock(hashtext($1::text))")
+                .bind(source_id)
+                .execute(&mut *conn)
+                .await
+                .unwrap();
+            return true;
+        }
+    }
+    false
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1831,13 +1873,16 @@ async fn mirrored(pool: &PgPool, id: &str) -> (i64, i64) {
 /// yet, a delete would be seen, and the run would refuse and write nothing:
 /// green, and about nothing.
 async fn await_inside(inside: &Arc<AtomicUsize>) {
-    for _ in 0..200 {
+    // Five seconds, the same budget `await_ending` allows, and for the same
+    // reason: this is a deadline on a machine that may be running six other
+    // test binaries, not a measurement of how long reaching the adapter takes.
+    for _ in 0..500 {
         if inside.load(Ordering::SeqCst) > 0 {
             return;
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    panic!("no run reached the adapter in two seconds; there is nothing to interleave with");
+    panic!("no run reached the adapter in five seconds; there is nothing to interleave with");
 }
 
 /// **Deleting a source with `purge_items` while a sync of it is in flight
