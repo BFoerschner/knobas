@@ -94,6 +94,15 @@ mod tests {
     /// whole hazard the id is per instance: `customfield_10102` here is a
     /// perfectly plausible thing for a reader to have copied off another
     /// server.
+    /// The plugin key, spelled out rather than read from
+    /// [`EPIC_LINK_SCHEMA`].
+    ///
+    /// Load-bearing: a fixture built from the constant agrees with whatever
+    /// the constant says, so changing the constant to `gh-epic-status` would
+    /// move the rule *and* the corpus together and every test here would pass.
+    /// The literal is the second witness.
+    const REAL_KEY: &str = "com.pyxis.greenhopper.jira:gh-epic-link";
+
     fn greenhopper() -> Vec<FieldMeta> {
         vec![
             field("summary", "Summary", false, None),
@@ -103,12 +112,7 @@ mod tests {
                 true,
                 Some("com.pyxis.greenhopper.jira:gh-epic-label"),
             ),
-            field(
-                "customfield_10101",
-                "Epic Link",
-                true,
-                Some(EPIC_LINK_SCHEMA),
-            ),
+            field("customfield_10101", "Epic Link", true, Some(REAL_KEY)),
             field(
                 "customfield_10102",
                 "Epic Status",
@@ -154,7 +158,7 @@ mod tests {
             "customfield_10109",
             "Übergeordnetes Epic",
             true,
-            Some(EPIC_LINK_SCHEMA),
+            Some(REAL_KEY),
         );
         fields.insert(0, field("customfield_10500", "Epic Link", true, None));
         assert_eq!(
