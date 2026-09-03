@@ -395,14 +395,14 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             (field::MERGED, &paths.merged, Wanted::Flag),
         ];
 
-        /// Clause 2 for one path on one item, and the evidence clause 3 wants
-        /// from it.
-        let mut weigh = |seen: &mut Evidence,
-                         name: &str,
-                         payload: &serde_json::Value,
-                         path: &PayloadPath,
-                         wanted: Wanted,
-                         within: &str| {
+        // Clause 2 for one path on one item, and the evidence clause 3 wants
+        // from it.
+        let weigh = |seen: &mut Evidence,
+                     name: &str,
+                     payload: &serde_json::Value,
+                     path: &PayloadPath,
+                     wanted: Wanted,
+                     within: &str| {
             if let Some(value) = at(payload, path) {
                 assert!(
                     wanted.matches(value),
