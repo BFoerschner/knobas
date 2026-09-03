@@ -1048,16 +1048,27 @@ async fn a_revoked_pat_reaches_the_credential_health_surface_and_the_mirror_surv
         "the sources view is told once that the credential works"
     );
 
+    // The stamp the *good* run left, kept so the refusal's own can be compared
+    // against it. `set_health` writes `auth_checked_at = now()` on every
+    // verdict, so by this point the column is already non-null and
+    // `is_some()` on it below would pass whether or not the refused run ever
+    // reached it.
+    let checked_when_healthy = healthy.health.checked_at;
+
     // 2. The token is revoked -- here by swapping what the keychain holds,
     //    which is the same thing from the adapter's side and leaves the real
     //    token for the guard to clean up.
+    //
+    //    Bound rather than inlined because it is the secret **in play** for
+    //    the run below, and so the one the §14 assertion has to name.
+    let refused_secret = format!("revoked-{}", std::process::id());
     state
         .secrets
         .put(
             JIRA,
             &Secret {
                 kind: AuthMethod::Pat,
-                value: format!("revoked-{}", std::process::id()),
+                value: refused_secret.clone(),
             },
         )
         .expect("the replacement credential is stored");
@@ -1077,7 +1088,13 @@ async fn a_revoked_pat_reaches_the_credential_health_surface_and_the_mirror_surv
          row (interfaces §3): {:?}",
         refused.health
     );
-    assert!(refused.health.checked_at.is_some(), "{:?}", refused.health);
+    assert!(
+        refused.health.checked_at > checked_when_healthy,
+        "the refusal stamps `auth_checked_at` itself -- the column the sources view reads as \
+         *when this was last asked*. Compared against the good run's stamp and not merely for \
+         non-null, because the good run already filled it in: {:?} vs {checked_when_healthy:?}",
+        refused.health
+    );
     let event = events.last();
     assert_eq!(event.state, AuthState::Unauthorized);
     assert_eq!(event.source_id, JIRA);
@@ -1092,9 +1109,17 @@ async fn a_revoked_pat_reaches_the_credential_health_surface_and_the_mirror_surv
     // person being asked to re-enter a credential. Asserted as it is rather
     // than wished otherwise: putting the status here is an IPC-surface change
     // (§10.8) and no criterion asks for one.
+    //
+    // **`refused_secret` first, and it is the one that does the work.** The
+    // bearer this run presented is the replacement, not `pat.raw` -- a detail
+    // line that grew the server's answer, or the request that drew it, would
+    // carry *that* string, and naming only `pat.raw` here would pass under an
+    // implementation that echoed the presented credential verbatim. `pat.raw`
+    // is asserted too because it is still this source's secret of record at
+    // the keychain the run before.
     assert!(
-        !detail.contains(&pat.raw),
-        "spec §14: a health detail is never a place a secret can reach"
+        !detail.contains(&refused_secret) && !detail.contains(&pat.raw),
+        "spec §14: a health detail is never a place a secret can reach: {detail:?}"
     );
     println!("SEEDED credential health after the revoke: {:?}", event);
 
@@ -2589,10 +2614,11 @@ async fn a_revoked_confluence_pat_reaches_the_credential_health_surface_and_the_
     let synced = confluence_pages(&state.pool).await;
     assert!(
         synced.len() >= 5,
-        "`fixtures/tidewater/work.json` names five pages and the seed puts each of them under the \
-         space home page, so a walk of the space answers at least six and never fewer than five \
-         -- an exact count here would be asserting the home page rather than the fixture: \
-         {synced:?}"
+        "`fixtures/tidewater/work.json` names five pages, and `seed-atlassian-content.sh` creates \
+         each of them under the space home page it reads off the space -- so a walk of the space \
+         in fact answers six. The bound is the fixture's five and not the six, because the sixth \
+         is the seed's own scaffolding and this assertion is about the corpus arriving under a \
+         personal access token; the exact set is pinned at step 4 instead: {synced:?}"
     );
     assert!(
         synced
@@ -2617,6 +2643,12 @@ async fn a_revoked_confluence_pat_reaches_the_credential_health_surface_and_the_
          last assertion here a claim about a cursor that exists: {healthy:?}"
     );
 
+    // The stamp the *good* run left, for the comparison at step 3: every
+    // verdict writes `auth_checked_at = now()`, so the column is already
+    // non-null here and a bare `is_some()` below would pass whether or not the
+    // refused run ever reached it.
+    let checked_when_healthy = healthy.health.checked_at;
+
     // 2. The token stops working -- here by swapping what the keychain holds
     //    for a string this Confluence never issued, which is the shape
     //    `live_confluence_seeded.rs`'s own `bad_token()` uses, and which leaves
@@ -2624,13 +2656,17 @@ async fn a_revoked_confluence_pat_reaches_the_credential_health_surface_and_the_
     //    at the server: what the next run measures is a bearer the server
     //    cannot **resolve** -- the 401 #284 recorded -- and not a token whose
     //    row Confluence has deleted.
+    //
+    //    Bound rather than inlined because it is the secret **in play** for
+    //    the refused run, and so the one the §14 assertion has to name.
+    let refused_secret = format!("revoked-{}", std::process::id());
     state
         .secrets
         .put(
             CONFLUENCE,
             &Secret {
                 kind: AuthMethod::Pat,
-                value: format!("revoked-{}", std::process::id()),
+                value: refused_secret.clone(),
             },
         )
         .expect("the replacement credential is stored");
@@ -2650,7 +2686,13 @@ async fn a_revoked_confluence_pat_reaches_the_credential_health_surface_and_the_
          row (interfaces §3): {:?}",
         refused.health
     );
-    assert!(refused.health.checked_at.is_some(), "{:?}", refused.health);
+    assert!(
+        refused.health.checked_at > checked_when_healthy,
+        "the refusal stamps `auth_checked_at` itself -- the column the sources view reads as \
+         *when this was last asked*. Compared against the good run's stamp and not merely for \
+         non-null, because the good run already filled it in: {:?} vs {checked_when_healthy:?}",
+        refused.health
+    );
     let event = events.last();
     assert_eq!(event.state, AuthState::Unauthorized);
     assert_eq!(event.source_id, CONFLUENCE);
@@ -2659,9 +2701,14 @@ async fn a_revoked_confluence_pat_reaches_the_credential_health_surface_and_the_
         detail.contains("unauthorized"),
         "the detail line names the fault the row is in: {detail:?}"
     );
+    // **`refused_secret` first, and it is the one that does the work**, for
+    // the reason the Jira half above gives at length: the bearer this run
+    // presented is the replacement, so an implementation that echoed the
+    // presented credential into the detail would be caught by that name and
+    // not by `pat.raw`, which this source stopped using a run ago.
     assert!(
-        !detail.contains(&pat.raw),
-        "spec §14: a health detail is never a place a secret can reach"
+        !detail.contains(&refused_secret) && !detail.contains(&pat.raw),
+        "spec §14: a health detail is never a place a secret can reach: {detail:?}"
     );
     println!("SEEDED Confluence credential health after the revoke: {event:?}");
 
