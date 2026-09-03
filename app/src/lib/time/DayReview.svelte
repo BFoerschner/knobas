@@ -28,7 +28,7 @@
   own guess at what was open, so it says so in words as well as in colour —
   colour alone is not a reading — and the only thing it offers is *Assign…*:
   it may not be edited or deleted, because the next day read reconciles the
-  day's unassigned passive blocks back to what the beats support and an edit
+  day's unassigned passive blocks back to what the observations support and an edit
   would be undone under the reader's hands. Assigning is what takes it out of
   that reconciliation, by making it manual.
 
@@ -583,7 +583,7 @@
                 <!--
                   The only thing a passive block offers. It is deliberately not
                   editable or deletable: the next day read reconciles the day's
-                  unassigned passive blocks back to what the beats support, so
+                  unassigned passive blocks back to what the observations support, so
                   an edit would be undone under the reader's hands. Assigning
                   is what takes it out of that reconciliation.
                 -->

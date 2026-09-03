@@ -197,6 +197,6 @@ test("the days past the horizon are named, and only those", () => {
   expect(daysPastHorizon(week)).toEqual(["Mon 24", "Tue 25", "Wed 26"]);
 });
 
-test("a week knobas still has every beat for names no days at all", () => {
+test("a week knobas still has every observation for names no days at all", () => {
   expect(daysPastHorizon(weekWith({}))).toEqual([]);
 });

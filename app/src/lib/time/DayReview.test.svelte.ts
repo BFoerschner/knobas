@@ -759,8 +759,8 @@ test("a refused assignment shows the reason the backend gave", async () => {
 // -- the observation horizon (#337) ------------------------------------------
 //
 // Two days that draw the *same* strip: no blocks, nothing offered, the same
-// "nothing tracked" line. One of them is a day knobas no longer has the beats
-// for and the other is a day the reader had the app shut on, and the note is
+// "nothing tracked" line. One of them is a day past the observation horizon
+// and the other is a day the reader had the app shut on, and the note is
 // the only thing on screen that can tell them apart -- which is why both
 // directions are here. A view that always drew the note, or never did, would
 // satisfy either test alone.
@@ -772,9 +772,9 @@ test("a refused assignment shows the reason the backend gave", async () => {
  * Asserted against `horizonNote` rather than against a copy of its words: what
  * this pins is that the strip draws the *shared* sentence, which is the whole
  * of #337's "one decision, both surfaces". The words themselves are pinned
- * once, by the literal below.
+ * once, in `day.test.ts` (#344).
  */
-test("a day knobas no longer has the beats for says so above the strip", async () => {
+test("a day past the observation horizon says so above the strip", async () => {
   render([], { pastHorizon: true });
 
   await vi.waitFor(() => expect(text()).toContain(horizonNote("this day")));
@@ -785,14 +785,14 @@ test("a day knobas no longer has the beats for says so above the strip", async (
   ).toContain("Nothing tracked on this day");
 });
 
-test("a day with nothing on it that knobas still has the beats for says nothing", async () => {
+test("a day with nothing on it that is inside the horizon says nothing", async () => {
   render([]);
 
   await vi.waitFor(() => expect(text()).toContain("Nothing tracked on this day"));
   expect(
     text(),
     "a day inside the horizon was drawn as one knobas has forgotten",
-  ).not.toContain("no longer has the beats");
+  ).not.toContain("keeps a month of observations");
 });
 
 /**

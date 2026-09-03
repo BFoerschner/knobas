@@ -144,8 +144,7 @@ export function durationReading(minutes: number): string {
 }
 
 /**
- * What either surface says about a day knobas no longer has the beats for
- * (#337).
+ * What either surface says about a day past the observation horizon (#337).
  *
  * **One sentence, two subjects**, and that is the whole of the decision: the
  * strip says it about *this day* and the timesheet says it about the columns
@@ -158,12 +157,23 @@ export function durationReading(minutes: number): string {
  * correct is the one a person makes without being told: an empty passive
  * column looks exactly like a day the app was shut on.
  *
+ * **One word for the record, and no claim about the past** — both settled in
+ * `CONTEXT.md`'s *observation* and *observation horizon* (#344). The sentence
+ * named the same thing twice, as *observations* and then as *beats*; and it
+ * said *no longer has*, which asserts that observations for this day once
+ * existed. knobas cannot know that: a day past the horizon on which nobody
+ * had the app open never had one, and the stamp the horizon comes from
+ * records when a sweep ran, not what it found. *Has none* is the whole of
+ * what is true.
+ *
  * Exported from here rather than from `week.ts` for the reason {@link MONTHS}
- * is: one copy cannot drift from the other.
+ * is: one copy cannot drift from the other. The words themselves are pinned
+ * in `day.test.ts`; every other test of this sentence asserts against this
+ * function, which is what makes them agree with each other and blind to it.
  */
 export function horizonNote(subject: string): string {
   return (
-    `knobas keeps a month of observations and no longer has the beats for ` +
+    `knobas keeps a month of observations and has none for ` +
     `${subject}: what was open is absent, not zero.`
   );
 }

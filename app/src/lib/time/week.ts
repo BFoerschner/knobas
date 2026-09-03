@@ -148,10 +148,10 @@ export function columnHeading(key: string, index: number): string {
 }
 
 /**
- * The headings of the days knobas no longer has the observations for (#337).
+ * The headings of the days past the observation horizon (#337).
  *
  * **Every such day, not only the drawn ones.** A collapsed empty Saturday is
- * still a Saturday whose beats retention took, and a note that named only the
+ * still a Saturday whose observations retention took, and a note that named only the
  * visible columns would go quiet on exactly the week — one entirely past the
  * horizon — where nothing else on screen says anything at all.
  *
