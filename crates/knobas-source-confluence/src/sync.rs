@@ -624,7 +624,10 @@ mod tests {
             if let Some(fault) = self.identity_fault.as_ref().or(self.fault.as_ref()) {
                 return Err(clone_fault(fault));
             }
-            Ok(serde_json::from_value(json!({ "username": "knobas" })).unwrap())
+            Ok(serde_json::from_value(
+                json!({ "username": "knobas", "userKey": MY_KEY }),
+            )
+            .unwrap())
         }
 
         async fn search(
@@ -797,6 +800,56 @@ mod tests {
             .as_str()
             .unwrap_or_else(|| panic!("not a cursor this adapter wrote: {cursor}"))
             .to_owned()
+    }
+
+    /// The `userKey` this fake's `/rest/api/user/current` reports -- the key
+    /// a mention in a body is written with, and the one thing that lets
+    /// `body_text` carry a name at all.
+    const MY_KEY: &str = "ff8080818f2a1b4c018f2a1c9d0e0001";
+
+    /// A comment in the storage format a Confluence **editor** writes a
+    /// mention in: a user link carrying the key and no name anywhere.
+    fn mentioning_comment(id: &str, when: &str) -> Value {
+        json!({
+            "id": id,
+            "type": "comment",
+            "body": { "storage": { "value": format!(
+                "<p><ac:link><ri:user ri:userkey=\"{MY_KEY}\" /></ac:link> can you add the \
+                 SLA?</p>"), "representation": "storage" } },
+            "version": { "number": 1, "when": when, "by": { "username": "priya" } }
+        })
+    }
+
+    /// The thin record `mention = currentUser()` answers for that comment:
+    /// `MENTION_EXPAND`'s fields and nothing else.
+    fn mention_hit(comment_id: &str, page_id: &str, when: &str) -> Value {
+        json!({
+            "id": comment_id,
+            "type": "comment",
+            "container": { "id": page_id, "type": "page" },
+            "version": { "number": 1, "when": when }
+        })
+    }
+
+    /// Hang a mentioning comment off the fake's oldest page and register the
+    /// mention query's answer for it. Answers the page's id.
+    ///
+    /// **The oldest page on purpose**: the whole reason the mention walk
+    /// exists is that a comment does not move its page's `lastmodified`, so
+    /// the page this reaches must be one no incremental page walk would.
+    fn a_mention_arrives(fake: &Fake, when: &str) -> String {
+        let comment = mentioning_comment("900", when);
+        let mut pages = fake.pages.lock().unwrap();
+        let page = pages.first_mut().expect("the corpus has a page");
+        page["children"]["comment"]["results"] = json!([comment]);
+        page["children"]["comment"]["size"] = json!(1);
+        let id = page["id"].as_str().expect("a page id").to_owned();
+        drop(pages);
+        fake.mentions
+            .lock()
+            .unwrap()
+            .push(mention_hit("900", &id, when));
+        id
     }
 
     fn a_corpus() -> Vec<Value> {
@@ -1088,6 +1141,154 @@ mod tests {
         run(&fake, &cfg(json!({})), None).await.unwrap();
         assert!(
             !fake.calls().iter().any(|c| c.starts_with("comments ")),
+            "{:?}",
+            fake.calls()
+        );
+    }
+
+    /// **The criterion (#287), end to end at this seam.** A comment naming
+    /// the account arrives on a page nobody has edited in months; the run
+    /// after it delivers *that page*, and its `body_text` carries the `@name`
+    /// `knobas_core::inbox`'s mention rule reads.
+    ///
+    /// Everything the ticket rests on is in the one assertion: the page walk
+    /// cannot reach this page (its `version.when` is two months below the
+    /// bound), the mention query can, the comment's user **key** is resolved
+    /// to a name, and the entity is the page rather than the comment.
+    #[tokio::test]
+    async fn a_comment_that_mentions_me_delivers_the_page_it_is_on() {
+        let fake = Fake::new(a_corpus());
+        let (_, first) = run(&fake, &cfg(json!({})), None).await.unwrap();
+        let page_id = a_mention_arrives(&fake, "2026-09-03T09:00:00.000Z");
+
+        let (items, _) = run(&fake, &cfg(json!({})), Some(first)).await.unwrap();
+        assert_eq!(
+            ids(&items),
+            vec![page_id.clone()],
+            "the mention walk delivers the page the comment is on: {:?}",
+            fake.calls()
+        );
+        assert!(
+            items[0].body_text.contains("@knobas"),
+            "the mention has to reach body_text as a name, or no inbox rule can \
+             see it: {:?}",
+            items[0].body_text
+        );
+        // The page was fetched whole by id -- the mention record itself
+        // carries no body, and mapping from it would mirror an empty page.
+        assert!(
+            fake.calls().contains(&format!("content {page_id}")),
+            "{:?}",
+            fake.calls()
+        );
+    }
+
+    /// Battery clause 2 **after a mention**, which is the case the ordinary
+    /// idle test cannot reach: the page the mention resolved to keeps its own
+    /// old `version.when`, so it falls out of the `seen` window at once. Only
+    /// the *comment's* entry keeps the next run from re-delivering the page,
+    /// and on every poll for ever.
+    #[tokio::test]
+    async fn a_delivered_mention_settles_and_the_next_poll_returns_the_same_bytes() {
+        let fake = Fake::new(a_corpus());
+        let (_, first) = run(&fake, &cfg(json!({})), None).await.unwrap();
+        a_mention_arrives(&fake, "2026-09-03T09:00:00.000Z");
+
+        let (items, second) = run(&fake, &cfg(json!({})), Some(first)).await.unwrap();
+        assert_eq!(items.len(), 1, "{:?}", ids(&items));
+        let (items, third) = run(&fake, &cfg(json!({})), Some(second.clone()))
+            .await
+            .unwrap();
+        assert!(
+            items.is_empty(),
+            "the mention was delivered once: {:?}",
+            ids(&items)
+        );
+        assert_eq!(third, second, "and the position did not move");
+    }
+
+    /// **The mention walk never moves the watermark.** The comment is dated
+    /// twelve days after the newest page edit; a run that advanced to it would
+    /// put every page edited in between below the next query's lower bound and
+    /// lose those edits for good.
+    #[tokio::test]
+    async fn a_mention_newer_than_every_page_leaves_the_watermark_where_it_was() {
+        let fake = Fake::new(a_corpus());
+        let (_, first) = run(&fake, &cfg(json!({})), None).await.unwrap();
+        assert_eq!(watermark(&first), "2026-08-22T10:40:00Z");
+        a_mention_arrives(&fake, "2026-09-03T09:00:00.000Z");
+
+        let (_, second) = run(&fake, &cfg(json!({})), Some(first)).await.unwrap();
+        assert_eq!(
+            watermark(&second),
+            "2026-08-22T10:40:00Z",
+            "the page walk's position is the watermark, and a comment is not a page edit"
+        );
+    }
+
+    /// A page the page walk already delivered this run is not fetched and sent
+    /// a second time by the mention walk -- which on a full sync would be one
+    /// wasted request and one wasted upsert per mentioning page.
+    #[tokio::test]
+    async fn a_mentioning_page_the_walk_already_sent_is_not_sent_twice() {
+        let fake = Fake::new(a_corpus());
+        let page_id = a_mention_arrives(&fake, "2026-09-03T09:00:00.000Z");
+        let (items, _) = run(&fake, &cfg(json!({})), None).await.unwrap();
+        assert_eq!(
+            ids(&items).iter().filter(|id| **id == page_id).count(),
+            1,
+            "{:?}",
+            ids(&items)
+        );
+        assert!(
+            !fake.calls().contains(&format!("content {page_id}")),
+            "a full sync already has the page: {:?}",
+            fake.calls()
+        );
+    }
+
+    /// A mention record the walk cannot place produces nothing, and takes the
+    /// run down with it in neither direction.
+    ///
+    /// Three shapes: a comment whose container the server did not expand, a
+    /// **page** record -- whose container is its *space*, so a walk reading a
+    /// container id blindly would fetch a space id as a page -- and a type
+    /// this adapter never asked for.
+    #[tokio::test]
+    async fn a_mention_record_the_walk_cannot_place_contributes_nothing() {
+        let fake = Fake::new(a_corpus()).mentioning(vec![
+            json!({ "id": "900", "type": "comment",
+                    "version": { "number": 1, "when": "2026-09-03T09:00:00.000Z" } }),
+            json!({ "id": "901", "type": "blogpost",
+                    "container": { "id": 98305, "key": "ENG", "type": "space" },
+                    "version": { "number": 1, "when": "2026-09-03T09:00:00.000Z" } }),
+            json!({ "id": "902",
+                    "version": { "number": 1, "when": "2026-09-03T09:00:00.000Z" } }),
+        ]);
+        let (_, first) = run(&fake, &cfg(json!({})), None).await.unwrap();
+        let (items, _) = run(&fake, &cfg(json!({})), Some(first)).await.unwrap();
+        assert!(items.is_empty(), "{:?}", ids(&items));
+    }
+
+    /// A **page** that names the account in its own body is the other half of
+    /// `type in (page, comment)`: the record the query answers *is* the page,
+    /// and its own id is what gets fetched.
+    #[tokio::test]
+    async fn a_page_that_mentions_me_in_its_own_body_is_delivered_too() {
+        let fake = Fake::new(a_corpus());
+        let (_, first) = run(&fake, &cfg(json!({})), None).await.unwrap();
+        // A new version of page 100 that the *page* walk still cannot see,
+        // because the fake's corpus timestamp is what CQL bounds on and this
+        // record's is the one the mention query answered with.
+        fake.mentions.lock().unwrap().push(json!({
+            "id": "100", "type": "page",
+            "container": { "id": 98305, "key": "ENG", "type": "space" },
+            "version": { "number": 1, "when": "2026-09-03T09:00:00.000Z" }
+        }));
+        let (items, _) = run(&fake, &cfg(json!({})), Some(first)).await.unwrap();
+        assert_eq!(ids(&items), vec!["100"]);
+        assert!(
+            fake.calls().contains(&"content 100".to_owned()),
             "{:?}",
             fake.calls()
         );
