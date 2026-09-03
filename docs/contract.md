@@ -3361,12 +3361,15 @@ From this commit on, each of the following requires an orchestrator decision **a
   otherwise have to be revised. #280 may add the constraint or may follow this schema's usual
   no-foreign-key rule; either way nothing here changes. Nothing in #278 writes it.
 
-  **`kind` enumerates `passive` before anything writes one.** #281 adds the derivation; the day
+  **`kind` enumerates `passive` before anything writes one.** #282 adds the derivation; the day
   review (#279) draws the two distinguishably and would otherwise have one kind to distinguish.
   The vocabulary lives in three places — the check constraint, `time::BlockKind`, and the
   `'manual'` literal in the two writing statements — and `every_block_kind_is_one_the_schema_accepts`
   reads the migration file to keep them in step, the cross-check `knobas_core::start_work` runs
-  against `0008`'s `step` vocabulary.
+  against `0008`'s `step` vocabulary. **`0013`'s own comments credit that derivation to #281,
+  and stay wrong**: sqlx checksums an applied migration, so editing one for a comment would
+  fail startup on every existing database — the rule this file states for `0001`. The number
+  here is the correction (#306).
 
   **The module pair.** `crates/knobas-app/src/time/mod.rs` holds the decisions and
   `crates/knobas-app/src/commands/time.rs` is shims over it — the arrangement `backup/` set and
@@ -3395,7 +3398,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   `entity_mirror.rs` states.
 
   **`timer_heartbeat`'s `foreground` is taken and not yet stored, and that is deliberate.** It is
-  the observation passive attribution (#281) turns into passive blocks, and #281 brings the table
+  the observation passive attribution (#282) turns into passive blocks, and #282 brings the table
   to store it in. It is on the command **now** because the frontend rule that computes it — *open
   detail, else room anchor, else none* — is part of this ticket, and adding the parameter later
   would be a second §10.8 touch on a command that already exists.
@@ -3404,7 +3407,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   the stamp lands and a refusal is logged, never propagated: the stamp is a statement about
   knobas being alive, and a beat lost to a malformed foreground would freeze `last_heartbeat` and
   hand the next relaunch a block hours short — the one failure the relaunch rule exists to
-  prevent (`a_foreground_the_timer_could_never_run_on_does_not_cost_the_beat`). So #281 inherits
+  prevent (`a_foreground_the_timer_could_never_run_on_does_not_cost_the_beat`). So #282 inherits
   the parameter unvalidated; what it inherits alongside it is a log line already complaining
   about every bad one.
 
@@ -3441,7 +3444,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   `WriteOp::LogWork` is #280's growth with its own entry. `crates/knobas-http/**` and
   `crates/knobas-app/src/{error,profile}.rs` are untouched: the commands' failures are
   `invalid`, `conflict` and query failures, which `IpcError`'s existing constructors and its
-  `From<sqlx::Error>` already cover. No settings key — passive attribution's is #281's. The
+  `From<sqlx::Error>` already cover. No settings key — passive attribution's is #282's. The
   backup export needs no change to carry the two new tables: it dumps the whole `knobas` schema
   (design §16.12), so `knobas.timer` and `knobas.block` ride in it already; the share export's
   time toggle is #283's paperwork. `knobas_core` gains nothing — the store is in `knobas-app`

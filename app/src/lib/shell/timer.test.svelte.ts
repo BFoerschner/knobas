@@ -226,7 +226,7 @@ test("the heartbeat is sent every thirty seconds and carries the foreground", ()
   belt.timer.foreground = null;
   vi.advanceTimersByTime(HEARTBEAT_MS);
   // `null` is an observation and not a missing one: nothing was in front of
-  // the reader, which is what #281 will record as an unattributed gap.
+  // the reader, which is what #282 will record as an unattributed gap.
   expect(belt.calls.beats).toEqual([TICKET, null]);
 
   stop();

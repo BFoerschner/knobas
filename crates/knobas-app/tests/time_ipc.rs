@@ -458,7 +458,7 @@ async fn an_entity_timers_line_is_filed_under_that_entity() {
 /// Neither is reachable through `time::start`: `TimerTarget` is a tagged enum,
 /// so "both halves" and "neither half" have no spelling in Rust at all. The
 /// check constraint is therefore a backstop against a future writer -- #279's
-/// block editor, #281's passive derivation, a restored backup -- and a
+/// block editor, #282's passive derivation, a restored backup -- and a
 /// backstop nothing exercises is a backstop nobody knows is there. So these
 /// two go through raw `insert`s, which is the only way to reach it.
 #[tokio::test]

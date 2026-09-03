@@ -88,7 +88,7 @@ export interface KeyHandlers {
    * nothing is in front of the reader, so `press()` answers `"pick"` again and
    * the shell re-opens a dialog that is already up. It stops being harmless
    * the moment another surface can start a timer while the picker is open,
-   * which is what #281's passive attribution brings; the fix then is a
+   * which is what #282's passive attribution brings; the fix then is a
    * `stopPropagation` in the modal that wants the key, not a rung here.
    */
   toggleTimer: () => void;
