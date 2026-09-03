@@ -141,6 +141,13 @@ const READ_BLOCK: &str = "select entity_id, label, context_id from knobas.block 
 /// somebody confirmed it. `created_at` and the id break ties, so two links
 /// confirmed in the same instant still order deterministically rather than by
 /// whatever the planner returned.
+///
+/// **This is deliberately not [`knobas_core::link::entries_of`]'s order**,
+/// which is `created_at desc` over the same view. That read *lists* rows for
+/// the links panel, and newest row first is what a list wants; this one
+/// *ranks* candidates by when the reader agreed to them. The two questions are
+/// different, so the two orders are, and a change to either is not a change to
+/// the other.
 const LINKED: &str = "select case when l.from_id = $1 then l.to_id else l.from_id end as other
        from knobas.confirmed_link l
       where l.from_id = $1 or l.to_id = $1

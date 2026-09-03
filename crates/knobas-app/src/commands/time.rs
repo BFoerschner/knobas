@@ -884,7 +884,8 @@ mod tests {
         rust.sort();
         assert_eq!(
             rust, declared,
-            "the mirror's SuggestionRule and the Rust enum no longer agree, so              the dialog cannot say why it suggested what it suggested"
+            "the mirror's SuggestionRule and the Rust enum no longer agree, so \
+             the dialog cannot say why it suggested what it suggested"
         );
     }
 
