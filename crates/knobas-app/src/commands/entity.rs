@@ -2266,3 +2266,78 @@ pub async fn list_projects_inner(
     let declarations = declared_paths(pool).await?;
     Ok(knobas_core::project::list(pool, &declarations).await?)
 }
+
+// -- the standup digest (#288) ----------------------------------------------
+//
+// Here for the reason the two sections above give, and the reason spec #272
+// gives in as many words: §10.8 freezes the `commands/` + `ipc/` layout, and
+// "standup and Confluence reads go into the entity module as usual" -- the
+// `time` module pair was the one ratified exception and this is not a second
+// one. What the read decides lives in `crate::standup`; this seam adds the
+// pool, the identity and the declarations, the same three things
+// `inbox_items_inner` adds, and nothing else.
+
+/// The standup digest for one day (issue #288, spec #272 stories 58-63).
+///
+/// Three lists -- yesterday, today, blockers -- every line carrying the item
+/// it came from, which source said so and which verb it was. `CONTEXT.md`'s
+/// **digest**; [`crate::standup`] holds the rules and the reasoning.
+///
+/// **The webview computes the days**, each as a date and the two instants it
+/// spans: `today` is the day being asked about and `earlier` the days before
+/// it, oldest first. The rule is [`day_blocks`](crate::commands::time::day_blocks)'s
+/// in full -- the machine's timezone is a fact only that side holds, and a UTC
+/// offset would be the wrong shape as well as the wrong owner for a day
+/// containing a daylight-saving change. How far back the *yesterday* rule may
+/// reach is **not** the webview's to say: at most
+/// [`standup::LOOKBACK_DAYS`](crate::standup::LOOKBACK_DAYS) of `earlier` are
+/// consulted however many are sent.
+///
+/// **The registry is the injected one**, the shape [`inbox_items`] has and for
+/// the same reason: the blockers list is read through the descriptors'
+/// declared paths (#277), and a test that could not hand over a descriptor
+/// could only witness the declarations the shipped adapters happen to carry --
+/// which is a battery that passes just as well against a hardcoded list of
+/// English status words. That is the one mistake this read must not be able to
+/// make.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the
+/// database or the sync engine is still coming up,
+/// [`Internal`](crate::IpcErrorCode::Internal) for a read failure.
+#[tauri::command]
+pub async fn standup_digest<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    today: crate::time::week::DayWindow,
+    earlier: Vec<crate::time::week::DayWindow>,
+) -> Result<crate::standup::StandupDigest, IpcError> {
+    let state = crate::sources::state(&app)?;
+    standup_digest_inner(
+        &state.pool,
+        state.registry.as_ref(),
+        Utc::now(),
+        today,
+        &earlier,
+    )
+    .await
+}
+
+/// [`standup_digest`] with the pool, the registry and the clock handed in, so
+/// a test can reach it -- the split every read in this module has.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) for a read
+/// failure or a source listing that fails.
+pub async fn standup_digest_inner(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    now: DateTime<Utc>,
+    today: crate::time::week::DayWindow,
+    earlier: &[crate::time::week::DayWindow],
+) -> Result<crate::standup::StandupDigest, IpcError> {
+    let identity = identity_of(pool).await?;
+    let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
+    crate::standup::digest(pool, &identity, &declarations, now, today, earlier).await
+}

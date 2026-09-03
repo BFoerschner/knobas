@@ -984,3 +984,105 @@ fn the_mini_board_shapes_match_their_typescript_mirror() {
         serde_json::Value::Null
     );
 }
+
+// -- the standup digest (#288) ----------------------------------------------
+
+/// Every field of a digest line, in the order `DigestLine` declares them.
+const DIGEST_LINE_FIELDS: &[&str] = &[
+    "entity_id",
+    "kind",
+    "title",
+    "source",
+    "verb",
+    "reason",
+    "at",
+];
+
+/// The line with an item behind it -- the shape every list but one draws.
+fn digest_line() -> knobas_app::standup::DigestLine {
+    knobas_app::standup::DigestLine {
+        entity_id: Some("jira:PAY-231".to_owned()),
+        kind: Some("ticket".to_owned()),
+        title: "Payments retry storm".to_owned(),
+        source: "jira".to_owned(),
+        verb: "log_work".to_owned(),
+        reason: "you logged work on it in jira".to_owned(),
+        at: at(),
+    }
+}
+
+/// The one line with **no** item: a running timer on an ad-hoc label.
+///
+/// Exercised as its own fixture because `entity_id` and `kind` are null on
+/// exactly this line, and a `skip_serializing_if` added to either would pass
+/// every test written against the other and hand the view `undefined` on the
+/// one row whose whole point is that it must not be a link.
+fn digest_label_line() -> knobas_app::standup::DigestLine {
+    knobas_app::standup::DigestLine {
+        entity_id: None,
+        kind: None,
+        title: "DB config for the migration".to_owned(),
+        source: "knobas".to_owned(),
+        verb: "timer".to_owned(),
+        reason: "the timer is running on this label".to_owned(),
+        at: at(),
+    }
+}
+
+#[test]
+fn the_digest_line_shape_matches_its_typescript_mirror() {
+    let filled = serde_json::to_value(digest_line()).unwrap();
+    assert_shape("DigestLine", &filled, DIGEST_LINE_FIELDS);
+
+    let label = serde_json::to_value(digest_label_line()).unwrap();
+    assert_shape("DigestLine", &label, DIGEST_LINE_FIELDS);
+    for absent in ["entity_id", "kind"] {
+        assert!(
+            label[absent].is_null(),
+            "{absent} must keep its key as null, not vanish -- the view branches on it"
+        );
+    }
+}
+
+/// The digest itself, and the day its first list is about.
+///
+/// `yesterday_day` is exercised **as `None`** as well as filled: a week of
+/// silence is a real answer, and the heading has to be able to say so rather
+/// than reading `undefined`.
+#[test]
+fn the_standup_digest_shape_matches_its_typescript_mirror() {
+    let filled = knobas_app::standup::StandupDigest {
+        yesterday_day: Some(chrono::NaiveDate::from_ymd_opt(2026, 8, 28).expect("a Friday")),
+        yesterday: vec![digest_line()],
+        today: vec![digest_label_line()],
+        blockers: vec![digest_line()],
+    };
+    let wire = serde_json::to_value(&filled).unwrap();
+    assert_shape(
+        "StandupDigest",
+        &wire,
+        &["yesterday_day", "yesterday", "today", "blockers"],
+    );
+    assert_eq!(
+        wire["yesterday_day"],
+        serde_json::json!("2026-08-28"),
+        "a `NaiveDate` crosses as the `YYYY-MM-DD` the address and the heading use"
+    );
+    assert_shape("DigestLine", &wire["yesterday"][0], DIGEST_LINE_FIELDS);
+
+    let silent = knobas_app::standup::StandupDigest {
+        yesterday_day: None,
+        yesterday: Vec::new(),
+        today: Vec::new(),
+        blockers: Vec::new(),
+    };
+    let wire = serde_json::to_value(&silent).unwrap();
+    assert!(wire["yesterday_day"].is_null());
+    for empty in ["yesterday", "today", "blockers"] {
+        assert_eq!(
+            wire[empty],
+            serde_json::json!([]),
+            "an empty list is a list, never a missing key"
+        );
+    }
+}

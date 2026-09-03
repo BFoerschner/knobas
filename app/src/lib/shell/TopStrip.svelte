@@ -114,6 +114,8 @@
   const onSettings = $derived(router.route.view === "settings");
   /** §2's *Today*: the day review, on the day it is pressed (#279). */
   const onTime = $derived(router.route.view === "time");
+  /** *Standup*: the digest at its own address (#288). */
+  const onStandup = $derived(router.route.view === "standup");
 
   /**
    * How each state reads in the cluster's tooltip.
@@ -199,6 +201,24 @@
       <path d="M2 6.5h12M5.5 1.8v2.4M10.5 1.8v2.4" />
     </svg>
     <span class="k">Today</span>
+  </button>
+
+  <!--
+    *Standup* (#288). Beside *Today* because they are the same kind of thing —
+    a surface about the day, one click from anywhere — and a digest nothing
+    opens is a digest nobody reads. The address carries no date: the digest is
+    this morning's standup, defined against today.
+  -->
+  <button
+    class="tb-btn {onStandup ? 'on' : ''}"
+    aria-current={onStandup ? "page" : undefined}
+    title="Standup — yesterday, today and blockers"
+    onclick={() => router.go(hashFor({ view: "standup" }))}
+  >
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M2.5 4h11M2.5 8h7M2.5 12h9" />
+    </svg>
+    <span class="k">Standup</span>
   </button>
 
   <!--

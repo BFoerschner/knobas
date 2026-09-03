@@ -257,6 +257,44 @@ impl Env {
             .unwrap_or_default()
     }
 
+    /// Wait until Jira's **search index** answers `jql` with `expect`.
+    ///
+    /// The adapter enumerates through `/rest/api/2/search`, which reads Lucene
+    /// and not the database, and Jira updates that index *asynchronously*
+    /// after a write. So a sync fired the instant a REST write returns 204 can
+    /// mirror the row as it was before the write -- which is the race #325
+    /// records against a different assertion, and which made
+    /// `a_seeded_days_work_is_what_the_digest_lists_under_yesterday` fail one
+    /// run in two with two of its three producers present and the mirror's
+    /// missing.
+    ///
+    /// So: any live assertion that writes through the REST API and then asks
+    /// the *mirror* about it has to wait for the index first, and this is
+    /// where it waits. Bounded, and it fails loudly rather than syncing
+    /// anyway -- a test that quietly went on with stale data is the thing
+    /// being fixed, not a cheaper version of it.
+    async fn indexed(&self, jql: &str, expect: &str) {
+        const EVERY: Duration = Duration::from_millis(250);
+        const CAP: usize = 60;
+        for attempt in 0..CAP {
+            if self.jql(jql).await.iter().any(|key| key == expect) {
+                if attempt > 0 {
+                    println!(
+                        "SEEDED search index caught up after {}ms: {jql}",
+                        attempt * 250
+                    );
+                }
+                return;
+            }
+            tokio::time::sleep(EVERY).await;
+        }
+        panic!(
+            "Jira's search index never answered {jql:?} with {expect} in {}s. The write landed \
+             (its own status was asserted above); what did not is the index the adapter reads.",
+            CAP * 250 / 1000
+        );
+    }
+
     /// Delete every issue and revoke every token a **killed** run left behind
     /// -- the ones no `Drop` ever reached. Read-only in the ordinary case.
     async fn clear_leftovers(&self) {
@@ -446,6 +484,14 @@ struct Litter {
     moved: Option<(String, String)>,
     /// The key of the ticket the create filed.
     created: Option<String>,
+    /// `(issue key, the account it was assigned to before)` -- what the digest
+    /// suite borrows a ticket with.
+    ///
+    /// `None` in the second half is a ticket that was **unassigned**, which is
+    /// a state the restore has to be able to put back: `{"name": null}` is how
+    /// Jira spells it, and restoring it as the empty string would leave a
+    /// ticket assigned to an account that does not exist.
+    assigned: Option<(String, Option<String>)>,
     /// `(issue key, worklog id)` -- what `log_work` put on the ticket.
     ///
     /// A worklog carries no label, so a **killed** run's worklog is the one
@@ -459,11 +505,12 @@ struct Litter {
 
 impl Drop for Litter {
     fn drop(&mut self) {
-        let (comment, moved, created, worklog) = (
+        let (comment, moved, created, worklog, assigned) = (
             self.comment.take(),
             self.moved.take(),
             self.created.take(),
             self.worklog.take(),
+            self.assigned.take(),
         );
         let env = env();
         undo("what the write queue sent", move || async move {
@@ -558,6 +605,23 @@ impl Drop for Litter {
                     .any(|w| w["id"].as_str() == Some(id.as_str()))
                 {
                     failures.push(format!("worklog {id} is still on {key} after its delete"));
+                }
+            }
+
+            // Put the assignee back, including putting *nobody* back: an
+            // unassigned ticket is a state the seed can be in, and `name:
+            // null` is how Jira is told to restore it.
+            if let Some((key, was)) = assigned {
+                let (status, body) = call(
+                    reqwest::Method::PUT,
+                    format!("rest/api/2/issue/{key}/assignee"),
+                    Some(json!({ "name": was })),
+                )
+                .await;
+                if status != 204 {
+                    failures.push(format!(
+                        "restoring {key}'s assignee to {was:?} -> {status}: {body}"
+                    ));
                 }
             }
 
@@ -750,6 +814,32 @@ async fn sync(state: &SourcesState) {
         .trigger(JIRA, SyncTrigger::Manual, Some(sink))
         .await
         .expect("the run starts");
+    wait.await.expect("the run reports its ending");
+}
+
+/// Sync the source **from no position at all**, and wait for the run to end.
+///
+/// `knobas_sync::backfill`'s own words: an incremental run re-fetches what
+/// changed *upstream*, and it decides that from the watermark and the
+/// `(key, updated)` pairs the previous run recorded. A fixture that changes a
+/// field through the REST API and then wants the mirror to agree is asking for
+/// exactly the job that entry point exists to do -- so it asks for it, rather
+/// than syncing repeatedly and hoping an incremental notices.
+///
+/// Measured, not assumed: three live runs asserted after ordinary `sync` calls
+/// -- the last of them six of them over twenty-two seconds, with Jira's search
+/// index already agreeing -- and `sync.live_item` held the old assignee every
+/// time. It is deterministic, not flaky.
+async fn backfill(state: &SourcesState) {
+    let (done, wait) = tokio::sync::oneshot::channel();
+    let sink = Arc::new(Ending {
+        done: std::sync::Mutex::new(Some(done)),
+    });
+    state
+        .scheduler
+        .trigger(JIRA, SyncTrigger::Backfill, Some(sink))
+        .await
+        .expect("the backfill starts");
     wait.await.expect("the run reports its ending");
 }
 
@@ -1354,6 +1444,268 @@ async fn a_days_work_is_logged_to_pay_231_and_comes_back_in_the_mirror() {
     drop(litter);
 }
 
+/// **A day's real work, listed under *yesterday* with its refs** (issue #288,
+/// M3.3).
+///
+/// The digest is a **join** over three producers that reach the database by
+/// three unrelated routes, and this is the only place all three are real at
+/// once:
+///
+/// 1. **`knobas.worklog`** -- the local copy of an afternoon logged to Jira
+///    through the write queue;
+/// 2. **the activity stream** -- the `queued` line the queue writes when a
+///    person comments, carrying the op the digest reports as the verb;
+/// 3. **the mirror** -- `sync.live_item`, an item the sources say is *mine*,
+///    which on Jira means §4.1's `author`, which the adapter maps from the
+///    **assignee** (`map.rs`). So this test borrows a seeded ticket by
+///    assigning it to the suite's own account, and gives it back.
+///
+/// Every one of the three can be green in `tests/standup_ipc.rs` while this
+/// join is broken, and the third is the one no scratch fixture can settle: it
+/// rests on what the *adapter* puts in `author`, against a real server, for
+/// the account the source is really configured as.
+///
+/// **Asked for tomorrow, so today is *yesterday*.** The rule under test is
+/// "the newest day before the given date with any of my activity", and the
+/// only day this suite can put real work on is the day it runs. Asking for
+/// tomorrow's digest makes today the newest earlier day, which is the same
+/// question a Monday morning asks of Friday.
+///
+/// **And one thing that must not be on it**: PAY-231 is the seed's, assigned
+/// to `mara`, and the suite is somebody else. Story 63 -- *the digest
+/// describes me only* -- is asserted here against a real corpus rather than
+/// against a fixture, which is the one place a mirror read that forgot whose
+/// day this is would show up.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
+async fn a_seeded_days_work_is_what_the_digest_lists_under_yesterday() {
+    use knobas_core::write_queue::WriteState;
+
+    let env = env();
+    env.clear_leftovers().await;
+    let mut litter = Litter::default();
+    let pat = Pat::issue(&env).await;
+    let (state, _events) = app("atlassian_live_digest", &env, AuthMethod::Pat, &pat.raw).await;
+
+    sync(&state).await;
+    let borrowed = format!("{JIRA}:{TRANSITIONED}");
+    let seeded = format!("{JIRA}:{COMMENTED}");
+    let held = mirrored(&state.pool).await;
+    for id in [&borrowed, &seeded] {
+        assert!(held.contains(id), "{id} is not in the mirror: {held:?}");
+    }
+
+    // -- the day, and the work on it ----------------------------------------
+    //
+    // The window is bounded below by this morning's own midnight, so the
+    // worklog is never dated before the day it is being logged on, and above
+    // by `now`, so it is never dated in the future -- a run at 00:30 and a run
+    // at 23:30 both file an hour that is inside today and already past.
+    let now = chrono::Utc::now();
+    let day = now.date_naive();
+    let midnight = day.and_hms_opt(0, 0, 0).expect("midnight").and_utc();
+    let ended = now - Duration::from_secs(60);
+    let started = std::cmp::max(ended - Duration::from_secs(3600), midnight);
+    assert!(
+        started < ended,
+        "this run is inside the first minute of the day; there is no past hour to log"
+    );
+
+    // 1. An afternoon on PAY-240, through the write queue.
+    sqlx::query(
+        "insert into knobas.block (started_at, ended_at, entity_id, kind)
+         values ($1, $2, $3, 'manual')",
+    )
+    .bind(started)
+    .bind(ended)
+    .bind(&borrowed)
+    .execute(&state.pool)
+    .await
+    .expect("a block is written");
+
+    let draft =
+        knobas_app::time::worklog::draft(&state.pool, state.registry.as_ref(), &borrowed, day, 0)
+            .await
+            .expect("the draft is readable")
+            .expect("a Jira ticket with an unlogged block has a draft");
+    let note = format!(
+        "{LITTER_LABEL}: the digest suite logged this (pid {})",
+        std::process::id()
+    );
+    let logged = knobas_app::time::worklog::log(
+        &state,
+        &borrowed,
+        day,
+        0,
+        draft.started_at,
+        draft.seconds,
+        &note,
+    )
+    .await
+    .expect("the day is logged");
+    if let Some(id) = logged.remote_id.clone() {
+        litter.worklog = Some((TRANSITIONED.to_owned(), id));
+    }
+
+    // 2. A comment on the same ticket, through the same queue.
+    let body = format!(
+        "{LITTER_LABEL}: the digest suite commented (pid {})",
+        std::process::id()
+    );
+    let row = write(
+        &state,
+        json!({ "Comment": { "entity": borrowed, "body": body } }),
+    )
+    .await;
+    let comments = env.issue(TRANSITIONED, "comment").await["fields"]["comment"].clone();
+    if let Some(id) = comments["comments"]
+        .as_array()
+        .and_then(|all| all.last())
+        .and_then(|posted| posted["id"].as_str())
+    {
+        litter.comment = Some((TRANSITIONED.to_owned(), id.to_owned()));
+    }
+    assert_eq!(row.state, WriteState::Sent, "{:?}", row.detail);
+
+    // 3. The ticket becomes *mine* at the source, which is what the mirror
+    //    half reads. Owned before the assertion, so a failure below still
+    //    gives it back.
+    let was = env.issue(TRANSITIONED, "assignee").await["fields"]["assignee"]["name"]
+        .as_str()
+        .map(str::to_owned);
+    let (status, answered) = env
+        .api(
+            reqwest::Method::PUT,
+            &format!("rest/api/2/issue/{TRANSITIONED}/assignee"),
+            Some(json!({ "name": env.user })),
+        )
+        .await;
+    litter.assigned = Some((TRANSITIONED.to_owned(), was.clone()));
+    assert_eq!(
+        status, 204,
+        "assigning {TRANSITIONED} to the suite: {answered}"
+    );
+    // Jira's search is a Lucene index updated asynchronously, and the adapter
+    // enumerates through it -- so a sync fired the instant the PUT answers 204
+    // mirrors the assignee as it was, and the digest's mirror half then
+    // correctly reports a ticket that is still somebody else's. Wait for the
+    // index to agree, *then* sync.
+    env.indexed(
+        &format!("key = {TRANSITIONED} AND assignee = \"{}\"", env.user),
+        TRANSITIONED,
+    )
+    .await;
+    // -- and now wait for the *mirror* to have caught up ---------------------
+    //
+    // The precondition the digest's mirror half needs is "`sync.live_item`
+    // holds this ticket as the suite's", and an ordinary sync does not deliver
+    // it: an incremental run decides what to re-fetch from its watermark and
+    // the `(key, updated)` pairs it recorded last time, and an assignment made
+    // through Jira's own assignee endpoint does not reliably move that item
+    // into the window. Measured over three live runs, the last with six syncs
+    // across twenty-two seconds and the search index already agreeing: the
+    // mirror held the old assignee every time.
+    //
+    // So this asks for the run that exists for exactly this -- `backfill`,
+    // no stored position, `knobas_sync::backfill`'s own reason -- and still
+    // converges rather than assuming, because the assertion downstream is
+    // about what the digest makes of the mirror and not about how a sync got
+    // there. It fails loudly with what the mirror actually held.
+    let mut attributed_to = None;
+    for attempt in 0..3 {
+        backfill(&state).await;
+        attributed_to = sqlx::query_scalar::<_, Option<String>>(
+            "select author from sync.live_item where entity_id = $1",
+        )
+        .bind(&borrowed)
+        .fetch_one(&state.pool)
+        .await
+        .expect("the borrowed ticket is mirrored");
+        if attributed_to.as_deref() == Some(env.user.as_str()) {
+            if attempt > 0 {
+                println!(
+                    "SEEDED mirror caught up with the assignment on backfill {}",
+                    attempt + 1
+                );
+            }
+            break;
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+    assert_eq!(
+        attributed_to.as_deref(),
+        Some(env.user.as_str()),
+        "three backfills and the mirror still does not hold {TRANSITIONED} as the suite's, so \
+         the digest cannot attribute it; the write itself landed (its 204 is asserted above) \
+         and the search index agreed (the wait above returned)"
+    );
+
+    // -- and what the digest makes of it ------------------------------------
+    let window = |on: chrono::NaiveDate| knobas_app::time::week::DayWindow {
+        day: on,
+        from: on.and_hms_opt(0, 0, 0).expect("midnight").and_utc(),
+        to: on
+            .succ_opt()
+            .expect("the next day")
+            .and_hms_opt(0, 0, 0)
+            .expect("midnight")
+            .and_utc(),
+    };
+    let digest = knobas_app::commands::entity::standup_digest_inner(
+        &state.pool,
+        state.registry.as_ref(),
+        chrono::Utc::now(),
+        window(day.succ_opt().expect("tomorrow exists")),
+        &[window(day)],
+    )
+    .await
+    .expect("the digest reads");
+
+    assert_eq!(
+        digest.yesterday_day,
+        Some(day),
+        "today is the newest day before tomorrow with any of this account's work"
+    );
+    let listed: Vec<(Option<&str>, &str, &str)> = digest
+        .yesterday
+        .iter()
+        .map(|line| {
+            (
+                line.entity_id.as_deref(),
+                line.source.as_str(),
+                line.verb.as_str(),
+            )
+        })
+        .collect();
+    for verb in ["log_work", "comment", "attributed"] {
+        assert!(
+            listed.contains(&(Some(borrowed.as_str()), JIRA, verb)),
+            "no {verb} line for {borrowed} under yesterday: {listed:?}"
+        );
+    }
+    for line in &digest.yesterday {
+        assert!(
+            line.entity_id.is_some(),
+            "every line on this list has an item to open: {line:?}"
+        );
+        assert!(
+            !line.reason.trim().is_empty(),
+            "a line whose provenance cannot be shown is not shippable: {line:?}"
+        );
+    }
+    assert!(
+        !listed.iter().any(|(id, _, _)| *id == Some(seeded.as_str())),
+        "{COMMENTED} is assigned to somebody else and its work is theirs: {listed:?}"
+    );
+    println!(
+        "SEEDED digest for {day}: {} lines under yesterday",
+        digest.yesterday.len()
+    );
+
+    state.scheduler.shutdown().await;
+    drop(litter);
+}
+
 // -- the Confluence half: a mention in the inbox (#287) ----------------------
 
 /// The Confluence source id, and the `EntityRef` namespace every mirrored page
@@ -1862,6 +2214,106 @@ async fn a_comment_that_mentions_me_becomes_an_inbox_mention() {
 
     state.scheduler.shutdown().await;
     drop(mention);
+}
+
+/// **A page the source says is mine is on the digest, under the day it moved**
+/// (issue #288, the Confluence half of criterion 4).
+///
+/// The Jira test above witnesses the two producers a *write* makes -- the
+/// worklog copy and the activity stream. This is the third, the **mirror**,
+/// and it is the one that cannot be settled against a scratch fixture: it
+/// rests on what the *adapter* puts in §4.1's `author` for a real page, and
+/// `knobas-source-confluence`'s answer is the version's author falling back to
+/// the creator (`map.rs`). The seeded pages were written by this account, so
+/// the digest for the day after the day one of them last moved has to carry
+/// it, with its content id as the ref.
+///
+/// **Nothing is written here, and that is deliberate.** A page *edit* through
+/// knobas needs `UpdatePage`, which is #286's growth of the SPI and is not on
+/// this branch; the alternative -- a raw REST edit of a seeded page -- would
+/// put a body-restore path into a live suite for a fact this read already
+/// establishes without touching the server. The day is taken from the page's
+/// own mirrored timestamp rather than assumed to be today, so the assertion
+/// holds however long ago the environment was seeded.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
+async fn a_page_the_source_says_is_mine_is_on_the_digest_for_the_day_it_moved() {
+    let wiki = wiki();
+    let state = wiki_app("atlassian_live_digest_page", &wiki).await;
+    sync_source(&state, CONFLUENCE).await;
+
+    // The page, and the day the mirror says it last moved -- read back rather
+    // than assumed, so this is a statement about the adapter's own `author`
+    // and `item_updated_at` and not about when the suite happens to run.
+    let page = format!("{CONFLUENCE}:{}", wiki.page);
+    let moved: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
+        "select coalesce(item_updated_at, synced_at) from sync.live_item
+          where entity_id = $1 and author = $2",
+    )
+    .bind(&page)
+    .bind(&wiki.user)
+    .fetch_optional(&state.pool)
+    .await
+    .expect("the mirror is readable")
+    .unwrap_or_else(|| {
+        panic!(
+            "{} is not mirrored with {} as its §4.1 author -- the seed writes the \
+             pages as this account, and the digest's mirror half is what that \
+             normalization feeds",
+            wiki.title, wiki.user
+        )
+    });
+
+    let window = |on: chrono::NaiveDate| knobas_app::time::week::DayWindow {
+        day: on,
+        from: on.and_hms_opt(0, 0, 0).expect("midnight").and_utc(),
+        to: on
+            .succ_opt()
+            .expect("the next day")
+            .and_hms_opt(0, 0, 0)
+            .expect("midnight")
+            .and_utc(),
+    };
+    let day = moved.date_naive();
+    let digest = knobas_app::commands::entity::standup_digest_inner(
+        &state.pool,
+        state.registry.as_ref(),
+        // A clock outside the day being asked about, so no running timer of
+        // this scratch database's own can join the list. There is none, and
+        // saying so costs one argument.
+        window(day.succ_opt().expect("tomorrow exists")).to,
+        window(day.succ_opt().expect("tomorrow exists")),
+        &[window(day)],
+    )
+    .await
+    .expect("the digest reads");
+
+    assert_eq!(digest.yesterday_day, Some(day));
+    let line = digest
+        .yesterday
+        .iter()
+        .find(|line| line.entity_id.as_deref() == Some(page.as_str()))
+        .unwrap_or_else(|| {
+            panic!(
+                "{} is not on the digest for {day}, which is the day the mirror \
+                 says it moved: {:?}",
+                wiki.title, digest.yesterday
+            )
+        });
+    assert_eq!(line.source, CONFLUENCE);
+    assert_eq!(
+        line.verb, "attributed",
+        "the mirror half says the source attributes the page to the reader, \
+         never that the reader wrote it"
+    );
+    assert!(
+        line.reason.contains(CONFLUENCE),
+        "the reason names the source it came from: {:?}",
+        line.reason
+    );
+    println!("SEEDED digest page line: {} ({})", line.title, line.reason);
+
+    state.scheduler.shutdown().await;
 }
 
 /// The page ids this source holds live.

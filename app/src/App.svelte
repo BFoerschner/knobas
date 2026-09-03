@@ -30,6 +30,7 @@
   import FirstRun from "./lib/sources/FirstRun.svelte";
   import SourcesView from "./lib/sources/SourcesView.svelte";
   import StartWork from "./lib/start-work/StartWork.svelte";
+  import StandupView from "./lib/standup/StandupView.svelte";
   import DayReview from "./lib/time/DayReview.svelte";
   import WeekTimesheet from "./lib/time/WeekTimesheet.svelte";
   import { ipcErrorMessage } from "./lib/ipc";
@@ -786,6 +787,14 @@
           revision={timeRevision}
           onchanged={() => (timeRevision += 1)}
         />
+      {:else if router.route.view === "standup"}
+        <!--
+          The standup digest (#288): three lists at their own address, drawn
+          for today. The address carries no date -- a digest is this morning's
+          standup, and `#/standup/<date>` is the standup *protocol*'s, which is
+          a note per date and a different surface.
+        -->
+        <StandupView {router} />
       {:else if router.route.view === "first-run"}
         <FirstRun demo={lifecycle.status?.demo ?? false} onfinish={onFirstRunDone} />
       {:else if router.route.view === "start-work"}

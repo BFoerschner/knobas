@@ -126,6 +126,11 @@ vi.mock("../ipc/entity", () => ({
   createContext: () => Promise.reject(new Error("no context creation in this test")),
   promoteContext: () => Promise.reject(new Error("no promotion in this test")),
   listEntities: () => deferred(PAGE),
+  // The standup digest (#288). The `ports` prop is what the case below drives
+  // the view through; this is here because the module-level import resolves
+  // whether or not a prop overrides it.
+  standupDigest: () =>
+    deferred({ yesterday_day: null, yesterday: [], today: [], blockers: [] }),
   // The Tickets tile's read (#178). Deferred like the rest, so the tile is
   // unmounted mid-flight by the test that checks it leaves nothing behind.
   miniBoard: () => deferred({ columns: [], sources: [] }),
@@ -261,6 +266,7 @@ const QueryBox = (await import("../launcher/QueryBox.svelte")).default;
 const StartWork = (await import("../start-work/StartWork.svelte")).default;
 const DayReview = (await import("../time/DayReview.svelte")).default;
 const WeekTimesheet = (await import("../time/WeekTimesheet.svelte")).default;
+const StandupView = (await import("../standup/StandupView.svelte")).default;
 const AddSource = (await import("../sources/AddSource.svelte")).default;
 const Diagnostics = (await import("../sources/Diagnostics.svelte")).default;
 const FirstRun = (await import("../sources/FirstRun.svelte")).default;
@@ -540,6 +546,28 @@ const CASES: Case[] = [
             weekTimesheet: () => deferred({ days: [], rows: [], past_horizon: [] }),
             logAllPreview: () => Promise.reject(new Error("no plan in this test")),
             logAll: () => Promise.reject(new Error("no write in this test")),
+          },
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * The standup digest (#288). Its effect is the digest's read, keyed on the
+     * day the clock says -- `deferred` here, so the three lists land after the
+     * unmount, which is what a reader glancing at the standup and moving on
+     * does.
+     */
+    name: "StandupView",
+    source: "lib/standup/StandupView.svelte",
+    open: (target) => ({
+      app: mount(StandupView, {
+        target,
+        props: {
+          router: createRouter(),
+          ports: {
+            standupDigest: () =>
+              deferred({ yesterday_day: null, yesterday: [], today: [], blockers: [] }),
           },
         },
       }),
