@@ -17,8 +17,32 @@
 //!    following `_links.next` until there is none.
 //! 5. Drop what the overlap re-delivered, complete the comments the server did
 //!    not expand, push the rest into the sink.
-//! 6. If nothing was pushed, hand back the cursor byte-identically. Otherwise
+//! 6. **The mention walk** ([`SyncRun::mentions`]): one more query, `mention =
+//!    currentUser() AND type in (page, comment)` over the same window, whose
+//!    results are resolved to the pages they are on and pushed too.
+//! 7. If nothing was pushed, hand back the cursor byte-identically. Otherwise
 //!    advance the watermark to `min(max(previous, newest emitted), ceiling)`.
+//!
+//! # Why the mention walk is a second query and not a wider first one
+//!
+//! A mention usually lives in a **comment**, and a comment is separate content
+//! in Confluence: posting one does not move the page's `lastmodified`. So the
+//! page walk -- bounded by a page's own `lastmodified` -- can never reach a
+//! comment posted on a page nobody has edited since, which is most pages. The
+//! second query is bounded by the *comment's* timestamp instead, and that is
+//! the only bound that reaches it (`crate::cql::build_mention_cql`).
+//!
+//! It emits the **page**, never the comment: this adapter declares one entity
+//! kind, a comment belongs to its page's payload (`crate::KIND_PAGE`), and the
+//! thing a person opens from the inbox is the page the discussion is on.
+//!
+//! **It does not move the watermark.** The two walks share one cursor, and the
+//! records the mention walk sees are newer than the page edits the page walk
+//! is bounded by -- advancing on a comment posted today would put every page
+//! edited yesterday below the next run's lower bound and lose it for good.
+//! What the mention walk does contribute is its `seen` entries, which is what
+//! makes the *next* run skip the same comment and leaves an idle poll idle
+//! (battery clause 2).
 //!
 //! # The ceiling, and what it is for (`CONTEXT.md`, *Watermark*)
 //!
@@ -68,11 +92,12 @@ use chrono::{DateTime, Utc};
 use knobas_source::{Sink, SourceError};
 
 use crate::ConfluenceConfig;
-use crate::api::{ConfluenceApi, EXPAND};
-use crate::cql::{Order, build_cql};
+use crate::api::{ConfluenceApi, EXPAND, MENTION_EXPAND};
+use crate::cql::{Order, build_cql, build_mention_cql};
 use crate::cursor::{ConfluenceCursor, Seen};
 use crate::map;
 use crate::model::RawContent;
+use crate::storage::Account;
 
 /// A stop so a server that keeps handing out `_links.next` cannot spin a run
 /// forever. At the default page size this is a quarter of a million pages.
@@ -122,15 +147,45 @@ struct RunStart {
     offset_secs: i32,
 }
 
+/// The band of the corpus a walk reads, and the identity it reads it as.
+///
+/// One type because the four travel together and always will: the mention
+/// walk reads the *same* cursor the page walk is bounded by, in the same zone,
+/// as the same account -- and a run that passed three of the four would be a
+/// second answer to "where is this source up to".
+struct Window<'a> {
+    /// The lower bound of the `lastmodified >=` clause, or `None` for a full
+    /// sync.
+    since: Option<DateTime<Utc>>,
+    /// The UTC offset every CQL literal in this run is rendered in.
+    offset_secs: i32,
+    /// The position the run started from, which is what recognises a record
+    /// the overlap re-delivered.
+    previous: Option<&'a ConfluenceCursor>,
+    /// Who the credential is, for resolving a mention's user key
+    /// ([`crate::storage::Account`]).
+    me: Option<Account<'a>>,
+}
+
 impl SyncRun<'_> {
     pub(crate) async fn run(
         &self,
         cursor: Option<String>,
         sink: &mut (dyn Sink + Send),
     ) -> Result<String, SourceError> {
-        // First, and not for the identity: a content search can be answered
-        // anonymously with an empty page, and this call cannot.
-        self.api.current_user().await?;
+        // First, and not only for the identity: a content search can be
+        // answered anonymously with an empty page, and this call cannot. The
+        // identity is now read off it too -- a Confluence mention carries a
+        // user **key**, and this is the one call that says which key the
+        // credential is. The *server's* answer and not the configured
+        // `username`, because it is the server that owns the key/name pairing;
+        // `test_connection` fills the configuration in from this same call, so
+        // the two agree by construction.
+        let whoami = self.api.current_user().await?;
+        let me = whoami.username.as_deref().map(|username| Account {
+            username,
+            user_key: whoami.user_key.as_deref(),
+        });
 
         let witnessed = self.run_start().await?;
         let offset = witnessed.offset_secs;
@@ -139,6 +194,11 @@ impl SyncRun<'_> {
         let cql = build_cql(self.cfg, since, offset, Order::Ascending);
 
         let mut emitted: usize = 0;
+        // The entity ids this run has already handed to the sink, so the
+        // mention walk does not re-deliver a page the page walk just sent --
+        // one wasted request and one wasted upsert per mentioning page on
+        // every full sync, otherwise.
+        let mut delivered: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         // Every record this run *saw* in the window -- see the module docs.
         // Skipped ones belong here as much as emitted ones.
         let mut seen_in_window: Vec<Seen> = Vec::new();
@@ -175,8 +235,9 @@ impl SyncRun<'_> {
                     continue;
                 }
                 self.complete(&mut raw).await?;
-                let item = map::to_sync_item(self.source_id, self.base_url, &raw);
+                let item = map::to_sync_item(self.source_id, self.base_url, &raw, me);
                 // Sink failures are never swallowed (SPI doc on `Source::sync`).
+                delivered.insert(raw.content.id.clone());
                 sink.item(item).await?;
                 emitted += 1;
                 if let Some(u) = when {
@@ -198,6 +259,20 @@ impl SyncRun<'_> {
             }
             next = Some(link);
         }
+
+        emitted += self
+            .mentions(
+                &Window {
+                    since,
+                    offset_secs: offset,
+                    previous: previous.as_ref(),
+                    me,
+                },
+                &mut delivered,
+                &mut seen_in_window,
+                sink,
+            )
+            .await?;
 
         match (emitted, watermark) {
             // Battery clause 2: nothing happened, so the position did not
@@ -229,6 +304,99 @@ impl SyncRun<'_> {
                 Ok(ConfluenceCursor::advanced(clamped, offset, &seen_in_window).encode())
             }
         }
+    }
+
+    /// The mention walk: every page and comment that names this account since
+    /// the cursor, emitted as the **page** it is on.
+    ///
+    /// Answers how many items it pushed. The module docs carry why this is a
+    /// second query and why it must not move the watermark; the three
+    /// decisions that live here:
+    ///
+    /// * **`seen` is fed from the record CQL returned**, comment or page, and
+    ///   the skip is checked against the same identity. That is what makes an
+    ///   idle poll idle: the page a comment resolves to keeps its own old
+    ///   `version.when` and would fall out of the `seen` window immediately,
+    ///   so deduplicating on the *page* would re-emit it on every run for
+    ///   ever. Deduplicating on the comment cannot: its timestamp is newer
+    ///   than the watermark, so it stays in `seen` exactly as long as the
+    ///   query keeps returning it. It also *wins* `seen`'s cap for the same
+    ///   reason -- [`crate::cursor::SEEN_CAP`] keeps the newest entries -- so
+    ///   a run with hundreds of fresh mentions can evict page-walk entries and
+    ///   re-deliver a page. That is the cap's documented cost (bandwidth, not
+    ///   correctness), reached from a second direction.
+    /// * **The page is fetched whole** rather than mapped from the thin
+    ///   `MENTION_EXPAND` record, so a mentioning page and a page the ordinary
+    ///   walk delivered are mapped from the same shape -- and the comment
+    ///   carrying the mention is in the payload where every other comment is.
+    /// * **A failure here fails the run**, and is not swallowed into a partial
+    ///   success. `mention` is a CQL field Confluence Data Center has had for
+    ///   as long as CQL, and `tests/live_confluence_seeded.rs` is the witness
+    ///   that this instance answers it; an instance that does not would leave
+    ///   the source stuck rather than quietly mention-blind, which is the
+    ///   direction a person can see and act on.
+    async fn mentions(
+        &self,
+        window: &Window<'_>,
+        delivered: &mut std::collections::BTreeSet<String>,
+        seen_in_window: &mut Vec<Seen>,
+        sink: &mut (dyn Sink + Send),
+    ) -> Result<usize, SourceError> {
+        let cql = build_mention_cql(self.cfg, window.since, window.offset_secs);
+        let mut emitted: usize = 0;
+        let mut next: Option<String> = None;
+        let mut requests: u32 = 0;
+        loop {
+            let page = match &next {
+                None => {
+                    self.api
+                        .search(&cql, self.cfg.page_size, MENTION_EXPAND)
+                        .await?
+                }
+                Some(link) => self.api.follow(link).await?,
+            };
+            for raw in &page.results {
+                let version = raw.content.version.as_ref();
+                let number = version.and_then(|v| v.number);
+                if let Some(u) = version
+                    .and_then(|v| v.when.as_deref())
+                    .and_then(crate::time::parse_time)
+                {
+                    seen_in_window.push(Seen {
+                        i: raw.content.id.clone(),
+                        n: number,
+                        u,
+                    });
+                }
+                if window
+                    .previous
+                    .is_some_and(|c| c.already_delivered(&raw.content.id, number))
+                {
+                    continue;
+                }
+                let Some(page_id) = raw.content.page_it_is_on() else {
+                    continue;
+                };
+                if !delivered.insert(page_id.clone()) {
+                    continue;
+                }
+                let mut target = self.api.content(&page_id, EXPAND).await?;
+                self.complete(&mut target).await?;
+                let item = map::to_sync_item(self.source_id, self.base_url, &target, window.me);
+                sink.item(item).await?;
+                emitted += 1;
+            }
+            let Some(link) = page.links.next else { break };
+            requests += 1;
+            if requests >= MAX_PAGES {
+                return Err(SourceError::protocol(format!(
+                    "Confluence kept offering another page of mention results after \
+                     {MAX_PAGES}; refusing to report a partial walk as a completed sync."
+                )));
+            }
+            next = Some(link);
+        }
+        Ok(emitted)
     }
 
     /// The run-start probe: the newest page in this source's scope, and the
@@ -321,6 +489,11 @@ mod tests {
     /// **this run** does with what a server says.
     struct Fake {
         pages: Mutex<Vec<Value>>,
+        /// What `mention = currentUser()` answers: comment records carrying
+        /// the page they are on in `container`, and page records naming the
+        /// account in their own body. Empty in every test that is not about
+        /// mentions, which is how the mention walk stays invisible to them.
+        mentions: Mutex<Vec<Value>>,
         /// Comments the search does *not* expand, by content id -- the
         /// completion path's input.
         detached_comments: Mutex<std::collections::BTreeMap<String, Vec<Value>>>,
@@ -343,12 +516,19 @@ mod tests {
         fn new(pages: Vec<Value>) -> Self {
             Self {
                 pages: Mutex::new(pages),
+                mentions: Mutex::new(Vec::new()),
                 detached_comments: Mutex::new(std::collections::BTreeMap::new()),
                 calls: Mutex::new(Vec::new()),
                 fault: None,
                 identity_fault: None,
                 edit_mid_walk: Mutex::new(None),
             }
+        }
+
+        /// The records `mention = currentUser()` will answer with.
+        fn mentioning(mut self, rows: Vec<Value>) -> Self {
+            self.mentions = Mutex::new(rows);
+            self
         }
 
         fn calls(&self) -> Vec<String> {
@@ -372,7 +552,11 @@ mod tests {
             start: usize,
             limit: usize,
         ) -> (Vec<Value>, bool) {
-            let pages = self.pages.lock().unwrap().clone();
+            let pages = if is_mention_query(cql) {
+                self.mentions.lock().unwrap().clone()
+            } else {
+                self.pages.lock().unwrap().clone()
+            };
             let bound = cql
                 .split_once("lastmodified >= \"")
                 .map(|(_, rest)| rest.split('"').next().unwrap_or_default().to_owned());
@@ -441,7 +625,7 @@ mod tests {
             if let Some(fault) = self.identity_fault.as_ref().or(self.fault.as_ref()) {
                 return Err(clone_fault(fault));
             }
-            Ok(serde_json::from_value(json!({ "username": "knobas" })).unwrap())
+            Ok(serde_json::from_value(json!({ "username": "knobas", "userKey": MY_KEY })).unwrap())
         }
 
         async fn search(
@@ -455,8 +639,8 @@ mod tests {
                 return Err(clone_fault(fault));
             }
             assert!(
-                cql.contains("type = page"),
-                "every query this adapter sends is scoped to pages: {cql}"
+                cql.contains("type = page") || is_mention_query(cql),
+                "every query this adapter sends is the page walk's or the mention walk's: {cql}"
             );
             let (rows, more) = self.matching(cql, expand, 0, limit as usize);
             Ok(envelope(
@@ -507,6 +691,34 @@ mod tests {
             let rows = held.get(id).cloned().unwrap_or_default();
             Ok(envelope(rows, None))
         }
+
+        async fn content(
+            &self,
+            id: &str,
+            expand: &str,
+        ) -> Result<crate::model::RawContent, SourceError> {
+            self.calls.lock().unwrap().push(format!("content {id}"));
+            if let Some(fault) = &self.fault {
+                return Err(clone_fault(fault));
+            }
+            let pages = self.pages.lock().unwrap().clone();
+            let mut row = pages
+                .into_iter()
+                .find(|p| p["id"] == json!(id))
+                .ok_or_else(|| SourceError::protocol(format!("no content {id}")))?;
+            if !expand.contains("children.comment")
+                && let Some(object) = row.as_object_mut()
+            {
+                object.remove("children");
+            }
+            Ok(serde_json::from_value(row).expect("the fake holds well-formed records"))
+        }
+    }
+
+    /// Whether a CQL is the mention walk's, read the way the fake's `search`
+    /// has to read it: by the clause only that walk sends.
+    fn is_mention_query(cql: &str) -> bool {
+        cql.contains("mention = currentUser()")
     }
 
     fn clone_fault(fault: &SourceError) -> SourceError {
@@ -586,6 +798,56 @@ mod tests {
             .as_str()
             .unwrap_or_else(|| panic!("not a cursor this adapter wrote: {cursor}"))
             .to_owned()
+    }
+
+    /// The `userKey` this fake's `/rest/api/user/current` reports -- the key
+    /// a mention in a body is written with, and the one thing that lets
+    /// `body_text` carry a name at all.
+    const MY_KEY: &str = "ff8080818f2a1b4c018f2a1c9d0e0001";
+
+    /// A comment in the storage format a Confluence **editor** writes a
+    /// mention in: a user link carrying the key and no name anywhere.
+    fn mentioning_comment(id: &str, when: &str) -> Value {
+        json!({
+            "id": id,
+            "type": "comment",
+            "body": { "storage": { "value": format!(
+                "<p><ac:link><ri:user ri:userkey=\"{MY_KEY}\" /></ac:link> can you add the \
+                 SLA?</p>"), "representation": "storage" } },
+            "version": { "number": 1, "when": when, "by": { "username": "priya" } }
+        })
+    }
+
+    /// The thin record `mention = currentUser()` answers for that comment:
+    /// `MENTION_EXPAND`'s fields and nothing else.
+    fn mention_hit(comment_id: &str, page_id: &str, when: &str) -> Value {
+        json!({
+            "id": comment_id,
+            "type": "comment",
+            "container": { "id": page_id, "type": "page" },
+            "version": { "number": 1, "when": when }
+        })
+    }
+
+    /// Hang a mentioning comment off the fake's oldest page and register the
+    /// mention query's answer for it. Answers the page's id.
+    ///
+    /// **The oldest page on purpose**: the whole reason the mention walk
+    /// exists is that a comment does not move its page's `lastmodified`, so
+    /// the page this reaches must be one no incremental page walk would.
+    fn a_mention_arrives(fake: &Fake, when: &str) -> String {
+        let comment = mentioning_comment("900", when);
+        let mut pages = fake.pages.lock().unwrap();
+        let page = pages.first_mut().expect("the corpus has a page");
+        page["children"]["comment"]["results"] = json!([comment]);
+        page["children"]["comment"]["size"] = json!(1);
+        let id = page["id"].as_str().expect("a page id").to_owned();
+        drop(pages);
+        fake.mentions
+            .lock()
+            .unwrap()
+            .push(mention_hit("900", &id, when));
+        id
     }
 
     fn a_corpus() -> Vec<Value> {
@@ -882,6 +1144,164 @@ mod tests {
         );
     }
 
+    /// **The criterion (#287), end to end at this seam.** A comment naming
+    /// the account arrives on a page nobody has edited in months; the run
+    /// after it delivers *that page*, and its `body_text` carries the `@name`
+    /// `knobas_core::inbox`'s mention rule reads.
+    ///
+    /// Everything the ticket rests on is in the one assertion: the page walk
+    /// cannot reach this page (its `version.when` is two months below the
+    /// bound), the mention query can, the comment's user **key** is resolved
+    /// to a name, and the entity is the page rather than the comment.
+    #[tokio::test]
+    async fn a_comment_that_mentions_me_delivers_the_page_it_is_on() {
+        let fake = Fake::new(a_corpus());
+        let (_, first) = run(&fake, &cfg(json!({})), None).await.unwrap();
+        let page_id = a_mention_arrives(&fake, "2026-09-03T09:00:00.000Z");
+
+        let (items, _) = run(&fake, &cfg(json!({})), Some(first)).await.unwrap();
+        assert_eq!(
+            ids(&items),
+            vec![page_id.clone()],
+            "the mention walk delivers the page the comment is on: {:?}",
+            fake.calls()
+        );
+        assert!(
+            items[0].body_text.contains("@knobas"),
+            "the mention has to reach body_text as a name, or no inbox rule can \
+             see it: {:?}",
+            items[0].body_text
+        );
+        // The page was fetched whole by id -- the mention record itself
+        // carries no body, and mapping from it would mirror an empty page.
+        assert!(
+            fake.calls().contains(&format!("content {page_id}")),
+            "{:?}",
+            fake.calls()
+        );
+        // **And the item is dated by the comment**, which is what puts it
+        // inside `knobas_core::inbox::WINDOW_DAYS`. The page's own edit is two
+        // months old; an item dated by that would be mirrored, searchable and
+        // *absent from the inbox* -- the one failure that would make the whole
+        // walk pointless.
+        assert_eq!(
+            items[0].updated_at.map(|t| t.to_rfc3339()).as_deref(),
+            Some("2026-09-03T09:00:00+00:00"),
+            "the mention's own date, not the page's last edit"
+        );
+    }
+
+    /// Battery clause 2 **after a mention**, which is the case the ordinary
+    /// idle test cannot reach: the page the mention resolved to keeps its own
+    /// old `version.when`, so it falls out of the `seen` window at once. Only
+    /// the *comment's* entry keeps the next run from re-delivering the page,
+    /// and on every poll for ever.
+    #[tokio::test]
+    async fn a_delivered_mention_settles_and_the_next_poll_returns_the_same_bytes() {
+        let fake = Fake::new(a_corpus());
+        let (_, first) = run(&fake, &cfg(json!({})), None).await.unwrap();
+        a_mention_arrives(&fake, "2026-09-03T09:00:00.000Z");
+
+        let (items, second) = run(&fake, &cfg(json!({})), Some(first)).await.unwrap();
+        assert_eq!(items.len(), 1, "{:?}", ids(&items));
+        let (items, third) = run(&fake, &cfg(json!({})), Some(second.clone()))
+            .await
+            .unwrap();
+        assert!(
+            items.is_empty(),
+            "the mention was delivered once: {:?}",
+            ids(&items)
+        );
+        assert_eq!(third, second, "and the position did not move");
+    }
+
+    /// **The mention walk never moves the watermark.** The comment is dated
+    /// twelve days after the newest page edit; a run that advanced to it would
+    /// put every page edited in between below the next query's lower bound and
+    /// lose those edits for good.
+    #[tokio::test]
+    async fn a_mention_newer_than_every_page_leaves_the_watermark_where_it_was() {
+        let fake = Fake::new(a_corpus());
+        let (_, first) = run(&fake, &cfg(json!({})), None).await.unwrap();
+        assert_eq!(watermark(&first), "2026-08-22T10:40:00Z");
+        a_mention_arrives(&fake, "2026-09-03T09:00:00.000Z");
+
+        let (_, second) = run(&fake, &cfg(json!({})), Some(first)).await.unwrap();
+        assert_eq!(
+            watermark(&second),
+            "2026-08-22T10:40:00Z",
+            "the page walk's position is the watermark, and a comment is not a page edit"
+        );
+    }
+
+    /// A page the page walk already delivered this run is not fetched and sent
+    /// a second time by the mention walk -- which on a full sync would be one
+    /// wasted request and one wasted upsert per mentioning page.
+    #[tokio::test]
+    async fn a_mentioning_page_the_walk_already_sent_is_not_sent_twice() {
+        let fake = Fake::new(a_corpus());
+        let page_id = a_mention_arrives(&fake, "2026-09-03T09:00:00.000Z");
+        let (items, _) = run(&fake, &cfg(json!({})), None).await.unwrap();
+        assert_eq!(
+            ids(&items).iter().filter(|id| **id == page_id).count(),
+            1,
+            "{:?}",
+            ids(&items)
+        );
+        assert!(
+            !fake.calls().contains(&format!("content {page_id}")),
+            "a full sync already has the page: {:?}",
+            fake.calls()
+        );
+    }
+
+    /// A mention record the walk cannot place produces nothing, and takes the
+    /// run down with it in neither direction.
+    ///
+    /// Three shapes: a comment whose container the server did not expand, a
+    /// **page** record -- whose container is its *space*, so a walk reading a
+    /// container id blindly would fetch a space id as a page -- and a type
+    /// this adapter never asked for.
+    #[tokio::test]
+    async fn a_mention_record_the_walk_cannot_place_contributes_nothing() {
+        let fake = Fake::new(a_corpus()).mentioning(vec![
+            json!({ "id": "900", "type": "comment",
+                    "version": { "number": 1, "when": "2026-09-03T09:00:00.000Z" } }),
+            json!({ "id": "901", "type": "blogpost",
+                    "container": { "id": 98305, "key": "ENG", "type": "space" },
+                    "version": { "number": 1, "when": "2026-09-03T09:00:00.000Z" } }),
+            json!({ "id": "902",
+                    "version": { "number": 1, "when": "2026-09-03T09:00:00.000Z" } }),
+        ]);
+        let (_, first) = run(&fake, &cfg(json!({})), None).await.unwrap();
+        let (items, _) = run(&fake, &cfg(json!({})), Some(first)).await.unwrap();
+        assert!(items.is_empty(), "{:?}", ids(&items));
+    }
+
+    /// A **page** that names the account in its own body is the other half of
+    /// `type in (page, comment)`: the record the query answers *is* the page,
+    /// and its own id is what gets fetched.
+    #[tokio::test]
+    async fn a_page_that_mentions_me_in_its_own_body_is_delivered_too() {
+        let fake = Fake::new(a_corpus());
+        let (_, first) = run(&fake, &cfg(json!({})), None).await.unwrap();
+        // A new version of page 100 that the *page* walk still cannot see,
+        // because the fake's corpus timestamp is what CQL bounds on and this
+        // record's is the one the mention query answered with.
+        fake.mentions.lock().unwrap().push(json!({
+            "id": "100", "type": "page",
+            "container": { "id": 98305, "key": "ENG", "type": "space" },
+            "version": { "number": 1, "when": "2026-09-03T09:00:00.000Z" }
+        }));
+        let (items, _) = run(&fake, &cfg(json!({})), Some(first)).await.unwrap();
+        assert_eq!(ids(&items), vec!["100"]);
+        assert!(
+            fake.calls().contains(&"content 100".to_owned()),
+            "{:?}",
+            fake.calls()
+        );
+    }
+
     /// A configured space list reaches the query. Without this the option
     /// would parse, validate, appear in the form -- and mirror the whole wiki.
     #[tokio::test]
@@ -895,7 +1315,11 @@ mod tests {
             .into_iter()
             .filter(|c| c.starts_with("search "))
             .collect();
-        assert_eq!(searches.len(), 2, "the probe and the walk: {searches:?}");
+        assert_eq!(
+            searches.len(),
+            3,
+            "the probe, the page walk and the mention walk: {searches:?}"
+        );
         for search in &searches {
             assert!(
                 search.contains("space in (\"ENG\")"),

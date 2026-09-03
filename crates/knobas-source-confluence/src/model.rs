@@ -130,6 +130,17 @@ pub(crate) struct Content {
     /// survives a rename, a move and a space change, which is the whole reason
     /// the criterion names it rather than the title.
     pub id: String,
+    /// `page` or `comment`. Read by the mention walk and nowhere else: a
+    /// comment's [`container`](Self::container) is the page it hangs off,
+    /// while a **page's** container is its *space* -- so the mention walk must
+    /// know which record it is holding before it reads a container id, or it
+    /// would follow a space id as though it were a page's.
+    #[serde(default, rename = "type")]
+    pub content_type: Option<String>,
+    /// What this content hangs off, when `expand=container` asked. The page,
+    /// for a comment.
+    #[serde(default)]
+    pub container: Option<Container>,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]
@@ -142,6 +153,54 @@ pub(crate) struct Content {
     pub children: Option<Children>,
     #[serde(default, rename = "_links")]
     pub links: Option<ContentLinks>,
+}
+
+/// `expand=container`: for a comment, the page it is on.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct Container {
+    /// A [`Value`] and not a `String`, and this is not fussiness: a **page's**
+    /// container is its space, and a space's `id` comes back as a JSON
+    /// *number*. Typed as a string, that record would fail to deserialize and
+    /// take the whole mention walk's response down with it -- an adapter that
+    /// refuses a run because a page has a space.
+    #[serde(default)]
+    pub id: Option<Value>,
+}
+
+impl Container {
+    /// The container's id **as a content id**, which is what a comment's is.
+    /// A space's numeric id is not one and reads as absent.
+    pub(crate) fn content_id(&self) -> Option<&str> {
+        self.id.as_ref()?.as_str()
+    }
+}
+
+impl Content {
+    /// Which page this record is *on*, or `None` for one nothing can place --
+    /// the mention walk's only reader.
+    ///
+    /// **The type is read first, and that is the whole point.** A comment's
+    /// [`container`](Self::container) is the page it hangs off; a **page's**
+    /// container is its *space*, whose id is from another namespace entirely.
+    /// A walk that read a container id without asking what it was holding
+    /// would fetch a space id as though it were a page's and either 404 or,
+    /// worse, mirror something that is not the page.
+    ///
+    /// A record whose type this adapter never asked for -- a blog post, an
+    /// attachment, a type a later Confluence adds -- is placed nowhere: the
+    /// adapter emits one kind, and the alternative is inventing a page for
+    /// something that has none.
+    pub(crate) fn page_it_is_on(&self) -> Option<String> {
+        match self.content_type.as_deref() {
+            Some("comment") => self
+                .container
+                .as_ref()
+                .and_then(Container::content_id)
+                .map(str::to_owned),
+            Some("page") => Some(self.id.clone()),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -398,6 +457,46 @@ mod tests {
         }))
         .unwrap();
         assert!(more.truncated());
+    }
+
+    /// The mention walk's two fields, and the trap they exist for: a
+    /// comment's container is the **page**, a page's container is its
+    /// **space**, and the ids are from different namespaces. Reading a
+    /// container without reading the type would follow a space id as a page's.
+    #[test]
+    fn a_comments_container_is_its_page_and_a_pages_container_is_its_space() {
+        let comment: RawContent = serde_json::from_value(json!({
+            "id": "98320", "type": "comment",
+            "container": { "id": "98307", "type": "page", "title": "SEPA payout retry design" },
+            "version": { "number": 1, "when": "2026-09-03T10:00:00.000Z" }
+        }))
+        .unwrap();
+        assert_eq!(comment.content.content_type.as_deref(), Some("comment"));
+        assert_eq!(
+            comment
+                .content
+                .container
+                .as_ref()
+                .and_then(Container::content_id),
+            Some("98307")
+        );
+
+        let page: RawContent = serde_json::from_value(json!({
+            "id": "98307", "type": "page",
+            "container": { "id": 98305, "key": "ENG", "type": "space" }
+        }))
+        .unwrap();
+        assert_eq!(page.content.content_type.as_deref(), Some("page"));
+        // A space id is a **number** in this response. It reads as no content
+        // id at all, and -- the half that matters -- the record still parses:
+        // typed as a string it would not, and one page with a space would fail
+        // the whole walk.
+        assert!(
+            page.content
+                .container
+                .as_ref()
+                .is_some_and(|c| c.content_id().is_none())
+        );
     }
 
     #[test]

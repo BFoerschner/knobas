@@ -751,18 +751,56 @@ async fn a_full_sync_mirrors_every_seeded_page_of_the_space() {
             "body_text is what FTS matches on and starts with the title: {:?}",
             it.body_text
         );
-        // The record's own stamp, never `now()`.
-        let stamped = it.payload["version"]["when"]
-            .as_str()
-            .unwrap_or_else(|| panic!("{}: no version.when on {}", it.entity, it.payload));
+        // The record's own stamp, never `now()` -- and the newest one it
+        // carries, page **and** discussion (#287). A comment in Confluence is
+        // separate content and does not move its page's `version.when`, so an
+        // item dated by the page alone would be a page commented on this
+        // morning wearing last year's date; every reader that filters on
+        // recency drops it, `knobas_core::inbox`'s mention window first. The
+        // expected value is computed from the payload the same way
+        // `crate::map` computes it, so this stays an assertion about **the
+        // server's own timestamps** rather than about knobas' arithmetic.
+        let stamps: Vec<&str> = std::iter::once(&it.payload["version"]["when"])
+            .chain(
+                it.payload["children"]["comment"]["results"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|c| &c["version"]["when"]),
+            )
+            .filter_map(serde_json::Value::as_str)
+            .collect();
+        assert!(
+            !stamps.is_empty(),
+            "{}: no version.when anywhere on {}",
+            it.entity,
+            it.payload
+        );
+        let newest = stamps
+            .iter()
+            .filter_map(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|t| t.with_timezone(&chrono::Utc))
+            .max()
+            .unwrap_or_else(|| panic!("{}: no parseable stamp in {stamps:?}", it.entity));
         assert_eq!(
             it.updated_at.map(|t| t.to_rfc3339()),
-            chrono::DateTime::parse_from_rfc3339(stamped)
-                .map(|t| t.with_timezone(&chrono::Utc).to_rfc3339())
-                .ok(),
-            "{}: {stamped}",
+            Some(newest.to_rfc3339()),
+            "{}: {stamps:?}",
             it.entity
         );
+        // `children.comment.version` is asked for by `api::EXPAND`, and a page
+        // with a discussion is where it can be seen to have arrived. Without
+        // it every comment falls back to the page's date silently.
+        if let Some(comments) = it.payload["children"]["comment"]["results"].as_array()
+            && let Some(first) = comments.first()
+        {
+            assert!(
+                first["version"]["when"].is_string(),
+                "{}: this Confluence did not expand children.comment.version, so a comment \
+                 can no longer date the page it is on: {first}",
+                it.entity
+            );
+        }
     }
 
     assert!(

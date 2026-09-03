@@ -25,14 +25,47 @@
 //! decoding first would manufacture a tag out of prose and then strip it,
 //! silently deleting what the author wrote.
 
+/// Who a storage body's user links are resolved against.
+///
+/// Confluence writes a mention as `<ac:link><ri:user ri:userkey="…"/></ac:link>`
+/// -- a **key**, not a name -- so a body_text built by stripping tags carries
+/// no trace of who was mentioned. This is the one identity the adapter can
+/// resolve a key to, and it is the only one the inbox asks about: the account
+/// the source is configured with, read from `/rest/api/user/current` at the
+/// start of every run ([`crate::model::CurrentUser`]).
+///
+/// ADR-0007's shape, in one sentence: **one named read, and a miss where the
+/// shape is absent.** A link naming somebody else's key resolves to nothing
+/// rather than to a guess -- which is the direction that costs a mention
+/// knobas never claims, instead of claiming somebody else's as mine.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Account<'a> {
+    /// The username contract §4.1 spells `author` with, and the string the
+    /// inbox's mention rule and `@me` match against.
+    pub username: &'a str,
+    /// `userKey` -- the stable id a Confluence editor writes into a mention.
+    /// `None` on an instance that did not report one, which makes every
+    /// key-shaped link a miss.
+    pub user_key: Option<&'a str>,
+}
+
 /// The storage format stripped to text.
 ///
 /// Block-level elements become line breaks so `<h2>A</h2><p>B</p>` reads as
 /// two lines rather than as `AB`; inline elements vanish so `a<em>b</em>c`
 /// reads as `abc`. Runs of whitespace collapse, blank lines go, and the
 /// result is trimmed -- what is left is what a person would have typed.
+///
+/// **One element does not vanish: `ri:user`.** A mention is markup, and
+/// stripping it would delete the only thing that says the body names somebody
+/// -- so it is rendered back to the `@name` a person typed to make it, which
+/// is the spelling `knobas_core::inbox`'s mention rule reads and the spelling
+/// that module already documents Confluence as using. `ri:username` renders
+/// whoever it names; `ri:userkey` renders only [`Account`]'s own key, because
+/// that is the one key this adapter can resolve. See [`Account`] for the
+/// direction the misses fall in.
 #[must_use]
-pub(crate) fn to_text(storage: &str) -> String {
+pub(crate) fn to_text(storage: &str, me: Option<Account<'_>>) -> String {
     let mut out = String::with_capacity(storage.len());
     let mut rest = storage;
     while let Some(open) = rest.find('<') {
@@ -56,7 +89,20 @@ pub(crate) fn to_text(storage: &str) -> String {
             rest = "";
             break;
         };
-        if is_block(&tag_name(tag)) {
+        let name = tag_name(tag);
+        if name == "ri:user" {
+            if let Some(mentioned) = mentioned_name(tag, me) {
+                // A trailing space, always: the mention rule requires the
+                // username not be followed by another name character, and a
+                // `<ac:plain-text-link-body>` right behind the link would
+                // otherwise run its text straight onto the name and hide the
+                // mention. `tidy` collapses the space away where nothing
+                // follows.
+                out.push('@');
+                out.push_str(mentioned);
+                out.push(' ');
+            }
+        } else if is_block(&name) {
             out.push('\n');
         }
         rest = tail;
@@ -82,6 +128,52 @@ fn split_tag(rest: &str) -> Option<(&str, &str)> {
         }
     }
     None
+}
+
+/// Which name a `ri:user` element renders as, if any.
+///
+/// Two attributes, in the order Confluence prefers them: `ri:username` names
+/// the account outright and is rendered whoever it is, and `ri:userkey` is
+/// rendered only when it is [`Account`]'s own -- an unresolvable key is a
+/// miss, never a guess.
+fn mentioned_name<'a>(tag: &'a str, me: Option<Account<'a>>) -> Option<&'a str> {
+    if let Some(name) = attr(tag, "ri:username").filter(|name| !name.is_empty()) {
+        return Some(name);
+    }
+    let me = me?;
+    let key = attr(tag, "ri:userkey").filter(|key| !key.is_empty())?;
+    (Some(key) == me.user_key).then_some(me.username)
+}
+
+/// One attribute's value out of a tag body, or `None` for an attribute that is
+/// absent or unquoted.
+///
+/// The name must be **preceded by whitespace and followed by `=`**, because
+/// `ri:username` contains `ri:user` and a substring search for one would find
+/// the other. Whitespace and not "or the start of the tag": the first token in
+/// a tag body is the element name, never an attribute, so requiring the space
+/// costs nothing and needs no second case. Deliberately total: a malformed tag
+/// yields no attribute rather than an error, which is this module's whole
+/// discipline (a body that would not parse is a page that is not searchable).
+fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    let mut rest = tag;
+    loop {
+        let at = rest.find(name)?;
+        let before_ok = at > 0
+            && rest[..at]
+                .chars()
+                .next_back()
+                .is_some_and(|c| c.is_ascii_whitespace());
+        let after = &rest[at + name.len()..];
+        let value = after.trim_start();
+        if before_ok && value.starts_with('=') {
+            let value = value[1..].trim_start();
+            let quote = value.chars().next().filter(|c| *c == '"' || *c == '\'')?;
+            let value = &value[quote.len_utf8()..];
+            return value.find(quote).map(|end| &value[..end]);
+        }
+        rest = after;
+    }
 }
 
 /// The element name inside a tag body, lowercased and without its `/`.
@@ -208,6 +300,23 @@ fn tidy(raw: &str) -> String {
 mod tests {
     use super::*;
 
+    /// A body with no `ri:user` in it renders identically whoever is asking,
+    /// so every test that is not about a mention reads it with no account --
+    /// and shadowing the name here keeps that claim in one place rather than
+    /// in thirty call sites.
+    fn to_text(storage: &str) -> String {
+        super::to_text(storage, None)
+    }
+
+    /// The account the seeded Confluence's admin is, as
+    /// `/rest/api/user/current` reports it.
+    fn me() -> Account<'static> {
+        Account {
+            username: "knobas",
+            user_key: Some("ff8080818f2a1b4c018f2a1c9d0e0001"),
+        }
+    }
+
     /// The seeded fixture page, in the storage format
     /// `testenv/seed-atlassian-content.sh` builds for it -- the exact body the
     /// live suite reads back off the real server.
@@ -329,5 +438,116 @@ mod tests {
         // must still be searchable.
         assert_eq!(to_text("<p>unclosed"), "unclosed");
         assert_eq!(to_text("a < b"), "a < b");
+    }
+
+    /// **The detection rule, stated as a test.** A Confluence mention is
+    /// `<ac:link><ri:user …/></ac:link>`, and what reaches the mirror's
+    /// `body_text` is the `@name` a person typed to make it -- which is what
+    /// `knobas_core::inbox`'s mention rule reads.
+    ///
+    /// Both spellings, because a Data Center editor writes the key and the
+    /// REST API accepts the name: `ri:username` names the account outright,
+    /// `ri:userkey` is resolved against the one key this adapter knows.
+    #[test]
+    fn a_user_link_renders_as_the_at_name_the_mention_rule_reads() {
+        assert_eq!(
+            super::to_text(
+                "<p><ac:link><ri:user ri:username=\"knobas\" /></ac:link> can you add the \
+                 SLA?</p>",
+                Some(me())
+            ),
+            "@knobas can you add the SLA?"
+        );
+        assert_eq!(
+            super::to_text(
+                "<p><ac:link><ri:user ri:userkey=\"ff8080818f2a1b4c018f2a1c9d0e0001\" \
+                 /></ac:link> can you add the SLA?</p>",
+                Some(me())
+            ),
+            "@knobas can you add the SLA?"
+        );
+    }
+
+    /// **The negative control, and the one that matters.** A link naming
+    /// somebody *else* renders as somebody else -- a renderer that resolved
+    /// every key to the configured account would put every colleague's
+    /// mentions in my inbox, which is the failure this pins.
+    ///
+    /// An unresolvable key renders as **nothing**: ADR-0007's miss direction,
+    /// and the cost is a mention of somebody knobas is not configured as.
+    #[test]
+    fn a_link_that_is_not_mine_never_renders_as_me() {
+        assert_eq!(
+            super::to_text(
+                "<p><ac:link><ri:user ri:username=\"mara.lindqvist\" /></ac:link> ping</p>",
+                Some(me())
+            ),
+            "@mara.lindqvist ping"
+        );
+        assert_eq!(
+            super::to_text(
+                "<p><ac:link><ri:user ri:userkey=\"2c9080f0-somebody-else\" /></ac:link> \
+                 ping</p>",
+                Some(me())
+            ),
+            "ping",
+            "an unresolvable key is a miss, not a guess"
+        );
+        // And with no account at all -- a source whose `username` was never
+        // filled in -- a key resolves to nothing while a name still renders.
+        assert_eq!(
+            super::to_text(
+                "<p><ac:link><ri:user ri:userkey=\"ff8080818f2a1b4c018f2a1c9d0e0001\" \
+                 /></ac:link> ping</p>",
+                None
+            ),
+            "ping"
+        );
+    }
+
+    /// A malformed or empty user link contributes nothing and takes nothing
+    /// down with it: an element with no attribute at all, an attribute with no
+    /// value, an unquoted value, an empty value, and the `ri:username`
+    /// substring hazard -- `attr` must not read `ri:username`'s value when it
+    /// was asked for `ri:userkey`, nor find `ri:userkey` inside a longer
+    /// attribute name.
+    #[test]
+    fn a_malformed_user_link_is_a_miss_and_the_body_still_reads() {
+        for tag in [
+            "<ri:user/>",
+            "<ri:user ri:userkey/>",
+            "<ri:user ri:userkey=/>",
+            "<ri:user ri:userkey=ff8080818f2a1b4c018f2a1c9d0e0001/>",
+            "<ri:user ri:userkey=\"\"/>",
+            "<ri:user ri:username=\"\"/>",
+            "<ri:user data-ri:userkey=\"ff8080818f2a1b4c018f2a1c9d0e0001\"/>",
+        ] {
+            assert_eq!(
+                super::to_text(&format!("<p>before{tag}after</p>"), Some(me())),
+                "beforeafter",
+                "{tag} must render as nothing"
+            );
+        }
+        // A `<` that never closes is the text it was and nothing is
+        // rendered from it -- the module's own rule, unchanged by mentions,
+        // and the reason a truncated body is searchable rather than empty.
+        assert_eq!(
+            super::to_text("<p>before<ri:user ri:username=\"knobas\"", Some(me())),
+            "before<ri:user ri:username=\"knobas\""
+        );
+    }
+
+    /// The rendered name is **delimited**, because the mention rule requires
+    /// the username not be followed by another name character. A mention whose
+    /// link carries a plain-text body would otherwise read as `@knobasknobas`
+    /// and match nobody.
+    #[test]
+    fn a_rendered_mention_is_delimited_from_whatever_follows_it() {
+        let text = super::to_text(
+            "<p><ac:link><ri:user ri:username=\"knobas\" /><ac:plain-text-link-body>\
+             <![CDATA[knobas]]></ac:plain-text-link-body></ac:link>?</p>",
+            Some(me()),
+        );
+        assert_eq!(text, "@knobas knobas?");
     }
 }

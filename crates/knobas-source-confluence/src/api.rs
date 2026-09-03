@@ -1,4 +1,4 @@
-//! The four calls this adapter makes.
+//! The five calls this adapter makes.
 //!
 //! A trait rather than a direct dependency on [`crate::http::ConfluenceHttp`],
 //! because the interesting part of this adapter is paging, the ceiling and
@@ -14,6 +14,7 @@
 //! | [`search`](ConfluenceApi::search) | `rest/api/content/search` | `cql`, `limit`, `expand` |
 //! | [`follow`](ConfluenceApi::follow) | whatever `_links.next` said | *(the server's own)* |
 //! | [`comments`](ConfluenceApi::comments) | `rest/api/content/{id}/child/comment` | `limit`, `start`, `expand` |
+//! | [`content`](ConfluenceApi::content) | `rest/api/content/{id}` | `expand` |
 //!
 //! Atlassian publishes no machine-readable specification for this product, so
 //! there is no mock that can record an invented parameter as a violation the
@@ -27,7 +28,16 @@
 
 use knobas_source::SourceError;
 
-use crate::model::{ContentPage, CurrentUser};
+use crate::model::{ContentPage, CurrentUser, RawContent};
+
+/// What the **mention walk** asks a record to carry.
+///
+/// Deliberately thin: it needs the id, the `version` its cursor entry is made
+/// of, and the `container` a comment hangs off. The page it resolves to is
+/// then fetched whole with [`EXPAND`], so a mentioning page and a page the
+/// ordinary walk delivered are mapped from byte-identical records rather than
+/// from two shapes that have to agree.
+pub(crate) const MENTION_EXPAND: &str = "version,container";
 
 /// What a page's record is asked to carry.
 ///
@@ -43,8 +53,16 @@ use crate::model::{ContentPage, CurrentUser};
 ///   of one per page. A server that will not expand this deeply is not a
 ///   failure: [`crate::sync`] completes what it did not get, which is the
 ///   Jira adapter's `complete` under another name.
-pub(crate) const EXPAND: &str =
-    "body.storage,ancestors,space,version,history,children.comment.body.storage";
+/// * `children.comment.version` -- **when** each of those comments was
+///   written. `body_text` has always carried the discussion; without its dates
+///   the record could not say when it last changed, and a page whose only
+///   recent event is a comment would be dated by an edit a year old. Jira
+///   answers this natively -- a comment moves an issue's `fields.updated` --
+///   and this expansion is what lets a Confluence page answer the same
+///   question ([`crate::map`]). A server that will not expand it falls back to
+///   the page's own stamp, which is the behaviour before it was asked for.
+pub(crate) const EXPAND: &str = "body.storage,ancestors,space,version,history,\
+                                 children.comment.body.storage,children.comment.version";
 
 #[async_trait::async_trait]
 pub(crate) trait ConfluenceApi: Send + Sync {
@@ -66,6 +84,14 @@ pub(crate) trait ConfluenceApi: Send + Sync {
     /// `GET /rest/api/content/{id}/child/comment` -- the completion path, for
     /// a server that did not expand the comments with the page.
     async fn comments(&self, id: &str, start: u32, limit: u32) -> Result<ContentPage, SourceError>;
+    /// `GET /rest/api/content/{id}?expand=…` -- one record by id.
+    ///
+    /// The mention walk's second half: a comment that names the account is
+    /// found by CQL, and the **page** it hangs off is what becomes the item,
+    /// fetched here. A search cannot do it -- `id = <n>` is CQL, but a comment
+    /// on a page nobody edited is precisely the case whose page the walk's own
+    /// bound excludes.
+    async fn content(&self, id: &str, expand: &str) -> Result<RawContent, SourceError>;
 }
 
 /// The real endpoints.
@@ -109,6 +135,14 @@ impl ConfluenceApi for crate::http::ConfluenceHttp {
                 ("limit", limit.to_string()),
                 ("expand", "body.storage,version,history".to_owned()),
             ],
+        )
+        .await
+    }
+
+    async fn content(&self, id: &str, expand: &str) -> Result<RawContent, SourceError> {
+        self.get_json(
+            &format!("rest/api/content/{id}"),
+            &[("expand", expand.to_owned())],
         )
         .await
     }
