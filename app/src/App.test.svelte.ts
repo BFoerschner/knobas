@@ -1483,7 +1483,6 @@ test("a stop whose block is not on a ticket opens the ad-hoc dialog, not the dra
     worklog_id: null,
   };
   adHocOffer = {
-    block_id: 9,
     suggestion: {
       entity_id: "mock:PAY-231",
       title: "Retry failed SEPA payouts",

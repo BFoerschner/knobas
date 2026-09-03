@@ -111,14 +111,14 @@ pub struct Suggestion {
 ///
 /// * [`offer`] answering `None` is *this is not an ad-hoc block* -- its target
 ///   is a ticket, and the worklog draft is what opens.
-/// * `Some(AdHocBlock { suggestion: None, .. })` is *the dialog opens and
-///   knobas has nothing to suggest* -- no rule fired, and *Keep local* is the
-///   default.
+/// * `Some(AdHocBlock { suggestion: None })` is *the dialog opens and knobas
+///   has nothing to suggest* -- no rule fired, and *Keep local* is the default.
+///
+/// One field, and the block's id is deliberately **not** echoed back: the
+/// caller passed it in and still holds it, so a copy on the way out would be a
+/// value with no reader and a promise of a guard nothing makes.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AdHocBlock {
-    /// The block the dialog is about, echoed back so a shell that stopped twice
-    /// cannot draw the first answer over the second block.
-    pub block_id: i64,
     pub suggestion: Option<Suggestion>,
 }
 
@@ -152,15 +152,19 @@ const LINKED: &str = "select case when l.from_id = $1 then l.to_id else l.from_i
 /// archiving a room later does not unmake the afternoon that happened in it.
 const ANCHOR: &str = "select anchor_id from knobas.context where id = $1";
 
-/// The last ticket logged to inside a day, by when it was logged.
+/// The tickets logged to inside a day, most recently logged first.
 ///
 /// `created_at`, not `started_at`: "today's last logged ticket" is about the
 /// order the reader logged things in, and a worklog written this afternoon for
 /// this morning's work is still the last thing they logged.
+///
+/// **The whole day and not `limit 1`**, so that a worklog whose source has
+/// since been removed is *skipped* rather than ending the rule -- the same
+/// reading [`linked_to_target`] gives its own list. A day holds a handful of
+/// these.
 const LAST_LOGGED: &str = "select entity_id from knobas.worklog
       where created_at >= $1 and created_at < $2
-      order by created_at desc, id desc
-      limit 1";
+      order by created_at desc, id desc";
 
 /// What the mirror calls an entity. Blank is nothing, as everywhere else.
 const TITLE: &str = "select title from knobas.entity where id = $1";
@@ -203,7 +207,12 @@ async fn logging_namespaces(
 
 /// Whether `entity_id` is a ticket in the only sense this module has one: its
 /// source declares `log_work`.
-fn takes_a_worklog(entity_id: &str, namespaces: &HashSet<String>) -> bool {
+///
+/// Named apart from [`super::worklog`]'s `takes_a_worklog`, which asks the same
+/// question one entity and one configuration read at a time. This is the same
+/// rule read off a set built once -- see [`logging_namespaces`] -- and two
+/// functions of one name in sibling modules would read as one function moved.
+fn worklog_can_go_to(entity_id: &str, namespaces: &HashSet<String>) -> bool {
     EntityRef::parse(entity_id).is_ok_and(|reference| namespaces.contains(&reference.namespace))
 }
 
@@ -232,7 +241,7 @@ async fn linked_to_target(
     let rows = sqlx::query(LINKED).bind(target).fetch_all(pool).await?;
     for row in &rows {
         let other: String = row.try_get("other")?;
-        if takes_a_worklog(&other, namespaces) {
+        if worklog_can_go_to(&other, namespaces) {
             return Ok(Some(other));
         }
     }
@@ -253,7 +262,7 @@ async fn context_anchor(
         .fetch_optional(pool)
         .await?
         .flatten();
-    Ok(anchor.filter(|anchor| takes_a_worklog(anchor, namespaces)))
+    Ok(anchor.filter(|anchor| worklog_can_go_to(anchor, namespaces)))
 }
 
 /// Rule three: the last ticket logged to on the block's own day.
@@ -270,12 +279,14 @@ async fn last_logged(
     namespaces: &HashSet<String>,
 ) -> Result<Option<String>, IpcError> {
     let (from, to) = day_bounds(day, offset_minutes)?;
-    let logged: Option<String> = sqlx::query_scalar(LAST_LOGGED)
+    let logged: Vec<String> = sqlx::query_scalar(LAST_LOGGED)
         .bind(from)
         .bind(to)
-        .fetch_optional(pool)
+        .fetch_all(pool)
         .await?;
-    Ok(logged.filter(|entity_id| takes_a_worklog(entity_id, namespaces)))
+    Ok(logged
+        .into_iter()
+        .find(|entity_id| worklog_can_go_to(entity_id, namespaces)))
 }
 
 /// What the ad-hoc dialog should show for `block_id`, or `None` when the block
@@ -310,7 +321,7 @@ pub async fn offer(
     let namespaces = logging_namespaces(pool, registry).await?;
     if target
         .as_deref()
-        .is_some_and(|target| takes_a_worklog(target, &namespaces))
+        .is_some_and(|target| worklog_can_go_to(target, &namespaces))
     {
         // The block is on a ticket. Its time goes to that ticket, and the
         // worklog draft is the surface for that -- offering to re-target it
@@ -340,10 +351,7 @@ pub async fn offer(
         }),
         None => None,
     };
-    Ok(Some(AdHocBlock {
-        block_id,
-        suggestion,
-    }))
+    Ok(Some(AdHocBlock { suggestion }))
 }
 
 #[cfg(test)]
@@ -371,19 +379,19 @@ mod tests {
     #[test]
     fn only_a_configured_logging_namespace_makes_an_id_a_ticket() {
         let namespaces: HashSet<String> = ["jira".to_owned(), "jira-eu".to_owned()].into();
-        assert!(takes_a_worklog("jira:PAY-231", &namespaces));
-        assert!(takes_a_worklog("jira-eu:PAY-231", &namespaces));
+        assert!(worklog_can_go_to("jira:PAY-231", &namespaces));
+        assert!(worklog_can_go_to("jira-eu:PAY-231", &namespaces));
         assert!(
-            !takes_a_worklog("gitea:tidewater/payments#4", &namespaces),
+            !worklog_can_go_to("gitea:tidewater/payments#4", &namespaces),
             "a repo's pull request is not somewhere a worklog can go"
         );
         assert!(
-            !takes_a_worklog("ctx:5b1c0f1e", &namespaces),
+            !worklog_can_go_to("ctx:5b1c0f1e", &namespaces),
             "a stored context is linkable, so it turns up as a candidate -- and \
              it is never a ticket"
         );
         assert!(
-            !takes_a_worklog("PAY-231", &namespaces),
+            !worklog_can_go_to("PAY-231", &namespaces),
             "a string that is not an entity id is not a ticket"
         );
     }

@@ -36,10 +36,7 @@ const BLOCK: Block = {
 };
 
 function offering(rule: SuggestionRule = "linked_to_target"): AdHocOffer {
-  return {
-    block_id: BLOCK.id,
-    suggestion: { entity_id: TICKET, title: "Retry failed SEPA payouts", rule },
-  };
+  return { suggestion: { entity_id: TICKET, title: "Retry failed SEPA payouts", rule } };
 }
 
 const DRAFT: Draft = {
@@ -190,7 +187,7 @@ test("Keep local closes the dialog and writes nothing at all", () => {
  * *Keep local* — and it is the primary action rather than a ghost.
  */
 test("with no suggestion there is only Keep local, and it is the default", () => {
-  render({ block_id: BLOCK.id, suggestion: null });
+  render({ suggestion: null });
 
   // Every button with words on it. The dialog's own dismiss control is an
   // icon and carries none, so it is not one of the ways *out of this

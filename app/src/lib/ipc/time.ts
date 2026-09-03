@@ -434,10 +434,11 @@ export interface Suggestion {
  * what opens. This shape with `suggestion: null` is *the dialog opens and
  * knobas has nothing to suggest* — no rule fired, and *Keep local* is the
  * default.
+ *
+ * One field: the caller passed the block id in and still holds it, so an echo
+ * of it here would be a value with no reader.
  */
 export interface AdHocBlock {
-  /** Echoed back, so a second stop cannot be drawn over the first answer. */
-  block_id: number;
   suggestion: Suggestion | null;
 }
 

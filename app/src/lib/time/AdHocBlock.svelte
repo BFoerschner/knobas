@@ -31,8 +31,10 @@
     type Block,
     type Draft,
   } from "../ipc/time";
+  import type { SuggestionRule } from "../ipc/time";
   import Modal from "../shell/Modal.svelte";
   import { targetReading } from "../shell/timer";
+  import { durationReading, minutesBetween } from "./day";
   import { localDay, offsetMinutes } from "./draft";
 
   let {
@@ -75,37 +77,45 @@
   /**
    * **Why this ticket**, in one sentence per rule.
    *
-   * The `switch` is exhaustive over `SuggestionRule`, so a rule added to the
-   * backend fails `svelte-check` here rather than drawing a suggestion with no
-   * reason under it.
+   * The `switch` is exhaustive **because the `default` arm assigns the rule to
+   * `never`**: a fourth rule added to the backend fails `svelte-check` right
+   * here, rather than reaching this dialog as a suggestion with no reason under
+   * it. A `default: return ""` would compile for ever and draw exactly that.
    */
-  const because = $derived.by(() => {
-    switch (suggestion?.rule) {
+  function reasonFor(rule: SuggestionRule): string {
+    switch (rule) {
       case "linked_to_target":
         return `You linked it to ${on}.`;
       case "context_anchor":
         return "It anchors the room this block ran in.";
       case "last_logged":
         return "It is the last ticket you logged time to on this day.";
-      default:
-        return "";
+      default: {
+        const unhandled: never = rule;
+        throw new Error(`no reason is written for the ${String(unhandled)} rule`);
+      }
     }
-  });
+  }
 
-  /** `45m`, `2h 30m` — how long the block was. */
-  const length = $derived.by(() => {
-    const minutes = Math.round(
-      (new Date(block.ended_at).getTime() - new Date(block.started_at).getTime()) / 60_000,
-    );
-    const whole = Math.floor(minutes / 60);
-    const rest = minutes % 60;
-    if (whole === 0) return `${rest}m`;
-    return rest === 0 ? `${whole}h` : `${whole}h ${rest}m`;
-  });
+  const because = $derived(suggestion ? reasonFor(suggestion.rule) : "");
+
+  /**
+   * `45 min`, `2 h 15 min` — how long the block was, **in the day review's own
+   * reading**.
+   *
+   * `durationReading` rather than a second formatter: this dialog opens over
+   * the strip that draws the same block, and two spellings of one length side
+   * by side read as two different numbers.
+   */
+  const length = $derived(durationReading(minutesBetween(block.started_at, block.ended_at)));
 
   let sending = $state(false);
-  /** What went wrong, in the backend's own words. */
-  let failed = $state<string | null>(null);
+  /**
+   * Why the reader is still looking at this dialog: a refusal in the backend's
+   * own words, or the one non-failure that leaves them here — a block that
+   * moved with nothing left to log on it.
+   */
+  let problem = $state<string | null>(null);
 
   /**
    * *Log to a ticket…*: move the block onto the ticket, then open the draft.
@@ -123,7 +133,7 @@
   function logToTicket() {
     if (!suggestion || sending) return;
     sending = true;
-    failed = null;
+    problem = null;
     void updateBlock(block.id, block.started_at, block.ended_at, {
       kind: "entity",
       entity_id: suggestion.entity_id,
@@ -139,7 +149,7 @@
           // The move happened; there is simply nothing to log. Said rather
           // than closed silently, because the block is on the ticket now and
           // a reader told nothing would believe neither had happened.
-          failed = `This block is on ${key} now, but there is nothing left to log on it today.`;
+          problem = `This block is on ${key} now, but there is nothing left to log on it today.`;
           sending = false;
           return;
         }
@@ -149,7 +159,7 @@
       .catch((error: unknown) => {
         // Never swallowed: the block is still where it was, and a reader who
         // is not told will close this believing the time is on the ticket.
-        failed = error instanceof Error ? error.message : String(error);
+        problem = error instanceof Error ? error.message : String(error);
         sending = false;
       });
   }
@@ -172,8 +182,8 @@
       </p>
     {/if}
 
-    {#if failed}
-      <p class="fail">{failed}</p>
+    {#if problem}
+      <p class="fail">{problem}</p>
     {/if}
   {/snippet}
 

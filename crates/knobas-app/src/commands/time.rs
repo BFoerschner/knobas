@@ -894,7 +894,6 @@ mod tests {
     #[test]
     fn the_ad_hoc_block_shape_matches_its_typescript_mirror() {
         let offer = crate::time::suggest::AdHocBlock {
-            block_id: 7,
             suggestion: Some(crate::time::suggest::Suggestion {
                 entity_id: "jira:PAY-231".to_owned(),
                 title: None,
@@ -905,7 +904,7 @@ mod tests {
             MIRROR,
             "AdHocBlock",
             &serde_json::to_value(&offer).unwrap(),
-            &["block_id", "suggestion"],
+            &["suggestion"],
         );
     }
 

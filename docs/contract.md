@@ -4060,8 +4060,9 @@ From this commit on, each of the following requires an orchestrator decision **a
   **Two absences, and they are different answers**, which is why `AdHocBlock` is a struct rather
   than an `Option<Option<Suggestion>>` — serde spells both of those `null`. The command's own
   `null` is *this block is on a ticket*, and the shell opens #280's worklog draft instead;
-  `{ block_id, suggestion: null }` is *the dialog opens and knobas has nothing to suggest*, where
-  *Keep local* is the default. **That is what keeps the shell free of a list of kinds**: whether a
+  `{ suggestion: null }` is *the dialog opens and knobas has nothing to suggest*, where *Keep
+  local* is the default. The block's id is not echoed back: the caller passed it in and still holds
+  it. **That is what keeps the shell free of a list of kinds**: whether a
   block's target is somewhere a worklog can go is read off the source's declared `log_work`, the
   same descriptor question `worklog::takes_a_worklog` asks, so an adapter that starts taking
   worklogs needs no frontend change. A table of kinds here is exactly what §3a exists to prevent.

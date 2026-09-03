@@ -182,6 +182,22 @@
   });
 
   /**
+   * **The room the reader is standing in**, resolved, or `null` when they are
+   * not in one.
+   *
+   * One lookup for the two questions below, which read different fields of it:
+   * the foreground rule wants its *anchor* (what the clock runs on when nothing
+   * is open) and the timer's room wants its *stored context* (where the reader
+   * was standing). Two `find`s over the same list would be two chances for one
+   * of them to go on reading a room the address has left.
+   */
+  const standingIn = $derived.by(() => {
+    const route = router.route;
+    if (route.view !== "room") return null;
+    return contexts.find((candidate) => candidate.id === route.ctx) ?? null;
+  });
+
+  /**
    * **What is in front of the reader**, by the rule spec #272 states for both
    * the heartbeat and ⌘T: *the open detail, else the room's anchor, else
    * none* (#278).
@@ -204,7 +220,7 @@
     if (open && canBeTarget({ entityId: open })) {
       return { kind: "entity", entity_id: open } as const;
     }
-    const anchor = contexts.find((candidate) => candidate.id === route.ctx)?.anchorId;
+    const anchor = standingIn?.anchorId;
     if (anchor && canBeTarget({ entityId: anchor })) {
       return { kind: "entity", entity_id: anchor } as const;
     }
@@ -232,11 +248,7 @@
    * standing*. The same room supplies both, and they answer different
    * questions.
    */
-  const roomContext = $derived.by(() => {
-    const route = router.route;
-    if (route.view !== "room") return null;
-    return contexts.find((candidate) => candidate.id === route.ctx)?.filter.context ?? null;
-  });
+  const roomContext = $derived(standingIn?.filter.context ?? null);
 
   $effect(() => {
     timer.roomContext = roomContext;

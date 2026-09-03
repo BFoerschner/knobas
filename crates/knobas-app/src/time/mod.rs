@@ -295,16 +295,16 @@ fn vet(target: TimerTarget) -> Result<TimerTarget, IpcError> {
 /// while a refused start is a sentence in front of a reader whose finger is
 /// still on the key.
 ///
-/// Blank is `None`, not a refusal: an empty string is a shell that had no room
-/// rather than one that named a bad one.
+/// **`None` is the only way to say "no room", and a blank string is not one.**
+/// The shell's derived rooms carry `null` and never `""`, so an empty string is
+/// the same frontend bug as any other malformed value and is refused with the
+/// rest -- a second spelling of absence would be a second thing every later
+/// reader had to know about.
 fn in_room(context_id: Option<String>) -> Result<Option<String>, IpcError> {
     let Some(context_id) = context_id else {
         return Ok(None);
     };
     let context_id = context_id.trim().to_owned();
-    if context_id.is_empty() {
-        return Ok(None);
-    }
     let reference = EntityRef::parse(&context_id).map_err(IpcError::invalid)?;
     if !reference.namespace.eq_ignore_ascii_case(CONTEXT_NAMESPACE) {
         return Err(IpcError::invalid(format!(

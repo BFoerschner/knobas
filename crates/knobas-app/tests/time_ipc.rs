@@ -2166,8 +2166,6 @@ async fn a_ticket_linked_to_the_page_is_the_suggestion_and_names_its_rule() {
     let offered = offer(&pool, block)
         .await
         .expect("a page is an ad-hoc block");
-    assert_eq!(offered.block_id, block, "the offer is about this block");
-
     let suggestion = offered.suggestion.expect("the linked ticket is suggested");
     assert_eq!(suggestion.entity_id, TICKET);
     assert_eq!(
@@ -2454,6 +2452,16 @@ async fn todays_last_logged_ticket_is_the_third_rule() {
         suggested(&pool, block).await,
         Some((TICKET.to_owned(), time::suggest::SuggestionRule::LastLogged)),
         "the *last* ticket logged to today, not the first"
+    );
+
+    // ...and a worklog whose source has since been removed is **skipped**,
+    // not the end of the rule -- the reading rule one gives its own list. It
+    // is the newest of the three, so a `limit 1` here answers nothing at all.
+    logged_at(&pool, "sunset:OLD-1", at(16, 0)).await;
+    assert_eq!(
+        suggested(&pool, block).await,
+        Some((TICKET.to_owned(), time::suggest::SuggestionRule::LastLogged)),
+        "a worklog knobas can no longer reach is not a reason to stop looking"
     );
 }
 
