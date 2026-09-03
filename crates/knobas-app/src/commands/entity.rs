@@ -2460,6 +2460,11 @@ pub async fn publish_standup_protocol_inner(
         let space = crate::protocol::space_of(pool, &target.parent).await?;
         let payload = crate::protocol::create_page_payload(&target, &space, day, &note.body_md);
         crate::sources::write_queue::submit(state, payload).await?;
+        // Wait for the re-read `submit` set off. The link this call is about
+        // to draw points at a page that has an address only once a sync has
+        // seen it, so triggering and hoping would leave every ordinary publish
+        // unlinked until the reader happened to open the view again.
+        crate::sources::write_queue::resync(state, &target.source_id).await;
     }
     standup_protocol_inner(pool, day).await
 }
@@ -2593,6 +2598,9 @@ pub async fn create_action_item_ticket_inner(
         }),
     )
     .await?;
+    // The same wait, for the same reason: a created ticket has no address
+    // until the mirror has it, and this is the call that goes looking.
+    crate::sources::write_queue::resync(state, &project_ref.namespace).await;
 
     let ticket_entity_id = ticket_titled(pool, &project_ref.namespace, title).await?;
     let mut linked = false;

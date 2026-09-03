@@ -479,7 +479,15 @@ fn escape(text: &str) -> String {
 /// **Found by the page's title**, which is the module header's ruling put into
 /// a statement: a `create_page` write whose `title` is this date's page title
 /// is this date's publication, whatever the reader has since done to the
-/// publish target. Matching the parent too would strand a write queued under
+/// publish target.
+///
+/// The title is read at `payload->'CreatePage'->>'title'` because the payload
+/// column holds the **whole serialized `WriteOp`**, and serde's default
+/// external tagging puts the variant's name around its fields. A path that
+/// forgot the tag would match nothing and every publish would be a first one,
+/// which is the duplicate this rule exists to prevent -- so
+/// `publishing_a_date_twice_queues_one_page` asserts on the queue's depth
+/// rather than on what the call answered. Matching the parent too would strand a write queued under
 /// yesterday's target and let a second one be composed beside it, which is
 /// exactly the duplicate this rule exists to prevent.
 ///
@@ -503,7 +511,7 @@ pub async fn publication_of(
         "select id, source_id, state, detail, remote_id
            from knobas.write_queue
           where op = $1
-            and payload->>'title' = $2
+            and payload->'CreatePage'->>'title' = $2
             and state <> 'refused'
             and state <> 'discarded'
           order by id desc
