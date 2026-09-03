@@ -73,6 +73,7 @@ const ROW: EntityRow = {
   title: "Retry failed SEPA payouts",
   updated_at: "2026-08-22T11:48:00Z",
   synced_at: "2026-08-22T14:30:00Z",
+  path: null,
 };
 
 const PAGE: EntityPage = { rows: [ROW], total: 1 };

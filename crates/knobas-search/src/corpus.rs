@@ -118,6 +118,16 @@ pub struct Corpus {
     /// When knobas last saw the row -- the per-row provenance §4 requires
     /// ("synced 4 min ago").
     pub(crate) synced_at: &'static str,
+    /// Where a row sits **inside its source**, as one line, or `null::text`
+    /// for a corpus whose rows sit nowhere (#284).
+    ///
+    /// One SQL expression, and the only one allowed here is
+    /// [`ancestor_path_read!`](knobas_core::ancestor_path_read) -- a second
+    /// spelling would be a second answer to "where is this", and the launcher
+    /// row and the detail panel both draw it. ADR-0007: it misses to `null`
+    /// for every kind whose records carry no `ancestors`, which is every kind
+    /// but a Confluence page today.
+    pub(crate) path: &'static str,
     /// An extra `where` fragment scoping the corpus, for a relation that holds
     /// more than one kind of thing. `None` for [`LIVE_ITEM`].
     pub(crate) scope: Option<&'static str>,
@@ -142,6 +152,7 @@ pub const LIVE_ITEM: Corpus = Corpus {
     author: Some("i.author"),
     updated_at: "i.item_updated_at",
     synced_at: "i.synced_at",
+    path: knobas_core::ancestor_path_read!("i.payload"),
     scope: None,
 };
 
@@ -182,6 +193,11 @@ pub const NOTE: Corpus = Corpus {
     updated_at: "n.updated_at",
     // A local table is never behind itself: what knobas holds *is* the source.
     synced_at: "n.updated_at",
+    // A note sits nowhere: it is knobas' own, it has no source to be nested
+    // inside, and there is no payload to read ancestors out of. `null::text`
+    // and not an empty string -- absence is the ADR-0007 miss, and an empty
+    // string would draw an empty path line on every note in the launcher.
+    path: "null::text",
     scope: None,
 };
 

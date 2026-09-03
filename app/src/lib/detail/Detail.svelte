@@ -198,6 +198,20 @@
   const label = $derived(kindSingular(shownKind, declared));
   const key = $derived(entityId.slice(entityId.indexOf(":") + 1));
   const fields = $derived(detail ? projectPayload(detail.payload) : []);
+  /**
+   * Where this item sits inside its source, when its record says — a
+   * Confluence page's ancestor path (#284).
+   *
+   * Read off the **row**, not out of `detail.payload`, although the payload is
+   * right there. The launcher row draws the same string, the launcher has no
+   * payload to read it out of, and one rule with two implementations is the
+   * drift #277 spent a whole test file pinning against. So the one spelling is
+   * `knobas_core::ancestor_path_read!` in SQL, both surfaces read what it
+   * joined, and this line is a field access rather than a second rule. It
+   * misses to `null`, so a ticket, a build and a page nobody has filed
+   * anywhere all show no path rather than a wrong one.
+   */
+  const path = $derived(detail?.row.path ?? null);
   /** Narrowed once, so the button and its handler agree that it is a string. */
   const webUrl = $derived(detail?.web_url ?? null);
 
@@ -504,6 +518,9 @@
             {key}
           </span>
           <h2 id={titleId}>{detail.row.title}</h2>
+          {#if path}
+            <div class="d-path">{path}</div>
+          {/if}
         </div>
       </div>
 
@@ -629,6 +646,19 @@
   */
   .d-body {
     white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  /*
+    Where the item lives, under its title: quieter than the title and allowed
+    to wrap, because a path is prose of unbounded length and truncating it
+    throws away the end — which is the half nearest the page.
+  */
+  .d-path {
+    margin-top: 2px;
+    color: var(--faint);
+    font-size: 11.5px;
+    line-height: 1.35;
     overflow-wrap: anywhere;
   }
 </style>

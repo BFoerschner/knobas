@@ -44,7 +44,7 @@ pub(crate) const GROUP_ORDER: &[&str] = &[
 /// display column. A non-optional `rank: f32` here panics at runtime on the
 /// *normal* case, not on an edge one.
 ///
-/// Names the nine columns it reads and no more. `sync.live_item` carries a
+/// Names the ten columns it reads and no more. `sync.live_item` carries a
 /// `tsvector`; `select *` into a `FromRow` struct panics at runtime
 /// (interfaces §1).
 #[derive(Debug, sqlx::FromRow)]
@@ -56,6 +56,10 @@ pub struct RawHit {
     title: Option<String>,
     updated_at: Option<DateTime<Utc>>,
     synced_at: Option<DateTime<Utc>>,
+    /// Where the row sits inside its source, joined by the statement (#284).
+    /// Null for a group header, and null for every record with no readable
+    /// `ancestors` -- two absences that mean the same thing to a reader.
+    path: Option<String>,
     rank: Option<f32>,
     snippet: Option<String>,
 }
@@ -109,6 +113,7 @@ fn hit(row: RawHit) -> Option<SearchHit> {
             title: row.title.unwrap_or_default(),
             updated_at: row.updated_at,
             synced_at,
+            path: row.path,
         },
         rank: row.rank.unwrap_or_default(),
         snippet: row
@@ -140,6 +145,7 @@ mod tests {
             title: None,
             updated_at: None,
             synced_at: None,
+            path: None,
             rank: None,
             snippet: None,
         }
@@ -154,6 +160,7 @@ mod tests {
             title: Some(id.to_owned()),
             updated_at: None,
             synced_at: Some(Utc::now()),
+            path: None,
             rank: Some(rank),
             snippet: Some(format!(
                 "{}sepa{} batch",

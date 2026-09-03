@@ -70,6 +70,17 @@ export interface SearchHit {
   /** RFC 3339 timestamp — the row's provenance ("synced 4 min ago"). */
   synced_at: string;
   title: string;
+  /**
+   * Where the row sits **inside its source**, as one line — a Confluence
+   * page's ancestor path, `Engineering › Payments` (#284).
+   *
+   * `null` for every row whose record carries no readable `ancestors`, which
+   * is every kind but a page today: the ADR-0007 **miss**, so a row shows no
+   * path rather than a wrong one and no caller has to ask what kind it holds.
+   * Joined by one SQL statement, `knobas_core::ancestor_path_read!`, so the
+   * launcher row and the detail panel cannot disagree about what a path is.
+   */
+  path: string | null;
   rank: number;
   snippet: Segment[];
 }

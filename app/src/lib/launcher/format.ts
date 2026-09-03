@@ -23,7 +23,6 @@ export function syncAge(iso: string, now?: Date): string {
   return `synced ${ago(iso, now)}`;
 }
 
-
 /**
  * What to say about a source whose credential needs attention.
  *
@@ -62,7 +61,10 @@ export function provenance(
   // remove it, it only respells it as `health?.state` and costs the narrowing
   // that `COMPLAINT[health.state]` below depends on.
   if (health && isActionable(health.state)) {
-    return { text: `${sourceId} · ${COMPLAINT[health.state] ?? health.state}`, failing: true };
+    return {
+      text: `${sourceId} · ${COMPLAINT[health.state] ?? health.state}`,
+      failing: true,
+    };
   }
   return { text: syncAge(syncedAt, now), failing: false };
 }

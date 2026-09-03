@@ -475,20 +475,25 @@ teamcity-live-seeded:
 # WHERE THE LIVE SUITES GO. One line per suite in the block marked below, each
 # a `cargo test -p <crate> --test <live suite> -- --ignored --nocapture
 # --test-threads=1`, gated on KNOBAS_JIRA_URL / KNOBAS_CONFLUENCE_URL from
-# `./seed --env`. Two exist (#276): the Jira adapter's
-# `live_jira_seeded` -- sync, payload, cursor, the real 401 -- and the app
-# crate's `atlassian_live`, which is the engine-and-queue half: credential
-# health end to end, and the three write ops read back out of Jira. M3.2 adds
-# the Confluence adapter's beside them. Serial and unparallelised for the
-# reason `gitea-live` gives: one server, and tests that write to it.
+# `./seed --env`. Three exist: the Jira adapter's `live_jira_seeded` (#276) --
+# sync, payload, cursor, the real 401 -- the app crate's `atlassian_live`,
+# which is the engine-and-queue half (credential health end to end, and the
+# three write ops read back out of Jira), and the Confluence adapter's
+# `live_confluence_seeded` (#284), which is the **only** witness that adapter
+# has: ADR-0013 refused a mockd half for a product with no machine-readable
+# spec. Serial and unparallelised for the reason `gitea-live` gives: one
+# server, and tests that write to it.
 #
 # THE SUITES SHARE ONE SEEDED SERVER, AND EACH TAKES BACK WHAT IT WROTE, from
 # a `Drop` that checks rather than assumes. What a *killed* run leaves is put
-# back by the next run of the **Jira adapter's** suite, whose leftover
-# clearing works from `seed-state.json` rather than from anything a run
-# remembers: a stray issue and a stray comment deleted, a label removed, a
-# status moved back through the workflow -- the union of what either suite
-# writes. Order does not matter, and neither does a re-run: after a green run
+# back by the next run of the suite that wrote it, whose leftover clearing
+# works from `seed-state.json` rather than from anything a run remembers. On
+# the Jira side: a stray issue and a stray comment deleted, a label removed, a
+# status moved back through the workflow -- the union of what either Jira
+# suite writes. On the Confluence side: every seeded page's title put back,
+# which is the whole of what that suite writes (one rename, to witness that a
+# renamed page keeps its content id). Order does not matter, and neither does
+# a re-run: after a green run
 # the server holds exactly the seeded corpus, and a run started against a
 # dirty one prints what it put back. What neither suite can undo is the `PAY`
 # key counter -- the create leaves the project one key further on -- which is
@@ -550,4 +555,5 @@ atlassian-live:
     # ---- live suites gated on the Atlassian URLs: one line each, added here ----
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-jira --test live_jira_seeded -- --ignored --nocapture --test-threads=1
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test atlassian_live -- --ignored --nocapture --test-threads=1
-    echo "atlassian-live: every Atlassian-gated live suite green (2 suites)"
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-confluence --test live_confluence_seeded -- --ignored --nocapture --test-threads=1
+    echo "atlassian-live: every Atlassian-gated live suite green (3 suites)"

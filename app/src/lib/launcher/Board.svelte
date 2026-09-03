@@ -127,6 +127,7 @@
       sourceId={item.source_id}
       title={item.title}
       syncedAt={item.synced_at}
+      path={item.path}
       sources={home.sources}
       {now}
       selected={index === selected}

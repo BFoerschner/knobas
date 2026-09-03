@@ -48,11 +48,14 @@ macro_rules! recent_sql {
         concat!(
             $prefix,
             "select s.entity_id, s.kind, s.source_id, s.title,\n",
-            "       s.item_updated_at as updated_at, s.synced_at\n",
+            "       s.item_updated_at as updated_at, s.synced_at, s.path\n",
             "  from unnest($1::text[]) as k(kind)\n",
             "  cross join lateral (\n",
             "      select i.entity_id, i.kind, i.source_id, i.title,\n",
-            "             i.item_updated_at, i.synced_at\n",
+            "             i.item_updated_at, i.synced_at,\n",
+            "             ",
+            knobas_core::ancestor_path_read!("i.payload"),
+            " as path\n",
             "        from sync.live_item i\n",
             "       where i.kind = k.kind\n",
             "       order by i.item_updated_at desc nulls last, i.entity_id\n",
@@ -149,6 +152,9 @@ struct RecentRow {
     title: String,
     updated_at: Option<DateTime<Utc>>,
     synced_at: DateTime<Utc>,
+    /// Where the row sits inside its source (#284); null for a record with no
+    /// readable `ancestors`.
+    path: Option<String>,
 }
 
 /// The newest items across every kind the mirror holds.
@@ -172,6 +178,7 @@ pub async fn recent(pool: &sqlx::PgPool, limit: u32) -> Result<Vec<EntityRow>, S
             title: row.title,
             updated_at: row.updated_at,
             synced_at: row.synced_at,
+            path: row.path,
         })
         .collect())
 }

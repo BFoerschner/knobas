@@ -58,6 +58,18 @@ pub struct EntityRow {
     pub updated_at: Option<DateTime<Utc>>,
     /// When knobas last saw it. Always known -- it is knobas' own clock.
     pub synced_at: DateTime<Utc>,
+    /// Where this row sits **inside its source**, as one line -- a Confluence
+    /// page's ancestor path, `Engineering \u{203a} Payments` (#284, ratified
+    /// as a contract §10.8 exception under that ticket's criterion 5).
+    ///
+    /// `None` for every row whose record carries no readable `ancestors`,
+    /// which is every kind but a page today: the ADR-0007 **miss**. Joined by
+    /// `knobas_core::ancestor_path_read!`, the one statement that spells it,
+    /// so this row and the launcher's cannot disagree about what a path is.
+    ///
+    /// This struct and `knobas_search::EntityRow` are pinned to **one wire
+    /// shape** by `commands::search`'s own test; the field is on both.
+    pub path: Option<String>,
 }
 
 /// Which slice of the corpus a room wants.
@@ -149,6 +161,9 @@ pub struct EntityPage {
 const LIVE_UPDATED: &str = concat!(
     r#"
 select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at,
+       "#,
+    knobas_core::ancestor_path_read!("i.payload"),
+    r#" as path,
        count(*) over () as total
   from sync.live_item i
  where ($1::text[] is null or i.source_id = any($1))
@@ -168,6 +183,9 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
 const LIVE_TITLE: &str = concat!(
     r#"
 select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at,
+       "#,
+    knobas_core::ancestor_path_read!("i.payload"),
+    r#" as path,
        count(*) over () as total
   from sync.live_item i
  where ($1::text[] is null or i.source_id = any($1))
@@ -191,6 +209,9 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
 const ALL_UPDATED: &str = concat!(
     r#"
 select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at,
+       "#,
+    knobas_core::ancestor_path_read!("i.payload"),
+    r#" as path,
        count(*) over () as total
   from sync.item i
   join knobas.entity e on e.id = i.entity_id
@@ -210,6 +231,9 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
 const ALL_TITLE: &str = concat!(
     r#"
 select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at,
+       "#,
+    knobas_core::ancestor_path_read!("i.payload"),
+    r#" as path,
        count(*) over () as total
   from sync.item i
   join knobas.entity e on e.id = i.entity_id
@@ -305,6 +329,7 @@ pub async fn list_entities_inner(
                 title: row.get("title"),
                 updated_at: row.get("item_updated_at"),
                 synced_at: row.get("synced_at"),
+                path: row.get("path"),
             })
             .collect(),
         total,
@@ -432,9 +457,13 @@ const DETAIL_ACTIVITY: i64 = 20;
 /// `coalesce(c.enabled, true)` for the turned-off one (issue #204).
 /// `source_config` is a **left** join because `run_once` syncs unconfigured
 /// sources.
-const DETAIL: &str = r#"
+const DETAIL: &str = concat!(
+    r#"
 select i.entity_id, i.source_id, i.kind, i.title, i.body_text, i.author,
        i.item_updated_at, i.synced_at, i.payload, i.web_url,
+       "#,
+    knobas_core::ancestor_path_read!("i.payload"),
+    r#" as path,
        e.deleted_at,
        c.display_name, c.kind as adapter_kind,
        coalesce(c.enabled, true) as source_enabled
@@ -442,7 +471,8 @@ select i.entity_id, i.source_id, i.kind, i.title, i.body_text, i.author,
   join knobas.entity e on e.id = i.entity_id
   left join knobas.source_config c on c.id = i.source_id
  where i.entity_id = $1
-"#;
+"#
+);
 
 /// Everything the slide-over needs for `entity_id`, in three round trips.
 ///
@@ -478,6 +508,11 @@ pub async fn get_entity_inner(pool: &PgPool, entity_id: &str) -> Result<EntityDe
             title: row.get("title"),
             updated_at: row.get("item_updated_at"),
             synced_at: row.get("synced_at"),
+            // The detail panel draws the same path the launcher row does, out
+            // of the same statement -- the panel *has* the payload, but
+            // reading it here would be a second spelling of "where is this",
+            // and ADR-0007 requirement 2 exists to stop exactly that.
+            path: row.get("path"),
         },
         source: SourceRef {
             display_name: display_name.unwrap_or_else(|| source_id.clone()),
