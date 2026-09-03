@@ -354,7 +354,9 @@ Two containers plus a PostgreSQL each (~700 MB / ~800 MB, and Jira wants ~4 GB
 of RAM). **The databases are not optional**: Jira 10 removed the embedded H2
 engine, so without them the setup wizard stops at its database step.
 
-Both are then set up unattended, in about three minutes from empty volumes:
+Both are then set up unattended, from empty volumes, in the minutes the
+`atlassian-live` recipe header measures — **one product at a time, Jira
+first**:
 
 ```sh
 # 10-user, 3-hour Data Center keys, free, public, and needing no
@@ -362,28 +364,36 @@ Both are then set up unattended, in about three minutes from empty volumes:
 # 2026-03-30, so these are the only free licences left. The script pulls them
 # off Atlassian's page and checks each decodes to the 10-user, 3-hour Data
 # Center licence for its product; nothing to type or paste. Run it BEFORE
-# `up`, because Confluence reads its key at first start.
+# either `up`, because Confluence reads its key at first start.
 eval "$(./fetch-timebomb-keys.sh)"
 
-docker compose --profile real-atlassian up -d jira-db jira confluence-db confluence
-./seed --atlassian          # the wizards, then the Tidewater content (next section);
-                            # or ./seed-atlassian.sh jira|confluence for the wizards alone
+# Jira gets the VM to itself until it is RUNNING; Confluence is not created
+# before that. Two JVMs claiming their heaps at once on the 8 GB VM is what
+# pushed Jira's post-wizard restart past its wait (issue #314), and that
+# restart is the long pole: Jira writes its schema and re-initialises its
+# whole plugin system before `/status` says RUNNING.
+docker compose --profile real-atlassian up -d --wait jira-db jira
+./seed-atlassian.sh jira
+docker compose --profile real-atlassian up -d --wait confluence-db confluence
+./seed-atlassian.sh confluence
+
+./seed-atlassian-content.sh # the Tidewater content (next section)
 eval "$(./seed --env)"      # adds KNOBAS_JIRA_* and KNOBAS_CONFLUENCE_*
 ```
+
+`just atlassian-live` is all of that as one command, and on a machine with
+headroom `./seed --atlassian` still walks both wizards and seeds the content
+against a pair brought up together.
 
 The admin account is `knobas` / `knobas-dev` on both, and re-running the seed
 against a set-up instance is a no-op.
 
-**On a busy machine, bring them up one at a time — Jira first.** Two JVMs
-claiming their heaps at once on the 8 GB VM is what pushed Jira's post-wizard
-restart past its wait once (issue #314): it is the long pole, since Jira writes
-its schema and re-initialises its plugin system before `/status` says
-`RUNNING`. `just atlassian-live` does this for you; by hand it is `up -d
-jira-db jira` → `./seed-atlassian.sh jira` → `up -d confluence-db confluence` →
-`./seed-atlassian.sh confluence`, and then the content seed. The wait is capped
-at 900 s and prints the reported state every 30 s, so a slow start reads as a
-slow start rather than as a hang; if it fires, that is the machine, and
-`docker logs knobas-jira` is the next look.
+**What the waits print.** Jira's post-wizard wait for `RUNNING` is capped at
+900 s and the wizard-ready wait, on both products, at 600 s; both print the
+state the product is reporting and how far into the cap they are, every 30 s.
+A state that climbs is a slow start, one state repeated to the cap is a hang,
+and `UNREACHABLE` throughout is a container to read `docker logs` for. A cap
+that fires is a statement about the machine.
 
 The keys live in your **shell**, not in `.env` — that file is tracked
 (`./fetch-timebomb-keys.sh --write` drops them in the git-ignored
@@ -434,9 +444,9 @@ services, from a trap, so the teardown runs when a step fails and on Ctrl-C.
 starting together on the 8 GB VM is what made Jira's wait too tight under load
 (#314), and Confluence's container is not created until Jira is `RUNNING` with
 its REST answering. The recipe's header carries the measured wall clock of a
-full run and where a new live suite's line goes. <FILL: the sequenced
-measurement, from the live run> The three-hour window holds with hours of
-margin.
+full run and where a new live suite's line goes:
+<FILL:314 the sequenced measurement, from the live run>. The three-hour window
+holds with hours of margin.
 
 **The suite gated on `KNOBAS_CONFLUENCE_URL`** (issue #284) is
 `crates/knobas-source-confluence/tests/live_confluence_seeded.rs`, and it is
