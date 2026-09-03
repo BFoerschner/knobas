@@ -54,6 +54,17 @@ export interface Inbox {
   readonly count: number;
   /** Set when the last read or answer failed, so a surface can say so. */
   readonly error: string | null;
+  /**
+   * Whether {@link refresh} has ever succeeded — *the stream on this store is
+   * a read and not the empty list it was built with*.
+   *
+   * The one caller is the notifier (#290), and the distinction is the whole of
+   * why it exists: the first stream the inbox answers with is the backlog, and
+   * a notifier primed against the empty list this store holds *before* that
+   * read would announce every line of it. `false` after a failed read, because
+   * a read that failed says nothing about what is in the inbox.
+   */
+  readonly answered: boolean;
   /** True while an answer is in flight, so a button cannot be double-fired. */
   readonly busy: boolean;
   /** Read the count alone — what the strip needs and all it needs. */
@@ -95,7 +106,8 @@ export function createInbox(ports?: InboxPorts): Inbox {
     count: number;
     error: string | null;
     busy: boolean;
-  }>({ stream: [], snoozed: [], count: 0, error: null, busy: false });
+    answered: boolean;
+  }>({ stream: [], snoozed: [], count: 0, error: null, busy: false, answered: false });
 
   let live = false;
 
@@ -124,6 +136,10 @@ export function createInbox(ports?: InboxPorts): Inbox {
       state.snoozed = snoozed;
       state.count = count;
       state.error = null;
+      // Last, and only on the way through: `answered` is what tells the
+      // notifier that this stream is a read rather than the list this store
+      // was built with.
+      state.answered = true;
     } catch (error) {
       state.error = ipcErrorMessage(error);
     }
@@ -162,6 +178,9 @@ export function createInbox(ports?: InboxPorts): Inbox {
     },
     get busy() {
       return state.busy;
+    },
+    get answered() {
+      return state.answered;
     },
     refreshCount,
     refresh,
