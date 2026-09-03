@@ -3761,8 +3761,9 @@ From this commit on, each of the following requires an orchestrator decision **a
   account of an afternoon, and drafting one would put minutes nobody vouched for into a worklog
   that bills a client. `UNLOGGED_BLOCKS` carries `kind = 'manual'`, which is also what `log`
   covers, since it re-derives its blocks from that same read. #282's own surface is where a
-  passive block is assigned and becomes a claim; `a_passive_block_is_not_drafted` is the guard,
-  and it is here before its writer is.
+  passive block is assigned and becomes a claim; `a_passive_block_is_not_drafted` is the guard.
+  It was written before its writer existed and #282 landed while this branch was open, so it now
+  stands in front of rows the derivation really produces.
 
   **`worklog_draft` answers `null` for two different questions on purpose**, because the caller
   does the same thing with both: the shell asks for a draft on **every** stop that closed an

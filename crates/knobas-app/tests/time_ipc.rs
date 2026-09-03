@@ -1814,11 +1814,12 @@ async fn a_ticket_with_no_unlogged_time_has_no_draft() {
 /// into a worklog that bills a client, so the draft narrows to `manual` -- and
 /// so does `log`, which re-derives its covered blocks from the same read.
 ///
-/// The row is inserted directly rather than through the timer, because the
-/// timer only makes `manual` ones: #282's derivation is the writer of the
-/// other kind and it is not here yet. That is the point -- the guard has to be
-/// in place before its writer arrives, or the first passive afternoon knobas
-/// records is one it silently offers to bill.
+/// The row is inserted directly rather than derived from heartbeats: the
+/// timer only ever makes `manual` ones, and #282's derivation -- the writer of
+/// the other kind, which landed while this branch was open -- has its own
+/// tests above for whether it produces the row. What is witnessed here is the
+/// draft's side of the boundary, which is a fact about the `kind` column and
+/// nothing else, so the shortest fixture that states it is the honest one.
 #[tokio::test]
 async fn a_passive_block_is_not_drafted() {
     let pool = scratch("worklog-passive").await;
