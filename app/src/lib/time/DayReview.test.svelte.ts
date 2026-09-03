@@ -52,6 +52,8 @@ function onTicket(id: number, from: string, to: string, title: string | null): D
 }
 
 type Update = [number, string, string, TimerTarget];
+/** What *Assign…* on a gap sends: no id, because there is no row yet. */
+type Create = [string, string, TimerTarget];
 
 let target: HTMLDivElement;
 let app: Record<string, unknown> | undefined;
@@ -59,6 +61,7 @@ let app: Record<string, unknown> | undefined;
 function render(rows: DayBlock[], over: { update?: () => Promise<DayBlock> } = {}) {
   const updates: Update[] = [];
   const deletes: number[] = [];
+  const creates: Create[] = [];
   const asked: Array<[string, string]> = [];
   let listed = rows;
 
@@ -106,11 +109,20 @@ function render(rows: DayBlock[], over: { update?: () => Promise<DayBlock> } = {
           listed = listed.filter((entry) => entry.block.id !== id);
           return Promise.resolve();
         },
+        createBlock: (from: string, to: string, on: TimerTarget) => {
+          creates.push([from, to, on]);
+          // The backend answers with the row it wrote, and the view re-reads
+          // the day — so the strip after an assignment is modelled too, which
+          // is where the gap going away is visible.
+          const made = block(90 + creates.length, from, to, { target: on });
+          listed = [...listed, made];
+          return Promise.resolve(made);
+        },
       },
     },
   });
   flushSync();
-  return { router, updates, deletes, asked };
+  return { router, updates, deletes, creates, asked };
 }
 
 /** Every segment on the strip, as `"block"` or `"gap"`, in order. */
@@ -509,3 +521,155 @@ function set(field: HTMLInputElement | HTMLSelectElement, value: string) {
   field.dispatchEvent(new Event("change", { bubbles: true }));
   flushSync();
 }
+
+// -- passive blocks and *Assign…* (#282) --------------------------------------
+
+/** A passive block: knobas' guess at what was open, on the ticket. */
+function passive(id: number, from: string, to: string): DayBlock {
+  return {
+    ...block(id, from, to, {
+      kind: "passive",
+      target: { kind: "entity", entity_id: "jira:PAY-231" },
+    }),
+    title: "Retry failed SEPA payouts",
+  };
+}
+
+/** Type into the assign form, whichever segment opened it. */
+function assignAs(kind: "entity" | "label", value: string) {
+  const select = target.querySelector<HTMLSelectElement>('select[id^="assign-kind-"]')!;
+  select.value = kind;
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  const field = target.querySelector<HTMLInputElement>('input[aria-label="What this time was on"]')!;
+  field.value = value;
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+}
+
+/**
+ * Story 22: the two kinds are **distinguishable on one strip**, and in words
+ * as well as in styling — colour alone is not a reading.
+ *
+ * Both directions, on one strip, because a marker drawn on every block and a
+ * marker drawn on none would each pass half of this.
+ */
+test("a passive block is drawn as one and a manual block beside it is not", async () => {
+  render([passive(1, at(9), at(10)), block(2, at(10), at(11))]);
+  await vi.waitFor(() => expect(strip()).toEqual(["block", "block"]));
+
+  const segments = target.querySelectorAll(".strip > .seg");
+  expect(segments[0]!.classList.contains("passive")).toBe(true);
+  expect(segments[1]!.classList.contains("passive")).toBe(false);
+  expect(segmentText(0)).toContain("what was open");
+  expect(segmentText(1)).not.toContain("what was open");
+});
+
+/**
+ * A passive block offers *Assign…* and nothing else.
+ *
+ * Not editable and not deletable on purpose: the next day read reconciles the
+ * day's unassigned passive blocks back to what the heartbeats support, so an
+ * edit would be undone under the reader's hands. Assigning is what takes the
+ * block out of that reconciliation, by making it manual.
+ */
+test("a passive block offers *Assign…* and neither *Edit* nor *Delete*", async () => {
+  render([passive(1, at(9), at(10))]);
+  await vi.waitFor(() => expect(strip()).toEqual(["block"]));
+
+  expect(button("Assign…")).toBeTruthy();
+  expect(button("Edit")).toBeUndefined();
+  expect(button("Delete")).toBeUndefined();
+});
+
+/**
+ * **The first *Assign…* path**: a passive block, assigned, is `update_block`
+ * over the block's own span — which is where the backend writes
+ * `kind: "manual"`.
+ *
+ * The times are asserted as the block's own: an assignment that moved either
+ * edge would be a different edit wearing the same button.
+ */
+test("*Assign…* on a passive block sends the block's own span and the chosen target", async () => {
+  const { updates, creates } = render([passive(1, at(9), at(10, 30))]);
+  await vi.waitFor(() => expect(button("Assign…")).toBeTruthy());
+
+  button("Assign…")!.click();
+  flushSync();
+  assignAs("label", "  DB config for the migration  ");
+  button("Assign")!.click();
+
+  await vi.waitFor(() => expect(updates).toHaveLength(1));
+  expect(creates).toHaveLength(0);
+  expect(updates[0]).toEqual([
+    1,
+    at(9),
+    at(10, 30),
+    { kind: "label", label: "DB config for the migration" },
+  ]);
+});
+
+/**
+ * **The second *Assign…* path**: a gap has no row, so it is `create_block`
+ * spanning exactly the unaccounted stretch — and the strip stops drawing a gap
+ * there.
+ */
+test("*Assign…* on a gap writes a block spanning it and the gap goes", async () => {
+  const { creates, updates } = render([block(1, at(9), at(10)), block(2, at(11), at(12))]);
+  await vi.waitFor(() => expect(strip()).toEqual(["block", "gap", "block"]));
+
+  button("Assign…")!.click();
+  flushSync();
+  assignAs("entity", "jira:PAY-231");
+  button("Assign")!.click();
+
+  await vi.waitFor(() => expect(creates).toHaveLength(1));
+  expect(updates).toHaveLength(0);
+  expect(creates[0]).toEqual([at(10), at(11), { kind: "entity", entity_id: "jira:PAY-231" }]);
+
+  await vi.waitFor(() => {
+    flushSync();
+    expect(strip()).toEqual(["block", "block", "block"]);
+  });
+});
+
+/** One form at a time: opening *Assign…* on a gap closes the one on a block. */
+test("only one assign form is open at a time", async () => {
+  render([passive(1, at(9), at(10)), block(2, at(11), at(12))]);
+  await vi.waitFor(() => expect(strip()).toEqual(["block", "gap", "block"]));
+
+  button("Assign…")!.click();
+  flushSync();
+  expect(target.querySelectorAll('input[aria-label="What this time was on"]')).toHaveLength(1);
+
+  // The gap's, which is the second *Assign…* on the strip.
+  [...target.querySelectorAll<HTMLButtonElement>("button")]
+    .filter((candidate) => candidate.textContent?.trim() === "Assign…")[1]!
+    .click();
+  flushSync();
+  expect(target.querySelectorAll('input[aria-label="What this time was on"]')).toHaveLength(1);
+});
+
+/**
+ * A refused assignment says why, in the backend's own words, and leaves the
+ * strip alone — the rule the edit path follows for the same reason.
+ */
+test("a refused assignment shows the reason the backend gave", async () => {
+  render([passive(1, at(9), at(10))], {
+    update: () =>
+      Promise.reject({
+        code: "invalid",
+        message: "PAY-999 is not an entity knobas knows",
+      }),
+  });
+  await vi.waitFor(() => expect(button("Assign…")).toBeTruthy());
+
+  button("Assign…")!.click();
+  flushSync();
+  assignAs("entity", "jira:PAY-999");
+  button("Assign")!.click();
+
+  await vi.waitFor(() => {
+    flushSync();
+    expect(text()).toContain("PAY-999 is not an entity knobas knows");
+  });
+});

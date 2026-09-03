@@ -24,14 +24,23 @@
   refusal is what a reader hits, the sentence it came with is shown here rather
   than swallowed — "nothing happened" is not something anybody can act on.
 
-  **Passive blocks arrive with #282.** The kind switch below is here now with
-  one arm that acts, because story 22 is that the two are *distinguishable* on
-  one strip, and a switch added later would be a rendering rule discovered
-  after the strip already existed.
+  **Passive blocks are the second style** (#282). A passive block is knobas'
+  own guess at what was open, so it says so in words as well as in colour —
+  colour alone is not a reading — and the only thing it offers is *Assign…*:
+  it may not be edited or deleted, because the next day read reconciles the
+  day's unassigned passive blocks back to what the beats support and an edit
+  would be undone under the reader's hands. Assigning is what takes it out of
+  that reconciliation, by making it manual.
+
+  **A gap offers *Assign…* too, and it is the same sentence.** "This half-hour
+  was this ticket" is one thought; whether knobas already had a row to put it
+  on is not the reader's problem. The two paths differ by one call —
+  `update_block` on a block, `create_block` on a gap — and share a form.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../ipc";
   import {
+    createBlock as realCreateBlock,
     dayBlocks as realDayBlocks,
     deleteBlock as realDeleteBlock,
     updateBlock as realUpdateBlock,
@@ -63,6 +72,7 @@
     dayBlocks: typeof realDayBlocks;
     updateBlock: typeof realUpdateBlock;
     deleteBlock: typeof realDeleteBlock;
+    createBlock: typeof realCreateBlock;
   }
 
   let {
@@ -94,6 +104,7 @@
     dayBlocks: realDayBlocks,
     updateBlock: realUpdateBlock,
     deleteBlock: realDeleteBlock,
+    createBlock: realCreateBlock,
     ...ports,
   };
 
@@ -116,6 +127,16 @@
   /** The block whose edit form is open, if any. One at a time. */
   let editing = $state<number | null>(null);
   let form = $state({ from: "", to: "", kind: "label" as TimerTarget["kind"], value: "" });
+  /**
+   * The stretch whose *Assign…* form is open, if any (#282).
+   *
+   * One shape for both paths, and `id` is the whole difference: a passive
+   * block has a row to rewrite and a gap does not. Keeping them one state
+   * rather than two is what stops the strip opening an assign form and an edit
+   * form on the same row, and what lets one `<form>` serve both.
+   */
+  let assigning = $state<null | { key: string; from: string; to: string; id: number | null }>(null);
+  let assignForm = $state({ kind: "label" as TimerTarget["kind"], value: "" });
 
   const segments = $derived(segmentsOf(rows));
 
@@ -155,6 +176,7 @@
 
   function go(to: string) {
     editing = null;
+    assigning = null;
     refusal = null;
     router.go(hashFor({ view: "time", day: to }));
   }
@@ -184,6 +206,7 @@
     try {
       await action();
       editing = null;
+      assigning = null;
     } catch (error) {
       refusal = ipcErrorMessage(error);
     }
@@ -213,6 +236,43 @@
     void write(() => io.deleteBlock(entry.block.id));
   }
 
+  /**
+   * Open the *Assign…* form on a passive block or on a gap.
+   *
+   * The field starts empty in both cases, including on a passive block that
+   * already names a target: the reader is being asked *what this time was on*,
+   * and pre-filling it with knobas' own guess would turn the question into a
+   * confirmation of the thing the whole feature is careful not to assert.
+   */
+  function assign(over: { key: string; from: string; to: string; id: number | null }) {
+    refusal = null;
+    editing = null;
+    assigning = assigning?.key === over.key ? null : over;
+    assignForm = { kind: "label", value: "" };
+  }
+
+  /**
+   * Send an assignment: `update_block` where there is a row, `create_block`
+   * where there is only a gap.
+   *
+   * The backend writes `kind: "manual"` on the first, which is what takes a
+   * passive block out of the day read's reconciliation — see `time::day`'s
+   * `UPDATE`. Both re-read the day, because both change what the strip is.
+   */
+  function saveAssignment(over: { from: string; to: string; id: number | null }) {
+    const value = assignForm.value.trim();
+    const target: TimerTarget =
+      assignForm.kind === "entity"
+        ? { kind: "entity", entity_id: value }
+        : { kind: "label", label: value };
+    void write(() => {
+      assigning = null;
+      return over.id === null
+        ? io.createBlock(over.from, over.to, target)
+        : io.updateBlock(over.id, over.from, over.to, target);
+    });
+  }
+
   /** The half of a target a person types: an entity id, or the label itself. */
   function valueOf(target: TimerTarget): string {
     return target.kind === "entity" ? target.entity_id : target.label;
@@ -220,6 +280,7 @@
 
   function edit(entry: DayBlock) {
     refusal = null;
+    assigning = null;
     editing = entry.block.id;
     form = {
       from: clockReading(entry.block.started_at),
@@ -313,6 +374,37 @@
       </p>
     {/if}
 
+    <!--
+      One form for both *Assign…* paths. A snippet rather than two copies:
+      the fields are the same question, and two copies is how the gap path and
+      the block path come to disagree about which halves a target may have.
+    -->
+    {#snippet assignment(over: { key: string; from: string; to: string; id: number | null })}
+      <form
+        class="edit"
+        onsubmit={(event) => {
+          event.preventDefault();
+          saveAssignment(over);
+        }}
+      >
+        <label class="l" for="assign-kind-{over.key}">On</label>
+        <select class="sel-inline" id="assign-kind-{over.key}" bind:value={assignForm.kind}>
+          <option value="entity">An entity</option>
+          <option value="label">A label</option>
+        </select>
+        <input
+          class="inp grow"
+          type="text"
+          aria-label="What this time was on"
+          bind:value={assignForm.value}
+        />
+        <button class="btn sm pri" type="submit">Assign</button>
+        <button class="btn sm ghost" type="button" onclick={() => (assigning = null)}>
+          Cancel
+        </button>
+      </form>
+    {/snippet}
+
     <ol class="strip">
       {#each segments as segment (segment.key)}
         {#if segment.kind === "gap"}
@@ -327,6 +419,29 @@
               {clockReading(segment.from, key)} → {clockReading(segment.to, key)}
             </span>
             <span class="txt">{durationReading(segment.minutes)} unaccounted</span>
+            <span class="acts">
+              <!--
+                Story 23: a gap is the thing a person most often wants to fix,
+                and *Assign…* on one writes a manual block spanning exactly it
+                — the same sentence as assigning a passive block, sent through
+                `create_block` because there is no row yet.
+              -->
+              <button
+                class="btn sm"
+                onclick={() =>
+                  assign({
+                    key: segment.key,
+                    from: segment.from,
+                    to: segment.to,
+                    id: null,
+                  })}
+              >
+                Assign…
+              </button>
+            </span>
+            {#if assigning?.key === segment.key}
+              {@render assignment(assigning)}
+            {/if}
           </li>
         {:else}
           {@const entry = segment.block}
@@ -360,6 +475,15 @@
                 <span class="label">{target.label}</span>
               {/if}
 
+              {#if block.kind === "passive"}
+                <!--
+                  Said in words and not only in colour: a passive block is
+                  knobas' guess at what was open, and a reader who cannot tell
+                  it from a block they made would be reading a claim they never
+                  agreed to. Nothing here is ever logged on its own.
+                -->
+                <i class="passive">what was open — not tracked</i>
+              {/if}
               {#if block.ended_by_relaunch}
                 <!--
                   The honest reading of the flag: knobas stopped being alive
@@ -373,6 +497,27 @@
             </span>
 
             <span class="acts">
+              {#if block.kind === "passive" && !locked}
+                <!--
+                  The only thing a passive block offers. It is deliberately not
+                  editable or deletable: the next day read reconciles the day's
+                  unassigned passive blocks back to what the beats support, so
+                  an edit would be undone under the reader's hands. Assigning
+                  is what takes it out of that reconciliation.
+                -->
+                <button
+                  class="btn sm pri"
+                  onclick={() =>
+                    assign({
+                      key: segment.key,
+                      from: block.started_at,
+                      to: block.ended_at,
+                      id: block.id,
+                    })}
+                >
+                  Assign…
+                </button>
+              {/if}
               {#if block.kind === "manual" && !locked}
                 {#if block.ended_by_relaunch}
                   <button class="btn sm pri" onclick={() => extendToNow(entry)}>Extend to now</button>
@@ -383,6 +528,10 @@
                 <button class="btn sm ghost" onclick={() => remove(entry)}>Delete</button>
               {/if}
             </span>
+
+            {#if assigning?.key === segment.key}
+              {@render assignment(assigning)}
+            {/if}
 
             {#if editing === block.id}
               <form
@@ -504,6 +653,24 @@
   .ctxk {
     font: 500 11px var(--mono);
     color: var(--faint);
+    margin-left: 6px;
+  }
+
+  /*
+    The second style, and it is a *style* rather than a colour: a dashed left
+    edge and a dimmed ground, so a passive block reads as provisional next to
+    a manual one at a glance and still reads as one in monochrome. The gap
+    above is dashed all round; this is dashed on one side, because a passive
+    block is a claim about time that was used and a gap is a claim about time
+    that was not.
+  */
+  .seg.block.passive {
+    border-left: 2px dashed var(--amber);
+    background: var(--raised);
+  }
+
+  .passive {
+    color: var(--amber);
     margin-left: 6px;
   }
 

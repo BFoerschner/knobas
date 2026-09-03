@@ -18,9 +18,13 @@
 
   The sources view stays where it is. Folding it in here is information
   architecture this ticket does not own.
+
+  The second section arrived with #282 (passive attribution) and cost exactly
+  what the ruling said it would: one component and one import.
 -->
 <script lang="ts">
   import BackupSection from "./BackupSection.svelte";
+  import PassiveSection from "./PassiveSection.svelte";
 </script>
 
 <div class="view">
@@ -30,5 +34,6 @@
 
   <div class="view-b">
     <BackupSection />
+    <PassiveSection />
   </div>
 </div>
