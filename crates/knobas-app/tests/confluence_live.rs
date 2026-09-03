@@ -645,22 +645,29 @@ async fn the_three_page_writes_go_through_the_queue_and_come_back_from_confluenc
 
     let (after, after_version) = env.body_and_version(&edited.id).await;
     assert_eq!(
-        after, whole,
-        "Confluence stored something other than the body knobas sent"
-    );
-    assert_eq!(
         after_version,
         base_version + 1,
         "the edit did not advance the version by exactly one"
     );
-    // The rest of the page, intact: the second section is untouched, character
-    // for character.
-    let tail = &before[end..];
+    // **The rest of the page, intact** -- the criterion, and asserted as the
+    // two halves rather than only as the whole, so a failure says *which* half
+    // moved. Should these hold while the whole-body assertion below does not,
+    // the server normalised storage format it was handed: that is a finding
+    // about the product to write down before any assertion here is changed,
+    // never a run to repeat (ADR-0013).
     assert!(
-        after.ends_with(tail),
-        "the rest of the page did not survive"
+        after.starts_with(&before[..start]),
+        "everything before the edited section did not survive"
+    );
+    assert!(
+        after.ends_with(&before[end..]),
+        "everything after the edited section did not survive"
     );
     assert!(after.contains(&edit), "the edit is not in the page");
+    assert_eq!(
+        after, whole,
+        "Confluence stored something other than the body knobas sent"
+    );
 
     // -- a comment -----------------------------------------------------------
     let words = format!("does the SLA still hold? -- {LITTER}");
