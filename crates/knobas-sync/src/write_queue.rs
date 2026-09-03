@@ -159,22 +159,25 @@ pub async fn submit(
 /// row.
 ///
 /// [`submit`] is this plus a flush, and is what almost everything wants. This
-/// half exists on its own for one caller and one reason: **a caller that keeps
-/// a local record of the write has to be able to write that record, carrying
-/// this row's id, before the flush settles the write.**
+/// half exists on its own for one caller and one reason: **nothing may be sent
+/// to a source before knobas' own record of it exists.**
 ///
-/// The worklog is that caller (issue #280). Its local copy carries the id Jira
-/// gives the worklog, and the only moment that id exists is the instant
-/// [`Source::write`](knobas_source::Source::write) answers -- inside the
-/// flush. `store::sent` stamps it onto whatever copy names the settling write,
-/// so a copy inserted *after* `submit` returned would be a copy the settle had
-/// already looked for and not found, and the id would be gone for good rather
-/// than merely late.
+/// The worklog is that caller (issue #280). It keeps a local copy of what it
+/// sent, and the copy is also what marks the blocks it covers as spent -- so a
+/// crash in the gap between the send and the copy would leave a worklog on the
+/// ticket with no trace of it here and the same afternoon offered for logging
+/// again. `submit` has that gap by construction; this half plus
+/// [`flush_source`] does not.
 ///
-/// The pair is therefore: `queue`, write the local copy against the id, then
-/// [`flush_source`]. A crash between them leaves a pending write and a copy
-/// with no remote id -- which is the ordinary state of every worklog logged
+/// The pair is therefore: `queue`, write the local record against this row's
+/// id, then [`flush_source`]. A crash between them leaves a pending write and
+/// a copy that says so -- which is the ordinary state of every worklog logged
 /// while Jira is down, and the next flush finishes it.
+///
+/// **The id Jira answers with is a separate problem and is solved separately**
+/// (`knobas_core::write_queue::sent`): the settle records it on the queue row
+/// as well as on the copy, so a flush the scheduler happens to run first
+/// cannot lose it.
 ///
 /// **Not a second write path.** Nothing here reaches a source: the flush loop
 /// is still the only thing that calls `Source::write`, and a row queued and

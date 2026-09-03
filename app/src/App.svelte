@@ -232,7 +232,10 @@
   function draftWorklog(closed: Block | null) {
     if (!closed || closed.target.kind !== "entity") return;
     const on = closed.target.entity_id;
-    void worklogDraft(on, localDay(new Date(closed.ended_at)), offsetMinutes())
+    void worklogDraft(on, {
+      day: localDay(new Date(closed.ended_at)),
+      offsetMinutes: offsetMinutes(),
+    })
       .then((draft) => {
         worklog = draft;
       })

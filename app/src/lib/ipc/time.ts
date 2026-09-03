@@ -272,32 +272,57 @@ export interface Worklog {
 }
 
 /**
+ * **The reader's own reckoning of a day** — which the backend cannot work out
+ * for itself, and which both worklog calls take.
+ *
+ * One object rather than two positional arguments, because they travel
+ * together through every signature on both sides of the bridge and one of them
+ * is a string: `logWork(entityId, day, …, startedAt, …)` with three strings in
+ * a row is a swap nothing catches.
+ */
+export interface ReaderDay {
+  /** `"YYYY-MM-DD"`, in the reader's own reckoning. */
+  day: string;
+  /**
+   * Minutes east of UTC — `offsetMinutes()` from `lib/time/draft`, which is
+   * `getTimezoneOffset` **negated**. This machine is the only thing that knows
+   * which day the reader means.
+   */
+  offsetMinutes: number;
+}
+
+/**
  * The worklog draft for a ticket and one of the reader's days, or `null`.
  *
  * **Ask on every stop; `null` is the ordinary answer.** Whether a worklog can
  * go somewhere is the backend's decision, read off the source's declared write
  * ops — so the shell opens the draft when it gets one and does nothing when it
  * does not, rather than keeping a list of kinds that can be timed and logged.
- *
- * `day` is `"YYYY-MM-DD"` in the reader's own reckoning and `offsetMinutes` is
- * their offset from UTC (`-new Date().getTimezoneOffset()`): this machine is
- * the only thing that knows which day the reader means.
  */
-export function worklogDraft(
-  entityId: string,
-  day: string,
-  offsetMinutes: number,
-): Promise<Draft | null> {
-  return invoke<Draft | null>("worklog_draft", { entityId, day, offsetMinutes });
+export function worklogDraft(entityId: string, when: ReaderDay): Promise<Draft | null> {
+  return invoke<Draft | null>("worklog_draft", {
+    entityId,
+    day: when.day,
+    offsetMinutes: when.offsetMinutes,
+  });
+}
+
+/** What the reader settled on in the draft. */
+export interface LoggedWork {
+  /** RFC 3339 — when the work began. Editable in the draft. */
+  startedAt: string;
+  /** How long was **worked**. Editable in the draft. */
+  seconds: number;
+  /** May be empty: a worklog with no words is a worklog. */
+  comment: string;
 }
 
 /**
  * Log the day's work on a ticket: the write is queued like any other, a local
  * copy exists at once, and the blocks it covers become read-only.
  *
- * `startedAt`, `seconds` and `comment` are what the reader settled on. Which
- * blocks are covered is **not** passed: the backend re-derives them, so a
- * webview cannot log another ticket's time or the same block twice.
+ * Which blocks are covered is **not** passed: the backend re-derives them, so
+ * a webview cannot log another ticket's time or the same block twice.
  *
  * Rejects with `conflict` when the day's time on that ticket has already been
  * logged, and with `invalid` for a source that takes no worklogs or a duration
@@ -305,19 +330,16 @@ export function worklogDraft(
  */
 export function logWork(
   entityId: string,
-  day: string,
-  offsetMinutes: number,
-  startedAt: string,
-  seconds: number,
-  comment: string,
+  when: ReaderDay,
+  logged: LoggedWork,
 ): Promise<Worklog> {
   return invoke<Worklog>("log_work", {
     entityId,
-    day,
-    offsetMinutes,
-    startedAt,
-    seconds,
-    comment,
+    day: when.day,
+    offsetMinutes: when.offsetMinutes,
+    startedAt: logged.startedAt,
+    seconds: logged.seconds,
+    comment: logged.comment,
   });
 }
 

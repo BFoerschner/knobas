@@ -585,7 +585,10 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
         },
         knobas_source::WriteOp::LogWork {
             entity: "jira:PAY-231".to_owned(),
-            started: chrono::Utc::now(),
+            // A fixed instant, the discipline `contract.rs`'s sibling probe
+            // records: a probe whose payload moves is one whose failures
+            // cannot be compared between runs.
+            started: chrono::DateTime::from_timestamp(1_788_000_000, 0).expect("a fixed instant"),
             seconds: 2_700,
             comment: "probe".to_owned(),
         },

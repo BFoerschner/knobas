@@ -106,6 +106,28 @@ create table knobas.worklog (
   created_at      timestamptz not null default now()
 );
 
+-- ## What the source answered, on the row that asked
+--
+-- `knobas.write_queue` keeps the id its write came back with, and the worklog's
+-- own `remote_id` above is a copy of it. Two homes for one value, deliberately,
+-- and the reason is an ordering nothing can enforce:
+--
+--   * `knobas_app::time::worklog::log` queues the write, writes the copy, then
+--     flushes -- so ordinarily the copy is there when the settle stamps it;
+--   * but the scheduler flushes every source on its own tick, and a tick landing
+--     between the queue row and the copy settles the write while nothing names
+--     it. The stamp would then match no row, and the id -- which exists only in
+--     the answer to that one call -- would be gone for good.
+--
+-- So the settle writes it here too, and the copy adopts it from here. Two
+-- writers, one value, no ordering required. This column is **internal to the
+-- queue**: `knobas_core::write_queue`'s `queue_columns!` does not list it, so it
+-- does not cross the bridge and `QueuedWrite` keeps its shape.
+--
+-- `null` for every op but `log_work`, and for a worklog whose write has not
+-- landed. Not unique, for the reason `knobas.worklog.remote_id` is not.
+alter table knobas.write_queue add column remote_id text;
+
 -- The day review asks "what has been logged for this ticket", newest first.
 create index worklog_entity_idx on knobas.worklog (entity_id, started_at desc);
 

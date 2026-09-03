@@ -19,11 +19,14 @@
   rewriting it and say so. Editing down to empty is allowed — a worklog with no
   words is a worklog.
 
-  The **interval is editable** in the same spirit, but only its length: the
-  start is what the blocks say and the duration is what is logged. A reader who
-  worked longer than the clock says can raise it; nothing here re-derives the
-  blocks from the number, because which blocks are covered is the backend's
-  (`knobas_app::time::worklog::log` records why).
+  The **interval is editable as a whole** (spec #272, story 31): when the work
+  began and how long it lasted are both the reader's to correct — a timer
+  started ten minutes after the work did is the ordinary case. What the edit
+  does *not* move is which blocks the worklog covers: those are re-derived by
+  the backend from the same rule the draft used, because a caller that could
+  name them could name another ticket's (`knobas_app::time::worklog::log`
+  records why). The day does not move either — `atClock` keeps it, so
+  correcting a start cannot file the afternoon under yesterday.
 
   ## ADR-0012's sentence is here on purpose
 
@@ -38,7 +41,7 @@
 <script lang="ts">
   import { logWork as realLogWork, type Draft, type Worklog } from "../ipc/time";
   import Modal from "../shell/Modal.svelte";
-  import { offsetMinutes } from "./draft";
+  import { atClock, clockOf, offsetMinutes } from "./draft";
 
   let {
     draft,
@@ -86,6 +89,23 @@
   /** Minutes, because that is the unit a person corrects a clock in. */
   let minutes = $state(Math.round(draft.seconds / 60));
 
+  // svelte-ignore state_referenced_locally
+  /** When the work began, as the time field shows it. */
+  let began = $state(clockOf(draft.started_at));
+
+  /**
+   * ...and as the instant that is sent. The day never moves; see `atClock`.
+   *
+   * **An untouched field sends the block's own start, verbatim.** A time field
+   * has no seconds, so putting every start through `atClock` would round
+   * 09:00:37 down to 09:00 on a draft nobody edited — knobas quietly changing
+   * a fact it measured. The reading is only replaced once it differs from what
+   * the block says.
+   */
+  const startedAt = $derived(
+    began === clockOf(draft.started_at) ? draft.started_at : atClock(draft.started_at, began),
+  );
+
   let sending = $state(false);
   /** What the backend said, if it refused. */
   let failed = $state<string | null>(null);
@@ -127,11 +147,8 @@
     failed = null;
     void logWork(
       draft.entity_id,
-      draft.day,
-      offsetMinutes(),
-      draft.started_at,
-      seconds,
-      comment,
+      { day: draft.day, offsetMinutes: offsetMinutes() },
+      { startedAt, seconds, comment },
     )
       .then((worklog) => {
         onlogged(worklog);
@@ -155,13 +172,18 @@
 <Modal title="Log time to {key}" subtitle={draft.day} {onclose}>
   {#snippet body()}
     <p class="lab">
-      {clock(draft.started_at)}–{clock(draft.ended_at)}, the day's blocks on this ticket
-      concatenated.
+      The day's blocks on this ticket, concatenated — they ran until {clock(draft.ended_at)}.
     </p>
 
-    <div class="fld">
-      <label class="l" for="{uid}-mins">Time logged (minutes)</label>
-      <input class="inp" id="{uid}-mins" type="number" min="1" step="1" bind:value={minutes} />
+    <div class="two">
+      <div class="fld">
+        <label class="l" for="{uid}-began">Started</label>
+        <input class="inp" id="{uid}-began" type="time" bind:value={began} />
+      </div>
+      <div class="fld">
+        <label class="l" for="{uid}-mins">Time logged (minutes)</label>
+        <input class="inp" id="{uid}-mins" type="number" min="1" step="1" bind:value={minutes} />
+      </div>
     </div>
 
     {#if draft.candidates.length > 0}
@@ -232,6 +254,12 @@
 
   .fld {
     margin-top: 12px;
+  }
+
+  .two {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
   }
 
   .fld .l {

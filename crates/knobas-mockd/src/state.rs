@@ -175,10 +175,6 @@ pub enum MockFault {
 struct Inner {
     issues: Vec<JiraIssue>,
     next_comment_id: u64,
-    /// The next id `POST .../worklog` hands out, continuing the fixture's own
-    /// `30000 + index` run so a worklog knobas writes is numbered like the
-    /// ones that were seeded.
-    next_worklog_id: u64,
     /// Advances one minute per mutation; see the module docs.
     clock: DateTime<Utc>,
     max_results_cap: u32,
@@ -291,40 +287,6 @@ impl MockState {
         });
         issue.updated = now;
         inner.next_comment_id += 1;
-        Some(id)
-    }
-
-    /// Appends a worklog and bumps the issue's `updated`; returns the new
-    /// worklog's id, or `None` if there is no such issue.
-    ///
-    /// The same shape as [`add_comment`](Self::add_comment), including the
-    /// ordering rule: no issue, no tick, and no id consumed.
-    ///
-    /// `started` is the caller's, not the clock's -- a worklog is a statement
-    /// about when the work happened, and a mock that stamped it `now` could
-    /// not witness an adapter that dropped the field.
-    pub fn add_worklog(
-        &self,
-        key: &str,
-        author: &str,
-        started: DateTime<Utc>,
-        seconds: u64,
-        comment: &str,
-    ) -> Option<u64> {
-        let mut inner = self.write();
-        let idx = inner.issues.iter().position(|i| i.key == key)?;
-        let now = inner.tick();
-        let id = inner.next_worklog_id;
-        let issue = &mut inner.issues[idx];
-        issue.worklogs.push(JiraWorklog {
-            id,
-            author: author.to_owned(),
-            comment: comment.to_owned(),
-            started,
-            time_spent_seconds: seconds,
-        });
-        issue.updated = now;
-        inner.next_worklog_id += 1;
         Some(id)
     }
 
@@ -669,11 +631,10 @@ fn default_server_offset() -> FixedOffset {
 
 impl Inner {
     fn fresh() -> Self {
-        let (issues, next_comment_id, next_worklog_id) = build_issues();
+        let (issues, next_comment_id) = build_issues();
         Self {
             issues,
             next_comment_id,
-            next_worklog_id,
             clock: fixture().today,
             max_results_cap: DEFAULT_MAX_RESULTS_CAP,
             build_types: crate::tc_state::build_types(),
@@ -692,7 +653,7 @@ impl Inner {
 ///
 /// `reset()` and `from_fixture()` both go through here, so the two cannot
 /// drift apart.
-fn build_issues() -> (Vec<JiraIssue>, u64, u64) {
+fn build_issues() -> (Vec<JiraIssue>, u64) {
     let fx = fixture();
     let username = |id: &str| {
         fx.person(id)
@@ -772,7 +733,7 @@ fn build_issues() -> (Vec<JiraIssue>, u64, u64) {
         });
     }
     resolve_references(&mut issues, fx);
-    (issues, next_comment_id, next_worklog_id)
+    (issues, next_comment_id)
 }
 
 /// The second pass: `parent` and `issuelinks`, which point at *other* issues

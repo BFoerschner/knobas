@@ -45,3 +45,41 @@ export function offsetMinutes(at: Date = new Date()): number {
   // discovering `Object.is(-0, 0)`.
   return -at.getTimezoneOffset() || 0;
 }
+
+/**
+ * The local clock reading of an instant, as `HH:MM` — what a time field shows.
+ *
+ * Zero-padded and 24-hour, because that is what `<input type="time">` takes
+ * and gives back; `toLocaleTimeString` is locale-shaped and would hand the
+ * field a value it refuses.
+ */
+export function clockOf(iso: string): string {
+  const at = new Date(iso);
+  return `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
+}
+
+/**
+ * `iso` moved to the local clock reading `hhmm`, as an RFC 3339 instant.
+ *
+ * **The calendar day does not move**, which is the whole of what this is for:
+ * the draft's interval is editable, and a reader correcting *when the work
+ * began* is saying 08:30 rather than 09:00 on the day they logged — not on
+ * some other day. Seconds and milliseconds are cleared, because a time field
+ * does not carry them and leaving the original's would make an edited start
+ * read `08:30:47`.
+ *
+ * A malformed reading — which `<input type="time">` produces while it is being
+ * typed into, and when it is cleared — leaves the instant alone. The
+ * alternative is `Invalid Date` reaching the backend as the moment a worklog
+ * began.
+ */
+export function atClock(iso: string, hhmm: string): string {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(hhmm);
+  const at = new Date(iso);
+  if (!match || Number.isNaN(at.getTime())) return iso;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return iso;
+  at.setHours(hours, minutes, 0, 0);
+  return at.toISOString();
+}

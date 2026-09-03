@@ -9,7 +9,7 @@
  */
 import { afterEach, expect, test, vi } from "vitest";
 
-import { localDay, offsetMinutes } from "./draft";
+import { atClock, clockOf, localDay, offsetMinutes } from "./draft";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -57,4 +57,45 @@ test("the offset is positive east of UTC", () => {
 
   const utc = { getTimezoneOffset: () => 0 } as Date;
   expect(offsetMinutes(utc)).toBe(0);
+});
+
+/**
+ * The interval is editable as a whole (#272, story 31), and correcting when
+ * the work began must not move the **day** it was worked on.
+ *
+ * A reader in any zone east of UTC who started at 00:30 would otherwise see
+ * their afternoon filed under yesterday by a naive UTC round trip.
+ */
+test("a corrected start keeps its calendar day", () => {
+  const nine = new Date(2026, 8, 3, 9, 0, 0);
+  const iso = nine.toISOString();
+  expect(clockOf(iso)).toBe("09:00");
+
+  const earlier = new Date(atClock(iso, "08:30"));
+  expect(clockOf(atClock(iso, "08:30"))).toBe("08:30");
+  expect(localDay(earlier)).toBe("2026-09-03");
+
+  // ...and the far edge of the day, which is where a UTC round trip goes
+  // wrong: still the 3rd.
+  const midnight = new Date(atClock(iso, "00:10"));
+  expect(localDay(midnight)).toBe("2026-09-03");
+  const late = new Date(atClock(iso, "23:50"));
+  expect(localDay(late)).toBe("2026-09-03");
+});
+
+/**
+ * A half-typed or cleared time field leaves the instant alone.
+ *
+ * `<input type="time">` reports `""` while it is being edited, and
+ * `new Date(NaN).toISOString()` throws — so without this the draft would
+ * either send `Invalid Date` as the moment a worklog began or blow up mid-
+ * keystroke.
+ */
+test("a reading that is not a time leaves the instant where it was", () => {
+  const iso = new Date(2026, 8, 3, 9, 0, 0).toISOString();
+  for (const bad of ["", "9", "09:", "24:00", "09:60", "nonsense"]) {
+    expect(atClock(iso, bad), bad).toBe(iso);
+  }
+  // ...and the direction that shows it is not simply refusing everything.
+  expect(atClock(iso, "8:30")).not.toBe(iso);
 });

@@ -312,63 +312,6 @@ async fn a_comment_reaches_the_ticket() {
     jira.assert_no_violations();
 }
 
-/// M3.1 (#280): logging work puts a worklog on the ticket, and the id Jira
-/// gave it comes back on the receipt.
-///
-/// Three claims, and each of them is a different way the write could be
-/// reported as done while being wrong:
-///
-/// * the worklog is **on the ticket**, with the seconds and the comment that
-///   were asked for -- read out of mockd's own state, not out of a 201;
-/// * `started` survives the hop, which is the field with a format rather than a
-///   value: mockd parses it with Jira's own pattern and answers 400 for `Z` or
-///   for a missing millisecond field, so this passing is the wire format being
-///   right;
-/// * the **receipt carries the id**. `WriteReceipt::none()` would leave a local
-///   copy that can never name what it stands for, and nothing else in knobas
-///   would notice.
-#[tokio::test]
-async fn logging_work_puts_a_worklog_on_the_ticket_and_names_it() {
-    let jira = spawn_mock_jira().await;
-    let source = source(&jira.base_url(), serde_json::json!({}));
-    let before = jira.state().issue("PAY-231").expect("in the fixture");
-    let started = chrono::DateTime::parse_from_rfc3339("2026-09-03T09:30:00Z")
-        .expect("a fixed instant")
-        .with_timezone(&chrono::Utc);
-
-    let receipt = source
-        .write(WriteOp::LogWork {
-            entity: "jira:PAY-231".to_owned(),
-            started,
-            seconds: 2_700,
-            comment: "- Retry SEPA payouts".to_owned(),
-        })
-        .await
-        .expect("a declared op is performed");
-
-    let after = jira.state().issue("PAY-231").expect("in the fixture");
-    assert_eq!(after.worklogs.len(), before.worklogs.len() + 1);
-    let logged = after.worklogs.last().expect("the worklog just added");
-    assert_eq!(logged.time_spent_seconds, 2_700);
-    assert_eq!(logged.comment, "- Retry SEPA payouts");
-    assert_eq!(
-        logged.started, started,
-        "the instant the work began is the one field of a worklog that has a \
-         format rather than a value, and Jira refuses every spelling but its own"
-    );
-    assert_eq!(
-        logged.author, "mara.lindqvist",
-        "story 17: the source attributes the write to the credential's own account"
-    );
-    assert_eq!(
-        receipt.remote_id.as_deref(),
-        Some(logged.id.to_string().as_str()),
-        "the receipt is the only way the local copy can ever name the worklog \
-         Jira just made"
-    );
-    jira.assert_no_violations();
-}
-
 /// Story 1: a ticket moves, and the mirror's source of truth says so.
 ///
 /// PAY-231 is `In Progress`, whose workflow offers `In Review`.

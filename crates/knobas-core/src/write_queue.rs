@@ -680,9 +680,19 @@ pub async fn hold(
 ///
 /// `remote_id` is what the source said it made -- `WriteReceipt::remote_id`,
 /// which is `None` for every op but `log_work`. When it is present it is
-/// stamped onto the `knobas.worklog` row that names this write, **in the same
-/// statement as the settle**, and that is the whole of how a worklog's local
-/// copy comes to carry Jira's id (issue #280).
+/// written **in the same statement as the settle**, to two places: the queue
+/// row itself, and the `knobas.worklog` row that names this write. That is the
+/// whole of how a worklog's local copy comes to carry Jira's id (issue #280).
+///
+/// # Why both
+///
+/// The copy is the one a person reads, and the queue row is the one that is
+/// always there. `worklog::log` queues, writes the copy, then flushes -- but
+/// the scheduler flushes on its own tick too, and a tick landing between those
+/// first two steps settles the write while no copy names it. The `update`
+/// below would match nothing, and the id exists nowhere else. Keeping it on
+/// the queue row as well means the copy can adopt it afterwards, so the two
+/// orderings agree.
 ///
 /// # Why this statement knows about `knobas.worklog`
 ///
@@ -714,7 +724,8 @@ pub async fn sent(
         "with settled as (
            update knobas.write_queue
               set state = 'sent', wait_reason = null, settled_at = now(),
-                  attempted_at = now(), attempts = attempts + 1
+                  attempted_at = now(), attempts = attempts + 1,
+                  remote_id = coalesce($2, remote_id)
             where id = $1 and state = 'pending'
             returning ",
         queue_columns!(),

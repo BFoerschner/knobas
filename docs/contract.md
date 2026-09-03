@@ -3702,21 +3702,25 @@ From this commit on, each of the following requires an orchestrator decision **a
   rather than taking the afternoon with it.
 
   **The settle is what stamps the id, in one statement.**
-  `knobas_core::write_queue::sent(pool, id, remote_id)` settles the queue row and updates the
-  worklog naming that row in the same statement, so "the write settled" and "the copy carries
-  the id" are one event. It names `knobas.worklog` deliberately: no transaction spans
+  `knobas_core::write_queue::sent(pool, id, remote_id)` settles the queue row, records the id on
+  it, and updates the worklog naming that row — all in the same statement, so "the write
+  settled" and "the copy carries the id" are one event. It names `knobas.worklog` deliberately: no transaction spans
   `Source::write` and the settle (ADR-0012), so a second statement could settle and then fail to
   stamp, leaving a worklog Jira holds and knobas cannot name with nothing left to re-read it
   from. The `update` matches nothing for every other op.
 
-  **`knobas_sync::write_queue::queue` exists beside `submit`** for the same reason, and it is not
-  a second write path: it is `submit`'s first half, and the flush loop is still the only caller
-  of `Source::write` (`write_choke_point.rs` is unchanged in that respect). The worklog's copy
-  has to exist, carrying the queued row's id, *before* the flush settles the write — otherwise
-  the settle looks for a copy that is not there yet and the id is gone for good rather than
-  merely late. So `time::worklog::log` queues, writes the copy, then flushes.
+  **`knobas_sync::write_queue::queue` exists beside `submit`**, and it is not a second write
+  path: it is `submit`'s first half, and the flush loop is still the only caller of
+  `Source::write` (`write_choke_point.rs` is unchanged in that respect). The reason is
+  **durability, not the id**: nothing may be sent to Jira before a local record of it exists, or
+  a crash in the gap leaves a worklog on the ticket that knobas has no trace of and offers the
+  reader to log again. So `time::worklog::log` queues, writes the copy and spends the blocks,
+  then flushes. The id survives either order because of the queue column above — the ordering and
+  the column answer two different questions, and both are needed.
   `sources::write_queue::submit` is now those two halves called in order and behaves exactly as
-  before. `HANDS_TO_THE_QUEUE` gains its third entry, `knobas-app/src/time/worklog.rs`, which
+  before. `time::worklog::keep` — the copy, and the blocks it spends — is `pub` for one reason:
+  it is the seam where the order of the copy and the flush stops mattering, and
+  `a_settle_that_beat_the_copy_still_gives_it_the_id` has to be able to put the copy second. `HANDS_TO_THE_QUEUE` gains its third entry, `knobas-app/src/time/worklog.rs`, which
   builds the op typed rather than as a `json!` literal for the reason the #44 entry gives.
 
   **Two commands**, both in the `time` module pair the #278 entry ratified:
@@ -3744,6 +3748,12 @@ From this commit on, each of the following requires an orchestrator decision **a
   the bridge for those two days is not worth it. Stated here because it is a limit, not an
   oversight.
 
+  **The interval is editable as a whole** (spec #272, story 31): the draft carries a start field
+  and a minutes field, and both are the reader's — a timer started ten minutes after the work did
+  is the ordinary case. An untouched start is sent **verbatim**, seconds and all, rather than put
+  through the minute-granularity field: rounding 09:00:37 down on a draft nobody edited would be
+  knobas quietly changing a fact it measured.
+
   **Which blocks a worklog covers is not an argument**, and that asymmetry is the point:
   `started_at`, `seconds` and `comment` are the reader's, edited in the draft or not, and knobas
   has no business overruling a person's account of their own afternoon — but *which of knobas'
@@ -3752,9 +3762,13 @@ From this commit on, each of the following requires an orchestrator decision **a
 
   **DTOs**: `Draft`, `Candidate`, `CandidateSource` (`mirror` | `activity`) and `Worklog`, all
   mirrored in `app/src/lib/ipc/time.ts` and pinned by `assert_shape`/`declared_union` in
-  `commands/time.rs`. A candidate carries its own **`bullet`**, composed in Rust: the frontend
-  joins the bullets of what is ticked and never formats a line of its own, so the wording of
-  every worklog knobas sends is one rule in one language. `WriteOpPayload` in
+  `commands/time.rs`. The mirror's two functions take `ReaderDay` and `LoggedWork` **objects**
+  rather than six positional arguments — three of them adjacent strings, where a swap is silent —
+  and unpack them into the same `invoke` payload the commands declare; those two interfaces are
+  the frontend's own shape and cross nothing. A candidate carries its own **`bullet`**, composed in Rust: the frontend
+  joins the bullets of what is ticked, so the wording of every worklog knobas *sends* is one rule
+  in one language. It strips the leading `- ` when it draws a candidate's own row, because a
+  checkbox list does not need a second bullet glyph; nothing it draws reaches the comment. `WriteOpPayload` in
   `app/src/lib/ipc/sources.ts` gains its ninth member, which
   `every_write_op_variant_is_declared_in_the_mirror` requires.
 
@@ -3773,10 +3787,14 @@ From this commit on, each of the following requires an orchestrator decision **a
   `crates/knobas-app/src/{error,profile}.rs` are untouched. `QueuedWrite` keeps its shape and its
   mirror: the receipt is consumed at the settle and nothing stores it on the queue row. No
   settings key. The backup export carries `knobas.worklog` already, for the reason the #278 entry
-  gives. Outside the frozen list: `knobas-mockd` grew `POST api/2/issue/{key}/worklog` (the WADL
-  declares it as `addWorklog`, so the generated allowlist already had it), parsing `started` with
-  Jira's own pattern so that an adapter sending `Z` is refused here exactly as it would be by the
-  product — which, per ADR-0013, is the one thing a mock of this endpoint is worth having.
+  gives. **`knobas-mockd` is untouched**, and deliberately: ADR-0013 freezes it — *nothing new* — so
+  `POST api/2/issue/{key}/worklog` stays a contract verb it answers `501` to. The worklog's wire
+  format is witnessed by the real Jira in `atlassian_live.rs` and, offline, by the one thing about
+  it that is a string rather than a request: `a_worklogs_started_carries_milliseconds_and_a_numeric_offset`
+  pins Jira's `started` pattern in the adapter's own tests. The app-level seam
+  (`tests/worklog_ipc.rs`) runs against a **trait-level fake** — the `knobas-source-mock` layer
+  ADR-0013 explicitly keeps — because what it asserts is knobas' own plumbing and not a claim
+  about any source.
 
   Ratified by the orchestrator as spec #272 and issue #280, whose acceptance criteria specify the
   op, the migration, the commands, the candidates, the ADR-0012 quotation, the live test and this

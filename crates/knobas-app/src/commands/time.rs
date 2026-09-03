@@ -215,6 +215,13 @@ pub async fn delete_block(lifecycle: State<'_, Lifecycle>, id: i64) -> Result<()
 /// offset from UTC, because their machine is the only thing that knows which
 /// day they mean.
 ///
+/// **Takes no `Lifecycle`**, and that is not an oversight: the draft asks the
+/// *adapter* whether a worklog can go there, so it needs the sources state --
+/// which carries the pool as well, and is managed later than the pool is. Two
+/// routes to one pool in one shim would be a second thing that can be
+/// `not_ready` for a different reason. The shape `commands::entity`'s
+/// `submit_write` uses, for the same reason.
+///
 /// # Errors
 ///
 /// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
@@ -223,15 +230,13 @@ pub async fn delete_block(lifecycle: State<'_, Lifecycle>, id: i64) -> Result<()
 #[tauri::command]
 pub async fn worklog_draft<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
-    lifecycle: State<'_, Lifecycle>,
     entity_id: String,
     day: chrono::NaiveDate,
     offset_minutes: i32,
 ) -> Result<Option<time::worklog::Draft>, IpcError> {
-    let pool = lifecycle.pool()?;
     let sources = crate::sources::state(&app)?;
     time::worklog::draft(
-        &pool,
+        &sources.pool,
         sources.registry.as_ref(),
         &entity_id,
         day,

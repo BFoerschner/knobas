@@ -11,7 +11,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { Candidate, Draft, Worklog } from "../ipc/time";
+import type { Candidate, Draft, LoggedWork, ReaderDay, Worklog } from "../ipc/time";
 import WorklogDraft from "./WorklogDraft.svelte";
 
 const TICKET = "jira:PAY-231";
@@ -70,7 +70,7 @@ function logged(id = 3): Worklog {
 
 function render(
   draft: Draft = DRAFT,
-  logWork: (...args: unknown[]) => Promise<Worklog> = () => Promise.resolve(logged()),
+  logWork: () => Promise<Worklog> = () => Promise.resolve(logged()),
 ) {
   const sent: Sent[] = [];
   const onclose = vi.fn();
@@ -81,16 +81,9 @@ function render(
       draft,
       onclose,
       onlogged,
-      logWork: ((
-        entityId: string,
-        day: string,
-        offsetMinutes: number,
-        startedAt: string,
-        seconds: number,
-        comment: string,
-      ) => {
-        sent.push({ entityId, day, offsetMinutes, startedAt, seconds, comment });
-        return logWork(entityId, day, offsetMinutes, startedAt, seconds, comment);
+      logWork: ((entityId: string, when: ReaderDay, work: LoggedWork) => {
+        sent.push({ entityId, ...when, ...work });
+        return logWork();
       }) as never,
     },
   });
@@ -205,6 +198,29 @@ test("it sends the interval, the edited comment and the reader's own day", async
 
   await vi.waitFor(() => expect(onlogged).toHaveBeenCalledTimes(1));
   expect(onclose).toHaveBeenCalledTimes(1);
+});
+
+/**
+ * The interval is editable **as a whole** (#272, story 31): the start as well
+ * as the length, because a timer started ten minutes after the work did is the
+ * ordinary case.
+ */
+test("a corrected start is what is logged, on the same day", async () => {
+  const { sent } = render();
+  const began = target.querySelector<HTMLInputElement>("input[type=time]");
+  expect(began, "the draft has no start field").not.toBeNull();
+
+  began!.value = "08:30";
+  began!.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+
+  logButton().click();
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+
+  const at = new Date(sent[0]!.startedAt);
+  expect(at.getHours()).toBe(8);
+  expect(at.getMinutes()).toBe(30);
+  expect(sent[0]!.day, "correcting a start must not move the day").toBe("2026-09-03");
 });
 
 /** An edited length is what is logged — the minutes field, not the blocks. */

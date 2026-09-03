@@ -636,7 +636,9 @@ fn every_write_op_has_a_stated_projection() {
         },
         WriteOp::LogWork {
             entity: "jira:PAY-231".to_owned(),
-            started: chrono::Utc::now(),
+            // Fixed, like `contract.rs`'s probe: a payload that moves between
+            // runs is one whose failures cannot be compared.
+            started: chrono::DateTime::from_timestamp(1_788_000_000, 0).expect("a fixed instant"),
             seconds: 2_700,
             comment: "SEPA retry".to_owned(),
         },

@@ -20,8 +20,12 @@
 //! | create | `POST api/2/issue` | `{"fields":{"project":{"key":…},"summary":…,"description":…,"issuetype":{"name":…}}}` |
 //! | log work | `POST api/2/issue/{key}/worklog` | `{"started":"<yyyy-MM-dd'T'HH:mm:ss.SSSZ>","timeSpentSeconds":…,"comment":…}` |
 //!
-//! All three are in `testenv/specs/jira-dc-rest.wadl`, so `knobas-mockd`
-//! records a violation for anything else and this crate's own suite goes red.
+//! All four are in `testenv/specs/jira-dc-rest.wadl` -- the worklog resource as
+//! `addWorklog` -- so `knobas-mockd` records a violation for anything else and
+//! this crate's own suite goes red. mockd serves the first three and answers
+//! `POST .../worklog` with its 501, which is a contract verb it has no handler
+//! for rather than a violation: ADR-0013 freezes it, and the worklog's witness
+//! is the real Jira (`knobas-app/tests/atlassian_live.rs`).
 
 use knobas_source::SourceError;
 

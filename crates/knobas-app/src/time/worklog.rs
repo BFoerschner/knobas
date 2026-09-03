@@ -34,13 +34,22 @@
 //!
 //! # Why `log` queues before it writes the copy
 //!
+//! Because **nothing may be sent to Jira before knobas' own record of it
+//! exists.** The copy is what marks the blocks as spent, so a crash between
+//! the send and the copy would leave a worklog on the ticket with no trace of
+//! it here and the same afternoon offered for logging again. `submit` has that
+//! gap by construction, which is why `knobas_sync::write_queue::queue` exists
+//! beside it and why the order here is queue, copy, flush.
+//!
+//! # And why the id survives the other order anyway
+//!
 //! The id Jira gives a worklog exists exactly once: in the answer to the POST,
-//! inside the flush loop. `knobas_core::write_queue::sent` stamps it onto the
-//! copy that names the settling write, in the same statement as the settle --
-//! so the copy has to exist, carrying the queue row's id, *before* the flush
-//! runs. That is the whole reason `knobas_sync::write_queue::queue` exists
-//! beside `submit`, and it is why the order here is queue, copy, flush rather
-//! than the ordinary submit-and-be-done.
+//! inside the flush loop. The scheduler flushes every source on its own tick,
+//! so a tick can settle this write in the gap above -- with no copy for the
+//! settle's stamp to find. `knobas_core::write_queue::sent` therefore records
+//! the id on the **queue row** as well, and [`keep`] takes it from there. Two
+//! writers, one value, no ordering required; migration `0014` records the
+//! reasoning beside the column.
 
 use chrono::{DateTime, Duration, FixedOffset, NaiveDate, Utc};
 use knobas_core::entity::EntityRef;
@@ -487,10 +496,20 @@ pub async fn draft(
 /// over blocks that are still offered for logging would be logged twice, and a
 /// block pointing at a worklog that was never written is a block nothing can
 /// give back.
+/// The `remote_id` is read **off the queue row this copy names**, rather than
+/// left null for the settle to fill in, and that is the fix for an ordering
+/// nothing can enforce: the scheduler flushes on its own tick, so the write
+/// this copy belongs to may already have settled -- with no copy for the
+/// settle's own stamp to have found. `knobas_core::write_queue::sent` keeps
+/// the id on the queue row for exactly this reason, and migration `0014`
+/// records it. A write that has not landed yet reads `null` here and is
+/// stamped by the settle in the ordinary way.
 const LOG: &str = "with made as (
        insert into knobas.worklog
-         (entity_id, started_at, seconds, comment, block_ids, write_queue_id)
-       values ($1, $2, $3, $4, $5, $6)
+         (entity_id, started_at, seconds, comment, block_ids, write_queue_id,
+          remote_id)
+       select $1, $2, $3, $4, $5, $6, q.remote_id
+         from knobas.write_queue q where q.id = $6
        returning id, entity_id, started_at, seconds, comment, block_ids,
                  write_queue_id, remote_id, created_at
      ), marked as (
@@ -498,6 +517,43 @@ const LOG: &str = "with made as (
          from made where b.id = any(made.block_ids)
      )
      select * from made";
+
+/// Write the local copy of a worklog, and spend the blocks it covers.
+///
+/// The middle step of [`log`], and public for one reason: it is the seam where
+/// **the order of the copy and the flush stops mattering**, and a test has to
+/// be able to put the copy second (`tests/worklog_ipc.rs`,
+/// `a_settle_that_beat_the_copy_still_gives_it_the_id`). Nothing in production
+/// calls it but `log`.
+///
+/// `write_queue_id` names a row that already exists; the copy takes its
+/// `remote_id` from that row, so a write a scheduler tick has already settled
+/// is not a worklog knobas can never name.
+///
+/// # Errors
+///
+/// [`IpcError`] if the write fails, including when `write_queue_id` names no
+/// row -- there is then nothing to copy from and nothing to flush.
+pub async fn keep(
+    pool: &PgPool,
+    entity_id: &str,
+    started_at: DateTime<Utc>,
+    seconds: i64,
+    comment: &str,
+    block_ids: &[i64],
+    write_queue_id: i64,
+) -> Result<Worklog, IpcError> {
+    let row = sqlx::query(LOG)
+        .bind(entity_id)
+        .bind(started_at)
+        .bind(seconds)
+        .bind(comment)
+        .bind(block_ids)
+        .bind(write_queue_id)
+        .fetch_one(pool)
+        .await?;
+    worklog_of(&row)
+}
 
 /// Log a day's work on a ticket: queue the write, keep the copy, and make the
 /// blocks read-only.
@@ -561,16 +617,16 @@ pub async fn log(
     let payload = serde_json::to_value(&op).map_err(IpcError::internal)?;
     let (queued, source_id) = crate::sources::write_queue::queue(state, payload).await?;
 
-    let row = sqlx::query(LOG)
-        .bind(entity_id)
-        .bind(started_at)
-        .bind(seconds)
-        .bind(comment)
-        .bind(&block_ids)
-        .bind(queued.id)
-        .fetch_one(&state.pool)
-        .await?;
-    let worklog = worklog_of(&row)?;
+    let worklog = keep(
+        &state.pool,
+        entity_id,
+        started_at,
+        seconds,
+        comment,
+        &block_ids,
+        queued.id,
+    )
+    .await?;
 
     crate::sources::write_queue::flush(state, &source_id, queued.id).await?;
 
