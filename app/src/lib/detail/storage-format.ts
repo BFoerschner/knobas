@@ -353,8 +353,16 @@ export function parseStorageFormat(storage: string): StorageNode[] {
 
 type ElementNode = Extract<StorageNode, { kind: "element" }>;
 
-/** One parsed tag. */
-interface Tag {
+/**
+ * One parsed tag.
+ *
+ * Exported with {@link readTag} for `page-sections.ts`, which scans the *same*
+ * markup for heading boundaries and must read a tag the same way this parser
+ * does -- quoted attribute values and all. A second scanner with its own idea
+ * of where a tag ends is how `<img alt="a > b"/>` becomes two different
+ * documents to two readers of one page.
+ */
+export interface Tag {
   name: string;
   closing: boolean;
   selfClosing: boolean;
@@ -370,7 +378,7 @@ interface Tag {
  * half and spill `b"/>` into the page as text. `null` for a `<` that never
  * closes.
  */
-function readTag(source: string, open: number): Tag | null {
+export function readTag(source: string, open: number): Tag | null {
   let quote: string | null = null;
   let end = -1;
   for (let at = open + 1; at < source.length; at += 1) {
