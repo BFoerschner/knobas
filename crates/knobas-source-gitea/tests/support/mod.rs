@@ -103,10 +103,20 @@ pub fn branch(name: &str, sha: &str, message: &str, timestamp: &str) -> Value {
     })
 }
 
+/// One pull request as Gitea's `/pulls` listing serves it.
+///
+/// `requested_reviewers` is here because Gitea's own `PullRequest` model
+/// carries it on every pull request -- an array of users, or `null` where
+/// nobody has been asked -- and it is the path this adapter's descriptor
+/// declares its reviewers at (#277). The fake standing in for the real
+/// container has to carry the field the declaration names, or the shape this
+/// suite certifies is not the shape the live one does; `tests/live_gitea.rs`
+/// is where the two are held together.
 pub fn pull(number: u64, title: &str, body: &str, updated: &str, comments: u64) -> Value {
     json!({
         "number": number, "title": title, "body": body, "state": "open",
         "draft": false, "merged": false, "comments": comments,
+        "requested_reviewers": [{ "login": "tom", "id": 8 }],
         "user": { "login": "mara", "id": 7 },
         "html_url": format!("https://gitea.example/tidewater/payout-service/pulls/{number}"),
         "head": { "label": "feature/PAY-231-sepa-retry", "ref": "feature/PAY-231-sepa-retry" },

@@ -260,6 +260,7 @@ knobas-app	test/sources_mirror	the_auth_state_union_matches_the_rust_enum
 knobas-app	test/sources_mirror	the_connection_report_shape_matches_its_typescript_mirror
 knobas-app	test/sources_mirror	the_db_stats_shape_matches_its_typescript_mirror
 knobas-app	test/sources_mirror	the_descriptor_shape_matches_its_typescript_mirror
+knobas-app	test/sources_mirror	the_list_path_shape_matches_its_typescript_mirror
 knobas-app	test/sources_mirror	the_mirror_invokes_the_write_queue_commands_by_their_registered_names
 knobas-app	test/sources_mirror	the_patch_and_draft_payloads_the_mirror_describes_decode
 knobas-app	test/sources_mirror	the_queue_counts_shape_matches_its_typescript_mirror
@@ -355,6 +356,16 @@ knobas-core	lib/knobas_core	note::tests::a_blank_title_becomes_a_name
 knobas-core	lib/knobas_core	note::tests::a_body_names_the_things_between_its_double_brackets
 knobas-core	lib/knobas_core	note::tests::a_stray_bracket_is_not_a_reference
 knobas-core	lib/knobas_core	note::tests::an_unclosed_bracket_ends_the_scan_where_it_starts
+knobas-core	lib/knobas_core	payload::tests::a_container_is_only_reported_where_the_source_wrote_one
+knobas-core	lib/knobas_core	payload::tests::a_flag_is_a_boolean_or_it_is_nothing
+knobas-core	lib/knobas_core	payload::tests::a_kind_that_declares_nothing_misses
+knobas-core	lib/knobas_core	payload::tests::a_list_keeps_the_usable_strings_and_drops_the_rest
+knobas-core	lib/knobas_core	payload::tests::a_list_that_is_not_an_array_yields_nothing
+knobas-core	lib/knobas_core	payload::tests::a_miss_is_a_miss_however_the_source_spelled_it
+knobas-core	lib/knobas_core	payload::tests::a_value_that_is_not_a_usable_string_is_passed_over
+knobas-core	lib/knobas_core	payload::tests::declarations_are_keyed_by_source_then_kind
+knobas-core	lib/knobas_core	payload::tests::the_field_names_the_sql_macros_use_are_the_serialized_ones
+knobas-core	lib/knobas_core	payload::tests::the_first_candidate_that_lands_on_a_string_wins
 knobas-core	lib/knobas_core	start_work::tests::a_failed_step_stops_the_sequence_rather_than_advancing_past_it
 knobas-core	lib/knobas_core	start_work::tests::a_failure_part_way_through_stops_everything_after_it
 knobas-core	lib/knobas_core	start_work::tests::a_flow_runs_from_the_front_and_ends_when_every_step_is_settled
@@ -444,6 +455,9 @@ knobas-core	test/notes	adding_a_ref_draws_a_link_and_removing_it_withdraws_the_l
 knobas-core	test/notes	an_unresolved_ref_creates_no_link_and_says_it_is_unresolved
 knobas-core	test/notes	an_untitled_note_is_given_a_name_rather_than_none
 knobas-core	test/notes	deleting_a_note_removes_its_body_and_tombstones_its_address
+knobas-core	test/payload_paths	a_declared_path_resolves_the_same_in_sql_and_in_rust
+knobas-core	test/payload_paths	a_path_that_lands_on_no_usable_value_misses_in_both
+knobas-core	test/payload_paths	an_undeclared_source_kind_or_field_misses_in_both
 knobas-core	test/projects	a_blank_project_key_contributes_nothing
 knobas-core	test/projects	a_build_and_its_configuration_are_one_project
 knobas-core	test/projects	a_build_configuration_with_no_readable_name_is_reported_by_its_key
@@ -903,6 +917,9 @@ knobas-source	lib/knobas_source	contract::tests::rejects_a_connectivity_failure_
 knobas-source	lib/knobas_source	contract::tests::rejects_a_connectivity_failure_misclassified_by_test_connection
 knobas-source	lib/knobas_source	contract::tests::rejects_a_do_nothing_adapter
 knobas-source	lib/knobas_source	contract::tests::rejects_a_foreign_namespace
+knobas-source	lib/knobas_source	contract::tests::rejects_a_path_into_an_object_that_does_not_have_that_key
+knobas-source	lib/knobas_source	contract::tests::rejects_a_path_that_lands_on_an_object
+knobas-source	lib/knobas_source	contract::tests::rejects_a_reviewer_entry_key_the_elements_do_not_carry
 knobas-source	lib/knobas_source	contract::tests::rejects_a_source_id_knobas_keeps_for_itself
 knobas-source	lib/knobas_source	contract::tests::rejects_a_write_capability_with_no_write_ops
 knobas-source	lib/knobas_source	contract::tests::rejects_an_adapter_that_cannot_connect_when_nothing_is_wrong
@@ -916,6 +933,8 @@ knobas-source	lib/knobas_source	contract::tests::rejects_an_id_that_is_not_a_slu
 knobas-source	lib/knobas_source	contract::tests::rejects_an_ill_formed_item_id
 knobas-source	lib/knobas_source	contract::tests::rejects_an_undeclared_kind
 knobas-source	lib/knobas_source	contract::tests::rejects_an_unknown_write_op_identifier
+knobas-source	lib/knobas_source	contract::tests::rejects_one_kinds_payload_paths_declared_twice
+knobas-source	lib/knobas_source	contract::tests::rejects_payload_paths_for_a_kind_the_adapter_does_not_emit
 knobas-source	lib/knobas_source	contract::tests::rejects_write_ops_without_the_write_capability
 knobas-source	lib/knobas_source	instance::tests::accepts_the_ids_the_contract_names
 knobas-source	lib/knobas_source	instance::tests::debug_redacts_the_secret

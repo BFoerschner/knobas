@@ -107,6 +107,20 @@ fn descriptor(id: &str, kind: &str, write_ops: &[String]) -> SourceDescriptor {
             full_sync_exhaustive: true,
         }],
         config_schema: serde_json::json!({"type": "object", "properties": {}}),
+        // Where this stand-in keeps what the inbox reads (#277). Gitea's
+        // spellings, because the fixtures below are Gitea-shaped pull
+        // requests: an inbox rule reads through the declaration now, so a
+        // source that declares nothing produces no review requests and no
+        // assignments -- which is what `a_source_that_declares_no_paths_
+        // contributes_no_items` asserts.
+        payload_paths: vec![knobas_source::KindPaths {
+            kind: "pr".to_owned(),
+            reviewers: vec![knobas_source::ListPath {
+                at: knobas_source::PayloadPath::of(["requested_reviewers"]),
+                entry: knobas_source::PayloadPath::of(["login"]),
+            }],
+            ..knobas_source::KindPaths::default()
+        }],
     }
 }
 

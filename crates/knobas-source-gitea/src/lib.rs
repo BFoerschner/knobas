@@ -80,7 +80,9 @@ mod write;
 pub use config::{GiteaConfig, config_schema};
 pub use source::{GiteaSource, build};
 
-use knobas_source::{AuthMethod, Capability, KindInfo, SourceDescriptor};
+use knobas_source::{
+    AuthMethod, Capability, KindInfo, KindPaths, ListPath, PayloadPath, SourceDescriptor,
+};
 
 /// The adapter kind, and the default instance id (interfaces §4.2).
 pub const ADAPTER_KIND: &str = "gitea";
@@ -191,7 +193,39 @@ pub fn descriptor_template() -> SourceDescriptor {
         // ADR-0003 meet.
         entity_kinds: entity_kinds(),
         config_schema: config::config_schema(),
+        payload_paths: payload_paths(),
     }
+}
+
+/// Where a Gitea record keeps what knobas reads (#277, ADR-0007).
+///
+/// A pull request only: a repository, a branch and a commit carry none of
+/// these facts, and a kind that declares nothing is a miss for every reader.
+///
+/// * `reviewers` is Gitea's `requested_reviewers`, each element a user object
+///   whose `login` is the account -- the same spelling `author` is filled from
+///   (`map::pr_item`), which is what makes it comparable with the configured
+///   identity. Gitea sends `null` there when nobody has been asked, and an
+///   absent list is a rule that finds nothing rather than a rule that fails.
+/// * `merged` is Gitea's boolean, which is what the start-work merge pass
+///   follows. `merged_at` is the same fact as a timestamp and is deliberately
+///   not a second candidate: a flag is a boolean here (see
+///   [`knobas_source::KindPaths::merged`]).
+///
+/// **No project.** Gitea has no project grouping in knobas (ADR-0010 says so
+/// in as many words: "Gitea has no such thing here and gets none"), and a
+/// repository is an entity *kind*, not the axis a room is drawn along.
+#[must_use]
+fn payload_paths() -> Vec<KindPaths> {
+    vec![KindPaths {
+        kind: KIND_PR.to_owned(),
+        reviewers: vec![ListPath {
+            at: PayloadPath::of(["requested_reviewers"]),
+            entry: PayloadPath::of(["login"]),
+        }],
+        merged: vec![PayloadPath::of(["merged"])],
+        ..KindPaths::default()
+    }]
 }
 
 #[cfg(test)]

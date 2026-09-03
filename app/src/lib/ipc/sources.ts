@@ -39,6 +39,48 @@ export interface SourceDescriptor {
   entity_kinds: KindInfo[];
   /** JSON Schema. The form is generated from it — never hand-built per adapter. */
   config_schema: unknown;
+  /**
+   * Where this adapter's records keep what knobas reads but the contract does
+   * not normalize — a status, a priority, an assignee, requested reviewers, a
+   * merged flag, a project (#277). One entry per entity kind that has any of
+   * them; a kind that declares nothing is a miss, never a guess.
+   */
+  payload_paths: KindPaths[];
+}
+
+/**
+ * `knobas_core::payload::PayloadPath` — the object keys to walk, in order.
+ * `["fields", "status", "name"]`.
+ */
+export type PayloadPath = string[];
+
+/** `knobas_core::payload::ListPath` — where a list of strings lives. */
+export interface ListPath {
+  /** Where the array is. */
+  at: PayloadPath;
+  /** Where the string is inside each element; empty means the element itself. */
+  entry: PayloadPath;
+}
+
+/**
+ * `knobas_core::payload::KindPaths` — one entity kind's declared paths.
+ *
+ * Every path field is a list of *candidates*, most specific first: one
+ * adapter's alternative spellings of its own field, never knobas guessing.
+ */
+export interface KindPaths {
+  /** One of the descriptor's `entity_kinds`. */
+  kind: string;
+  status_name: PayloadPath[];
+  priority: PayloadPath[];
+  assignee: PayloadPath[];
+  reviewers: ListPath[];
+  /** A boolean in the payload — a merge timestamp is a different fact. */
+  merged: PayloadPath[];
+  project_key: PayloadPath[];
+  project_name: PayloadPath[];
+  /** Status names this source considers blocked-like, in its own spelling. */
+  blocked_statuses: string[];
 }
 
 /** What one sync run did — `knobas_sync::SyncReport`. */
@@ -75,11 +117,7 @@ export function demoLoad(): Promise<SyncReport> {
  * which is a different prompt from a secret that was rejected.
  */
 export type AuthState =
-  | "ok"
-  | "unauthorized"
-  | "unreachable"
-  | "missing_secret"
-  | "unknown";
+  "ok" | "unauthorized" | "unreachable" | "missing_secret" | "unknown";
 
 /**
  * One source's credential health — `knobas_sync::CredentialHealth`, the
@@ -165,7 +203,8 @@ export interface SourceSyncStatus {
 }
 
 /** Where a run is — `knobas_sync::SyncPhase`. */
-export type SyncPhase = "started" | "fetching" | "writing" | "finished" | "failed";
+export type SyncPhase =
+  "started" | "fetching" | "writing" | "finished" | "failed";
 
 /** One progress message — `knobas_sync::SyncProgress`. */
 export interface SyncProgress {
@@ -305,7 +344,10 @@ export function addSource(input: NewSource): Promise<SourceSummary> {
   return invoke<SourceSummary>("add_source", { input });
 }
 
-export function updateSource(id: string, patch: SourcePatch): Promise<SourceSummary> {
+export function updateSource(
+  id: string,
+  patch: SourcePatch,
+): Promise<SourceSummary> {
   return invoke<SourceSummary>("update_source", { id, patch });
 }
 
@@ -317,7 +359,10 @@ export function deleteSource(id: string, purgeItems: boolean): Promise<void> {
  * Store a credential for a saved source and test it. Write-only: nothing reads
  * one back.
  */
-export function setSourceSecret(id: string, secret: SecretInput): Promise<CredentialHealth> {
+export function setSourceSecret(
+  id: string,
+  secret: SecretInput,
+): Promise<CredentialHealth> {
   return invoke<CredentialHealth>("set_source_secret", { id, secret });
 }
 
@@ -417,7 +462,10 @@ export function syncStatus(): Promise<SourceSyncStatus[]> {
  * (`finished_at - started_at`), item counts. `sourceId: null` spans every
  * source. `limit` is clamped to 500.
  */
-export function listSyncRuns(sourceId: string | null, limit: number): Promise<SyncRunRow[]> {
+export function listSyncRuns(
+  sourceId: string | null,
+  limit: number,
+): Promise<SyncRunRow[]> {
   return invoke<SyncRunRow[]>("list_sync_runs", { sourceId, limit });
 }
 

@@ -253,57 +253,55 @@ impl Declarations {
     }
 }
 
-/// Where a declared path ended up on one record -- the contract battery's
-/// question, which is finer than the readers'.
+/// The value one path leads to, if it leads to one.
 ///
-/// A reader only needs "value or miss". Certifying a *declaration* needs to
-/// tell two misses apart, because only one of them is the adapter's fault:
+/// A miss is a miss: an absent key, a null, a container the source did not
+/// write, a scalar where the path expected an object. Which of those it was is
+/// not a distinction any reader may act on -- that is the whole of ADR-0007's
+/// requirement 1 -- so this answers with the value or with nothing.
 ///
-/// * [`Absent`](Self::Absent) -- the source said there is nothing here. An
-///   unassigned Jira issue carries `"assignee": null`; a Gitea pull request
-///   with no requested reviewer carries `"requested_reviewers": null`. A
-///   declaration is not wrong because a record is empty.
-/// * [`Missing`](Self::Missing) -- the walk reached an object the source
-///   really wrote and the next key was not in it. That is the adapter pointing
-///   at a field its own records do not have: `fields.status.nam`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Landing<'a> {
-    /// The path reached a value.
-    Value(&'a serde_json::Value),
-    /// The source says there is nothing here (a null, or a container it did
-    /// not write at all).
-    Absent,
-    /// The path ran off the end of something the source *did* write.
-    Missing,
-}
-
-/// Walk one path into one payload, distinguishing the two misses.
-///
-/// See [`Landing`]. Used by the contract battery; the resolvers below treat
-/// both misses alike, because a reader may not care why it got nothing.
+/// The **contract battery** asks one thing more, and asks it of the corpus
+/// rather than of a record: if the container a declared key would live in
+/// exists on some item, the declaration has to resolve on some item. See
+/// [`container_of`], which is how it asks.
 #[must_use]
-pub fn probe<'a>(payload: &'a serde_json::Value, path: &PayloadPath) -> Landing<'a> {
+pub fn at<'a>(payload: &'a serde_json::Value, path: &PayloadPath) -> Option<&'a serde_json::Value> {
     let mut at = payload;
     for segment in path.segments() {
-        match at {
-            serde_json::Value::Object(fields) => match fields.get(segment) {
-                // The source wrote the key and wrote nothing in it: an
-                // unassigned issue, a pull request nobody was asked to review.
-                Some(serde_json::Value::Null) => return Landing::Absent,
-                Some(next) => at = next,
-                // A key an object the source wrote does not have: the
-                // declaration is pointing at nothing.
-                None => return Landing::Missing,
-            },
-            // Only reachable as the whole payload: a record that is `null`
-            // says nothing about anything.
-            serde_json::Value::Null => return Landing::Absent,
-            // Something else entirely -- a string where an object was
-            // declared. The source wrote it; the declaration is wrong about it.
-            _ => return Landing::Missing,
+        at = at.as_object()?.get(segment)?;
+        if at.is_null() {
+            return None;
         }
     }
-    Landing::Value(at)
+    Some(at)
+}
+
+/// The object a path's last key would sit in, if the source wrote one.
+///
+/// The contract battery's question, and the reason it is asked this way. A
+/// declared path that resolves nowhere is either a source that carries no such
+/// value -- an unassigned issue, a pull request nobody was asked to review --
+/// or an adapter naming a key its own records do not have, and a reader cannot
+/// tell those apart afterwards. Neither can a single record: `fields.assignee`
+/// being null says nothing about whether `name` would be the right key inside
+/// it.
+///
+/// The **corpus** can. If some item of the kind carries the container -- a
+/// `fields.status` object, a payload root, a reviewer element -- then some
+/// item of the kind must resolve the path, or the last key is one no record of
+/// this adapter has. That is the check, and it is what makes a misspelled
+/// `fields.status.nam` a red test instead of a read that misses for ever.
+///
+/// `None` for the empty path, which addresses the payload itself and has no
+/// last key.
+#[must_use]
+pub fn container_of<'a>(
+    payload: &'a serde_json::Value,
+    path: &PayloadPath,
+) -> Option<&'a serde_json::Map<String, serde_json::Value>> {
+    let (_, parents) = path.segments().split_last()?;
+    let container = at(payload, &PayloadPath(parents.to_vec()))?;
+    container.as_object()
 }
 
 /// The first candidate that lands on a usable string.
@@ -314,12 +312,9 @@ pub fn probe<'a>(payload: &'a serde_json::Value, path: &PayloadPath) -> Landing<
 /// missing is a miss.
 #[must_use]
 pub fn resolve_string(payload: &serde_json::Value, candidates: &[PayloadPath]) -> Option<String> {
-    candidates.iter().find_map(|path| match probe(payload, path) {
-        Landing::Value(serde_json::Value::String(text)) => {
-            let trimmed = text.trim();
-            (!trimmed.is_empty()).then(|| trimmed.to_owned())
-        }
-        _ => None,
+    candidates.iter().find_map(|path| {
+        let text = at(payload, path)?.as_str()?.trim();
+        (!text.is_empty()).then(|| text.to_owned())
     })
 }
 
@@ -332,10 +327,9 @@ pub fn resolve_string(payload: &serde_json::Value, candidates: &[PayloadPath]) -
 /// misses, which is what it did before this existed.
 #[must_use]
 pub fn resolve_flag(payload: &serde_json::Value, candidates: &[PayloadPath]) -> Option<bool> {
-    candidates.iter().find_map(|path| match probe(payload, path) {
-        Landing::Value(serde_json::Value::Bool(flag)) => Some(*flag),
-        _ => None,
-    })
+    candidates
+        .iter()
+        .find_map(|path| at(payload, path)?.as_bool())
 }
 
 /// Every usable string every candidate list yields, in declaration order.
@@ -350,18 +344,17 @@ pub fn resolve_flag(payload: &serde_json::Value, candidates: &[PayloadPath]) -> 
 pub fn resolve_list(payload: &serde_json::Value, candidates: &[ListPath]) -> Vec<String> {
     let mut out = Vec::new();
     for candidate in candidates {
-        let Landing::Value(serde_json::Value::Array(elements)) = probe(payload, &candidate.at)
+        let Some(elements) = at(payload, &candidate.at).and_then(serde_json::Value::as_array)
         else {
             continue;
         };
         for element in elements {
-            if let Landing::Value(serde_json::Value::String(text)) =
-                probe(element, &candidate.entry)
-            {
-                let trimmed = text.trim();
-                if !trimmed.is_empty() {
-                    out.push(trimmed.to_owned());
-                }
+            let Some(text) = at(element, &candidate.entry).and_then(serde_json::Value::as_str)
+            else {
+                continue;
+            };
+            if !text.trim().is_empty() {
+                out.push(text.trim().to_owned());
             }
         }
     }
@@ -524,7 +517,12 @@ mod tests {
     #[test]
     fn the_field_names_the_sql_macros_use_are_the_serialized_ones() {
         let wire = serde_json::to_value(KindPaths::default()).unwrap();
-        let mut keys: Vec<&str> = wire.as_object().unwrap().keys().map(String::as_str).collect();
+        let mut keys: Vec<&str> = wire
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
         keys.sort_unstable();
         let mut expected: Vec<&str> = field::ALL.to_vec();
         expected.push("kind");
@@ -589,7 +587,10 @@ mod tests {
             "a word is not a flag"
         );
         assert_eq!(
-            resolve_flag(&serde_json::json!({ "merged": "2026-09-01T00:00:00Z" }), &merged),
+            resolve_flag(
+                &serde_json::json!({ "merged": "2026-09-01T00:00:00Z" }),
+                &merged
+            ),
             None
         );
     }
@@ -623,33 +624,53 @@ mod tests {
         }
     }
 
-    /// The distinction the contract battery is built on: a source saying
-    /// "nothing here" is not an adapter declaring a field that does not exist.
+    /// The corpus-level question the contract battery asks, and the record
+    /// that cannot answer it alone: `fields.assignee` being null says nothing
+    /// about whether `name` is the right key inside one.
     #[test]
-    fn a_null_is_absent_and_a_key_an_object_lacks_is_missing() {
+    fn a_container_is_only_reported_where_the_source_wrote_one() {
         let issue = jira_issue();
-        assert!(matches!(
-            probe(&issue, &PayloadPath::of(["fields", "priority", "name"])),
-            Landing::Absent,
-            ),
-            "an unset Jira field is null, and a declaration is not wrong because a record is empty"
+        assert!(
+            container_of(&issue, &PayloadPath::of(["fields", "status", "name"])).is_some(),
+            "the object a status name would sit in is on this record, so some record of this \
+             kind has to resolve the path"
         );
-        assert!(matches!(
-            probe(&issue, &PayloadPath::of(["fields", "status", "nam"])),
-            Landing::Missing
-        ));
-        assert!(matches!(
-            probe(&issue, &PayloadPath::of(["fields", "nothing", "here"])),
-            Landing::Missing
-        ));
-        assert!(matches!(
-            probe(&issue, &PayloadPath::of(["fields", "status", "name", "deeper"])),
-            Landing::Missing,
-        ));
-        assert!(matches!(
-            probe(&issue, &PayloadPath::of(["fields", "status", "name"])),
-            Landing::Value(serde_json::Value::String(_))
-        ));
+        assert!(
+            container_of(&issue, &PayloadPath::of(["fields", "status", "nam"])).is_some(),
+            "and the misspelling names the same container, which is what makes it findable"
+        );
+        assert_eq!(
+            container_of(&issue, &PayloadPath::of(["fields", "priority", "name"])),
+            None,
+            "an unset Jira field is null: this record carries no container, so it demands \
+             nothing of the declaration"
+        );
+        assert_eq!(
+            container_of(&issue, &PayloadPath::of(["fields", "nothing", "here"])),
+            None
+        );
+        assert!(
+            container_of(&issue, &PayloadPath::of(["status"])).is_some(),
+            "a one-segment path sits in the payload itself"
+        );
+        assert_eq!(
+            container_of(&issue, &PayloadPath::of([] as [&str; 0])),
+            None
+        );
+    }
+
+    #[test]
+    fn a_miss_is_a_miss_however_the_source_spelled_it() {
+        let issue = jira_issue();
+        for path in [
+            PayloadPath::of(["fields", "status", "nam"]),
+            PayloadPath::of(["fields", "priority", "name"]),
+            PayloadPath::of(["fields", "nothing", "here"]),
+            PayloadPath::of(["fields", "status", "name", "deeper"]),
+        ] {
+            assert_eq!(at(&issue, &path), None, "{path:?}");
+        }
+        assert!(at(&issue, &PayloadPath::of(["fields", "status", "name"])).is_some());
     }
 
     #[test]

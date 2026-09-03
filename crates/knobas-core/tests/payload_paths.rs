@@ -99,7 +99,12 @@ async fn in_sql(pool: &PgPool, declarations: &Declarations, entity_id: &str) -> 
 }
 
 /// The same four questions asked of the payload in Rust.
-fn in_rust(declarations: &Declarations, source: &str, kind: &str, payload: &serde_json::Value) -> Resolved {
+fn in_rust(
+    declarations: &Declarations,
+    source: &str,
+    kind: &str,
+    payload: &serde_json::Value,
+) -> Resolved {
     let empty = KindPaths::default();
     let paths = declarations.get(source, kind).unwrap_or(&empty);
     let mut reviewers = resolve_list(payload, &paths.reviewers);
@@ -132,7 +137,11 @@ async fn both(
     assert_eq!(sql.status.as_deref(), status, "SQL status for {key}");
     assert_eq!(rust.status.as_deref(), status, "Rust status for {key}");
     assert_eq!(sql.priority.as_deref(), priority, "SQL priority for {key}");
-    assert_eq!(rust.priority.as_deref(), priority, "Rust priority for {key}");
+    assert_eq!(
+        rust.priority.as_deref(),
+        priority,
+        "Rust priority for {key}"
+    );
     assert_eq!(sql.merged, merged, "SQL merged for {key}");
     assert_eq!(rust.merged, merged, "Rust merged for {key}");
     assert_eq!(sql.reviewers, reviewers, "SQL reviewers for {key}");
@@ -210,12 +219,7 @@ async fn a_declared_path_resolves_the_same_in_sql_and_in_rust() {
             "merged": true,
             "requested_reviewers": [{ "login": "tom.reyes" }, { "login": "mara.lindqvist" }]
         }),
-        (
-            None,
-            None,
-            Some(true),
-            &["mara.lindqvist", "tom.reyes"],
-        ),
+        (None, None, Some(true), &["mara.lindqvist", "tom.reyes"]),
     )
     .await;
 }
