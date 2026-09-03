@@ -146,6 +146,11 @@ vi.mock("../ipc/time", () => ({
   // attribution section reads this on mount (#282).
   passiveAttribution: () => Promise.resolve(false),
   setPassiveAttribution: () => Promise.reject(new Error("no settings write in this test")),
+  // The week timesheet sits under the day strip on the same address (#283),
+  // so a time deep link mounts it too.
+  weekTimesheet: () => Promise.resolve({ days: [], rows: [] }),
+  logAllPreview: () => Promise.reject(new Error("no plan in this test")),
+  logAll: () => Promise.reject(new Error("no write in this test")),
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({

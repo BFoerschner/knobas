@@ -30,6 +30,7 @@
   import SourcesView from "./lib/sources/SourcesView.svelte";
   import StartWork from "./lib/start-work/StartWork.svelte";
   import DayReview from "./lib/time/DayReview.svelte";
+  import WeekTimesheet from "./lib/time/WeekTimesheet.svelte";
   import { ipcErrorMessage } from "./lib/ipc";
   import {
     adHocBlock,
@@ -702,6 +703,13 @@
           must not read one.
         -->
         <DayReview {router} day={router.route.day} />
+        <!--
+          ...and the week under it (#283). One address for both, which is what
+          makes assigning a block and watching the week's unlogged total change
+          one glance (spec #272 story 44): the strip's date drives the
+          highlighted column rather than opening a second view.
+        -->
+        <WeekTimesheet day={router.route.day} />
       {:else if router.route.view === "first-run"}
         <FirstRun demo={lifecycle.status?.demo ?? false} onfinish={onFirstRunDone} />
       {:else if router.route.view === "start-work"}
