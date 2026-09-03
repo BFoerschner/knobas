@@ -4167,9 +4167,14 @@ From this commit on, each of the following requires an orchestrator decision **a
   endpoint (and say in as many words that *that* is a §4.2 row and "not a §10.8 surface"), the
   dialog fill, the help text and the live test; on the report they say only "reported on the
   `ConnectionReport` the way the account name is", which read literally is a **named** field.
-  The map is the wider shape, directed when the issue was dispatched so that the next adapter with
-  a per-instance id of its own needs no second touch of this frozen crate. That widening is what
-  this entry exists to put in front of a ratifier: the endpoint needed no entry, the map does.
+  The map is the wider shape, directed by the orchestrator when the issue was dispatched so that
+  the next adapter with a per-instance id of its own needs no second touch of this frozen crate.
+  The endpoint needed no entry; the map does, and this is it.
+
+  **Ratified by the orchestrator, 2026-09-03**, as the §10.8 exception for #297: the generic
+  `ConnectionInfo::discovered` map keyed by `config_schema` property, in place of a named
+  `epic_link_field`, on the reasoning above. **Björn keeps the gate for frozen contracts and this
+  entry is flagged for his review**, as #284's is.
 
 **`crates/knobas-sync/**` is NOT frozen — and stream F is expected to restructure it.**
 
