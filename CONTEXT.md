@@ -180,8 +180,16 @@ The week under the day strip, Monday to Sunday with empty weekends collapsed: a 
 _Avoid_: report, timecard, week view
 
 **Passive attribution**:
-The opt-in recording of which entity was in the foreground — the open detail, else the room's anchor entity, else nothing — while the app window is focused, as passive [blocks](#block). A gap stays a gap until a person assigns it; nothing recorded this way reaches a source on its own. Observations are kept a month, and a day older than that is a day knobas no longer has the beats for — the day review and the timesheet say so rather than drawing it as a day with nothing on it. (#315, #337)
+The opt-in recording of which entity was in the foreground — the open detail, else the room's anchor entity, else nothing — while the app window is focused, as passive [blocks](#block) derived from [observations](#observation). A gap stays a gap until a person assigns it; nothing recorded this way reaches a source on its own. Observations are kept a month, and past the [observation horizon](#observation-horizon) knobas has no record of what was open at all. (#315, #337)
 _Avoid_: automatic tracking, activity tracking (that is the activity stream's word)
+
+**Observation**:
+One heartbeat's record of what was in the foreground at a single instant — an entity, or nothing — written only while [passive attribution](#passive-attribution) is on. It says what was open *then* and nothing about what was open in between, which is why a passive [block](#block) is derived from a run of observations and never from one.
+_Avoid_: beat, heartbeat (the tick that leaves an observation, never the record it leaves — and only the record is ever spoken about to a reader)
+
+**Observation horizon**:
+The instant before which knobas has thrown its [observations](#observation) away: a fact about what was swept, not about how old a day is, so a profile nothing has ever been swept from has no horizon at all. A day reaching back past it is a day knobas has no record for, and what was open on it is **absent, not zero** — the day review and the timesheet say so rather than drawing it as a day with nothing on it. (#315, #337)
+_Avoid_: retention cutoff, thirty days ago (both name a date arithmetic can reach; the horizon is only ever what a sweep actually took)
 
 ## Export
 
