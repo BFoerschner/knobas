@@ -351,9 +351,17 @@ mod tests {
     /// search.ts` imports D's declaration rather than repeating it, which is
     /// only honest while that holds -- and neither crate compiles against the
     /// other, so nothing but this notices the day one of them gains a field.
+    ///
+    /// **`path` is carried with a value, not left `None`** (#284). Both
+    /// structs would serialize `None` to `"path": null` and the two objects
+    /// would still be equal, so a `None` fixture would pass while one of the
+    /// two had the field spelled differently or missing behind a
+    /// `skip_serializing_if`. A value on both sides is what makes the
+    /// comparison say something about the field this test was extended for.
     #[test]
     fn the_two_entity_rows_are_one_wire_shape() {
         let at = chrono::Utc::now();
+        let path = Some("Engineering \u{203a} Payments".to_owned());
         let search = serde_json::to_value(knobas_search::EntityRow {
             entity_id: "jira:PAY-231".to_owned(),
             kind: "ticket".to_owned(),
@@ -361,6 +369,7 @@ mod tests {
             title: "Retry failed SEPA payouts".to_owned(),
             updated_at: Some(at),
             synced_at: at,
+            path: path.clone(),
         })
         .expect("serializes");
         let room = serde_json::to_value(crate::commands::entity::EntityRow {
@@ -370,6 +379,7 @@ mod tests {
             title: "Retry failed SEPA payouts".to_owned(),
             updated_at: Some(at),
             synced_at: at,
+            path,
         })
         .expect("serializes");
 
@@ -377,6 +387,10 @@ mod tests {
             search, room,
             "the two EntityRow structs no longer share a wire shape, so \
              app/src/lib/ipc/search.ts must stop importing entity.ts's"
+        );
+        assert_eq!(
+            search["path"], "Engineering \u{203a} Payments",
+            "the ratified §10.8 field is on the wire under its own name"
         );
     }
 

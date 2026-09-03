@@ -38,6 +38,7 @@ function answer(raw: string, titles: string[] = ["one"]): SearchResponse {
           source_id: "jira",
           updated_at: null,
           synced_at: "2026-08-25T12:00:00Z",
+          path: null,
           title,
           rank: 1,
           snippet: [],

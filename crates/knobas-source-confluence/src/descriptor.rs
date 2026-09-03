@@ -5,29 +5,12 @@
 //! downstream carries a hardcoded Confluence table, which is why the kind
 //! metadata (label, plural, monogram) lives here and not in the launcher.
 //!
-//! # The declared payload paths (#277) -- TODO, deliberately
+//! # The declared payload paths (#277)
 //!
-//! ADR-0007's destination is a descriptor that **declares where each of its
-//! payload's readable facts lives**, so knobas stops learning each source's
-//! shape. Issue #277 adds that per-kind field to `SourceDescriptor`; it had
-//! not merged when this crate landed, so the declaration cannot be written
-//! yet -- the field does not exist to write it into. What this adapter will
-//! declare, in full, so it is one mechanical edit and not a fresh decision:
-//!
-//! | fact | path | note |
-//! |---|---|---|
-//! | project key | `space.key` | ADR-0010: a **space** is Confluence's project |
-//! | project name | `space.name` | |
-//! | status | *(miss)* | a page has no status a reader could act on |
-//! | priority | *(miss)* | Confluence has none |
-//! | assignee | *(miss)* | a page has no assignee |
-//! | reviewer | *(miss)* | no review model |
-//! | merged | *(miss)* | not a change-proposal kind |
-//!
-//! Every one of these but the first two is a **miss** in ADR-0007's sense: the
-//! read finds nothing and contributes nothing, which is the failure a payload
-//! read is allowed. Declaring a path for a fact Confluence does not have would
-//! be the forbidden alternative -- a guess.
+//! ADR-0007's destination: the adapter says **where** its records keep what
+//! knobas reads, instead of every reader outside the adapter holding a little
+//! table of per-source spellings. Confluence's answer is short, and most of it
+//! is "nowhere" -- see [`payload_paths`].
 
 use knobas_source::{AuthMethod, KindInfo, SourceDescriptor};
 
@@ -78,7 +61,43 @@ pub fn descriptor_template() -> SourceDescriptor {
             full_sync_exhaustive: true,
         }],
         config_schema: config_schema(),
+        payload_paths: payload_paths(),
     }
+}
+
+/// Where a Confluence page keeps what knobas reads (#277, ADR-0007).
+///
+/// **A space is Confluence's project** (ADR-0010, spelled *space* in the UI),
+/// so `space.key` and `space.name` are the project key and name -- and they
+/// are the two paths the census resolves to list a source's projects. The
+/// `space` object is expanded on every record this adapter emits
+/// ([`crate::api::EXPAND`]), which is what makes the declaration true rather
+/// than hopeful; `the_space_and_the_ancestors_are_where_their_readers_look` in
+/// the live suite is where the real server confirms it, and contract battery
+/// clause 6 refuses a path no item of the kind resolves.
+///
+/// **Everything else is a miss, and deliberately so.** A page has no status a
+/// reader could act on, no priority, no assignee, no requested reviewers and
+/// no merged flag: Confluence has none of those concepts, so this declares no
+/// path for them and every reader misses. Declaring a path for a fact the
+/// source does not have is the guess ADR-0007 forbids -- and clause 4 of the
+/// battery is what catches a reader that grew a knobas-side fallback for one.
+///
+/// **`blocked_statuses` is empty for the same reason**, not by omission: a
+/// page is never "stuck". A source with no status cannot have a blocked-like
+/// one, so the set is empty rather than borrowing Jira's three names.
+///
+/// One entry, because this adapter emits one kind. A `comment` is not a kind
+/// here -- it lives in its page's payload, the way a Jira comment lives in its
+/// issue's -- so it needs no declaration.
+fn payload_paths() -> Vec<knobas_source::KindPaths> {
+    use knobas_source::{KindPaths, PayloadPath};
+    vec![KindPaths {
+        kind: crate::KIND_PAGE.to_owned(),
+        project_key: vec![PayloadPath::of(["space", "key"])],
+        project_name: vec![PayloadPath::of(["space", "name"])],
+        ..KindPaths::default()
+    }]
 }
 
 /// The JSON Schema the Add-source form is generated from.
@@ -199,6 +218,55 @@ mod tests {
         }
     }
 
+    /// **ADR-0010 through #277's declaration**: a space is Confluence's
+    /// project, and `space.key` / `space.name` are where the census resolves
+    /// it. Both are expanded on every record this adapter emits, which is what
+    /// makes the declaration true rather than hopeful -- contract battery
+    /// clause 6 refuses a path no item of the kind resolves, and the live
+    /// suite is where the real server answers.
+    #[test]
+    fn a_space_is_this_sources_project_and_the_declaration_says_where() {
+        let d = descriptor_template();
+        let paths = &d.payload_paths;
+        assert_eq!(paths.len(), 1, "this adapter emits one kind: {paths:?}");
+        assert_eq!(paths[0].kind, crate::KIND_PAGE);
+        assert_eq!(
+            paths[0].project_key,
+            vec![knobas_source::PayloadPath::of(["space", "key"])]
+        );
+        assert_eq!(
+            paths[0].project_name,
+            vec![knobas_source::PayloadPath::of(["space", "name"])]
+        );
+        // Clause 1's own precondition, checked here too because a declaration
+        // for a kind the adapter does not emit is one nothing ever reads.
+        let kinds: Vec<&str> = d.entity_kinds.iter().map(|k| k.id.as_str()).collect();
+        assert!(kinds.contains(&paths[0].kind.as_str()), "{kinds:?}");
+    }
+
+    /// **Everything Confluence does not have is a miss, and stays one.**
+    ///
+    /// A page has no status, no priority, no assignee, no requested reviewers
+    /// and no merged flag, so this adapter declares no path for any of them --
+    /// and `blocked_statuses` is empty because a source with no status cannot
+    /// have a blocked-like one. Declaring a path for a fact the source does
+    /// not have is the guess ADR-0007 forbids, and it is the kind of thing a
+    /// later edit adds "for symmetry" with the Jira declaration next door.
+    #[test]
+    fn the_facts_confluence_does_not_have_are_declared_nowhere() {
+        let paths = &descriptor_template().payload_paths[0];
+        assert!(paths.status_name.is_empty(), "{:?}", paths.status_name);
+        assert!(paths.priority.is_empty(), "{:?}", paths.priority);
+        assert!(paths.assignee.is_empty(), "{:?}", paths.assignee);
+        assert!(paths.reviewers.is_empty(), "{:?}", paths.reviewers);
+        assert!(paths.merged.is_empty(), "{:?}", paths.merged);
+        assert!(
+            paths.blocked_statuses.is_empty(),
+            "a page is never stuck, so it borrows no other product's names: {:?}",
+            paths.blocked_statuses
+        );
+    }
+
     /// The Add-source form is generated from `config_schema` (spec §3a), so
     /// the schema and the struct the adapter parses must describe the same
     /// keys. Drift here is a form field that is silently discarded, or a
@@ -247,6 +315,13 @@ mod tests {
         assert_eq!(back.adapter_kind, crate::ADAPTER_KIND);
         assert!(back.write_ops.is_empty());
         assert!(back.entity_kinds[0].full_sync_exhaustive);
+        // The declaration travels with it: a reader resolves it on the other
+        // side of the bridge, so a hop that dropped it would turn every
+        // path-driven read into a silent miss.
+        assert_eq!(
+            back.payload_paths[0].project_key,
+            vec![knobas_source::PayloadPath::of(["space", "key"])]
+        );
     }
 
     /// A schema property that named a password would put a secret in the DB.

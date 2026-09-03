@@ -90,6 +90,7 @@
         sourceId={hit.source_id}
         title={hit.title}
         syncedAt={hit.synced_at}
+        path={hit.path}
         snippet={hit.snippet}
         {sources}
         {now}

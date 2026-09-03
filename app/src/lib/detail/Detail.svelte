@@ -22,7 +22,6 @@
   import { openFreshContext } from "../shell/contexts.svelte";
   import Monogram from "../shell/Monogram.svelte";
   import { kindRegistry } from "../shell/kind-registry.svelte";
-  import { ancestorPath } from "../launcher/ancestors";
   import { hashFor } from "../shell/router.svelte";
   import { kindMonogram, kindSingular } from "../shell/kinds";
   import { openExternal } from "../shell/open-external";
@@ -203,14 +202,16 @@
    * Where this item sits inside its source, when its record says — a
    * Confluence page's ancestor path (#284).
    *
-   * The **one** named read of that shape lives in `launcher/ancestors.ts`
-   * (ADR-0007 requirement 2) rather than here, because the launcher row is
-   * meant to draw the same string and a second spelling is how the two come to
-   * disagree about what a path is. It misses to `null`, so a ticket, a build
-   * and a page nobody has filed anywhere all show no path rather than a wrong
-   * one.
+   * Read off the **row**, not out of `detail.payload`, although the payload is
+   * right there. The launcher row draws the same string, the launcher has no
+   * payload to read it out of, and one rule with two implementations is the
+   * drift #277 spent a whole test file pinning against. So the one spelling is
+   * `knobas_core::ancestor_path_read!` in SQL, both surfaces read what it
+   * joined, and this line is a field access rather than a second rule. It
+   * misses to `null`, so a ticket, a build and a page nobody has filed
+   * anywhere all show no path rather than a wrong one.
    */
-  const path = $derived(detail ? ancestorPath(detail.payload) : null);
+  const path = $derived(detail?.row.path ?? null);
   /** Narrowed once, so the button and its handler agree that it is a string. */
   const webUrl = $derived(detail?.web_url ?? null);
 

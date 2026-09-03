@@ -24,6 +24,7 @@ function row(entity_id: string, kind: string, title: string): EntityRow {
     title,
     updated_at: "2026-09-03T09:00:00Z",
     synced_at: "2026-09-03T09:01:00Z",
+    path: null,
   };
 }
 

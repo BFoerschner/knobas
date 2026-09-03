@@ -69,6 +69,7 @@ vi.mock("../ipc/search", () => ({
             source_id: "mock",
             updated_at: null,
             synced_at: "2026-08-28T09:30:00Z",
+            path: null,
             title: "SEPA retry runbook",
             rank: 1,
             snippet: [],
@@ -114,6 +115,9 @@ function detail(over: Partial<EntityDetail> = {}): EntityDetail {
       title: "Retry failed SEPA payouts",
       updated_at: "2026-08-22T11:48:00Z",
       synced_at: "2026-08-22T14:30:00Z",
+      // A ticket sits nowhere: the ADR-0007 miss, and the default this file's
+      // other tests are written against.
+      path: null,
     },
     source: {
       id: "mock",
@@ -338,6 +342,7 @@ test("an undeclared kind is browsable — §3a's promise", async () => {
           title: "Payout queue backed up",
           updated_at: "2026-08-22T08:05:00Z",
           synced_at: "2026-08-22T14:30:00Z",
+          path: null,
         },
         kind_info: null,
         payload: {
@@ -458,6 +463,7 @@ test("a withdrawn entity opens with a banner that says why it is still here", as
           title: "Legacy payout reconciliation (withdrawn)",
           updated_at: null,
           synced_at: "2026-08-22T14:30:00Z",
+          path: null,
         },
         deleted_at: "2026-08-22T12:00:00Z",
         web_url: null,
@@ -1117,6 +1123,11 @@ test("a page shows its ancestor path and its body as text", async () => {
           title: "SEPA payout retry design",
           updated_at: "2026-08-22T10:40:00Z",
           synced_at: "2026-08-22T14:30:00Z",
+          // Joined by `knobas_core::ancestor_path_read!` and carried on the
+          // row, so the panel and the launcher draw the same string. The
+          // payload below still holds the `ancestors` the statement read it
+          // out of, which is what makes this fixture a page and not a stub.
+          path: "Engineering › Payments",
         },
         body_text:
           "SEPA payout retry design\n\nBackoff policy\nbase 30 s, factor 2\n\nuse <retry> here",

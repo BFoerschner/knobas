@@ -1614,6 +1614,20 @@ From this commit on, each of the following requires an orchestrator decision **a
 
 **Ratified exceptions to the frozen list** (recorded here because this section requires it):
 
+- **IPC schema**, issue #284 (2026-09-03): `EntityRow` grows `path: Option<String>`, `#[serde(default)]`, on **both** structs that share that wire shape — `knobas_search::EntityRow` (the search corpus, flattened into every `SearchHit`) and `knobas_app::commands::entity::EntityRow` (a room line, and `EntityDetail.row`) — and on the two TypeScript mirrors, `app/src/lib/ipc/entity.ts` and `app/src/lib/ipc/search.ts`.
+
+  **Ratified by the orchestrator under #284's own criterion 5** ("Launcher results for pages show the ancestor path"), which cannot be met without it: a launcher row is a `SearchHit`, and before this it carried six identity fields and no payload, so there was nothing on a hit to read a Confluence page's ancestors out of. **Björn keeps the gate for frozen contracts and this entry is flagged for his review.**
+
+  **Additive and backward-compatible.** `#[serde(default)]` means a row written or piped by a peer built before this still decodes — as a row that sits nowhere, which is the same thing a miss says. No command is added, no command's arguments change, no event changes, the `commands/` + `ipc/` module layout is untouched, and neither append-only barrel grows a line. **No migration**: the value is joined at read time from the payload the mirror already stores.
+
+  **One payload read, not two.** The value comes from `knobas_core::ancestor_path_read!` and from nowhere else — the titles of an item's `ancestors`, outermost first, joined by `payload::ANCESTOR_SEPARATOR`. It is expanded by the two launcher corpora (`knobas_search::corpus`), by `home.rs`'s recent statement and by `knobas-app`'s four room statements and its detail statement, and by nothing else. It is a **payload read outside an adapter** and therefore ADR-0007's interim discipline applies in full: it misses to `null` for every record with no readable `ancestors` (an absent key, a non-array, non-object elements, an absent, non-string or blank title — every one of them), it is one named statement, and its failure direction is *absence*, pinned by `crates/knobas-core/tests/ancestor_path.rs` across all six unusable shapes.
+
+  It is **not** a #277 declared read, and that is the one thing here a reader should not mistake: `KindPaths` has no slot shaped like "a list of strings joined in order" — `reviewers` is an unordered set of accounts — so expressing it as a declaration would itself be a `crates/knobas-source/src/**` change and a §10.8 conversation of its own. When such a slot is ratified, this read expires into it, which is what ADR-0007 says every interim read does.
+
+  **The detail panel reads the row, not the payload**, although it holds the payload: one rule with two implementations is the drift #277 spent a whole test file pinning against, and the launcher has no payload to read. So `Detail.svelte` renders `detail.row.path` and the frontend has no path rule of its own.
+
+  Pinned by: `knobas_app::commands::search`'s `the_two_entity_rows_are_one_wire_shape` (extended to carry a value, since two `None`s would compare equal while one struct had the field spelled differently); `knobas_search`'s `the_hit_shape_matches_its_typescript_mirror` (the TS side); `sql::tests::user_text_never_enters_the_sql_string`, whose closed literal list gains this statement's six fixed literals and nothing else; and `Row.test.svelte.ts` for the two rendering directions.
+
 - **IPC schema**, issue #53 (2026-08-28): `EntityDetail.links` becomes
   `Vec<knobas_core::link::LinkEntry>`, where a `LinkEntry` is the link record plus a `LinkEnd` --
   the end the reader is *not* on (`entity_id`, `kind`, `title`, `deleted_at`). Two new DTOs, both

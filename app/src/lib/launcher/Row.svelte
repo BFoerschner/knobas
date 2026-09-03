@@ -25,6 +25,7 @@
     sourceId,
     title,
     syncedAt,
+    path = null,
     snippet = [],
     sources,
     selected,
@@ -37,6 +38,20 @@
     sourceId: string;
     title: string;
     syncedAt: string;
+    /**
+     * Where this item sits inside its source — a Confluence page's ancestor
+     * path, `Engineering › Payments` (#284).
+     *
+     * `null` for every row that has none, which is the ADR-0007 **miss**: the
+     * row shows no path rather than a wrong one, and the caller does not have
+     * to know what kind it is holding. Joined by one SQL statement
+     * (`knobas_core::ancestor_path_read!`) and carried on `EntityRow.path`, so
+     * this row and the detail panel cannot disagree about what a path is.
+     *
+     * Drawn under the title and not beside the key, because a path is prose of
+     * unbounded length and the key column is 56 px.
+     */
+    path?: string | null;
     /** The matched excerpt, already split. Empty for a list or board row. */
     snippet?: Segment[];
     sources: CredentialHealth[];
@@ -66,6 +81,9 @@
   <span class="ty">{kind}</span>
   <span class="t">
     <span class="k">{key}</span>{title}
+    {#if path}
+      <span class="pa">{path}</span>
+    {/if}
     {#if snippet.length > 0}
       <span class="sn"
         >{#each snippet as seg, i (i)}{#if seg.hit}<mark>{seg.text}</mark>{:else}{seg.text}{/if}{/each}</span
@@ -146,6 +164,22 @@
     background: transparent;
     color: var(--amber);
     font-weight: 500;
+  }
+  /*
+    The path is where the item lives, not what it says, so it is quieter than
+    the excerpt and sits above it — a reader scanning five pages called
+    *Runbook* is looking for the space, and finds it on the same line every
+    time.
+  */
+  .pa {
+    display: block;
+    color: var(--faint);
+    font-size: 11px;
+    line-height: 1.3;
+    margin-top: 1px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .sy {
     font: 400 10px var(--mono);

@@ -71,6 +71,9 @@ fn row(updated_at: Option<DateTime<Utc>>) -> EntityRow {
         title: "Payments retry storm".to_owned(),
         updated_at,
         synced_at: at(),
+        // A ticket sits nowhere: the ADR-0007 miss `path` reports for every
+        // record with no readable `ancestors` (#284).
+        path: None,
     }
 }
 
@@ -150,6 +153,10 @@ const KIND_INFO_FIELDS: &[&str] = &["full_sync_exhaustive", "id", "label", "mono
 const ENTITY_ROW_FIELDS: &[&str] = &[
     "entity_id",
     "kind",
+    // Where the row sits inside its source, ratified as a §10.8 exception
+    // under #284's criterion 5. On the wire even when it is `null`, which is
+    // what lets one TypeScript declaration serve both Rust structs.
+    "path",
     "source_id",
     "synced_at",
     "title",

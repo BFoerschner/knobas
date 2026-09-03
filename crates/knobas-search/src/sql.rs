@@ -276,8 +276,8 @@ pub fn search_sql(
         };
         let _ = writeln!(
             sql,
-            "  select p.kind as kind, p.entity_id as entity_id, p.rank as rank,\n         p.item_updated_at as item_updated_at,\n         {} as source_id, {} as title, {} as synced_at,\n         {snippet} as snippet",
-            corpus.source_id, corpus.title, corpus.synced_at
+            "  select p.kind as kind, p.entity_id as entity_id, p.rank as rank,\n         p.item_updated_at as item_updated_at,\n         {} as source_id, {} as title, {} as synced_at,\n         {} as path,\n         {snippet} as snippet",
+            corpus.source_id, corpus.title, corpus.synced_at, corpus.path
         );
         let _ = write!(sql, "    from picked p\n    join {}", corpus.relation);
         let _ = write!(sql, " on {} = p.entity_id", corpus.entity_id);
@@ -299,7 +299,7 @@ pub fn search_sql(
     // their kind rather than at the front of it.
     let _ = write!(
         sql,
-        "select t.kind as group_kind, t.kind_total as kind_total,\n       d.entity_id as entity_id, d.source_id as source_id, d.title as title,\n       d.item_updated_at as updated_at, d.synced_at as synced_at,\n       d.rank as rank, d.snippet as snippet\n  from totals t\n  left join detail d on d.kind = t.kind\n order by t.kind, {}",
+        "select t.kind as group_kind, t.kind_total as kind_total,\n       d.entity_id as entity_id, d.source_id as source_id, d.title as title,\n       d.item_updated_at as updated_at, d.synced_at as synced_at,\n       d.path as path,\n       d.rank as rank, d.snippet as snippet\n  from totals t\n  left join detail d on d.kind = t.kind\n order by t.kind, {}",
         order_by("d.", ranked, true)
     );
 
@@ -462,7 +462,23 @@ mod tests {
     /// contains a quoted string not named here is either a new static fragment
     /// nobody reviewed, or -- the case that matters -- user text that reached
     /// the SQL instead of the bind list.
-    const ALLOWED_LITERALS: &[&str] = &["english", ":*", "", " — "];
+    /// The last six are `ancestor_path_read!`'s (#284): the payload keys it
+    /// walks, the three `jsonb_typeof` comparands it guards on, and the
+    /// separator it joins a path with. They are `concat!`ed `&'static str`s inside that macro, so
+    /// no value can reach them -- and naming them here is what keeps this list
+    /// closed rather than widened.
+    const ALLOWED_LITERALS: &[&str] = &[
+        "english",
+        ":*",
+        "",
+        " — ",
+        "ancestors",
+        "title",
+        "array",
+        "object",
+        "string",
+        " \u{203a} ",
+    ];
 
     fn filters(
         sources: &[&str],
@@ -896,6 +912,7 @@ mod tests {
             author: None,
             updated_at: "o.updated_at",
             synced_at: "o.synced_at",
+            path: "null::text",
             scope: Some("o.archived is false"),
         };
         let built = search_sql(

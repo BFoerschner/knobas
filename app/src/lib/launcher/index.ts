@@ -7,7 +7,6 @@
  */
 export { default as Launcher } from "./Launcher.svelte";
 export { type LauncherAction, navigationActions } from "./actions";
-export { ancestorPath } from "./ancestors";
 export { provenance, sourceMonogram, syncAge } from "./format";
 export { type LauncherMode, type LauncherRow } from "./rows";
 export { DEBOUNCE_MS, SEARCH_LIMIT } from "./session.svelte";

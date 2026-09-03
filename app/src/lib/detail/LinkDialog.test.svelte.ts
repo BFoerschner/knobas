@@ -56,6 +56,7 @@ function hit(over: { id: string; kind?: string; title: string }) {
     source_id: "mock",
     updated_at: null,
     synced_at: "2026-08-28T09:30:00Z",
+    path: null,
     title: over.title,
     rank: 1,
     snippet: [],

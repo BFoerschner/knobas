@@ -83,6 +83,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use knobas_core::payload::resolve_string;
 use knobas_source::contract::{Fault, VecSink, battery};
 use knobas_source::instance::SourceInstance;
 use knobas_source::{AuthMethod, Source, SourceError, SyncItem};
@@ -865,15 +866,18 @@ async fn each_page_carries_its_comments_as_seeded() {
     );
 }
 
-/// **ADR-0010's project read, and the ancestor path, against the real
-/// payload.**
+/// **The declared project paths (#277) and the ancestor path, against the
+/// real payload.**
 ///
-/// A space is what a Jira project is (ADR-0010), and a census outside this
-/// crate reads its key and name out of the payload; the launcher reads the
-/// ancestor titles out of the same payload. Neither read lives in this crate,
-/// so nothing in the adapter's own suite would notice Confluence moving them
-/// -- and a reader that found nothing would show *no path* rather than fail.
-/// Asserted here, where the payload is the server's.
+/// A space is what a Jira project is (ADR-0010), and since #277 the census
+/// resolves it through this adapter's **declaration** -- `space.key` and
+/// `space.name` -- rather than through a per-source arm in knobas' own SQL.
+/// A declaration is a claim about the corpus, so the corpus is where it is
+/// checked: `passes_the_contract_battery_against_the_seeded_server` runs
+/// clause 6 over these same items and refuses a path no item resolves, and
+/// this test reads the two paths directly so a failure names the field rather
+/// than the clause. The launcher and detail path reads the same payload for
+/// its ancestors, and neither read lives in this crate.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
 async fn the_space_and_the_ancestors_are_where_their_readers_look() {
@@ -884,19 +888,29 @@ async fn the_space_and_the_ancestors_are_where_their_readers_look() {
     let mut spaces: BTreeMap<String, String> = BTreeMap::new();
     for page in &seeded.seed.pages {
         let it = item(&items, &page.id);
-        let key = it.payload["space"]["key"].as_str().unwrap_or_else(|| {
+        // Read through the **declaration**, not through a literal path, so
+        // what is certified is the thing the census actually resolves: an
+        // adapter that moved its declaration without moving its expand -- or
+        // the other way round -- fails here.
+        let declared = knobas_source_confluence::descriptor_template()
+            .payload_paths
+            .into_iter()
+            .find(|p| p.kind == it.kind)
+            .unwrap_or_else(|| panic!("{}: no declaration for kind {:?}", page.id, it.kind));
+        let key = resolve_string(&it.payload, &declared.project_key).unwrap_or_else(|| {
             panic!(
-                "{}: ADR-0010 reads the project key at space.key, and it is not a string \
-                 there: {}",
-                page.id, it.payload["space"]
+                "{}: the declared project_key {:?} resolves to nothing on the server's own \
+                 payload: {}",
+                page.id, declared.project_key, it.payload["space"]
             )
         });
-        let name = it.payload["space"]["name"].as_str().unwrap_or_else(|| {
+        let name = resolve_string(&it.payload, &declared.project_name).unwrap_or_else(|| {
             panic!(
-                "{}: ADR-0010 reads the project name at space.name: {}",
-                page.id, it.payload["space"]
+                "{}: the declared project_name {:?} resolves to nothing: {}",
+                page.id, declared.project_name, it.payload["space"]
             )
         });
+        let (key, name) = (key.as_str(), name.as_str());
         assert_eq!(key, seeded.seed.space, "{}", page.id);
         spaces.insert(key.to_owned(), name.to_owned());
 
@@ -1231,13 +1245,21 @@ async fn the_search_that_could_read_as_an_empty_corpus_is_never_the_first_call()
 /// The contract battery -- the suite every adapter must pass -- against the
 /// server that decides.
 ///
-/// Clause 2 is the one this corpus was seeded for: an incremental run after no
-/// changes emits nothing and returns the same cursor. Clause 5 is the one this
-/// adapter's read-only descriptor rests on: it declares no write ops, so the
-/// battery calls `write` with **every** op the SPI knows and each must be
-/// refused with `Protocol`. Faults are real: a bearer token that never existed
-/// draws Confluence's own refusal, and a port nothing listens on is
-/// unreachable.
+/// Three clauses matter most here, and none of them can be run anywhere else:
+///
+/// * **Clause 2** is what this corpus was seeded for -- an incremental run
+///   after no changes emits nothing and returns the same cursor.
+/// * **Clause 5** is what this adapter's read-only descriptor rests on: it
+///   declares no write ops, so the battery calls `write` with *every* op the
+///   SPI knows and each must be refused with `Protocol`.
+/// * **Clause 6** (#277) holds the payload declaration against this adapter's
+///   own corpus: `space.key` and `space.name` must resolve to strings on the
+///   server's real records, and every field this adapter declares nothing for
+///   must resolve to nothing. A declaration is a claim about a corpus, so a
+///   real corpus is the only thing that can judge it.
+///
+/// Faults are real: a bearer token that never existed draws Confluence's own
+/// refusal, and a port nothing listens on is unreachable.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
 async fn passes_the_contract_battery_against_the_seeded_server() {

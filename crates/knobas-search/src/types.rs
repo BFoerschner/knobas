@@ -225,6 +225,20 @@ pub struct EntityRow {
     /// When knobas last saw it -- the per-row provenance §4 requires
     /// ("synced 4 min ago").
     pub synced_at: DateTime<Utc>,
+    /// Where this row sits **inside its source**, as one line -- a Confluence
+    /// page's ancestor path, `Engineering \u{203a} Payments` (#284, ratified
+    /// as a contract §10.8 exception under that ticket's criterion 5).
+    ///
+    /// `None` for every row whose record carries no readable `ancestors`,
+    /// which is every kind but a page today: the ADR-0007 **miss**, so a
+    /// launcher row shows no path rather than a wrong one, and nothing
+    /// downstream has to ask what kind it is holding.
+    ///
+    /// `#[serde(default)]`, so a stored or piped row written before this
+    /// existed still decodes -- as a row that sits nowhere, which is the same
+    /// thing a miss says.
+    #[serde(default)]
+    pub path: Option<String>,
 }
 
 /// One result: a row, its rank, and the excerpt with the match marked.
@@ -293,7 +307,7 @@ mod tests {
     ///
     /// This mirror is the one that needs pinning most, because it is the only
     /// one that is not a literal transcription: `SearchHit.row` carries
-    /// `#[serde(flatten)]`, so `EntityRow`'s six fields appear inline and the
+    /// `#[serde(flatten)]`, so `EntityRow`'s fields appear inline and the
     /// TypeScript declares them inline too. Nothing but this test connects the
     /// two. Drop the attribute and the wire grows a nested `row` object while
     /// both files still compile, both still look right, and every hit in the
@@ -312,6 +326,12 @@ mod tests {
                 title: "Retry failed SEPA payouts".to_owned(),
                 updated_at: None,
                 synced_at: chrono::Utc::now(),
+                // #284: a value and not `None`, because `path` is the field
+                // this test exists to catch -- an `Option` left `None` here
+                // would still serialize as `"path": null` and pass, but a
+                // reviewer reading the fixture would not see that the launcher
+                // row now carries one.
+                path: Some("Engineering \u{203a} Payments".to_owned()),
             },
             rank: 0.5,
             snippet: vec![Segment {
@@ -329,6 +349,7 @@ mod tests {
             [
                 "entity_id",
                 "kind",
+                "path",
                 "rank",
                 "snippet",
                 "source_id",

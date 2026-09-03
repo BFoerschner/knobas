@@ -121,6 +121,7 @@ function row(kind: string, key: string): EntityRow {
     title: `Title of ${key}`,
     updated_at: "2026-08-22T11:48:00Z",
     synced_at: "2026-08-22T14:30:00Z",
+    path: null,
   };
 }
 

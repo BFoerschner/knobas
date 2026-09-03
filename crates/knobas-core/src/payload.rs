@@ -426,6 +426,66 @@ macro_rules! declared_string {
     };
 }
 
+/// What separates two segments of an [`ancestor_path_read!`] path.
+///
+/// A single-glyph guillemet with a space either side, and it is a constant
+/// because two surfaces render the same string: the launcher row and the
+/// detail panel both draw what the SQL joined, and a second spelling anywhere
+/// would be a path that reads differently depending on where you look at it.
+/// `the_ancestor_path_joins_on_the_one_separator` holds the SQL to this.
+pub const ANCESTOR_SEPARATOR: &str = " \u{203a} ";
+
+/// SQL for "where this record sits inside its source, as one line" -- the
+/// titles of an item's `ancestors`, outermost first, joined by
+/// [`ANCESTOR_SEPARATOR`].
+///
+/// # Why this is not a declared read
+///
+/// #277 moved every payload read a `KindPaths` field can express onto the
+/// adapter's own declaration, and this is the one that cannot be: an ancestor
+/// path is a **list of strings joined in order**, and `KindPaths` has no slot
+/// shaped like that -- `reviewers` is the only list it carries and it is an
+/// unordered set of accounts, not a path. Adding a slot is a `knobas-source`
+/// change and therefore a §10.8 conversation of its own. So this stays under
+/// ADR-0007's *interim* discipline, and meets all three of its requirements:
+///
+/// 1. **It misses, never guesses.** A payload with no `ancestors`, an
+///    `ancestors` that is not an array, elements that are not objects,
+///    elements whose `title` is absent, not a string, or blank -- every one of
+///    them contributes nothing, and a record with no usable segment at all
+///    yields `null` rather than an empty string. `string_agg` over no rows is
+///    `null`, which is what makes that true by construction rather than by a
+///    guard someone has to remember.
+/// 2. **One named statement**, this one, expanded by the two reads that draw a
+///    row (`knobas_search`'s launcher corpora and `knobas_app`'s room and
+///    entity statements) and nowhere else.
+/// 3. **The failure direction is absence**, pinned by
+///    `knobas-core/tests/ancestor_path.rs` across all six unusable shapes.
+///
+/// `$payload` is the payload expression, as a literal (`"i.payload"`), because
+/// that is what `concat!` folds: every statement built with this is a
+/// `&'static str`, so nothing here can concatenate a value into SQL.
+///
+/// The `jsonb_typeof(... ) = 'array'` guard is not decoration:
+/// `jsonb_array_elements` **raises** on a non-array, so without it a single
+/// Jira ticket whose payload happened to carry an `ancestors` object would
+/// abort the whole launcher query rather than miss.
+#[macro_export]
+macro_rules! ancestor_path_read {
+    ($payload:literal) => {
+        concat!(
+            "(case when jsonb_typeof(",
+            $payload,
+            "->'ancestors') = 'array' then (select string_agg(btrim(a.value->>'title'), ",
+            "' \u{203a} ' order by a.ordinality) from jsonb_array_elements(",
+            $payload,
+            "->'ancestors') with ordinality a where jsonb_typeof(a.value) = 'object' \
+              and jsonb_typeof(a.value->'title') = 'string' \
+              and btrim(a.value->>'title') <> '') end)"
+        )
+    };
+}
+
 /// SQL for "the boolean the declared path leads to, or nothing" -- see
 /// [`declared_string!`] for the arguments and [`resolve_flag`] for why only a
 /// JSON boolean counts.
