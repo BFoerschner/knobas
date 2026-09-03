@@ -569,10 +569,10 @@ pub async fn due(pool: &PgPool, source_id: &str) -> Result<Vec<QueuedWrite>, Cor
 ///
 /// Two of them wrap that update in a CTE and write `knobas.worklog` in the
 /// same statement -- [`sent`] stamps the copy, [`discard`] deletes it -- and
-/// both say in place why that may not be a second statement. The update is
-/// still exactly this one, guard and all, so the concurrency argument below
-/// covers them: `discard` expands this macro inside its CTE; `sent` spells the
-/// same update out, having a `returning` list it builds around.
+/// both say in place why that may not be a second statement. Both expand this
+/// macro inside the CTE rather than restating the update, so the guard and the
+/// concurrency argument below are theirs too: what differs between them is the
+/// second sub-statement and nothing else.
 ///
 /// The state guard in the `where` clause is what makes each of these safe to
 /// call concurrently with the others: two flush loops that both decided to
@@ -728,14 +728,13 @@ pub async fn sent(
     remote_id: Option<&str>,
 ) -> Result<Option<QueuedWrite>, CoreError> {
     let row = sqlx::query_as::<_, QueuedWrite>(concat!(
-        "with settled as (
-           update knobas.write_queue
-              set state = 'sent', wait_reason = null, settled_at = now(),
-                  attempted_at = now(), attempts = attempts + 1,
-                  remote_id = coalesce($2, remote_id)
-            where id = $1 and state = 'pending'
-            returning ",
-        queue_columns!(),
+        "with settled as (",
+        transition!(
+            "state = 'sent', wait_reason = null, settled_at = now(), \
+             attempted_at = now(), attempts = attempts + 1, \
+             remote_id = coalesce($2, remote_id)
+              where id = $1 and state = 'pending'"
+        ),
         "
          ), stamped as (
            update knobas.worklog w

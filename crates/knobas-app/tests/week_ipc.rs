@@ -813,16 +813,24 @@ async fn remote_id_of(pool: &PgPool, worklog: i64) -> Option<String> {
 
 /// **Withdrawing a queued worklog gives the afternoon back** (issue #328).
 ///
-/// The four columns the ticket names, each of which a discard used to leave
-/// wrong for good, and all four of them are one fact seen from four places --
-/// so all four are asserted here rather than split, because an implementation
-/// that fixed one and not the rest is exactly the failure that shipped:
+/// The four consequences the ticket names, each of which a discard used to
+/// leave wrong for good, asserted together rather than split -- because an
+/// implementation that fixed one and not the rest is exactly the failure that
+/// shipped:
 ///
 /// 1. the week draws the time as **held**, permanently;
 /// 2. `unlogged` stays **zero**, so story 41's honest total understates;
-/// 3. ***Log all*** never offers the blocks again (`plan` is empty);
-/// 4. the **day review** will not let them be edited by hand either -- the
-///    `worklog_id is null` guard on `day::update` is the read-only rule.
+/// 3. ***Log all*** never offers the blocks again, and neither does the draft
+///    (`week::LOGGABLE` and `worklog::UNLOGGED_BLOCKS` are the two reads);
+/// 4. the **day review** will not let them be edited or deleted by hand
+///    either -- the `worklog_id is null` guard on `day::update` and
+///    `day::remove` is the read-only rule.
+///
+/// **They are four consequences but not four independent witnesses**, and
+/// saying so is worth more than the appearance of coverage: 1 and 2 are two
+/// halves of one subtraction (`unlogged = tracked - logged - held`), so no
+/// regression can fail one and pass the other. What is separately witnessed
+/// is the week cell, the two loggable reads, and the two day-review writes.
 ///
 /// **Tuesday is the control.** A second day is logged and *not* discarded, so
 /// the release has something it must leave alone: a statement that deleted
@@ -909,6 +917,22 @@ async fn discarding_a_queued_worklog_gives_the_afternoon_back() {
         "Monday is loggable again and Tuesday is still spoken for: {planned:?}"
     );
 
+    // ...and so does the draft, which is *Log all*'s single-day counterpart
+    // and narrows on the same column through its own read
+    // (`worklog::UNLOGGED_BLOCKS`). The ticket names both, so both are asked.
+    let draft = time::worklog::draft(
+        &state.pool,
+        state.registry.as_ref(),
+        TICKET,
+        date(MONDAY),
+        0,
+    )
+    .await
+    .expect("the draft reads")
+    .expect("Monday has unlogged time on the ticket again");
+    assert_eq!(draft.block_ids, vec![monday_block]);
+    assert_eq!(draft.seconds, 3_600);
+
     // 4: and so does the day review -- the read-only rule is off this block.
     time::day::update(
         &state.pool,
@@ -949,6 +973,14 @@ async fn discarding_a_queued_worklog_gives_the_afternoon_back() {
         "Tuesday's write is still pending, which the week counts as logged"
     );
     assert_eq!(row.cells[column(MONDAY + 1)].unlogged_seconds, 0);
+
+    // The other half of the read-only rule, and last because it takes the row
+    // every assertion above reads. `DELETE` carries the same `worklog_id is
+    // null` clause `UPDATE` does, so a release that reached one and not the
+    // other would leave a block editable but undeletable.
+    time::day::remove(&state.pool, monday_block)
+        .await
+        .expect("a released block can be deleted again");
 
     state.scheduler.shutdown().await;
 }
@@ -1013,6 +1045,23 @@ async fn a_discard_leaves_a_worklog_jira_answered_for_alone() {
         planned.is_empty(),
         "*Log all* must not offer an hour Jira already has: {planned:?}"
     );
+
+    // And the cell, which is the only place `is_logged`'s answer for
+    // `discarded` is still reachable from: a copy that outlived the write that
+    // was going to carry it. `time/week.rs` and contract.md both say it reads
+    // as *held*, and this is the fixture that can say whether they are right.
+    let sheet = time::week::read(&state.pool, &week())
+        .await
+        .expect("the week reads");
+    let cell = row_for(&sheet, Some(TICKET))
+        .expect("the ticket has a row")
+        .cells[column(MONDAY)];
+    assert_eq!(
+        cell.held_seconds, 3_600,
+        "a discarded write over a copy Jira answered for is held, not logged          and not unlogged"
+    );
+    assert_eq!(cell.logged_seconds, 0);
+    assert_eq!(cell.unlogged_seconds, 0);
 
     state.scheduler.shutdown().await;
 }

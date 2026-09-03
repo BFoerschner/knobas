@@ -4244,7 +4244,9 @@ From this commit on, each of the following requires an orchestrator decision **a
   time reads as *unlogged* and every surface offers it again. No migration and no new command --
   nothing in this section changed, which is why #328 has no entry of its own. `discarded` stays in
   `is_logged`'s *held* half as a backstop: the release spares a copy carrying a `remote_id`, so an
-  hour Jira answered for is never offered for logging twice.
+  hour Jira answered for is never offered for logging twice, and
+  `a_discard_leaves_a_worklog_jira_answered_for_alone` reads that cell rather than leaving the
+  claim unwitnessed.
   *Unlogged* is `tracked - logged - held` floored at zero; the floor is not
   tidiness, it is that the draft's interval and seconds are the reader's own and may exceed the
   blocks they were made of.
