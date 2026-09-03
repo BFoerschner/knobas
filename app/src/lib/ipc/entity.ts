@@ -1137,8 +1137,19 @@ export interface DigestLine {
    */
   source: string;
   /**
-   * Which verb, as one word: `authored`, the write queue's own op (`comment`,
-   * `transition`, …), `log_work`, `timer`, `blocked_status` or `blocked_by`.
+   * Which verb, as one word: `attributed`, `log_work`, `timer`,
+   * `blocked_status`, `blocked_by` — or, for a write, **the write queue's own
+   * `op`** (`comment`, `transition`, …).
+   *
+   * A `string` and deliberately not a union, which is where this differs from
+   * `InboxItem.category`: a `WriteOp` identifier is the *adapter's*, so a
+   * closed union here would go stale the day an adapter declares a new op. A
+   * view that branches on it must have a default arm.
+   *
+   * `attributed`, not `authored`: interfaces §4.1's `author` is whoever the
+   * **adapter** says a record belongs to, and Jira's says the assignee — so a
+   * mirror line means "the source attributes this to you", never "you wrote
+   * it".
    */
   verb: string;
   /** Why this line is here, as a sentence naming the source and the verb. */

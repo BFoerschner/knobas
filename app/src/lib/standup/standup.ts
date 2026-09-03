@@ -25,7 +25,7 @@
  */
 import type { DayWindow } from "../ipc/time";
 
-import { dayBounds, shiftDay } from "./../time/day";
+import { dayBounds, shiftDay } from "../time/day";
 
 /**
  * How many earlier days the view sends.

@@ -565,7 +565,7 @@ async fn yesterdays_line_per_producer_names_its_item_its_source_and_its_verb() {
         vec![
             (Some(logged.as_str()), TRACKER, "log_work"),
             (Some(commented.as_str()), TRACKER, "comment"),
-            (Some(pr.as_str()), FORGE, "authored"),
+            (Some(pr.as_str()), FORGE, "attributed"),
         ],
         "newest first, one line per producer, each naming its source and verb"
     );

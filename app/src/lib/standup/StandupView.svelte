@@ -41,14 +41,25 @@
   import { ago } from "../shell/time";
   import { digestWindows, LOOKBACK_DAYS } from "./standup";
 
+  /**
+   * The bridge this view needs, injectable so a test needs no Tauri.
+   *
+   * A named type rather than an inline one, the shape `DayReview`'s
+   * `DayPorts` has: not exported, because an instance `<script>` cannot export
+   * a type in Svelte 5 and a caller supplying ports writes an object literal
+   * anyway.
+   */
+  interface StandupPorts {
+    standupDigest: typeof realStandupDigest;
+  }
+
   let {
     router,
     ports,
     now = () => new Date(),
   }: {
     router: Router;
-    /** The bridge, injectable so a test needs no Tauri. */
-    ports?: { standupDigest?: typeof realStandupDigest };
+    ports?: Partial<StandupPorts>;
     /** Injectable clock — which day the digest is about. */
     now?: () => Date;
   } = $props();
@@ -57,7 +68,7 @@
   // Read once, at init, the decision `DayReview`'s own ports record: production
   // omits this prop and a bridge swapped mid-life would leave what is on screen
   // read through one set of ports and re-read through another.
-  const io = { standupDigest: realStandupDigest, ...ports };
+  const io: StandupPorts = { standupDigest: realStandupDigest, ...ports };
 
   const key = $derived(dayKey(now()));
 
@@ -139,8 +150,15 @@
           -->
           <p class="empty">{loaded ? silence : "Reading…"}</p>
         {:else}
+          <!--
+            Keyed by position, deliberately. Nothing here is edited in place
+            and each list is redrawn whole on every read, so there is no
+            identity for a key to preserve — and a key built out of the line's
+            own fields throws on a duplicate, which two worklogs on one ticket
+            with the same start really are.
+          -->
           <ol class="dg-l">
-            {#each lines as line (line.verb + ":" + (line.entity_id ?? line.title) + ":" + line.at)}
+            {#each lines as line, index (index)}
               <li class="dg-i">
                 {#if line.entity_id === null}
                   <!--

@@ -163,7 +163,7 @@ test("a line opens its item's address, with the key encoded", async () => {
           kind: "pr",
           title: "Add payout CSV export",
           source: "gitea",
-          verb: "authored",
+          verb: "attributed",
         }),
       ],
     }),

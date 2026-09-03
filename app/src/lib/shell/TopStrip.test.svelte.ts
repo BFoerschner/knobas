@@ -233,6 +233,37 @@ test("*Today* opens the day review on the day it is pressed", () => {
   expect(router.route).toEqual({ view: "time", day });
 });
 
+/**
+ * *Standup* (#288): the way into the digest, beside *Today*.
+ *
+ * A view nothing opens is a view nobody reads, and the digest is the one
+ * surface whose whole purpose is being glanced at once a morning. Its address
+ * carries **no** date, unlike *Today*'s — a digest is defined against today,
+ * and `#/standup/<date>` is left for the standup protocol.
+ */
+test("*Standup* opens the digest, at an address with no date in it", () => {
+  const { router } = render([]);
+
+  const standup = target.querySelector<HTMLButtonElement>('button[title^="Standup"]');
+  expect(standup, "the strip has no way into the digest").toBeTruthy();
+
+  standup!.click();
+  flushSync();
+
+  expect(location.hash).toBe("#/standup");
+  expect(router.route).toEqual({ view: "standup" });
+});
+
+/** ...and it says so while the reader is there, like the other destinations. */
+test("the strip marks the digest as current while the reader is on it", () => {
+  location.hash = "#/standup";
+  render([]);
+
+  const standup = target.querySelector<HTMLButtonElement>('button[title^="Standup"]');
+  expect(standup!.getAttribute("aria-current")).toBe("page");
+  expect(target.querySelector('button[title^="Today"]')!.getAttribute("aria-current")).toBeNull();
+});
+
 /** ...and it says so while the reader is there, like the other destinations. */
 test("the strip marks the day review as current while the reader is on it", () => {
   location.hash = "#/time/2026-09-03";

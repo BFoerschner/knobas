@@ -25,6 +25,17 @@
 //!   commit pushed, a pull request opened, a page edited. Interfaces §4.1
 //!   normalizes `author`, so "mine" is a comparison against the configured
 //!   usernames and needs no declared path and no per-source spelling.
+//!
+//!   **What §4.1's `author` means is the adapter's to say, and it is not
+//!   always "wrote it".** Gitea maps a commit's author; the Jira adapter maps
+//!   the **assignee** (`knobas-source-jira/src/map.rs`). So this half is
+//!   *"items the source attributes to me"*, which is what its lines say in as
+//!   many words -- a line reading "you authored this ticket" would be knobas
+//!   claiming a ticket somebody else moved yesterday was written by the
+//!   reader. Being generous about a ticket of the reader's own is the safe
+//!   direction to be wrong in; putting a colleague's name on the reader's
+//!   standup is not, and no source normalizes `author` to somebody who has
+//!   nothing to do with the record.
 //! * **The activity stream** carries what knobas *did on the user's behalf*: a
 //!   comment, a transition, a ticket created -- every one of them a write that
 //!   went through the queue, which writes one line per state change. The
@@ -37,6 +48,16 @@
 //!   for a worklog restored from a backup that has no queue row at all, and
 //!   reading both would put every logged afternoon on the list twice. So
 //!   `log_work` is the one op the activity half skips.
+//!
+//! **What no producer carries, stated rather than left to be discovered: a
+//! comment typed in a source's own UI.** A comment's author lives in the
+//! verbatim payload, in the source's own shape, and `KindPaths` has no slot
+//! for it -- so reading one would mean knobas guessing a path per source,
+//! which is precisely the per-source coalesce #277 spent a milestone
+//! removing. The activity half therefore carries the comments and transitions
+//! the reader made *through knobas*, and a comment typed into Jira is absent
+//! until a `KindPaths` slot for it is ratified, at which point this read
+//! expires into the declaration like every other (ADR-0007).
 //!
 //! # Mine only, and what that rests on
 //!
@@ -61,15 +82,20 @@
 //! each one a [`DayWindow`], a date and the two instants it spans -- because
 //! the reader's timezone is a fact only the webview holds; `crate::time::day`
 //! records that rule in full and a digest that did the arithmetic itself would
-//! be wrong on every day containing a daylight-saving change. What the caller
-//! does **not** decide is how far back the rule looks: this module consults at
-//! most the newest [`LOOKBACK_DAYS`] of them and ignores the rest, so the cap
-//! is a property of the digest rather than of whichever surface asked for one.
+//! be wrong on every day containing a daylight-saving change.
+//!
+//! What the caller does **not** decide is how far back the rule looks, and the
+//! cap is applied to the windows' **dates** rather than to their number. Those
+//! are not the same rule: "the newest seven of whatever arrived" holds
+//! `CONTEXT.md`'s *"at most seven days back"* only for a caller that happens to
+//! send seven consecutive days, so one window dated a fortnight ago would
+//! quietly reach a fortnight back. Reading the dates makes the sentence true of
+//! any list, in any order, which is what a rule the caller cannot widen means.
 
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 use knobas_core::entity::EntityRef;
 use knobas_core::payload::Declarations;
-use sqlx::{PgPool, Row};
+use sqlx::PgPool;
 
 use crate::IpcError;
 use crate::time::week::DayWindow;
@@ -77,37 +103,68 @@ use crate::time::week::DayWindow;
 /// How many days before the digest's own date the *yesterday* rule may reach.
 ///
 /// Seven, so a Monday reads Friday and a Monday after a week off reads nothing
-/// rather than reaching back into the month before it (story 60). The rule is
-/// enforced **here** and not by the caller: a webview that computed eight
-/// windows would otherwise quietly widen the digest, and the one thing this
-/// number is for is that it cannot.
-pub const LOOKBACK_DAYS: usize = 7;
+/// rather than reaching back into the month before it (story 60). Enforced
+/// **here**, against the dates, for the reason the module header gives.
+pub const LOOKBACK_DAYS: i64 = 7;
 
-/// The most lines any one list carries.
+/// The most lines any one **producer** contributes to one list.
 ///
 /// A bound rather than a paging story: a standup list nobody can read to the
 /// end is already too long, and the alternative -- an unbounded read over a
 /// day of a busy corpus -- is a view that stalls on the one morning it matters.
+///
+/// **Per producer, and the merged list is not capped again.** A second cap over
+/// the merge would be a bound that can silently delete a whole producer: two
+/// hundred mirror lines all dated later than the afternoon would push every
+/// worklog off the list, and the reader would be looking at a standup with
+/// their own hours missing and nothing saying so. Three bounded reads are a
+/// bounded list.
 const MOST_LINES: i64 = 200;
 
 /// The relation that means "blocked by", read from the end that is blocked.
 ///
 /// A link row is directed and carries one word, and `blocks` / `blocked by`
 /// are that one row read from its two ends (`app/src/lib/detail/relations.ts`
-/// holds the vocabulary). So a ticket is blocked when it is the **`to`** end
-/// of a `blocks` link, and `blocked_by_the_link_graph`'s statement joins on
-/// exactly that.
+/// holds the vocabulary). So an item is blocked when it is the **`to`** end of
+/// a `blocks` link, and [`BLOCKED_BY_LINK`]'s join reads exactly that.
 ///
 /// Only this word. `depends-on` is a different relation with a different
 /// reading, and a digest that treated it as a blocker would be knobas deciding
 /// what a word the user chose means.
-const BLOCKS: &str = "blocks";
+///
+/// Named `_RELATION` because `CONTEXT.md`'s **block** is a stretch of time and
+/// `crate::time::week` already has a `BLOCKS` of its own; a bare `BLOCKS` here
+/// would be two vocabularies sharing one word in one crate.
+const BLOCKS_RELATION: &str = "blocks";
 
 /// The actor every line a person is responsible for carries.
 ///
 /// The spelling `knobas_core::activity::ActivityRow` reserves, and the same
 /// constant `crate::inbox`, `commands::entity` and the write queue each write.
 const ACTOR: &str = "user";
+
+/// The `source` a line carries when knobas is the one saying it.
+const KNOBAS: &str = "knobas";
+
+/// The verb the running timer's line carries.
+const TIMER: &str = "timer";
+
+/// The verb a mirror line carries.
+///
+/// *Attributed*, not *authored*, and the word is the finding: §4.1's `author`
+/// is whoever the **adapter** says a record belongs to, and the Jira adapter
+/// says the assignee. The module header carries the whole reasoning.
+const ATTRIBUTED: &str = "attributed";
+
+/// The verb a worklog line carries -- the same word the write op is spelled
+/// with, so a reader who has seen one recognises the other.
+const LOG_WORK: &str = "log_work";
+
+/// The verb a blocker the source called stuck carries.
+const BLOCKED_STATUS: &str = "blocked_status";
+
+/// The verb a blocker a link marks carries.
+const BLOCKED_BY: &str = "blocked_by";
 
 /// One line of one list: what it is about, and why it is here.
 ///
@@ -136,13 +193,22 @@ pub struct DigestLine {
     /// as text.
     pub title: String,
     /// **Which source.** A `source_config.id` for anything the mirror saw or a
-    /// write was addressed to; `knobas` for a line that is knobas' own record
-    /// of an act -- a worklog copy, a running timer -- and has no source
-    /// behind it.
+    /// write was addressed to; [`KNOBAS`] for a line that is knobas' own
+    /// record of an act -- a worklog copy, a running timer -- and has no
+    /// source behind it.
     pub source: String,
-    /// **Which verb**, as one word: `authored` for the mirror half, the write
-    /// queue's own `op` for a write (`comment`, `transition`, ...),
-    /// `log_work`, `timer`, `blocked_status` or `blocked_by`.
+    /// **Which verb**, as one word: [`ATTRIBUTED`] for the mirror half,
+    /// [`LOG_WORK`], [`TIMER`], [`BLOCKED_STATUS`], [`BLOCKED_BY`] -- or, for
+    /// a write, **the write queue's own `op`**.
+    ///
+    /// A `String` and deliberately not an enum, which is where this differs
+    /// from its near-twin `knobas_core::inbox::InboxItem::category`. That
+    /// vocabulary is closed and this one is not: a `WriteOp` identifier is the
+    /// *adapter's* (ADR-0006 grows the set, and an out-of-process adapter can
+    /// name one this binary has never heard of), so an enum here would need an
+    /// `Other(String)` arm and would then be a closed type pretending. The
+    /// five knobas-owned words are consts above so that no reader has to
+    /// spell one twice.
     pub verb: String,
     /// Why this line is here, as a sentence naming the source and the verb.
     pub reason: String,
@@ -173,11 +239,12 @@ pub struct StandupDigest {
 
 /// The digest for one day.
 ///
-/// `today` is the day being asked about and `earlier` the days before it,
-/// oldest first; at most the newest [`LOOKBACK_DAYS`] of `earlier` are
-/// consulted. `now` is what decides whether the running timer belongs on the
-/// list at all -- a digest read for a past date describes that date, and a
-/// timer running this afternoon is not something that happened on it.
+/// `today` is the day being asked about and `earlier` the days before it, in
+/// any order; the ones inside [`LOOKBACK_DAYS`] are consulted newest first and
+/// the rest are ignored. `now` is what decides whether the running timer
+/// belongs on the list at all -- a digest read for a past date describes that
+/// date, and a timer running this afternoon is not something that happened on
+/// it.
 ///
 /// # Errors
 ///
@@ -190,7 +257,7 @@ pub async fn digest(
     today: DayWindow,
     earlier: &[DayWindow],
 ) -> Result<StandupDigest, IpcError> {
-    let mut today_lines = work_in(pool, identity, today.from, today.to).await?;
+    let mut today_lines = work_in(pool, identity, today).await?;
     if today.from <= now && now < today.to {
         today_lines.extend(running_timer(pool).await?);
         sort_newest_first(&mut today_lines);
@@ -198,8 +265,8 @@ pub async fn digest(
 
     let mut yesterday_day = None;
     let mut yesterday = Vec::new();
-    for window in earlier.iter().rev().take(LOOKBACK_DAYS) {
-        let lines = work_in(pool, identity, window.from, window.to).await?;
+    for window in in_reach(today.day, earlier) {
+        let lines = work_in(pool, identity, window).await?;
         if !lines.is_empty() {
             yesterday_day = Some(window.day);
             yesterday = lines;
@@ -215,9 +282,28 @@ pub async fn digest(
     })
 }
 
-/// Everything the user did inside one half-open window, newest first.
+/// The candidate days for *yesterday*, newest first: those strictly before the
+/// digest's own day and no more than [`LOOKBACK_DAYS`] before it.
 ///
-/// Half-open on purpose, and it is the boundary that matters: `>= from` and
+/// Sorted here rather than trusted from the caller, and filtered by date
+/// rather than by position -- both halves of the module header's rule. A
+/// window dated on or after the digest's own day is dropped too: that day is
+/// the *today* list's, and a caller that repeated it would otherwise get the
+/// same lines under both headings.
+fn in_reach(day: NaiveDate, earlier: &[DayWindow]) -> Vec<DayWindow> {
+    let floor = day - Duration::days(LOOKBACK_DAYS);
+    let mut candidates: Vec<DayWindow> = earlier
+        .iter()
+        .copied()
+        .filter(|window| window.day < day && window.day >= floor)
+        .collect();
+    candidates.sort_by(|a, b| b.day.cmp(&a.day));
+    candidates
+}
+
+/// Everything the user did inside one day's window, newest first.
+///
+/// The window is half-open, and it is the boundary that matters: `>= from` and
 /// `< to`, so an item touched at 23:59 belongs to the day it was touched on
 /// and to no other. A `>` on the lower edge would lose the first second of
 /// every day and a `<=` on the upper one would put yesterday's last minute on
@@ -225,14 +311,12 @@ pub async fn digest(
 async fn work_in(
     pool: &PgPool,
     identity: &[String],
-    from: DateTime<Utc>,
-    to: DateTime<Utc>,
+    window: DayWindow,
 ) -> Result<Vec<DigestLine>, IpcError> {
-    let mut lines = authored_in_the_mirror(pool, identity, from, to).await?;
-    lines.extend(written_through_knobas(pool, from, to).await?);
-    lines.extend(logged_as_worklogs(pool, from, to).await?);
+    let mut lines = attributed_in_the_mirror(pool, identity, window).await?;
+    lines.extend(written_through_knobas(pool, window).await?);
+    lines.extend(logged_as_worklogs(pool, window).await?);
     sort_newest_first(&mut lines);
-    lines.truncate(MOST_LINES as usize);
     Ok(lines)
 }
 
@@ -243,13 +327,28 @@ fn sort_newest_first(lines: &mut [DigestLine]) {
     lines.sort_by(|a, b| b.at.cmp(&a.at));
 }
 
-/// Items the user authored that moved inside the window.
+/// The mirror's answer to "what of mine moved on this day".
+///
+/// `FromRow` rather than a hand-written walk over `try_get`, the discipline
+/// `knobas_core::link::LinkRow` records: a column the statement forgets is
+/// then a decode failure the type system points at, rather than a `map_err`
+/// somebody has to write correctly five times.
+#[derive(sqlx::FromRow)]
+struct MirrorRow {
+    entity_id: String,
+    kind: String,
+    source_id: String,
+    title: String,
+    at: DateTime<Utc>,
+}
+
+/// Items the source attributes to the user that moved inside the window.
 ///
 /// `coalesce(item_updated_at, synced_at)` is the instant, the same fallback
 /// every mirror-derived read in this codebase uses: interfaces §4.1 lets a
 /// source leave `updated_at` unset, and an item with no date could not be put
 /// on a day at all.
-const AUTHORED: &str = r#"select i.entity_id, i.kind, i.source_id, i.title,
+const ATTRIBUTED_TO_ME: &str = r#"select i.entity_id, i.kind, i.source_id, i.title,
               coalesce(i.item_updated_at, i.synced_at) as at
          from sync.live_item i
         where i.author = any($1)
@@ -258,35 +357,46 @@ const AUTHORED: &str = r#"select i.entity_id, i.kind, i.source_id, i.title,
         order by at desc
         limit $4"#;
 
-async fn authored_in_the_mirror(
+async fn attributed_in_the_mirror(
     pool: &PgPool,
     identity: &[String],
-    from: DateTime<Utc>,
-    to: DateTime<Utc>,
+    window: DayWindow,
 ) -> Result<Vec<DigestLine>, IpcError> {
-    let rows = sqlx::query(AUTHORED)
+    let rows = sqlx::query_as::<_, MirrorRow>(ATTRIBUTED_TO_ME)
         .bind(identity)
-        .bind(from)
-        .bind(to)
+        .bind(window.from)
+        .bind(window.to)
         .bind(MOST_LINES)
         .fetch_all(pool)
         .await
         .map_err(IpcError::internal)?;
-    rows.into_iter()
-        .map(|row| {
-            let kind: String = row.try_get("kind").map_err(IpcError::internal)?;
-            let source: String = row.try_get("source_id").map_err(IpcError::internal)?;
-            Ok(DigestLine {
-                entity_id: Some(row.try_get("entity_id").map_err(IpcError::internal)?),
-                title: row.try_get("title").map_err(IpcError::internal)?,
-                reason: format!("you authored this {kind} in {source}"),
-                kind: Some(kind),
-                source,
-                verb: "authored".to_owned(),
-                at: row.try_get("at").map_err(IpcError::internal)?,
-            })
+    Ok(rows
+        .into_iter()
+        .map(|row| DigestLine {
+            entity_id: Some(row.entity_id),
+            reason: format!("{} attributes this {} to you", row.source_id, row.kind),
+            kind: Some(row.kind),
+            title: row.title,
+            source: row.source_id,
+            verb: ATTRIBUTED.to_owned(),
+            at: row.at,
         })
-        .collect()
+        .collect())
+}
+
+/// One write the reader made, as the activity stream recorded it.
+///
+/// `kind`, `title` and `source_id` are all nullable, and each absence is a
+/// real state rather than a fault: the join is a **left** one, and a write's
+/// `detail` is a jsonb object whose keys are the queue's to write.
+#[derive(sqlx::FromRow)]
+struct WriteRow {
+    at: DateTime<Utc>,
+    entity_id: String,
+    op: String,
+    source_id: Option<String>,
+    kind: Option<String>,
+    title: Option<String>,
 }
 
 /// The writes the user made through knobas, at the moment they made them.
@@ -314,43 +424,51 @@ const WRITTEN: &str = r#"select a.at,
           and a.verb = 'queued'
           and a.entity_id is not null
           and a.detail->>'op' is not null
-          and a.detail->>'op' <> 'log_work'
-          and a.at >= $2
-          and a.at <  $3
+          and a.detail->>'op' <> $2
+          and a.at >= $3
+          and a.at <  $4
         order by a.at desc
-        limit $4"#;
+        limit $5"#;
 
 async fn written_through_knobas(
     pool: &PgPool,
-    from: DateTime<Utc>,
-    to: DateTime<Utc>,
+    window: DayWindow,
 ) -> Result<Vec<DigestLine>, IpcError> {
-    let rows = sqlx::query(WRITTEN)
+    let rows = sqlx::query_as::<_, WriteRow>(WRITTEN)
         .bind(ACTOR)
-        .bind(from)
-        .bind(to)
+        .bind(LOG_WORK)
+        .bind(window.from)
+        .bind(window.to)
         .bind(MOST_LINES)
         .fetch_all(pool)
         .await
         .map_err(IpcError::internal)?;
-    rows.into_iter()
+    Ok(rows
+        .into_iter()
         .map(|row| {
-            let entity_id: String = row.try_get("entity_id").map_err(IpcError::internal)?;
-            let op: String = row.try_get("op").map_err(IpcError::internal)?;
-            let title: Option<String> = row.try_get("title").map_err(IpcError::internal)?;
-            let source: Option<String> = row.try_get("source_id").map_err(IpcError::internal)?;
-            let source = source.unwrap_or_else(|| namespace_of(&entity_id));
-            Ok(DigestLine {
-                title: title.unwrap_or_else(|| entity_id.clone()),
-                reason: format!("you queued a {op} on it in {source}"),
-                kind: row.try_get("kind").map_err(IpcError::internal)?,
-                entity_id: Some(entity_id),
+            let source = row
+                .source_id
+                .unwrap_or_else(|| namespace_of(&row.entity_id));
+            DigestLine {
+                reason: format!("you queued a {} on it in {source}", row.op),
+                title: row.title.unwrap_or_else(|| row.entity_id.clone()),
+                entity_id: Some(row.entity_id),
+                kind: row.kind,
                 source,
-                verb: op,
-                at: row.try_get("at").map_err(IpcError::internal)?,
-            })
+                verb: row.op,
+                at: row.at,
+            }
         })
-        .collect()
+        .collect())
+}
+
+/// One worklog, as knobas' own copy of it holds it.
+#[derive(sqlx::FromRow)]
+struct WorklogRow {
+    at: DateTime<Utc>,
+    entity_id: String,
+    kind: Option<String>,
+    title: Option<String>,
 }
 
 /// The hours, out of knobas' own copy of them.
@@ -366,35 +484,40 @@ const WORKLOGS: &str = r#"select w.started_at as at, w.entity_id, e.kind, e.titl
         order by w.started_at desc
         limit $3"#;
 
-async fn logged_as_worklogs(
-    pool: &PgPool,
-    from: DateTime<Utc>,
-    to: DateTime<Utc>,
-) -> Result<Vec<DigestLine>, IpcError> {
-    let rows = sqlx::query(WORKLOGS)
-        .bind(from)
-        .bind(to)
+async fn logged_as_worklogs(pool: &PgPool, window: DayWindow) -> Result<Vec<DigestLine>, IpcError> {
+    let rows = sqlx::query_as::<_, WorklogRow>(WORKLOGS)
+        .bind(window.from)
+        .bind(window.to)
         .bind(MOST_LINES)
         .fetch_all(pool)
         .await
         .map_err(IpcError::internal)?;
-    rows.into_iter()
+    Ok(rows
+        .into_iter()
         .map(|row| {
-            let entity_id: String = row.try_get("entity_id").map_err(IpcError::internal)?;
-            let title: Option<String> = row.try_get("title").map_err(IpcError::internal)?;
-            let source = namespace_of(&entity_id);
-            Ok(DigestLine {
-                title: title.unwrap_or_else(|| entity_id.clone()),
+            let source = namespace_of(&row.entity_id);
+            DigestLine {
                 reason: format!("you logged work on it in {source}"),
-                kind: row.try_get("kind").map_err(IpcError::internal)?,
-                entity_id: Some(entity_id),
+                title: row.title.unwrap_or_else(|| row.entity_id.clone()),
+                entity_id: Some(row.entity_id),
+                kind: row.kind,
                 source,
-                verb: "log_work".to_owned(),
-                at: row.try_get("at").map_err(IpcError::internal)?,
-            })
+                verb: LOG_WORK.to_owned(),
+                at: row.at,
+            }
         })
-        .collect()
+        .collect())
 }
+
+/// What an entity is called, for a line that has only an id.
+#[derive(sqlx::FromRow)]
+struct EntityRow {
+    kind: String,
+    title: String,
+}
+
+/// The timer's target, named. A named statement like every other read here.
+const TIMER_TARGET: &str = "select kind, title from knobas.entity where id = $1";
 
 /// What the timer is on right now -- story 61, *"today includes the running
 /// timer's target, so the digest knows what I am on right now."*
@@ -418,23 +541,18 @@ async fn running_timer(pool: &PgPool) -> Result<Vec<DigestLine>, IpcError> {
             at: timer.started_at,
         },
         crate::time::TimerTarget::Entity { entity_id } => {
-            let row = sqlx::query("select kind, title from knobas.entity where id = $1")
+            let named = sqlx::query_as::<_, EntityRow>(TIMER_TARGET)
                 .bind(entity_id)
                 .fetch_optional(pool)
                 .await
                 .map_err(IpcError::internal)?;
-            let (kind, title) = match row {
-                Some(row) => (
-                    row.try_get::<String, _>("kind").ok(),
-                    row.try_get::<String, _>("title").ok(),
-                ),
-                None => (None, None),
-            };
             let source = namespace_of(entity_id);
             DigestLine {
-                title: title.unwrap_or_else(|| entity_id.clone()),
+                title: named
+                    .as_ref()
+                    .map_or_else(|| entity_id.clone(), |row| row.title.clone()),
+                kind: named.map(|row| row.kind),
                 reason: format!("the timer is running on it, in {source}"),
-                kind,
                 entity_id: Some(entity_id.clone()),
                 source,
                 verb: TIMER.to_owned(),
@@ -444,12 +562,6 @@ async fn running_timer(pool: &PgPool) -> Result<Vec<DigestLine>, IpcError> {
     };
     Ok(vec![line])
 }
-
-/// The `source` a line carries when knobas is the one saying it.
-const KNOBAS: &str = "knobas";
-
-/// The verb the running timer's line carries.
-const TIMER: &str = "timer";
 
 /// The source id an entity id names, or [`KNOBAS`] for one that names none.
 ///
@@ -464,6 +576,19 @@ fn namespace_of(entity_id: &str) -> String {
         _ => KNOBAS.to_owned(),
     }
 }
+
+/// The `KindPaths` key the blocked-like set is declared under.
+///
+/// `knobas_core::payload::field` does not carry it -- that module lists the
+/// fields that are *paths*, and this one is a set of names -- so the literal
+/// the statement below folds is pinned to the struct here instead, by
+/// `the_blocked_set_is_looked_up_at_the_key_kind_paths_serializes_it_under`.
+///
+/// Test-only because that pin is the whole of its job: `concat!` folds
+/// literals, so the statement cannot be built from a `const` and a production
+/// reference to this one would be a second spelling of a value nothing reads.
+#[cfg(test)]
+const BLOCKED_STATUSES: &str = "blocked_statuses";
 
 /// The user's items whose status their own source calls blocked-like.
 ///
@@ -511,6 +636,17 @@ macro_rules! blocked_by_status {
 
 const BLOCKED_BY_STATUS: &str = blocked_by_status!();
 
+/// One blocker the source itself calls stuck.
+#[derive(sqlx::FromRow)]
+struct BlockedStatusRow {
+    entity_id: String,
+    kind: String,
+    source_id: String,
+    title: String,
+    at: DateTime<Utc>,
+    status: String,
+}
+
 /// The user's items a **link** marks blocked.
 ///
 /// `knobas.confirmed_link`, never `knobas.link`: an unconfirmed row is a
@@ -518,15 +654,14 @@ const BLOCKED_BY_STATUS: &str = blocked_by_status!();
 /// blocker would be reporting a guess as a fact. The same reading
 /// `knobas_core::link::entries_of` records.
 ///
-/// The direction is stated once, here: the blocked item is the link's **`to`**
-/// end. `A blocks B` and `B is blocked by A` are the same row read from its
-/// two ends, so joining `l.to_id` is what makes this list "things that are
+/// The direction is [`BLOCKS_RELATION`]'s: the blocked item is the link's
+/// **`to`** end, so joining `l.to_id` is what makes this list "things that are
 /// stuck" rather than "things that are in somebody's way".
 macro_rules! blocked_by_link {
     () => {
         concat!(
             "select s.entity_id, s.kind, s.source_id, s.title, s.at,
-                    o.id as other_id, o.title as other_title
+                    o.title as other_title
                from (select i.entity_id, i.kind, i.source_id, i.title,
                             coalesce(i.item_updated_at, i.synced_at) as at,
                             ",
@@ -544,6 +679,17 @@ macro_rules! blocked_by_link {
 
 const BLOCKED_BY_LINK: &str = blocked_by_link!();
 
+/// One blocker a link marks, with the end that is in the way.
+#[derive(sqlx::FromRow)]
+struct BlockedLinkRow {
+    entity_id: String,
+    kind: String,
+    source_id: String,
+    title: String,
+    at: DateTime<Utc>,
+    other_title: String,
+}
+
 /// Both halves of the blockers list, the declared set first.
 ///
 /// An item can be on both and then it is on the list twice, with a different
@@ -556,56 +702,93 @@ async fn blockers(
     identity: &[String],
     declarations: &Declarations,
 ) -> Result<Vec<DigestLine>, IpcError> {
-    let mut lines = Vec::new();
-
-    let rows = sqlx::query(BLOCKED_BY_STATUS)
+    let by_status = sqlx::query_as::<_, BlockedStatusRow>(BLOCKED_BY_STATUS)
         .bind(identity)
         .bind(declarations.as_param())
         .bind(MOST_LINES)
         .fetch_all(pool)
         .await
         .map_err(IpcError::internal)?;
-    for row in rows {
-        let source: String = row.try_get("source_id").map_err(IpcError::internal)?;
-        let status: String = row.try_get("status").map_err(IpcError::internal)?;
-        lines.push(DigestLine {
-            entity_id: Some(row.try_get("entity_id").map_err(IpcError::internal)?),
-            kind: Some(row.try_get("kind").map_err(IpcError::internal)?),
-            title: row.try_get("title").map_err(IpcError::internal)?,
-            reason: format!("{source} calls this status blocked-like: {status}"),
-            source,
-            verb: "blocked_status".to_owned(),
-            at: row.try_get("at").map_err(IpcError::internal)?,
-        });
-    }
-
-    let rows = sqlx::query(BLOCKED_BY_LINK)
+    let by_link = sqlx::query_as::<_, BlockedLinkRow>(BLOCKED_BY_LINK)
         .bind(identity)
         .bind(declarations.as_param())
-        .bind(BLOCKS)
+        .bind(BLOCKS_RELATION)
         .bind(MOST_LINES)
         .fetch_all(pool)
         .await
         .map_err(IpcError::internal)?;
-    for row in rows {
-        let other_title: String = row.try_get("other_title").map_err(IpcError::internal)?;
-        lines.push(DigestLine {
-            entity_id: Some(row.try_get("entity_id").map_err(IpcError::internal)?),
-            kind: Some(row.try_get("kind").map_err(IpcError::internal)?),
-            title: row.try_get("title").map_err(IpcError::internal)?,
-            source: row.try_get("source_id").map_err(IpcError::internal)?,
-            verb: "blocked_by".to_owned(),
-            reason: format!("a link marks it blocked by {other_title}"),
-            at: row.try_get("at").map_err(IpcError::internal)?,
-        });
-    }
 
+    let mut lines: Vec<DigestLine> = by_status
+        .into_iter()
+        .map(|row| DigestLine {
+            entity_id: Some(row.entity_id),
+            kind: Some(row.kind),
+            title: row.title,
+            reason: format!(
+                "{} calls this status blocked-like: {}",
+                row.source_id, row.status
+            ),
+            source: row.source_id,
+            verb: BLOCKED_STATUS.to_owned(),
+            at: row.at,
+        })
+        .collect();
+    lines.extend(by_link.into_iter().map(|row| DigestLine {
+        entity_id: Some(row.entity_id),
+        kind: Some(row.kind),
+        title: row.title,
+        source: row.source_id,
+        verb: BLOCKED_BY.to_owned(),
+        reason: format!("a link marks it blocked by {}", row.other_title),
+        at: row.at,
+    }));
     Ok(lines)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn day(iso: &str) -> NaiveDate {
+        iso.parse().expect("a date")
+    }
+
+    fn window(on: &str) -> DayWindow {
+        let day = day(on);
+        DayWindow {
+            day,
+            from: day.and_hms_opt(0, 0, 0).expect("midnight").and_utc(),
+            to: day
+                .succ_opt()
+                .expect("the next day")
+                .and_hms_opt(0, 0, 0)
+                .expect("midnight")
+                .and_utc(),
+        }
+    }
+
+    /// The cap is a rule about **dates**, not about how many windows arrived.
+    ///
+    /// The distinction is the whole of it: `take(LOOKBACK_DAYS)` over whatever
+    /// the caller sent holds `CONTEXT.md`'s "at most seven days back" only for
+    /// a caller that happens to send seven consecutive days, so a single
+    /// window dated a fortnight ago would reach a fortnight back. It is also
+    /// what makes the order the caller used irrelevant.
+    #[test]
+    fn only_the_seven_days_before_the_digests_own_are_in_reach_of_yesterday() {
+        let sent = [
+            window("2026-08-31"), // the digest's own day
+            window("2026-09-01"), // after it
+            window("2026-08-17"), // a fortnight back -- one window, still out
+            window("2026-08-24"), // exactly seven days back -- in
+            window("2026-08-30"), // the day before -- in, and first
+        ];
+        let reachable: Vec<String> = in_reach(day("2026-08-31"), &sent)
+            .into_iter()
+            .map(|window| window.day.to_string())
+            .collect();
+        assert_eq!(reachable, ["2026-08-30", "2026-08-24"]);
+    }
 
     /// The two blocker statements resolve the declaration rather than naming a
     /// status, a path or an account of their own.
@@ -619,7 +802,7 @@ mod tests {
     fn the_blocker_statements_read_the_declaration_and_never_a_word_of_their_own() {
         for statement in [BLOCKED_BY_STATUS, BLOCKED_BY_LINK] {
             assert!(
-                statement.contains("blocked_statuses") || statement.contains("confirmed_link"),
+                statement.contains(BLOCKED_STATUSES) || statement.contains("confirmed_link"),
                 "a blocker statement asks the declaration or the link graph: {statement}"
             );
             for word in ["'Blocked'", "'blocked'", "'On Hold'", "'Impediment'"] {
@@ -632,10 +815,37 @@ mod tests {
         }
     }
 
+    /// The literal the blocked set is looked up by is the one `KindPaths`
+    /// serializes it under.
+    ///
+    /// `concat!` folds literals, so the statement carries the field name as a
+    /// *string* and no compiler check reaches it. `knobas_core`'s own
+    /// `the_field_names_the_sql_macros_use_are_the_serialized_ones` pins the
+    /// struct's key set, and this pins that key set to the one call site
+    /// outside that crate -- without it a rename made in both those places
+    /// would leave this read permanently missing, and missing is what a
+    /// blockers list looks like when nobody is blocked.
+    #[test]
+    fn the_blocked_set_is_looked_up_at_the_key_kind_paths_serializes_it_under() {
+        let declared = serde_json::to_value(knobas_source::KindPaths {
+            blocked_statuses: vec!["Waiting for support".to_owned()],
+            ..knobas_source::KindPaths::default()
+        })
+        .expect("a declaration serializes");
+        assert!(
+            declared.get(BLOCKED_STATUSES).is_some(),
+            "`KindPaths` does not serialize a {BLOCKED_STATUSES:?} key: {declared}"
+        );
+        assert!(
+            BLOCKED_BY_STATUS.contains(&format!("'{BLOCKED_STATUSES}'")),
+            "the statement looks the set up under some other name: {BLOCKED_BY_STATUS}"
+        );
+    }
+
     /// The relation is spelled once and the join reads the blocked end.
     #[test]
     fn the_link_half_joins_the_blocked_end_of_a_blocks_link() {
-        assert_eq!(BLOCKS, "blocks");
+        assert_eq!(BLOCKS_RELATION, "blocks");
         assert!(
             BLOCKED_BY_LINK.contains("l.to_id = s.entity_id"),
             "the blocked item is the `to` end; joining `from_id` would list \

@@ -1562,7 +1562,7 @@ async fn a_seeded_days_work_is_what_the_digest_lists_under_yesterday() {
             )
         })
         .collect();
-    for verb in ["log_work", "comment", "authored"] {
+    for verb in ["log_work", "comment", "attributed"] {
         assert!(
             listed.contains(&(Some(borrowed.as_str()), JIRA, verb)),
             "no {verb} line for {borrowed} under yesterday: {listed:?}"
@@ -2102,6 +2102,106 @@ async fn a_comment_that_mentions_me_becomes_an_inbox_mention() {
 }
 
 /// The page ids this source holds live.
+/// **A page the source says is mine is on the digest, under the day it moved**
+/// (issue #288, the Confluence half of criterion 4).
+///
+/// The Jira test above witnesses the two producers a *write* makes -- the
+/// worklog copy and the activity stream. This is the third, the **mirror**,
+/// and it is the one that cannot be settled against a scratch fixture: it
+/// rests on what the *adapter* puts in §4.1's `author` for a real page, and
+/// `knobas-source-confluence`'s answer is the version's author falling back to
+/// the creator (`map.rs`). The seeded pages were written by this account, so
+/// the digest for the day after the day one of them last moved has to carry
+/// it, with its content id as the ref.
+///
+/// **Nothing is written here, and that is deliberate.** A page *edit* through
+/// knobas needs `UpdatePage`, which is #286's growth of the SPI and is not on
+/// this branch; the alternative -- a raw REST edit of a seeded page -- would
+/// put a body-restore path into a live suite for a fact this read already
+/// establishes without touching the server. The day is taken from the page's
+/// own mirrored timestamp rather than assumed to be today, so the assertion
+/// holds however long ago the environment was seeded.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
+async fn a_page_the_source_says_is_mine_is_on_the_digest_for_the_day_it_moved() {
+    let wiki = wiki();
+    let state = wiki_app("atlassian_live_digest_page", &wiki).await;
+    sync_source(&state, CONFLUENCE).await;
+
+    // The page, and the day the mirror says it last moved -- read back rather
+    // than assumed, so this is a statement about the adapter's own `author`
+    // and `item_updated_at` and not about when the suite happens to run.
+    let page = format!("{CONFLUENCE}:{}", wiki.page);
+    let moved: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
+        "select coalesce(item_updated_at, synced_at) from sync.live_item
+          where entity_id = $1 and author = $2",
+    )
+    .bind(&page)
+    .bind(&wiki.user)
+    .fetch_optional(&state.pool)
+    .await
+    .expect("the mirror is readable")
+    .unwrap_or_else(|| {
+        panic!(
+            "{} is not mirrored with {} as its §4.1 author -- the seed writes the \
+             pages as this account, and the digest's mirror half is what that \
+             normalization feeds",
+            wiki.title, wiki.user
+        )
+    });
+
+    let window = |on: chrono::NaiveDate| knobas_app::time::week::DayWindow {
+        day: on,
+        from: on.and_hms_opt(0, 0, 0).expect("midnight").and_utc(),
+        to: on
+            .succ_opt()
+            .expect("the next day")
+            .and_hms_opt(0, 0, 0)
+            .expect("midnight")
+            .and_utc(),
+    };
+    let day = moved.date_naive();
+    let digest = knobas_app::commands::entity::standup_digest_inner(
+        &state.pool,
+        state.registry.as_ref(),
+        // A clock outside the day being asked about, so no running timer of
+        // this scratch database's own can join the list. There is none, and
+        // saying so costs one argument.
+        window(day.succ_opt().expect("tomorrow exists")).to,
+        window(day.succ_opt().expect("tomorrow exists")),
+        &[window(day)],
+    )
+    .await
+    .expect("the digest reads");
+
+    assert_eq!(digest.yesterday_day, Some(day));
+    let line = digest
+        .yesterday
+        .iter()
+        .find(|line| line.entity_id.as_deref() == Some(page.as_str()))
+        .unwrap_or_else(|| {
+            panic!(
+                "{} is not on the digest for {day}, which is the day the mirror \
+                 says it moved: {:?}",
+                wiki.title, digest.yesterday
+            )
+        });
+    assert_eq!(line.source, CONFLUENCE);
+    assert_eq!(
+        line.verb, "attributed",
+        "the mirror half says the source attributes the page to the reader, \
+         never that the reader wrote it"
+    );
+    assert!(
+        line.reason.contains(CONFLUENCE),
+        "the reason names the source it came from: {:?}",
+        line.reason
+    );
+    println!("SEEDED digest page line: {} ({})", line.title, line.reason);
+
+    state.scheduler.shutdown().await;
+}
+
 async fn confluence_pages(pool: &sqlx::PgPool) -> Vec<String> {
     sqlx::query_scalar::<_, String>(
         "select entity_id from sync.live_item where source_id = $1 order by entity_id",
