@@ -988,7 +988,7 @@ async fn discarding_a_queued_worklog_gives_the_afternoon_back() {
 /// **A worklog Jira answered for is not undone by a discard** (issue #328).
 ///
 /// `remote_id` on the copy is knobas' record that the source made a worklog,
-/// and a release that removed one would be knobas forgetting an entry that
+/// and a release that removed one would be knobas forgetting a worklog that
 /// exists in Jira -- and then offering the same hour to *Log all* again, which
 /// bills it twice. So the delete carries `remote_id is null` as its own
 /// condition, and this is the direction that pins it.
@@ -1058,7 +1058,7 @@ async fn a_discard_leaves_a_worklog_jira_answered_for_alone() {
         .cells[column(MONDAY)];
     assert_eq!(
         cell.held_seconds, 3_600,
-        "a discarded write over a copy Jira answered for is held, not logged          and not unlogged"
+        "a discarded write over a copy Jira answered for is held, not logged and not unlogged"
     );
     assert_eq!(cell.logged_seconds, 0);
     assert_eq!(cell.unlogged_seconds, 0);

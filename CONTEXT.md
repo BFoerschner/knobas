@@ -156,7 +156,7 @@ A knobas-owned stretch of time — start, end, [timer target](#timer-target) —
 _Avoid_: interval (that is a worklog's editable span), entry, session
 
 **Worklog**:
-The Jira record that one or more [blocks](#block) become when logged — a [write-back](#write-back) through the write queue like any other, with a local copy. Sending it changes nothing about the blocks. **Withdrawing its queued write does**: nothing reached Jira, so the copy goes with the write and the blocks are unlogged again, offered by *Log all* and editable in the day review. A worklog Jira has already answered for is not withdrawable that way. (#328) At-least-once like every write (ADR-0012): a worklog in flight when knobas stops may land twice, and knobas re-sends rather than guess.
+The Jira record that one or more [blocks](#block) become when logged — a [write-back](#write-back) through the write queue like any other, with a local copy. Sending it changes nothing about the blocks. **Withdrawing its queued write does**: knobas never saw it land, so the copy goes with the write and the blocks are unlogged again, offered by *Log all* and editable in the day review. A worklog Jira has already answered for is not withdrawable that way. (#328) At-least-once like every write (ADR-0012): a worklog in flight when knobas stops may land twice, and knobas re-sends rather than guess.
 _Avoid_: time entry, logged time (that is the timesheet's column, not the record)
 
 **Digest**:

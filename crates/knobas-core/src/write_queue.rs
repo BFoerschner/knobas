@@ -570,9 +570,10 @@ pub async fn due(pool: &PgPool, source_id: &str) -> Result<Vec<QueuedWrite>, Cor
 /// Two of them wrap that update in a CTE and write `knobas.worklog` in the
 /// same statement -- [`sent`] stamps the copy, [`discard`] deletes it -- and
 /// both say in place why that may not be a second statement. Both expand this
-/// macro inside the CTE rather than restating the update, so the guard and the
-/// concurrency argument below are theirs too: what differs between them is the
-/// second sub-statement and nothing else.
+/// macro inside the CTE rather than restating the update, so the shape and the
+/// concurrency argument below are theirs too. What each sets and which states
+/// it accepts are still its own -- that is what this macro takes as its
+/// argument -- and so is the sub-statement beside it.
 ///
 /// The state guard in the `where` clause is what makes each of these safe to
 /// call concurrently with the others: two flush loops that both decided to
@@ -787,24 +788,43 @@ pub async fn sent(
 /// **Except when Jira answered anyway**, which is what `remote_id is null`
 /// guards. The copy carries what the source called the worklog, and a copy
 /// that has one is knobas' record that the hour exists at Jira; deleting that
-/// would forget an entry knobas cannot re-read, and then offer the same hour
+/// would forget a worklog knobas cannot re-read, and then offer the same hour
 /// to *Log all*, which bills it twice. The guard is on the delete itself
 /// rather than left to the state machine, so the statement is safe on its own
 /// terms.
 ///
 /// The one gap it cannot close is at-least-once's own (ADR-0012): a write that
 /// arrived and whose settle never landed is a `pending` row with no id
-/// anywhere, and nothing here can tell it from one that never left. The queue
-/// row is kept, discarded, with its payload -- so what was withdrawn is still
-/// answerable even when the copy is gone.
+/// anywhere, and nothing here can tell it from one that never left. **That is
+/// not only a crash.** `knobas_sync::write_queue::attempt` names the ordinary
+/// case in place -- "the row settled under us -- the user discarded it while
+/// it was in flight" -- and the flush loop's per-source lock does not hold a
+/// discard back. So the window is one HTTP round-trip wide, and inside it this
+/// statement gives back blocks whose hour is at Jira, which *Log all* will
+/// then offer again. `attempts` cannot narrow it either: every writer of that
+/// column bumps it *after* the call, never before, so a write in flight is
+/// indistinguishable from one that has not been tried.
+///
+/// What that buys is the alternative #328 weighed and rejected -- a copy no
+/// surface can release, reading as *held* for good. The queue row is kept,
+/// discarded, with its payload, so what was withdrawn is still answerable even
+/// when the copy is gone.
 ///
 /// # Why this statement knows about `knobas.worklog`
 ///
 /// [`sent`]'s reason, from the other end: the queue owns when a write stops
 /// being owed, and the copy's existence is a fact about that. One statement
 /// makes "the write is withdrawn" and "the time is knobas' own again" the same
-/// event, so no window exists in which a webview reads a settled queue row
-/// beside blocks that are still spoken for.
+/// event, so the withdrawal is never half-done: no webview reads a settled
+/// queue row beside blocks this statement was going to release.
+///
+/// The claim stops at this statement, deliberately. `time::worklog::commit`
+/// queues the write and writes the copy in that order, so a discard landing
+/// between those two steps finds no copy to delete and the insert that follows
+/// attaches one to a row that is already discarded -- #328's own shape, and
+/// not withdrawable a second time. That window is two adjacent awaits wide and
+/// only a person can open it, so it is recorded here rather than guarded, and
+/// `time/week.rs` describes the cell it produces.
 ///
 /// # Errors
 ///
