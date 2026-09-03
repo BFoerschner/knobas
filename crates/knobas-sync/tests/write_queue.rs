@@ -59,9 +59,9 @@ struct Fake {
     /// test, which needs the window between reading the queue and settling it
     /// to be wide enough that a second flusher would fall into it.
     dwell: Arc<Mutex<std::time::Duration>>,
-    /// What the source says it made. `None` -- `WriteReceipt::none()` -- is
-    /// every op but `create_page` and `log_work`; the two that name what they
-    /// created set it.
+    /// What the source says it made. `None` is `WriteReceipt::none()`, which
+    /// is what every op but `create_page` and `log_work` really answers; a
+    /// test that needs an id sets one.
     receipt: Arc<Mutex<Option<String>>>,
     /// What settles the row from *inside* the write, once.
     ///
@@ -245,7 +245,7 @@ impl Harness {
                 WriteOp::CreateTicket { title, .. } | WriteOp::CreatePage { title, .. } => {
                     title.clone()
                 }
-                other => panic!("this harness queues comments and page edits, got {other:?}"),
+                other => panic!("this harness queues comments, edits and creates, got {other:?}"),
             })
             .collect()
     }
