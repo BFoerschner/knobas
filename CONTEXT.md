@@ -177,7 +177,7 @@ _Avoid_: automatic tracking, activity tracking (that is the activity stream's wo
 Everything knobas owns, notes included; the mirror is excluded (it re-syncs).
 
 **Share export**:
-A curated export — links, assets, contexts, smart lists — with notes excluded by default; every part toggleable.
+A curated export — links, assets, contexts, smart lists — with notes and time excluded by default; every part toggleable. *Time* is the timer, [blocks](#block), [worklogs](#worklog) and the time settings: personal the way a note is, and a colleague reading a link map has no use for somebody's hours. The default is recorded; the export itself is M4. (#283)
 
 ## Surfaces
 

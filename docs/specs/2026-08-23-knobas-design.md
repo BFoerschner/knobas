@@ -352,7 +352,7 @@ Rust workspace: `knobas-core` (entities, links, contexts, notes, time, activity)
 9. **Frontend: Svelte 5 + Vite** (no SvelteKit); port region-by-region, keep the mockup CSS global. → §14.
 10. **Backlog promotions:** conflict UI → v1 (follows from 7); desktop notifications → **M3** (amended 2026-08-27 — they pair with the daily flow, and M2's inbox is in-app only); open-in-editor/terminal, paste-URL→chip, quick capture → v1.5; rest stays v2. → §13.
 11. **Context membership: explicit adds + direct links + one hop, fixed rule, not configurable in v1.** Asset membership counts through ancestors. → §5a.
-12. **Export defaults: backup = all of `knobas` incl. notes, no `sync`; share = links/assets/contexts/smart lists, no notes; every part toggleable.** → §14.
+12. **Export defaults: backup = all of `knobas` incl. notes, no `sync`; share = links/assets/contexts/smart lists, no notes; every part toggleable.** → §14. **Amended 2026-09-03 (spec #272, issue #283):** *time* — the timer, blocks, worklogs and the time settings — rides in the backup by the schema-scoped dump and is **out of the share export by default**, toggleable with every other part. The default is recorded now; the curated share export itself is M4.
 
 ## Appendix — mockup map
 
