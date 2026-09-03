@@ -24,6 +24,7 @@ mod api;
 mod config;
 mod cursor;
 mod descriptor;
+mod digest;
 mod discover;
 mod http;
 mod jql;
