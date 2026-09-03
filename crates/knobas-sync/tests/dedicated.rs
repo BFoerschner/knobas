@@ -88,7 +88,7 @@ impl Source for Parked {
         Ok(r#"{"v":1,"n":1}"#.to_owned())
     }
 
-    async fn write(&self, _op: WriteOp) -> Result<(), SourceError> {
+    async fn write(&self, _op: WriteOp) -> Result<knobas_source::WriteReceipt, SourceError> {
         Err(SourceError::protocol("read-only"))
     }
 }
@@ -122,7 +122,7 @@ impl Source for Failing {
     ) -> Result<Cursor, SourceError> {
         Err(SourceError::Unreachable("simulated".into()))
     }
-    async fn write(&self, _op: WriteOp) -> Result<(), SourceError> {
+    async fn write(&self, _op: WriteOp) -> Result<knobas_source::WriteReceipt, SourceError> {
         Err(SourceError::protocol("read-only"))
     }
 }

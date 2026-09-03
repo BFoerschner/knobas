@@ -1,7 +1,9 @@
 //! The [`Source`] implementation: what the sync engine and `test_source` hold.
 
 use knobas_source::instance::SourceInstance;
-use knobas_source::{ConnectionInfo, Cursor, Sink, Source, SourceDescriptor, SourceError, WriteOp};
+use knobas_source::{
+    ConnectionInfo, Cursor, Sink, Source, SourceDescriptor, SourceError, WriteOp, WriteReceipt,
+};
 
 use crate::client::{HttpRest, Rest, connection_info};
 use crate::write;
@@ -156,20 +158,23 @@ impl Source for TeamCitySource {
     /// exist precisely so they cannot be confused (`map::build_key` /
     /// `map::build_config_key`), and sending `1187` as a configuration id
     /// would trigger whatever configuration happened to be called that.
-    async fn write(&self, op: WriteOp) -> Result<(), SourceError> {
+    async fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError> {
         match &op {
             WriteOp::TriggerBuild { entity } => {
-                write::trigger(&self.rest, &self.build_config_id(entity)?).await
+                write::trigger(&self.rest, &self.build_config_id(entity)?).await?;
+                Ok(WriteReceipt::none())
             }
             WriteOp::RerunBuild { entity } => {
-                write::rerun(&self.rest, self.build_id(entity)?).await
+                write::rerun(&self.rest, self.build_id(entity)?).await?;
+                Ok(WriteReceipt::none())
             }
             WriteOp::Comment { .. }
             | WriteOp::Transition { .. }
             | WriteOp::CreateTicket { .. }
             | WriteOp::CreateBranch { .. }
             | WriteOp::CreatePullRequest { .. }
-            | WriteOp::Approve { .. } => Err(SourceError::protocol(format!(
+            | WriteOp::Approve { .. }
+            | WriteOp::LogWork { .. } => Err(SourceError::protocol(format!(
                 "the TeamCity adapter does not support {:?}",
                 op.identifier()
             ))),

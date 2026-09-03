@@ -54,6 +54,10 @@ pub const WRITE_OP_COMMENT: &str = "comment";
 pub const WRITE_OP_TRANSITION: &str = "transition";
 /// See [`WRITE_OP_COMMENT`].
 pub const WRITE_OP_CREATE_TICKET: &str = "create_ticket";
+/// See [`WRITE_OP_COMMENT`]. M3.1's growth (issue #280): the only adapter that
+/// declares it, because it is the only source knobas mirrors that holds
+/// worklogs.
+pub const WRITE_OP_LOG_WORK: &str = "log_work";
 
 /// The one entity kind this adapter emits. Epics are Jira issues of type
 /// `Epic`, so they arrive as tickets too (interfaces doc §4.2: kinds = `ticket`).

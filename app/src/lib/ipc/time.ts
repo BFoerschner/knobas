@@ -206,6 +206,119 @@ export function updateBlock(
  */
 export function deleteBlock(id: number): Promise<void> {
   return invoke<void>("delete_block", { id });
+/** Where a worklog-draft candidate was seen — `worklog::CandidateSource`. */
+export type CandidateSource = "mirror" | "activity";
+
+/**
+ * One thing knobas saw the reader do inside a draft's interval —
+ * `worklog::Candidate`.
+ *
+ * A proposal, not a record: the draft draws these as checkboxes and the
+ * comment is the {@link bullet}s of the ticked ones, joined with newlines.
+ * **Do not compose a bullet here** — the wording is the backend's, so that
+ * every worklog knobas has ever sent is spelled one way.
+ */
+export interface Candidate {
+  /** Stable within a draft — `"item:jira:PAY-231"`, `"activity:4211"`. */
+  id: string;
+  source: CandidateSource;
+  /** RFC 3339, UTC. */
+  at: string;
+  entity_id: string | null;
+  /** The line this candidate contributes to the comment, verbatim. */
+  bullet: string;
+}
+
+/** What stopping the timer on a ticket offers — `worklog::Draft`. */
+export interface Draft {
+  entity_id: string;
+  /** `"2026-09-03"`, the reader's own day. */
+  day: string;
+  /** RFC 3339, UTC — the first block's start. */
+  started_at: string;
+  /**
+   * RFC 3339, UTC — the last block's end.
+   *
+   * **Not `started_at` plus {@link seconds}.** The difference between the two
+   * is the gaps between the day's blocks, which is exactly what is *not*
+   * logged.
+   */
+  ended_at: string;
+  /** The time about to be logged: the blocks' durations added up. */
+  seconds: number;
+  /** The blocks this draft is made of, oldest first. */
+  block_ids: number[];
+  candidates: Candidate[];
+  /** The comment as generated from every candidate. Editable, down to empty. */
+  comment: string;
+}
+
+/** knobas' copy of a worklog it has sent, or is still sending — `worklog::Worklog`. */
+export interface Worklog {
+  id: number;
+  entity_id: string;
+  /** RFC 3339, UTC. */
+  started_at: string;
+  seconds: number;
+  comment: string;
+  /** The blocks it was made of. They carry its id and are read-only now. */
+  block_ids: number[];
+  /** The write that carries it; read its state with `pendingWrites`. */
+  write_queue_id: number | null;
+  /** What Jira called it — `null` while the write is still owed. */
+  remote_id: string | null;
+  /** RFC 3339, UTC. */
+  created_at: string;
+}
+
+/**
+ * The worklog draft for a ticket and one of the reader's days, or `null`.
+ *
+ * **Ask on every stop; `null` is the ordinary answer.** Whether a worklog can
+ * go somewhere is the backend's decision, read off the source's declared write
+ * ops — so the shell opens the draft when it gets one and does nothing when it
+ * does not, rather than keeping a list of kinds that can be timed and logged.
+ *
+ * `day` is `"YYYY-MM-DD"` in the reader's own reckoning and `offsetMinutes` is
+ * their offset from UTC (`-new Date().getTimezoneOffset()`): this machine is
+ * the only thing that knows which day the reader means.
+ */
+export function worklogDraft(
+  entityId: string,
+  day: string,
+  offsetMinutes: number,
+): Promise<Draft | null> {
+  return invoke<Draft | null>("worklog_draft", { entityId, day, offsetMinutes });
+}
+
+/**
+ * Log the day's work on a ticket: the write is queued like any other, a local
+ * copy exists at once, and the blocks it covers become read-only.
+ *
+ * `startedAt`, `seconds` and `comment` are what the reader settled on. Which
+ * blocks are covered is **not** passed: the backend re-derives them, so a
+ * webview cannot log another ticket's time or the same block twice.
+ *
+ * Rejects with `conflict` when the day's time on that ticket has already been
+ * logged, and with `invalid` for a source that takes no worklogs or a duration
+ * that is not positive.
+ */
+export function logWork(
+  entityId: string,
+  day: string,
+  offsetMinutes: number,
+  startedAt: string,
+  seconds: number,
+  comment: string,
+): Promise<Worklog> {
+  return invoke<Worklog>("log_work", {
+    entityId,
+    day,
+    offsetMinutes,
+    startedAt,
+    seconds,
+    comment,
+  });
 }
 
 /**

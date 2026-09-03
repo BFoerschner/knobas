@@ -104,7 +104,7 @@ impl Source for Flood {
         }
         Ok("done".into())
     }
-    async fn write(&self, _op: WriteOp) -> Result<(), SourceError> {
+    async fn write(&self, _op: WriteOp) -> Result<knobas_source::WriteReceipt, SourceError> {
         Err(SourceError::protocol("read-only"))
     }
 }

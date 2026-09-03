@@ -90,9 +90,9 @@ impl Source for Fake {
         Ok(cursor.unwrap_or_default())
     }
 
-    async fn write(&self, _op: WriteOp) -> Result<(), SourceError> {
+    async fn write(&self, _op: WriteOp) -> Result<knobas_source::WriteReceipt, SourceError> {
         Err(match *self.answer.lock().unwrap() {
-            Answer::Accept => return Ok(()),
+            Answer::Accept => return Ok(knobas_source::WriteReceipt::none()),
             Answer::Unreachable => SourceError::Unreachable("connection timed out".to_owned()),
             Answer::Unauthorized => SourceError::Unauthorized { status: Some(401) },
         })

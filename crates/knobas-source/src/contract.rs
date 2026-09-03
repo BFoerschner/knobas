@@ -89,7 +89,20 @@ fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
         crate::WriteOp::TriggerBuild {
             entity: target.clone(),
         },
-        crate::WriteOp::RerunBuild { entity: target },
+        crate::WriteOp::RerunBuild {
+            entity: target.clone(),
+        },
+        crate::WriteOp::LogWork {
+            entity: target,
+            // A fixed instant, not `Utc::now()`: an adapter that (wrongly)
+            // attempted this probe would otherwise write a different worklog
+            // on every run, and a battery whose payload moves is one whose
+            // failures cannot be compared between runs.
+            started: chrono::DateTime::from_timestamp(1_788_000_000, 0)
+                .expect("a fixed instant"),
+            seconds: 60,
+            comment: "contract battery probe".into(),
+        },
     ]
     .into_iter()
     .map(|op| (op.identifier(), op))
@@ -868,7 +881,7 @@ mod tests {
             Ok("1".into())
         }
 
-        async fn write(&self, op: WriteOp) -> Result<(), SourceError> {
+        async fn write(&self, op: WriteOp) -> Result<crate::WriteReceipt, SourceError> {
             if self.behavior == Behavior::DeclaresAWriteOp
                 && self
                     .descriptor()
@@ -883,7 +896,7 @@ mod tests {
                 unreachable!("battery must not perform a write the descriptor declares");
             }
             if self.behavior == Behavior::AcceptsUndeclaredWrite {
-                return Ok(());
+                return Ok(crate::WriteReceipt::none());
             }
             Err(SourceError::protocol(format!("unsupported op: {op:?}")))
         }

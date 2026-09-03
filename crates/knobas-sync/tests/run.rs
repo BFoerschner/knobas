@@ -163,7 +163,7 @@ impl Source for FakeSource {
         Ok(format!("at-{}", self.items.len()))
     }
 
-    async fn write(&self, _op: WriteOp) -> Result<(), SourceError> {
+    async fn write(&self, _op: WriteOp) -> Result<knobas_source::WriteReceipt, SourceError> {
         Err(SourceError::protocol("read-only".to_owned()))
     }
 }
@@ -205,7 +205,7 @@ impl Source for LockProbingSource {
         Ok("locked".to_owned())
     }
 
-    async fn write(&self, _op: WriteOp) -> Result<(), SourceError> {
+    async fn write(&self, _op: WriteOp) -> Result<knobas_source::WriteReceipt, SourceError> {
         Err(SourceError::protocol("read-only".to_owned()))
     }
 }

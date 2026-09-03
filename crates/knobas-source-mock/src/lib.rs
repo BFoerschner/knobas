@@ -50,7 +50,7 @@ use knobas_source::contract::Fault;
 use knobas_source::instance::SourceInstance;
 use knobas_source::{
     Capability, ConnectionInfo, Cursor, KindInfo, Sink, Source, SourceDescriptor, SourceError,
-    SyncItem, WriteOp,
+    SyncItem, WriteOp, WriteReceipt,
 };
 use serde::{Deserialize, Serialize};
 
@@ -809,7 +809,7 @@ impl Source for MockSource {
         Ok(CURSOR.to_owned())
     }
 
-    async fn write(&self, op: WriteOp) -> Result<(), SourceError> {
+    async fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError> {
         // The SPI's own mapping, not a copy of it: a per-adapter table drifts
         // from the identifiers descriptors are validated against.
         let id = op.identifier();
@@ -823,7 +823,9 @@ impl Source for MockSource {
             return Err(err);
         }
         self.lock().push(op);
-        Ok(())
+        // Nothing here creates a row with an id of its own, so there is
+        // nothing to hand back -- see `WriteReceipt`.
+        Ok(WriteReceipt::none())
     }
 }
 

@@ -40,6 +40,8 @@
 //! that table. Nothing about the switch touches the stamp: a person who never
 //! turns passive attribution on keeps the relaunch rule in full.
 
+pub mod worklog;
+
 use chrono::{DateTime, Utc};
 use knobas_core::entity::EntityRef;
 use sqlx::{PgPool, Row};

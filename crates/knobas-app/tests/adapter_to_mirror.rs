@@ -147,7 +147,7 @@ impl Source for PreWidening {
         let mut narrowed = NarrowSink { inner: sink };
         self.0.sync(cursor, &mut narrowed).await
     }
-    async fn write(&self, op: WriteOp) -> Result<(), SourceError> {
+    async fn write(&self, op: WriteOp) -> Result<knobas_source::WriteReceipt, SourceError> {
         self.0.write(op).await
     }
 }

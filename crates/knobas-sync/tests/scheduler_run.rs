@@ -100,7 +100,7 @@ impl Source for Renamed {
         };
         self.inner.sync(cursor, &mut renaming).await
     }
-    async fn write(&self, op: knobas_source::WriteOp) -> Result<(), SourceError> {
+    async fn write(&self, op: knobas_source::WriteOp) -> Result<knobas_source::WriteReceipt, SourceError> {
         self.inner.write(op).await
     }
 }

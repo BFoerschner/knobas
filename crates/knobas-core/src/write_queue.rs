@@ -343,6 +343,7 @@ pub const PROJECTED_OPS: &[&str] = &[
     "approve",
     "trigger_build",
     "rerun_build",
+    "log_work",
 ];
 
 /// What `op` counts as its target having changed.
@@ -399,9 +400,10 @@ pub const PROJECTED_OPS: &[&str] = &[
 ///   lands.
 ///
 /// **Liveness alone** -- `"create_ticket"`, `"create_branch"`,
-/// `"create_pull_request"`, `"trigger_build"`, `"rerun_build"`. These do not
-/// overwrite anything: they add a ticket, a branch, a pull request or a queued
-/// build *beside* whatever the container holds now, so a change to the
+/// `"create_pull_request"`, `"trigger_build"`, `"rerun_build"`, `"log_work"`.
+/// These do not
+/// overwrite anything: they add a ticket, a branch, a pull request, a queued
+/// build or a worklog *beside* whatever the container holds now, so a change to the
 /// container is not a change to what the write would replace -- there is
 /// nothing it would replace. Holding a create because someone renamed the
 /// repository would be a decision the user cannot act on and cannot learn
@@ -410,6 +412,16 @@ pub const PROJECTED_OPS: &[&str] = &[
 /// that was purged. And a duplicate -- the branch already exists, the pull
 /// request is already open -- is the source's answer to give, which arrives as
 /// a refusal carrying what it said (ADR-0004), not as a hold.
+///
+/// `"log_work"` is in that group and the reasoning is worth stating, because
+/// its target *is* a mirrored item and the conservative fallback would
+/// therefore have bitten: a worklog is a statement about **hours somebody
+/// worked**, and nothing that can happen to the ticket makes those hours wrong.
+/// Holding a worklog because a colleague replied to the ticket while Jira was
+/// unreachable would ask the reader to re-consent to their own afternoon, and
+/// the two versions the hold dialog would show them would differ in a comment
+/// that has nothing to do with the time. What does still hold it is the ticket
+/// leaving the mirror -- there is then nothing to log against.
 ///
 /// For a create the target is the **container**, and knobas does not mirror
 /// every container: there is no `jira:PAY` item. Such a target projects
@@ -436,7 +448,8 @@ pub fn project(op: &str, target: Option<&Target>) -> serde_json::Value {
         | "create_branch"
         | "create_pull_request"
         | "trigger_build"
-        | "rerun_build" => serde_json::json!({
+        | "rerun_build"
+        | "log_work" => serde_json::json!({
             "op": op,
             "live": live,
         }),
@@ -665,19 +678,57 @@ pub async fn hold(
 
 /// The source accepted the write. Terminal.
 ///
+/// `remote_id` is what the source said it made -- `WriteReceipt::remote_id`,
+/// which is `None` for every op but `log_work`. When it is present it is
+/// stamped onto the `knobas.worklog` row that names this write, **in the same
+/// statement as the settle**, and that is the whole of how a worklog's local
+/// copy comes to carry Jira's id (issue #280).
+///
+/// # Why this statement knows about `knobas.worklog`
+///
+/// Because the alternative is a window. `Source::write` answers the id exactly
+/// once, in the flush loop, and no transaction spans that call and this one
+/// (ADR-0012) -- so a second statement here could settle the write and then
+/// fail to stamp the copy, leaving a worklog that Jira holds and knobas cannot
+/// name, with nothing left to re-read it from. One statement makes "the write
+/// settled" and "the copy carries the id" the same event.
+///
+/// The `update` matches nothing for every other op and for every write that
+/// carries no worklog, which is what keeps this a settle that stamps rather
+/// than a settle that depends on a worklog existing.
+///
 /// `None` if the write is not pending -- which is what stops a flush loop that
-/// raced with the user's *discard* from resurrecting a withdrawn write.
+/// raced with the user's *discard* from resurrecting a withdrawn write. A
+/// write that did not settle stamps nothing, because the `update` reads the
+/// settled row rather than the argument.
 ///
 /// # Errors
 ///
 /// [`CoreError::Db`] if the statement fails.
-pub async fn sent(pool: &PgPool, id: i64) -> Result<Option<QueuedWrite>, CoreError> {
-    let row = sqlx::query_as::<_, QueuedWrite>(transition!(
-        "state = 'sent', wait_reason = null, settled_at = now(), \
-         attempted_at = now(), attempts = attempts + 1
-          where id = $1 and state = 'pending'"
+pub async fn sent(
+    pool: &PgPool,
+    id: i64,
+    remote_id: Option<&str>,
+) -> Result<Option<QueuedWrite>, CoreError> {
+    let row = sqlx::query_as::<_, QueuedWrite>(concat!(
+        "with settled as (
+           update knobas.write_queue
+              set state = 'sent', wait_reason = null, settled_at = now(),
+                  attempted_at = now(), attempts = attempts + 1
+            where id = $1 and state = 'pending'
+            returning ",
+        queue_columns!(),
+        "
+         ), stamped as (
+           update knobas.worklog w
+              set remote_id = $2
+             from settled
+            where w.write_queue_id = settled.id and $2 is not null
+         )
+         select * from settled"
     ))
     .bind(id)
+    .bind(remote_id)
     .fetch_optional(pool)
     .await?;
     Ok(row)

@@ -200,6 +200,86 @@ pub async fn update_block(
 pub async fn delete_block(lifecycle: State<'_, Lifecycle>, id: i64) -> Result<(), IpcError> {
     let pool = lifecycle.pool()?;
     time::day::remove(&pool, id).await
+/// The worklog draft for a ticket and one of the reader's days, or `null`
+/// (issue #280).
+///
+/// **Called on every stop, and `null` is the ordinary answer.** The shell asks
+/// for a draft whenever a timer that was on an entity stops, and opens the
+/// draft only if it got one -- so the decision "is this something a worklog can
+/// go to" lives in [`crate::time::worklog`] with the descriptor it is read
+/// from, not in the webview as a list of kinds. A stop on a note, on a repo, or
+/// on a ticket whose blocks are already logged answers `null`, and the reader
+/// sees nothing rather than an apology.
+///
+/// `day` is the reader's own day (`2026-09-03`) and `offsetMinutes` their own
+/// offset from UTC, because their machine is the only thing that knows which
+/// day they mean.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a target that is not an
+/// entity id or an offset that is not an offset.
+#[tauri::command]
+pub async fn worklog_draft<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+    day: chrono::NaiveDate,
+    offset_minutes: i32,
+) -> Result<Option<time::worklog::Draft>, IpcError> {
+    let pool = lifecycle.pool()?;
+    let sources = crate::sources::state(&app)?;
+    time::worklog::draft(
+        &pool,
+        sources.registry.as_ref(),
+        &entity_id,
+        day,
+        offset_minutes,
+    )
+    .await
+}
+
+/// Log a day's work on a ticket: queue the write, keep the copy, and make the
+/// blocks it covers read-only (issue #280).
+///
+/// `startedAt`, `seconds` and `comment` are what the reader settled on in the
+/// draft; **which blocks are covered is not an argument**, and
+/// [`crate::time::worklog::log`] records why -- a caller that could name them
+/// could name another ticket's.
+///
+/// The answer is the local copy, read back after the flush: `remote_id` is
+/// already Jira's if the write went through, and `null` if it is still owed.
+/// The write itself is in the pending-writes panel like any other.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a target whose source does not
+/// take worklogs or a duration that is not positive, and
+/// [`Conflict`](crate::IpcErrorCode::Conflict) when the day has no unlogged
+/// time left on that ticket.
+#[tauri::command]
+pub async fn log_work<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    day: chrono::NaiveDate,
+    offset_minutes: i32,
+    started_at: chrono::DateTime<chrono::Utc>,
+    seconds: i64,
+    comment: String,
+) -> Result<time::worklog::Worklog, IpcError> {
+    let sources = crate::sources::state(&app)?;
+    time::worklog::log(
+        &sources,
+        &entity_id,
+        day,
+        offset_minutes,
+        started_at,
+        seconds,
+        &comment,
+    )
+    .await
 }
 
 /// Write a block over a stretch nobody claimed — *Assign…* on a gap (#282).

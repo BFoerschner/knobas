@@ -84,9 +84,9 @@ impl Source for Recording {
         Ok(cursor.unwrap_or_default())
     }
 
-    async fn write(&self, op: WriteOp) -> Result<(), SourceError> {
+    async fn write(&self, op: WriteOp) -> Result<knobas_source::WriteReceipt, SourceError> {
         self.ops.lock().unwrap().push(op);
-        Ok(())
+        Ok(knobas_source::WriteReceipt::none())
     }
 }
 
