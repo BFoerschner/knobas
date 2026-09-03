@@ -183,6 +183,29 @@ test("a failed read does not zero the count", async () => {
   expect(inbox.error).toBe("the database went away");
 });
 
+/**
+ * **`answered` says whether the stream on this store is a read** (#290).
+ *
+ * The notifier's whole backlog rule hangs off it: an empty stream that has
+ * never been read is not an empty inbox, and a notifier primed against it
+ * would take the reader's first real read for news. A failed read leaves it
+ * false, which is the same rule the count follows for the same reason — a read
+ * that failed says nothing about what is in the inbox.
+ */
+test("the stream is not an answer until a read has succeeded", async () => {
+  const inbox = createInbox();
+  expect(inbox.answered, "an empty inbox and an unread one are not the same thing").toBe(false);
+
+  reject = { code: "not_ready", message: "the database is still starting" };
+  await inbox.refresh();
+  expect(inbox.answered, "a read that failed is not an answer").toBe(false);
+
+  stream = [entry()];
+  count = 1;
+  await inbox.refresh();
+  expect(inbox.answered).toBe(true);
+});
+
 // -- what the stream draws ---------------------------------------------------
 
 /** Story 7: which source, and what it is about, without opening it. */
