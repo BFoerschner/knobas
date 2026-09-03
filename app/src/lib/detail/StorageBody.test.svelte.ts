@@ -202,14 +202,43 @@ test("a self-closing macro, an unnamed one and a nested one each place one place
 
   const inline = render(
     '<p>see <ac:image ac:align="center"><ri:attachment ri:filename="x.png"/></ac:image> and ' +
-      "<ac:link><ri:page ri:content-title=\"Home\"/></ac:link></p>",
+      "<ac:link><ri:page ri:content-title=\"Home\"/></ac:link>" +
+      // Genuinely self-closing, which is the shape that has no close tag to
+      // skip to: a subtree skip started here would swallow the rest of the
+      // paragraph.
+      " and <ac:image ac:align=\"right\"/> too</p>",
   );
   expect(
     [...inline.target.querySelectorAll(".ac")].map((node) => node.textContent?.trim()),
     "an element with no ac:name is labelled by its own name",
-  ).toEqual(["image", "link"]);
+  ).toEqual(["image", "link", "image"]);
   expect(inline.text()).toContain("see");
+  expect(inline.text(), "a self-closing macro swallowed what followed it").toContain("too");
   inline.done();
+});
+
+/**
+ * A macro **inside a table cell** — the shape where the two features meet.
+ *
+ * A placeholder that escaped its cell would break the row, and a subtree skip
+ * that overran would eat the rest of the table; both are invisible in a test
+ * that puts the macro in a paragraph of its own.
+ */
+test("a macro inside a table cell stays in its cell and the table stays a table", () => {
+  const screen = render(
+    "<table><tbody><tr><td>Runbook</td><td>" +
+      '<ac:structured-macro ac:name="jira"><ac:parameter ac:name="key">PAY-231' +
+      "</ac:parameter></ac:structured-macro></td></tr>" +
+      "<tr><td>Owner</td><td>payments</td></tr></tbody></table>",
+  );
+
+  const table = screen.target.querySelector("table")!;
+  expect(table.rows, "the table lost a row to the macro").toHaveLength(2);
+  const cell = table.rows[0]!.cells[1]!;
+  expect(cell.querySelector(".ac")?.textContent?.trim()).toBe("jira macro");
+  expect(cell.textContent, "the macro's parameters leaked into the cell").not.toContain("PAY-231");
+  expect([...table.rows[1]!.cells].map((c) => c.textContent)).toEqual(["Owner", "payments"]);
+  screen.done();
 });
 
 /**
