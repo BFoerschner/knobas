@@ -779,7 +779,11 @@ mod tests {
         assert!(body.contains("## Attendees"), "{body}");
         assert!(body.contains("## Notes"), "{body}");
         assert!(body.contains("## Action items"), "{body}");
-        assert_eq!(action_items(&body), Vec::new(), "an empty bullet is no item");
+        assert_eq!(
+            action_items(&body),
+            Vec::new(),
+            "an empty bullet is no item"
+        );
         let typed = body.replace("- [ ] \n", "- [ ] Ask Ines about the SEPA retry\n");
         assert_eq!(
             action_items(&typed),

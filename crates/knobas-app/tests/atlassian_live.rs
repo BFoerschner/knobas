@@ -2991,7 +2991,8 @@ async fn a_protocol_is_published_under_standup_protocols_and_reads_back() {
         .await;
     assert_eq!(status, 200, "reading the published page back: {body}");
     assert_eq!(
-        body["title"], json!(PROTOCOL_DAY),
+        body["title"],
+        json!(PROTOCOL_DAY),
         "the page is titled with the date"
     );
     assert_eq!(body["space"]["key"], json!(wiki.space));
@@ -3008,13 +3009,20 @@ async fn a_protocol_is_published_under_standup_protocols_and_reads_back() {
     let stored = body["body"]["storage"]["value"]
         .as_str()
         .expect("a storage body");
-    for expected in ["<h2>Attendees</h2>", "<li>Mara</li>", "Ask Ines about the retry"] {
+    for expected in [
+        "<h2>Attendees</h2>",
+        "<li>Mara</li>",
+        "Ask Ines about the retry",
+    ] {
         assert!(
             stored.contains(expected),
             "the published body is missing {expected:?}: {stored}"
         );
     }
-    println!("live suite: published protocol page {content_id} under {}", wiki.standup_parent);
+    println!(
+        "live suite: published protocol page {content_id} under {}",
+        wiki.standup_parent
+    );
 }
 
 /// **The duplicate-title ruling's second layer, against the real product**
@@ -3048,7 +3056,11 @@ async fn a_second_page_with_one_title_in_one_space_is_refused() {
     });
 
     let (status, body) = wiki
-        .api(reqwest::Method::POST, "rest/api/content", Some(create.clone()))
+        .api(
+            reqwest::Method::POST,
+            "rest/api/content",
+            Some(create.clone()),
+        )
         .await;
     assert_eq!(status, 200, "the first create: {body}");
     let id = body["id"].as_str().expect("an id").to_owned();

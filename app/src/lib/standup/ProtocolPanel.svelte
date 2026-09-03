@@ -355,6 +355,7 @@
       <label>
         Confluence
         <select
+          aria-label="Confluence to publish into"
           value={dialog.sourceId ?? ""}
           onchange={(event) => {
             dialog!.sourceId = event.currentTarget.value || null;
@@ -378,6 +379,7 @@
         Parent page
         <input
           type="search"
+          aria-label="Parent page"
           placeholder="Standup protocols"
           disabled={dialog.sourceId === null}
           value={dialog.query}
@@ -421,6 +423,7 @@
     <label>
       Project
       <select
+        aria-label="Project the ticket goes in"
         value={ticketFor.project ?? ""}
         onchange={(event) => (ticketFor!.project = event.currentTarget.value || null)}
       >
@@ -436,6 +439,7 @@
       Type
       <input
         type="text"
+        aria-label="Ticket type"
         value={ticketFor.type}
         oninput={(event) => (ticketFor!.type = event.currentTarget.value)}
       />

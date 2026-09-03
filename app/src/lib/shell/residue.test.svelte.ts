@@ -131,6 +131,19 @@ vi.mock("../ipc/entity", () => ({
   // whether or not a prop overrides it.
   standupDigest: () =>
     deferred({ yesterday_day: null, yesterday: [], today: [], blockers: [] }),
+  // The standup protocol under the digest (#289), deferred like the rest so
+  // the view can be unmounted with its reads in flight.
+  standupProtocol: () =>
+    deferred({
+      day: "2026-09-03",
+      note_id: "note:1",
+      page_title: "2026-09-03",
+      publication: null,
+    }),
+  standupPublishTarget: () => deferred(null),
+  setStandupPublishTarget: () => deferred(null),
+  publishStandupProtocol: () => deferred(null),
+  createActionItemTicket: () => deferred(null),
   // The Tickets tile's read (#178). Deferred like the rest, so the tile is
   // unmounted mid-flight by the test that checks it leaves nothing behind.
   miniBoard: () => deferred({ columns: [], sources: [] }),
@@ -267,6 +280,8 @@ const StartWork = (await import("../start-work/StartWork.svelte")).default;
 const DayReview = (await import("../time/DayReview.svelte")).default;
 const WeekTimesheet = (await import("../time/WeekTimesheet.svelte")).default;
 const StandupView = (await import("../standup/StandupView.svelte")).default;
+const ProtocolPanel = (await import("../standup/ProtocolPanel.svelte")).default;
+const StandupSection = (await import("../settings/StandupSection.svelte")).default;
 const AddSource = (await import("../sources/AddSource.svelte")).default;
 const Diagnostics = (await import("../sources/Diagnostics.svelte")).default;
 const FirstRun = (await import("../sources/FirstRun.svelte")).default;
@@ -568,6 +583,58 @@ const CASES: Case[] = [
           ports: {
             standupDigest: () =>
               deferred({ yesterday_day: null, yesterday: [], today: [], blockers: [] }),
+          },
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * The standup protocol under the digest (#289). Its effect is the
+     * get-or-create and the note read that follows it, keyed on the day --
+     * `deferred` here, so both land after the unmount, which is what a reader
+     * opening the standup and moving straight on does.
+     */
+    name: "ProtocolPanel",
+    source: "lib/standup/ProtocolPanel.svelte",
+    open: (target) => ({
+      app: mount(ProtocolPanel, {
+        target,
+        props: {
+          day: "2026-09-03",
+          router: createRouter(),
+          ports: {
+            standupProtocol: () =>
+              deferred({
+                day: "2026-09-03",
+                note_id: "note:1",
+                page_title: "2026-09-03",
+                publication: null,
+              }),
+            getNote: () => deferred(NOTE),
+          },
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * The publish target in settings (#289). Its effect is one read of three
+     * things at once, deferred so the whole `Promise.all` resolves after the
+     * unmount.
+     */
+    name: "StandupSection",
+    source: "lib/settings/StandupSection.svelte",
+    open: (target) => ({
+      app: mount(StandupSection, {
+        target,
+        props: {
+          ports: {
+            standupPublishTarget: () => deferred(null),
+            setStandupPublishTarget: () =>
+              deferred({ source_id: "wiki", parent: "wiki:98400" }),
+            listSources: () => deferred([]),
+            listAdapters: () => deferred([]),
           },
         },
       }),

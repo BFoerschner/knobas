@@ -66,6 +66,34 @@ vi.mock("../ipc/entity", () => ({
   // surface an address reaches, not about what is on it.
   standupDigest: () =>
     Promise.resolve({ yesterday_day: null, yesterday: [], today: [], blockers: [] }),
+  // The standup protocol under the digest (#289). Its panel and the settings
+  // section both import these at module level, so the mock has to define them
+  // wherever the shell is mounted whole.
+  standupProtocol: () =>
+    Promise.resolve({
+      day: "2026-09-03",
+      note_id: "note:1",
+      page_title: "2026-09-03",
+      publication: null,
+    }),
+  standupPublishTarget: () => Promise.resolve(null),
+  setStandupPublishTarget: () =>
+    Promise.reject(new Error("no publish target change in this test")),
+  publishStandupProtocol: () => Promise.reject(new Error("no publish in this test")),
+  createActionItemTicket: () => Promise.reject(new Error("no ticket in this test")),
+  getNote: () =>
+    Promise.resolve({
+      note: {
+        id: "note:1",
+        title: "Standup 2026-09-03",
+        body_md: "",
+        created_at: "2026-09-03T07:00:00Z",
+        updated_at: "2026-09-03T07:00:00Z",
+      },
+      refs: [],
+      links: [],
+    }),
+  saveNote: () => Promise.reject(new Error("no note save in this test")),
   listEntities: () => Promise.resolve(PAGE),
   getEntity: () => Promise.resolve(DETAIL),
   recentActivity: () => Promise.resolve([]),

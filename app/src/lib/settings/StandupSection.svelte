@@ -127,6 +127,7 @@
     <label class="fld">
       Confluence
       <select
+        aria-label="Confluence source for standup protocols"
         value={sourceId}
         disabled={saving}
         onchange={(event) => (sourceId = event.currentTarget.value)}
@@ -142,6 +143,7 @@
       Parent page
       <input
         type="text"
+        aria-label="Parent page for standup protocols"
         placeholder="confluence:98400"
         value={parent}
         disabled={saving}

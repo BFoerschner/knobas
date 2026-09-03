@@ -2447,12 +2447,14 @@ pub async fn publish_standup_protocol_inner(
     let pool = &state.pool;
     let target = match target {
         Some(chosen) => crate::protocol::set_publish_target(pool, &chosen).await?,
-        None => crate::protocol::publish_target(pool).await?.ok_or_else(|| {
-            IpcError::invalid(
-                "knobas does not know where to publish standup protocols yet. Choose the \
+        None => crate::protocol::publish_target(pool)
+            .await?
+            .ok_or_else(|| {
+                IpcError::invalid(
+                    "knobas does not know where to publish standup protocols yet. Choose the \
                  Confluence source and the parent page first.",
-            )
-        })?,
+                )
+            })?,
     };
 
     let note = crate::protocol::get_or_create(pool, day).await?;
