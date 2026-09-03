@@ -1045,6 +1045,7 @@ knobas-source-confluence	lib/knobas_source_confluence	storage::tests::the_seeded
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_full_sync_walks_every_page_following_the_next_link
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_page_edited_mid_walk_can_shift_a_row_past_the_offset
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_refused_credential_ends_the_run_with_nothing_in_the_sink
+knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_search_that_answers_emptily_to_a_refused_credential_still_ends_in_an_error
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_sink_failure_abandons_the_run
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::an_empty_corpus_syncs_to_nothing_and_still_answers_a_cursor
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::an_expanded_comment_container_is_not_fetched_again

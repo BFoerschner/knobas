@@ -2,8 +2,14 @@
 //!
 //! Two formats, and neither is interchangeable with the other:
 //!
-//! * **Responses** stamp `version.when` as ISO 8601 with an offset --
-//!   `2026-08-22T12:40:00.000+02:00` on this container.
+//! * **Responses** stamp `version.when` as ISO 8601 with an offset. Which
+//!   offset is not knowable in advance and is never assumed here: measured on
+//!   Confluence 9.2.21, this container renders **UTC with a `Z`**
+//!   (`2026-09-03T11:58:04.419Z`), where Jira DC on the same host sends the
+//!   same kind of field in the host's own zone (`+02:00`). That is why the
+//!   offset is read back off a timestamp the server itself rendered rather
+//!   than copied from the sibling adapter -- see the header of
+//!   `tests/live_confluence_seeded.rs`, which records the measurement.
 //! * **CQL** takes `"yyyy-MM-dd HH:mm"` with **no zone at all**, read in the
 //!   instance's own time zone, at **one-minute resolution**. Both facts shape
 //!   the cursor: the zone is taken from a timestamp the server itself

@@ -428,11 +428,16 @@ macro_rules! declared_string {
 
 /// What separates two segments of an [`ancestor_path_read!`] path.
 ///
-/// A single-glyph guillemet with a space either side, and it is a constant
-/// because two surfaces render the same string: the launcher row and the
-/// detail panel both draw what the SQL joined, and a second spelling anywhere
-/// would be a path that reads differently depending on where you look at it.
-/// `the_ancestor_path_joins_on_the_one_separator` holds the SQL to this.
+/// A single-glyph guillemet with a space either side.
+///
+/// The separator is chosen **once, in SQL**: the launcher row and the detail
+/// panel each render whatever string [`ancestor_path_read!`] joined, so
+/// neither of them holds a copy of it and neither can disagree about it. What
+/// this constant is for is that the macro cannot use it -- `concat!` folds
+/// literals and not `const` items, so the glyph has to be written a second
+/// time inside the statement. `the_ancestor_path_joins_on_the_one_separator`
+/// is what keeps that second spelling honest: it asserts the SQL joins on
+/// exactly this value, so the two cannot drift apart unnoticed.
 pub const ANCESTOR_SEPARATOR: &str = " \u{203a} ";
 
 /// SQL for "where this record sits inside its source, as one line" -- the

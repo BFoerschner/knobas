@@ -325,8 +325,15 @@ mod tests {
         /// completion path's input.
         detached_comments: Mutex<std::collections::BTreeMap<String, Vec<Value>>>,
         calls: Mutex<Vec<String>>,
-        /// Set to fail every call after the first `current_user`.
+        /// Set to fail every call, `current_user` included.
         fault: Option<SourceError>,
+        /// Set to fail **only** `current_user`, leaving the search answering
+        /// normally -- the shape of the server this run's call ordering exists
+        /// for: one that reads a content search anonymously and answers it
+        /// with an empty page. `fault` cannot express that, because it refuses
+        /// the search too, and a run refused by its *search* would end in
+        /// `Err` with the identity check deleted.
+        identity_fault: Option<SourceError>,
         /// Pages whose `version.when` moves forward the moment the walk asks
         /// for its second page -- the mid-run edit the ceiling exists for.
         edit_mid_walk: Mutex<Option<(String, String)>>,
@@ -339,6 +346,7 @@ mod tests {
                 detached_comments: Mutex::new(std::collections::BTreeMap::new()),
                 calls: Mutex::new(Vec::new()),
                 fault: None,
+                identity_fault: None,
                 edit_mid_walk: Mutex::new(None),
             }
         }
@@ -430,7 +438,7 @@ mod tests {
     impl ConfluenceApi for Fake {
         async fn current_user(&self) -> Result<crate::model::CurrentUser, SourceError> {
             self.calls.lock().unwrap().push("current_user".to_owned());
-            if let Some(fault) = &self.fault {
+            if let Some(fault) = self.identity_fault.as_ref().or(self.fault.as_ref()) {
                 return Err(clone_fault(fault));
             }
             Ok(serde_json::from_value(json!({ "username": "knobas" })).unwrap())
@@ -940,6 +948,50 @@ mod tests {
         // sync run is the caller that applies it, which is where a plausible
         // `unwrap_or(0)` would live.
         assert_eq!(parsed.tz_offset_secs, crate::time::MIN_UTC_OFFSET_SECS);
+    }
+
+    /// **The hazard the call ordering exists for, witnessed rather than
+    /// asserted about.**
+    ///
+    /// A server that reads a content search anonymously answers it `200` with
+    /// an empty page when the credential cannot be resolved. The `page` kind
+    /// claims `full_sync_exhaustive`, so a run that reported `Ok` there would
+    /// be the engine's licence to tombstone the entire mirror. What stops it
+    /// is that `current_user` runs first **and its answer is obeyed**.
+    ///
+    /// Neither of this file's other two tests can see that second half:
+    ///
+    /// * `the_credential_is_checked_before_anything_that_could_answer_emptily`
+    ///   runs against a fake that answers everything, so it pins *which call
+    ///   is first* and not *what happens when that call says no*;
+    /// * `a_refused_credential_ends_the_run_with_nothing_in_the_sink` sets
+    ///   `fault`, which refuses the search as well -- so the run would still
+    ///   end in `Err` with the identity check deleted outright.
+    ///
+    /// Nor can the live suite: this container 401s the search too (the header
+    /// of `tests/live_confluence_seeded.rs` records that), so there also the
+    /// search is what refuses the run. This test is the only place the
+    /// tolerated-failure direction is visible, which is why the fake needs a
+    /// fault that stops at the identity call.
+    #[tokio::test]
+    async fn a_search_that_answers_emptily_to_a_refused_credential_still_ends_in_an_error() {
+        let mut fake = Fake::new(Vec::new());
+        fake.identity_fault = Some(SourceError::Unauthorized { status: Some(401) });
+        let mut sink = VecSink(Vec::new());
+        let got = SyncRun {
+            api: &fake,
+            cfg: &cfg(json!({})),
+            source_id: "confluence",
+            base_url: "http://127.0.0.1:8090",
+        }
+        .run(None, &mut sink)
+        .await;
+        assert!(
+            matches!(got, Err(SourceError::Unauthorized { .. })),
+            "an unresolvable credential over a search that answers emptily must end the run, \
+             not hand the sweep an empty exhaustive corpus: {got:?}"
+        );
+        assert!(sink.0.is_empty(), "{:?}", sink.0.len());
     }
 
     /// A credential the server refuses is refused **before** anything is
