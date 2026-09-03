@@ -482,7 +482,7 @@ async fn attempt(
             // in flight. The write landed anyway, and this is the only moment
             // knobas can know that, so it says so rather than returning
             // quietly (issue #336).
-            unclaimed(deps, write, &receipt).await?;
+            unclaimed(deps, write, &receipt).await;
             Ok(false)
         }
         Err(error) => {
@@ -640,30 +640,30 @@ async fn waited(
 /// happened, on the container it happened under, which is where a person
 /// looking for it would look.
 ///
-/// A failure to write the line is logged, never raised -- [`announce`]'s
-/// reason: the write is delivered either way, and losing the narration must
-/// not turn a delivered write into a failed one.
-///
-/// # Errors
-///
-/// [`FlushError::Store`] if the row cannot be re-read.
-async fn unclaimed(
-    deps: &SchedulerDeps,
-    write: &QueuedWrite,
-    receipt: &WriteReceipt,
-) -> Result<(), FlushError> {
-    let Some(settled) = store::get(&deps.pool, write.id).await? else {
-        return Ok(());
+/// **Infallible, like the line it writes.** Both the re-read and the record
+/// are logged and dropped on failure rather than raised, which is
+/// [`announce`]'s own rule taken one step back: the write has already been
+/// delivered by the time this runs, and a database that will not answer must
+/// not turn a delivered write into a failed flush. Nothing downstream branches
+/// on it -- [`attempt`] returns `Ok(false)` either way, because the queue did
+/// not move.
+async fn unclaimed(deps: &SchedulerDeps, write: &QueuedWrite, receipt: &WriteReceipt) {
+    let settled = match store::get(&deps.pool, write.id).await {
+        Ok(Some(settled)) => settled,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::warn!(%error, write = write.id, "the withdrawn write could not be re-read");
+            return;
+        }
     };
     if settled.state != WriteState::Discarded {
-        return Ok(());
+        return;
     }
     let mut extra = serde_json::Map::new();
     if let Some(remote_id) = &receipt.remote_id {
         extra.insert("remote_id".to_owned(), remote_id.as_str().into());
     }
     announce_with(deps, "unclaimed", &settled, extra).await;
-    Ok(())
 }
 
 /// The source refused the write. It stops being offered.
