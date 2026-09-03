@@ -3674,7 +3674,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   the merge and the cap into a state machine spread across a write path, a row and a restart,
   where the only witness is a database. Here the write path is one `insert` with no state, and
   the three rules live in `time::passive::derive`, which takes a slice of observations and
-  answers with spans: no clock, no pool, no setting, ten unit tests and no PostgreSQL. It is also
+  answers with spans: no clock, no pool, no setting, fifteen unit tests and no PostgreSQL. It is also
   the only shape in which the **cap** can be what the spec says it is: "the day's passive total
   never exceeds focused time" is a rule about a *day*, the reader's midnight is a fact only the
   webview holds (#279's entry above), and the day read is therefore the one call that is told

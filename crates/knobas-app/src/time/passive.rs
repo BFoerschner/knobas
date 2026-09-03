@@ -553,6 +553,36 @@ mod tests {
         assert_eq!(spans[0].target, on("jira:PAY-231"));
     }
 
+    /// ...and the boundary between those two, which is the floor compared a
+    /// second time.
+    ///
+    /// The cap trims the later visit to **exactly** the floor, and the rule
+    /// that decides whether that is a block is the same rule the floor itself
+    /// states: shorter than two minutes is dropped, so two minutes is offered.
+    /// Neither of the two tests above can tell a `<` here from a `<=` --
+    /// theirs are trimmed well clear of the line on either side -- and the two
+    /// comparisons are in different statements, so witnessing one does not
+    /// witness the other.
+    #[test]
+    fn a_visit_the_day_can_pay_for_down_to_the_floor_is_offered() {
+        let mut observations = beats(Some(on("jira:PAY-231")), 0, 600, 30);
+        observations.extend(beats(Some(on("jira:PAY-99")), 3600, 3720, 30));
+
+        let spans = derive(&observations);
+
+        assert_eq!(
+            spans.len(),
+            2,
+            "the day had exactly two minutes left and the visit wanted two \
+             and a half: {spans:?}"
+        );
+        assert_eq!(
+            seconds(&spans[1]),
+            FLOOR_SECONDS,
+            "a visit trimmed to exactly the floor is still a block"
+        );
+    }
+
     /// The floor, at the length the ticket names.
     ///
     /// Beats at 0, 30 and 60 on the ticket and one at 90 on something else:
@@ -592,6 +622,35 @@ mod tests {
             "one visit, not none and not four: {spans:?}"
         );
         assert_eq!(seconds(ticket[0]), 150);
+    }
+
+    /// ...and the boundary itself, which is the one place neither of those two
+    /// can reach.
+    ///
+    /// Ninety seconds is short and a hundred and fifty is long, so a `>` where
+    /// the rule says `>=` is green against both of them: it drops only the
+    /// visit that is *exactly* the floor, and nothing else asks about that
+    /// visit. The spec's rule is "shorter than two minutes", so two minutes is
+    /// a block, and this is the assertion that says which side of the line the
+    /// line itself is on.
+    #[test]
+    fn a_visit_of_exactly_the_floor_is_a_block() {
+        let mut observations = beats(Some(on("jira:PAY-231")), 0, 90, 30);
+        observations.extend(beats(Some(on("jira:PAY-99")), 120, 400, 30));
+
+        let spans = derive(&observations);
+
+        let ticket: Vec<&PassiveSpan> = spans
+            .iter()
+            .filter(|span| span.target == on("jira:PAY-231"))
+            .collect();
+        assert_eq!(
+            ticket.len(),
+            1,
+            "a visit of exactly the floor is not shorter than the floor: \
+             {spans:?}"
+        );
+        assert_eq!(seconds(ticket[0]), FLOOR_SECONDS);
     }
 
     /// The merge rule: an unbroken run of beats on one target is **one**
