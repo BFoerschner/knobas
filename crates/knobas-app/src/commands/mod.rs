@@ -17,6 +17,7 @@ pub mod backup;
 pub mod entity;
 pub mod search;
 pub mod sources;
+pub mod time;
 
 #[cfg(test)]
 mod tests {
