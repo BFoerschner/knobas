@@ -141,6 +141,11 @@ vi.mock("../ipc/time", () => ({
   dayBlocks: () => Promise.resolve([]),
   updateBlock: () => Promise.reject(new Error("no edit in this test")),
   deleteBlock: () => Promise.reject(new Error("no edit in this test")),
+  createBlock: () => Promise.reject(new Error("no edit in this test")),
+  // The settings view is one of the addresses below, and its passive
+  // attribution section reads this on mount (#282).
+  passiveAttribution: () => Promise.resolve(false),
+  setPassiveAttribution: () => Promise.reject(new Error("no settings write in this test")),
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({

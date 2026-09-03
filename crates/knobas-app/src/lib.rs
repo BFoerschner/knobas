@@ -245,6 +245,9 @@ pub fn run() {
             commands::time::day_blocks,
             commands::time::update_block,
             commands::time::delete_block,
+            commands::time::create_block,
+            commands::time::passive_attribution,
+            commands::time::set_passive_attribution,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

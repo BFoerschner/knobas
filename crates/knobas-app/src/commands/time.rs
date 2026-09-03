@@ -1,5 +1,6 @@
-//! The timer's four commands (issue #278) -- what the top strip, ⌘T and the
-//! launcher's *Start timer* row call.
+//! The time module's commands (issues #278, #279, #282) -- what the top
+//! strip, ⌘T, the launcher's *Start timer* row, the day review and the
+//! settings view call.
 //!
 //! Shims, like every other module here: the decisions are in [`crate::time`],
 //! which is testable without a window. The §10.8 exception this module lands
@@ -107,9 +108,9 @@ pub async fn stop_timer<R: tauri::Runtime>(
 ///
 /// Sent every thirty seconds while the window is focused. `foreground` is what
 /// the reader has in front of them by the rule *open detail, else room anchor,
-/// else none*; [`crate::time`]'s module docs record why it is taken and not
-/// yet stored, and [`time::heartbeat`] records why a foreground it dislikes is
-/// logged rather than refused.
+/// else none*. It is stored as an observation while passive attribution is on
+/// (#282) and dropped otherwise; [`time::heartbeat`] records why a foreground
+/// it dislikes costs the attribution and never the beat.
 ///
 /// # Errors
 ///
@@ -199,6 +200,69 @@ pub async fn update_block(
 pub async fn delete_block(lifecycle: State<'_, Lifecycle>, id: i64) -> Result<(), IpcError> {
     let pool = lifecycle.pool()?;
     time::day::remove(&pool, id).await
+}
+
+/// Write a block over a stretch nobody claimed — *Assign…* on a gap (#282).
+///
+/// The counterpart of [`update_block`], which is what *Assign…* on a **passive
+/// block** calls: the reader's sentence is the same either way ("this
+/// half-hour was this ticket"), and the only difference is whether knobas
+/// already had a row to put it on. Both end in a manual block.
+///
+/// **No `AppHandle` and no activity line**, for the reason [`update_block`]
+/// carries neither: filling in a stretch that has already passed is a
+/// correction to knobas' own record, not something that just happened.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a target that is not an
+/// entity id, is a stored context or is a blank label, and for an end before
+/// its start.
+#[tauri::command]
+pub async fn create_block(
+    lifecycle: State<'_, Lifecycle>,
+    started_at: chrono::DateTime<chrono::Utc>,
+    ended_at: chrono::DateTime<chrono::Utc>,
+    target: TimerTarget,
+) -> Result<time::day::DayBlock, IpcError> {
+    let pool = lifecycle.pool()?;
+    time::day::create(&pool, started_at, ended_at, target).await
+}
+
+/// Whether passive attribution is switched on. `false` until somebody says
+/// otherwise — the setting is opt-in (#282).
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn passive_attribution(lifecycle: State<'_, Lifecycle>) -> Result<bool, IpcError> {
+    let pool = lifecycle.pool()?;
+    time::passive::enabled(&pool).await
+}
+
+/// Switch passive attribution on or off, and answer with what is now stored.
+///
+/// The answer is the stored value rather than nothing, so the settings toggle
+/// draws what the database holds instead of what the click asked for — the
+/// rule `set_backup_schedule` follows for the same surface.
+///
+/// **Switching it off stops the recording; it does not delete what has already
+/// been offered.** `crate::time::passive::set_enabled` carries the reasoning.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
+#[tauri::command]
+pub async fn set_passive_attribution(
+    lifecycle: State<'_, Lifecycle>,
+    enabled: bool,
+) -> Result<bool, IpcError> {
+    let pool = lifecycle.pool()?;
+    time::passive::set_enabled(&pool, enabled).await
 }
 
 #[cfg(test)]
@@ -383,6 +447,9 @@ mod tests {
             "day_blocks",
             "update_block",
             "delete_block",
+            "create_block",
+            "passive_attribution",
+            "set_passive_attribution",
         ] {
             assert!(
                 MIRROR.contains(&format!("\"{command}\"")),
@@ -417,6 +484,13 @@ mod tests {
             ("update_block", "endedAt"),
             ("update_block", "target"),
             ("delete_block", "id"),
+            // The same camelCase rename, on the command that carries no id --
+            // which is the one place a wrong spelling would arrive as a block
+            // starting at the Unix epoch rather than as a refusal.
+            ("create_block", "startedAt"),
+            ("create_block", "endedAt"),
+            ("create_block", "target"),
+            ("set_passive_attribution", "enabled"),
         ] {
             let at = MIRROR
                 .find(&format!("\"{call}\""))
