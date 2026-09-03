@@ -118,6 +118,15 @@ pub struct DayRecord {
     /// that is not a contradiction: retention took the *evidence*, not the
     /// record made from it while the evidence was there. The flag says the
     /// strip cannot be added to, never that what is on it is untrue.
+    ///
+    /// **It does not ask whether passive attribution is switched on**, and
+    /// that is deliberate. The stamp it comes from is written only where a
+    /// sweep actually deleted rows, so a profile that never had the feature on
+    /// has no stamp and no day past the horizon; one that had it on, was
+    /// swept, and has since switched it off really has lost those beats, and
+    /// the sentence stays true. Gating it on the switch would make the strip
+    /// stop explaining a gap at the moment a person turned the recording off,
+    /// which is when they are most likely to be looking at one.
     pub past_horizon: bool,
 }
 
@@ -233,10 +242,16 @@ fn day_block_of(row: &sqlx::postgres::PgRow) -> Result<DayBlock, IpcError> {
 ///
 /// # ...and reports whether it could have (#337)
 ///
-/// [`DayRecord::past_horizon`] is read **after** the reconciliation and from
-/// the same [`Horizon`](super::passive::Horizon) it consulted, so the strip's
-/// word for a day and the guard's decision about it are the same answer rather
-/// than two computations of it.
+/// The flag is the same comparison the reconciliation just made -- both spend
+/// [`Horizon::passed`](super::passive::Horizon::passed), so the strip's word
+/// for a day and the guard's decision about it cannot be two different rules.
+///
+/// It is a **second** read of the stamp, and the order is what makes that
+/// safe: the stamp only ever moves forward ([`prune`](super::passive::prune)
+/// takes the `max`), so a sweep landing between the two can only turn a day
+/// the reconciliation ran on into one the strip calls absent -- the note
+/// appears over blocks that are still true. The other way round, a day
+/// `materialize` refused that then read as inside the horizon, cannot happen.
 ///
 /// # Errors
 /// [`IpcError`] if the read fails.

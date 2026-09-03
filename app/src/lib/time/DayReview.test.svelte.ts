@@ -794,3 +794,22 @@ test("a day with nothing on it that knobas still has the beats for says nothing"
     "a day inside the horizon was drawn as one knobas has forgotten",
   ).not.toContain("no longer has the beats");
 });
+
+/**
+ * **The note does not contradict the strip under it.**
+ *
+ * `DayRecord::past_horizon`'s own claim, rendered: retention took the
+ * *evidence*, not the record made from it while the evidence was there, so a
+ * passive block the day was already offered is still drawn and still offers
+ * *Assign…*. A view that read the flag as "this day is unknown" and blanked
+ * the strip would lose an afternoon knobas had every right to keep — which is
+ * the failure #315's `materialize` guard exists to prevent, made visible.
+ */
+test("a day past the horizon still draws the blocks it was already offered", async () => {
+  render([passive(1, at(9), at(10))], { pastHorizon: true });
+
+  await vi.waitFor(() => expect(text()).toContain(horizonNote("this day")));
+  expect(strip()).toEqual(["block"]);
+  expect(text()).toContain("what was open — not tracked");
+  expect(button("Assign…"), "the block is still the reader's to claim").toBeTruthy();
+});

@@ -470,3 +470,21 @@ test("a week knobas still has every beat for says nothing about the horizon", as
     "a week inside the horizon was drawn as one knobas has forgotten",
   ).not.toContain("no longer has the beats");
 });
+
+/**
+ * The same, on the timesheet: a column past the horizon keeps the numbers it
+ * has. The note is about what knobas can no longer *add* to the week, and a
+ * cell blanked or dimmed on the strength of it would hide time somebody
+ * tracked.
+ */
+test("a column past the horizon keeps the time already recorded on it", async () => {
+  render(
+    weekOf(
+      [row({ cells: DAYS.map((_, index) => (index === 0 ? cell({ tracked_seconds: 3600 }) : cell())) })],
+      [true, false, false, false, false, false, false],
+    ),
+  );
+
+  await vi.waitFor(() => expect(text()).toContain(horizonNote("Mon 24")));
+  expect(text(), "Monday's tracked hour went missing under the note").toContain("1 h");
+});
