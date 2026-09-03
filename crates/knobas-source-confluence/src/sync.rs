@@ -73,6 +73,7 @@ use crate::cql::{Order, build_cql};
 use crate::cursor::{ConfluenceCursor, Seen};
 use crate::map;
 use crate::model::RawContent;
+use crate::storage::Account;
 
 /// A stop so a server that keeps handing out `_links.next` cannot spin a run
 /// forever. At the default page size this is a quarter of a million pages.
@@ -128,9 +129,19 @@ impl SyncRun<'_> {
         cursor: Option<String>,
         sink: &mut (dyn Sink + Send),
     ) -> Result<String, SourceError> {
-        // First, and not for the identity: a content search can be answered
-        // anonymously with an empty page, and this call cannot.
-        self.api.current_user().await?;
+        // First, and not only for the identity: a content search can be
+        // answered anonymously with an empty page, and this call cannot. The
+        // identity is now read off it too -- a Confluence mention carries a
+        // user **key**, and this is the one call that says which key the
+        // credential is. The *server's* answer and not the configured
+        // `username`, because it is the server that owns the key/name pairing;
+        // `test_connection` fills the configuration in from this same call, so
+        // the two agree by construction.
+        let whoami = self.api.current_user().await?;
+        let me = whoami.username.as_deref().map(|username| Account {
+            username,
+            user_key: whoami.user_key.as_deref(),
+        });
 
         let witnessed = self.run_start().await?;
         let offset = witnessed.offset_secs;
@@ -175,7 +186,7 @@ impl SyncRun<'_> {
                     continue;
                 }
                 self.complete(&mut raw).await?;
-                let item = map::to_sync_item(self.source_id, self.base_url, &raw);
+                let item = map::to_sync_item(self.source_id, self.base_url, &raw, me);
                 // Sink failures are never swallowed (SPI doc on `Source::sync`).
                 sink.item(item).await?;
                 emitted += 1;

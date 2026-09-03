@@ -5,16 +5,29 @@ use knobas_core::entity::EntityRef;
 use knobas_source::SyncItem;
 
 use crate::model::RawContent;
+use crate::storage::Account;
 
 /// Map one page, in the namespace of the instance that fetched it.
 ///
 /// `source_id` is `SourceInstance::id` and never the adapter kind (P10): two
 /// Confluences are `confluence` and `confluence-eu`, and their items must not
 /// collide.
-pub(crate) fn to_sync_item(source_id: &str, base_url: &str, raw: &RawContent) -> SyncItem {
+///
+/// `me` is the account the run authenticated as, and it is here for one
+/// reason: a Confluence mention is markup carrying a user **key**, so
+/// [`crate::storage::to_text`] needs an identity to resolve one against before
+/// `body_text` can carry the `@name` the inbox's mention rule reads. `None` is
+/// a run that could not say who it is, and renders every key-shaped link as
+/// nothing -- the miss direction, spelled out on [`Account`].
+pub(crate) fn to_sync_item(
+    source_id: &str,
+    base_url: &str,
+    raw: &RawContent,
+    me: Option<Account<'_>>,
+) -> SyncItem {
     let content = &raw.content;
     let title = content.title.clone().unwrap_or_default();
-    let body = crate::storage::to_text(raw.storage());
+    let body = crate::storage::to_text(raw.storage(), me);
     let comments = content
         .children
         .as_ref()
@@ -25,7 +38,7 @@ pub(crate) fn to_sync_item(source_id: &str, base_url: &str, raw: &RawContent) ->
         [title.clone(), body].into_iter().chain(
             comments
                 .iter()
-                .map(|c| crate::storage::to_text(c.storage())),
+                .map(|c| crate::storage::to_text(c.storage(), me)),
         ),
     );
     SyncItem {
@@ -106,6 +119,20 @@ fn join(parts: impl IntoIterator<Item = String>) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// The account the seeded Confluence's admin is -- the one every mapping
+    /// below is made as, so a `ri:user` link in a fixture body renders the way
+    /// the mirror will really hold it.
+    fn me() -> Account<'static> {
+        Account {
+            username: "knobas",
+            user_key: Some("ff8080818f2a1b4c018f2a1c9d0e0001"),
+        }
+    }
+
+    fn to_sync_item(source_id: &str, base_url: &str, raw: &RawContent) -> SyncItem {
+        super::to_sync_item(source_id, base_url, raw, Some(me()))
+    }
 
     /// The seeded page as the real server answers it, with the expansions
     /// [`crate::api::EXPAND`] asks for. Every path asserted below is one
