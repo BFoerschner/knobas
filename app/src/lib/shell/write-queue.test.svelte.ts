@@ -443,11 +443,10 @@ test("only a pending worklog's withdrawal needs consent", () => {
 
   // Every other op: today's behaviour, and the reasoning does not carry.
   expect(withdrawnWorklog(write())).toBeNull();
-  expect(
-    withdrawnWorklog(
-      write({ op: "create_ticket", payload: { CreateTicket: { entity: "jira:PAY", title: "t", body: "b", ticket_type: "Task" } } }),
-    ),
-  ).toBeNull();
+  const create = {
+    CreateTicket: { entity: "jira:PAY", title: "a payout fails", body: "", ticket_type: "Bug" },
+  } as const;
+  expect(withdrawnWorklog(write({ op: "create_ticket", payload: create }))).toBeNull();
 
   // A worklog the flush loop cannot be holding. `due` yields an entity's head
   // only when it is pending, so neither of these is in the window.
@@ -457,7 +456,8 @@ test("only a pending worklog's withdrawal needs consent", () => {
   // An op named `log_work` whose payload this build cannot read is not a
   // worklog it can describe, and a dialog with blanks in it is worse than
   // none.
-  expect(withdrawnWorklog(worklog({ payload: { Comment: { entity: "x", body: "y" } } }))).toBeNull();
+  const unreadable = { Comment: { entity: "jira:PAY-231", body: "on it" } } as const;
+  expect(withdrawnWorklog(worklog({ payload: unreadable }))).toBeNull();
 
   // …and the *identifier* is what decides, never the payload's shape. `op` is
   // the stable name the backend and the panel already agree on (ADR-0006);
