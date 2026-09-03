@@ -470,6 +470,24 @@ pub const ANCESTOR_SEPARATOR: &str = " \u{203a} ";
 /// `jsonb_array_elements` **raises** on a non-array, so without it a single
 /// Jira ticket whose payload happened to carry an `ancestors` object would
 /// abort the whole launcher query rather than miss.
+///
+/// # Do not "simplify" the `order by a.ordinality` away
+///
+/// A mutation check found that removing it changes no observable behaviour:
+/// PostgreSQL happens to aggregate in scan order, and for
+/// `jsonb_array_elements ... with ordinality` that is array order, so every
+/// test here stays green without it. That is a true result with a
+/// precondition attached, and the precondition is not a guarantee:
+/// `string_agg` **without** an `ORDER BY` has no defined order at all, and
+/// the plan that produces scan order today is free to change under a parallel
+/// or reordered scan tomorrow.
+///
+/// Order is the entire meaning of a path -- two ancestors joined the other way
+/// round name a different place -- so the clause stays, and it stays *without*
+/// a test that can see it. The same treatment
+/// `crates/knobas-source-jira/src/time.rs` gives `jql_floor`, and for the same
+/// reason: "unobservable today" is a fact about this planner, not about this
+/// statement.
 #[macro_export]
 macro_rules! ancestor_path_read {
     ($payload:literal) => {
