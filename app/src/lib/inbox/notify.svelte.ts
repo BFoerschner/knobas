@@ -23,6 +23,15 @@
  * silence in this path is always attributable to the kind or to the focus, and
  * never to a permission the notifier failed to check.
  *
+ * ## Why nothing is seen before the setting has been read
+ *
+ * `seen` is a one-way memory, so an item recorded there is disqualified for
+ * the rest of the session. Until the stored kinds have come back this store
+ * does not know which kinds are on — and *unknown is not off* — so
+ * {@link Notifications.saw} returns before touching anything. A read that is
+ * slow, or one that failed and is waiting on the section's *Retry*, therefore
+ * costs the reader nothing but the wait.
+ *
  * ## Why the first read is primed and not announced
  *
  * The first stream the inbox answers with is the **backlog** — everything that
@@ -73,8 +82,23 @@ import {
 } from "../ipc/entity";
 import { DEFAULT_CTX, hashFor, router } from "../shell/router.svelte";
 
-/** What a notification carries, as much of it as this store fills in. */
-export interface Notification {
+/**
+ * The key in a notification's `extra` that carries where its click goes.
+ *
+ * Named once because it is the two ends of the click path: {@link
+ * Notifications.saw} writes it and {@link Notifications.start} reads it back
+ * out of whatever the OS hands over, and a literal spelled twice is a door
+ * that silently stops opening.
+ */
+const ADDRESS = "address";
+
+/**
+ * What a notification carries, as much of it as this store fills in.
+ *
+ * `NotificationDraft` and not `Notification`: this is a browser module, and a
+ * type sharing a name with the DOM global would have the two read as one.
+ */
+export interface NotificationDraft {
   title: string;
   body: string;
   extra: Record<string, unknown>;
@@ -88,7 +112,7 @@ export interface NotifyPorts {
   isPermissionGranted: () => Promise<boolean | null>;
   /** Ask the OS. `"granted"` is the only answer that is a yes. */
   requestPermission: () => Promise<string>;
-  send: (notification: Notification) => void;
+  send: (notification: NotificationDraft) => void;
   /** Subscribe to notification clicks; see the module note about desktop. */
   onAction: (handler: (notification: { extra?: Record<string, unknown> }) => void) => Promise<
     () => void
@@ -117,11 +141,11 @@ export interface Notifications {
   /**
    * Switch one kind on or off.
    *
-   * Switching a kind **on** asks the OS first where it has not already said
-   * yes, and stores nothing if the answer is no: a checkbox drawn on over a
-   * refused permission is a switch that promises something nothing will
-   * deliver. Switching one **off** never asks — knobas has no business
-   * prompting anybody on the way out.
+   * Switching the **first** kind on asks the OS, and a later one asks only if
+   * the permission has since gone. Nothing is stored if the answer is no: a
+   * checkbox drawn on over a refused permission is a switch that promises
+   * something nothing will deliver. Switching one **off** never asks — knobas
+   * has no business prompting anybody on the way out.
    */
   choose(kind: InboxCategory, on: boolean): Promise<void>;
   /** Offer the inbox's current stream. See the module note for the gates. */
@@ -202,7 +226,17 @@ export function createNotifications(ports?: Partial<NotifyPorts>): Notifications
     if (state.busy) return;
     state.busy = true;
     try {
-      if (on && !(await io.isPermissionGranted())) {
+      // **The first kind switched on always asks**, even where the OS says it
+      // has already said yes. That is the criterion's own wording (spec #272,
+      // story 72) and on desktop it is the difference between asking and never
+      // asking at all: `tauri-plugin-notification`'s desktop implementation
+      // answers `permission_state()` with `Granted` unconditionally, so a
+      // guard that only asked when the answer was no would leave
+      // `requestPermission` unreached on macOS -- and with it the line that
+      // tells the reader what the OS said. Later kinds ask only if the
+      // permission has since gone, which is what keeps knobas from prompting
+      // on every click.
+      if (on && (state.kinds.length === 0 || !(await io.isPermissionGranted()))) {
         const answered = (await io.requestPermission()) === "granted";
         state.permission = answered ? "granted" : "refused";
         if (!answered) {
@@ -226,6 +260,16 @@ export function createNotifications(ports?: Partial<NotifyPorts>): Notifications
   }
 
   function saw(items: InboxEntry[]): void {
+    // **Nothing is seen until the setting has been read.** `seen` is a
+    // one-way memory, so an item recorded here is disqualified for the rest of
+    // the session -- and while `loaded` is false this store does not know
+    // which kinds are on. *Unknown is not off* is the rule {@link reseed}
+    // states, and burning the stream against an unknown setting would break it
+    // in the one direction that cannot be undone: a read that is slow, or one
+    // that failed and is waiting on *Retry*, would silently cost the reader
+    // every item that arrived in the meantime.
+    if (!state.loaded) return;
+
     const fresh: InboxEntry[] = [];
     for (const entry of items) {
       const key = entry.item.key;
@@ -249,7 +293,7 @@ export function createNotifications(ports?: Partial<NotifyPorts>): Notifications
       io.send({
         title: entry.item.title,
         body: entry.item.reason,
-        extra: { address: addressOf(entry.item) },
+        extra: { [ADDRESS]: addressOf(entry.item) },
       });
     }
   }
@@ -285,7 +329,7 @@ export function createNotifications(ports?: Partial<NotifyPorts>): Notifications
 
       void io
         .onAction((notification) => {
-          const address = notification.extra?.["address"];
+          const address = notification.extra?.[ADDRESS];
           if (live && typeof address === "string") io.navigate(address);
         })
         .then((unlisten) => {

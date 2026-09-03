@@ -257,7 +257,11 @@ async fn find(
 /// records and `time::passive`'s `SETTING_KEY` repeats. Namespaced `inbox.`
 /// because the setting is about the inbox's own categories and nothing else
 /// in knobas has an opinion about them.
-const NOTIFICATION_KINDS_KEY: &str = "inbox.notification_kinds";
+///
+/// `pub` so that a test writing the row by hand -- the only way to reach the
+/// read side's forgiving half, which no writer of ours can produce -- names
+/// the same key the reader does instead of retyping it into a SQL literal.
+pub const NOTIFICATION_KINDS_KEY: &str = "inbox.notification_kinds";
 
 /// Which categories may notify. **Empty until somebody says otherwise**: every
 /// kind is off by default (spec #272, story 71), so a noisy Jira cannot make

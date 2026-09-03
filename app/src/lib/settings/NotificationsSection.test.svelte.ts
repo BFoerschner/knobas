@@ -173,6 +173,28 @@ test("an OS that refuses leaves every switch off and says so", async () => {
   expect(box("Mentions").checked, "the switch reads on over a refused permission").toBe(false);
 });
 
+/**
+ * **The outcome line is reachable on the platform knobas ships**, which is the
+ * half of story 72 a stubbed test can most easily fake.
+ *
+ * The desktop plugin answers `permission_state()` with `Granted` whatever the
+ * OS thinks, so a first switch-on against an already-granted permission is the
+ * *ordinary* macOS case — and it still has to say what happened, or the
+ * criterion's "shows the outcome" is a paragraph nobody ever sees.
+ */
+test("the first switch-on against an already-granted permission still says so", async () => {
+  const { calls } = render({ granted: true });
+  await vi.waitFor(() => expect(boxes()).toHaveLength(5));
+
+  box("Review requests").click();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(text()).toContain("allows knobas to notify you");
+  });
+  expect(calls.asked).toBe(1);
+  expect(calls.stored).toEqual([["review_request"]]);
+});
+
 /** Switching one off sends the rest and asks the OS nothing. */
 test("switching a kind off sends what is left and prompts nobody", async () => {
   const { calls } = render({ stored: ["review_request", "mention"], granted: true });

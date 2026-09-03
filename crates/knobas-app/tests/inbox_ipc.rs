@@ -839,9 +839,10 @@ async fn an_unreadable_setting_reads_as_off_rather_than_as_on() {
         serde_json::json!(["not_a_category"]),
     ] {
         sqlx::query(
-            "insert into knobas.setting (key, value) values ('inbox.notification_kinds', $1)
+            "insert into knobas.setting (key, value) values ($1, $2)
              on conflict (key) do update set value = excluded.value",
         )
+        .bind(knobas_app::inbox::NOTIFICATION_KINDS_KEY)
         .bind(&value)
         .execute(&harness.deps.pool)
         .await
@@ -866,9 +867,10 @@ async fn an_unreadable_setting_reads_as_off_rather_than_as_on() {
 async fn an_unknown_word_beside_known_ones_drops_only_itself() {
     let harness = harness().await;
     sqlx::query(
-        "insert into knobas.setting (key, value) values ('inbox.notification_kinds', $1)
+        "insert into knobas.setting (key, value) values ($1, $2)
          on conflict (key) do update set value = excluded.value",
     )
+    .bind(knobas_app::inbox::NOTIFICATION_KINDS_KEY)
     .bind(serde_json::json!([
         "from_the_future",
         "mention",

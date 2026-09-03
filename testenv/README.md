@@ -760,7 +760,11 @@ for it. The remaining suspect is below knobas: `tauri-plugin-notification`'s
 desktop path hands the notification to `notify-rust`, whose macOS backend goes
 through `mac-notification-sys` and whose result the plugin discards
 (`let _ = notification.show()` inside a spawned task), so a refusal there is
-invisible from this side. The bundle *is* registered with Launch Services
+invisible from this side. The same block discards
+`notify_rust::set_application(..)`'s result too, and under `tauri::is_dev()`
+substitutes `com.apple.Terminal` for the app's own identifier — checked and
+ruled out here, since `cargo:rustc-cfg=dev` is absent from this bundle's
+`target/debug/build/knobas-app-*/output`, so the real identifier was used. The bundle *is* registered with Launch Services
 (`lsregister -dump` lists it, `activityTypes: NOTIFICATION#:dev.knobas.desktop`),
 so the identity is not the missing piece. Re-run the check on a machine or an
 OS version where another `notify-rust` app does deliver before concluding

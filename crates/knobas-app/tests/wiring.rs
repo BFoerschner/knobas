@@ -240,9 +240,16 @@ fn each_plugin_is_pinned_to_one_version_on_both_sides_of_the_bridge() {
 /// resolves every identifier in `capabilities/` against the plugins it can
 /// see), dropping the permissions is the two tests above, and what is left --
 /// crate present, permissions present, nobody calling `.plugin(..)` -- produces
-/// no compile error and no test failure anywhere else. What proves it is
-/// reached is the signed bundle recorded in #290's PR body, where the
-/// notification appeared.
+/// no compile error and no test failure anywhere else.
+///
+/// **And here the opener's argument runs out, which is stated rather than
+/// borrowed.** What proves the opener call is *reached* is a bundled build
+/// where somebody pressed the button. The equivalent run for this plugin --
+/// `testenv/README.md`, "Signed dev build (macOS)" -- produced **no
+/// notification**: knobas' own half is reached (the item arrives, the shell
+/// hands it to `sendNotification`) and nothing comes out of `notify-rust`,
+/// whose result the plugin discards. So this test proves the call is written,
+/// and nothing in the tree yet proves it is answered.
 #[test]
 fn the_notification_plugin_is_registered() {
     let code = strip_comments(include_str!("../src/lib.rs"));
