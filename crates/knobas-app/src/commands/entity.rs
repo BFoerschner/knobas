@@ -1741,6 +1741,54 @@ pub async fn complete_inbox_item<R: tauri::Runtime>(
     Ok(())
 }
 
+/// Which inbox categories may raise a desktop notification (#290).
+///
+/// Empty for a profile nobody has switched one on in, which is what makes the
+/// feature opt-in per kind (spec #272, story 71).
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read
+/// fails.
+#[tauri::command]
+pub async fn notification_kinds(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<Vec<knobas_core::inbox::Category>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::inbox::notification_kinds(&pool).await
+}
+
+/// Set which inbox categories may notify, and answer with what is now stored.
+///
+/// Takes the words rather than the enum, the shape [`unlink`] takes its id in
+/// and for the same reason: a value Tauri itself cannot deserialize is
+/// rejected with a bare string and no [`IpcErrorCode`](crate::IpcErrorCode),
+/// so a category this build does not know reads to the settings section as a
+/// window that broke rather than as `invalid` with a sentence in it.
+///
+/// **Nothing here asks about the OS permission.** Requesting it is the
+/// settings surface's, on the click that switches the first kind on (story
+/// 72); this command records a *preference*, and a preference that could only
+/// be stored while some other system said yes would be a setting that
+/// silently forgot itself.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for a word that is
+/// not an inbox category,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write
+/// fails.
+#[tauri::command]
+pub async fn set_notification_kinds(
+    lifecycle: State<'_, Lifecycle>,
+    kinds: Vec<String>,
+) -> Result<Vec<knobas_core::inbox::Category>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::inbox::set_notification_kinds(&pool, &kinds).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

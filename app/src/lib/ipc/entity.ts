@@ -1070,3 +1070,32 @@ export interface Project {
 export function listProjects(): Promise<Project[]> {
   return invoke<Project[]>("list_projects");
 }
+
+/**
+ * Which inbox categories may raise a desktop notification —
+ * `notification_kinds` (#290, spec #272 "Notifications").
+ *
+ * Empty for a profile nobody has switched one on in: every kind is off by
+ * default, so a noisy Jira cannot make the feature unusable on day one.
+ *
+ * One `knobas.setting` row and no migration — the rule
+ * `set_backup_schedule` and `set_passive_attribution` follow. It is a
+ * *preference* and says nothing about the OS permission, which is asked for on
+ * the click that switches the first kind on and is not knobas' to remember.
+ */
+export function notificationKinds(): Promise<InboxCategory[]> {
+  return invoke<InboxCategory[]>("notification_kinds");
+}
+
+/**
+ * Set which inbox categories may notify — `set_notification_kinds`. Answers
+ * with what is now **stored**, deduplicated and in the backend's own order, so
+ * the toggles draw the database rather than the click.
+ *
+ * Rejects with `invalid` for a word that is not a category — the write side is
+ * strict where the read side is forgiving, because the only caller is a
+ * surface sending back words it was given.
+ */
+export function setNotificationKinds(kinds: InboxCategory[]): Promise<InboxCategory[]> {
+  return invoke<InboxCategory[]>("set_notification_kinds", { kinds });
+}

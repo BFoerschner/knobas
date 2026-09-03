@@ -1,13 +1,16 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the main window may call. Custom `#[tauri::command]`s need no permission; this is Tauri's own core API surface at its default, plus the one plugin the app registers. `opener:allow-open-url` is granted rather than `opener:default`, which would also carry `allow-reveal-item-in-dir` (a file-manager call knobas never makes) and `allow-default-urls` (which adds `mailto:` and `tel:`). The scope is the second wall behind `openExternal`'s own scheme check: `web_url` is data an adapter mirrored from a remote system, and `file://` or `vscode://` reaching the OS opener would be a remote-code path that starts in somebody's backlog.",
+  "description": "What the main window may call. Custom `#[tauri::command]`s need no permission; this is Tauri's own core API surface at its default, plus the two plugins the app registers. `opener:allow-open-url` is granted rather than `opener:default`, which would also carry `allow-reveal-item-in-dir` (a file-manager call knobas never makes) and `allow-default-urls` (which adds `mailto:` and `tel:`). The scope is the second wall behind `openExternal`'s own scheme check: `web_url` is data an adapter mirrored from a remote system, and `file://` or `vscode://` reaching the OS opener would be a remote-code path that starts in somebody's backlog. The notification plugin is granted the same way, one command at a time: `notification:default` bundles sixteen permissions -- channels, scheduling, cancelling, reading back what is on screen -- and knobas makes exactly three calls, so the three are named here and the other thirteen are doors nothing asked for.",
   "windows": ["main"],
   "permissions": [
     "core:default",
     {
       "identifier": "opener:allow-open-url",
       "allow": [{ "url": "http://*" }, { "url": "https://*" }]
-    }
+    },
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission",
+    "notification:allow-notify"
   ]
 }

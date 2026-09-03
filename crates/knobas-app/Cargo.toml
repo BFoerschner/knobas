@@ -64,6 +64,12 @@ tokio-util = { version = "0.7", default-features = false }
 # protocol, and a mismatch fails at run time with "command not found" rather
 # than at build time.
 tauri-plugin-opener = "=2.5.4"
+# Desktop notifications for inbox items (#290, spec #272 "Notifications").
+# Pinned exactly and to the same version as `@tauri-apps/plugin-notification` in
+# `app/package.json`, the discipline `tauri-plugin-opener` above records: the two
+# halves speak one protocol and a mismatch fails at run time with "command not
+# found" rather than at build time.
+tauri-plugin-notification = "=2.4.0"
 tracing = "0.1"
 # Without a subscriber every `tracing` line the database layer emits -- which
 # port the server came up on, whether it reused an existing data directory --

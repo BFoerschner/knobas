@@ -138,10 +138,15 @@ pub fn run() {
     install_panic_hook();
 
     tauri::Builder::default()
-        // *Open in browser*, the app's only plugin. Its permission is granted
-        // in `capabilities/default.json`; without that entry the command is
+        // *Open in browser*. Its permission is granted in
+        // `capabilities/default.json`; without that entry the command is
         // registered and every call is denied at run time.
         .plugin(tauri_plugin_opener::init())
+        // Desktop notifications for inbox items (#290). Its three commands are
+        // granted one by one in `capabilities/default.json`; without those
+        // entries the commands are registered and every call is denied at run
+        // time, with nothing failing in the build.
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             // Both managed synchronously, before anything can call in, and
             // both for the same reason: they are what a command asks when the
@@ -254,6 +259,11 @@ pub fn run() {
             commands::time::week_timesheet,
             commands::time::log_all_preview,
             commands::time::log_all,
+            // Appended at the foot of the list rather than beside the other
+            // `commands::entity::` lines: the barrel is append-only (§10.8),
+            // and #288 was appending to it in the same week.
+            commands::entity::notification_kinds,
+            commands::entity::set_notification_kinds,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")
