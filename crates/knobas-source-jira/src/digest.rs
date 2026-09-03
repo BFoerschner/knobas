@@ -187,14 +187,59 @@ mod tests {
         );
     }
 
-    /// Length prefixes, not separators: two records that differ only in where
-    /// a boundary falls must not collide, and a Jira summary may contain any
-    /// character a separator could be spelled with.
+    /// **Length prefixes, not separators.** Two records that differ only in
+    /// where a boundary falls must not collide, and a Jira summary may contain
+    /// any character a separator could be spelled with -- including the type
+    /// tags this encoding uses.
+    ///
+    /// The pairs are chosen so that **the type tag alone does not save them**.
+    /// `{"a": "4b"}` and `{"a4": "b"}` feed the identical byte sequence once
+    /// the lengths are removed: the `4` that tags a string is absorbed into the
+    /// neighbouring key or value, and both objects have one key, so even the
+    /// count agrees. An earlier version of this test used `["a", "bc"]` against
+    /// `["ab", "c"]`, which the tag *does* separate -- it passed with the
+    /// prefixes deleted, and a mutation check found it.
     #[test]
     fn a_boundary_cannot_be_forged_by_the_content_around_it() {
+        assert_ne!(of(&json!({ "a": "4b" })), of(&json!({ "a4": "b" })));
+        assert_ne!(of(&json!(["a", "4b"])), of(&json!(["a4", "b"])));
         assert_ne!(of(&json!(["a", "bc"])), of(&json!(["ab", "c"])));
-        assert_ne!(of(&json!({ "a": "b" })), of(&json!({ "ab": "" })));
         assert_ne!(of(&json!([""])), of(&json!([])));
+    }
+
+    /// **The sort is a guard against a feature flag, and is vacuous until that
+    /// flag flips.** Said plainly because a reader deserves to know which of
+    /// these tests can fail today.
+    ///
+    /// `serde_json::Value`'s map is a `BTreeMap` unless some crate in the tree
+    /// turns `preserve_order` on, and a `BTreeMap` hands its keys over sorted
+    /// already -- so with the sort in [`feed`] deleted, this build's digests do
+    /// not change and no test here can tell. That is exactly the day the sort
+    /// matters: under `preserve_order` the map would follow the order Jira
+    /// serialized a field in, two reads could differ in nothing else, and every
+    /// poll would re-emit the corpus.
+    ///
+    /// So this asserts the *invariant* rather than the mechanism -- a record
+    /// built by inserting its keys in reverse digests as one built in order --
+    /// and it starts failing on its own the moment the flag makes it capable
+    /// of failing. `an_untouched_source_is_still_quiet_after_many_polls` in the
+    /// live suite is the other end of the same rope.
+    #[test]
+    fn key_order_cannot_reach_the_digest_however_the_map_is_built() {
+        let mut forwards = serde_json::Map::new();
+        for key in ["assignee", "labels", "summary", "updated"] {
+            forwards.insert(key.to_owned(), json!(key));
+        }
+        let mut backwards = serde_json::Map::new();
+        for key in ["updated", "summary", "labels", "assignee"] {
+            backwards.insert(key.to_owned(), json!(key));
+        }
+        assert_eq!(
+            of(&Value::Object(forwards)),
+            of(&Value::Object(backwards)),
+            "insertion order reached the digest, so two reads of one unchanged issue can \
+             disagree and every poll will re-emit the window"
+        );
     }
 
     /// The shapes a value can take are distinguished by type, not only by

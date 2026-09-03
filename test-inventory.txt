@@ -1443,6 +1443,7 @@ knobas-source-jira	lib/knobas_source_jira	descriptor::tests::the_template_surviv
 knobas-source-jira	lib/knobas_source_jira	digest::tests::a_boundary_cannot_be_forged_by_the_content_around_it
 knobas-source-jira	lib/knobas_source_jira	digest::tests::a_changed_field_changes_the_digest_even_with_updated_untouched
 knobas-source-jira	lib/knobas_source_jira	digest::tests::an_absent_field_and_an_empty_one_are_different_records
+knobas-source-jira	lib/knobas_source_jira	digest::tests::key_order_cannot_reach_the_digest_however_the_map_is_built
 knobas-source-jira	lib/knobas_source_jira	digest::tests::the_same_record_digests_the_same_whatever_order_its_keys_arrived_in
 knobas-source-jira	lib/knobas_source_jira	digest::tests::the_type_is_part_of_the_record
 knobas-source-jira	lib/knobas_source_jira	discover::tests::a_field_table_with_no_schemas_falls_back_to_the_name
