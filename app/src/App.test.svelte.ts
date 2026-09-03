@@ -570,6 +570,51 @@ test("a project the census reports gets a room in the switcher", async () => {
 });
 
 /**
+ * **A project keeps the source's own word** (ADR-0010, #285), end to end
+ * through the shell: a Confluence source's project room is chipped *space*,
+ * and the Jira source's beside it is chipped *project*.
+ *
+ * The wire this witnesses is the one nothing else can see: `App.svelte` is
+ * where a source's adapter kind meets the census, on one line into
+ * `switcherContexts`, and the store it comes from is seeded on another. Drop
+ * either and every space room silently reads *project* -- the generic word,
+ * which is the same word four fifths of the app legitimately shows, so no
+ * other test would notice.
+ *
+ * Both rooms in one test, and read off the **rendered** chip: a fixture with
+ * only the Confluence source would pass just as happily against a word
+ * hardcoded to "space".
+ */
+test("a Confluence source's project room is chipped space, and a Jira one project", async () => {
+  dbReady = true;
+  healthRows = [row("wiki", "ok"), row("jira", "ok")];
+  // The adapter kind is the *only* thing separating these two sources here,
+  // which is what makes the chip's word attributable to it.
+  sourceRows = [
+    { ...summary("wiki"), adapter_kind: "confluence" },
+    { ...summary("jira"), adapter_kind: "jira" },
+  ];
+  projectRows = [
+    { source_id: "wiki", key: "ENG", name: "Engineering" },
+    { source_id: "jira", key: "PAY", name: "Payments Platform" },
+  ];
+  location.hash = "#/ctx/proj:wiki:ENG";
+
+  app = mount(App, { target, props: {} });
+  await until(() => roomName() === "Engineering", "the space room never arrived");
+  await until(() => roomKindWord() !== "", "the room drew no kind chip at all");
+
+  expect(
+    roomKindWord(),
+    "a Confluence space room is chipped with knobas' generic word instead of the wiki's own",
+  ).toBe("space");
+
+  router.go("#/ctx/proj:jira:PAY");
+  await until(() => roomName() === "Payments Platform", "the project room never arrived");
+  expect(roomKindWord(), "the Jira project room borrowed Confluence's word").toBe("project");
+});
+
+/**
  * The subscription behind the project rooms (`projects.start()`), which is
  * what keeps them current *within* a session.
  *
@@ -843,6 +888,11 @@ test("a source room that vanishes under the reader is announced too", async () =
 /** The switcher's own name for the room the reader is in. */
 function roomName(): string {
   return target.querySelector(".ctx-name .nm")?.textContent?.trim() ?? "";
+}
+
+/** The chip beside the room's heading — its `kindWord`, as a reader sees it. */
+function roomKindWord(): string {
+  return target.querySelector(".room-bar .kind")?.textContent?.trim() ?? "";
 }
 
 /**
