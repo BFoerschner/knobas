@@ -1580,7 +1580,7 @@ async fn a_passive_block_a_new_manual_one_overlaps_is_taken_back_whole() {
 // is made of, what the candidates are, and what the comment says. The other
 // half of the worklog -- queueing the write, the local copy, Jira's id landing
 // on it -- needs a source that answers, and lives in `tests/worklog_ipc.rs`
-// with mockd behind it.
+// behind a trait-level fake (the layer ADR-0013 keeps).
 
 /// The reader's day, and the offset their machine sends with it. UTC here, so
 /// the fixtures below read as the instants they are.
@@ -1802,6 +1802,58 @@ async fn a_ticket_with_no_unlogged_time_has_no_draft() {
     let pool = scratch("worklog-nothing").await;
     configure_jira(&pool, "mara.lindqvist").await;
     assert!(draft_of(&pool, TICKET).await.is_none());
+}
+
+/// **A passive block is not something to log.**
+///
+/// `0013`'s block vocabulary has two kinds and #282 writes the second one:
+/// `passive` is knobas' guess at what was open on screen, not a person's
+/// account of an afternoon. Drafting one would put minutes nobody vouched for
+/// into a worklog that bills a client, so the draft narrows to `manual` -- and
+/// so does `log`, which re-derives its covered blocks from the same read.
+///
+/// The row is inserted directly rather than through the timer, because the
+/// timer only makes `manual` ones: #282's derivation is the writer of the
+/// other kind and it is not here yet. That is the point -- the guard has to be
+/// in place before its writer arrives, or the first passive afternoon knobas
+/// records is one it silently offers to bill.
+#[tokio::test]
+async fn a_passive_block_is_not_drafted() {
+    let pool = scratch("worklog-passive").await;
+    configure_jira(&pool, "mara.lindqvist").await;
+    sqlx::query(
+        "insert into knobas.block (started_at, ended_at, entity_id, kind)
+         values ($1, $2, $3, 'passive')",
+    )
+    .bind(Utc.with_ymd_and_hms(2026, 9, 3, 9, 0, 0).unwrap())
+    .bind(Utc.with_ymd_and_hms(2026, 9, 3, 10, 30, 0).unwrap())
+    .bind(TICKET)
+    .execute(&pool)
+    .await
+    .expect("a passive block is written");
+
+    assert!(
+        draft_of(&pool, TICKET).await.is_none(),
+        "the day's only block was passive -- knobas guessed at it, and a guess \
+         is not an afternoon anybody has claimed"
+    );
+
+    // ...and the direction that shows the narrowing is `kind` and not the
+    // fixture failing to insert: a manual block beside it *is* drafted, and
+    // the interval is that block alone.
+    let claimed = block(&pool, TICKET, (11, 0), (12, 0)).await;
+    let drafted = draft_of(&pool, TICKET)
+        .await
+        .expect("the manual block is something to draft");
+    assert_eq!(
+        drafted.block_ids,
+        vec![claimed],
+        "the passive block was drafted alongside the manual one"
+    );
+    assert_eq!(
+        drafted.seconds, 3_600,
+        "the passive block's ninety minutes are in the interval"
+    );
 }
 
 /// The candidates: what the mirror says the reader did in the interval, and

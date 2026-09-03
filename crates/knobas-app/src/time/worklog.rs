@@ -255,8 +255,18 @@ async fn takes_a_worklog(
 /// across midnight is one block on the earlier day rather than two. Splitting
 /// it would invent a boundary nobody made, in a table whose whole point is
 /// that every row is a stretch somebody actually worked.
+///
+/// **`kind = 'manual'` only.** `0013`'s vocabulary has a second kind --
+/// `passive`, which #282 derives from what was open on screen -- and a passive
+/// block is knobas' *guess* at an afternoon rather than a person's account of
+/// one. Drafting one would put minutes nobody vouched for into a worklog that
+/// bills a client, and the read that offers blocks for logging is the place
+/// that distinction has to be made, because [`log`] re-derives the covered
+/// blocks from this same query. #282's own surface is where a passive block is
+/// assigned and thereby becomes a person's claim; until it has been through
+/// that, it is not something to log.
 const UNLOGGED_BLOCKS: &str = "select id, started_at, ended_at from knobas.block
-     where entity_id = $1 and worklog_id is null
+     where entity_id = $1 and worklog_id is null and kind = 'manual'
        and started_at >= $2 and started_at < $3
      order by started_at, id";
 

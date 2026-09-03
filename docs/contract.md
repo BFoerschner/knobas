@@ -3754,6 +3754,14 @@ From this commit on, each of the following requires an orchestrator decision **a
       -> Result<time::worklog::Worklog, IpcError>;
   ```
 
+  **The draft reads `manual` blocks only.** `0013`'s block vocabulary has a second kind and
+  #282 writes it: a `passive` block is knobas' guess at what was open on screen, not a person's
+  account of an afternoon, and drafting one would put minutes nobody vouched for into a worklog
+  that bills a client. `UNLOGGED_BLOCKS` carries `kind = 'manual'`, which is also what `log`
+  covers, since it re-derives its blocks from that same read. #282's own surface is where a
+  passive block is assigned and becomes a claim; `a_passive_block_is_not_drafted` is the guard,
+  and it is here before its writer is.
+
   **`worklog_draft` answers `null` for two different questions on purpose**, because the caller
   does the same thing with both: the shell asks for a draft on **every** stop that closed an
   entity's block and opens the modal only if it got one. A stop on a note, on a Gitea commit or
