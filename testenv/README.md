@@ -747,6 +747,25 @@ notarization warning is expected too. The #290 manual check is: in that
 bundle, switch one notification kind on, unfocus the window, and see one
 notification in Notification Center.
 
+**What that check found on 2026-09-03, on macOS 26.5 with this
+certificate: no banner.** Recorded here rather than left for the next person
+to rediscover. Both `codesign` checks above pass, and knobas' own half is
+reached — with the kind on and the window unfocused, a new inbox item appears
+in the strip's badge and the shell hands it to `sendNotification`; a
+diagnostic build with the focus and once-per-item gates removed, so that every
+new item notifies unconditionally, produced no banner either. Nothing arrives:
+`dev.knobas.desktop` never appears in `~/Library/Preferences/com.apple.ncprefs.plist`
+(where macOS records every app that has posted one) and `log show` has no line
+for it. The remaining suspect is below knobas: `tauri-plugin-notification`'s
+desktop path hands the notification to `notify-rust`, whose macOS backend goes
+through `mac-notification-sys` and whose result the plugin discards
+(`let _ = notification.show()` inside a spawned task), so a refusal there is
+invisible from this side. The bundle *is* registered with Launch Services
+(`lsregister -dump` lists it, `activityTypes: NOTIFICATION#:dev.knobas.desktop`),
+so the identity is not the missing piece. Re-run the check on a machine or an
+OS version where another `notify-rust` app does deliver before concluding
+anything about knobas' own gating, which has its own tests.
+
 ## Scripts
 
 | Script | Does |
