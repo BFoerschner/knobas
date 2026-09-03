@@ -148,6 +148,20 @@ function worklog(over: Partial<QueuedWrite> = {}): QueuedWrite {
   });
 }
 
+/**
+ * Let anything a click started run to the end, then re-render.
+ *
+ * A `setTimeout(0)` rather than a microtask flush, because the queue's own
+ * `act` is three awaits deep — the command, its `.then`, and the re-read that
+ * follows — and a macrotask runs after all of them. Without it a *negative*
+ * assertion about the panel ("the row is still listed") reads the state as it
+ * was before the click's work landed, and passes whatever the button did.
+ */
+async function settle() {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+}
+
 async function render() {
   const queue = createWriteQueue();
   await queue.refresh();
@@ -484,7 +498,7 @@ test("discarding a queued worklog asks first, and cancelling leaves it queued", 
   calls.length = 0;
 
   screen.button("Cancel")!.click();
-  flushSync();
+  await settle();
 
   expect(calls.filter((c) => c.command === "discard_write")).toEqual([]);
   expect(screen.dialogs()).toHaveLength(2);
@@ -503,11 +517,13 @@ test("discarding a queued worklog asks first, and cancelling leaves it queued", 
   expect(asking).toContain(adrSentence());
 
   screen.button("Keep it queued")!.click();
-  flushSync();
+  await settle();
 
   expect(screen.dialogs()).toHaveLength(1);
   expect(calls.filter((c) => c.command === "discard_write")).toEqual([]);
   // The row itself: still in the queue the panel read, and still on screen.
+  // Read after `settle`, so a *Keep it queued* that discarded would have
+  // emptied both by now rather than being caught only by the call log.
   expect(screen.queue.rows.map((row) => row.id)).toEqual([4]);
   expect(screen.section("Waiting")!.textContent).toContain("jira:PAY-231");
   screen.done();
@@ -527,11 +543,12 @@ test("a refused worklog asks too, from the decisions section", async () => {
   calls.length = 0;
 
   screen.button("Discard")!.click();
-  flushSync();
+  await settle();
 
   expect(calls.filter((c) => c.command === "discard_write")).toEqual([]);
   expect(screen.dialogs()).toHaveLength(2);
   expect(screen.dialogs()[1]!.textContent).toContain("knobas cannot tell whether Jira already");
+  expect(screen.queue.rows.map((row) => row.id)).toEqual([4]);
   screen.done();
 });
 
