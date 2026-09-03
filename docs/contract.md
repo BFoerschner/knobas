@@ -534,7 +534,7 @@ Returning a guard rather than a bare `SocketAddr` (as the brief sketched) is del
 |---|---|---|
 | 8200 | mockd health + `/__mock/*` admin | mockd |
 | 8210 | Jira DC REST v2 | mockd |
-| 8211 | Confluence DC v1 (M3) | mockd |
+| 8211 | ~~Confluence DC v1 (M3)~~ — **unreserved 2026-09-03** (ADR-0013: mockd is deprecated and gets no Confluence half; the real container on 8090 is the witness) | — |
 | 8212 | TeamCity REST | mockd |
 | 8213 | Flowrun stub (M4) | mockd |
 | 3000 | Gitea (real, pinned image) | container |

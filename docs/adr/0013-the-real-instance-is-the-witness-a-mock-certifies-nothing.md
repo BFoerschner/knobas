@@ -1,0 +1,22 @@
+---
+status: accepted
+---
+
+# The real instance is the witness; a mock certifies nothing
+
+Roadmap §3 built M0–M2 on a mock-first test strategy: `knobas-mockd` serves Jira and TeamCity subsets validated against the vendored specs, the Jira adapter has only ever been certified against it, port 8211 was reserved for a Confluence half, and M3's exit criterion as first written says "worklogs land in mockd Jira; protocol published to mockd Confluence". The real containers (`--profile real-atlassian`, the seeded TeamCity, Gitea) were the milestone-exit backstop for "behavioral drift". Features that passed against mockd kept failing later against the real system; the mock encoded the implementer's assumptions, and a test that checks an assumption against itself cannot fail. The one adapter certified against its real server (TeamCity, #266, seeded by #269) is the one that stopped surprising anyone.
+
+Decided 2026-09-02 (Björn, M3 grilling session): **every adapter and every write path is tested against the real system, and no mock is a witness for any acceptance or exit criterion.** Each system gets a seed script from the Tidewater fixtures, a `just <system>-live` recipe (stand up → seed → suite → tear down), and a live suite that the PR body shows and the merge-manager re-runs before squashing. `just check` stays fast; the working model carries the rule that a PR touching an adapter crate, a `WriteOp`, or the sync engine must include its live run. mockd is frozen and deprecated: no Confluence half, 8211 unreserved, nothing new; its tests stay only until the live suites assert the same things, then go with it. `knobas-source-mock`, the trait-level fake that lets UI and engine tests run with no server at all, is a different thing and stays.
+
+## Considered options
+
+- **Keep mock-first, add a Confluence half to mockd** as the roadmap planned. Rejected: Atlassian publishes no machine-readable Confluence DC spec, so that mock would have been shaped by reading docs — the exact assumption-checks-assumption loop this reverses — and the real container was already in the compose file precisely because it "is the only contract there will ever be".
+- **Retire mockd in one ticket now.** Rejected for sequencing, not principle: deleting its Jira and TeamCity tests before the live suites cover the same assertions removes regression cover while the replacement is being written.
+- **Run the live suites inside `just check`.** Rejected: a Jira boot and a three-hour timebomb clock in front of a CSS fix is a gate nobody runs.
+
+## Consequences
+
+- The Atlassian pair lives on 10-user, 3-hour timebomb keys (self-service DC trials ended 2026-03-30), so the live shape is disposable: the seed must be fast, idempotent against a partly seeded instance, and followed by `down -v`. The keys are a human step, filed per milestone.
+- Jira project creation over REST fixes a template key, so the seeded workflow is Jira's default rather than a custom Tidewater one; seeded worklogs and comments belong to the admin account, and identity-dependent tests configure that username.
+- **Flowrun is the single named exception**: it is an internal system with no container, so its stub *defines* the assumed contract until the real-system gate (roadmap §5). Nothing else gets one, and this sentence is not precedent.
+- M3 opens with a small gated **M3.0 Witness** that seeds the real Jira and Confluence and certifies the existing Jira adapter and its three write ops against Jira 10.3.24 before M3.1 writes the first worklog into it.

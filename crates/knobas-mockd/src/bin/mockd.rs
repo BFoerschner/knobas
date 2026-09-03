@@ -31,9 +31,13 @@ ENVIRONMENT:
     MOCKD_TEAMCITY_BASE_URL  over MOCKD_PUBLIC_BASE_URL when set.
 
 NOTE:
-    Ports 8211 (Confluence DC, M3) and 8213 (Flowrun, M4) are *reserved* by
-    interfaces doc §5 and deliberately not bound: those APIs do not exist yet.
-    They were not forgotten.
+    mockd is DEPRECATED (ADR-0013, 2026-09-03): frozen, nothing new goes in,
+    and it is deleted once the live suites assert what its tests assert. The
+    real container is the witness.
+
+    Port 8213 (Flowrun, M4) is *reserved* by interfaces doc §5 and deliberately
+    not bound: that API does not exist yet. 8211, once reserved for a Confluence
+    half, is unreserved: there will be none.
 ";
 
 struct Args {
@@ -164,7 +168,8 @@ async fn main() {
         .await,
     );
     println!(
-        "mockd: ports 8211 (confluence, M3) and 8213 (flowrun, M4) are reserved, not bound; \
+        "mockd: DEPRECATED (ADR-0013) -- the real container is the witness; \
+         port 8213 (flowrun, M4) is reserved, not bound; 8211 is unreserved; \
          fixture today = {}",
         knobas_source_mock::fixture().today
     );

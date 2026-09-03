@@ -1,8 +1,9 @@
 # `testenv` — the knobas test environment
 
 A small fake company on a laptop: the Tidewater Freight fixture served by real
-software where we can self-host it, and by our own faithful mock where we
-cannot.
+software (Gitea and Uptime Kuma always, TeamCity, Jira and Confluence behind
+opt-in profiles) and, until the live suites replace it, by our own deprecated
+mock.
 
 ```sh
 cd testenv
@@ -15,7 +16,7 @@ Two layers, and the difference is the point:
 | Layer | What | Why |
 |---|---|---|
 | **Real products** | Gitea, Uptime Kuma v2 | Cheap to self-host, so the adapters are certified against the actual software rather than against our idea of it. |
-| **mockd** | Jira Data Center v2, TeamCity REST | Jira and TeamCity are not cheap to self-host (see the profiles below). `crates/knobas-mockd` serves the *same* Tidewater fixture, so both layers tell one story (design §14a). |
+| **mockd** (deprecated) | Jira Data Center v2, TeamCity REST | Built while Jira and TeamCity were "not cheap to self-host". **Deprecated 2026-09-03 (ADR-0013).** A mock certifies nothing, the real containers behind the profiles below are the witness for every adapter and every write path, and mockd gets nothing new; its tests stay until the live suites assert the same things, then it is deleted. `crates/knobas-mockd` still serves the *same* Tidewater fixture, so both layers tell one story while it lasts (design §14a). |
 
 ## Ports
 
@@ -30,15 +31,16 @@ runs it, so the table and the file cannot drift.
 | 3001 | Uptime Kuma v2 | default |
 | 8200 | mockd — health + `/__mock/*` admin API | default |
 | 8210 | mockd — Jira Data Center REST v2 | default |
-| 8211 | **reserved** — Confluence DC mock (M3) | *bound by nothing* |
 | 8212 | mockd — TeamCity REST | default |
 | 8213 | **reserved** — Flowrun stub (M4) | *bound by nothing* |
 | 8111 | real TeamCity server | `--profile real-teamcity` |
 | 8080 | real Jira Software | `--profile real-atlassian` |
 | 8090 | real Confluence | `--profile real-atlassian` |
 
-8211 and 8213 are reserved on purpose and bound by nothing — in the compose
-file *and* in the `mockd` binary. They were not forgotten.
+8213 is reserved on purpose and bound by nothing — in the compose file *and*
+in the `mockd` binary. It was not forgotten: Flowrun is ADR-0013's single
+named exception. 8211, reserved for a Confluence mock until 2026-09-03, is
+unreserved by the same ADR; the real Confluence on 8090 is the witness.
 
 ## Credentials
 
@@ -355,11 +357,13 @@ engine, so without them the setup wizard stops at its database step.
 Both are then set up unattended, in about three minutes from empty volumes:
 
 ```sh
-# 10-user, 3-hour Data Center keys, free and needing no my.atlassian.com
-# account. Atlassian ended self-service 30-day DC trials on 2026-03-30, so
-# these are the only free licences left:
-#   https://developer.atlassian.com/platform/marketplace/timebomb-licenses-for-testing-server-apps/
-export JIRA_LICENSE_KEY='AAAB...' CONFLUENCE_LICENSE_KEY='AAAB...'
+# 10-user, 3-hour Data Center keys, free, public, and needing no
+# my.atlassian.com account. Atlassian ended self-service 30-day DC trials on
+# 2026-03-30, so these are the only free licences left. The script pulls them
+# off Atlassian's page and checks each decodes to the 10-user, 3-hour Data
+# Center licence for its product; nothing to type or paste. Run it BEFORE
+# `up`, because Confluence reads its key at first start.
+eval "$(./fetch-timebomb-keys.sh)"
 
 docker compose --profile real-atlassian up -d jira-db jira confluence-db confluence
 ./seed --atlassian          # or ./seed-atlassian.sh jira|confluence
@@ -369,10 +373,13 @@ eval "$(./seed --env)"      # adds KNOBAS_JIRA_* and KNOBAS_CONFLUENCE_*
 The admin account is `knobas` / `knobas-dev` on both, and re-running the seed
 against a set-up instance is a no-op.
 
-Put the keys in your **shell**, not in `.env` — that file is tracked.
+The keys live in your **shell**, not in `.env` — that file is tracked
+(`./fetch-timebomb-keys.sh --write` drops them in the git-ignored
+`.env.licences` if you want them to survive a new terminal).
 `CONFLUENCE_LICENSE_KEY` must be set when the container *first starts*, since
-Confluence reads it at first-time setup; Jira's goes in through the wizard and
-can be exported later.
+Confluence reads it at first-time setup, and `seed-atlassian.sh` checks the
+container's own environment for it; Jira's goes in through the wizard, and the
+seed fetches it itself when it is unset.
 
 **Three hours is the shape of this environment.** The licence expires three
 hours after it is applied, and restarting the container does not reset it. So
@@ -494,6 +501,7 @@ history.
 | `./seed` | Everything below, in order. Idempotent — re-running is a no-op that exits 0. |
 | `./seed-gitea.sh` | Org, users, repos, branches, commits, PRs, comments, reviews. |
 | `./seed-kuma.sh` | Kuma admin account, monitors, API key. |
+| `./fetch-timebomb-keys.sh` | Pulls the two 10-user, 3-hour Data Center timebomb keys off Atlassian's public page, checks each decodes to the right product, prints `export` lines (`--write` also drops them in the git-ignored `.env.licences`). `seed-atlassian.sh` calls it when a key is unset. |
 | `./seed-atlassian.sh` | The real Jira and Confluence containers' setup wizards, unattended (`--profile real-atlassian`). |
 | `./seed-teamcity.sh` | The real TeamCity container's first start, an access token and one authorised agent (`--profile real-teamcity`); then runs the script below. |
 | `./seed-teamcity-builds.sh` | The Tidewater projects, build configurations, VCS roots and builds in the real TeamCity; `--running` for the fixture's running build. |

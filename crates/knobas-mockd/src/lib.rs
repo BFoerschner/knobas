@@ -1,5 +1,20 @@
+//! # Deprecated (ADR-0013, 2026-09-03)
+//!
+//! `knobas-mockd` is frozen and deprecated. A mock certifies nothing: the real
+//! container is the witness for every adapter and every write path
+//! (`docs/adr/0013-the-real-instance-is-the-witness-a-mock-certifies-nothing.md`).
+//! Nothing new goes in, not a Confluence half, not an endpoint, not a
+//! deviation, and port 8211 is unreserved. The crate and its Jira and
+//! TeamCity tests stay only until the live suites for those two systems
+//! (`just teamcity-live-seeded`, and `just atlassian-live` arriving with
+//! #275) assert the same things; then the crate is deleted with them.
+//! `knobas-source-mock`, the trait-level fake behind `--demo` and the UI
+//! tests, is a different thing and stays.
+//!
+//! What follows describes the crate as it is while it lasts.
+//!
 //! `knobas-mockd` — faithful, stateful HTTP mocks of the source APIs knobas
-//! cannot self-host, backed by the Tidewater Freight fixture.
+//! could not self-host cheaply, backed by the Tidewater Freight fixture.
 //!
 //! Two ways in, one behaviour:
 //!
