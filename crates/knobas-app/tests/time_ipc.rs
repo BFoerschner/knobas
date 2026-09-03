@@ -1602,6 +1602,55 @@ async fn a_passive_block_a_new_manual_one_overlaps_is_taken_back_whole() {
     );
 }
 
+// -- retention (#315) -------------------------------------------------------
+//
+// `time::passive::prune` is the whole of it, and the clock is a parameter
+// rather than `Utc::now()` so these fixtures can put a horizon wherever the
+// rule needs one. The seam is still the strip: what a pruned day *reads* as
+// is the only thing about retention a person can see.
+
+/// A day the day review can still reach keeps every beat it had, whether or
+/// not anybody has read it yet.
+///
+/// The sweep runs **before** this day is ever materialized, which is the case
+/// worth naming: a retention rule that kept only what had already been turned
+/// into blocks would quietly delete the afternoons of the reader who has not
+/// got round to reviewing them, which is most readers most weeks.
+#[tokio::test]
+async fn a_day_inside_the_horizon_keeps_its_beats_and_is_still_offered() {
+    let pool = scratch("time-passive-retain").await;
+    time::passive::set_enabled(&pool, true).await.unwrap();
+    let midnight = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
+    let long_ago = midnight - Duration::days(1);
+    let ticket = on(TICKET);
+    let run = |from| beats(&pool, Some(&ticket), from, 21, Duration::seconds(30));
+    run(long_ago + Duration::hours(9)).await;
+    run(midnight + Duration::hours(9)).await;
+    assert_eq!(observations(&pool).await, 42, "two mornings of beats");
+
+    // A `now` whose horizon falls exactly on the later day's midnight: the day
+    // before it is past retention, the day after it is not.
+    let taken = time::passive::prune(&pool, midnight + Duration::days(time::passive::RETENTION_DAYS))
+        .await
+        .expect("the sweep runs");
+
+    assert_eq!(taken, 21, "the older morning is what the horizon is past");
+    assert_eq!(
+        observations(&pool).await,
+        21,
+        "the sweep took beats the day review can still be pointed at"
+    );
+    assert_eq!(
+        day(&pool, midnight).await,
+        vec![(BlockKind::Passive, on(TICKET), 600)],
+        "a day nobody had read before the sweep lost the block it supports"
+    );
+    assert!(
+        day(&pool, long_ago).await.is_empty(),
+        "the swept day never had a block, and the sweep must not have invented one"
+    );
+}
+
 // -- the worklog draft (#280) -----------------------------------------------
 //
 // The draft's *reads*, against a real database: which blocks a day's interval
