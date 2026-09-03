@@ -705,3 +705,182 @@ fn every_candidate_op_is_one_the_spi_defines() {
         }
     }
 }
+
+// -- which kinds may notify -------------------------------------------------
+
+/// **Every kind is off until somebody says otherwise** (spec #272, story 71).
+///
+/// The direction that matters: a fresh profile must read as *empty*, not as
+/// *all*. The whole reason the setting exists is that a noisy Jira must not be
+/// able to make the feature unusable on the day it is installed, and a default
+/// that came back full would notify for every item in the first sync.
+#[tokio::test]
+async fn a_profile_nobody_has_opted_in_on_notifies_for_nothing() {
+    let harness = harness().await;
+    let stored = knobas_app::inbox::notification_kinds(&harness.deps.pool)
+        .await
+        .expect("the setting reads");
+    assert!(
+        stored.is_empty(),
+        "a fresh profile notifies for {stored:?} -- every kind is off by default"
+    );
+}
+
+/// The round trip, and the two things the write normalises.
+///
+/// The settings section draws a checkbox per category and sends the whole set
+/// back on every click, so the order is the order the boxes happen to sit in
+/// and a double-click can send a word twice. What comes back is one spelling
+/// for one set: deduplicated, and in `Category::ALL`'s order rather than the
+/// caller's.
+#[tokio::test]
+async fn what_comes_back_is_the_stored_set_deduplicated_and_in_one_order() {
+    let harness = harness().await;
+    let answered = knobas_app::inbox::set_notification_kinds(
+        &harness.deps.pool,
+        &[
+            "mention".to_owned(),
+            "review_request".to_owned(),
+            "mention".to_owned(),
+        ],
+    )
+    .await
+    .expect("two known categories are stored");
+    assert_eq!(
+        answered,
+        vec![
+            knobas_core::inbox::Category::ReviewRequest,
+            knobas_core::inbox::Category::Mention
+        ]
+    );
+    assert_eq!(
+        knobas_app::inbox::notification_kinds(&harness.deps.pool)
+            .await
+            .expect("the setting reads back"),
+        answered,
+        "the read answers what the write said it stored"
+    );
+}
+
+/// Switching every kind off again stores the empty set rather than leaving the
+/// last one on.
+///
+/// The failure this is about is a write that treats "nothing chosen" as
+/// "nothing to do": the reader unticks the last box, the row is left where it
+/// was, and knobas goes on interrupting somebody who has just asked it to
+/// stop.
+#[tokio::test]
+async fn unticking_the_last_box_stores_the_empty_set() {
+    let harness = harness().await;
+    knobas_app::inbox::set_notification_kinds(&harness.deps.pool, &["failed_build".to_owned()])
+        .await
+        .expect("one category is stored");
+    let answered = knobas_app::inbox::set_notification_kinds(&harness.deps.pool, &[])
+        .await
+        .expect("the empty set is stored");
+    assert!(answered.is_empty());
+    assert!(
+        knobas_app::inbox::notification_kinds(&harness.deps.pool)
+            .await
+            .expect("the setting reads back")
+            .is_empty(),
+        "a kind switched off is still switched on after a restart"
+    );
+}
+
+/// A word this build has no category for is **refused, with a sentence**, and
+/// nothing is stored.
+///
+/// `invalid` and not a Tauri decode failure: the command takes the words rather
+/// than the enum precisely so that this arrives at the settings section as an
+/// `IpcError` it can draw, instead of as a bare string with no code on it.
+#[tokio::test]
+async fn a_word_that_is_not_a_category_is_refused_and_stores_nothing() {
+    let harness = harness().await;
+    knobas_app::inbox::set_notification_kinds(&harness.deps.pool, &["mention".to_owned()])
+        .await
+        .expect("one category is stored");
+
+    let refused = knobas_app::inbox::set_notification_kinds(
+        &harness.deps.pool,
+        &["mention".to_owned(), "everything".to_owned()],
+    )
+    .await
+    .expect_err("an unknown category is refused");
+    assert_eq!(refused.code, knobas_app::IpcErrorCode::Invalid);
+    assert!(
+        refused.message.contains("everything") && refused.message.contains("review_request"),
+        "the refusal names the word and what the inbox does notify for: {}",
+        refused.message
+    );
+
+    assert_eq!(
+        knobas_app::inbox::notification_kinds(&harness.deps.pool)
+            .await
+            .expect("the setting reads back"),
+        vec![knobas_core::inbox::Category::Mention],
+        "the refused write left the stored set where it was"
+    );
+}
+
+/// A stored value that is not a list of category words reads as **silence**,
+/// not as a failure.
+///
+/// The setting is a permission to interrupt somebody, so the safe direction for
+/// one knobas cannot read is off. Two shapes, both reachable: a value of the
+/// wrong type (an older build, a hand-edited row, a restored backup) and a list
+/// carrying a category some future build has and this one does not.
+#[tokio::test]
+async fn an_unreadable_setting_reads_as_off_rather_than_as_on() {
+    let harness = harness().await;
+    for value in [
+        serde_json::json!(true),
+        serde_json::json!("mention"),
+        serde_json::json!(["not_a_category"]),
+    ] {
+        sqlx::query(
+            "insert into knobas.setting (key, value) values ('inbox.notification_kinds', $1)
+             on conflict (key) do update set value = excluded.value",
+        )
+        .bind(&value)
+        .execute(&harness.deps.pool)
+        .await
+        .expect("the row is written");
+
+        assert!(
+            knobas_app::inbox::notification_kinds(&harness.deps.pool)
+                .await
+                .expect("an unreadable setting is not an error")
+                .is_empty(),
+            "{value} read as something other than silence"
+        );
+    }
+}
+
+/// A list that is *partly* readable keeps the half this build knows.
+///
+/// The other direction of the test above, and the one that says the forgiving
+/// read is forgiving rather than blunt: a profile that used a build with a
+/// sixth category must not lose the five it still has.
+#[tokio::test]
+async fn an_unknown_word_beside_known_ones_drops_only_itself() {
+    let harness = harness().await;
+    sqlx::query(
+        "insert into knobas.setting (key, value) values ('inbox.notification_kinds', $1)
+         on conflict (key) do update set value = excluded.value",
+    )
+    .bind(serde_json::json!(["from_the_future", "mention", "failed_build"]))
+    .execute(&harness.deps.pool)
+    .await
+    .expect("the row is written");
+
+    assert_eq!(
+        knobas_app::inbox::notification_kinds(&harness.deps.pool)
+            .await
+            .expect("the setting reads"),
+        vec![
+            knobas_core::inbox::Category::Mention,
+            knobas_core::inbox::Category::FailedBuild
+        ]
+    );
+}
