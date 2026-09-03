@@ -115,7 +115,10 @@ impl Source for Discovering {
     ) -> Result<knobas_source::Cursor, SourceError> {
         Err(SourceError::protocol("not a syncing fake"))
     }
-    async fn write(&self, _op: knobas_source::WriteOp) -> Result<(), SourceError> {
+    async fn write(
+        &self,
+        _op: knobas_source::WriteOp,
+    ) -> Result<knobas_source::WriteReceipt, SourceError> {
         Err(SourceError::protocol("read-only"))
     }
 }
