@@ -102,7 +102,17 @@ pub struct SourceSyncStatus {
     /// [`running`](Self::running) is false -- the last one to finish, which is
     /// the run [`last_outcome`](Self::last_outcome) describes. `None` only for
     /// a source that has never run.
+    ///
+    /// That is the **listing's** answer, which is all `status_for` can give:
+    /// it is about the source. On a `sync:state` **event** it is stronger --
+    /// the run that event is about, whatever else the source has open (#304).
     pub run_id: Option<i64>,
+    /// When the run this status is about started -- set **while
+    /// [`running`](Self::running)**, and `None` once that run is over. The
+    /// TypeScript mirror says the same thing in its own units ("RFC 3339,
+    /// while `running`"), and `scheduler::state_of_run` relies on it: a
+    /// terminal emit carries the run's time in
+    /// [`last_finished_at`](Self::last_finished_at) rather than here (#304).
     pub started_at: Option<chrono::DateTime<chrono::Utc>>,
     pub last_finished_at: Option<chrono::DateTime<chrono::Utc>>,
     pub last_outcome: Option<SyncOutcome>,

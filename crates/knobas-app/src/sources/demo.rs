@@ -103,14 +103,17 @@ pub async fn demo_load_inner(pool: &PgPool) -> Result<SyncReport, DemoError> {
 /// [`demo_load_inner`] against a scratch database with nothing listening, and
 /// the command is the caller that has a window to tell.
 ///
-/// The status is read back through [`status_for`], the way the scheduler's
-/// own emit reads it, not hand-built. The registration wrote the
-/// `source_config` row the query is keyed on, so the read answers for the mock
-/// even though the load logs no `sync_run` row (out of scope by ruling): the
-/// status is terminal (`running: false`, no `run_id`), which is all the store
-/// asks of it. A failed read is logged and not raised, as in the scheduler --
-/// the corpus already landed, and an event the window missed is not a reason
-/// to report the load as failed.
+/// The status is read back through [`status_for`], not hand-built. The
+/// scheduler's own emits no longer read it whole -- since #304 they compose the
+/// run's half from the run they are about -- but there is no run here to
+/// compose from: the load logs no `sync_run` row at all (out of scope by
+/// ruling), so the source-level read *is* the whole answer, and the `coalesce`
+/// that decides #304's `run_id` has nothing to choose between. The registration
+/// wrote the `source_config` row the query is keyed on, so the read still
+/// answers for the mock: the status is terminal (`running: false`, no
+/// `run_id`), which is all the store asks of it. A failed read is logged and
+/// not raised, as in the scheduler -- the corpus already landed, and an event
+/// the window missed is not a reason to report the load as failed.
 ///
 /// # Errors
 ///

@@ -553,6 +553,79 @@ async fn status_reports_running_then_the_finished_shape() {
     );
 }
 
+/// The terminal `sync:state` is about **the run that just ended** -- not about
+/// whichever row `status_for`'s laterals happen to pick for the source (#304).
+///
+/// The neighbour here is the one `reconcile_abandoned` manufactures: it closes
+/// every open run at scheduler start, and the `f` lateral orders by
+/// `started_at desc`, so a *finished* run dated ahead of this one owns
+/// `coalesce(r.id, f.id)` for every read afterwards. ADR-0005 says a run id
+/// always comes with an ending; an emit that names a different run than the one
+/// that just ended breaks that pairing for every listener keyed on `run_id`
+/// (the wizard's DONE panel attaches by it).
+///
+/// The neighbour's outcome is deliberately *not* `ok`: the id alone would go
+/// green on an emit that still took its ending from the source.
+#[tokio::test]
+async fn the_terminal_state_names_the_run_that_ended_not_a_newer_neighbour() {
+    let h = harness(AuthKind::None, false).await;
+    let run_id = run_log::start(&h.deps.pool, &h.id, SyncTrigger::Manual)
+        .await
+        .unwrap();
+    let (neighbour,): (i64,) = sqlx::query_as(
+        "insert into knobas.sync_run
+                (source_id, trigger, started_at, finished_at, outcome)
+         values ($1, 'schedule', now() + interval '1 minute',
+                 now() + interval '1 minute', 'unauthorized')
+         returning id",
+    )
+    .bind(&h.id)
+    .fetch_one(&h.deps.pool)
+    .await
+    .unwrap();
+
+    let result = knobas_sync::scheduler::execute_run(
+        &h.deps,
+        &h.id,
+        run_id,
+        RunMode::Incremental,
+        None,
+        std::time::Instant::now(),
+    )
+    .await;
+    assert_eq!(result.outcome, SyncOutcome::Ok);
+    knobas_sync::scheduler::settle(&h.deps, &h.id, run_id, &result).await;
+
+    let terminal = h
+        .events
+        .states
+        .lock()
+        .unwrap()
+        .last()
+        .cloned()
+        .expect("settling a run emits its terminal sync:state");
+    assert!(!terminal.running, "the run is over");
+    assert_eq!(
+        terminal.run_id,
+        Some(run_id),
+        "the emit must name run {run_id}, not the neighbour {neighbour} the \
+         source-level read prefers"
+    );
+    assert_eq!(
+        terminal.last_outcome,
+        Some(SyncOutcome::Ok),
+        "the ending is this run's, not the neighbour's `unauthorized`"
+    );
+    let row = run_log::get(&h.deps.pool, run_id)
+        .await
+        .unwrap()
+        .expect("the run this emit is about is still in the log");
+    assert_eq!(
+        terminal.last_finished_at, row.finished_at,
+        "the finish time is this run's own, not the neighbour's future one"
+    );
+}
+
 /// A disabled source still appears in the sources view -- it just has no next
 /// run. So does one that needs a human: `next_run_at` is the countdown, and a
 /// countdown to a run that will never start is a lie the UI would render.

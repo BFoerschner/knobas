@@ -189,6 +189,11 @@ export interface SourceSyncStatus {
    * The run this status is about: the one in flight, or — once `running` is
    * false — the last one to finish, which is the run `last_outcome` describes.
    * null only for a source that has never run.
+   *
+   * That is what `syncStatus()` answers, which is about the source. On an
+   * `EVENTS.syncState` event it is the run the event is about — the one that
+   * just started or just ended — which is what makes keying a listener on it
+   * sound (#304).
    */
   run_id: number | null;
   /** RFC 3339, while `running`. */

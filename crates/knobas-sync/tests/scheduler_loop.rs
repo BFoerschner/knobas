@@ -700,6 +700,104 @@ async fn a_trigger_says_running_before_it_returns() {
     retire(&pool, &ids).await;
 }
 
+/// The `running` `sync:state` names **the run that just started**, even when
+/// another run for the same source is already open (#304).
+///
+/// `status_for`'s `r` lateral takes whichever run is open for the source,
+/// `started_at desc` -- so a second open run decides what every emit for that
+/// source carries. That happens whenever more than one scheduler is live over
+/// one `source_config` (the app's test binary), and it is what makes an id a
+/// caller was handed unobservable: ADR-0005's ending is delivered by run id.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_running_state_names_its_own_run_not_another_open_one() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    // Off the schedule: this test is about what `trigger` emits, and a ticker
+    // starting a run of its own would put a third id in play.
+    let ids = seed_quiet(&pool, 1).await;
+    let id = ids[0].clone();
+
+    #[derive(Default)]
+    struct Recorder(std::sync::Mutex<Vec<SourceSyncStatus>>);
+    impl SyncEvents for Recorder {
+        fn sync_state(&self, s: SourceSyncStatus) {
+            self.0.lock().unwrap().push(s);
+        }
+        fn source_health(&self, _h: knobas_sync::config::CredentialHealth) {}
+        fn activity_new(&self, _r: knobas_core::activity::ActivityRow) {}
+    }
+
+    let events = Arc::new(Recorder::default());
+    let connector = knobas_db::test_util::test_connector().await;
+    let scheduler = Scheduler::start(SchedulerDeps {
+        pool: sched_pool,
+        connections: Arc::new(TestConnections(connector)),
+        registry: Arc::new(SlowRegistry {
+            inside: Arc::new(AtomicUsize::new(0)),
+            peak: Arc::new(AtomicUsize::new(0)),
+            dwell: Duration::from_secs(5),
+            fault: None,
+        }),
+        secrets: Arc::new(MemoryStore::new()),
+        events: Arc::clone(&events) as Arc<dyn SyncEvents>,
+    })
+    .await
+    .unwrap();
+
+    // *After* `Scheduler::start`, which closes every open run it finds
+    // (`reconcile_abandoned`). Dated ahead, because the lateral takes the
+    // newest open run and this test must not depend on which of two rows
+    // Postgres returns first.
+    let (neighbour,): (i64,) = sqlx::query_as(
+        "insert into knobas.sync_run (source_id, trigger, started_at)
+         values ($1, 'schedule', now() + interval '1 minute') returning id",
+    )
+    .bind(&id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let run_id = scheduler
+        .trigger(&id, SyncTrigger::Manual, None)
+        .await
+        .unwrap();
+    // No await between the trigger and this read, as in
+    // `a_trigger_says_running_before_it_returns`.
+    let seen = events.0.lock().unwrap().clone();
+    let first = seen
+        .first()
+        .expect("a running sync:state must be emitted before trigger returns");
+    assert!(first.running);
+    assert_eq!(
+        first.run_id,
+        Some(run_id),
+        "the emit must name the run `trigger` returned ({run_id}), not the \
+         neighbour ({neighbour}) that happens to be open too"
+    );
+    let row = run_log::get(&pool, run_id)
+        .await
+        .unwrap()
+        .expect("the run trigger opened");
+    assert_eq!(
+        first.started_at,
+        Some(row.started_at),
+        "and it carries that run's start time, not the neighbour's"
+    );
+
+    scheduler.shutdown().await;
+    // Close the neighbour by hand. `retire` holds the *source* off the
+    // schedule, but nothing holds off the next `Scheduler::start` in this
+    // binary: `reconcile_abandoned` is whole-database, so an open row left
+    // here would be closed by the next test's scheduler and counted as one of
+    // its own abandoned runs.
+    sqlx::query("update knobas.sync_run set finished_at = now(), outcome = 'error' where id = $1")
+        .bind(neighbour)
+        .execute(&pool)
+        .await
+        .unwrap();
+    retire(&pool, &ids).await;
+}
+
 /// **Every phase the mirror declares is actually emitted by a real run**, and
 /// no message claims the run took no time at all.
 ///
