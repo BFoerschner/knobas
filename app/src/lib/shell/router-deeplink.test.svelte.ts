@@ -127,6 +127,21 @@ vi.mock("../ipc/backup", () => ({
   restoreBackup: () => Promise.reject(new Error("unused")),
 }));
 
+/**
+ * The timer and the day review (#278, #279). Both are reached from a cold deep
+ * link — the day review *is* one of the addresses below — and neither may
+ * reach a real bridge here.
+ */
+vi.mock("../ipc/time", () => ({
+  currentTimer: () => Promise.resolve(null),
+  startTimer: () => Promise.reject(new Error("no timer in this test")),
+  stopTimer: () => Promise.resolve(null),
+  timerHeartbeat: () => Promise.resolve(null),
+  dayBlocks: () => Promise.resolve([]),
+  updateBlock: () => Promise.reject(new Error("no edit in this test")),
+  deleteBlock: () => Promise.reject(new Error("no edit in this test")),
+}));
+
 vi.mock("@tauri-apps/api/event", () => ({
   listen: () => Promise.resolve(() => {}),
 }));
@@ -202,8 +217,11 @@ const ADDRESSES = [
   // The inbox is a real view since #45; it is in this list because it has to
   // render from a cold deep link like every other address.
   "#/inbox",
-  // M3-M4 addresses, reserved so an open kind never collides with a view.
+  // The day review is a real view since #279, in both its spellings: the bare
+  // address means today, and a dated one means that day.
   "#/time",
+  "#/time/2026-09-03",
+  // M3-M4 addresses, reserved so an open kind never collides with a view.
   "#/standup",
   "#/assets/board",
   "#/monitor/kuma",
@@ -270,6 +288,18 @@ test("the settings view is what #/settings renders, not a later milestone", asyn
   expect(text).toContain("Backup");
   // The boundary sentence, all the way through the shell.
   expect(text).toContain("after 03:00");
+  expect(text).not.toMatch(/arrives in a later milestone/i);
+});
+
+/**
+ * `#/time/<day>` reaches the day review (#279), not the "arrives in a later
+ * milestone" pane the address used to fall through to. The date in the address
+ * is the date on the screen, which is what makes the address worth having.
+ */
+test("the day review is what a time address renders, not a later milestone", async () => {
+  const text = await open("#/time/2026-09-03");
+  expect(text).toContain("Thursday 3 September 2026");
+  expect(text).toContain("Nothing tracked on this day");
   expect(text).not.toMatch(/arrives in a later milestone/i);
 });
 

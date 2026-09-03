@@ -124,3 +124,74 @@ export function stopTimer(): Promise<Block | null> {
 export function timerHeartbeat(foreground: TimerTarget | null): Promise<RunningTimer | null> {
   return invoke<RunningTimer | null>("timer_heartbeat", { foreground });
 }
+
+/**
+ * One block as the day review draws it — `time::day::DayBlock`.
+ *
+ * The title is beside the block rather than inside it, and the split is the
+ * point: a block is knobas' own durable record, and the title is the mirror's
+ * *current* opinion of a row that may since have been renamed or purged. A
+ * block whose entity is gone still says how long it was and what it was on.
+ */
+export interface DayBlock {
+  block: Block;
+  /**
+   * What the mirror calls the target, or `null`.
+   *
+   * `null` for a label block — there is no entity — and for an entity the
+   * mirror has never held, has purged, or holds under a blank title. One
+   * question for the view, with one answer: show the id instead.
+   */
+  title: string | null;
+}
+
+/**
+ * The blocks overlapping `[from, to)`, earliest first.
+ *
+ * **The caller computes the interval**, and for the day review it is the
+ * reader's own local midnight and the next one — `dayBounds` in
+ * `lib/time/day.ts`. The backend is given instants rather than a date because
+ * the machine's timezone is a fact only this side holds, and an offset would
+ * be the wrong shape as well: a day containing a DST change is 23 or 25 hours
+ * long and has two of them.
+ *
+ * Overlap, not containment: a block that ran through midnight is on both days
+ * it touched, so the strip a person most wants to fix has something to edit.
+ */
+export function dayBlocks(from: string, to: string): Promise<DayBlock[]> {
+  return invoke<DayBlock[]>("day_blocks", { from, to });
+}
+
+/**
+ * Move a block's start, its end and its target — and, with `endedAt` set to
+ * now, this is *Extend to now*.
+ *
+ * All three every time, because the reader is stating what the block *is*.
+ * That is also why a successful update always clears
+ * {@link Block.ended_by_relaunch}: the marker means *knobas guessed this end*,
+ * and once a person has said what the end is, it is theirs.
+ *
+ * Rejects with `invalid` for a stored context, a malformed entity id, a blank
+ * label, an end before its start, and a block already logged into a worklog —
+ * which is read-only, so that what knobas shows never disagrees with what the
+ * ticket holds — and with `not_found` for a block that is no longer there.
+ */
+export function updateBlock(
+  id: number,
+  startedAt: string,
+  endedAt: string,
+  target: TimerTarget,
+): Promise<DayBlock> {
+  return invoke<DayBlock>("update_block", { id, startedAt, endedAt, target });
+}
+
+/**
+ * Delete a block. Nothing comes back — the day review re-reads the day, which
+ * is the one answer that is true about the rest of the strip as well.
+ *
+ * Rejects the way {@link updateBlock} does: a logged block cannot be deleted
+ * either.
+ */
+export function deleteBlock(id: number): Promise<void> {
+  return invoke<void>("delete_block", { id });
+}

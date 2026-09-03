@@ -74,9 +74,12 @@ test("#/entity/<id> is a detail whose kind is not known yet", () => {
 });
 
 /** M3–M4 addresses parse, so the shell can say "arrives in M<n>" rather than
- * rendering a blank screen or, worse, treating `standup` as a kind. */
+ * rendering a blank screen or, worse, treating `standup` as a kind.
+ *
+ * `#/time` left this list with #279 and has a view of its own; the test above
+ * it is where it went. */
 test("a later milestone's address is known-unknown, not a kind", () => {
-  for (const hash of ["#/time", "#/standup", "#/assets/board", "#/monitor/db-1"]) {
+  for (const hash of ["#/standup", "#/assets/board", "#/monitor/db-1"]) {
     expect(parseHash(hash)).toEqual({ view: "unknown", hash });
   }
 });
@@ -122,9 +125,32 @@ test("the inbox address can carry a context filter", () => {
   expect(parseHash("#/inbox/ctx/")).toEqual({ view: "inbox", ctx: null });
 });
 
+/**
+ * The day review's address (#279). `time` was a reserved M3 word until this
+ * ticket; the second and third assertions are the half graduating a word is
+ * exactly when somebody stops thinking about.
+ *
+ * A tail that is not a day is **today**, not `unknown`: the head owns the
+ * whole address, the way `#/sources/x` and `#/settings/x` already do, and
+ * "arrives in a later milestone" is the one thing this address must not say
+ * any more.
+ */
+test("the day review has an address, and `time` is still not a kind", () => {
+  expect(parseHash("#/time/2026-09-03")).toEqual({ view: "time", day: "2026-09-03" });
+  expect(parseHash("#/time")).toEqual({ view: "time", day: null });
+  expect(parseHash("#/time/whenever")).toEqual({ view: "time", day: null });
+  // The shape is checked, not the calendar -- `Date` in the view owns that.
+  expect(parseHash("#/time/2026-02-31")).toEqual({ view: "time", day: "2026-02-31" });
+  // And the thing that must not happen: a detail slide-over over an entity of
+  // kind `time`.
+  expect(parseHash("#/time/mock:PAY-231")).toEqual({ view: "time", day: null });
+});
+
 test("round-trips every address it produces", () => {
   for (const hash of [
     "#/ctx/all",
+    "#/time",
+    "#/time/2026-09-03",
     "#/ctx/src:jira",
     "#/ticket/mock:PAY-231",
     "#/entity/mock:PAY-231",

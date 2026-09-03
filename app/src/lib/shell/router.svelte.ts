@@ -10,7 +10,9 @@
  * | `#/entity/<entity_id>` | kind-agnostic alias, resolved via `get_entity`   |
  * | `#/inbox`              | the inbox — one actionable stream (#45)          |
  * | `#/inbox/ctx/<id>`     | the inbox, pre-filtered to one context (#47)     |
- * | `#/sources`            | the sources view                                 |
+ * | `#/time/<YYYY-MM-DD>` | the day review for one day (#279)                |
+ * | `#/time`              | the day review, on today                         |
+ * | `#/sources`           | the sources view                                 |
  * | `#/settings`           | the settings view                                |
  * | `#/first-run`          | the §14a wizard                                  |
  *
@@ -42,6 +44,18 @@ export type Route =
     }
   | { view: "sources" }
   | { view: "settings" }
+  /**
+   * The day review (#279): one day's blocks on a strip, editable.
+   *
+   * `day` is `YYYY-MM-DD` **in the reader's own timezone**, or `null` for
+   * today. `null` rather than today's date filled in here on purpose: this
+   * module is pure, and a parse that read the clock would give `#/time` a
+   * different meaning depending on when it was parsed -- including across a
+   * midnight the reader is sitting through. The view resolves `null` against
+   * its own clock, which is also the only place a change of day can be
+   * noticed.
+   */
+  | { view: "time"; day: string | null }
   | { view: "first-run" }
   /**
    * The start-work stepper for one ticket (#44). `key` is the ticket's entity
@@ -75,6 +89,11 @@ const RESERVED = new Set([
   // reasoning the M2-M4 group below is here for, applied to a word that has
   // stopped waiting.
   "inbox",
+  // `time` is a view now (#279): `#/time/2026-09-03` reaches `DayReview`
+  // rather than reading "arrives in a later milestone". It stays in this list
+  // for the reason `inbox` does -- a *kind* called `time` must still never
+  // claim the address.
+  "time",
   // M2-M4, reserved so an open kind never collides with a view.
   //
   // `note` was here until #46 and is not any more: notes are a kind now, so
@@ -82,7 +101,6 @@ const RESERVED = new Set([
   // reaches `Detail`. It is the one word in this list that stopped being a
   // *view* and became a kind, which is exactly what this list is arranged
   // around -- so a later tidy-up that adds it back is a note nobody can open.
-  "time",
   "standup",
   "assets",
   "asset",
@@ -90,6 +108,17 @@ const RESERVED = new Set([
   "monitor",
   "start-work",
 ]);
+
+/**
+ * A day in the address: `YYYY-MM-DD`, four-two-two.
+ *
+ * A shape check, not a calendar check. `#/time/2026-02-31` parses here and is
+ * resolved by `Date` in the view, which is where a real calendar lives; what
+ * this keeps out is `#/time/whenever`, which would otherwise become a day
+ * whose bounds are two `Invalid Date`s and a strip that silently shows
+ * nothing.
+ */
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * `decodeURIComponent` that survives what a person can type.
@@ -126,6 +155,18 @@ export function parseHash(hash: string, ctx: string = DEFAULT_CTX): Route {
     // opens. The bare address stays the whole stream.
     const ctx = segments[1] === "ctx" ? segments.slice(2).map(decode).join("/") : "";
     return { view: "inbox", ctx: ctx === "" ? null : ctx };
+  }
+  // Before the open-kind branch, like `start-work` below and for the same
+  // reason: `time` is in `RESERVED`, so this is the only thing that can reach
+  // the view.
+  //
+  // A tail that is not a day is **today**, not `unknown`. The head owns the
+  // whole address -- the rule `#/sources/x` and `#/settings/x` already follow
+  // -- and "arrives in a later milestone" is the one thing `#/time/whenever`
+  // must not say, now that it does not.
+  if (head === "time") {
+    const day = segments[1] ?? "";
+    return { view: "time", day: DAY.test(day) ? day : null };
   }
   if (head === "sources") return { view: "sources" };
   if (head === "settings") return { view: "settings" };
@@ -172,6 +213,8 @@ export function hashFor(route: Route): string {
   switch (route.view) {
     case "inbox":
       return route.ctx === null ? "#/inbox" : `#/inbox/ctx/${encodeId(route.ctx)}`;
+    case "time":
+      return route.day === null ? "#/time" : `#/time/${route.day}`;
     case "sources":
       return "#/sources";
     case "settings":

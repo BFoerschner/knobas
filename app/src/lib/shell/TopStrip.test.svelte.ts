@@ -207,6 +207,42 @@ test("the strip has a way into settings, and it goes to #/settings", () => {
   expect(router.route).toEqual({ view: "settings" });
 });
 
+/**
+ * *Today* (#279): spec §2's day button, and the one control on this strip that
+ * is drawn unconditionally rather than when it has something to say.
+ *
+ * The address it produces carries **the date**, not the bare `#/time`, and
+ * that is the assertion worth making: an address that meant "whenever this was
+ * opened" would be a bookmark, a note link and a back button that all showed a
+ * different day.
+ */
+test("*Today* opens the day review on the day it is pressed", () => {
+  const { router } = render([]);
+
+  const today = target.querySelector<HTMLButtonElement>('button[title^="Today"]');
+  expect(today, "the strip has no way into the day review").toBeTruthy();
+
+  today!.click();
+  flushSync();
+
+  const now = new Date();
+  const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
+    now.getDate(),
+  ).padStart(2, "0")}`;
+  expect(location.hash).toBe(`#/time/${day}`);
+  expect(router.route).toEqual({ view: "time", day });
+});
+
+/** ...and it says so while the reader is there, like the other destinations. */
+test("the strip marks the day review as current while the reader is on it", () => {
+  location.hash = "#/time/2026-09-03";
+  render([]);
+
+  const today = target.querySelector<HTMLButtonElement>('button[title^="Today"]');
+  expect(today!.getAttribute("aria-current")).toBe("page");
+  expect(tool("Settings")!.getAttribute("aria-current")).toBeNull();
+});
+
 /** Which of the two is current, so the strip says where the reader is. */
 test("the strip marks the surface the reader is actually on", () => {
   location.hash = "#/settings";

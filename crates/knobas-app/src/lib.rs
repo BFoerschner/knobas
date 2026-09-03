@@ -242,6 +242,9 @@ pub fn run() {
             commands::time::start_timer,
             commands::time::stop_timer,
             commands::time::timer_heartbeat,
+            commands::time::day_blocks,
+            commands::time::update_block,
+            commands::time::delete_block,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

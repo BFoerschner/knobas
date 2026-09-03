@@ -19,10 +19,17 @@
   flaps (story 16), which is spec §2's rule for a flap literally: a value that
   changes while you watch.
 
-  The Assets and Today/Day buttons of spec §2 are M3.1's later tickets and M4
-  and are deliberately absent. Reserving a slot for a button that cannot work
-  is how a shell fills up with dead chrome, and a disabled control teaches the
-  reader nothing except that the app is unfinished.
+  **Today** joined them in M3.1 (#279): spec §2's day button, opening the day
+  review on the current date. Unlike the inbox count and the timer it is
+  **always drawn**, because it is a destination rather than a reading — the
+  same rule the sources and settings buttons follow. It carries today's date at
+  the moment it is pressed, so the address names the day rather than meaning
+  "whenever this was opened".
+
+  The Assets buttons of spec §2 are M4's and are deliberately absent. Reserving
+  a slot for a button that cannot work is how a shell fills up with dead chrome,
+  and a disabled control teaches the reader nothing except that the app is
+  unfinished.
 -->
 <script lang="ts">
   import { inbox as sharedInbox, type Inbox } from "../inbox/inbox.svelte";
@@ -33,9 +40,10 @@
   import { sourceMonogram } from "./monogram";
   import { builtinContexts, type RoomContext } from "./contexts";
   import { health as sharedHealth, isActionable, type Health } from "./health.svelte";
-  import type { Router } from "./router.svelte";
+  import { hashFor, type Router } from "./router.svelte";
   import { timer as sharedTimer, type Timer } from "./timer.svelte";
   import { targetReading } from "./timer";
+  import { dayKey } from "../time/day";
 
   let {
     router,
@@ -104,6 +112,8 @@
    * click to say what a second button says by being there.
    */
   const onSettings = $derived(router.route.view === "settings");
+  /** §2's *Today*: the day review, on the day it is pressed (#279). */
+  const onTime = $derived(router.route.view === "time");
 
   /**
    * How each state reads in the cluster's tooltip.
@@ -177,6 +187,19 @@
       <span class="k">{inbox.count}</span>
     </button>
   {/if}
+
+  <button
+    class="tb-btn {onTime ? 'on' : ''}"
+    aria-current={onTime ? "page" : undefined}
+    title="Today — the day's blocks, editable"
+    onclick={() => router.go(hashFor({ view: "time", day: dayKey(new Date()) }))}
+  >
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <rect x="2" y="3" width="12" height="11" rx="1" />
+      <path d="M2 6.5h12M5.5 1.8v2.4M10.5 1.8v2.4" />
+    </svg>
+    <span class="k">Today</span>
+  </button>
 
   <!--
     Absent when nothing is running, deliberately — the inbox count's rule.
