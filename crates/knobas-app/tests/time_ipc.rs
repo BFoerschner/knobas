@@ -511,6 +511,25 @@ async fn the_schema_refuses_a_second_timer_row() {
         "a second timer row was accepted, so two surfaces can disagree about \
          what the clock is on"
     );
+
+    // ...and the same refusal by the other door. The insert above collides on
+    // the primary key because `only_one` defaults to `true`; a writer that
+    // spells the column out can ask for `false`, and only
+    // `timer_only_one_chk` stands between that and a second legal row. The
+    // migration's own comment says the check is what makes the key a
+    // singleton "rather than merely a boolean key with two legal rows" --
+    // this is the assertion that makes the sentence true. Without it the
+    // check can be deleted and every test here stays green.
+    let refused = sqlx::query("insert into knobas.timer (only_one, label) values (false, $1)")
+        .bind(LABEL)
+        .execute(&pool)
+        .await;
+    assert!(
+        refused.is_err(),
+        "knobas.timer took a second row with `only_one = false`, so the \
+         primary key is a boolean key with two legal rows and the timer is \
+         no longer a singleton"
+    );
 }
 
 /// A block that ends before it starts is not a short block, it is a bad write.
