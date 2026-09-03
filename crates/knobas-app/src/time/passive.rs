@@ -1142,4 +1142,26 @@ mod tests {
             "spec #272: visits shorter than two minutes are dropped"
         );
     }
+
+    /// The retention window outlasts every surface that reads a past day.
+    ///
+    /// [`RETENTION_DAYS`]' floor, spelled where lowering it fails rather than
+    /// in prose alone. One half is a constant this crate holds
+    /// ([`MOST_DAYS`](super::week::MOST_DAYS)), so a timesheet that grew to a
+    /// fortnight would fail here rather than start quietly reading days whose
+    /// beats had been swept. The other is a literal, because #288's digest
+    /// does not exist yet and a constant invented for it would be this module
+    /// guessing at another module's rule.
+    #[test]
+    fn the_retention_window_outlasts_the_surfaces_that_read_a_past_day() {
+        /// The standup digest's *yesterday* reaches back at most this far
+        /// (#288: "at most seven days back, so Monday reads Friday").
+        const DIGEST_LOOK_BACK_DAYS: i64 = 7;
+        let week = i64::try_from(super::super::week::MOST_DAYS).expect("a week is small");
+
+        assert!(
+            RETENTION_DAYS >= week + DIGEST_LOOK_BACK_DAYS,
+            "knobas keeps {RETENTION_DAYS} days of observations, and a surface              reads back {week} + {DIGEST_LOOK_BACK_DAYS}: some day the reader              can still be shown is a day the sweep has taken the beats for"
+        );
+    }
 }

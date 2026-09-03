@@ -99,7 +99,11 @@ use crate::IpcError;
 ///
 /// Seven, because the surface is a week and a bound the caller cannot exceed
 /// is cheaper than a read that scans a year because a webview miscounted.
-const MOST_DAYS: usize = 7;
+///
+/// `pub(crate)` for one reader outside this module: `passive::RETENTION_DAYS`
+/// is derived from how far back a surface can read, and this is that number
+/// for the timesheet, pinned rather than copied into a comment (#315).
+pub(crate) const MOST_DAYS: usize = 7;
 
 /// One of the reader's days: the date they call it, and the interval it is.
 ///
