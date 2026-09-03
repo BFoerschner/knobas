@@ -118,9 +118,20 @@ impl JiraSource {
 /// decides whether membership is mirrored is the **configured** id and nothing
 /// else; a discovered one that is not in the config has not been applied to
 /// anything, and saying "found" and stopping there would read as though it
-/// had. That is the shape this says out loud, because the sources view renders
-/// this detail beside the credential's health, which is where a source's
-/// standing gaps belong.
+/// had. That is the shape this says out loud, in the one line a connection
+/// gets.
+///
+/// **How far that line reaches today, exactly.** It is `ConnectionInfo::detail`,
+/// and `ConnectionReport` deliberately does not carry that field (`knobas-app`'s
+/// `sources::ConnectionReport`), so the Add-source dialog never shows it. Where
+/// it does surface is `source_config.auth_detail`, which only `crud::set_secret`
+/// writes -- the re-enter-a-credential path -- and which the next successful sync
+/// clears (`scheduler::apply_health_and_backoff`, `SyncOutcome::Ok` writes a
+/// `None` detail). So a saved source states this gap beside its credential
+/// health from a credential re-entry until its next good run, and nowhere else.
+/// That is the same reach every other clause of this detail has had since M1,
+/// and widening it is an IPC change nobody has ratified; said here so the next
+/// reader does not take the line for a permanent banner.
 ///
 /// A saved source reaches the second arm whenever the reader never filled the
 /// field in: the Add-source dialog fills it for a source being *created*, and
