@@ -1157,8 +1157,10 @@ async fn an_incremental_run_after_one_edit_returns_that_issue_and_moves_the_wate
 /// classic one would. A real Data Center project made from the *Basic software
 /// development* template is **classic**, and it serves exactly one of them:
 /// `fields.parent` is the sub-task relation and is **absent from every issue
-/// in this corpus**, epic children included, while `customfield_10101` carries
-/// `PAY-200` on all five PAY children.
+/// in this corpus**, epic children included, while the Epic Link field carries
+/// `PAY-200` on all five PAY children. Its id is the instance's own and
+/// differed on every seed (`customfield_10101`, `_10102`, `_10109`), which is
+/// why this test reads it from `seed-state.json` rather than naming one.
 ///
 /// So against this server the `epic_link_field` option is not a fallback for
 /// old instances -- it is the only path to epic membership, and a source

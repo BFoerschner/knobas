@@ -469,8 +469,9 @@ over `PUT /rest/api/2/issuetypescheme/<id>`.
 and `OPS` are *classic* Data Center projects, so `fields.parent` — the
 spelling a next-gen or a recent company-managed project uses — is **absent
 from every issue**, the epic's children included. The relationship lives in
-the "Epic Link" custom field, whose id is this instance's own
-(`customfield_10101` on a fresh seed), and the seed records it as
+the "Epic Link" custom field, whose id is this instance's own and differs
+between seeds of the same script (`customfield_10101`, `_10102` and `_10109`
+on three of them), which is why the seed records it as
 `jira.epic_link_field`. A Jira source configured without the adapter's
 `epic_link_field` option therefore mirrors no epic membership at all from this
 server. `knobas-mockd` serves both spellings, which is what hid that until

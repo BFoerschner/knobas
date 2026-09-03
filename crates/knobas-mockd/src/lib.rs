@@ -167,9 +167,11 @@
 //!     and `OPS` are *classic* Data Center projects, and they serve exactly the
 //!     custom field. `fields.parent` is **absent from every issue in the
 //!     corpus**, the epic's five children included — it is the sub-task
-//!     relation there, not the epic one — and the Epic Link id is
-//!     `customfield_10101`, which is the reason `seed-state.json` now records
-//!     `jira.epic_link_field` rather than any suite hard-coding one. Serving
+//!     relation there, not the epic one — and the Epic Link id is the
+//!     instance's own: `customfield_10101`, `_10102` and `_10109` on three
+//!     seeds of the same script, which is the reason `seed-state.json` now
+//!     records `jira.epic_link_field` rather than any suite (or any reader of
+//!     this list) hard-coding one. Serving
 //!     both spellings is therefore a convenience no single instance offers, and
 //!     it hid a real consequence: against a classic Data Center project a Jira
 //!     source configured without `epic_link_field` mirrors **no** epic
