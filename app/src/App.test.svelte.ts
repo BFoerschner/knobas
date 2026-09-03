@@ -1170,28 +1170,47 @@ function pickerTitle(): string | null {
   return picker ? "open" : null;
 }
 
+/** A promoted context, whose room is therefore *about* its anchor. */
+const PROMOTED: ContextRow = {
+  id: "ctx:pay",
+  kind: "epic",
+  title: "SEPA migration",
+  anchor_id: "jira:EPIC-1",
+  created_at: "2026-09-02T09:00:00Z",
+  archived_at: null,
+};
+
 /**
- * The first half of the foreground rule: **the open detail**.
+ * The first rung of the foreground rule: **the open detail beats the room's
+ * anchor**.
  *
  * This rule lives in exactly one place — `App.svelte`'s `foreground` — and it
  * is read by two things that cannot see each other, ⌘T and the heartbeat. ⌘T
  * is the observable half, so pressing it is how the rule is witnessed: the
  * target it starts on *is* the foreground.
+ *
+ * **The detail is opened inside a room that has an anchor**, so the two rungs
+ * genuinely compete. In *All work* they do not — a derived room has no anchor
+ * — and a fixture standing there would pass just as happily with the rungs in
+ * the wrong order, which is what a mutation run showed before this was moved.
  */
-test("⌘T starts on the entity the detail slide-over has open", async () => {
+test("⌘T starts on the open detail rather than on the anchor of the room behind it", async () => {
   dbReady = true;
   healthRows = [row("mock", "ok")];
-  location.hash = "#/ctx/all";
+  contextRows = [PROMOTED];
+  location.hash = "#/ctx/ctx:pay";
 
   app = mount(App, { target, props: {} });
-  await until(() => tabLabels().includes("All work"), "the shell never drew a room");
+  await until(() => roomName() === "SEPA migration", "the stored room never arrived");
 
   router.go("#/ticket/mock:PAY-231");
   flushSync();
   pressTimerKey();
   await until(() => timerStarts.length > 0, "⌘T never reached the timer");
 
-  expect(timerStarts).toEqual([{ kind: "entity", entity_id: "mock:PAY-231" }]);
+  expect(timerStarts, "the room's anchor won over what the reader has open").toEqual([
+    { kind: "entity", entity_id: "mock:PAY-231" },
+  ]);
   expect(pickerTitle(), "the picker opened over a foreground that existed").toBeNull();
 });
 
@@ -1206,16 +1225,7 @@ test("⌘T starts on the entity the detail slide-over has open", async () => {
 test("⌘T with no detail open starts on the room's anchor, never on the room itself", async () => {
   dbReady = true;
   healthRows = [row("mock", "ok")];
-  contextRows = [
-    {
-      id: "ctx:pay",
-      kind: "epic",
-      title: "SEPA migration",
-      anchor_id: "jira:EPIC-1",
-      created_at: "2026-09-02T09:00:00Z",
-      archived_at: null,
-    },
-  ];
+  contextRows = [PROMOTED];
   location.hash = "#/ctx/ctx:pay";
 
   app = mount(App, { target, props: {} });

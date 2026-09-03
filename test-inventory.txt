@@ -45,6 +45,7 @@ knobas-app	lib/knobas_app	commands::time::tests::the_mirror_declares_the_target_
 knobas-app	lib/knobas_app	commands::time::tests::the_mirror_invokes_the_commands_by_their_registered_names
 knobas-app	lib/knobas_app	commands::time::tests::the_mirror_sends_the_argument_names_tauri_expects
 knobas-app	lib/knobas_app	commands::time::tests::the_running_timer_shape_matches_its_typescript_mirror
+knobas-app	lib/knobas_app	commands::time::tests::the_shells_context_namespace_is_the_one_the_backend_refuses
 knobas-app	lib/knobas_app	error::tests::a_failed_run_keeps_the_source_it_belongs_to
 knobas-app	lib/knobas_app	error::tests::a_link_endpoint_that_is_not_in_the_mirror_is_not_found
 knobas-app	lib/knobas_app	error::tests::every_code_has_its_snake_case_spelling
@@ -305,7 +306,7 @@ knobas-app	test/suggestions_ipc	dismissing_is_remembered_across_a_later_pass
 knobas-app	test/suggestions_ipc	drawing_the_reverse_of_a_proposal_empties_the_tray_row_and_keeps_the_users_direction
 knobas-app	test/suggestions_ipc	linking_a_proposed_pair_by_hand_accepts_it_instead_of_refusing
 knobas-app	test/suggestions_ipc	the_tray_is_scoped_to_the_room_it_is_drawn_in
-knobas-app	test/time_ipc	a_heartbeat_carrying_a_context_as_its_foreground_is_refused
+knobas-app	test/time_ipc	a_foreground_the_timer_could_never_run_on_does_not_cost_the_beat
 knobas-app	test/time_ipc	a_heartbeat_moves_the_last_alive_stamp_forward
 knobas-app	test/time_ipc	a_heartbeat_with_no_timer_running_is_not_a_failure
 knobas-app	test/time_ipc	a_label_timers_line_carries_the_label_and_no_entity
