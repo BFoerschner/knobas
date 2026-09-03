@@ -4,8 +4,14 @@
 -- Single-writer (orchestrator), like every migration: a stream that needs more
 -- schema requests `0016` and never edits this file or its predecessors -- sqlx
 -- checksums applied migrations and an edit fails startup on every existing
--- database. `0013` is the timer's, `0014` is the worklog's (#280), and `0015`
--- was allocated to this stream.
+-- database.
+--
+-- `0013` is the timer's. **`0014` is #280's and is not in the tree yet** -- that
+-- stream is in flight on `feat/280-worklog-to-jira` and `0013`'s own header
+-- allocated the number to it -- so this stream took `0015` and left the slot
+-- empty. sqlx applies by version and skips what it has already run, so a
+-- development database that took this first takes `0014` when #280 lands, out
+-- of order and without incident; a fresh profile takes them in order.
 --
 -- Frozen surface: `crates/knobas-db/migrations/**` is §10.8-frozen, and this
 -- migration is a ratified exception recorded in that section with issue #282.
@@ -88,6 +94,15 @@ create table knobas.heartbeat (
 -- order. One index, on the column all of them narrow by.
 create index heartbeat_at_idx on knobas.heartbeat (at);
 
+-- ## One index on an existing table, and why it cannot refuse an honest write
+--
+-- The statement below is the only thing here that touches `knobas.block`. It
+-- adds no column and alters no constraint of `0013`'s; it is called out anyway,
+-- because a uniqueness constraint arriving on a table that already has writers
+-- is the kind of addition that can start refusing writes nothing refused
+-- yesterday. This one cannot: it covers `passive` rows only, and until this
+-- migration lands there are none -- `0013` enumerated the kind with no writer.
+--
 -- ## The passive block is addressed by the instant it starts at
 --
 -- The day read reconciles: it derives the day's passive spans and makes the

@@ -10,7 +10,7 @@
 //!
 //! One `knobas.setting` row, [`SETTING_KEY`], default `false` -- the backup
 //! module's precedent, and therefore no migration for the setting itself. With
-//! it off, [`record`] is never called and [`materialize`] returns before it
+//! it off, [`observe`] writes nothing and [`materialize`] returns before it
 //! reads anything: knobas records nothing, rather than recording and declining
 //! to look. That is the difference between a setting and a filter, and it is
 //! the whole of what "opt in" means here.
@@ -278,16 +278,31 @@ pub async fn set_enabled(pool: &PgPool, on: bool) -> Result<bool, IpcError> {
     Ok(on)
 }
 
+/// Record this beat, if passive attribution is on.
+///
+/// The one call [`heartbeat`](super::heartbeat) makes, so the switch is read
+/// and the row is written in one place rather than as a sequence the caller
+/// has to get in the right order. It runs **after** the stamp has landed: see
+/// that function for why nothing about the foreground may cost the beat.
+///
+/// # Errors
+/// [`IpcError`] if the setting cannot be read or the write fails.
+pub async fn observe(pool: &PgPool, foreground: Option<&TimerTarget>) -> Result<(), IpcError> {
+    if !enabled(pool).await? {
+        return Ok(());
+    }
+    record(pool, foreground).await
+}
+
 /// Insert one observation.
 ///
-/// Called by [`heartbeat`](super::heartbeat) **after** the stamp has landed and
-/// only while the setting is on. A malformed foreground arrives here as
-/// `None`: the beat still happened and the window was still focused, so the
-/// observation is a real one -- what it cannot say is what was open.
+/// A malformed foreground arrives here as `None`: the beat still happened and
+/// the window was still focused, so the observation is a real one -- what it
+/// cannot say is what was open.
 ///
 /// # Errors
 /// [`IpcError`] if the write fails.
-pub async fn record(pool: &PgPool, foreground: Option<&TimerTarget>) -> Result<(), IpcError> {
+async fn record(pool: &PgPool, foreground: Option<&TimerTarget>) -> Result<(), IpcError> {
     let (entity_id, label) = foreground.map_or((None, None), TimerTarget::columns);
     sqlx::query("insert into knobas.heartbeat (entity_id, label) values ($1, $2)")
         .bind(entity_id)
@@ -431,6 +446,15 @@ pub(super) async fn materialize(
 /// to lose is the attribution rather than the whole observation. [`vet`] is
 /// the same rule the timer refuses on, asked here so there is one answer to
 /// "may time be attributed to this" in the crate.
+///
+/// **This is deliberately not [`target_of`](super::target_of), which decodes
+/// the same two columns for the timer and the block.** That function is
+/// *exactly one, or the row is a schema failure and says so*; this one is
+/// **at most one**, because `heartbeat_target_chk` allows neither half and a
+/// beat with nothing in the foreground is a real observation rather than a
+/// broken row. Sharing one decoder would mean either an internal error on
+/// every empty room or a silent fallback that made a broken timer row look
+/// like an empty one. Two rules, two decoders, and the reason written down.
 fn observation_of(row: &sqlx::postgres::PgRow) -> Result<Observation, IpcError> {
     let entity_id: Option<String> = row.try_get("entity_id")?;
     let label: Option<String> = row.try_get("label")?;
@@ -479,6 +503,54 @@ mod tests {
 
     fn seconds(span: &PassiveSpan) -> i64 {
         span.length().num_seconds()
+    }
+
+    /// **The cap is spent in order, and the later visit is the one trimmed.**
+    ///
+    /// Two dense sessions, each claiming a window past its last beat, and a
+    /// day that can afford one of those tails and not both. The first visit is
+    /// offered whole and the second ends at its last beat -- which is the
+    /// ordering rule stated as an outcome rather than as a comment, and the
+    /// case neither `the_cap_binds_when_heartbeats_overlap` (one visit) nor
+    /// the tail tests (no competition) can reach.
+    #[test]
+    fn the_cap_is_spent_in_order_and_the_later_visit_is_trimmed() {
+        let mut observations = beats(Some(on("jira:PAY-231")), 0, 600, 5);
+        observations.extend(beats(Some(on("jira:PAY-99")), 3600, 4200, 5));
+
+        let spans = derive(&observations);
+
+        assert_eq!(spans.len(), 2, "two sessions, two visits: {spans:?}");
+        assert_eq!(
+            seconds(&spans[0]),
+            630,
+            "the earlier visit is paid first and keeps the window its last \
+             beat credits forward"
+        );
+        assert_eq!(
+            seconds(&spans[1]),
+            600,
+            "and the later one is trimmed to what the day has left"
+        );
+    }
+
+    /// ...and when what the day has left is under the floor, the visit is not
+    /// offered at all: a stretch knobas cannot pay for is not a stretch it may
+    /// suggest, and nothing after it can be paid for either.
+    #[test]
+    fn a_visit_the_day_cannot_pay_for_is_not_offered() {
+        let mut observations = beats(Some(on("jira:PAY-231")), 0, 600, 30);
+        observations.extend(beats(Some(on("jira:PAY-99")), 630, 720, 30));
+
+        let spans = derive(&observations);
+
+        assert_eq!(
+            spans.len(),
+            1,
+            "the day had ninety seconds of budget left and the second visit \
+             wanted a hundred and twenty: {spans:?}"
+        );
+        assert_eq!(spans[0].target, on("jira:PAY-231"));
     }
 
     /// The floor, at the length the ticket names.

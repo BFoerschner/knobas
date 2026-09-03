@@ -1506,3 +1506,50 @@ async fn a_day_with_no_observations_is_left_exactly_as_it_was() {
         "a day with no observations had its passive blocks reconciled away"
     );
 }
+
+/// A passive block the day no longer supports is **taken back**, and the
+/// commonest way that happens is a person claiming the stretch themselves.
+///
+/// This is the half of the reconciliation the other tests do not reach: they
+/// witness rows being offered and rows being left alone, and this witnesses one
+/// being forgotten. Without it a `materialize` that only ever inserted would
+/// leave the reader looking at knobas' guess underneath the block they had just
+/// written over it.
+///
+/// It is also where the overlap rule is witnessed at its **sharpest edge**:
+/// the block the reader writes covers only half of the passive one, and the
+/// passive one goes **whole**. That is the documented direction -- a
+/// suggestion can be lost, never invented -- and it is the shape a reviewer
+/// should argue with if they are going to argue with anything here.
+#[tokio::test]
+async fn a_passive_block_a_new_manual_one_overlaps_is_taken_back_whole() {
+    let pool = scratch("time-passive-forget").await;
+    time::passive::set_enabled(&pool, true).await.unwrap();
+    let midnight = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
+    let at = |h, m| midnight + Duration::hours(h) + Duration::minutes(m);
+    beats(
+        &pool,
+        Some(&on(TICKET)),
+        at(9, 0),
+        21,
+        Duration::seconds(30),
+    )
+    .await;
+    assert_eq!(
+        day(&pool, midnight).await,
+        vec![(BlockKind::Passive, on(TICKET), 600)],
+        "a block was offered to take back"
+    );
+
+    // The reader says what the morning was, over part of the same stretch.
+    time::day::create(&pool, at(9, 5), at(9, 40), labelled(LABEL))
+        .await
+        .expect("an unaccounted stretch can be claimed");
+
+    assert_eq!(
+        day(&pool, midnight).await,
+        vec![(BlockKind::Manual, labelled(LABEL), 2100)],
+        "the passive block knobas had guessed is still there underneath the \
+         one the reader wrote over it"
+    );
+}

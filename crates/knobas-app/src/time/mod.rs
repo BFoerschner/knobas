@@ -482,12 +482,18 @@ pub async fn heartbeat(
 
     // Last, and after the stamp, for the same reason the vet is: nothing about
     // the foreground may cost the beat. The stamp is already durable by the
-    // time this runs, so a failed setting read or a failed insert is reported
-    // to the caller without ever having put `last_heartbeat` at risk -- and it
-    // is reported rather than swallowed, because a recording that has silently
-    // stopped is a day review that quietly says the reader did nothing.
-    if passive::enabled(pool).await? {
-        passive::record(pool, foreground.as_ref()).await?;
+    // time this runs, so a failed setting read or a failed insert cannot put
+    // `last_heartbeat` at risk.
+    //
+    // **Logged as well as returned**, and the log is the half that matters: a
+    // beat is sent every thirty seconds from a window whose store deliberately
+    // keeps what is on screen when one rejects (#278, `timer.svelte.ts`), so a
+    // failure that only travelled the wire would be seen by nobody -- and a
+    // recording that has silently stopped is a day review that quietly says
+    // the reader did nothing.
+    if let Err(error) = passive::observe(pool, foreground.as_ref()).await {
+        tracing::warn!(%error, "passive attribution did not record this beat");
+        return Err(error);
     }
 
     row.as_ref().map(timer_of).transpose()

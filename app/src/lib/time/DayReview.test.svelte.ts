@@ -632,6 +632,32 @@ test("*Assign…* on a gap writes a block spanning it and the gap goes", async (
   });
 });
 
+/**
+ * **The heading does not count knobas' own guesses as tracked time.**
+ *
+ * A passive block says *what was open — not tracked* in the same view, so a
+ * total that added it would contradict, in one line, every block it summed.
+ * Both numbers are asserted, and they are different numbers on purpose: a
+ * heading that simply dropped passive rows and one that counted them into
+ * *offered* are told apart only by the second reading.
+ */
+test("the heading counts manual time as tracked and passive time as offered", async () => {
+  render([block(1, at(9), at(10)), passive(2, at(10), at(10, 45))]);
+  await vi.waitFor(() => expect(strip()).toEqual(["block", "block"]));
+
+  expect(heading()).toContain("1 h tracked");
+  expect(heading()).toContain("45 min offered");
+});
+
+/** With nothing passive on the day, the second reading is absent entirely. */
+test("a day with no passive blocks says nothing about offered time", async () => {
+  render([block(1, at(9), at(10))]);
+  await vi.waitFor(() => expect(strip()).toEqual(["block"]));
+
+  expect(heading()).toContain("1 h tracked");
+  expect(heading()).not.toContain("offered");
+});
+
 /** One form at a time: opening *Assign…* on a gap closes the one on a block. */
 test("only one assign form is open at a time", async () => {
   render([passive(1, at(9), at(10)), block(2, at(11), at(12))]);
@@ -650,8 +676,10 @@ test("only one assign form is open at a time", async () => {
 });
 
 /**
- * A refused assignment says why, in the backend's own words, and leaves the
- * strip alone — the rule the edit path follows for the same reason.
+ * A refused assignment says why, in the backend's own words, and **leaves the
+ * form open with what the reader typed still in it** — the rule the edit path
+ * follows, and the reason it matters here is that the sentence has to sit
+ * beside the field it is about rather than beside a form that has gone.
  */
 test("a refused assignment shows the reason the backend gave", async () => {
   render([passive(1, at(9), at(10))], {
@@ -672,4 +700,9 @@ test("a refused assignment shows the reason the backend gave", async () => {
     flushSync();
     expect(text()).toContain("PAY-999 is not an entity knobas knows");
   });
+  const field = target.querySelector<HTMLInputElement>(
+    'input[aria-label="What this time was on"]',
+  );
+  expect(field, "the form closed under the refusal it was meant to explain").not.toBeNull();
+  expect(field!.value).toBe("jira:PAY-999");
 });

@@ -128,24 +128,49 @@
   let editing = $state<number | null>(null);
   let form = $state({ from: "", to: "", kind: "label" as TimerTarget["kind"], value: "" });
   /**
-   * The stretch whose *Assign…* form is open, if any (#282).
+   * A stretch the reader is naming — a passive block, or a gap.
    *
-   * One shape for both paths, and `id` is the whole difference: a passive
-   * block has a row to rewrite and a gap does not. Keeping them one state
-   * rather than two is what stops the strip opening an assign form and an edit
-   * form on the same row, and what lets one `<form>` serve both.
+   * One type for both paths, and `id` is the whole difference: a passive block
+   * has a row to rewrite and a gap does not. A named type rather than the
+   * shape spelled out at each of the four places it travels through, because
+   * that is how the two paths come to disagree about what an assignment is.
    */
-  let assigning = $state<null | { key: string; from: string; to: string; id: number | null }>(null);
+  interface Assignment {
+    /** The segment it is open on, so one form is open at a time. */
+    key: string;
+    from: string;
+    to: string;
+    /** The block to rewrite, or `null` for a gap, which has no row yet. */
+    id: number | null;
+  }
+
+  /** The stretch whose *Assign…* form is open, if any (#282). */
+  let assigning = $state<Assignment | null>(null);
   let assignForm = $state({ kind: "label" as TimerTarget["kind"], value: "" });
 
   const segments = $derived(segmentsOf(rows));
 
-  const tracked = $derived(
-    rows.reduce(
-      (total, entry) => total + minutesBetween(entry.block.started_at, entry.block.ended_at),
-      0,
-    ),
-  );
+  /** Minutes over the rows a predicate keeps. */
+  function total(kind: "manual" | "passive"): number {
+    return rows
+      .filter((entry) => entry.block.kind === kind)
+      .reduce(
+        (sum, entry) => sum + minutesBetween(entry.block.started_at, entry.block.ended_at),
+        0,
+      );
+  }
+
+  /**
+   * **Tracked time is manual time, and passive time is counted beside it.**
+   *
+   * A passive block says *what was open — not tracked*, so a heading that
+   * added it to the tracked total would contradict, in one line, every block
+   * it was summing. The two numbers are the two things a person wants at a
+   * glance: what they have said their day was, and what knobas is offering to
+   * fill the rest with.
+   */
+  const tracked = $derived(total("manual"));
+  const offered = $derived(total("passive"));
 
   /**
    * Read the day whenever the address names another one.
@@ -244,7 +269,7 @@
    * and pre-filling it with knobas' own guess would turn the question into a
    * confirmation of the thing the whole feature is careful not to assert.
    */
-  function assign(over: { key: string; from: string; to: string; id: number | null }) {
+  function assign(over: Assignment) {
     refusal = null;
     editing = null;
     assigning = assigning?.key === over.key ? null : over;
@@ -259,18 +284,21 @@
    * passive block out of the day read's reconciliation — see `time::day`'s
    * `UPDATE`. Both re-read the day, because both change what the strip is.
    */
-  function saveAssignment(over: { from: string; to: string; id: number | null }) {
+  function saveAssignment(over: Assignment) {
     const value = assignForm.value.trim();
     const target: TimerTarget =
       assignForm.kind === "entity"
         ? { kind: "entity", entity_id: value }
         : { kind: "label", label: value };
-    void write(() => {
-      assigning = null;
-      return over.id === null
+    // The form is closed by `write` **on success only**, the way the edit form
+    // is: a refusal leaves it open with what the reader typed still in it, so
+    // the sentence the backend sent is beside the field it is about rather
+    // than beside a form that has gone.
+    void write(() =>
+      over.id === null
         ? io.createBlock(over.from, over.to, target)
-        : io.updateBlock(over.id, over.from, over.to, target);
-    });
+        : io.updateBlock(over.id, over.from, over.to, target),
+    );
   }
 
   /** The half of a target a person types: an entity id, or the label itself. */
@@ -335,6 +363,9 @@
     <h1>
       {dayLabel(key)}
       <span class="k">{durationReading(tracked)} tracked</span>
+      {#if offered > 0}
+        <span class="k offered">{durationReading(offered)} offered</span>
+      {/if}
     </h1>
     <div class="days">
       <button class="btn sm" onclick={() => go(shiftDay(key, -1))} aria-label="The day before">
@@ -379,7 +410,7 @@
       the fields are the same question, and two copies is how the gap path and
       the block path come to disagree about which halves a target may have.
     -->
-    {#snippet assignment(over: { key: string; from: string; to: string; id: number | null })}
+    {#snippet assignment(over: Assignment)}
       <form
         class="edit"
         onsubmit={(event) => {
@@ -592,6 +623,10 @@
     display: flex;
     align-items: center;
     gap: 4px;
+  }
+
+  .offered {
+    color: var(--amber);
   }
 
   .refusal {

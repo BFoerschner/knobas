@@ -103,6 +103,7 @@ knobas-app	lib/knobas_app	tests::the_window_may_not_be_narrower_than_the_stylesh
 knobas-app	lib/knobas_app	time::passive::tests::a_target_interrupted_by_another_does_not_merge_across_it
 knobas-app	lib/knobas_app	time::passive::tests::a_visit_of_ninety_seconds_is_not_a_block
 knobas-app	lib/knobas_app	time::passive::tests::a_visit_past_the_floor_is_a_block
+knobas-app	lib/knobas_app	time::passive::tests::a_visit_the_day_cannot_pay_for_is_not_offered
 knobas-app	lib/knobas_app	time::passive::tests::adjacent_visits_to_one_target_are_one_block
 knobas-app	lib/knobas_app	time::passive::tests::an_unfocused_observation_is_neither_time_nor_attribution
 knobas-app	lib/knobas_app	time::passive::tests::focused_time_with_nothing_open_attributes_nothing_and_pays_for_itself
@@ -111,6 +112,7 @@ knobas-app	lib/knobas_app	time::passive::tests::observations_out_of_order_derive
 knobas-app	lib/knobas_app	time::passive::tests::silence_longer_than_a_beat_window_breaks_a_visit
 knobas-app	lib/knobas_app	time::passive::tests::the_beat_window_is_the_interval_the_shell_beats_at
 knobas-app	lib/knobas_app	time::passive::tests::the_cap_binds_when_heartbeats_overlap
+knobas-app	lib/knobas_app	time::passive::tests::the_cap_is_spent_in_order_and_the_later_visit_is_trimmed
 knobas-app	lib/knobas_app	time::tests::a_label_is_trimmed_and_may_not_be_blank
 knobas-app	lib/knobas_app	time::tests::a_note_and_a_synced_item_are_both_legal_targets
 knobas-app	lib/knobas_app	time::tests::a_stored_context_is_not_a_timer_target
@@ -333,6 +335,7 @@ knobas-app	test/time_ipc	a_heartbeat_with_no_timer_running_is_not_a_failure
 knobas-app	test/time_ipc	a_label_timers_line_carries_the_label_and_no_entity
 knobas-app	test/time_ipc	a_logged_block_refuses_both_edits_and_says_why
 knobas-app	test/time_ipc	a_manual_block_is_never_turned_passive
+knobas-app	test/time_ipc	a_passive_block_a_new_manual_one_overlaps_is_taken_back_whole
 knobas-app	test/time_ipc	a_second_start_is_refused_and_leaves_the_first_running
 knobas-app	test/time_ipc	a_started_timer_is_what_the_next_read_answers_with
 knobas-app	test/time_ipc	a_stored_context_is_refused_as_a_target

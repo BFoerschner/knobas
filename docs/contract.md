@@ -3644,8 +3644,19 @@ From this commit on, each of the following requires an orchestrator decision **a
   **every** time command lives"); what is new here is one migration, three commands, one changed
   statement, and one read that writes.
 
-  **The migration.** `0015_the_heartbeat_and_what_it_saw.sql` adds one table and one index and
-  edits nothing. `0014` is #280's worklog table; this stream took the next free number after it.
+  **The migration.** `0015_the_heartbeat_and_what_it_saw.sql` adds one table, one index on it, and
+  **one partial unique index on the existing `knobas.block`** — no column, constraint or row of
+  `0013`'s is altered, and no earlier migration file is touched. The third statement is called out
+  rather than folded into "adds a table", because a uniqueness constraint arriving on a table that
+  already has writers is the kind of addition that can refuse a write nothing refused yesterday;
+  the paragraph below argues it cannot refuse an honest one.
+
+  **`0014` is #280's and is not in the tree yet.** That stream is in flight on
+  `feat/280-worklog-to-jira` and #278's entry above already allocated it ("the next free number is
+  `0014`, and #280's worklog table takes it"), so this stream took `0015` and left the slot. sqlx
+  applies by version and skips what it has already run, so a **development** database that took
+  `0015` first takes `0014` when #280 lands, out of order and without incident; a fresh profile
+  takes them in order. Nothing has shipped, so no database exists that this can matter to.
 
   ```sql
   create table knobas.heartbeat (
@@ -3682,7 +3693,8 @@ From this commit on, each of the following requires an orchestrator decision **a
   the obvious next accuracy fix — needs no schema.
 
   **A passive block is addressed by the instant it starts at**, which is what
-  `block_passive_start_idx` says and what the reconciliation's upsert conflicts on. Spans are
+  `block_passive_start_idx` — the one addition to an existing table — says, and what the
+  reconciliation's upsert conflicts on. Spans are
   disjoint by construction, so two passive blocks starting at the same instant is not a race to
   resolve but a statement that cannot be true. Partial, on `passive` only: two *manual* blocks
   may honestly start in the same second, and a block that has been assigned leaves the index the
@@ -3770,10 +3782,13 @@ From this commit on, each of the following requires an orchestrator decision **a
   `crates/knobas-app/src/{error,profile}.rs` are untouched: the failures are `invalid` and query
   failures, which `IpcError` already carries. The backup export needs no change — it dumps the
   whole `knobas` schema (design §16.12), so `knobas.heartbeat` rides in it. `knobas_core` gains
-  nothing. **The worklog draft's own guard is #280's**: `time::worklog`'s `UNLOGGED_BLOCKS` reads
-  `knobas.block` without narrowing on `kind`, which was harmless while nothing wrote a passive
-  row and is not any more; it wants `and kind = 'manual'` and an assertion beside it, and it is
-  named here because this entry is what makes it necessary.
+  nothing. **The worklog draft's own guard is #280's, and it is not in this tree**:
+  `crates/knobas-app/src/time/worklog.rs` exists only on `feat/280-worklog-to-jira`, where
+  `UNLOGGED_BLOCKS` reads `knobas.block` without narrowing on `kind`. That was harmless while
+  nothing wrote a passive row and is not any more — spec #272: "*Log all* … never touches passive
+  or label blocks" — so it wants `and kind = 'manual'` and an assertion beside it. It is named
+  here, in the entry that makes it necessary, rather than fixed here, because that branch is
+  being live-tested and is not this stream's to edit; #280's merge-manager or #283 owns it.
 
   **Which barrels were appended**: three lines at the foot of the `commands::time::` group in
   `crates/knobas-app/src/lib.rs`'s `generate_handler!` list, three functions at the foot of
