@@ -558,10 +558,13 @@ async fn a_cancelled_run_leaves_the_source_lock_free() {
     // buying a green that says nothing. `await_inside` puts the run past that
     // statement and inside the adapter, where it demonstrably holds the lock.
     await_inside(&inside).await;
+    let mut asking = probe(&pool).await;
     assert!(
-        inside.load(Ordering::SeqCst) > 0,
-        "the run must be holding the source's lock when the cancellation arrives"
+        !lock_is_free(&mut asking, &id).await,
+        "the run must be holding the source's lock when the cancellation \
+         arrives, or what follows is about nothing"
     );
+    drop(asking);
 
     scheduler.shutdown().await;
 
@@ -578,35 +581,63 @@ async fn a_cancelled_run_leaves_the_source_lock_free() {
     retire(&pool, &ids).await;
 }
 
-/// Wait, to a deadline, for `source_id`'s advisory lock to come free.
+/// One pooled connection to ask [`lock_is_free`] down, bounded.
+///
+/// The wait is on `acquire`, not on the question: `pg_try_advisory_lock`
+/// cannot block, but drawing the connection to ask it on can, and a test that
+/// hangs on a saturated pool reports nothing at all. The old single-shot form
+/// of this assertion had a timeout around the whole query for that reason;
+/// this is where it went.
+async fn probe(pool: &PgPool) -> sqlx::pool::PoolConnection<sqlx::Postgres> {
+    tokio::time::timeout(Duration::from_secs(5), pool.acquire())
+        .await
+        .expect("a connection to ask about the lock on")
+        .unwrap()
+}
+
+/// Is `source_id`'s advisory lock free **right now**?
 ///
 /// `pg_try_advisory_lock` is the *non-blocking* form: it answers at once
-/// whether the lock is free rather than queueing behind whoever holds it, so
-/// the deadline here bounds the waiting and no query can hang inside it. The
-/// answer is taken on one connection held for the whole poll and handed
-/// straight back on success, because a session lock belongs to the session
-/// that took it -- an unlock on some other connection out of the pool would
-/// release nothing and leave the test's own lock behind for whoever draws
-/// that connection next.
-async fn await_lock_free(pool: &PgPool, source_id: &str) -> bool {
-    let mut conn = pool.acquire().await.unwrap();
-    for attempt in 0..250 {
-        if attempt > 0 {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        let (free,): (bool,) = sqlx::query_as("select pg_try_advisory_lock(hashtext($1::text))")
+/// rather than queueing behind whoever holds it, so this cannot hang and a
+/// caller can ask it in either direction -- "nobody holds it yet" is as much
+/// an answer as "somebody still does".
+///
+/// Takes the connection rather than the pool because the lock it may acquire
+/// is a **session** lock: it belongs to the session that took it, so the
+/// unlock has to go down the same connection. Issued on whatever the pool
+/// handed out next, the unlock would release nothing and leave the test's own
+/// lock sitting on a pooled connection for whoever draws it after.
+async fn lock_is_free(conn: &mut sqlx::PgConnection, source_id: &str) -> bool {
+    let (free,): (bool,) = sqlx::query_as("select pg_try_advisory_lock(hashtext($1::text))")
+        .bind(source_id)
+        .fetch_one(&mut *conn)
+        .await
+        .unwrap();
+    if free {
+        sqlx::query("select pg_advisory_unlock(hashtext($1::text))")
             .bind(source_id)
-            .fetch_one(&mut *conn)
+            .execute(&mut *conn)
             .await
             .unwrap();
-        if free {
-            sqlx::query("select pg_advisory_unlock(hashtext($1::text))")
-                .bind(source_id)
-                .execute(&mut *conn)
-                .await
-                .unwrap();
+    }
+    free
+}
+
+/// Wait, to a five-second deadline, for `source_id`'s advisory lock to come
+/// free -- one connection for the whole poll, for the reason
+/// [`lock_is_free`] gives.
+///
+/// Returns rather than panicking like its siblings above, and that is the
+/// difference between a harness that could not get going and a claim that is
+/// false: a lock still held when the deadline runs out is the *subject* of
+/// the test that calls this, so the message belongs at that call site.
+async fn await_lock_free(pool: &PgPool, source_id: &str) -> bool {
+    let mut conn = probe(pool).await;
+    for _ in 0..250 {
+        if lock_is_free(&mut conn, source_id).await {
             return true;
         }
+        tokio::time::sleep(Duration::from_millis(20)).await;
     }
     false
 }
