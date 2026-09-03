@@ -817,6 +817,32 @@ async fn sync(state: &SourcesState) {
     wait.await.expect("the run reports its ending");
 }
 
+/// Sync the source **from no position at all**, and wait for the run to end.
+///
+/// `knobas_sync::backfill`'s own words: an incremental run re-fetches what
+/// changed *upstream*, and it decides that from the watermark and the
+/// `(key, updated)` pairs the previous run recorded. A fixture that changes a
+/// field through the REST API and then wants the mirror to agree is asking for
+/// exactly the job that entry point exists to do -- so it asks for it, rather
+/// than syncing repeatedly and hoping an incremental notices.
+///
+/// Measured, not assumed: three live runs asserted after ordinary `sync` calls
+/// -- the last of them six of them over twenty-two seconds, with Jira's search
+/// index already agreeing -- and `sync.live_item` held the old assignee every
+/// time. It is deterministic, not flaky.
+async fn backfill(state: &SourcesState) {
+    let (done, wait) = tokio::sync::oneshot::channel();
+    let sink = Arc::new(Ending {
+        done: std::sync::Mutex::new(Some(done)),
+    });
+    state
+        .scheduler
+        .trigger(JIRA, SyncTrigger::Backfill, Some(sink))
+        .await
+        .expect("the backfill starts");
+    wait.await.expect("the run reports its ending");
+}
+
 struct Ending {
     done: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 }
@@ -1572,24 +1598,22 @@ async fn a_seeded_days_work_is_what_the_digest_lists_under_yesterday() {
     // -- and now wait for the *mirror* to have caught up ---------------------
     //
     // The precondition the digest's mirror half needs is "`sync.live_item`
-    // holds this ticket as the suite's", and one `sync` call is not a promise
-    // of it. Three things sit between the PUT and that row, and each of them
-    // takes its own time: Jira's search index (waited for above -- the adapter
-    // enumerates through Lucene, not the database), the incremental run's own
-    // watermark, and the scheduler, which may hand back a run that was already
-    // in flight when the write queue flushed a moment earlier.
+    // holds this ticket as the suite's", and an ordinary sync does not deliver
+    // it: an incremental run decides what to re-fetch from its watermark and
+    // the `(key, updated)` pairs it recorded last time, and an assignment made
+    // through Jira's own assignee endpoint does not reliably move that item
+    // into the window. Measured over three live runs, the last with six syncs
+    // across twenty-two seconds and the search index already agreeing: the
+    // mirror held the old assignee every time.
     //
-    // Asserting after exactly one sync makes the test a race against all
-    // three, and it lost: the first live run reported two of the three
-    // producers with the mirror's missing, and the second reported the mirror
-    // still holding `mara.lindqvist` with the index already agreeing. So this
-    // *converges* on the precondition instead of assuming it, and fails
-    // loudly with what the mirror actually held if it never arrives. What is
-    // under test is what the digest makes of the mirror, not how promptly a
-    // sync reaches it.
+    // So this asks for the run that exists for exactly this -- `backfill`,
+    // no stored position, `knobas_sync::backfill`'s own reason -- and still
+    // converges rather than assuming, because the assertion downstream is
+    // about what the digest makes of the mirror and not about how a sync got
+    // there. It fails loudly with what the mirror actually held.
     let mut attributed_to = None;
-    for attempt in 0..6 {
-        sync(&state).await;
+    for attempt in 0..3 {
+        backfill(&state).await;
         attributed_to = sqlx::query_scalar::<_, Option<String>>(
             "select author from sync.live_item where entity_id = $1",
         )
@@ -1600,7 +1624,7 @@ async fn a_seeded_days_work_is_what_the_digest_lists_under_yesterday() {
         if attributed_to.as_deref() == Some(env.user.as_str()) {
             if attempt > 0 {
                 println!(
-                    "SEEDED mirror caught up with the assignment on sync {}",
+                    "SEEDED mirror caught up with the assignment on backfill {}",
                     attempt + 1
                 );
             }
@@ -1611,9 +1635,9 @@ async fn a_seeded_days_work_is_what_the_digest_lists_under_yesterday() {
     assert_eq!(
         attributed_to.as_deref(),
         Some(env.user.as_str()),
-        "six syncs and the mirror still does not hold {TRANSITIONED} as the suite's, so the \
-         digest cannot attribute it; the write itself landed (its 204 is asserted above) and \
-         the search index agreed (the wait above returned)"
+        "three backfills and the mirror still does not hold {TRANSITIONED} as the suite's, so \
+         the digest cannot attribute it; the write itself landed (its 204 is asserted above) \
+         and the search index agreed (the wait above returned)"
     );
 
     // -- and what the digest makes of it ------------------------------------
