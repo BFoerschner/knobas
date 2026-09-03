@@ -1,6 +1,6 @@
-//! The **app**, end to end, against the seeded real Jira (issue #276,
-//! ADR-0013) -- the half of the M3.0 certification that the adapter's own live
-//! suite cannot reach.
+//! The **app**, end to end, against the seeded real Atlassian pair (issues
+//! #276 and #287, ADR-0013) -- the half of each certification that an
+//! adapter's own live suite cannot reach.
 //!
 //! `knobas-source-jira/tests/live_jira_seeded.rs` certifies the adapter: the
 //! wire, the payload, the cursor. Two of M3.0's claims are not about the
@@ -29,6 +29,13 @@
 //!   shows. Both halves are asserted against **Jira's own answer**, never
 //!   against knobas' mirror of it.
 //!
+//! The Confluence half (#287) is the M3.2 exit criterion, and it is here for
+//! the same reason: *a comment that mentions me becomes an inbox item* is a
+//! claim about the adapter, the sync engine, the inbox derivation and the
+//! action filter together -- four crates, none of which can witness it alone.
+//! [`a_comment_that_mentions_me_becomes_an_inbox_mention`] is that sentence,
+//! measured.
+//!
 //! `#[ignore]`d, so `just check` runs none of it. `just atlassian-live` from
 //! the repo root stands the pair up, seeds it, runs this, and tears it down
 //! again; inside a licence window already open:
@@ -42,13 +49,15 @@
 //! # What this file writes, and what it takes away
 //!
 //! It is the suite that writes: a personal access token, a comment on PAY-231,
-//! one transition of PAY-240 and back, one new ticket in `PAY`, and one
-//! worklog on PAY-231. Every one
-//! of them is undone when the test ends, passing or panicking alike, by a
-//! `Drop` that checks rather than assumes -- [`Litter`] and [`Pat`]. What a
+//! one transition of PAY-240 and back, one new ticket in `PAY`, one worklog on
+//! PAY-231, and -- for the Confluence half -- one comment on a seeded page.
+//! Every one of them is undone when the test ends, passing or panicking alike,
+//! by a `Drop` that checks rather than assumes -- [`Litter`], [`Pat`] and
+//! [`Mention`]. What a
 //! *killed* run left behind is cleared before the next one takes a baseline:
 //! [`Env::clear_leftovers`] deletes every issue and revokes every token
-//! carrying [`LITTER_LABEL`]. The **full** restore is
+//! carrying [`LITTER_LABEL`], and [`Wiki::clear_leftovers`] deletes every
+//! comment whose body carries it. The **full** restore is
 //! `knobas-source-jira`'s live suite's `Seeded::clear_leftovers`, which works
 //! from `seed-state.json` rather than from a label and so also puts back a
 //! comment or a status this suite left behind -- either suite's leftovers are
@@ -1343,4 +1352,504 @@ async fn a_days_work_is_logged_to_pay_231_and_comes_back_in_the_mirror() {
 
     state.scheduler.shutdown().await;
     drop(litter);
+}
+
+// -- the Confluence half: a mention in the inbox (#287) ----------------------
+
+/// The Confluence source id, and the `EntityRef` namespace every mirrored page
+/// is in.
+const CONFLUENCE: &str = "confluence";
+
+/// Where the seeded Confluence is, and the fixture ids the seed recorded.
+///
+/// A second environment struct rather than a field on [`Env`]: the Jira tests
+/// above must keep failing with *Jira* advice on a run where only Jira is up,
+/// and a merged struct would make every one of them need Confluence too.
+struct Wiki {
+    url: String,
+    user: String,
+    password: String,
+    http: reqwest::Client,
+    /// The space key the seed created.
+    space: String,
+    /// The seeded page a mentioning comment is posted on, by content id.
+    page: String,
+    /// The page's title, for the messages.
+    title: String,
+}
+
+fn wiki() -> Wiki {
+    let need = |key: &str| {
+        std::env::var(key)
+            .ok()
+            .map(|v| v.trim().to_owned())
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| {
+                panic!(
+                    "{key} is not set -- this test needs testenv's seeded Confluence. From the \
+                     repo root: `just atlassian-live`; or, inside a licence window already open, \
+                     `eval \"$(cd testenv && ./seed --env)\"`"
+                )
+            })
+    };
+    let state = std::env::var("KNOBAS_CONFLUENCE_SEED_STATE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testenv/seed-state.json")
+        });
+    let raw = std::fs::read_to_string(&state).unwrap_or_else(|e| {
+        panic!(
+            "{}: {e} -- run `./seed-atlassian-content.sh`",
+            state.display()
+        )
+    });
+    let whole: serde_json::Value = serde_json::from_str(&raw).expect("seed-state.json is JSON");
+    let confluence = &whole["confluence"];
+    // The `sepa-design` page: the one fixture page that already has a
+    // discussion, so a comment posted on it is one more in a thread rather
+    // than the first thing anybody ever said.
+    let page = confluence["pages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|p| p["fixture_id"] == json!("sepa-design"))
+        .unwrap_or_else(|| {
+            panic!(
+                "{}: no confluence.pages entry for `sepa-design` -- run \
+                 `./seed-atlassian-content.sh`",
+                state.display()
+            )
+        });
+    Wiki {
+        url: need("KNOBAS_CONFLUENCE_URL")
+            .trim_end_matches('/')
+            .to_owned(),
+        user: need("KNOBAS_CONFLUENCE_USER"),
+        password: need("KNOBAS_CONFLUENCE_PASSWORD"),
+        http: client(),
+        space: confluence["space"]
+            .as_str()
+            .expect("confluence.space")
+            .to_owned(),
+        page: page["id"].as_str().expect("a page id").to_owned(),
+        title: page["title"].as_str().expect("a page title").to_owned(),
+    }
+}
+
+impl Wiki {
+    async fn api(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<serde_json::Value>,
+    ) -> (u16, serde_json::Value) {
+        api(
+            &self.http,
+            &self.url,
+            &self.user,
+            &self.password,
+            method,
+            path,
+            body,
+        )
+        .await
+    }
+
+    /// `userKey` -- the stable id a Confluence mention is written with, and
+    /// the one thing that makes the comment below a *mention* rather than
+    /// prose. Asked of the server rather than composed: only Confluence knows
+    /// it.
+    async fn my_user_key(&self) -> String {
+        let (status, body) = self
+            .api(reqwest::Method::GET, "rest/api/user/current", None)
+            .await;
+        assert_eq!(status, 200, "GET /rest/api/user/current: {body}");
+        assert_eq!(
+            body["username"].as_str(),
+            Some(self.user.as_str()),
+            "the credential is the seed's admin: {body}"
+        );
+        body["userKey"]
+            .as_str()
+            .unwrap_or_else(|| {
+                panic!("this Confluence reports no userKey for {}: {body}", self.user)
+            })
+            .to_owned()
+    }
+
+    /// One page's record, with whatever `expand` asks for.
+    async fn content(&self, id: &str, expand: &str) -> serde_json::Value {
+        let (status, body) = self
+            .api(
+                reqwest::Method::GET,
+                &format!("rest/api/content/{id}?expand={expand}"),
+                None,
+            )
+            .await;
+        assert_eq!(status, 200, "GET content {id}: {body}");
+        body
+    }
+
+    /// The page's `version.when` -- what CQL's `lastmodified` matches, and the
+    /// value the claim "a comment does not move its page's timestamp" is
+    /// about.
+    async fn page_modified(&self) -> String {
+        self.content(&self.page, "version").await["version"]["when"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned()
+    }
+
+    /// Delete every comment a killed run left behind -- the ones no `Drop`
+    /// ever reached, recognised by the marker in their body. Read-only in the
+    /// ordinary case.
+    async fn clear_leftovers(&self) {
+        let (status, body) = self
+            .api(
+                reqwest::Method::GET,
+                &format!(
+                    "rest/api/content/{}/child/comment?expand=body.storage&limit=100",
+                    self.page
+                ),
+                None,
+            )
+            .await;
+        assert_eq!(status, 200, "listing comments of {}: {body}", self.page);
+        for id in body["results"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|c| {
+                c["body"]["storage"]["value"]
+                    .as_str()
+                    .is_some_and(|v| v.contains(LITTER_LABEL))
+            })
+            .filter_map(|c| c["id"].as_str().map(str::to_owned))
+        {
+            let (status, body) = self
+                .api(
+                    reqwest::Method::DELETE,
+                    &format!("rest/api/content/{id}"),
+                    None,
+                )
+                .await;
+            assert!(
+                status == 204 || status == 200,
+                "deleting the leftover comment {id}: {status} {body}"
+            );
+            println!("live suite: deleted leftover Confluence comment {id}");
+        }
+    }
+}
+
+/// The comment this test posts, taken back out when the guard drops.
+///
+/// **The fixture cannot carry it.** `testenv/seed-atlassian-content.sh` builds
+/// every comment body through one `jq` definition that escapes `<`, `>` and
+/// `&`, so a seeded comment is one `<p>` of text and *cannot* hold the
+/// `<ac:link><ri:user/></ac:link>` markup a mention is. The seed is therefore
+/// left alone and the mention is created here, over REST, with the real
+/// `userKey` the server just reported.
+struct Mention {
+    url: String,
+    user: String,
+    password: String,
+    id: String,
+}
+
+impl Mention {
+    /// Post a comment on the seeded page that mentions the admin account.
+    async fn post(wiki: &Wiki, user_key: &str) -> Mention {
+        let storage = format!(
+            "<p><ac:link><ri:user ri:userkey=\"{user_key}\" /></ac:link> can you confirm the \
+             manual-review SLA? [{LITTER_LABEL}]</p>"
+        );
+        let (status, body) = wiki
+            .api(
+                reqwest::Method::POST,
+                "rest/api/content",
+                Some(json!({
+                    "type": "comment",
+                    "container": { "id": wiki.page, "type": "page" },
+                    "body": { "storage": { "value": storage, "representation": "storage" } },
+                })),
+            )
+            .await;
+        assert_eq!(
+            status, 200,
+            "posting a mentioning comment on {}: {body}",
+            wiki.page
+        );
+        let id = body["id"].as_str().expect("a comment id").to_owned();
+        // What the server *stored*, which is not necessarily what was sent: a
+        // Confluence may normalise a user link, and the whole feature rests on
+        // which spelling comes back.
+        let stored = wiki.content(&id, "body.storage").await["body"]["storage"]["value"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        println!("SEEDED mentioning comment {id} on page {}: {stored}", wiki.page);
+        Mention {
+            url: wiki.url.clone(),
+            user: wiki.user.clone(),
+            password: wiki.password.clone(),
+            id,
+        }
+    }
+}
+
+impl Drop for Mention {
+    fn drop(&mut self) {
+        let (url, user, password, id) = (
+            self.url.clone(),
+            self.user.clone(),
+            self.password.clone(),
+            self.id.clone(),
+        );
+        undo("the mentioning comment", move || async move {
+            let http = client();
+            let (status, body) = api(
+                &http,
+                &url,
+                &user,
+                &password,
+                reqwest::Method::DELETE,
+                &format!("rest/api/content/{id}"),
+                None,
+            )
+            .await;
+            if status != 204 && status != 200 && status != 404 {
+                return Err(format!("DELETE comment {id} -> {status}: {body}"));
+            }
+            let (status, _) = api(
+                &http,
+                &url,
+                &user,
+                &password,
+                reqwest::Method::GET,
+                &format!("rest/api/content/{id}"),
+                None,
+            )
+            .await;
+            // A deleted comment is trashed rather than purged, and Confluence
+            // answers 404 for one whose status is `trashed` on this path.
+            if status != 404 {
+                return Err(format!("comment {id} still answers {status} after its delete"));
+            }
+            Ok(())
+        });
+    }
+}
+
+/// A `SourcesState` with the seeded Confluence configured and nothing else.
+async fn wiki_app(name: &str, wiki: &Wiki) -> SourcesState {
+    let connector = knobas_db::test_util::scratch_database(name).await;
+    let pool = connector
+        .pool(4)
+        .await
+        .expect("a pool onto the scratch database");
+    let secrets = Arc::new(MemoryStore::new());
+    secrets
+        .put(
+            CONFLUENCE,
+            &Secret {
+                kind: AuthMethod::UserPassword,
+                value: wiki.password.clone(),
+            },
+        )
+        .expect("the Confluence credential is stored");
+
+    knobas_sync::config::insert(
+        &pool,
+        &knobas_sync::config::InsertConfig {
+            id: CONFLUENCE.to_owned(),
+            adapter_kind: "confluence".to_owned(),
+            display_name: "Tidewater Confluence (seeded)".to_owned(),
+            base_url: wiki.url.clone(),
+            auth_kind: knobas_sync::config::AuthKind::Method(AuthMethod::UserPassword),
+            // The username is half of the Basic pair **and** the identity the
+            // inbox matches a mention against -- one field doing the two jobs
+            // #82 gave it.
+            config: json!({ "username": wiki.user, "spaces": [wiki.space] }),
+            sync_interval_secs: 86_400,
+            enabled: true,
+        },
+    )
+    .await
+    .expect("the source row is written");
+
+    let scheduler = Scheduler::start(SchedulerDeps {
+        pool: pool.clone(),
+        connections: Arc::new(Connections(connector)),
+        registry: Arc::new(Registry::builtin()),
+        secrets: secrets.clone(),
+        events: Arc::new(Events::default()),
+    })
+    .await
+    .expect("a scheduler over the scratch database");
+
+    SourcesState {
+        pool,
+        scheduler,
+        secrets,
+        registry: Arc::new(Registry::builtin()),
+    }
+}
+
+/// Sync one source and wait for the run to end, whichever way it ends.
+async fn sync_source(state: &SourcesState, id: &str) {
+    let (done, wait) = tokio::sync::oneshot::channel();
+    let sink = Arc::new(Ending {
+        done: std::sync::Mutex::new(Some(done)),
+    });
+    state
+        .scheduler
+        .trigger(id, SyncTrigger::Manual, Some(sink))
+        .await
+        .expect("the run starts");
+    wait.await.expect("the run reports its ending");
+}
+
+/// **M3.2's exit criterion: a comment that mentions the admin account becomes
+/// an inbox item** (#287), through the real Confluence, the real sync engine
+/// and the real inbox derivation.
+///
+/// The sequence is the one the feature exists for, and the order is the whole
+/// witness:
+///
+/// 1. A full sync, which mirrors the seeded space and leaves a cursor.
+/// 2. A comment mentioning the admin is posted on a seeded page -- written
+///    with the `userKey` the server itself reports, because that is what a
+///    mention *is* in the storage format and what the fixture cannot hold.
+/// 3. An incremental sync. The page's own `lastmodified` is asserted either
+///    way and printed: on this product a comment does not move it, so the page
+///    walk cannot reach the page and the mention query is the only path to it.
+/// 4. The item is in the inbox as a **mention**, keyed on the page.
+/// 5. Its actions are **empty** -- the adapter declares no write op yet
+///    (#286) -- and *snooze* records an activity line naming the page, which
+///    is the criterion's "each records its activity line" for the two answers
+///    the write queue knows nothing about.
+///
+/// CQL reads an index the write path updates asynchronously, so step 3 polls
+/// to [`INDEX_BUDGET`] rather than sleeping a guessed amount.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
+async fn a_comment_that_mentions_me_becomes_an_inbox_mention() {
+    let wiki = wiki();
+    wiki.clear_leftovers().await;
+    let state = wiki_app("atlassian_live_mention", &wiki).await;
+
+    // 1. The seeded corpus, and a cursor.
+    sync_source(&state, CONFLUENCE).await;
+    let mirrored = confluence_pages(&state.pool).await;
+    assert!(
+        mirrored.iter().any(|id| id == &format!("confluence:{}", wiki.page)),
+        "the seeded page is mirrored before anything is written: {mirrored:?}"
+    );
+    let before = wiki.page_modified().await;
+    let items = inbox_mentions(&state).await;
+    assert!(
+        items.is_empty(),
+        "the seeded fixture mentions nobody -- its one comment names `@Mara` in prose, and the \
+         admin is not Mara: {items:?}"
+    );
+
+    // 2. The mention.
+    let user_key = wiki.my_user_key().await;
+    let mention = Mention::post(&wiki, &user_key).await;
+
+    // 3. The incremental run, polled until the index has it.
+    let after = wiki.page_modified().await;
+    println!(
+        "SEEDED page {} lastmodified: {before} before the comment, {after} after -- {}",
+        wiki.page,
+        if before == after {
+            "unchanged, so the page walk cannot reach it and the mention query is the only path"
+        } else {
+            "MOVED, so the page walk reaches it too and this run witnesses the weaker path"
+        }
+    );
+    let deadline = std::time::Instant::now() + INDEX_BUDGET;
+    let found = loop {
+        sync_source(&state, CONFLUENCE).await;
+        let items = inbox_mentions(&state).await;
+        if let Some(item) = items.into_iter().next() {
+            break item;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "no inbox mention after {INDEX_BUDGET:?} of syncing -- Confluence's CQL index never \
+             answered `mention = currentUser()` for comment {}",
+            mention.id
+        );
+    };
+
+    // 4. The item, keyed on the page the comment is on.
+    assert_eq!(
+        found.item.entity_id.as_deref(),
+        Some(format!("confluence:{}", wiki.page).as_str()),
+        "the entity is the page, not the comment: {:?}",
+        found.item
+    );
+    assert_eq!(found.item.kind.as_deref(), Some("page"));
+    assert_eq!(found.item.title, wiki.title);
+    assert_eq!(found.item.source_id, CONFLUENCE);
+    assert!(
+        found.item.web_url.is_some(),
+        "*Open in browser* is the action knobas' own: {:?}",
+        found.item
+    );
+    println!("SEEDED inbox mention: {} ({})", found.item.key, found.item.title);
+
+    // 5. What it offers, and what an answer records.
+    assert!(
+        found.actions.is_empty(),
+        "the Confluence adapter declares no write op yet (#286), so no button is offered: {:?}",
+        found.actions
+    );
+    let line = knobas_app::commands::entity::snooze_inbox_item_inner(
+        &state.pool,
+        state.registry.as_ref(),
+        chrono::Utc::now(),
+        &found.item.key,
+        chrono::Utc::now() + chrono::Duration::days(2),
+    )
+    .await
+    .expect("the mention is on the stream");
+    assert_eq!(line.verb, "snoozed");
+    assert_eq!(line.actor, "user");
+    assert_eq!(
+        line.entity_id.as_deref(),
+        Some(format!("confluence:{}", wiki.page).as_str())
+    );
+    println!("SEEDED activity line: {} {:?}", line.verb, line.entity_id);
+
+    state.scheduler.shutdown().await;
+    drop(mention);
+}
+
+/// The page ids this source holds live.
+async fn confluence_pages(pool: &sqlx::PgPool) -> Vec<String> {
+    sqlx::query_scalar::<_, String>(
+        "select entity_id from sync.live_item where source_id = $1 order by entity_id",
+    )
+    .bind(CONFLUENCE)
+    .fetch_all(pool)
+    .await
+    .expect("the mirror is readable")
+}
+
+/// The inbox's mentions, from the real derivation over the real identity.
+async fn inbox_mentions(state: &SourcesState) -> Vec<knobas_app::inbox::InboxEntry> {
+    knobas_app::commands::entity::inbox_items_inner(
+        &state.pool,
+        state.registry.as_ref(),
+        chrono::Utc::now(),
+        knobas_core::inbox::Shelf::Stream,
+    )
+    .await
+    .expect("the inbox derivation reads")
+    .into_iter()
+    .filter(|e| e.item.category == knobas_core::inbox::Category::Mention)
+    .collect()
 }
