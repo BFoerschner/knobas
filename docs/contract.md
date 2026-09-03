@@ -3503,6 +3503,13 @@ From this commit on, each of the following requires an orchestrator decision **a
   candidates are one adapter's alternative spellings and an instance uses one of them, so
   per-candidate evidence would fail the second spelling wherever it is the unused one. A candidate
   list is certified as a whole; the first candidate is the one clause 3 really pins.
+  **That assignee example holds only on an instance whose assignee is populated**, and the
+  battery's own corpus is not one: its items leave `fields.assignee` explicitly null, so both
+  spellings stop at that null, neither resolves and neither names a missing key — the pair is
+  silent under this tolerance and under per-candidate evidence alike, and witnesses nothing. The
+  example the tests pin is therefore a field the corpus really resolves: `fields.status.nam`
+  behind a working `fields.status.name` (#303, PR #308,
+  `accepts_a_later_candidate_an_earlier_one_resolves_for`).
 
   **`knobas_core::string_at!` is retired with its last call site.** It was ADR-0007's interim
   shape — SQL for the string a *literal* path leads to, with the three refusals — and every
