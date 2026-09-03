@@ -268,6 +268,8 @@ const ReenterSecret = (await import("../sources/ReenterSecret.svelte")).default;
 const SourcesView = (await import("../sources/SourcesView.svelte")).default;
 const BackupSection = (await import("../settings/BackupSection.svelte")).default;
 const PassiveSection = (await import("../settings/PassiveSection.svelte")).default;
+const NotificationsSection = (await import("../settings/NotificationsSection.svelte")).default;
+const { createNotifications } = await import("../inbox/notify.svelte");
 const { createHealth } = await import("./health.svelte");
 
 /**
@@ -410,6 +412,7 @@ const CASES: Case[] = [
             count: 0,
             error: null,
             busy: false,
+            answered: true,
             refreshCount: async () => {},
             refresh: async () => {},
             snooze: async () => {},
@@ -663,6 +666,34 @@ const CASES: Case[] = [
             setPassiveAttribution: () =>
               Promise.reject(new Error("no settings write in this test")),
           },
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * The desktop-notification toggles (#290). Its effect is the setting read,
+     * the same shape as the section above -- and the store it reads through is
+     * a fresh one per mount, because the module-level `notifications` is the
+     * window's and a test that armed it would leave it armed for the next.
+     */
+    name: "NotificationsSection",
+    source: "lib/settings/NotificationsSection.svelte",
+    open: (target) => ({
+      app: mount(NotificationsSection, {
+        target,
+        props: {
+          store: createNotifications({
+            notificationKinds: () => deferred<never[]>([]),
+            setNotificationKinds: () =>
+              Promise.reject(new Error("no settings write in this test")),
+            isPermissionGranted: () => Promise.resolve(false),
+            requestPermission: () => Promise.resolve("granted"),
+            send: () => {},
+            onAction: () => Promise.resolve(() => {}),
+            focused: () => true,
+            navigate: () => {},
+          }),
         },
       }),
     }),
