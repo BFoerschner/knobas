@@ -19,6 +19,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Block, DayBlock, TimerTarget } from "../ipc/time";
 import { createRouter } from "../shell/router.svelte";
 import DayReview from "./DayReview.svelte";
+import { horizonNote } from "./day";
 
 const DAY = "2026-09-03";
 /** The clock the view is given, so *Today* and *Extend to now* are fixed. */
@@ -753,4 +754,43 @@ test("a refused assignment shows the reason the backend gave", async () => {
   );
   expect(field, "the form closed under the refusal it was meant to explain").not.toBeNull();
   expect(field!.value).toBe("jira:PAY-999");
+});
+
+// -- the observation horizon (#337) ------------------------------------------
+//
+// Two days that draw the *same* strip: no blocks, nothing offered, the same
+// "nothing tracked" line. One of them is a day knobas no longer has the beats
+// for and the other is a day the reader had the app shut on, and the note is
+// the only thing on screen that can tell them apart -- which is why both
+// directions are here. A view that always drew the note, or never did, would
+// satisfy either test alone.
+
+/**
+ * **A day past the horizon says so, in the sentence the timesheet under it
+ * uses.**
+ *
+ * Asserted against `horizonNote` rather than against a copy of its words: what
+ * this pins is that the strip draws the *shared* sentence, which is the whole
+ * of #337's "one decision, both surfaces". The words themselves are pinned
+ * once, by the literal below.
+ */
+test("a day knobas no longer has the beats for says so above the strip", async () => {
+  render([], { pastHorizon: true });
+
+  await vi.waitFor(() => expect(text()).toContain(horizonNote("this day")));
+  expect(text()).toContain("absent, not zero");
+  expect(
+    text(),
+    "the note has to sit above the line that reads as an idle day, not replace it",
+  ).toContain("Nothing tracked on this day");
+});
+
+test("a day with nothing on it that knobas still has the beats for says nothing", async () => {
+  render([]);
+
+  await vi.waitFor(() => expect(text()).toContain("Nothing tracked on this day"));
+  expect(
+    text(),
+    "a day inside the horizon was drawn as one knobas has forgotten",
+  ).not.toContain("no longer has the beats");
 });

@@ -148,6 +148,25 @@ export function columnHeading(key: string, index: number): string {
 }
 
 /**
+ * The headings of the days knobas no longer has the observations for (#337).
+ *
+ * **Every such day, not only the drawn ones.** A collapsed empty Saturday is
+ * still a Saturday whose beats retention took, and a note that named only the
+ * visible columns would go quiet on exactly the week — one entirely past the
+ * horizon — where nothing else on screen says anything at all.
+ *
+ * Headings rather than dates, so the sentence names the columns in the words
+ * the table's own header uses. Empty when the week is wholly inside the
+ * horizon, which is what the view draws nothing on.
+ */
+export function daysPastHorizon(week: Week): string[] {
+  return week.days
+    .map((day, index) => ({ day, index }))
+    .filter(({ index }) => week.past_horizon[index] === true)
+    .map(({ day, index }) => columnHeading(day, index));
+}
+
+/**
  * `"24–30 August 2026"` — the week's own heading.
  *
  * Built from the two ends rather than from a locale formatter, the rule

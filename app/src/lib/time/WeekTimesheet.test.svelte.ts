@@ -14,6 +14,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { DayWindow, PlannedWorklog, Week, WeekCell, WeekRow, Worklog } from "../ipc/time";
+import { horizonNote } from "./day";
 import WeekTimesheet from "./WeekTimesheet.svelte";
 
 /** The fixture week: Monday 24 August 2026 to Sunday the 30th. */
@@ -412,4 +413,60 @@ test("a week with nothing to log says so rather than offering a send", async () 
   button("Log all…")!.click();
   await vi.waitFor(() => expect(text()).toContain("Nothing to log this week"));
   expect(button("Send 0")).toBeUndefined();
+});
+
+// -- the observation horizon (#337) ------------------------------------------
+//
+// Every fixture below is a week with **no rows**: past the horizon the "no
+// target, app open" row reads zero and `week::read` drops it, so the week that
+// most needs explaining is the one with nothing on the table at all. That is
+// why the note is drawn from the week rather than from that row.
+
+/**
+ * **A week straddling the horizon draws both readings at once**, which is the
+ * ordinary week rather than the corner: the timesheet's seven windows can sit
+ * anywhere, so any run of them can be behind the sweep.
+ *
+ * The note is asserted against `horizonNote` — the day review's own sentence,
+ * shared rather than restated — and against the days it must *not* name, which
+ * is the half a view that simply said "this week" would fail.
+ */
+test("a week straddling the horizon names the days it has no beats for", async () => {
+  render(weekOf([], [true, true, true, false, false, false, false]));
+
+  await vi.waitFor(() => expect(text()).toContain("no longer has the beats"));
+  expect(text()).toContain(horizonNote("Mon 24, Tue 25, Wed 26"));
+  expect(
+    text(),
+    "Thursday's beats are all still there and the note claimed otherwise",
+  ).not.toContain("Thu 27");
+  expect(
+    text(),
+    "the note has to sit above the line that reads as a week nobody worked",
+  ).toContain("Nothing tracked this week");
+});
+
+/**
+ * A collapsed weekend day is still a day whose observations retention took.
+ *
+ * The column is not drawn — an empty Saturday collapses — so a note built from
+ * the *visible* columns would go silent about the one thing on screen it had
+ * to say.
+ */
+test("a collapsed weekend day past the horizon is still named", async () => {
+  render(weekOf([], [false, false, false, false, false, true, false]));
+
+  await vi.waitFor(() => expect(text()).toContain("no longer has the beats"));
+  expect(headings(), "the empty Saturday is collapsed, as it always was").not.toContain("Sat 29");
+  expect(text()).toContain(horizonNote("Sat 29"));
+});
+
+test("a week knobas still has every beat for says nothing about the horizon", async () => {
+  render(weekOf([]));
+
+  await vi.waitFor(() => expect(text()).toContain("Nothing tracked this week"));
+  expect(
+    text(),
+    "a week inside the horizon was drawn as one knobas has forgotten",
+  ).not.toContain("no longer has the beats");
 });
