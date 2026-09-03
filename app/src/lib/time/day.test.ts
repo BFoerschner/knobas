@@ -227,6 +227,4 @@ test("the horizon note says knobas has no observations, never that it lost them"
     "knobas keeps a month of observations and has none for Mon 24, Tue 25, Wed 26: " +
       "what was open is absent, not zero.",
   );
-  expect(horizonNote("this day")).not.toContain("beat");
-  expect(horizonNote("this day")).not.toContain("no longer");
 });

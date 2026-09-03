@@ -37,10 +37,10 @@
 //! # What an observation claims, and why the cap follows from it
 //!
 //! An observation says *this was in the foreground at this instant*. It
-//! cannot say what was open in between, so the rule is: **a beat credits its
-//! target forward, for one beat window, and no further.** Silence therefore
-//! stops being work [`BEAT_WINDOW_SECONDS`] after the last thing knobas
-//! heard, whatever happened to the process in between.
+//! cannot say what was open in between, so the rule is: **an observation
+//! credits its target forward, for one beat window, and no further.** Silence
+//! therefore stops being work [`BEAT_WINDOW_SECONDS`] after the last thing
+//! knobas heard, whatever happened to the process in between.
 //!
 //! Focused time is the same walk read a beat later: the gap between one beat
 //! and the next, clamped to the same window. So a session's claims add up to

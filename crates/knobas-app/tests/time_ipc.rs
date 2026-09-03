@@ -1723,15 +1723,15 @@ async fn the_day_the_horizon_cuts_through_keeps_the_blocks_it_was_already_offere
     assert_eq!(
         day(&pool, midnight).await,
         offered,
-        "the day read reconciled a day it no longer has the beats for, and \
+        "the day read reconciled a day past the observation horizon, and \
          forgot the morning on the strength of the afternoon"
     );
 
     // **And the strip says so about the whole day, afternoon included (#337).**
     //
     // The one deliberate over-claim in the reading: this day's afternoon
-    // beats are still in the table, and knobas announces the day as one it no
-    // longer has the beats for. It is the guard's own `from` comparison --
+    // beats are still in the table, and knobas announces the day as one past
+    // the observation horizon. It is the guard's own `from` comparison --
     // `Horizon::passed`, the single one -- and saying anything softer here
     // would promise a reader beats that `materialize` has just refused to
     // spend, which is the mismatch #337 exists to close. The error runs
