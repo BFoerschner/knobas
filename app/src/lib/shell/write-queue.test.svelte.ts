@@ -8,6 +8,9 @@
  * pinned in Rust twice over; this is the half that stops a convenience
  * affordance putting it back.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { flushSync, mount, unmount } from "svelte";
 import { beforeEach, expect, test, vi } from "vitest";
 
@@ -34,7 +37,14 @@ vi.mock("../ipc/sources", () => ({
   writeQueueCounts: () => record("write_queue_counts", null, counts),
   flushWrites: (sourceId: string | null) => record("flush_writes", { sourceId }, undefined),
   applyHeldWrite: (id: number) => record("apply_held_write", { id }, undefined),
-  discardWrite: (id: number) => record("discard_write", { id }, undefined),
+  discardWrite: (id: number) =>
+    // The fake queue actually forgets the row, so "the row is untouched" is
+    // something a test reads off the panel rather than infers from the call
+    // log. A rejected discard leaves the rows alone, which is the truth as
+    // well: nothing settled.
+    record("discard_write", { id }, undefined).then(() => {
+      rows = rows.filter((row) => row.id !== id);
+    }),
   amendWrite: (id: number, payload: unknown) => record("amend_write", { id, payload }, undefined),
 }));
 
@@ -46,7 +56,33 @@ const {
   editableBody,
   readSnapshot,
   withBody,
+  withdrawnWorklog,
 } = await import("./write-queue.svelte");
+
+/**
+ * ADR-0012's canonical sentence, **read out of the ADR at test time**.
+ *
+ * Not retyped here: a copy in the test is a second place for the wording to
+ * drift from the decision record, and a test holding its own copy would go on
+ * passing while the surface and the ADR disagreed. `commands/time.rs` does
+ * the same for the worklog draft; this side can go further and check the
+ * sentence in the *rendered* dialog rather than in the component's source.
+ */
+function adrSentence(): string {
+  const adr = readFileSync(
+    join(process.cwd(), "..", "docs/adr/0012-writes-are-at-least-once-no-idempotency-key.md"),
+    "utf8",
+  );
+  const quoted = adr
+    .split("\n")
+    .find((line) => line.startsWith("> A write knobas was sending"));
+  if (quoted === undefined) {
+    throw new Error("ADR-0012 no longer states its canonical sentence as a block quote");
+  }
+  // Collapsed on both sides: the ADR is Prettier-formatted and the component
+  // wraps its prose, so a literal comparison would fail on formatting.
+  return quoted.replace(/^>\s*/, "").split(/\s+/).join(" ");
+}
 
 const NOW = new Date("2026-08-29T12:00:00Z");
 
@@ -86,6 +122,46 @@ function held(over: Partial<QueuedWrite> = {}): QueuedWrite {
   });
 }
 
+/**
+ * A queued worklog — the one op whose withdrawal can bill an hour twice
+ * (#331).
+ *
+ * Its `started` is deliberately a **different day** from `queued_at`, and its
+ * `seconds` a different number from every other quantity in this file, so a
+ * dialog that named the wrong instant or the wrong length would fail rather
+ * than coincidentally agree.
+ */
+function worklog(over: Partial<QueuedWrite> = {}): QueuedWrite {
+  return write({
+    id: 4,
+    op: "log_work",
+    payload: {
+      LogWork: {
+        entity: "jira:PAY-231",
+        started: "2026-08-27T10:00:00Z",
+        seconds: 8100,
+        comment: "traced the payout retry",
+      },
+    },
+    target_snapshot: { op: "log_work", live: true, text: null },
+    ...over,
+  });
+}
+
+/**
+ * Let anything a click started run to the end, then re-render.
+ *
+ * A `setTimeout(0)` rather than a microtask flush, because the queue's own
+ * `act` is three awaits deep — the command, its `.then`, and the re-read that
+ * follows — and a macrotask runs after all of them. Without it a *negative*
+ * assertion about the panel ("the row is still listed") reads the state as it
+ * was before the click's work landed, and passes whatever the button did.
+ */
+async function settle() {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+}
+
 async function render() {
   const queue = createWriteQueue();
   await queue.refresh();
@@ -103,6 +179,8 @@ async function render() {
       [...target.querySelectorAll("button")].find((b) =>
         (b.textContent ?? "").trim().startsWith(label),
       ),
+    /** Every open dialog, panel first — a confirmation stacks a second one. */
+    dialogs: () => [...target.querySelectorAll<HTMLElement>('[role="dialog"]')],
     section: (heading: string) => {
       const h = [...target.querySelectorAll("h3")].find((node) =>
         (node.textContent ?? "").includes(heading),
@@ -357,6 +435,144 @@ test("discard and cancel both withdraw the write", async () => {
   screen.done();
 });
 
+// -- withdrawing a worklog (issue #331) ---------------------------------------
+
+/**
+ * Which withdrawals need consent, as a decision rather than as markup.
+ *
+ * The op, and **only** the op. Scoping it to `pending` as well was the
+ * obvious-looking narrowing and it is wrong twice over: Jira answers a
+ * `Protocol` refusal for a worklog it *accepted but did not name*
+ * (`knobas_source_jira::write::log_work`), and hold detection runs before the
+ * send, so a write that arrived and lost its settle is held on the next
+ * flush. `discard` releases the blocks of all three open states alike, so all
+ * three are asked about.
+ */
+test("every open worklog's withdrawal needs consent, and no other op's", () => {
+  const log = worklog();
+  expect(withdrawnWorklog(log)).toEqual({
+    entity: "jira:PAY-231",
+    started: "2026-08-27T10:00:00Z",
+    seconds: 8100,
+    comment: "traced the payout retry",
+  });
+
+  // Every other op: today's behaviour, and the reasoning does not carry.
+  expect(withdrawnWorklog(write())).toBeNull();
+  const create = {
+    CreateTicket: { entity: "jira:PAY", title: "a payout fails", body: "", ticket_type: "Bug" },
+  } as const;
+  expect(withdrawnWorklog(write({ op: "create_ticket", payload: create }))).toBeNull();
+
+  // A refusal can be a worklog Jira took and did not name; a hold can be one
+  // that arrived before its settle was lost. Neither state is evidence, and
+  // neither is treated as any.
+  expect(withdrawnWorklog(worklog({ state: "held" }))).not.toBeNull();
+  expect(withdrawnWorklog(worklog({ state: "refused" }))).not.toBeNull();
+
+  // An op named `log_work` whose payload this build cannot read is not a
+  // worklog it can describe, and a dialog with blanks in it is worse than
+  // none.
+  const unreadable = { Comment: { entity: "jira:PAY-231", body: "on it" } } as const;
+  expect(withdrawnWorklog(worklog({ payload: unreadable }))).toBeNull();
+
+  // …and the *identifier* is what decides, never the payload's shape. `op` is
+  // the stable name the backend and the panel already agree on (ADR-0006);
+  // sniffing the payload instead would be a build confirming on an op it has
+  // misread.
+  expect(withdrawnWorklog(worklog({ op: "comment" }))).toBeNull();
+});
+
+/**
+ * The consent moment #331 asks for, and the half of it that matters most:
+ * **cancelling leaves the row exactly where it was.**
+ *
+ * Not "the command was not called" — the fake queue really does drop a
+ * discarded row, so a panel still listing the write is the row surviving,
+ * observed the way the reader observes it.
+ */
+test("discarding a queued worklog asks first, and cancelling leaves it queued", async () => {
+  rows = [worklog()];
+  counts = { pending: 1, held: 0, refused: 0 };
+  const screen = await render();
+  calls.length = 0;
+
+  screen.button("Cancel")!.click();
+  await settle();
+
+  expect(calls.filter((c) => c.command === "discard_write")).toEqual([]);
+  expect(screen.dialogs()).toHaveLength(2);
+
+  // What is being withdrawn: the ticket, when the logged span began, and how
+  // long it was — in minutes *and* in the seconds that cross the wire.
+  const asking = screen.dialogs()[1]!.textContent!.replace(/\s+/g, " ");
+  expect(asking).toContain("PAY-231");
+  expect(asking).toContain("27 August 2026");
+  expect(asking).toContain("2 h 15 min");
+  expect(asking).toContain("8100 seconds");
+  expect(asking).toContain("traced the payout retry");
+
+  // The consequence in the user's words, and the guarantee in the ADR's.
+  expect(asking).toContain("knobas cannot tell whether Jira already took it");
+  expect(asking).toContain(adrSentence());
+
+  screen.button("Keep it queued")!.click();
+  await settle();
+
+  expect(screen.dialogs()).toHaveLength(1);
+  expect(calls.filter((c) => c.command === "discard_write")).toEqual([]);
+  // The row itself: still in the queue the panel read, and still on screen.
+  // Read after `settle`, so a *Keep it queued* that discarded would have
+  // emptied both by now rather than being caught only by the call log.
+  expect(screen.queue.rows.map((row) => row.id)).toEqual([4]);
+  expect(screen.section("Waiting")!.textContent).toContain("jira:PAY-231");
+  screen.done();
+});
+
+/**
+ * The same question from the other section, on the state that looks safest.
+ *
+ * A refused worklog is the one this nearly missed: Jira refuses with a
+ * `Protocol` fault when it *took* the worklog and did not name it, so the row
+ * that reads "the source refused this write" can be an hour already logged.
+ */
+test("a refused worklog asks too, from the decisions section", async () => {
+  rows = [worklog({ state: "refused", wait_reason: null, detail: "worklog id missing" })];
+  counts = { pending: 0, held: 0, refused: 1 };
+  const screen = await render();
+  calls.length = 0;
+
+  screen.button("Discard")!.click();
+  await settle();
+
+  expect(calls.filter((c) => c.command === "discard_write")).toEqual([]);
+  expect(screen.dialogs()).toHaveLength(2);
+  expect(screen.dialogs()[1]!.textContent).toContain("knobas cannot tell whether Jira already");
+  expect(screen.queue.rows.map((row) => row.id)).toEqual([4]);
+  screen.done();
+});
+
+/** …and consent given is the discard that was asked for, on that row. */
+test("confirming the withdrawal discards the worklog", async () => {
+  rows = [worklog()];
+  counts = { pending: 1, held: 0, refused: 0 };
+  const screen = await render();
+  calls.length = 0;
+
+  screen.button("Cancel")!.click();
+  flushSync();
+  screen.button("Discard the worklog")!.click();
+
+  await vi.waitFor(() => expect(calls.some((c) => c.command === "discard_write")).toBe(true));
+  expect(calls.find((c) => c.command === "discard_write")!.args).toEqual({ id: 4 });
+  await vi.waitFor(() => expect(screen.queue.busy).toBe(false));
+  flushSync();
+
+  expect(screen.dialogs()).toHaveLength(1);
+  expect(screen.text()).toContain("Nothing is queued");
+  screen.done();
+});
+
 /** Story 15: the reader merges the two intentions themselves. */
 test("editing a held write sends the words the reader typed", async () => {
   rows = [held()];
@@ -472,13 +688,12 @@ test("flush now retries the waiting writes and releases nothing", async () => {
  * The guarantee the queue cannot keep, said where a re-send is contemplated
  * (ADR-0012, issue #224). No transaction spans the send and the settle, so a
  * write in flight when knobas stopped may arrive twice. The sentence is the
- * ADR's own, verbatim, and it is not tied to a row: it holds whether the
- * queue is empty or full, so both are rendered.
+ * ADR's own, verbatim -- read out of the ADR here rather than retyped (#331)
+ * -- and it is not tied to a row: it holds whether the queue is empty or
+ * full, so both are rendered.
  */
 test("the panel states that a write may arrive twice, whatever it holds", async () => {
-  const sentence =
-    "A write knobas was sending when it stopped may arrive twice. " +
-    "knobas re-sends rather than guess; it never merges or drops what you wrote.";
+  const sentence = adrSentence();
 
   const empty = await render();
   expect(empty.text()).toContain("Nothing is queued");

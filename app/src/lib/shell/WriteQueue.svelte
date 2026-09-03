@@ -13,6 +13,12 @@
   their own verb — not a differently-shaded member of one list. Story 18 is
   "distinguishable at a glance", and a badge on row nine of twelve is not that.
 
+  **A worklog's withdrawal asks first.** Discarding any other write is
+  immediate, as it always was; discarding a queued worklog opens a
+  confirmation, because since #328 that withdrawal gives the blocks back and
+  the same hour can then be logged a second time (issue #331). The rule for
+  *which* lives in `withdrawnWorklog`, beside its reasons.
+
   **There is no timeout and there is nothing here that could become one.** No
   auto-apply, no bulk "send everything", no timer. *Flush now* asks the queue
   to retry what is merely waiting; it cannot release a held write, and the
@@ -21,6 +27,8 @@
 -->
 <script lang="ts">
   import type { QueuedWrite } from "../ipc/sources";
+  import { clockReading, dayKey, dayLabel, durationReading } from "../time/day";
+  import { minutesOf } from "../time/week";
   import Modal from "./Modal.svelte";
   import { ago } from "./time";
   import {
@@ -28,6 +36,8 @@
     editableBody,
     readSnapshot,
     withBody,
+    withdrawnWorklog,
+    type WithdrawnWorklog,
     type WriteQueue,
   } from "./write-queue.svelte";
 
@@ -45,6 +55,15 @@
   /** The row whose edit box is open, if any. One at a time. */
   let editing = $state<number | null>(null);
   let draft = $state("");
+
+  /**
+   * The worklog a withdrawal is being asked about, if any (issue #331).
+   *
+   * The row's id rather than the row: a refresh lands between the question
+   * and the answer routinely, and what is confirmed must be the write the
+   * reader was shown, not whichever object the list holds a moment later.
+   */
+  let withdrawing = $state<{ id: number; log: WithdrawnWorklog } | null>(null);
 
   const decisions = $derived(queue.rows.filter((row) => demandOf(row.state) === "decide"));
   const waiting = $derived(queue.rows.filter((row) => demandOf(row.state) === "waiting"));
@@ -78,7 +97,52 @@
     await queue.amend(row.id, payload);
     editing = null;
   }
+
+  /**
+   * Withdraw a write -- after asking, when the withdrawal is a worklog's.
+   *
+   * Every other op goes straight through, which is what it always did.
+   * {@link withdrawnWorklog} is where the *which* lives, and why.
+   */
+  function withdraw(row: QueuedWrite) {
+    const log = withdrawnWorklog(row);
+    if (log === null) {
+      void queue.discard(row.id);
+      return;
+    }
+    withdrawing = { id: row.id, log };
+  }
+
+  function confirmWithdrawal() {
+    const asked = withdrawing;
+    if (asked === null) return;
+    withdrawing = null;
+    void queue.discard(asked.id);
+  }
+
+  /** `PAY-231` -- the half after the first colon, as everywhere else. */
+  function ticketKey(entity: string): string {
+    return entity.slice(entity.indexOf(":") + 1);
+  }
+
+  /** `2 h 15 min` -- minute-granular and never rounded up (CONTEXT.md). */
+  function worked(seconds: number): string {
+    return durationReading(minutesOf(seconds));
+  }
 </script>
+
+<!--
+  ADR-0012's canonical sentence, written once and rendered twice -- under the
+  retry control, and in the withdrawal dialog. A second typed copy is a second
+  place for it to drift from the decision record, which is the reason
+  `write-queue.test.svelte.ts` stopped holding one of its own.
+-->
+{#snippet guarantee()}
+  <p class="wq-guarantee">
+    A write knobas was sending when it stopped may arrive twice. knobas re-sends rather than
+    guess; it never merges or drops what you wrote.
+  </p>
+{/snippet}
 
 <Modal
   title="Pending writes"
@@ -207,11 +271,7 @@
                     Edit…
                   </button>
                 {/if}
-                <button
-                  class="btn danger"
-                  disabled={queue.busy}
-                  onclick={() => queue.discard(row.id)}
-                >
+                <button class="btn danger" disabled={queue.busy} onclick={() => withdraw(row)}>
                   Discard
                 </button>
               {/if}
@@ -239,7 +299,7 @@
             <p class="wq-why">{waitingBecause(row)}</p>
             {#if body !== null}<pre class="log wq-mine">{body}</pre>{/if}
             <footer class="wq-acts">
-              <button class="btn danger" disabled={queue.busy} onclick={() => queue.discard(row.id)}>
+              <button class="btn danger" disabled={queue.busy} onclick={() => withdraw(row)}>
                 Cancel
               </button>
             </footer>
@@ -264,16 +324,68 @@
     -->
     <div class="wq-foot">
       <span class="lab">Retries the waiting writes. Held writes are untouched.</span>
-      <p class="wq-guarantee">
-        A write knobas was sending when it stopped may arrive twice. knobas re-sends rather than
-        guess; it never merges or drops what you wrote.
-      </p>
+      {@render guarantee()}
     </div>
     <span class="spacer"></span>
     <button class="btn" disabled={queue.busy} onclick={() => queue.flush(null)}>Flush now</button>
     <button class="btn ghost" onclick={onclose}>Close</button>
   {/snippet}
 </Modal>
+
+<!--
+  The consent moment on the one withdrawal that can bill an hour twice
+  (issue #331). Not a generic "are you sure": the panel's other discards are
+  ordinary, and a confirmation on all of them would teach the reader to click
+  through this one.
+
+  Three things, in the order the reader needs them. **What is being
+  withdrawn**, so the question is about a worklog they recognise rather than
+  about a queue row. **What knobas cannot promise**, in plain words: the
+  write may already be at Jira -- `knobas_core::write_queue::discard` names
+  the window in its own doc comment, one HTTP round-trip wide and not
+  crash-only -- and since #328 the withdrawal hands the same hour back to
+  *Log all*. **ADR-0012's sentence**, verbatim, because the guarantee behind
+  all of that is written down once and quoted, never paraphrased.
+
+  It asks on every open worklog, not only a pending one. `withdrawnWorklog`
+  carries the reasoning: a refusal can be a worklog Jira accepted but did not
+  name, and a hold can be one that arrived before the settle was lost, so the
+  state is not evidence of anything the dialog would need.
+
+  No end instant is shown. `WriteOp::LogWork` carries `started` and `seconds`
+  and nothing else, and `seconds` is worked time rather than the span it sits
+  in -- so an end computed here would be knobas inventing a fact about the
+  worklog in the middle of telling the reader what it cannot be sure of.
+-->
+{#if withdrawing}
+  {@const log = withdrawing.log}
+  <Modal title="Withdraw this worklog?" center onclose={() => (withdrawing = null)}>
+    {#snippet body()}
+      <p>
+        <b>{worked(log.seconds)}</b> logged to <b>{ticketKey(log.entity)}</b>, starting
+        {dayLabel(dayKey(new Date(log.started)))} at {clockReading(log.started)} — {log.seconds}
+        seconds.
+      </p>
+      {#if log.comment}<pre class="log wq-mine">{log.comment}</pre>{/if}
+      <p>
+        <b>knobas cannot tell whether Jira already took it.</b> Nothing in the queue separates a
+        write that arrived and was never marked sent from one that never left — not the state it
+        is in, and not how many times it has been tried. Withdrawing it makes this time
+        <b>unlogged</b> again and offers it back to <i>Log all</i>, so if Jira did take it,
+        logging it a second time puts the same {worked(log.seconds)} on {ticketKey(log.entity)}
+        twice.
+      </p>
+      {@render guarantee()}
+    {/snippet}
+    {#snippet footer()}
+      <span class="spacer"></span>
+      <button class="btn ghost" onclick={() => (withdrawing = null)}>Keep it queued</button>
+      <button class="btn danger" disabled={queue.busy} onclick={confirmWithdrawal}>
+        Discard the worklog
+      </button>
+    {/snippet}
+  </Modal>
+{/if}
 
 <style>
   .wq-error {
