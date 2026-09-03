@@ -2820,7 +2820,61 @@ impl Drop for Protocol {
             if status != 404 {
                 return Err(format!("page {id} still answers {status} after its delete"));
             }
-            Ok(())
+            // **And wait for the CQL index to give it up**, which is a
+            // separate fact from the page being gone.
+            //
+            // Measured, not assumed: this run deleted the page, verified the
+            // 404, and `live_confluence_seeded`'s
+            // `a_full_sync_mirrors_every_seeded_page_of_the_space` -- which
+            // asserts the space holds nothing the seed does not know about --
+            // failed seconds later with the deleted page still in its results.
+            // Confluence writes that index asynchronously in *both*
+            // directions, and this suite is the one that pushed the page into
+            // it (the publish test polls until it appears). So the wait is
+            // symmetric: a suite that put a page in a shared index takes it
+            // back out of the index, not merely out of the API, before the
+            // next suite reads it.
+            //
+            // A one-second tick rather than a busy loop, because there is no
+            // sync run here to make time pass -- and a bound rather than a
+            // guessed sleep, so the failure names what did not happen.
+            let deadline = std::time::Instant::now() + INDEX_BUDGET;
+            loop {
+                let (status, listing) = api(
+                    &http,
+                    &url,
+                    &user,
+                    &password,
+                    reqwest::Method::GET,
+                    // The adapter's own query, which is what the next suite
+                    // asks: `type = page`, percent-encoded.
+                    "rest/api/content/search?cql=type%20%3D%20page&limit=200",
+                    None,
+                )
+                .await;
+                if status != 200 {
+                    return Err(format!(
+                        "CQL search after deleting {id} -> {status}: {listing}"
+                    ));
+                }
+                let indexed = listing["results"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|page| page["id"].as_str())
+                    .any(|found| found == id);
+                if !indexed {
+                    return Ok(());
+                }
+                if std::time::Instant::now() >= deadline {
+                    return Err(format!(
+                        "page {id} is deleted and answers 404, but Confluence's CQL index still \
+                         lists it after {INDEX_BUDGET:?} -- the next suite's full sync would read \
+                         it as a page the seed knows nothing about"
+                    ));
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
         });
     }
 }
