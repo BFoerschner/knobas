@@ -101,8 +101,15 @@
      * the shell's, exactly as `onlink`'s write is. `undefined` — a caller with
      * no timer to offer — leaves the row out of the chain entirely, the same
      * distinction `onlink` draws.
+     *
+     * **Required, unlike `onlink`**, and for the reason `switcherContexts`
+     * records after #238: this prop is the only join between the launcher's
+     * *Start timer* row and the shell that acts on it, and an optional one
+     * can be dropped from `App.svelte`, type-check clean, and remove the row
+     * from the product without failing a test. `onlink` keeps its `?` because
+     * it is already witnessed at the App seam; this one was not.
      */
-    ontimer?: ((targetId: string, targetTitle: string) => void) | undefined;
+    ontimer: ((targetId: string, targetTitle: string) => void) | undefined;
     /**
      * The IPC, injectable. Production passes nothing and gets the real
      * bridge; a test passes fakes and needs no `window.__TAURI_INTERNALS__`.

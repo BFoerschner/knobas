@@ -65,8 +65,15 @@
      * directly would be a second place that decision was made. `undefined`
      * leaves the slot a plain reading with no button, which is what a caller
      * with nothing to do about it gets.
+     *
+     * **Required, and deliberately not defaulted** (the rule #238 set and
+     * `shell/contexts.ts`'s `switcherContexts` records): this prop is the
+     * whole of the join between the strip's slot and the shell's stop, and an
+     * optional one can be dropped from a call site, type-check clean, and
+     * leave a permanently disabled button that no test fails on. A caller with
+     * nothing to do about the timer says so by passing `undefined`.
      */
-    ontimer?: (() => void) | undefined;
+    ontimer: (() => void) | undefined;
     /** The rooms the switcher offers. Defaults to *All work* alone. */
     contexts?: RoomContext[];
     /**

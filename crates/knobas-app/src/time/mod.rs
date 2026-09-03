@@ -115,7 +115,10 @@ impl TimerTarget {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BlockKind {
-    /// A person started and stopped a timer over it.
+    /// The timer made it -- `CONTEXT.md`'s wording, and deliberately not "a
+    /// person started and stopped it": [`close_stranded`] writes a `Manual`
+    /// block that nobody stopped. [`Block::ended_by_relaunch`] is what tells
+    /// those two apart; the kind says only where the block came from.
     Manual,
     /// Passive attribution recorded what was open (#281). No writer yet.
     Passive,
@@ -464,8 +467,8 @@ pub async fn heartbeat(
 ///
 /// A timer that died before its first heartbeat closes at zero length. That
 /// block is still written: "a timer was running and knobas stopped" is a fact
-/// the day review can act on, and dropping it would be knobas deciding a
-/// sitting did not happen.
+/// the day review can act on, and dropping it would be knobas deciding the
+/// block did not happen.
 ///
 /// `None` when no timer was stranded, which is every ordinary launch.
 ///
@@ -488,7 +491,7 @@ pub async fn close_stranded(pool: &PgPool) -> Result<Option<Block>, IpcError> {
     tracing::info!(
         block = block.id,
         ended_at = %block.ended_at,
-        "a timer outlived the last session and was closed at its last heartbeat"
+        "a timer outlived the last run of knobas and was closed at its last heartbeat"
     );
     Ok(Some(block))
 }

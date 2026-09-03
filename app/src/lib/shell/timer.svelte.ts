@@ -89,7 +89,7 @@ export interface Timer {
    *
    * The stop comes first and unconditionally, because that is what closes the
    * block the reader was in; a start that let the backend refuse it as a
-   * `conflict`, or one that replaced the row, would lose the sitting either
+   * `conflict`, or one that replaced the row, would lose the block either
    * way. It answers with the block that closed, which is what #280's worklog
    * draft opens on.
    *
@@ -122,6 +122,9 @@ export interface Timer {
 }
 
 export function createTimer(ports?: Partial<TimerPorts>): Timer {
+  /** Whether {@link Timer.begin} is already running. See its guard below. */
+  let live = false;
+
   const io: TimerPorts = {
     currentTimer: realCurrentTimer,
     startTimer: realStartTimer,
@@ -199,6 +202,14 @@ export function createTimer(ports?: Partial<TimerPorts>): Timer {
       return "started";
     },
     begin() {
+      if (live) {
+        // Already begun. Handing back a teardown that unwinds the *first*
+        // set of intervals would strand them if the second caller stopped
+        // first, so this one is a no-op and the first teardown remains the
+        // real one -- the rule `health.svelte.ts`'s `start()` records.
+        return () => {};
+      }
+      live = true;
       let stopped = false;
       let unlisten: (() => void) | undefined;
 
@@ -229,15 +240,24 @@ export function createTimer(ports?: Partial<TimerPorts>): Timer {
       // the timer's own). `listen` is itself an `invoke` and resolves a tick
       // or more later, so the "torn down before it resolved" race is handled
       // the way `health.svelte.ts` handles it.
-      void io.listen(EVENTS.activityNew, () => void refresh()).then((off) => {
-        if (stopped) {
-          off();
-          return;
-        }
-        unlisten = off;
-      });
+      void io
+        .listen(EVENTS.activityNew, () => void refresh())
+        .then((off) => {
+          if (stopped) {
+            off();
+            return;
+          }
+          unlisten = off;
+        })
+        .catch(() => {
+          // A failed subscription is not a failed window, the rule
+          // `health.svelte.ts` records: the clock still ticks, the beat still
+          // lands, and this window's own starts and stops still write through
+          // the store. What is lost is only news of a change made elsewhere.
+        });
 
       return () => {
+        live = false;
         stopped = true;
         clearInterval(ticking);
         clearInterval(beating);

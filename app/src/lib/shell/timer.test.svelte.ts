@@ -287,6 +287,56 @@ test("the subscription, the clock and the heartbeat are all torn down", async ()
 });
 
 /**
+ * **Beginning twice is one set of intervals, not two.**
+ *
+ * `App.svelte` calls `begin()` once, so this is latent -- and latent is
+ * exactly what the rule `health.svelte.ts` records is about: the second
+ * caller's teardown would unwind the first caller's subscription and strand
+ * the second's, so a store that answered both with a real teardown would leak
+ * a heartbeat that nobody can stop. The witness is the beat, because a second
+ * interval is a second beat every thirty seconds.
+ */
+test("beginning twice does not double the heartbeat, and the first teardown is the real one", async () => {
+  const belt = bench();
+  const stop = belt.timer.begin();
+  const stopAgain = belt.timer.begin();
+  await vi.advanceTimersByTimeAsync(0);
+
+  vi.advanceTimersByTime(HEARTBEAT_MS);
+  expect(belt.calls.beats, "a second begin() started a second heartbeat").toHaveLength(1);
+
+  // The second caller's teardown is the no-op, so it strands nothing...
+  stopAgain();
+  vi.advanceTimersByTime(HEARTBEAT_MS);
+  expect(belt.calls.beats, "the no-op teardown stopped the real heartbeat").toHaveLength(2);
+
+  // ...and the first caller's is still the one that stops everything.
+  stop();
+  vi.advanceTimersByTime(HEARTBEAT_MS * 2);
+  expect(belt.calls.beats, "the first teardown did not stop the heartbeat").toHaveLength(2);
+  expect(belt.listening()).toBe(false);
+});
+
+/**
+ * **A subscription that never lands is not a window that stops working.**
+ *
+ * `listen` is itself an `invoke`, and it rejects when there is no bridge
+ * behind it -- which is what browser QA under `?fake-ipc` looks like if the
+ * fixture is not installed yet. The rule `health.svelte.ts` records: keep the
+ * rest running. What is lost is only news of a change made elsewhere; the
+ * clock still ticks and the beat still lands.
+ */
+test("a subscription that rejects leaves the clock and the heartbeat running", async () => {
+  const belt = bench({ listen: (() => Promise.reject(new Error("no bridge"))) as never });
+  const stop = belt.timer.begin();
+  await vi.advanceTimersByTimeAsync(0);
+
+  vi.advanceTimersByTime(HEARTBEAT_MS);
+  expect(belt.calls.beats, "a failed subscription took the heartbeat with it").toHaveLength(1);
+  stop();
+});
+
+/**
  * A failed read keeps what is on screen. `current_timer` rejects with
  * `not_ready` for the whole of bring-up, and a strip that blanked on that
  * would lose a running timer every time the database restarted under it.

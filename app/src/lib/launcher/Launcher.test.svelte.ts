@@ -119,6 +119,9 @@ function open(props: Record<string, unknown> = {}) {
       open: true,
       onnavigate: () => {},
       onclose: () => {},
+      // Spelled out rather than omitted: `ontimer` is required so a shell
+      // cannot drop it silently, and a fixture with no timer to offer says so.
+      ontimer: undefined,
       now: NOW,
       ports: {
         search: async () => response(),
@@ -760,6 +763,7 @@ test("⌘K opens the overlay from anywhere, and opening twice is not closing", a
       open: false,
       onnavigate: () => {},
       onclose: () => {},
+      ontimer: undefined,
       ports: { search: async () => response(), launcherHome: async () => HOME },
     },
   });

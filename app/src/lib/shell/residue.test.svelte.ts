@@ -537,6 +537,7 @@ const CASES: Case[] = [
           open: true,
           onnavigate: () => {},
           onclose: () => {},
+          ontimer: undefined,
           ports: LAUNCHER_PORTS,
         },
       }),

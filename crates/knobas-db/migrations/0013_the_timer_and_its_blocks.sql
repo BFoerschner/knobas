@@ -14,7 +14,8 @@
 -- A **timer** is a fact about *now*: one clock, running, on one target. A
 -- **block** is a fact about the *past*: a stretch that started and ended. They
 -- have different lifetimes -- there is at most one timer ever and there are as
--- many blocks as there were sittings -- and the moment that turns the first
+-- many blocks as there were stretches of time worked -- and the moment that
+-- turns the first
 -- into the second is the only writer of the second (`stop`, or the relaunch
 -- sweep). Storing a running timer as a block with a null end would make every
 -- reader of the day's blocks carry the "and one of these might not have
@@ -81,9 +82,15 @@ create table knobas.timer (
   -- of its value -- a stamp that only moved on a change would place a
   -- crash at the last *interaction* and log the hours since as work.
   --
-  -- Defaulted to the start rather than to `now()` so a timer that never lived
-  -- to see a heartbeat closes at zero length rather than at whatever the
-  -- clock said when the row was read back.
+  -- Defaulted to `now()`, which is `started_at`'s default evaluated in the
+  -- same transaction and therefore the same instant: a timer that never lived
+  -- to see a heartbeat closes at **zero length** rather than at whatever the
+  -- clock said when the row was read back. The two defaults have to stay the
+  -- same expression for that to hold, and a writer that binds `started_at`
+  -- explicitly -- a backdated timer, an import -- has to bind this too, or it
+  -- writes a timer whose last heartbeat precedes its start and whose block
+  -- then trips `block_span_chk`. Nothing does that today; #279's block editor
+  -- is the first thing that could.
   last_heartbeat timestamptz not null default now(),
 
   -- Exactly one half of the target, in the spelling `CONTEXT.md` uses.
@@ -111,7 +118,10 @@ create table knobas.block (
 
   -- How the block came to exist:
   --
-  --   manual   -- a person started and stopped a timer over it
+  --   manual   -- the timer made it: a person started it, and either that
+  --                person stopped it or the relaunch sweep closed it when
+  --                knobas stopped being alive (`ended_by_relaunch` below is
+  --                what tells those two apart -- the kind does not)
   --   passive  -- passive attribution recorded what was open (#281)
   --
   -- A closed vocabulary in plain `text` with a check, the discipline `0005`'s

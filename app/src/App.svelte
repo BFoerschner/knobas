@@ -287,6 +287,7 @@
     let stopInbox: (() => void) | undefined;
     let stopContexts: (() => void) | undefined;
     let stopProjects: (() => void) | undefined;
+    let stopTimer: (() => void) | undefined;
 
     void (async () => {
       // Dev only, and behind `import.meta.env.DEV` so Rollup folds the branch
@@ -331,6 +332,18 @@
       // a sync run ending, because a project room appears when the first item
       // carrying it syncs.
       stopProjects = projects.start();
+      // The clock, the heartbeat and the activity subscription (#278). Behind
+      // the same await as the four above, and for the same reason: `begin()`
+      // issues a `listen` *synchronously*, and a `listen` before the fixture
+      // is a listen into nothing. The tick and the beat are intervals and do
+      // not care, but the subscription is how the strip learns about a start
+      // or a stop this window did not make, and losing it under `?fake-ipc`
+      // would be invisible in browser QA -- the shell would simply stop
+      // noticing.
+      //
+      // Nothing is waiting on the tick: the first `refresh` comes from the
+      // `lifecycle.ready` effect below, which fires long after this.
+      stopTimer = timer.begin();
       // Once, at shell start: `list_adapters` is static per build and answers
       // before the database is up, so there is nothing to poll and nothing to
       // tear down.
@@ -345,16 +358,10 @@
       restoreTile: () => room?.restoreTile() ?? false,
       toggleTimer,
     });
-    // The clock, the heartbeat and the activity subscription. Outside the
-    // `await` above because none of the three touches the bridge until it
-    // fires -- and because the tick has to be running before the first
-    // `refresh` lands, or the strip would draw a frozen elapsed reading until
-    // the next second.
-    const stopTimer = timer.begin();
 
     return () => {
       disposed = true;
-      stopTimer();
+      stopTimer?.();
       stopHealth?.();
       stopMerges?.();
       stopInbox?.();

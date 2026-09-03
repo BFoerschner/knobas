@@ -3283,8 +3283,10 @@ From this commit on, each of the following requires an orchestrator decision **a
   `running` flag, both of which let a second row live long enough for two surfaces to disagree
   about what the clock is on. `time::start` turns that violation into a `conflict` by asking for
   it (`on conflict (only_one) do nothing`, no row back means refused), so two starts racing
-  produce one timer and one honest refusal rather than an overwrite. `tests/time_ipc.rs` pins both
-  levels: the command's `conflict`, and a raw second `insert` that the schema itself rejects.
+  produce one timer and one honest refusal rather than an overwrite. `tests/time_ipc.rs` pins all
+  three levels: the command's `conflict`, a raw second `insert` that collides on the primary key,
+  and a raw `insert` naming `only_one = false` — which is the only thing `timer_only_one_chk`
+  stands in the way of, and without which the check could be deleted with every test still green.
 
   **The target is two nullable columns with an exactly-one check, in both tables, deliberately.**
   Not one column with a discriminator: the entity half is an entity id and has to read like every
@@ -3300,12 +3302,17 @@ From this commit on, each of the following requires an orchestrator decision **a
   rule is `knobas_app::time::vet`'s, on the way in, because it is about the `ctx:` namespace
   (`knobas_core::entity::RESERVED_NAMESPACES`) and a check constraint that parsed entity ids would
   be a second copy of that list — the copy that goes stale. `CONTEXT.md`'s *timer target* gives
-  the reason: a context is a set, and time on a set has nowhere to go. It is enforced three times
-  over, because a context is a real `knobas.entity` row of kind `ctx` and reaches every list like
-  anything else: `start_timer` and `timer_heartbeat` refuse one with `invalid`, ⌘T's picker
-  filters it out of the recents, and the launcher's *Start timer* row is absent on it. Each has
-  its own witness, and each witnesses a **refusal** rather than an absence — the fixture puts a
-  real context row in the middle of the list.
+  the reason: a context is a set, and time on a set has nowhere to go. **`start_timer` is the one
+  enforcement**: it refuses a `ctx:` id with `invalid`, and `tests/time_ipc.rs`'s
+  `a_stored_context_is_refused_as_a_target` builds the context through
+  `knobas_core::context::create_adhoc` rather than inventing the string. The two frontend guards
+  — ⌘T's picker filtering it out of the recents, and the launcher's *Start timer* row being
+  absent on it — are defence in depth over a list that **cannot carry one today**: recents and
+  search both read `sync.live_item`, and migration `0006`'s `item_entity_reserved_chk` forbids a
+  `sync.item` row from naming the `ctx:` namespace at all. They are here because the rule belongs
+  to the *list* rather than to that constraint two crates away — #279 draws its own candidates —
+  and each is witnessed as a **refusal** rather than an absence: the fixture puts a real context
+  row in the middle of the list and asserts the rows either side of it survive.
 
   **`worklog_id` carries no foreign key because there is no table yet.** The worklog arrives with
   #280 and takes the next free number; the column is here rather than there because a block's
@@ -3350,8 +3357,15 @@ From this commit on, each of the following requires an orchestrator decision **a
   the observation passive attribution (#281) turns into passive blocks, and #281 brings the table
   to store it in. It is on the command **now** because the frontend rule that computes it — *open
   detail, else room anchor, else none* — is part of this ticket, and adding the parameter later
-  would be a second §10.8 touch on a command that already exists. It is vetted on arrival all the
-  same, so #281 cannot inherit a foreground the timer could never run on.
+  would be a second §10.8 touch on a command that already exists.
+
+  **It is not validated, and `timer_heartbeat` never refuses on it.** The value is vetted *after*
+  the stamp lands and a refusal is logged, never propagated: the stamp is a statement about
+  knobas being alive, and a beat lost to a malformed foreground would freeze `last_heartbeat` and
+  hand the next relaunch a block hours short — the one failure the relaunch rule exists to
+  prevent (`a_foreground_the_timer_could_never_run_on_does_not_cost_the_beat`). So #281 inherits
+  the parameter unvalidated; what it inherits alongside it is a log line already complaining
+  about every bad one.
 
   **No new event, and that is the acceptance criterion rather than an omission.** `start_timer`
   and `stop_timer` write activity lines with actor `user` and announce them on the existing

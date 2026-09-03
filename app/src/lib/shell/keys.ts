@@ -79,9 +79,17 @@ export interface KeyHandlers {
    * launcher, for the same reason.
    *
    * It is bound **unconditionally**, above the `Esc` ladder and outside it: a
-   * verb is not a rung. A modal that wants to keep the key stops propagation
-   * itself, exactly as `Modal.svelte` already does for `Esc` — so ⌘T inside
-   * the picker does not start a second timer behind it.
+   * verb is not a rung.
+   *
+   * **Nothing currently intercepts it, `Modal.svelte` included** — that
+   * component stops propagation for `Escape` alone — so ⌘T pressed inside
+   * ⌘T's own picker does reach this handler. It is harmless in the state the
+   * picker opens in: the picker opens only when nothing is running and
+   * nothing is in front of the reader, so `press()` answers `"pick"` again and
+   * the shell re-opens a dialog that is already up. It stops being harmless
+   * the moment another surface can start a timer while the picker is open,
+   * which is what #281's passive attribution brings; the fix then is a
+   * `stopPropagation` in the modal that wants the key, not a rung here.
    */
   toggleTimer: () => void;
 }
