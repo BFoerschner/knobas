@@ -17,7 +17,12 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { InboxCategory, InboxEntry } from "../ipc/entity";
-import { addressOf, createNotifications, type Notification, type NotifyPorts } from "./notify.svelte";
+import {
+  addressOf,
+  createNotifications,
+  type NotificationDraft,
+  type NotifyPorts,
+} from "./notify.svelte";
 
 /** One line of the stream, of `category`, about `entityId`. */
 function entry(
@@ -51,7 +56,7 @@ function entry(
  */
 function bench(overrides: Partial<NotifyPorts> = {}) {
   const calls = {
-    sent: [] as Notification[],
+    sent: [] as NotificationDraft[],
     stored: [] as InboxCategory[][],
     asked: 0,
     checked: 0,
