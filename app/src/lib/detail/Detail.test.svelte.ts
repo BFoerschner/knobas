@@ -1105,12 +1105,15 @@ test("a failure from the opener becomes a toast", async () => {
  * A page opens at its address, shows its ancestor path, and shows its body as
  * **text** (#284).
  *
- * The body half is the criterion's "for now": the storage format is in the
- * payload verbatim and rendering it is the next ticket, so what a reader sees
- * today is `body_text` — the stripped words, with the headings on their own
- * lines. It is drawn as text and never as markup, which is roadmap §4 gotcha
+ * The body half was the criterion's "for now" in #284 and the markup renderer
+ * landed in #285 — but this fixture's *source* is the mock adapter, so it
+ * still takes the plain-text arm, and that is what keeps it meaningful: it is
+ * now the direction *"anything but a Confluence source shows `body_text`"*.
+ * The words are drawn as text and never as markup, which is roadmap §4 gotcha
  * 7 and is why the escaped tag below has to come out as the characters the
- * author typed rather than as an element.
+ * author typed rather than as an element. The Confluence arm is
+ * `a Confluence page renders its markup, its macro placeholders and its
+ * comments` at the bottom of this file.
  */
 test("a page shows its ancestor path and its body as text", async () => {
   answer = () =>
@@ -1179,5 +1182,224 @@ test("an item whose record names no ancestors shows no path at all", async () =>
   );
   flushSync();
   expect(screen.target.querySelector(".d-path")).toBeNull();
+  screen.done();
+});
+
+/**
+ * The **page detail**, end to end: `get_entity`'s payload in, a rendered page
+ * out (#285, criteria 2 and 3).
+ *
+ * The seam this covers is the one between the sanitizer and the panel. The
+ * sanitizer's own DOM assertions live in `StorageBody.test.svelte.ts`; what is
+ * here is that the panel finds the storage format in the payload, prefers it
+ * to the normalized text, and puts the comments under it. `body_text` carries
+ * a marker no rendering of the markup could produce, so "the page renders" and
+ * "the text arm was taken" cannot both be true.
+ */
+test("a Confluence page renders its markup, its macro placeholders and its comments", async () => {
+  answer = () =>
+    Promise.resolve(
+      detail({
+        row: {
+          entity_id: "confluence:98307",
+          kind: "page",
+          source_id: "confluence",
+          title: "SEPA payout retry design",
+          updated_at: "2026-08-22T10:40:00Z",
+          synced_at: "2026-08-22T14:30:00Z",
+          path: "Engineering › Payments",
+        },
+        source: {
+          id: "confluence",
+          display_name: "Tidewater wiki",
+          adapter_kind: "confluence",
+          enabled: true,
+        },
+        // The FTS blob. If this shows up on screen the panel took the plain
+        // text arm, and no assertion about the markup below means anything.
+        body_text: "STRIPPED-TEXT-ARM",
+        payload: {
+          id: "98307",
+          space: { key: "ENG", name: "Engineering" },
+          body: {
+            storage: {
+              value:
+                "<h2>Backoff policy</h2><p>base <strong>30 s</strong>, factor 2.</p>" +
+                '<ac:structured-macro ac:name="info"><ac:rich-text-body>' +
+                "<p>owned by payments</p></ac:rich-text-body></ac:structured-macro>" +
+                "<table><thead><tr><th>Code</th><th>Meaning</th></tr></thead>" +
+                "<tbody><tr><td>503</td><td>retry</td></tr></tbody></table>" +
+                "<script>alert(1)</script>",
+              representation: "storage",
+            },
+          },
+          children: {
+            comment: {
+              results: [
+                {
+                  id: "98320",
+                  body: { storage: { value: "<p>@Mara can you add the <em>SLA</em>?</p>" } },
+                },
+                { id: "98321", body: { storage: { value: "<p>on it</p>" } } },
+              ],
+            },
+          },
+        },
+      }),
+    );
+  const screen = render({ entityId: "confluence:98307", kind: "page" });
+  await vi.waitFor(() => expect(screen.text()).toContain("Backoff policy"));
+  flushSync();
+
+  const body = screen.target.querySelector(".d-body.storage");
+  expect(body, "the page detail did not render its storage format at all").not.toBeNull();
+  expect(body!.querySelector("h2")?.textContent).toBe("Backoff policy");
+  expect(body!.querySelector("strong")?.textContent).toBe("30 s");
+  // A table, as a table (criterion 2).
+  expect(body!.querySelector("table")!.rows).toHaveLength(2);
+  // A macro, named, with its own body gone with it.
+  expect([...body!.querySelectorAll(".ac")].map((n) => n.textContent?.trim())).toEqual([
+    "info macro",
+  ]);
+  expect(body!.textContent).not.toContain("owned by payments");
+  // gotcha 7, at the surface it is about: no script element anywhere in the
+  // panel, and its body is not shown as prose in the page either.
+  //
+  // Scoped to the body for the prose half, deliberately: the §3a *Details*
+  // projection below shows the whole raw payload as text, `body.storage.value`
+  // included, so the panel's full `textContent` legitimately contains the
+  // characters `<script>alert(1)</script>` -- as characters, in a disclosure,
+  // which is what `payload.ts` exists to guarantee. The claim being made here
+  // is about the *rendered page*.
+  expect(screen.target.querySelector("script")).toBeNull();
+  expect(body!.textContent).not.toContain("alert(1)");
+  // The markup arm was taken, not the text arm.
+  expect(screen.text(), "the panel fell back to the FTS blob").not.toContain("STRIPPED-TEXT-ARM");
+
+  // The comments, under the body, each rendered the same way (criterion 3).
+  const comments = [...screen.target.querySelectorAll(".cmt")];
+  expect(comments).toHaveLength(2);
+  expect(comments[0]!.textContent).toContain("can you add the SLA?");
+  expect(comments[0]!.querySelector("em")?.textContent).toBe("SLA");
+  expect(comments[1]!.textContent).toContain("on it");
+  expect(screen.text()).toContain("Comments");
+  // Under the body: the document order is body first, then comments.
+  const order = [...screen.target.querySelectorAll(".d-body.storage, .cmt")];
+  expect(order[0]).toBe(body);
+
+  screen.done();
+});
+
+/**
+ * The gate, from the other side: a page from **another adapter** keeps its
+ * body as text.
+ *
+ * `page` is a word two adapters may both emit and a Gitea wiki page's body is
+ * Markdown, so a renderer chosen by the shape of the payload would render one
+ * product's markup with another's rules — the guess ADR-0007 forbids. The
+ * payload here is deliberately Confluence-shaped: the only thing that differs
+ * is which adapter the source runs.
+ */
+test("a page from another adapter is not rendered as Confluence markup", async () => {
+  answer = () =>
+    Promise.resolve(
+      detail({
+        row: {
+          entity_id: "gitea:wiki/Home",
+          kind: "page",
+          source_id: "gitea",
+          title: "Home",
+          updated_at: null,
+          synced_at: "2026-08-22T14:30:00Z",
+          path: null,
+        },
+        source: {
+          id: "gitea",
+          display_name: "Tidewater Gitea",
+          adapter_kind: "gitea",
+          enabled: true,
+        },
+        body_text: "Home\n\nrunbooks live here",
+        payload: {
+          body: { storage: { value: "<h2>Not Confluence</h2>", representation: "storage" } },
+        },
+      }),
+    );
+  const screen = render({ entityId: "gitea:wiki/Home", kind: "page" });
+  await vi.waitFor(() => expect(screen.text()).toContain("runbooks live here"));
+  flushSync();
+
+  expect(screen.target.querySelector(".d-body.storage")).toBeNull();
+  expect(screen.target.querySelector(".d-body h2")).toBeNull();
+  // The body, and not the panel: the *Details* projection shows the raw
+  // payload as text, so `Not Confluence` is legitimately on screen there --
+  // inside a JSON disclosure, as characters.
+  expect(
+    screen.target.querySelector(".d-body")?.textContent,
+    "another product's markup was rendered as Confluence's",
+  ).not.toContain("Not Confluence");
+  screen.done();
+});
+
+/**
+ * **A page is a link end** (criterion 4, asserted rather than built).
+ *
+ * Nothing in the linking flow knows about kinds — `create_link` takes two
+ * addresses — so what is worth witnessing is that the flow is *reachable* from
+ * a page's own panel: the header offers *Link to…*, the dialog opens over a
+ * page, and the write goes out with the page's address as the near end. The
+ * far end is a page too here, which is the picker's one fixed answer in this
+ * file, so both ends of this link are pages.
+ */
+test("a page detail can draw a link, with the page as the near end", async () => {
+  answer = () =>
+    Promise.resolve(
+      detail({
+        row: {
+          entity_id: "confluence:98307",
+          kind: "page",
+          source_id: "confluence",
+          title: "SEPA payout retry design",
+          updated_at: null,
+          synced_at: "2026-08-22T14:30:00Z",
+          path: "Engineering › Payments",
+        },
+        source: {
+          id: "confluence",
+          display_name: "Tidewater wiki",
+          adapter_kind: "confluence",
+          enabled: true,
+        },
+        body_text: "SEPA payout retry design",
+        payload: { id: "98307" },
+      }),
+    );
+  const screen = render({ entityId: "confluence:98307", kind: "page" });
+  await vi.waitFor(() => expect(screen.text()).toContain("Nothing linked yet"));
+  flushSync();
+
+  [...screen.target.querySelectorAll<HTMLButtonElement>(".d-h button")]
+    .find((button) => button.textContent?.includes("Link to"))!
+    .click();
+  flushSync();
+
+  const picker = screen.target.querySelector<HTMLInputElement>(
+    'input[placeholder="Search everything"]',
+  )!;
+  picker.value = "sepa";
+  picker.dispatchEvent(new Event("input", { bubbles: true }));
+  await vi.waitFor(() =>
+    expect(screen.target.querySelectorAll('[role="option"]').length).toBeGreaterThan(0),
+  );
+  picker.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+  );
+  flushSync();
+  [...screen.target.querySelectorAll<HTMLButtonElement>("button")]
+    .find((button) => button.textContent?.trim() === "Link")!
+    .click();
+
+  await vi.waitFor(() => expect(created).toHaveLength(1));
+  expect(created).toEqual([{ fromId: "confluence:98307", toId: "mock:ENG-SEPA" }]);
   screen.done();
 });
