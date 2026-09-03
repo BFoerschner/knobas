@@ -180,7 +180,7 @@ The week under the day strip, Monday to Sunday with empty weekends collapsed: a 
 _Avoid_: report, timecard, week view
 
 **Passive attribution**:
-The opt-in recording of which entity was in the foreground — the open detail, else the room's anchor entity, else nothing — while the app window is focused, as passive [blocks](#block). A gap stays a gap until a person assigns it; nothing recorded this way reaches a source on its own.
+The opt-in recording of which entity was in the foreground — the open detail, else the room's anchor entity, else nothing — while the app window is focused, as passive [blocks](#block). A gap stays a gap until a person assigns it; nothing recorded this way reaches a source on its own. Observations are kept a month, and a day older than that is a day knobas no longer has the beats for — the day review and the timesheet say so rather than drawing it as a day with nothing on it. (#315, #337)
 _Avoid_: automatic tracking, activity tracking (that is the activity stream's word)
 
 ## Export

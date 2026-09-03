@@ -144,6 +144,31 @@ export function durationReading(minutes: number): string {
 }
 
 /**
+ * What either surface says about a day knobas no longer has the beats for
+ * (#337).
+ *
+ * **One sentence, two subjects**, and that is the whole of the decision: the
+ * strip says it about *this day* and the timesheet says it about the columns
+ * it names, in the same words. Two sentences would be two claims about the
+ * same fact on one screen — the day review and the week timesheet are drawn
+ * one above the other — and a reader comparing them would have to work out
+ * whether they meant the same thing.
+ *
+ * It says *absent, not zero* outright, because the reading it exists to
+ * correct is the one a person makes without being told: an empty passive
+ * column looks exactly like a day the app was shut on.
+ *
+ * Exported from here rather than from `week.ts` for the reason {@link MONTHS}
+ * is: one copy cannot drift from the other.
+ */
+export function horizonNote(subject: string): string {
+  return (
+    `knobas keeps a month of observations and no longer has the beats for ` +
+    `${subject}: what was open is absent, not zero.`
+  );
+}
+
+/**
  * One thing on the strip: a block, or the unaccounted time before it.
  *
  * A tagged union rather than blocks with an optional gap hanging off each,

@@ -45,6 +45,7 @@
     deleteBlock as realDeleteBlock,
     updateBlock as realUpdateBlock,
     type DayBlock,
+    type DayRecord,
     type TimerTarget,
   } from "../ipc/time";
   import { latestRead } from "../shell/latest-read";
@@ -56,6 +57,7 @@
     dayLabel,
     dayBounds,
     durationReading,
+    horizonNote,
     minutesBetween,
     segmentsOf,
     shiftDay,
@@ -127,6 +129,15 @@
   const today = $derived(dayKey(now()));
 
   let rows = $state<DayBlock[]>([]);
+  /**
+   * This day reaches back past what retention has swept (#337).
+   *
+   * Not derived from the strip, and it could not be: a day past the horizon
+   * draws exactly what a day nobody had the app open on draws. It is the
+   * backend's answer, from the stamp that says what knobas actually threw
+   * away.
+   */
+  let pastHorizon = $state(false);
   /** The read failed. The header still works, so the reader can move days. */
   let failure = $state<string | null>(null);
   /**
@@ -196,7 +207,7 @@
    * predictable way — the **rejection** path gets dropped, so a stale failure
    * blanks a day that has since read fine (#107).
    */
-  const readDay = latestRead<DayBlock[]>();
+  const readDay = latestRead<DayRecord>();
   $effect(() => {
     // Read for its own sake: *Log all* below changes this day's blocks without
     // changing the address, and a strip still offering *Edit* on a block that
@@ -209,7 +220,8 @@
     const { from, to } = dayBounds(on);
     await readDay(() => io.dayBlocks(from.toISOString(), to.toISOString()), {
       ok: (listed) => {
-        rows = listed;
+        rows = listed.blocks;
+        pastHorizon = listed.past_horizon;
         failure = null;
       },
       fail: (cause) => {
@@ -424,6 +436,17 @@
         passing notification.
       -->
       <p class="refusal" role="alert">{refusal}</p>
+    {/if}
+
+    {#if pastHorizon}
+      <!--
+        Said before the strip, and before the "nothing tracked" line below it,
+        because it changes what that line means: on a day past the horizon
+        knobas was not idle and the reader was not away — knobas has thrown the
+        record away. The words are `horizonNote`'s, shared verbatim with the
+        timesheet under this (#337).
+      -->
+      <p class="horizon">{horizonNote("this day")}</p>
     {/if}
 
     {#if segments.length === 0 && !failure}
@@ -664,6 +687,20 @@
     border-radius: 2px;
     color: var(--text);
     background: var(--raised);
+  }
+
+  /*
+    Quieter than a refusal and louder than nothing: this is a fact about the
+    day rather than something that went wrong, and there is nothing for the
+    reader to do about it.
+  */
+  .horizon {
+    margin: 0 0 10px;
+    padding: 8px 10px;
+    border: 1px dashed var(--hair2);
+    border-radius: 2px;
+    color: var(--muted);
+    font: 400 12px var(--sans);
   }
 
   .strip {

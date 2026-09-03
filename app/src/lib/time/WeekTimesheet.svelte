@@ -42,10 +42,11 @@
   } from "../ipc/time";
   import { latestRead } from "../shell/latest-read";
   import { targetReading } from "../shell/timer";
-  import { dayKey, durationReading } from "./day";
+  import { dayKey, durationReading, horizonNote } from "./day";
   import {
     cellIsEmpty,
     columnHeading,
+    daysPastHorizon,
     minutesOf,
     mondayOf,
     visibleColumns,
@@ -124,6 +125,15 @@
   const columns = $derived(week === null ? [] : visibleColumns(week, key));
   /** The highlighted column, or -1 when the strip's day is in another week. */
   const highlighted = $derived(week === null ? -1 : week.days.indexOf(key));
+  /**
+   * The headings of this week's days knobas no longer has the beats for
+   * (#337).
+   *
+   * Every one of them, not only the drawn columns: a collapsed weekend day is
+   * still a day whose observations retention took, and `daysPastHorizon`
+   * carries the reasoning.
+   */
+  const absent = $derived(week === null ? [] : daysPastHorizon(week));
 
   /** Unlogged seconds over the rows a predicate keeps. */
   function unloggedOver(keep: (row: WeekRow) => boolean): number {
@@ -238,6 +248,17 @@
 
   {#if failure}
     <p class="empty fail">{failure}</p>
+  {/if}
+
+  {#if absent.length > 0}
+    <!--
+      Outside both branches below, deliberately. A week entirely past the
+      horizon has no rows at all — `week::read` drops the "no target, app open"
+      row when it has nothing to say — so it falls into the "nothing tracked
+      this week" arm, which is the one reading that is false about it. This is
+      drawn above that line in both arms, in the day review's own words.
+    -->
+    <p class="horizon">{horizonNote(absent.join(", "))}</p>
   {/if}
 
   {#if planned !== null}
@@ -375,6 +396,20 @@
   .head h2 {
     margin: 0;
     font: 600 13px var(--sans);
+  }
+
+  /*
+    The day review's `.horizon`, in the same words and the same key: a fact
+    about the week rather than something that went wrong, and nothing for the
+    reader to do about it.
+  */
+  .horizon {
+    margin: 0 0 10px;
+    padding: 8px 10px;
+    border: 1px dashed var(--hair2);
+    border-radius: 2px;
+    color: var(--muted);
+    font: 400 12px var(--sans);
   }
 
   .confirm {

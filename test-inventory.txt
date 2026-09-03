@@ -45,6 +45,7 @@ knobas-app	lib/knobas_app	commands::time::tests::the_block_kinds_match_their_typ
 knobas-app	lib/knobas_app	commands::time::tests::the_block_shape_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::time::tests::the_candidate_shape_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::time::tests::the_candidate_sources_match_their_typescript_mirror
+knobas-app	lib/knobas_app	commands::time::tests::the_day_record_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::time::tests::the_day_review_row_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::time::tests::the_day_window_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::time::tests::the_draft_quotes_adr_0012s_sentence_verbatim
@@ -379,8 +380,10 @@ knobas-app	test/time_ipc	a_block_on_a_ticket_is_not_an_ad_hoc_block_at_all
 knobas-app	test/time_ipc	a_block_started_outside_a_stored_room_is_not_given_one
 knobas-app	test/time_ipc	a_block_that_ran_through_midnight_is_on_both_days
 knobas-app	test/time_ipc	a_blocks_start_end_and_target_can_all_be_moved
+knobas-app	test/time_ipc	a_database_no_sweep_has_run_in_has_no_day_past_the_horizon
 knobas-app	test/time_ipc	a_day_inside_the_horizon_keeps_its_beats_and_is_still_offered
 knobas-app	test/time_ipc	a_day_is_the_readers_day
+knobas-app	test/time_ipc	a_day_past_the_horizon_says_so_and_an_observed_empty_day_does_not
 knobas-app	test/time_ipc	a_day_with_no_observations_is_left_exactly_as_it_was
 knobas-app	test/time_ipc	a_days_blocks_concatenate_into_one_interval_that_bills_no_lunch
 knobas-app	test/time_ipc	a_foreground_the_timer_could_never_run_on_does_not_cost_the_beat
@@ -441,6 +444,8 @@ knobas-app	test/time_ipc	with_passive_attribution_off_the_beat_still_stamps_and_
 knobas-app	test/week_ipc	a_block_through_midnight_is_booked_on_monday_and_covers_tuesdays_small_hours
 knobas-app	test/week_ipc	a_cell_counts_pending_as_logged_held_as_held_and_a_guess_as_neither
 knobas-app	test/week_ipc	a_discard_leaves_a_worklog_jira_answered_for_alone
+knobas-app	test/week_ipc	a_week_nobody_had_the_app_open_in_is_not_past_the_horizon
+knobas-app	test/week_ipc	a_week_straddling_the_horizon_says_which_of_its_days_have_no_beats
 knobas-app	test/week_ipc	discarding_a_queued_worklog_gives_the_afternoon_back
 knobas-app	test/week_ipc	log_all_makes_one_worklog_per_day_and_ticket
 knobas-app	test/week_ipc	log_all_touches_neither_a_passive_block_nor_a_label_one

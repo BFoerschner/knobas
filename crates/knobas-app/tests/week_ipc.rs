@@ -1065,3 +1065,82 @@ async fn a_discard_leaves_a_worklog_jira_answered_for_alone() {
 
     state.scheduler.shutdown().await;
 }
+
+// -- the observation horizon, as the timesheet meets it (#337) --------------
+
+/// **A week that straddles the horizon draws both readings at once.**
+///
+/// The sharp case, and the one the fixture week is shaped for: the sweep's
+/// horizon falls on Thursday's midnight, so Monday to Wednesday are days
+/// knobas no longer has the beats for and Thursday to Sunday are days it does.
+/// The "no target, app open" row reads **zero** for every one of the seven --
+/// Monday's beats are gone and the rest never had any -- so without the flag
+/// the timesheet says the same thing about a day it swept and a day the reader
+/// had the app shut on.
+///
+/// The row is asserted absent as well, deliberately: a week entirely past the
+/// horizon loses it altogether (`week::read` drops a row with nothing in it),
+/// which is why the reading cannot be hung on that row and rides on the week.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_week_straddling_the_horizon_says_which_of_its_days_have_no_beats() {
+    let (state, _wrote) = app("week_ipc_horizon").await;
+    time::passive::set_enabled(&state.pool, true)
+        .await
+        .expect("passive attribution is switched on");
+
+    // Ten minutes of Monday, which is what gives the sweep something to take
+    // and therefore a stamp to write.
+    beats(&state.pool, MONDAY, 9, 0, 21).await;
+
+    // A horizon on Thursday's midnight: three days behind it, four in front.
+    let thursday = at(MONDAY + 3, 0, 0);
+    let taken = time::passive::prune(
+        &state.pool,
+        thursday + chrono::Duration::days(time::passive::RETENTION_DAYS),
+    )
+    .await
+    .expect("the sweep runs");
+    assert_eq!(taken, 21, "Monday's beats are what the horizon is past");
+
+    let sheet = time::week::read(&state.pool, &week())
+        .await
+        .expect("the week reads");
+
+    assert_eq!(
+        sheet.past_horizon,
+        vec![true, true, true, false, false, false, false],
+        "the week has to name the days knobas no longer has the beats for, \
+         and only those"
+    );
+    assert!(
+        row_for(&sheet, None).is_none(),
+        "the fixture is only sharp while the no-target row is absent: with a \
+         row of zeros on screen the reader would have something else to read"
+    );
+}
+
+/// **A week with the app shut all through it is not a week past the horizon.**
+///
+/// The other direction of the same question, on a database the sweep has never
+/// taken anything out of. Every cell reads zero and the no-target row is
+/// missing, exactly as in the straddling week above -- and the flag is the
+/// only thing that disagrees, which is the whole of what it is for.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_week_nobody_had_the_app_open_in_is_not_past_the_horizon() {
+    let (state, _wrote) = app("week_ipc_horizon_shut").await;
+    time::passive::set_enabled(&state.pool, true)
+        .await
+        .expect("passive attribution is switched on");
+
+    let sheet = time::week::read(&state.pool, &week())
+        .await
+        .expect("the week reads");
+
+    assert_eq!(
+        sheet.past_horizon,
+        vec![false; 7],
+        "nothing has been swept, so knobas still has every beat these days \
+         never had"
+    );
+    assert!(row_for(&sheet, None).is_none(), "the app was shut all week");
+}

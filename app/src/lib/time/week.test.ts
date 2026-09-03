@@ -15,6 +15,7 @@ import type { Week, WeekCell, WeekRow } from "../ipc/time";
 import {
   columnHeading,
   dayIsEmpty,
+  daysPastHorizon,
   minutesOf,
   mondayOf,
   visibleColumns,
@@ -51,6 +52,7 @@ function weekWith(cells: Record<number, WeekCell>): Week {
       "2026-08-30",
     ],
     rows: [row],
+    past_horizon: Array.from({ length: 7 }, () => false),
   };
 }
 
@@ -179,4 +181,22 @@ test("the week's heading reads the same on every machine", () => {
   expect(weekLabel(["2026-08-24", "2026-08-30"])).toBe("24–30 August 2026");
   expect(weekLabel(["2026-08-31", "2026-09-06"])).toBe("31 August – 6 September 2026");
   expect(weekLabel(["2026-12-28", "2027-01-03"])).toBe("28 December 2026 – 3 January 2027");
+});
+
+/**
+ * The days a note has to name (#337), in the table's own words.
+ *
+ * The fixture is a **straddling** week, which is the ordinary one: `vet`
+ * bounds a timesheet's column count and says nothing about where its windows
+ * sit, so any run of days can be behind the horizon. A helper that answered
+ * "the week is past it" or "the week is not" could not draw this at all.
+ */
+test("the days past the horizon are named, and only those", () => {
+  const week = weekWith({});
+  week.past_horizon = [true, true, true, false, false, false, false];
+  expect(daysPastHorizon(week)).toEqual(["Mon 24", "Tue 25", "Wed 26"]);
+});
+
+test("a week knobas still has every beat for names no days at all", () => {
+  expect(daysPastHorizon(weekWith({}))).toEqual([]);
 });
