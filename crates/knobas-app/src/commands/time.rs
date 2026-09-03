@@ -29,7 +29,10 @@ use crate::{IpcError, Lifecycle};
 ///
 /// Best-effort by design: `emit` fails only when there is no window to hear
 /// it, and a timer that started is started whether or not the strip heard.
-fn announce<R: tauri::Runtime>(app: &tauri::AppHandle<R>, line: knobas_core::activity::ActivityRow) {
+fn announce<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    line: knobas_core::activity::ActivityRow,
+) {
     if let Err(error) = app.emit(crate::events::ACTIVITY_NEW, &line) {
         tracing::warn!(%error, verb = %line.verb, "an activity line was not announced");
     }
@@ -46,8 +49,9 @@ fn announce<R: tauri::Runtime>(app: &tauri::AppHandle<R>, line: knobas_core::act
 /// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is still
 /// coming up, [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
 #[tauri::command]
-pub async fn current_timer(lifecycle: State<'_, Lifecycle>) -> Result<Option<RunningTimer>, IpcError>
-{
+pub async fn current_timer(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<Option<RunningTimer>, IpcError> {
     let pool = lifecycle.pool()?;
     time::current(&pool).await
 }

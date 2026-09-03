@@ -114,7 +114,9 @@ async fn a_started_timer_is_what_the_next_read_answers_with() {
 #[tokio::test]
 async fn an_ad_hoc_label_is_as_legal_a_target_as_a_ticket() {
     let pool = scratch("time-label").await;
-    let started = time::start(&pool, labelled(LABEL)).await.expect("it starts");
+    let started = time::start(&pool, labelled(LABEL))
+        .await
+        .expect("it starts");
     assert_eq!(started.timer.target, labelled(LABEL));
 
     let block = time::stop(&pool)
@@ -180,7 +182,10 @@ async fn stopping_closes_a_block_over_the_time_the_timer_ran() {
     time::start(&pool, on(TICKET)).await.expect("it starts");
     age(&pool, Duration::minutes(45), Duration::seconds(10)).await;
 
-    let stopped = time::stop(&pool).await.unwrap().expect("a block was closed");
+    let stopped = time::stop(&pool)
+        .await
+        .unwrap()
+        .expect("a block was closed");
     let block = stopped.block;
     assert_eq!(block.target, on(TICKET));
     assert_eq!(block.kind, BlockKind::Manual);
@@ -191,7 +196,10 @@ async fn stopping_closes_a_block_over_the_time_the_timer_ran() {
     assert_eq!(block.worklog_id, None, "nothing in #278 logs a worklog");
 
     let minutes = (block.ended_at - block.started_at).num_minutes();
-    assert_eq!(minutes, 45, "the block does not span the time the timer ran");
+    assert_eq!(
+        minutes, 45,
+        "the block does not span the time the timer ran"
+    );
 
     assert_eq!(
         time::current(&pool).await.unwrap(),
@@ -212,7 +220,11 @@ async fn stopping_a_stopped_timer_is_a_success_that_writes_nothing() {
         time::stop(&pool).await.unwrap().is_none(),
         "the second stop invented a block"
     );
-    assert_eq!(blocks(&pool).await, 1, "the second stop wrote a second block");
+    assert_eq!(
+        blocks(&pool).await,
+        1,
+        "the second stop wrote a second block"
+    );
 }
 
 /// How many blocks the database holds. Counted rather than listed: what these
@@ -345,7 +357,9 @@ async fn relaunch_with_no_timer_closes_nothing() {
 #[tokio::test]
 async fn a_timer_that_never_saw_a_heartbeat_still_closes() {
     let pool = scratch("time-relaunch-instant").await;
-    time::start(&pool, labelled(LABEL)).await.expect("it starts");
+    time::start(&pool, labelled(LABEL))
+        .await
+        .expect("it starts");
     age(&pool, Duration::hours(4), Duration::hours(4)).await;
 
     let block = time::close_stranded(&pool)
@@ -394,7 +408,9 @@ async fn the_relaunch_sweep_signs_its_line_as_knobas() {
 #[tokio::test]
 async fn a_label_timers_line_carries_the_label_and_no_entity() {
     let pool = scratch("time-activity-label").await;
-    let started = time::start(&pool, labelled(LABEL)).await.expect("it starts");
+    let started = time::start(&pool, labelled(LABEL))
+        .await
+        .expect("it starts");
 
     assert_eq!(started.activity.entity_id, None);
     assert_eq!(
@@ -434,13 +450,11 @@ async fn the_schema_refuses_a_target_that_is_both_halves_or_neither() {
         (Some(TICKET), Some(LABEL), "both halves"),
         (None, None, "neither half"),
     ] {
-        let refused = sqlx::query(
-            "insert into knobas.timer (entity_id, label) values ($1, $2)",
-        )
-        .bind(entity_id)
-        .bind(label)
-        .execute(&pool)
-        .await;
+        let refused = sqlx::query("insert into knobas.timer (entity_id, label) values ($1, $2)")
+            .bind(entity_id)
+            .bind(label)
+            .execute(&pool)
+            .await;
         assert!(
             refused.is_err(),
             "knobas.timer accepted a target that is {what}"

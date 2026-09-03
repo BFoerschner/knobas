@@ -212,10 +212,7 @@ fn vet(target: TimerTarget) -> Result<TimerTarget, IpcError> {
     match target {
         TimerTarget::Entity { entity_id } => {
             let reference = EntityRef::parse(&entity_id).map_err(IpcError::invalid)?;
-            if reference
-                .namespace
-                .eq_ignore_ascii_case(CONTEXT_NAMESPACE)
-            {
+            if reference.namespace.eq_ignore_ascii_case(CONTEXT_NAMESPACE) {
                 return Err(IpcError::invalid(format!(
                     "{entity_id} is a stored context, and a context is never a timer \
                      target: it is a set, and time on a set has nowhere to go. Use an \
@@ -516,7 +513,11 @@ mod tests {
     /// target (story 14).
     #[test]
     fn a_note_and_a_synced_item_are_both_legal_targets() {
-        for id in ["note:5b1c0f1e", "jira:PAY-231", "confluence:ENG:SEPA design"] {
+        for id in [
+            "note:5b1c0f1e",
+            "jira:PAY-231",
+            "confluence:ENG:SEPA design",
+        ] {
             let vetted = vet(TimerTarget::Entity {
                 entity_id: id.to_owned(),
             })
@@ -589,9 +590,8 @@ mod tests {
     /// vocabulary, for the same reason.
     #[test]
     fn every_block_kind_is_one_the_schema_accepts() {
-        let migration = include_str!(
-            "../../../knobas-db/migrations/0013_the_timer_and_its_blocks.sql"
-        );
+        let migration =
+            include_str!("../../../knobas-db/migrations/0013_the_timer_and_its_blocks.sql");
         let check = migration
             .split("block_kind_chk")
             .nth(1)
