@@ -111,8 +111,9 @@ fn descriptor(id: &str, kind: &str, write_ops: &[String]) -> SourceDescriptor {
         // spellings, because the fixtures below are Gitea-shaped pull
         // requests: an inbox rule reads through the declaration now, so a
         // source that declares nothing produces no review requests and no
-        // assignments -- which is what `a_source_that_declares_no_paths_
-        // contributes_no_items` asserts.
+        // assignments -- which is what
+        // `a_source_that_declares_no_paths_produces_no_assignments_and_no_review_requests`
+        // asserts in `knobas-core/tests/inbox.rs`.
         payload_paths: vec![knobas_source::KindPaths {
             kind: "pr".to_owned(),
             reviewers: vec![knobas_source::ListPath {

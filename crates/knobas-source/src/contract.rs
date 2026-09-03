@@ -309,6 +309,33 @@ where
 ///    resolver that grew a knobas-side fallback for an undeclared field dies
 ///    on, and such a resolver would pass every other clause here while quietly
 ///    putting a value on screen that no source said.
+///
+/// # What this cannot see, and why neither is fixable here
+///
+/// A corpus-shaped question is answered by the corpus, so two declarations
+/// pass without being asked anything. Both are recorded rather than left for
+/// the next reader to discover as a hole:
+///
+/// * **A kind the corpus never populates.** The evidence below is gathered
+///   inside the walk over `items`, so a kind with no items contributes no
+///   evidence and clauses 2, 3 and 4 say nothing about it: a wholly wrong
+///   declaration for it is silent here. The alternative -- demanding that
+///   every declared kind be populated -- would fail a battery run against any
+///   instance that happens to have no build configurations, which is the same
+///   move clause 3 refuses for an unassigned issue. Clause 1 is what still
+///   holds for such a kind: it must at least be one the adapter emits.
+/// * **A candidate an earlier candidate resolves for.** The scalars share one
+///   evidence slot across a field's candidate list, so `fields.assignee.keyy`
+///   after a working `fields.assignee.name` passes. That is the price of a
+///   candidate list being a list: two candidates are *one adapter's*
+///   alternative spellings, and an instance uses one of them -- per-candidate
+///   evidence would fail the second spelling on every instance that does not
+///   use it, which is the case the list exists for. So a candidate list is
+///   certified as a whole, and the first candidate is the one this clause
+///   really pins. `reviewers` is not an exception to that: the array path gets
+///   its own slot only so a resolving *array* cannot excuse a wrong key
+///   *inside* its elements, which is a different question from one candidate
+///   excusing another.
 fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
     use knobas_core::payload::{
         KindPaths, PayloadPath, at, field, names_a_missing_key, resolve_flag, resolve_list,

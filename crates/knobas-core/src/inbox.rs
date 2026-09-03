@@ -487,8 +487,12 @@ macro_rules! credential_expiry {
 /// Wrap a set of candidate rows in the shelving, the de-duplication and the
 /// ordering every read shares.
 ///
-/// **The three binds are the same for every read**: `$1` the identity
-/// usernames, `$2` the clock, `$3` which shelf. That is what lets the count
+/// **The four binds are the same for every read**: `$1` the identity
+/// usernames, `$2` the clock, `$3` which shelf, and `$4` what every configured
+/// source declares about its own payloads ([`crate::payload::Declarations`],
+/// bound as one jsonb since #277 -- a rule added here binds it whether or not
+/// it resolves a declared path, because the union has to type-check). That is
+/// what lets the count
 /// below be the *same statement* rather than a second predicate that can
 /// disagree with the stream -- the failure `knobas_search::lists` calls the
 /// worst one available, a number on screen that no test comparing the list

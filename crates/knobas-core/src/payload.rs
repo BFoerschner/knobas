@@ -49,11 +49,11 @@
 //!
 //! A value that is not a string where a string is declared, a blank or
 //! whitespace-only string, an absent key: all three are a miss, and the next
-//! candidate is tried. This is the same triple refusal
-//! [`string_at!`](crate::string_at) has always made -- `->>` yields an
-//! object's *text form* rather than nothing, so without the type check a
-//! source that spells a field some other way arrives as a value like
-//! `{"id":3}`, a guess dressed as an observation.
+//! candidate is tried. These are the three refusals ADR-0007's interim
+//! `string_at!` made and this module inherited whole when its last call site
+//! expired (#277) -- `->>` yields an object's *text form* rather than nothing,
+//! so without the type check a source that spells a field some other way
+//! arrives as a value like `{"id":3}`, a guess dressed as an observation.
 
 use std::collections::BTreeMap;
 
@@ -332,10 +332,10 @@ pub fn names_a_missing_key(payload: &serde_json::Value, path: &PayloadPath) -> b
 
 /// The first candidate that lands on a usable string.
 ///
-/// Usable is the same triple refusal SQL's [`string_at!`](crate::string_at)
-/// makes: it must be a JSON **string**, and trimming it must leave something.
-/// A candidate that misses is passed over for the next one; all of them
-/// missing is a miss.
+/// Usable is the same triple refusal [`declared_string!`](crate::declared_string)
+/// makes in SQL: it must be a JSON **string**, and trimming it must leave
+/// something. A candidate that misses is passed over for the next one; all of
+/// them missing is a miss.
 #[must_use]
 pub fn resolve_string(payload: &serde_json::Value, candidates: &[PayloadPath]) -> Option<String> {
     candidates.iter().find_map(|path| {
@@ -366,6 +366,14 @@ pub fn resolve_flag(payload: &serde_json::Value, candidates: &[PayloadPath]) -> 
 /// requested. Elements that are not strings, and strings that are blank, are
 /// dropped -- the same refusal, applied per element, so one odd entry costs
 /// that entry and not the list.
+///
+/// **Declaration order is this function's, not the rule's.**
+/// [`declared_list!`](crate::declared_list) is a table expression whose rows
+/// come out in the join's order, so the two implementations agree on the
+/// *values* and not on their sequence -- which is why the agreement test sorts
+/// both sides, and why the one reader of it (`inbox`'s review-request rule)
+/// compares with `= any(...)` rather than by position. A caller that needs an
+/// order must impose one.
 #[must_use]
 pub fn resolve_list(payload: &serde_json::Value, candidates: &[ListPath]) -> Vec<String> {
     let mut out = Vec::new();
@@ -388,7 +396,8 @@ pub fn resolve_list(payload: &serde_json::Value, candidates: &[ListPath]) -> Vec
 }
 
 /// SQL for "the string the declared path leads to, or nothing" -- the
-/// path-driven form of [`string_at!`](crate::string_at).
+/// path-driven successor to ADR-0007's `string_at!`, which read a *literal*
+/// path and expanded nowhere once these reads landed.
 ///
 /// `$decl` is the placeholder the [`Declarations`] jsonb is bound at
 /// (`"$4"`), `$field` the [`KindPaths`] field name as a literal
@@ -571,7 +580,8 @@ mod tests {
         assert_eq!(resolve_string(&flat, &paths).as_deref(), Some("To Do"));
     }
 
-    /// The three refusals `string_at!` makes, one candidate at a time.
+    /// The three refusals a usable string has to survive, one candidate at a
+    /// time.
     #[test]
     fn a_value_that_is_not_a_usable_string_is_passed_over() {
         let payload = serde_json::json!({

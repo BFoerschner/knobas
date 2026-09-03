@@ -3451,6 +3451,20 @@ From this commit on, each of the following requires an orchestrator decision **a
   corpus rather than of a record, so an unassigned issue — whose walk stops at a `null` — cannot
   fail a declaration, and the clause is safe to run against a live instance); and a field a kind
   does not declare resolves to nothing, which is the clause a knobas-side fallback would die on.
+  **Two declarations the clause cannot see**, recorded so neither is later read as a hole it
+  closed: a kind the corpus never populates is asked nothing at all (demanding every declared kind
+  be populated would fail a run against an instance with no build configurations, the same move
+  clause 3 refuses for an unassigned issue), and a candidate an earlier candidate resolves for is
+  excused — `fields.assignee.keyy` after a working `fields.assignee.name` passes, because two
+  candidates are one adapter's alternative spellings and an instance uses one of them, so
+  per-candidate evidence would fail the second spelling wherever it is the unused one. A candidate
+  list is certified as a whole; the first candidate is the one clause 3 really pins.
+
+  **`knobas_core::string_at!` is retired with its last call site.** It was ADR-0007's interim
+  shape — SQL for the string a *literal* path leads to, with the three refusals — and every
+  statement that expanded it is in the list below. Rather than leave an exported macro with no
+  expander and a doc naming call sites that no longer exist, it is gone; `declared_string!` makes
+  the same three refusals and `payload::resolve_string` is their Rust half.
 
   **The reads that expired**, all of them payload reads ADR-0007 governs, and **none of them
   changed its failure direction** — each is still pinned by the test named on it:
