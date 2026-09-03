@@ -1418,6 +1418,7 @@ knobas-source-jira	lib/knobas_source_jira	config::tests::projects_and_a_filter_a
 knobas-source-jira	lib/knobas_source_jira	config::tests::the_cloud_flavor_is_refused_by_name
 knobas-source-jira	lib/knobas_source_jira	config::tests::the_epic_link_field_must_be_a_bare_field_id
 knobas-source-jira	lib/knobas_source_jira	cursor::tests::a_cursor_with_no_watermark_asks_for_everything
+knobas-source-jira	lib/knobas_source_jira	cursor::tests::a_record_that_changed_within_one_second_is_not_the_one_already_delivered
 knobas-source-jira	lib/knobas_source_jira	cursor::tests::an_offset_change_widens_the_overlap_once
 knobas-source-jira	lib/knobas_source_jira	cursor::tests::an_unreadable_cursor_means_full_sync
 knobas-source-jira	lib/knobas_source_jira	cursor::tests::entries_sharing_a_timestamp_are_still_ordered_deterministically
@@ -1439,6 +1440,11 @@ knobas-source-jira	lib/knobas_source_jira	descriptor::tests::the_schema_asks_for
 knobas-source-jira	lib/knobas_source_jira	descriptor::tests::the_schema_defaults_are_a_valid_configuration
 knobas-source-jira	lib/knobas_source_jira	descriptor::tests::the_template_declares_the_ratified_write_set_and_nothing_else
 knobas-source-jira	lib/knobas_source_jira	descriptor::tests::the_template_survives_a_json_round_trip
+knobas-source-jira	lib/knobas_source_jira	digest::tests::a_boundary_cannot_be_forged_by_the_content_around_it
+knobas-source-jira	lib/knobas_source_jira	digest::tests::a_changed_field_changes_the_digest_even_with_updated_untouched
+knobas-source-jira	lib/knobas_source_jira	digest::tests::an_absent_field_and_an_empty_one_are_different_records
+knobas-source-jira	lib/knobas_source_jira	digest::tests::the_same_record_digests_the_same_whatever_order_its_keys_arrived_in
+knobas-source-jira	lib/knobas_source_jira	digest::tests::the_type_is_part_of_the_record
 knobas-source-jira	lib/knobas_source_jira	discover::tests::a_field_table_with_no_schemas_falls_back_to_the_name
 knobas-source-jira	lib/knobas_source_jira	discover::tests::an_id_that_is_not_a_bare_field_id_is_not_discovered
 knobas-source-jira	lib/knobas_source_jira	discover::tests::an_instance_without_the_plugin_discovers_nothing
@@ -1489,7 +1495,6 @@ knobas-source-jira	lib/knobas_source_jira	source::tests::an_unreachable_instance
 knobas-source-jira	lib/knobas_source_jira	source::tests::basic_auth_needs_the_username_from_the_config
 knobas-source-jira	lib/knobas_source_jira	source::tests::the_cloud_flavor_is_refused_at_build_time
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_changed_issue_is_the_only_thing_the_next_run_emits
-knobas-source-jira	lib/knobas_source_jira	sync::tests::a_field_changed_without_moving_updated_is_invisible_to_every_later_run
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_full_sync_walks_the_whole_total_not_just_the_first_page
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_page_that_arrives_empty_while_total_still_claims_more_ends_the_run
 knobas-source-jira	lib/knobas_source_jira	sync::tests::a_sink_failure_aborts_the_run
@@ -1500,11 +1505,11 @@ knobas-source-jira	lib/knobas_source_jira	sync::tests::an_idle_incremental_emits
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_idle_poll_does_not_reach_back_further_than_the_overlap
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_idle_run_after_the_server_changed_zone_returns_the_same_bytes
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_incremental_run_that_hits_the_page_cap_fails_too
+knobas-source-jira	lib/knobas_source_jira	sync::tests::an_unchanged_record_inside_the_overlap_window_is_still_skipped
 knobas-source-jira	lib/knobas_source_jira	sync::tests::an_unreadable_cursor_falls_back_to_a_full_sync
 knobas-source-jira	lib/knobas_source_jira	sync::tests::completes_a_truncated_comment_container
 knobas-source-jira	lib/knobas_source_jira	sync::tests::completion_pages_the_comment_endpoint_too
 knobas-source-jira	lib/knobas_source_jira	sync::tests::fetches_comments_when_the_container_is_absent
-knobas-source-jira	lib/knobas_source_jira	sync::tests::inside_the_overlap_window_the_reassigned_issue_is_returned_and_then_skipped
 knobas-source-jira	lib/knobas_source_jira	sync::tests::leaves_a_complete_container_alone
 knobas-source-jira	lib/knobas_source_jira	sync::tests::one_new_issue_then_an_idle_poll_settles
 knobas-source-jira	lib/knobas_source_jira	sync::tests::pages_with_start_at_until_the_total_is_reached
@@ -1514,6 +1519,7 @@ knobas-source-jira	lib/knobas_source_jira	sync::tests::the_field_list_asks_for_t
 knobas-source-jira	lib/knobas_source_jira	sync::tests::the_run_after_a_zone_change_widens_its_window_once
 knobas-source-jira	lib/knobas_source_jira	sync::tests::the_watermark_literal_is_read_in_the_servers_zone
 knobas-source-jira	lib/knobas_source_jira	sync::tests::the_watermark_never_moves_backwards
+knobas-source-jira	lib/knobas_source_jira	sync::tests::two_changes_inside_one_second_are_two_versions_and_both_are_delivered
 knobas-source-jira	lib/knobas_source_jira	time::tests::an_impossible_offset_falls_back_to_the_safe_direction
 knobas-source-jira	lib/knobas_source_jira	time::tests::parses_jiras_own_offset_form
 knobas-source-jira	lib/knobas_source_jira	time::tests::reads_the_offset_off_a_server_timestamp

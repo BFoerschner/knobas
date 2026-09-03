@@ -21,12 +21,23 @@
 //!
 //! * **`max(previous, …)`** on the watermark, so a re-delivered *older* item
 //!   cannot drag the position backwards.
-//! * **`seen_in_window` is every pair the run saw**, skipped ones included --
+//! * **`seen_in_window` is every record the run saw**, skipped ones included --
 //!   `seen` records what the *window* contained, not what crossed the SPI. A
 //!   run that reports only what it emitted forgets, every run, whatever it
 //!   recognised that run, and an idle poll never settles. The watermark holds
 //!   perfectly while that happens, which is why the sequence that shows it is
 //!   *one new issue and then an idle poll*, never a full sync and then one.
+//!
+//! # What "already delivered" means, and what it costs to get wrong
+//!
+//! An issue is recognised by [`crate::digest`] of the raw `/search` record and
+//! **not** by its `updated` (issue #345, cursor version 2). `/search` reports
+//! `updated` to the second, an issue changes in milliseconds, and this run is
+//! fired after every landed write -- so keying on the timestamp dropped, for
+//! ever, any change that landed in the same second as the one a run had just
+//! recorded. The digest is computed here, before the skip decision and before
+//! `complete`, which is what keeps the comparison like-for-like across runs
+//! without costing a request per issue.
 
 use chrono::{DateTime, Utc};
 use knobas_source::{Sink, SourceError};
@@ -133,9 +144,9 @@ impl SyncRun<'_> {
         let mut start_at: u32 = 0;
         let mut pages: u32 = 0;
         let mut emitted: usize = 0;
-        // Every `(key, updated)` this run *saw* in the window -- see the module
-        // docs. Skipped pairs belong here as much as emitted ones.
-        let mut seen_in_window: Vec<(String, DateTime<Utc>)> = Vec::new();
+        // Every `(key, updated, digest)` this run *saw* in the window -- see
+        // the module docs. Skipped records belong here as much as emitted ones.
+        let mut seen_in_window: Vec<(String, DateTime<Utc>, String)> = Vec::new();
         // Seeded from the previous position, which is what makes the new one
         // `max(previous, newest emitted)` rather than "newest emitted".
         let mut watermark: Option<DateTime<Utc>> = previous.as_ref().and_then(|c| c.updated_to);
@@ -157,14 +168,17 @@ impl SyncRun<'_> {
                     .updated
                     .as_deref()
                     .and_then(parse_jira_time);
+                // Digested before `complete`, which is what makes the value
+                // comparable across runs -- see the module docs.
+                let digest = crate::digest::of(&raw.raw);
                 if let Some(u) = updated {
-                    seen_in_window.push((raw.issue.key.clone(), u));
+                    seen_in_window.push((raw.issue.key.clone(), u, digest.clone()));
                 }
                 // The overlap exists so nothing is missed; this is what keeps
                 // it from also meaning "everything arrives twice".
                 if previous
                     .as_ref()
-                    .is_some_and(|c| c.already_delivered(&raw.issue.key, updated))
+                    .is_some_and(|c| c.already_delivered(&raw.issue.key, &digest))
                 {
                     continue;
                 }
@@ -203,10 +217,10 @@ impl SyncRun<'_> {
             // Items arrived, but neither they nor the previous cursor carry a
             // readable `updated`; advancing to anything would be a guess. An
             // issue with no `updated` at all is therefore re-delivered on every
-            // run -- `already_delivered` cannot recognise a pair with no
-            // timestamp. Real Jira always sets the field, and mockd synthesizes
-            // it for the fixture's one null, so this is a tolerated shape and
-            // not a supported one.
+            // run -- it never enters `seen`, because `advanced` bounds that set
+            // by the timestamp such an issue does not have. Real Jira always
+            // sets the field, and mockd synthesizes it for the fixture's one
+            // null, so this is a tolerated shape and not a supported one.
             (_, None) => Ok(cursor.unwrap_or_else(|| JiraCursor::empty(offset).encode())),
             (_, Some(w)) => Ok(JiraCursor::advanced(w, offset, &seen_in_window).encode()),
         }
@@ -1138,39 +1152,40 @@ mod tests {
         );
     }
 
-    /// **A change that does not move `fields.updated` is invisible to every
-    /// later incremental run** (issue #345).
+    /// **Two changes inside one second are two versions, and both are
+    /// delivered** (issue #345).
     ///
-    /// This pins the *mechanism*, not a Jira behaviour: the adapter's whole
-    /// incremental window is `updated >= watermark − 2 min`, so an issue whose
-    /// `updated` stayed where it was is never **returned** by the query at
-    /// all. That is a different failure from the one
-    /// [`crate::cursor::JiraCursor::already_delivered`] produces -- there the
-    /// issue comes back and is recognised -- and the two are worth telling
-    /// apart, because only the second is recoverable by widening the overlap.
+    /// This is the fix's own test, and its fixture is the sequence a real
+    /// installation runs constantly: something changes, a sync records the
+    /// issue, and something else changes it again before that second is out.
+    /// `knobas_app::sources::write_queue`'s `refresh` fires a sync after every
+    /// landed write, so *comment through knobas, then reassign in Jira* is
+    /// exactly this shape -- measured on Jira DC 10.3.24 with 88 ms between the
+    /// two.
     ///
-    /// **Both directions in one run.** PAY-231 is edited the ordinary way and
-    /// PAY-228 is reassigned without its `updated` moving, so the run is *not*
-    /// idle: something is emitted, the watermark advances, and PAY-228 is
-    /// still missing. A fixture that only reassigned would witness nothing but
-    /// "an idle run is idle", which is
-    /// [`an_idle_incremental_emits_nothing_and_returns_the_same_cursor`]'s job.
+    /// **The stamp does not move between the two changes, and that is the
+    /// point.** `/search` reports `updated` to the second while an issue
+    /// changes in milliseconds, so a run cannot see a difference in the
+    /// timestamp even though there is one. While `seen` was keyed on
+    /// `(key, updated)` the second change was therefore dropped before the
+    /// sink -- and dropped **for ever**, because `updated` never moves again on
+    /// its own and no later incremental run reaches it. Only
+    /// `knobas_sync::run_backfill` recovered it, and nothing knew to run one.
     ///
-    /// The consequence downstream is the ticket: `author` is the assignee
-    /// (`crate::map`), and `sync.live_item.author` is what the standup digest's
-    /// mirror half, the inbox's author matching (#82) and every `@me` filter
-    /// key on. None of them can learn the new assignee, because nothing
-    /// re-reads the row. `knobas_sync::run_backfill` -- which hands the adapter
-    /// no position at all -- is the only run that recovers it.
+    /// What it cost downstream is why this is not a cosmetic miss: `author` is
+    /// the assignee on Jira (`crate::map`), and `sync.live_item.author` is what
+    /// the standup digest's mirror half, the inbox's author matching (#82) and
+    /// every `@me` filter key on.
     ///
-    /// Whether Jira DC really leaves `updated` alone on
-    /// `PUT /rest/api/2/issue/{key}/assignee` is a question about the product
-    /// and is settled against the seeded container (ADR-0013), never here.
-    /// This test says what follows *if* it does.
+    /// The last poll is here so the assertion cannot be satisfied by an adapter
+    /// that simply stopped recognising anything: once the change is delivered
+    /// the source must go **quiet** again, which is battery clause 2.
     #[tokio::test]
-    async fn a_field_changed_without_moving_updated_is_invisible_to_every_later_run() {
+    async fn two_changes_inside_one_second_are_two_versions_and_both_are_delivered() {
         let mut issues = five_issues();
-        issues[3] = assigned("PAY-228", "2026-08-21T16:05:00.000+0000", "mara.lindqvist");
+        // Its own stamp is the newest in the fixture, so it sets the watermark
+        // and the whole question is `seen`, never the query's lower bound.
+        issues[4] = assigned("PAY-231", "2026-08-22T11:48:00.000+0000", "mara.lindqvist");
         let mut api = FakeApi {
             issues,
             ..FakeApi::default()
@@ -1179,61 +1194,75 @@ mod tests {
 
         let mut first = VecSink(Vec::new());
         let cursor = run(&api, &config, None, &mut first).await.unwrap();
-        let mirrored = |sink: &VecSink| {
-            sink.0
+        assert_eq!(
+            first
+                .0
                 .iter()
-                .find(|i| i.entity.key == "PAY-228")
-                .map(|i| i.author.clone())
-        };
-        assert_eq!(
-            mirrored(&first),
+                .find(|i| i.entity.key == "PAY-231")
+                .map(|i| i.author.clone()),
             Some(Some("mara.lindqvist".to_owned())),
-            "the full sync is what puts the old assignee in the mirror"
+            "the run that records the issue is what puts the old assignee in the mirror"
         );
 
-        // The reassignment, as Jira's dedicated assignee endpoint is claimed to
-        // make it: the field changes and `updated` does not.
-        api.reassign("PAY-228", "knobas");
-        // …and an ordinary edit elsewhere, so this run has work to do.
-        api.edit("PAY-231", "2026-08-22T12:30:00.000+0000");
+        // The second change, inside the second that run recorded: the assignee
+        // moves and `updated` -- as `/search` renders it -- does not.
+        api.reassign("PAY-231", "knobas");
 
-        let (keys, advanced) = keys_of(&api, &config, Some(cursor.clone())).await;
+        let mut second = VecSink(Vec::new());
+        let advanced = run(&api, &config, Some(cursor.clone()), &mut second)
+            .await
+            .unwrap();
         assert_eq!(
-            keys,
+            second
+                .0
+                .iter()
+                .map(|i| i.entity.key.as_str())
+                .collect::<Vec<_>>(),
             vec!["PAY-231"],
-            "the edited issue came back and the reassigned one never entered the window"
+            "the reassigned issue is delivered although its `updated` is unchanged"
         );
-        assert_ne!(
-            advanced, cursor,
-            "the run was not idle -- which is what makes the miss above a miss and not an \
-             absence of syncing"
+        assert_eq!(
+            second.0[0].author.as_deref(),
+            Some("knobas"),
+            "and it carries the new assignee, which is what every `@me` reader needs"
         );
+        assert_ne!(advanced, cursor, "the cursor records the new record");
 
-        // And it stays missing however many times the source is polled: the
-        // window only ever moves forward, away from PAY-228's untouched stamp.
-        let (again, _) = keys_of(&api, &config, Some(advanced)).await;
+        // ...and the source settles: nothing changed since, so nothing is
+        // emitted and the position is handed back byte-identically.
+        let mut third = VecSink(Vec::new());
+        let settled = run(&api, &config, Some(advanced.clone()), &mut third)
+            .await
+            .unwrap();
         assert!(
-            again.is_empty(),
-            "a later poll does not reach it either: {again:?}"
+            third.0.is_empty(),
+            "an idle poll after the delivery must emit nothing: {:?}",
+            third.0.iter().map(|i| &i.entity.key).collect::<Vec<_>>()
         );
+        assert_eq!(settled, advanced, "byte-identical");
     }
 
-    /// **The same miss, by the other door**: inside the overlap window the
-    /// query *does* return the reassigned issue, and `seen` skips it (#345).
+    /// **An unchanged record inside the overlap window is still skipped**
+    /// (battery clause 2, and the half issue #345's fix must not break).
     ///
-    /// The sibling above is the case where the issue never enters the window.
-    /// For the first two minutes after a run there is a second mechanism, and
-    /// it matters to any proposed fix: `already_delivered` recognises the pair
-    /// `(key, updated)`, `updated` is exactly what did not change, so the issue
-    /// is delivered to the run and dropped before the sink. **Widening the
-    /// query alone therefore fixes nothing here** -- the wider window would
-    /// return the issue and `seen` would skip it again.
+    /// The overlap re-delivers the last two minutes on every run by design, and
+    /// `seen` is the only thing keeping that from meaning "every poll emits the
+    /// recent corpus". Giving the identity a digest could have broken it in one
+    /// specific way -- a field that differed between two reads of an unchanged
+    /// issue would make every poll re-emit everything -- so the property is
+    /// asserted here rather than left to follow from its sibling.
     ///
-    /// The witness that the two doors really are different is the cursor's own
-    /// `seen`: it is built from what the *pages returned*, so PAY-231 being in
-    /// it is proof the query answered with it and the run chose to skip it.
+    /// **The window is open, not closed**, which is what makes this a test: the
+    /// query *does* return PAY-231 and the run chooses to skip it. The witness
+    /// is the cursor's own `seen`, which is built from what the pages returned,
+    /// so PAY-231 appearing in it is proof the query answered with it.
+    ///
+    /// Offline this can only pin the rule. Whether a real Jira's `/search`
+    /// answers an untouched issue byte-identically twice is a question for the
+    /// server, and `tests/live_jira_seeded.rs`'s repeated idle poll is where it
+    /// is asked (ADR-0013).
     #[tokio::test]
-    async fn inside_the_overlap_window_the_reassigned_issue_is_returned_and_then_skipped() {
+    async fn an_unchanged_record_inside_the_overlap_window_is_still_skipped() {
         let mut issues = five_issues();
         issues[4] = assigned("PAY-231", "2026-08-22T11:48:00.000+0000", "mara.lindqvist");
         let mut api = FakeApi {
@@ -1243,15 +1272,15 @@ mod tests {
         let config = cfg(serde_json::json!({}));
         let cursor = keys_of(&api, &config, None).await.1;
 
-        api.reassign("PAY-231", "knobas");
-        // Something else inside the window, so the run is not idle.
+        // Something else inside the window, so the run is not idle and the skip
+        // below is a decision rather than an absence of work.
         api.edit("PAY-228", "2026-08-22T11:49:00.000+0000");
 
         let (keys, advanced) = keys_of(&api, &config, Some(cursor)).await;
         assert_eq!(
             keys,
             vec!["PAY-228"],
-            "the reassigned issue reached the run and was dropped before the sink"
+            "PAY-231 reached the run untouched and was skipped before the sink"
         );
         let parsed = crate::cursor::JiraCursor::parse(&advanced).unwrap();
         assert!(
