@@ -27,20 +27,18 @@
 //! second event would be a second thing to keep in step with the first, and
 //! it would carry no fact the row does not already hold.
 //!
-//! # The heartbeat, and the one thing it does not do yet
+//! # The heartbeat, and the two things that ride on it
 //!
 //! The frontend sends [`heartbeat`] every thirty seconds while the window is
 //! focused, carrying the foreground target by the rule *open detail, else room
 //! anchor, else none*. It advances `last_heartbeat`, and that stamp is what
 //! [`close_stranded`] closes a block at on relaunch.
 //!
-//! The foreground it carries is **accepted and not yet stored**: passive
-//! attribution (#281) is what turns those observations into passive blocks,
-//! and it brings the table to store them in. It is taken now, rather than
-//! added to the command later, because the frontend rule that computes it is
-//! part of this ticket and a parameter added afterwards would be a second
-//! §10.8 touch on a command that already exists. The absence is deliberate and
-//! is recorded in that entry.
+//! The foreground it carries is **stored as an observation while passive
+//! attribution is switched on** (#282, [`passive`]) and dropped otherwise.
+//! #278 took the parameter without a table to put it in and said so; `0015` is
+//! that table. Nothing about the switch touches the stamp: a person who never
+//! turns passive attribution on keeps the relaunch rule in full.
 
 use chrono::{DateTime, Utc};
 use knobas_core::entity::EntityRef;
@@ -56,6 +54,16 @@ use crate::IpcError;
 /// -- [`Block`], [`TimerTarget`], [`vet`], [`block_of`] -- which is why it is
 /// a child module and not a sibling.
 pub mod day;
+
+/// Passive attribution: the heartbeat's observations, and the blocks they
+/// support (#282).
+///
+/// A third file for the same reason [`day`] is a second: the timer is a state
+/// machine, the day review is a read and two writes, and this is one pure
+/// function with a store either side of it. It is the only thing here that
+/// says something the reader never typed, which is why the spec asks reviewers
+/// to look hardest at it.
+pub mod passive;
 
 /// The activity actor for everything a person does with the timer.
 const ACTOR: &str = "user";
@@ -129,7 +137,10 @@ pub enum BlockKind {
     /// block that nobody stopped. [`Block::ended_by_relaunch`] is what tells
     /// those two apart; the kind says only where the block came from.
     Manual,
-    /// Passive attribution recorded what was open (#281). No writer yet.
+    /// Passive attribution recorded what was open (#282). Written only by
+    /// [`passive::materialize`], and turned into [`Manual`](Self::Manual) the
+    /// moment a person assigns it -- nothing else in the crate writes this
+    /// word, and nothing at all writes it back.
     Passive,
 }
 
@@ -420,8 +431,10 @@ pub async fn stop(pool: &PgPool) -> Result<Option<TimerStopped>, IpcError> {
 
 /// Stamp the timer as alive, and answer with it.
 ///
-/// `foreground` is what the window has in front of the reader right now --
-/// see the module docs for why it is taken and not yet stored.
+/// `foreground` is what the window has in front of the reader right now. It is
+/// stored as an observation while passive attribution is on (#282) and dropped
+/// otherwise -- **off means nothing is recorded**, not that it is recorded and
+/// not looked at.
 ///
 /// **Nothing about the foreground can stop the stamp landing, and that is the
 /// whole shape of this function.** The stamp is a statement about *knobas*,
@@ -450,14 +463,31 @@ pub async fn heartbeat(
     // something this function happened to like.
     let row = sqlx::query(BEAT).fetch_optional(pool).await?;
 
-    // The observation is vetted and dropped. It is dropped because #281 brings
-    // the table to keep it in; it is vetted because a foreground the timer
-    // could never run on is a frontend bug, and a log line is where a bug with
-    // no user-visible consequence belongs.
-    if let Some(foreground) = foreground
-        && let Err(error) = vet(foreground)
-    {
-        tracing::warn!(%error, "a heartbeat carried a foreground that is not a legal timer target");
+    // The observation is vetted, then stored if there is anywhere to store it.
+    // A foreground the timer could never run on is a frontend bug: it is
+    // logged and **the observation is still written, with no target**. The
+    // beat happened and the window was focused, so dropping the row would put
+    // a hole in the timeline the derivation reads focused time off -- losing
+    // the attribution is honest, losing the observation is not.
+    let foreground = foreground.and_then(|foreground| match vet(foreground) {
+        Ok(target) => Some(target),
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                "a heartbeat carried a foreground that is not a legal timer target"
+            );
+            None
+        }
+    });
+
+    // Last, and after the stamp, for the same reason the vet is: nothing about
+    // the foreground may cost the beat. The stamp is already durable by the
+    // time this runs, so a failed setting read or a failed insert is reported
+    // to the caller without ever having put `last_heartbeat` at risk -- and it
+    // is reported rather than swallowed, because a recording that has silently
+    // stopped is a day review that quietly says the reader did nothing.
+    if passive::enabled(pool).await? {
+        passive::record(pool, foreground.as_ref()).await?;
     }
 
     row.as_ref().map(timer_of).transpose()

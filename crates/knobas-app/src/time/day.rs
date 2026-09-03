@@ -109,6 +109,17 @@ const LIST: &str = "select b.id, b.started_at, b.ended_at, b.entity_id, b.label,
 /// still claiming knobas chose the end would be knobas disowning an edit it
 /// was handed.
 ///
+/// **`kind = 'manual'`, unconditionally, and that is what *Assign…* is**
+/// (#282). A passive block is knobas' own guess at what was open; the moment a
+/// person states its target the guess becomes their record, and it must stop
+/// being something [`passive::materialize`](super::passive::materialize) will
+/// reconcile away under them. The write is unconditional rather than a
+/// `case`, because the other direction is not a thing a caller may ask for:
+/// there is no parameter that could request `passive`, and passive attribution
+/// is the only writer of that word. So *assigning a passive block makes it
+/// manual* is witnessed by a test, and *a manual block cannot be turned
+/// passive* is witnessed by there being no way to say it.
+///
 /// The `worklog_id is null` in the `where` is the read-only rule, enforced
 /// here rather than checked first: a check followed by an update is two
 /// statements with a gap between them, and this is one.
@@ -119,7 +130,7 @@ const LIST: &str = "select b.id, b.started_at, b.ended_at, b.entity_id, b.label,
 const UPDATE: &str = "with edited as (
          update knobas.block
             set started_at = $2, ended_at = $3, entity_id = $4, label = $5,
-                ended_by_relaunch = false
+                ended_by_relaunch = false, kind = 'manual'
           where id = $1 and worklog_id is null
          returning id, started_at, ended_at, entity_id, label, kind,
                    ended_by_relaunch, worklog_id
@@ -131,6 +142,23 @@ const UPDATE: &str = "with edited as (
 
 /// Delete one block, subject to the same read-only rule.
 const DELETE: &str = "delete from knobas.block where id = $1 and worklog_id is null returning id";
+
+/// Write a block a person stated outright -- *Assign…* on a gap (#282).
+///
+/// `'manual'` is spelled here for the same reason [`UPDATE`] spells it: a
+/// block a person named is theirs, whatever the strip drew before they named
+/// it. The join is in the same statement so the answer is a [`DayBlock`] the
+/// view can draw without a second read.
+const CREATE: &str = "with made as (
+         insert into knobas.block (started_at, ended_at, entity_id, label, kind)
+         values ($1, $2, $3, $4, 'manual')
+         returning id, started_at, ended_at, entity_id, label, kind,
+                   ended_by_relaunch, worklog_id
+     )
+     select b.id, b.started_at, b.ended_at, b.entity_id, b.label, b.kind,
+            b.ended_by_relaunch, b.worklog_id, e.title
+       from made b
+       left join knobas.entity e on e.id = b.entity_id";
 
 /// Why a write matched no row. Read *after* the write, never before it.
 const DIAGNOSE: &str = "select worklog_id from knobas.block where id = $1";
@@ -154,6 +182,19 @@ fn day_block_of(row: &sqlx::postgres::PgRow) -> Result<DayBlock, IpcError> {
 /// with two blocks starting in the same second draws in the order they were
 /// written rather than in whatever order the planner returned them.
 ///
+/// # This read reconciles the day's passive blocks first (#282)
+///
+/// [`passive::materialize`](super::passive::materialize) runs before the
+/// select, and it is a **write inside a read** on purpose. The derivation's
+/// cap is a rule about a *day*, the reader's midnight is a fact only the
+/// webview holds, and this is the one call that is handed the two instants a
+/// day is. A command of its own would be one every future reader of blocks had
+/// to remember to run first, and one that forgot would draw a day with no
+/// passive time and nothing to distinguish that from a day with none.
+///
+/// It writes nothing at all when passive attribution is off, or when the day
+/// has no observations to speak from.
+///
 /// # Errors
 /// [`IpcError`] if the read fails.
 pub async fn list(
@@ -161,6 +202,8 @@ pub async fn list(
     from: DateTime<Utc>,
     to: DateTime<Utc>,
 ) -> Result<Vec<DayBlock>, IpcError> {
+    super::passive::materialize(pool, from, to).await?;
+
     let rows = sqlx::query(LIST)
         .bind(from)
         .bind(to)
@@ -245,6 +288,47 @@ pub async fn update(
         Some(row) => day_block_of(&row),
         None => Err(refusal(pool, id).await),
     }
+}
+
+/// Write a block over a stretch nobody claimed -- *Assign…* on a gap (#282,
+/// spec #272 story 23).
+///
+/// **The same shape as [`update`] minus the id**, deliberately: assigning an
+/// unaccounted stretch and assigning a passive one are the same sentence from
+/// the reader's side ("this half-hour was this ticket"), and the only
+/// difference is whether knobas already had a row to put it on. Both refuse
+/// the same targets and both end in a manual block.
+///
+/// Nothing stops the new block overlapping an existing one. Blocks may
+/// overlap -- #279 made them editable, and `segmentsOf` has drawn overlapping
+/// blocks since -- and a refusal here would mean a reader who mistyped a
+/// minute could not say what they meant.
+///
+/// # Errors
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a target [`vet`] refuses and
+/// for an end before its start; [`IpcError`] if the write fails.
+pub async fn create(
+    pool: &PgPool,
+    started_at: DateTime<Utc>,
+    ended_at: DateTime<Utc>,
+    target: TimerTarget,
+) -> Result<DayBlock, IpcError> {
+    let target = vet(target)?;
+    if ended_at < started_at {
+        return Err(IpcError::invalid(
+            "a block cannot end before it starts -- check the two times over",
+        ));
+    }
+    let (entity_id, label) = target.columns();
+
+    let row = sqlx::query(CREATE)
+        .bind(started_at)
+        .bind(ended_at)
+        .bind(entity_id)
+        .bind(label)
+        .fetch_one(pool)
+        .await?;
+    day_block_of(&row)
 }
 
 /// Delete a block.

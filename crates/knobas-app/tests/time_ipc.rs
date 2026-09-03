@@ -1058,3 +1058,410 @@ async fn a_block_ending_at_midnight_belongs_to_the_day_it_ran_in() {
          day at all"
     );
 }
+
+// -- passive attribution ----------------------------------------------------
+//
+// The seam is the same one the rest of this file uses: beats in through the
+// store, blocks out through `time::day::list`, and the only SQL is fixture SQL
+// that writes a **past** -- the heartbeat command can only ever record `now()`,
+// and a day with a morning of beats in it cannot be built by waiting.
+//
+// The arithmetic these tests assert on is `time::passive::derive`'s, which has
+// its own unit tests without a database. What is witnessed here is that the
+// derivation is reached at all, that the setting gates it, and that what comes
+// out of it is a row the day review can draw and a person can assign.
+
+/// Insert `count` observations, `every` apart, starting at `from`.
+///
+/// `None` is *the reader had nothing in front of them*, which is a legal
+/// observation. Fixture SQL, like `age` and `block_at` above.
+async fn beats(
+    pool: &PgPool,
+    target: Option<&TimerTarget>,
+    from: DateTime<Utc>,
+    count: i64,
+    every: Duration,
+) {
+    let (entity_id, label) = match target {
+        Some(TimerTarget::Entity { entity_id }) => (Some(entity_id.as_str()), None),
+        Some(TimerTarget::Label { label }) => (None, Some(label.as_str())),
+        None => (None, None),
+    };
+    for step in 0..count {
+        sqlx::query("insert into knobas.heartbeat (at, entity_id, label) values ($1, $2, $3)")
+            .bind(from + every * i32::try_from(step).expect("a test fixture is small"))
+            .bind(entity_id)
+            .bind(label)
+            .execute(pool)
+            .await
+            .expect("an observation in the past");
+    }
+}
+
+/// How many observations knobas has kept.
+async fn observations(pool: &PgPool) -> i64 {
+    sqlx::query_scalar("select count(*) from knobas.heartbeat")
+        .fetch_one(pool)
+        .await
+        .expect("the observations are countable")
+}
+
+/// The day's blocks, as `(kind, target, minutes)`, in the order the strip
+/// draws them.
+async fn day(pool: &PgPool, on_day: DateTime<Utc>) -> Vec<(BlockKind, TimerTarget, i64)> {
+    time::day::list(pool, on_day, on_day + Duration::days(1))
+        .await
+        .expect("the day is readable")
+        .into_iter()
+        .map(|entry| {
+            (
+                entry.block.kind,
+                entry.block.target,
+                (entry.block.ended_at - entry.block.started_at).num_seconds(),
+            )
+        })
+        .collect()
+}
+
+const OTHER: &str = "jira:PAY-99";
+
+/// **The off state, and both halves of it.** Passive attribution is opt-in, so
+/// a profile nobody has switched it on in records nothing at all and offers no
+/// blocks -- and the heartbeat goes on doing the job it did before #282, which
+/// is the half that would otherwise be lost silently.
+///
+/// The stamp is asserted as a *movement*, from a `last_heartbeat` an hour in
+/// the past: "the timer still has a stamp" would pass against a heartbeat that
+/// stopped writing one altogether.
+#[tokio::test]
+async fn with_passive_attribution_off_the_beat_still_stamps_and_nothing_is_recorded() {
+    let pool = scratch("time-passive-off").await;
+    assert!(
+        !time::passive::enabled(&pool).await.unwrap(),
+        "passive attribution is off until somebody switches it on"
+    );
+
+    time::start(&pool, on(TICKET)).await.expect("it starts");
+    age(&pool, Duration::hours(2), Duration::hours(1)).await;
+    let stale = time::current(&pool).await.unwrap().unwrap().last_heartbeat;
+
+    let beaten = time::heartbeat(&pool, Some(on(OTHER)))
+        .await
+        .expect("a beat with the setting off is still a beat")
+        .expect("the timer is running");
+
+    assert!(
+        beaten.last_heartbeat > stale + Duration::minutes(50),
+        "the beat did not move `last_heartbeat`, so a relaunch would close \
+         this block an hour early: {stale} -> {}",
+        beaten.last_heartbeat
+    );
+    assert_eq!(
+        observations(&pool).await,
+        0,
+        "off means knobas records nothing, not that it records and declines \
+         to look"
+    );
+}
+
+/// Switched on, a beat is an observation -- and a foreground the timer could
+/// never run on costs the attribution rather than the row: the beat happened
+/// and the window was focused, and a hole in the timeline is what the focused
+/// budget would be measured wrong from.
+#[tokio::test]
+async fn switched_on_every_beat_is_an_observation_even_a_malformed_one() {
+    let pool = scratch("time-passive-record").await;
+    assert!(time::passive::set_enabled(&pool, true).await.unwrap());
+
+    time::heartbeat(&pool, Some(on(TICKET))).await.unwrap();
+    time::heartbeat(&pool, None).await.unwrap();
+    let context = knobas_core::context::create_adhoc(&pool, "SEPA migration")
+        .await
+        .expect("a stored context");
+    time::heartbeat(&pool, Some(on(&context.id))).await.unwrap();
+
+    assert_eq!(observations(&pool).await, 3);
+    let attributed: i64 =
+        sqlx::query_scalar("select count(*) from knobas.heartbeat where entity_id = $1")
+            .bind(TICKET)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(attributed, 1, "one of those three was on the ticket");
+    let unattributed: i64 = sqlx::query_scalar(
+        "select count(*) from knobas.heartbeat where entity_id is null and label is null",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        unattributed, 2,
+        "an empty foreground and a foreground that is a stored context are \
+         both observations with nothing to attribute"
+    );
+}
+
+/// The floor and the merge, through the day read.
+///
+/// Twenty-one beats on one ticket, then ninety seconds on another, then
+/// twenty-one more on the first. What the strip gets is **two** blocks, not
+/// forty-two and not one: the merge makes each run a stretch, the floor drops
+/// the ninety-second glance, and the interruption keeps the two runs apart.
+#[tokio::test]
+async fn the_day_read_offers_the_blocks_the_beats_support() {
+    let pool = scratch("time-passive-day").await;
+    time::passive::set_enabled(&pool, true).await.unwrap();
+    let midnight = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
+    let at = |h, m, s| midnight + Duration::hours(h) + Duration::minutes(m) + Duration::seconds(s);
+
+    beats(&pool, Some(&on(TICKET)), at(9, 0, 0), 21, Duration::seconds(30)).await;
+    beats(&pool, Some(&on(OTHER)), at(9, 10, 30), 3, Duration::seconds(30)).await;
+    beats(&pool, Some(&on(TICKET)), at(9, 12, 0), 21, Duration::seconds(30)).await;
+
+    assert_eq!(
+        day(&pool, midnight).await,
+        vec![
+            (BlockKind::Passive, on(TICKET), 630),
+            (BlockKind::Passive, on(TICKET), 630),
+        ],
+        "a ninety-second glance at another ticket is not a block, and the two \
+         runs either side of it are not one"
+    );
+
+    // Reading the day again says the same thing, with the same rows: the
+    // reconciliation is idempotent, and an id the strip drew is an id
+    // *Assign…* can still be sent.
+    let first: Vec<i64> = time::day::list(&pool, midnight, midnight + Duration::days(1))
+        .await
+        .unwrap()
+        .iter()
+        .map(|entry| entry.block.id)
+        .collect();
+    let again: Vec<i64> = time::day::list(&pool, midnight, midnight + Duration::days(1))
+        .await
+        .unwrap()
+        .iter()
+        .map(|entry| entry.block.id)
+        .collect();
+    assert_eq!(first, again, "a second read rewrote the day's passive blocks");
+}
+
+/// The cap, through the day read, on the numbers that separate it from the
+/// merge: beats arriving six times as often as they are sent.
+///
+/// Five minutes of focused time, claims that add up to five and a half, and a
+/// block of exactly five. Without the cap the merge still gives **one** block,
+/// of 330 seconds -- so this fails on its arithmetic rather than its length,
+/// which is what tells "capped" from "merged".
+#[tokio::test]
+async fn the_cap_binds_through_the_day_read() {
+    let pool = scratch("time-passive-cap").await;
+    time::passive::set_enabled(&pool, true).await.unwrap();
+    let midnight = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
+
+    beats(
+        &pool,
+        Some(&on(TICKET)),
+        midnight + Duration::hours(9),
+        61,
+        Duration::seconds(5),
+    )
+    .await;
+
+    assert_eq!(
+        day(&pool, midnight).await,
+        vec![(BlockKind::Passive, on(TICKET), 300)],
+        "sixty-one beats five seconds apart are five minutes of focused time"
+    );
+}
+
+/// **Assigning a passive block makes it manual** -- the one direction of the
+/// kind write there is a way to ask for.
+///
+/// And the second half, which is the reason the write is there at all: the
+/// next day read does not grow a passive twin over the stretch. The beats that
+/// produced the block are still in the table and still derive the same span;
+/// what stops it coming back is that a block the person owns now covers it.
+#[tokio::test]
+async fn assigning_a_passive_block_makes_it_manual_and_it_stays_assigned() {
+    let pool = scratch("time-passive-assign").await;
+    time::passive::set_enabled(&pool, true).await.unwrap();
+    let midnight = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
+    beats(
+        &pool,
+        Some(&on(TICKET)),
+        midnight + Duration::hours(9),
+        21,
+        Duration::seconds(30),
+    )
+    .await;
+
+    let offered = time::day::list(&pool, midnight, midnight + Duration::days(1))
+        .await
+        .unwrap();
+    let [offered] = offered.as_slice() else {
+        panic!("one passive block was offered, not {}", offered.len())
+    };
+    assert_eq!(offered.block.kind, BlockKind::Passive);
+
+    let assigned = time::day::update(
+        &pool,
+        offered.block.id,
+        offered.block.started_at,
+        offered.block.ended_at,
+        labelled(LABEL),
+    )
+    .await
+    .expect("a passive block can be assigned");
+    assert_eq!(
+        assigned.block.kind,
+        BlockKind::Manual,
+        "a block a person has named is theirs, not knobas' guess"
+    );
+    assert_eq!(assigned.block.id, offered.block.id, "assigning wrote a new row");
+
+    assert_eq!(
+        day(&pool, midnight).await,
+        vec![(BlockKind::Manual, labelled(LABEL), 600)],
+        "the beats still derive this stretch, and the next read offered it \
+         again beside the block it had already become"
+    );
+}
+
+/// The other direction of the kind write, which is not a thing a caller can
+/// ask for: editing a manual block leaves it manual.
+///
+/// It is witnessed as a *round trip through the one command that writes the
+/// column* rather than as an absence, because the failure it stands against is
+/// an `update` that copied whatever kind it found -- which would turn every
+/// edit of an assigned block back into a passive one on the next read.
+#[tokio::test]
+async fn a_manual_block_is_never_turned_passive() {
+    let pool = scratch("time-passive-direction").await;
+    let midnight = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
+    let at = |h| midnight + Duration::hours(h);
+    let id = block_at(&pool, at(9), at(10), &on(TICKET)).await;
+
+    let edited = time::day::update(&pool, id, at(9), at(11), on(TICKET))
+        .await
+        .expect("a manual block is editable");
+
+    assert_eq!(edited.block.kind, BlockKind::Manual);
+}
+
+/// *Assign…* on a gap: a manual block spanning it, and nothing else about the
+/// day changes.
+#[tokio::test]
+async fn assigning_a_gap_writes_a_manual_block_over_it() {
+    let pool = scratch("time-passive-gap").await;
+    let midnight = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
+    let at = |h, m| midnight + Duration::hours(h) + Duration::minutes(m);
+    block_at(&pool, at(9, 0), at(10, 0), &on(TICKET)).await;
+    block_at(&pool, at(11, 0), at(12, 0), &on(TICKET)).await;
+
+    let made = time::day::create(&pool, at(10, 0), at(11, 0), labelled(LABEL))
+        .await
+        .expect("an unaccounted hour can be claimed");
+    assert_eq!(made.block.kind, BlockKind::Manual);
+    assert_eq!(made.block.target, labelled(LABEL));
+
+    assert_eq!(
+        day(&pool, midnight).await,
+        vec![
+            (BlockKind::Manual, on(TICKET), 3600),
+            (BlockKind::Manual, labelled(LABEL), 3600),
+            (BlockKind::Manual, on(TICKET), 3600),
+        ],
+        "the gap is gone and the blocks either side of it are untouched"
+    );
+
+    let refusal = time::day::create(&pool, at(11, 0), at(10, 0), labelled(LABEL))
+        .await
+        .expect_err("a block cannot end before it starts");
+    assert_eq!(refusal.code, IpcErrorCode::Invalid);
+}
+
+/// Passive attribution never draws over time a block already claims.
+///
+/// The timer ran through the whole of these beats, so the derivation has
+/// something to say about the stretch and no business saying it: where they
+/// overlap the block wins and the span is dropped whole, the direction that
+/// can only lose a suggestion and never invent one.
+#[tokio::test]
+async fn a_stretch_a_block_already_covers_is_not_offered_passively() {
+    let pool = scratch("time-passive-covered").await;
+    time::passive::set_enabled(&pool, true).await.unwrap();
+    let midnight = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
+    let at = |h, m| midnight + Duration::hours(h) + Duration::minutes(m);
+    block_at(&pool, at(9, 0), at(9, 30), &labelled(LABEL)).await;
+
+    beats(&pool, Some(&on(TICKET)), at(9, 5), 21, Duration::seconds(30)).await;
+    beats(&pool, Some(&on(TICKET)), at(10, 0), 21, Duration::seconds(30)).await;
+
+    assert_eq!(
+        day(&pool, midnight).await,
+        vec![
+            (BlockKind::Manual, labelled(LABEL), 1800),
+            (BlockKind::Passive, on(TICKET), 600),
+        ],
+        "the morning's beats fell inside a block the person owns, and the ten \
+         o'clock ones did not"
+    );
+}
+
+/// Switching it off stops the recording and the derivation; it does not take
+/// back what has already been offered.
+///
+/// A passive block on a day nobody has reviewed yet is knobas' answer to "what
+/// was I doing", and nothing passive has ever reached a source, so there is
+/// nothing to withdraw.
+#[tokio::test]
+async fn switching_it_off_leaves_the_blocks_already_offered_alone() {
+    let pool = scratch("time-passive-off-later").await;
+    time::passive::set_enabled(&pool, true).await.unwrap();
+    let midnight = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
+    beats(
+        &pool,
+        Some(&on(TICKET)),
+        midnight + Duration::hours(9),
+        21,
+        Duration::seconds(30),
+    )
+    .await;
+    assert_eq!(day(&pool, midnight).await.len(), 1, "a block was offered");
+
+    assert!(!time::passive::set_enabled(&pool, false).await.unwrap());
+
+    assert_eq!(
+        day(&pool, midnight).await,
+        vec![(BlockKind::Passive, on(TICKET), 600)],
+        "switching the setting off deleted a block the reader had not answered yet"
+    );
+}
+
+/// A day the beats say nothing about is a day this reconciliation says nothing
+/// about -- every day before #282 existed is such a day, and one that spoke
+/// would delete passive blocks it has no evidence either way for.
+#[tokio::test]
+async fn a_day_with_no_observations_is_left_exactly_as_it_was() {
+    let pool = scratch("time-passive-silent-day").await;
+    time::passive::set_enabled(&pool, true).await.unwrap();
+    let midnight = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
+    let at = |h| midnight + Duration::hours(h);
+    sqlx::query(
+        "insert into knobas.block (started_at, ended_at, entity_id, kind)
+         values ($1, $2, $3, 'passive')",
+    )
+    .bind(at(9))
+    .bind(at(10))
+    .bind(TICKET)
+    .execute(&pool)
+    .await
+    .expect("a passive block from a knobas that still had the beats");
+
+    assert_eq!(
+        day(&pool, midnight).await,
+        vec![(BlockKind::Passive, on(TICKET), 3600)],
+        "a day with no observations had its passive blocks reconciled away"
+    );
+}

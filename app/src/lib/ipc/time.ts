@@ -48,7 +48,13 @@ export interface LabelTarget {
  */
 export type TimerTarget = EntityTarget | LabelTarget;
 
-/** How a block came to exist — `time::BlockKind`. */
+/**
+ * How a block came to exist — `time::BlockKind`.
+ *
+ * `"passive"` is knobas' own guess at what was open (#282) and is never logged
+ * anywhere on its own. Assigning one through {@link updateBlock} makes it
+ * `"manual"`; nothing turns a manual block back.
+ */
 export type BlockKind = "manual" | "passive";
 
 /** The timer that is running — `time::RunningTimer`. */
@@ -113,8 +119,9 @@ export function stopTimer(): Promise<Block | null> {
  *
  * Sent every thirty seconds while the window is focused. `foreground` is what
  * the reader has in front of them — open detail, else the room's anchor, else
- * `null`. It is what passive attribution (#281) will be derived from; today
- * the backend vets it and stores nothing.
+ * `null`. It is what passive attribution (#282) derives its blocks from: while
+ * that setting is on the backend stores one observation per beat, and while it
+ * is off it stores nothing at all.
  *
  * **A foreground the backend dislikes never costs the beat.** The stamp is
  * what a stranded timer's block is closed at, so a refused beat would freeze
@@ -171,6 +178,11 @@ export function dayBlocks(from: string, to: string): Promise<DayBlock[]> {
  * {@link Block.ended_by_relaunch}: the marker means *knobas guessed this end*,
  * and once a person has said what the end is, it is theirs.
  *
+ * **This is also *Assign…* on a passive block** (#282): a successful update
+ * writes `kind: "manual"`, because the moment a person states a block's target
+ * knobas' guess has become their record and must stop being something the next
+ * day read reconciles away under them.
+ *
  * Rejects with `invalid` for a stored context, a malformed entity id, a blank
  * label, an end before its start, and a block already logged into a worklog —
  * which is read-only, so that what knobas shows never disagrees with what the
@@ -194,4 +206,52 @@ export function updateBlock(
  */
 export function deleteBlock(id: number): Promise<void> {
   return invoke<void>("delete_block", { id });
+}
+
+/**
+ * Write a block over a stretch nobody claimed — *Assign…* on a gap (#282).
+ *
+ * The counterpart of {@link updateBlock}, which is what *Assign…* on a
+ * **passive** block calls. The reader's sentence is the same either way ("this
+ * half-hour was this ticket"); the only difference is whether knobas already
+ * had a row to put it on, and both end in a manual block.
+ *
+ * Rejects with `invalid` for a stored context, a malformed entity id, a blank
+ * label and an end before its start. Overlapping an existing block is allowed:
+ * blocks have been editable since #279 and may overlap, and a refusal here
+ * would mean a reader who mistyped a minute could not say what they meant.
+ */
+export function createBlock(
+  startedAt: string,
+  endedAt: string,
+  target: TimerTarget,
+): Promise<DayBlock> {
+  return invoke<DayBlock>("create_block", { startedAt, endedAt, target });
+}
+
+/**
+ * Whether passive attribution is switched on — `false` until somebody says
+ * otherwise (#282).
+ *
+ * **Off means knobas records nothing**, not that it records and declines to
+ * look: with it off the heartbeat still stamps the timer alive and stores no
+ * observation, and the day review derives nothing.
+ */
+export function passiveAttribution(): Promise<boolean> {
+  return invoke<boolean>("passive_attribution");
+}
+
+/**
+ * Switch passive attribution on or off, and get back what is now stored.
+ *
+ * The stored value rather than nothing, so the toggle draws what the database
+ * holds instead of what the click asked for — the rule `setBackupSchedule`
+ * follows on the same surface.
+ *
+ * Switching it off stops the recording; the passive blocks already offered
+ * stay where they are, because nothing passive has ever reached a source and
+ * there is therefore nothing to withdraw.
+ */
+export function setPassiveAttribution(enabled: boolean): Promise<boolean> {
+  return invoke<boolean>("set_passive_attribution", { enabled });
 }
