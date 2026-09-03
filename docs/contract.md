@@ -3648,6 +3648,7 @@ From this commit on, each of the following requires an orchestrator decision **a
 
   Ratified by the orchestrator as spec #272 and issue #279, whose acceptance criteria specify the
   address, the three commands, the strip, *Extend to now*, the tests and this entry.
+
 - **`crates/knobas-source/src/**`, `crates/knobas-db/migrations/0014_the_worklog.sql` and the IPC
   command schema with both append-only barrels, issue #280 (2026-09-03):** the worklog — M3.1's
   `WriteOp` growth, the local copy of what it sends, and the two commands that draft and log it.
@@ -3700,6 +3701,26 @@ From this commit on, each of the following requires an orchestrator decision **a
   `0013` could not: `knobas.block.worklog_id` → `knobas.worklog(id)` `on delete set null`, the
   one knobas-owned-both-ends case in this schema, so deleting a worklog gives its blocks back
   rather than taking the afternoon with it.
+
+  **And one column on `knobas.write_queue`: `remote_id`.** The same value as the worklog's, on the
+  row that asked for it, because the two writers of the copy's id can arrive in either order:
+  `log` queues, writes the copy, then flushes — but the scheduler flushes on its own tick, and a
+  tick landing between the queue row and the copy settles the write while nothing names it, so the
+  settle's own stamp would match no row and the id would be gone. The copy takes it off the queue
+  row instead, whenever it is written. The column is **internal to the queue**: `queue_columns!`
+  does not list it, so `QueuedWrite` keeps its shape and its TypeScript mirror is untouched.
+
+  **What "read-only" means for a covered block, and where it is enforced.** In two places, and
+  neither is a trigger: the *draft* offers only blocks whose `worklog_id is null`, so a logged
+  afternoon cannot be logged twice; and #279's `update` and `delete` carry the same
+  `worklog_id is null` in their own `where`, which is story 20's refusal. The foreign key above is
+  the third leg — it makes "logged into a worklog that exists" a thing the schema knows, so a
+  deleted worklog gives its blocks back instead of locking them for ever.
+
+  That key is why **`time_ipc.rs`'s `logged_into` now writes a real worklog row** rather than
+  stamping a fabricated id: a block pointing at a worklog that does not exist is exactly the state
+  the key forbids. #279's helper said in as many words that this was the shape it would take once
+  the worklog landed.
 
   **The settle is what stamps the id, in one statement.**
   `knobas_core::write_queue::sent(pool, id, remote_id)` settles the queue row, records the id on

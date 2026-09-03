@@ -206,6 +206,8 @@ export function updateBlock(
  */
 export function deleteBlock(id: number): Promise<void> {
   return invoke<void>("delete_block", { id });
+}
+
 /** Where a worklog-draft candidate was seen — `worklog::CandidateSource`. */
 export type CandidateSource = "mirror" | "activity";
 

@@ -42,9 +42,9 @@ knobas-app	lib/knobas_app	commands::time::tests::a_day_review_row_with_no_title_
 knobas-app	lib/knobas_app	commands::time::tests::both_halves_of_a_target_match_their_typescript_mirror
 knobas-app	lib/knobas_app	commands::time::tests::the_block_kinds_match_their_typescript_mirror
 knobas-app	lib/knobas_app	commands::time::tests::the_block_shape_matches_its_typescript_mirror
-knobas-app	lib/knobas_app	commands::time::tests::the_day_review_row_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::time::tests::the_candidate_shape_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::time::tests::the_candidate_sources_match_their_typescript_mirror
+knobas-app	lib/knobas_app	commands::time::tests::the_day_review_row_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::time::tests::the_draft_quotes_adr_0012s_sentence_verbatim
 knobas-app	lib/knobas_app	commands::time::tests::the_draft_shape_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::time::tests::the_mirror_declares_the_target_as_a_union_of_its_two_halves
@@ -368,9 +368,9 @@ knobas-app	test/time_ipc	an_entity_timers_line_is_filed_under_that_entity
 knobas-app	test/time_ipc	an_unlogged_block_beside_a_logged_one_is_still_editable
 knobas-app	test/time_ipc	assigning_a_gap_writes_a_manual_block_over_it
 knobas-app	test/time_ipc	assigning_a_passive_block_makes_it_manual_and_it_stays_assigned
+knobas-app	test/time_ipc	another_tickets_blocks_are_not_in_this_tickets_interval
 knobas-app	test/time_ipc	editing_or_deleting_a_block_that_is_not_there_says_so
 knobas-app	test/time_ipc	extending_a_relaunch_ended_block_moves_its_end_and_drops_the_marker
-knobas-app	test/time_ipc	another_tickets_blocks_are_not_in_this_tickets_interval
 knobas-app	test/time_ipc	relaunch_closes_a_stranded_timer_at_its_last_heartbeat
 knobas-app	test/time_ipc	relaunch_with_no_timer_closes_nothing
 knobas-app	test/time_ipc	starting_and_stopping_write_the_activity_lines_the_shell_reads
@@ -382,6 +382,7 @@ knobas-app	test/time_ipc	the_cap_binds_through_the_day_read
 knobas-app	test/time_ipc	the_day_read_offers_the_blocks_the_beats_support
 knobas-app	test/time_ipc	the_days_blocks_come_back_in_time_order_whatever_order_they_were_written_in
 knobas-app	test/time_ipc	the_candidates_are_the_readers_own_work_inside_the_interval
+knobas-app	test/time_ipc	the_days_blocks_come_back_in_time_order_whatever_order_they_were_written_in
 knobas-app	test/time_ipc	the_relaunch_sweep_signs_its_line_as_knobas
 knobas-app	test/time_ipc	the_schema_accepts_a_block_of_no_length
 knobas-app	test/time_ipc	the_schema_refuses_a_block_that_ends_before_it_starts

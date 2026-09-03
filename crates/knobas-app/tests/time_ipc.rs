@@ -644,11 +644,26 @@ async fn mirrored(pool: &PgPool, entity_id: &str, title: &str) {
         .expect("a mirrored ticket");
 }
 
-/// Stamp a block as logged. **The only way to reach the read-only rule until
-/// #280**: `knobas.worklog` does not exist yet and nothing writes this column,
-/// so the alternative is a rule with no test at all until the worklog lands.
-/// Migration `0013` put the column here for exactly this reason.
-async fn logged_into(pool: &PgPool, block: i64, worklog: i64) {
+/// Stamp a block as logged, by writing the worklog it was logged into, and
+/// answer that worklog's id.
+///
+/// **A real `knobas.worklog` row, since #280** -- which is the shape this
+/// helper's own note said it would take once the worklog landed. Migration
+/// `0014` puts a foreign key on `knobas.block.worklog_id`, so a fabricated id
+/// is now a state the schema refuses; that is what the key is for, and it is
+/// what makes deleting a worklog give its blocks back rather than leave them
+/// locked for ever.
+async fn logged_into(pool: &PgPool, block: i64) -> i64 {
+    let worklog = sqlx::query_scalar::<_, i64>(
+        "insert into knobas.worklog
+           (entity_id, started_at, seconds, comment, block_ids)
+         values ($1, now(), 3600, '', array[$2::bigint]) returning id",
+    )
+    .bind(TICKET)
+    .bind(block)
+    .fetch_one(pool)
+    .await
+    .expect("a worklog to log the block into");
     let rows = sqlx::query("update knobas.block set worklog_id = $2 where id = $1")
         .bind(block)
         .bind(worklog)
@@ -657,6 +672,7 @@ async fn logged_into(pool: &PgPool, block: i64, worklog: i64) {
         .expect("the block is stamped")
         .rows_affected();
     assert_eq!(rows, 1, "there was no block {block} to stamp");
+    worklog
 }
 
 /// The strip labels an entity block with the title the mirror holds, and falls
@@ -944,7 +960,7 @@ async fn a_logged_block_refuses_both_edits_and_says_why() {
         &on(TICKET),
     )
     .await;
-    logged_into(&pool, id, 77).await;
+    let worklog = logged_into(&pool, id).await;
 
     let refusal = time::day::update(
         &pool,
@@ -980,7 +996,7 @@ async fn a_logged_block_refuses_both_edits_and_says_why() {
         vec![(
             day + Duration::hours(9),
             day + Duration::hours(10),
-            Some(77)
+            Some(worklog)
         )],
         "the refused edits changed the block anyway, so what knobas shows now \
          disagrees with what the worklog holds"
@@ -1000,7 +1016,7 @@ async fn an_unlogged_block_beside_a_logged_one_is_still_editable() {
         &on(TICKET),
     )
     .await;
-    logged_into(&pool, locked, 77).await;
+    logged_into(&pool, locked).await;
     let free = block_at(
         &pool,
         day + Duration::hours(11),
@@ -1615,8 +1631,12 @@ async fn block(pool: &PgPool, entity: &str, from: (u32, u32), to: (u32, u32)) ->
     .expect("a block is written")
 }
 
-/// A mirrored item authored by `author`, updated at `at`.
-async fn mirrored(pool: &PgPool, id: &str, title: &str, author: &str, at: DateTime<Utc>) {
+/// A mirrored item **authored by `author`**, updated at `at`.
+///
+/// Not the day review's `mirrored` above: that one writes a title for a block
+/// to read back, and the two fields this one exists for -- who wrote it and
+/// when -- are exactly what the candidate list narrows on.
+async fn authored(pool: &PgPool, id: &str, title: &str, author: &str, at: DateTime<Utc>) {
     sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'commit', $2)")
         .bind(id)
         .bind(title)
@@ -1803,7 +1823,7 @@ async fn the_candidates_are_the_readers_own_work_inside_the_interval() {
     configure_jira(&pool, "mara.lindqvist").await;
     block(&pool, TICKET, (9, 0), (11, 0)).await;
 
-    mirrored(
+    authored(
         &pool,
         "jira:c1",
         "Retry SEPA payouts",
@@ -1811,7 +1831,7 @@ async fn the_candidates_are_the_readers_own_work_inside_the_interval() {
         at(9, 30),
     )
     .await;
-    mirrored(
+    authored(
         &pool,
         "jira:c2",
         "Someone else's work",
@@ -1819,7 +1839,7 @@ async fn the_candidates_are_the_readers_own_work_inside_the_interval() {
         at(9, 40),
     )
     .await;
-    mirrored(
+    authored(
         &pool,
         "jira:c3",
         "Yesterday's commit",

@@ -200,6 +200,8 @@ pub async fn update_block(
 pub async fn delete_block(lifecycle: State<'_, Lifecycle>, id: i64) -> Result<(), IpcError> {
     let pool = lifecycle.pool()?;
     time::day::remove(&pool, id).await
+}
+
 /// The worklog draft for a ticket and one of the reader's days, or `null`
 /// (issue #280).
 ///
