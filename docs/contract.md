@@ -4233,7 +4233,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   and neither *Log all* nor the draft offers the blocks again. Held is still the honest cell of the
   four this read has — the time has not reached the ticket and the blocks are spoken for — but the
   way out is the discard path's to build (clear the copy and the mark), not this read's to paper
-  over, and it is filed rather than fixed here. *Unlogged* is `tracked - logged - held` floored at zero; the floor is not
+  over: filed as **#328** rather than fixed here. *Unlogged* is `tracked - logged - held` floored at zero; the floor is not
   tidiness, it is that the draft's interval and seconds are the reader's own and may exceed the
   blocks they were made of.
 

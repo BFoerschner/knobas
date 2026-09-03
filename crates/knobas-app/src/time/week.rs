@@ -43,7 +43,8 @@
 //! honest cell of the four available -- the time really has not reached the
 //! ticket and the blocks really are spoken for -- but the way out belongs to
 //! the discard path (clearing the copy and the mark), which is
-//! `knobas_core::write_queue`'s to build and not this read's to paper over.
+//! `knobas_core::write_queue`'s to build and not this read's to paper over --
+//! filed as #328.
 //!
 //! **Unlogged** is the difference, floored at zero. The floor is not
 //! defensive tidiness: the draft's interval and seconds are the reader's own
