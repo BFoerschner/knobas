@@ -95,17 +95,18 @@ VERIFIED_CONFLUENCE_IMAGE=sha256:d15c23a1dfea0d390536115003cd732c9b404571f85bc08
 # 300 s was the cap and not a measurement, so the slowest start under that load
 # is unknown and above it.
 #
-# WHICH MAKES 900 s INSURANCE, NOT A FIX. The fix is the sequencing: Jira starts
-# and is seeded with the VM to itself, before Confluence exists (see the
-# recipe's header), and every recipe run since -- 292 s, 399 s, 480 s, and the
-# 392 s one that measured the numbers above -- has been nowhere near even the
-# old cap. What kept 300 s survivable this long is the recipe's refusal to run
-# while TeamCity is up; the pair sharing the VM with a third JVM is the case
-# nobody has measured, and 900 s is the margin for it. The cap costs a working
-# run nothing -- the loop breaks the moment /status says RUNNING -- so all it
-# decides is how long a run that is going to fail takes to say so, and the
-# three-hour licence window has ample room for that. A cap that fires here is a
-# report about the machine, not a flake to widen again.
+# WHICH MAKES 900 s INSURANCE, NOT A FIX. The fix is the sequencing: Jira
+# starts and is seeded with the VM to itself, before Confluence exists (see the
+# recipe's header), and every recipe run since -- 292 s, 399 s, 480 s, the
+# 392 s one that measured the numbers above, and the 327 s re-run of the
+# merged bytes -- has been nowhere near even the old cap. What kept 300 s
+# survivable this long is the recipe's refusal to run while TeamCity is up;
+# the pair sharing the VM with a third JVM is the case nobody has measured,
+# and 900 s is the margin for it. The cap costs a working run nothing -- the
+# loop breaks the moment /status says RUNNING -- so all it decides is how long
+# a run that is going to fail takes to say so, and the three-hour licence
+# window has ample room for that. A cap that fires here is a report about the
+# machine, not a flake to widen again.
 #
 # All five are seconds of WALL CLOCK, not counts of anything.
 FIRST_RUN_CAP_S=600

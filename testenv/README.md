@@ -448,9 +448,10 @@ starting together on the 8 GB VM is what made Jira's wait too tight under load
 (#314), and Confluence's container is not created until Jira is `RUNNING` with
 its REST answering. The recipe's header carries the measured wall clock of a
 full run and where a new live suite's line goes: measured 2026-09-03, a full
-run from empty volumes is **392 s** — 317 of them the two wizard walks and the
-content seed, 14 the three live suites once compiled, the rest the teardown.
-The three-hour window holds with hours of margin.
+run from empty volumes takes **between 311 s and 392 s** depending on what else
+the machine is doing — in the 327 s one, 265 of them the two wizard walks and
+the content seed, 22 the three live suites once compiled, the rest the
+teardown. The three-hour window holds with hours of margin.
 
 **The suite gated on `KNOBAS_CONFLUENCE_URL`** (issue #284) is
 `crates/knobas-source-confluence/tests/live_confluence_seeded.rs`, and it is

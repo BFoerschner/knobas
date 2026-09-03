@@ -484,16 +484,24 @@ teamcity-live-seeded:
 #     competing for), and the content seed the rest. The three suites, 26 tests,
 #     ran in 14 s once compiled; the teardown took the balance.
 #
+#   2026-09-03, the same shape re-run on the merged bytes, TeamCity stopped and
+#     two other agents building: **327 s in all**, seeded and verified at 265,
+#     the three suites (28 tests by then) in 22. Same run, the two numbers this
+#     ticket is about: Jira served its wizard 46 s after answering FIRST_RUN --
+#     one progress line, `jira is serving no form yet -- 30s of 600s`, printed
+#     inside that gap -- and the post-wizard wait for RUNNING returned in 0 s
+#     again. Full runs so far sit between 311 s and 392 s.
+#
 # The suites are seconds, not hours, so the three-hour window holds with well
 # over two and a half hours of margin either way; the number to re-measure is
 # the one in this header, whenever a suite is added below or the order changes.
 #
 # THE SEQUENCING IS THE FIX; THE WIDER CAP IN seed-atlassian.sh IS INSURANCE.
-# No run since has come near even the old 300 s cap -- 292 s, 399 s, 480 s and
-# this 392 s one, all with TeamCity stopped -- and what has kept that cap
-# survivable is the refusal below to start while TeamCity is up. The pair
-# sharing the 8 GB VM with a third JVM is the case that killed #313 and the
-# case nobody has measured.
+# No run since has come near even the old 300 s cap -- 292 s, 399 s, 480 s, and
+# the 392 s and 327 s ones above, all with TeamCity stopped -- and what has kept
+# that cap survivable is the refusal below to start while TeamCity is up. The
+# pair sharing the 8 GB VM with a third JVM is the case that killed #313 and
+# the case nobody has measured.
 #
 # WHERE THE LIVE SUITES GO. One line per suite in the block marked below, each
 # a `cargo test -p <crate> --test <live suite> -- --ignored --nocapture
