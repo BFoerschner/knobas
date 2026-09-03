@@ -185,7 +185,7 @@ _Avoid_: automatic tracking, activity tracking (that is the activity stream's wo
 
 **Observation**:
 One heartbeat's record of what was in the foreground at a single instant — an entity, or nothing — written only while [passive attribution](#passive-attribution) is on. It says what was open *then* and nothing about what was open in between, which is why a passive [block](#block) is derived from a run of observations and never from one. (#315, #344)
-_Avoid_: beat. The heartbeat's tick is a beat and `BEAT_WINDOW_SECONDS` is its width, so the word survives as the passive-attribution module's own shorthand; *observation* is the record it leaves, the word this glossary uses, and the only one of the two a reader is ever shown.
+_Avoid_: beat. The heartbeat's tick is a beat and `BEAT_WINDOW_SECONDS` is its width, so the word survives as passive attribution's own shorthand in code and tests; *observation* is the record it leaves, the word this glossary uses, and the only one of the two a reader is ever shown.
 
 **Observation horizon**:
 The instant before which knobas has thrown its [observations](#observation) away: a fact about what was swept, not about how old a day is, so a profile nothing has ever been swept from has no horizon at all. A day reaching back past it is a day knobas has no record for, and what was open on it is **absent, not zero** — the day review and the timesheet say so rather than drawing it as a day with nothing on it. (#315, #337, #344)

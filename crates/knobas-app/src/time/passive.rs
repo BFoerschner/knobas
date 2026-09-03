@@ -466,7 +466,8 @@ const OFFER: &str = "insert into knobas.block (started_at, ended_at, entity_id, 
                     entity_id = excluded.entity_id,
                     label = excluded.label";
 
-/// Make the day's unassigned passive blocks equal to what the beats support.
+/// Make the day's unassigned passive blocks equal to what the observations
+/// support.
 ///
 /// Called by [`day::list`](super::day::list) before it reads, and by nothing
 /// else. **The day read is where this belongs**, and the reason is the cap: it
@@ -572,7 +573,7 @@ pub(super) async fn materialize(
     Ok(())
 }
 
-/// Every observation older than the horizon goes, in one statement.
+/// Every observation older than the cutoff goes, in one statement.
 const SWEEP: &str = "delete from knobas.heartbeat where at < $1";
 
 /// Read the stamp; `None` when knobas has never thrown an observation away.

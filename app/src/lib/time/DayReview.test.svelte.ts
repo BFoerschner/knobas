@@ -617,7 +617,7 @@ test("a passive block is drawn as one and a manual block beside it is not", asyn
  * A passive block offers *Assign…* and nothing else.
  *
  * Not editable and not deletable on purpose: the next day read reconciles the
- * day's unassigned passive blocks back to what the heartbeats support, so an
+ * day's unassigned passive blocks back to what the observations support, so an
  * edit would be undone under the reader's hands. Assigning is what takes the
  * block out of that reconciliation, by making it manual.
  */

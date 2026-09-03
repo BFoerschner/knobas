@@ -547,7 +547,7 @@ pub async fn read(pool: &PgPool, days: &[DayWindow]) -> Result<Week, IpcError> {
         // honest one, when the row is simply not there.
         //
         // The one week that reading is *wrong* for is a week past the horizon,
-        // where knobas was not shut and simply no longer has the beats. That
+        // where knobas was not shut and simply has no observations. That
         // is what `past_horizon` says, and it says it on the week for exactly
         // this reason: there is no row here to hang it on (#337).
         out.push(open);

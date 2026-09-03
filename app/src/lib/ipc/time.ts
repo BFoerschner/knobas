@@ -582,8 +582,8 @@ export interface Week {
   /** Targets first in title order, then the no-target row if it has one. */
   rows: WeekRow[];
   /**
-   * Which of {@link Week.days} knobas no longer has the observations for, in
-   * the same order (#337).
+   * Which of {@link Week.days} knobas has no observations for, in the same
+   * order (#337).
    *
    * One entry per day rather than one flag for the week, because a week that
    * straddles the horizon is the ordinary case: `week::vet` bounds a
