@@ -2293,23 +2293,38 @@ pub async fn list_projects_inner(
 /// [`standup::LOOKBACK_DAYS`](crate::standup::LOOKBACK_DAYS) of `earlier` are
 /// consulted however many are sent.
 ///
+/// **The registry is the injected one**, the shape [`inbox_items`] has and for
+/// the same reason: the blockers list is read through the descriptors'
+/// declared paths (#277), and a test that could not hand over a descriptor
+/// could only witness the declarations the shipped adapters happen to carry --
+/// which is a battery that passes just as well against a hardcoded list of
+/// English status words. That is the one mistake this read must not be able to
+/// make.
+///
 /// # Errors
 ///
 /// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the
-/// database is still coming up, [`Internal`](crate::IpcErrorCode::Internal)
-/// for a read failure.
+/// database or the sync engine is still coming up,
+/// [`Internal`](crate::IpcErrorCode::Internal) for a read failure.
 #[tauri::command]
-pub async fn standup_digest(
-    lifecycle: State<'_, Lifecycle>,
+pub async fn standup_digest<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     today: crate::time::week::DayWindow,
     earlier: Vec<crate::time::week::DayWindow>,
 ) -> Result<crate::standup::StandupDigest, IpcError> {
-    let pool = lifecycle.pool()?;
-    standup_digest_inner(&pool, Utc::now(), today, &earlier).await
+    let state = crate::sources::state(&app)?;
+    standup_digest_inner(
+        &state.pool,
+        state.registry.as_ref(),
+        Utc::now(),
+        today,
+        &earlier,
+    )
+    .await
 }
 
-/// [`standup_digest`] with the pool and the clock handed in, so a test can
-/// reach it -- the split every read in this module has.
+/// [`standup_digest`] with the pool, the registry and the clock handed in, so
+/// a test can reach it -- the split every read in this module has.
 ///
 /// # Errors
 ///
@@ -2317,11 +2332,12 @@ pub async fn standup_digest(
 /// failure or a source listing that fails.
 pub async fn standup_digest_inner(
     pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
     now: DateTime<Utc>,
     today: crate::time::week::DayWindow,
     earlier: &[crate::time::week::DayWindow],
 ) -> Result<crate::standup::StandupDigest, IpcError> {
     let identity = identity_of(pool).await?;
-    let declarations = declared_paths(pool).await?;
+    let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
     crate::standup::digest(pool, &identity, &declarations, now, today, earlier).await
 }
