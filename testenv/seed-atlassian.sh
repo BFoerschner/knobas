@@ -34,8 +34,12 @@
 # under "Data Center host product licenses". They are free and need no
 # my.atlassian.com account, which since 2026-03-30 is the only free door left.
 # Three hours is the shape of this environment: it is stand up, run what needs
-# a real instance, `docker compose down -v`. It is not a long-lived seeded
-# environment like Gitea's.
+# a real instance, then `docker compose --profile real-atlassian down -v jira
+# jira-db confluence confluence-db` -- the four services NAMED, because a bare
+# profile-scoped `down -v` also takes the default profile's containers and
+# volumes, Gitea and its seeded corpus included (README.md, "Jira and
+# Confluence, end to end"). It is not a long-lived seeded environment like
+# Gitea's.
 #
 # The keys are public and `fetch-timebomb-keys.sh` pulls them off Atlassian's
 # page. Run it BEFORE `docker compose up`, because Confluence reads its key at

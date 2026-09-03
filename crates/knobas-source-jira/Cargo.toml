@@ -19,5 +19,11 @@ serde_json.workspace = true
 # The HTTP-level mock the exit criteria are certified against (interfaces §5).
 # A dev-dependency only: nothing in the shipped adapter knows mockd exists.
 knobas-mockd = { path = "../knobas-mockd" }
+# Test-only, and only in `tests/live_jira_seeded.rs`: the raw requests that
+# certify what mapping cannot carry -- the status and headers of a real 401,
+# and the edit that suite makes through Jira's own REST API. The adapter
+# itself reaches the network through `knobas-http` and nothing else. Inherited
+# from the workspace so `cargo tree -i reqwest` stays at one copy.
+reqwest.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
