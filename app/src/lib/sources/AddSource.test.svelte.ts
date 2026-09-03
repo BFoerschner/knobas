@@ -900,9 +900,18 @@ test("a failed test fills nothing, so one server's ids cannot land on another", 
   expect(input("#add-cfg-epic_link_field").value).toBe("");
 });
 
-test("a discovered key naming a property this adapter does not declare fills nothing", async () => {
-  // The report is the adapter's claim about its own schema; a key that names
-  // nothing must not invent a config value the form never drew.
+test("a discovered key naming a property this adapter does not declare never reaches the config", async () => {
+  // The report is the adapter's claim about its own schema, and a key that
+  // names nothing must not invent a config value the form never drew — the
+  // rest of the map still lands.
+  //
+  // What enforces it is `validate`, which builds the config from the schema's
+  // fields; the `!field` guard inside `fillDiscovered` is a second layer and
+  // is **not** witnessed by this test. Mutating that guard away leaves the
+  // saved config identical, because the stray key is dropped downstream
+  // either way, and nothing on screen renders `configValues` for a key no
+  // field drew. Recorded rather than pretended: the direction this cannot see
+  // is "the dialog held a value it never showed".
   report = { ...report, discovered: { not_a_property: "x", ...EPIC } };
   await toTested();
   await saveFromTest();
