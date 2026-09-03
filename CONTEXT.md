@@ -27,7 +27,7 @@ _Avoid_: plugin, client
 
 **Project**:
 A source's own grouping of its items, where the source has one — a Jira project, a TeamCity project, a Confluence **space** (from M3.2). Per source and in the source's own word: Gitea has no such thing, and its repository is an entity kind rather than a grouping. Not a [Context](#context), which is a working set a person builds. (ADR-0010)
-_Avoid_: container, space (as the generic term; it is the right word for a Confluence project, because a project keeps the source's own word), workspace, board (ADR-0009)
+_Avoid_: container, space (as a synonym for project; it stays as Confluence's own word, ADR-0010), workspace, board (ADR-0009)
 
 **Census**:
 The whole-corpus report of every [project](#project) a source's live items show (`list_projects`), which is what the switcher builds project rooms from. Deliberately not a room's own read — that scans the newest 200 items and is a window, not a census, so a quiet project would silently lose its room. (#208)
