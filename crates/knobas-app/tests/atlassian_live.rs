@@ -257,6 +257,44 @@ impl Env {
             .unwrap_or_default()
     }
 
+    /// Wait until Jira's **search index** answers `jql` with `expect`.
+    ///
+    /// The adapter enumerates through `/rest/api/2/search`, which reads Lucene
+    /// and not the database, and Jira updates that index *asynchronously*
+    /// after a write. So a sync fired the instant a REST write returns 204 can
+    /// mirror the row as it was before the write -- which is the race #325
+    /// records against a different assertion, and which made
+    /// `a_seeded_days_work_is_what_the_digest_lists_under_yesterday` fail one
+    /// run in two with two of its three producers present and the mirror's
+    /// missing.
+    ///
+    /// So: any live assertion that writes through the REST API and then asks
+    /// the *mirror* about it has to wait for the index first, and this is
+    /// where it waits. Bounded, and it fails loudly rather than syncing
+    /// anyway -- a test that quietly went on with stale data is the thing
+    /// being fixed, not a cheaper version of it.
+    async fn indexed(&self, jql: &str, expect: &str) {
+        const EVERY: Duration = Duration::from_millis(250);
+        const CAP: usize = 60;
+        for attempt in 0..CAP {
+            if self.jql(jql).await.iter().any(|key| key == expect) {
+                if attempt > 0 {
+                    println!(
+                        "SEEDED search index caught up after {}ms: {jql}",
+                        attempt * 250
+                    );
+                }
+                return;
+            }
+            tokio::time::sleep(EVERY).await;
+        }
+        panic!(
+            "Jira's search index never answered {jql:?} with {expect} in {}s. The write landed \
+             (its own status was asserted above); what did not is the index the adapter reads.",
+            CAP * 250 / 1000
+        );
+    }
+
     /// Delete every issue and revoke every token a **killed** run left behind
     /// -- the ones no `Drop` ever reached. Read-only in the ordinary case.
     async fn clear_leftovers(&self) {
@@ -1521,9 +1559,36 @@ async fn a_seeded_days_work_is_what_the_digest_lists_under_yesterday() {
         status, 204,
         "assigning {TRANSITIONED} to the suite: {answered}"
     );
+    // Jira's search is a Lucene index updated asynchronously, and the adapter
+    // enumerates through it -- so a sync fired the instant the PUT answers 204
+    // mirrors the assignee as it was, and the digest's mirror half then
+    // correctly reports a ticket that is still somebody else's. Wait for the
+    // index to agree, *then* sync.
+    env.indexed(
+        &format!("key = {TRANSITIONED} AND assignee = \"{}\"", env.user),
+        TRANSITIONED,
+    )
+    .await;
     // The assignment and the comment both moved `updated`, so this sync is
     // what puts today's date on the mirror row as well as the account.
     sync(&state).await;
+
+    // The mirror's own answer, before the digest is asked about it. Without
+    // this the failure downstream is "no attributed line", which names the
+    // symptom and not which of the two steps -- the index catching up, or the
+    // sync reading it -- did not happen.
+    let attributed_to: Option<String> =
+        sqlx::query_scalar("select author from sync.live_item where entity_id = $1")
+            .bind(&borrowed)
+            .fetch_one(&state.pool)
+            .await
+            .expect("the borrowed ticket is mirrored");
+    assert_eq!(
+        attributed_to.as_deref(),
+        Some(env.user.as_str()),
+        "the mirror has to hold {TRANSITIONED} as the suite's before the digest can attribute \
+         it; the old assignee here means the sync read a stale search index"
+    );
 
     // -- and what the digest makes of it ------------------------------------
     let window = |on: chrono::NaiveDate| knobas_app::time::week::DayWindow {
