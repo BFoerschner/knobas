@@ -90,7 +90,7 @@ impl Steps for Queue<'_> {
         found(
             &self.state.pool,
             BRANCH_BY_NAME,
-            &like_prefix(&repo.to_string()),
+            &like_prefix(repo),
             KIND_BRANCH,
             name,
         )
@@ -101,7 +101,7 @@ impl Steps for Queue<'_> {
         found(
             &self.state.pool,
             PULL_REQUEST_BY_HEAD,
-            &like_prefix(&repo.to_string()),
+            &like_prefix(repo),
             KIND_PR,
             head,
         )
@@ -146,7 +146,8 @@ const PULL_REQUEST_BY_HEAD: &str = "select entity_id from sync.live_item
       where entity_id like $1 and kind = $2 and payload->'head'->>'ref' = $3
       order by entity_id limit 1";
 
-/// An id as a `like` prefix, with `like`'s own metacharacters escaped.
+/// The repository's id as a `like` prefix, with `like`'s own metacharacters
+/// escaped.
 ///
 /// `_` is common in repository names and matches *any* character in a
 /// pattern, so an unescaped `gitea:acme/payout_service%` would also match
@@ -155,21 +156,21 @@ const PULL_REQUEST_BY_HEAD: &str = "select entity_id from sync.live_item
 /// does not exist. Postgres' default escape character is `\`, and the value
 /// is bound, so escaping the three metacharacters is the whole job.
 ///
-/// Takes a `&str` rather than an `EntityRef` since #289, which needs the same
-/// escaping for a **source id** -- `commands::entity::ticket_titled` narrows a
-/// look-back-after-write to one source's corpus, and source ids carry
-/// underscores just as repository names do. One escaping, so a second caller
-/// cannot get it subtly wrong.
-pub(crate) fn like_prefix(id: &str) -> String {
-    format!("{}%", escape_like(id))
+/// The escaping itself is [`escape_like`], shared since #289.
+fn like_prefix(repo: &EntityRef) -> String {
+    format!("{}%", escape_like(&repo.to_string()))
 }
 
 /// The escaping half of [`like_prefix`], without the trailing `%`.
 ///
-/// Separate because #289's caller wants `<escaped source id>:%` and not
-/// `<escaped source id>%` -- and trimming the `%` back off would be wrong for
-/// an id that ends in one, since its own `%` is escaped to `\%` and a trim
-/// cannot tell the two apart.
+/// Split out for #289, which needs the same escaping for a **source id**:
+/// `commands::entity::ticket_titled` narrows a look-back-after-write to one
+/// source's corpus with `<escaped source id>:%`, and source ids carry
+/// underscores just as repository names do. It wants the escaping and its own
+/// separator, not this function's bare `%` -- and trimming the `%` back off
+/// would be wrong for an id that ends in one, since its own `%` is escaped to
+/// `\%` and a trim cannot tell the two apart. So the escaping is shared and
+/// each caller spells its own pattern.
 pub(crate) fn escape_like(value: &str) -> String {
     let mut out = String::with_capacity(value.len() + 4);
     for ch in value.chars() {
@@ -212,12 +213,9 @@ mod tests {
     #[test]
     fn a_repository_id_is_matched_literally_not_as_a_pattern() {
         let repo = EntityRef::new("gitea", "acme/payout_service");
-        assert_eq!(
-            like_prefix(&repo.to_string()),
-            "gitea:acme/payout\\_service%"
-        );
+        assert_eq!(like_prefix(&repo), "gitea:acme/payout\\_service%");
         let plain = EntityRef::new("gitea", "acme/payouts");
-        assert_eq!(like_prefix(&plain.to_string()), "gitea:acme/payouts%");
+        assert_eq!(like_prefix(&plain), "gitea:acme/payouts%");
         // The same escaping a source id gets (#289), without the `%` that
         // would make a trailing one indistinguishable from an escaped one.
         assert_eq!(escape_like("wiki_two"), "wiki\\_two");

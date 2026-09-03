@@ -250,6 +250,15 @@ pub fn template_of(day: NaiveDate) -> String {
 /// again for the same date rather than resurrecting a body they threw away --
 /// the same direction `note::save` takes for a stale editor.
 ///
+/// **The title is the whole of the identity, and that is a consequence rather
+/// than an oversight.** A protocol is not a kind and owns no column, so a note
+/// the reader wrote themselves and called `Standup 2026-09-03` *is* that
+/// date's protocol from here on: this read adopts it, offers it *Publish*, and
+/// publishes what it holds. Nothing is overwritten -- the body they typed is
+/// the body that is opened -- and the alternative is the marker column
+/// `CONTEXT.md`'s "not a kind of its own" and spec #272's migration list both
+/// rule out. Stated so the next reader meets it here rather than in a wiki.
+///
 /// # Errors
 ///
 /// [`Internal`](crate::IpcErrorCode::Internal) if the read or the write fails.

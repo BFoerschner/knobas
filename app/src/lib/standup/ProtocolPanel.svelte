@@ -13,7 +13,7 @@
   `NoteView`'s decision and its reasoning in full: the write is idempotent, and
   the answer carries the refs it reconciled. What this panel does **not** share
   with `NoteView` is the slide-over frame: a protocol is read here, under the
-  digest, next to the three lists it is the minutes of.
+  digest, next to the three lists the standup generated.
 
   ## Publishing asks once, and then never again
 
@@ -160,14 +160,14 @@
    * round trip and never a sentence.
    */
   async function save(): Promise<boolean> {
-    const open = protocol;
-    if (!open) return false;
+    const current = protocol;
+    if (!current) return false;
     try {
       // The title is the protocol's identity — it is what the get-or-create
       // matches on — so it is never rewritten from here. Only the body is the
       // reader's to change.
-      const note = await io.getNote(open.note_id);
-      await io.saveNote(open.note_id, note.note.title, body);
+      const note = await io.getNote(current.note_id);
+      await io.saveNote(current.note_id, note.note.title, body);
       failure = null;
       return true;
     } catch (cause) {
@@ -237,11 +237,11 @@
 
   async function fileTicket() {
     const asked = ticketFor;
-    const open = protocol;
-    if (!asked || !open || asked.project === null) return;
+    const current = protocol;
+    if (!asked || !current || asked.project === null) return;
     try {
       const filed = await io.createActionItemTicket(
-        open.note_id,
+        current.note_id,
         asked.project,
         asked.type,
         asked.text,

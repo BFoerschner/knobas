@@ -827,6 +827,76 @@ async fn a_parent_in_another_wikis_address_space_is_refused() {
     );
 }
 
+/// ADR-0007 requirement 3 for `protocol::space_of`, direction one: **a parent
+/// the mirror does not hold misses to a refusal, not to a guess.**
+///
+/// `space_of` is a payload read outside an adapter, so the ADR binds it: it
+/// must miss rather than guess, sit in one named statement, and have its
+/// failure direction *pinned by a test*. The doc states both directions; these
+/// two tests are what turn that from an author's habit into an obligation.
+///
+/// The direction that would bite is a page the reader configured as the parent
+/// and the source has since removed: a read that fell back to a default space
+/// would publish the team's standup into a space nobody chose.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_parent_the_mirror_does_not_hold_refuses_rather_than_guessing_a_space() {
+    let harness = Harness::new("protocol_parent_gone").await;
+    let refused = harness
+        .publish(Some(PublishTarget {
+            source_id: WIKI.to_owned(),
+            parent: format!("{WIKI}:99999"),
+        }))
+        .await
+        .expect_err("it refuses");
+    assert_eq!(refused.code, knobas_app::IpcErrorCode::NotFound);
+    assert!(
+        refused.message.contains("not in the mirror"),
+        "{}",
+        refused.message
+    );
+    assert_eq!(harness.create_pages_queued().await, 0, "and queued nothing");
+}
+
+/// The same requirement, direction two: **a parent record that names no space
+/// is refused**, rather than published into a space read off something else.
+///
+/// A Confluence page record always carries its space, so this is the shape the
+/// ADR's "unrecognized shape" clause is about -- a second wiki spelling it
+/// differently, or a record widened later. The read contributes nothing and
+/// the publish stops; nothing reaches the queue.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_parent_record_that_names_no_space_is_refused() {
+    let harness = Harness::new("protocol_parent_spaceless").await;
+    harness.mirror(SyncItem {
+        entity: knobas_core::entity::EntityRef::new(WIKI, "98401"),
+        kind: "page".to_owned(),
+        title: "Standup protocols".to_owned(),
+        body_text: String::new(),
+        author: None,
+        updated_at: Some(chrono::Utc::now()),
+        // The one field this read wants, absent.
+        payload: serde_json::json!({ "id": "98401" }),
+        web_url: None,
+        deleted: false,
+    });
+    harness.sync(WIKI).await;
+
+    let refused = harness
+        .publish(Some(PublishTarget {
+            source_id: WIKI.to_owned(),
+            parent: format!("{WIKI}:98401"),
+        }))
+        .await
+        .expect_err("it refuses");
+    assert_eq!(refused.code, knobas_app::IpcErrorCode::Invalid);
+    assert!(
+        refused.message.contains("which space"),
+        "{}",
+        refused.message
+    );
+    assert_eq!(harness.create_pages_queued().await, 0, "and queued nothing");
+}
+
 // -- the settle after a restart ---------------------------------------------
 
 /// The acceptance criterion's hardest question: *does the settle path record
