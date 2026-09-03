@@ -429,8 +429,14 @@ fn unreachable_pool() -> sqlx::PgPool {
 /// Built by the same `sources::start`-shaped call the app makes, so this test
 /// drives the scheduler rather than a stand-in: the run it triggers is a real
 /// run on a real dedicated connection.
+///
+/// `db` is where those dedicated connections come from, and it has to be the
+/// database `pool` is on: a caller on the binary's shared database passes
+/// [`test_connector`](knobas_db::test_util::test_connector), and one on a
+/// database of its own passes that (#300).
 fn sources_state(
     app: &tauri::App<MockRuntime>,
+    db: knobas_db::embedded::Connector,
     pool: sqlx::PgPool,
 ) -> knobas_app::sources::SourcesState {
     use std::sync::Arc;
@@ -440,7 +446,7 @@ fn sources_state(
     tokio::task::block_in_place(|| {
         tauri::async_runtime::block_on(async move {
             knobas_app::sources::SourcesState {
-                scheduler: knobas_app::sources::test_scheduler(&handle, pool.clone())
+                scheduler: knobas_app::sources::test_scheduler(&handle, db, pool.clone())
                     .await
                     .expect("a scheduler over the test pool"),
                 pool,
@@ -605,8 +611,30 @@ async fn demo_load_ends_with_a_terminal_sync_state_for_the_mock() {
 /// up later.
 #[tokio::test(flavor = "multi_thread")]
 async fn sync_now_answers_before_the_run_and_reports_it_on_the_event() {
-    let pool = knobas_db::test_util::test_pool().await;
-    knobas_db::migrate::run(&pool).await.unwrap();
+    // A database of its own, not the binary's shared one -- the remedy
+    // `demo_load_ends_with_a_terminal_sync_state_for_the_mock` already needed,
+    // for the same reason (#300).
+    //
+    // The scheduler this test manages is the real one, so on the shared
+    // database it is one of several live over a single `source_config`, and
+    // `emit_state` does not build its payload from the run it is emitting for:
+    // it re-reads the source through `status_for`, whose query takes
+    // `coalesce(r.id, f.id)` from *whichever* run is open. A neighbour's open
+    // `mock` run therefore puts a **neighbour's** id on this run's `running`
+    // emit, and the run id stops telling the events apart -- PR #302's gate
+    // failed exactly there, on `running` rather than on `run_id`.
+    //
+    // One scheduler over one database has at most one open `mock` run: while
+    // this run is in flight `trigger` joins it rather than starting a second,
+    // and `sync_interval_secs` (300 s) keeps the ticker from starting another
+    // inside the five seconds this test waits. So every emit here is about the
+    // run it was triggered for, and the run-id keying below is then belt and
+    // braces rather than the load-bearing part it was asked to be.
+    let db = knobas_db::test_util::scratch_database("sync_now_sync_state").await;
+    let pool = db
+        .pool(5)
+        .await
+        .expect("a pool onto this test's own database");
     // Registers `mock` in `source_config`, which is what `prepare_sync`
     // requires. The sync it performs is incidental.
     knobas_app::sources::demo::demo_load_inner(&pool)
@@ -622,7 +650,7 @@ async fn sync_now_answers_before_the_run_and_reports_it_on_the_event() {
         serde_json::json!({ "sourceId": "mock" }),
         move |app| {
             app.manage(ready_over(pool_for_state.clone()));
-            app.manage(sources_state(app, pool_for_state));
+            app.manage(sources_state(app, db, pool_for_state));
             app.listen("sync:state", move |event| {
                 if let Ok(value) = serde_json::from_str::<serde_json::Value>(event.payload()) {
                     recorder.lock().unwrap().push(value);
@@ -634,13 +662,32 @@ async fn sync_now_answers_before_the_run_and_reports_it_on_the_event() {
     .deserialize::<i64>()
     .expect("a run id came back");
 
+    // **This run's** events, by the id `sync_now` returned, rather than the
+    // first and last to arrive (#300).
+    //
+    // The private database above is what makes the id trustworthy; this is
+    // what makes each assertion say *which* run it is about. `first()` and the
+    // last terminal event of any run are claims about arrival order, and this
+    // scheduler is real: should a second `mock` run ever overlap this one --
+    // a shorter `sync_interval_secs`, a second source in the demo fixture, a
+    // future test reaching this database -- the searches fail loudly instead
+    // of asserting against the wrong run. They also carry the `run_id` claim
+    // the two `assert_eq!`s here used to make after the fact, which is why
+    // neither asserts it again.
+    let mine = |status: &serde_json::Value| status["run_id"] == serde_json::json!(returned);
+
     // Emitted before the spawn, so it is already there.
-    let started = seen.lock().unwrap().first().cloned().expect(
-        "a `running` sync:state must be emitted before sync_now returns -- \
-         otherwise EVENTS.syncState is a promise the docs make and nothing keeps",
-    );
+    let started = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|status| mine(status))
+        .cloned()
+        .expect(
+            "a `running` sync:state must be emitted before sync_now returns -- \
+             otherwise EVENTS.syncState is a promise the docs make and nothing keeps",
+        );
     assert_eq!(started["running"], serde_json::json!(true));
-    assert_eq!(started["run_id"], serde_json::json!(returned));
     assert_eq!(started["source_id"], serde_json::json!("mock"));
 
     // The run lands on its own task. Wait for the **event**, not for the log
@@ -655,7 +702,7 @@ async fn sync_now_answers_before_the_run_and_reports_it_on_the_event() {
             .unwrap()
             .iter()
             .rev()
-            .find(|status| status["running"] == serde_json::json!(false))
+            .find(|status| mine(status) && status["running"] == serde_json::json!(false))
             .cloned();
         if terminal.is_some() {
             break;
@@ -663,7 +710,6 @@ async fn sync_now_answers_before_the_run_and_reports_it_on_the_event() {
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     }
     let terminal = terminal.expect("a terminal sync:state must follow the run");
-    assert_eq!(terminal["run_id"], serde_json::json!(returned));
     assert_eq!(terminal["last_outcome"], serde_json::json!("ok"));
 
     // And by then the row it describes is closed, because the emit is the last
@@ -748,6 +794,8 @@ async fn a_submitted_write_is_queued_delivered_and_followed_by_a_re_read() {
             .unwrap();
 
     let pool_for_state = pool.clone();
+    // The shared database `pool` is on, which is where this test's sources are.
+    let db = knobas_db::test_util::test_connector().await;
     let queued = invoke_managing(
         "submit_write",
         serde_json::json!({
@@ -755,7 +803,7 @@ async fn a_submitted_write_is_queued_delivered_and_followed_by_a_re_read() {
         }),
         move |app| {
             app.manage(ready_over(pool_for_state.clone()));
-            app.manage(sources_state(app, pool_for_state));
+            app.manage(sources_state(app, db, pool_for_state));
         },
     )
     .expect("submit_write must answer")
