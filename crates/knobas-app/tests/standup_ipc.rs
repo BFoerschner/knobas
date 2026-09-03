@@ -625,17 +625,48 @@ async fn yesterdays_line_per_producer_names_its_item_its_source_and_its_verb() {
     }
 }
 
+/// The `log_work` op **as the SPI spells it**, for the fixture below.
+///
+/// Spelled from the enum rather than typed as the word, because that word is
+/// the whole of the no-double-counting rule: `knobas_app::standup` skips
+/// `detail->>'op' = 'log_work'` on the activity side precisely because
+/// `knobas.worklog` already carries the afternoon, and the value it is matched
+/// against is written from `WriteOp::identifier`. A rename in the SPI and no
+/// rename in the digest does not fail -- it silently stops matching, and every
+/// logged afternoon is on the standup twice with nothing saying so. A fixture
+/// that typed the word would go on passing through exactly that.
+///
+/// Here rather than in `src/standup.rs` beside the constant: `crates/*/src/**`
+/// may not name the write op at all, which is `knobas-sync`'s
+/// `write_choke_point` rule and not an accident of layout.
+fn log_work_op() -> String {
+    knobas_source::WriteOp::LogWork {
+        entity: format!("{TRACKER}:PAY-231"),
+        started: days_before(1, 14, 0),
+        seconds: 5400,
+        comment: String::new(),
+    }
+    .identifier()
+    .to_owned()
+}
+
 /// A logged afternoon is **one** line, not two (the `log_work` skip).
 ///
 /// A worklog travels through the write queue like every other write, so it
 /// leaves a `queued` activity line *as well as* the local copy. Reading both
 /// halves would put every logged afternoon on the standup twice.
+///
+/// The queue line's op comes from [`log_work_op`], so this is also the pin
+/// holding `standup::LOG_WORK` to the SPI's identifier -- in both directions,
+/// since either one moving alone leaves the skip not matching and puts a
+/// second line on the list.
 #[tokio::test]
 async fn a_logged_afternoon_is_one_line_and_not_the_queue_line_as_well() {
     let h = harness("standup-worklog-once").await;
     let ticket = h.ticket("PAY-231", ME, "In Progress").await;
     h.worklog(&ticket, days_before(1, 14, 0)).await;
-    h.queued(&ticket, "log_work", days_before(1, 17, 0)).await;
+    h.queued(&ticket, &log_work_op(), days_before(1, 17, 0))
+        .await;
 
     let digest = h.digest().await;
 
