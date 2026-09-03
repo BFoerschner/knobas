@@ -867,7 +867,10 @@ async fn discarding_a_queued_worklog_gives_the_afternoon_back() {
         WriteState::Pending,
         "the fixture needs an open write -- a settled one cannot be discarded"
     );
-    assert_eq!(worklog_id_of(&state.pool, monday_block).await, Some(monday.id));
+    assert_eq!(
+        worklog_id_of(&state.pool, monday_block).await,
+        Some(monday.id)
+    );
 
     // The withdrawal itself, through the seam `discard_write` shims.
     let discarded = knobas_sync::write_queue::discard(state.scheduler.deps(), queued)
