@@ -95,17 +95,19 @@
 //! login attempt; `Seeded::refused_source` in the adapter's live suite carries
 //! the full reasoning.
 
+mod live_digest;
+
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use async_trait::async_trait;
 use knobas_app::sources::{Registry, SourcesState};
 use knobas_secrets::{MemoryStore, Secret, SecretStore};
 use knobas_source::AuthMethod;
 use knobas_sync::SyncTrigger;
 use knobas_sync::health::AuthState;
-use knobas_sync::scheduler::{RunConnections, Scheduler, SchedulerDeps, SyncEvents};
+use knobas_sync::scheduler::{Scheduler, SchedulerDeps, SyncEvents};
+use live_digest::{Connections, Ending, day_window, sync};
 use serde_json::json;
 
 /// The source id, which is also the `EntityRef` namespace every mirrored
@@ -832,16 +834,6 @@ where
 
 // -- the app, wired the way the app wires it --------------------------------
 
-/// Connections a run gets: the scratch database's own, not the shared one's.
-struct Connections(knobas_db::embedded::Connector);
-
-#[async_trait]
-impl RunConnections for Connections {
-    async fn open(&self) -> Result<sqlx::PgConnection, sqlx::Error> {
-        self.0.connect().await
-    }
-}
-
 /// The `source:health` events the shell would render, kept so the assertion
 /// can be on the **event** and not only on the stored column. The two are
 /// different claims: `set_health` reports a change once, and a sources view
@@ -942,20 +934,6 @@ async fn app(name: &str, env: &Env, auth: AuthMethod, secret: &str) -> (SourcesS
     )
 }
 
-/// Sync the source and wait for the run to end, whichever way it ends.
-async fn sync(state: &SourcesState) {
-    let (done, wait) = tokio::sync::oneshot::channel();
-    let sink = Arc::new(Ending {
-        done: std::sync::Mutex::new(Some(done)),
-    });
-    state
-        .scheduler
-        .trigger(JIRA, SyncTrigger::Manual, Some(sink))
-        .await
-        .expect("the run starts");
-    wait.await.expect("the run reports its ending");
-}
-
 /// Sync the source **from no position at all**, and wait for the run to end.
 ///
 /// `knobas_sync::backfill`'s own words: an incremental run re-fetches what
@@ -980,37 +958,13 @@ async fn sync(state: &SourcesState) {
 /// backfill alike until the CQL index catches up. It takes the source for that
 /// reason.
 async fn backfill(state: &SourcesState, source: &str) {
-    let (done, wait) = tokio::sync::oneshot::channel();
-    let sink = Arc::new(Ending {
-        done: std::sync::Mutex::new(Some(done)),
-    });
+    let (sink, wait) = Ending::for_run();
     state
         .scheduler
         .trigger(source, SyncTrigger::Backfill, Some(sink))
         .await
         .expect("the backfill starts");
     wait.await.expect("the run reports its ending");
-}
-
-struct Ending {
-    done: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
-}
-
-impl knobas_sync::progress::ProgressSink for Ending {
-    fn report(&self, progress: knobas_sync::progress::SyncProgress) {
-        use knobas_sync::progress::SyncPhase;
-        if !matches!(progress.phase, SyncPhase::Finished | SyncPhase::Failed) {
-            return;
-        }
-        if let Some(sender) = self
-            .done
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
-        {
-            let _ = sender.send(());
-        }
-    }
 }
 
 /// The keys the mirror holds live for this source -- the thing a wrongly
@@ -1023,25 +977,6 @@ async fn mirrored(pool: &sqlx::PgPool) -> Vec<String> {
     .fetch_all(pool)
     .await
     .expect("the mirror is readable")
-}
-
-/// One whole UTC day, as the digest's readers ask for it.
-///
-/// Free rather than a closure re-declared inside each digest test: two of them
-/// carried the same ten lines and this branch's own would have been a third,
-/// and two digest tests that disagreed about where a day begins would both
-/// stay green while measuring different things.
-fn day_window(on: chrono::NaiveDate) -> knobas_app::time::week::DayWindow {
-    knobas_app::time::week::DayWindow {
-        day: on,
-        from: on.and_hms_opt(0, 0, 0).expect("midnight").and_utc(),
-        to: on
-            .succ_opt()
-            .expect("the next day")
-            .and_hms_opt(0, 0, 0)
-            .expect("midnight")
-            .and_utc(),
-    }
 }
 
 /// Queue one write through the app's own submit path -- the same call the
@@ -1093,7 +1028,7 @@ async fn a_revoked_pat_reaches_the_credential_health_surface_and_the_mirror_surv
     // 1. The token works, which is what makes revoking it mean anything -- and
     //    is the product's own answer to `http::credential`'s claim that a Jira
     //    DC personal access token is a Bearer token.
-    sync(&state).await;
+    sync(&state, JIRA).await;
     let synced = mirrored(&state.pool).await;
     assert!(
         synced.len() >= 7,
@@ -1135,7 +1070,7 @@ async fn a_revoked_pat_reaches_the_credential_health_surface_and_the_mirror_surv
         )
         .expect("the replacement credential is stored");
 
-    sync(&state).await;
+    sync(&state, JIRA).await;
 
     // 3. The credential-health path, at both ends of it: the stored column the
     //    sources view polls, and the event it re-renders on.
@@ -1234,7 +1169,7 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
     // The mirror has to hold the tickets first: the queue snapshots its target
     // when a write is queued and re-reads it before sending, which is how a
     // write over a ticket that moved is held rather than sent.
-    sync(&state).await;
+    sync(&state, JIRA).await;
     let held = mirrored(&state.pool).await;
     for key in [COMMENTED, TRANSITIONED] {
         assert!(
@@ -1359,7 +1294,7 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
     let transitioned = format!("{JIRA}:{TRANSITIONED}");
     let deadline = std::time::Instant::now() + INDEX_BUDGET;
     for round in 1.. {
-        sync(&state).await;
+        sync(&state, JIRA).await;
         // `fields.status.name` is where a Jira status lives, and the mirrored
         // `payload` is the record verbatim -- the reading
         // `knobas_core::write_queue::project` records for why `"transition"`
@@ -1570,7 +1505,7 @@ async fn a_days_work_is_logged_to_pay_231_and_comes_back_in_the_mirror() {
     let pat = env.pat().await;
     let (state, _events) = app("atlassian_live_worklog", &env, AuthMethod::Pat, &pat.raw).await;
 
-    sync(&state).await;
+    sync(&state, JIRA).await;
     let ticket = format!("{JIRA}:{COMMENTED}");
     assert!(
         mirrored(&state.pool).await.contains(&ticket),
@@ -1714,7 +1649,7 @@ async fn a_days_work_is_logged_to_pay_231_and_comes_back_in_the_mirror() {
     // 4. And the next sync brings it back into the mirror's payload, which is
     //    what everything downstream of the mirror reads (§4.1: the record is
     //    verbatim).
-    sync(&state).await;
+    sync(&state, JIRA).await;
     let payload: serde_json::Value =
         sqlx::query_scalar("select payload from sync.live_item where entity_id = $1")
             .bind(&ticket)
@@ -1780,7 +1715,7 @@ async fn a_seeded_days_work_is_what_the_digest_lists_under_yesterday() {
     let pat = env.pat().await;
     let (state, _events) = app("atlassian_live_digest", &env, AuthMethod::Pat, &pat.raw).await;
 
-    sync(&state).await;
+    sync(&state, JIRA).await;
     let borrowed = format!("{JIRA}:{TRANSITIONED}");
     let seeded = format!("{JIRA}:{COMMENTED}");
     let held = mirrored(&state.pool).await;
@@ -1913,7 +1848,7 @@ async fn a_seeded_days_work_is_what_the_digest_lists_under_yesterday() {
     // with what the mirror actually held.
     let mut attributed_to = None;
     for attempt in 0..5 {
-        sync(&state).await;
+        sync(&state, JIRA).await;
         attributed_to = sqlx::query_scalar::<_, Option<String>>(
             "select author from sync.live_item where entity_id = $1",
         )
@@ -2691,20 +2626,6 @@ async fn wiki_app(
     )
 }
 
-/// Sync one source and wait for the run to end, whichever way it ends.
-async fn sync_source(state: &SourcesState, id: &str) {
-    let (done, wait) = tokio::sync::oneshot::channel();
-    let sink = Arc::new(Ending {
-        done: std::sync::Mutex::new(Some(done)),
-    });
-    state
-        .scheduler
-        .trigger(id, SyncTrigger::Manual, Some(sink))
-        .await
-        .expect("the run starts");
-    wait.await.expect("the run reports its ending");
-}
-
 /// **M3.2's exit criterion: a comment that mentions the admin account becomes
 /// an inbox item** (#287), through the real Confluence, the real sync engine
 /// and the real inbox derivation.
@@ -2741,7 +2662,7 @@ async fn a_comment_that_mentions_me_becomes_an_inbox_mention() {
     .await;
 
     // 1. The seeded corpus, and a cursor.
-    sync_source(&state, CONFLUENCE).await;
+    sync(&state, CONFLUENCE).await;
     let mirrored = confluence_pages(&state.pool).await;
     assert!(
         mirrored
@@ -2774,7 +2695,7 @@ async fn a_comment_that_mentions_me_becomes_an_inbox_mention() {
     );
     let deadline = std::time::Instant::now() + INDEX_BUDGET;
     let found = loop {
-        sync_source(&state, CONFLUENCE).await;
+        sync(&state, CONFLUENCE).await;
         let items = inbox_mentions(&state).await;
         if let Some(item) = items.into_iter().next() {
             break item;
@@ -2904,7 +2825,7 @@ async fn the_launcher_finds_the_seeded_page_with_its_ancestor_path() {
     .await;
 
     // 1. The seeded corpus.
-    sync_source(&state, CONFLUENCE).await;
+    sync(&state, CONFLUENCE).await;
     let mirrored = confluence_pages(&state.pool).await;
     assert!(
         mirrored
@@ -3051,7 +2972,7 @@ async fn a_page_the_source_says_is_mine_is_on_the_digest_for_the_day_it_moved() 
         &wiki.password,
     )
     .await;
-    sync_source(&state, CONFLUENCE).await;
+    sync(&state, CONFLUENCE).await;
 
     // The page, and the day the mirror says it last moved -- read back rather
     // than assumed, so this is a statement about the adapter's own `author`
@@ -3313,7 +3234,7 @@ async fn a_page_edited_through_knobas_is_on_the_digest_under_yesterday() {
         &wiki.password,
     )
     .await;
-    sync_source(&state, CONFLUENCE).await;
+    sync(&state, CONFLUENCE).await;
 
     // The mirror has to hold the page first: the queue snapshots its target
     // when a write is queued and re-reads it before sending, so an unmirrored
@@ -3565,7 +3486,7 @@ async fn a_revoked_confluence_pat_reaches_the_credential_health_surface_and_the_
     //    is the product's own answer to `http::credential`'s claim that a
     //    Confluence DC personal access token is a Bearer token. Nothing else
     //    in the repo presents this server a *good* one.
-    sync_source(&state, CONFLUENCE).await;
+    sync(&state, CONFLUENCE).await;
     let synced = confluence_pages(&state.pool).await;
     assert!(
         synced.len() >= 5,
@@ -3627,7 +3548,7 @@ async fn a_revoked_confluence_pat_reaches_the_credential_health_surface_and_the_
         )
         .expect("the replacement credential is stored");
 
-    sync_source(&state, CONFLUENCE).await;
+    sync(&state, CONFLUENCE).await;
 
     // 3. The credential-health path, at both ends of it: the stored column the
     //    sources view polls, and the event it re-renders on.
@@ -3896,7 +3817,7 @@ async fn a_protocol_is_published_under_standup_protocols_and_reads_back() {
     let day: chrono::NaiveDate = PROTOCOL_DAY.parse().expect("the date parses");
 
     // 1. The seeded corpus, so the parent page has an address.
-    sync_source(&state, CONFLUENCE).await;
+    sync(&state, CONFLUENCE).await;
     let parent = format!("{CONFLUENCE}:{}", wiki.standup_parent);
 
     // 2. The protocol, and what was said at the standup.

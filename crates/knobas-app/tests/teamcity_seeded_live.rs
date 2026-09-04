@@ -62,15 +62,16 @@
 //!
 //! **One environment, one owner at a time** -- `testenv/README.md`.
 
+mod live_digest;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use knobas_app::sources::{Registry, SourcesState};
 use knobas_secrets::{MemoryStore, Secret, SecretStore};
 use knobas_source::AuthMethod;
-use knobas_sync::SyncTrigger;
-use knobas_sync::scheduler::{RunConnections, Scheduler, SchedulerDeps, SyncEvents};
+use knobas_sync::scheduler::{Scheduler, SchedulerDeps};
+use live_digest::{Connections, Quiet, day_window, on_digest, sync};
 use serde_json::json;
 
 /// The configured source id, which is also the entity namespace.
@@ -202,25 +203,6 @@ fn seeded_build_id() -> i64 {
 
 // -- the app, wired the way the app wires it --------------------------------
 
-/// Connections a run gets: the scratch database's own, not the shared one's.
-struct Connections(knobas_db::embedded::Connector);
-
-#[async_trait]
-impl RunConnections for Connections {
-    async fn open(&self) -> Result<sqlx::PgConnection, sqlx::Error> {
-        self.0.connect().await
-    }
-}
-
-/// Events nobody is listening for. The scheduler reports; there is no window.
-struct Quiet;
-
-impl SyncEvents for Quiet {
-    fn sync_state(&self, _status: knobas_sync::SourceSyncStatus) {}
-    fn source_health(&self, _health: knobas_sync::CredentialHealth) {}
-    fn activity_new(&self, _row: knobas_core::activity::ActivityRow) {}
-}
-
 /// A `SourcesState` over a database of this test's own, with the TeamCity
 /// source configured and its token in the (in-memory) keychain.
 ///
@@ -281,56 +263,6 @@ async fn app(env: &Env, account: &str) -> SourcesState {
     }
 }
 
-/// Sync the source and wait for the run to end, whichever way it ends.
-async fn sync(state: &SourcesState) {
-    let (done, wait) = tokio::sync::oneshot::channel();
-    let sink = Arc::new(Ending {
-        done: std::sync::Mutex::new(Some(done)),
-    });
-    state
-        .scheduler
-        .trigger(TEAMCITY, SyncTrigger::Manual, Some(sink))
-        .await
-        .expect("the run starts");
-    wait.await.expect("the run reports its ending");
-}
-
-struct Ending {
-    done: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
-}
-
-impl knobas_sync::progress::ProgressSink for Ending {
-    fn report(&self, progress: knobas_sync::progress::SyncProgress) {
-        use knobas_sync::progress::SyncPhase;
-        if !matches!(progress.phase, SyncPhase::Finished | SyncPhase::Failed) {
-            return;
-        }
-        if let Some(sender) = self
-            .done
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
-        {
-            let _ = sender.send(());
-        }
-    }
-}
-
-/// One whole UTC day, as the digest's readers ask for it -- the same shape
-/// `tests/atlassian_live.rs` and `tests/start_work_live.rs` use.
-fn day_window(on: chrono::NaiveDate) -> knobas_app::time::week::DayWindow {
-    knobas_app::time::week::DayWindow {
-        day: on,
-        from: on.and_hms_opt(0, 0, 0).expect("midnight").and_utc(),
-        to: on
-            .succ_opt()
-            .expect("the next day")
-            .and_hms_opt(0, 0, 0)
-            .expect("midnight")
-            .and_utc(),
-    }
-}
-
 /// **A seeded build the mirror attributes to the reader is on the digest for
 /// the day it ran** (issue #389, M3.3's exit criterion).
 ///
@@ -353,7 +285,7 @@ async fn a_seeded_build_the_mirror_attributes_to_the_reader_is_on_that_days_dige
     let env = env();
     let account = env.account().await;
     let state = app(&env, &account).await;
-    sync(&state).await;
+    sync(&state, TEAMCITY).await;
 
     let build = format!("{TEAMCITY}:build:{}", seeded_build_id());
     let (attributed_to, at): (Option<String>, chrono::DateTime<chrono::Utc>) = sqlx::query_as(
@@ -392,22 +324,14 @@ async fn a_seeded_build_the_mirror_attributes_to_the_reader_is_on_that_days_dige
     )
     .await
     .expect("the digest reads");
-    let listed: Vec<(Option<&str>, &str, Option<&str>, &str)> = digest
-        .today
-        .iter()
-        .map(|line| {
-            (
-                line.entity_id.as_deref(),
-                line.source.as_str(),
-                line.kind.as_deref(),
-                line.verb.as_str(),
-            )
-        })
-        .collect();
-    assert!(
-        listed.contains(&(Some(build.as_str()), TEAMCITY, Some("build"), "attributed")),
-        "fixture build {FIXTURE_BUILD} is not on the digest for {day}, which is the day the \
-         mirror dates it on: {listed:?}"
+    on_digest(
+        &digest.today,
+        &format!("fixture build {FIXTURE_BUILD}"),
+        day,
+        &build,
+        TEAMCITY,
+        "build",
+        "attributed",
     );
     for line in &digest.today {
         assert!(
