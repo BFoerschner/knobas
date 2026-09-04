@@ -80,11 +80,43 @@ const REQUESTED: usize = 50;
 /// to 25 and make this suite refuse to start. Since issue #143 that suite
 /// removes what it creates (`live_env::Litter`), so the corpus stays at its
 /// seeded shape and this ceiling is reached only by somebody writing to the
-/// container by hand. If a listing here does grow past it, prune the strays --
-/// `DELETE /repos/{owner}/{repo}/issues/{index}` for a pull request and
+/// container by hand.
+///
+/// # Who else spends this budget
+///
+/// **`payout-service` is not this suite's fixture, it is the environment's**,
+/// and the number above is a budget that other suites spend without importing
+/// it. `just start-work-live`
+/// (`crates/knobas-app/tests/start_work_live.rs`) writes to the same
+/// repository on every run: a branch, a pull request, a commit and a merge.
+/// Until issue #373 it merged into the **default branch** and left its merged
+/// pull request standing, so each run spent two of the default branch's commit
+/// budget and one of the pull listing's, permanently -- and the seed leaves
+/// the default branch at exactly the 19 below, so the very next run turned
+/// this suite red. It now merges into a scratch base branch of its own and
+/// deletes everything, including the merged pull request; its `Litter` refuses
+/// to end a run whose default-branch head moved. Anything else that writes to
+/// this container owes the same accounting: which listing does it grow, and
+/// what takes it back?
+///
+/// # If a listing does grow past it
+///
+/// Prune the strays -- `DELETE /repos/{owner}/{repo}/issues/{index}` for a
+/// pull request (it removes a **merged** one too; Gitea 1.27 answers 204) and
 /// `DELETE .../branches/{name}` for its branch -- before reaching for
-/// `testenv/reset`, which destroys every testenv volume. A bigger number is
-/// never the answer: the budgets in `sync.rs` are what it measures.
+/// `testenv/reset`, which destroys every testenv volume.
+///
+/// **That advice is complete for the pull listing and does nothing for the
+/// commit walk**, which is the one that breaks first. Neither `DELETE` rewrites
+/// history, so neither removes a commit from a branch that still exists: a
+/// merge commit on the default branch survives deleting both the pull request
+/// that made it and the branch it came from. What restores it is a force-push
+/// of the default branch to its pre-residue head -- the seeded head is
+/// `09479f857c2799bb158db2d31c013f678452a323`, recorded on issue #373 -- or
+/// `testenv/reset` followed by `testenv/seed`.
+///
+/// A bigger number is never the answer: the budgets in `sync.rs` are what it
+/// measures.
 const HEADROOM: usize = 19;
 
 /// One listing as the server actually serves it.

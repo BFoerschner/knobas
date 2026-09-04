@@ -38,13 +38,31 @@
 //! **One environment, one owner at a time** -- `testenv/README.md`. Seeding
 //! re-mints the token, which 401s anyone else mid-run.
 //!
-//! # Litter
+//! # Litter, and the budget it is spending
 //!
 //! Everything this creates at Gitea is named with the `knobas-` prefix
 //! `live_gitea`'s `Litter` reserves, and [`Litter`] below deletes it whether the
 //! test passes or panics. The prefix is not decoration: `litter_guard.rs` pins
 //! that nothing the seed creates starts with it, which is what makes deleting
 //! by prefix safe.
+//!
+//! **This file writes to the same `tidewater/payout-service` that
+//! `crates/knobas-source-gitea/tests/live_gitea_capped.rs` measures**, and that
+//! suite's `HEADROOM` is a budget of 19 records per listing: every branch's
+//! commit walk, the branch listing, the pull listing. The default branch is one
+//! of the branches it walks and the seed leaves it at exactly 19 commits, so a
+//! single commit added there turns `just gitea-live-capped` red -- in another
+//! crate, on another day, for a reason whose cause is in this file.
+//!
+//! That is not a hypothetical: until issue #373 this test merged into the
+//! default branch and left a merged pull request behind on every run, so each
+//! run spent two of that budget and one of the pull listing's for good.
+//! `DELETE /issues/{index}` reclaims the pull request; **nothing reclaims a
+//! commit on the default branch** short of a force-push or `testenv/reset`. So
+//! the flow merges into a scratch base branch of the run's own instead, and
+//! [`Litter`] refuses to end a run that moved the default branch. Anything
+//! added here that writes to Gitea should ask the same question first: what
+//! listing does it grow, and who takes it back?
 
 use std::sync::Arc;
 
@@ -61,6 +79,24 @@ use serde_json::json;
 
 /// The prefix `live_gitea`'s `Litter` reserves, and `litter_guard.rs` pins.
 const LITTER: &str = "knobas-";
+
+/// How long any one request to Gitea may take before it is a failure.
+///
+/// `reqwest` carries no default timeout, so a container that accepted the
+/// connection and then went quiet used to stall a run for ever -- and in
+/// [`Litter::drop`] with nothing on screen, because a `Drop` that has not
+/// returned has not reported anything either. Ten seconds, matching
+/// `live_env::REQUEST_BUDGET`, which `live_gitea`'s guard bounds its own
+/// requests with for the same reason (issue #170).
+///
+/// **A bound on each request is the whole bound here**, where `live_env` also
+/// carries a `CLEANUP_BUDGET` over the sequence. It can be: this guard makes a
+/// fixed, small number of requests -- one pull listing, one delete per pull
+/// request found, two branch deletes, and three re-reads, each listing costing
+/// a page or two ([`Env::listing`]) -- so bounding each one bounds the `Drop`.
+/// `live_env::Litter` sweeps an unknown number of leftovers, which is why the
+/// sequence there needs a budget of its own.
+const REQUEST_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// The mockd issue this flow starts from.
 ///
@@ -110,7 +146,10 @@ impl Env {
         path: &str,
         body: Option<serde_json::Value>,
     ) -> serde_json::Value {
-        let mut request = reqwest::Client::new()
+        let mut request = reqwest::Client::builder()
+            .timeout(REQUEST_BUDGET)
+            .build()
+            .expect("a bounded client")
             .request(method, format!("{}/api/v1{path}", self.url))
             .header("Authorization", format!("token {}", self.token));
         if let Some(body) = body {
@@ -123,93 +162,339 @@ impl Env {
         response.json().await.unwrap_or(json!(null))
     }
 
+    /// Every page of one listing, as raw records.
+    ///
+    /// Paged to the end rather than asked for with one big `limit`, because a
+    /// server is free to answer fewer records than it was asked for -- the
+    /// property `live_gitea_capped.rs` exists for, and the one
+    /// [`Litter::opened`] refuses to assume away on the collecting side. A
+    /// single page would put that blind spot straight back into the *checking*
+    /// side: the deletes would go out and their confirmation would read a page
+    /// that never held the residue, so the guard would pass over exactly what
+    /// it exists to catch. Stops on an **empty** page rather than a short one,
+    /// since a short page is what a capped server answers. Matches
+    /// `live_env::listing`, for the reason its own comment gives.
+    async fn listing(&self, path: &str, query: &[(&str, &str)]) -> Vec<serde_json::Value> {
+        let mut all = Vec::new();
+        for page in 1..=64 {
+            let mut url = format!("{path}?limit=50&page={page}");
+            for (key, value) in query {
+                url.push_str(&format!("&{key}={value}"));
+            }
+            let rows = self.api(reqwest::Method::GET, &url, None).await;
+            match rows.as_array() {
+                Some(rows) if !rows.is_empty() => all.extend(rows.iter().cloned()),
+                _ => return all,
+            }
+        }
+        panic!("GET {path}: 64 pages and still not empty -- is `page` being honoured?");
+    }
+
     /// Every branch of the mutated repository, by name.
     async fn branches(&self) -> Vec<String> {
-        self.api(
-            reqwest::Method::GET,
-            &format!("/repos/{}/branches?limit=50", self.full_name()),
-            None,
-        )
-        .await
-        .as_array()
-        .map(|rows| {
-            rows.iter()
-                .filter_map(|row| row["name"].as_str().map(str::to_owned))
-                .collect()
-        })
-        .unwrap_or_default()
+        self.listing(&format!("/repos/{}/branches", self.full_name()), &[])
+            .await
+            .iter()
+            .filter_map(|row| row["name"].as_str().map(str::to_owned))
+            .collect()
     }
 
     /// Every pull request, as `(number, head branch, merged)`.
     async fn pulls(&self) -> Vec<(u64, String, bool)> {
-        self.api(
-            reqwest::Method::GET,
-            &format!("/repos/{}/pulls?state=all&limit=50", self.full_name()),
-            None,
+        self.listing(
+            &format!("/repos/{}/pulls", self.full_name()),
+            &[("state", "all")],
         )
         .await
-        .as_array()
-        .map(|rows| {
-            rows.iter()
-                .filter_map(|row| {
-                    Some((
-                        row["number"].as_u64()?,
-                        row["head"]["ref"].as_str()?.to_owned(),
-                        row["merged"].as_bool().unwrap_or(false),
-                    ))
-                })
-                .collect()
+        .iter()
+        .filter_map(|row| {
+            Some((
+                row["number"].as_u64()?,
+                row["head"]["ref"].as_str()?.to_owned(),
+                row["merged"].as_bool().unwrap_or(false),
+            ))
         })
-        .unwrap_or_default()
+        .collect()
+    }
+
+    /// The repository's default branch, as Gitea's own record names it.
+    ///
+    /// Read from the server rather than assumed to be `main`, because it is the
+    /// branch [`Litter`] pins unchanged and a guard that pinned the wrong
+    /// branch would pass over exactly the residue it exists to catch.
+    async fn default_branch(&self) -> String {
+        self.api(
+            reqwest::Method::GET,
+            &format!("/repos/{}", self.full_name()),
+            None,
+        )
+        .await["default_branch"]
+            .as_str()
+            .expect("Gitea named the repository's default branch")
+            .to_owned()
+    }
+
+    /// The commit a branch is at.
+    ///
+    /// Three answers, kept apart on purpose: `Ok(Some(sha))`, `Ok(None)` when
+    /// Gitea says 404 and there really is no such branch, and `Err` when it
+    /// said anything else. [`Litter`] accuses the run of having merged into the
+    /// default branch whenever this is not the commit it recorded, and that
+    /// accusation sends the next reader force-pushing a shared fixture -- so a
+    /// 401 or a 500 must not be able to wear it. This is the one reader that
+    /// looks at a status code, which is why it does not go through
+    /// [`Env::api`].
+    async fn head_of(&self, branch: &str) -> Result<Option<String>, String> {
+        let url = format!(
+            "{}/api/v1/repos/{}/branches/{branch}",
+            self.url,
+            self.full_name()
+        );
+        let response = reqwest::Client::builder()
+            .timeout(REQUEST_BUDGET)
+            .build()
+            .expect("a bounded client")
+            .get(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .send()
+            .await
+            .map_err(|error| format!("GET {url}: {error}"))?;
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        let status = response.status();
+        if !status.is_success() {
+            return Err(format!("GET {url}: {status}"));
+        }
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|error| format!("GET {url}: {error}"))?;
+        body["commit"]["id"]
+            .as_str()
+            .map(|sha| Some(sha.to_owned()))
+            .ok_or_else(|| format!("GET {url}: {status}, but no commit id in {body}"))
     }
 }
 
-/// Deletes what this test made at Gitea, pass or panic.
+/// Deletes what this test made at Gitea, pass or panic, and **checks the
+/// listings agree it is gone**.
 ///
-/// The pull requests first: Gitea refuses to delete a branch an open pull
-/// request points at, and a `Drop` that gave up half way would leave residue
-/// for the next run to inherit -- which is the failure `litter_guard.rs` exists
-/// around.
+/// Three things happen in `Drop`, in this order, and the order is a decision.
+///
+/// 1. **The pull request, with `DELETE /repos/{owner}/{repo}/issues/{index}`.**
+///    Closing it is not enough and never was: Gitea refuses to close a *merged*
+///    pull request, and this flow merges, so every run before issue #373 left
+///    one standing for ever. `DELETE` removes a merged one too -- Gitea 1.27
+///    answers 204 -- and it is what takes the pull request out of the
+///    `state=all` listing `live_gitea_capped.rs` counts.
+/// 2. **The branches**, the flow's own and the scratch base it merged into.
+///    After the pull request, because Gitea will not delete a branch an open
+///    pull request points at -- which is the case on a run that failed before
+///    the merge.
+/// 3. **The check.** Neither branch left in the branch listing, none of the
+///    pull request numbers collected in step 1 left in the pull listing, and
+///    the default branch still at the commit it was at when this guard was
+///    made. Numbers, because Gitea rewrites a deleted branch's `head.ref`
+///    (see the comment on the collection below). The last of those is the whole of issue
+///    #373: a merge commit on the default branch is the one piece of residue no
+///    `DELETE` takes back (neither `issues/{index}` nor `branches/{name}`
+///    rewrites history -- only a force-push or `testenv/reset` does), so this
+///    guard's answer is to assert the merge never reached the default branch
+///    rather than to undo one that did.
+///
+/// A `Drop` that gave up half way would leave residue for the next run to
+/// inherit -- the failure `litter_guard.rs` exists around -- so the check
+/// reports rather than trusting the calls it just made.
 struct Litter {
+    /// The flow's own branch: the pull request's head.
     branch: String,
+    /// The scratch base branch the pull request merges into, so that the merge
+    /// commit lands somewhere this guard can delete.
+    base: String,
+    /// The branch that must come out of this run untouched, by Gitea's name for
+    /// it rather than by this file's guess at it.
+    default_branch: String,
+    /// The commit `default_branch` was at before the run wrote anything.
+    default_head: String,
+    /// The pull request the flow opened, once the test knows its number.
+    ///
+    /// **Told, not discovered.** The listing scan below is a fallback for a run
+    /// that panicked before it got this far, and a fallback is all it can be: a
+    /// server answering a short page would hand back no pull request, the guard
+    /// would delete nothing, and its own check -- which looks for what the scan
+    /// found -- would pass over the residue it exists to catch. A short page is
+    /// exactly the property `live_gitea_capped.rs` certifies the adapter
+    /// against, so it is not a hazard this file may assume away.
+    opened: std::sync::Mutex<Option<u64>>,
+}
+
+impl Litter {
+    /// Record the default branch and where it stands, before the run writes.
+    ///
+    /// Reads only: nothing is created here, so a guard exists from before the
+    /// first write and covers a panic in any of them.
+    async fn new(env: &Env, branch: String, base: String) -> Self {
+        let default_branch = env.default_branch().await;
+        let default_head = env
+            .head_of(&default_branch)
+            .await
+            .expect("Gitea answered where the default branch stands")
+            .expect("the default branch exists");
+        Self {
+            branch,
+            base,
+            default_branch,
+            default_head,
+            opened: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// Tell the guard which pull request the flow opened.
+    fn opened(&self, number: u64) {
+        *self
+            .opened
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(number);
+    }
 }
 
 impl Drop for Litter {
     fn drop(&mut self) {
-        assert!(
-            self.branch.starts_with(LITTER),
-            "this guard deletes by prefix, so it may only ever be given a {LITTER:?} name"
-        );
+        for name in [&self.branch, &self.base] {
+            assert!(
+                name.starts_with(LITTER),
+                "this guard deletes by prefix, so it may only ever be given {LITTER:?} names, \
+                 and it was given {name:?}"
+            );
+        }
         let env = env();
-        let branch = self.branch.clone();
+        let repo = env.full_name();
+        let (branch, base) = (self.branch.clone(), self.base.clone());
+        let names = [branch.clone(), base.clone()];
+        let default_branch = self.default_branch.clone();
+        let default_head = self.default_head.clone();
+        let told = *self
+            .opened
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // A blocking client in its own thread: `Drop` cannot be async, and the
         // test's runtime may already be winding down.
-        std::thread::spawn(move || {
+        let cleanup = std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .expect("a runtime for the cleanup");
-            rt.block_on(async {
-                for (number, head, _) in env.pulls().await {
-                    if head == branch {
-                        env.api(
-                            reqwest::Method::PATCH,
-                            &format!("/repos/{}/pulls/{number}", env.full_name()),
-                            Some(json!({ "state": "closed" })),
-                        )
-                        .await;
-                    }
+            rt.block_on(async move {
+                // By number from here on, never by head ref: **Gitea rewrites
+                // a pull request's `head.ref` to `refs/pull/{number}/head` once
+                // the branch it pointed at is deleted**, so a check that
+                // re-read the listing looking for `branch` would find nothing
+                // whether the delete worked or not. Measured: with the delete
+                // replaced by the old `PATCH state=closed`, which Gitea refuses
+                // on a merged pull request, the by-head check passed over a
+                // pull request that was still there.
+                let [branch, _] = &names;
+                let repo = env.full_name();
+                // The number the test recorded, plus anything the listing still
+                // shows on this branch -- the second for a run that panicked
+                // before it could record one. See `Litter::opened` for why the
+                // listing alone will not do.
+                let mut opened: Vec<u64> = told.into_iter().collect();
+                opened.extend(
+                    env.pulls()
+                        .await
+                        .into_iter()
+                        .filter(|(_, head, _)| head == branch)
+                        .map(|(number, _, _)| number)
+                        .filter(|number| Some(*number) != told),
+                );
+                for number in &opened {
+                    env.api(
+                        reqwest::Method::DELETE,
+                        &format!("/repos/{repo}/issues/{number}"),
+                        None,
+                    )
+                    .await;
                 }
-                env.api(
-                    reqwest::Method::DELETE,
-                    &format!("/repos/{}/branches/{branch}", env.full_name()),
-                    None,
-                )
-                .await;
-            });
-        })
-        .join()
-        .expect("the cleanup thread");
+                for name in &names {
+                    env.api(
+                        reqwest::Method::DELETE,
+                        &format!("/repos/{repo}/branches/{name}"),
+                        None,
+                    )
+                    .await;
+                }
+
+                let mut failures = Vec::new();
+                let still_listed: Vec<u64> = env
+                    .pulls()
+                    .await
+                    .into_iter()
+                    .map(|(number, _, _)| number)
+                    .filter(|number| opened.contains(number))
+                    .collect();
+                if !still_listed.is_empty() {
+                    failures.push(format!(
+                        "pull request(s) {still_listed:?}, opened from {branch}, are still in the \
+                         state=all listing that live_gitea_capped.rs counts"
+                    ));
+                }
+                let listed = env.branches().await;
+                let standing: Vec<&String> =
+                    names.iter().filter(|name| listed.contains(name)).collect();
+                if !standing.is_empty() {
+                    failures.push(format!("branch(es) {standing:?} are still there"));
+                }
+                match env.head_of(&default_branch).await {
+                    Ok(now) if now.as_deref() == Some(default_head.as_str()) => {}
+                    Ok(now) => failures.push(format!(
+                        "{default_branch} is at {now:?} and was at {default_head} when this run \
+                         started, so something this run did was merged into the default branch -- \
+                         which is residue no DELETE takes back, only a force-push or \
+                         testenv/reset"
+                    )),
+                    // Not the accusation above: this says nothing about whether
+                    // the default branch moved, and saying it did would send
+                    // somebody force-pushing a repository nobody touched.
+                    Err(error) => failures.push(format!(
+                        "could not read where {default_branch} stands ({error}), so whether this \
+                         run reached the default branch is unknown"
+                    )),
+                }
+                failures
+            })
+        });
+        // Never `expect` here. A panic inside the thread -- a request that
+        // could not even be sent, say -- would panic this `Drop` too, and a
+        // panic while already unwinding aborts the process, replacing a legible
+        // test failure with a crash. The thread names its own cause on stderr;
+        // this side only has to say what may still be standing.
+        let failures = match cleanup.join() {
+            Ok(failures) => failures,
+            Err(_) => vec![format!(
+                "the cleanup thread panicked (its own message is on stderr), so {branch:?}, \
+                 {base:?} and any pull request between them may still be standing"
+            )],
+        };
+
+        if failures.is_empty() {
+            return;
+        }
+        let report = format!(
+            "the start-work round trip did not leave {} as it found it, so the next run inherits \
+             it and live_gitea_capped.rs's HEADROOM budget shrinks (issue #373): {}",
+            repo,
+            failures.join("; ")
+        );
+        // Panicking while already unwinding aborts the process, which would
+        // replace a legible test failure with a crash. The test is already red
+        // in that case; this only has to be visible.
+        if std::thread::panicking() {
+            eprintln!("start_work_live cleanup: {report}");
+        } else {
+            panic!("{report}");
+        }
     }
 }
 
@@ -455,16 +740,80 @@ async fn a_ticket_becomes_a_branch_a_pull_request_and_a_status_and_comes_back() 
         "proposing must dispatch nothing"
     );
 
-    // 2. The reader edits the branch name -- which is story 4, and which is
-    //    also what keeps everything this test creates inside the litter prefix.
+    // 2. The reader edits the branch name **and the base** -- which is story 4
+    //    twice over, and which is also what keeps everything this test creates
+    //    inside the litter prefix.
+    //
+    //    The base is what makes this file repeatable. Merged into
+    //    `payout-service`'s *default* branch, each run left two commits there
+    //    -- the work commit and the merge commit -- that no API call takes
+    //    back, against a repository whose default-branch commit listing
+    //    `live_gitea_capped.rs` counts against a budget of 19 (issue #373; see
+    //    this file's header). So the flow is pointed at a scratch base branch
+    //    of this run's own, cut from the default branch and deleted with
+    //    everything else by [`Litter`].
+    //
+    //    Nothing the round trip certifies moves with it: Gitea decides the
+    //    branch, the draft prefix in its own copy of the title, whether the
+    //    merge is allowed and the merged flag the reverse direction reads,
+    //    and it decides all four the same way for a pull request based on a
+    //    branch as for one based on `main`. Reproposing the base is not a
+    //    contrivance either -- `plan::subject` guesses it from the repository
+    //    payload's `default_branch` and names "a base branch the user corrects
+    //    in the review step" as the cost of guessing wrong, so this is that
+    //    correction, on the real write path.
     let branch = format!("{LITTER}i44-{}", std::process::id());
-    let _litter = Litter {
-        branch: branch.clone(),
-    };
+    let base = format!("{branch}-base");
+    let litter = Litter::new(&env, branch.clone(), base.clone()).await;
+    let cut = env
+        .api(
+            reqwest::Method::POST,
+            &format!("/repos/{}/branches", env.full_name()),
+            Some(json!({
+                "new_branch_name": base,
+                "old_branch_name": litter.default_branch,
+            })),
+        )
+        .await;
+    assert_eq!(
+        env.head_of(&base)
+            .await
+            .expect("Gitea answered where the scratch base branch stands")
+            .as_deref(),
+        Some(litter.default_head.as_str()),
+        "the scratch base branch was not cut from {}, so the pull request below would be based \
+         on nothing this run controls: {cut}",
+        litter.default_branch,
+    );
+    //    What the **proposal** said the base was, asserted before it is edited
+    //    away. `plan::subject` reads it from the mirrored repository payload's
+    //    `default_branch`, and until this file reproposed the base that value
+    //    went to Gitea on every run -- so the chain from Gitea's repository
+    //    record through the adapter's stored payload to `subject`'s read was
+    //    witnessed here, incidentally, by the branch creation succeeding.
+    //    Reproposing the base ends that, and this is what takes its place:
+    //    stated rather than incidental, and against Gitea's own name for the
+    //    default branch rather than this file's guess at it.
+    for step in &flow {
+        let proposed = match step.step {
+            Step::CreateBranch => &step.payload["CreateBranch"]["from_ref"],
+            Step::CreatePullRequest => &step.payload["CreatePullRequest"]["base"],
+            _ => continue,
+        };
+        assert_eq!(
+            proposed.as_str(),
+            Some(litter.default_branch.as_str()),
+            "the {} step was proposed against {proposed}, not {:?}, which is what Gitea calls \
+             this repository's default branch -- so what plan::subject read out of the mirror \
+             is not the branch the server would have taken",
+            step.step,
+            litter.default_branch
+        );
+    }
     for step in &flow {
         let payload = match step.step {
-            Step::CreateBranch => with(&step.payload, "name", &branch),
-            Step::CreatePullRequest => with(&step.payload, "head", &branch),
+            Step::CreateBranch => with(&with(&step.payload, "name", &branch), "from_ref", &base),
+            Step::CreatePullRequest => with(&with(&step.payload, "head", &branch), "base", &base),
             _ => continue,
         };
         start_work::repropose(&state.pool, step.id, payload)
@@ -498,6 +847,9 @@ async fn a_ticket_becomes_a_branch_a_pull_request_and_a_status_and_comes_back() 
         .into_iter()
         .find(|(_, head, _)| head == &branch)
         .expect("the pull request the flow opened is not in Gitea's own listing");
+    //    Told to the guard here rather than rediscovered in `Drop`: see
+    //    `Litter::opened`.
+    litter.opened(number);
 
     //    **And it is a draft**, in Gitea's own copy of the title. Story 8 is
     //    met by `plan::DRAFT_PREFIX` rather than by a `draft` flag, because
