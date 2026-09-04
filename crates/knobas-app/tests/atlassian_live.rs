@@ -1308,7 +1308,7 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
     //
     // `sync` here is not an extra run in the ordinary case: `trigger` attaches
     // to the run `refresh` already started and waits for its ending.
-    let mirrored_status = format!("{JIRA}:{TRANSITIONED}");
+    let transitioned = format!("{JIRA}:{TRANSITIONED}");
     let deadline = std::time::Instant::now() + INDEX_BUDGET;
     loop {
         sync(&state).await;
@@ -1316,21 +1316,21 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
         // `payload` is the record verbatim -- the reading
         // `knobas_core::write_queue::project` records for why `"transition"`
         // compares the whole record instead of the status.
-        let held: Option<String> = sqlx::query_scalar(
+        let in_mirror: Option<String> = sqlx::query_scalar(
             "select payload->'fields'->'status'->>'name' from sync.live_item
               where entity_id = $1",
         )
-        .bind(&mirrored_status)
+        .bind(&transitioned)
         .fetch_one(&state.pool)
         .await
         .expect("the transitioned ticket is mirrored");
-        if held.as_deref() == Some(to.as_str()) {
+        if in_mirror.as_deref() == Some(to.as_str()) {
             break;
         }
         assert!(
             std::time::Instant::now() < deadline,
             "{TRANSITIONED} is {to:?} at Jira (asserted above) but the mirror still holds it \
-             as {held:?} after {INDEX_BUDGET:?}. Until the mirror agrees, the next write's \
+             as {in_mirror:?} after {INDEX_BUDGET:?}. Until the mirror agrees, the next write's \
              queue-time snapshot and its flush-time re-read can disagree, and the refusal \
              below comes back Held with no detail instead (#325)."
         );
