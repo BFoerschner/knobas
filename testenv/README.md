@@ -854,9 +854,13 @@ Both states are visible in the unified log, and this is the way to tell them
 apart without guessing:
 
 ```sh
-log show --last 5m --predicate 'process == "usernoted"' --style compact \
+/usr/bin/log show --last 5m --info --predicate 'process == "usernoted"' --style compact \
   | grep -E 'knobas.desktop|askpermissions'
 ```
+
+(`/usr/bin/log` by path, because zsh has a builtin named `log` that answers
+"too many arguments" and shows nothing; `--info`, because both lines below
+are info-level and the default level filter hides them.)
 
 * `Delivering <NotificationRecord app:"dev.knobas.desktop" ...> to
   [ .alert .lockScreen .notificationCenter ]` with **no matching `Presenting`
