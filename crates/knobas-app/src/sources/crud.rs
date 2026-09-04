@@ -338,10 +338,16 @@ pub async fn set_secret(
     ))?;
     let outcome = source.test_connection().await;
 
+    // A good check records **no** detail. What the adapter had to say about
+    // the far end is its connection note, which belongs to the *Test
+    // connection* result (`ConnectionReport::detail`) and is never stored;
+    // credential health carries what the last check said went wrong, and a
+    // check that went right has nothing to put there (#326). The failure arm
+    // keeps the error text, which is that column's own business.
     let (state, detail, expires) = match &outcome {
         Ok(info) => (
             knobas_sync::config::AuthState::Ok,
-            info.detail.clone(),
+            None,
             info.secret_expires_at,
         ),
         Err(error) => (auth_state_of(error), Some(error.to_string()), None),

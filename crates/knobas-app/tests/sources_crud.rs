@@ -423,6 +423,14 @@ async fn re_entering_a_secret_overwrites_it_tests_it_and_releases_the_backoff() 
         "the mock connects, so the credential is good"
     );
     assert!(health.checked_at.is_some());
+    // A good check records no detail: the adapter's connection note is not
+    // credential health, and this is the one path that used to write it
+    // there (#326). The mock *does* return a note, so an empty detail here is
+    // the path dropping it and not the adapter having none.
+    assert!(
+        health.detail.is_none(),
+        "a successful re-entry must not store the connection note: {health:?}"
+    );
     assert_eq!(
         f.secrets.get(&f.id).unwrap().unwrap().value,
         "pat-two",
@@ -432,6 +440,11 @@ async fn re_entering_a_secret_overwrites_it_tests_it_and_releases_the_backoff() 
         .await
         .unwrap()
         .unwrap();
+    assert!(
+        cfg.health.detail.is_none(),
+        "the stored credential health carries no note either: {:?}",
+        cfg.health
+    );
     assert!(
         cfg.backoff_until.is_none(),
         "a fresh credential earns an immediate retry"
@@ -779,10 +792,22 @@ async fn a_credential_that_is_still_wrong_does_not_release_the_backoff() {
     .unwrap();
 
     assert_eq!(health.state, AuthState::Unauthorized);
+    // A failed check keeps recording what went wrong -- that half of the
+    // column is credential health proper (#326).
+    assert_eq!(
+        health.detail.as_deref(),
+        Some("unauthorized"),
+        "the error text is what a rejected re-entry records: {health:?}"
+    );
     let cfg = knobas_sync::config::get(&f.pool, &f.id)
         .await
         .unwrap()
         .unwrap();
+    assert_eq!(
+        cfg.health.detail.as_deref(),
+        Some("unauthorized"),
+        "and it is what the row holds afterwards"
+    );
     assert_eq!(
         cfg.backoff_until.map(|t| t.timestamp()),
         Some(held_until.timestamp()),
