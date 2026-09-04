@@ -4722,8 +4722,8 @@ From this commit on, each of the following requires an orchestrator decision **a
 
   **Credential health stops carrying the note.** On a successful re-entry check, `set_secret` records
   `Ok` with **no** detail; on failure it keeps recording the error text. The glossary's *Credential
-  health* was sharpened to match: what the last check said went wrong, not what an adapter had to say
-  when it went right.
+  health* was sharpened to match in `ec05ac4`, ahead of this change: what the last check said went
+  wrong, not what an adapter had to say when it went right.
 
   **Two surfaces, one rule.** The Add-source dialog renders the note as its own line beneath
   `Connected as … · version · ms`, nothing when absent; every source row gains a *Test* action that
@@ -4731,7 +4731,11 @@ From this commit on, each of the following requires an orchestrator decision **a
   stored row and the stored secret, `crud::test`'s existing path), and shows the same two lines
   **transiently** — until the row's next action or the next re-list — persisting nothing and patching
   no health; `code == "unauthorized"` offers *Re-enter* on the strength of the result alone. Both draw
-  the line from `app/src/lib/sources/connection.ts`, so there is one spelling of it.
+  the line from `app/src/lib/sources/connection.ts`, so there is one spelling of it. The row's draft
+  still carries an `auth_kind` (`SourceDraft.auth_kind` is not nullable on the wire; the row sends its
+  own or `Pat`), which `crud::test` ignores for a saved source in favour of the stored row's -- a value
+  on the wire that means nothing there is the one cost of not widening `SourceDraft`, and widening it
+  would be an entry of its own here.
 
   Pinned by: `tests/sources_mirror.rs`'s `the_connection_report_shape_matches_its_typescript_mirror`
   (the field exercised as `Some`, since `null` satisfies any declared type);
