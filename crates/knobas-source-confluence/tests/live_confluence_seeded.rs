@@ -234,8 +234,9 @@ fn seeded() -> Seeded {
     let whole: serde_json::Value = serde_json::from_str(&raw).expect("seed-state.json is JSON");
     let seed: Seed = serde_json::from_value(whole["confluence"].clone()).unwrap_or_else(|e| {
         panic!(
-            "{}: no `confluence` block with `space`, `home_page_id`, `author` and `pages` -- \
-             run `./seed-atlassian-content.sh`: {e}",
+            "{}: no `confluence` block with `space`, `home_page_id`, `author` and `pages` \
+             (each page carrying the `parent_id` the seed put it under) -- run \
+             `./seed-atlassian-content.sh`: {e}",
             state.display()
         )
     });

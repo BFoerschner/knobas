@@ -3571,8 +3571,9 @@ async fn a_revoked_confluence_pat_reaches_the_credential_health_surface_and_the_
         synced.len() >= 5,
         "`fixtures/tidewater/work.json` names five pages, and `seed-atlassian-content.sh` creates \
          each of them under the space home page it reads off the space, or under one of its \
-         siblings there -- so a walk of the space in fact answers six. The bound is the fixture's five and not the six, because the sixth \
-         is the seed's own scaffolding and this assertion is about the corpus arriving under a \
+         siblings there -- so a walk of the space in fact answers six. The bound is the fixture's \
+         five and not the six, because the sixth is the seed's own scaffolding and this \
+         assertion is about the corpus arriving under a \
          personal access token; the exact set is pinned at step 4 instead: {synced:?}"
     );
     assert!(

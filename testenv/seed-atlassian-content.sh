@@ -228,7 +228,11 @@ verify() {
   # hit's ancestor path two segments long, and a seed that put it back under
   # the home page would leave every live path assertion true and pointless.
   # By fixture title, like the read above, and against the titles the server
-  # reports.
+  # reports. A second GET of what is today the same page, because the two are
+  # different claims: the read above asks for "the first page with a body",
+  # this one for "the page the seed nests", and a fixture that ever gave
+  # another page a body would silently stop checking the nesting if they
+  # shared a request.
   _nested=$(jq -r --arg n "$NESTED_PAGE" '.pages[] | select(.id == $n) | .title' "$FIXTURE")
   _under=$(jq -r --arg u "$NESTED_UNDER" '.pages[] | select(.id == $u) | .title' "$FIXTURE")
   say "verify: ancestors of \"$_nested\""
@@ -245,6 +249,17 @@ verify() {
   [ "$_fail" -eq 0 ] || die "verify FAILED"
   say "verify ok: PAY-231 with its worklogs, \"$_title\" with its body, and \"$_nested\" under \"$_under\""
 }
+
+# The nesting is a claim about the fixture, so it is checked against the
+# fixture before anything reads or writes a page: a work.json that renamed
+# either id would otherwise seed a flat space and take the launcher path's
+# live witness with it, quietly. Ahead of the --verify dispatch, so the proof
+# step names the fixture as the cause rather than reporting a page it looked
+# for under an empty title.
+jq -e --arg k "$SPACE_KEY" --arg n "$NESTED_PAGE" --arg u "$NESTED_UNDER" \
+  '[.pages[] | select(.space == $k) | .id] | (index($n) != null) and (index($u) != null)' \
+  "$FIXTURE" >/dev/null \
+  || die "the fixture's $SPACE_KEY pages must include \"$NESTED_PAGE\" and \"$NESTED_UNDER\" -- the nesting the launcher's ancestor path is witnessed by"
 
 if [ "${1:-}" = "--verify" ]; then verify; exit 0; fi
 [ $# -eq 0 ] || die "unknown argument '$1'; usage: ./seed-atlassian-content.sh [--verify]"
@@ -558,15 +573,6 @@ page_storage() {  # page_storage <fixture body or empty>
       | join("")
     end'
 }
-
-# The nesting is a claim about the fixture, so it is checked against the
-# fixture before a page is created: a work.json that renamed either id would
-# otherwise seed a flat space and take the launcher path's live witness with
-# it, quietly.
-jq -e --arg k "$SPACE_KEY" --arg n "$NESTED_PAGE" --arg u "$NESTED_UNDER" \
-  '[.pages[] | select(.space == $k) | .id] | (index($n) != null) and (index($u) != null)' \
-  "$FIXTURE" >/dev/null \
-  || die "the fixture's $SPACE_KEY pages must include \"$NESTED_PAGE\" and \"$NESTED_UNDER\" -- the nesting the launcher's ancestor path is witnessed by"
 
 PAGE_IDS='[]'
 # The nested page comes last: it is created under a page this same loop
