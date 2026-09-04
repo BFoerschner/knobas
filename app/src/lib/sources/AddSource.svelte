@@ -278,6 +278,7 @@
         error: ipcErrorMessage(cause),
         code: null,
         elapsed_ms: 0,
+        detail: null,
         discovered: {},
       };
     } finally {
@@ -419,6 +420,15 @@
       {#if report}
         <!-- Text: `error` is a line an upstream server wrote (gotcha 7). -->
         <p class="test-res {report.ok ? '' : 'fail'}">{reportLine}</p>
+        {#if report.ok && report.detail}
+          <!--
+            The adapter's connection note (#326): its own line beneath the
+            result, only when it connected and only when there is one -- no
+            empty element for an adapter with nothing to add. Text, like the
+            line above it.
+          -->
+          <p class="test-note">{report.detail}</p>
+        {/if}
       {/if}
     {:else}
       <div class="form">
@@ -468,6 +478,14 @@
     display: grid;
     gap: 4px;
     min-width: 0;
+  }
+
+  /* The connection note: the result line's type, quieter, hung beneath it. */
+  .test-note {
+    font: 400 11px var(--mono);
+    color: var(--muted);
+    padding: 0 10px;
+    margin-top: 4px;
   }
 
   .form {

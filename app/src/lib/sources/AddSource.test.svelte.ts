@@ -31,6 +31,7 @@ let report: ConnectionReport = {
   error: null,
   code: null,
   elapsed_ms: 214,
+  detail: null,
   discovered: {},
 };
 let addFails: unknown = null;
@@ -176,6 +177,7 @@ beforeEach(() => {
     error: null,
     code: null,
     elapsed_ms: 214,
+    detail: null,
     discovered: {},
   };
   target = document.createElement("div");
@@ -302,7 +304,7 @@ test("Test connection shows account, server version and elapsed time on success"
 });
 
 test("the three optional readings are simply absent when the server does not say", async () => {
-  report = { ok: true, account: null, server_version: null, secret_expires_at: null, error: null, code: null, elapsed_ms: 88, discovered: {} };
+  report = { ok: true, account: null, server_version: null, secret_expires_at: null, error: null, code: null, elapsed_ms: 88, detail: null, discovered: {} };
   await toAuth();
   type("#add-secret", "s3cret");
   button("Next")!.click();
@@ -319,6 +321,66 @@ test("the three optional readings are simply absent when the server does not say
   expect(button("Next")!.disabled).toBe(false);
 });
 
+test("a connection note is its own line beneath the result, and text only", async () => {
+  const NOTE = "Epic Link customfield_10101 found but not configured: epic membership is not mirrored";
+  report = { ...report, detail: `${NOTE} <b>x</b>` };
+  await toAuth();
+  type("#add-secret", "s3cret");
+  button("Next")!.click();
+  flushSync();
+  button("Test connection")!.click();
+  await settle();
+
+  const result = target.querySelector(".test-res")!;
+  const note = target.querySelector(".test-note")!;
+  expect(note).not.toBeNull();
+  expect(note.textContent).toContain(NOTE);
+  // Beneath the result line, not folded into it: the reader scans one line
+  // for "did it connect" and a second for what the far end had to say.
+  expect(result.textContent).not.toContain("Epic Link");
+  expect(result.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  // An adapter's line is text (gotcha 7), never markup.
+  expect(note.textContent).toContain("<b>x</b>");
+  expect(note.querySelector("b")).toBeNull();
+  expect(button("Next")!.disabled).toBe(false);
+});
+
+test("no connection note renders no extra element", async () => {
+  report = { ...report, detail: null };
+  await toAuth();
+  type("#add-secret", "s3cret");
+  button("Next")!.click();
+  flushSync();
+  button("Test connection")!.click();
+  await settle();
+
+  expect(target.querySelector(".test-res")).not.toBeNull();
+  expect(target.querySelector(".test-note")).toBeNull();
+});
+
+test("a failed test shows no note even if the report carried one", async () => {
+  report = {
+    ok: false,
+    account: null,
+    server_version: null,
+    secret_expires_at: null,
+    error: "401 Unauthorized from /rest/api/2/myself",
+    code: "unauthorized",
+    elapsed_ms: 190,
+    detail: "a note that should not be here",
+    discovered: {},
+  };
+  await toAuth();
+  type("#add-secret", "wrong");
+  button("Next")!.click();
+  flushSync();
+  button("Test connection")!.click();
+  await settle();
+
+  expect(target.querySelector(".test-note")).toBeNull();
+  expect(text()).not.toContain("a note that should not be here");
+});
+
 test("a failed test shows the error and leaves Next disabled", async () => {
   report = {
     ok: false,
@@ -328,6 +390,7 @@ test("a failed test shows the error and leaves Next disabled", async () => {
     error: "401 Unauthorized from /rest/api/2/myself",
     code: "unauthorized",
     elapsed_ms: 190,
+    detail: null,
     discovered: {},
   };
   await toAuth();
@@ -354,6 +417,7 @@ test("a test error from a source system is text, never markup", async () => {
     error: '<img src=x onerror="alert(1)">',
     code: "internal",
     elapsed_ms: 12,
+    detail: null,
     discovered: {},
   };
   await toAuth();

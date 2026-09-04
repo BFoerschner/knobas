@@ -231,6 +231,10 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
       error: null,
       code: null,
       elapsed_ms: 214,
+      // The connection note (#326): the Epic Link clause, which is the one
+      // thing a real Jira says that nothing else on the report does. The
+      // demo's "saved" source has no id configured, so it is the gap arm.
+      detail: "Epic Link customfield_10101 found but not configured: epic membership is not mirrored",
       // What a real Jira reports about itself (#297): the Epic Link custom
       // field id, which the Add-source dialog puts in the empty field.
       discovered: { epic_link_field: "customfield_10101" },
