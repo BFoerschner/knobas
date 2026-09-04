@@ -742,6 +742,8 @@ test("Test is disabled while in flight, and the result goes on the row's next ac
   await settle();
   expect(button("Test", row)!.disabled).toBe(false);
   expect(row.querySelector(".test-res")).not.toBeNull();
+  // An adapter with nothing to add leaves no empty element behind.
+  expect(row.querySelector(".test-note")).toBeNull();
 
   // The next action on this row -- here *Sync now* -- takes the result with
   // it: the line said what a test found, and a sync is a newer fact.
