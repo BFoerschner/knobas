@@ -2021,8 +2021,12 @@ async fn a_seeded_days_work_is_what_the_digest_lists_under_yesterday() {
 /// `epic_link_field`, so both answers are the *found but not configured* arm
 /// -- the case the Add-source dialog closes for a source being *created* and
 /// the one a saved row can still be in, which is what the row's *Test* is
-/// for. The configured arm is `tests/field_discovery.rs`'s and the adapter's
-/// own live suite's; the no-field arm has no real product to witness it.
+/// for. The *configured* arm -- the one every source created through the
+/// dialog ends up in, because the dialog fills the field from `discovered` --
+/// is [`test_source_answers_the_configured_arm_once_the_saved_source_names_the_field`]'s
+/// (#381), on the same kind of row once its config names the field. So two
+/// of the three arms reach `test_source` in a test here; the no-field arm has
+/// no real product to witness it, and is the adapter's unit test's alone.
 ///
 /// That the call **writes nothing** is `tests/sources_crud.rs`'s claim over
 /// the mock; it is not re-asserted on the row here, because the scheduler
@@ -2113,6 +2117,123 @@ async fn test_source_carries_the_epic_link_note_for_a_draft_and_for_a_saved_sour
         "one instance, one field, one note, whichever way it was asked"
     );
     println!("SEEDED connection note (saved): {:?}", saved.detail);
+
+    state.scheduler.shutdown().await;
+    drop(pat);
+}
+
+/// **The configured arm reaches `test_source` (#381).** The arm above is the
+/// one a row can *still* be in; this is the one every source created through
+/// the Add-source dialog *ends up* in, because the dialog fills
+/// `epic_link_field` from `discovered` -- and until this test it was witnessed
+/// at the adapter only, never through the app's `ConnectionReport`.
+///
+/// The id has to come from **this run's** discovery, not from a constant: it
+/// is minted per instance run (`customfield_10101`, `10109` and `10102` have
+/// all been measured), so a typed one would read the wrong field rather than
+/// fail. So: a draft's test reads `discovered["epic_link_field"]`, the saved
+/// row is edited to name it -- the whole config, the way the edit form sends
+/// one, since `config::patch` replaces the column -- and the row's *Test*
+/// answers `Epic Link customfield_…` with **no** *found but not configured*
+/// clause. The absence is the load-bearing assertion: containment of the
+/// prefix alone is true of both arms. The id's value is never asserted.
+///
+/// Which arms reach `test_source` in a test, after this one: the configured
+/// arm (here) and the found-but-not-configured arm (above). The no-field arm
+/// still does not: no real product here lacks the field.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
+async fn test_source_answers_the_configured_arm_once_the_saved_source_names_the_field() {
+    use knobas_app::sources::{SecretInput, SourceDraft, SourcePatch, crud};
+
+    let env = env();
+    let pat = env.pat().await;
+    let (state, _events) = app(
+        "atlassian_live_configured_note",
+        &env,
+        AuthMethod::Pat,
+        &pat.raw,
+    )
+    .await;
+
+    // 1. Discover the id from this run, the way the Add-source dialog does.
+    let draft = crud::test(
+        &state.pool,
+        &state.secrets,
+        state.registry.as_ref(),
+        SourceDraft {
+            source_id: None,
+            adapter_kind: "jira".to_owned(),
+            base_url: env.url.clone(),
+            auth_kind: AuthMethod::Pat,
+            config: json!({ "username": env.user }),
+            secret: Some(SecretInput {
+                value: pat.raw.clone(),
+            }),
+        },
+    )
+    .await
+    .expect("test_source on a draft against the seeded Jira");
+    assert!(draft.ok, "{draft:?}");
+    let found = draft
+        .discovered
+        .get("epic_link_field")
+        .cloned()
+        .expect("the draft's test discovered this instance's Epic Link field");
+    assert!(
+        found.starts_with("customfield_"),
+        "a bare custom field id, as the dialog would store it: {found:?}"
+    );
+
+    // 2. Name it on the saved row. The whole config, as the edit form sends
+    //    it: `username` rides along because the column is replaced, not merged.
+    crud::update(
+        &state.pool,
+        state.registry.as_ref(),
+        JIRA,
+        SourcePatch {
+            config: Some(json!({ "username": env.user, "epic_link_field": found })),
+            ..SourcePatch::default()
+        },
+    )
+    .await
+    .expect("the saved source now names its Epic Link field");
+
+    // 3. The row's *Test*: a draft naming the saved source, no typed secret.
+    let saved = crud::test(
+        &state.pool,
+        &state.secrets,
+        state.registry.as_ref(),
+        SourceDraft {
+            source_id: Some(JIRA.to_owned()),
+            adapter_kind: "jira".to_owned(),
+            base_url: env.url.clone(),
+            auth_kind: AuthMethod::Pat,
+            config: json!({}),
+            secret: None,
+        },
+    )
+    .await
+    .expect("test_source on the configured saved source");
+    assert!(saved.ok, "{saved:?}");
+    let note = saved.detail.clone().unwrap_or_default();
+    assert!(
+        note.contains("Epic Link customfield_"),
+        "the configured note names the field: {saved:?}"
+    );
+    assert!(
+        !note.contains("found but not configured"),
+        "the field is configured, so the note must not say it is not: {note:?}"
+    );
+    assert!(
+        note.contains(found.as_str()),
+        "the note names the id the row was configured with: {note:?} vs {found:?}"
+    );
+    assert_ne!(
+        saved.detail, draft.detail,
+        "configuring the field moved the row out of the draft's arm"
+    );
+    println!("SEEDED connection note (configured): {note}");
 
     state.scheduler.shutdown().await;
     drop(pat);
