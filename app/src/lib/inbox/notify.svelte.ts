@@ -14,7 +14,7 @@
  * An item notifies only if it is **new**, its **kind is on**, and the window
  * is **unfocused**. The order matters in one place: an item is marked seen
  * whatever the focus, so something that arrived while the reader was looking
- * at it does not fire a notification the moment they switch away. Spec story
+ * at it does not fire a desktop notification the moment they switch away. Spec story
  * 74 is "I am never told what is already on screen", and an item that waited
  * for a blur would be exactly that.
  *
@@ -41,7 +41,7 @@
  *
  * The first stream the inbox answers with is the **backlog** — everything that
  * needs the reader now, including whatever arrived while knobas was shut. A
- * notification per line of it is a burst about nothing new, so the first
+ * desktop notification per line of it is a burst about nothing new, so the first
  * observation records the keys and says nothing. What "first" means is the
  * shell's: `App.svelte` feeds this only once `inbox.answered` is true, because
  * the empty stream a store holds before its first read would otherwise prime
@@ -58,9 +58,9 @@
  *
  * ## The click, and where it comes from
  *
- * A notification carries the item's address, and {@link Notifications.start}
+ * A desktop notification carries the item's address, and {@link Notifications.start}
  * subscribes to the click to navigate there. The channel is knobas' own
- * (#339): `send` invokes the `notify` command, whose Rust shows the
+ * (#339): `send` invokes the `notify` command, whose Rust shows the desktop
  * notification through `notify-rust` and waits on the handle off the main
  * thread, and a body click comes back as the `notification:clicked` event
  * carrying that address. `@tauri-apps/plugin-notification` is still what asks
@@ -97,7 +97,7 @@ import {
 import { DEFAULT_CTX, hashFor, router } from "../shell/router.svelte";
 
 /**
- * The key in a notification's `extra` that carries where its click goes.
+ * The key in a desktop notification's `extra` that carries where its click goes.
  *
  * Named once because it is the two ends of the click path: {@link
  * Notifications.saw} writes it and {@link Notifications.start} reads it back
@@ -107,7 +107,7 @@ import { DEFAULT_CTX, hashFor, router } from "../shell/router.svelte";
 const ADDRESS = "address";
 
 /**
- * What a notification carries, as much of it as this store fills in.
+ * What a desktop notification carries, as much of it as this store fills in.
  *
  * `NotificationDraft` and not `Notification`: this is a browser module, and a
  * type sharing a name with the DOM global would have the two read as one.
@@ -127,7 +127,7 @@ export interface NotifyPorts {
   /** Ask the OS. `"granted"` is the only answer that is a yes. */
   requestPermission: () => Promise<string>;
   send: (notification: NotificationDraft) => void;
-  /** Subscribe to notification clicks; see the module note for the channel. */
+  /** Subscribe to desktop notification clicks; see the module note for the channel. */
   onAction: (handler: (notification: { extra?: Record<string, unknown> }) => void) => Promise<
     () => void
   >;
@@ -164,12 +164,12 @@ export interface Notifications {
   choose(kind: InboxCategory, on: boolean): Promise<void>;
   /** Offer the inbox's current stream. See the module note for the gates. */
   saw(items: InboxEntry[]): void;
-  /** Subscribe to notification clicks. Returns the teardown. */
+  /** Subscribe to desktop notification clicks. Returns the teardown. */
   start(): () => void;
 }
 
 /**
- * Where a notification's click goes.
+ * Where a desktop notification's click goes.
  *
  * The kind-agnostic `#/entity/<id>` alias, which is what `InboxView`'s own
  * *Open* uses and for the reason recorded there: an item's `kind` is the
@@ -384,8 +384,8 @@ export function createNotifications(ports?: Partial<NotifyPorts>): Notifications
         })
         .catch(() => {
           // A `listen` before the IPC is up (`?fake-ipc`) rejects. A failed
-          // subscription is not a failed window — notifications still fire,
-          // they simply have no door behind them.
+          // subscription is not a failed window — desktop notifications still
+          // fire, they simply have no door behind them.
         });
 
       return () => {

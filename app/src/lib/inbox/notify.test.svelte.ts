@@ -1,5 +1,5 @@
 /**
- * The notification listener: the three gates, the click, and the permission
+ * The desktop notification listener: the three gates, the click, and the permission
  * (issue #290, spec #272 story 70–74).
  *
  * The seam is the store, because that is where the rules live — the settings
@@ -110,7 +110,7 @@ function bench(overrides: Partial<NotifyPorts> = {}) {
     answers: (to: string) => {
       answer = to;
     },
-    /** Deliver a click on a notification the OS is showing. */
+    /** Deliver a click on a desktop notification the OS is showing. */
     click: (notification: { extra?: Record<string, unknown> }) => action?.(notification),
     /** Prime the store past the backlog, the way the first read does. */
     async primed(kinds: InboxCategory[] = [], seed: InboxEntry[] = []) {
@@ -202,7 +202,7 @@ test("nothing is sent while the window is focused, and the same item is sent whi
  * they later switch away.
  *
  * The gate is about the moment of arrival, not about the moment of the next
- * signal. A notification held back until the blur would be knobas telling
+ * signal. A desktop notification held back until the blur would be knobas telling
  * somebody about something they have already read — the failure story 74 is
  * about, arriving one step later than the naive test would look for it.
  */
@@ -223,7 +223,7 @@ test("an item seen while focused is not announced by the next signal after a blu
 
 // -- once per item ----------------------------------------------------------
 
-/** The same item twice **in one stream** is one notification. */
+/** The same item twice **in one stream** is one desktop notification. */
 test("one item repeated inside a single signal notifies once", async () => {
   const b = bench();
   await b.primed(["mention"]);
@@ -232,7 +232,7 @@ test("one item repeated inside a single signal notifies once", async () => {
 });
 
 /**
- * The same item **across two signals** is one notification.
+ * The same item **across two signals** is one desktop notification.
  *
  * This is the direction that actually happens: the inbox re-reads the whole
  * stream on every `activity:new` and every finished sync, so an item that
@@ -250,7 +250,7 @@ test("one item arriving in two signals notifies once", async () => {
 });
 
 /**
- * An item that **leaves and comes back** is still one notification this
+ * An item that **leaves and comes back** is still one desktop notification this
  * session.
  *
  * The key is the demand (`<category>:<subject>`) and not the occurrence, so a
@@ -271,7 +271,7 @@ test("an item that leaves the stream and returns is not announced twice", async 
  * **The backlog is recorded, not announced.**
  *
  * The first stream is everything that needs the reader now, including what
- * arrived while knobas was shut. A notification per line of it is a burst
+ * arrived while knobas was shut. A desktop notification per line of it is a burst
  * about nothing new — and it would land on a reader who has just opened the
  * app, which is the one moment they are least in need of being told.
  */
@@ -289,8 +289,8 @@ test("the first stream primes and says nothing, and the next arrival speaks", as
 
 // -- the click --------------------------------------------------------------
 
-/** The address a notification carries is the item's own. */
-test("a notification carries the entity's address and its click navigates there", async () => {
+/** The address a desktop notification carries is the item's own. */
+test("a desktop notification carries the entity's address and its click navigates there", async () => {
   const b = bench();
   cleanup = b.store.start();
   await b.primed(["review_request"]);
@@ -382,7 +382,7 @@ test("a notification:clicked event navigates to the item it carries", async () =
  * without one is not sent: a waiter keyed to nothing is a click that opens
  * nowhere.
  */
-test("a sent notification reaches the notify command with its address", async () => {
+test("a sent desktop notification reaches the notify command with its address", async () => {
   const sent: WireDraft[] = [];
   const send = sendThrough((draft) => {
     sent.push(draft);

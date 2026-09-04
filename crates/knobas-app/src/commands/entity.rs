@@ -1795,7 +1795,7 @@ pub async fn set_notification_kinds(
 /// A shim over [`crate::notify::Notifier`], where the rules live and are
 /// tested: one wait per address, sixteen at once, a click emitted with the
 /// address and a clear emitted as nothing. Off the async runtime with
-/// `spawn_blocking` because the show blocks until the OS has the notification
+/// `spawn_blocking` because the show blocks until the OS has the desktop notification
 /// -- milliseconds, but the wait behind it is a thread of its own and the
 /// runtime is not where either belongs.
 ///
@@ -1817,7 +1817,9 @@ pub async fn notify(
     let address = draft.address.clone();
     let shown = tauri::async_runtime::spawn_blocking(move || notifier.notify(draft))
         .await
-        .map_err(|error| IpcError::internal(format!("the notification task ended: {error}")))?;
+        .map_err(|error| {
+            IpcError::internal(format!("the desktop notification task ended: {error}"))
+        })?;
     match shown {
         Ok(_) => Ok(()),
         Err(error) => {

@@ -167,15 +167,12 @@ pub fn run() {
             tracing::info!(demo = profile.demo, dir = %profile.dir.display(), "profile");
             handle.manage(profile);
             handle.manage(Lifecycle::new());
-            // The notification sender and its waiter registry (#339), over
-            // the real backend and the real event bridge. Managed here for
-            // the same reason as `Lifecycle`: the command that reaches for
+            // The desktop notification sender and its waiter registry (#339),
+            // over the real backend and the real event bridge. Managed here
+            // for the same reason as `Lifecycle`: the command that reaches for
             // it must never see "state not managed".
-            let identifier = handle.config().identifier.clone();
             let backend: std::sync::Arc<dyn notify::Backend> =
-                std::sync::Arc::new(move |draft: &notify::NotificationDraft| {
-                    notify::platform::show(&identifier, draft)
-                });
+                std::sync::Arc::new(notify::platform::show);
             let events = std::sync::Arc::new(sources::events::TauriEvents::new(handle.clone()));
             handle.manage(std::sync::Arc::new(notify::Notifier::new(backend, events)));
 

@@ -4759,8 +4759,8 @@ From this commit on, each of the following requires an orchestrator decision **a
 
   **This revises #290's "nothing new crosses the bridge as an event."** #290's entry recorded the
   click as built and, on desktop, unreachable: `tauri-plugin-notification` 2.4.0's desktop `notify`
-  hands the notification to `notify-rust` and drops the handle (`let _ = notification.show()`), and
-  `register_listener`, the command behind `onAction`, exists on mobile only. Nothing that already
+  hands the desktop notification to `notify-rust` and drops the handle (`let _ = notification.show()`),
+  and `register_listener`, the command behind `onAction`, exists on mobile only. Nothing that already
   crossed the bridge could carry a click, because nothing in the process could *learn* of one — the
   handle a click arrives on did not survive the plugin's own `notify`. So the send moves into knobas
   and the click comes back as an event. Decided in the 2026-09-04 grilling of #339 (the two Triage
@@ -4775,9 +4775,10 @@ From this commit on, each of the following requires an orchestrator decision **a
   `commands::entity` module — the notifier's setting lives there (#290) and the `commands/` + `ipc/`
   layout is untouched. The rules live in `crates/knobas-app/src/notify.rs`, which is not a frozen
   surface: `notify-rust = "=4.18.0"` with `preview-macos-un` (the `UNUserNotificationCenter`
-  backend, Björn's ruling on the prototype's evidence) shows the notification, and the handle's
+  backend, Björn's ruling on the prototype's evidence) shows the desktop notification, and the handle's
   `wait_for_action` runs on a thread of its own. The wait is unbounded — the prototype showed it
-  returns on a click or on the reader clearing the notification, never on the banner sliding away —
+  returns on a click or on the reader clearing the desktop notification, never on the banner sliding
+  away —
   so there is a registry: one waiter per address (a second send for an address already waited on
   shows and starts no second wait) and at most sixteen concurrent waiters (a send beyond the cap
   shows fire-and-forget and says so at `debug`); a completed wait frees its slot. No timeout is
