@@ -364,19 +364,17 @@ impl Harness {
 
     /// The line the queue writes for the *same* write when it is delivered.
     ///
-    /// Carries the same `op` as its `queued` line, and that is the point:
-    /// `knobas_sync::write_queue::announce_with` builds one detail object for
-    /// every verb it announces and puts `"op": write.op` in all of them. So
-    /// the digest cannot tell one write's narration apart by op, and the verb
-    /// is the only thing that can pick the person's act out of the queue's
-    /// story about it.
+    /// It carries the same `op` as its `queued` line, and what that costs is
+    /// argued in one place:
+    /// [`a_write_is_on_the_day_it_was_queued_and_not_the_day_it_was_sent`].
     async fn sent(&self, entity_id: &str, op: &str, at: DateTime<Utc>) {
         self.write_line("sent", entity_id, op, at).await;
     }
 
-    /// One of the write queue's own lines, in the shape `announce_with`
-    /// writes: the verb says which state change, and the detail names the
-    /// write, its op and its source whichever change it was.
+    /// One of the write queue's own lines, in the shape
+    /// `knobas_sync::write_queue::announce_with` writes it: the verb says
+    /// which state change, and the detail names the write, its op and its
+    /// source whichever change it was.
     async fn write_line(&self, verb: &str, entity_id: &str, op: &str, at: DateTime<Utc>) {
         self.activity(
             "user",
@@ -718,8 +716,9 @@ async fn a_logged_afternoon_is_one_line_and_not_the_queue_line_as_well() {
 /// The reader stood up and said "I commented on PAY-231" **yesterday**. A
 /// digest keyed on `sent` puts it on today's list, where it is a thing the
 /// reader did not do today, and takes it off yesterday's, where it is a thing
-/// they did. So both lists are asserted, and by count: the write is on
-/// yesterday's and absent from today's.
+/// they did. So both lists are asserted: yesterday's by content, and today's
+/// by **count**, because a line that must not be there has no content to be
+/// compared against.
 ///
 /// # What each mutant does to this, so a survivor is not read as a gap
 ///
@@ -812,9 +811,8 @@ async fn a_days_hours_are_still_on_the_list_under_two_hundred_mirror_lines() {
 async fn a_write_is_one_line_however_many_states_the_queue_narrates() {
     let h = harness("standup-queue-states").await;
     let ticket = h.ticket("PAY-231", ME, "In Progress").await;
-    let detail = serde_json::json!({ "op": "comment", "source_id": TRACKER, "write_id": 7 });
     for verb in ["queued", "held", "sent"] {
-        h.activity("user", verb, &ticket, days_before(1, 11, 0), detail.clone())
+        h.write_line(verb, &ticket, "comment", days_before(1, 11, 0))
             .await;
     }
 
