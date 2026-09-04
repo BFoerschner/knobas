@@ -98,11 +98,15 @@ A deliberate full sync whose purpose is re-fetching unchanged items after the fe
 _Avoid_: refetch
 
 **Credential health**:
-A source's authentication state as knobas last observed it, surfaced per source in the shell.
+A source's authentication state as knobas last observed it, surfaced per source in the shell. Carries what the credential's last check *said went wrong*, not what an adapter had to say about the far end when it went right — that is a [Connection note](#connection-note).
 
 **Discovered configuration**:
 A configuration value an adapter learns from the instance itself during *Test connection*, rather than one the user types. It reaches the Add-source dialog on the connection report, keyed by the config property it belongs in, and the dialog fills that field **only when it is empty** — a value somebody typed is never replaced. Jira's Epic Link custom field id is the first: it is minted per instance, so an id copied from another server reads the wrong field rather than failing (#297). Not a secret, and never written by *Test connection* itself, which writes nothing.
 _Avoid_: auto-detected, probed
+
+**Connection note**:
+The one line an adapter says about the far end that nothing else on the connection report already says — Jira's Epic Link clause ("found but not configured: epic membership is not mirrored") is the first. It belongs to the moment of *Test connection*: shown wherever a test result is shown, on a draft or on a saved source, and never stored. Not [Credential health](#credential-health), which a good sync may rewrite; a note is true of the far end as just found, not of the credential. (#326)
+_Avoid_: detail (the field's name, not the term), diagnostic, warning
 
 ## Links and contexts
 
