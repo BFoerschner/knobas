@@ -11,10 +11,11 @@
 
 use async_trait::async_trait;
 use knobas_core::entity::EntityRef;
+use knobas_core::payload::Declarations;
 use knobas_core::write_queue::{self, WriteState};
 use sqlx::PgPool;
 
-use super::{Landing, Linked, Steps};
+use super::{Landing, Linked, PullRequestOnHead, Steps};
 use crate::sources::SourcesState;
 use crate::{IpcError, IpcErrorCode};
 
@@ -97,15 +98,23 @@ impl Steps for Queue<'_> {
         .await
     }
 
-    async fn pull_request(&self, repo: &EntityRef, head: &str) -> Result<Option<String>, IpcError> {
-        found(
-            &self.state.pool,
-            PULL_REQUEST_BY_HEAD,
-            &like_prefix(repo),
-            KIND_PR,
-            head,
-        )
-        .await
+    async fn pull_request(
+        &self,
+        repo: &EntityRef,
+        head: &str,
+    ) -> Result<PullRequestOnHead, IpcError> {
+        // The declaration is resolved here rather than threaded through
+        // `Steps`: it is a property of the running binary's registry, which
+        // this implementation has and the trait's other implementations --
+        // the fake in the seam tests -- have no use for. `merge::follow_merges`
+        // takes it as an argument instead because it is one pass over the whole
+        // corpus and the caller already holds it; this is two lookups per flow,
+        // and the listing behind `declared_paths` is the same round trip the
+        // inbox makes per read.
+        let declarations =
+            crate::sources::paths::declared_paths(&self.state.pool, self.state.registry.as_ref())
+                .await?;
+        pull_request_on_head(&self.state.pool, &declarations, repo, head).await
     }
 
     async fn refresh(&self, source: &str) {
@@ -132,7 +141,8 @@ const BRANCH_BY_NAME: &str = "select entity_id from sync.live_item
       where entity_id like $1 and kind = $2 and title = $3
       order by entity_id limit 1";
 
-/// The pull request of a repository opened from head branch `$3`.
+/// Every pull request of a repository opened from head branch `$3`, each with
+/// what its own source says about whether it is merged.
 ///
 /// **A source-shaped read outside an adapter, and it is here because there is
 /// no other way.** `Source::write` answers nothing, so the pull request knobas
@@ -142,9 +152,40 @@ const BRANCH_BY_NAME: &str = "select entity_id from sync.live_item
 /// ticket's status, met here in the read direction. It is confined to this one
 /// statement deliberately: a source that spells its pull requests differently
 /// needs one more `coalesce` here and nothing else anywhere.
-const PULL_REQUEST_BY_HEAD: &str = "select entity_id from sync.live_item
-      where entity_id like $1 and kind = $2 and payload->'head'->>'ref' = $3
-      order by entity_id limit 1";
+///
+/// # Why it is a list and no longer `limit 1` (#359)
+///
+/// A head branch is re-usable, and the mirror deliberately holds merged pull
+/// requests -- `state=all`, with the reason written at
+/// `knobas_source_gitea::client::Client::pulls`. So `order by entity_id limit
+/// 1` picked **lexicographically among every pull request that head ever
+/// had**, merged ones included: on a head whose pull requests are `#7`
+/// (merged) and `#8` (open) it answers `#7`, which settled the create step
+/// "already open" against a merge and then drew the ticket's link to it.
+///
+/// The merged flag is read at the path the source **declares** (#277,
+/// `$4`), not at a spelling written here: Gitea says its pull requests carry a
+/// boolean `merged` and the reverse direction in `super::merge` already follows
+/// that same declaration, so the two halves of the pull-request story cannot
+/// disagree about what merged means. A source that declares no flag resolves
+/// to `null` for every row, which
+/// [`PullRequestOnHead`](super::PullRequestOnHead) turns into `Unknown` --
+/// the miss ADR-0007 requires, pinned there and by
+/// `a_source_that_declares_no_merged_flag_yields_no_open_pull_request`.
+///
+/// `order by i.entity_id` survives as the tie-break among rows the caller
+/// cannot otherwise tell apart, so a head that somehow carries two open pull
+/// requests -- two bases, which a forge does allow -- answers the same one on
+/// every call rather than whichever the planner reached first.
+const PULL_REQUEST_BY_HEAD: &str = concat!(
+    "select i.entity_id, ",
+    knobas_core::declared_flag!("$4", "merged"),
+    " as merged
+       from sync.live_item i
+      where i.entity_id like $1 and i.kind = $2
+        and i.payload->'head'->>'ref' = $3
+      order by i.entity_id"
+);
 
 /// The repository's id as a `like` prefix, with `like`'s own metacharacters
 /// escaped.
@@ -203,6 +244,59 @@ async fn found(
         .map_err(IpcError::internal)
 }
 
+/// What the mirror holds from one head branch, resolved through the
+/// declarations `declarations` carries.
+///
+/// Public, and taking a pool rather than a [`Queue`], because this is the half
+/// of the look-before-write that a test can drive against a real mirror: the
+/// [`Steps`] fake stands where the queue does and therefore cannot witness the
+/// statement above. `Queue::pull_request` is this function plus the lookup of
+/// the declarations.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
+pub async fn pull_request_on_head(
+    pool: &PgPool,
+    declarations: &Declarations,
+    repo: &EntityRef,
+    head: &str,
+) -> Result<PullRequestOnHead, IpcError> {
+    let rows: Vec<(String, Option<bool>)> = sqlx::query_as(PULL_REQUEST_BY_HEAD)
+        .bind(like_prefix(repo))
+        .bind(KIND_PR)
+        .bind(head)
+        .bind(declarations.as_param())
+        .fetch_all(pool)
+        .await
+        .map_err(IpcError::internal)?;
+    Ok(pick_open(&rows))
+}
+
+/// Which of a head's pull requests the flow may act on, given each one's
+/// declared merged flag.
+///
+/// **The rule, written once**, because it has two callers: this module, over
+/// what [`PULL_REQUEST_BY_HEAD`] answered, and the [`Steps`] fake in
+/// `tests/start_work.rs`, over the mirror a test dictated. A fake that
+/// classified for itself would be a second opinion about what "open" means,
+/// and the seam tests would then pass against a rule the real read does not
+/// have.
+///
+/// `None` is the declared read missing -- an undeclared source, a flag that is
+/// not a JSON boolean -- and it never becomes [`PullRequestOnHead::Open`]. See
+/// that type for why that direction and not the other.
+#[must_use]
+pub fn pick_open(rows: &[(String, Option<bool>)]) -> PullRequestOnHead {
+    if let Some((id, _)) = rows.iter().find(|(_, merged)| *merged == Some(false)) {
+        return PullRequestOnHead::Open(id.clone());
+    }
+    if let Some((id, _)) = rows.iter().find(|(_, merged)| *merged == Some(true)) {
+        return PullRequestOnHead::OnlyMerged(id.clone());
+    }
+    PullRequestOnHead::Unknown
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,5 +314,55 @@ mod tests {
         // would make a trailing one indistinguishable from an escaped one.
         assert_eq!(escape_like("wiki_two"), "wiki\\_two");
         assert_eq!(escape_like("odd%"), "odd\\%");
+    }
+
+    /// The pinned failure direction (ADR-0007 requirement 3, and #359's whole
+    /// question): a pull request whose merged-ness the source declares no path
+    /// for is **not** offered as open. It is `Unknown`, so the flow dispatches
+    /// and lets the source refuse a duplicate, rather than settling a step
+    /// against a record it cannot read.
+    #[test]
+    fn a_pull_request_of_unreadable_merged_ness_is_never_the_open_one() {
+        let unreadable = [("gitea:acme/api#7".to_owned(), None)];
+        assert_eq!(pick_open(&unreadable), PullRequestOnHead::Unknown);
+        assert_eq!(pick_open(&[]), PullRequestOnHead::Unknown);
+    }
+
+    /// The bug: lexicographic order over a re-used head puts the *merged* `#7`
+    /// ahead of the open `#8`, so picking the first row is picking a merge.
+    /// The open one is chosen however the rows are ordered.
+    #[test]
+    fn an_open_pull_request_wins_over_a_merged_one_from_the_same_head() {
+        let merged_first = [
+            ("gitea:acme/api#7".to_owned(), Some(true)),
+            ("gitea:acme/api#8".to_owned(), Some(false)),
+        ];
+        assert_eq!(
+            pick_open(&merged_first),
+            PullRequestOnHead::Open("gitea:acme/api#8".to_owned())
+        );
+        let merged_last = [
+            ("gitea:acme/api#8".to_owned(), Some(false)),
+            ("gitea:acme/api#7".to_owned(), Some(true)),
+        ];
+        assert_eq!(
+            pick_open(&merged_last),
+            PullRequestOnHead::Open("gitea:acme/api#8".to_owned())
+        );
+    }
+
+    /// A head whose every pull request is merged names one, so the step that
+    /// refuses can say which -- rather than answering the same "nothing here"
+    /// an empty mirror does.
+    #[test]
+    fn a_head_whose_pull_requests_are_all_merged_names_one() {
+        let merged = [
+            ("gitea:acme/api#7".to_owned(), Some(true)),
+            ("gitea:acme/api#8".to_owned(), Some(true)),
+        ];
+        assert_eq!(
+            pick_open(&merged),
+            PullRequestOnHead::OnlyMerged("gitea:acme/api#7".to_owned())
+        );
     }
 }

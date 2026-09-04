@@ -27,7 +27,7 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use knobas_app::IpcErrorCode;
-use knobas_app::start_work::{self, Landing, Linked, Steps};
+use knobas_app::start_work::{self, Landing, Linked, PullRequestOnHead, Steps};
 use knobas_core::entity::EntityRef;
 use knobas_core::start_work::{FlowStep, Step, StepOutcome};
 use sqlx::PgPool;
@@ -36,6 +36,16 @@ use sqlx::PgPool;
 const TICKET: &str = "jira:PAY-231";
 const REPO: &str = "gitea:tidewater/payout-service";
 const PR: &str = "gitea:tidewater/payout-service#142";
+/// A head branch re-used: `#7` was merged months ago, `#8` is the live one.
+///
+/// The numbers are chosen so that **`#7` sorts before `#8`**, which is what
+/// makes these fixtures able to witness #359 at all: the read this replaced
+/// took `order by entity_id limit 1` over every pull request the head ever
+/// had, so a merged one that sorts first is the one it answered with. A pair
+/// like `#7` and `#142` would hide the bug -- `#142` sorts first and happens to
+/// be the open one.
+const PR_MERGED: &str = "gitea:tidewater/payout-service#7";
+const PR_REOPENED: &str = "gitea:tidewater/payout-service#8";
 
 /// What the fake will answer for one op identifier.
 #[derive(Clone, Debug)]
@@ -64,10 +74,16 @@ struct Fake {
     landings: Mutex<std::collections::HashMap<i64, Landing>>,
     /// The branches the mirror holds, as `(repo, name)`.
     branches: Mutex<Vec<(String, String)>>,
-    /// The pull requests the mirror holds, as `(repo, head, entity id)`.
-    pulls: Mutex<Vec<(String, String, String)>>,
+    /// The pull requests the mirror holds, as `(repo, head, entity id,
+    /// merged)`.
+    ///
+    /// The merged flag is `Option<bool>` and not `bool` because the real read
+    /// resolves it through what the source **declares** (#277): `None` is that
+    /// declared read missing, which is a state a fixture has to be able to put
+    /// the mirror in -- it is the direction #359 pinned.
+    pulls: Mutex<Vec<(String, String, String, Option<bool>)>>,
     /// What a refresh puts into the mirror, if anything.
-    on_refresh: Mutex<Option<(String, String, String)>>,
+    on_refresh: Mutex<Option<(String, String, String, Option<bool>)>>,
     log: Mutex<Recorded>,
     next_write_id: Mutex<i64>,
 }
@@ -95,7 +111,21 @@ impl Fake {
     /// shape, since `Source::write` answers nothing and the number is learned
     /// by reading back.
     fn revealing_on_refresh(self, head: &str) -> Self {
-        *self.on_refresh.lock().unwrap() = Some((REPO.to_owned(), head.to_owned(), PR.to_owned()));
+        *self.on_refresh.lock().unwrap() = Some((
+            REPO.to_owned(),
+            head.to_owned(),
+            PR.to_owned(),
+            Some(false),
+        ));
+        self
+    }
+
+    /// Put one pull request into the mirror this fake stands for.
+    fn holding(self, head: &str, id: &str, merged: Option<bool>) -> Self {
+        self.pulls
+            .lock()
+            .unwrap()
+            .push((REPO.to_owned(), head.to_owned(), id.to_owned(), merged));
         self
     }
 
@@ -212,14 +242,21 @@ impl Steps for Fake {
         &self,
         repo: &EntityRef,
         head: &str,
-    ) -> Result<Option<String>, knobas_app::IpcError> {
-        Ok(self
+    ) -> Result<PullRequestOnHead, knobas_app::IpcError> {
+        // **Classified by the real rule, not by a second one.** A fake that
+        // decided for itself which of a head's pull requests counts as open
+        // would let these tests pass against a rule the mirror does not have;
+        // `pick_open` is the one `start_work::queue` runs over what its own
+        // statement answered.
+        let rows: Vec<(String, Option<bool>)> = self
             .pulls
             .lock()
             .unwrap()
             .iter()
-            .find(|(r, h, _)| r == &repo.to_string() && h == head)
-            .map(|(_, _, id)| id.clone()))
+            .filter(|(r, h, _, _)| r == &repo.to_string() && h == head)
+            .map(|(_, _, id, merged)| (id.clone(), *merged))
+            .collect();
+        Ok(knobas_app::start_work::queue::pick_open(&rows))
     }
 
     async fn refresh(&self, _source: &str) {
@@ -464,7 +501,7 @@ async fn a_retry_whose_effect_already_landed_sends_nothing() {
     fake.pulls
         .lock()
         .unwrap()
-        .push((REPO.to_owned(), head, PR.to_owned()));
+        .push((REPO.to_owned(), head, PR.to_owned(), Some(false)));
 
     let failed = step_of(
         &start_work::flow(&pool, &ticket()).await.unwrap(),
@@ -752,6 +789,192 @@ async fn an_edited_proposal_is_what_gets_dispatched() {
 
     assert_eq!(proposed_branch(&flow), "knobas-PAY-231");
     assert_eq!(outcome(&flow, Step::CreateBranch), StepOutcome::Pending);
+}
+
+// -- a re-used head branch (#359) ------------------------------------------
+
+/// **The read, against a real mirror.** A head branch used twice leaves two
+/// records behind -- the mirror holds merged pull requests deliberately
+/// (`state=all`) -- and the flow must find the open one.
+///
+/// This is the half the [`Fake`] cannot witness: it stands where the queue
+/// does, so the statement itself is only under test here.
+#[tokio::test]
+async fn a_merged_pull_request_on_a_re_used_head_is_not_the_open_one() {
+    let pool = corpus("sw_head_reused").await;
+    let head = "feature/PAY-231";
+    item(
+        &pool,
+        PR_MERGED,
+        "pr",
+        "payout dashboard latency",
+        serde_json::json!({"merged": true, "state": "closed", "head": {"ref": head}}),
+    )
+    .await;
+    item(
+        &pool,
+        PR_REOPENED,
+        "pr",
+        "payout dashboard latency, part two",
+        serde_json::json!({"merged": false, "state": "open", "head": {"ref": head}}),
+    )
+    .await;
+
+    let found = start_work::queue::pull_request_on_head(&pool, &declarations(), &repo(), head)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        found,
+        PullRequestOnHead::Open(PR_REOPENED.to_owned()),
+        "the read answered with a pull request that was merged, which is what \
+         settles the create step \"already open\" against a merge and then links \
+         the ticket to it"
+    );
+}
+
+/// A head whose only pull request is merged offers no open one, and names the
+/// merged one so the step that refuses can say which.
+#[tokio::test]
+async fn a_head_whose_only_pull_request_is_merged_offers_no_open_one() {
+    let pool = corpus("sw_head_only_merged").await;
+    let head = "feature/PAY-231";
+    item(
+        &pool,
+        PR_MERGED,
+        "pr",
+        "payout dashboard latency",
+        serde_json::json!({"merged": true, "state": "closed", "head": {"ref": head}}),
+    )
+    .await;
+
+    let found = start_work::queue::pull_request_on_head(&pool, &declarations(), &repo(), head)
+        .await
+        .unwrap();
+
+    assert_eq!(found, PullRequestOnHead::OnlyMerged(PR_MERGED.to_owned()));
+}
+
+/// **The pinned failure direction, end to end** (ADR-0007 requirement 3). The
+/// payload here says `"merged": false` in as many words, and the source
+/// declares no path to it -- so knobas misses rather than reading a spelling
+/// it was not told about, and the flow gets `Unknown` rather than an open pull
+/// request it would then link.
+#[tokio::test]
+async fn a_source_that_declares_no_merged_flag_yields_no_open_pull_request() {
+    let pool = corpus("sw_head_undeclared").await;
+    let head = "feature/PAY-231";
+    item(
+        &pool,
+        PR_REOPENED,
+        "pr",
+        "payout dashboard latency, part two",
+        serde_json::json!({"merged": false, "state": "open", "head": {"ref": head}}),
+    )
+    .await;
+
+    let found = start_work::queue::pull_request_on_head(
+        &pool,
+        &knobas_core::payload::Declarations::empty(),
+        &repo(),
+        head,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        found,
+        PullRequestOnHead::Unknown,
+        "a payload read outside an adapter misses; it does not read a spelling \
+         nobody declared"
+    );
+}
+
+/// **The seam.** With both pull requests on the head, the flow settles the
+/// create step against the open one and draws the ticket's link to it -- never
+/// to the merge.
+#[tokio::test]
+async fn a_re_used_head_links_the_open_pull_request_and_not_the_merged_one() {
+    let pool = corpus("sw_reused_flow").await;
+    let flow = planned(&pool).await;
+    let head = proposed_branch(&flow);
+    let fake = Fake::new()
+        .holding(&head, PR_MERGED, Some(true))
+        .holding(&head, PR_REOPENED, Some(false));
+
+    let flow = start_work::run(&pool, &fake, &ticket()).await.unwrap();
+
+    assert_eq!(
+        fake.ops(),
+        vec!["create_branch", "transition"],
+        "a pull request that is open from this head is this step's effect, so \
+         nothing is sent"
+    );
+    assert_eq!(
+        fake.links(),
+        vec![(PR_REOPENED.to_owned(), TICKET.to_owned())],
+        "the ticket was linked to the merged pull request"
+    );
+    assert_eq!(
+        step_of(&flow, Step::CreatePullRequest).detail.as_deref(),
+        Some(&format!("{PR_REOPENED} is already open")[..])
+    );
+}
+
+/// **The other half of the ruling.** When the only pull request on the head is
+/// merged, the flow **opens a new one** rather than settling "already open"
+/// against the merge: a forge does not refuse a pull request from a head whose
+/// last one was merged, and the new commits on that head are what wants
+/// reviewing. The link then goes to what the refresh brought back.
+#[tokio::test]
+async fn a_head_whose_only_pull_request_is_merged_gets_a_new_one() {
+    let pool = corpus("sw_merged_head_flow").await;
+    let flow = planned(&pool).await;
+    let head = proposed_branch(&flow);
+    let fake = Fake::new()
+        .holding(&head, PR_MERGED, Some(true))
+        .revealing_on_refresh(&head);
+
+    let flow = start_work::run(&pool, &fake, &ticket()).await.unwrap();
+
+    assert_eq!(
+        fake.ops(),
+        vec!["create_branch", "create_pull_request", "transition"],
+        "the merged pull request settled the step, so no new one was opened"
+    );
+    assert_eq!(
+        fake.links(),
+        vec![(PR.to_owned(), TICKET.to_owned())],
+        "the link must go to the pull request this flow made"
+    );
+    assert_eq!(outcome(&flow, Step::LinkPullRequest), StepOutcome::Succeeded);
+}
+
+/// And when nothing new reaches the mirror, the link step **refuses with a
+/// reason the user can act on**: it names the merged pull request it declined
+/// to link to. A wrong link is permanent and is what the reverse direction
+/// reads; a failed step is retryable.
+#[tokio::test]
+async fn a_link_step_refuses_a_merged_pull_request_and_names_it() {
+    let pool = corpus("sw_merged_head_no_new").await;
+    let flow = planned(&pool).await;
+    let head = proposed_branch(&flow);
+    let fake = Fake::new().holding(&head, PR_MERGED, Some(true));
+
+    let flow = start_work::run(&pool, &fake, &ticket()).await.unwrap();
+
+    assert_eq!(outcome(&flow, Step::LinkPullRequest), StepOutcome::Failed);
+    assert!(fake.links().is_empty(), "the ticket was linked to a merge");
+    assert_eq!(fake.refreshes(), 1, "it asked for a sync before giving up");
+    let detail = step_of(&flow, Step::LinkPullRequest)
+        .detail
+        .clone()
+        .expect("the step has to carry why");
+    assert!(
+        detail.contains(PR_MERGED) && detail.contains("merged"),
+        "the refusal must name what it found: {detail}"
+    );
+    assert_eq!(outcome(&flow, Step::Transition), StepOutcome::Pending);
 }
 
 // -- the reverse direction -------------------------------------------------
