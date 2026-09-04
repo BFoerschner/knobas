@@ -494,32 +494,45 @@ gitea-live-capped:
 # mockd's workflow. Criterion 1 is met end to end only once the ticket side is
 # the seeded Jira `atlassian-live` stands up, and that is not this recipe.
 #
-# WHAT IT WRITES TO GITEA AND WHAT IT TAKES BACK. It opens one branch named
-# `knobas-i44-<pid>` and a draft pull request from it; the draft prefix is read
-# back off Gitea's own copy of the title there, which is where story 8's claim
-# is witnessed. Then it commits one file on the branch -- a pull request with no
-# diff is not one Gitea will merge -- renames it out of draft, and **merges**
-# it, because the reverse direction is about a pull request somebody actually
-# finished. (The rename is also what makes the merge reachable at all: Gitea
-# will not merge a title still carrying the WIP prefix. That refusal is never
-# exercised here, since the rename comes first, so it is a reason for the step
-# and not a thing this run certifies.)
+# WHAT IT WRITES TO GITEA AND WHAT IT TAKES BACK. It cuts a scratch base branch
+# `knobas-i44-<pid>-base` from the repository's default branch, opens
+# `knobas-i44-<pid>` off it and a draft pull request from that; the draft prefix
+# is read back off Gitea's own copy of the title there, which is where story 8's
+# claim is witnessed. Then it commits one file on the branch -- a pull request
+# with no diff is not one Gitea will merge -- renames it out of draft, and
+# **merges** it into the scratch base, because the reverse direction is about a
+# pull request somebody actually finished. (The rename is also what makes the
+# merge reachable at all: Gitea will not merge a title still carrying the WIP
+# prefix. That refusal is never exercised here, since the rename comes first, so
+# it is a reason for the step and not a thing this run certifies.)
 #
-# `Litter`'s `Drop` deletes the branch when the test ends, passing or
+# `Litter`'s `Drop` takes all of it back when the test ends, passing or
 # panicking, under the `knobas-` prefix `litter_guard.rs` pins nothing in the
-# seed shares. It asks Gitea to close the pull request first, which matters on
-# a run that *failed* before the merge -- Gitea will not delete a branch an open
-# pull request points at. On a run that got as far as merging, that close is
-# refused (a merged pull request cannot be closed) and the refusal is
-# discarded; the branch delete is the part that does the work.
+# seed shares: `DELETE /repos/{owner}/{repo}/issues/{index}` for the pull
+# request, then both branches, then a re-read of the branch listing, the pull
+# listing and the default branch's head to check the server agrees they are
+# gone. The pull request goes first because Gitea will not delete a branch an
+# open pull request points at.
 #
-# **The merge commit is not taken back**, and cannot be: it is on
-# `payout-service`'s default branch, where deleting it would mean rewriting the
-# seeded history. So this recipe is repeatable but not perfectly
-# residue-free -- each run leaves two commits (the work commit and the merge
-# commit, since the merge is a `"Do": "merge"`) and one `knobas-i44-<pid>.txt`
-# on the default branch. Nothing downstream reads that file or counts those
-# commits; `testenv/reset` is the remedy if it ever matters, the same
+# **The default branch is never written to, and that is a requirement rather
+# than tidiness** (issue #373). This recipe and
+# `crates/knobas-source-gitea/tests/live_gitea_capped.rs` share one
+# `tidewater/payout-service`, and that suite's `HEADROOM` is a budget of 19
+# records per listing -- the pull listing it walks, and the commits of every
+# branch, the default one included, which the seed leaves at exactly 19. So a
+# commit on the default branch turns `just gitea-live-capped` red, and no API
+# call takes one back: `DELETE issues/{index}` reclaims a pull request and
+# `DELETE branches/{name}` a branch, but a merge commit on the default branch
+# needs a force-push or `testenv/reset`. Until #373 this recipe merged there and
+# left the merged pull request standing, so every run spent two commits and one
+# pull for good; now it merges into the scratch base branch and the guard
+# refuses to end a run whose default-branch head moved. Measured over five
+# consecutive runs: branches 4 -> 4, pulls 14 -> 14, default-branch commits
+# 19 -> 19, root files 10 -> 10.
+#
+# The nine `knobas-i44-*.txt` files already on the default branch are what the
+# old shape left behind. Removing them means rewriting the seeded history, so
+# they stay; `testenv/reset` is the remedy if it ever matters, the same
 # deliberate-not-routine one `gitea-live` names.
 #
 # Serial and unparallelised for `gitea-live`'s reasons: one server, and a test
