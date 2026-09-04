@@ -447,6 +447,51 @@ async fn the_shapes_the_fake_only_assumes_are_certified_here() {
         sepa.body_text
     );
 
+    // **The declared merged flag, in both directions** (#277, and #359 made the
+    // `false` direction load-bearing). `descriptor_template`'s `pr` kind
+    // declares `merged` at `["merged"]`, and `start_work`'s look-before-write
+    // now treats a pull request as open only where that path resolves to a
+    // JSON `false` -- a miss is `Unknown`, dispatches a create and refuses to
+    // link. So an open pull request whose record simply lacked the key would
+    // stop the flow's link step dead, and nothing docker-free could see it: the
+    // wiremock fixture writes `"merged": false` by construction, which is this
+    // test's whole premise about a fake being confidently wrong.
+    //
+    // The contract battery does not cover this either, and the direction it
+    // misses is exactly this one: its clause 3 is satisfied as soon as *some*
+    // item of the kind resolves the path, and the fixture's merged pull request
+    // does that on its own.
+    let merged_path = [knobas_source::PayloadPath::of(["merged"])];
+    let flags: Vec<(&str, Option<bool>)> = prs
+        .iter()
+        .map(|i| {
+            (
+                i.title.as_str(),
+                knobas_core::payload::resolve_flag(&i.payload, &merged_path),
+            )
+        })
+        .collect();
+    assert!(
+        flags.iter().all(|(_, merged)| merged.is_some()),
+        "every mirrored pull request must resolve the declared merged flag; one that misses is          one the start-work flow can neither settle nor link: {flags:?}"
+    );
+    assert_eq!(
+        flags
+            .iter()
+            .find(|(title, _)| title.contains("Fix ledger drift"))
+            .map(|(_, merged)| *merged),
+        Some(Some(true)),
+        "the fixture's merged pull request has to read as merged: {flags:?}"
+    );
+    assert_eq!(
+        flags
+            .iter()
+            .find(|(title, _)| title.contains("SEPA retry"))
+            .map(|(_, merged)| *merged),
+        Some(Some(false)),
+        "an open pull request has to read as `false` and not as an absent key -- the difference          between the start-work flow linking it and refusing to: {flags:?}"
+    );
+
     // The author is the source's word for who did it, not knobas's.
     assert!(
         prs.iter().all(|i| i.author.is_some()),
