@@ -1467,6 +1467,15 @@ impl Scheduler {
 /// `Existing` covers both ways of being handed somebody else's run: enrolled in
 /// one still in flight, and served the record of one already over. Neither
 /// began after the call, which is the only property the distinction is about.
+///
+/// **Not a retreat from ADR-0005's "no caller has to know which of those
+/// happened".** That sentence is about the *ending*, and the ending is still
+/// promised identically on all three paths -- which is what lets `resync` wait
+/// on a joined run at all. This says something else, and only inside this
+/// crate: whether the run began before or after the call. A caller asking "did
+/// the mirror get re-read?" still must not ask; the one asking "could a sync
+/// have seen what I just wrote?" has no other way to know, and used to guess
+/// wrong one time in five (#358).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Triggered {
     Started(i64),
