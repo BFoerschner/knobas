@@ -294,15 +294,28 @@ impl Drop for Litter {
                 .build()
                 .expect("a runtime for the cleanup");
             rt.block_on(async move {
-                for (number, head, _) in env.pulls().await {
-                    if head == branch {
-                        env.api(
-                            reqwest::Method::DELETE,
-                            &format!("/repos/{}/issues/{number}", env.full_name()),
-                            None,
-                        )
-                        .await;
-                    }
+                // By number from here on, never by head ref: **Gitea rewrites
+                // a pull request's `head.ref` to `refs/pull/{number}/head` once
+                // the branch it pointed at is deleted**, so a check that
+                // re-read the listing looking for `branch` would find nothing
+                // whether the delete worked or not. Measured: with the delete
+                // replaced by the old `PATCH state=closed`, which Gitea refuses
+                // on a merged pull request, the by-head check passed over a
+                // pull request that was still there.
+                let opened: Vec<u64> = env
+                    .pulls()
+                    .await
+                    .into_iter()
+                    .filter(|(_, head, _)| head == &branch)
+                    .map(|(number, _, _)| number)
+                    .collect();
+                for number in &opened {
+                    env.api(
+                        reqwest::Method::DELETE,
+                        &format!("/repos/{}/issues/{number}", env.full_name()),
+                        None,
+                    )
+                    .await;
                 }
                 for name in [&branch, &base] {
                     env.api(
@@ -314,16 +327,17 @@ impl Drop for Litter {
                 }
 
                 let mut failures = Vec::new();
-                let left: Vec<u64> = env
+                let still_listed: Vec<u64> = env
                     .pulls()
                     .await
                     .into_iter()
-                    .filter(|(_, head, _)| head == &branch)
                     .map(|(number, _, _)| number)
+                    .filter(|number| opened.contains(number))
                     .collect();
-                if !left.is_empty() {
+                if !still_listed.is_empty() {
                     failures.push(format!(
-                        "pull request(s) {left:?} opened from {branch} are still in the listing"
+                        "pull request(s) {still_listed:?}, opened from {branch}, are still in the \
+                         state=all listing that live_gitea_capped.rs counts"
                     ));
                 }
                 let names = env.branches().await;
