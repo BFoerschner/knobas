@@ -270,6 +270,62 @@ dev: deps
 demo: deps
     cd crates/knobas-app && PATH="$PWD/../../app/node_modules/.bin:$PATH" tauri dev -- -- --demo
 
+# THE ALL-SKIPPED RUN. Every live recipe below calls this before it invokes
+# cargo, and it refuses the run in which nothing would have run (issue #351).
+#
+# `just teamcity-live` once reported **"12 passed"** with all twelve of those
+# tests skipped: there was no gitignored `.env`, so `KNOBAS_TEAMCITY_URL` was
+# unset and `live_or_skip!` returned from each test before it opened a
+# connection. A live recipe exists to say "the adapter works against the real
+# server". That run said nothing whatsoever and reported success -- into a PR
+# body, under the working model's live-run rule, as evidence.
+#
+# WHY THE GATE VARIABLES AND NOT THE SKIP COUNT. Counting the skips looks like
+# the more direct measurement, and it is not available: a `live_or_skip!` skip
+# is an early `return`, so libtest counts it as **passed**. The "12 passed"
+# above *is* the all-skipped run -- there is no skip count anywhere in cargo's
+# output to compare a total against. The only trace is the `SKIP:` line the
+# macro prints, which lives in one test file, is pinned by nothing, and is
+# visible only for as long as `--nocapture` stays on the command line. A guard
+# built on that would be reading a *message* where it means to read a fact, and
+# it would stop guarding silently the day somebody reworded the message -- which
+# is the same class of error one level up again. The gate variable is the fact:
+# it is the single input `live_or_skip!` and every sibling suite's `need()`
+# consult, and it is knowable before a test binary is even built.
+#
+# WHAT THIS DOES NOT CLAIM. A variable that is set is not a server that answers.
+# This is the *necessary* condition, checked at the one place where its absence
+# is silent: a wrong URL or a dead token already fails loudly and in the suite,
+# as a connection error or a 401. The hole being closed is the unset one.
+#
+# ONE SKIP STAYS LEGAL. Nothing here says anything about an individual test. A
+# suite whose gate variables are all present may still skip a test for a reason
+# of its own and pass; it is the run where *nothing* ran that is refused.
+#
+# CALLING IT. `just _require-live-env '<where they come from>' NAME [NAME...]`,
+# after the recipe has sourced its variables and while they are exported -- this
+# runs as a child process, so an unexported shell variable is invisible to it.
+# The first argument is printed verbatim and is what the person who hits this
+# actually needs; it may span lines. **Pass it in single quotes**: it is
+# interpolated into a single-quoted shell word, so double quotes and `$` inside
+# it are safe and a single quote in it is not.
+_require-live-env SOURCE +NAMES:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    missing=
+    for name in {{NAMES}}; do
+      if [ -z "${!name:-}" ]; then missing="${missing:+$missing }$name"; fi
+    done
+    [ -n "$missing" ] || exit 0
+    echo "error: unset or empty: $missing" >&2
+    echo "  Every test in this suite is gated on these. Without them the suite would" >&2
+    echo "  skip its way to a green line certifying nothing, so this recipe stops here" >&2
+    echo "  instead of reporting a success it has not earned (issue #351)." >&2
+    echo >&2
+    echo "  Where they come from:" >&2
+    echo '{{SOURCE}}' | sed 's/^/    /' >&2
+    exit 1
+
 # The Gitea adapter against the REAL pinned container in `testenv/`.
 #
 # That container is this adapter's contract source (interfaces §4.2). The
@@ -333,6 +389,8 @@ gitea-live:
     docker compose up -d --wait gitea
     ./seed-gitea.sh
     eval "$(./seed --env)"
+    just _require-live-env 'testenv/: ./seed-gitea.sh && eval "$(./seed --env)"' \
+      KNOBAS_GITEA_URL KNOBAS_GITEA_TOKEN
     cd ..
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-gitea --test live_gitea \
       -- --ignored --nocapture --test-threads=1
@@ -382,6 +440,10 @@ gitea-live-capped:
     docker compose up -d --wait gitea
     ./seed-gitea.sh
     eval "$(./seed --env)"
+    # Before the overlay, not after: a run refused for a missing variable must
+    # not be one that left the shared container capped on its way out.
+    just _require-live-env 'testenv/: ./seed-gitea.sh && eval "$(./seed --env)"' \
+      KNOBAS_GITEA_URL KNOBAS_GITEA_TOKEN
     uncap() { cd "$testenv" && docker compose up -d --wait gitea >/dev/null; }
     trap 'uncap' EXIT
     trap 'trap - EXIT INT; uncap; kill -INT $$' INT
@@ -389,6 +451,54 @@ gitea-live-capped:
     docker compose -f docker-compose.yml -f docker-compose.capped.yml up -d --wait gitea
     cd ..
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-gitea --test live_gitea_capped \
+      -- --ignored --nocapture --test-threads=1
+
+# M2 exit criterion 1 against the same real Gitea: ticket -> branch -> pull
+# request -> link -> In Progress, and back again when the pull request is
+# merged (issue #44). The suite is `crates/knobas-app/tests/start_work_live.rs`
+# and it is one test, deliberately -- the criterion is the round trip.
+#
+# WHICH RECIPE CERTIFIES WHAT. `gitea-live` above certifies the *adapter*
+# against the shapes interfaces §4.2 fixes. This one certifies the *flow* over
+# it: the real orchestrator, the real write queue, the real adapters and a real
+# database, with a mockd Jira in-process for the ticket side. Its sibling
+# `tests/start_work.rs` proves the same sequence against a fake dispatcher and
+# runs inside `just check`; nothing there touches a server. Until this recipe
+# existed nothing ran this file at all, and what an unrun suite accumulates is
+# what #347 found in it: an assertion no implementation could fail.
+#
+# WHAT IT WRITES TO GITEA AND WHAT IT TAKES BACK. It opens one branch named
+# `knobas-i44-<pid>`, commits one file on it, opens a draft pull request,
+# renames it out of draft and **merges** it -- the reverse direction is about a
+# pull request somebody actually finished, and Gitea refuses to merge one whose
+# title still carries the WIP prefix, which is what makes that prefix's claim a
+# real one. `Litter`'s `Drop` closes the pull request and deletes the branch
+# when the test ends, passing or panicking, under the `knobas-` prefix
+# `litter_guard.rs` pins nothing in the seed shares.
+#
+# **The merge commit is not taken back**, and cannot be: it is on
+# `payout-service`'s default branch, where deleting it would mean rewriting the
+# seeded history. So this recipe is repeatable but not perfectly
+# residue-free -- each run leaves one commit and one `knobas-i44-<pid>.txt` on
+# the default branch. Nothing downstream reads that file or counts those
+# commits; `testenv/reset` is the remedy if it ever matters, the same
+# deliberate-not-routine one `gitea-live` names.
+#
+# Serial and unparallelised for `gitea-live`'s reasons: one server, and a test
+# that writes to it. ONE ENVIRONMENT, ONE OWNER -- this seeds, so it re-mints
+# the Gitea token and 401s anyone else mid-run. Claim it first.
+# testenv/README.md, "One environment, one owner at a time".
+start-work-live:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd testenv
+    docker compose up -d --wait gitea
+    ./seed-gitea.sh
+    eval "$(./seed --env)"
+    just _require-live-env 'testenv/: ./seed-gitea.sh && eval "$(./seed --env)"' \
+      KNOBAS_GITEA_URL KNOBAS_GITEA_TOKEN
+    cd ..
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test start_work_live \
       -- --ignored --nocapture --test-threads=1
 
 # TeamCity's live certification: the adapter against a **real** TeamCity.
@@ -401,10 +511,26 @@ gitea-live-capped:
 # form: the corpus changes between one request and the next, so a fixed id, a
 # count or a title would be a test that fails for a reason nobody can act on.
 #
-# No docker and no seed, so this recipe is two lines: load `.env` and un-ignore
-# the tests. `.env` is optional -- with no `KNOBAS_TEAMCITY_URL` the suite
-# skips, naming the variable, rather than failing. `cp .env.example .env` is
-# enough to run it; the default URL needs no token.
+# **A GREEN HERE SAYS NOTHING ABOUT THE SEEDED SERVER, IN EITHER DIRECTION.**
+# This recipe reads the **repo-root `.env`** -- not `./seed --env`, not
+# `seed-state.json` -- and `.env.example`'s `KNOBAS_TEAMCITY_URL` is
+# `https://teamcity.jetbrains.com/guestAuth`, JetBrains' **public** instance.
+# So unless somebody has edited their own `.env`, what this certifies is the
+# adapter against a server we do not own, whose corpus changes under us. The
+# recipe for the container in `testenv/` is `teamcity-live-seeded` below, and
+# the two are not substitutes: `./seed --env` printing `KNOBAS_TEAMCITY_URL`
+# does not change this recipe's default either (testenv/README.md, "TeamCity,
+# with one build agent").
+#
+# No docker and no seed, so the body is three lines: load `.env`, refuse a run
+# with nothing to run against, un-ignore the tests. `cp .env.example .env` is
+# enough; the default URL needs no token, which is why only the URL is gated.
+#
+# `.env` USED TO BE OPTIONAL, and that is the bug this guard closes. With no
+# `.env` the suite skipped every test by name and libtest counted the skips as
+# passes: **"12 passed", nothing run, exit 0** (issue #351, found by #347's live
+# window). See `_require-live-env` above for why the variable is what is
+# checked rather than the skips.
 #
 # Serial and unparallelised on purpose. The rate limiter is per adapter
 # instance, so concurrent tests would not share one budget, and the server
@@ -413,6 +539,10 @@ teamcity-live:
     #!/usr/bin/env bash
     set -euo pipefail
     if [ -f .env ]; then set -a; . ./.env; set +a; fi
+    just _require-live-env 'the repo-root .env, which is gitignored:
+      cp .env.example .env
+    Its default URL is the public JetBrains guest instance and needs no token.' \
+      KNOBAS_TEAMCITY_URL
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-teamcity --test live_teamcity \
       -- --ignored --nocapture --test-threads=1
 
@@ -429,8 +559,9 @@ teamcity-live:
 # its variables: `./seed --env` prints KNOBAS_TEAMCITY_URL and
 # KNOBAS_TEAMCITY_TOKEN once `./seed --teamcity` has run. It is deliberately
 # not brought up here -- the TeamCity profile is opt-in and its seed depends
-# on the Gitea seed for its VCS roots -- so a missing token stops with the
-# three commands to run. testenv/README.md, "TeamCity, end to end".
+# on the Gitea seed for its VCS roots -- so a missing URL or token stops the
+# recipe, through the shared `_require-live-env` guard above, with the three
+# commands to run. testenv/README.md, "TeamCity, end to end".
 #
 # Serial and unparallelised for the same reason as `gitea-live`: one server,
 # and one test that mutates it. One owner at a time: testenv/README.md, "One
@@ -440,14 +571,12 @@ teamcity-live-seeded:
     set -euo pipefail
     cd testenv
     eval "$(./seed --env)"
-    if [ -z "${KNOBAS_TEAMCITY_TOKEN:-}" ]; then
-      echo "teamcity-live-seeded: no KNOBAS_TEAMCITY_TOKEN in seed-state.json -- the real" >&2
-      echo "  TeamCity is not seeded from this tree. From testenv/:" >&2
-      echo "    docker compose --profile real-teamcity up -d teamcity teamcity-agent" >&2
-      echo "    ./seed            # Gitea first: the VCS roots point at it" >&2
-      echo "    ./seed --teamcity" >&2
-      exit 1
-    fi
+    just _require-live-env 'seed-state.json, via eval "$(./seed --env)". No entry
+    there means the real TeamCity is not seeded from this tree. From testenv/:
+      docker compose --profile real-teamcity up -d teamcity teamcity-agent
+      ./seed            # Gitea first: the VCS roots point at it
+      ./seed --teamcity' \
+      KNOBAS_TEAMCITY_URL KNOBAS_TEAMCITY_TOKEN
     cd ..
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-teamcity --test live_teamcity_seeded \
       -- --ignored --nocapture --test-threads=1
@@ -603,6 +732,15 @@ atlassian-live:
     ./seed-atlassian-content.sh           # the Tidewater content
     ./seed-atlassian-content.sh --verify  # PAY-231 with its worklogs, one page with its body
     eval "$(./seed --env)"
+    # `./seed --env` prints the Atlassian block only once seed-state.json has a
+    # `jira`/`confluence` entry, so an unseeded state file yields four suites
+    # that would each stop on their own `need()` -- or, the day one of them
+    # grows a skip, would not. Refused here, once, for all four.
+    just _require-live-env 'seed-state.json, via eval "$(./seed --env)", once
+    seed-atlassian.sh and seed-atlassian-content.sh have run -- which is what
+    the lines above this one in this recipe do.' \
+      KNOBAS_JIRA_URL KNOBAS_JIRA_USER KNOBAS_JIRA_PASSWORD \
+      KNOBAS_CONFLUENCE_URL KNOBAS_CONFLUENCE_USER KNOBAS_CONFLUENCE_PASSWORD
     echo "atlassian-live: seeded and verified after $(( $(date +%s) - t0 ))s; KNOBAS_JIRA_URL=$KNOBAS_JIRA_URL KNOBAS_CONFLUENCE_URL=$KNOBAS_CONFLUENCE_URL"
     cd ..
     # ---- live suites gated on the Atlassian URLs: one line each, added here ----

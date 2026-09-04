@@ -21,11 +21,17 @@ Implementation now runs ticket-driven:
   reviewer in a throwaway worktree) and the **standard pass** (everything else).
 - **A PR at the real systems' edge carries its live run (rule, Björn 2026-09-02, ADR-0013).** A PR
   touching an adapter crate, a `WriteOp`, the descriptor, or the sync engine carries its live run's
-  output in its body, and the merge-manager re-runs it before squashing. The recipes are
-  `just gitea-live`, `just teamcity-live-seeded`, and `just atlassian-live` (arriving with #275);
-  a PR runs whichever its change reaches. `just check` stays as it is; the live run is in addition
-  to it, never inside it. A mockd run is not a substitute: the real container is the witness, a
-  mock certifies nothing, and mockd is deprecated.
+  output in its body, and the merge-manager re-runs it before squashing. The recipes, in full —
+  keep this list current, a suite whose recipe is missing from it is one nobody knows to run:
+  `just gitea-live`, `just gitea-live-capped`, `just start-work-live` (#350), `just teamcity-live`,
+  `just teamcity-live-seeded`, and `just atlassian-live`; a PR runs whichever its change reaches,
+  and one touching the start-work flow reaches `start-work-live`. `just check` stays as it is; the
+  live run is in addition to it, never inside it. A mockd run is not a substitute: the real
+  container is the witness, a mock certifies nothing, and mockd is deprecated.
+  **Paste the output, and read the counts.** A recipe reporting "N passed" is not on its own
+  evidence that N tests ran: a suite gated on an unset variable used to skip every test and report
+  success, so every recipe now refuses to start without its gate variables (#351, table in
+  `testenv/README.md`, *The live recipes*).
 - **Termination is objective, not vibes:** the agent's work ends when findings are resolved AND
   `just check` is green; hard cap 3 review rounds, then Björn adjudicates.
 - **Merging is delegated to a merge-manager agent (amended 2026-08-28 — Björn, overriding the

@@ -80,6 +80,39 @@ export KNOBAS_GITEA_REPO=payout-service
 `testenv/seed-state.json` relative to the crate unless
 `KNOBAS_TEAMCITY_SEED_STATE` names another path.
 
+## The live recipes
+
+Every live suite has a `just` recipe, and the recipe is how it is run — a suite
+with no recipe is one nothing runs, which is how
+`crates/knobas-app/tests/start_work_live.rs` came to be carrying an assertion no
+implementation could fail (issues #347, #350). Each recipe's own header in the
+`justfile` says what it certifies and what it writes; this table says which
+variables gate it and where those come from.
+
+| Recipe | Suite | Gated on | From |
+|---|---|---|---|
+| `just gitea-live` | `knobas-source-gitea` / `live_gitea` — the adapter against the shapes interfaces §4.2 fixes | `KNOBAS_GITEA_URL`, `KNOBAS_GITEA_TOKEN` | `./seed-gitea.sh` then `eval "$(./seed --env)"` (the recipe does both) |
+| `just gitea-live-capped` | `live_gitea_capped` — paged walks against a server capped to one record | as above | as above |
+| `just start-work-live` | `knobas-app` / `start_work_live` — M2 exit criterion 1, ticket → branch → PR → link → status and back | as above | as above |
+| `just teamcity-live` | `knobas-source-teamcity` / `live_teamcity` — the adapter against the **public JetBrains** instance, read-only | `KNOBAS_TEAMCITY_URL` | the repo-root `.env`: `cp .env.example .env` |
+| `just teamcity-live-seeded` | `live_teamcity_seeded` — the adapter against **our** seeded TeamCity | `KNOBAS_TEAMCITY_URL`, `KNOBAS_TEAMCITY_TOKEN` | `./seed --teamcity` then `eval "$(./seed --env)"` |
+| `just atlassian-live` | four suites across Jira, Confluence and the app | `KNOBAS_JIRA_URL`/`USER`/`PASSWORD`, `KNOBAS_CONFLUENCE_URL`/`USER`/`PASSWORD` | the recipe seeds the pair and evals `./seed --env` itself |
+
+**A recipe with nothing to run against fails; it does not pass quietly.** Each
+one calls the `justfile`'s `_require-live-env` guard on the variables above
+before it invokes cargo, and stops naming the ones that are missing and where
+they come from. This is not hypothetical: `just teamcity-live` reported *"12
+passed"* with every one of those twelve tests skipped, because there was no
+`.env`, `KNOBAS_TEAMCITY_URL` was unset, and `live_or_skip!` returns early —
+which libtest counts as a **pass**, so there is no skip total in cargo's output
+to notice (issue #351). The guard checks the variables rather than the skips for
+exactly that reason. It says nothing about an individual test: a suite whose
+variables are all present may still skip one for a reason of its own and pass.
+
+`just teamcity-live` reads the **repo-root `.env`** and points at a server that
+is not ours; a green from it is not a statement about the container in this
+directory, in either direction. That is `teamcity-live-seeded`.
+
 ## One environment, one owner at a time
 
 The repo's standing rule is that a worktree has exactly one owner. **This
