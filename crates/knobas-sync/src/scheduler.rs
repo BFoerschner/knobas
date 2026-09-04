@@ -1169,6 +1169,12 @@ impl Scheduler {
     /// the id of a run already in flight -- so neither wait can be for
     /// something that will never speak.
     ///
+    /// **Not a full sync**, whatever the name suggests: every run this asks for
+    /// is an *incremental sync* in `CONTEXT.md`'s sense, from the stored
+    /// cursor, and [`backfill`](Self::backfill) is still the only cursor-less
+    /// run. What `resync` names here is the **wait**, which is the whole of
+    /// what it adds to [`trigger`](Self::trigger).
+    ///
     /// Answers the id of the run it waited on last.
     ///
     /// # Errors
