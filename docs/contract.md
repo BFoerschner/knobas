@@ -4562,7 +4562,10 @@ From this commit on, each of the following requires an orchestrator decision **a
   `notification:allow-notify` one at a time rather than `notification:default`, which bundles
   sixteen — channels, scheduling, cancelling, reading back what is on screen. A missing grant is
   denied at run time with nothing failing in the build, which is what the two capability tests are
-  for.
+  for. *Superseded in part by #339's entry below (2026-09-04): the `notification:allow-notify` grant
+  left `capabilities/default.json` when knobas stopped calling the plugin's `notify`, and the list
+  above is left as history rather than rewritten, the treatment the #53 entry gives the #52 sentences
+  it supersedes.*
 
   **Nothing new crosses the bridge as an event.** The notifier listens to the inbox moving, which is
   `activity:new` and `sync:state` re-read through the existing store — `inbox.svelte.ts`'s own

@@ -6,7 +6,7 @@
 
   Every other section here takes its bridge as a prop, because every other
   section is the only reader of the setting it draws. This one is not: the
-  listener in `inbox/notify.svelte.ts` reads the same kinds to decide whether
+  listener in `inbox/notify.svelte.ts` reads the same categories to decide whether
   an item may interrupt somebody, and two independent reads of one setting is
   two chances for the switch on screen to disagree with the switch that fires.
   So the store is the seam, and the prop exists for the test that drives it.
@@ -14,7 +14,7 @@
   ## Why the permission is asked for here and not on the way in
 
   Story 72: knobas asks for nothing it is not about to use. The prompt belongs
-  to the click that switches the first kind on, and never to the settings view
+  to the click that switches the first category on, and never to the settings view
   opening — a person browsing their settings has not asked to be interrupted.
   A refusal leaves every box off, which is the store's rule and is stated here
   as well, because a checkbox that sprang back is otherwise indistinguishable
@@ -38,7 +38,7 @@
    * Pinned to that list by `knobas_app::inbox`'s
    * `every_inbox_category_has_a_toggle_in_the_interface`: a sixth category
    * added on the Rust side would otherwise be a demand nobody can ever switch
-   * notifications on for, with nothing failing anywhere.
+   * desktop notifications on for, with nothing failing anywhere.
    */
   const KINDS: { id: InboxCategory; label: string }[] = [
     { id: "review_request", label: "Review requests" },
@@ -75,13 +75,14 @@
 <div class="sec-b">
   <p>
     When an inbox item arrives while this window is <em>not</em> focused, knobas can
-    hand it to the operating system as a notification. Clicking one opens the item.
+    hand it to the operating system as a desktop notification. Clicking one opens the
+    item.
   </p>
   <p class="sub">
     Nothing is sent while the window is focused — you are never told about
     something already on screen — and nothing is sent for an item you have
-    already been told about. Every kind is off until you switch it on, and the
-    first one you switch on is when your operating system is asked whether
+    already been told about. Every category is off until you switch it on, and
+    the first one you switch on is when your operating system is asked whether
     knobas may notify you at all.
   </p>
 
@@ -103,9 +104,9 @@
 
     {#if store.permission === "refused"}
       <p class="fail">
-        Your operating system refused notifications for knobas, so nothing was
-        switched on. Allow them for knobas in the system settings, then try
-        again.
+        Your operating system refused desktop notifications for knobas, so
+        nothing was switched on. Allow them for knobas in the system settings,
+        then try again.
       </p>
     {:else if store.permission === "granted"}
       <p class="sub ok">Your operating system allows knobas to notify you.</p>

@@ -98,7 +98,7 @@ afterEach(() => {
  * decide whether anything ever fires: only while the window is not focused,
  * and only once per item.
  */
-test("the section offers one switch per kind and says when a notification fires", async () => {
+test("the section offers one switch per category and says when a desktop notification fires", async () => {
   render();
   await vi.waitFor(() => expect(boxes()).toHaveLength(5));
 
@@ -112,6 +112,8 @@ test("the section offers one switch per kind and says when a notification fires"
   expect(text()).toContain("not");
   expect(text()).toContain("focused");
   expect(text()).toContain("already been told about");
+  expect(text(), "the copy spells desktop notification in full").toContain("desktop notification");
+  expect(text(), "the copy says category, not kind, for the switch").toContain("Every category");
 });
 
 /** All off is what a profile nobody has opted in on draws (story 71). */
@@ -124,7 +126,7 @@ test("a profile nobody has opted in on draws every switch off", async () => {
   }
 });
 
-test("the switches draw the stored kinds", async () => {
+test("the switches draw the stored categories", async () => {
   render({ stored: ["mention", "failed_build"] });
   await vi.waitFor(() => expect(boxes()).toHaveLength(5));
 
@@ -137,7 +139,7 @@ test("the switches draw the stored kinds", async () => {
  * **Switching the first one on asks the operating system and says what it
  * answered** (story 72).
  */
-test("switching the first kind on asks the OS, stores it, and reports the outcome", async () => {
+test("switching the first category on asks the OS, stores it, and reports the outcome", async () => {
   const { calls } = render();
   await vi.waitFor(() => expect(boxes()).toHaveLength(5));
 
@@ -166,7 +168,7 @@ test("an OS that refuses leaves every switch off and says so", async () => {
   box("Mentions").click();
   await vi.waitFor(() => {
     flushSync();
-    expect(text()).toContain("refused notifications for knobas");
+    expect(text()).toContain("refused desktop notifications for knobas");
   });
   expect(calls.asked).toBe(1);
   expect(calls.stored, "a refused permission wrote a setting").toEqual([]);
@@ -196,7 +198,7 @@ test("the first switch-on against an already-granted permission still says so", 
 });
 
 /** Switching one off sends the rest and asks the OS nothing. */
-test("switching a kind off sends what is left and prompts nobody", async () => {
+test("switching a category off sends what is left and prompts nobody", async () => {
   const { calls } = render({ stored: ["review_request", "mention"], granted: true });
   await vi.waitFor(() => expect(boxes()).toHaveLength(5));
 
@@ -213,7 +215,7 @@ test("switching a kind off sends what is left and prompts nobody", async () => {
  * A write that failed leaves the switches reading what is stored and says why
  * — the rule `PassiveSection` records for the same screen.
  */
-test("a write that is refused says why rather than claiming the kind is on", async () => {
+test("a write that is refused says why rather than claiming the category is on", async () => {
   render({
     granted: true,
     ports: {
@@ -232,7 +234,7 @@ test("a write that is refused says why rather than claiming the kind is on", asy
 });
 
 /**
- * A read that failed is not "every kind off": *off* is a claim about what is
+ * A read that failed is not "every category off": *off* is a claim about what is
  * stored, and a section that could not ask has not earned it. Retry asks
  * again.
  */
