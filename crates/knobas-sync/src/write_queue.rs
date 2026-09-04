@@ -68,11 +68,37 @@ const ACTOR: &str = "user";
 /// for it, and ADR-0012 singles out the first as the op a duplicate files
 /// twice.
 ///
-/// **`create_branch` and `create_pull_request` are deliberately not here.**
-/// They were weighed under this question in #333's table and left with the
-/// re-send answer they had -- Gitea refuses the duplicate with a 409 -- and
-/// widening to them is a decision for the ticket that makes it, not a side
-/// effect of this one.
+/// **`create_branch` and `create_pull_request` are deliberately not here, and
+/// the reason is the withdrawn row rather than the 409** (issue #353, which
+/// made the decision #336 left open; #333's table had only the *re-send*
+/// answer, which is a different question).
+///
+/// Both open something against a ref the caller named -- `create_branch`'s
+/// `name`, `create_pull_request`'s `head` -- and the withdrawal keeps it:
+/// `knobas_core::write_queue::discard` keeps the row *with its payload*, "so
+/// what was withdrawn is still answerable". That ref is an address and not
+/// merely a label. A branch's name **is** its identity at the source, and
+/// Gitea holds at most one open pull request per `head`/`base` pair (`an open
+/// pull request already exists for this pair` is among the refusals
+/// `knobas_source_gitea::write::create_pull_request` documents). So the next
+/// sync mirrors an artefact the withdrawn row can still be matched to -- and
+/// knobas already owns both reads and already depends on them:
+/// `knobas_app::start_work::queue`'s `BRANCH_BY_NAME` and
+/// `PULL_REQUEST_BY_HEAD` are how the start-work flow looks before it writes,
+/// and how its link step finds a pull request at all. Retrying a
+/// `create_pull_request` step whose write was withdrawn in flight finds the
+/// pull request *by that head*, settles it "already open", and the link step
+/// then draws the edge back to the ticket that asked for it. The artefact is
+/// reclaimable, so a line saying nothing claims it would be false.
+///
+/// **The property is the address, not "the server named nothing".** Gitea
+/// answers `WriteReceipt::none()` for both ops on the *success* path too, so a
+/// pull request's server-assigned number is nothing the withdrawal took away
+/// -- knobas never has it, and reads it back out of the mirror either way.
+/// `create_ticket` is in the list because after the withdrawal nothing
+/// recovers *which* ticket: "the next sync cannot tell a ticket it made from
+/// one a colleague made" (`unclaimed`, below), and a title is not an address
+/// the way a head branch is.
 ///
 /// Stated as a list for [`PROJECTED_OPS`](store::PROJECTED_OPS)'s reason, and
 /// guarded the same way: `every_write_op_says_whether_a_withdrawal_can_leave_one`
