@@ -4752,7 +4752,8 @@ From this commit on, each of the following requires an orchestrator decision **a
   `notify.svelte.ts`'s module header, and the README.
 
   **Pinned by:** `notify::tests` (the registry over an injected backend: the second send, the
-  seventeenth waiter, the freed slot, the click emitted and the clear not, a refused show),
+  seventeenth waiter, the freed slot, the slot held until the click has left, the click emitted
+  and the clear not, a refused show),
   `tests/entity_mirror.rs` (`NotificationDraft`, `NotificationClicked`), `lib.rs`'s
   `the_event_names_match_their_typescript_mirror`, `commands::entity`'s barrel-versus-mirror test,
   `tests/wiring.rs` (the two grants and no third), and `notify.test.svelte.ts` (the store with the

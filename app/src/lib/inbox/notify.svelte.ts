@@ -217,8 +217,9 @@ export function clickChannel(listen: Listen = tauriListen): NotifyPorts["onActio
  * The real `send`: the `notify` command, given the address out of `extra`.
  *
  * A draft with no string address is not sent at all — the backend would key
- * a waiter to it and its click would open nowhere; every draft this store
- * writes has one, so the guard is the type's, not a path anything reaches.
+ * a waiter to it and its click would open nowhere. Every draft this store
+ * writes carries one, so in the window the guard is the type's; its test
+ * reaches it by hand.
  *
  * Fire-and-forget on purpose — the port is synchronous and a refused send
  * has no surface to land on. The refusal is not lost: the Rust side logs it

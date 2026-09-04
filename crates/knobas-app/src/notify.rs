@@ -118,8 +118,9 @@ where
     }
 }
 
-/// What became of a send, for the log and the tests. The notification was
-/// shown in every case; the variants say whether a click can reach anybody.
+/// What became of a send, for the tests -- the command discards it, having
+/// said what it needed to at `debug` on the thread. The notification was shown
+/// in every case; the variants say whether a click can reach anybody.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Delivery {
     /// Shown, and a thread is waiting on its click.
@@ -171,7 +172,7 @@ impl Notifier {
         }
     }
 
-    /// How many waits are running. For the tests and the log.
+    /// How many waits are running. For the tests.
     #[must_use]
     pub fn waiting(&self) -> usize {
         self.waiting
@@ -375,11 +376,19 @@ mod tests {
     #[derive(Default)]
     struct FakeEvents {
         clicked: Mutex<Vec<String>>,
+        /// When set, the first emit records its address and then blocks
+        /// until the test opens the gate -- so the test can look at the
+        /// registry while a click is still leaving.
+        hold: Mutex<Option<mpsc::Receiver<()>>>,
     }
 
     impl NotificationEvents for FakeEvents {
         fn notification_clicked(&self, address: String) {
+            let gate = self.hold.lock().unwrap().take();
             self.clicked.lock().unwrap().push(address);
+            if let Some(gate) = gate {
+                let _ = gate.recv();
+            }
         }
     }
 
@@ -570,8 +579,39 @@ mod tests {
         b.settled();
     }
 
-    /// A platform that refuses is reported, and holds no slot: the next send
-    /// for the same address is a fresh attempt rather than a duplicate.
+    /// The slot outlives the emit. While a click is still leaving, the
+    /// registry still counts its wait, so a registry that reads as empty has
+    /// nothing left in flight -- the order `settled` leans on above. Pinned
+    /// here because every other test passes with the slot released *before*
+    /// the emit: the gap is microseconds, and `settled` wins the race.
+    #[test]
+    fn the_slot_is_held_until_the_click_has_left() {
+        let b = Bench::new();
+        let (open, gate) = mpsc::channel::<()>();
+        *b.events.hold.lock().unwrap() = Some(gate);
+        assert_eq!(b.send("#/inbox"), Delivery::Waiting);
+        b.release("#/inbox", "default");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while b.clicked().is_empty() {
+            assert!(Instant::now() < deadline, "the click never began to leave");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(
+            b.notifier.waiting(),
+            1,
+            "the slot is freed only once the click has left"
+        );
+        open.send(()).expect("the emit is waiting on the gate");
+        b.settled();
+        assert_eq!(b.clicked(), vec!["#/inbox"]);
+    }
+
+    /// A platform that refuses is reported, and keeps no slot: the next send
+    /// for the same address is a fresh attempt rather than a duplicate. (The
+    /// slot is held *while* the show runs -- `admitted` travels with the
+    /// thread -- so a same-address send racing a show that then fails reads
+    /// `AlreadyWaiting` and goes fire-and-forget; that window is the show's
+    /// few milliseconds, and it is freed the moment the refusal is known.)
     #[test]
     fn a_refused_show_is_an_error_and_holds_no_slot() {
         let b = Bench::new();

@@ -81,6 +81,7 @@ knobas-app	lib/knobas_app	notify::tests::a_completed_wait_frees_its_slot_for_the
 knobas-app	lib/knobas_app	notify::tests::a_refused_show_is_an_error_and_holds_no_slot
 knobas-app	lib/knobas_app	notify::tests::a_second_send_for_an_address_already_waiting_shows_but_starts_no_second_wait
 knobas-app	lib/knobas_app	notify::tests::the_seventeenth_concurrent_waiter_shows_but_does_not_wait
+knobas-app	lib/knobas_app	notify::tests::the_slot_is_held_until_the_click_has_left
 knobas-app	lib/knobas_app	profile::tests::a_blank_database_url_counts_as_unset
 knobas-app	lib/knobas_app	profile::tests::a_demo_profile_ignores_an_externally_managed_database
 knobas-app	lib/knobas_app	profile::tests::demo_is_a_separate_directory_database_and_keychain
