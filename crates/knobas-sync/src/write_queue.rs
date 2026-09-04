@@ -68,11 +68,60 @@ const ACTOR: &str = "user";
 /// for it, and ADR-0012 singles out the first as the op a duplicate files
 /// twice.
 ///
-/// **`create_branch` and `create_pull_request` are deliberately not here.**
-/// They were weighed under this question in #333's table and left with the
-/// re-send answer they had -- Gitea refuses the duplicate with a 409 -- and
-/// widening to them is a decision for the ticket that makes it, not a side
-/// effect of this one.
+/// **`create_branch` and `create_pull_request` are deliberately not here, and
+/// the reason is the withdrawn row rather than the 409** (issue #353, which
+/// made the decision #336 left open; #333's table had only the *re-send*
+/// answer, which is a different question).
+///
+/// Both open something against a ref the caller named -- `create_branch`'s
+/// `name`, `create_pull_request`'s `head` -- and the withdrawal keeps it:
+/// `knobas_core::write_queue::discard` keeps the row *with its payload*, "so
+/// what was withdrawn is still answerable". That ref is an address and not
+/// merely a label. A branch's name **is** its identity at the source, and
+/// Gitea holds at most one open pull request per `head`/`base` pair (`an open
+/// pull request already exists for this pair` is among the refusals
+/// `knobas_source_gitea::write::create_pull_request` documents). So the next
+/// sync mirrors an artefact the withdrawn row can still be matched to -- and
+/// knobas already owns both reads and already depends on them:
+/// `knobas_app::start_work::queue`'s `BRANCH_BY_NAME` and
+/// `PULL_REQUEST_BY_HEAD` are how the start-work flow looks before it writes,
+/// and how its link step finds a pull request at all. Retrying a
+/// `create_pull_request` step whose write was withdrawn in flight finds the
+/// pull request *by that head*, settles it "already open", and the link step
+/// then draws the edge back to the ticket that asked for it. The artefact is
+/// reclaimable, so a line saying nothing claims it would be false.
+///
+/// **The reclaiming is start-work's; the address is the op's.** A
+/// `create_pull_request` submitted straight through `submit_write` has no flow
+/// to retry it, so nothing walks that path on its own. What is true of the op
+/// either way is the part this list turns on -- the row still names where to
+/// look, and the read that looks is already written -- and start-work is the
+/// caller that has one, which is the caller this op exists for (#44).
+///
+/// **The address is not a perfect key, and it does not have to be.**
+/// `PULL_REQUEST_BY_HEAD` reads `sync.live_item`, which knows nothing of open
+/// versus closed, so a repository that re-used a head branch can match more
+/// than one pull request and the statement takes one of them. That ambiguity
+/// belongs to the look-before-write and the withdrawal adds nothing to it.
+/// What the row has to do here is narrower: name one repository's pull
+/// requests from one named branch, which is a set a person can look at.
+/// `base` narrows it further; a `title` does not narrow to one artefact at
+/// all, since any number of them can carry the same one -- which is exactly
+/// why `create_ticket`, whose row carries a title and no address, needs the
+/// line. The tree already draws that same line, in the read direction:
+/// `knobas_app::commands::entity::ticket_titled` is the read-back for a
+/// created ticket, and its own doc says why it is the weaker one --
+/// "`start_work`'s precedent matched a head branch, and this matches free
+/// prose".
+///
+/// **The property is the address, not "the server named nothing".** Gitea
+/// answers `WriteReceipt::none()` for both ops on the *success* path too, so a
+/// pull request's server-assigned number is nothing the withdrawal took away
+/// -- knobas never has it, and reads it back out of the mirror either way.
+/// `create_ticket` is in the list because after the withdrawal nothing
+/// recovers *which* ticket: "the next sync cannot tell a ticket it made from
+/// one a colleague made" (`unclaimed`, below), and a title is not an address
+/// the way a head branch is.
 ///
 /// Stated as a list for [`PROJECTED_OPS`](store::PROJECTED_OPS)'s reason, and
 /// guarded the same way: `every_write_op_says_whether_a_withdrawal_can_leave_one`
