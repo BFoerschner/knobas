@@ -105,9 +105,14 @@ const ACTOR: &str = "user";
 /// belongs to the look-before-write and the withdrawal adds nothing to it.
 /// What the row has to do here is narrower: name one repository's pull
 /// requests from one named branch, which is a set a person can look at.
-/// `base` narrows it further; `title` narrows it not at all, since two
-/// artefacts can carry the same one -- which is exactly why `create_ticket`,
-/// whose row carries a title and no address, needs the line.
+/// `base` narrows it further; a `title` does not narrow to one artefact at
+/// all, since any number of them can carry the same one -- which is exactly
+/// why `create_ticket`, whose row carries a title and no address, needs the
+/// line. The tree already draws that same line, in the read direction:
+/// `knobas_app::commands::entity::ticket_titled` is the read-back for a
+/// created ticket, and its own doc says why it is the weaker one --
+/// "`start_work`'s precedent matched a head branch, and this matches free
+/// prose".
 ///
 /// **The property is the address, not "the server named nothing".** Gitea
 /// answers `WriteReceipt::none()` for both ops on the *success* path too, so a
