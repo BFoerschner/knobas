@@ -34,7 +34,12 @@ const PAGE: EntityPage = {
 
 const DETAIL: EntityDetail = {
   row: PAGE.rows[0]!,
-  source: { id: "mock", display_name: "Mock", adapter_kind: "mock", enabled: true },
+  source: {
+    id: "mock",
+    display_name: "Mock",
+    adapter_kind: "mock",
+    enabled: true,
+  },
   kind_info: null,
   body_text: "the SEPA batch",
   author: null,
@@ -49,6 +54,9 @@ vi.mock("../ipc/entity", () => ({
   // The write the ticket detail's status select queues (#179). Not what this
   // file is about, so it refuses.
   submitWrite: () => Promise.reject(new Error("no write in this test")),
+  // The desktop notification send (#339): the notifier store imports it at
+  // module level. Nothing here notifies, so it refuses.
+  notify: () => Promise.reject(new Error("no notification in this test")),
   // Contexts (#47): the store imports these at module level, so every mock of
   // this module has to define them even where no context is ever made.
   listContexts: () => Promise.resolve([]),
@@ -56,7 +64,8 @@ vi.mock("../ipc/entity", () => ({
   // (#209). Empty here: this file is not about which rooms exist.
   listProjects: () => Promise.resolve([]),
   contextMembers: () => Promise.resolve([]),
-  createContext: () => Promise.reject(new Error("no context creation in this test")),
+  createContext: () =>
+    Promise.reject(new Error("no context creation in this test")),
   promoteContext: () => Promise.reject(new Error("no promotion in this test")),
   // The Tickets tile's read (#178); this file is about addresses, not the
   // board.
@@ -65,7 +74,12 @@ vi.mock("../ipc/entity", () => ({
   // mock has to answer for it. Three empty lists -- this file is about which
   // surface an address reaches, not about what is on it.
   standupDigest: () =>
-    Promise.resolve({ yesterday_day: null, yesterday: [], today: [], blockers: [] }),
+    Promise.resolve({
+      yesterday_day: null,
+      yesterday: [],
+      today: [],
+      blockers: [],
+    }),
   // The standup protocol under the digest (#289). Its panel and the settings
   // section both import these at module level, so the mock has to define them
   // wherever the shell is mounted whole.
@@ -79,8 +93,10 @@ vi.mock("../ipc/entity", () => ({
   standupPublishTarget: () => Promise.resolve(null),
   setStandupPublishTarget: () =>
     Promise.reject(new Error("no publish target change in this test")),
-  publishStandupProtocol: () => Promise.reject(new Error("no publish in this test")),
-  createActionItemTicket: () => Promise.reject(new Error("no ticket in this test")),
+  publishStandupProtocol: () =>
+    Promise.reject(new Error("no publish in this test")),
+  createActionItemTicket: () =>
+    Promise.reject(new Error("no ticket in this test")),
   getNote: () =>
     Promise.resolve({
       note: {
@@ -121,28 +137,66 @@ vi.mock("../ipc/sources", () => ({
   syncNow: () => Promise.resolve(1),
   syncAll: () => Promise.resolve([]),
   deleteSource: () => Promise.resolve(),
-  setSourceSecret: () => Promise.resolve({ source_id: "mock", state: "ok", checked_at: null, detail: null, secret_expires_at: null }),
+  setSourceSecret: () =>
+    Promise.resolve({
+      source_id: "mock",
+      state: "ok",
+      checked_at: null,
+      detail: null,
+      secret_expires_at: null,
+    }),
   credentialHealth: () => Promise.resolve([]),
   syncStatus: () => Promise.resolve([]),
   listSyncRuns: () => Promise.resolve([]),
-  dbStats: () => Promise.resolve({ db_bytes: 0, entity_count: 0, item_count: 0, per_source: [], oldest_synced_at: null, newest_synced_at: null }),
+  dbStats: () =>
+    Promise.resolve({
+      db_bytes: 0,
+      entity_count: 0,
+      item_count: 0,
+      per_source: [],
+      oldest_synced_at: null,
+      newest_synced_at: null,
+    }),
   listAdapters: () => Promise.resolve([]),
   addSource: () => Promise.reject(new Error("unused")),
   testSource: () => Promise.reject(new Error("unused")),
   reindexFts: () => Promise.resolve(),
-  demoLoad: () => Promise.resolve({ source_id: "mock", upserted: 0, deleted: 0, swept: 0, cursor: "" }),
+  demoLoad: () =>
+    Promise.resolve({
+      source_id: "mock",
+      upserted: 0,
+      deleted: 0,
+      swept: 0,
+      cursor: "",
+    }),
   syncNowWithProgress: () => Promise.resolve(1),
 }));
 
 vi.mock("../ipc/search", () => ({
   search: () =>
     Promise.resolve({
-      interpreted: { text: "", prefix: null, filters: { sources: [], kinds: [], updated_within_days: null, mine: false }, unknown_tokens: [] },
+      interpreted: {
+        text: "",
+        prefix: null,
+        filters: {
+          sources: [],
+          kinds: [],
+          updated_within_days: null,
+          mine: false,
+        },
+        unknown_tokens: [],
+      },
       groups: [],
       total: 0,
       took_ms: 1,
     }),
-  launcherHome: () => Promise.resolve({ smart_lists: [], recent: [], sources: [], pending_writes: 0 }),
+  launcherHome: () =>
+    Promise.resolve({
+      smart_lists: [],
+      recent: [],
+      sources: [],
+      pending_writes: 0,
+    }),
   smartLists: () => Promise.resolve([]),
   smartListItems: () => Promise.resolve([]),
 }));
@@ -178,10 +232,12 @@ vi.mock("../ipc/time", () => ({
   // The settings view is one of the addresses below, and its passive
   // attribution section reads this on mount (#282).
   passiveAttribution: () => Promise.resolve(false),
-  setPassiveAttribution: () => Promise.reject(new Error("no settings write in this test")),
+  setPassiveAttribution: () =>
+    Promise.reject(new Error("no settings write in this test")),
   // The week timesheet sits under the day strip on the same address (#283),
   // so a time deep link mounts it too.
-  weekTimesheet: () => Promise.resolve({ days: [], rows: [], past_horizon: [] }),
+  weekTimesheet: () =>
+    Promise.resolve({ days: [], rows: [], past_horizon: [] }),
   logAllPreview: () => Promise.reject(new Error("no plan in this test")),
   logAll: () => Promise.reject(new Error("no write in this test")),
 }));

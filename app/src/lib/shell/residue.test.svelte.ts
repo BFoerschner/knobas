@@ -80,7 +80,12 @@ const PAGE: EntityPage = { rows: [ROW], total: 1 };
 
 const DETAIL: EntityDetail = {
   row: ROW,
-  source: { id: "mock", display_name: "Tidewater (mock)", adapter_kind: "mock", enabled: true },
+  source: {
+    id: "mock",
+    display_name: "Tidewater (mock)",
+    adapter_kind: "mock",
+    enabled: true,
+  },
   kind_info: null,
   body_text: "body",
   author: "mara",
@@ -116,6 +121,9 @@ vi.mock("../ipc/entity", () => ({
   // The write the ticket detail's status select queues (#179). Not what this
   // file is about, so it refuses.
   submitWrite: () => Promise.reject(new Error("no write in this test")),
+  // The desktop notification send (#339): the notifier store imports it at
+  // module level. Nothing here notifies, so it refuses.
+  notify: () => Promise.reject(new Error("no notification in this test")),
   // Contexts (#47): the store imports these at module level, so every mock of
   // this module has to define them even where no context is ever made.
   listContexts: () => Promise.resolve([]),
@@ -123,7 +131,8 @@ vi.mock("../ipc/entity", () => ({
   // (#209). Empty here: this file is not about which rooms exist.
   listProjects: () => Promise.resolve([]),
   contextMembers: () => Promise.resolve([]),
-  createContext: () => Promise.reject(new Error("no context creation in this test")),
+  createContext: () =>
+    Promise.reject(new Error("no context creation in this test")),
   promoteContext: () => Promise.reject(new Error("no promotion in this test")),
   listEntities: () => deferred(PAGE),
   // The standup digest (#288). The `ports` prop is what the case below drives
@@ -242,7 +251,12 @@ vi.mock("../ipc/backup", () => ({
       next_due_at: null,
       archives: [],
     }),
-  backupNow: () => deferred({ taken_at: "2026-08-29T01:00:00Z", file: "knobas-x.knobas", bytes: 1 }),
+  backupNow: () =>
+    deferred({
+      taken_at: "2026-08-29T01:00:00Z",
+      file: "knobas-x.knobas",
+      bytes: 1,
+    }),
   setBackupSchedule: () => deferred(undefined),
   restoreBackup: () => deferred(undefined),
 }));
@@ -251,7 +265,8 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: (event: string, handler: (payload: { payload: unknown }) => void) => {
     // Modelled as a real `window` listener so that failing to unsubscribe is
     // the same failure as failing to remove a listener. See the module docs.
-    const relay = (raised: Event) => handler({ payload: (raised as CustomEvent).detail });
+    const relay = (raised: Event) =>
+      handler({ payload: (raised as CustomEvent).detail });
     window.addEventListener(`tauri:${event}`, relay);
     return deferred(() => window.removeEventListener(`tauri:${event}`, relay));
   },
@@ -281,15 +296,20 @@ const DayReview = (await import("../time/DayReview.svelte")).default;
 const WeekTimesheet = (await import("../time/WeekTimesheet.svelte")).default;
 const StandupView = (await import("../standup/StandupView.svelte")).default;
 const ProtocolPanel = (await import("../standup/ProtocolPanel.svelte")).default;
-const StandupSection = (await import("../settings/StandupSection.svelte")).default;
+const StandupSection = (await import("../settings/StandupSection.svelte"))
+  .default;
 const AddSource = (await import("../sources/AddSource.svelte")).default;
 const Diagnostics = (await import("../sources/Diagnostics.svelte")).default;
 const FirstRun = (await import("../sources/FirstRun.svelte")).default;
 const ReenterSecret = (await import("../sources/ReenterSecret.svelte")).default;
 const SourcesView = (await import("../sources/SourcesView.svelte")).default;
-const BackupSection = (await import("../settings/BackupSection.svelte")).default;
-const PassiveSection = (await import("../settings/PassiveSection.svelte")).default;
-const NotificationsSection = (await import("../settings/NotificationsSection.svelte")).default;
+const BackupSection = (await import("../settings/BackupSection.svelte"))
+  .default;
+const PassiveSection = (await import("../settings/PassiveSection.svelte"))
+  .default;
+const NotificationsSection = (
+  await import("../settings/NotificationsSection.svelte")
+).default;
 const { createNotifications } = await import("../inbox/notify.svelte");
 const { createHealth } = await import("./health.svelte");
 
@@ -307,7 +327,13 @@ const LAUNCHER_PORTS = {
       interpreted: {
         text: "sepa",
         prefix: null,
-        filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
+        filters: {
+          sources: [],
+          kinds: [],
+          updated_within_days: null,
+          mine: false,
+          authors: [],
+        },
         unknown_tokens: [],
       },
       groups: [],
@@ -373,11 +399,15 @@ const CASES: Case[] = [
     name: "ContextTabs",
     source: "lib/shell/ContextTabs.svelte",
     open: (target) => ({
-      app: mount(ContextTabs, { target, props: { router: createRouter(), contexts: CONTEXTS } }),
+      app: mount(ContextTabs, {
+        target,
+        props: { router: createRouter(), contexts: CONTEXTS },
+      }),
     }),
     // The window listener only exists while the popover is open, so a pass
     // that never opened it would prove nothing about the teardown.
-    exercise: (target) => target.querySelector<HTMLButtonElement>(".ctx-name")?.click(),
+    exercise: (target) =>
+      target.querySelector<HTMLButtonElement>(".ctx-name")?.click(),
   },
   {
     name: "StatusBar",
@@ -411,7 +441,10 @@ const CASES: Case[] = [
     name: "SuggestionTray",
     source: "lib/shell/SuggestionTray.svelte",
     open: (target) => ({
-      app: mount(SuggestionTray, { target, props: { sources: [], onopen: () => {} } }),
+      app: mount(SuggestionTray, {
+        target,
+        props: { sources: [], onopen: () => {} },
+      }),
     }),
   },
   {
@@ -448,7 +481,10 @@ const CASES: Case[] = [
     name: "Room",
     source: "lib/shell/Room.svelte",
     open: (target) => ({
-      app: mount(Room, { target, props: { router: createRouter(), contexts: CONTEXTS } }),
+      app: mount(Room, {
+        target,
+        props: { router: createRouter(), contexts: CONTEXTS },
+      }),
     }),
   },
   {
@@ -536,8 +572,10 @@ const CASES: Case[] = [
           day: "2026-09-03",
           ports: {
             dayBlocks: () => deferred({ blocks: [], past_horizon: false }),
-            updateBlock: () => Promise.reject(new Error("no edit in this test")),
-            deleteBlock: () => Promise.reject(new Error("no edit in this test")),
+            updateBlock: () =>
+              Promise.reject(new Error("no edit in this test")),
+            deleteBlock: () =>
+              Promise.reject(new Error("no edit in this test")),
           },
         },
       }),
@@ -558,8 +596,10 @@ const CASES: Case[] = [
         props: {
           day: "2026-08-26",
           ports: {
-            weekTimesheet: () => deferred({ days: [], rows: [], past_horizon: [] }),
-            logAllPreview: () => Promise.reject(new Error("no plan in this test")),
+            weekTimesheet: () =>
+              deferred({ days: [], rows: [], past_horizon: [] }),
+            logAllPreview: () =>
+              Promise.reject(new Error("no plan in this test")),
             logAll: () => Promise.reject(new Error("no write in this test")),
           },
         },
@@ -582,7 +622,12 @@ const CASES: Case[] = [
           router: createRouter(),
           ports: {
             standupDigest: () =>
-              deferred({ yesterday_day: null, yesterday: [], today: [], blockers: [] }),
+              deferred({
+                yesterday_day: null,
+                yesterday: [],
+                today: [],
+                blockers: [],
+              }),
           },
         },
       }),
@@ -647,14 +692,18 @@ const CASES: Case[] = [
       const props = $state({ value: "first" });
       const app = mount(Flap, { target, props });
       // A flap only arms its animation timers when the value moves.
-      return { app: { ...app, __props: props } as unknown as Record<string, unknown> };
+      return {
+        app: { ...app, __props: props } as unknown as Record<string, unknown>,
+      };
     },
     exercise: () => {},
   },
   {
     name: "Modal",
     source: "lib/shell/Modal.svelte",
-    open: (target) => ({ app: mount(ModalFixture, { target, props: { onclose: () => {} } }) }),
+    open: (target) => ({
+      app: mount(ModalFixture, { target, props: { onclose: () => {} } }),
+    }),
   },
   {
     /**
@@ -732,7 +781,10 @@ const CASES: Case[] = [
     name: "AddSource",
     source: "lib/sources/AddSource.svelte",
     open: (target) => ({
-      app: mount(AddSource, { target, props: { onclose: () => {}, onsaved: () => {} } }),
+      app: mount(AddSource, {
+        target,
+        props: { onclose: () => {}, onsaved: () => {} },
+      }),
     }),
   },
   {
@@ -801,7 +853,9 @@ const CASES: Case[] = [
   {
     name: "FirstRun",
     source: "lib/sources/FirstRun.svelte",
-    open: (target) => ({ app: mount(FirstRun, { target, props: { onfinish: () => {} } }) }),
+    open: (target) => ({
+      app: mount(FirstRun, { target, props: { onfinish: () => {} } }),
+    }),
   },
   {
     name: "ReenterSecret",
@@ -934,13 +988,17 @@ test("the tracker sees what is left behind, and stops seeing it when it is clean
     // no-op) while TypeScript's lib types do not. The tracker still has to
     // survive it, because a null is what an optional handler evaluates to.
     window.addEventListener("pointerdown", null as unknown as EventListener);
-    expect(track.residue().listeners).toEqual(["pointerdown (capture) on window"]);
+    expect(track.residue().listeners).toEqual([
+      "pointerdown (capture) on window",
+    ]);
 
     // The capture flag is part of the identity: a bubble-phase remove does not
     // balance a capture-phase add, and reporting that it did would hide the
     // exact shape of this stream's first finding.
     window.removeEventListener("pointerdown", leak);
-    expect(track.residue().listeners).toEqual(["pointerdown (capture) on window"]);
+    expect(track.residue().listeners).toEqual([
+      "pointerdown (capture) on window",
+    ]);
 
     window.removeEventListener("pointerdown", leak, true);
     clearTimeout(timeout);
@@ -983,7 +1041,9 @@ test("a removal with a different function reference does not balance the add", a
 
     window.dispatchEvent(new Event("pointerdown"));
     expect(fired, "the listener is still attached — that is the leak").toBe(1);
-    expect(track.residue().listeners).toEqual(["pointerdown (capture) on window"]);
+    expect(track.residue().listeners).toEqual([
+      "pointerdown (capture) on window",
+    ]);
 
     // ...and the tracker stops seeing it only when it is genuinely gone.
     window.removeEventListener("pointerdown", real, true);
@@ -1016,7 +1076,9 @@ test("an unmatched remove does not pay for a later leak", async () => {
     window.addEventListener("pointerdown", leak, true);
     await track.settle();
 
-    expect(track.residue().listeners).toEqual(["pointerdown (capture) on window"]);
+    expect(track.residue().listeners).toEqual([
+      "pointerdown (capture) on window",
+    ]);
 
     window.removeEventListener("pointerdown", leak, true);
   } finally {
@@ -1041,7 +1103,10 @@ test("every component with an effect is in the table", () => {
       const path = join(dir, item.name);
       if (item.isDirectory()) {
         walk(path);
-      } else if (item.name.endsWith(".svelte") && !item.name.endsWith(".fixture.svelte")) {
+      } else if (
+        item.name.endsWith(".svelte") &&
+        !item.name.endsWith(".fixture.svelte")
+      ) {
         if (readFileSync(path, "utf8").includes("$effect(")) {
           withEffects.push(path.slice(root.length));
         }
@@ -1054,7 +1119,10 @@ test("every component with an effect is in the table", () => {
   // teardown matters most was the one component this guard could not see.
   walk(root);
 
-  expect(withEffects.length, "no components were scanned at all").toBeGreaterThan(0);
+  expect(
+    withEffects.length,
+    "no components were scanned at all",
+  ).toBeGreaterThan(0);
   const covered = new Set(CASES.map((entry) => entry.source));
   expect(withEffects.filter((file) => !covered.has(file)).sort()).toEqual([]);
 });

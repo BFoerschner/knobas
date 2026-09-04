@@ -113,7 +113,9 @@ let demoProfile = false;
 
 function status(): AppStatus {
   return {
-    db: dbReady ? { state: "ready", detail: null } : { state: "starting", detail: null },
+    db: dbReady
+      ? { state: "ready", detail: null }
+      : { state: "starting", detail: null },
     app_version: "0.0.0-test",
     demo: demoProfile,
     first_run: firstRun,
@@ -154,7 +156,14 @@ vi.mock("./lib/ipc/sources", () => ({
   testSource: () => Promise.resolve({ ok: true }),
   setSourceSecret: () => Promise.resolve(undefined),
   reindexFts: () => Promise.resolve(undefined),
-  demoLoad: () => Promise.resolve({ source_id: "mock", upserted: 0, deleted: 0, swept: 0, cursor: "" }),
+  demoLoad: () =>
+    Promise.resolve({
+      source_id: "mock",
+      upserted: 0,
+      deleted: 0,
+      swept: 0,
+      cursor: "",
+    }),
   syncNowWithProgress: () => Promise.resolve(1),
 }));
 
@@ -170,13 +179,16 @@ vi.mock("./lib/ipc/entity", () => ({
     return Promise.resolve(projectRows);
   },
   contextMembers: () => Promise.resolve([]),
-  createContext: () => Promise.reject(new Error("no context creation in this test")),
+  createContext: () =>
+    Promise.reject(new Error("no context creation in this test")),
   promoteContext: () => Promise.reject(new Error("no promotion in this test")),
   listEntities: (filter: { kinds: string[] }) => {
     const rows =
       filter.kinds.length === 0
         ? entityRows
-        : entityRows.filter((candidate) => filter.kinds.includes(candidate.kind));
+        : entityRows.filter((candidate) =>
+            filter.kinds.includes(candidate.kind),
+          );
     return Promise.resolve({ rows, total: rows.length });
   },
   getEntity: () => Promise.resolve(null),
@@ -188,35 +200,35 @@ vi.mock("./lib/ipc/entity", () => ({
   // than left undefined, because a stream that always fails is one that can
   // never witness an item arriving -- the #238 fixture gap this file's own
   // header is about, in the store the whole of #290 hangs off.
-  inboxItems: (shelf: string) => Promise.resolve(shelf === "stream" ? inboxRows : []),
+  inboxItems: (shelf: string) =>
+    Promise.resolve(shelf === "stream" ? inboxRows : []),
   inboxCount: () => Promise.resolve(inboxRows.length),
   snoozeInboxItem: () => Promise.reject(new Error("no snooze in this test")),
   completeInboxItem: () => Promise.reject(new Error("no answer in this test")),
   // Which kinds may raise a desktop notification (#290).
   notificationKinds: () => Promise.resolve(notifyKinds),
-  setNotificationKinds: () => Promise.reject(new Error("no settings write in this test")),
+  setNotificationKinds: () =>
+    Promise.reject(new Error("no settings write in this test")),
+  // The send itself (#339): knobas' own command, not the plugin's.
+  notify: (draft: { title: string; body: string; address: string }) => {
+    notified.push(draft);
+    return Promise.resolve();
+  },
 }));
 
 /** The stream `inbox_items` answers. Mutable: an item arrives mid-session. */
 let inboxRows: InboxEntry[] = [];
 /** Which kinds `notification_kinds` says are switched on (#290). */
 let notifyKinds: InboxCategory[] = [];
-/** Every notification the plugin was handed, in order (#290). */
-let notified: { title: string; body: string; extra: Record<string, unknown> }[] = [];
+/** Every draft the `notify` command was handed, in order (#290, #339). */
+let notified: { title: string; body: string; address: string }[] = [];
 
+// The plugin is the permission's only (#339): the send is the `notify`
+// command above and the click is the `notification:clicked` event, which
+// the `listen` fixture below carries like every other event.
 vi.mock("@tauri-apps/plugin-notification", () => ({
-  sendNotification: (notification: {
-    title: string;
-    body: string;
-    extra: Record<string, unknown>;
-  }) => notified.push(notification),
   isPermissionGranted: () => Promise.resolve(true),
   requestPermission: () => Promise.resolve("granted"),
-  // What the desktop plugin really does with a click subscription: there is no
-  // `register_listener` command outside mobile, so the invoke behind `onAction`
-  // rejects. The shell has to survive that, which is why the fixture reproduces
-  // it rather than resolving.
-  onAction: () => Promise.reject(new Error("command plugin:notification|register_listener not found")),
 }));
 
 /**
@@ -268,12 +280,19 @@ vi.mock("./lib/ipc/time", () => ({
   deleteBlock: () => Promise.reject(new Error("no edit in this test")),
   createBlock: () => Promise.reject(new Error("no edit in this test")),
   passiveAttribution: () => Promise.resolve(false),
-  setPassiveAttribution: () => Promise.reject(new Error("no settings write in this test")),
-  worklogDraft: (entityId: string, when: { day: string; offsetMinutes: number }) => {
+  setPassiveAttribution: () =>
+    Promise.reject(new Error("no settings write in this test")),
+  worklogDraft: (
+    entityId: string,
+    when: { day: string; offsetMinutes: number },
+  ) => {
     draftAsks.push({ entityId, ...when });
     return Promise.resolve(null);
   },
-  adHocBlock: (blockId: number, when: { day: string; offsetMinutes: number }) => {
+  adHocBlock: (
+    blockId: number,
+    when: { day: string; offsetMinutes: number },
+  ) => {
     adHocAsks.push({ blockId, ...when });
     return Promise.resolve(adHocOffer);
   },
@@ -399,7 +418,13 @@ function row(
   state: CredentialHealth["state"],
   checked_at: string | null = null,
 ): CredentialHealth {
-  return { source_id, state, checked_at, detail: null, secret_expires_at: null };
+  return {
+    source_id,
+    state,
+    checked_at,
+    detail: null,
+    secret_expires_at: null,
+  };
 }
 
 /** A configured source as `list_sources` reports it, healthy and never run. */
@@ -482,7 +507,10 @@ afterEach(() => {
  * inside the poll is what lets a Svelte effect run between attempts —
  * `vi.waitFor` only yields.
  */
-function until(condition: () => boolean, whatWasWaitedFor: string): Promise<void> {
+function until(
+  condition: () => boolean,
+  whatWasWaitedFor: string,
+): Promise<void> {
   return vi.waitFor(
     () => {
       flushSync();
@@ -532,14 +560,22 @@ gate below untestable",
       () => listenCalls > 0 && lifecycle.status !== null,
       "the shell never finished bring-up",
     );
-    expect(saw, "the empty stream was taken for a read of an empty inbox").not.toHaveBeenCalled();
+    expect(
+      saw,
+      "the empty stream was taken for a read of an empty inbox",
+    ).not.toHaveBeenCalled();
 
     // ...and once it can answer, the backlog is what the notifier is primed
     // against.
     dbReady = true;
     emit(EVENTS.dbState, { state: "ready", detail: null });
-    await until(() => saw.mock.calls.length > 0, "the inbox's read never reached the notifier");
-    expect(saw.mock.calls[0]![0]!.map((entry) => entry.item.key)).toEqual(["mention:PAY-231"]);
+    await until(
+      () => saw.mock.calls.length > 0,
+      "the inbox's read never reached the notifier",
+    );
+    expect(saw.mock.calls[0]![0]!.map((entry) => entry.item.key)).toEqual([
+      "mention:PAY-231",
+    ]);
   } finally {
     saw.mockRestore();
     // The lifecycle store is the window's one instance and its state outlives
@@ -568,7 +604,10 @@ test("credential health is not read while the database is still coming up", asyn
   // `app_status` says `starting`, so the command that needs `AppState` has not
   // been called at all — rather than called, rejected and swallowed, which is
   // what left the store empty for the session.
-  expect(healthCalls, "a read before the database can answer is a read thrown away").toBe(0);
+  expect(
+    healthCalls,
+    "a read before the database can answer is a read thrown away",
+  ).toBe(0);
   expect(health.all).toEqual([]);
 });
 
@@ -616,7 +655,11 @@ test("a rejection landing while the boot seed is in flight is not written back t
   let releaseSeed: (() => void) | undefined;
   answerHealth = () =>
     new Promise<CredentialHealth[]>((resolve) => {
-      releaseSeed = () => resolve([row("gitea", "ok", "2026-08-25T11:50:00Z"), row("jira", "ok")]);
+      releaseSeed = () =>
+        resolve([
+          row("gitea", "ok", "2026-08-25T11:50:00Z"),
+          row("jira", "ok"),
+        ]);
     });
 
   app = mount(App, { target, props: {} });
@@ -626,7 +669,10 @@ test("a rejection landing while the boot seed is in flight is not written back t
   // this test emit into a store with no subscription yet — a race in the
   // *test*, and one that would have read as the fix failing.
   await until(
-    () => healthCalls > 0 && releaseSeed !== undefined && (listeners.get("source:health") ?? []).length > 0,
+    () =>
+      healthCalls > 0 &&
+      releaseSeed !== undefined &&
+      (listeners.get("source:health") ?? []).length > 0,
     "the shell never both subscribed and issued the boot seed",
   );
 
@@ -635,7 +681,10 @@ test("a rejection landing while the boot seed is in flight is not written back t
   // at mount — long before this seed, which is the whole point of subscribing
   // first.
   emit("source:health", row("gitea", "unauthorized", "2026-08-25T11:59:00Z"));
-  await until(() => health.get("gitea") !== null, "the event never reached the store");
+  await until(
+    () => health.get("gitea") !== null,
+    "the event never reached the store",
+  );
   expect(health.get("gitea")!.state).toBe("unauthorized");
 
   releaseSeed!();
@@ -645,9 +694,10 @@ test("a rejection landing while the boot seed is in flight is not written back t
     health.get("gitea")!.state,
     "the boot seed wrote a stale ok over a credential the scheduler had just seen refused",
   ).toBe("unauthorized");
-  expect(health.unauthorized, "the top strip's 401 reading went quiet on a live rejection").toBe(
-    true,
-  );
+  expect(
+    health.unauthorized,
+    "the top strip's 401 reading went quiet on a live rejection",
+  ).toBe(true);
 });
 
 /**
@@ -717,7 +767,10 @@ test("a Confluence source's project room is chipped space, and a Jira one projec
   location.hash = "#/ctx/proj:wiki:ENG";
 
   app = mount(App, { target, props: {} });
-  await until(() => roomName() === "Engineering", "the space room never arrived");
+  await until(
+    () => roomName() === "Engineering",
+    "the space room never arrived",
+  );
   await until(() => roomKindWord() !== "", "the room drew no kind chip at all");
 
   expect(
@@ -726,8 +779,14 @@ test("a Confluence source's project room is chipped space, and a Jira one projec
   ).toBe("space");
 
   router.go("#/ctx/proj:jira:PAY");
-  await until(() => roomName() === "Payments Platform", "the project room never arrived");
-  expect(roomKindWord(), "the Jira project room borrowed Confluence's word").toBe("project");
+  await until(
+    () => roomName() === "Payments Platform",
+    "the project room never arrived",
+  );
+  expect(
+    roomKindWord(),
+    "the Jira project room borrowed Confluence's word",
+  ).toBe("project");
 });
 
 /**
@@ -752,7 +811,10 @@ test("a project that first appears mid-session gets its room without a reload", 
   projectRows = [];
 
   app = mount(App, { target, props: {} });
-  await until(() => tabLabels().includes("mock"), "the shell never drew the source room");
+  await until(
+    () => tabLabels().includes("mock"),
+    "the shell never drew the source room",
+  );
   await until(() => projectCalls > 0, "the shell never read the census at all");
   expect(
     tabLabels(),
@@ -799,7 +861,10 @@ test("finishing the wizard shows the rooms the demo corpus just wrote", async ()
     () => target.querySelector(".firstrun") !== null && projectCalls > 0,
     "the wizard never rendered over a booted shell",
   );
-  expect(tabLabels(), "the wizard takes the whole window; there is no strip yet").toEqual([]);
+  expect(
+    tabLabels(),
+    "the wizard takes the whole window; there is no strip yet",
+  ).toEqual([]);
 
   // `demo_load` registers `mock` and syncs the Tidewater fixture in one call,
   // so both reads answer differently from here on.
@@ -809,7 +874,10 @@ test("finishing the wizard shows the rooms the demo corpus just wrote", async ()
   press("Next");
   press("Load the Tidewater dataset");
   await until(
-    () => [...target.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Finish"),
+    () =>
+      [...target.querySelectorAll("button")].some(
+        (b) => b.textContent?.trim() === "Finish",
+      ),
     "the demo load never reached the wizard's last panel",
   );
   press("Finish");
@@ -861,14 +929,20 @@ test("leaving the wizard by a room tab still gets the demo corpus its project ro
     () => target.querySelector(".firstrun") !== null,
     "the wizard's route form never rendered inside the shell",
   );
-  expect(tabLabels(), "the route form keeps the shell around it").toEqual(["All work", "mock"]);
+  expect(tabLabels(), "the route form keeps the shell around it").toEqual([
+    "All work",
+    "mock",
+  ]);
 
   // From here on the corpus has projects in it.
   projectRows = [{ source_id: "mock", key: "PAY", name: "Payments Platform" }];
   press("Next");
   press("Load the Tidewater dataset");
   await until(
-    () => [...target.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Finish"),
+    () =>
+      [...target.querySelectorAll("button")].some(
+        (b) => b.textContent?.trim() === "Finish",
+      ),
     "the demo load never reached the wizard's last panel",
   );
 
@@ -878,7 +952,8 @@ test("leaving the wizard by a room tab still gets the demo corpus its project ro
   const tab = [...target.querySelectorAll(".tabs .tab:not(.new)")].find(
     (candidate) => candidate.textContent?.trim() === "All work",
   );
-  if (!(tab instanceof HTMLButtonElement)) throw new Error("no *All work* tab in the strip");
+  if (!(tab instanceof HTMLButtonElement))
+    throw new Error("no *All work* tab in the strip");
   tab.click();
   flushSync();
   await until(
@@ -954,19 +1029,32 @@ test("a project room that vanishes under the reader is announced and hands the a
   projectRows = [];
   syncEnded();
 
-  await until(() => toasts.items.length > 0, "the vanished room was never announced");
+  await until(
+    () => toasts.items.length > 0,
+    "the vanished room was never announced",
+  );
   expect(toasts.items.map((toast) => toast.text)).toEqual([
     "Payments Platform is no longer a room. Showing All work.",
   ]);
-  expect(toasts.items[0]?.tone ?? "plain", "this is news, not an error").toBe("plain");
+  expect(toasts.items[0]?.tone ?? "plain", "this is news, not an error").toBe(
+    "plain",
+  );
   expect(tabLabels()).toEqual(["All work", "mock"]);
-  expect(location.hash, "the address bar must stop naming the vanished room").toBe("#/ctx/all");
+  expect(
+    location.hash,
+    "the address bar must stop naming the vanished room",
+  ).toBe("#/ctx/all");
   expect(router.ctx).toBe("all");
-  expect(history.length, "replace, not push: the dead address is not one step back").toBe(entries);
+  expect(
+    history.length,
+    "replace, not push: the dead address is not one step back",
+  ).toBe(entries);
 
   router.back();
   flushSync();
-  expect(location.hash, "back() must not land on the dead id").toBe("#/ctx/all");
+  expect(location.hash, "back() must not land on the dead id").toBe(
+    "#/ctx/all",
+  );
   expect(toasts.items, "one toast, not one per re-render").toHaveLength(1);
 });
 
@@ -983,7 +1071,10 @@ test("a source room that vanishes under the reader is announced too", async () =
   location.hash = "#/ctx/src:gitea";
 
   app = mount(App, { target, props: {} });
-  await until(() => tabLabels().includes("gitea"), "the shell never drew the source room");
+  await until(
+    () => tabLabels().includes("gitea"),
+    "the shell never drew the source room",
+  );
   expect(toasts.items).toEqual([]);
   const entries = history.length;
 
@@ -1028,10 +1119,16 @@ test("a dead address at boot falls back to All work silently and keeps its addre
   location.hash = "#/ctx/proj:mock:OPS";
 
   app = mount(App, { target, props: {} });
-  await until(() => tabLabels().includes("Payments Platform"), "the census never reached the switcher");
+  await until(
+    () => tabLabels().includes("Payments Platform"),
+    "the census never reached the switcher",
+  );
 
   expect(roomName()).toBe("All work");
-  expect(toasts.items, "nothing was under the reader, so there is nothing to announce").toEqual([]);
+  expect(
+    toasts.items,
+    "nothing was under the reader, so there is nothing to announce",
+  ).toEqual([]);
   expect(location.hash).toBe("#/ctx/proj:mock:OPS");
   expect(router.ctx).toBe("proj:mock:OPS");
 });
@@ -1049,15 +1146,22 @@ test("a stored context navigated to before its tab arrives is not announced", as
   location.hash = "#/ctx/all";
 
   app = mount(App, { target, props: {} });
-  await until(() => tabLabels().includes("mock"), "the shell never drew the source room");
+  await until(
+    () => tabLabels().includes("mock"),
+    "the shell never drew the source room",
+  );
 
   router.go("#/ctx/ctx:fresh");
   flushSync();
-  expect(roomName(), "the fallback flash the reseed-first rule exists for").toBe("All work");
+  expect(
+    roomName(),
+    "the fallback flash the reseed-first rule exists for",
+  ).toBe("All work");
   expect(toasts.items).toEqual([]);
-  expect(location.hash, "the address must not be rewritten under a room still arriving").toBe(
-    "#/ctx/ctx:fresh",
-  );
+  expect(
+    location.hash,
+    "the address must not be rewritten under a room still arriving",
+  ).toBe("#/ctx/ctx:fresh");
 
   const fresh: ContextRow = {
     id: "ctx:fresh",
@@ -1069,7 +1173,10 @@ test("a stored context navigated to before its tab arrives is not announced", as
   };
   contextRows = [fresh];
   emit(EVENTS.contextsChanged, fresh);
-  await until(() => tabLabels().includes("Thursday triage"), "the new context never reached the switcher");
+  await until(
+    () => tabLabels().includes("Thursday triage"),
+    "the new context never reached the switcher",
+  );
 
   expect(roomName()).toBe("Thursday triage");
   expect(toasts.items).toEqual([]);
@@ -1084,11 +1191,17 @@ test("a project appearing mid-session while standing in All work is not announce
   location.hash = "#/ctx/all";
 
   app = mount(App, { target, props: {} });
-  await until(() => tabLabels().includes("mock") && projectCalls > 0, "the shell never booted");
+  await until(
+    () => tabLabels().includes("mock") && projectCalls > 0,
+    "the shell never booted",
+  );
 
   projectRows = [{ source_id: "mock", key: "OPS", name: "Operations" }];
   syncEnded();
-  await until(() => tabLabels().includes("Operations"), "the new project never reached the switcher");
+  await until(
+    () => tabLabels().includes("Operations"),
+    "the new project never reached the switcher",
+  );
 
   expect(toasts.items).toEqual([]);
   expect(location.hash).toBe("#/ctx/all");
@@ -1107,21 +1220,35 @@ test("a detail open over a vanished room stays open while the room under it move
   location.hash = "#/ctx/proj:mock:PAY";
 
   app = mount(App, { target, props: {} });
-  await until(() => tabLabels().includes("Payments Platform"), "the shell never drew the project room");
+  await until(
+    () => tabLabels().includes("Payments Platform"),
+    "the shell never drew the project room",
+  );
   router.go("#/ticket/mock:PAY-231");
   flushSync();
-  expect(target.querySelector("aside.detail"), "the fixture needs the slide-over open").not.toBeNull();
+  expect(
+    target.querySelector("aside.detail"),
+    "the fixture needs the slide-over open",
+  ).not.toBeNull();
   const entries = history.length;
 
   projectRows = [];
   syncEnded();
-  await until(() => toasts.items.length > 0, "the vanished room was never announced");
+  await until(
+    () => toasts.items.length > 0,
+    "the vanished room was never announced",
+  );
 
   expect(toasts.items.map((toast) => toast.text)).toEqual([
     "Payments Platform is no longer a room. Showing All work.",
   ]);
-  expect(location.hash, "the detail segment is kept").toBe("#/ticket/mock:PAY-231");
-  expect(target.querySelector("aside.detail"), "the slide-over must survive the room going").not.toBeNull();
+  expect(location.hash, "the detail segment is kept").toBe(
+    "#/ticket/mock:PAY-231",
+  );
+  expect(
+    target.querySelector("aside.detail"),
+    "the slide-over must survive the room going",
+  ).not.toBeNull();
   expect(router.ctx).toBe("all");
   expect(history.length).toBe(entries);
   router.back();
@@ -1143,12 +1270,21 @@ test("a sync run ending with the room still in the census is not announced", asy
   location.hash = "#/ctx/proj:mock:PAY";
 
   app = mount(App, { target, props: {} });
-  await until(() => tabLabels().includes("Payments Platform"), "the shell never drew the project room");
+  await until(
+    () => tabLabels().includes("Payments Platform"),
+    "the shell never drew the project room",
+  );
   const census = projectCalls;
 
   syncEnded();
-  await until(() => projectCalls > census, "the run ending never made the store re-list");
-  await until(() => tabLabels().includes("Payments Platform"), "the re-list never landed");
+  await until(
+    () => projectCalls > census,
+    "the run ending never made the store re-list",
+  );
+  await until(
+    () => tabLabels().includes("Payments Platform"),
+    "the re-list never landed",
+  );
 
   expect(toasts.items).toEqual([]);
   expect(location.hash).toBe("#/ctx/proj:mock:PAY");
@@ -1170,17 +1306,26 @@ test("Escape in a room restores the maximised tile", async () => {
   entityRows = [entity("page", "ENG-1"), entity("build", "b-1")];
 
   app = mount(App, { target, props: {} });
-  await until(() => tileLabels().length === 2, "the room never drew its two tiles");
+  await until(
+    () => tileLabels().length === 2,
+    "the room never drew its two tiles",
+  );
   const [first] = tileLabels();
 
   press("Maximise");
   expect(tileLabels()).toEqual([first]);
 
   window.dispatchEvent(
-    new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    new KeyboardEvent("keydown", {
+      key: "Escape",
+      bubbles: true,
+      cancelable: true,
+    }),
   );
   await until(() => tileLabels().length === 2, "Escape never reached the room");
-  expect(location.hash, "restoring a tile is not a navigation").toBe("#/ctx/all");
+  expect(location.hash, "restoring a tile is not a navigation").toBe(
+    "#/ctx/all",
+  );
 });
 
 /**
@@ -1196,16 +1341,25 @@ test("a non-room view and back finds the grid, not the maximised tile", async ()
   entityRows = [entity("page", "ENG-1"), entity("build", "b-1")];
 
   app = mount(App, { target, props: {} });
-  await until(() => tileLabels().length === 2, "the room never drew its two tiles");
+  await until(
+    () => tileLabels().length === 2,
+    "the room never drew its two tiles",
+  );
 
   press("Maximise");
   expect(tileLabels()).toHaveLength(1);
 
   location.hash = "#/sources";
-  await until(() => tileLabels().length === 0, "the Sources view never replaced the room");
+  await until(
+    () => tileLabels().length === 0,
+    "the Sources view never replaced the room",
+  );
 
   location.hash = "#/ctx/all";
-  await until(() => tileLabels().length === 2, "the room never drew its grid again");
+  await until(
+    () => tileLabels().length === 2,
+    "the room never drew its grid again",
+  );
 });
 
 /**
@@ -1230,23 +1384,44 @@ test("returning to a source room that vanished while the reader was in the sourc
   location.hash = "#/ctx/src:gitea";
 
   app = mount(App, { target, props: {} });
-  await until(() => tabLabels().includes("gitea"), "the shell never drew the source room");
+  await until(
+    () => tabLabels().includes("gitea"),
+    "the shell never drew the source room",
+  );
 
   router.go("#/sources");
-  await until(() => deleteButtons() === 2, "the sources view never listed its rows");
-  expect(tabLabels(), "opening the view is not a removal").toEqual(["All work", "gitea", "mock"]);
-  expect(router.ctx, "the room the reader left is what back() goes to").toBe("src:gitea");
+  await until(
+    () => deleteButtons() === 2,
+    "the sources view never listed its rows",
+  );
+  expect(tabLabels(), "opening the view is not a removal").toEqual([
+    "All work",
+    "gitea",
+    "mock",
+  ]);
+  expect(router.ctx, "the room the reader left is what back() goes to").toBe(
+    "src:gitea",
+  );
 
   // gitea is removed here; the view's re-list no longer carries it.
   sourceRows = [summary("mock")];
   press("Delete");
   press("Delete source");
-  await until(() => !tabLabels().includes("gitea"), "the removal never reached the switcher");
-  expect(toasts.items.map((toast) => toast.text), "the view's own toast, and nothing about a room").toEqual([
-    "gitea removed.",
-  ]);
-  expect(location.hash, "nobody is standing in the room, so nothing moves yet").toBe("#/sources");
-  expect(router.ctx, "the dead room is still the one back() goes to").toBe("src:gitea");
+  await until(
+    () => !tabLabels().includes("gitea"),
+    "the removal never reached the switcher",
+  );
+  expect(
+    toasts.items.map((toast) => toast.text),
+    "the view's own toast, and nothing about a room",
+  ).toEqual(["gitea removed."]);
+  expect(
+    location.hash,
+    "nobody is standing in the room, so nothing moves yet",
+  ).toBe("#/sources");
+  expect(router.ctx, "the dead room is still the one back() goes to").toBe(
+    "src:gitea",
+  );
 
   router.back();
   flushSync();
@@ -1254,7 +1429,9 @@ test("returning to a source room that vanished while the reader was in the sourc
     "gitea removed.",
     "gitea is no longer a room. Showing All work.",
   ]);
-  expect(location.hash, "the address bar must not name the vanished room").toBe("#/ctx/all");
+  expect(location.hash, "the address bar must not name the vanished room").toBe(
+    "#/ctx/all",
+  );
   expect(router.ctx).toBe("all");
   expect(roomName()).toBe("All work");
 });
@@ -1267,10 +1444,16 @@ test("returning to a source room that still exists after a detour through the so
   location.hash = "#/ctx/src:gitea";
 
   app = mount(App, { target, props: {} });
-  await until(() => tabLabels().includes("gitea"), "the shell never drew the source room");
+  await until(
+    () => tabLabels().includes("gitea"),
+    "the shell never drew the source room",
+  );
 
   router.go("#/sources");
-  await until(() => deleteButtons() === 2, "the sources view never listed its rows");
+  await until(
+    () => deleteButtons() === 2,
+    "the sources view never listed its rows",
+  );
 
   router.back();
   flushSync();
@@ -1292,14 +1475,23 @@ test("returning from the sources view to a different room that exists is silent 
   location.hash = "#/ctx/src:mock";
 
   app = mount(App, { target, props: {} });
-  await until(() => tabLabels().includes("mock"), "the shell never drew the source room");
+  await until(
+    () => tabLabels().includes("mock"),
+    "the shell never drew the source room",
+  );
 
   router.go("#/sources");
-  await until(() => deleteButtons() === 2, "the sources view never listed its rows");
+  await until(
+    () => deleteButtons() === 2,
+    "the sources view never listed its rows",
+  );
   sourceRows = [summary("gitea")];
   press("Delete");
   press("Delete source");
-  await until(() => !tabLabels().includes("mock"), "the removal never reached the switcher");
+  await until(
+    () => !tabLabels().includes("mock"),
+    "the removal never reached the switcher",
+  );
 
   router.go("#/ctx/src:gitea");
   flushSync();
@@ -1322,35 +1514,53 @@ test("a dead address for a room the reader never stood in stays silent even thou
   location.hash = "#/ctx/src:mock";
 
   app = mount(App, { target, props: {} });
-  await until(() => tabLabels().includes("mock"), "the shell never drew the source room");
+  await until(
+    () => tabLabels().includes("mock"),
+    "the shell never drew the source room",
+  );
 
   router.go("#/sources");
-  await until(() => deleteButtons() === 2, "the sources view never listed its rows");
+  await until(
+    () => deleteButtons() === 2,
+    "the sources view never listed its rows",
+  );
   // One removal, and a re-list that carries neither: the authoritative set
   // is what forgets, so `gitea` leaves with `mock` without its own Delete.
   sourceRows = [];
   press("Delete");
   press("Delete source");
-  await until(() => tabLabels().length === 1, "the emptied re-list never reached the switcher");
-  expect(toasts.items.map((toast) => toast.text), "the button removed the room the reader left").toEqual([
-    "mock removed.",
-  ]);
+  await until(
+    () => tabLabels().length === 1,
+    "the emptied re-list never reached the switcher",
+  );
+  expect(
+    toasts.items.map((toast) => toast.text),
+    "the button removed the room the reader left",
+  ).toEqual(["mock removed."]);
   toasts.items = [];
 
   router.go("#/ctx/src:gitea");
   flushSync();
-  expect(toasts.items, "nothing the reader stood in went under them").toEqual([]);
-  expect(location.hash, "a dead address opened cold keeps its address").toBe("#/ctx/src:gitea");
+  expect(toasts.items, "nothing the reader stood in went under them").toEqual(
+    [],
+  );
+  expect(location.hash, "a dead address opened cold keeps its address").toBe(
+    "#/ctx/src:gitea",
+  );
   expect(roomName()).toBe("All work");
 });
-
 
 // -- the timer's two shell-only wires (#278) --------------------------------
 
 /** ⌘T, as the window receives it. */
 function pressTimerKey(): void {
   window.dispatchEvent(
-    new KeyboardEvent("keydown", { key: "t", metaKey: true, bubbles: true, cancelable: true }),
+    new KeyboardEvent("keydown", {
+      key: "t",
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    }),
   );
   flushSync();
 }
@@ -1358,7 +1568,9 @@ function pressTimerKey(): void {
 /** The ⌘T picker, if it is up. */
 function pickerTitle(): string | null {
   const dialogs = [...target.querySelectorAll<HTMLElement>('[role="dialog"]')];
-  const picker = dialogs.find((dialog) => dialog.textContent?.includes("What is the time on?"));
+  const picker = dialogs.find((dialog) =>
+    dialog.textContent?.includes("What is the time on?"),
+  );
   return picker ? "open" : null;
 }
 
@@ -1393,17 +1605,24 @@ test("⌘T starts on the open detail rather than on the anchor of the room behin
   location.hash = "#/ctx/ctx:pay";
 
   app = mount(App, { target, props: {} });
-  await until(() => roomName() === "SEPA migration", "the stored room never arrived");
+  await until(
+    () => roomName() === "SEPA migration",
+    "the stored room never arrived",
+  );
 
   router.go("#/ticket/mock:PAY-231");
   flushSync();
   pressTimerKey();
   await until(() => timerStarts.length > 0, "⌘T never reached the timer");
 
-  expect(timerStarts, "the room's anchor won over what the reader has open").toEqual([
-    { kind: "entity", entity_id: "mock:PAY-231" },
-  ]);
-  expect(pickerTitle(), "the picker opened over a foreground that existed").toBeNull();
+  expect(
+    timerStarts,
+    "the room's anchor won over what the reader has open",
+  ).toEqual([{ kind: "entity", entity_id: "mock:PAY-231" }]);
+  expect(
+    pickerTitle(),
+    "the picker opened over a foreground that existed",
+  ).toBeNull();
 });
 
 /**
@@ -1421,7 +1640,10 @@ test("⌘T with no detail open starts on the room's anchor, never on the room it
   location.hash = "#/ctx/ctx:pay";
 
   app = mount(App, { target, props: {} });
-  await until(() => roomName() === "SEPA migration", "the stored room never arrived");
+  await until(
+    () => roomName() === "SEPA migration",
+    "the stored room never arrived",
+  );
 
   pressTimerKey();
   await until(() => timerStarts.length > 0, "⌘T never reached the timer");
@@ -1442,7 +1664,10 @@ test("⌘T with nothing in front of the reader opens the picker and starts nothi
   location.hash = "#/ctx/all";
 
   app = mount(App, { target, props: {} });
-  await until(() => tabLabels().includes("All work"), "the shell never drew a room");
+  await until(
+    () => tabLabels().includes("All work"),
+    "the shell never drew a room",
+  );
 
   pressTimerKey();
   await until(() => pickerTitle() !== null, "⌘T never opened the picker");
@@ -1494,7 +1719,10 @@ test("stopping a timer that crossed midnight drafts the day the work began on", 
   };
 
   app = mount(App, { target, props: {} });
-  await until(() => tabLabels().includes("All work"), "the shell never drew a room");
+  await until(
+    () => tabLabels().includes("All work"),
+    "the shell never drew a room",
+  );
 
   pressTimerKey();
   await until(() => draftAsks.length > 0, "the stop never asked for a draft");
@@ -1534,7 +1762,10 @@ test("stopping a timer on an ad-hoc label asks for no draft", async () => {
   };
 
   app = mount(App, { target, props: {} });
-  await until(() => tabLabels().includes("All work"), "the shell never drew a room");
+  await until(
+    () => tabLabels().includes("All work"),
+    "the shell never drew a room",
+  );
 
   pressTimerKey();
   await until(() => timerStops > 0, "⌘T never stopped the label's timer");
@@ -1546,7 +1777,10 @@ test("stopping a timer on an ad-hoc label asks for no draft", async () => {
   await new Promise((settled) => setTimeout(settled, 0));
   flushSync();
 
-  expect(draftAsks, "a label has nowhere to log to, so nothing may be drafted").toEqual([]);
+  expect(
+    draftAsks,
+    "a label has nowhere to log to, so nothing may be drafted",
+  ).toEqual([]);
 });
 
 /**
@@ -1590,7 +1824,10 @@ test("a stop whose block is not on a ticket opens the ad-hoc dialog, not the dra
   };
 
   app = mount(App, { target, props: {} });
-  await until(() => tabLabels().includes("All work"), "the shell never drew a room");
+  await until(
+    () => tabLabels().includes("All work"),
+    "the shell never drew a room",
+  );
 
   pressTimerKey();
   await until(
@@ -1603,9 +1840,10 @@ test("a stop whose block is not on a ticket opens the ad-hoc dialog, not the dra
   expect(adHocAsks).toEqual([
     { blockId: 9, day: "2026-09-03", offsetMinutes: offsetMinutes() },
   ]);
-  expect(draftAsks, "the ad-hoc dialog is the answer, so no draft was asked for").toEqual(
-    [],
-  );
+  expect(
+    draftAsks,
+    "the ad-hoc dialog is the answer, so no draft was asked for",
+  ).toEqual([]);
   expect(target.textContent).toContain("PAY-231");
 });
 
@@ -1639,16 +1877,20 @@ test("a stop whose block is on a ticket falls through to the worklog draft", asy
   adHocOffer = null;
 
   app = mount(App, { target, props: {} });
-  await until(() => tabLabels().includes("All work"), "the shell never drew a room");
+  await until(
+    () => tabLabels().includes("All work"),
+    "the shell never drew a room",
+  );
 
   pressTimerKey();
   await until(() => draftAsks.length > 0, "the stop never asked for a draft");
   flushSync();
 
   expect(adHocAsks.map((ask) => ask.blockId)).toEqual([10]);
-  expect(target.textContent, "the ad-hoc dialog opened over a ticket").not.toContain(
-    "Log an ad-hoc block",
-  );
+  expect(
+    target.textContent,
+    "the ad-hoc dialog opened over a ticket",
+  ).not.toContain("Log an ad-hoc block");
 });
 
 /**
@@ -1668,7 +1910,10 @@ test("a start records the stored room the reader is in, and nothing for a derive
   location.hash = "#/ctx/ctx:pay";
 
   app = mount(App, { target, props: {} });
-  await until(() => roomName() === "SEPA migration", "the stored room never arrived");
+  await until(
+    () => roomName() === "SEPA migration",
+    "the stored room never arrived",
+  );
 
   pressTimerKey();
   await until(() => timerStarts.length > 0, "⌘T never reached the timer");
@@ -1687,9 +1932,15 @@ test("a start records the stored room the reader is in, and nothing for a derive
   router.go("#/ticket/mock:PAY-231");
   flushSync();
   pressTimerKey();
-  await until(() => timerStarts.length > 1, "the second ⌘T never reached the timer");
+  await until(
+    () => timerStarts.length > 1,
+    "the second ⌘T never reached the timer",
+  );
 
-  expect(timerRooms, "a derived room is not a stored context").toEqual(["ctx:pay", null]);
+  expect(timerRooms, "a derived room is not a stored context").toEqual([
+    "ctx:pay",
+    null,
+  ]);
 });
 
 /**
@@ -1713,7 +1964,10 @@ test("⌘T in an ad-hoc room, which has no anchor, opens the picker", async () =
   location.hash = "#/ctx/ctx:triage";
 
   app = mount(App, { target, props: {} });
-  await until(() => roomName() === "Thursday triage", "the stored room never arrived");
+  await until(
+    () => roomName() === "Thursday triage",
+    "the stored room never arrived",
+  );
 
   pressTimerKey();
   await until(() => pickerTitle() !== null, "⌘T never opened the picker");
@@ -1742,7 +1996,10 @@ test("⌘T on an open page detail starts the timer on the page", async () => {
   location.hash = "#/ctx/ctx:pay";
 
   app = mount(App, { target, props: {} });
-  await until(() => roomName() === "SEPA migration", "the stored room never arrived");
+  await until(
+    () => roomName() === "SEPA migration",
+    "the stored room never arrived",
+  );
 
   router.go("#/page/confluence:98307");
   flushSync();
@@ -1752,7 +2009,10 @@ test("⌘T on an open page detail starts the timer on the page", async () => {
   expect(timerStarts, "a page did not reach the foreground rule").toEqual([
     { kind: "entity", entity_id: "confluence:98307" },
   ]);
-  expect(pickerTitle(), "the picker opened over a page that was right there").toBeNull();
+  expect(
+    pickerTitle(),
+    "the picker opened over a page that was right there",
+  ).toBeNull();
 });
 
 // -- the notification listener's wire (#290) --------------------------------
@@ -1809,9 +2069,13 @@ function inboxEntry(
  * file with no other seam, which is the class this whole file was written for
  * (#238). The fixture is the real one: the inbox re-reads on `activity:new`,
  * so the arrival is delivered as that event and the notification is read off
- * the stubbed plugin.
+ * the stubbed `notify` command.
+ *
+ * And the way back (#339): a `notification:clicked` event carrying that
+ * address moves the window there. The store's tests prove the channel with a
+ * faked `listen`; this is the one place that proves the shell *started* it.
  */
-test("an inbox item arriving while the window is unfocused reaches the notification plugin", async () => {
+test("an inbox item arriving while the window is unfocused reaches the notify command, and its click comes back", async () => {
   dbReady = true;
   notifyKinds = ["failed_build"];
   const unfocused = vi.spyOn(document, "hasFocus").mockReturnValue(false);
@@ -1824,15 +2088,24 @@ test("an inbox item arriving while the window is unfocused reaches the notificat
 
     inboxRows = [inboxEntry("failed_build", "tidewater-payouts-42")];
     emit(EVENTS.activityNew, activityRow());
-    await until(() => notified.length > 0, "the arrival never reached the plugin");
+    await until(
+      () => notified.length > 0,
+      "the arrival never reached the plugin",
+    );
 
     expect(notified).toHaveLength(1);
     expect(notified[0]!.title).toBe("Title of tidewater-payouts-42");
     expect(notified[0]!.body).toBe("Why tidewater-payouts-42 is here");
     expect(
-      notified[0]!.extra["address"],
+      notified[0]!.address,
       "the notification's click has nowhere to go",
     ).toBe("#/entity/gitea:acme%2Fpayouts%23144");
+
+    emit(EVENTS.notificationClicked, { address: notified[0]!.address });
+    await until(
+      () => window.location.hash === "#/entity/gitea:acme%2Fpayouts%23144",
+      "the click never reached the router",
+    );
   } finally {
     unfocused.mockRestore();
   }
@@ -1864,10 +2137,16 @@ test("the same arrival on a focused window sends nothing", async () => {
     // check would be satisfied before this test's own read had landed — and
     // the silence below would then be about a stream nobody had offered yet.
     await until(
-      () => inbox.stream.some((entry) => entry.item.key.endsWith("tidewater-payouts-43")),
+      () =>
+        inbox.stream.some((entry) =>
+          entry.item.key.endsWith("tidewater-payouts-43"),
+        ),
       "the inbox never re-read after the activity signal",
     );
-    expect(notified, "the reader was told about something already on screen").toEqual([]);
+    expect(
+      notified,
+      "the reader was told about something already on screen",
+    ).toEqual([]);
   } finally {
     focused.mockRestore();
   }
