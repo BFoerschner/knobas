@@ -921,8 +921,12 @@ async fn an_edit_made_against_a_version_the_server_has_passed_is_refused_by_conf
         .expect("the queue's due list reads");
     assert!(
         !still_due.iter().any(|w| w.id == refused.id),
-        "a refused write is terminal: the queue still offers it to the next flush, so a decision          the server already made would be re-sent for ever: {:?}",
-        still_due.iter().map(|w| (w.id, w.state)).collect::<Vec<_>>()
+        "a refused write is terminal: the queue still offers it to the next flush, so a decision \
+         the server already made would be re-sent for ever: {:?}",
+        still_due
+            .iter()
+            .map(|w| (w.id, w.state))
+            .collect::<Vec<_>>()
     );
     // **Then the end-to-end half**: flush again and confirm nothing moved.
     knobas_sync::write_queue::flush_source(state.scheduler.deps(), CONFLUENCE)
