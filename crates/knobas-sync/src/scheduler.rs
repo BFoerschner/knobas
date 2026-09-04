@@ -1186,9 +1186,9 @@ impl Scheduler {
     ///
     /// Every run this asks for is an *incremental sync* in `CONTEXT.md`'s
     /// sense, from the stored cursor; [`backfill`](Self::backfill) is still
-    /// the only cursor-less run. What the name has to carry is the **wait**,
-    /// which is the whole of what this adds to [`trigger`](Self::trigger) --
-    /// and *after the write* is the half of it #358 is about (#375).
+    /// the only cursor-less run. The name carries the two things this adds to
+    /// [`trigger`](Self::trigger) and nothing else: the **wait**, and that
+    /// what it waits for is a run **after the write** (#375).
     ///
     /// Answers the id of the run it waited on last.
     ///
