@@ -226,9 +226,11 @@ impl Env {
 ///    After the pull request, because Gitea will not delete a branch an open
 ///    pull request points at -- which is the case on a run that failed before
 ///    the merge.
-/// 3. **The check.** Neither branch left in the branch listing, no pull request
-///    left on the flow's head, and the default branch still at the commit it
-///    was at when this guard was made. The last of those is the whole of issue
+/// 3. **The check.** Neither branch left in the branch listing, none of the
+///    pull request numbers collected in step 1 left in the pull listing, and
+///    the default branch still at the commit it was at when this guard was
+///    made. Numbers, because Gitea rewrites a deleted branch's `head.ref`
+///    (see the comment on the collection below). The last of those is the whole of issue
 ///    #373: a merge commit on the default branch is the one piece of residue no
 ///    `DELETE` takes back (neither `issues/{index}` nor `branches/{name}`
 ///    rewrites history -- only a force-push or `testenv/reset` does), so this
