@@ -270,6 +270,17 @@ dev: deps
 demo: deps
     cd crates/knobas-app && PATH="$PWD/../../app/node_modules/.bin:$PATH" tauri dev -- -- --demo
 
+# Where the three Gitea-backed live recipes get their gate variables, in one
+# place because all three obtain them the same way: the lines this text names
+# are literally the lines above each guard call. Kept as a variable rather than
+# a second private recipe -- what the three share is a message and a variable
+# list, not behaviour, and a forwarding recipe would be an indirection with
+# nothing in it.
+gitea_live_env := "testenv/, which is what the lines above this one do:
+  docker compose up -d --wait gitea
+  ./seed-gitea.sh
+  eval \"$(./seed --env)\""
+
 # THE ALL-SKIPPED RUN. Every live recipe below calls this before it invokes
 # cargo, and it refuses the run in which nothing would have run (issue #351).
 #
@@ -389,8 +400,7 @@ gitea-live:
     docker compose up -d --wait gitea
     ./seed-gitea.sh
     eval "$(./seed --env)"
-    just _require-live-env 'testenv/: ./seed-gitea.sh && eval "$(./seed --env)"' \
-      KNOBAS_GITEA_URL KNOBAS_GITEA_TOKEN
+    just _require-live-env '{{gitea_live_env}}' KNOBAS_GITEA_URL KNOBAS_GITEA_TOKEN
     cd ..
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-gitea --test live_gitea \
       -- --ignored --nocapture --test-threads=1
@@ -442,8 +452,7 @@ gitea-live-capped:
     eval "$(./seed --env)"
     # Before the overlay, not after: a run refused for a missing variable must
     # not be one that left the shared container capped on its way out.
-    just _require-live-env 'testenv/: ./seed-gitea.sh && eval "$(./seed --env)"' \
-      KNOBAS_GITEA_URL KNOBAS_GITEA_TOKEN
+    just _require-live-env '{{gitea_live_env}}' KNOBAS_GITEA_URL KNOBAS_GITEA_TOKEN
     uncap() { cd "$testenv" && docker compose up -d --wait gitea >/dev/null; }
     trap 'uncap' EXIT
     trap 'trap - EXIT INT; uncap; kill -INT $$' INT
@@ -453,28 +462,41 @@ gitea-live-capped:
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-gitea --test live_gitea_capped \
       -- --ignored --nocapture --test-threads=1
 
-# M2 exit criterion 1 against the same real Gitea: ticket -> branch -> pull
-# request -> link -> In Progress, and back again when the pull request is
-# merged (issue #44). The suite is `crates/knobas-app/tests/start_work_live.rs`
-# and it is one test, deliberately -- the criterion is the round trip.
+# The start-work flow over the real Gitea: ticket -> branch -> pull request ->
+# link -> In Progress, and back again when the pull request is merged (issue
+# #44). The suite is `crates/knobas-app/tests/start_work_live.rs` and it is one
+# test, deliberately -- what is under test is the round trip.
 #
 # WHICH RECIPE CERTIFIES WHAT. `gitea-live` above certifies the *adapter*
 # against the shapes interfaces §4.2 fixes. This one certifies the *flow* over
 # it: the real orchestrator, the real write queue, the real adapters and a real
-# database, with a mockd Jira in-process for the ticket side. Its sibling
-# `tests/start_work.rs` proves the same sequence against a fake dispatcher and
-# runs inside `just check`; nothing there touches a server. Until this recipe
-# existed nothing ran this file at all, and what an unrun suite accumulates is
-# what #347 found in it: an assertion no implementation could fail.
+# database. Its sibling `tests/start_work.rs` proves the same sequence against a
+# fake dispatcher and runs inside `just check`; nothing there touches a server.
+# Until this recipe existed nothing ran this file at all, and what an unrun
+# suite accumulates is what #347 found in it: an assertion no implementation
+# could fail.
+#
+# HALF OF IT IS STILL A MOCK, AND THIS RECIPE IS NOT M2's EXIT CERTIFICATE.
+# The repository side is the real container; the *ticket* side is
+# `knobas_mockd::spawn_mock_jira()`, in process. ADR-0013 says no mock is a
+# witness for an acceptance or exit criterion, so what this run witnesses is
+# the branch, the pull request, the draft prefix and the link at a server that
+# decides them -- not the two Jira transitions, which are asserted against
+# mockd's workflow. Criterion 1 is met end to end only once the ticket side is
+# the seeded Jira `atlassian-live` stands up, and that is not this recipe.
 #
 # WHAT IT WRITES TO GITEA AND WHAT IT TAKES BACK. It opens one branch named
 # `knobas-i44-<pid>`, commits one file on it, opens a draft pull request,
 # renames it out of draft and **merges** it -- the reverse direction is about a
 # pull request somebody actually finished, and Gitea refuses to merge one whose
 # title still carries the WIP prefix, which is what makes that prefix's claim a
-# real one. `Litter`'s `Drop` closes the pull request and deletes the branch
-# when the test ends, passing or panicking, under the `knobas-` prefix
-# `litter_guard.rs` pins nothing in the seed shares.
+# real one. `Litter`'s `Drop` deletes the branch when the test ends, passing or
+# panicking, under the `knobas-` prefix `litter_guard.rs` pins nothing in the
+# seed shares. It asks Gitea to close the pull request first, which matters on
+# a run that *failed* before the merge -- Gitea will not delete a branch an open
+# pull request points at. On a run that got as far as merging, that close is
+# refused (a merged pull request cannot be closed) and the refusal is
+# discarded; the branch delete is the part that does the work.
 #
 # **The merge commit is not taken back**, and cannot be: it is on
 # `payout-service`'s default branch, where deleting it would mean rewriting the
@@ -495,8 +517,7 @@ start-work-live:
     docker compose up -d --wait gitea
     ./seed-gitea.sh
     eval "$(./seed --env)"
-    just _require-live-env 'testenv/: ./seed-gitea.sh && eval "$(./seed --env)"' \
-      KNOBAS_GITEA_URL KNOBAS_GITEA_TOKEN
+    just _require-live-env '{{gitea_live_env}}' KNOBAS_GITEA_URL KNOBAS_GITEA_TOKEN
     cd ..
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test start_work_live \
       -- --ignored --nocapture --test-threads=1
