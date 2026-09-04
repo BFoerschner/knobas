@@ -1121,6 +1121,43 @@ impl Scheduler {
         self.inner.trigger(source_id, trigger, progress).await
     }
 
+    /// Re-read one source and **wait for the run to end** (issue #289).
+    ///
+    /// [`trigger`](Self::trigger) starts or joins a run and answers straight
+    /// away, which is right for a write that has just landed: nothing is
+    /// waiting on the mirror, and story 15 only asks that the app stop
+    /// disagreeing with itself within the second.
+    ///
+    /// A caller that is about to *look for what its write created* needs the
+    /// other behaviour, and the reason is `start_work::queue::Queue::refresh`'s
+    /// in as many words: `Source::write` answers no address for a created page
+    /// or pull request, so the only way to name one is to read the mirror, and
+    /// reading it before the run that fetches it has finished is reading it too
+    /// early.
+    ///
+    /// ADR-0005 guarantees a run id always comes with an ending -- including
+    /// when the id handed back belongs to a run already in flight, which is
+    /// exactly what happens here, since `crate::write_queue::flush` has usually
+    /// triggered one already. So this cannot wait for something that will never
+    /// speak.
+    ///
+    /// Answers the id of the run it waited on.
+    ///
+    /// # Errors
+    /// [`TriggerError`].
+    pub async fn resync(&self, source_id: &str) -> Result<i64, TriggerError> {
+        let (done, wait) = tokio::sync::oneshot::channel();
+        let sink = Arc::new(RunEnded {
+            done: std::sync::Mutex::new(Some(done)),
+        });
+        let run_id = self
+            .inner
+            .trigger(source_id, SyncTrigger::Manual, Some(sink))
+            .await?;
+        let _ = wait.await;
+        Ok(run_id)
+    }
+
     /// **Backfill** one source: the same run in every respect but one -- the
     /// stored position is not used, so the source is re-read from the top and
     /// every mirrored item is rewritten with whatever the adapter's *current*
@@ -1373,6 +1410,31 @@ impl Scheduler {
             .is_err()
         {
             tracing::warn!("the sync pool did not close in time; the postmaster will reap it");
+        }
+    }
+}
+
+/// A progress sink that resolves when its run ends.
+///
+/// The `Option` makes a second terminal message -- which ADR-0005 says cannot
+/// happen, and which this must survive if it ever did -- a no-op rather than a
+/// panic inside a sink this crate would then have to catch.
+struct RunEnded {
+    done: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+}
+
+impl ProgressSink for RunEnded {
+    fn report(&self, progress: SyncProgress) {
+        if !matches!(progress.phase, SyncPhase::Finished | SyncPhase::Failed) {
+            return;
+        }
+        let sender = self
+            .done
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(sender) = sender {
+            let _ = sender.send(());
         }
     }
 }
