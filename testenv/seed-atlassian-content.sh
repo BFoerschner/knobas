@@ -259,7 +259,8 @@ verify() {
 jq -e --arg k "$SPACE_KEY" --arg n "$NESTED_PAGE" --arg u "$NESTED_UNDER" \
   '[.pages[] | select(.space == $k) | .id] | (index($n) != null) and (index($u) != null)' \
   "$FIXTURE" >/dev/null \
-  || die "the fixture's $SPACE_KEY pages must include \"$NESTED_PAGE\" and \"$NESTED_UNDER\" -- the nesting the launcher's ancestor path is witnessed by"
+  || die "the fixture's $SPACE_KEY pages must include \"$NESTED_PAGE\" and \"$NESTED_UNDER\" --
+  they are the nesting the launcher's ancestor path is witnessed by."
 
 if [ "${1:-}" = "--verify" ]; then verify; exit 0; fi
 [ $# -eq 0 ] || die "unknown argument '$1'; usage: ./seed-atlassian-content.sh [--verify]"
@@ -592,7 +593,13 @@ for row in $(jq -r --arg k "$SPACE_KEY" --arg n "$NESTED_PAGE" \
     # page that is already there was put where it is by an earlier run, and
     # seed-state.json describes the instance rather than the intention.
     parent=$(printf '%s' "$API_BODY" | jq -r '.results[0].ancestors[-1].id // empty')
-    skip "page \"$title\" (id $pid, under ${parent:-nothing})"
+    # Named here rather than left to record an empty parent_id: a page with no
+    # ancestors at all is not one this script created, and the suites that read
+    # parent_id would otherwise fail three layers away on a blank id.
+    [ -n "$parent" ] || die "page \"$title\" (id $pid) is already in $SPACE_KEY with no
+  ancestors at all, so it is not a page this script created. \`docker compose --profile
+  real-atlassian down -v jira jira-db confluence confluence-db\` and seed again."
+    skip "page \"$title\" (id $pid, under $parent)"
   else
     if [ "$fid" = "$NESTED_PAGE" ]; then
       parent=$(printf '%s' "$PAGE_IDS" | jq -r --arg f "$NESTED_UNDER" \

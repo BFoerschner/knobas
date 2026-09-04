@@ -801,6 +801,13 @@ atlassian-live:
     docker compose --profile real-atlassian up -d --wait confluence-db confluence
     ./seed-atlassian.sh confluence        # ... and Confluence's, on a quiet VM
     ./seed-atlassian-content.sh           # the Tidewater content
+    # AND AGAIN, DELIBERATELY. Every step of that script is find-then-skip, and
+    # the skip branch is the only one that reads where a page already sits off
+    # the server instead of choosing it -- so a window that always seeds from
+    # scratch never reaches it, on a script four suites read (#396). The second
+    # run writes nothing and costs seconds; the day it writes twice, or records
+    # a different tree than the first run built, this line is what says so.
+    ./seed-atlassian-content.sh
     ./seed-atlassian-content.sh --verify  # PAY-231 and one page, read back with its ancestors
     eval "$(./seed --env)"
     # `./seed --env` prints the Atlassian block only once seed-state.json has a

@@ -1270,14 +1270,26 @@ async fn the_space_and_the_ancestors_are_where_their_readers_look() {
         }
         depths.insert(page.fixture_id.clone(), ancestors.len());
     }
-    // The seed nests one page, and a corpus that lost that nesting would leave
-    // every path assertion in this repo true and one segment long -- including
-    // the launcher's, which asserts equality against whatever the server says.
-    // So the *shape* is asserted here, where the whole corpus is in hand.
-    assert!(
-        depths.values().any(|&d| d >= 2),
-        "no seeded page is more than one level deep, so nothing here or in the launcher's live \
-         test can witness a joined ancestor path: {depths:?}"
+    // The seed nests one page and hangs the other four straight off the space
+    // home, and the whole corpus is in hand here, so the *shape* is asserted
+    // rather than any one page's place. It has to be, twice over. A corpus that
+    // lost the nesting would leave every path assertion in this repo true and
+    // one segment long -- including the launcher's, which asserts equality
+    // against whatever the server says. And a corpus that gained a nesting
+    // cannot be caught by the per-page equality above: on the find-by-title
+    // path `parent_id` is the server's own answer, so a page an earlier run had
+    // moved under a sibling records that sibling and matches itself.
+    let deeper: Vec<_> = depths.iter().filter(|&(_, &d)| d != 1).collect();
+    assert_eq!(
+        deeper.len(),
+        1,
+        "the seed nests exactly one page and puts the rest directly under the space home. None \
+         deeper, and nothing here or in the launcher's live test can witness a joined ancestor \
+         path; more than one, and a page is somewhere the seed did not put it: {depths:?}"
+    );
+    assert_eq!(
+        deeper[0].1, &2,
+        "the nested page sits two deep -- the space home and the one page below it: {depths:?}"
     );
     println!("SEEDED spaces, as ADR-0010's census reads them: {spaces:?}");
     println!("SEEDED ancestor depths, by fixture id: {depths:?}");
