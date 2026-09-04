@@ -116,8 +116,9 @@ pub struct DayRecord {
     ///
     /// **Passive blocks the day was already offered are still drawn**, and
     /// that is not a contradiction: the observation sweep took the
-    /// *evidence*, not the record made from it while the evidence was there. The flag says the
-    /// strip cannot be added to, never that what is on it is untrue.
+    /// *evidence*, not the record made from it while the evidence was there.
+    /// The flag says the strip cannot be added to, never that what is on it is
+    /// untrue.
     ///
     /// **It does not ask whether passive attribution is switched on**, and
     /// that is deliberate. The stamp it comes from is written only where a

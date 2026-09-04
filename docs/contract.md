@@ -2878,13 +2878,14 @@ From this commit on, each of the following requires an orchestrator decision **a
   status select reuses `WriteOp::Transition` — the existing variant, no SPI growth — so the two
   transitions the start-work flow was ratified with become any status a source's corpus shows. It is
   optimistic by design: knobas has no read of reachable transitions (~~M3's descriptor growth, per
-  ADR-0007~~ — struck 2026-09-04: #277's entry below *is* that growth and it brought no such read.
-  Spec #272 books it for a later milestone instead — "No transitions read: the status select stays
-  optimistic and refuses by name as today; a per-ticket transitions read is booked for a later
-  milestone with its own entry" — and `docs/roadmap.md`'s v1.5 fast follows now carries the
-  booking), so the adapter resolves the target at write time and refuses by name, and the refusal
+  ADR-0007~~), so the adapter resolves the target at write time and refuses by name, and the refusal
   surfaces through the existing pending/held-write UI. **#179 therefore adds no frozen-surface change
-  of its own**, and neither does #178.
+  of its own**, and neither does #178. *The parenthetical is struck 2026-09-04: #277's entry below is
+  that growth and it brought no such read. Spec #272 books the read for a later milestone instead —
+  "No transitions read: the status select stays optimistic and refuses by name as today; a per-ticket
+  transitions read is booked for a later milestone with its own entry" — and `docs/roadmap.md`'s v1.5
+  fast follows now carries the booking. What the sentence records, an optimistic select that resolves
+  at write time, is unchanged.*
 
   Ratified by the orchestrator as issue #177 itself, whose acceptance criteria specify the command,
   its tests and this entry.
