@@ -205,12 +205,13 @@ export interface WithdrawnWorklog {
  *   something knobas then offers to do again.
  * * `create_branch`, `create_pull_request` — the withdrawn row still carries
  *   the ref they were opened against, so what the source made stays
- *   nameable. That argument is **not restated here**: it is made in
+ *   nameable. One clause of the argument and no more: it is *made* in
  *   `knobas_sync::write_queue::UNCLAIMED_OPS`' doc comment, which is where it
- *   belongs and where a reader should go. Issue #353 settled it, and settled
- *   it against the answer that used to sit on this line — that a 409 stops a
- *   duplicate — which answers whether a *re-send* can make a second one, a
- *   different question from what a withdrawal leaves behind.
+ *   belongs and where a reader should go for it. Issue #353 settled the
+ *   question, and settled it against the answer that used to sit on this line
+ *   — that a 409 stops the duplicate — which answers whether a *re-send* can
+ *   make a second one, a different question from what a withdrawal leaves
+ *   behind.
  * * `create_page`, `update_page` — an update changes a page the mirror already
  *   holds, and a withdrawn `create_page` leaves `create_ticket`'s residue: an
  *   unclaimed page, which is why `UNCLAIMED_OPS` names it too.
