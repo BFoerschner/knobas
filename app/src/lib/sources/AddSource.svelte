@@ -34,6 +34,7 @@
   } from "../ipc/sources";
   import Modal from "../shell/Modal.svelte";
   import SchemaForm from "./SchemaForm.svelte";
+  import { connectionLine, connectionNote } from "./connection";
   import { defaultValues, schemaFields, validate, type SchemaField } from "./schema-form";
 
   let {
@@ -313,20 +314,12 @@
     }
   }
 
-  /** *"Connected as ‹account› · ‹version› · ‹ms› ms"*, minus what is absent. */
-  const reportLine = $derived.by(() => {
-    if (!report) return "";
-    if (!report.ok) return report.error ?? "The connection failed.";
-    // The three readings depend on P4 and may be `None`. An absent one is
-    // simply not written — never "null", never an orphaned separator.
-    return [
-      report.account ? `Connected as ${report.account}` : "Connected",
-      report.server_version,
-      `${report.elapsed_ms} ms`,
-    ]
-      .filter((part): part is string => Boolean(part))
-      .join(" · ");
-  });
+  /**
+   * The result line and the note beneath it, by the one rule the sources
+   * view's rows also draw from (`connection.ts`, #326).
+   */
+  const reportLine = $derived(report ? connectionLine(report) : "");
+  const reportNote = $derived(report ? connectionNote(report) : null);
 </script>
 
 <Modal title="Add a source" wide onclose={onclose}>
@@ -420,14 +413,14 @@
       {#if report}
         <!-- Text: `error` is a line an upstream server wrote (gotcha 7). -->
         <p class="test-res {report.ok ? '' : 'fail'}">{reportLine}</p>
-        {#if report.ok && report.detail}
+        {#if reportNote}
           <!--
             The adapter's connection note (#326): its own line beneath the
             result, only when it connected and only when there is one -- no
             empty element for an adapter with nothing to add. Text, like the
             line above it.
           -->
-          <p class="test-note">{report.detail}</p>
+          <p class="test-note">{reportNote}</p>
         {/if}
       {/if}
     {:else}
@@ -478,14 +471,6 @@
     display: grid;
     gap: 4px;
     min-width: 0;
-  }
-
-  /* The connection note: the result line's type, quieter, hung beneath it. */
-  .test-note {
-    font: 400 11px var(--mono);
-    color: var(--muted);
-    padding: 0 10px;
-    margin-top: 4px;
   }
 
   .form {

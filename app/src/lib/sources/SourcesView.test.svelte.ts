@@ -12,7 +12,13 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { CredentialHealth, SourceSummary, SyncRunRow } from "../ipc/sources";
+import type {
+  ConnectionReport,
+  CredentialHealth,
+  SourceDraft,
+  SourceSummary,
+  SyncRunRow,
+} from "../ipc/sources";
 
 const NOW = new Date("2026-08-25T12:00:00Z");
 
@@ -23,7 +29,30 @@ const calls = {
   deleteSource: [] as { id: string; purge: boolean }[],
   setSecret: [] as { id: string; value: string }[],
   listSources: 0,
+  testSource: [] as SourceDraft[],
 };
+
+/** What a row's *Test* answers with. */
+let testReport: ConnectionReport = okReport();
+/** Answers `test_source` per call, when a test needs one held in flight. */
+let answerTest: ((draft: SourceDraft) => Promise<ConnectionReport>) | null = null;
+
+function okReport(over: Partial<ConnectionReport> = {}): ConnectionReport {
+  return {
+    ok: true,
+    account: "mara.oyelaran",
+    server_version: "9.12.4",
+    secret_expires_at: null,
+    error: null,
+    code: null,
+    elapsed_ms: 214,
+    detail: null,
+    discovered: {},
+    ...over,
+  };
+}
+
+const NOTE = "Epic Link customfield_10101 found but not configured: epic membership is not mirrored";
 
 let sources: SourceSummary[] = [];
 let listFails: unknown = null;
@@ -74,7 +103,11 @@ vi.mock("../ipc/sources", () => ({
     }),
   listAdapters: () => Promise.resolve([]),
   addSource: () => Promise.reject(new Error("not used here")),
-  testSource: () => Promise.reject(new Error("not used here")),
+  testSource: (draft: SourceDraft) => {
+    calls.testSource.push(draft);
+    if (answerTest) return answerTest(draft);
+    return Promise.resolve(testReport);
+  },
   credentialHealth: () => Promise.resolve([]),
   reindexFts: () => Promise.resolve(),
 }));
@@ -220,6 +253,9 @@ beforeEach(() => {
   calls.deleteSource = [];
   calls.setSecret = [];
   calls.listSources = 0;
+  calls.testSource = [];
+  testReport = okReport();
+  answerTest = null;
   listeners.clear();
   sources = [];
   listFails = null;
@@ -571,6 +607,172 @@ test("a source whose health is unauthorized offers Re-enter, not Sync now", asyn
   expect(button("Sync now", row)).toBeUndefined();
   expect(row.className).toContain("err");
   expect(row.textContent).toContain("401 from /rest/api/2/myself");
+});
+
+// -- Test on a saved row (#326) -----------------------------------------------
+
+test("Test on a row re-tests the stored credential and shows the line and the note", async () => {
+  sources = [source()];
+  testReport = okReport({ detail: NOTE });
+  const store = health();
+  render({ health: store });
+  await settle();
+  const before = store.get("jira");
+  const listed = calls.listSources;
+
+  button("Test", rowFor("jira")!)!.click();
+  await settle();
+
+  // A draft naming the saved source, with no typed secret: the backend tests
+  // the stored row and the stored credential, and nobody is asked for a PAT.
+  expect(calls.testSource.length).toBe(1);
+  expect(calls.testSource[0]!.source_id).toBe("jira");
+  expect(calls.testSource[0]!.secret).toBeNull();
+
+  const row = rowFor("jira")!;
+  const line = row.querySelector(".test-res")!;
+  expect(line.textContent).toContain("Connected as mara.oyelaran");
+  expect(line.textContent).toContain("9.12.4");
+  expect(line.textContent).toContain("214 ms");
+  const note = row.querySelector(".test-note")!;
+  expect(note.textContent).toContain(NOTE);
+  expect(line.textContent).not.toContain("Epic Link");
+
+  // Nothing is persisted. The credential health this row draws from is the
+  // same reading it had, the store was not patched, no secret was written
+  // and no re-list was issued: a manual test is a look, not a write.
+  expect(store.get("jira")).toEqual(before);
+  expect(row.textContent).toContain("credential ok");
+  expect(calls.setSecret).toEqual([]);
+  expect(calls.listSources).toBe(listed);
+});
+
+test("a row's failed Test shows the error line, and unauthorized offers Re-enter", async () => {
+  sources = [source()];
+  testReport = okReport({
+    ok: false,
+    account: null,
+    server_version: null,
+    error: "401 Unauthorized from /rest/api/2/myself",
+    code: "unauthorized",
+    elapsed_ms: 190,
+    detail: "a note a failed test must not show",
+  });
+  const store = health();
+  render({ health: store });
+  await settle();
+  const before = store.get("jira");
+
+  button("Test", rowFor("jira")!)!.click();
+  await settle();
+
+  const row = rowFor("jira")!;
+  const line = row.querySelector(".test-res")!;
+  expect(line.textContent).toContain("401 Unauthorized from /rest/api/2/myself");
+  expect(line.className).toContain("fail");
+  expect(row.querySelector(".test-note")).toBeNull();
+  // What the row does today for that state: offers *Re-enter* in place of
+  // *Sync now* -- and only for the result's code, not by rewriting the
+  // stored health, which still reads as it did.
+  expect(button("Re-enter", row)).toBeTruthy();
+  expect(button("Sync now", row)).toBeUndefined();
+  expect(store.get("jira")).toEqual(before);
+  expect(row.textContent).toContain("credential ok");
+  expect(calls.setSecret).toEqual([]);
+});
+
+test("a row's Test that failed for another reason keeps Sync now", async () => {
+  sources = [source()];
+  testReport = okReport({
+    ok: false,
+    account: null,
+    server_version: null,
+    error: "dns: no such host",
+    code: "unreachable",
+  });
+  render();
+  await settle();
+
+  button("Test", rowFor("jira")!)!.click();
+  await settle();
+
+  const row = rowFor("jira")!;
+  expect(row.querySelector(".test-res")!.textContent).toContain("dns: no such host");
+  // A network fault says nothing about the credential (P7): no password box.
+  expect(button("Re-enter", row)).toBeUndefined();
+  expect(button("Sync now", row)).toBeTruthy();
+});
+
+test("a rejected test_source is the row's error line, as text", async () => {
+  sources = [source()];
+  answerTest = () =>
+    Promise.reject({ code: "not_found", message: "<b>no secret</b> stored", source_id: "jira" });
+  render();
+  await settle();
+
+  button("Test", rowFor("jira")!)!.click();
+  await settle();
+
+  const line = rowFor("jira")!.querySelector(".test-res")!;
+  expect(line.textContent).toContain("<b>no secret</b> stored");
+  expect(line.querySelector("b")).toBeNull();
+});
+
+test("Test is disabled while in flight, and the result goes on the row's next action", async () => {
+  sources = [source()];
+  let resolve!: (report: ConnectionReport) => void;
+  answerTest = () =>
+    new Promise<ConnectionReport>((r) => {
+      resolve = r;
+    });
+  render();
+  await settle();
+
+  const row = rowFor("jira")!;
+  const test = button("Test", row)!;
+  test.click();
+  flushSync();
+  expect(test.disabled).toBe(true);
+  // A second click while in flight is not a second test.
+  test.click();
+  flushSync();
+  expect(calls.testSource.length).toBe(1);
+
+  resolve(okReport());
+  await settle();
+  expect(button("Test", row)!.disabled).toBe(false);
+  expect(row.querySelector(".test-res")).not.toBeNull();
+
+  // The next action on this row -- here *Sync now* -- takes the result with
+  // it: the line said what a test found, and a sync is a newer fact.
+  button("Sync now", row)!.click();
+  flushSync();
+  expect(rowFor("jira")!.querySelector(".test-res")).toBeNull();
+});
+
+test("a row's Test result does not outlive a reload of the list", async () => {
+  sources = [source(), source({ id: "gitea", adapter_kind: "gitea", display_name: "Gitea" })];
+  render();
+  await settle();
+
+  button("Test", rowFor("jira")!)!.click();
+  await settle();
+  expect(rowFor("jira")!.querySelector(".test-res")).not.toBeNull();
+
+  // Some other source's run finishing re-lists the view; the re-list is what
+  // clears the transient result, not the row being re-created.
+  emit("sync:state", {
+    source_id: "gitea",
+    running: false,
+    run_id: 9,
+    started_at: "2026-08-25T11:59:00Z",
+    last_finished_at: "2026-08-25T11:59:30Z",
+    last_outcome: "ok",
+    next_run_at: null,
+    backoff_until: null,
+  });
+  await settle();
+  expect(rowFor("jira")!.querySelector(".test-res")).toBeNull();
 });
 
 test("a source:health event turns a healthy row into one that needs a human", async () => {

@@ -53,12 +53,14 @@
 <script lang="ts">
   import { listen } from "@tauri-apps/api/event";
 
-  import { EVENTS, ipcErrorMessage } from "../ipc";
+  import { EVENTS, ipcErrorMessage, isIpcError } from "../ipc";
   import {
     deleteSource,
     listSources,
     syncAll,
     syncNow,
+    testSource,
+    type ConnectionReport,
     type CredentialHealth,
     type SourceSummary,
     type SourceSyncStatus,
@@ -94,6 +96,15 @@
   let statuses = $state<Record<string, SourceSyncStatus>>({});
   /** The source whose *Re-enter* strip is open, if any. */
   let fixing = $state<string | null>(null);
+  /**
+   * Per source id, what its last *Test* found (#326) -- **transient**. Cleared
+   * by the row's next action and by every re-list, and never written
+   * anywhere: a manual test is a look at the far end, not a verdict on the
+   * credential, so the health store is not patched from it.
+   */
+  let tests = $state<Record<string, ConnectionReport>>({});
+  /** The source ids with a test in flight: one per row at a time. */
+  let testing = $state<Record<string, boolean>>({});
   /** The source a delete confirm is asking about, if any. */
   let deleting = $state<SourceSummary | null>(null);
   /** Whether the Add-source dialog is up. */
@@ -124,6 +135,8 @@
       ok: (rows) => {
         sources = rows;
         error = null;
+        // A re-list is a newer fact about every row than a test result was.
+        tests = {};
         // The rows carry health as of `list_sources`, and they are the whole
         // set — so this *replaces* rather than patches. Patching kept the
         // launcher's chips and this view reading one fact, but it could only
@@ -209,7 +222,59 @@
     };
   }
 
+  /** The row's next action takes its test result with it. */
+  function forget(sourceId: string) {
+    if (!(sourceId in tests)) return;
+    const { [sourceId]: _gone, ...rest } = tests;
+    tests = rest;
+  }
+
+  /**
+   * *Test* on a saved row: `test_source` with a draft naming the source and
+   * no typed secret, so the backend tests the stored row against the stored
+   * credential (`crud::test`). Writes nothing, and this side keeps it so: the
+   * result lives in `tests` and nowhere else.
+   */
+  async function test(source: SourceSummary) {
+    if (testing[source.id]) return;
+    forget(source.id);
+    testing = { ...testing, [source.id]: true };
+    let report: ConnectionReport;
+    try {
+      report = await testSource({
+        source_id: source.id,
+        adapter_kind: source.adapter_kind,
+        base_url: source.base_url,
+        // Only meaningful for an unsaved draft; a saved source is tested
+        // against what it is stored as, whatever this says. The wire shape
+        // still needs a method, so a source with none is handed the first.
+        auth_kind: source.auth_kind ?? "Pat",
+        config: source.config,
+        secret: null,
+      });
+    } catch (cause) {
+      // A rejection is a result too -- a saved source whose credential is
+      // gone rejects rather than answering `ok: false` -- and the row shows
+      // it the way the dialog would, with the code kept for the branch on it.
+      report = {
+        ok: false,
+        account: null,
+        server_version: null,
+        secret_expires_at: null,
+        error: ipcErrorMessage(cause),
+        code: isIpcError(cause) ? cause.code : null,
+        elapsed_ms: 0,
+        detail: null,
+        discovered: {},
+      };
+    } finally {
+      testing = { ...testing, [source.id]: false };
+    }
+    tests = { ...tests, [source.id]: report };
+  }
+
   async function sync(source: SourceSummary) {
+    forget(source.id);
     markStarted(source.id);
     try {
       await syncNow(source.id);
@@ -311,9 +376,16 @@
           {now}
           health={health.get(source.id)}
           status={statuses[source.id] ?? null}
+          test={tests[source.id] ?? null}
+          testing={testing[source.id] ?? false}
           onsync={() => void sync(source)}
-          onreenter={() => (fixing = source.id)}
+          ontest={() => void test(source)}
+          onreenter={() => {
+            forget(source.id);
+            fixing = source.id;
+          }}
           ondelete={() => {
+            forget(source.id);
             purge = false;
             deleting = source;
           }}

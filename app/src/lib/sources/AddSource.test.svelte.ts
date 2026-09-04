@@ -952,6 +952,7 @@ test("a failed test fills nothing, so one server's ids cannot land on another", 
     error: "the credential was refused",
     code: "unauthorized",
     elapsed_ms: 12,
+    detail: null,
     // A backend that answered this on a failure would be wrong; the dialog
     // does not depend on it being right.
     discovered: EPIC,

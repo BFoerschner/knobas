@@ -21,17 +21,22 @@
   import type {
     AuthMethod,
     AuthState,
+    ConnectionReport,
     CredentialHealth,
     SourceSummary,
     SourceSyncStatus,
   } from "../ipc/sources";
+  import { connectionLine, connectionNote } from "./connection";
 
   let {
     source,
     health,
     status,
     now,
+    test = null,
+    testing = false,
     onsync,
+    ontest,
     onreenter,
     ondelete,
   }: {
@@ -47,7 +52,18 @@
     /** The live sync status from `sync:state`, when there has been one. */
     status: SourceSyncStatus | null;
     now: Date;
+    /**
+     * What this row's last *Test* found, while the view still holds it (#326).
+     *
+     * Transient by rule: the view drops it on the row's next action and on
+     * every re-list, and nothing stores it -- a manual test is a look at the
+     * far end, not a verdict on the credential, so it never touches `health`.
+     */
+    test?: ConnectionReport | null;
+    /** A test is in flight for this row: one at a time. */
+    testing?: boolean;
     onsync: () => void;
+    ontest: () => void;
     onreenter: () => void;
     ondelete: () => void;
   } = $props();
@@ -64,8 +80,16 @@
    * now*, which is the gesture that tests whether the server came back.
    */
   const needsSecret = $derived(
-    credential.state === "unauthorized" || credential.state === "missing_secret",
+    credential.state === "unauthorized" ||
+      credential.state === "missing_secret" ||
+      // A manual test the far end refused: the row does what it does for
+      // that state -- offers *Re-enter* -- on the strength of the result's
+      // code alone, without rewriting the stored health (#326).
+      (test !== null && !test.ok && test.code === "unauthorized"),
   );
+
+  const testLine = $derived(test ? connectionLine(test) : "");
+  const testNote = $derived(test ? connectionNote(test) : null);
 
   const running = $derived(status?.running ?? false);
 
@@ -178,6 +202,9 @@
   </span>
 
   <span class="acts">
+    <button class="btn sm" disabled={testing} onclick={ontest}>
+      {testing ? "Testing…" : "Test"}
+    </button>
     {#if needsSecret}
       <button class="btn sm pri" onclick={onreenter}>Re-enter</button>
     {:else if source.enabled && !running}
@@ -185,6 +212,20 @@
     {/if}
     <button class="btn sm ghost" onclick={ondelete}>Delete</button>
   </span>
+
+  {#if test}
+    <!--
+      The same two lines the Add-source dialog draws (#326): the result, and
+      the connection note beneath it when it connected and had one. Text,
+      both: an adapter's line is something an upstream server wrote.
+    -->
+    <span class="test">
+      <p class="test-res {test.ok ? '' : 'fail'}">{testLine}</p>
+      {#if testNote}
+        <p class="test-note">{testNote}</p>
+      {/if}
+    </span>
+  {/if}
 </div>
 
 <style>
@@ -193,6 +234,15 @@
     display: flex;
     gap: 4px;
     justify-content: flex-end;
+  }
+
+  /* A test result spans the row beneath its columns, inside the row's shading. */
+  .test {
+    grid-column: 1 / -1;
+  }
+
+  .test .test-res {
+    margin-top: 0;
   }
 
   /* The expiry countdown's two loud tones. `.sub` supplies the type. */
