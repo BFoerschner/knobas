@@ -1342,7 +1342,7 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
     // that was not really reading the mirror would sail past it.
     let transitioned = format!("{JIRA}:{TRANSITIONED}");
     let deadline = std::time::Instant::now() + INDEX_BUDGET;
-    loop {
+    for round in 1.. {
         sync(&state).await;
         // `fields.status.name` is where a Jira status lives, and the mirrored
         // `payload` is the record verbatim -- the reading
@@ -1360,6 +1360,10 @@ async fn the_three_write_ops_go_through_the_queue_and_come_back_from_jira() {
              a sync that tombstoned it, not a stale index",
         );
         if in_mirror.as_deref() == Some(to.as_str()) {
+            // Printed either way: the run's own output is the only place a
+            // reader can see whether this wait was a formality on the day or
+            // the thing that made the refusal below deterministic.
+            println!("SEEDED mirror holds {TRANSITIONED} as {to:?} after {round} sync(s)");
             break;
         }
         assert!(
