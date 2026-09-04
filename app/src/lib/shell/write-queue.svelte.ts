@@ -191,9 +191,10 @@ export interface WithdrawnWorklog {
  * round-trip wide. Inside it, the hour is at Jira *and* back on knobas'
  * timesheet, one click from being sent again.
  *
- * No other op has that shape, because no other op hands a resource back. Each
- * bullet answers that one question, whether anything is re-offered or charged
- * twice, and stops there:
+ * No other op has that shape, and `discard`'s own statement is the reason: it
+ * deletes from `knobas.worklog` and from nothing else, so `log_work` is the
+ * only op holding a local copy a withdrawal can give back. That is the one
+ * question each bullet answers; the rest it leaves alone.
  *
  * * `comment`, `approve`, `transition`, `trigger_build`, `rerun_build` —
  *   withdrawing one in flight leaves the reply posted or the status moved,
@@ -201,22 +202,21 @@ export interface WithdrawnWorklog {
  *   nothing is charged twice.
  * * `create_ticket` — ADR-0012 names it as the create that is *not* naturally
  *   idempotent, but the duplicate it warns about is the **queue re-sending**,
- *   which a discard prevents rather than causes. Nothing comes back to the
- *   timesheet and knobas does not offer the create again.
- * * `create_branch`, `create_pull_request` — a withdrawal in flight can leave
- *   a branch or a pull request open at the source. Neither is an hour, and
- *   neither is a click away from being sent a second time.
- * * `create_page`, `update_page` — an update changes a page the mirror
- *   already holds, and a create can leave a new one. Neither returns to the
- *   user as work to redo.
+ *   which a discard prevents rather than causes, so no hour comes back to the
+ *   timesheet.
+ * * `create_branch`, `create_pull_request` — a withdrawal releases nothing
+ *   here either. What one can leave standing at the source is the other
+ *   question, and so is start-work's retry of the step that made it.
+ * * `create_page`, `update_page` — the same, and an `update_page` makes no
+ *   artefact at all: it changes a page the mirror already holds.
  *
- * What a withdrawal *leaves behind*, whether the source made something knobas
- * cannot name and which ops that is true of, is the other question, and
- * `knobas_sync::write_queue::UNCLAIMED_OPS`' doc comment is where it is asked
- * and answered. Issue #353 settled it there, and settled it against the
- * answer that used to sit on the `create_branch` line — that a 409 stops the
- * duplicate — which is about whether a *re-send* can make a second artefact,
- * and so answers neither question here.
+ * That other question — did the source make something knobas cannot name,
+ * `CONTEXT.md`'s **unclaimed write** — is asked and answered in
+ * `knobas_sync::write_queue::UNCLAIMED_OPS`' doc comment. Issue #353 settled
+ * it there, and settled it against the answer that used to sit on the
+ * `create_branch` line, that a 409 stops the duplicate: that one is about
+ * whether a *re-send* makes a second artefact, which is neither question and
+ * does not belong on these lines again.
  *
  * Those bullets and `log_work` itself are the whole of `WriteOp` as ADR-0006's
  * set currently stands, and they are enumerated here **without a guard**.
