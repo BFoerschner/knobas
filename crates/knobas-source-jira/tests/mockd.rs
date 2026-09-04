@@ -634,15 +634,14 @@ async fn test_connection_reports_the_account_and_the_server() {
     assert_eq!(info.account.as_deref(), Some("mara.lindqvist"), "{info:?}");
     assert_eq!(info.server_version.as_deref(), Some("9.17.0"), "{info:?}");
     // mockd serves no field table (its deviation 13), so nothing is discovered
-    // -- and the detail says the consequence rather than staying silent about
-    // it: against a classic project, a source with no Epic Link id mirrors no
-    // epic membership at all (#297). The real product's answer is certified in
-    // `tests/live_jira_seeded.rs`.
+    // -- and the connection note says the consequence rather than staying
+    // silent about it: against a classic project, a source with no Epic Link
+    // id mirrors no epic membership at all (#297). The note is that clause
+    // and nothing the report already carries (#326). The real product's
+    // answer is certified in `tests/live_jira_seeded.rs`.
     assert_eq!(
         info.detail.as_deref(),
-        Some(
-            "Server 9.17.0 \u{b7} no Epic Link field: a classic project's epic membership is not mirrored"
-        ),
+        Some("no Epic Link field: a classic project's epic membership is not mirrored"),
         "{info:?}"
     );
     assert!(
@@ -665,8 +664,7 @@ async fn a_configured_epic_link_field_is_what_the_connection_reports() {
         serde_json::json!({ "epic_link_field": knobas_mockd::jira::EPIC_LINK_FIELD }),
     );
     let info = source.test_connection().await.unwrap();
-    let expected =
-        "Server 9.17.0 \u{b7} Epic Link ".to_owned() + knobas_mockd::jira::EPIC_LINK_FIELD;
+    let expected = "Epic Link ".to_owned() + knobas_mockd::jira::EPIC_LINK_FIELD;
     assert_eq!(info.detail.as_deref(), Some(expected.as_str()), "{info:?}");
     assert_only_the_field_probe(&jira);
 }

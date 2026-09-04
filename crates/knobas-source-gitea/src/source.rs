@@ -145,9 +145,9 @@ impl Source for GiteaSource {
         let server_version = self.client.version().await.ok().flatten();
         Ok(ConnectionInfo {
             account: user.login.filter(|l| !l.trim().is_empty()),
-            detail: server_version
-                .as_deref()
-                .map(|version| format!("Gitea {version}")),
+            // No connection note: the version is `server_version`'s to say,
+            // and a note is for what nothing else on the report says (#326).
+            detail: None,
             server_version,
             // Gitea's personal access tokens do not expire, and the endpoint
             // that lists them needs basic auth, which this adapter does not

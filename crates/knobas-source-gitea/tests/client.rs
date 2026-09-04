@@ -13,7 +13,10 @@ async fn test_connection_reports_the_account_and_the_server_version() {
     let info = source.test_connection().await.unwrap();
     assert_eq!(info.account.as_deref(), Some("mara"));
     assert_eq!(info.server_version.as_deref(), Some("1.24.3"));
-    assert_eq!(info.detail.as_deref(), Some("Gitea 1.24.3"));
+    // No connection note: `Gitea 1.24.3` was the version the report already
+    // carries as `server_version`, and a note says only what nothing else on
+    // the report says (#326).
+    assert_eq!(info.detail, None, "{info:?}");
     // Gitea's personal access tokens do not expire, so there is nothing to
     // count down (interfaces §2.2 `CredentialHealth::secret_expires_at`).
     assert!(info.secret_expires_at.is_none());

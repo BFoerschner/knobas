@@ -295,10 +295,11 @@ pub(crate) struct CurrentUser {
     pub username: Option<String>,
     #[serde(default, rename = "displayName")]
     pub display_name: Option<String>,
-    /// The stable key behind the username. Reported in
-    /// `ConnectionInfo::detail` rather than as the account, because the
-    /// account is the thing a person recognises and `username` is what the
-    /// identity convention (#82) stores.
+    /// The stable key behind the username. Not the account -- that is
+    /// `username`, the thing a person recognises and what the identity
+    /// convention (#82) stores -- but what a mention tag's key is compared
+    /// against to say whether a comment mentions the reader
+    /// (`storage::mentioned_name`).
     #[serde(default, rename = "userKey")]
     pub user_key: Option<String>,
 }

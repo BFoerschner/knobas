@@ -338,10 +338,16 @@ pub async fn set_secret(
     ))?;
     let outcome = source.test_connection().await;
 
+    // A good check records **no** detail. What the adapter had to say about
+    // the far end is its connection note, which belongs to the *Test
+    // connection* result (`ConnectionReport::detail`) and is never stored;
+    // credential health carries what the last check said went wrong, and a
+    // check that went right has nothing to put there (#326). The failure arm
+    // keeps the error text, which is that column's own business.
     let (state, detail, expires) = match &outcome {
         Ok(info) => (
             knobas_sync::config::AuthState::Ok,
-            info.detail.clone(),
+            None,
             info.secret_expires_at,
         ),
         Err(error) => (auth_state_of(error), Some(error.to_string()), None),
@@ -482,6 +488,7 @@ pub async fn test(
             error: None,
             code: None,
             elapsed_ms,
+            detail: info.detail,
             discovered: info.discovered,
         },
         Err(error) => ConnectionReport {
@@ -492,6 +499,9 @@ pub async fn test(
             error: Some(error.to_string()),
             code: Some(crate::IpcError::from_source_error(&error, draft.source_id.as_deref()).code),
             elapsed_ms,
+            // A test that did not connect has no note about the far end;
+            // `error` is its one line.
+            detail: None,
             // A test that failed learned nothing worth filling a form with.
             discovered: std::collections::BTreeMap::new(),
         },

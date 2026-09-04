@@ -314,6 +314,14 @@ export interface ConnectionReport {
   code: IpcErrorCode | null;
   elapsed_ms: number;
   /**
+   * The adapter's connection note: the one line it says about the far end
+   * that nothing else here already says — Jira's Epic Link clause is the
+   * first (#326). Shown beneath the result line wherever a test result is
+   * shown, never stored. Null when the test failed (`error` is the line) and
+   * for an adapter with nothing to add.
+   */
+  detail: string | null;
+  /**
    * Config values the adapter learned from the far end, keyed by the
    * `config_schema` property each belongs in — Jira's Epic Link custom field
    * id, whose value is different on every instance (#297).

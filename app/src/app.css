@@ -350,6 +350,8 @@ textarea.inp{height:auto;min-height:64px;padding:6px 8px;resize:vertical;line-he
 .radios label.off{opacity:.45;cursor:default}
 .radios input{accent-color:var(--text)}
 .test-res{font:400 12px var(--mono);padding:8px 10px;background:var(--bg);border:1px solid var(--hair);border-radius:2px;margin-top:8px}
+/* The connection note (#326): the result line's type, quieter, hung beneath it. */
+.test-note{font:400 11px var(--mono);color:var(--muted);padding:0 10px;margin-top:4px}
 
 /* ---- tooltip ---- */
 .tip{position:fixed;z-index:60;background:var(--raised);border:1px solid var(--hair2);border-radius:2px;padding:6px 8px;font:400 11px/1.4 var(--mono);color:var(--muted);max-width:320px;pointer-events:none}

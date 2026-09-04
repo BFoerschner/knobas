@@ -132,11 +132,11 @@ impl Source for ConfluenceSource {
             // endpoint set. The credential-health strip shows the countdown as
             // soon as that endpoint is added.
             secret_expires_at: None,
-            detail: Some(match (me.display_name.as_deref(), me.user_key.as_deref()) {
-                (Some(name), Some(key)) => format!("Confluence Data Center -- {name} ({key})"),
-                (Some(name), None) => format!("Confluence Data Center -- {name}"),
-                _ => "Confluence Data Center".to_owned(),
-            }),
+            // No connection note: the display name and user key said nothing
+            // `account` does not, and a note is for what nothing else on the
+            // report says (#326). The key stays what the sync compares a
+            // mention tag against (`storage::mentioned_name`).
+            detail: None,
             // Nothing per-instance for the dialog to fill: this adapter's
             // config keys are spaces and tuning, all of them the reader's own
             // choices rather than ids the server mints (#297).
@@ -259,6 +259,47 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         drop(listener);
         format!("http://127.0.0.1:{port}")
+    }
+
+    /// A one-shot Confluence on `127.0.0.1:0` that answers `body` to whatever
+    /// it is asked, `Connection: close`, on a std thread -- this crate's tokio
+    /// has no `net` feature and one canned answer does not need one.
+    fn one_answer(body: &'static str) -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            use std::io::{Read, Write};
+            if let Ok((mut socket, _)) = listener.accept() {
+                let mut buf = [0_u8; 4096];
+                let _ = socket.read(&mut buf);
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
+                     Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = socket.write_all(response.as_bytes());
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    /// A successful test names the account and carries **no connection note**
+    /// (#326): what this adapter used to put there -- `Confluence Data Center
+    /// -- <name> (<key>)` -- said nothing the report's `account` did not, and
+    /// a note is only for what nothing else on the report says.
+    #[tokio::test]
+    async fn a_successful_test_reports_the_account_and_no_note() {
+        let mut i = instance(json!({}));
+        i.base_url = one_answer(
+            r#"{"username":"mara.lindqvist","displayName":"Mara Lindqvist",
+                "userKey":"ff8080818f2a1b4c018f2a1c9d0e0001"}"#,
+        );
+        let info = built(i)
+            .test_connection()
+            .await
+            .expect("the stub answers /rest/api/user/current");
+        assert_eq!(info.account.as_deref(), Some("mara.lindqvist"), "{info:?}");
+        assert_eq!(info.detail, None, "{info:?}");
     }
 
     /// The descriptor a *configured* source reports: the instance's id (which

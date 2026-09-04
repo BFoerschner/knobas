@@ -150,6 +150,9 @@ fn the_connection_report_shape_matches_its_typescript_mirror() {
         error: Some("the credential was refused".to_owned()),
         code: Some(knobas_app::IpcErrorCode::Unauthorized),
         elapsed_ms: 42,
+        // `Some`, not `None`: a `null` on the wire satisfies any declared type,
+        // so only a value proves the mirror reads the field (#326).
+        detail: Some("Epic Link customfield_10101".to_owned()),
         discovered: std::collections::BTreeMap::from([(
             "epic_link_field".to_owned(),
             "customfield_10101".to_owned(),
@@ -162,6 +165,7 @@ fn the_connection_report_shape_matches_its_typescript_mirror() {
         &[
             "account",
             "code",
+            "detail",
             "discovered",
             "elapsed_ms",
             "error",
@@ -169,6 +173,11 @@ fn the_connection_report_shape_matches_its_typescript_mirror() {
             "secret_expires_at",
             "server_version",
         ],
+    );
+    // The connection note is a string, carried verbatim (#326).
+    assert_eq!(
+        wire["detail"],
+        serde_json::json!("Epic Link customfield_10101")
     );
     // A map on the wire, not a list of pairs and not a second named field per
     // adapter: the dialog looks a config property up by name in it (#297).

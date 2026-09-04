@@ -228,10 +228,20 @@ pub struct ConnectionReport {
     /// [`code`](Self::code) instead, and it is the **one** declared deviation
     /// in this shape: serializing `SourceError` puts an untagged Rust enum on
     /// the bridge for the frontend to pattern-match, and P1 says branch on a
-    /// code. `ConnectionInfo::detail` is deliberately *not* carried -- it
-    /// would be a second undeclared field, and `account` plus
-    /// `server_version` already say what it would.
+    /// code.
     pub error: Option<String>,
+    /// The adapter's **connection note** (`CONTEXT.md`): the one line it says
+    /// about the far end that nothing else on this report already says --
+    /// Jira's Epic Link clause is the first. Copied through from
+    /// [`knobas_source::ConnectionInfo::detail`] on a successful test and
+    /// `None` on a failed one, where [`error`](Self::error) is the line.
+    ///
+    /// It belongs to the moment of *Test connection*: the Add-source dialog
+    /// and a saved source's row show it beside the test result, and nothing
+    /// stores it. It is not credential health, which a good sync may rewrite
+    /// -- a note is true of the far end as just found, not of the credential
+    /// (#326, §10.8).
+    pub detail: Option<String>,
     /// The class the UI branches on -- `unauthorized` is what turns *Test*
     /// into *Re-enter*, and a message is not something to branch on.
     pub code: Option<crate::IpcErrorCode>,
