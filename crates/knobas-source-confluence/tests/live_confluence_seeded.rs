@@ -363,6 +363,13 @@ impl Seeded {
 
     /// One page's `version.when` **as the record has it**: the database, which
     /// no index sits in front of.
+    ///
+    /// Parsed as RFC 3339 and not through the adapter's `time::parse_time`,
+    /// which is `pub(crate)`: this file already reads the same field the same
+    /// way twice over, and `src/time.rs` records what this product actually
+    /// sends -- "measured on Confluence 9.2.21, this container renders **UTC
+    /// with a `Z`**". A stamp this cannot read is a product change, which is
+    /// the one thing this suite exists to report.
     async fn recorded_when(&self, id: &str) -> chrono::DateTime<chrono::Utc> {
         let record = self.content(id, "version").await;
         let raw = record["version"]["when"]
@@ -370,7 +377,11 @@ impl Seeded {
             .unwrap_or_else(|| panic!("page {id} has no version.when: {record}"))
             .to_owned();
         chrono::DateTime::parse_from_rfc3339(&raw)
-            .unwrap_or_else(|e| panic!("page {id}: version.when {raw:?} is not RFC 3339: {e}"))
+            .unwrap_or_else(|e| {
+                panic!(
+                    "page {id}: version.when {raw:?} is not the RFC 3339 this adapter parses: {e}"
+                )
+            })
             .with_timezone(&chrono::Utc)
     }
 
@@ -444,11 +455,24 @@ impl Seeded {
     ///
     /// Not a sleep. A sleep long enough to be safe is a guess, and a guess
     /// that is too short is a race made rarer rather than a race removed. This
-    /// returns only once the index and the records agree, or fails at
-    /// [`INDEX_BUDGET`] naming the disagreement -- the shape
+    /// returns only once the index's *order* stops contradicting the records,
+    /// or fails at [`INDEX_BUDGET`] naming the disagreement -- the shape
     /// [`a_renamed_page_keeps_its_id_and_moves_the_watermark_to_itself`] polls
-    /// its own read with. Once it returns, the order can only move again if
-    /// something writes, and nothing in this suite writes after it.
+    /// its own read with.
+    ///
+    /// **What it is and is not.** It is agreement about order, not about
+    /// values: an index entry stale in a way that inverts nothing passes, and
+    /// so it should -- a page whose stale entry leaves the order right is a
+    /// page the walk cannot be hurt by. Once it returns, the order can move
+    /// again only if something writes to the space, and nothing in this suite
+    /// writes after it.
+    ///
+    /// **That last sentence needs the suite to be serial, so here it is
+    /// written down.** `just atlassian-live` runs this file with
+    /// `--test-threads=1`, and so does the manual command in this module's
+    /// header. Run in parallel instead, the rename test's edit and its `Drop`
+    /// restore land *while* the walk is walking, and no wait can help: a write
+    /// concurrent with a paged read is not something a reader can settle.
     async fn settled_index_order(&self) -> Vec<String> {
         let deadline = std::time::Instant::now() + INDEX_BUDGET;
         let started = std::time::Instant::now();
