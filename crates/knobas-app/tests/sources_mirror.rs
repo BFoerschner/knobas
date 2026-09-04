@@ -175,7 +175,10 @@ fn the_connection_report_shape_matches_its_typescript_mirror() {
         ],
     );
     // The connection note is a string, carried verbatim (#326).
-    assert_eq!(wire["detail"], serde_json::json!("Epic Link customfield_10101"));
+    assert_eq!(
+        wire["detail"],
+        serde_json::json!("Epic Link customfield_10101")
+    );
     // A map on the wire, not a list of pairs and not a second named field per
     // adapter: the dialog looks a config property up by name in it (#297).
     assert_eq!(
