@@ -530,10 +530,15 @@ gitea-live-capped:
 # consecutive runs: branches 4 -> 4, pulls 14 -> 14, default-branch commits
 # 19 -> 19, root files 10 -> 10.
 #
-# The nine `knobas-i44-*.txt` files already on the default branch are what the
-# old shape left behind. Removing them means rewriting the seeded history, so
-# they stay; `testenv/reset` is the remedy if it ever matters, the same
-# deliberate-not-routine one `gitea-live` names.
+# WHAT DOES NOT COME BACK, and why neither matters. Gitea does not reuse a
+# deleted pull request's index, so each run's pull request is a larger integer
+# than the last -- but nothing counts indices. `live_gitea_capped.rs` counts
+# *records* (`must_be_capped_with_more_behind_it` measures `keys.len()`), and
+# the record goes with the `DELETE`. And the nine `knobas-i44-*.txt` files
+# already on the default branch are what the old shape left behind; removing
+# them means rewriting the seeded history, so they stay. `testenv/reset` is the
+# remedy if either ever matters, the same deliberate-not-routine one
+# `gitea-live` names.
 #
 # Serial and unparallelised for `gitea-live`'s reasons: one server, and a test
 # that writes to it. ONE ENVIRONMENT, ONE OWNER -- this seeds, so it re-mints
