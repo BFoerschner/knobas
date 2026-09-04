@@ -442,11 +442,12 @@ a wider one (issue #332). All four print what the product is showing — the
 state, the form, the code it is answering the POST with, or that it is not
 answering — and how far into the cap they are, every 30 s.
 
-Each of the two that read over the network also bounds a single request, so
-that one unanswered call cannot outlive the cap around it: `POLL_TIMEOUT_S`
-(10 s) for a `/status` poll or a wizard page, `WIZARD_POST_TIMEOUT_S` (60 s)
-for a wizard POST, which is the step's actual work and not a free GET
-(issue #367).
+All four also bound the single request they make, so that one unanswered call
+cannot outlive the cap around it: `POLL_TIMEOUT_S` (10 s) covers three of them
+— a `/status` poll, or a read of the wizard page — and `WIZARD_POST_TIMEOUT_S`
+(60 s) the fourth, a wizard POST, which is the step's actual work and not a
+free GET (issue #367).
+
 A state that climbs is a slow start, one state repeated to the cap is a hang,
 and `UNREACHABLE` throughout is a container to read `docker logs` for. A cap
 that fires is a statement about the machine.

@@ -148,11 +148,13 @@ VERIFIED_CONFLUENCE_IMAGE=sha256:d15c23a1dfea0d390536115003cd732c9b404571f85bc08
 #
 # Which puts the two constraints in tension, and 60 s is where they sit.
 # ABOVE any POST that has answered: MEASURED-PLACEHOLDER. BELOW the overrun a
-# timeout costs: it is discovered by the cap check only after curl has spent
-# it, so WIZARD_POST_CAP_S can be overshot by at most one of these -- 300 s
-# becomes at worst 360 s, which is a bound worth stating and is not the
-# unbounded wait it replaces. If a real POST is ever cut, widen this; that
-# would show up as a wizard step applied twice, not as a slow run.
+# timeout costs: the cap is checked only after curl has come back, so the last
+# attempt starts just under it and runs a whole timeout past it, and the sleep
+# before that attempt is on the far side of the check too. The worst case is
+# therefore WIZARD_POST_CAP_S + POLL_S + this, 365 s against a 300 s cap --
+# which is a bound worth writing down and is not the unbounded wait it
+# replaces. If a real POST is ever cut, widen this; that would show up as a
+# wizard step applied twice, not as a slow run.
 #
 # All seven are seconds of WALL CLOCK, not counts of anything.
 FIRST_RUN_CAP_S=600
@@ -332,31 +334,36 @@ wizard_post() {  # wizard_post <url> <curl --data args...>
     _out=$(curl -sS --max-time "$WIZARD_POST_TIMEOUT_S" -c "$JAR" -b "$JAR" \
                 -o "$JAR.body" -w '%{http_code} %{redirect_url}' \
                 -X POST "$_url" "$@" 2>/dev/null) || _prc=$?
+    # ONE `case` OVER WHAT CURL DID, not two: a timeout is not an HTTP code
+    # and carrying it as one -- `_code=timeout`, then a second switch with a
+    # `timeout)` arm -- puts a value in `_code` that the arm below would print
+    # as "answered timeout" the day someone adds a branch. What every arm that
+    # keeps going leaves behind is the pair the messages need: `_plast` fills
+    # the failure's "last response:" column, `_pdoing` is the progress line's
+    # verb, and the timeout has to read as a sentence in both.
+    #
+    # `break` inside the inner `case` leaves the `while`, not the `case`.
     case "$_prc" in
-      0)  _code=${_out%% *}; _loc=${_out#* } ;;
-      28) _code=timeout; _loc= ;;
+      0)
+        _code=${_out%% *}; _loc=${_out#* }
+        case "$_code" in
+          2*|3*) break ;;
+          5*) _plast=$_code; _pdoing="answering $_code" ;;
+          *) die "$_url answered $_code" ;;
+        esac ;;
       # ONLY 28 IS RETRIED, because only 28 is "no answer yet". A refused
       # connection, a reset, an empty reply: none of those has been seen at
       # this point in the walk, and folding them into the retry is how they
       # would stay unseen. Still fatal, but named -- `curl: (7)` alone was the
       # entire message before.
-      *)  die "the POST to $_url failed outright (curl exit $_prc).
+      28)
+        _plast="no reply in ${WIZARD_POST_TIMEOUT_S}s (curl --max-time)"
+        _pdoing="not answering" ;;
+      *) die "the POST to $_url failed outright (curl exit $_prc).
   step: ${_was:-none}
   This is not the warming window the retry exists for; that window answers.
   A connection refused or reset mid-walk is the container going away:
     docker logs --tail 50 knobas-$_pwho" ;;
-    esac
-    # What the app just did, in the two voices the messages below need:
-    # `_plast` fills the failure's "last response:" column, `_pdoing` is the
-    # progress line's verb. A timeout has to read as a sentence in both, which
-    # is why it is not simply carried as the string "timeout".
-    case "$_code" in
-      2*|3*) break ;;
-      5*)      _plast=$_code
-               _pdoing="answering $_code" ;;
-      timeout) _plast="no reply in ${WIZARD_POST_TIMEOUT_S}s (curl --max-time)"
-               _pdoing="not answering" ;;
-      *) die "$_url answered $_code" ;;
     esac
     _pwaited=$(( $(date +%s) - _pt0 ))
     if [ "$_pwaited" -ge "$WIZARD_POST_CAP_S" ]; then
