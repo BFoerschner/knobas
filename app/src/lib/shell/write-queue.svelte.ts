@@ -203,8 +203,24 @@ export interface WithdrawnWorklog {
  *   `create_ticket` can leave is one unclaimed ticket at the source: a
  *   residue a person can see and delete, not an hour on an invoice, and not
  *   something knobas then offers to do again.
- * * `create_branch`, `create_pull_request` — the source refuses the duplicate
- *   with a 409 (ADR-0012), so a re-send cannot make a second one.
+ * * `create_branch`, `create_pull_request` — the withdrawn row still carries
+ *   the ref they were opened against, so what the source made stays
+ *   nameable. That argument is **not restated here**: it is made in
+ *   `knobas_sync::write_queue::UNCLAIMED_OPS`' doc comment, which is where it
+ *   belongs and where a reader should go. Issue #353 settled it, and settled
+ *   it against the answer that used to sit on this line — that a 409 stops a
+ *   duplicate — which answers whether a *re-send* can make a second one, a
+ *   different question from what a withdrawal leaves behind.
+ * * `create_page`, `update_page` — an update changes a page the mirror already
+ *   holds, and a withdrawn `create_page` leaves `create_ticket`'s residue: an
+ *   unclaimed page, which is why `UNCLAIMED_OPS` names it too.
+ *
+ * That list is the whole of `WriteOp` as of ADR-0006's current set, and it is
+ * enumerated here **without a guard**. `knobas-sync`'s
+ * `every_write_op_says_whether_a_withdrawal_can_leave_one` matches on the enum
+ * with no wildcard arm, so a new variant stops that test compiling; nothing
+ * does the same for these bullets, which is why they point at that doc rather
+ * than compete with it.
  *
  * ## Why the state is not part of the question
  *
